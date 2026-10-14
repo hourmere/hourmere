@@ -147,3 +147,9 @@ vite.config.ts.timestamp-*
 
 # Turbo Repo
 .turbo
+
+# macOS
+.DS_Store
+
+# Private planning docs, research data and company site (never commit; repo goes public at launch)
+temp/
