@@ -297,6 +297,24 @@ describe('formatReport', () => {
     expect(report).toContain('\\u{1b}[31mred\\u{202e}')
     expect(displayText('plain text, ünïcödé and emoji 🙂')).toBe('plain text, ünïcödé and emoji 🙂')
   })
+
+  it('escapes legacy workflow commands anywhere in untrusted text', () => {
+    // The runner finds the legacy ##[command] syntax anywhere in a line, even after
+    // our own prefix (actions/runner, Runner.Common/ActionCommand.cs, TryParse).
+    const hostile = commit({
+      subject: 'Fix ##[error]forged annotation',
+      authorName: 'Eve ##[add-mask]MISSING',
+      signOffs: ['Other ##[stop-commands]token <other@example.com>'],
+    })
+    const report = formatReport('base##[warning]..head', [
+      { commit: hostile, result: checkCommit(hostile, opts) },
+    ])
+    expect(report).not.toContain('##[')
+    expect(report).toContain('Fix \\u{23}#[error]forged annotation')
+    expect(report).toContain('Eve \\u{23}#[add-mask]MISSING')
+    expect(report).toContain('Other \\u{23}#[stop-commands]token')
+    expect(report).toContain('base\\u{23}#[warning]..head')
+  })
 })
 
 describe('the command line', () => {
@@ -337,5 +355,13 @@ describe('the command line', () => {
     const unknown = run(repo.dir, 'main', 'nope')
     expect(unknown.status).toBe(2)
     expect(unknown.stderr).toContain('nope is not a commit')
+  })
+
+  it('escapes legacy workflow commands in CLI error output', () => {
+    const repo = scratchRepo()
+    const failed = run(repo.dir, 'main', '##[error]forged')
+    expect(failed.status).toBe(2)
+    expect(failed.stderr).not.toContain('##[')
+    expect(failed.stderr).toContain('\\u{23}#[error]forged is not a commit')
   })
 })

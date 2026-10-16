@@ -137,11 +137,16 @@ export function checkCommit(commit: Commit, options: { honorExemptions: boolean 
   return { status: 'missing', problem, authorExempt: exempt }
 }
 
-/** Escapes control and format characters (newlines, ANSI escapes, bidi overrides). */
+/** Escapes control/format characters and the legacy GitHub Actions command prefix. */
 export function displayText(text: string): string {
-  return text.replace(
-    /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu,
-    (char) => `\\u{${char.codePointAt(0)?.toString(16)}}`,
+  return (
+    text
+      .replace(
+        /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu,
+        (char) => `\\u{${char.codePointAt(0)?.toString(16)}}`,
+      )
+      // Unlike ::command::, the runner recognizes ##[command] anywhere in a line.
+      .replaceAll('##[', '\\u{23}#[')
   )
 }
 
@@ -152,7 +157,7 @@ export function formatReport(
   range: string,
   checked: Array<{ commit: Commit; result: Result }>,
 ): string {
-  // Every line starts with text of ours, so none can begin with "::" (a workflow command).
+  // Our prefix prevents ::command:: at line start; displayText escapes legacy commands.
   const lines = [`DCO sign-off check of ${checked.length} commit(s) in ${displayText(range)}:`]
   for (const { commit, result } of checked) {
     const label = LABELS[result.status].padEnd(8)
