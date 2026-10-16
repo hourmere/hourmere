@@ -126,6 +126,13 @@ export function hasUnsafeJsonText(value: unknown): boolean {
   return false
 }
 
+/** An error's name, message and code, cut to 200 characters: enough to recognize it. */
+function summary(err: unknown): string {
+  if (!(err instanceof Error)) return String(err).slice(0, 200)
+  const code = (err as { code?: unknown }).code
+  return `${err.name}: ${err.message}${typeof code === 'string' ? ` (${code})` : ''}`.slice(0, 200)
+}
+
 const JSON_CONTENT_TYPE = /^application\/([a-z0-9.+-]+\+)?json/i
 
 /**
@@ -197,22 +204,29 @@ export function createApp({
   mcp,
 }: AppDeps) {
   const app = new OpenAPIHono({ defaultHook: validationHook })
-  // Unexpected errors (including Better Auth's, which it rethrows) are logged on one line with
-  // control characters escaped: error messages can carry request input, e.g. Postgres echoing
-  // a malformed value, and must not be able to forge log lines.
   // Logs one line with control characters escaped: error text can carry request input
   // (e.g. Postgres echoing a malformed value) and must not be able to forge log lines.
   // c.req.path is percent-decoded, so it is escaped too.
-  const logError = (c: Context, label: string, detail: unknown) =>
-    console.error(
-      `${new Date().toISOString()} ERROR ${escapeControlCharacters(
-        `${c.req.method} ${c.req.path}: ${label}${inspect(detail, { breakLength: Number.POSITIVE_INFINITY })}`,
-      )}`,
+  const logLine = (c: Context, level: 'ERROR' | 'WARN', text: string) =>
+    (level === 'ERROR' ? console.error : console.warn)(
+      `${new Date().toISOString()} ${level} ${escapeControlCharacters(`${c.req.method} ${c.req.path}: ${text}`)}`,
     )
+  const logError = (c: Context, label: string, detail: unknown) =>
+    logLine(c, 'ERROR', `${label}${inspect(detail, { breakLength: Number.POSITIVE_INFINITY })}`)
 
   // Unexpected errors (including Better Auth's, which it rethrows) are logged and answered
   // with an opaque 500; only failures the caller can act on get a specific code.
   app.onError((err, c) => {
+    // The client went away before it got an answer: it closed the connection, or the
+    // server's request timeout cut it off (Node has then answered it 408). Whatever failed
+    // after that, typically reading the rest of the body (Better Auth throws "aborted", a
+    // /api/v1 validator refuses the JSON), is no server error and nobody gets the answer:
+    // one WARN line naming the error, without a stack, and 499 (nginx's "client closed
+    // request") for the request log.
+    if (c.req.raw.signal.aborted) {
+      logLine(c, 'WARN', `client closed the connection before the answer (${summary(err)})`)
+      return new Response(null, { status: 499 })
+    }
     if (err instanceof HTTPException && err.status < 500) {
       // A prepared response (e.g. from middleware) is sent as is; otherwise use our shape.
       if (err.res) return err.getResponse()
