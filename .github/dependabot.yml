@@ -1,5 +1,5 @@
 # Dependency updates. Minor and patch versions arrive as one weekly pull request per
-# ecosystem; major versions get their own. Security updates (enabled in the repository's
+# ecosystem; major versions get their own (except TypeScript, see below). Security updates (enabled in the repository's
 # settings) are not grouped, so each one can be merged on its own, and skip the cooldown.
 # New versions wait 7 days before a pull request (Dependabot's default is 3), which gives
 # a compromised or broken release time to be caught and pulled first.
@@ -17,6 +17,12 @@ updates:
     groups:
       npm-minor-and-patch:
         update-types: [minor, patch]
+    ignore:
+      # TypeScript majors are upgraded by hand. apps/site must stay on a major @astrojs/check
+      # supports (its typecheck runs on TypeScript's JavaScript API); #19's bump also left
+      # package-lock.json inconsistent. Minor and patch updates still come through.
+      - dependency-name: typescript
+        update-types: [version-update:semver-major]
 
   # Actions in .github/workflows, pinned to commit SHAs with the version in a comment.
   - package-ecosystem: github-actions
