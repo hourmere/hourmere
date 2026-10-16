@@ -16,7 +16,8 @@ Open-source scheduling for people and AI agents. Self-host or use the cloud.
 | `packages/auth` | Sign-in (Better Auth: email links, Google, Microsoft), sessions, organizations, API keys. |
 | `packages/mail` | Outgoing email: SMTP, or the server log when SMTP is not configured; booking email templates and calendar invitations. |
 | `packages/jobs` | Background jobs on Postgres (pg-boss): typed job definitions, enqueueing inside a transaction, workers. |
-| `packages/notifications` | The booking notification job: who gets which email, at most once. See [docs/notifications.md](docs/notifications.md). |
+| `packages/notifications` | The booking notification job: who gets which email, sent once. See [docs/notifications.md](docs/notifications.md). |
+| `tools/api-types` | Generates the web app's API types from the server's OpenAPI document (`npm run api:types`). |
 
 ## Development
 
@@ -32,7 +33,16 @@ npm run dev        # API on :3000, web app on http://localhost:5173
 Without `SMTP_URL`, sign-in links are printed in the `npm run dev` output instead of being emailed.
 In development anyone may sign up unless `SIGNUP` or `SIGNUP_ALLOWED_DOMAINS` is set (see Self-hosting).
 
-Other commands: `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`, `npm run db:migrate`, `npm run db:down`.
+Open the app at http://localhost:5173. Vite serves it and proxies `/api/` and `/sign-in/confirm` (the server's page for emailed sign-in links) to the API server (on `PORT` from the environment or `.env`, default 3000), so the browser talks to one origin, as in production. To run the two separately, start the API with sign-in links and cookies pointing at Vite (and open sign-up, as `npm run dev` does), then Vite:
+
+```sh
+PUBLIC_URL=http://localhost:5173 SIGNUP=open npm run dev --workspace @hourmere/server
+npm run dev --workspace @hourmere/web
+```
+
+The web app only uses the public API (`/api/v1/*` and Better Auth's `/api/auth/*`). Its types for `/api/v1` are generated from the server's OpenAPI document: after changing a route, run `npm run api:types` (no database needed) and commit `apps/web/src/api/schema.d.ts`; CI fails if it is out of date.
+
+Other commands: `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`, `npm run db:migrate`, `npm run db:down`, `npm run api:types`.
 
 The website runs on its own: `npm run dev --workspace @hourmere/site` (http://localhost:4321). `npm run build` writes it to `apps/site/dist`. `npm run deploy --workspace @hourmere/site` builds it and publishes it as Cloudflare Workers static assets on hourmere.com and www.hourmere.com (config in `apps/site/wrangler.jsonc`); it needs `wrangler login` to the Cobaltmere Cloudflare account.
 
@@ -84,10 +94,12 @@ Sign-in links open a page with a "Sign in to Hourmere" button, and only pressing
 in: email security scanners that open every link (such as Microsoft Safe Links) would
 otherwise use up the one-time link before the person clicks it.
 
-Agents use API keys (`hm_…`) sent as `Authorization: Bearer <key>`. For now keys are created
-with Better Auth's endpoints while signed in (`POST /api/auth/api-key/create`, `GET
-/api/auth/api-key/list`, `POST /api/auth/api-key/delete`). The API is described at
+Agents use API keys (`hm_…`) sent as `Authorization: Bearer <key>`. Create them on the web
+app's API keys page, or with Better Auth's endpoints while signed in (`POST
+/api/auth/api-key/create`, `GET /api/auth/api-key/list`, `POST /api/auth/api-key/delete`). The API is described at
 `/api/v1/openapi.json`; its conventions are in [docs/api-conventions.md](docs/api-conventions.md).
+The same keys connect MCP clients such as Claude Code to the remote MCP server at `/mcp`; see
+[docs/mcp.md](docs/mcp.md).
 
 ## Contributing
 

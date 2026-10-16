@@ -68,6 +68,10 @@ describe.skipIf(!serverUrl)('startServer', () => {
             '/api/v1/bookings/{id}',
           ]),
         )
+        // And mounts the MCP endpoint, which wants an API key.
+        const mcp = await fetch(`http://127.0.0.1:${server.port}/mcp`, { method: 'POST' })
+        expect(mcp.status).toBe(401)
+        expect(mcp.headers.get('www-authenticate')).toBe('Bearer')
         console.error(new Error('boom\n[mail] {"forged":true}'))
       } finally {
         await server.close()

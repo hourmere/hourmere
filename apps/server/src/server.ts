@@ -6,20 +6,47 @@ import {
   createAuthPool,
   createCallerResolver,
 } from '@hourmere/auth'
-import { createDb, createPool, runMigrations } from '@hourmere/db'
+import { createDb, createPool, type Db, runMigrations } from '@hourmere/db'
 import { createJobs } from '@hourmere/jobs'
 import { createLogMailer, createSmtpMailer, type Mailer } from '@hourmere/mail'
 import { bookingNotificationJob } from '@hourmere/notifications'
 import { sql } from 'kysely'
 import { createApp } from './app.ts'
-import { loadConfig } from './config.ts'
+import { type Config, loadConfig } from './config.ts'
+import { bookingTools } from './mcp/bookings.ts'
+import { mcpEndpoint } from './mcp/endpoint.ts'
+import { whoamiTool } from './mcp/whoami.ts'
 import { installOneLineConsole } from './one-line-console.ts'
+import type { RouteModule } from './openapi.ts'
 import { bookingRoutes } from './routes/bookings.ts'
 import { eventTypeRoutes } from './routes/event-types.ts'
+import { instanceRoutes } from './routes/instance.ts'
 import { profileRoutes } from './routes/profile.ts'
 import { publicRoutes } from './routes/public.ts'
 import { scheduleRoutes } from './routes/schedules.ts'
 import { createWorkerHealthApp } from './worker-health.ts'
+
+/**
+ * The /api/v1 route groups, each created with what it needs. The OpenAPI document (and with
+ * it the web app's types, `npm run api:types`) is made from this same list. Route groups hold
+ * only db and in-memory rate limiters, and creating them touches neither.
+ */
+export function productRoutes({
+  db,
+  socialProviders,
+}: {
+  db: Db
+  socialProviders: Config['socialProviders']
+}): RouteModule[] {
+  return [
+    instanceRoutes({ socialProviders }),
+    profileRoutes({ db }),
+    scheduleRoutes({ db }),
+    eventTypeRoutes({ db }),
+    publicRoutes({ db }),
+    bookingRoutes({ db }),
+  ]
+}
 
 export interface RunningServer {
   port: number
@@ -138,14 +165,9 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
       publicUrl: config.PUBLIC_URL,
       trustedProxies: config.trustedProxies,
       webDist: config.WEB_DIST,
-      // Route groups hold only db (closed below) and in-memory rate limiters.
-      routes: [
-        profileRoutes({ db }),
-        scheduleRoutes({ db }),
-        eventTypeRoutes({ db }),
-        publicRoutes({ db }),
-        bookingRoutes({ db }),
-      ],
+      // db is closed below.
+      routes: productRoutes({ db, socialProviders: config.socialProviders }),
+      mcp: mcpEndpoint({ tools: [whoamiTool, ...bookingTools({ db })] }),
     }).fetch
   }
 

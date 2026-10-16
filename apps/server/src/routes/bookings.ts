@@ -94,11 +94,11 @@ export const BookingWithToken = z
   })
   .openapi('BookingWithToken')
 
-const CancelBody = z
+export const CancelBody = z
   .strictObject({ reason: z.string().max(1000).optional() })
   .openapi('CancelBooking')
 
-const BookingPage = z
+export const BookingPage = z
   .object({
     data: z.array(Booking),
     nextCursor: z.string().nullable().openapi({
@@ -106,6 +106,21 @@ const BookingPage = z
     }),
   })
   .openapi('BookingPage')
+
+/** Filters and paging for the host's bookings (GET /api/v1/bookings, MCP list_bookings). */
+export const ListBookingsQuery = z.object({
+  from: Instant.optional().openapi({ description: 'Only bookings starting at or after' }),
+  to: Instant.optional().openapi({ description: 'Only bookings starting before' }),
+  status: z.enum(['confirmed', 'cancelled']).optional(),
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_PAGE_SIZE)
+    .optional()
+    .openapi({ description: `Page size, 1–${MAX_PAGE_SIZE} (default 50)` }),
+  cursor: z.string().optional(),
+})
 
 const error = (description: string) => ({ description, content: json(ErrorBody) })
 
@@ -258,21 +273,7 @@ export function bookingRoutes({
           'Bookings in the organization the caller acts in where the caller is a host, ordered by start time. Paginated with a cursor: pass `nextCursor` from one page as `cursor` for the next (keep the other parameters the same).',
         security: authenticated,
         middleware: caller,
-        request: {
-          query: z.object({
-            from: Instant.optional().openapi({ description: 'Only bookings starting at or after' }),
-            to: Instant.optional().openapi({ description: 'Only bookings starting before' }),
-            status: z.enum(['confirmed', 'cancelled']).optional(),
-            limit: z.coerce
-              .number()
-              .int()
-              .min(1)
-              .max(MAX_PAGE_SIZE)
-              .optional()
-              .openapi({ description: `Page size, 1–${MAX_PAGE_SIZE} (default 50)` }),
-            cursor: z.string().optional(),
-          }),
-        },
+        request: { query: ListBookingsQuery },
         responses: {
           200: { description: 'A page of bookings', content: json(BookingPage) },
           400: error('Invalid parameters (`invalid_request`, `invalid_range`, `invalid_cursor`)'),
