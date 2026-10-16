@@ -179,13 +179,19 @@ function AddOverride({
 }) {
   const [date, setDate] = useState('')
   const [mode, setMode] = useState<'unavailable' | 'hours'>('unavailable')
-  const [intervals, setIntervals] = useState<IntervalDraft[]>(() => [intervalDraft()])
+  const [initialIntervals] = useState(() => [intervalDraft()])
+  const [intervals, setIntervals] = useState<IntervalDraft[]>(initialIntervals)
   const [errors, setErrors] = useState<FieldErrors>({})
   const [formError, setFormError] = useState<string | null>(null)
   const [attempt, setAttempt] = useState(0)
   const [saving, setSaving] = useState(false)
   const submitButton = useRef<HTMLButtonElement>(null)
-  useUnsavedChanges(date !== '')
+  const values = (hours: IntervalDraft[]) => hours.map(({ start, end }) => [start, end])
+  useUnsavedChanges(
+    date !== '' ||
+      mode !== 'unavailable' ||
+      JSON.stringify(values(intervals)) !== JSON.stringify(values(initialIntervals)),
+  )
 
   const replaces = existing.some((o) => o.date === date)
 

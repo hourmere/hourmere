@@ -399,6 +399,61 @@ describe('date overrides', () => {
   const overridesSection = () => screen.findByRole('region', { name: 'Date overrides' })
 
   it.each([
+    [false, false, true],
+    [true, false, true],
+    [false, true, true],
+    [false, false, false],
+  ])(
+    'protects override hours without a date (cleared: %s, hidden: %s, edited: %s)',
+    async (clearDate, hideHours, editHours) => {
+      const user = userEvent.setup()
+      const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+      const api = scheduleServer([schedule()], {
+        extra: {
+          [`PUT /api/v1/schedules/${SCHEDULE_ID}/overrides/2030-12-24`]: ({ body }) =>
+            json(201, { date: '2030-12-24', ...(body as object) }),
+        },
+      })
+      renderApp(`/app/availability/${SCHEDULE_ID}`)
+      const section = await overridesSection()
+      await within(section).findByText('No upcoming date overrides.')
+      await user.click(within(section).getByRole('radio', { name: 'Other hours' }))
+      if (editHours) {
+        fireEvent.change(within(section).getByLabelText('That date, hours 1, until'), {
+          target: { value: '12:00' },
+        })
+      }
+      const date = within(section).getByLabelText('Date')
+      if (clearDate) {
+        fireEvent.change(date, { target: { value: '2030-12-24' } })
+        fireEvent.change(date, { target: { value: '' } })
+      }
+      if (hideHours) {
+        await user.click(within(section).getByRole('radio', { name: 'Unavailable all day' }))
+      }
+      const back = within(screen.getByRole('navigation', { name: 'Main' })).getByRole('link', {
+        name: 'Availability',
+      })
+      expect(fireEvent.click(back)).toBe(false)
+      expect(confirm).toHaveBeenCalledOnce()
+      await user.click(screen.getByRole('button', { name: 'Sign out' }))
+      expect(confirm).toHaveBeenCalledTimes(2)
+      expect(api.to('POST /api/auth/sign-out')).toHaveLength(0)
+      const reload = new Event('beforeunload', { cancelable: true })
+      window.dispatchEvent(reload)
+      expect(reload.defaultPrevented).toBe(true)
+      fireEvent.change(date, { target: { value: '2030-12-24' } })
+      await user.click(within(section).getByRole('button', { name: 'Save override' }))
+      await within(section).findByText(/Added the override for/)
+      confirm.mockClear()
+      await user.click(back)
+      expect(await screen.findByRole('heading', { name: 'Availability', level: 1 })).toBeDefined()
+      expect(confirm).not.toHaveBeenCalled()
+      expect(location()).toBe('/app/availability')
+    },
+  )
+
+  it.each([
     ['Pacific/Kiritimati', '2030-01-01T10:30:00Z', '2030-01-02'],
     ['Pacific/Honolulu', '2030-01-01T00:30:00Z', '2029-12-31'],
   ])('uses today in %s for the query and date input', async (timeZone, now, today) => {

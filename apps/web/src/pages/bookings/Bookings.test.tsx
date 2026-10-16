@@ -23,6 +23,20 @@ const numbered = (from: number, count: number): Booking[] =>
   })
 
 describe('the bookings list', () => {
+  it('shows the end date for an overnight booking in the list', async () => {
+    fakeApi({
+      ...signedIn,
+      ...profile(),
+      'GET /api/v1/bookings': () =>
+        json(200, {
+          data: [booking({ end: '2030-03-05T09:00:00.000Z' })],
+          nextCursor: null,
+        }),
+    })
+    renderApp('/app/bookings')
+    const row = (await screen.findByRole('rowheader', { name: 'Intro call' })).closest('tr')
+    expect(row?.textContent).toMatch(/10:00\sAM – Mar 5, 2030, 10:00\sAM/)
+  })
   it('lists upcoming bookings in the host’s time zone', async () => {
     const api = fakeApi({
       ...signedIn,
@@ -232,6 +246,13 @@ describe('a booking', () => {
       ...extra,
     })
   }
+
+  it('shows the host’s end date for an overnight booking in the detail', async () => {
+    bookingServer(booking({ end: '2030-03-05T09:00:00.000Z' }))
+    renderApp(`/app/bookings/${BOOKING_ID}`)
+    const when = await screen.findByRole('region', { name: 'When' })
+    expect(when.textContent).toMatch(/10:00\sAM – Mar 5, 2030, 10:00\sAM/)
+  })
 
   it('shows the invitee, guests, answers, location and times in the host’s zone', async () => {
     bookingServer(withAnswers)

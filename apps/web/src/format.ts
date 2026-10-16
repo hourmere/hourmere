@@ -76,9 +76,13 @@ export function zoned(timeZone: string) {
     /** Includes each endpoint's date, so a range across midnight is unambiguous. */
     dateTimeRange: (start: string, end: string) =>
       `${dateTime.format(new Date(start))} – ${dateTime.format(new Date(end))}`,
-    /** "09:00 – 09:30" */
-    timeRange: (start: string, end: string) =>
-      `${time.format(new Date(start))} – ${time.format(new Date(end))}`,
+    /** "09:00 – 09:30", including the end date when it falls on another local day. */
+    timeRange: (start: string, end: string) => {
+      const from = new Date(start)
+      const to = new Date(end)
+      const until = date.format(from) === date.format(to) ? time.format(to) : dateTime.format(to)
+      return `${time.format(from)} – ${until}`
+    },
   }
 }
 
