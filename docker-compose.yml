@@ -2,8 +2,10 @@
 # PUBLIC_URL (optionally SMTP and Google/Microsoft sign-in), then
 #   docker compose up -d
 # The app listens on 127.0.0.1:3000; put a reverse proxy with TLS in front of it. Until SMTP
-# is configured, sign-in links are printed by `docker compose logs app`. Background jobs
-# (booking emails) run inside `app` unless you split them out (the `worker` service below).
+# is configured, sign-in links are printed by `docker compose logs app`. With the default
+# SIGNUP=first-user, sign in right after the first start: the first account should be yours.
+# Background jobs (booking emails) run inside `app` unless you split them out (the `worker`
+# service below).
 name: hourmere
 
 services:
@@ -25,6 +27,9 @@ services:
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       MICROSOFT_CLIENT_ID: ${MICROSOFT_CLIENT_ID:-}
       MICROSOFT_CLIENT_SECRET: ${MICROSOFT_CLIENT_SECRET:-}
+      # Who may create an account (see .env.example); empty means first-user.
+      SIGNUP: ${SIGNUP:-}
+      SIGNUP_ALLOWED_DOMAINS: ${SIGNUP_ALLOWED_DOMAINS:-}
       TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
       HOURMERE_ROLE: ${HOURMERE_ROLE:-}
     ports:

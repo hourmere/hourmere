@@ -1,6 +1,11 @@
 import type { AddressInfo } from 'node:net'
 import { serve } from '@hono/node-server'
-import { createAuth, createAuthPool, createCallerResolver } from '@hourmere/auth'
+import {
+  assertSignupEnforced,
+  createAuth,
+  createAuthPool,
+  createCallerResolver,
+} from '@hourmere/auth'
 import { createDb, createPool, runMigrations } from '@hourmere/db'
 import { createJobs } from '@hourmere/jobs'
 import { createLogMailer, createSmtpMailer, type Mailer } from '@hourmere/mail'
@@ -65,8 +70,34 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
     }
     mailer = createLogMailer()
   }
+  // Sign-in emails go out after the request is answered, and shutdown does not wait for them;
+  // the count is for saying how many it drops.
+  let sending = 0
+  const sender = mailer
+  const countingMailer: Mailer = {
+    async send(message) {
+      sending += 1
+      try {
+        await sender.send(message)
+      } finally {
+        sending -= 1
+      }
+    },
+  }
 
   const role = config.HOURMERE_ROLE
+  // A worker serves only /api/health, for the container health check: no sign-in, no API.
+  const authPool =
+    role === 'worker' ? undefined : createAuthPool(config.DATABASE_URL, config.signup)
+  if (authPool) {
+    try {
+      await assertSignupEnforced(authPool, config.signup)
+    } catch (err) {
+      await Promise.all([db.destroy(), authPool.end()])
+      throw err
+    }
+  }
+
   // Background jobs: every role queues them, `all` and `worker` run them.
   const jobs = createJobs({
     connectionString: config.DATABASE_URL,
@@ -77,13 +108,16 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
     migrate: config.AUTO_MIGRATE,
     instanceName: role,
   })
-  await jobs.start()
+  try {
+    await jobs.start()
+  } catch (err) {
+    await Promise.all([db.destroy(), authPool?.end()])
+    throw err
+  }
   const checkDb = async () => {
     await sql`SELECT 1`.execute(db)
   }
 
-  // A worker serves only /api/health, for the container health check: no sign-in, no API.
-  const authPool = role === 'worker' ? undefined : createAuthPool(config.DATABASE_URL)
   let fetch: Parameters<typeof serve>[0]['fetch']
   if (!authPool) {
     fetch = createWorkerHealthApp({ checkDb, checkJobs: () => jobs.check() }).fetch
@@ -93,7 +127,8 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
       db,
       baseURL: config.PUBLIC_URL,
       secret: config.BETTER_AUTH_SECRET,
-      mailer,
+      mailer: countingMailer,
+      signup: config.signup,
       socialProviders: config.socialProviders,
     })
     fetch = createApp({
@@ -120,8 +155,10 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
         console.log(`Hourmere worker running jobs; health check on :${info.port}/api/health`)
       } else {
         const providers = Object.keys(config.socialProviders)
+        const { mode, allowedDomains } = config.signup
+        const signup = `${mode}${allowedDomains.length ? `, plus ${allowedDomains.join(', ')}` : ''}`
         console.log(
-          `Hourmere listening on :${info.port} (${config.PUBLIC_URL}); sign-in: email${providers.map((p) => `, ${p}`).join('')}; jobs: ${role === 'all' ? 'run here' : 'queued for a worker'}`,
+          `Hourmere listening on :${info.port} (${config.PUBLIC_URL}); sign-in: email${providers.map((p) => `, ${p}`).join('')}; sign-up: ${signup}; jobs: ${role === 'all' ? 'run here' : 'queued for a worker'}`,
         )
       }
       resolve(s)
@@ -136,6 +173,8 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
         // ones up to a timeout), then the pools the jobs use.
         server.close(async (err) => {
           try {
+            if (sending)
+              console.warn(`shutting down: dropping ${sending} email(s) still being sent`)
             await jobs.stop().finally(() => Promise.all([db.destroy(), authPool?.end()]))
             restoreConsole()
             if (err) reject(err)

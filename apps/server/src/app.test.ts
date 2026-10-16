@@ -119,6 +119,15 @@ describe('serving the built web app', () => {
     expect(res.status).toBe(404)
     expect(res.headers.get('cache-control')).toBeNull()
   })
+
+  it('serves the sign-in confirm page itself, keeping its headers', async () => {
+    const res = await app.request('/sign-in/confirm')
+    expect(res.status).toBe(200)
+    expect(await res.text()).toContain('Sign in to Hourmere</button>')
+    expect(res.headers.get('cache-control')).toBe('no-store')
+    expect(res.headers.get('referrer-policy')).toBe('no-referrer')
+    expect(res.headers.get('content-security-policy')).toContain("default-src 'none'")
+  })
 })
 
 describe('route modules and errors', () => {

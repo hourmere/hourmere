@@ -30,6 +30,7 @@ npm run dev        # API on :3000, web app on http://localhost:5173
 ```
 
 Without `SMTP_URL`, sign-in links are printed in the `npm run dev` output instead of being emailed.
+In development anyone may sign up unless `SIGNUP` or `SIGNUP_ALLOWED_DOMAINS` is set (see Self-hosting).
 
 Other commands: `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`, `npm run db:migrate`, `npm run db:down`.
 
@@ -55,6 +56,33 @@ users get `EMAIL_NOT_VERIFIED` and have to use an email link. Until `SMTP_URL` a
 sign-in link to its log (`docker compose logs app`), so you can sign in right after the first
 start. Anyone who can read that log can sign in as anyone: configure SMTP before inviting
 anyone else, and always on a hosted or internet-facing instance.
+
+`SIGNUP` decides who may create an account; existing users can always sign in. With
+`first-user` (the default), the first person to sign in gets an account, and after that only
+addresses in `SIGNUP_ALLOWED_DOMAINS` (comma-separated email domains, e.g.
+`example.com,example.org`; exact match, so list subdomains separately). So sign in right
+after the first start: the first account should be yours. `closed` allows only those domains
+(nobody, if the list is empty); `open` lets anyone who can reach the instance sign up. A new
+address that may not sign up gets no sign-in email, and the request is answered the same way
+as for any other address. The request does not wait for the email either: if sending fails
+(e.g. wrong SMTP settings), the person sees the usual answer and the failure appears in the
+log.
+
+The database enforces the sign-up rules too, using settings the app passes in the `options`
+startup parameter when it connects (`search_path` and `hourmere.*`), and it needs read
+committed isolation (Postgres's default) or serializable. Connect the app to Postgres
+directly, as the compose file does; connection poolers such as PgBouncer are not supported,
+since they do not pass custom startup settings like `hourmere.*` on to Postgres. The app reads
+the settings back at startup and refuses to start if they are missing.
+
+That check looks at one connection, once, at startup: a pooler slipped in later at the same
+address would turn the database's check off without notice (the app's own check still
+applies). It also means the app needs the database at startup even with `AUTO_MIGRATE=false`;
+if the database is down, the app exits and compose restarts it.
+
+Sign-in links open a page with a "Sign in to Hourmere" button, and only pressing it signs
+in: email security scanners that open every link (such as Microsoft Safe Links) would
+otherwise use up the one-time link before the person clicks it.
 
 Agents use API keys (`hm_…`) sent as `Authorization: Bearer <key>`. For now keys are created
 with Better Auth's endpoints while signed in (`POST /api/auth/api-key/create`, `GET
