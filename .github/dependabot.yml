@@ -1,0 +1,39 @@
+# Dependency updates. Minor and patch versions arrive as one weekly pull request per
+# ecosystem; major versions get their own. Security updates (enabled in the repository's
+# settings) are not grouped, so each one can be merged on its own, and skip the cooldown.
+# New versions wait 7 days before a pull request (Dependabot's default is 3), which gives
+# a compromised or broken release time to be caught and pulled first.
+# Not covered on purpose: the postgres image in the compose files and CI. A Postgres major
+# upgrade needs a data migration, so it is a deliberate change, not a bot pull request.
+version: 2
+updates:
+  # The root covers every workspace in apps/* and packages/* through package-lock.json.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      npm-minor-and-patch:
+        update-types: [minor, patch]
+
+  # Actions in .github/workflows, pinned to commit SHAs with the version in a comment.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      actions-minor-and-patch:
+        update-types: [minor, patch]
+
+  # Base image in the Dockerfile. Its tag (26-slim) names only the Node.js major, so this
+  # proposes new majors only: move .node-version, engines and the image together, or close it.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
