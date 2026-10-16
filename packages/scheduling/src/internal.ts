@@ -1,4 +1,5 @@
-// Helpers shared by the services; not part of the package's exports.
+// Helpers shared by the services. Only validTimeZone is exported from the package, for
+// transports that read a time zone themselves (the MCP server's slot search).
 import { AvailabilityInputError, validateTimeZone } from '@hourmere/core'
 import { DomainError } from './errors.ts'
 

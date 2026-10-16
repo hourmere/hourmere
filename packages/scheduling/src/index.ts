@@ -58,6 +58,7 @@ export {
   SLUG_PATTERN,
   updateEventType,
 } from './event-types.ts'
+export { validTimeZone } from './internal.ts'
 export {
   getProfile,
   HANDLE_MAX_LENGTH,

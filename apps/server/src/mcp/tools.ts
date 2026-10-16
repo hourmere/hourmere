@@ -23,8 +23,9 @@ export type McpCaller = Extract<Principal, { kind: 'api_key' }>
 export interface ToolCall {
   caller: McpCaller
   /**
-   * Counts this call against `limiter` for the caller's API key. Over the limit, the call
-   * stops here and the tool answers `rate_limited` with the seconds to wait.
+   * Counts this call against `limiter` for the caller's user, all of their API keys together
+   * (one person cannot multiply a limit by creating keys). Over the limit, the call stops
+   * here and the tool answers `rate_limited` with the seconds to wait.
    */
   rateLimit(limiter: RateLimiter): void
 }
@@ -99,11 +100,24 @@ const DOMAIN_KINDS: ReadonlySet<DomainErrorKind> = new Set([
   'conflict',
 ])
 
-/** "path: message; …", as the REST API reports request validation failures. */
+/**
+ * `text`, cut to `max` characters with a note of how much was left out. For anything that
+ * repeats client input (field names, tool names) into a response or a log line.
+ */
+export function clip(text: string, max: number): string {
+  return text.length > max ? `${text.slice(0, max)}…(+${text.length - max} chars)` : text
+}
+
+/**
+ * "path: message; …", as the REST API reports request validation failures. Zod repeats
+ * unknown field names in its messages, so each part and the whole are bounded.
+ */
 function describeIssues(issues: readonly z.core.$ZodIssue[]): string {
-  return issues
-    .map((i) => (i.path.length ? `${i.path.join('.')}: ${i.message}` : i.message))
-    .join('; ')
+  const parts = issues.map((i) => {
+    const path = i.path.map((p) => clip(String(p), 100)).join('.')
+    return clip(path ? `${path}: ${i.message}` : i.message, 300)
+  })
+  return clip(parts.join('; '), 2000)
 }
 
 /** Logs one line about a failed call; the endpoint escapes it (see endpoint.ts). */
@@ -142,7 +156,7 @@ export async function runTool(
     if (err instanceof RateLimited) {
       return errorResult({
         error: 'rate_limited',
-        message: `Too many ${tool.name} calls with this API key; try again in ${err.retryAfterSeconds} s`,
+        message: `Too many ${tool.name} calls for this user; try again in ${err.retryAfterSeconds} s`,
         retryAfterSeconds: err.retryAfterSeconds,
       })
     }
@@ -247,7 +261,7 @@ export function registerTools(
   const call: ToolCall = {
     caller,
     rateLimit(limiter) {
-      const retryAfter = limiter.hit(`api_key:${caller.apiKeyId}`)
+      const retryAfter = limiter.hit(`user:${caller.user.id}`)
       if (retryAfter !== undefined) throw new RateLimited(retryAfter)
     },
   }

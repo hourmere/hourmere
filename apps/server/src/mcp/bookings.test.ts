@@ -9,7 +9,7 @@ import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/cli
 import type pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from '../app.ts'
-import type { RateLimit } from '../rate-limit.ts'
+import { PUBLIC_RATE_LIMITS, type RateLimit } from '../rate-limit.ts'
 import { bookingRoutes } from '../routes/bookings.ts'
 import { publicRoutes } from '../routes/public.ts'
 import { type BookingToolsDeps, bookingTools } from './bookings.ts'
@@ -183,7 +183,7 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
       })
       const refused = await initialize(disabled.key)
       expect(refused.status).toBe(401)
-      expect(refused.headers.get('www-authenticate')).toBe('Bearer')
+      expect(refused.headers.get('www-authenticate')).toBe('Bearer error="invalid_token"')
 
       const deleted = await createKey(agent.userId, 'deleted')
       await testDb.pool.query('DELETE FROM auth.apikey WHERE id = $1', [deleted.keyId])
@@ -252,6 +252,22 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
         localStart: '2026-11-02T23:30:00+09:00',
       })
       expect(tokyo.slots).toHaveLength(14)
+    })
+
+    it('cuts the hour a daylight saving change adds to a 62-day search', async () => {
+      // New York leaves daylight saving time on 1 November, so these 62 days last
+      // 62 × 24 + 1 hours, one more than the slots service takes.
+      const result = ok<{ slots: { start: string }[] }>(
+        await call('find_available_slots', {
+          handle: 'ada',
+          slug: 'intro',
+          timeZone: 'America/New_York',
+          startDate: '2026-10-02',
+          endDate: '2026-12-02',
+        }),
+      )
+      expect(result.slots.length).toBeGreaterThan(100)
+      expect(result.slots.at(-1)?.start.startsWith('2026-12-02')).toBe(true)
     })
 
     it.each([
@@ -456,23 +472,77 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
       }
     })
 
-    it('limits public-page tools per API key like the public endpoints', async () => {
-      const limitedApp = appWith({ slots: { limit: 1, windowSeconds: 60 } })
-      const args = {
+    it('counts create_booking per user, across keys: the 11th call in a minute is refused', async () => {
+      const real = appWith({ book: PUBLIC_RATE_LIMITS.book })
+      const busy = await f.host({ name: 'Busy Agent', handle: null })
+      const first = await createKey(busy.userId, 'first')
+      const second = await createKey(busy.userId, 'second')
+      const other = await f.host({ name: 'Other Agent', handle: null })
+      const otherKey = await createKey(other.userId, 'other')
+      // Not a slot, so nothing is booked, but every call counts.
+      const args = bookingArgs('2026-11-02T09:10:00Z')
+      const client = await connect(first.key, real)
+      try {
+        for (let i = 0; i < PUBLIC_RATE_LIMITS.book.limit; i++) {
+          const result = await client.callTool({ name: 'create_booking', arguments: args })
+          expect(errorOf(result as ToolResult).error).toBe('slot_unavailable')
+        }
+        const eleventh = await client.callTool({ name: 'create_booking', arguments: args })
+        expect(errorOf(eleventh as ToolResult)).toMatchObject({
+          error: 'rate_limited',
+          retryAfterSeconds: expect.any(Number),
+        })
+      } finally {
+        await client.close()
+      }
+      // Another key of the same user shares the count; another user does not.
+      expect(errorOf(await call('create_booking', args, second.key, real)).error).toBe(
+        'rate_limited',
+      )
+      expect(errorOf(await call('create_booking', args, otherKey.key, real)).error).toBe(
+        'slot_unavailable',
+      )
+    })
+
+    it('counts find_available_slots and the manage-token tools per user too', async () => {
+      const once = { limit: 1, windowSeconds: 60 }
+      const limited = appWith({ slots: once, manage: once })
+      const busy = await f.host({ name: 'Busy Agent', handle: null })
+      const first = await createKey(busy.userId, 'first')
+      const second = await createKey(busy.userId, 'second')
+      const other = await f.host({ name: 'Other Agent', handle: null })
+      const otherKey = await createKey(other.userId, 'other')
+      const slotArgs = {
         handle: 'ada',
         slug: 'intro',
         timeZone: 'UTC',
         startDate: '2026-11-03',
         endDate: '2026-11-03',
       }
-      ok(await call('find_available_slots', args, agent.key, limitedApp))
+      ok(await call('find_available_slots', slotArgs, first.key, limited))
       expect(
-        errorOf(await call('find_available_slots', args, agent.key, limitedApp)),
-      ).toMatchObject({
-        error: 'rate_limited',
-      })
-      // Counted per key: another agent is not affected.
-      ok(await call('find_available_slots', args, adaKey.key, limitedApp))
+        errorOf(await call('find_available_slots', slotArgs, second.key, limited)),
+      ).toMatchObject({ error: 'rate_limited' })
+      ok(await call('find_available_slots', slotArgs, otherKey.key, limited))
+
+      // Rescheduling and cancelling with a manage token share one count.
+      const booked = ok<Booked>(
+        await call('create_booking', bookingArgs('2026-11-03T08:00:00Z'), first.key, limited),
+      )
+      const moved = ok<Booked>(
+        await call(
+          'reschedule_booking',
+          { manageToken: booked.manageToken, start: '2026-11-03T08:30:00Z' },
+          first.key,
+          limited,
+        ),
+      )
+      expect(
+        errorOf(
+          await call('cancel_booking', { manageToken: moved.manageToken }, second.key, limited),
+        ),
+      ).toMatchObject({ error: 'rate_limited' })
+      ok(await call('cancel_booking', { manageToken: moved.manageToken }, otherKey.key, limited))
     })
   })
 })

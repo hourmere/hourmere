@@ -14,7 +14,7 @@ REST API.
   (`@modelcontextprotocol/server` 2.x).
 - **Protocol versions:** `2026-07-28`, and the earlier revisions that start with
   `initialize` (`2025-11-25` and before), which most clients still speak.
-- **Stateless:** every JSON-RPC message is its own POST, answered with JSON or a short SSE
+- **Stateless:** every JSON-RPC message is its own POST (to `/mcp` or `/mcp/`), answered with JSON or a short SSE
   stream for that request. There are no sessions (`Mcp-Session-Id`) and no standing GET
   stream: `GET` and `DELETE` get 405. Any server instance can answer any request.
 - **Limits:** bodies up to 2 MB (the largest legal booking, see
@@ -43,8 +43,9 @@ await (await fetch('/api/auth/api-key/create', {
 })).json()
 ```
 
-A missing, malformed, unknown, disabled or deleted key gets **401** with
-`WWW-Authenticate: Bearer`. Session cookies are never accepted on `/mcp`, even alongside a
+A missing key gets **401** with `WWW-Authenticate: Bearer`; a malformed, unknown, disabled
+or deleted one gets 401 with `WWW-Authenticate: Bearer error="invalid_token"` (RFC 6750).
+Session cookies are never accepted on `/mcp`, even alongside a
 key: a JSON-RPC endpoint that cookies could authenticate would let any web page act as a
 signed-in visitor (CSRF).
 
@@ -56,10 +57,10 @@ connect.
 
 **Rate limits:** each key's limit (600 requests a minute, shared with the REST API) counts
 every MCP request; beyond it, **429** with `Retry-After`. Tools that act on public booking
-pages are also limited per key with the numbers the public endpoints apply per address:
-`find_available_slots` 120 a minute, `create_booking` 10, `reschedule_booking` and
-`cancel_booking` by manage token 30 together. Beyond those, the tool answers `rate_limited`
-(see [Errors](#errors)).
+pages are also limited per user, all of their keys together, with the numbers the public
+endpoints apply per address: `find_available_slots` 120 a minute, `create_booking` 10,
+`reschedule_booking` and `cancel_booking` by manage token 30 together. Beyond those, the tool
+answers `rate_limited` (see [Errors](#errors)).
 
 ## Connecting a client
 
@@ -70,8 +71,9 @@ claude mcp add --transport http hourmere https://hourmere.example.com/mcp \
   --header "Authorization: Bearer hm_…"
 ```
 
-**Clients configured with JSON** (Cursor, VS Code, Windsurf and others that support remote
-servers with headers; the exact keys vary by client):
+**Clients configured with JSON** (Cursor, Windsurf and others that support remote servers
+with headers; the exact keys vary by client, e.g. VS Code's `.vscode/mcp.json` uses
+`"servers"` instead of `"mcpServers"`):
 
 ```json
 {
@@ -88,14 +90,15 @@ servers with headers; the exact keys vary by client):
 **Claude Desktop and claude.ai:** custom connectors there sign in with OAuth, which Hourmere
 does not offer yet (see [What's next](#whats-next)). Meanwhile Claude Desktop can reach the
 endpoint through a local bridge that adds the header, such as
-[`mcp-remote`](https://www.npmjs.com/package/mcp-remote), in `claude_desktop_config.json`:
+[`mcp-remote`](https://www.npmjs.com/package/mcp-remote), in `claude_desktop_config.json`.
+Pin a version (versions before 0.1.16 have a remote code execution flaw, CVE-2025-6514):
 
 ```json
 {
   "mcpServers": {
     "hourmere": {
       "command": "npx",
-      "args": ["mcp-remote", "https://hourmere.example.com/mcp", "--header", "Authorization:${HOURMERE_AUTH}"],
+      "args": ["mcp-remote@0.14.3", "https://hourmere.example.com/mcp", "--header", "Authorization:${HOURMERE_AUTH}"],
       "env": { "HOURMERE_AUTH": "Bearer hm_…" }
     }
   }
@@ -131,8 +134,9 @@ fields are those of the REST API (`/api/v1/openapi.json`). Results come as
 `structuredContent` and, for older clients, as the same JSON in a text block.
 
 - **Times** are RFC 3339. Results give instants in UTC (`2026-11-02T08:00:00.000Z`).
-  `find_available_slots` takes a `timeZone` (IANA, e.g. `Europe/Berlin`; UTC offsets are
-  refused because they ignore daylight saving time) and calendar days in it (`startDate`,
+  `find_available_slots` takes a `timeZone` (an IANA name, e.g. `Europe/Berlin`; numeric
+  offsets such as `+01:00` are refused because they ignore daylight saving time) and
+  calendar days in it (`startDate`,
   `endDate`, inclusive, at most 62 days), and gives each slot in that zone too
   (`localStart`: `2026-11-02T09:00:00+01:00`). Pass a slot's `start` unchanged to
   `create_booking` or `reschedule_booking`.
@@ -157,8 +161,9 @@ themselves) whose text is the REST API's error body:
   `slot_taken`, `invalid_time_zone`, `invalid_responses`, `booking_not_found`,
   `booking_cancelled`, `idempotency_key_reused`, …); `message` is safe to show and may change.
 - Arguments that do not fit the schema get `invalid_request`, with `message` naming the
-  fields (`invitee.email: Invalid email address`). Unknown arguments are refused, not ignored.
-  Text with NUL characters or malformed Unicode is refused the same way.
+  fields (`invitee.email: Invalid email address`; long names and messages are shortened).
+  Unknown arguments are refused, not ignored. Text with NUL characters or malformed Unicode is
+  refused the same way.
 - `rate_limited` adds `retryAfterSeconds`.
 - `internal_error` means a bug on our side; details go to the server log only.
 

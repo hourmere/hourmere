@@ -222,8 +222,9 @@ export function createApp({
   app.use('/api/v1/*', routeRateLimits())
   // Not /api/auth: Better Auth reads the raw request body itself.
   app.use('/api/v1/*', jsonTextGuard)
-  // The MCP endpoint is logged and body-limited like /api; it applies its own checks.
-  app.use('/mcp', requestLogger, clientIp(trustedProxies), apiBodyLimit())
+  // The MCP endpoint (and anything under it) is logged, body-limited and never cached like
+  // /api/v1, 413s included; it applies its own checks.
+  app.use('/mcp/*', noStoreByDefault, requestLogger, clientIp(trustedProxies), apiBodyLimit())
 
   app.openapi(healthRoute, async (c) => {
     try {

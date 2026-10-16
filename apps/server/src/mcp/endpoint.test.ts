@@ -263,7 +263,85 @@ describe('MCP transport', () => {
       body: 'x',
     })
     expect(res.status).toBe(413)
+    expect(res.headers.get('cache-control')).toBe('no-store')
     expect(resolveCaller).not.toHaveBeenCalled()
+  })
+
+  it('takes requests up to the limit: a 1.9 MB tool call works', async () => {
+    const text = 'x'.repeat(1_900_000)
+    const res = await rpc({
+      jsonrpc: '2.0',
+      id: 3,
+      method: 'tools/call',
+      params: { name: 'probe', arguments: { outcome: 'ok', text } },
+    })
+    expect(res.status).toBe(200)
+    expect(await message(res)).toMatchObject({
+      id: 3,
+      result: { structuredContent: { outcome: 'ok', caller: 'Ada' } },
+    })
+  })
+
+  it('keeps results open to new fields and arguments closed', async () => {
+    const client = await connect()
+    const { tools } = await client.listTools()
+    await client.close()
+    const closed: string[] = []
+    const walk = (schema: unknown, at: string) => {
+      if (typeof schema !== 'object' || schema === null) return
+      const s = schema as Record<string, unknown>
+      if (s.additionalProperties === false) closed.push(at)
+      for (const [key, value] of Object.entries(s)) walk(value, `${at}.${key}`)
+    }
+    for (const tool of tools) walk(tool.outputSchema, tool.name)
+    expect(closed).toEqual([])
+    for (const tool of tools) {
+      expect(tool.inputSchema, tool.name).toMatchObject({ additionalProperties: false })
+    }
+  })
+
+  it('logs what the SDK refuses on one bounded line, whatever the client sent', async () => {
+    const lines: string[] = []
+    const spies = (['warn', 'error'] as const).map((m) =>
+      vi.spyOn(console, m).mockImplementation((...args) => {
+        lines.push(args.join(' '))
+      }),
+    )
+    const huge = `tool${'n'.repeat(500_000)}`
+    try {
+      // A 2026-07-28 request whose Mcp-Name header does not match the body.
+      const res = await app.request(url, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          accept: 'application/json, text/event-stream',
+          authorization: 'Bearer hm_good',
+          'mcp-protocol-version': '2026-07-28',
+          'mcp-method': 'tools/call',
+          'mcp-name': 'other',
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 4,
+          method: 'tools/call',
+          params: {
+            name: huge,
+            arguments: {},
+            _meta: {
+              'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+              'io.modelcontextprotocol/clientCapabilities': {},
+            },
+          },
+        }),
+      })
+      expect(res.status).toBe(400)
+    } finally {
+      for (const spy of spies) spy.mockRestore()
+    }
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toMatch(/WARN POST \/mcp: /)
+    expect(lines[0]).toMatch(/…\(\+\d+ chars\)$/)
+    expect(lines[0]?.length).toBeLessThan(2200)
   })
 
   it('answers OAuth discovery and GET /mcp itself, not the web app', async () => {
@@ -275,13 +353,33 @@ describe('MCP transport', () => {
         '/.well-known/oauth-protected-resource',
         '/.well-known/oauth-protected-resource/mcp',
         '/.well-known/oauth-authorization-server',
+        '/.well-known/oauth-authorization-server/mcp',
         '/.well-known/openid-configuration',
+        '/.well-known/openid-configuration/mcp',
+        '/mcp/.well-known/openid-configuration',
+        '/mcp/.well-known/oauth-authorization-server',
+        '/mcp/anything',
       ]) {
         const res = await withWeb.request(path)
-        expect(res.status).toBe(404)
+        expect(res.status, path).toBe(404)
         expect(await res.json()).toEqual({ error: 'not_found' })
+        expect(res.headers.get('cache-control')).toBe(path.startsWith('/mcp') ? 'no-store' : null)
       }
-      expect((await withWeb.request('/mcp')).status).toBe(405)
+      for (const path of ['/mcp', '/mcp/']) {
+        const get = await withWeb.request(path)
+        expect(get.status, path).toBe(405)
+        expect(get.headers.get('allow')).toBe('POST')
+      }
+      const slash = await withWeb.request(`${PUBLIC_URL}/mcp/`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          accept: 'application/json, text/event-stream',
+          authorization: 'Bearer hm_good',
+        },
+        body: JSON.stringify(initialize),
+      })
+      expect(slash.status).toBe(200)
       expect((await withWeb.request('/some/page')).status).toBe(200)
     } finally {
       await rm(webDist, { recursive: true, force: true })
@@ -296,14 +394,15 @@ describe('MCP transport', () => {
 
 describe('MCP authentication', () => {
   it('needs an API key: none, unknown and malformed keys get 401 with WWW-Authenticate', async () => {
-    for (const headers of [
-      {},
-      { authorization: 'Bearer hm_nope' },
-      { authorization: 'Basic abc' },
-    ] as Record<string, string>[]) {
-      const res = await rpc(initialize, { authorization: '', ...headers })
+    for (const [authorization, challenge] of [
+      ['', 'Bearer'],
+      ['Basic abc', 'Bearer'],
+      ['Bearer hm_nope', 'Bearer error="invalid_token"'],
+      ['bearer  hm_nope', 'Bearer error="invalid_token"'],
+    ]) {
+      const res = await rpc(initialize, { authorization: authorization as string })
       expect(res.status).toBe(401)
-      expect(res.headers.get('www-authenticate')).toBe('Bearer')
+      expect(res.headers.get('www-authenticate')).toBe(challenge)
       expect(await res.json()).toMatchObject({ error: 'unauthorized' })
     }
     await expect(connect({ headers: { authorization: 'Bearer hm_nope' } })).rejects.toThrow()
@@ -445,6 +544,14 @@ describe('MCP tool results', () => {
       error: 'invalid_request',
       message: expect.stringMatching(/surprise/),
     })
+  })
+
+  it('bounds the validation message, whatever names the client sent', async () => {
+    const result = await call({ outcome: 'ok', [`k${'e'.repeat(100_000)}`]: 1 })
+    const body = textOf(result) as { error: string; message: string }
+    expect(body.error).toBe('invalid_request')
+    expect(body.message).toMatch(/Unrecognized key/)
+    expect(body.message.length).toBeLessThan(2100)
   })
 
   it('refuses NUL and lone surrogates anywhere in the arguments', async () => {

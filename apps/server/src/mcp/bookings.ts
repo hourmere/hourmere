@@ -15,6 +15,7 @@ import {
   type PublicContext,
   rescheduleManagedBooking,
   type ServiceContext,
+  validTimeZone,
 } from '@hourmere/scheduling'
 import { createRateLimiter, PUBLIC_RATE_LIMITS, type RateLimit } from '../rate-limit.ts'
 import {
@@ -41,19 +42,6 @@ const manageToken = z.string().openapi({
     'The manageToken that create_booking or reschedule_booking returned for this booking (also the token in the invitee link https://<host>/booking#token=<token>)',
 })
 
-/**
- * An IANA zone name in its canonical spelling; UTC offsets are refused (they ignore DST).
- * The same rule as the booking service applies to the invitee's time zone.
- */
-function canonicalTimeZone(value: string): string | undefined {
-  if (value === '' || /^[+-]/.test(value)) return undefined
-  try {
-    return new Temporal.ZonedDateTime(0n, value).timeZoneId
-  } catch {
-    return undefined
-  }
-}
-
 /** RFC 3339 with the zone's offset, e.g. 2026-11-02T10:00:00+01:00. */
 const localTime = (iso: string, timeZone: string) =>
   Temporal.Instant.from(iso)
@@ -65,7 +53,7 @@ const FindSlotsInput = z.strictObject({
   slug,
   timeZone: z.string().min(1).max(64).openapi({
     description:
-      'IANA time zone, e.g. Europe/Berlin or America/New_York (not a UTC offset): startDate and endDate are days in this zone, and each slot is also given in it. Use the time zone of the person you are booking for.',
+      'IANA time zone name, e.g. Europe/Berlin or America/New_York (numeric offsets such as +01:00 are refused: they ignore daylight saving time). startDate and endDate are days in this zone, and each slot is also given in it. Use the time zone of the person you are booking for.',
     example: 'Europe/Berlin',
   }),
   startDate: z.iso.date().openapi({ description: 'First day to search, YYYY-MM-DD in timeZone' }),
@@ -85,7 +73,10 @@ const LocalSlot = Slot.extend({
 
 const FindSlotsOutput = z.object({
   eventType: PublicEventType,
-  timeZone: z.string().openapi({ description: 'The requested time zone, canonically spelled' }),
+  timeZone: z.string().openapi({
+    description:
+      'The requested time zone, with its letter case normalized (europe/berlin → Europe/Berlin)',
+  }),
   slots: z.array(LocalSlot).openapi({
     description:
       "Bookable slots, sorted by start. Pass a slot's `start` unchanged to create_booking.",
@@ -140,18 +131,18 @@ export interface BookingToolsDeps {
   db: Db
   now?: () => Temporal.Instant
   /**
-   * Per-API-key limits for the tools that act on public booking pages; defaults to the
-   * public endpoints' per-address limits (PUBLIC_RATE_LIMITS). Replaced in tests.
+   * Per-user limits for the tools that act on public booking pages; defaults to the public
+   * endpoints' per-address limits (PUBLIC_RATE_LIMITS). Replaced in tests.
    */
   rateLimits?: Partial<Record<keyof typeof PUBLIC_RATE_LIMITS, RateLimit>>
 }
 
 /**
  * Tools for booking someone's public event type (as the invitee, like the booking page)
- * and for the bookings the caller hosts. Tools that act on public pages are limited per API
- * key with the numbers the public endpoints apply per address: an agent behind a shared
- * address (a hosted assistant) is not throttled by other people's agents, and it gets no
- * more than the booking page gives a person.
+ * and for the bookings the caller hosts. Tools that act on public pages are limited per
+ * user (all of their API keys together) with the numbers the public endpoints apply per
+ * address: an agent behind a shared address (a hosted assistant) is not throttled by other
+ * people's agents, and a person gets no more through agents than the booking page gives.
  */
 export function bookingTools({
   db,
@@ -184,14 +175,7 @@ export function bookingTools({
     },
     async run(args, call) {
       call.rateLimit(slotsLimit)
-      const timeZone = canonicalTimeZone(args.timeZone)
-      if (!timeZone) {
-        throw new DomainError(
-          'invalid',
-          'invalid_time_zone',
-          'timeZone must be an IANA time zone name',
-        )
-      }
+      const timeZone = validTimeZone(args.timeZone)
       const first = Temporal.PlainDate.from(args.startDate)
       const last = Temporal.PlainDate.from(args.endDate)
       if (Temporal.PlainDate.compare(last, first) < 0) {

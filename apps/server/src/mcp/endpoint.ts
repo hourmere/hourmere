@@ -9,7 +9,7 @@ import { createMiddleware } from 'hono/factory'
 import { routeBodyLimit } from '../body-limit.ts'
 import { withClientIpHeader } from '../client-ip.ts'
 import { BOOKING_BODY_LIMIT } from '../routes/public.ts'
-import { type McpCaller, prepareTools, registerTools, type Tool } from './tools.ts'
+import { clip, type McpCaller, prepareTools, registerTools, type Tool } from './tools.ts'
 
 export const MCP_PATH = '/mcp'
 
@@ -38,11 +38,24 @@ export type McpModule = (shared: {
 
 type McpEnv = { Variables: { mcpCaller: McpCaller } }
 
-/** Logs one line with control characters escaped, as createApp does for REST errors. */
+/** Longest text of one log line, before escaping. */
+const MAX_LOG_TEXT = 2000
+
+/**
+ * Logs one line with control characters escaped, as createApp does for REST errors, and cut
+ * to MAX_LOG_TEXT: what the SDK reports repeats client input (methods, tool names, header
+ * values), and an authenticated client must not be able to fill the disk.
+ */
 function logLine(level: 'ERROR' | 'WARN', what: string, detail: unknown): void {
   const shown =
-    typeof detail === 'string' ? detail : inspect(detail, { breakLength: Number.POSITIVE_INFINITY })
-  const text = `${what}${shown}`
+    typeof detail === 'string'
+      ? detail
+      : inspect(detail, {
+          breakLength: Number.POSITIVE_INFINITY,
+          maxStringLength: MAX_LOG_TEXT,
+          maxArrayLength: 20,
+        })
+  const text = clip(`${what}${shown}`, MAX_LOG_TEXT)
   const log = level === 'ERROR' ? console.error : console.warn
   log(`${new Date().toISOString()} ${level} ${escapeControlCharacters(text)}`)
 }
@@ -63,11 +76,17 @@ function callerOf(authInfo: AuthInfo | undefined): McpCaller {
   return caller
 }
 
-const unauthorized = (c: Context, message: string) => {
-  // Will name the protected-resource metadata (resource_metadata="…") once OAuth arrives.
-  c.header('WWW-Authenticate', 'Bearer')
+/**
+ * 401 with the RFC 6750 challenge: `error="invalid_token"` when a bearer token was sent but
+ * is not valid, a bare `Bearer` when there was none. Will also name the protected-resource
+ * metadata (resource_metadata="…") once OAuth arrives.
+ */
+const unauthorized = (c: Context, message: string, invalidToken = false) => {
+  c.header('WWW-Authenticate', invalidToken ? 'Bearer error="invalid_token"' : 'Bearer')
   return c.json({ error: 'unauthorized', message }, 401)
 }
+
+const BEARER = /^Bearer[ \t]+\S/i
 
 /**
  * Authenticates with `Authorization: Bearer hm_…` only. Cookies are dropped before caller
@@ -94,7 +113,11 @@ function requireApiKey(resolveCaller: CallerResolver) {
           c.header('Retry-After', String(result.retryAfterSeconds))
         return c.json({ error: 'rate_limited' }, 429)
       }
-      return unauthorized(c, 'The API key is malformed, unknown, expired or revoked')
+      return unauthorized(
+        c,
+        'The API key is malformed, unknown, expired or revoked',
+        BEARER.test(c.req.header('authorization') ?? ''),
+      )
     }
     // With an Authorization header the resolver only accepts API keys; checked regardless.
     if (result.principal.kind !== 'api_key') {
@@ -187,25 +210,31 @@ export function mcpEndpoint({ tools }: McpEndpointOptions): McpModule {
   )
 
   return ({ app, resolveCaller, publicUrl }) => {
-    app.all(
-      MCP_PATH,
-      // Enforced by createApp's apiBodyLimit, before anything reads the body.
-      routeBodyLimit(MCP_BODY_LIMIT),
-      noStore,
-      checkOrigin(new URL(publicUrl).origin),
-      postOnly(),
-      requireApiKey(resolveCaller),
-      (c) => handler.fetch(c.req.raw, { authInfo: toAuthInfo(c.var.mcpCaller) }),
-    )
+    // `/mcp/` is the same endpoint: clients and proxies add the slash.
+    for (const path of [MCP_PATH, `${MCP_PATH}/`]) {
+      app.all(
+        path,
+        // Enforced by createApp's apiBodyLimit, before anything reads the body.
+        routeBodyLimit(MCP_BODY_LIMIT),
+        noStore,
+        checkOrigin(new URL(publicUrl).origin),
+        postOnly(),
+        requireApiKey(resolveCaller),
+        (c) => handler.fetch(c.req.raw, { authInfo: toAuthInfo(c.var.mcpCaller) }),
+      )
+    }
 
-    // No OAuth yet. Answer the discovery documents (RFC 9728, RFC 8414, OpenID) with 404,
-    // not the web app's HTML, so clients that look for them after a 401 learn that early.
+    // No OAuth yet. Answer the discovery documents (RFC 9728, RFC 8414, OpenID, at the root
+    // and under /mcp) with 404, not the web app's HTML, so clients that look for them after
+    // a 401 learn that early. Nothing else lives under /mcp/ either.
     for (const path of [
       '/.well-known/oauth-protected-resource',
       '/.well-known/oauth-protected-resource/*',
       '/.well-known/oauth-authorization-server',
       '/.well-known/oauth-authorization-server/*',
       '/.well-known/openid-configuration',
+      '/.well-known/openid-configuration/*',
+      `${MCP_PATH}/*`,
     ]) {
       app.all(path, (c) => c.json({ error: 'not_found' }, 404))
     }
