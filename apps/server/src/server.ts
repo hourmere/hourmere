@@ -6,6 +6,9 @@ import { createLogMailer, createSmtpMailer, type Mailer } from '@hourmere/mail'
 import { sql } from 'kysely'
 import { createApp } from './app.ts'
 import { loadConfig } from './config.ts'
+import { bookingTools } from './mcp/bookings.ts'
+import { mcpEndpoint } from './mcp/endpoint.ts'
+import { whoamiTool } from './mcp/whoami.ts'
 import { installOneLineConsole } from './one-line-console.ts'
 import { bookingRoutes } from './routes/bookings.ts'
 import { publicRoutes } from './routes/public.ts'
@@ -78,6 +81,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
     webDist: config.WEB_DIST,
     // Route groups hold only db (closed below) and in-memory rate limiters.
     routes: [publicRoutes({ db }), bookingRoutes({ db })],
+    mcp: mcpEndpoint({ tools: [whoamiTool, ...bookingTools({ db })] }),
   })
 
   const server = await new Promise<ReturnType<typeof serve>>((resolve) => {

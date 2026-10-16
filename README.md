@@ -55,6 +55,8 @@ Agents use API keys (`hm_…`) sent as `Authorization: Bearer <key>`. For now ke
 with Better Auth's endpoints while signed in (`POST /api/auth/api-key/create`, `GET
 /api/auth/api-key/list`, `POST /api/auth/api-key/delete`). The API is described at
 `/api/v1/openapi.json`; its conventions are in [docs/api-conventions.md](docs/api-conventions.md).
+The same keys connect MCP clients such as Claude Code to the remote MCP server at `/mcp`; see
+[docs/mcp.md](docs/mcp.md).
 
 ## License
 

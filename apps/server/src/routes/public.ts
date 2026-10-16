@@ -19,7 +19,7 @@ const Question = QuestionSchema.openapi('Question', {
     'A booking-form field beyond name and email. Its answer goes in `responses` under `id`: text for short_text, long_text and phone; one of `options` for select; a list of distinct `options` for multi_select; true or false for checkbox (a required checkbox must be true).',
 })
 
-const PublicEventType = z
+export const PublicEventType = z
   .object({
     handle: z.string(),
     slug: z.string(),
@@ -39,12 +39,12 @@ const PublicEventType = z
   })
   .openapi('PublicEventType')
 
-const Slot = z.object({ start: Instant, end: Instant }).openapi('Slot')
+export const Slot = z.object({ start: Instant, end: Instant }).openapi('Slot')
 
 const name = z.string().min(1).max(200)
 const email = z.email().max(254)
 
-const CreateBooking = z
+export const CreateBooking = z
   .strictObject({
     start: Instant.openapi({ description: 'The start of an offered slot' }),
     invitee: z.strictObject({
@@ -58,7 +58,7 @@ const CreateBooking = z
   })
   .openapi('CreateBooking')
 
-const PageParams = z.object({
+export const PageParams = z.object({
   handle: z.string().openapi({ example: 'ada' }),
   slug: z.string().openapi({ example: 'intro-call' }),
 })

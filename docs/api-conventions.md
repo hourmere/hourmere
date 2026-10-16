@@ -91,7 +91,8 @@ A request is authenticated by one of:
   for `/api/v1`. API key requests are exempt.
 
 `GET /api/v1/me` returns the caller, the organization they act in and whether they used a
-session or an API key.
+session or an API key. The MCP server at `/mcp` ([mcp.md](mcp.md)) takes API keys only, never
+session cookies, and answers with the same error codes.
 
 ## Validation
 
