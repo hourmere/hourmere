@@ -90,6 +90,9 @@ A request is authenticated by one of:
   get a 403: Better Auth checks this for `/api/auth/*`, the shared `requireCaller` middleware
   for `/api/v1`. API key requests are exempt.
 
+`GET /api/v1/instance` needs no credentials: it tells clients what the instance offers before
+anyone signs in, such as which sign-in methods are enabled (`signIn.google`, …).
+
 `GET /api/v1/me` returns the caller, the organization they act in and whether they used a
 session or an API key.
 

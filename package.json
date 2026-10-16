@@ -8,7 +8,8 @@
   },
   "workspaces": [
     "apps/*",
-    "packages/*"
+    "packages/*",
+    "tools/*"
   ],
   "scripts": {
     "dev": "node scripts/dev.ts",
@@ -17,11 +18,12 @@
     "db:migrate": "node --env-file-if-exists=.env packages/db/src/migrate-cli.ts",
     "lint": "biome check .",
     "format": "biome check --write .",
-    "typecheck": "npm run typecheck --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present && tsc -p tools/api-types",
     "test": "vitest run",
     "build": "npm run build --workspaces --if-present",
     "start": "node apps/server/src/index.ts",
     "auth:sql": "npm run --workspace @hourmere/auth schema:sql",
+    "api:types": "npm run --silent --workspace @hourmere/api-types generate",
     "db:types": "kysely-codegen --dialect postgres --date-parser string --default-schema public --exclude-pattern public.schema_migrations --out-file packages/db/src/tables.ts"
   },
   "devDependencies": {
