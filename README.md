@@ -58,6 +58,17 @@ with Better Auth's endpoints while signed in (`POST /api/auth/api-key/create`, `
 The same keys connect MCP clients such as Claude Code to the remote MCP server at `/mcp`; see
 [docs/mcp.md](docs/mcp.md).
 
+## Contributing
+
+Bug reports, ideas and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers
+setup, checks, conventions and the DCO sign-off; everyone follows the
+[code of conduct](CODE_OF_CONDUCT.md).
+
+## Security
+
+Report vulnerabilities privately to [security@hourmere.com](mailto:security@hourmere.com), not
+in a public issue. See [SECURITY.md](SECURITY.md).
+
 ## License
 
 [AGPL-3.0](LICENSE)
