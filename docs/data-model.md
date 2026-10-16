@@ -90,6 +90,14 @@ types in `packages/db/src/tables.ts` are generated from the migrated database.
   Microsoft), so nothing obtained or linked by whoever held the account before can act as,
   or sign in as, the real owner. A provider that confirms the address links again at the
   owner's next sign-in with it.
+- **Only one first user.** Who may create an account follows `SIGNUP` (`open`, `first-user`
+  or `closed`, plus `SIGNUP_ALLOWED_DOMAINS`). The application refuses a new user the policy
+  does not allow (`SIGNUP_DISABLED`), but checks before the insert, outside its transaction.
+  A `BEFORE INSERT` trigger on `auth."user"` checks again inside it: in first-user mode it
+  takes a transaction-scoped advisory lock before looking for an existing user, so of two
+  first sign-ups at the same moment only one is created. Better Auth's connections carry the
+  policy as settings (`hourmere.signup`, `hourmere.signup_allowed_domains`); other
+  connections (migrations, psql) are not limited.
 - **A personal organization is its user's alone**: no invitations or other members, the
   owner cannot be removed or demoted, and it cannot be deleted on its own.
 - **Ownership is enforced where it is cheap to do so.** Composite foreign keys keep a

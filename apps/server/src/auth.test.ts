@@ -11,6 +11,7 @@ import {
   createCallerResolver,
   ensurePersonalOrganization,
   type OAuthClient,
+  type SignupPolicy,
 } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
@@ -20,8 +21,11 @@ import type pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.ts'
 import { requireCaller } from './caller.ts'
+import { pressConfirmButton } from './sign-in-confirm-testing.ts'
 
 const serverUrl = process.env.DATABASE_URL
+// Sign-up control has its own tests (signup.test.ts).
+const OPEN: SignupPolicy = { mode: 'open', allowedDomains: [] }
 
 interface Me {
   user: { id: string; name: string; email: string }
@@ -65,6 +69,7 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
       baseURL: publicUrl,
       secret,
       mailer: { send: async (m) => void outbox.push(m) },
+      signup: OPEN,
       socialProviders,
       socialProviderOptions,
     })
@@ -84,7 +89,7 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
   beforeAll(async () => {
     testDb = await createTestDatabase(serverUrl as string)
     db = createDb(testDb.pool)
-    authPool = createAuthPool(testDb.url)
+    authPool = createAuthPool(testDb.url, OPEN)
     main = instance(origin)
   })
 
@@ -99,8 +104,8 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
       .map((c) => c.split(';')[0])
       .join('; ')
 
-  /** Requests a magic link and returns the URL from the email it sends. */
-  async function requestLink(email: string, { app }: Instance = main): Promise<URL> {
+  /** Requests a magic link and returns the link in the email it sends. */
+  async function emailedLink(email: string, { app }: Instance = main): Promise<URL> {
     const before = outbox.length
     const res = await app.request('/api/auth/sign-in/magic-link', {
       method: 'POST',
@@ -114,6 +119,11 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
     const link = mail?.text.match(/https?:\/\/\S+/)?.[0]
     expect(link).toBeDefined()
     return new URL(link as string)
+  }
+
+  /** Requests a magic link and returns what pressing the button on the page it opens requests. */
+  async function requestLink(email: string, i: Instance = main): Promise<URL> {
+    return pressConfirmButton(i.app, await emailedLink(email, i))
   }
 
   /** Signs in through the emailed link; returns the session cookie. */
@@ -214,7 +224,7 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
    * `release()`. Lets a test interleave another request at an exact point.
    */
   function pausingPool() {
-    const pool = createAuthPool(testDb.url)
+    const pool = createAuthPool(testDb.url, OPEN)
     let pattern: RegExp | undefined
     let reached = () => {}
     let release = () => {}
@@ -541,17 +551,115 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
       expect(cookieHeader(res)).not.toContain('session_token')
     })
 
-    it('keeps the token out of the request log', async () => {
-      const link = await requestLink('quiet@example.com')
-      const log = vi.spyOn(console, 'log').mockImplementation(() => {})
-      try {
-        await main.app.request(link.toString())
-        const lines = log.mock.calls.map((args) => args.join(' '))
-        expect(lines.some((l) => l.includes('/api/auth/magic-link/verify'))).toBe(true)
-        expect(lines.join('\n')).not.toContain(link.searchParams.get('token'))
-      } finally {
-        log.mockRestore()
-      }
+    it('keeps the token out of the log from the request to the signed-in redirect', async () => {
+      let token = ''
+      const lines = await printedLines(async () => {
+        const link = await emailedLink('quiet@example.com')
+        token = new URLSearchParams(link.hash.slice(1)).get('token') as string
+        const res = await main.app.request((await pressConfirmButton(main.app, link)).toString())
+        expect(res.status).toBe(302)
+      })
+      expect(token).toMatch(/^[A-Za-z]{32}$/)
+      expect(lines.some((l) => l.includes('/api/auth/magic-link/verify'))).toBe(true)
+      expect(lines.join('\n')).not.toContain(token)
+    })
+
+    describe('confirm page', () => {
+      const tokenOf = (link: URL) => new URLSearchParams(link.hash.slice(1)).get('token') as string
+
+      it('is where the email links, with the token only in the fragment', async () => {
+        const link = await emailedLink('confirm@example.com')
+        expect(`${link.origin}${link.pathname}`).toBe(`${origin}/sign-in/confirm`)
+        expect(link.search).toBe('')
+        expect(Object.fromEntries(new URLSearchParams(link.hash.slice(1)))).toEqual({
+          token: expect.stringMatching(/^[A-Za-z]{32}$/),
+          callbackURL: '/',
+        })
+      })
+
+      it('does not use up the link when opened, as mail scanners do; its button signs in', async () => {
+        const link = await emailedLink('scanned@example.com')
+        // Requests never carry the fragment.
+        for (const method of ['GET', 'HEAD', 'GET']) {
+          const res = await main.app.request(`${link.origin}${link.pathname}`, { method })
+          expect(res.status, method).toBe(200)
+          expect(res.headers.getSetCookie(), method).toEqual([])
+        }
+        const hash = createHash('sha256').update(tokenOf(link)).digest('base64url')
+        expect(
+          await count(`SELECT count(*)::int AS n FROM auth.verification WHERE identifier = $1`, [
+            `magic-link:${hash}`,
+          ]),
+        ).toBe(1)
+
+        const res = await main.app.request((await pressConfirmButton(main.app, link)).toString())
+        expect(res.status).toBe(302)
+        expect(res.headers.get('location')).toBe(`${origin}/`)
+        expect((await me({ cookie: cookieHeader(res) })).body.user.email).toBe(
+          'scanned@example.com',
+        )
+      })
+
+      it('passes callbackURL and errorCallbackURL on to Better Auth unchanged', async () => {
+        const before = outbox.length
+        const requested = await main.app.request('/api/auth/sign-in/magic-link', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            email: 'callbacks@example.com',
+            callbackURL: '/welcome?tab=1',
+            errorCallbackURL: '/oops',
+          }),
+        })
+        expect(requested.status).toBe(200)
+        const text = outbox.slice(before).find((m) => m.to === 'callbacks@example.com')?.text
+        const submit = await pressConfirmButton(
+          main.app,
+          new URL(text?.match(/https?:\/\/\S+/)?.[0] as string),
+        )
+        expect(`${submit.origin}${submit.pathname}`).toBe(`${origin}/api/auth/magic-link/verify`)
+        expect(Object.fromEntries(submit.searchParams)).toEqual({
+          token: expect.any(String),
+          callbackURL: '/welcome?tab=1',
+          errorCallbackURL: '/oops',
+        })
+        const first = await main.app.request(submit.toString())
+        expect(first.headers.get('location')).toBe(`${origin}/welcome?tab=1`)
+        // A used (or expired) link lands on Better Auth's error redirect, as before.
+        const again = await main.app.request(submit.toString())
+        expect(again.headers.get('location')).toBe(`${origin}/oops?error=INVALID_TOKEN`)
+        expect(cookieHeader(again)).not.toContain('session_token')
+      })
+
+      it('shows no button for a link without a token', async () => {
+        await expect(
+          pressConfirmButton(main.app, new URL(`${origin}/sign-in/confirm#callbackURL=%2F`)),
+        ).rejects.toThrow(/no button/)
+      })
+
+      it('is self-contained, under a strict CSP, never cached and sending no Referer', async () => {
+        const res = await main.app.request('/sign-in/confirm')
+        expect(res.headers.get('content-type')).toMatch(/^text\/html/)
+        expect(res.headers.get('cache-control')).toBe('no-store')
+        expect(res.headers.get('referrer-policy')).toBe('no-referrer')
+        const html = await res.text()
+        expect(html).toContain('<button type="submit">Sign in to Hourmere</button>')
+        // Nothing loaded from elsewhere, and the CSP allows only this page's inline script
+        // and style.
+        expect(html).not.toMatch(/\s(src|href)=/)
+        const sha256 = (source = '') =>
+          `'sha256-${createHash('sha256').update(source).digest('base64')}'`
+        const script = /<script>([\s\S]*?)<\/script>/.exec(html)?.[1]
+        const style = /<style>([\s\S]*?)<\/style>/.exec(html)?.[1]
+        expect(res.headers.get('content-security-policy')?.split('; ')).toEqual([
+          "default-src 'none'",
+          `script-src ${sha256(script)}`,
+          `style-src ${sha256(style)}`,
+          "form-action 'self'",
+          "base-uri 'none'",
+          "frame-ancestors 'none'",
+        ])
+      })
     })
 
     it('sets Secure cookies when PUBLIC_URL is https', async () => {
@@ -1216,6 +1324,7 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
         db,
         baseURL: origin,
         secret: randomBytes(32).toString('base64'),
+        signup: OPEN,
         mailer: {
           send: async () => {
             throw new Error('smtp down\n[mail] {"forged":true}')

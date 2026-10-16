@@ -12,13 +12,16 @@ const url = process.env.DATABASE_URL
 if (!url) throw new Error('DATABASE_URL is not set')
 
 const placeholder = { clientId: 'schema-generation-only', clientSecret: 'schema-generation-only' }
+// Does not affect the schema.
+const signup = { mode: 'closed', allowedDomains: [] } as const
 
 export const auth = createAuth({
-  pool: createAuthPool(url),
+  pool: createAuthPool(url, signup),
   db: createDb(createPool(url)),
   baseURL: 'http://localhost:3000',
   secret: 'schema-generation-only-not-a-real-secret',
   mailer: createLogMailer(),
+  signup,
   // Every optional feature on, so the generated schema covers all of them.
   socialProviders: { google: placeholder, microsoft: placeholder },
 })

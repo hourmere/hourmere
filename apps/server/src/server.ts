@@ -55,13 +55,14 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
     mailer = createLogMailer()
   }
 
-  const authPool = createAuthPool(config.DATABASE_URL)
+  const authPool = createAuthPool(config.DATABASE_URL, config.signup)
   const auth = createAuth({
     pool: authPool,
     db,
     baseURL: config.PUBLIC_URL,
     secret: config.BETTER_AUTH_SECRET,
     mailer,
+    signup: config.signup,
     socialProviders: config.socialProviders,
   })
 
@@ -79,8 +80,10 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
   const server = await new Promise<ReturnType<typeof serve>>((resolve) => {
     const s = serve({ fetch: app.fetch, port: config.PORT }, (info: AddressInfo) => {
       const providers = Object.keys(config.socialProviders)
+      const { mode, allowedDomains } = config.signup
+      const signup = `${mode}${allowedDomains.length ? `, plus ${allowedDomains.join(', ')}` : ''}`
       console.log(
-        `Hourmere listening on :${info.port} (${config.PUBLIC_URL}); sign-in: email${providers.map((p) => `, ${p}`).join('')}`,
+        `Hourmere listening on :${info.port} (${config.PUBLIC_URL}); sign-in: email${providers.map((p) => `, ${p}`).join('')}; sign-up: ${signup}`,
       )
       resolve(s)
     })

@@ -51,6 +51,19 @@ sign-in link to its log (`docker compose logs app`), so you can sign in right af
 start. Anyone who can read that log can sign in as anyone: configure SMTP before inviting
 anyone else, and always on a hosted or internet-facing instance.
 
+`SIGNUP` decides who may create an account; existing users can always sign in. With
+`first-user` (the default), the first person to sign in gets an account, and after that only
+addresses in `SIGNUP_ALLOWED_DOMAINS` (comma-separated email domains, e.g.
+`example.com,example.org`; exact match, so list subdomains separately). So sign in right
+after the first start: the first account should be yours. `closed` allows only those domains
+(nobody, if the list is empty); `open` lets anyone who can reach the instance sign up. A new
+address that may not sign up gets no sign-in email, and the request is answered the same way
+as for any other address.
+
+Sign-in links open a page with a "Sign in to Hourmere" button, and only pressing it signs
+in: email security scanners that open every link (such as Microsoft Safe Links) would
+otherwise use up the one-time link before the person clicks it.
+
 Agents use API keys (`hm_…`) sent as `Authorization: Bearer <key>`. For now keys are created
 with Better Auth's endpoints while signed in (`POST /api/auth/api-key/create`, `GET
 /api/auth/api-key/list`, `POST /api/auth/api-key/delete`). The API is described at
