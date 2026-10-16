@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { createRoute, z } from '@hono/zod-openapi'
 import { DomainError, type DomainErrorKind } from '@hourmere/scheduling'
 import { HTTPException } from 'hono/http-exception'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { type AppDeps, createApp } from './app.ts'
 import { authenticated, json, type RouteModule } from './openapi.ts'
 
@@ -139,6 +139,12 @@ describe('route modules and errors', () => {
         if (fail === 'weird') throw new DomainError('weird' as DomainErrorKind, 'weird')
         if (fail === 'prepared')
           throw new HTTPException(418, { res: new Response('teapot', { status: 418 }) })
+        if (fail === 'http500') throw new HTTPException(500, { message: 'db password is hunter2' })
+        if (fail === 'caused')
+          throw new DomainError('conflict', 'email_taken', 'That email is already in use', {
+            cause: new Error('duplicate key value violates unique constraint\nKey (email)=(a@b.c)'),
+          })
+        if (fail === 'bug') throw new Error('unexpected')
         if (fail) throw new DomainError(fail as DomainErrorKind, `thing_${fail}`)
         return c.json(
           {
@@ -235,8 +241,47 @@ describe('route modules and errors', () => {
   })
 
   it('keeps other errors opaque', async () => {
+    const res = await post('?fail=bug', valid)
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: 'internal_error' })
+  })
+
+  it('treats a DomainError whose kind is a prototype key as a bug', async () => {
     const res = await post('?fail=__proto__', valid)
     expect(res.status).toBe(500)
     expect(await res.json()).toEqual({ error: 'internal_error' })
+  })
+
+  it('never shows the message of a 5xx HTTPException', async () => {
+    const res = await post('?fail=http500', valid)
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: 'internal_error' })
+  })
+
+  it("logs a DomainError's cause on one line, without sending it to the client", async () => {
+    const logged: string[] = []
+    const spy = vi.spyOn(console, 'error').mockImplementation((...args) => {
+      logged.push(args.join(' '))
+    })
+    try {
+      const res = await post('?fail=caused', valid)
+      expect(res.status).toBe(409)
+      expect(await res.json()).toEqual({
+        error: 'email_taken',
+        message: 'That email is already in use',
+      })
+    } finally {
+      spy.mockRestore()
+    }
+    expect(logged).toHaveLength(1)
+    expect(logged[0]).toContain('email_taken caused by')
+    expect(logged[0]).toContain('Key (email)=(a@b.c)')
+    expect(logged[0]).not.toContain('\n')
+  })
+
+  it('refuses reserved codes for DomainError', () => {
+    expect(() => new DomainError('invalid', 'invalid_request')).toThrow(/reserved/)
+    expect(() => new DomainError('not_found', 'not_found')).toThrow(/reserved/)
+    expect(new DomainError('not_found', 'event_type_not_found').code).toBe('event_type_not_found')
   })
 })

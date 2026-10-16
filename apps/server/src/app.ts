@@ -4,7 +4,7 @@ import { serveStatic } from '@hono/node-server/serve-static'
 import { createRoute, type Hook, OpenAPIHono, z } from '@hono/zod-openapi'
 import { type CallerResolver, escapeControlCharacters } from '@hourmere/auth'
 import { DomainError, type DomainErrorKind } from '@hourmere/scheduling'
-import type { Env } from 'hono'
+import type { Context, Env } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { logger } from 'hono/logger'
 import { requireCaller } from './caller.ts'
@@ -81,6 +81,7 @@ const domainStatus = {
 
 // Codes for errors raised by the framework itself (e.g. malformed JSON), so every error
 // response has the documented `{ "error": code }` shape.
+// Other 4xx statuses fall back to invalid_request; 5xx are always internal_error.
 const httpErrorCodes: Record<number, string> = {
   400: 'invalid_request',
   401: 'unauthorized',
@@ -117,24 +118,34 @@ export function createApp({
   // Unexpected errors (including Better Auth's, which it rethrows) are logged on one line with
   // control characters escaped: error messages can carry request input, e.g. Postgres echoing
   // a malformed value, and must not be able to forge log lines.
+  // Logs one line with control characters escaped: error text can carry request input
+  // (e.g. Postgres echoing a malformed value) and must not be able to forge log lines.
+  // c.req.path is percent-decoded, so it is escaped too.
+  const logError = (c: Context, label: string, detail: unknown) =>
+    console.error(
+      `${new Date().toISOString()} ERROR ${escapeControlCharacters(
+        `${c.req.method} ${c.req.path}: ${label}${inspect(detail, { breakLength: Number.POSITIVE_INFINITY })}`,
+      )}`,
+    )
+
+  // Unexpected errors (including Better Auth's, which it rethrows) are logged and answered
+  // with an opaque 500; only failures the caller can act on get a specific code.
   app.onError((err, c) => {
-    if (err instanceof HTTPException) {
+    if (err instanceof HTTPException && err.status < 500) {
       // A prepared response (e.g. from middleware) is sent as is; otherwise use our shape.
       if (err.res) return err.getResponse()
-      const error = httpErrorCodes[err.status] ?? 'error'
+      const error = httpErrorCodes[err.status] ?? 'invalid_request'
       return c.json(err.message ? { error, message: err.message } : { error }, err.status)
     }
     // Failures the caller can act on, thrown by the service layer. An unknown kind (only
     // possible by bypassing the type) is a bug and falls through to the 500 below.
     if (err instanceof DomainError && Object.hasOwn(domainStatus, err.kind)) {
+      // The lower-level error a service wrapped is for us, not the client.
+      if (err.cause !== undefined) logError(c, `${err.code} caused by `, err.cause)
       const body = err.detail ? { error: err.code, message: err.detail } : { error: err.code }
       return c.json(body, domainStatus[err.kind])
     }
-    // c.req.path is percent-decoded, so it is escaped too.
-    const detail = escapeControlCharacters(
-      `${c.req.method} ${c.req.path}: ${inspect(err, { breakLength: Number.POSITIVE_INFINITY })}`,
-    )
-    console.error(`${new Date().toISOString()} ERROR ${detail}`)
+    logError(c, '', err)
     return c.json({ error: 'internal_error' }, 500)
   })
   app.use('/api/*', requestLogger)

@@ -33,9 +33,10 @@ Every error response has the same shape:
 `error` is a stable, machine-readable snake_case code that clients may branch on; `message`
 is optional and may change. The HTTP status carries the category and the code names the
 specific case, e.g. 404 `event_type_not_found`, 409 `slot_taken`. These codes are reserved
-for the generic cases in the table below: `invalid_request`, `unauthorized`, `forbidden`,
-`not_found` (unknown endpoint), `rate_limited`, `internal_error`. Codes are never renamed
-within `/api/v1`.
+for the generic cases in the table below (services cannot use them): `invalid_request`,
+`unauthorized`, `forbidden`, `not_found` (unknown endpoint), `method_not_allowed`,
+`payload_too_large`, `unsupported_media_type`, `rate_limited`, `internal_error`. Codes are never
+renamed within `/api/v1`.
 
 | Status | Meaning |
 |---|---|
@@ -44,6 +45,7 @@ within `/api/v1`.
 | 403 `forbidden` | Valid credentials, but the caller may not do this (e.g. not a member of the organization, or a role that lacks the permission) |
 | 404 `not_found` | No such resource or endpoint, or one the caller cannot see |
 | 409 | Conflict with the current state (e.g. the slot was just booked) |
+| 405 `method_not_allowed`, 413 `payload_too_large`, 415 `unsupported_media_type` | Raised by the HTTP layer for the obvious cases; any other 4xx from it is `invalid_request` |
 | 429 `rate_limited` | Too many requests; `Retry-After` gives the seconds to wait when known |
 | 500 `internal_error` | An unexpected server error; details go to the server log only |
 
@@ -64,6 +66,8 @@ for failures the caller can act on; the server maps the kind to a status and ans
 | `conflict` | 409 |
 
 Anything else a service throws is a bug: 500 `internal_error`, logged on one escaped line.
+A lower-level error wrapped as a DomainError's `cause` is logged the same way and never sent
+to the client.
 New route groups are `RouteModule`s (`apps/server/src/openapi.ts`) created in `index.ts` with
 their services and registered by `createApp`; `apps/server/src/app.test.ts` has a template.
 
