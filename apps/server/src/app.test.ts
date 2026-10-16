@@ -2,11 +2,18 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { createApp } from './app.ts'
+import { type AppDeps, createApp } from './app.ts'
+
+// Sign-in is covered by auth.test.ts against a real database.
+const noAuth: Pick<AppDeps, 'authHandler' | 'resolveCaller' | 'publicUrl'> = {
+  publicUrl: 'http://localhost:3000',
+  authHandler: async () => new Response(null, { status: 404 }),
+  resolveCaller: async () => ({ ok: false, error: 'unauthorized', setCookie: [] }),
+}
 
 describe('GET /api/health', () => {
   it('reports ok when the database answers', async () => {
-    const app = createApp({ checkDb: async () => {} })
+    const app = createApp({ ...noAuth, checkDb: async () => {} })
     const res = await app.request('/api/health')
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ status: 'ok', database: 'ok' })
@@ -14,6 +21,7 @@ describe('GET /api/health', () => {
 
   it('reports 503 when the database is unreachable', async () => {
     const app = createApp({
+      ...noAuth,
       checkDb: async () => {
         throw new Error('connection refused')
       },
@@ -25,14 +33,21 @@ describe('GET /api/health', () => {
 })
 
 describe('API surface', () => {
-  const app = createApp({ checkDb: async () => {} })
+  const app = createApp({ ...noAuth, checkDb: async () => {} })
 
-  it('publishes an OpenAPI document that lists the health route', async () => {
+  it('publishes an OpenAPI document that lists the routes', async () => {
     const res = await app.request('/api/v1/openapi.json')
     expect(res.status).toBe(200)
     const doc = (await res.json()) as { openapi: string; paths: Record<string, unknown> }
     expect(doc.openapi).toBe('3.1.0')
-    expect(Object.keys(doc.paths)).toContain('/api/health')
+    expect(Object.keys(doc.paths)).toEqual(expect.arrayContaining(['/api/health', '/api/v1/me']))
+  })
+
+  it('answers 401 JSON on authenticated routes when nobody is signed in', async () => {
+    const res = await app.request('/api/v1/me')
+    expect(res.status).toBe(401)
+    expect(res.headers.get('www-authenticate')).toBe('Bearer')
+    expect(await res.json()).toEqual({ error: 'unauthorized' })
   })
 
   it('answers unknown API paths with a JSON 404', async () => {
@@ -51,7 +66,7 @@ describe('serving the built web app', () => {
     await mkdir(join(dist, 'assets'))
     await writeFile(join(dist, 'index.html'), '<title>Hourmere</title>')
     await writeFile(join(dist, 'assets', 'app-abc123.js'), 'console.log(1)')
-    app = createApp({ checkDb: async () => {}, webDist: dist })
+    app = createApp({ ...noAuth, checkDb: async () => {}, webDist: dist })
   })
 
   afterAll(async () => {

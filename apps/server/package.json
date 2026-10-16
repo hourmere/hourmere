@@ -9,7 +9,9 @@
   "dependencies": {
     "@hono/node-server": "2.1.5",
     "@hono/zod-openapi": "1.6.3",
+    "@hourmere/auth": "*",
     "@hourmere/db": "*",
+    "@hourmere/mail": "*",
     "hono": "4.13.13",
     "kysely": "0.29.6",
     "zod": "4.6.7"

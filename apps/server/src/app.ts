@@ -1,11 +1,24 @@
 import { relative } from 'node:path'
+import { inspect } from 'node:util'
 import { serveStatic } from '@hono/node-server/serve-static'
 import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi'
+import { type CallerResolver, escapeControlCharacters } from '@hourmere/auth'
+import { HTTPException } from 'hono/http-exception'
 import { logger } from 'hono/logger'
+import { requireCaller } from './caller.ts'
+import { clientIp, withClientIp } from './client-ip.ts'
 
 export interface AppDeps {
   /** Resolves when the database answers; rejects otherwise. */
   checkDb: () => Promise<void>
+  /** Better Auth's request handler (sign-in, sessions, API keys), served at /api/auth/*. */
+  authHandler: (request: Request) => Promise<Response>
+  /** Identifies the caller of authenticated routes (session cookie or API key). */
+  resolveCaller: CallerResolver
+  /** PUBLIC_URL: cookie-authenticated writes must come from its origin. */
+  publicUrl: string
+  /** Reverse proxies (IPs or CIDR ranges) whose X-Forwarded-For names the client. */
+  trustedProxies?: readonly string[] | undefined
   /** Absolute path of the built web app, if this process should serve it. */
   webDist?: string | undefined
 }
@@ -33,9 +46,66 @@ const healthRoute = createRoute({
   },
 })
 
-export function createApp({ checkDb, webDist }: AppDeps) {
+// See docs/api-conventions.md.
+const ErrorBody = z
+  .object({
+    error: z.string().openapi({ description: 'Machine-readable code, e.g. unauthorized' }),
+    message: z.string().optional().openapi({ description: 'Human-readable detail' }),
+  })
+  .openapi('Error')
+
+const Me = z
+  .object({
+    user: z.object({ id: z.uuid(), name: z.string(), email: z.string() }),
+    organization: z
+      .object({
+        id: z.uuid(),
+        name: z.string(),
+        slug: z.string(),
+        personal: z.boolean().openapi({
+          description: 'A personal organization (every user has one) rather than a team',
+        }),
+      })
+      .openapi({ description: 'The organization the caller acts in' }),
+    principal: z.object({
+      kind: z.enum(['session', 'api_key']),
+      apiKeyId: z.uuid().nullable().openapi({ description: 'The key used, for kind api_key' }),
+    }),
+  })
+  .openapi('Me')
+
+const json = <T extends z.ZodType>(schema: T) => ({ 'application/json': { schema } })
+
+// Typed explicitly: an inferred literal type here makes createRoute lose the middleware's
+// types (c.var.principal).
+const authenticated: Record<string, string[]>[] = [{ apiKey: [] }, { session: [] }]
+
+/** Logs requests without query strings: sign-in links and OAuth callbacks carry secrets there. */
+const requestLogger = logger((line, ...rest) => console.log(line.replace(/\?\S*/, ''), ...rest))
+
+export function createApp({
+  checkDb,
+  authHandler,
+  resolveCaller,
+  publicUrl,
+  trustedProxies = [],
+  webDist,
+}: AppDeps) {
   const app = new OpenAPIHono()
-  app.use('/api/*', logger())
+  // Unexpected errors (including Better Auth's, which it rethrows) are logged on one line with
+  // control characters escaped: error messages can carry request input, e.g. Postgres echoing
+  // a malformed value, and must not be able to forge log lines.
+  app.onError((err, c) => {
+    if (err instanceof HTTPException) return err.getResponse()
+    // c.req.path is percent-decoded, so it is escaped too.
+    const detail = escapeControlCharacters(
+      `${c.req.method} ${c.req.path}: ${inspect(err, { breakLength: Number.POSITIVE_INFINITY })}`,
+    )
+    console.error(`${new Date().toISOString()} ERROR ${detail}`)
+    return c.json({ error: 'internal_error' }, 500)
+  })
+  app.use('/api/*', requestLogger)
+  app.use('/api/*', clientIp(trustedProxies))
 
   app.openapi(healthRoute, async (c) => {
     try {
@@ -44,6 +114,51 @@ export function createApp({ checkDb, webDist }: AppDeps) {
     } catch {
       return c.json({ status: 'degraded' as const, database: 'unreachable' as const }, 503)
     }
+  })
+
+  // Better Auth's own protocol (sign-in, sign-out, sessions, organizations, API keys); it
+  // follows Better Auth's versioning, not ours, so it lives outside /api/v1.
+  app.on(['GET', 'POST'], '/api/auth/*', (c) =>
+    authHandler(withClientIp(c.req.raw, c.var.clientIp)),
+  )
+
+  app.openAPIRegistry.registerComponent('securitySchemes', 'apiKey', {
+    type: 'http',
+    scheme: 'bearer',
+    description: 'An API key (hm_…), created through POST /api/auth/api-key/create',
+  })
+  app.openAPIRegistry.registerComponent('securitySchemes', 'session', {
+    type: 'apiKey',
+    in: 'cookie',
+    name: 'better-auth.session_token',
+    description: 'The web app session (prefixed __Secure- on https)',
+  })
+
+  // Authenticated routes list this middleware; it provides c.var.principal.
+  const caller = requireCaller(resolveCaller, { allowedOrigin: new URL(publicUrl).origin })
+
+  const meRoute = createRoute({
+    method: 'get',
+    path: '/api/v1/me',
+    summary: 'The caller and the organization they act in',
+    security: authenticated,
+    middleware: caller,
+    responses: {
+      200: { description: 'The signed-in caller', content: json(Me) },
+      401: { description: 'No valid session or API key', content: json(ErrorBody) },
+      429: { description: "The API key's rate limit is used up", content: json(ErrorBody) },
+    },
+  })
+  app.openapi(meRoute, (c) => {
+    const p = c.var.principal
+    return c.json(
+      {
+        user: p.user,
+        organization: p.organization,
+        principal: { kind: p.kind, apiKeyId: p.kind === 'api_key' ? p.apiKeyId : null },
+      },
+      200,
+    )
   })
 
   // The product API is versioned under /api/v1 (agents depend on it for years);

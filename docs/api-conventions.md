@@ -1,0 +1,61 @@
+# API conventions
+
+Rules for the product API under `/api/v1`. Agents depend on it for years, so changes are
+additive within a version. The OpenAPI document is served at `/api/v1/openapi.json`.
+
+## Versioning
+
+- Product endpoints live under `/api/v1`. A breaking change means `/api/v2`, not an edit.
+- Within a version, only additive changes: new endpoints, new optional request fields,
+  new response fields. Clients must ignore fields they do not know.
+- `/api/health` is operational and unversioned.
+- `/api/auth/*` is [Better Auth](https://www.better-auth.com)'s own protocol (sign-in,
+  sessions, organizations, API keys). It follows Better Auth's conventions, including its
+  error shape (`{ "message", "code" }`), not the ones below.
+
+## JSON
+
+- Field names are camelCase (`apiKeyId`, `startAt`), matching the TypeScript and zod
+  schemas and Better Auth. Enum values are lowercase snake_case (`api_key`, `round_robin`).
+- IDs are UUID strings.
+- Timestamps are RFC 3339 strings in UTC with a `Z` suffix, e.g. `2026-10-15T09:30:00.000Z`.
+  Calendar dates are `YYYY-MM-DD`; wall-clock times are `HH:MM` with an IANA time zone
+  alongside.
+
+## Errors
+
+Every error response has the same shape:
+
+```json
+{ "error": "unauthorized", "message": "optional human-readable detail" }
+```
+
+`error` is a stable, machine-readable lowercase code that clients may branch on; `message`
+is optional and may change. The HTTP status carries the category:
+
+| Status | Meaning |
+|---|---|
+| 400 | The request is malformed or fails validation |
+| 401 `unauthorized` | No valid credentials: missing, unknown, expired or revoked session or API key. Sent with `WWW-Authenticate: Bearer` |
+| 403 `forbidden` | Valid credentials, but the caller may not do this (e.g. not a member of the organization, or a role that lacks the permission) |
+| 404 `not_found` | No such resource or endpoint, or one the caller cannot see |
+| 409 | Conflict with the current state (e.g. the slot was just booked) |
+| 429 `rate_limited` | Too many requests; `Retry-After` gives the seconds to wait when known |
+| 500 `internal_error` | An unexpected server error; details go to the server log only |
+
+## Authentication
+
+A request is authenticated by one of:
+
+- **API key** (agents, scripts): `Authorization: Bearer hm_…`. Keys belong to a user and act
+  in one organization, chosen when the key is created (the user's personal organization by
+  default). If the Authorization header is present it alone decides: a bad key is a 401
+  even when a session cookie is also sent.
+- **Session cookie** (the web app, same origin): set by signing in through `/api/auth/*`.
+  Requests act in the session's active organization. Cookie-authenticated requests other
+  than GET, HEAD and OPTIONS must come from the app's own `Origin` (CSRF protection), or they
+  get a 403: Better Auth checks this for `/api/auth/*`, the shared `requireCaller` middleware
+  for `/api/v1`. API key requests are exempt.
+
+`GET /api/v1/me` returns the caller, the organization they act in and whether they used a
+session or an API key.

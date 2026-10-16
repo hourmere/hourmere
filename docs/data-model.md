@@ -39,7 +39,7 @@ types in `packages/db/src/tables.ts` are generated from the migrated database.
 | Table | Owner | Purpose |
 |---|---|---|
 | `profiles` | user | Public handle (`hourmere.com/{handle}/{event}`), time zone, locale, default destination calendar |
-| `personal_organizations` | user | Marks the organization created for each user; deleting the user deletes it |
+| `personal_organizations` | user | Marks the organization created for each user; deleting the user deletes it, and it cannot be deleted on its own |
 | `schedules` | user | Named working hours: time zone + weekly intervals (JSON); one default per user |
 | `schedule_overrides` | user | Per-date exceptions: unavailable, or replacement intervals |
 | `calendar_connections` | user | A connected Google / Microsoft / CalDAV account; credentials encrypted (AES-256-GCM) |
@@ -82,6 +82,12 @@ types in `packages/db/src/tables.ts` are generated from the migrated database.
   connections), deletes their personal organization with its bookings and invitee data,
   and deletes their API keys (Better Auth stores the owner as text, so a trigger does it).
   Team organization data is deleted with the organization.
+- **Accounts start from a proven email address.** The application refuses to create a user
+  whose email the sign-in provider did not verify. Should an unverified user exist anyway,
+  a trigger deletes their API keys the moment the email becomes verified, so a key minted
+  by whoever held the account before cannot act as the real owner.
+- **A personal organization is its user's alone**: no invitations or other members, the
+  owner cannot be removed or demoted, and it cannot be deleted on its own.
 - **Ownership is enforced where it is cheap to do so.** Composite foreign keys keep a
   booking in its event type's organization and a host's schedule among that host's own
   schedules. Membership of `event_types.owner_user_id` and destination calendars
@@ -102,6 +108,9 @@ Validated by the application (zod), not by the database:
 - `event_types.location` / `bookings.location`: `{ "kind": "google_meet" | "zoom" | "phone" | "in_person" | "link", ... }`.
 - `event_types.questions` / `bookings.responses`: booking-form fields and answers.
 - `calendars.sync_state`: provider sync token / delta link and push channel id + expiry.
+- `auth.apikey.metadata`: `{ "organizationId": "<uuid>" }`, the organization the key acts
+  in; set when the key is created (the owner's personal organization unless they name
+  another one they belong to) and re-checked against membership on every request.
 
 ## Planned additions (each a new migration)
 

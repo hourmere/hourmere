@@ -4,8 +4,11 @@ import { defineConfig } from 'vite'
 export default defineConfig({
   plugins: [react()],
   server: {
+    // Fixed: `npm run dev` points the API's PUBLIC_URL (sign-in links, cookies) at this port.
     port: 5173,
-    // The API runs separately in development (npm run dev starts both).
+    strictPort: true,
+    // The API runs separately in development (npm run dev starts both). The browser only
+    // talks to this origin, so the session cookie is same-origin as in production.
     proxy: { '/api': 'http://localhost:3000' },
   },
 })
