@@ -1,6 +1,7 @@
 import { createRoute, z } from '@hono/zod-openapi'
 import type { Db } from '@hourmere/db'
 import {
+  type BookingNotifier,
   createPublicBooking,
   getPublicEventType,
   listPublicSlots,
@@ -73,6 +74,8 @@ const eventTypeNotFound = error('No such public event type (`event_type_not_foun
 export interface PublicRoutesDeps {
   db: Db
   now?: () => Temporal.Instant
+  /** Queues the booking emails in the booking's transaction; none are sent without it. */
+  notify?: BookingNotifier | undefined
   /** Replaces PUBLIC_RATE_LIMITS.page, .slots and .book, e.g. in tests. */
   rateLimits?: Partial<Record<keyof typeof PUBLIC_RATE_LIMITS, RateLimit>>
 }
@@ -84,9 +87,10 @@ export interface PublicRoutesDeps {
 export function publicRoutes({
   db,
   now = () => Temporal.Now.instant(),
+  notify,
   rateLimits = {},
 }: PublicRoutesDeps): RouteModule {
-  const ctx: PublicContext = { db, now }
+  const ctx: PublicContext = { db, now, notify }
   const limit = (group: keyof typeof PUBLIC_RATE_LIMITS) =>
     rateLimit(createRateLimiter(rateLimits[group] ?? PUBLIC_RATE_LIMITS[group]))
   const pageLimit = limit('page')
@@ -151,7 +155,7 @@ export function publicRoutes({
         path: '/api/v1/public/{handle}/{slug}/bookings',
         summary: 'Book a slot',
         description:
-          "Books an offered slot and returns the booking with the secret of the invitee's manage link (`manageToken`, returned only this once). Send an `Idempotency-Key` to make retries safe: a retry with the same key and the same request returns the original booking (200) instead of booking again. All anonymous callers share one key space per organization, so the key must be random (e.g. a UUIDv4), never derived from the request.",
+          "Books an offered slot and returns the booking with the booking's own manage token (`manageToken`, returned only this once; it stays with this booking, and emails carry their own). Send an `Idempotency-Key` to make retries safe: a retry with the same key and the same request returns the original booking (200) instead of booking again. All anonymous callers share one key space per organization, so the key must be random (e.g. a UUIDv4), never derived from the request.",
         middleware: [bookLimit, routeBodyLimit(BOOKING_BODY_LIMIT)],
         request: {
           params: PageParams,

@@ -128,6 +128,19 @@ export async function enqueueBookingNotifications(
   }
 }
 
+/**
+ * The booking services' `notify` (BookingNotifier in @hourmere/scheduling, given in their
+ * contexts): queues each booking change's notifications through the transaction that makes
+ * the change, judged by the instant the service used for its checks.
+ */
+export function bookingNotifier(queue: NotificationQueue) {
+  return (
+    transaction: KyselyTransactionLike & { readonly isTransaction: boolean },
+    event: BookingEvent,
+    now: Temporal.Instant,
+  ): Promise<void> => enqueueBookingNotifications(queue, transaction, event, now)
+}
+
 // --- Sending ------------------------------------------------------------------------------
 
 /**
@@ -278,6 +291,9 @@ function loadNotificationData(db: Db, bookingId: string): Promise<NotificationDa
         's.time_zone as schedule_zone',
       ])
       .where('bh.booking_id', '=', bookingId)
+      // Only addresses their owner proved. Accounts start verified; should one not be, it
+      // gets nothing and is not named as organizer or attendee.
+      .where('u.emailVerified', '=', true)
       .orderBy('u.id')
       .execute()
     const attendees = await conn
@@ -450,8 +466,17 @@ export async function sendBookingNotification(
   const { booking, hosts, attendees } = data
   const organizer = hosts[0]
   const invitee = attendees.find((a) => a.isBooker) ?? attendees[0]
-  // Nobody to send on behalf of, or nobody it is for.
-  if (!organizer || !invitee) return
+  const log = deps.log ?? ((line: string) => console.warn(line))
+  // Nobody to send on behalf of: no host with a verified address. Worth a line, since then
+  // the invitee hears nothing either.
+  if (!organizer) {
+    log(
+      `${new Date().toISOString()} WARN ${BOOKING_NOTIFICATION_JOB}: booking ${bookingId} has no host with a verified email address; not sending its ${kind} emails`,
+    )
+    return
+  }
+  // Nobody it is for.
+  if (!invitee) return
   const guests = attendees.filter((a) => a !== invitee)
 
   const meeting: BookingEmailMeeting = {
@@ -524,7 +549,6 @@ export async function sendBookingNotification(
   // collected and dealt with at the end. Anything else (the mail server unreachable, sign-in
   // or relaying refused, a sending limit, shutdown) would hit every remaining recipient the
   // same way, so it ends the attempt at once and the job is retried.
-  const log = deps.log ?? ((line: string) => console.warn(line))
   const refused: string[] = []
   const gone: { key: string; err: MailRejectedError }[] = []
   // Recipients this run tried to send to (not those done in an earlier attempt).
