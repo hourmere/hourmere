@@ -169,8 +169,10 @@ up a token (below), and several valid secrets per booking, each 256 random bits.
 Links put the secret in the URL fragment,
 `https://<app>/booking#token=<token>&action=reschedule` (or `action=cancel`), which browsers
 send neither to the server nor in `Referer`, so it stays out of logs; the web app reads it
-and calls the API with `X-Manage-Token`. `action` is a hint for which form to open. Calendar invitations never contain the secret: calendars are
-shared and synced.
+and calls the API with `X-Manage-Token`. `action` is a hint for which form to open.
+Calendar invitations never contain the secret: calendars are shared and synced. Without
+`SMTP_URL` the log mailer prints emails, manage links included, as it prints sign-in links:
+the same rule applies (only where whoever reads the log may act as anyone).
 
 ## Calendar invitations
 
