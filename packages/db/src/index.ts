@@ -1,10 +1,12 @@
 import { Kysely, PostgresDialect } from 'kysely'
 import pg from 'pg'
+import type { DB } from './tables.ts'
 
 export { runMigrations } from './migrate.ts'
+export type * from './tables.ts'
 
-// Table types are added together with the migrations that create the tables.
-export type Database = Record<string, never>
+// Generated from the migrated database by `npm run db:types`; CI fails if it is stale.
+export type Database = DB
 
 export type Db = Kysely<Database>
 

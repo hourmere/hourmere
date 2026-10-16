@@ -1,0 +1,16 @@
+// Entry point for the Better Auth CLI (`npm run auth:sql`); not used at runtime.
+// Run it against a database migrated to the latest version: the output then contains only
+// what changed (e.g. after enabling a plugin) and goes into a new file in packages/db/migrations.
+import { existsSync } from 'node:fs'
+import { createAuth, createAuthPool } from './index.ts'
+
+const envFile = new URL('../../../.env', import.meta.url)
+if (!process.env.DATABASE_URL && existsSync(envFile)) process.loadEnvFile(envFile)
+const url = process.env.DATABASE_URL
+if (!url) throw new Error('DATABASE_URL is not set')
+
+export const auth = createAuth({
+  pool: createAuthPool(url),
+  baseURL: 'http://localhost:3000',
+  secret: 'schema-generation-only-not-a-real-secret',
+})
