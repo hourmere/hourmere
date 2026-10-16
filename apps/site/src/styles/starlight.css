@@ -1,0 +1,21 @@
+/* Brand overrides for the Starlight documentation pages. These rules are unlayered, so they win
+   over Starlight's layered defaults in both themes: keep each theme's values behind its selector. */
+
+:root {
+  --sl-font: "Manrope Variable", system-ui, sans-serif;
+}
+
+/* Dark theme */
+:root:not([data-theme="light"]) {
+  --sl-color-accent-low: #16244a;
+  --sl-color-accent: #5b82f0;
+  --sl-color-accent-high: #c3d2fb;
+  --sl-color-black: #0e1015;
+}
+
+/* Light theme */
+:root[data-theme="light"] {
+  --sl-color-accent-low: #eaf0fd;
+  --sl-color-accent: #1f4fd8;
+  --sl-color-accent-high: #0a1e4a;
+}

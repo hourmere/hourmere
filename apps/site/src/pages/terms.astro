@@ -1,0 +1,274 @@
+---
+import Legal from '../layouts/Legal.astro'
+import { company, contact, site } from '../site'
+
+const linkRefunds = 'https://support.link.com/questions/sold-through-link-refunds'
+
+const sections = [
+  { id: 'the-service', title: 'The Service' },
+  { id: 'open-source', title: 'Open-source software and self-hosting' },
+  { id: 'accounts', title: 'Accounts' },
+  { id: 'ai-agents-and-api', title: 'AI agents, the API and the MCP server' },
+  { id: 'calendar-connections', title: 'Calendar connections' },
+  { id: 'your-data', title: 'Your data and your invitees' },
+  { id: 'plans-and-payment', title: 'Plans and payment' },
+  { id: 'acceptable-use', title: 'Acceptable use' },
+  { id: 'third-party-services', title: 'Third-party services' },
+  { id: 'availability', title: 'Availability and changes' },
+  { id: 'disclaimers', title: 'Disclaimers' },
+  { id: 'liability', title: 'Limitation of liability' },
+  { id: 'indemnification', title: 'Indemnification' },
+  { id: 'termination', title: 'Termination' },
+  { id: 'governing-law', title: 'Governing law and venue' },
+  { id: 'general', title: 'General' },
+  { id: 'changes', title: 'Changes to these Terms' },
+  { id: 'contact', title: 'Contact' },
+]
+---
+
+<Legal
+  title="Terms of Service"
+  description="The terms for using the Hourmere website and Hourmere Cloud, provided by Cobaltmere, LLC."
+  path="/terms"
+  effective="2026-10-15"
+  sections={sections}
+>
+  <Fragment slot="intro">
+    <p>
+      These Terms of Service ("Terms") govern your use of the Hourmere website at hourmere.com and of
+      Hourmere Cloud, the hosted Hourmere service, including its API and remote MCP server (together,
+      the "Service"). The Service is provided by {company.name}, a Delaware limited liability company
+      ("{company.shortName}", "we", "us"). For Hourmere, these Terms replace the general Terms of
+      Service at <a href={company.terms}>cobaltmere.com/terms</a>.
+    </p>
+    <p>
+      By creating an account or using the Service, you agree to these Terms. If you use the Service
+      on behalf of an organization, you agree to these Terms on its behalf and confirm that you have
+      the authority to do so.
+    </p>
+    <p class="callout">
+      Hourmere is in development and Hourmere Cloud is not available yet. These Terms will apply to
+      Hourmere Cloud when it opens. Until then, they apply to your use of this website.
+    </p>
+  </Fragment>
+
+  <h2 id="the-service">1. The Service</h2>
+  <p>
+    Hourmere is scheduling software. It lets you share booking links so that invitees can pick a
+    time that works, syncs with Google Calendar and Microsoft 365, sends email confirmations and
+    reminders, provides an embeddable booking widget, and offers an API and a remote MCP server so
+    that AI assistants and other applications can work with your schedule.
+  </p>
+
+  <h2 id="open-source">2. Open-source software and self-hosting</h2>
+  <p>
+    The Hourmere software is being developed as open source under the <a href={site.license.url}
+      >GNU Affero General Public License v3.0</a
+    > (AGPL-3.0). Your use, modification and distribution of the software, including running your own
+    Hourmere instance, is governed by that license, not by these Terms. If you run your own instance,
+    you are its operator and are responsible for it, including the data it holds and its connections
+    to calendar providers. These Terms apply only to the Service that we operate.
+  </p>
+
+  <h2 id="accounts">3. Accounts</h2>
+  <p>
+    You must give accurate information when you create an account and keep access to your sign-in
+    methods, such as your email account, secure. You are responsible for activity under your account,
+    including activity by users you invite and by applications you authorize. You must be at least
+    18 years old, or the age of majority where you live if that is higher, to use Hourmere Cloud.
+  </p>
+
+  <h2 id="ai-agents-and-api">4. AI agents, the API and the MCP server</h2>
+  <ul>
+    <li>
+      You can authorize AI assistants and other applications to use your account through the API or
+      the remote MCP server with an API key that you create. OAuth authorization for AI connectors is
+      planned. Actions that applications take with your API key, such as booking, rescheduling or
+      cancelling meetings, are treated as actions taken by you.
+    </li>
+    <li>Keep your API keys secret. If you think a key has been misused, revoke it right away.</li>
+    <li>
+      AI assistants can make mistakes. Check important bookings, and do not give API keys to
+      applications you do not trust. AI assistants are provided by third parties, and we are not
+      responsible for their actions or output.
+    </li>
+    <li>
+      We may apply rate limits and usage limits to the API and the MCP server to keep the Service
+      reliable for everyone.
+    </li>
+  </ul>
+
+  <h2 id="calendar-connections">5. Calendar connections</h2>
+  <p>
+    When you connect a Google or Microsoft calendar, you authorize Hourmere to access it as described
+    in our <a href="/privacy">Privacy Policy</a>. You can disconnect a calendar at any time. Your use
+    of Google and Microsoft services remains subject to their own terms.
+  </p>
+
+  <h2 id="your-data">6. Your data and your invitees</h2>
+  <ul>
+    <li>
+      You keep all rights to the data that you and your invitees submit to the Service ("Customer
+      Data"). You grant us a limited license to host, process and transmit Customer Data only as
+      needed to provide, secure and support the Service. Our handling of personal data is described
+      in our <a href="/privacy">Privacy Policy</a>.
+    </li>
+    <li>
+      If you need a data processing agreement, for example under the GDPR, we will provide one on
+      request at <a href={`mailto:${contact.privacy}`}>{contact.privacy}</a>.
+    </li>
+    <li>
+      You decide what information your booking pages ask invitees for. You are responsible for having
+      the right to collect and use that information and for complying with the laws that apply to
+      you. Do not use booking questions to collect payment card numbers, passwords or government
+      identification numbers.
+    </li>
+    <li>
+      You can delete your data at any time, and you can request an export of it, or access to or
+      deletion of it, by emailing <a href={`mailto:${contact.privacy}`}>{contact.privacy}</a>. We delete Customer Data within 30 days after you delete your account, except where the law
+      requires us to keep it. Copies in our backups are rotated out and deleted within a further 30
+      days.
+    </li>
+  </ul>
+
+  <h2 id="plans-and-payment">7. Plans and payment</h2>
+  <ul>
+    <li>
+      Hourmere Cloud will offer a Free plan and paid plans. Paid plans are billed per seat, in advance
+      for each billing period, at the prices shown when you buy.
+    </li>
+    <li>
+      Payments are processed by Stripe. For purchases made through Stripe's merchant-of-record
+      service, your order is sold through Link, LLC, an affiliate of Stripe, which handles payment
+      processing and applicable sales tax, VAT or GST.
+    </li>
+    <li>
+      Subscriptions renew automatically at the end of each billing period unless you cancel before
+      the renewal date.
+    </li>
+    <li>
+      We may change prices for future billing periods with at least 30 days' notice. Price changes do
+      not affect the period you have already paid for.
+    </li>
+    <li>
+      Cancellations and refunds are handled under the <a href={company.refundPolicy}
+        >{company.shortName} Refund &amp; Cancellation Policy</a
+      >. If your purchase was processed by Link, LLC as merchant of record, Link's <a
+        href={linkRefunds}>refund policy for purchases sold through Link</a
+      > may also apply: you may be able to request a refund from Link under that policy, and where it
+      is more favorable to you than ours, it applies.
+    </li>
+  </ul>
+
+  <h2 id="acceptable-use">8. Acceptable use</h2>
+  <p>You agree not to:</p>
+  <ul>
+    <li>use the Service for anything unlawful, fraudulent, deceptive or abusive;</li>
+    <li>
+      send spam or unsolicited messages through booking pages, invitations or notifications, or
+      impersonate another person or organization;
+    </li>
+    <li>
+      access or attempt to access other users' accounts or data, or get around the Service's security
+      measures, rate limits or usage limits;
+    </li>
+    <li>interfere with, disrupt or overload the Service; or</li>
+    <li>resell Hourmere Cloud without our written permission.</li>
+  </ul>
+  <p>We may suspend accounts that break these rules.</p>
+
+  <h2 id="third-party-services">9. Third-party services</h2>
+  <p>
+    The Service works with third-party services, such as Google Calendar, Microsoft 365, AI
+    assistants and Stripe. Your use of those services is governed by their own terms, and we are not
+    responsible for them.
+  </p>
+
+  <h2 id="availability">10. Availability and changes</h2>
+  <p>
+    We work to keep the Service available, but we do not guarantee uninterrupted operation. We may
+    change or remove features. If we discontinue Hourmere Cloud, we will, where reasonably possible,
+    give at least 60 days' notice and a way to export your data. Shorter notice may be necessary in
+    an emergency or where the law requires it. We will refund any prepaid fees for the period after
+    the Service ends.
+  </p>
+
+  <h2 id="disclaimers">11. Disclaimers</h2>
+  <p>
+    To the maximum extent permitted by law, the Service is provided "as is" and "as available",
+    without warranties of any kind, express or implied, including warranties of merchantability,
+    fitness for a particular purpose and non-infringement.
+  </p>
+
+  <h2 id="liability">12. Limitation of liability</h2>
+  <p>
+    To the maximum extent permitted by law, {company.shortName} will not be liable for indirect,
+    incidental, special, consequential or punitive damages, or for lost profits, revenue or data. Our
+    total liability for any claim relating to the Service will not exceed the greater of the amounts
+    you paid us for the Service in the 12 months before the claim and US$100.
+  </p>
+
+  <h2 id="indemnification">13. Indemnification</h2>
+  <p>
+    To the extent permitted by law, you will defend and indemnify {company.shortName} against
+    third-party claims, and the resulting damages, losses and reasonable costs, including reasonable
+    legal fees, to the extent they arise from Customer Data that you or your invitees submit, from
+    your use of the Service in breach of these Terms or the law, or from actions taken with your API
+    keys. This does not apply to the extent a claim is caused by our own breach of these Terms. We
+    will tell you promptly about any such claim and let you control its defense, and you will not
+    settle a claim in a way that admits fault for us or imposes obligations on us without our
+    consent.
+  </p>
+
+  <h2 id="termination">14. Termination</h2>
+  <p>
+    You may stop using the Service and delete your account at any time. We may suspend or end your
+    access if you materially breach these Terms. Sections that by their nature should survive
+    termination will survive.
+  </p>
+
+  <h2 id="governing-law">15. Governing law and venue</h2>
+  <p>
+    These Terms are governed by the laws of the State of Delaware, USA, without regard to its
+    conflict-of-law rules. Any dispute arising out of or relating to these Terms or the Service will
+    be brought exclusively in the state or federal courts located in the State of Delaware, and you
+    and we consent to their jurisdiction. Nothing in these Terms limits rights you have under
+    mandatory consumer protection laws of your country of residence, including any right to bring
+    proceedings in the courts there.
+  </p>
+
+  <h2 id="general">16. General</h2>
+  <ul>
+    <li>
+      <strong>Entire agreement.</strong> These Terms, together with the Privacy Policy and the
+      policies they refer to, are the entire agreement between you and {company.shortName} about the
+      Service, and replace any earlier agreements about it. If you have signed a data processing
+      agreement with us, it also applies.
+    </li>
+    <li>
+      <strong>Severability.</strong> If any part of these Terms is found to be unenforceable, that
+      part will be enforced to the maximum extent permitted and the rest of these Terms will remain
+      in effect.
+    </li>
+    <li>
+      <strong>Assignment.</strong> You may not assign or transfer these Terms without our written
+      consent. We may assign them as part of a merger, acquisition or sale of all or substantially
+      all of our assets, and will notify you if we do.
+    </li>
+  </ul>
+
+  <h2 id="changes">17. Changes to these Terms</h2>
+  <p>
+    We may update these Terms. We will post the new version on this page with a new effective date.
+    If the changes are material, we will notify you by email or in the Service at least 30 days
+    before they take effect.
+  </p>
+
+  <h2 id="contact">18. Contact</h2>
+  <p>
+    {company.name}<br />
+    Support: <a href={`mailto:${contact.support}`}>{contact.support}</a><br />
+    Privacy: <a href={`mailto:${contact.privacy}`}>{contact.privacy}</a><br />
+    Security reports: <a href={`mailto:${contact.security}`}>{contact.security}</a>
+  </p>
+</Legal>

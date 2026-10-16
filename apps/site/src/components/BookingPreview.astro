@@ -1,0 +1,175 @@
+---
+// Illustration of a booking page for the homepage hero. Not interactive.
+const days = [
+  { name: 'Mon', date: 9 },
+  { name: 'Tue', date: 10, selected: true },
+  { name: 'Wed', date: 11 },
+  { name: 'Thu', date: 12 },
+  { name: 'Fri', date: 13 },
+]
+const times = ['9:00', '9:30', '10:30', '13:00', '14:30', '16:00']
+const chosen = '10:30'
+---
+
+<figure class="preview">
+  <div
+    class="booking"
+    role="img"
+    aria-label="Example booking page: a 30-minute intro call, with open times listed for Tuesday the 10th."
+  >
+    <div class="head" aria-hidden="true">
+      <span class="avatar">AR</span>
+      <span>
+        <span class="host">Alex Rivera</span>
+        <span class="event">Intro call</span>
+        <span class="meta">30 min</span>
+      </span>
+    </div>
+    <div class="days" aria-hidden="true">
+      {
+        days.map((day) => (
+          <span class:list={['day', { selected: day.selected }]}>
+            <span class="day-name">{day.name}</span>
+            <span class="day-date">{day.date}</span>
+          </span>
+        ))
+      }
+    </div>
+    <div class="times" aria-hidden="true">
+      {times.map((time) => <span class:list={['time', { chosen: time === chosen }]}>{time}</span>)}
+    </div>
+    <p class="tz" aria-hidden="true">
+      <span class="dot"></span>Select a time to book
+    </p>
+  </div>
+  <figcaption>Illustration of a booking page.</figcaption>
+</figure>
+
+<style>
+  .preview {
+    margin: 0;
+  }
+
+  .booking {
+    padding: 22px;
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    background: var(--surface);
+    box-shadow: 10px 10px 0 var(--accent-soft);
+  }
+
+  .head {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .head > span:last-child {
+    display: grid;
+  }
+
+  .avatar {
+    display: grid;
+    flex: none;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: var(--deep-mere);
+    color: #ffffff;
+    font-weight: 800;
+    font-size: 15px;
+  }
+
+  .host {
+    color: var(--muted);
+    font-size: 14px;
+  }
+
+  .event {
+    font-size: 19px;
+    font-weight: 800;
+  }
+
+  .meta {
+    color: var(--muted);
+    font-size: 14px;
+  }
+
+  .days {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 6px;
+    margin-top: 16px;
+  }
+
+  .day {
+    display: grid;
+    justify-items: center;
+    padding: 8px 0;
+    border-radius: 10px;
+    font-size: 13px;
+  }
+
+  .day-name {
+    color: var(--muted);
+  }
+
+  .day-date {
+    font-size: 17px;
+    font-weight: 800;
+  }
+
+  .day.selected {
+    background: var(--accent-soft);
+    box-shadow: inset 0 0 0 2px var(--cobalt);
+  }
+
+  .times {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    margin-top: 16px;
+  }
+
+  .time {
+    padding: 9px 0;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    color: var(--link);
+    font-weight: 750;
+    font-size: 15px;
+    text-align: center;
+  }
+
+  .time.chosen {
+    border-color: var(--cobalt);
+    background: var(--cobalt);
+    color: #ffffff;
+  }
+
+  .tz {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 16px 0 0;
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--amber);
+  }
+
+  figcaption {
+    margin-top: 10px;
+    color: var(--muted);
+    font-size: 13px;
+    text-align: center;
+  }
+</style>
