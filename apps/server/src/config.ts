@@ -1,10 +1,28 @@
 import { EMAIL_DOMAIN, SIGNUP_MODES, type SignupPolicy } from '@hourmere/auth'
 import { z } from 'zod'
 import { isTrustedProxyEntry } from './client-ip.ts'
+import { DEFAULT_HTTP_TIMEOUTS, type HttpTimeouts } from './http-timeouts.ts'
+import { DEFAULT_HSTS_MAX_AGE } from './security-headers.ts'
 
 // docker compose passes unset optional variables as empty strings.
 const optional = <T extends z.ZodType>(schema: T) =>
   z.preprocess((v) => (v === '' ? undefined : v), schema.optional())
+
+// A whole number of seconds from 1 to an hour; the cap catches milliseconds given by mistake.
+const timeoutSeconds = (name: string, defaultMs: number) => {
+  const error = `${name} must be a whole number of seconds from 1 to 3600`
+  return z.preprocess(
+    (v) => (v === '' ? undefined : v),
+    z.coerce
+      .number({ error })
+      .int({ error })
+      .min(1, { error })
+      .max(3600, { error })
+      .default(defaultMs / 1000),
+  )
+}
+
+const HSTS_MAX_AGE_FORMAT = 'HSTS_MAX_AGE must be a whole number of seconds (0 or more)'
 
 const SMTP_URL_FORMAT =
   'SMTP_URL must look like smtps://user:password@host:465 or smtp://user:password@host:587, with no path (percent-encode special characters in the password)'
@@ -98,6 +116,24 @@ const schema = z
       .transform((v) => v === 'true'),
     // Built web app to serve; unset in development, where Vite serves it.
     WEB_DIST: z.string().optional(),
+    // Strict-Transport-Security max-age in seconds, sent only when PUBLIC_URL is https on a
+    // real host name; 0 tells browsers to forget an earlier policy.
+    HSTS_MAX_AGE: z.preprocess(
+      (v) => (v === '' ? undefined : v),
+      z.coerce
+        .number({ error: HSTS_MAX_AGE_FORMAT })
+        .int({ error: HSTS_MAX_AGE_FORMAT })
+        .min(0, { error: HSTS_MAX_AGE_FORMAT })
+        .default(DEFAULT_HSTS_MAX_AGE),
+    ),
+    // How long a client may take to send a request's headers, to send the whole request, and
+    // how long an idle connection stays open between requests (see http-timeouts.ts).
+    HTTP_HEADERS_TIMEOUT: timeoutSeconds('HTTP_HEADERS_TIMEOUT', DEFAULT_HTTP_TIMEOUTS.headers),
+    HTTP_REQUEST_TIMEOUT: timeoutSeconds('HTTP_REQUEST_TIMEOUT', DEFAULT_HTTP_TIMEOUTS.request),
+    HTTP_KEEP_ALIVE_TIMEOUT: timeoutSeconds(
+      'HTTP_KEEP_ALIVE_TIMEOUT',
+      DEFAULT_HTTP_TIMEOUTS.keepAlive,
+    ),
     // What this process runs: `all` (the default: API and background jobs in one process),
     // `web` (API only, jobs are only queued) or `worker` (background jobs only, with
     // /api/health on PORT for container health checks).
@@ -124,6 +160,14 @@ const schema = z
           'SIGNUP_ALLOWED_DOMAINS has no effect with SIGNUP=open, where anyone can sign up; use SIGNUP=first-user or closed',
       })
     }
+    // Node refuses to start otherwise: the whole request includes its headers.
+    if (c.HTTP_HEADERS_TIMEOUT > c.HTTP_REQUEST_TIMEOUT) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['HTTP_HEADERS_TIMEOUT'],
+        message: 'HTTP_HEADERS_TIMEOUT must not be longer than HTTP_REQUEST_TIMEOUT',
+      })
+    }
     for (const provider of ['GOOGLE', 'MICROSOFT'] as const) {
       const id = c[`${provider}_CLIENT_ID`]
       const secret = c[`${provider}_CLIENT_SECRET`]
@@ -144,11 +188,19 @@ export interface OAuthClient {
 
 export type Config = Omit<
   z.infer<typeof schema>,
-  'PUBLIC_URL' | 'TRUSTED_PROXIES' | 'SIGNUP' | 'SIGNUP_ALLOWED_DOMAINS'
+  | 'PUBLIC_URL'
+  | 'TRUSTED_PROXIES'
+  | 'SIGNUP'
+  | 'SIGNUP_ALLOWED_DOMAINS'
+  | 'HTTP_HEADERS_TIMEOUT'
+  | 'HTTP_REQUEST_TIMEOUT'
+  | 'HTTP_KEEP_ALIVE_TIMEOUT'
 > & {
   PUBLIC_URL: string
   trustedProxies: string[]
   signup: SignupPolicy
+  /** HTTP_*_TIMEOUT, in milliseconds. */
+  httpTimeouts: HttpTimeouts
   /** Social sign-in providers whose credentials are set. */
   socialProviders: { google?: OAuthClient; microsoft?: OAuthClient }
 }
@@ -165,11 +217,24 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const c = parsed.data
   const google = oauthClient(c.GOOGLE_CLIENT_ID, c.GOOGLE_CLIENT_SECRET)
   const microsoft = oauthClient(c.MICROSOFT_CLIENT_ID, c.MICROSOFT_CLIENT_SECRET)
-  const { TRUSTED_PROXIES, SIGNUP, SIGNUP_ALLOWED_DOMAINS, ...rest } = c
+  const {
+    TRUSTED_PROXIES,
+    SIGNUP,
+    SIGNUP_ALLOWED_DOMAINS,
+    HTTP_HEADERS_TIMEOUT,
+    HTTP_REQUEST_TIMEOUT,
+    HTTP_KEEP_ALIVE_TIMEOUT,
+    ...rest
+  } = c
   return {
     ...rest,
     trustedProxies: TRUSTED_PROXIES ?? [],
     signup: { mode: SIGNUP, allowedDomains: SIGNUP_ALLOWED_DOMAINS ?? [] },
+    httpTimeouts: {
+      headers: HTTP_HEADERS_TIMEOUT * 1000,
+      request: HTTP_REQUEST_TIMEOUT * 1000,
+      keepAlive: HTTP_KEEP_ALIVE_TIMEOUT * 1000,
+    },
     PUBLIC_URL: c.PUBLIC_URL ? new URL(c.PUBLIC_URL).origin : `http://localhost:${c.PORT}`,
     socialProviders: { ...(google && { google }), ...(microsoft && { microsoft }) },
   }

@@ -8,6 +8,7 @@ import { createJobs } from '@hourmere/jobs'
 import { BOOKING_NOTIFICATION_JOB, bookingNotificationJob } from '@hourmere/notifications'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { startServer } from './server.ts'
+import { trickle } from './slow-client-testing.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const METHODS = ['log', 'info', 'warn', 'error', 'debug', 'dir', 'dirxml'] as const
@@ -151,6 +152,42 @@ describe.skipIf(!serverUrl)('startServer', () => {
       '[auth] sign-in email not sent (code=ECONNECTION, command=CONN)',
     ])
     expect(printed.warn.filter((l) => l.includes('dropping'))).toHaveLength(1)
+  })
+
+  it('cuts off clients that send too slowly, after the configured timeouts', async () => {
+    await quietly(async () => {
+      const server = await startServer({
+        DATABASE_URL: testDb.url,
+        PORT: String(await freePort()),
+        BETTER_AUTH_SECRET: randomBytes(32).toString('base64'),
+        HTTP_HEADERS_TIMEOUT: '1',
+        HTTP_REQUEST_TIMEOUT: '2',
+      })
+      try {
+        const headers = await trickle(server.port, {
+          first: 'GET /api/health HTTP/1.1\r\nHost: localhost\r\n',
+          drip: 'X-Slow: 1\r\n',
+          everyMs: 100,
+        })
+        expect(headers.response).toMatch(/^HTTP\/1\.1 408 /)
+        // Checked every quarter of the shorter timeout; plus room for a busy machine.
+        expect(headers.closedAfterMs).toBeGreaterThanOrEqual(1000)
+        expect(headers.closedAfterMs).toBeLessThan(1000 + 250 + 500)
+
+        // A booking request whose JSON body never ends; the route waits for it to validate.
+        const body = await trickle(server.port, {
+          first:
+            'POST /api/v1/public/ada/intro/bookings HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 10000\r\n\r\n{',
+          drip: ' ',
+          everyMs: 100,
+        })
+        expect(body.response).toMatch(/^HTTP\/1\.1 408 /)
+        expect(body.closedAfterMs).toBeGreaterThanOrEqual(2000)
+        expect(body.closedAfterMs).toBeLessThan(2000 + 250 + 500)
+      } finally {
+        await server.close()
+      }
+    })
   })
 
   it('refuses to start when database connections lose the sign-up settings', async () => {

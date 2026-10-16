@@ -96,6 +96,56 @@ describe('loadConfig', () => {
     }
   })
 
+  it('takes the HSTS max-age in seconds, 180 days unless set', () => {
+    expect(loadConfig(base).HSTS_MAX_AGE).toBe(15_552_000)
+    expect(loadConfig({ ...base, HSTS_MAX_AGE: '' }).HSTS_MAX_AGE).toBe(15_552_000)
+    expect(loadConfig({ ...base, HSTS_MAX_AGE: '31536000' }).HSTS_MAX_AGE).toBe(31_536_000)
+    expect(loadConfig({ ...base, HSTS_MAX_AGE: '0' }).HSTS_MAX_AGE).toBe(0)
+    for (const bad of ['-1', '1.5', '1y', 'off']) {
+      expect(() => loadConfig({ ...base, HSTS_MAX_AGE: bad }), bad).toThrow(
+        /HSTS_MAX_AGE must be a whole number of seconds/,
+      )
+    }
+  })
+
+  it('takes HTTP timeouts in whole seconds and passes them on in milliseconds', () => {
+    const defaults = { headers: 20_000, request: 60_000, keepAlive: 5_000 }
+    expect(loadConfig(base).httpTimeouts).toEqual(defaults)
+    expect(
+      loadConfig({
+        ...base,
+        HTTP_HEADERS_TIMEOUT: '',
+        HTTP_REQUEST_TIMEOUT: '',
+        HTTP_KEEP_ALIVE_TIMEOUT: '',
+      }).httpTimeouts,
+    ).toEqual(defaults)
+    expect(
+      loadConfig({
+        ...base,
+        HTTP_HEADERS_TIMEOUT: '10',
+        HTTP_REQUEST_TIMEOUT: '120',
+        HTTP_KEEP_ALIVE_TIMEOUT: '65',
+      }).httpTimeouts,
+    ).toEqual({ headers: 10_000, request: 120_000, keepAlive: 65_000 })
+    // Milliseconds by mistake, fractions, zero (which would turn Node's timeout off).
+    for (const bad of ['60000', '0.5', '0', '-5', '1m']) {
+      expect(() => loadConfig({ ...base, HTTP_REQUEST_TIMEOUT: bad }), bad).toThrow(
+        /HTTP_REQUEST_TIMEOUT must be a whole number of seconds from 1 to 3600/,
+      )
+    }
+    expect(() => loadConfig({ ...base, HTTP_KEEP_ALIVE_TIMEOUT: '0' })).toThrow(
+      /HTTP_KEEP_ALIVE_TIMEOUT must be a whole number of seconds/,
+    )
+    // Node refuses a headers timeout longer than the request timeout.
+    expect(() =>
+      loadConfig({ ...base, HTTP_HEADERS_TIMEOUT: '30', HTTP_REQUEST_TIMEOUT: '20' }),
+    ).toThrow(/HTTP_HEADERS_TIMEOUT must not be longer than HTTP_REQUEST_TIMEOUT/)
+    expect(
+      loadConfig({ ...base, HTTP_HEADERS_TIMEOUT: '20', HTTP_REQUEST_TIMEOUT: '20' }).httpTimeouts
+        .request,
+    ).toBe(20_000)
+  })
+
   describe('sign-up', () => {
     it('defaults to first-user, also when compose passes the variables empty', () => {
       const policy = { mode: 'first-user', allowedDomains: [] }

@@ -13,6 +13,7 @@ import { bookingNotificationJob } from '@hourmere/notifications'
 import { sql } from 'kysely'
 import { createApp } from './app.ts'
 import { type Config, loadConfig } from './config.ts'
+import { httpServerOptions } from './http-timeouts.ts'
 import { bookingTools } from './mcp/bookings.ts'
 import { mcpEndpoint } from './mcp/endpoint.ts'
 import { whoamiTool } from './mcp/whoami.ts'
@@ -163,6 +164,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
       authHandler: auth.handler,
       resolveCaller: createCallerResolver({ auth, db }),
       publicUrl: config.PUBLIC_URL,
+      hstsMaxAge: config.HSTS_MAX_AGE,
       trustedProxies: config.trustedProxies,
       webDist: config.WEB_DIST,
       // db is closed below.
@@ -172,7 +174,8 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
   }
 
   const server = await new Promise<ReturnType<typeof serve>>((resolve) => {
-    const s = serve({ fetch, port: config.PORT }, (info: AddressInfo) => {
+    const serverOptions = httpServerOptions(config.httpTimeouts)
+    const s = serve({ fetch, port: config.PORT, serverOptions }, (info: AddressInfo) => {
       if (role === 'worker') {
         console.log(`Hourmere worker running jobs; health check on :${info.port}/api/health`)
       } else {

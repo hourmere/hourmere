@@ -15,6 +15,11 @@ import type { McpModule } from './mcp/endpoint.ts'
 import { describeCaller, Me } from './me.ts'
 import { authenticated, ErrorBody, json, type RouteModule } from './openapi.ts'
 import { routeRateLimits } from './rate-limit.ts'
+import {
+  DEFAULT_HSTS_MAX_AGE,
+  securityHeaders,
+  strictTransportSecurity,
+} from './security-headers.ts'
 import { MAGIC_LINK_CONFIRM_PATH, signInConfirmPage } from './sign-in-confirm.ts'
 
 export interface AppDeps {
@@ -26,6 +31,11 @@ export interface AppDeps {
   resolveCaller: CallerResolver
   /** PUBLIC_URL: cookie-authenticated writes must come from its origin. */
   publicUrl: string
+  /**
+   * HSTS_MAX_AGE in seconds (default DEFAULT_HSTS_MAX_AGE); Strict-Transport-Security is only
+   * sent when publicUrl is https on a real host name.
+   */
+  hstsMaxAge?: number | undefined
   /** Reverse proxies (IPs or CIDR ranges) whose X-Forwarded-For names the client. */
   trustedProxies?: readonly string[] | undefined
   /** Absolute path of the built web app, if this process should serve it. */
@@ -180,6 +190,7 @@ export function createApp({
   authHandler,
   resolveCaller,
   publicUrl,
+  hstsMaxAge = DEFAULT_HSTS_MAX_AGE,
   trustedProxies = [],
   webDist,
   routes = [],
@@ -219,6 +230,8 @@ export function createApp({
     logError(c, '', err)
     return c.json({ error: 'internal_error' }, 500)
   })
+  // First, so it also covers what every later middleware, route and onError answers.
+  app.use('*', securityHeaders({ hsts: strictTransportSecurity(publicUrl, hstsMaxAge) }))
   app.use('/api/*', requestLogger)
   app.use('/api/*', clientIp(trustedProxies))
   // First on /api/v1, so it also covers what the middleware below and onError answer.
