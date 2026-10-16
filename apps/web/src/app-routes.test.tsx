@@ -5,6 +5,7 @@ import {
   emptyAccount,
   fakeApi,
   instance,
+  json,
   renderApp,
   signedIn,
   signedOut,
@@ -23,21 +24,27 @@ describe('the app under /app', () => {
   it.each(['/event-types', '/availability', '/bookings', '/api-keys', '/settings'])(
     'does not keep the old address %s, even when signed in',
     async (path) => {
-      fakeApi({ ...signedIn })
+      const api = fakeApi({
+        ...signedIn,
+        [`GET /api/v1/public${path}`]: () => json(404, { error: 'host_not_found' }),
+      })
       renderApp(path)
       expect(await screen.findByRole('heading', { name: 'Page not found' })).toBeDefined()
       expect(location()).toBe(path)
       // The public frame, not the app's: no navigation, no session needed.
       expect(screen.queryByRole('navigation', { name: 'Main' })).toBeNull()
-      expect(screen.getByRole('link', { name: 'Go to Hourmere' }).getAttribute('href')).toBe('/app')
+      expect(api.to('GET /api/v1/me')).toHaveLength(0)
     },
   )
 
   it('shows old addresses as not found without asking anyone to sign in', async () => {
-    fakeApi({ ...signedOut })
+    const api = fakeApi({
+      'GET /api/v1/public/api-keys': () => json(404, { error: 'host_not_found' }),
+    })
     renderApp('/api-keys')
     expect(await screen.findByRole('heading', { name: 'Page not found' })).toBeDefined()
     expect(location()).toBe('/api-keys')
+    expect(api.to('GET /api/v1/me')).toHaveLength(0)
   })
 
   it('shows an unknown page under /app inside the app', async () => {
