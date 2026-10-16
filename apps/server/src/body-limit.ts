@@ -32,6 +32,13 @@ export interface BodyCheck {
 }
 
 /**
+ * Methods whose requests are passed on untouched: GET, HEAD and TRACE carry no body, and
+ * fetch's Request refuses to be built with TRACE, TRACK or CONNECT, so rebuilding one would
+ * turn the request into a 500.
+ */
+const PASSED_THROUGH = new Set(['GET', 'HEAD', 'TRACE', 'TRACK', 'CONNECT'])
+
+/**
  * Runs the rest of the request (`next`) with a body that `check` sees while it is read.
  * Nothing is read on check's behalf: a chunk passes through only when a reader asks for it,
  * so a request answered without reading its body (e.g. 401, 429) leaves it unread. Even the
@@ -51,7 +58,7 @@ export interface BodyCheck {
  */
 export async function checkBodyAsRead(c: Context, next: Next, check: BodyCheck): Promise<void> {
   const original = c.req.raw
-  if (original.method === 'GET' || original.method === 'HEAD') return next()
+  if (PASSED_THROUGH.has(original.method)) return next()
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
   let refusal: unknown
   const checked = new ReadableStream<Uint8Array>(
@@ -115,8 +122,8 @@ export async function checkBodyAsRead(c: Context, next: Next, check: BodyCheck):
  */
 export function apiBodyLimit(): MiddlewareHandler {
   return createMiddleware(async (c, next) => {
-    // GET and HEAD carry no body to read, whatever their headers say.
-    if (c.req.method === 'GET' || c.req.method === 'HEAD') return next()
+    // These carry no body to read, whatever their headers say.
+    if (PASSED_THROUGH.has(c.req.method)) return next()
     let maxSize = DEFAULT_BODY_LIMIT
     for (const { handler } of matchedRoutes(c)) {
       const declared = (handler as { [DECLARED]?: number })[DECLARED]

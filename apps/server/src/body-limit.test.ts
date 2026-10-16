@@ -101,4 +101,10 @@ describe('request bodies over a real socket', () => {
       })
     },
   )
+
+  it('answers TRACE like any other unmatched request instead of failing', async () => {
+    // fetch's Request refuses TRACE, so the body check must not try to rebuild the request.
+    expect((await send('TRACE', '/api/v1/missing')).status).toBe(404)
+    expect((await send('TRACE', '/mcp')).status).toBe(405)
+  })
 })
