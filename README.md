@@ -66,6 +66,17 @@ app's API keys page, or with Better Auth's endpoints while signed in (`POST
 /api/auth/api-key/create`, `GET /api/auth/api-key/list`, `POST /api/auth/api-key/delete`). The API is described at
 `/api/v1/openapi.json`; its conventions are in [docs/api-conventions.md](docs/api-conventions.md).
 
+## Contributing
+
+Bug reports, ideas and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers
+setup, checks, conventions and the DCO sign-off; everyone follows the
+[code of conduct](CODE_OF_CONDUCT.md).
+
+## Security
+
+Report vulnerabilities privately to [security@hourmere.com](mailto:security@hourmere.com), not
+in a public issue. See [SECURITY.md](SECURITY.md).
+
 ## License
 
 [AGPL-3.0](LICENSE)
