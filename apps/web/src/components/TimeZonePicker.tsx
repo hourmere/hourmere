@@ -5,7 +5,7 @@ import { useEffect, useId, useMemo, useState } from 'react'
 import { isKnownTimeZone, utcOffset } from '../format.ts'
 import type { ControlProps } from './forms.tsx'
 
-/** Suggestions shown at once; typing narrows them down. */
+/** Suggestions shown at once while typing; more typing narrows them down. */
 const MAX_SHOWN = 100
 
 /** The time zones the browser knows, with UTC, sorted. */
@@ -65,7 +65,8 @@ export function TimeZonePicker({
   const optionId = (index: number) => `${listId}-option-${index}`
 
   const matches = filtering ? matchTimeZones(zones, value) : zones
-  const shown = matches.slice(0, MAX_SHOWN)
+  // Opened without typing, the whole list scrolls (to the current zone); typing caps it.
+  const shown = filtering ? matches.slice(0, MAX_SHOWN) : matches
 
   // Keep the active suggestion in view while moving through the list with the keyboard.
   useEffect(() => {
@@ -172,7 +173,7 @@ export function TimeZonePicker({
       {open && shown.length === 0 && (
         <div className="combobox-list combobox-empty">No time zone matches “{value}”.</div>
       )}
-      {open && matches.length > MAX_SHOWN && (
+      {open && shown.length < matches.length && (
         <p className="hint">Type to narrow down the {matches.length} time zones.</p>
       )}
     </div>

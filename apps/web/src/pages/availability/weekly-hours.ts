@@ -131,12 +131,13 @@ export function validateIntervals(
   }
   parsed.sort((a, b) => a.start - b.start)
   const overlaps: string[] = []
-  for (let n = 1; n < parsed.length; n++) {
-    const previous = parsed[n - 1]
-    const current = parsed[n]
-    if (previous && current && current.start < previous.end) {
-      overlaps.push(`${previous.label} and ${current.label}`)
+  // Each range against the one reaching furthest so far, which any overlap must hit.
+  let furthest: (typeof parsed)[number] | undefined
+  for (const current of parsed) {
+    if (furthest && current.start < furthest.end) {
+      overlaps.push(`${furthest.label} and ${current.label}`)
     }
+    if (!furthest || current.end > furthest.end) furthest = current
   }
   if (overlaps.length) errors[prefix] = `These hours overlap: ${overlaps.join('; ')}.`
   return errors
