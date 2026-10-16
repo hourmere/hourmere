@@ -100,6 +100,15 @@ Input is checked in two layers, so REST and MCP behave identically:
   questions, or that a slot is still free. Failures use specific codes (400
   `invalid_responses`, 409 `slot_taken`, …).
 
+Free text (names, emails, answers, reasons, question labels and options) must be well-formed
+Unicode without control characters: no NUL, C0 or C1 controls, DEL, U+2028 or U+2029; only
+multi-line fields (long answers, reasons) may contain tabs and line breaks. Services refuse
+anything else with the field's code (`invalid_invitee`, `invalid_guests`, `invalid_responses`,
+`invalid_reason`, `invalid_questions`), using the helpers in `packages/scheduling/src/text.ts`.
+As a safety net for every `/api/v1` route, a JSON body with NUL or a lone surrogate anywhere
+(values or keys) is refused with 400 `invalid_request` before the route runs. Request bodies
+over 64 KB get 413 `payload_too_large` on all of `/api`, sign-in included.
+
 ## Lists
 
 A list response is `{ "data": [ … ] }`. Lists that can grow without bound use cursor
@@ -119,11 +128,15 @@ Booking pages and invitee links work without credentials:
   gets the same 404 `booking_not_found`. Only the token's SHA-256 is stored, so it is returned
   once, when the booking is made (and with the new booking after a reschedule).
 
-They are rate limited per client IP (`TRUSTED_PROXIES` decides which address that is): 120
-requests a minute for event pages and for slots, 10 for creating bookings, 30 for manage
-endpoints; beyond that 429 `rate_limited` with `Retry-After`. The counters live in each server
-process's memory, so with several instances a client gets that budget once per instance; a
-shared store comes with multi-instance deployments.
+They are rate limited per client (`TRUSTED_PROXIES` decides which address that is; IPv6
+clients count per /64 network, since one subscriber usually has a whole /64): 120 requests a
+minute for event pages and for slots, 10 for creating bookings, 30 for manage endpoints;
+beyond that 429 `rate_limited` with `Retry-After`. The counters live in each server process's
+memory, so with several instances a client gets that budget once per instance; a shared store
+comes with multi-instance deployments.
+
+A slots request may span at most 62 days and at most 20 000 possible start times at the event
+type's slot step (about 13 days with 1-minute steps); beyond either, 400 `range_too_long`.
 
 ## Retries
 
@@ -134,3 +147,7 @@ secret is not stored and cannot be returned twice. The same key with a different
 refused with 409 `idempotency_key_reused`. Keys are scoped to the organization and the
 caller's API key, and all anonymous callers share one scope, so they must be random (e.g. a
 UUIDv4), never derived from the request.
+
+Rescheduling is not idempotent: it cancels the booking and creates a new one with a new
+manage token, so retrying it after a lost response gets 409 `booking_cancelled`. Booking
+emails (coming later) will carry the new link, so the invitee does not lose it.

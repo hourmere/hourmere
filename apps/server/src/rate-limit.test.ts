@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createRateLimiter, PUBLIC_RATE_LIMITS } from './rate-limit.ts'
+import { createRateLimiter, PUBLIC_RATE_LIMITS, rateLimitKey } from './rate-limit.ts'
 
 describe('createRateLimiter', () => {
   it('allows the limit per window, then says how long to wait', () => {
@@ -31,6 +31,24 @@ describe('createRateLimiter', () => {
     limiter.hit('ip-10')
     expect(limiter.hit('ip-0')).toBeUndefined()
     expect(limiter.hit('ip-9')).toBe(60)
+  })
+
+  it('counts IPv4 clients by address and IPv6 clients by /64 network', () => {
+    expect(rateLimitKey('203.0.113.7')).toBe('203.0.113.7')
+    expect(rateLimitKey(undefined)).toBe('unknown')
+    const net = '2001:db8:1:2::/64'
+    for (const ip of [
+      '2001:db8:1:2::1',
+      '2001:0db8:0001:0002:ffff:ffff:ffff:ffff',
+      '2001:DB8:1:2:a::b',
+      '2001:db8:1:2::ffff:192.0.2.1',
+    ]) {
+      expect(rateLimitKey(ip), ip).toBe(net)
+    }
+    expect(rateLimitKey('2001:db8:1:3::1')).toBe('2001:db8:1:3::/64')
+    expect(rateLimitKey('::1')).toBe('0:0:0:0::/64')
+    expect(rateLimitKey('fe80::1%eth0')).toBe('fe80:0:0:0::/64')
+    expect(rateLimitKey('1::')).toBe('1:0:0:0::/64')
   })
 
   it('has the documented public limits', () => {

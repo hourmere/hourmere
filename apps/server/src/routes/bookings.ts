@@ -111,6 +111,16 @@ const hostNotFound = error(
   'No such booking among those the caller hosts in this organization (`booking_not_found`)',
 )
 const unauthorized = error('No valid session or API key')
+const keyRateLimited = error(
+  "The API key's rate limit is used up (`rate_limited`); see Retry-After",
+)
+const crossOrigin = error(
+  'A cookie-authenticated write that does not come from the app itself (`forbidden`)',
+)
+const invalidId = error('The id is not a UUID (`invalid_request`)')
+const invalidCancel = error(
+  'Invalid request (`invalid_request`), or a reason over 1000 characters or with control characters (`invalid_reason`)',
+)
 
 export interface BookingRoutesDeps {
   db: Db
@@ -176,7 +186,7 @@ export function bookingRoutes({
         },
         responses: {
           200: { description: 'The cancelled booking', content: json(Booking) },
-          400: error('Invalid request'),
+          400: invalidCancel,
           404: manageNotFound,
           409: error(
             'Already cancelled (`booking_cancelled`) or already started (`booking_in_past`)',
@@ -216,7 +226,7 @@ export function bookingRoutes({
           400: error('Invalid request'),
           404: manageNotFound,
           409: error(
-            'Already cancelled (`booking_cancelled`), already started (`booking_in_past`), the event type no longer takes bookings (`event_type_unavailable`), or the time is not offered (`slot_unavailable`, `slot_taken`)',
+            'Already cancelled (`booking_cancelled`), already started (`booking_in_past`), without a host (`booking_has_no_host`), the event type no longer takes bookings (`event_type_unavailable`), or the time is not offered (`slot_unavailable`, `slot_taken`)',
           ),
           429: rateLimited,
         },
@@ -260,6 +270,7 @@ export function bookingRoutes({
           200: { description: 'A page of bookings', content: json(BookingPage) },
           400: error('Invalid parameters (`invalid_request`, `invalid_range`, `invalid_cursor`)'),
           401: unauthorized,
+          429: keyRateLimited,
         },
       }),
       async (c) => {
@@ -285,8 +296,10 @@ export function bookingRoutes({
         request: { params: z.object({ id: z.uuid() }) },
         responses: {
           200: { description: 'The booking', content: json(Booking) },
+          400: invalidId,
           401: unauthorized,
           404: hostNotFound,
+          429: keyRateLimited,
         },
       }),
       async (c) =>
@@ -306,12 +319,14 @@ export function bookingRoutes({
         },
         responses: {
           200: { description: 'The cancelled booking', content: json(Booking) },
-          400: error('Invalid request'),
+          400: invalidCancel,
           401: unauthorized,
+          403: crossOrigin,
           404: hostNotFound,
           409: error(
             'Already cancelled (`booking_cancelled`) or already started (`booking_in_past`)',
           ),
+          429: keyRateLimited,
         },
       }),
       async (c) => {

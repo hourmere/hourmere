@@ -4,6 +4,7 @@
 // and checks answers with validateResponses. The format is described in docs/data-model.md.
 import { z } from 'zod'
 import { DomainError } from './errors.ts'
+import { isMultiLineText, isSingleLineText, textSchema } from './text.ts'
 
 export const QUESTION_TYPES = [
   'short_text',
@@ -31,12 +32,16 @@ const isChoice = (type: QuestionType) => type === 'select' || type === 'multi_se
  */
 export const QuestionSchema = z
   .strictObject({
-    id: z.string().regex(/^[A-Za-z0-9_-]{1,64}$/, 'id must be 1 to 64 letters, digits, "_" or "-"'),
-    label: z.string().trim().min(1).max(MAX_QUESTION_LABEL),
+    id: z
+      .string()
+      .regex(/^[A-Za-z0-9_-]{1,64}$/, 'id must be 1 to 64 letters, digits, "_" or "-"')
+      // Generic JSON handling (e.g. zod records) drops this key, so it could never be answered.
+      .refine((id) => id !== '__proto__', 'id must not be __proto__'),
+    label: textSchema({ max: MAX_QUESTION_LABEL }),
     type: z.enum(QUESTION_TYPES),
     required: z.boolean().default(false),
     options: z
-      .array(z.string().trim().min(1).max(MAX_OPTION_LENGTH))
+      .array(textSchema({ max: MAX_OPTION_LENGTH }))
       .min(1)
       .max(MAX_OPTIONS)
       .optional(),
@@ -81,6 +86,20 @@ export const ResponsesSchema = z.record(z.string(), ResponseValueSchema)
 export type Responses = z.output<typeof ResponsesSchema>
 
 /**
+ * Validates questions a host submits (the owner-side API's write path). Throws
+ * `invalid_questions` naming the first problem; returns them normalized (trimmed, defaults).
+ */
+export function validateQuestions(value: unknown): Question[] {
+  const result = QuestionsSchema.safeParse(value)
+  if (!result.success) {
+    const issue = result.error.issues[0]
+    const where = issue?.path.length ? `questions.${issue.path.join('.')}: ` : ''
+    throw new DomainError('invalid', 'invalid_questions', `${where}${issue?.message ?? 'invalid'}`)
+  }
+  return result.data
+}
+
+/**
  * Reads `event_types.questions`. Questions are validated when they are stored, so data that
  * does not match the schema is a bug and throws (500), never a client error.
  */
@@ -102,7 +121,10 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 /**
  * Checks answers against the event type's questions and returns them normalized (text
  * trimmed, empty optional answers left out). Throws `invalid_responses` for an unknown
- * question, a missing required answer, or an answer of the wrong kind or length.
+ * question, a missing required answer, or an answer of the wrong kind, length or text
+ * (control characters, malformed Unicode; long_text may have tabs and line breaks).
+ * Answers are read as own properties only and returned in an object without a prototype,
+ * so question ids such as `constructor` or `__proto__` never reach Object.prototype.
  */
 export function validateResponses(questions: readonly Question[], given: unknown): Responses {
   const invalid = (message: string) => new DomainError('invalid', 'invalid_responses', message)
@@ -111,9 +133,9 @@ export function validateResponses(questions: readonly Question[], given: unknown
   if (Object.keys(given).some((id) => !ids.has(id))) {
     throw invalid('responses answers a question this event type does not ask')
   }
-  const result: Responses = {}
+  const result: Responses = Object.create(null)
   for (const q of questions) {
-    const value = given[q.id]
+    const value = Object.hasOwn(given, q.id) ? given[q.id] : undefined
     const name = `Question "${q.id}"`
     const missing = () => invalid(`${name} is required`)
     switch (q.type) {
@@ -132,6 +154,9 @@ export function validateResponses(questions: readonly Question[], given: unknown
         }
         if (text.length > MAX_ANSWER_LENGTH[q.type]) {
           throw invalid(`${name} takes at most ${MAX_ANSWER_LENGTH[q.type]} characters`)
+        }
+        if (!(q.type === 'long_text' ? isMultiLineText(text) : isSingleLineText(text))) {
+          throw invalid(`${name} contains characters that are not allowed`)
         }
         if (q.type === 'phone' && !PHONE.test(text)) throw invalid(`${name} takes a phone number`)
         result[q.id] = text

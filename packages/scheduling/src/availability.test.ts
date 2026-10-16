@@ -9,6 +9,7 @@ import {
   findSlots,
   getPublicEventType,
   listPublicSlots,
+  MAX_SLOT_CANDIDATES,
   MAX_SLOT_RANGE_DAYS,
 } from './availability.ts'
 import type { PublicContext } from './context.ts'
@@ -295,6 +296,111 @@ describe.skipIf(!serverUrl)('availability', () => {
       { start: '2026-11-02T23:00:00.000Z', end: '2026-11-02T23:30:00.000Z' },
       { start: '2026-11-02T23:30:00.000Z', end: '2026-11-03T00:00:00.000Z' },
     ])
+  })
+
+  it('handles busy time that is unbounded or reaches ±infinity', async () => {
+    const host = await f.host({ handle: 'busy-forever' })
+    await f.schedule(host.userId)
+    await f.eventType(host.organizationId, host.userId, { slug: 'call' })
+    const slots = (start: string, end: string) =>
+      listPublicSlots(ctx, {
+        handle: 'busy-forever',
+        slug: 'call',
+        start: instant(start),
+        end: instant(end),
+      })
+    // Busy from Tuesday 12:00 Berlin on, forever.
+    await f.calendarBusy(host.userId, [['2026-11-03T11:00:00Z', 'infinity']])
+    const monday = await slots('2026-11-02T00:00Z', '2026-11-03T00:00Z')
+    expect(monday).toHaveLength(16)
+    expect((await slots('2026-11-03T00:00Z', '2026-11-04T00:00Z')).map((s) => s.start)).toEqual([
+      '2026-11-03T08:00:00.000Z',
+      '2026-11-03T08:30:00.000Z',
+      '2026-11-03T09:00:00.000Z',
+      '2026-11-03T09:30:00.000Z',
+      '2026-11-03T10:00:00.000Z',
+      '2026-11-03T10:30:00.000Z',
+    ])
+    // And then busy for all time, with an unbounded range too.
+    await f.calendarBusy(host.userId, [
+      ['-infinity', 'infinity'],
+      ['', '2026-11-01T00:00:00Z'],
+    ])
+    expect(await slots('2026-11-02T00:00Z', '2026-11-07T00:00Z')).toEqual([])
+  })
+
+  it('caps the candidate start times one request may make the engine check', async () => {
+    const host = await f.host({ handle: 'fine-grained' })
+    await f.schedule(host.userId)
+    await f.eventType(host.organizationId, host.userId, { slug: 'call', slotStepMinutes: 1 })
+    await f.eventType(host.organizationId, host.userId, { slug: 'half-hour' })
+    const start = instant('2026-11-02T00:00Z')
+    const request = (minutes: number) =>
+      listPublicSlots(ctx, {
+        handle: 'fine-grained',
+        slug: 'call',
+        start,
+        end: start.add({ minutes }),
+      })
+    await expect(request(MAX_SLOT_CANDIDATES)).resolves.toBeInstanceOf(Array)
+    await expect(request(MAX_SLOT_CANDIDATES + 1)).rejects.toMatchObject({
+      kind: 'invalid',
+      code: 'range_too_long',
+    })
+    // With 30-minute steps the full 62 days stay allowed.
+    await expect(
+      listPublicSlots(ctx, {
+        handle: 'fine-grained',
+        slug: 'half-hour',
+        start,
+        end: start.add({ hours: MAX_SLOT_RANGE_DAYS * 24 }),
+      }),
+    ).resolves.toBeInstanceOf(Array)
+  })
+
+  describe('date overrides far from UTC', () => {
+    // A range whose local dates differ from its UTC dates: the override for that local date
+    // must still be loaded.
+    it.each([
+      {
+        timeZone: 'Pacific/Kiritimati', // UTC+14
+        // Wed 2026-11-04 00:00–10:00 local; UTC dates: only 2026-11-03.
+        range: ['2026-11-03T10:00:00Z', '2026-11-03T20:00:00Z'],
+        override: { date: '2026-11-04', intervals: [{ start: '06:00', end: '07:00' }] },
+        expected: ['2026-11-03T16:00:00.000Z', '2026-11-03T16:30:00.000Z'],
+      },
+      {
+        timeZone: 'Pacific/Pago_Pago', // UTC-11
+        // Tue 2026-11-03 13:00–23:00 local; UTC dates: only 2026-11-04.
+        range: ['2026-11-04T00:00:00Z', '2026-11-04T10:00:00Z'],
+        override: { date: '2026-11-03', intervals: [{ start: '14:00', end: '15:00' }] },
+        expected: ['2026-11-04T01:00:00.000Z', '2026-11-04T01:30:00.000Z'],
+      },
+    ])('applies an override in $timeZone', async ({ timeZone, range, override, expected }) => {
+      const host = await f.host({ timeZone })
+      await f.schedule(host.userId, { timeZone, overrides: [override] })
+      const eventTypeId = await f.eventType(host.organizationId, host.userId)
+      const query = {
+        eventTypeId,
+        hostUserId: host.userId,
+        rangeStart: instant(range[0] as string),
+        rangeEnd: instant(range[1] as string),
+        now: NOW,
+      }
+      const slots = await findSlots(db, query)
+      expect(slots.map((s) => iso(s).start)).toEqual(expected)
+      expect(slots.map(iso)).toEqual(
+        getAvailableSlots({
+          schedule: {
+            timeZone,
+            weeklyHours: weekdays({ start: '09:00', end: '17:00' }),
+            dateOverrides: [override],
+          },
+          eventType: { durationMinutes: 30 },
+          ...query,
+        }).map(iso),
+      )
+    })
   })
 
   it('offers nothing when the host has no schedule', async () => {

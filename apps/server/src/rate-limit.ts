@@ -1,3 +1,4 @@
+import { isIP } from 'node:net'
 import { createMiddleware } from 'hono/factory'
 
 /** At most `limit` requests per client IP in each `windowSeconds`. */
@@ -78,12 +79,34 @@ export function createRateLimiter(
 }
 
 /**
- * Answers 429 `rate_limited` with Retry-After once the client IP (c.var.clientIp, which
- * honors TRUSTED_PROXIES) is over the limiter's limit. For routes' `middleware`.
+ * The key a client is counted under: its IPv4 address, or the /64 network of its IPv6
+ * address. One subscriber usually gets a whole /64 (or more), so counting single IPv6
+ * addresses would let a client rotate through billions of them.
+ */
+export function rateLimitKey(ip: string | undefined): string {
+  if (ip === undefined || isIP(ip) !== 6) return ip ?? 'unknown'
+  const [address = ''] = ip.split('%') // zone index, e.g. fe80::1%eth0
+  const [head = '', tail] = address.split('::')
+  const groups = (part: string) =>
+    // An embedded IPv4 address (::ffff:1.2.3.4) takes the last two groups.
+    part ? part.split(':').flatMap((g) => (g.includes('.') ? ['0', '0'] : [g])) : []
+  const left = groups(head)
+  const right = tail === undefined ? [] : groups(tail)
+  const full = [...left, ...Array(8 - left.length - right.length).fill('0'), ...right]
+  return `${full
+    .slice(0, 4)
+    .map((g) => Number.parseInt(g, 16).toString(16))
+    .join(':')}::/64`
+}
+
+/**
+ * Answers 429 `rate_limited` with Retry-After once the client (c.var.clientIp, which honors
+ * TRUSTED_PROXIES; IPv6 by /64, see rateLimitKey) is over the limiter's limit. For routes'
+ * `middleware`.
  */
 export function rateLimit(limiter: RateLimiter) {
   return createMiddleware(async (c, next) => {
-    const retryAfter = limiter.hit(c.var.clientIp ?? 'unknown')
+    const retryAfter = limiter.hit(rateLimitKey(c.var.clientIp))
     if (retryAfter !== undefined) {
       c.header('Retry-After', String(retryAfter))
       return c.json({ error: 'rate_limited' }, 429)

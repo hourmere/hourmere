@@ -6,8 +6,12 @@ import {
   type Question,
   QuestionsSchema,
   ResponsesSchema,
+  validateQuestions,
   validateResponses,
 } from './questions.ts'
+
+const NUL = 'A\u0000B'
+const LONE_SURROGATE = 'a\ud800b'
 
 describe('QuestionsSchema', () => {
   it('accepts every type, trims labels and options, and defaults required to false', () => {
@@ -60,6 +64,30 @@ describe('QuestionsSchema', () => {
     expect(QuestionsSchema.safeParse(value).success).toBe(false)
   })
 
+  it.each([
+    ['NUL in a label', [q({ label: NUL })]],
+    ['a lone surrogate in a label', [q({ label: LONE_SURROGATE })]],
+    ['a line break in a label', [q({ label: 'line\nbreak' })]],
+    ['a C1 control in a label', [q({ label: `a${String.fromCharCode(0x85)}b` })]],
+    ['NUL in an option', [q({ type: 'select', options: ['ok', NUL] })]],
+    ['a lone surrogate in an option', [q({ type: 'multi_select', options: [LONE_SURROGATE] })]],
+    ['__proto__ as an id', [q({ id: '__proto__' })]],
+  ])('refuses %s, with invalid_questions from validateQuestions', (_, value) => {
+    expect(QuestionsSchema.safeParse(value).success).toBe(false)
+    expect(() => validateQuestions(value)).toThrow(
+      expect.objectContaining({
+        kind: 'invalid',
+        code: 'invalid_questions',
+        message: expect.stringMatching(/^questions\.0\./),
+      }),
+    )
+  })
+
+  it('accepts ids named like Object.prototype members other than __proto__', () => {
+    const ids = ['constructor', 'toString', 'hasOwnProperty', 'valueOf']
+    expect(validateQuestions(ids.map((id) => q({ id }))).map((x) => x.id)).toEqual(ids)
+  })
+
   it('treats stored questions that do not match as a bug', () => {
     expect(parseQuestions([])).toEqual([])
     expect(() => parseQuestions([{ id: 'q', type: 'short_text' }])).toThrow(/QuestionsSchema/)
@@ -100,6 +128,57 @@ describe('validateResponses', () => {
     expect(() => check(given)).toThrow(
       expect.objectContaining({ kind: 'invalid', code: 'invalid_responses' }),
     )
+  })
+
+  it.each([
+    ['NUL in short text', 'text', NUL],
+    ['a lone surrogate in short text', 'text', LONE_SURROGATE],
+    ['a line break inside short text', 'text', 'line\nbreak'],
+    ['NUL in a phone number', 'phone', '+1 555\u00000100'],
+  ])('refuses %s', (_, id, text) => {
+    expect(() => check({ ...valid, [id]: text })).toThrow(
+      expect.objectContaining({ code: 'invalid_responses' }),
+    )
+  })
+
+  it('takes tabs and line breaks, but no other control characters, in long text', () => {
+    const long: Question[] = [{ id: 'notes', label: 'Notes', type: 'long_text', required: false }]
+    expect(validateResponses(long, { notes: ' a\tb\r\nc ' })).toEqual({ notes: 'a\tb\r\nc' })
+    for (const notes of [NUL, LONE_SURROGATE, 'a\u000bb', 'a\u2028b']) {
+      expect(() => validateResponses(long, { notes })).toThrow(
+        expect.objectContaining({ code: 'invalid_responses' }),
+      )
+    }
+  })
+
+  describe('with question ids named like Object.prototype members', () => {
+    // Built by hand: the schema refuses __proto__, but the validator must not rely on that.
+    const named = (required: boolean): Question[] =>
+      ['constructor', 'toString', '__proto__'].map((id) => ({
+        id,
+        label: id,
+        type: 'short_text',
+        required,
+      }))
+
+    it('reads only own answers', () => {
+      expect({ ...validateResponses(named(false), {}) }).toEqual({})
+      expect(() => validateResponses(named(true), {})).toThrow(
+        expect.objectContaining({ message: 'Question "constructor" is required' }),
+      )
+    })
+
+    it('keeps every answer as an own property of an object without a prototype', () => {
+      const given = JSON.parse('{"constructor":"a","toString":"b","__proto__":"c"}')
+      const result = validateResponses(named(true), given)
+      expect(Object.getPrototypeOf(result)).toBeNull()
+      expect(Object.entries(result)).toEqual([
+        ['constructor', 'a'],
+        ['toString', 'b'],
+        ['__proto__', 'c'],
+      ])
+      expect(JSON.parse(JSON.stringify(result))).toEqual(given)
+    })
   })
 
   it('allows long text up to 5000 characters', () => {

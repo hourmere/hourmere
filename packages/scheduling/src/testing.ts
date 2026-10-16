@@ -157,12 +157,15 @@ export function createFixtures(db: Db) {
     return row.id
   }
 
-  /** Busy intervals mirrored into one new calendar of the user. */
+  /**
+   * Busy intervals mirrored into one new calendar of the user. Bounds are Postgres range
+   * bounds, so `-infinity` and `infinity` work too.
+   */
   async function calendarBusy(
     userId: string,
     intervals: [string, string][],
     { checkConflicts = true }: { checkConflicts?: boolean } = {},
-  ): Promise<void> {
+  ): Promise<{ calendarId: string; externalEventIds: string[] }> {
     const connection = await db
       .insertInto('calendar_connections')
       .values({
@@ -183,16 +186,20 @@ export function createFixtures(db: Db) {
       })
       .returning('id')
       .executeTakeFirstOrThrow()
+    const externalEventIds: string[] = []
     for (const [start, end] of intervals) {
+      const externalEventId = `evt-${unique()}`
+      externalEventIds.push(externalEventId)
       await db
         .insertInto('calendar_busy')
         .values({
           calendar_id: calendar.id,
-          external_event_id: `evt-${unique()}`,
+          external_event_id: externalEventId,
           period: `[${start},${end})`,
         })
         .execute()
     }
+    return { calendarId: calendar.id, externalEventIds }
   }
 
   /** A booking with its host rows, in one transaction as the application writes it. */

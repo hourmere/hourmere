@@ -187,6 +187,20 @@ describe.skipIf(!serverUrl)('public routes', () => {
     expect(await res.json()).toMatchObject({ error })
   })
 
+  it('refuses unsafe text: NUL and lone surrogates up front, other controls in the service', async () => {
+    const invitee = (name: string) => ({ name, email: 'g@example.com', timeZone: 'UTC' })
+    for (const name of ['A\u0000B', 'a\ud800b']) {
+      const res = await book('2026-11-02T09:00:00Z', { invitee: invitee(name) })
+      expect(res.status).toBe(400)
+      expect(await res.json()).toMatchObject({ error: 'invalid_request' })
+    }
+    const bell = await book('2026-11-02T09:00:00Z', {
+      invitee: invitee(`A${String.fromCharCode(7)}B`),
+    })
+    expect(bell.status).toBe(400)
+    expect(await bell.json()).toMatchObject({ error: 'invalid_invitee' })
+  })
+
   it('replays a retry with the same Idempotency-Key and refuses a different request', async () => {
     const key = { 'idempotency-key': crypto.randomUUID() }
     const first = await book('2026-11-02T10:00:00Z', {}, key)
@@ -337,6 +351,11 @@ describe.skipIf(!serverUrl)('public routes', () => {
 
     // Another address has its own budget; other groups count separately.
     expect((await page('203.0.113.2')).status).toBe(200)
+    // IPv6 clients are counted by /64: rotating addresses inside it does not help.
+    expect((await page('2001:db8:1:2::1')).status).toBe(200)
+    expect((await page('2001:db8:1:2::2')).status).toBe(200)
+    expect((await page('2001:db8:1:2:ffff::3')).status).toBe(429)
+    expect((await page('2001:db8:1:3::1')).status).toBe(200)
     const manage = (ip: string) => limited.request('/api/v1/bookings/manage', {}, from(ip))
     expect((await manage('203.0.113.1')).status).toBe(404)
     expect((await manage('203.0.113.1')).status).toBe(429)
@@ -350,8 +369,13 @@ describe.skipIf(!serverUrl)('public routes', () => {
   })
 
   it('documents the routes', async () => {
+    interface Operation {
+      security?: unknown
+      parameters?: { name: string; in: string }[]
+      responses?: Record<string, { description: string }>
+    }
     const doc = (await (await get('/api/v1/openapi.json')).json()) as {
-      paths: Record<string, Record<string, { security?: unknown }>>
+      paths: Record<string, Record<string, Operation>>
     }
     expect(Object.keys(doc.paths)).toEqual(
       expect.arrayContaining([
@@ -369,12 +393,26 @@ describe.skipIf(!serverUrl)('public routes', () => {
     expect(doc.paths['/api/v1/public/{handle}/{slug}/bookings']?.post?.security).toBeUndefined()
     expect(doc.paths['/api/v1/bookings']?.get?.security).toEqual([{ apiKey: [] }, { session: [] }])
     expect(doc.paths['/api/v1/bookings/manage']?.get?.security).toBeUndefined()
-    const manage = doc.paths['/api/v1/bookings/manage']?.get as {
-      parameters?: { name: string; in: string }[]
-    }
-    expect(manage.parameters).toContainEqual(
+    expect(doc.paths['/api/v1/bookings/manage']?.get?.parameters).toContainEqual(
       expect.objectContaining({ name: 'x-manage-token', in: 'header' }),
     )
     expect(Object.keys(doc.paths).filter((p) => p.includes('{token}'))).toEqual([])
+    const responses = (path: string, method: string) =>
+      Object.keys(doc.paths[path]?.[method]?.responses ?? {})
+    expect(responses('/api/v1/bookings', 'get')).toEqual(
+      expect.arrayContaining(['200', '400', '401', '429']),
+    )
+    expect(responses('/api/v1/bookings/{id}', 'get')).toEqual(
+      expect.arrayContaining(['200', '400', '401', '404', '429']),
+    )
+    expect(responses('/api/v1/bookings/{id}/cancel', 'post')).toEqual(
+      expect.arrayContaining(['200', '400', '401', '403', '404', '409', '429']),
+    )
+    for (const [path, method] of [
+      ['/api/v1/bookings/manage/cancel', 'post'],
+      ['/api/v1/bookings/{id}/cancel', 'post'],
+    ] as const) {
+      expect(doc.paths[path]?.[method]?.responses?.['400']?.description).toContain('invalid_reason')
+    }
   })
 })

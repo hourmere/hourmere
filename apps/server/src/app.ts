@@ -5,6 +5,8 @@ import { createRoute, type Hook, OpenAPIHono, z } from '@hono/zod-openapi'
 import { type CallerResolver, escapeControlCharacters } from '@hourmere/auth'
 import { DomainError, type DomainErrorKind } from '@hourmere/scheduling'
 import type { Context, Env } from 'hono'
+import { bodyLimit } from 'hono/body-limit'
+import { createMiddleware } from 'hono/factory'
 import { HTTPException } from 'hono/http-exception'
 import { logger } from 'hono/logger'
 import { requireCaller } from './caller.ts'
@@ -102,6 +104,62 @@ const validationHook: Hook<unknown, Env, string, unknown> = (result, c) => {
   return c.json({ error: 'invalid_request', message }, 400)
 }
 
+/** Largest request body /api accepts. Product requests are a few KB; so is sign-in. */
+export const MAX_BODY_BYTES = 64 * 1024
+
+/**
+ * Whether a parsed JSON value has a string or object key containing NUL or a lone surrogate.
+ * Postgres refuses NUL in text and jsonb, and malformed Unicode breaks email, calendars and
+ * logs downstream; no route has a use for either. Iterative, so deep nesting cannot
+ * overflow the stack.
+ */
+export function hasUnsafeJsonText(value: unknown): boolean {
+  const unsafe = (text: string) => text.includes('\u0000') || !text.isWellFormed()
+  const pending: unknown[] = [value]
+  while (pending.length) {
+    const item = pending.pop()
+    if (typeof item === 'string') {
+      if (unsafe(item)) return true
+    } else if (Array.isArray(item)) {
+      pending.push(...item)
+    } else if (typeof item === 'object' && item !== null) {
+      for (const [key, child] of Object.entries(item)) {
+        if (unsafe(key)) return true
+        pending.push(child)
+      }
+    }
+  }
+  return false
+}
+
+const JSON_CONTENT_TYPE = /^application\/([a-z0-9.+-]+\+)?json/i
+
+/**
+ * Defense in depth for every /api/v1 route, present and future: a JSON body with NUL or
+ * malformed Unicode anywhere is refused before any route sees it. Services still check each
+ * field's text with specific codes. Malformed JSON is left to the route's validator.
+ * Hono keeps the body text, so the route can still read it.
+ */
+const jsonTextGuard = createMiddleware(async (c, next) => {
+  if (!JSON_CONTENT_TYPE.test(c.req.header('content-type') ?? '')) return next()
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(await c.req.text())
+  } catch {
+    return next()
+  }
+  if (hasUnsafeJsonText(parsed)) {
+    return c.json(
+      {
+        error: 'invalid_request',
+        message: 'Text in the request must not contain NUL characters or malformed Unicode',
+      },
+      400,
+    )
+  }
+  await next()
+})
+
 /** Logs requests without query strings: sign-in links and OAuth callbacks carry secrets there. */
 const requestLogger = logger((line, ...rest) => console.log(line.replace(/\?\S*/, ''), ...rest))
 
@@ -150,6 +208,15 @@ export function createApp({
   })
   app.use('/api/*', requestLogger)
   app.use('/api/*', clientIp(trustedProxies))
+  app.use(
+    '/api/*',
+    bodyLimit({
+      maxSize: MAX_BODY_BYTES,
+      onError: (c) => c.json({ error: 'payload_too_large' }, 413),
+    }),
+  )
+  // Not /api/auth: Better Auth reads the raw request body itself.
+  app.use('/api/v1/*', jsonTextGuard)
 
   app.openapi(healthRoute, async (c) => {
     try {

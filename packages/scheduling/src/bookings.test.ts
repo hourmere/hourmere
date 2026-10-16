@@ -24,6 +24,8 @@ const serverUrl = process.env.DATABASE_URL
 const instant = (iso: string) => Temporal.Instant.from(iso)
 // Mon 2026-11-02; Berlin is on CET (+01:00), so 09:00–17:00 local is 08:00Z–16:00Z.
 const NOW = instant('2026-11-01T12:00:00Z')
+const NUL = 'A\u0000B'
+const LONE_SURROGATE = 'a\ud800b'
 
 describe.skipIf(!serverUrl)('bookings', () => {
   let testDb: TestDatabase
@@ -66,6 +68,51 @@ describe.skipIf(!serverUrl)('bookings', () => {
 
   const count = async (sql: string, params: unknown[] = []) =>
     (await testDb.pool.query<{ n: number }>(sql, params)).rows[0]?.n
+
+  /**
+   * Holds the per-host lock the booking services take (same key as lockHosts), so a test
+   * can change the world while a booking waits for it. Returns the release function.
+   */
+  async function holdHostLock(userId: string) {
+    const client = await testDb.pool.connect()
+    const key = `booking-host:${userId}`
+    await client.query('SELECT pg_advisory_lock(hashtextextended($1, 0))', [key])
+    return async () => {
+      await client.query('SELECT pg_advisory_unlock(hashtextextended($1, 0))', [key])
+      client.release()
+    }
+  }
+
+  /** Resolves once a session of this database waits for a lock. */
+  async function untilSomeoneWaits() {
+    for (let i = 0; i < 500; i++) {
+      const waiting = await count(
+        `SELECT count(*)::int AS n FROM pg_stat_activity
+          WHERE datname = current_database() AND wait_event_type = 'Lock'`,
+      )
+      if (waiting) return
+      await new Promise((r) => setTimeout(r, 10))
+    }
+    throw new Error('nobody waited for a lock')
+  }
+
+  /** Runs `attempt` while the host's lock is held, calling `meanwhile` once it waits. */
+  async function whileWaiting<T>(
+    userId: string,
+    attempt: () => Promise<T>,
+    meanwhile: () => Promise<unknown>,
+  ): Promise<T> {
+    const release = await holdHostLock(userId)
+    const pending = attempt()
+    pending.catch(() => {})
+    try {
+      await untilSomeoneWaits()
+      await meanwhile()
+    } finally {
+      await release()
+    }
+    return pending
+  }
 
   describe('creating', () => {
     it('stores the booking, its host, attendees and answers, and returns the manage token once', async () => {
@@ -451,6 +498,51 @@ describe.skipIf(!serverUrl)('bookings', () => {
       expect(taken.status).toBe('confirmed')
     })
 
+    it("reschedule over the booking's own calendar event, but not over other busy time", async () => {
+      const s = await setup({ slotStepMinutes: 15 })
+      const { booking, manageToken } = await s.book('2026-11-02T10:00:00Z')
+      // Calendar sync mirrored the booking into the host's calendar; another event is real.
+      const { calendarId, externalEventIds } = await f.calendarBusy(s.userId, [
+        ['2026-11-02T10:00:00Z', '2026-11-02T10:30:00Z'],
+        ['2026-11-02T11:00:00Z', '2026-11-02T11:30:00Z'],
+      ])
+      await db
+        .insertInto('booking_calendar_events')
+        .values({
+          booking_id: booking.id,
+          calendar_id: calendarId,
+          external_event_id: externalEventIds[0] as string,
+        })
+        .execute()
+
+      const moved = await rescheduleManagedBooking(ctx, manageToken as string, {
+        start: instant('2026-11-02T10:15:00Z'),
+      })
+      expect(moved.booking.start).toBe('2026-11-02T10:15:00.000Z')
+      await expect(
+        rescheduleManagedBooking(ctx, moved.manageToken as string, {
+          start: instant('2026-11-02T11:00:00Z'),
+        }),
+      ).rejects.toMatchObject({ code: 'slot_unavailable' })
+    })
+
+    it('refuse to reschedule a booking without hosts', async () => {
+      const s = await setup()
+      const id = await f.booking(s.organizationId, [], '2026-11-02T10:00Z', '2026-11-02T10:30Z', {
+        eventTypeId: s.eventTypeId,
+      })
+      const token = 'NoHost'.padEnd(43, 'x')
+      await db
+        .updateTable('bookings')
+        .set({ manage_token_hash: createHash('sha256').update(token).digest() })
+        .where('id', '=', id)
+        .execute()
+      await expect(
+        rescheduleManagedBooking(ctx, token, { start: instant('2026-11-02T13:00:00Z') }),
+      ).rejects.toMatchObject({ kind: 'conflict', code: 'booking_has_no_host' })
+      expect((await getManagedBooking(ctx, token)).status).toBe('confirmed')
+    })
+
     it('cannot change a booking that has started', async () => {
       const s = await setup()
       const { manageToken } = await s.book('2026-11-02T10:00:00Z')
@@ -483,6 +575,164 @@ describe.skipIf(!serverUrl)('bookings', () => {
       await expect(cancelManagedBooking(ctx, manageToken as string)).resolves.toMatchObject({
         status: 'cancelled',
       })
+    })
+  })
+
+  describe('text', () => {
+    it.each([
+      ['NUL', NUL],
+      ['a lone surrogate', LONE_SURROGATE],
+    ])('refuses %s in names, emails, locales and answers', async (_, bad) => {
+      const s = await setup({ questions: [{ id: 'topic', label: 'Topic', type: 'short_text' }] })
+      const invitee = { name: 'Grace', email: 'grace@example.com', timeZone: 'UTC' }
+      const cases: [Partial<CreateBookingInput>, string][] = [
+        [{ invitee: { ...invitee, name: bad } }, 'invalid_invitee'],
+        [{ invitee: { ...invitee, email: `g${bad}@example.com` } }, 'invalid_invitee'],
+        [{ invitee: { ...invitee, locale: `en${bad}` } }, 'invalid_invitee'],
+        [{ invitee, guests: [{ name: bad, email: 'alan@example.com' }] }, 'invalid_guests'],
+        [{ invitee, guests: [{ name: 'Alan', email: `a${bad}@example.com` }] }, 'invalid_guests'],
+        [{ invitee, responses: { topic: bad } }, 'invalid_responses'],
+      ]
+      for (const [more, code] of cases) {
+        await expect(s.book('2026-11-02T09:00:00Z', more), code).rejects.toMatchObject({
+          kind: 'invalid',
+          code,
+        })
+      }
+      await expect(s.book('2026-11-02T09:00:00Z', { invitee })).resolves.toBeDefined()
+    })
+
+    it('refuses control characters in names and locales other than NUL too', async () => {
+      const s = await setup()
+      for (const name of ['Grace\nHopper', `Grace${String.fromCharCode(0x1b)}[31m`, 'a\u2028b']) {
+        await expect(
+          s.book('2026-11-02T09:00:00Z', {
+            invitee: { name, email: 'grace@example.com', timeZone: 'UTC' },
+          }),
+        ).rejects.toMatchObject({ code: 'invalid_invitee' })
+      }
+      await expect(
+        s.book('2026-11-02T09:00:00Z', {
+          invitee: { name: 'G', email: 'g@example.com', timeZone: 'UTC', locale: 'en US' },
+        }),
+      ).rejects.toMatchObject({ code: 'invalid_invitee' })
+    })
+
+    it.each([
+      ['NUL', NUL],
+      ['a lone surrogate', LONE_SURROGATE],
+    ])('refuses %s in cancel reasons, but takes line breaks', async (_, bad) => {
+      const s = await setup()
+      const { booking, manageToken } = await s.book('2026-11-02T09:00:00Z')
+      await expect(
+        cancelManagedBooking(ctx, manageToken as string, { reason: bad }),
+      ).rejects.toMatchObject({ kind: 'invalid', code: 'invalid_reason' })
+      const host: ServiceContext = {
+        db,
+        now: () => NOW,
+        principal: {
+          kind: 'session',
+          sessionId: 'session',
+          user: { id: s.userId, name: '', email: '' },
+          organization: { id: s.organizationId, name: '', slug: '', personal: true },
+        },
+      }
+      await expect(cancelHostBooking(host, booking.id, { reason: bad })).rejects.toMatchObject({
+        code: 'invalid_reason',
+      })
+      await expect(
+        cancelManagedBooking(ctx, manageToken as string, { reason: 'Sorry,\nsomething came up' }),
+      ).resolves.toMatchObject({ cancelReason: 'Sorry,\nsomething came up' })
+    })
+  })
+
+  describe('waiting for the host lock', () => {
+    it('books with the event type as it is once the lock is held, not as read before', async () => {
+      const s = await setup()
+      const { booking } = await whileWaiting(
+        s.userId,
+        () => s.book('2026-11-02T09:00:00Z'),
+        () =>
+          db
+            .updateTable('event_types')
+            .set({ duration_minutes: 60 })
+            .where('id', '=', s.eventTypeId)
+            .execute(),
+      )
+      expect([booking.start, booking.end]).toEqual([
+        '2026-11-02T09:00:00.000Z',
+        '2026-11-02T10:00:00.000Z',
+      ])
+    })
+
+    it('reschedules with the event type as it is once the lock is held', async () => {
+      const s = await setup()
+      const { manageToken } = await s.book('2026-11-02T10:00:00Z')
+      const { booking } = await whileWaiting(
+        s.userId,
+        () =>
+          rescheduleManagedBooking(ctx, manageToken as string, {
+            start: instant('2026-11-02T13:00:00Z'),
+          }),
+        () =>
+          db
+            .updateTable('event_types')
+            .set({ duration_minutes: 60 })
+            .where('id', '=', s.eventTypeId)
+            .execute(),
+      )
+      expect(booking.end).toBe('2026-11-02T14:00:00.000Z')
+    })
+
+    it('reads the clock after waiting when booking', async () => {
+      const s = await setup()
+      let clock = NOW
+      const ticking: PublicContext = { db, now: () => clock }
+      const attempt = whileWaiting(
+        s.userId,
+        () => s.book('2026-11-02T09:00:00Z', {}, ticking),
+        async () => {
+          clock = instant('2026-11-02T09:05:00Z')
+        },
+      )
+      await expect(attempt).rejects.toMatchObject({ code: 'slot_unavailable' })
+    })
+
+    it('reads the clock after waiting when rescheduling', async () => {
+      const s = await setup()
+      const { manageToken } = await s.book('2026-11-02T10:00:00Z')
+      let clock = NOW
+      const ticking: PublicContext = { db, now: () => clock }
+      const attempt = whileWaiting(
+        s.userId,
+        () =>
+          rescheduleManagedBooking(ticking, manageToken as string, {
+            start: instant('2026-11-02T13:00:00Z'),
+          }),
+        async () => {
+          clock = instant('2026-11-02T10:05:00Z')
+        },
+      )
+      await expect(attempt).rejects.toMatchObject({ code: 'booking_in_past' })
+    })
+
+    it('lets only one of two bookings that collide only through buffers succeed', async () => {
+      // 09:00 keeps 09:00–10:00 busy with its 30-minute buffer after; 09:30 does not overlap
+      // the 09:00 meeting itself, so the exclusion constraint alone would let both in.
+      const s = await setup({ bufferAfterMinutes: 30 })
+      const days = ['02', '03', '04', '05', '06']
+      const results = await Promise.allSettled(
+        days.flatMap((d) => [s.book(`2026-11-${d}T08:00:00Z`), s.book(`2026-11-${d}T08:30:00Z`)]),
+      )
+      for (const [i, d] of days.entries()) {
+        const pair = results.slice(i * 2, i * 2 + 2)
+        expect(
+          pair.filter((r) => r.status === 'fulfilled'),
+          d,
+        ).toHaveLength(1)
+        const refused = pair.find((r) => r.status === 'rejected')
+        expect(refused?.reason).toMatchObject({ code: 'slot_unavailable' })
+      }
     })
   })
 
@@ -556,6 +806,20 @@ describe.skipIf(!serverUrl)('bookings', () => {
       await expect(listHostBookings(ctxA, { cursor: 'nope' })).rejects.toMatchObject({
         code: 'invalid_cursor',
       })
+      // Instants Temporal accepts but Postgres or Date cannot hold.
+      for (const start of [
+        '-271821-04-20T00:00:00Z',
+        '0000-06-01T00:00:00Z',
+        '+010000-01-01T00:00:00Z',
+        '+275760-09-13T00:00:00Z',
+      ]) {
+        const cursor = Buffer.from(JSON.stringify([start, crypto.randomUUID()])).toString(
+          'base64url',
+        )
+        await expect(listHostBookings(ctxA, { cursor }), start).rejects.toMatchObject({
+          code: 'invalid_cursor',
+        })
+      }
       await expect(listHostBookings(ctxA, { limit: 0 })).rejects.toMatchObject({
         code: 'invalid_limit',
       })

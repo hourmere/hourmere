@@ -12,12 +12,20 @@ import {
   type WeeklyHours,
 } from '@hourmere/core'
 import type { Db, Json } from '@hourmere/db'
+import type { ExpressionBuilder } from 'kysely'
 import type { PublicContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { parseQuestions, type Question } from './questions.ts'
 
 /** Longest range one public slots request may cover. */
 export const MAX_SLOT_RANGE_DAYS = 62
+
+/**
+ * Most candidate start times (range minutes / slot step) one public slots request may make
+ * the engine check, so that 1-minute steps cannot keep a core busy: with a 30-minute step
+ * the full 62 days fit, with a 1-minute step about 13 days.
+ */
+export const MAX_SLOT_CANDIDATES = 20_000
 
 // The engine accepts instants in years 0001–9999; nothing bookable lies near either end.
 const LATEST_RANGE_END = Temporal.Instant.from('9999-12-01T00:00:00Z')
@@ -75,6 +83,8 @@ export interface PublicEventTypeRecord {
   title: string
   description: string | null
   durationMinutes: number
+  /** Distance between candidate starts (the duration unless set). */
+  slotStepMinutes: number
   location: Location | null
   questions: Question[]
   hostName: string
@@ -107,6 +117,7 @@ export async function findPublicEventType(
       'et.title',
       'et.description',
       'et.duration_minutes',
+      'et.slot_step_minutes',
       'et.location',
       'et.questions',
       'p.user_id',
@@ -129,6 +140,7 @@ export async function findPublicEventType(
     title: row.title,
     description: row.description,
     durationMinutes: row.duration_minutes,
+    slotStepMinutes: row.slot_step_minutes ?? row.duration_minutes,
     location: parseLocation(row.location),
     questions: parseQuestions(row.questions),
     hostName: row.name.trim() || row.handle,
@@ -176,8 +188,9 @@ export interface SlotView {
 }
 
 /**
- * The slots a public page offers in [start, end] (at most MAX_SLOT_RANGE_DAYS long).
- * Throws `invalid_range` when end is not after start and `range_too_long` beyond the cap.
+ * The slots a public page offers in [start, end]. Throws `invalid_range` when end is not
+ * after start, and `range_too_long` for more than MAX_SLOT_RANGE_DAYS or more than
+ * MAX_SLOT_CANDIDATES candidate starts at the event type's step.
  */
 export async function listPublicSlots(
   ctx: PublicContext,
@@ -195,6 +208,13 @@ export async function listPublicSlots(
   }
   const et = await findPublicEventType(ctx.db, input.handle, input.slug)
   if (!et) throw eventTypeNotFound()
+  if (input.end.since(input.start).total('minutes') / et.slotStepMinutes > MAX_SLOT_CANDIDATES) {
+    throw new DomainError(
+      'invalid',
+      'range_too_long',
+      'This event type offers too many start times in that range; ask for a shorter one',
+    )
+  }
   const slots = await findSlots(ctx.db, {
     eventTypeId: et.id,
     hostUserId: et.hostUserId,
@@ -231,7 +251,9 @@ export interface AvailabilityQuery {
  * - schedule: the host's schedule for this event type (`event_type_hosts.schedule_id`), or
  *   the host's default schedule; with neither, there is nothing to offer (`undefined`).
  *   Date overrides near the range are included.
- * - busy: intervals mirrored from the host's calendars that have `check_conflicts` on.
+ * - busy: intervals mirrored from the host's calendars that have `check_conflicts` on,
+ *   clipped to the window around the range (so unbounded and infinite ones work), except
+ *   the calendar event mirrored from `excludeBookingId` itself.
  * - bookings: the host's active bookings (`booking_hosts.active`, in any organization),
  *   each with the buffers of its own event type (0 when it has none). Bookings of this
  *   event type are passed as `bookings`, so they count toward `max_bookings_per_day`;
@@ -278,6 +300,8 @@ export async function buildAvailabilityInput(
   // extra local day on each side (UTC offsets stay within ±14 hours), and a booking's
   // buffers plus the new slot's reach at most 2 × 1440 minutes.
   const window = { start: rangeStart.subtract({ hours: 72 }), end: rangeEnd.add({ hours: 72 }) }
+  const windowRange = <DB, TB extends keyof DB>(eb: ExpressionBuilder<DB, TB>) =>
+    eb.fn<string>('tstzrange', [eb.val(window.start.toString()), eb.val(window.end.toString())])
 
   const [overrides, busy, bookings] = await Promise.all([
     db
@@ -292,20 +316,30 @@ export async function buildAvailabilityInput(
       .selectFrom('calendar_busy as cb')
       .innerJoin('calendars as c', 'c.id', 'cb.calendar_id')
       .innerJoin('calendar_connections as cc', 'cc.id', 'c.connection_id')
-      .select((eb) => [
-        eb.fn<Date | null>('lower', ['cb.period']).as('start'),
-        eb.fn<Date | null>('upper', ['cb.period']).as('end'),
-      ])
+      // Clipped to the window in SQL: a period may be unbounded or reach ±infinity, which
+      // node-postgres would return as null or a number instead of a Date.
+      .select((eb) => {
+        const clipped = eb('cb.period', '*', windowRange(eb))
+        return [
+          eb.fn<Date>('lower', [clipped]).as('start'),
+          eb.fn<Date>('upper', [clipped]).as('end'),
+        ]
+      })
       .where('cc.user_id', '=', hostUserId)
       .where('c.check_conflicts', '=', true)
-      .where((eb) =>
-        eb(
-          'cb.period',
-          '&&',
-          eb.fn<string>('tstzrange', [
-            eb.val(window.start.toString()),
-            eb.val(window.end.toString()),
-          ]),
+      .where((eb) => eb('cb.period', '&&', windowRange(eb)))
+      // The moved booking's own event in the host's calendar must not block its new time.
+      .$if(excludeBookingId !== undefined, (q) =>
+        q.where(({ not, exists, selectFrom }) =>
+          not(
+            exists(
+              selectFrom('booking_calendar_events as bce')
+                .select('bce.booking_id')
+                .where('bce.booking_id', '=', excludeBookingId as string)
+                .whereRef('bce.calendar_id', '=', 'cb.calendar_id')
+                .whereRef('bce.external_event_id', '=', 'cb.external_event_id'),
+            ),
+          ),
         ),
       )
       .execute(),
@@ -322,24 +356,14 @@ export async function buildAvailabilityInput(
       ])
       .where('bh.user_id', '=', hostUserId)
       .where('bh.active', '=', true)
-      .where((eb) =>
-        eb(
-          'bh.period',
-          '&&',
-          eb.fn<string>('tstzrange', [
-            eb.val(window.start.toString()),
-            eb.val(window.end.toString()),
-          ]),
-        ),
-      )
+      .where((eb) => eb('bh.period', '&&', windowRange(eb)))
       .$if(excludeBookingId !== undefined, (q) => q.where('b.id', '<>', excludeBookingId as string))
       .execute(),
   ])
 
   const busyIntervals: InstantInterval[] = busy.map((row) => ({
-    // An unbounded busy range blocks everything on that side of the window.
-    start: row.start ? toInstant(row.start) : window.start,
-    end: row.end ? toInstant(row.end) : window.end,
+    start: toInstant(row.start),
+    end: toInstant(row.end),
   }))
   const ownBookings: ExistingBooking[] = []
   for (const row of bookings) {

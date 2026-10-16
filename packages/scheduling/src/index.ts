@@ -11,6 +11,7 @@ export {
   type Location,
   type LocationKind,
   listPublicSlots,
+  MAX_SLOT_CANDIDATES,
   MAX_SLOT_RANGE_DAYS,
   type PublicEventType,
   type SlotView,
@@ -56,5 +57,13 @@ export {
   ResponsesSchema,
   type ResponseValue,
   ResponseValueSchema,
+  validateQuestions,
   validateResponses,
 } from './questions.ts'
+export {
+  cleanText,
+  isMultiLineText,
+  isSingleLineText,
+  type TextRules,
+  textSchema,
+} from './text.ts'

@@ -124,7 +124,7 @@ export function publicRoutes({
             content: json(z.object({ data: z.array(Slot) })),
           },
           400: error(
-            'Invalid parameters (`invalid_request`), end not after start (`invalid_range`) or a range that is too long (`range_too_long`)',
+            "Invalid parameters (`invalid_request`), end not after start (`invalid_range`), or a range that is too long (`range_too_long`: over 62 days, or over 20000 possible start times at the event type's step)",
           ),
           404: eventTypeNotFound,
           429: rateLimited,

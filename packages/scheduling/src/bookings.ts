@@ -15,6 +15,7 @@ import {
 import type { PublicContext, ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { type Responses, validateResponses } from './questions.ts'
+import { cleanText } from './text.ts'
 
 export type BookingStatus = 'confirmed' | 'cancelled'
 export type BookingSource = 'web' | 'embed' | 'api' | 'mcp'
@@ -63,6 +64,8 @@ const MAX_EMAIL = 254
 const MAX_LOCALE = 35
 const MAX_REASON = 1000
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+// A BCP 47 language tag's shape, e.g. "en", "en-US", "zh-Hant-TW".
+const LOCALE = /^[A-Za-z0-9]{1,8}(?:-[A-Za-z0-9]{1,8})*$/
 const IDEMPOTENCY_KEY = /^[\x21-\x7e]{1,255}$/
 const MANAGE_TOKEN = /^[A-Za-z0-9_-]{43}$/
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -96,12 +99,16 @@ export interface InviteeInput extends PersonInput {
 }
 
 function person(input: PersonInput, code: 'invalid_invitee' | 'invalid_guests', what: string) {
-  const name = input.name.trim()
-  const email = input.email.trim()
-  if (!name || name.length > MAX_NAME) {
-    throw new DomainError('invalid', code, `${what} needs a name of at most ${MAX_NAME} characters`)
+  const name = cleanText(input.name, { max: MAX_NAME })
+  if (name === undefined) {
+    throw new DomainError(
+      'invalid',
+      code,
+      `${what} needs a name of 1 to ${MAX_NAME} characters on one line, without control characters`,
+    )
   }
-  if (email.length > MAX_EMAIL || !EMAIL.test(email)) {
+  const email = cleanText(input.email, { max: MAX_EMAIL })
+  if (email === undefined || !EMAIL.test(email)) {
     throw new DomainError('invalid', code, `${what} needs a valid email address`)
   }
   return { name, email }
@@ -113,9 +120,16 @@ function validateInvitee(input: InviteeInput): Attendee {
   if (!timeZone) {
     throw new DomainError('invalid', 'invalid_time_zone', 'timeZone must be an IANA time zone name')
   }
-  const locale = input.locale?.trim() || null
-  if (locale && locale.length > MAX_LOCALE) {
-    throw new DomainError('invalid', 'invalid_invitee', 'locale is too long')
+  let locale: string | null = null
+  if (input.locale !== undefined && input.locale.trim() !== '') {
+    locale = cleanText(input.locale, { max: MAX_LOCALE }) ?? null
+    if (locale === null || !LOCALE.test(locale)) {
+      throw new DomainError(
+        'invalid',
+        'invalid_invitee',
+        'locale must be a language tag like en-US',
+      )
+    }
   }
   return { name, email, timeZone, locale, isBooker: true }
 }
@@ -134,13 +148,13 @@ function validateGuests(guests: readonly PersonInput[], invitee: Attendee): Atte
 }
 
 function normalizeReason(reason: string | undefined): string | null {
-  const text = reason?.trim()
-  if (!text) return null
-  if (text.length > MAX_REASON) {
+  if (reason === undefined || reason.trim() === '') return null
+  const text = cleanText(reason, { multiline: true, max: MAX_REASON })
+  if (text === undefined) {
     throw new DomainError(
       'invalid',
       'invalid_reason',
-      `The reason may be at most ${MAX_REASON} characters`,
+      `The reason may have at most ${MAX_REASON} characters and no control characters other than tabs and line breaks`,
     )
   }
   return text
@@ -321,7 +335,10 @@ async function lockHosts(db: Db, userIds: readonly string[]): Promise<void> {
   }
 }
 
-/** Throws `slot_unavailable` unless the engine offers exactly this start for this host now. */
+/**
+ * Throws `slot_unavailable` unless the engine offers exactly [start, end) for this host now.
+ * Comparing the end too catches an event type whose duration changed after the caller read it.
+ */
 async function requireOfferedSlot(
   db: Db,
   q: {
@@ -341,7 +358,7 @@ async function requireOfferedSlot(
     now: q.now,
     excludeBookingId: q.excludeBookingId,
   })
-  if (!slots.some((s) => s.start.equals(q.start))) {
+  if (!slots.some((s) => s.start.equals(q.start) && s.end.equals(q.end))) {
     throw new DomainError('conflict', 'slot_unavailable', 'This time is not available')
   }
 }
@@ -417,10 +434,11 @@ async function insertBooking(db: Db, b: NewBooking): Promise<{ id: string; manag
   return { id, manageToken: token }
 }
 
+const bookingCancelled = () =>
+  new DomainError('conflict', 'booking_cancelled', 'This booking is already cancelled')
+
 function assertChangeable(row: { status: string; start_at: Date }, now: Temporal.Instant): void {
-  if (row.status === 'cancelled') {
-    throw new DomainError('conflict', 'booking_cancelled', 'This booking is already cancelled')
-  }
+  if (row.status === 'cancelled') throw bookingCancelled()
   if (Temporal.Instant.compare(toInstant(row.start_at), now) <= 0) {
     throw new DomainError('conflict', 'booking_in_past', 'This booking has already started')
   }
@@ -502,10 +520,10 @@ export async function createPublicBooking(
     if (replay) return { ...replay, replayed: true }
   }
 
-  const responses = validateResponses(et.questions, input.responses ?? {})
+  // Fails fast before taking the lock; checked again below against the current questions.
+  validateResponses(et.questions, input.responses ?? {})
   const invitee = validateInvitee(input.invitee)
   const guests = validateGuests(input.guests ?? [], invitee)
-  const end = input.start.add({ minutes: et.durationMinutes })
 
   try {
     return await ctx.db.transaction().execute(async (trx) => {
@@ -515,25 +533,34 @@ export async function createPublicBooking(
         const replay = await findReplay(trx, scope)
         if (replay) return { ...replay, replayed: true }
       }
+      // The event type may have changed while we waited (duration, questions, rules), and
+      // waiting took time: read both again now that the host is locked.
+      const current = await findPublicEventType(trx, input.handle, input.slug)
+      if (!current || current.id !== et.id || current.hostUserId !== et.hostUserId) {
+        throw eventTypeNotFound()
+      }
+      const now = ctx.now()
+      const responses = validateResponses(current.questions, input.responses ?? {})
+      const end = input.start.add({ minutes: current.durationMinutes })
       await requireOfferedSlot(trx, {
-        eventTypeId: et.id,
-        hostUserId: et.hostUserId,
+        eventTypeId: current.id,
+        hostUserId: current.hostUserId,
         start: input.start,
         end,
-        now: ctx.now(),
+        now,
       })
       const { id, manageToken } = await insertBooking(trx, {
-        organizationId: et.organizationId,
-        eventTypeId: et.id,
+        organizationId: current.organizationId,
+        eventTypeId: current.id,
         start: input.start,
         end,
-        title: `${et.title} with ${invitee.name}`,
-        location: et.location,
+        title: `${current.title} with ${invitee.name}`,
+        location: current.location,
         responses,
         source: 'web',
         apiKeyId: null,
         idempotency: scope && { key: scope.key, fingerprint: scope.fingerprint },
-        hostUserIds: [et.hostUserId],
+        hostUserIds: [current.hostUserId],
         attendees: [invitee, ...guests],
       })
       return { booking: await loadBooking(trx, id), manageToken, replayed: false }
@@ -602,7 +629,6 @@ export async function rescheduleManagedBooking(
 ): Promise<BookingWithToken> {
   const hash = manageTokenHash(token)
   if (!hash) throw bookingNotFound()
-  const now = ctx.now()
   return ctx.db.transaction().execute(async (trx) => {
     const old = await trx
       .selectFrom('bookings')
@@ -620,6 +646,31 @@ export async function rescheduleManagedBooking(
       .forUpdate()
       .executeTakeFirst()
     if (!old) throw bookingNotFound()
+    // The status cannot change while the row is locked; the time check waits for the locks.
+    if (old.status === 'cancelled') throw bookingCancelled()
+
+    const [hosts, attendees] = await Promise.all([
+      trx.selectFrom('booking_hosts').select('user_id').where('booking_id', '=', old.id).execute(),
+      trx
+        .selectFrom('booking_attendees')
+        .select(['name', 'email', 'time_zone', 'locale', 'is_booker'])
+        .where('booking_id', '=', old.id)
+        .orderBy('is_booker', 'desc')
+        .orderBy('id')
+        .execute(),
+    ])
+    const hostUserIds = hosts.map((h) => h.user_id)
+    // Without a host there is nobody whose availability could be checked.
+    if (!hostUserIds.length) {
+      throw new DomainError(
+        'conflict',
+        'booking_has_no_host',
+        'This booking has no host, so it cannot be rescheduled',
+      )
+    }
+    await lockHosts(trx, hostUserIds)
+    // Read after the locks: waiting for them takes time, and the rules may have changed.
+    const now = ctx.now()
     assertChangeable(old, now)
 
     const eventType =
@@ -639,19 +690,6 @@ export async function rescheduleManagedBooking(
         'This event type no longer takes bookings',
       )
     }
-    const [hosts, attendees] = await Promise.all([
-      trx.selectFrom('booking_hosts').select('user_id').where('booking_id', '=', old.id).execute(),
-      trx
-        .selectFrom('booking_attendees')
-        .select(['name', 'email', 'time_zone', 'locale', 'is_booker'])
-        .where('booking_id', '=', old.id)
-        .orderBy('is_booker', 'desc')
-        .orderBy('id')
-        .execute(),
-    ])
-    const hostUserIds = hosts.map((h) => h.user_id)
-    await lockHosts(trx, hostUserIds)
-
     const end = start.add({ minutes: eventType.duration_minutes })
     for (const hostUserId of hostUserIds) {
       await requireOfferedSlot(trx, {
@@ -724,6 +762,9 @@ function encodeCursor(row: { start_at: Date; id: string }): string {
   return Buffer.from(JSON.stringify([row.start_at.toISOString(), row.id])).toString('base64url')
 }
 
+const EARLIEST_CURSOR = Temporal.Instant.from('0001-01-01T00:00:00Z')
+const LATEST_CURSOR = Temporal.Instant.from('9999-12-31T23:59:59.999Z')
+
 function decodeCursor(cursor: string): { start: Date; id: string } {
   const invalid = () => new DomainError('invalid', 'invalid_cursor', 'cursor is not valid')
   let parsed: unknown
@@ -735,11 +776,20 @@ function decodeCursor(cursor: string): { start: Date; id: string } {
   if (!Array.isArray(parsed) || parsed.length !== 2) throw invalid()
   const [start, id] = parsed
   if (typeof start !== 'string' || typeof id !== 'string' || !UUID.test(id)) throw invalid()
+  let instant: Temporal.Instant
   try {
-    return { start: toDate(Temporal.Instant.from(start)), id }
+    instant = Temporal.Instant.from(start)
   } catch {
     throw invalid()
   }
+  // Postgres and Date both need it; outside these years it can only be forged.
+  if (
+    Temporal.Instant.compare(instant, EARLIEST_CURSOR) < 0 ||
+    Temporal.Instant.compare(instant, LATEST_CURSOR) > 0
+  ) {
+    throw invalid()
+  }
+  return { start: toDate(instant), id }
 }
 
 /**
