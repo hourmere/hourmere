@@ -6,8 +6,9 @@ import { defineConfig } from 'astro/config'
 export default defineConfig({
   site: 'https://hourmere.com',
   // Emit privacy.html rather than privacy/index.html, so /privacy is served without a
-  // redirect (Google requires a static, non-redirecting privacy policy URL).
-  build: { format: 'file' },
+  // redirect (Google requires a static, non-redirecting privacy policy URL). Unlike 'file',
+  // 'preserve' keeps Starlight's links free of ".html".
+  build: { format: 'preserve' },
   trailingSlash: 'never',
   // Astro's HTML compression drops the space at a line break next to an inline element
   // ("the\n<a>" renders as "the<a>"), which glues words together in the legal pages.
@@ -33,6 +34,7 @@ export default defineConfig({
       sidebar: [{ label: 'Overview', link: '/docs' }],
       customCss: ['@fontsource-variable/manrope', './src/styles/starlight.css'],
       components: { Footer: './src/components/DocsFooter.astro' },
+      routeMiddleware: './src/route-data.ts',
       // The site has its own 404 page in src/pages.
       disable404Route: true,
       credits: false,

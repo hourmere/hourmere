@@ -9,12 +9,13 @@ interface Props {
   /** Full page title. */
   title: string
   description: string
-  /** Path of the page without a trailing slash, e.g. "/privacy". */
-  path: string
+  /** Path of the page without a trailing slash, e.g. "/privacy". Omit for pages that should
+   * not have a canonical URL, such as the 404 page. */
+  path?: string
 }
 
 const { title, description, path } = Astro.props
-const canonical = new URL(path, site.url).href
+const canonical = path === undefined ? undefined : new URL(path, site.url).href
 ---
 
 <!doctype html>
@@ -24,7 +25,7 @@ const canonical = new URL(path, site.url).href
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title}</title>
     <meta name="description" content={description} />
-    <link rel="canonical" href={canonical} />
+    {canonical && <link rel="canonical" href={canonical} />}
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
@@ -35,7 +36,7 @@ const canonical = new URL(path, site.url).href
     <meta property="og:site_name" content={site.name} />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
-    <meta property="og:url" content={canonical} />
+    {canonical && <meta property="og:url" content={canonical} />}
     <!-- Respect a light/dark choice made with the theme picker on the docs pages. -->
     <script is:inline>
       try {

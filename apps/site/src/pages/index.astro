@@ -41,7 +41,7 @@ const features = [
   },
   {
     title: 'Open source',
-    text: 'Licensed under AGPL-3.0. Read the code, run it on your own server, and change it to fit your needs.',
+    text: 'The source code will be published under AGPL-3.0, so you will be able to read it, run it on your own server and change it to fit your needs.',
   },
 ]
 
@@ -54,7 +54,7 @@ const agentActions = [
 ]
 
 const plans = [
-  { name: 'Self-hosted', price: '$0', unit: '', note: 'Run it on your own server.' },
+  { name: 'Self-hosted', price: '$0', unit: '', note: 'Free under AGPL-3.0, on your own server.' },
   { name: 'Free', price: '$0', unit: '', note: 'Unlimited event types and bookings.' },
   { name: 'Pro', price: '$8', unit: 'per seat / month', note: 'Plan details at launch.' },
   { name: 'Team', price: '$14', unit: 'per seat / month', note: 'Plan details at launch.' },
@@ -69,15 +69,16 @@ const plans = [
   <section class="hero">
     <div class="container hero-grid">
       <div>
-        <p class="status"><span class="status-dot" aria-hidden="true"></span>In development · launching soon</p>
+        <p class="status"><span class="status-dot" aria-hidden="true"></span>In development</p>
         <h1>Open-source scheduling for people and AI agents.</h1>
         <p class="lead">
-          Hourmere is an open-source alternative to Calendly. Share a booking link and let invitees
-          pick a time that works. Your AI assistant can check your availability and book, reschedule
+          Hourmere is an alternative to Calendly, being built as open-source software. Share a
+          booking link and let invitees pick a time that works. Your AI assistant can check your availability and book, reschedule
           or cancel meetings through an API and a remote MCP server.
         </p>
         <p class="lead">
-          Self-host it for free with one Docker Compose command, or use the managed cloud.
+          It is designed to be self-hosted for free with Docker Compose, or used as a managed cloud
+          service.
         </p>
         <div class="cta-row">
           <a class="btn btn-primary" href={launchUpdatesHref}>Get launch updates</a>
@@ -143,8 +144,8 @@ const plans = [
           API from your own tools.
         </p>
         <p class="agents-note">
-          Agents can access your account only after you authorize them, with an API key or through
-          OAuth.
+          Agents can access your account only with an API key that you create. OAuth for AI
+          connectors is planned.
         </p>
       </div>
       <div class="card agent-card">
@@ -162,8 +163,8 @@ const plans = [
       <h2 id="calendar-data-title">How Hourmere uses your calendar data</h2>
       <p class="section-intro">
         When you connect Google Calendar or Microsoft 365, Hourmere asks for permission to read your
-        free/busy information and the event data it needs to work out when you are available, and
-        to add, update and remove the calendar events for your bookings.
+        calendars, so it can work out when you are available, and to add, update and remove the
+        calendar events for your bookings.
       </p>
       <ul class="checklist data-list">
         <li>
@@ -174,11 +175,19 @@ const plans = [
           It is never sold, never used for advertising and never used to train generalized AI or
           machine learning models.
         </li>
+        <li>
+          From your other events, Hourmere keeps only their times and whether they make you busy. It
+          does not store their titles, descriptions or attendees.
+        </li>
         <li>Invitees see the times you are available, not the details of your calendar events.</li>
-        <li>AI assistants get access to your account only when you authorize them.</li>
+        <li>AI assistants get access to your account only when you give them an API key.</li>
         <li>
           You can disconnect a calendar at any time. Hourmere then stops reading it and deletes the
-          calendar data it stored from it within 30 days.
+          calendar data it stored, as described in the Privacy Policy.
+        </li>
+        <li>
+          If you sign in with Google or Microsoft, Hourmere receives your name, email address and
+          profile picture and uses them only to create your account and sign you in.
         </li>
       </ul>
       <p>
@@ -192,15 +201,15 @@ const plans = [
     <div class="container">
       <p class="eyebrow">Self-host or cloud</p>
       <h2 id="self-host-title">Run it yourself, or let us run it</h2>
-      <p class="section-intro">The same open-source software powers both.</p>
+      <p class="section-intro">The same open-source software will power both.</p>
       <div class="grid two">
         <div class="card">
           <h3>Self-hosted</h3>
           <p>
-            Run Hourmere on your own server with Docker, for free. Your data stays on your
-            infrastructure; {company.shortName} does not receive it.
+            Hourmere is designed to be self-hosted with Docker Compose, for free. A self-hosted
+            instance keeps its data on your own infrastructure; {company.shortName} does not receive
+            it.
           </p>
-          <pre class="code-block"><code>docker compose up -d</code></pre>
           <p class="small">
             The source code will be published on GitHub under {site.license.name} when Hourmere
             launches.
@@ -209,8 +218,8 @@ const plans = [
         <div class="card">
           <h3>Hourmere Cloud</h3>
           <p>
-            We host, update and operate Hourmere for you, so you can share your booking link without
-            running a server. Hourmere Cloud is launching soon.
+            We will host, update and operate Hourmere for you, so you can share your booking link
+            without running a server. Hourmere Cloud is in development.
           </p>
           <p class="small">
             Operated by <a href={company.url}>{company.name}</a>.
@@ -260,9 +269,8 @@ const plans = [
         <details>
           <summary>Is Hourmere really open source?</summary>
           <p>
-            Yes. Hourmere is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0),
-            and you can self-host it for free. The source code will be public on GitHub when
-            Hourmere launches.
+            Yes. Hourmere's source code will be published on GitHub under the GNU Affero General
+            Public License v3.0 (AGPL-3.0), and you will be able to self-host it for free.
           </p>
         </details>
         <details>
@@ -272,9 +280,9 @@ const plans = [
         <details>
           <summary>What can an AI assistant do with Hourmere?</summary>
           <p>
-            After you authorize it with an API key or OAuth, an assistant can list your event types,
-            check your availability, and book, reschedule or cancel meetings, through the API or the
-            remote MCP server.
+            With an API key that you create, an assistant can list your event types, check your
+            availability, and book, reschedule or cancel meetings, through the API or the remote MCP
+            server. OAuth for AI connectors is planned.
           </p>
         </details>
         <details>
@@ -290,7 +298,7 @@ const plans = [
 
   <section class="closing" aria-labelledby="closing-title">
     <div class="container closing-inner">
-      <h2 id="closing-title">Hourmere is launching soon.</h2>
+      <h2 id="closing-title">Hourmere is in development.</h2>
       <div class="cta-row">
         <a class="btn btn-light" href={launchUpdatesHref}>Get launch updates</a>
         <a class="btn btn-outline-light" href={site.github}>Follow on GitHub</a>
@@ -449,10 +457,6 @@ const plans = [
 
   .grid.two {
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
-  }
-
-  .card .code-block {
-    margin-top: 18px;
   }
 
   .card p.small {

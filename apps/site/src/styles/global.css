@@ -17,8 +17,6 @@
   --accent-soft: var(--mist);
   --button-bg: var(--cobalt);
   --button-text: #ffffff;
-  --code-bg: var(--deep-mere);
-  --code-text: #ffffff;
 
   --font: "Manrope Variable", system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
@@ -40,7 +38,6 @@
     --border: #283252;
     --link: #8faeff;
     --accent-soft: #16244a;
-    --code-bg: #060f26;
 
     color-scheme: dark;
   }
@@ -55,7 +52,6 @@
   --border: #283252;
   --link: #8faeff;
   --accent-soft: #16244a;
-  --code-bg: #060f26;
 
   color-scheme: dark;
 }
@@ -235,16 +231,4 @@ code {
 .card p {
   margin: 0;
   color: var(--muted);
-}
-
-.code-block {
-  margin: 0;
-  padding: 16px 18px;
-  overflow-x: auto;
-  border-radius: 10px;
-  background: var(--code-bg);
-  color: var(--code-text);
-  font-family: var(--mono);
-  font-size: 15px;
-  line-height: 1.5;
 }
