@@ -58,23 +58,34 @@ describe.skipIf(!serverUrl)('sign-up control', () => {
     return pool
   }
 
-  /** A Google sign-in whose (already verified) ID token says the user is `email`. */
+  /**
+   * A provider whose (already verified) ID token, or whose user info after the OAuth redirect,
+   * says the user is `email`, confirmed.
+   */
   const vouching = (email: string) => ({
     verifyIdToken: async () => true,
     getUserInfo: async () => ({
-      user: { email, emailVerified: true, name: 'From Google' },
-      data: { sub: `google-${email}` } as never,
+      user: { email, emailVerified: true, name: 'From provider' },
+      // Only the claims the account key is read from (Microsoft: oid, Google: sub).
+      data: { oid: `oid-${email}`, sub: `sub-${email}` } as never,
     }),
   })
+
+  const client = { clientId: 'id', clientSecret: 'secret' }
 
   interface InstanceOptions {
     mailer?: Mailer
     /** Enables Google sign-in, as this account. */
     google?: string
+    /** Enables Microsoft sign-in, as this account. */
+    microsoft?: string
     pool?: pg.Pool
   }
 
-  function instance(signup: SignupPolicy, { mailer, google, pool }: InstanceOptions = {}) {
+  function instance(
+    signup: SignupPolicy,
+    { mailer, google, microsoft, pool }: InstanceOptions = {},
+  ) {
     const auth = createAuth({
       pool: pool ?? authPool(signup),
       db,
@@ -82,10 +93,14 @@ describe.skipIf(!serverUrl)('sign-up control', () => {
       secret: randomBytes(32).toString('base64'),
       mailer: mailer ?? { send: async (m) => void outbox.push(m) },
       signup,
-      ...(google && {
-        socialProviders: { google: { clientId: 'id', clientSecret: 'secret' } },
-        socialProviderOptions: { google: vouching(google) },
-      }),
+      socialProviders: {
+        ...(google && { google: client }),
+        ...(microsoft && { microsoft: client }),
+      },
+      socialProviderOptions: {
+        ...(google && { google: vouching(google) }),
+        ...(microsoft && { microsoft: vouching(microsoft) }),
+      },
     })
     return createApp({
       checkDb: async () => {},
@@ -104,6 +119,9 @@ describe.skipIf(!serverUrl)('sign-up control', () => {
       body: JSON.stringify({ email, callbackURL: '/' }),
     })
 
+  /** Waits until a sign-in email has been sent: that happens after the answer. */
+  const afterSend = () => new Promise<void>((resolve) => setImmediate(resolve))
+
   /** Asks for a sign-in link; returns the emailed link, or undefined if no email was sent. */
   async function askForLink(app: App, email: string): Promise<URL | undefined> {
     const before = outbox.length
@@ -111,6 +129,7 @@ describe.skipIf(!serverUrl)('sign-up control', () => {
     // The same answer whether or not an email was sent.
     expect(res.status, email).toBe(200)
     expect(await res.json(), email).toEqual({ status: true })
+    await afterSend()
     const link = outbox
       .slice(before)
       .find((m) => m.to === email)
@@ -148,12 +167,13 @@ describe.skipIf(!serverUrl)('sign-up control', () => {
     expect(hasSession(res)).toBe(false)
   }
 
-  const googleSignIn = (app: App) =>
+  const idTokenSignIn = (app: App, provider: 'google' | 'microsoft') =>
     app.request('/api/auth/sign-in/social', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ provider: 'google', idToken: { token: 'header.payload.signature' } }),
+      body: JSON.stringify({ provider, idToken: { token: 'header.payload.signature' } }),
     })
+  const googleSignIn = (app: App) => idTokenSignIn(app, 'google')
 
   const users = async () =>
     (
@@ -166,9 +186,22 @@ describe.skipIf(!serverUrl)('sign-up control', () => {
         `SELECT (SELECT count(*)::int FROM auth."user") AS users,
                 (SELECT count(*)::int FROM auth.account) AS accounts,
                 (SELECT count(*)::int FROM auth.session) AS sessions,
-                (SELECT count(*)::int FROM auth.organization) AS organizations`,
+                (SELECT count(*)::int FROM auth.organization) AS organizations,
+                (SELECT count(*)::int FROM auth.member) AS members,
+                (SELECT count(*)::int FROM personal_organizations) AS personal,
+                (SELECT count(*)::int FROM auth.apikey) AS apikeys`,
       )
     ).rows[0]
+
+  const NO_ROWS = {
+    users: 0,
+    accounts: 0,
+    sessions: 0,
+    organizations: 0,
+    members: 0,
+    personal: 0,
+    apikeys: 0,
+  }
 
   describe('open', () => {
     it('lets anyone sign up, and existing users sign in again', async () => {
@@ -246,7 +279,7 @@ describe.skipIf(!serverUrl)('sign-up control', () => {
     it('refuses at sign-in a link sent before sign-up closed', async () => {
       const link = await askForLink(instance(OPEN), 'late@elsewhere.example')
       expectSignupDisabled(await useLink(instance(CLOSED), link))
-      expect(await rows()).toEqual({ users: 0, accounts: 0, sessions: 0, organizations: 0 })
+      expect(await rows()).toEqual(NO_ROWS)
     })
   })
 
@@ -264,6 +297,78 @@ describe.skipIf(!serverUrl)('sign-up control', () => {
       expect(await users()).toEqual(['owner@anywhere.example'])
       const allowed = await googleSignIn(instance(CLOSED, { google: 'colleague@team.example' }))
       expect(allowed.status).toBe(200)
+    })
+
+    it('refuse a Microsoft sign-up too, without naming the address', async () => {
+      for (const policy of [CLOSED, FIRST_USER]) {
+        if (policy === FIRST_USER) await signIn(instance(OPEN), 'owner@anywhere.example')
+        const before = await rows()
+        const res = await idTokenSignIn(
+          instance(policy, { microsoft: 'stranger@elsewhere.example' }),
+          'microsoft',
+        )
+        expect(res.status, policy.mode).toBe(403)
+        const body = await res.text()
+        expect(JSON.parse(body), policy.mode).toMatchObject({ code: 'SIGNUP_DISABLED' })
+        expect(body, policy.mode).not.toContain('stranger')
+        expect(hasSession(res), policy.mode).toBe(false)
+        expect(await rows(), policy.mode).toEqual(before)
+      }
+    })
+
+    it('refuse a sign-up through the OAuth redirect, landing on the error callback', async () => {
+      const app = instance(CLOSED, { google: 'stranger@elsewhere.example' })
+      const started = await app.request('/api/auth/sign-in/social', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          provider: 'google',
+          callbackURL: '/',
+          errorCallbackURL: '/sign-in-failed',
+        }),
+      })
+      expect(started.status).toBe(200)
+      const state = new URL(((await started.json()) as { url: string }).url).searchParams.get(
+        'state',
+      )
+      const cookie = started.headers
+        .getSetCookie()
+        .map((c) => c.split(';')[0])
+        .join('; ')
+      // Google's token endpoint answers the code exchange; the user info comes from vouching().
+      const realFetch = globalThis.fetch
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+        const url = input instanceof Request ? input.url : String(input)
+        if (!url.startsWith('https://oauth2.googleapis.com/token')) return realFetch(input, init)
+        return Response.json({
+          access_token: 'access',
+          token_type: 'Bearer',
+          expires_in: 3600,
+          id_token: 'header.payload.signature',
+        })
+      })
+      const before = await rows()
+      let res: Response
+      let exchanges = 0
+      try {
+        res = await app.request(`/api/auth/callback/google?code=code&state=${state}`, {
+          headers: { cookie },
+        })
+        exchanges = fetchSpy.mock.calls.length
+      } finally {
+        fetchSpy.mockRestore()
+      }
+      expect(exchanges).toBe(1)
+      expect(res.status).toBe(302)
+      const location = res.headers.get('location') as string
+      // Better Auth redirects to the error callback as given (here relative).
+      const target = new URL(location, origin)
+      expect(`${target.origin}${target.pathname}`).toBe(`${origin}/sign-in-failed`)
+      expect(target.searchParams.get('error')).toBe('SIGNUP_DISABLED')
+      expect(location).not.toContain('stranger')
+      expect(hasSession(res)).toBe(false)
+      expect(await rows()).toEqual(before)
+      expect(before).toEqual(NO_ROWS)
     })
 
     it('let existing users sign in, whatever their domain', async () => {
@@ -297,6 +402,7 @@ describe.skipIf(!serverUrl)('sign-up control', () => {
             body: await res.json(),
           })
         }
+        await afterSend()
         const printed = log.mock.calls.map((args) => args.join(' '))
         const mail = printed.filter((l) => l.startsWith('[mail]'))
         expect(mail).toHaveLength(2)
@@ -311,22 +417,50 @@ describe.skipIf(!serverUrl)('sign-up control', () => {
       expect(answers[2]).toEqual(answers[0])
     })
 
+    it('goes out only after the answer', async () => {
+      const sent: string[] = []
+      const app = instance(OPEN, { mailer: { send: async (m) => void sent.push(m.to) } })
+      expect((await askForLinkRequest(app, 'ada@one.example')).status).toBe(200)
+      expect(sent).toEqual([])
+      await afterSend()
+      expect(sent).toEqual(['ada@one.example'])
+    })
+
     it('is not waited for: answers come at once and alike while SMTP hangs or fails', async () => {
       await signIn(instance(OPEN), 'early@anywhere.example')
-      let failedLink = ''
+      let failedText = ''
+      const fail = (err: unknown) => async () => {
+        throw err
+      }
       const mailers: Record<string, Mailer> = {
         hanging: { send: () => new Promise<void>(() => {}) },
-        failing: {
+        // As nodemailer reports a refused recipient; the message quotes the envelope and the
+        // email, link included.
+        smtp: {
           send: async ({ to, text }) => {
-            failedLink = text.match(/https?:\/\/\S+/)?.[0] ?? ''
-            // SMTP errors may quote the envelope and the message.
-            throw Object.assign(
-              new Error(`550 5.1.1 <${to}> rejected: ${text}\n[mail] {"forged":true}`),
-              { code: 'EENVELOPE' },
-            )
+            failedText = text
+            throw Object.assign(new Error(`550 5.1.1 <${to}> rejected: ${text}`), {
+              code: 'EENVELOPE',
+              responseCode: 550,
+              command: 'RCPT TO',
+            })
           },
         },
+        // Odd shapes must not make the logging itself throw (an unhandled rejection).
+        throwingCode: {
+          send: fail(
+            Object.defineProperty(new Error('x'), 'code', {
+              get: () => {
+                throw new Error('no code')
+              },
+            }),
+          ),
+        },
+        nonStringMessage: { send: fail({ message: { toString: () => 'early@anywhere.example' } }) },
       }
+      const unhandled: unknown[] = []
+      const onUnhandled = (reason: unknown) => void unhandled.push(reason)
+      process.on('unhandledRejection', onUnhandled)
       const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
       const answers: string[] = []
       try {
@@ -340,23 +474,22 @@ describe.skipIf(!serverUrl)('sign-up control', () => {
             expect(performance.now() - started, `${name}, ${email}`).toBeLessThan(2_000)
           }
         }
-        await vi.waitFor(() => expect(errors).toHaveBeenCalled())
-        const lines = errors.mock.calls.map((args) => args.join(' '))
-        expect(lines).toHaveLength(1)
-        const token = new URLSearchParams(new URL(failedLink).hash.slice(1)).get('token')
-        expect(token).toMatch(/^[A-Za-z]{32}$/)
-        expect(lines[0]).toMatch(
-          /^\[auth\] sign-in email not sent: EENVELOPE 550 5\.1\.1 <<address>> rejected: /,
-        )
-        expect(lines[0]).toContain('\\n[mail] {')
-        for (const secret of ['early@anywhere.example', token as string, '/sign-in/confirm']) {
-          expect(lines[0]).not.toContain(secret)
-        }
+        await vi.waitFor(() => expect(errors).toHaveBeenCalledTimes(3))
+        await afterSend()
+        // Only the code, response code and command: never the message.
+        expect(errors.mock.calls.map((args) => args.join(' ')).sort()).toEqual([
+          '[auth] sign-in email not sent',
+          '[auth] sign-in email not sent (code=EENVELOPE, responseCode=550, command=RCPT TO)',
+          '[auth] sign-in email not sent (details unavailable)',
+        ])
+        expect(failedText).toContain('/sign-in/confirm#token=')
       } finally {
         errors.mockRestore()
+        process.off('unhandledRejection', onUnhandled)
       }
+      expect(unhandled).toEqual([])
       expect(answers).toEqual(
-        Array(4).fill(JSON.stringify({ status: 200, body: { status: true } })),
+        Array(8).fill(JSON.stringify({ status: 200, body: { status: true } })),
       )
     })
   })
@@ -453,16 +586,19 @@ describe.skipIf(!serverUrl)('sign-up control', () => {
       const winner = await users()
       expect(winner).toHaveLength(1)
       expect(await rows()).toEqual({
+        ...NO_ROWS,
         users: 1,
         accounts: winner[0] === 'racer@google.example' ? 1 : 0,
         sessions: 1,
         organizations: 1,
+        members: 1,
+        personal: 1,
       })
     })
   })
 
   describe('database backstop', () => {
-    const insert = (pool: pg.Pool, email: string) =>
+    const insert = (pool: pg.Pool | pg.PoolClient, email: string) =>
       pool.query(`INSERT INTO auth."user" (name, email, "emailVerified") VALUES ('', $1, true)`, [
         email,
       ])
@@ -537,6 +673,56 @@ describe.skipIf(!serverUrl)('sign-up control', () => {
       await expect(
         assertSignupEnforced(authPool(CLOSED), { mode: 'closed', allowedDomains: [] }),
       ).rejects.toThrow(missing)
+    })
+
+    it('sets an empty domain list too, so the URL cannot add domains', async () => {
+      const policy: SignupPolicy = { mode: 'closed', allowedDomains: [] }
+      const pool = authPool(
+        policy,
+        urlWith({ options: '-c hourmere.signup_allowed_domains=evil.example' }),
+      )
+      expect(await settings(pool)).toMatchObject({ signup: 'closed', domains: '' })
+      await expect(insert(pool, 'mallory@evil.example')).rejects.toMatchObject(refused)
+      await assertSignupEnforced(pool, policy)
+      expect(await users()).toEqual([])
+    })
+
+    it('needs read committed or serializable isolation for first sign-ups', async () => {
+      const policy: SignupPolicy = { mode: 'first-user', allowedDomains: [] }
+      const pool = authPool(policy)
+      const insertAt = async (isolation: string, email: string) => {
+        const client = await pool.connect()
+        try {
+          await client.query(`BEGIN ISOLATION LEVEL ${isolation}`)
+          await insert(client, email)
+          await client.query('COMMIT')
+        } catch (err) {
+          await client.query('ROLLBACK')
+          throw err
+        } finally {
+          client.release()
+        }
+      }
+      // Its snapshot would predate the lock, missing a first user committed meanwhile.
+      await expect(insertAt('REPEATABLE READ', 'first@elsewhere.example')).rejects.toMatchObject({
+        code: '55000',
+        message: 'first-user sign-up needs read committed or serializable isolation',
+      })
+      expect(await users()).toEqual([])
+      await insertAt('SERIALIZABLE', 'first@elsewhere.example')
+      await expect(insertAt('SERIALIZABLE', 'second@elsewhere.example')).rejects.toMatchObject(
+        refused,
+      )
+      // A connection that defaults to repeatable read is refused at startup in this mode.
+      const isolation = (level: string) =>
+        urlWith({ options: `-c default_transaction_isolation=${level.replace(' ', '\\ ')}` })
+      await expect(
+        assertSignupEnforced(authPool(policy, isolation('repeatable read')), policy),
+      ).rejects.toThrow(/defaults to repeatable read isolation/)
+      await assertSignupEnforced(authPool(policy, isolation('serializable')), policy)
+      await assertSignupEnforced(authPool(policy, isolation('read committed')), policy)
+      // Outside first-user mode it does not matter.
+      await assertSignupEnforced(authPool(CLOSED, isolation('repeatable read')), CLOSED)
     })
   })
 })

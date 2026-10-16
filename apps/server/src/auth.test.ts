@@ -104,6 +104,9 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
       .map((c) => c.split(';')[0])
       .join('; ')
 
+  /** Waits until a sign-in email has been sent: that happens after the answer. */
+  const afterSend = () => new Promise<void>((resolve) => setImmediate(resolve))
+
   /** Requests a magic link and returns the link in the email it sends. */
   async function emailedLink(email: string, { app }: Instance = main): Promise<URL> {
     const before = outbox.length
@@ -114,6 +117,7 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
     })
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ status: true })
+    await afterSend()
     const mail = outbox.slice(before).find((m) => m.to === email)
     expect(mail?.subject).toBe('Sign in to Hourmere')
     const link = mail?.text.match(/https?:\/\/\S+/)?.[0]
@@ -612,6 +616,7 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
           }),
         })
         expect(requested.status).toBe(200)
+        await afterSend()
         const text = outbox.slice(before).find((m) => m.to === 'callbacks@example.com')?.text
         const submit = await pressConfirmButton(
           main.app,

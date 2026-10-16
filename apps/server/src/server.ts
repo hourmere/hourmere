@@ -64,6 +64,20 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
     }
     mailer = createLogMailer()
   }
+  // Sign-in emails go out after the request is answered, and shutdown does not wait for them;
+  // the count is for saying how many it drops.
+  let sending = 0
+  const sender = mailer
+  const countingMailer: Mailer = {
+    async send(message) {
+      sending += 1
+      try {
+        await sender.send(message)
+      } finally {
+        sending -= 1
+      }
+    },
+  }
 
   const authPool = createAuthPool(config.DATABASE_URL, config.signup)
   try {
@@ -77,7 +91,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
     db,
     baseURL: config.PUBLIC_URL,
     secret: config.BETTER_AUTH_SECRET,
-    mailer,
+    mailer: countingMailer,
     signup: config.signup,
     socialProviders: config.socialProviders,
   })
@@ -119,6 +133,8 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
       new Promise<void>((resolve, reject) => {
         server.close(async (err) => {
           try {
+            if (sending)
+              console.warn(`shutting down: dropping ${sending} email(s) still being sent`)
             await Promise.all([db.destroy(), authPool.end()])
             restoreConsole()
             if (err) reject(err)

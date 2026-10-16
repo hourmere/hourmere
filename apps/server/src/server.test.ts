@@ -82,14 +82,15 @@ describe.skipIf(!serverUrl)('startServer', () => {
     }
   })
 
-  /** Silences the console while `fn` runs; returns console.error's calls as lines. */
-  async function quietly(fn: () => Promise<void>): Promise<string[]> {
+  /** Silences the console while `fn` runs; returns what went to warn and error, as lines. */
+  async function quietly(fn: () => Promise<void>) {
     const spies = (['log', 'info', 'warn', 'error'] as const).map((m) =>
       vi.spyOn(console, m).mockImplementation(() => {}),
     )
+    const lines = (i: number) => (spies[i]?.mock.calls ?? []).map((args) => args.join(' '))
     try {
       await fn()
-      return (spies[3]?.mock.calls ?? []).map((args) => args.join(' '))
+      return { warn: lines(2), error: lines(3) }
     } finally {
       for (const spy of spies) spy.mockRestore()
     }
@@ -107,7 +108,7 @@ describe.skipIf(!serverUrl)('startServer', () => {
       connected()
     })
     await new Promise<void>((resolve) => smtp.listen(0, '127.0.0.1', resolve))
-    const errors = await quietly(async () => {
+    const printed = await quietly(async () => {
       const port = await freePort()
       const publicUrl = `http://localhost:${port}`
       const server = await startServer({
@@ -129,20 +130,21 @@ describe.skipIf(!serverUrl)('startServer', () => {
         expect(await res.json()).toEqual({ status: true })
         await sending
       } finally {
-        // Does not wait for the email.
+        // Does not wait for the email, and says so.
         await server.close()
+        expect(vi.mocked(console.warn)).toHaveBeenLastCalledWith(
+          'shutting down: dropping 1 email(s) still being sent',
+        )
       }
       // The SMTP server goes away; the failure is logged, without the address.
       for (const socket of sockets) socket.destroy()
       await new Promise((resolve) => smtp.close(resolve))
-      await vi.waitFor(() =>
-        expect(vi.mocked(console.error)).toHaveBeenCalledWith(
-          expect.stringContaining('[auth] sign-in email not sent:'),
-        ),
-      )
+      await vi.waitFor(() => expect(vi.mocked(console.error)).toHaveBeenCalled())
     })
-    expect(errors).toHaveLength(1)
-    expect(errors[0]).not.toContain('ada@example.com')
+    expect(printed.error).toEqual([
+      '[auth] sign-in email not sent (code=ECONNECTION, command=CONN)',
+    ])
+    expect(printed.warn.filter((l) => l.includes('dropping'))).toHaveLength(1)
   })
 
   it('refuses to start when database connections lose the sign-up settings', async () => {

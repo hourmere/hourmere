@@ -17,8 +17,10 @@ export const MAGIC_LINK_VERIFY_PARAMS = [
  * Turns Better Auth's verify URL into the link to email: the confirm page, with the verify
  * parameters (token, callbackURL, …) in the fragment. Browsers never send the fragment, so
  * opening the link puts the token in no request log (ours or a proxy's) and no Referer
- * header. The button's request does carry it, to Better Auth, which uses it up right there;
- * our request log drops query strings.
+ * header. The button's request does carry it in the query string: our request log drops
+ * query strings, but a reverse proxy may log it. Better Auth usually uses the token up in
+ * that request, but some refusals come first (a rate limit's 429, an invalid callback URL's
+ * 403), so a logged token can still be valid until it expires.
  */
 export function confirmLink(verifyUrl: string): string {
   const url = new URL(verifyUrl)

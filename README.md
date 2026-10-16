@@ -28,6 +28,7 @@ npm run dev        # API on :3000, web app on http://localhost:5173
 ```
 
 Without `SMTP_URL`, sign-in links are printed in the `npm run dev` output instead of being emailed.
+In development anyone may sign up unless `SIGNUP` or `SIGNUP_ALLOWED_DOMAINS` is set (see Self-hosting).
 
 Other commands: `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`, `npm run db:migrate`, `npm run db:down`.
 
@@ -62,10 +63,18 @@ as for any other address. The request does not wait for the email either: if sen
 (e.g. wrong SMTP settings), the person sees the usual answer and the failure appears in the
 log.
 
-The database enforces the sign-up rules too, using settings the app passes when it connects.
-Connect the app to Postgres directly (as the compose file does), or through a connection
-pooler that passes the `options` startup parameter; PgBouncer, for one, does not. The app
-checks the settings arrive and refuses to start otherwise.
+The database enforces the sign-up rules too, using settings the app passes in the `options`
+startup parameter when it connects (`search_path` and `hourmere.*`), and it needs read
+committed isolation (Postgres's default) or serializable. Connect the app to Postgres
+directly, as the compose file does. Older PgBouncer versions refuse or drop `options`; 1.20.0
+and later pass it only with `search_path`, `hourmere.signup` and
+`hourmere.signup_allowed_domains` listed in `track_extra_parameters`. Either way the app reads
+the settings back at startup and refuses to start if they are missing.
+
+That check looks at one connection, once, at startup: a pooler slipped in later at the same
+address would turn the database's check off without notice (the app's own check still
+applies). It also means the app needs the database at startup even with `AUTO_MIGRATE=false`;
+if the database is down, the app exits and compose restarts it.
 
 Sign-in links open a page with a "Sign in to Hourmere" button, and only pressing it signs
 in: email security scanners that open every link (such as Microsoft Safe Links) would

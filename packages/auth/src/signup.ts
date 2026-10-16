@@ -53,29 +53,41 @@ export function signupConnectionOptions({ mode, allowedDomains }: SignupPolicy):
   if (!SIGNUP_MODES.includes(mode) || !allowedDomains.every((d) => EMAIL_DOMAIN.test(d))) {
     throw new Error('invalid sign-up policy')
   }
-  const options = [`-c hourmere.signup=${mode}`]
-  if (allowedDomains.length) {
-    options.push(`-c hourmere.signup_allowed_domains=${allowedDomains.join(',')}`)
-  }
-  return options.join(' ')
+  // The domain list is set even when empty, so nothing earlier in the options (e.g. from
+  // DATABASE_URL) can add domains.
+  return `-c hourmere.signup=${mode} -c hourmere.signup_allowed_domains=${allowedDomains.join(',')}`
 }
 
 /**
  * Rejects unless connections from `pool` carry `policy` for the database to enforce. Without
  * the settings the database check allows every insert, so a connection pooler that drops
- * startup parameters (PgBouncer refuses or ignores `options`) would silently turn it off; the
- * server refuses to start instead.
+ * startup parameters would silently turn it off; the server refuses to start instead. It
+ * looks at one connection, once.
+ *
+ * In first-user mode it also refuses repeatable read as the connections' default isolation,
+ * under which the database refuses first sign-ups (see migration 0006). Read committed
+ * (Postgres's default) and serializable work.
  */
 export async function assertSignupEnforced(pool: pg.Pool, policy: SignupPolicy): Promise<void> {
-  const { rows } = await pool.query<{ mode: string | null; domains: string | null }>(
+  const { rows } = await pool.query<{
+    mode: string | null
+    domains: string | null
+    isolation: string
+  }>(
     `SELECT current_setting('hourmere.signup', true) AS mode,
-            current_setting('hourmere.signup_allowed_domains', true) AS domains`,
+            current_setting('hourmere.signup_allowed_domains', true) AS domains,
+            current_setting('default_transaction_isolation') AS isolation`,
   )
   const mode = rows[0]?.mode || 'nothing'
   const domains = rows[0]?.domains || ''
   if (mode !== policy.mode || domains !== policy.allowedDomains.join(',')) {
     throw new Error(
       `the database connection does not carry the sign-up policy (hourmere.signup is ${mode}, expected ${policy.mode}; allowed domains "${domains}", expected "${policy.allowedDomains.join(',')}"). Connect to Postgres directly, or through a pooler that passes the "options" startup parameter.`,
+    )
+  }
+  if (policy.mode === 'first-user' && rows[0]?.isolation === 'repeatable read') {
+    throw new Error(
+      'the database connection defaults to repeatable read isolation, under which first-user sign-up cannot be checked; use read committed (the Postgres default) or serializable',
     )
   }
 }

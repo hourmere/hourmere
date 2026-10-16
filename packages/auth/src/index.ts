@@ -219,22 +219,24 @@ export function createAuth({
         expiresIn: MAGIC_LINK_MINUTES * 60,
         // Only a hash is stored, so a database leak does not expose usable links.
         storeToken: 'hashed',
-        sendMagicLink: async ({ email, url, token }) => {
+        sendMagicLink: async ({ email, url }) => {
           // No email to an address that has no account and may not create one: the link could
           // only fail. The request is answered the same either way, so this does not tell
           // anyone whether an address has an account.
           if (!(await maySignUp(db, signup, email)) && !(await hasAccount(db, email))) return
-          // Not awaited, for any address: waiting for SMTP would make an address that gets an
-          // email answer later than one that does not, and an SMTP failure would answer with
-          // an error only for those. A failure is logged instead (nothing retries it yet).
-          const link = confirmLink(url)
-          void Promise.resolve()
-            .then(() =>
-              mailer.send(
-                magicLinkEmail({ to: email, url: link, expiresInMinutes: MAGIC_LINK_MINUTES }),
-              ),
-            )
-            .catch((err) => logMailFailure(err, [link, url, token]))
+          const message = magicLinkEmail({
+            to: email,
+            url: confirmLink(url),
+            expiresInMinutes: MAGIC_LINK_MINUTES,
+          })
+          // Sent after the answer, for any address: waiting for SMTP would make an address that
+          // gets an email answer later than one that does not, and an SMTP failure would answer
+          // with an error only for those. A failure is logged instead (nothing retries it yet).
+          setImmediate(() => {
+            void Promise.resolve()
+              .then(() => mailer.send(message))
+              .catch(logMailFailure)
+          })
         },
       }),
     ],

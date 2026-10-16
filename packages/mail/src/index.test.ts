@@ -59,6 +59,14 @@ describe('smtpTransportOptions', () => {
     expect(requireTLS('smtp://[::1]:25')).toBe(false)
     expect(requireTLS('smtps://u:p@smtp.example.com:465')).toBe(false)
   })
+
+  it('gives up on an unresponsive server within seconds, not nodemailer’s minutes', () => {
+    expect(smtpTransportOptions('smtp://u:p@smtp.example.com:587')).toMatchObject({
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 30_000,
+    })
+  })
 })
 
 /** Just enough of an SMTP server to accept one message with AUTH PLAIN. */

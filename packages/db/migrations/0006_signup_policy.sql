@@ -6,7 +6,10 @@
 -- one), so in first-user mode two sign-ups at the same moment could both find no user and
 -- both be created. Here the check cannot race: first sign-ups take a transaction-scoped
 -- advisory lock, so a concurrent one waits until the other's transaction ends, and only
--- then looks for an existing user (read committed: that statement sees the committed row).
+-- then looks for an existing user. That needs read committed (Postgres's default), where
+-- the lookup sees the row committed meanwhile, or serializable, which fails one of the two
+-- transactions itself. Under repeatable read the lookup would use a snapshot from before
+-- the lock and miss it, so first sign-ups are refused there.
 --
 -- Better Auth's connections carry the policy as settings (createAuthPool in @hourmere/auth):
 -- hourmere.signup (open, first-user or closed) and hourmere.signup_allowed_domains
@@ -14,9 +17,9 @@
 -- pool) set neither and are not limited. An unknown mode refuses.
 --
 -- Connections without the settings are not limited, so anything that drops startup
--- parameters (a connection pooler such as PgBouncer, which refuses or ignores `options`)
--- would turn this check off. The server reads the settings back over Better Auth's pool at
--- startup (assertSignupEnforced) and refuses to start if they are missing or differ.
+-- parameters (e.g. a connection pooler that does not pass `options`) would turn this check
+-- off. The server reads the settings back over Better Auth's pool at startup
+-- (assertSignupEnforced) and refuses to start if they are missing or differ.
 CREATE FUNCTION enforce_signup_policy() RETURNS trigger
 LANGUAGE plpgsql SET search_path = public, pg_temp AS $$
 DECLARE
@@ -30,6 +33,10 @@ BEGIN
     RETURN NEW;
   END IF;
   IF mode = 'first-user' THEN
+    IF current_setting('transaction_isolation') = 'repeatable read' THEN
+      RAISE EXCEPTION 'first-user sign-up needs read committed or serializable isolation'
+        USING ERRCODE = 'object_not_in_prerequisite_state';
+    END IF;
     PERFORM pg_advisory_xact_lock(7340173);
     IF NOT EXISTS (SELECT 1 FROM auth."user") THEN
       RETURN NEW;

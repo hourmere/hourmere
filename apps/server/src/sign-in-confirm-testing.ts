@@ -32,14 +32,47 @@ export async function pressConfirmButton(app: App, link: URL): Promise<URL> {
     },
     incomplete: { hidden: true },
   }
-  runInNewContext(script, {
-    location: { hash: link.hash },
-    URLSearchParams,
-    document: {
+  // The page may read the fragment and nothing else of its location, and must not navigate
+  // (href, assign, replace, reload): only the button may lead to Better Auth.
+  const location = new Proxy(
+    {},
+    {
+      get: (_, prop) => {
+        if (prop === 'hash') return link.hash
+        throw new Error(`the confirm page used location.${String(prop)}`)
+      },
+      set: (_, prop) => {
+        throw new Error(`the confirm page navigated (location.${String(prop)})`)
+      },
+      defineProperty: () => {
+        throw new Error('the confirm page changed its location')
+      },
+    },
+  )
+  const document = new Proxy(
+    {
       getElementById: (id: string) => elements[id] ?? null,
       createElement: () => ({}),
     },
+    {
+      get: (target, prop) => {
+        if (prop in target) return target[prop as keyof typeof target]
+        throw new Error(`the confirm page used document.${String(prop)}`)
+      },
+      set: (_, prop) => {
+        throw new Error(`the confirm page set document.${String(prop)}`)
+      },
+    },
+  )
+  const context = { URLSearchParams, document }
+  // `location = url` navigates too.
+  Object.defineProperty(context, 'location', {
+    get: () => location,
+    set: () => {
+      throw new Error('the confirm page navigated (location)')
+    },
   })
+  runInNewContext(script, context)
   if (elements.confirm?.hidden) throw new Error('the confirm page shows no button for this link')
 
   // A GET form submission: the form's fields become the action's query string.

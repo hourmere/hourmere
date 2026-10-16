@@ -19,21 +19,35 @@ export function escapeControlCharacters(text: string): string {
   )
 }
 
-// Anything shaped like an email address.
-const EMAIL_ADDRESS = /[^\s<>()[\]"',;:]+@[^\s<>()[\]"',;:]+/g
+const MAIL_FAILURE = '[auth] sign-in email not sent'
 
 /**
- * Logs a sign-in email that could not be sent, as one line with control characters escaped
- * and without the recipient or the link: SMTP errors often quote the envelope or the message.
- * `secrets` (the link, the token) are cut out wherever they appear.
+ * Logs a sign-in email that could not be sent, as one line: the SMTP error's code, response
+ * code and command (nodemailer sets them, e.g. EAUTH 535 AUTH PLAIN), never its message,
+ * which can quote the recipient or the message with its link. Never throws: it runs where a
+ * throw would be an unhandled rejection.
  */
-export function logMailFailure(err: unknown, secrets: readonly string[]): void {
-  const code = (err as { code?: unknown } | null)?.code
-  let text = err instanceof Error ? err.message : 'unknown error'
-  if (typeof code === 'string') text = `${code} ${text}`
-  for (const secret of secrets) if (secret) text = text.replaceAll(secret, '<redacted>')
-  text = text.replace(EMAIL_ADDRESS, '<address>')
-  console.error(`[auth] sign-in email not sent: ${escapeControlCharacters(text)}`)
+export function logMailFailure(err: unknown): void {
+  try {
+    const details: string[] = []
+    if (typeof err === 'object' && err !== null) {
+      for (const field of ['code', 'responseCode', 'command'] as const) {
+        const value: unknown = (err as Record<string, unknown>)[field]
+        if (value !== undefined && value !== null) {
+          details.push(`${field}=${String(value).slice(0, 64)}`)
+        }
+      }
+    }
+    console.error(
+      details.length
+        ? `${MAIL_FAILURE} (${escapeControlCharacters(details.join(', '))})`
+        : MAIL_FAILURE,
+    )
+  } catch {
+    try {
+      console.error(`${MAIL_FAILURE} (details unavailable)`)
+    } catch {}
+  }
 }
 
 const format = (arg: unknown) =>
