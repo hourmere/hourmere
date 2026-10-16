@@ -105,7 +105,10 @@ const DOMAIN_KINDS: ReadonlySet<DomainErrorKind> = new Set([
  * repeats client input (field names, tool names) into a response or a log line.
  */
 export function clip(text: string, max: number): string {
-  return text.length > max ? `${text.slice(0, max)}…(+${text.length - max} chars)` : text
+  if (text.length <= max) return text
+  // Never cut a surrogate pair in half: a lone surrogate breaks JSON consumers and encoders.
+  const end = /[\uD800-\uDBFF]/.test(text[max - 1] ?? '') ? max - 1 : max
+  return `${text.slice(0, end)}…(+${text.length - end} chars)`
 }
 
 /**

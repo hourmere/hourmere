@@ -12,7 +12,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { type AppDeps, createApp } from '../app.ts'
 import { createRateLimiter } from '../rate-limit.ts'
 import { MCP_BODY_LIMIT, mcpEndpoint } from './endpoint.ts'
-import { defineTool, type Tool } from './tools.ts'
+import { clip, defineTool, type Tool } from './tools.ts'
 import { whoamiTool } from './whoami.ts'
 
 const PUBLIC_URL = 'http://localhost:3000'
@@ -575,5 +575,16 @@ describe('MCP tool results', () => {
       error: 'rate_limited',
       retryAfterSeconds: expect.any(Number),
     })
+  })
+})
+
+describe('clip', () => {
+  it('keeps short text and never leaves half a surrogate pair', () => {
+    expect(clip('abc', 3)).toBe('abc')
+    expect(clip('abcdef', 3)).toBe('abc…(+3 chars)')
+    const cut = clip(`${'x'.repeat(280)}😀${'a'.repeat(100)}`, 281)
+    expect(cut).toBe(`${'x'.repeat(280)}…(+102 chars)`)
+    expect(cut.isWellFormed()).toBe(true)
+    expect(() => encodeURIComponent(cut)).not.toThrow()
   })
 })
