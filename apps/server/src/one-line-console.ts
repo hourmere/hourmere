@@ -1,7 +1,8 @@
 import { formatWithOptions, type InspectOptions, inspect } from 'node:util'
 import { escapeControlCharacters } from '@hourmere/auth'
 
-const METHODS = ['log', 'info', 'warn', 'error', 'debug'] as const
+// dirxml is Node's log under another name, bound on its own, so it needs wrapping too.
+const METHODS = ['log', 'info', 'warn', 'error', 'debug', 'dirxml'] as const
 const ONE_LINE = { breakLength: Number.POSITIVE_INFINITY }
 
 /** console's own formatting (%s, objects, Error stacks), as one line with escapes. */
@@ -16,8 +17,8 @@ export function formatOneLine(args: unknown[]): string {
  * Postgres quoting a malformed value. Nothing a request influences can then start a line
  * of its own, so nothing can imitate a `[mail]` record.
  *
- * log, info, warn, error and debug are wrapped, and dir (which writes on its own). The
- * other methods go through those: trace and assert through error and warn, table, dirxml,
+ * log, info, warn, error, debug and dirxml are wrapped, and dir (which writes on its own).
+ * The other methods go through those: trace and assert through error and warn, table,
  * count and time through log. Writing to process.stdout / process.stderr directly is
  * outside this guarantee; no runtime dependency does so today.
  *

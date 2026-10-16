@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { startServer } from './server.ts'
 
 const serverUrl = process.env.DATABASE_URL
-const METHODS = ['log', 'info', 'warn', 'error', 'debug', 'dir'] as const
+const METHODS = ['log', 'info', 'warn', 'error', 'debug', 'dir', 'dirxml'] as const
 
 const freePort = () =>
   new Promise<number>((resolve, reject) => {

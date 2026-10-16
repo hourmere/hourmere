@@ -37,11 +37,29 @@ interface Filter {
   values: string[]
 }
 
-/** Validates sortBy and the filter of a list request; returns the filter, if any. */
+const NON_NEGATIVE_INTEGER = /^\d{1,9}$/
+
+/**
+ * Validates paging, sorting, the organization slug and the filter of a list request;
+ * returns the filter, if any.
+ */
 export function checkListQuery(path: string | undefined, query: unknown): Filter | undefined {
   const list = path === undefined ? undefined : LISTS[path]
   if (!list || !isRecord(query)) return undefined
-  const { sortBy, filterField, filterValue, filterOperator } = query
+  const { sortBy, filterField, filterValue, filterOperator, organizationSlug } = query
+  for (const param of ['limit', 'offset']) {
+    const value = query[param]
+    if (value !== undefined && !(typeof value === 'string' && NON_NEGATIVE_INTEGER.test(value))) {
+      throw bad('INVALID_QUERY', `${param} must be a non-negative integer`)
+    }
+  }
+  if (organizationSlug !== undefined && typeof organizationSlug !== 'string') {
+    throw bad('INVALID_QUERY', 'organizationSlug must be given once')
+  }
+  // Postgres refuses NUL in text, with a 500 and the value in its error.
+  if (typeof organizationSlug === 'string' && organizationSlug.includes('\u0000')) {
+    throw bad('INVALID_QUERY', 'organizationSlug must not contain NUL characters')
+  }
   if (sortBy !== undefined && (typeof sortBy !== 'string' || !list.sortable.includes(sortBy))) {
     throw bad('INVALID_FIELD', `sortBy must be one of ${list.sortable.join(', ')}`)
   }
@@ -71,6 +89,9 @@ export function checkListQuery(path: string | undefined, query: unknown): Filter
   if (!values.every((v): v is string => typeof v === 'string')) {
     throw bad('INVALID_FILTER', 'filterValue is required')
   }
+  if (values.some((v) => v.includes('\u0000'))) {
+    throw bad('INVALID_FILTER', 'filterValue must not contain NUL characters')
+  }
   if (list.uuids.includes(filterField) && !values.every(isUuid)) {
     throw bad('INVALID_ID', `filterValue must be a UUID for ${filterField}`)
   }
@@ -88,23 +109,29 @@ export async function emptyMemberList(ctx: AuthMiddlewareContext, db: Db, filter
   const query = isRecord(ctx.query) ? ctx.query : {}
   const session = await getSessionFromCtx(ctx)
   if (!session) return undefined
-  let organizationId: unknown = query.organizationId ?? session.session.activeOrganizationId
-  if (typeof query.organizationSlug === 'string') {
+  // Resolve the organization as Better Auth does: the slug if given (an empty one counts as
+  // absent), else the id, else the session's active organization. Anything unexpected is
+  // left to Better Auth rather than answered here.
+  const { organizationId: id, organizationSlug: slug, sortDirection, offset: rawOffset } = query
+  if (
+    (id !== undefined && typeof id !== 'string') ||
+    (slug !== undefined && typeof slug !== 'string')
+  ) {
+    return undefined
+  }
+  let organizationId: string | null | undefined = id || session.session.activeOrganizationId
+  if (slug) {
     const org = await db
       .selectFrom('auth.organization')
       .select('id')
-      .where('slug', '=', query.organizationSlug)
+      .where('slug', '=', slug)
       .executeTakeFirst()
     organizationId = org?.id
   }
   if (typeof organizationId !== 'string' || !isUuid(organizationId)) return undefined
+  // Only members may learn how many members match; Better Auth refuses everyone else.
   if (!(await isMember(db, session.user.id, organizationId))) return undefined
-  // Requests Better Auth would refuse are left to it.
-  const { sortDirection, limit, offset: rawOffset } = query
   if (sortDirection !== undefined && sortDirection !== 'asc' && sortDirection !== 'desc') {
-    return undefined
-  }
-  if (![limit, rawOffset].every((v) => v === undefined || Number.isFinite(Number(v)))) {
     return undefined
   }
 
@@ -121,7 +148,8 @@ export async function emptyMemberList(ctx: AuthMiddlewareContext, db: Db, filter
     else count = count.where(field, 'not in', values)
   }
   const total = Number((await count.executeTakeFirstOrThrow()).n)
+  // checkListQuery has made sure offset is a non-negative integer.
   const offset = Number(rawOffset ?? 0)
-  if (total > 0 && !(Number.isFinite(offset) && offset >= total)) return undefined
+  if (total > 0 && offset < total) return undefined
   return ctx.json({ members: [], total })
 }

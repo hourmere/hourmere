@@ -6,7 +6,7 @@ import { installOneLineConsole } from './one-line-console.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const forged = '[mail] {"links":["http://localhost:3000/api/auth/magic-link/verify?token=forged"]}'
-const METHODS = ['log', 'info', 'warn', 'error', 'debug', 'dir'] as const
+const METHODS = ['log', 'info', 'warn', 'error', 'debug', 'dir', 'dirxml'] as const
 
 /** A real Console whose stdout and stderr both go to one in-memory stream. */
 function streamConsole() {
@@ -45,10 +45,11 @@ describe('installOneLineConsole', () => {
     c.table([{ cell: `table\n${forged}` }])
     c.assert(false, `assert\n${forged}`)
     c.count(`count\n${forged}`)
+    c.dirxml(`dirxml\n${forged}`, { x: `y\n${forged}` })
     c.log(`bidi \u202e${forged} \u2066x\u2069`)
     c.log('[mail] {"to":"ada@example.com"}')
     const lines = out.lines()
-    expect(lines).toHaveLength(13)
+    expect(lines).toHaveLength(14)
     // All but the last (a genuine record) are hostile input that must stay inside its line.
     expect(hostile(lines.slice(0, -1))).toEqual([])
     expect(lines[0]).toMatch(/^log\\n\[mail\] .* \{ nested: 'x\\n\[mail\]/)
@@ -59,9 +60,10 @@ describe('installOneLineConsole', () => {
     expect(lines[5]).toMatch(/^Error: dir\\n\[mail\]/)
     expect(lines[6]).toBe('{ deep: [Object] }')
     expect(lines[7]).toMatch(/^Trace: trace\\n\[mail\]/)
-    expect(lines[11]).toMatch(/^bidi \\u202e\[mail\].* \\u2066x\\u2069$/)
+    expect(lines[11]).toMatch(/^dirxml\\n\[mail\].* \{ x: 'y\\n\[mail\]/)
+    expect(lines[12]).toMatch(/^bidi \\u202e\[mail\].* \\u2066x\\u2069$/)
     // A record the log mailer prints is unchanged.
-    expect(lines[12]).toBe('[mail] {"to":"ada@example.com"}')
+    expect(lines[13]).toBe('[mail] {"to":"ada@example.com"}')
   })
 
   it('can be undone', () => {

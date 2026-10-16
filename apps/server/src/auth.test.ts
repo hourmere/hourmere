@@ -414,6 +414,20 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
         ],
         [`${members}?sortBy=createdAt&sortDirection=desc`, 200],
         ['/api/auth/api-key/list?sortBy=createdAt', 200],
+        [`${members}?offset=abc`, 400, 'INVALID_QUERY'],
+        [`${members}?offset=0.5`, 400, 'INVALID_QUERY'],
+        [`${members}?limit=-1`, 400, 'INVALID_QUERY'],
+        [`${members}?offset=1e3`, 400, 'INVALID_QUERY'],
+        ['/api/auth/api-key/list?limit=abc', 400, 'INVALID_QUERY'],
+        [`${members}?filterField=role&filterValue=a%00b`, 400, 'INVALID_FILTER'],
+        [`${members}?organizationSlug=a%00b`, 400, 'INVALID_QUERY'],
+        // A repeated slug is refused rather than answered for some other organization.
+        [
+          `${members}?organizationSlug=a&organizationSlug=b&filterField=role&filterValue=admin`,
+          400,
+          'INVALID_QUERY',
+        ],
+        [`${members}?limit=10&offset=0`, 200],
       ]
       for (const [path, status, code] of cases) {
         const res = await main.app.request(path, { headers: { cookie } })
@@ -434,18 +448,50 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
           0,
         ],
         [`${members}?offset=5`, 1],
+        // The last member is at offset 0, so offset 1 (= total) is past the end.
+        [`${members}?offset=1`, 1],
       ]
+      const mine = (await me({ cookie })).body.organization
+      empty.push(
+        // By slug, and an empty slug counting as absent (as in Better Auth).
+        [`${members}?organizationSlug=${mine.slug}&filterField=role&filterValue=admin`, 0],
+        [`${members}?organizationId=${mine.id}&organizationSlug=&offset=3`, 1],
+      )
       for (const [path, total] of empty) {
         const res = await main.app.request(path, { headers: { cookie } })
         expect(res.status, path).toBe(200)
         expect(await res.json(), path).toEqual({ members: [], total })
       }
-      // Other organizations stay Better Auth's to refuse.
-      const theirs = (await me({ cookie: await signIn('not-mine@example.com') })).body.organization
-      const refused = await main.app.request(`${members}?organizationId=${theirs.id}`, {
+      // A team with two members, reached by its slug while the session acts in another
+      // organization (creating it makes it active, so switch back first).
+      const team = await createTeam(cookie, 'empty-listers')
+      await signIn('empty-lister-colleague@example.com')
+      await testDb.pool.query(
+        `INSERT INTO auth.member ("organizationId", "userId", role, "createdAt") VALUES ($1, $2, 'member', now())`,
+        [team, await userId('empty-lister-colleague@example.com')],
+      )
+      await post('/api/auth/organization/set-active', cookie, { organizationId: mine.id })
+      const bySlug = await main.app.request(`${members}?organizationSlug=empty-listers&offset=2`, {
         headers: { cookie },
       })
-      expect(refused.status).toBe(403)
+      expect(await bySlug.json()).toEqual({ members: [], total: 2 })
+
+      // Pages that do hold members are Better Auth's to list.
+      const first = await main.app.request(`${members}?offset=0`, { headers: { cookie } })
+      expect(((await first.json()) as { members: unknown[]; total: number }).total).toBe(1)
+
+      // Other organizations stay Better Auth's to refuse, and their member counts unknown.
+      const theirs = (await me({ cookie: await signIn('not-mine@example.com') })).body.organization
+      for (const query of [
+        `organizationId=${theirs.id}`,
+        `organizationId=${theirs.id}&offset=99`,
+        `organizationId=${theirs.id}&filterField=role&filterValue=admin`,
+        `organizationSlug=${theirs.slug}&offset=99`,
+      ]) {
+        const refused = await main.app.request(`${members}?${query}`, { headers: { cookie } })
+        expect(refused.status, query).toBe(403)
+        expect(JSON.stringify(await refused.json()), query).not.toContain('total')
+      }
     })
 
     it('rejects ids that are not UUIDs before they reach the database (and the log)', async () => {
