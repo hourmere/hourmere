@@ -6,6 +6,7 @@ import { serve } from '@hono/node-server'
 import { createRoute, z } from '@hono/zod-openapi'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createApp } from './app.ts'
+import { mcpEndpoint } from './mcp/endpoint.ts'
 import { authenticated, callerWithBodyLimit, json, type RouteModule } from './openapi.ts'
 
 const uploads: RouteModule = ({ app, caller }) => {
@@ -41,6 +42,7 @@ describe('request bodies over a real socket', () => {
       resolveCaller: async () => ({ ok: false, error: 'unauthorized', setCookie: [] }),
       publicUrl: 'http://localhost:3000',
       routes: [uploads],
+      mcp: mcpEndpoint({ tools: [] }),
     })
     await new Promise<void>((resolve) => {
       server = serve({ fetch: app.fetch, port: 0, hostname: '127.0.0.1' }, (info: AddressInfo) => {
@@ -83,21 +85,20 @@ describe('request bodies over a real socket', () => {
       req.end(body)
     })
 
-  it('keeps the connection usable after refusing a caller without reading its body', async () => {
-    const refused = await send(
-      'POST',
-      '/api/v1/uploads',
-      JSON.stringify({ data: 'x'.repeat(1_000_000) }),
-    )
-    expect(refused.status).toBe(401)
-    await new Promise((resolve) => setTimeout(resolve, 100))
-    // The same connection must still be served: the unread body is skipped, not left to
-    // stall the connection until the server gives up on it.
-    const next = await send('GET', '/api/health')
-    expect(next).toEqual({
-      status: 200,
-      body: '{"status":"ok","database":"ok"}',
-      reusedSocket: true,
-    })
-  })
+  it.each(['/api/v1/uploads', '/mcp'])(
+    'keeps the connection usable after %s refuses a caller without reading its body',
+    async (path) => {
+      const refused = await send('POST', path, JSON.stringify({ data: 'x'.repeat(1_000_000) }))
+      expect(refused.status).toBe(401)
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      // The same connection must still be served: the unread body is skipped, not left to
+      // stall the connection until the server gives up on it.
+      const next = await send('GET', '/api/health')
+      expect(next).toEqual({
+        status: 200,
+        body: '{"status":"ok","database":"ok"}',
+        reusedSocket: true,
+      })
+    },
+  )
 })
