@@ -296,10 +296,30 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
         state.refuse.set(address, NO_SUCH_USER)
       }
       await expect(sendBookingNotification(deps(mailer), bookingId, 'confirmed')).rejects.toThrow(
-        /refused every recipient for good/,
+        /refused every recipient it was offered for good/,
       )
       expect(sent).toEqual([])
       expect(await records(bookingId)).toEqual([])
+    })
+
+    it('does not give up on an address when it is the only one tried and refused for good', async () => {
+      const { bookingId, hostEmail } = await booked()
+      const { mailer, sent, state } = testMailer()
+      // First attempt: the host's email goes out, the invitee's is refused for now.
+      state.refuse.set('ada@example.com', GREYLISTED)
+      await expect(
+        sendBookingNotification(deps(mailer), bookingId, 'confirmed'),
+      ).rejects.toBeInstanceOf(NotificationRetryError)
+      expect(sent.map((m) => m.to)).toEqual([hostEmail])
+      // The retry tries only the invitee, and a bare 550 (a server refusing everything would
+      // say the same) is no reason to give up on them.
+      state.refuse.set('ada@example.com', { responseCode: 550, atRecipient: true })
+      await expect(sendBookingNotification(deps(mailer), bookingId, 'confirmed')).rejects.toThrow(
+        /refused every recipient it was offered for good/,
+      )
+      expect((await records(bookingId)).map((r) => [r.recipient.split(':')[0], r.outcome])).toEqual(
+        [['host', 'sent']],
+      )
     })
 
     it('treats refused relaying as a mail server problem: stop and retry', async () => {
@@ -393,6 +413,19 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
     expect((await records(bookingId)).map((r) => r.recipient)).toEqual([
       expect.stringMatching(/^host:/),
     ])
+  })
+
+  it('stops confirming once the meeting starts while the emails go out', async () => {
+    const { bookingId, hostEmail } = await booked({ guests: true })
+    const { mailer, sent, state } = testMailer()
+    let current = NOW
+    // The host's email takes until after the start.
+    state.during = (message) => {
+      if (message.to === hostEmail) current = instant(START).add({ minutes: 1 })
+    }
+    await sendBookingNotification({ ...deps(mailer), now: () => current }, bookingId, 'confirmed')
+    expect(sent.map((m) => m.to)).toEqual([hostEmail])
+    expect(await records(bookingId)).toHaveLength(1)
   })
 
   it('takes no further recipient once the job is told to stop', async () => {

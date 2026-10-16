@@ -382,7 +382,7 @@ async function sendOnce(
   key: { bookingId: string; kind: NotificationKind; recipient: string },
   withManageLink: boolean,
   message: (manageToken: string | undefined) => MailMessage,
-  now: Temporal.Instant,
+  clock: () => Temporal.Instant,
   signal: AbortSignal | undefined,
 ): Promise<'sent' | 'sent before' | 'overtaken'> {
   try {
@@ -401,8 +401,9 @@ async function sendOnce(
         .returning('recipient')
         .executeTakeFirst()
       if (!claimed) return 'sent before'
-      // Read the booking again: it may have been cancelled while an earlier recipient's
-      // email went out. Without a lock, which would hold up that cancel.
+      // Read the booking and the clock again: it may have been cancelled, or have started,
+      // while an earlier recipient's email went out. Without a lock, which would hold up
+      // that cancel.
       const current = await trx
         .selectFrom('bookings')
         .select(['status', 'start_at'])
@@ -410,7 +411,7 @@ async function sendOnce(
         .executeTakeFirst()
       if (
         !current ||
-        !stillTrue(key.kind, { status: current.status, start: instant(current.start_at) }, now)
+        !stillTrue(key.kind, { status: current.status, start: instant(current.start_at) }, clock())
       ) {
         throw new Overtaken()
       }
@@ -442,7 +443,8 @@ export async function sendBookingNotification(
   kind: NotificationKind,
   { signal }: { signal?: AbortSignal | undefined } = {},
 ): Promise<void> {
-  const now = (deps.now ?? (() => Temporal.Now.instant()))()
+  const clock = deps.now ?? (() => Temporal.Now.instant())
+  const now = clock()
   const data = await loadNotificationData(deps.db, bookingId)
   if (!data || !stillApplies(kind, data, now)) return
   const { booking, hosts, attendees } = data
@@ -525,6 +527,8 @@ export async function sendBookingNotification(
   const log = deps.log ?? ((line: string) => console.warn(line))
   const refused: string[] = []
   const gone: { key: string; err: MailRejectedError }[] = []
+  // Recipients this run tried to send to (not those done in an earlier attempt).
+  let attempted = 0
   for (const r of recipients) {
     signal?.throwIfAborted()
     try {
@@ -533,21 +537,24 @@ export async function sendBookingNotification(
         { bookingId, kind, recipient: r.key },
         r.withLinks,
         r.message,
-        now,
+        clock,
         signal,
       )
       // A later change (e.g. a cancellation) sends its own email.
       if (outcome === 'overtaken') return
+      if (outcome === 'sent') attempted++
     } catch (err) {
       if (!(err instanceof MailRejectedError) || !err.recipientOnly) throw err
+      attempted++
       if (err.permanent) gone.push({ key: r.key, err })
       else refused.push(`${r.key} (${codesOf(err)})`)
     }
   }
-  // Every address refused for good says more about the mail server than about the addresses.
-  if (gone.length === recipients.length) {
+  // Every address tried in this run refused for good says more about the mail server than
+  // about the addresses.
+  if (gone.length > 0 && gone.length === attempted) {
     throw new NotificationRetryError(
-      `the mail server refused every recipient for good (${gone.map((g) => codesOf(g.err)).join(', ')}); retrying rather than giving up on all of them`,
+      `the mail server refused every recipient it was offered for good (${gone.map((g) => codesOf(g.err)).join(', ')}); retrying rather than giving up on them`,
     )
   }
   for (const { key, err } of gone) {
