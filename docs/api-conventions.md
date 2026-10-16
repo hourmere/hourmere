@@ -96,21 +96,31 @@ session cookies, and answers with the same error codes.
 
 ## Validation
 
-Input is checked in two layers, so REST and MCP behave identically:
+Input is checked in two layers:
 
-- **Shape** (the route's zod schema): JSON syntax, types, required fields, string formats and
-  lengths. Request objects are strict: an unknown field (often a misspelling) is refused, not
-  ignored. Failures are 400 `invalid_request`, with `message` naming the fields.
-- **Values and meaning** (the service, shared with the MCP server): whatever needs the
+- **Shape** (the route's zod schema): JSON syntax, types and required fields. Request objects
+  are strict: an unknown field (often a misspelling) is refused, not ignored. A route may also
+  pre-check simple formats and lengths. Failures are 400 `invalid_request`, with `message`
+  naming the fields.
+- **Values and meaning** (the service, shared with the MCP server): the service validates
+  every value it relies on, formats, lengths and ranges as well as anything that needs the
   database or domain rules, e.g. that a time zone exists, that answers fit the event type's
-  questions, or that a slot is still free. Failures use specific codes (400
-  `invalid_responses`, 409 `slot_taken`, …).
+  questions, or that a slot is still free. Failures use specific codes (400 `invalid_slug`,
+  `invalid_questions`, `invalid_responses`, 409 `slot_taken`, …). Services never rely on a
+  route having checked something.
 
-Free text (names, emails, answers, reasons, question labels and options) must be well-formed
-Unicode without control characters: no NUL, C0 or C1 controls, DEL, U+2028 or U+2029; only
-multi-line fields (long answers, reasons) may contain tabs and line breaks. Services refuse
-anything else with the field's code (`invalid_invitee`, `invalid_guests`, `invalid_responses`,
-`invalid_reason`, `invalid_questions`), using the helpers in `packages/scheduling/src/text.ts`.
+MCP tools reuse the routes' zod schemas, so the same input fails the same way over REST and
+MCP. The OpenAPI document still describes limits (`maxLength`, `pattern`, `minimum`, …) as
+metadata where only the service enforces them.
+
+Free text (names, emails, answers, reasons, question labels and options, schedule names, event
+type titles and descriptions, location addresses and links) must be well-formed Unicode
+without control characters: no NUL, C0 or C1 controls, DEL, U+2028 or U+2029; only multi-line
+fields (long answers, reasons, event type descriptions) may contain tabs and line breaks.
+Services refuse anything else with the field's code (`invalid_invitee`, `invalid_guests`,
+`invalid_responses`, `invalid_reason`, `invalid_questions`, `invalid_schedule`,
+`invalid_event_type`, `invalid_location`), using the helpers in
+`packages/scheduling/src/text.ts`.
 As a safety net for every `/api/v1` route, a JSON body with NUL or a lone surrogate anywhere
 (values or keys) is refused with 400 `invalid_request` before the route runs.
 
@@ -121,7 +131,10 @@ string at its maximum length and every character escaped as `\uXXXX` (6 bytes, a
 Python's `json.dumps` sends by default). Creating a booking allows 2 MB: its largest legal
 request (20 multi-select answers choosing all 50 options of 200 characters, plus the invitee
 and 10 guests) is about 1.23 MB that way. Cancel and reschedule bodies stay far below 64 KB
-(a reason is at most 1000 characters).
+(a reason is at most 1000 characters). Creating or changing an event type allows 2 MB (20
+questions with 50 options of 200 characters come to about 1.29 MB), as do creating or
+changing a schedule (a day can hold 1440 one-minute intervals: about 1.23 MB for a week);
+setting one date's override allows 256 KB (about 176 KB for 1440 intervals).
 
 ## Lists
 

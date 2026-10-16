@@ -173,7 +173,8 @@ is `-32700` (HTTP 400), an unknown tool `-32602`. Refusals before the protocol l
   resource metadata at `/.well-known/oauth-protected-resource/mcp` (now a 404) and name it in
   the 401's `WWW-Authenticate` header, and access tokens will resolve to the same kind of
   caller as keys. The seam is `apps/server/src/mcp/endpoint.ts`.
-- Tools for event types, schedules and the profile, once their REST API lands.
+- Tools for the owner side (profile, schedules, event types), on the services the REST API
+  now uses for them.
 - Rescheduling as the host (the service layer only reschedules through manage tokens so far).
 
 ## Adding a tool
