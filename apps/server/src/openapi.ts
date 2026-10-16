@@ -1,5 +1,8 @@
 import type { OpenAPIHono } from '@hono/zod-openapi'
 import { z } from '@hono/zod-openapi'
+import type { Principal } from '@hourmere/auth'
+import type { Db } from '@hourmere/db'
+import type { ServiceContext } from '@hourmere/scheduling'
 import type { requireCaller } from './caller.ts'
 
 // See docs/api-conventions.md.
@@ -32,3 +35,40 @@ export type CallerMiddleware = ReturnType<typeof requireCaller>
  * - Call the service layer and let its DomainErrors propagate; createApp maps them.
  */
 export type RouteModule = (shared: { app: OpenAPIHono; caller: CallerMiddleware }) => void
+
+/** What a route module needs to call the service layer; index.ts provides it. */
+export interface ServiceDeps {
+  db: Db
+  /** The clock; defaults to the real one. */
+  now?: () => Temporal.Instant
+}
+
+/** The ServiceContext for the authenticated caller of a request. */
+export function serviceContext(
+  { db, now = () => Temporal.Now.instant() }: ServiceDeps,
+  principal: Principal,
+): ServiceContext {
+  return { db, principal, now }
+}
+
+type ErrorStatus = 400 | 403 | 404 | 409
+
+/**
+ * Documents an authenticated route's error responses, all with the Error shape: the given
+ * statuses (describe the codes a client may branch on) plus 401 and 429, which every
+ * authenticated route can answer.
+ */
+export function errorResponses(descriptions: Partial<Record<ErrorStatus, string>>) {
+  const responses: Partial<
+    Record<ErrorStatus | 401 | 429, { description: string; content: ReturnType<typeof json> }>
+  > = {}
+  for (const [status, description] of Object.entries(descriptions)) {
+    responses[Number(status) as ErrorStatus] = { description, content: json(ErrorBody) }
+  }
+  responses[401] = { description: 'No valid session or API key', content: json(ErrorBody) }
+  responses[429] = { description: "The API key's rate limit is used up", content: json(ErrorBody) }
+  return responses
+}
+
+/** Cookie-authenticated writes from another origin are refused (CSRF protection). */
+export const CROSS_ORIGIN_WRITE = 'forbidden: a cookie-authenticated write from another origin'

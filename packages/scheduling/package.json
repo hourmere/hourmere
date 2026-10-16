@@ -3,7 +3,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./testing": "./src/testing.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json"
@@ -11,6 +12,7 @@
   "dependencies": {
     "@hourmere/auth": "*",
     "@hourmere/core": "*",
-    "@hourmere/db": "*"
+    "@hourmere/db": "*",
+    "kysely": "0.29.6"
   }
 }

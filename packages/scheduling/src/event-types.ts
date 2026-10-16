@@ -1,0 +1,667 @@
+// Event types: what invitees can book. They belong to the organization the caller acts in.
+// In a personal organization an event type is its user's (personal page /{handle}/{slug});
+// in a team it belongs to the team page (owner_user_id NULL), readable by every member and
+// managed by owners and admins. Deleting one only marks it deleted, so past bookings keep
+// pointing at the event type they were made with.
+import { validateEventTypeRules } from '@hourmere/core'
+import type { Db, Json } from '@hourmere/db'
+import type { ServiceContext } from './context.ts'
+import { DomainError } from './errors.ts'
+import {
+  engineValidation,
+  isConstraintViolation,
+  isUuid,
+  jsonb,
+  SQLSTATE,
+  timestamp,
+} from './internal.ts'
+
+export const LOCATION_KINDS = ['google_meet', 'zoom', 'phone', 'in_person', 'link'] as const
+export type LocationKind = (typeof LOCATION_KINDS)[number]
+
+/** Where the meeting happens. Meet and Zoom links are generated per booking. */
+export type EventTypeLocation =
+  | { kind: 'google_meet' }
+  | { kind: 'zoom' }
+  /** The host's number, in E.164 (`+14155550123`). */
+  | { kind: 'phone'; number: string }
+  | { kind: 'in_person'; address: string }
+  /** Any other video or meeting link (http or https). */
+  | { kind: 'link'; url: string }
+
+// The question format is shared with the booking flow, which will own it in questions.ts;
+// validQuestions is the one place to swap for it.
+export const QUESTION_TYPES = [
+  'short_text',
+  'long_text',
+  'phone',
+  'select',
+  'multi_select',
+  'checkbox',
+] as const
+export type QuestionType = (typeof QUESTION_TYPES)[number]
+/** The question types that offer choices. */
+const CHOICE_TYPES: readonly QuestionType[] = ['select', 'multi_select']
+
+/** A booking-form field beyond name and email; answers are stored under `id`. */
+export interface Question {
+  id: string
+  label: string
+  type: QuestionType
+  required: boolean
+  /** The choices of a `select` or `multi_select` question; absent for other types. */
+  options?: string[]
+}
+
+/** A question as written by the caller; `required` defaults to false. */
+export type QuestionInput = Omit<Question, 'required'> & { required?: boolean | undefined }
+
+export type SchedulingType = 'individual' | 'round_robin' | 'collective'
+
+export interface EventType {
+  id: string
+  organizationId: string
+  /** The user whose personal page lists it; null for a team event type. */
+  ownerUserId: string | null
+  slug: string
+  title: string
+  description: string | null
+  durationMinutes: number
+  /** null = the duration. */
+  slotStepMinutes: number | null
+  bufferBeforeMinutes: number
+  bufferAfterMinutes: number
+  minimumNoticeMinutes: number
+  /** null = no limit. */
+  bookingWindowDays: number | null
+  /** null = no limit. */
+  maxBookingsPerDay: number | null
+  schedulingType: SchedulingType
+  location: EventTypeLocation | null
+  questions: Question[]
+  isActive: boolean
+  position: number
+  /** The host's schedule; null = the host's default schedule. */
+  scheduleId: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface EventTypeInput {
+  slug: string
+  title: string
+  description?: string | null | undefined
+  durationMinutes: number
+  slotStepMinutes?: number | null | undefined
+  bufferBeforeMinutes?: number | undefined
+  bufferAfterMinutes?: number | undefined
+  minimumNoticeMinutes?: number | undefined
+  bookingWindowDays?: number | null | undefined
+  maxBookingsPerDay?: number | null | undefined
+  location?: EventTypeLocation | null | undefined
+  questions?: QuestionInput[] | undefined
+  isActive?: boolean | undefined
+  position?: number | undefined
+  /** One of the host's schedules; null or omitted = the host's default schedule. */
+  scheduleId?: string | null | undefined
+}
+
+/** Omitted fields stay as they are; null clears a nullable field. */
+export type EventTypeUpdate = Partial<EventTypeInput>
+
+/** Lowercase letters, digits and inner hyphens, 1–64 characters (the `event_types` CHECK). */
+export const SLUG_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/
+/** E.164: a plus sign, then 7–15 digits. */
+export const PHONE_NUMBER_PATTERN = /^\+[1-9][0-9]{6,14}$/
+export const QUESTION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/
+
+/** Limits of the fields the availability engine does not read (its rules have their own). */
+export const EVENT_TYPE_LIMITS = {
+  slugMaxLength: 64,
+  titleMaxLength: 200,
+  descriptionMaxLength: 5000,
+  addressMaxLength: 500,
+  urlMaxLength: 2000,
+  questions: 20,
+  questionIdMaxLength: 64,
+  questionLabelMaxLength: 200,
+  options: 50,
+  optionMaxLength: 200,
+  /** position is a Postgres integer. */
+  positionMin: -2_147_483_648,
+  positionMax: 2_147_483_647,
+} as const
+
+/** The columns a caller sets, validated and normalized. */
+interface Fields {
+  slug: string
+  title: string
+  description: string | null
+  durationMinutes: number
+  slotStepMinutes: number | null
+  bufferBeforeMinutes: number
+  bufferAfterMinutes: number
+  minimumNoticeMinutes: number
+  bookingWindowDays: number | null
+  maxBookingsPerDay: number | null
+  location: EventTypeLocation | null
+  questions: Question[]
+  isActive: boolean
+  position: number
+}
+
+const FIELD_NAMES = [
+  'slug',
+  'title',
+  'description',
+  'durationMinutes',
+  'slotStepMinutes',
+  'bufferBeforeMinutes',
+  'bufferAfterMinutes',
+  'minimumNoticeMinutes',
+  'bookingWindowDays',
+  'maxBookingsPerDay',
+  'location',
+  'questions',
+  'isActive',
+  'position',
+] as const satisfies readonly (keyof Fields)[]
+
+const DEFAULTS = {
+  description: null,
+  slotStepMinutes: null,
+  bufferBeforeMinutes: 0,
+  bufferAfterMinutes: 0,
+  minimumNoticeMinutes: 0,
+  bookingWindowDays: null,
+  maxBookingsPerDay: null,
+  location: null,
+  questions: [],
+  isActive: true,
+  position: 0,
+} as const satisfies Partial<Fields>
+
+const notFound = () => new DomainError('not_found', 'event_type_not_found')
+
+const insufficientRole = () =>
+  new DomainError(
+    'forbidden',
+    'insufficient_role',
+    "Only the organization's owners and admins can manage its event types",
+  )
+
+/** The event types the caller can see in the organization they act in, by position. */
+export async function listEventTypes(ctx: ServiceContext): Promise<EventType[]> {
+  const rows = await selectEventTypes(ctx.db)
+    .where('e.organization_id', '=', ctx.principal.organization.id)
+    .where('e.deleted_at', 'is', null)
+    .where((eb) =>
+      eb.or([eb('e.owner_user_id', 'is', null), eb('e.owner_user_id', '=', ctx.principal.user.id)]),
+    )
+    .orderBy('e.position')
+    .orderBy('e.id')
+    .execute()
+  return rows.map(toEventType)
+}
+
+export async function getEventType(ctx: ServiceContext, id: string): Promise<EventType> {
+  const row = await visibleRow(ctx.db, ctx, id)
+  return toEventType(await loadEventType(ctx.db, row.id))
+}
+
+/**
+ * Creates an event type in the organization the caller acts in, hosted by the caller. In
+ * a personal organization it goes on the caller's personal page; in a team, on the team
+ * page, which needs the owner or admin role.
+ */
+export async function createEventType(
+  ctx: ServiceContext,
+  input: EventTypeInput,
+): Promise<EventType> {
+  const userId = ctx.principal.user.id
+  const { personalOwnerId, canManageTeam } = await access(ctx.db, ctx)
+  // A personal organization has no members but its user (see @hourmere/auth).
+  if (personalOwnerId !== null ? personalOwnerId !== userId : !canManageTeam) {
+    throw insufficientRole()
+  }
+  const fields = validFields({ ...DEFAULTS, ...defined(input) })
+  const scheduleId = validScheduleId(input.scheduleId) ?? null
+  return withWriteErrors(() =>
+    ctx.db.transaction().execute(async (trx) => {
+      const { id } = await trx
+        .insertInto('event_types')
+        .values({
+          ...columns(fields),
+          organization_id: ctx.principal.organization.id,
+          owner_user_id: personalOwnerId,
+          scheduling_type: 'individual',
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+      await trx
+        .insertInto('event_type_hosts')
+        .values({ event_type_id: id, user_id: userId, schedule_id: scheduleId })
+        .execute()
+      return toEventType(await loadEventType(trx, id))
+    }),
+  )
+}
+
+/** Changes the given fields; see EventTypeUpdate. */
+export async function updateEventType(
+  ctx: ServiceContext,
+  id: string,
+  input: EventTypeUpdate,
+): Promise<EventType> {
+  const changes = defined(input)
+  return withWriteErrors(() =>
+    ctx.db.transaction().execute(async (trx) => {
+      // Locked, so concurrent updates of different fields cannot undo each other.
+      const row = await visibleRow(trx, ctx, id, { lock: true })
+      await assertCanWrite(trx, ctx, row)
+      const scheduleId = validScheduleId(input.scheduleId)
+      if (Object.keys(changes).length > 0) {
+        const fields = validFields({ ...fieldsOf(row), ...changes })
+        await trx.updateTable('event_types').set(columns(fields)).where('id', '=', row.id).execute()
+      }
+      if (scheduleId !== undefined) {
+        // The composite foreign key keeps the schedule among the host's own schedules.
+        await trx
+          .updateTable('event_type_hosts')
+          .set({ schedule_id: scheduleId })
+          .where('event_type_id', '=', row.id)
+          .execute()
+      }
+      return toEventType(await loadEventType(trx, row.id))
+    }),
+  )
+}
+
+/** Marks the event type deleted; its slug becomes free and its bookings keep it. */
+export async function deleteEventType(ctx: ServiceContext, id: string): Promise<void> {
+  const row = await visibleRow(ctx.db, ctx, id)
+  await assertCanWrite(ctx.db, ctx, row)
+  await ctx.db
+    .updateTable('event_types')
+    .set({ deleted_at: new Date(ctx.now().epochMilliseconds) })
+    .where('id', '=', row.id)
+    .where('deleted_at', 'is', null)
+    .execute()
+}
+
+function selectEventTypes(db: Db) {
+  return db
+    .selectFrom('event_types as e')
+    .selectAll('e')
+    .select((eb) =>
+      eb
+        .selectFrom('event_type_hosts as h')
+        .select('h.schedule_id')
+        .whereRef('h.event_type_id', '=', 'e.id')
+        .orderBy('h.user_id')
+        .limit(1)
+        .as('schedule_id'),
+    )
+}
+
+type EventTypeRow = Awaited<
+  ReturnType<ReturnType<typeof selectEventTypes>['executeTakeFirstOrThrow']>
+>
+
+async function loadEventType(db: Db, id: string): Promise<EventTypeRow> {
+  return selectEventTypes(db).where('e.id', '=', id).executeTakeFirstOrThrow()
+}
+
+/**
+ * A live event type of the caller's organization that the caller may see: team event types
+ * are visible to every member, personal ones only to their owner. Anything else is as good
+ * as missing.
+ */
+async function visibleRow(db: Db, ctx: ServiceContext, id: string, { lock = false } = {}) {
+  if (!isUuid(id)) throw notFound()
+  let query = db
+    .selectFrom('event_types')
+    .selectAll()
+    .where('id', '=', id)
+    .where('organization_id', '=', ctx.principal.organization.id)
+    .where('deleted_at', 'is', null)
+  if (lock) query = query.forUpdate()
+  const row = await query.executeTakeFirst()
+  if (!row || (row.owner_user_id !== null && row.owner_user_id !== ctx.principal.user.id)) {
+    throw notFound()
+  }
+  return row
+}
+
+/** A visible personal event type is the caller's own; a team one needs owner or admin. */
+async function assertCanWrite(db: Db, ctx: ServiceContext, row: { owner_user_id: string | null }) {
+  if (row.owner_user_id !== null) return
+  if (!(await access(db, ctx)).canManageTeam) throw insufficientRole()
+}
+
+/** The caller's standing in the organization they act in. */
+async function access(db: Db, ctx: ServiceContext) {
+  const row = await db
+    .selectFrom('auth.member as m')
+    .leftJoin('personal_organizations as p', 'p.organization_id', 'm.organizationId')
+    .select(['m.role', 'p.user_id as personalOwnerId'])
+    .where('m.userId', '=', ctx.principal.user.id)
+    .where('m.organizationId', '=', ctx.principal.organization.id)
+    .executeTakeFirst()
+  // Better Auth stores several roles comma-separated.
+  const roles = row?.role.split(',').map((role) => role.trim()) ?? []
+  return {
+    personalOwnerId: row?.personalOwnerId ?? null,
+    canManageTeam: roles.includes('owner') || roles.includes('admin'),
+  }
+}
+
+/** Maps constraint violations of event type writes to the caller's mistake. */
+async function withWriteErrors<T>(write: () => Promise<T>): Promise<T> {
+  try {
+    return await write()
+  } catch (error) {
+    const unique = SQLSTATE.uniqueViolation
+    if (
+      isConstraintViolation(error, unique, 'event_types_personal_slug') ||
+      isConstraintViolation(error, unique, 'event_types_team_slug')
+    ) {
+      throw new DomainError(
+        'conflict',
+        'slug_taken',
+        'Another event type on this page already uses this slug',
+        { cause: error },
+      )
+    }
+    if (
+      isConstraintViolation(
+        error,
+        SQLSTATE.foreignKeyViolation,
+        'event_type_hosts_schedule_id_user_id_fkey',
+      )
+    ) {
+      throw new DomainError(
+        'invalid',
+        'schedule_not_found',
+        "scheduleId must be one of the host's schedules",
+        { cause: error },
+      )
+    }
+    throw error
+  }
+}
+
+/** The fields of `input` that are set, so they can be laid over defaults or current values. */
+function defined(input: EventTypeUpdate): Partial<Record<keyof Fields, unknown>> {
+  const result: Partial<Record<keyof Fields, unknown>> = {}
+  for (const name of FIELD_NAMES) if (input[name] !== undefined) result[name] = input[name]
+  return result
+}
+
+const invalid = (message: string) => new DomainError('invalid', 'invalid_event_type', message)
+
+function validFields(candidate: Partial<Record<keyof Fields, unknown>>): Fields {
+  const c = candidate
+  // The engine's own check, so a stored event type can never make availability fail.
+  engineValidation('invalid_event_type', () =>
+    validateEventTypeRules(
+      {
+        durationMinutes: c.durationMinutes,
+        slotStepMinutes: c.slotStepMinutes ?? undefined,
+        bufferBeforeMinutes: c.bufferBeforeMinutes,
+        bufferAfterMinutes: c.bufferAfterMinutes,
+        minimumNoticeMinutes: c.minimumNoticeMinutes,
+        bookingWindowDays: c.bookingWindowDays ?? undefined,
+        maxBookingsPerDay: c.maxBookingsPerDay ?? undefined,
+      },
+      '',
+    ),
+  )
+  if (typeof c.isActive !== 'boolean') throw invalid('isActive must be true or false')
+  const { positionMin, positionMax } = EVENT_TYPE_LIMITS
+  if (
+    !Number.isSafeInteger(c.position) ||
+    (c.position as number) < positionMin ||
+    (c.position as number) > positionMax
+  ) {
+    throw invalid(`position must be a whole number from ${positionMin} to ${positionMax}`)
+  }
+  return {
+    slug: validSlug(c.slug),
+    title: requiredText(c.title, 'title', EVENT_TYPE_LIMITS.titleMaxLength),
+    description: optionalText(c.description, 'description', EVENT_TYPE_LIMITS.descriptionMaxLength),
+    durationMinutes: c.durationMinutes as number,
+    slotStepMinutes: (c.slotStepMinutes ?? null) as number | null,
+    bufferBeforeMinutes: c.bufferBeforeMinutes as number,
+    bufferAfterMinutes: c.bufferAfterMinutes as number,
+    minimumNoticeMinutes: c.minimumNoticeMinutes as number,
+    bookingWindowDays: (c.bookingWindowDays ?? null) as number | null,
+    maxBookingsPerDay: (c.maxBookingsPerDay ?? null) as number | null,
+    location: validLocation(c.location),
+    questions: validQuestions(c.questions),
+    isActive: c.isActive,
+    position: c.position as number,
+  }
+}
+
+function validSlug(value: unknown): string {
+  if (typeof value !== 'string' || !SLUG_PATTERN.test(value)) {
+    throw new DomainError(
+      'invalid',
+      'invalid_slug',
+      'slug must be 1–64 lowercase letters, digits or hyphens, and start and end with a letter or digit',
+    )
+  }
+  return value
+}
+
+function requiredText(value: unknown, path: string, max: number): string {
+  const text = typeof value === 'string' ? value.trim() : ''
+  if (text === '' || text.length > max) throw invalid(`${path} must be 1–${max} characters`)
+  return text
+}
+
+/** Trimmed; blank means none. */
+function optionalText(value: unknown, path: string, max: number): string | null {
+  if (value === null) return null
+  if (typeof value !== 'string' || value.trim().length > max) {
+    throw invalid(`${path} must be text of at most ${max} characters, or null`)
+  }
+  return value.trim() || null
+}
+
+function validScheduleId(value: unknown): string | null | undefined {
+  if (value === undefined || value === null) return value
+  if (!isUuid(value)) {
+    throw new DomainError(
+      'invalid',
+      'schedule_not_found',
+      "scheduleId must be one of the host's schedules",
+    )
+  }
+  return value
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** Whether `value` has only these keys, so a misspelled field is reported, not dropped. */
+const onlyKeys = (value: Record<string, unknown>, keys: readonly string[]) =>
+  Object.keys(value).every((key) => keys.includes(key))
+
+function validLocation(value: unknown): EventTypeLocation | null {
+  if (value === null) return null
+  const fail = (message: string): never => {
+    throw new DomainError('invalid', 'invalid_location', message)
+  }
+  if (!isPlainObject(value)) return fail('location must be an object with a kind, or null')
+  const { kind } = value
+  const expect = (keys: readonly string[]) => {
+    if (!onlyKeys(value, ['kind', ...keys])) {
+      fail(
+        `A ${kind} location has ${keys.length ? `only kind and ${keys.join(', ')}` : 'only a kind'}`,
+      )
+    }
+  }
+  switch (kind) {
+    case 'google_meet':
+    case 'zoom':
+      expect([])
+      return { kind }
+    case 'phone': {
+      expect(['number'])
+      const { number } = value
+      if (typeof number !== 'string' || !PHONE_NUMBER_PATTERN.test(number)) {
+        return fail('location.number must be a phone number in E.164 format, e.g. +14155550123')
+      }
+      return { kind, number }
+    }
+    case 'in_person': {
+      expect(['address'])
+      const address = typeof value.address === 'string' ? value.address.trim() : ''
+      const max = EVENT_TYPE_LIMITS.addressMaxLength
+      if (address === '' || address.length > max) {
+        return fail(`location.address must be 1–${max} characters`)
+      }
+      return { kind, address }
+    }
+    case 'link': {
+      expect(['url'])
+      const { url } = value
+      if (
+        typeof url !== 'string' ||
+        url.length > EVENT_TYPE_LIMITS.urlMaxLength ||
+        !URL.canParse(url) ||
+        !['http:', 'https:'].includes(new URL(url).protocol)
+      ) {
+        return fail(
+          `location.url must be an http or https URL of at most ${EVENT_TYPE_LIMITS.urlMaxLength} characters`,
+        )
+      }
+      return { kind, url }
+    }
+    default:
+      return fail(`location.kind must be one of ${LOCATION_KINDS.join(', ')}`)
+  }
+}
+
+function validQuestions(value: unknown): Question[] {
+  const fail = (message: string): never => {
+    throw new DomainError('invalid', 'invalid_questions', message)
+  }
+  const L = EVENT_TYPE_LIMITS
+  if (!Array.isArray(value) || value.length > L.questions) {
+    return fail(`questions must be a list of at most ${L.questions} questions`)
+  }
+  const ids = new Set<string>()
+  return Array.from(value, (item: unknown, i): Question => {
+    const path = `questions[${i}]`
+    if (!isPlainObject(item)) return fail(`${path} must be an object`)
+    if (!onlyKeys(item, ['id', 'label', 'type', 'required', 'options'])) {
+      return fail(`${path} has only id, label, type, required and options`)
+    }
+    const { id, type, required = false, options } = item
+    if (typeof id !== 'string' || !QUESTION_ID_PATTERN.test(id)) {
+      return fail(
+        `${path}.id must be 1–${L.questionIdMaxLength} letters, digits, hyphens or underscores, starting with a letter or digit`,
+      )
+    }
+    if (ids.has(id)) return fail(`${path}.id ${id} appears more than once`)
+    ids.add(id)
+    const label = typeof item.label === 'string' ? item.label.trim() : ''
+    if (label === '' || label.length > L.questionLabelMaxLength) {
+      return fail(`${path}.label must be 1–${L.questionLabelMaxLength} characters`)
+    }
+    if (!QUESTION_TYPES.includes(type as QuestionType)) {
+      return fail(`${path}.type must be one of ${QUESTION_TYPES.join(', ')}`)
+    }
+    if (typeof required !== 'boolean') return fail(`${path}.required must be true or false`)
+    const question: Question = { id, label, type: type as QuestionType, required }
+    if (!CHOICE_TYPES.includes(question.type)) {
+      if (options !== undefined) {
+        return fail(`${path}.options is only for select and multi_select questions`)
+      }
+      return question
+    }
+    if (!Array.isArray(options) || options.length === 0 || options.length > L.options) {
+      return fail(`${path}.options must list 1–${L.options} choices`)
+    }
+    const choices = options.map((option: unknown) =>
+      typeof option === 'string' ? option.trim() : '',
+    )
+    if (choices.some((choice) => choice === '' || choice.length > L.optionMaxLength)) {
+      return fail(`${path}.options must each be 1–${L.optionMaxLength} characters`)
+    }
+    if (new Set(choices).size !== choices.length) {
+      return fail(`${path}.options must not repeat a choice`)
+    }
+    return { ...question, options: choices }
+  })
+}
+
+function fieldsOf(row: {
+  slug: string
+  title: string
+  description: string | null
+  duration_minutes: number
+  slot_step_minutes: number | null
+  buffer_before_minutes: number
+  buffer_after_minutes: number
+  minimum_notice_minutes: number
+  booking_window_days: number | null
+  max_bookings_per_day: number | null
+  location: Json | null
+  questions: Json
+  is_active: boolean
+  position: number
+}): Fields {
+  return {
+    slug: row.slug,
+    title: row.title,
+    description: row.description,
+    durationMinutes: row.duration_minutes,
+    slotStepMinutes: row.slot_step_minutes,
+    bufferBeforeMinutes: row.buffer_before_minutes,
+    bufferAfterMinutes: row.buffer_after_minutes,
+    minimumNoticeMinutes: row.minimum_notice_minutes,
+    bookingWindowDays: row.booking_window_days,
+    maxBookingsPerDay: row.max_bookings_per_day,
+    location: row.location as EventTypeLocation | null,
+    questions: row.questions as unknown as Question[],
+    isActive: row.is_active,
+    position: row.position,
+  }
+}
+
+function columns(fields: Fields) {
+  return {
+    slug: fields.slug,
+    title: fields.title,
+    description: fields.description,
+    duration_minutes: fields.durationMinutes,
+    slot_step_minutes: fields.slotStepMinutes,
+    buffer_before_minutes: fields.bufferBeforeMinutes,
+    buffer_after_minutes: fields.bufferAfterMinutes,
+    minimum_notice_minutes: fields.minimumNoticeMinutes,
+    booking_window_days: fields.bookingWindowDays,
+    max_bookings_per_day: fields.maxBookingsPerDay,
+    location: fields.location === null ? null : jsonb(fields.location),
+    questions: jsonb(fields.questions),
+    is_active: fields.isActive,
+    position: fields.position,
+  }
+}
+
+function toEventType(row: EventTypeRow): EventType {
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    ownerUserId: row.owner_user_id,
+    ...fieldsOf(row),
+    schedulingType: row.scheduling_type as SchedulingType,
+    scheduleId: row.schedule_id,
+    createdAt: timestamp(row.created_at),
+    updatedAt: timestamp(row.updated_at),
+  }
+}

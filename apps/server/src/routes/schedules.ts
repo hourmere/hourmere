@@ -1,0 +1,330 @@
+import { createRoute, z } from '@hono/zod-openapi'
+import {
+  createSchedule,
+  deleteSchedule,
+  deleteScheduleOverride,
+  getSchedule,
+  listScheduleOverrides,
+  listSchedules,
+  putScheduleOverride,
+  SCHEDULE_NAME_MAX_LENGTH,
+  updateSchedule,
+} from '@hourmere/scheduling'
+import {
+  authenticated,
+  CROSS_ORIGIN_WRITE,
+  errorResponses,
+  json,
+  type RouteModule,
+  type ServiceDeps,
+  serviceContext,
+} from '../openapi.ts'
+
+// Schemas check the JSON shape (400 invalid_request); the service checks values with the
+// availability engine's own rules and answers with specific codes, the same for REST and
+// MCP. Limits are documented here.
+
+const WallClockInterval = z
+  .strictObject({
+    start: z.string().openapi({
+      description: 'Local time HH:MM, 00:00–23:59',
+      pattern: '^\\d{2}:\\d{2}$',
+      example: '09:00',
+    }),
+    end: z.string().openapi({
+      description: 'Local time HH:MM after start; 24:00 is the end of the day',
+      pattern: '^\\d{2}:\\d{2}$',
+      example: '17:00',
+    }),
+  })
+  .openapi('WallClockInterval', {
+    description: 'Intervals of one day must not overlap; touching ones are joined',
+  })
+
+const day = z.array(WallClockInterval).optional()
+const WeeklyHours = z
+  .strictObject({
+    monday: day,
+    tuesday: day,
+    wednesday: day,
+    thursday: day,
+    friday: day,
+    saturday: day,
+    sunday: day,
+  })
+  .openapi('WeeklyHours', { description: 'A missing or empty weekday is unavailable' })
+
+const Schedule = z
+  .object({
+    id: z.uuid(),
+    name: z.string(),
+    timeZone: z.string().openapi({ example: 'Europe/Berlin' }),
+    weeklyHours: WeeklyHours,
+    isDefault: z.boolean().openapi({
+      description: 'Event types use the default schedule unless they name another',
+    }),
+    createdAt: z.iso.datetime(),
+    updatedAt: z.iso.datetime(),
+  })
+  .openapi('Schedule')
+
+const name = z.string().openapi({ minLength: 1, maxLength: SCHEDULE_NAME_MAX_LENGTH })
+const timeZone = z
+  .string()
+  .openapi({ description: 'IANA time zone name', example: 'Europe/Berlin' })
+
+const ScheduleInput = z
+  .strictObject({
+    name,
+    timeZone,
+    weeklyHours: WeeklyHours,
+    isDefault: z.boolean().optional().openapi({
+      description:
+        "Make it the default (the previous default stops being one). The user's first schedule is always the default.",
+    }),
+  })
+  .openapi('ScheduleInput')
+
+const ScheduleUpdate = z
+  .strictObject({
+    name: name.optional(),
+    timeZone: timeZone.optional(),
+    weeklyHours: WeeklyHours.optional(),
+    isDefault: z.boolean().optional().openapi({
+      description:
+        'true makes it the default. The default cannot be set to false; make another schedule the default instead.',
+    }),
+  })
+  .openapi('ScheduleUpdate')
+
+const ScheduleList = z.object({ data: z.array(Schedule) }).openapi('ScheduleList')
+
+const date = z.string().openapi({ format: 'date', example: '2026-12-24' })
+
+const ScheduleOverride = z
+  .object({
+    date,
+    intervals: z.array(WallClockInterval).openapi({ description: 'Empty: unavailable all day' }),
+  })
+  .openapi('ScheduleOverride')
+
+const ScheduleOverrideInput = z
+  .strictObject({
+    intervals: z.array(WallClockInterval).openapi({
+      description: 'Replace the weekly hours on this date; [] = unavailable all day',
+    }),
+  })
+  .openapi('ScheduleOverrideInput')
+
+const ScheduleOverrideList = z
+  .object({ data: z.array(ScheduleOverride) })
+  .openapi('ScheduleOverrideList')
+
+const IdParams = z.object({ id: z.string().openapi({ format: 'uuid' }) })
+const OverrideParams = IdParams.extend({
+  date: date.openapi({ description: 'Local date in the schedule’s time zone' }),
+})
+
+const tags = ['Schedules']
+const notFound = 'schedule_not_found: no such schedule among the caller’s'
+
+export function scheduleRoutes(deps: ServiceDeps): RouteModule {
+  return ({ app, caller }) => {
+    const route = { security: authenticated, middleware: caller, tags }
+
+    app.openapi(
+      createRoute({
+        ...route,
+        method: 'get',
+        path: '/api/v1/schedules',
+        summary: "The caller's schedules",
+        responses: {
+          200: { description: 'Oldest first', content: json(ScheduleList) },
+          ...errorResponses({}),
+        },
+      }),
+      async (c) =>
+        c.json({ data: await listSchedules(serviceContext(deps, c.var.principal)) }, 200),
+    )
+
+    app.openapi(
+      createRoute({
+        ...route,
+        method: 'post',
+        path: '/api/v1/schedules',
+        summary: 'Create a schedule',
+        request: { body: { content: json(ScheduleInput), required: true } },
+        responses: {
+          201: { description: 'The new schedule', content: json(Schedule) },
+          ...errorResponses({
+            400: 'invalid_request, invalid_schedule, invalid_time_zone or invalid_weekly_hours',
+            403: CROSS_ORIGIN_WRITE,
+          }),
+        },
+      }),
+      async (c) =>
+        c.json(
+          await createSchedule(serviceContext(deps, c.var.principal), c.req.valid('json')),
+          201,
+        ),
+    )
+
+    app.openapi(
+      createRoute({
+        ...route,
+        method: 'get',
+        path: '/api/v1/schedules/{id}',
+        summary: 'A schedule',
+        request: { params: IdParams },
+        responses: {
+          200: { description: 'The schedule', content: json(Schedule) },
+          ...errorResponses({ 404: notFound }),
+        },
+      }),
+      async (c) =>
+        c.json(
+          await getSchedule(serviceContext(deps, c.var.principal), c.req.valid('param').id),
+          200,
+        ),
+    )
+
+    app.openapi(
+      createRoute({
+        ...route,
+        method: 'patch',
+        path: '/api/v1/schedules/{id}',
+        summary: 'Change a schedule',
+        request: { params: IdParams, body: { content: json(ScheduleUpdate), required: true } },
+        responses: {
+          200: { description: 'The changed schedule', content: json(Schedule) },
+          ...errorResponses({
+            400: 'invalid_request, invalid_schedule, invalid_time_zone or invalid_weekly_hours',
+            403: CROSS_ORIGIN_WRITE,
+            404: notFound,
+            409: 'schedule_is_default: isDefault false on the default schedule',
+          }),
+        },
+      }),
+      async (c) =>
+        c.json(
+          await updateSchedule(
+            serviceContext(deps, c.var.principal),
+            c.req.valid('param').id,
+            c.req.valid('json'),
+          ),
+          200,
+        ),
+    )
+
+    app.openapi(
+      createRoute({
+        ...route,
+        method: 'delete',
+        path: '/api/v1/schedules/{id}',
+        summary: 'Delete a schedule',
+        description:
+          "Its overrides go with it; event types that used it fall back to the host's default schedule.",
+        request: { params: IdParams },
+        responses: {
+          204: { description: 'Deleted' },
+          ...errorResponses({
+            403: CROSS_ORIGIN_WRITE,
+            404: notFound,
+            409: 'schedule_is_default: the default schedule while the user has others',
+          }),
+        },
+      }),
+      async (c) => {
+        await deleteSchedule(serviceContext(deps, c.var.principal), c.req.valid('param').id)
+        return c.body(null, 204)
+      },
+    )
+
+    app.openapi(
+      createRoute({
+        ...route,
+        method: 'get',
+        path: '/api/v1/schedules/{id}/overrides',
+        summary: "A schedule's date overrides",
+        request: {
+          params: IdParams,
+          query: z.object({
+            from: date.optional().openapi({ description: 'First date, inclusive' }),
+            to: date.optional().openapi({ description: 'Last date, inclusive' }),
+          }),
+        },
+        responses: {
+          200: { description: 'By date', content: json(ScheduleOverrideList) },
+          ...errorResponses({
+            400: 'invalid_request, invalid_date or invalid_date_range',
+            404: notFound,
+          }),
+        },
+      }),
+      async (c) => {
+        const overrides = await listScheduleOverrides(
+          serviceContext(deps, c.var.principal),
+          c.req.valid('param').id,
+          c.req.valid('query'),
+        )
+        return c.json({ data: overrides }, 200)
+      },
+    )
+
+    app.openapi(
+      createRoute({
+        ...route,
+        method: 'put',
+        path: '/api/v1/schedules/{id}/overrides/{date}',
+        summary: 'Set the hours of one date',
+        request: {
+          params: OverrideParams,
+          body: { content: json(ScheduleOverrideInput), required: true },
+        },
+        responses: {
+          200: { description: 'The override was replaced', content: json(ScheduleOverride) },
+          201: { description: 'The override was created', content: json(ScheduleOverride) },
+          ...errorResponses({
+            400: 'invalid_request, invalid_date or invalid_intervals',
+            403: CROSS_ORIGIN_WRITE,
+            404: notFound,
+          }),
+        },
+      }),
+      async (c) => {
+        const { id, date } = c.req.valid('param')
+        const { override, created } = await putScheduleOverride(
+          serviceContext(deps, c.var.principal),
+          id,
+          date,
+          c.req.valid('json').intervals,
+        )
+        return created ? c.json(override, 201) : c.json(override, 200)
+      },
+    )
+
+    app.openapi(
+      createRoute({
+        ...route,
+        method: 'delete',
+        path: '/api/v1/schedules/{id}/overrides/{date}',
+        summary: 'Remove the override of one date',
+        description: 'The weekly hours apply to the date again.',
+        request: { params: OverrideParams },
+        responses: {
+          204: { description: 'Removed' },
+          ...errorResponses({
+            400: 'invalid_date',
+            403: CROSS_ORIGIN_WRITE,
+            404: `${notFound}; schedule_override_not_found: the date has no override`,
+          }),
+        },
+      }),
+      async (c) => {
+        const { id, date } = c.req.valid('param')
+        await deleteScheduleOverride(serviceContext(deps, c.var.principal), id, date)
+        return c.body(null, 204)
+      },
+    )
+  }
+}

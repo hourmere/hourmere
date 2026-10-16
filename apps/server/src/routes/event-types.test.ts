@@ -1,0 +1,234 @@
+import type { Db } from '@hourmere/db'
+import { createTestTeam, createTestUser, type TestUser } from '@hourmere/scheduling/testing'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { createTestApp, documentedOperations, productApp, type TestApp } from './test-app.ts'
+
+const serverUrl = process.env.DATABASE_URL
+
+describe('event type routes in the OpenAPI document', () => {
+  it('lists every route as authenticated', async () => {
+    const paths = await documentedOperations(productApp({} as Db))
+    expect(Object.keys(paths['/api/v1/event-types'] ?? {})).toEqual(['get', 'post'])
+    expect(Object.keys(paths['/api/v1/event-types/{id}'] ?? {})).toEqual(['get', 'patch', 'delete'])
+    for (const path of ['/api/v1/event-types', '/api/v1/event-types/{id}']) {
+      for (const operation of Object.values(paths[path] ?? {})) {
+        expect(operation.security).toEqual([{ apiKey: [] }, { session: [] }])
+        expect(Object.keys(operation.responses)).toEqual(expect.arrayContaining(['401', '429']))
+      }
+    }
+    expect(Object.keys(paths['/api/v1/event-types']?.post?.responses ?? {})).toEqual(
+      expect.arrayContaining(['201', '400', '403', '409']),
+    )
+  })
+})
+
+describe.skipIf(!serverUrl)('event type routes', () => {
+  let t: TestApp
+
+  beforeAll(async () => {
+    t = await createTestApp(serverUrl as string)
+  })
+
+  afterAll(async () => {
+    await t?.drop()
+  })
+
+  const api = (user: TestUser) => t.as(user.principal)
+  const body = (overrides: Record<string, unknown> = {}) => ({
+    slug: 'intro',
+    title: 'Intro call',
+    durationMinutes: 30,
+    ...overrides,
+  })
+  const idOf = (answer: { body: unknown }) => (answer.body as { id: string }).id
+
+  it('requires a caller', async () => {
+    expect((await t.anonymous.get('/api/v1/event-types')).status).toBe(401)
+    expect((await t.anonymous.post('/api/v1/event-types', body())).status).toBe(401)
+  })
+
+  it('creates, lists, reads, changes and deletes event types', async () => {
+    const user = await createTestUser(t.db)
+    const created = await api(user).post(
+      '/api/v1/event-types',
+      body({
+        location: { kind: 'phone', number: '+14155550123' },
+        questions: [{ id: 'company', label: 'Company', type: 'short_text' }],
+      }),
+    )
+    expect(created.status).toBe(201)
+    expect(created.body).toEqual({
+      id: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      organizationId: user.principal.organization.id,
+      ownerUserId: user.id,
+      slug: 'intro',
+      title: 'Intro call',
+      description: null,
+      durationMinutes: 30,
+      slotStepMinutes: null,
+      bufferBeforeMinutes: 0,
+      bufferAfterMinutes: 0,
+      minimumNoticeMinutes: 0,
+      bookingWindowDays: null,
+      maxBookingsPerDay: null,
+      schedulingType: 'individual',
+      location: { kind: 'phone', number: '+14155550123' },
+      questions: [{ id: 'company', label: 'Company', type: 'short_text', required: false }],
+      isActive: true,
+      position: 0,
+      scheduleId: null,
+      createdAt: expect.stringMatching(/Z$/),
+      updatedAt: expect.stringMatching(/Z$/),
+    })
+    const id = idOf(created)
+    expect(await api(user).get('/api/v1/event-types')).toEqual({
+      status: 200,
+      body: { data: [created.body] },
+    })
+    expect(await api(user).get(`/api/v1/event-types/${id}`)).toEqual({
+      status: 200,
+      body: created.body,
+    })
+
+    const changed = await api(user).patch(`/api/v1/event-types/${id}`, {
+      title: 'Renamed',
+      location: null,
+      maxBookingsPerDay: 2,
+    })
+    expect(changed).toMatchObject({
+      status: 200,
+      body: { title: 'Renamed', location: null, maxBookingsPerDay: 2, slug: 'intro' },
+    })
+
+    expect(await api(user).delete(`/api/v1/event-types/${id}`)).toEqual({ status: 204, body: null })
+    expect(await api(user).get(`/api/v1/event-types/${id}`)).toEqual({
+      status: 404,
+      body: { error: 'event_type_not_found' },
+    })
+    expect((await api(user).get('/api/v1/event-types')).body).toEqual({ data: [] })
+  })
+
+  it('answers 409 slug_taken for a slug used on the same page', async () => {
+    const user = await createTestUser(t.db)
+    await api(user).post('/api/v1/event-types', body())
+    expect(await api(user).post('/api/v1/event-types', body())).toEqual({
+      status: 409,
+      body: {
+        error: 'slug_taken',
+        message: 'Another event type on this page already uses this slug',
+      },
+    })
+  })
+
+  it("answers 404 for another organization's event types", async () => {
+    const [owner, other] = [await createTestUser(t.db), await createTestUser(t.db)]
+    const id = idOf(await api(owner).post('/api/v1/event-types', body()))
+    for (const res of [
+      await api(other).get(`/api/v1/event-types/${id}`),
+      await api(other).patch(`/api/v1/event-types/${id}`, { title: 'X' }),
+      await api(other).delete(`/api/v1/event-types/${id}`),
+      await api(owner).get('/api/v1/event-types/not-a-uuid'),
+    ]) {
+      expect(res).toEqual({ status: 404, body: { error: 'event_type_not_found' } })
+    }
+  })
+
+  it('lets team members read and owners or admins write', async () => {
+    const [admin, member] = [await createTestUser(t.db), await createTestUser(t.db)]
+    const team = await createTestTeam(t.db, [
+      { user: admin, role: 'admin' },
+      { user: member, role: 'member' },
+    ])
+    const asAdmin = t.as(team.as(admin))
+    const asMember = t.as(team.as(member))
+    const created = await asAdmin.post('/api/v1/event-types', body({ slug: 'team-call' }))
+    expect(created).toMatchObject({
+      status: 201,
+      body: { organizationId: team.id, ownerUserId: null },
+    })
+    const id = idOf(created)
+    expect(await asMember.get(`/api/v1/event-types/${id}`)).toEqual({
+      status: 200,
+      body: created.body,
+    })
+    const refused = {
+      status: 403,
+      body: {
+        error: 'insufficient_role',
+        message: "Only the organization's owners and admins can manage its event types",
+      },
+    }
+    expect(await asMember.post('/api/v1/event-types', body({ slug: 'mine' }))).toEqual(refused)
+    expect(await asMember.patch(`/api/v1/event-types/${id}`, { title: 'X' })).toEqual(refused)
+    expect(await asMember.delete(`/api/v1/event-types/${id}`)).toEqual(refused)
+    expect((await asAdmin.delete(`/api/v1/event-types/${id}`)).status).toBe(204)
+  })
+
+  it("answers 400 schedule_not_found for a schedule that is not the host's", async () => {
+    const [user, other] = [await createTestUser(t.db), await createTestUser(t.db)]
+    const schedule = await api(other).post('/api/v1/schedules', {
+      name: 'Theirs',
+      timeZone: 'UTC',
+      weeklyHours: {},
+    })
+    const res = await api(user).post('/api/v1/event-types', body({ scheduleId: idOf(schedule) }))
+    expect(res).toEqual({
+      status: 400,
+      body: {
+        error: 'schedule_not_found',
+        message: "scheduleId must be one of the host's schedules",
+      },
+    })
+
+    const own = await api(user).post('/api/v1/schedules', {
+      name: 'Mine',
+      timeZone: 'UTC',
+      weeklyHours: {},
+    })
+    const ok = await api(user).post('/api/v1/event-types', body({ scheduleId: idOf(own) }))
+    expect(ok).toMatchObject({ status: 201, body: { scheduleId: idOf(own) } })
+  })
+
+  it.each<[string, Record<string, unknown>, string]>([
+    ['a duration out of bounds', { durationMinutes: 0 }, 'invalid_event_type'],
+    ['a notice beyond a year', { minimumNoticeMinutes: 525601 }, 'invalid_event_type'],
+    ['a fractional duration', { durationMinutes: 1.5 }, 'invalid_request'],
+    ['a malformed slug', { slug: 'Intro Call' }, 'invalid_slug'],
+    [
+      'a phone number not in E.164',
+      { location: { kind: 'phone', number: '555-0123' } },
+      'invalid_location',
+    ],
+    ['an unknown location kind', { location: { kind: 'skype' } }, 'invalid_request'],
+    [
+      'a select question without options',
+      { questions: [{ id: 'q', label: 'Q', type: 'select' }] },
+      'invalid_questions',
+    ],
+    [
+      'an unknown question type',
+      { questions: [{ id: 'q', label: 'Q', type: 'date' }] },
+      'invalid_request',
+    ],
+    ['an unknown field', { color: 'blue' }, 'invalid_request'],
+    ['a missing title', { title: undefined }, 'invalid_request'],
+  ])('refuses %s with 400', async (_, change, error) => {
+    const user = await createTestUser(t.db)
+    const res = await api(user).post('/api/v1/event-types', body(change))
+    expect(res.status).toBe(400)
+    expect(res.body).toMatchObject({ error, message: expect.any(String) })
+  })
+
+  it('names the offending rule and its bounds in the message', async () => {
+    const user = await createTestUser(t.db)
+    expect(await api(user).post('/api/v1/event-types', body({ bufferAfterMinutes: 1441 }))).toEqual(
+      {
+        status: 400,
+        body: {
+          error: 'invalid_event_type',
+          message: 'bufferAfterMinutes must be a whole number from 0 to 1440, got 1441',
+        },
+      },
+    )
+  })
+})
