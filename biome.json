@@ -11,7 +11,9 @@
       "!**/dist",
       "!package-lock.json",
       "!packages/db/src/tables.ts",
-      "!apps/site/**/*.svg"
+      "!apps/web/src/api/schema.d.ts",
+      "!apps/site/**/*.svg",
+      "!apps/web/**/*.svg"
     ]
   },
   "formatter": {
