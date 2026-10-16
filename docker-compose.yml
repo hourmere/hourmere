@@ -7,7 +7,10 @@ services:
   app:
     build: .
     environment:
-      DATABASE_URL: postgres://hourmere:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/hourmere
+      # The password stays out of the URL so it may contain any characters (/, #, ?, …);
+      # the Postgres client reads PGPASSWORD when the URL has none.
+      DATABASE_URL: postgres://hourmere@db:5432/hourmere
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:3000}
     ports:
       - "127.0.0.1:${PORT:-3000}:3000"

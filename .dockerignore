@@ -9,3 +9,4 @@ temp
 !.env.example
 .DS_Store
 coverage
+.claude
