@@ -58,8 +58,11 @@ export function createSmtpMailer({ url, from }: SmtpMailerOptions): Mailer {
   }
 }
 
-/** Characters JSON leaves alone but terminals or log tools may treat as line breaks. */
-const LINE_BREAKING = /[\u007f-\u009f\u2028\u2029]/g
+/**
+ * Characters JSON leaves alone but terminals or log tools may treat as line breaks, and
+ * bidi controls that can make a line read differently from what it contains.
+ */
+const LINE_BREAKING = /[\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g
 const unicodeEscape = (c: string) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`
 
 /**

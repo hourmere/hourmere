@@ -99,6 +99,13 @@ export async function apiKeyRules(ctx: AuthMiddlewareContext, db: Db) {
   const fromServer = !ctx.request && typeof body.userId === 'string' ? body.userId : undefined
   const userId = session?.user.id ?? fromServer
   if (!userId || !isUuid(userId)) return
+  // Switching a key off is always allowed: it only takes power away. (Better Auth still
+  // checks that the key belongs to the caller.)
+  const disablingOnly =
+    !creating &&
+    body.enabled === false &&
+    Object.keys(body).every((k) => k === 'keyId' || k === 'enabled' || k === 'configId')
+  if (disablingOnly) return
   await mayHoldApiKeys(db, userId, session?.session.id)
   if (!withMetadata) return
   const organizationId = metadata.organizationId ?? (await ensurePersonalOrganization(db, userId))

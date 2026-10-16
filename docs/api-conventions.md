@@ -68,7 +68,7 @@ for failures the caller can act on; the server maps the kind to a status and ans
 Anything else a service throws is a bug: 500 `internal_error`, logged on one escaped line.
 A lower-level error wrapped as a DomainError's `cause` is logged the same way and never sent
 to the client.
-New route groups are `RouteModule`s (`apps/server/src/openapi.ts`) created in `index.ts` with
+New route groups are `RouteModule`s (`apps/server/src/openapi.ts`) created in `server.ts` with
 their services and registered by `createApp`; `apps/server/src/app.test.ts` has a template.
 
 ## Authentication

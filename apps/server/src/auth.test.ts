@@ -46,15 +46,21 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
     socialProviders?: { google?: OAuthClient; microsoft?: OAuthClient }
     socialProviderOptions?: AuthConfig['socialProviderOptions']
     trustedProxies?: string[]
+    pool?: pg.Pool
   }
 
   function instance(
     publicUrl: string,
-    { socialProviders = {}, socialProviderOptions = {}, trustedProxies = [] }: InstanceOptions = {},
+    {
+      socialProviders = {},
+      socialProviderOptions = {},
+      trustedProxies = [],
+      pool = authPool,
+    }: InstanceOptions = {},
   ): Instance {
     const secret = randomBytes(32).toString('base64')
     const auth = createAuth({
-      pool: authPool,
+      pool,
       db,
       baseURL: publicUrl,
       secret,
@@ -202,6 +208,58 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
     return { id: row.rows[0]?.id as string, key }
   }
 
+  /**
+   * A Better Auth pool that can pause a request: once armed with a pattern, the first
+   * statement whose SQL matches runs (and commits), then its result is held back until
+   * `release()`. Lets a test interleave another request at an exact point.
+   */
+  function pausingPool() {
+    const pool = createAuthPool(testDb.url)
+    let pattern: RegExp | undefined
+    let reached = () => {}
+    let release = () => {}
+    const paused = new Promise<void>((resolve) => {
+      reached = resolve
+    })
+    const resumed = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const forward = <T extends object>(target: T, prop: string | symbol) => {
+      const value = Reflect.get(target, prop)
+      return typeof value === 'function' ? value.bind(target) : value
+    }
+    const holding = (client: pg.PoolClient) =>
+      new Proxy(client, {
+        get(target, prop) {
+          if (prop !== 'query') return forward(target, prop)
+          return async (...args: unknown[]) => {
+            const result = await (target.query as (...a: unknown[]) => Promise<unknown>)(...args)
+            if (typeof args[0] === 'string' && pattern?.test(args[0])) {
+              pattern = undefined
+              reached()
+              await resumed
+            }
+            return result
+          }
+        },
+      })
+    const proxy = new Proxy(pool, {
+      get(target, prop) {
+        if (prop === 'connect') return async () => holding(await target.connect())
+        return forward(target, prop)
+      },
+    })
+    return {
+      pool: proxy,
+      arm: (p: RegExp) => {
+        pattern = p
+      },
+      paused,
+      release: () => release(),
+      end: () => pool.end(),
+    }
+  }
+
   /** Captures everything printed while `fn` runs, split into lines. */
   async function printedLines(fn: () => Promise<unknown>): Promise<string[]> {
     const calls: unknown[][] = []
@@ -313,6 +371,143 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
         true,
       )
       expect(lines.filter((l) => l.startsWith('[mail]'))).toEqual([])
+    })
+
+    it('accept only known sort and filter fields, exact filters, and UUIDs for id filters', async () => {
+      const cookie = await signIn('lister@example.com')
+      const self = await userId('lister@example.com')
+      const other = '00000000-0000-4000-8000-000000000000'
+      const forged = encodeURIComponent('zz\n[mail] {"forged":true}')
+      const members = '/api/auth/organization/list-members'
+      const cases: [string, number, string?][] = [
+        [`${members}?filterField=id&filterValue=${forged}`, 400, 'INVALID_ID'],
+        [
+          `${members}?filterField=userId&filterOperator=in&filterValue=${self}&filterValue=zz`,
+          400,
+          'INVALID_ID',
+        ],
+        [
+          `${members}?filterField=userId&filterOperator=in&filterValue=${self}`,
+          400,
+          'INVALID_FILTER',
+        ],
+        [
+          `${members}?filterField=userId&filterValue=${self}&filterValue=${self}`,
+          400,
+          'INVALID_FILTER',
+        ],
+        [
+          `${members}?filterField=role&filterOperator=contains&filterValue=own`,
+          400,
+          'INVALID_FILTER',
+        ],
+        [`${members}?filterField=role`, 400, 'INVALID_FILTER'],
+        [`${members}?filterField=createdAt&filterValue=2026-01-01`, 400, 'INVALID_FIELD'],
+        [`${members}?sortBy=${forged}`, 400, 'INVALID_FIELD'],
+        [`${members}?filterField=nope&filterValue=1`, 400, 'INVALID_FIELD'],
+        [`/api/auth/api-key/list?sortBy=${forged}`, 400, 'INVALID_FIELD'],
+        ['/api/auth/api-key/list?filterField=name&filterValue=x', 400, 'INVALID_FIELD'],
+        [`${members}?filterField=userId&filterValue=${self}`, 200],
+        [
+          `${members}?filterField=userId&filterOperator=in&filterValue=${self}&filterValue=${other}`,
+          200,
+        ],
+        [`${members}?sortBy=createdAt&sortDirection=desc`, 200],
+        ['/api/auth/api-key/list?sortBy=createdAt', 200],
+        [`${members}?offset=abc`, 400, 'INVALID_QUERY'],
+        [`${members}?offset=0.5`, 400, 'INVALID_QUERY'],
+        [`${members}?limit=-1`, 400, 'INVALID_QUERY'],
+        [`${members}?offset=1e3`, 400, 'INVALID_QUERY'],
+        ['/api/auth/api-key/list?limit=abc', 400, 'INVALID_QUERY'],
+        [`${members}?filterField=role&filterValue=a%00b`, 400, 'INVALID_FILTER'],
+        [`${members}?organizationSlug=a%00b`, 400, 'INVALID_QUERY'],
+        // A repeated slug is refused rather than answered for some other organization.
+        [
+          `${members}?organizationSlug=a&organizationSlug=b&filterField=role&filterValue=admin`,
+          400,
+          'INVALID_QUERY',
+        ],
+        [`${members}?limit=10&offset=0`, 200],
+      ]
+      for (const [path, status, code] of cases) {
+        const res = await main.app.request(path, { headers: { cookie } })
+        expect(res.status, path).toBe(status)
+        if (code) expect(await res.json(), path).toMatchObject({ code })
+      }
+
+      // Server-side calls pass paging as numbers, which Better Auth accepts too.
+      const headers = new Headers({ cookie })
+      const paging = { limit: 10, offset: 0 }
+      await expect(main.auth.api.listMembers({ headers, query: paging })).resolves.toMatchObject({
+        total: 1,
+      })
+      await expect(main.auth.api.listApiKeys({ headers, query: paging })).resolves.toMatchObject({
+        total: 0,
+      })
+      for (const query of [{ offset: -1 }, { offset: 0.5 }, { limit: 1e9 }]) {
+        await expect(
+          main.auth.api.listMembers({ headers, query }),
+          JSON.stringify(query),
+        ).rejects.toMatchObject({ body: { code: 'INVALID_QUERY' } })
+      }
+    })
+
+    it('list no members (instead of failing) when a filter or offset leaves nothing', async () => {
+      const cookie = await signIn('empty-lister@example.com')
+      const self = await userId('empty-lister@example.com')
+      const other = '00000000-0000-4000-8000-000000000000'
+      const members = '/api/auth/organization/list-members'
+      const empty: [string, number][] = [
+        [`${members}?filterField=role&filterValue=admin`, 0],
+        [
+          `${members}?filterField=userId&filterOperator=not_in&filterValue=${self}&filterValue=${other}`,
+          0,
+        ],
+        [`${members}?offset=5`, 1],
+        // The last member is at offset 0, so offset 1 (= total) is past the end.
+        [`${members}?offset=1`, 1],
+      ]
+      const mine = (await me({ cookie })).body.organization
+      empty.push(
+        // By slug, and an empty slug counting as absent (as in Better Auth).
+        [`${members}?organizationSlug=${mine.slug}&filterField=role&filterValue=admin`, 0],
+        [`${members}?organizationId=${mine.id}&organizationSlug=&offset=3`, 1],
+      )
+      for (const [path, total] of empty) {
+        const res = await main.app.request(path, { headers: { cookie } })
+        expect(res.status, path).toBe(200)
+        expect(await res.json(), path).toEqual({ members: [], total })
+      }
+      // A team with two members, reached by its slug while the session acts in another
+      // organization (creating it makes it active, so switch back first).
+      const team = await createTeam(cookie, 'empty-listers')
+      await signIn('empty-lister-colleague@example.com')
+      await testDb.pool.query(
+        `INSERT INTO auth.member ("organizationId", "userId", role, "createdAt") VALUES ($1, $2, 'member', now())`,
+        [team, await userId('empty-lister-colleague@example.com')],
+      )
+      await post('/api/auth/organization/set-active', cookie, { organizationId: mine.id })
+      const bySlug = await main.app.request(`${members}?organizationSlug=empty-listers&offset=2`, {
+        headers: { cookie },
+      })
+      expect(await bySlug.json()).toEqual({ members: [], total: 2 })
+
+      // Pages that do hold members are Better Auth's to list.
+      const first = await main.app.request(`${members}?offset=0`, { headers: { cookie } })
+      expect(((await first.json()) as { members: unknown[]; total: number }).total).toBe(1)
+
+      // Other organizations stay Better Auth's to refuse, and their member counts unknown.
+      const theirs = (await me({ cookie: await signIn('not-mine@example.com') })).body.organization
+      for (const query of [
+        `organizationId=${theirs.id}`,
+        `organizationId=${theirs.id}&offset=99`,
+        `organizationId=${theirs.id}&filterField=role&filterValue=admin`,
+        `organizationSlug=${theirs.slug}&offset=99`,
+      ]) {
+        const refused = await main.app.request(`${members}?${query}`, { headers: { cookie } })
+        expect(refused.status, query).toBe(403)
+        expect(JSON.stringify(await refused.json()), query).not.toContain('total')
+      }
     })
 
     it('rejects ids that are not UUIDs before they reach the database (and the log)', async () => {
@@ -725,6 +920,102 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
           mallory.id,
         ]),
       ).toBe(1)
+
+      // Switching a key off only takes power away, so it is allowed.
+      const disabled = await post('/api/auth/api-key/update', mallory.cookie, {
+        keyId: planted.id,
+        enabled: false,
+      })
+      expect(disabled.status).toBe(200)
+      const row = await testDb.pool.query(`SELECT enabled FROM auth.apikey WHERE id = $1`, [
+        planted.id,
+      ])
+      expect(row.rows).toEqual([{ enabled: false }])
+      // Anything more than switching off is refused.
+      for (const body of [
+        { keyId: planted.id, enabled: true },
+        { keyId: planted.id, enabled: false, name: 'sneaky' },
+      ]) {
+        const res = await post('/api/auth/api-key/update', mallory.cookie, body)
+        expect(res.status, JSON.stringify(body)).toBe(403)
+      }
+    })
+
+    /**
+     * Resolves a bearer key with `during` run after Better Auth has checked the key and
+     * before the membership lookup.
+     */
+    async function resolveKeyWithPause(key: string, during: () => Promise<void>) {
+      let reached = () => {}
+      let release = () => {}
+      const atBarrier = new Promise<void>((resolve) => {
+        reached = resolve
+      })
+      const barrier = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      const api = main.auth.api
+      const auth = {
+        ...main.auth,
+        api: {
+          ...api,
+          verifyApiKey: async (input: unknown) => {
+            const result = await api.verifyApiKey(input as never)
+            reached()
+            await barrier
+            return result
+          },
+        },
+      } as unknown as Auth
+      const pending = createCallerResolver({ auth, db })(
+        new Headers({ authorization: `Bearer ${key}` }),
+      )
+      await atBarrier
+      try {
+        await during()
+      } finally {
+        release()
+      }
+      return pending
+    }
+
+    it('do not authenticate if deleted while they are being checked', async () => {
+      // A key in an unverified account; its owner proves the email (which deletes the key)
+      // between Better Auth's key check and the membership lookup, then makes a key of their own.
+      const mallory = await unverifiedUser('split@example.com')
+      const planted = await plantKey(mallory.id, mallory.organizationId)
+      const result = await resolveKeyWithPause(planted.key, async () => {
+        const owner = await signIn('split@example.com')
+        expect((await createKey(owner)).status).toBe(200)
+        const keys = await testDb.pool.query<{ id: string }>(
+          `SELECT id FROM auth.apikey WHERE "referenceId" = $1`,
+          [mallory.id],
+        )
+        expect(keys.rows.map((r) => r.id)).not.toContain(planted.id)
+        expect(keys.rows).toHaveLength(1)
+      })
+      expect(result).toMatchObject({ ok: false, error: 'unauthorized' })
+    })
+
+    it('do not authenticate if disabled while they are being checked', async () => {
+      const cookie = await signIn('disabled-midway@example.com')
+      const key = (await (await createKey(cookie)).json()) as { id: string; key: string }
+      const result = await resolveKeyWithPause(key.key, async () => {
+        const off = await post('/api/auth/api-key/update', cookie, {
+          keyId: key.id,
+          enabled: false,
+        })
+        expect(off.status).toBe(200)
+      })
+      expect(result).toMatchObject({ ok: false, error: 'unauthorized' })
+    })
+
+    it("do not authenticate while their owner's email is not verified", async () => {
+      const mallory = await unverifiedUser('unverified-bearer@example.com')
+      const planted = await plantKey(mallory.id, mallory.organizationId)
+      const { res, body } = await me({ authorization: `Bearer ${planted.key}` })
+      expect(res.status).toBe(401)
+      expect(body).toEqual({ error: 'unauthorized' })
     })
 
     it('do not survive the owner proving the email while key creation is under way', async () => {
@@ -1029,12 +1320,170 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
       // did not vouch for the address (and as a database could hold from before the rule).
       const mallory = await unverifiedUser('late@example.com')
       const planted = await plantKey(mallory.id, mallory.organizationId)
-      const bearer = { authorization: `Bearer ${planted.key}` }
-      expect((await me(bearer)).res.status).toBe(200)
+      const keys = () =>
+        count(`SELECT count(*)::int AS n FROM auth.apikey WHERE "referenceId" = $1`, [mallory.id])
+      expect(await keys()).toBe(1)
 
-      // The real owner signs in with an email link: Better Auth revokes the unproven access.
+      // The real owner signs in with an email link: Better Auth revokes the unproven access,
+      // and the database deletes the key.
       await signIn('late@example.com')
-      expect((await me(bearer)).res.status).toBe(401)
+      expect(await keys()).toBe(0)
+      expect((await me({ authorization: `Bearer ${planted.key}` })).res.status).toBe(401)
+    })
+
+    it('does not let a login of an unverified account outlive its owner proving the email', async () => {
+      // An old unverified account with Mallory's Microsoft account linked to it.
+      const mallory = await unverifiedUser('paused@example.com')
+      await testDb.pool.query(
+        `INSERT INTO auth.account ("accountId", "providerId", "userId", "updatedAt")
+         VALUES ('ms-paused', 'microsoft', $1, now())`,
+        [mallory.id],
+      )
+      const pausing = pausingPool()
+      try {
+        const microsoft = instance(origin, {
+          pool: pausing.pool,
+          socialProviders: { microsoft: client },
+          socialProviderOptions: {
+            microsoft: vouching({
+              id: 'ms-paused',
+              email: 'paused@example.com',
+              emailVerified: false,
+            }),
+          },
+        })
+        // Mallory's login loads the account, stores the fresh tokens, and waits there.
+        pausing.arm(/^update "account"/i)
+        const login = socialSignIn(microsoft, 'microsoft')
+        await pausing.paused
+
+        // Meanwhile the real owner signs in with an email link.
+        const owner = await signIn('paused@example.com')
+        const state = await testDb.pool.query(
+          `SELECT u."emailVerified",
+                  (SELECT count(*)::int FROM auth.account a WHERE a."userId" = u.id) AS accounts,
+                  (SELECT count(*)::int FROM auth.session s WHERE s."userId" = u.id) AS sessions
+             FROM auth."user" u WHERE u.id = $1`,
+          [mallory.id],
+        )
+        expect(state.rows).toEqual([{ emailVerified: true, accounts: 0, sessions: 1 }])
+
+        // Mallory's login resumes and gets nothing.
+        pausing.release()
+        const res = await login
+        expect(res.status).toBe(403)
+        expect(await res.json()).toMatchObject({ code: 'EMAIL_NOT_VERIFIED' })
+        expect(cookieHeader(res)).not.toContain('session_token')
+        expect(
+          await count(`SELECT count(*)::int AS n FROM auth.session WHERE "userId" = $1`, [
+            mallory.id,
+          ]),
+        ).toBe(1)
+        expect((await me({ cookie: owner })).res.status).toBe(200)
+      } finally {
+        pausing.release()
+        await pausing.end()
+      }
+    })
+
+    it('ends sessions from before the owner proved the email through a verifying provider', async () => {
+      // An old unverified account in which Mallory holds a session. The owner's Google
+      // account is linked to it (from back when Google did not confirm the address; linking a
+      // provider to an unverified account now is refused by Better Auth's
+      // requireLocalEmailVerified).
+      const mallory = await unverifiedUser('proof@example.com')
+      await testDb.pool.query(
+        `INSERT INTO auth.account ("accountId", "providerId", "userId", "updatedAt")
+         VALUES ('g-proof', 'google', $1, now())`,
+        [mallory.id],
+      )
+      expect((await me({ cookie: mallory.cookie })).res.status).toBe(200)
+
+      // The owner signs in with Google, which now confirms the address: Better Auth marks the
+      // email verified, without revoking anything itself.
+      const google = instance(origin, {
+        socialProviders: { google: client },
+        socialProviderOptions: {
+          google: vouching({ id: 'g-proof', email: 'proof@example.com', emailVerified: true }),
+        },
+      })
+      const first = await socialSignIn(google, 'google')
+      // Better Auth judges this login by the account as it loaded it (still unverified), so
+      // this first one is refused; the email is verified from now on.
+      expect(first.status).toBe(403)
+      const user = await testDb.pool.query(
+        `SELECT u."emailVerified",
+                (SELECT count(*)::int FROM auth.account a WHERE a."userId" = u.id) AS accounts
+           FROM auth."user" u WHERE u.id = $1`,
+        [mallory.id],
+      )
+      expect(user.rows).toEqual([{ emailVerified: true, accounts: 0 }])
+
+      // Mallory's session ended with the proof, so it can neither read nor mint keys.
+      expect((await me({ cookie: mallory.cookie })).res.status).toBe(401)
+      const minted = await post('/api/auth/api-key/create', mallory.cookie, { name: 'late' })
+      expect(minted.status).toBe(401)
+
+      // The owner's next sign-in links Google again and gets a session that works.
+      const owner = await socialSignIn(google, 'google')
+      expect(owner.status).toBe(200)
+      const cookie = cookieHeader(owner)
+      expect((await me({ cookie }, google.app)).body.user.email).toBe('proof@example.com')
+      expect(
+        (await post('/api/auth/api-key/create', cookie, { name: 'owner' }, google.app)).status,
+      ).toBe(200)
+      expect(
+        await count(`SELECT count(*)::int AS n FROM auth.apikey WHERE "referenceId" = $1`, [
+          mallory.id,
+        ]),
+      ).toBe(1)
+    })
+
+    it('removes sign-in accounts linked before the owner proved the email', async () => {
+      // An old unverified account with Mallory's Microsoft account and the owner's Google
+      // account linked to it.
+      const mallory = await unverifiedUser('linked@example.com')
+      await testDb.pool.query(
+        `INSERT INTO auth.account ("accountId", "providerId", "userId", "updatedAt")
+         VALUES ('ms-linked', 'microsoft', $1, now()), ('g-linked', 'google', $1, now())`,
+        [mallory.id],
+      )
+      const google = instance(origin, {
+        socialProviders: { google: client },
+        socialProviderOptions: {
+          google: vouching({ id: 'g-linked', email: 'linked@example.com', emailVerified: true }),
+        },
+      })
+      const microsoft = instance(origin, {
+        socialProviders: { microsoft: client },
+        socialProviderOptions: {
+          microsoft: vouching({
+            id: 'ms-linked',
+            email: 'linked@example.com',
+            emailVerified: false,
+          }),
+        },
+      })
+      // The owner proves the address through Google.
+      expect((await socialSignIn(google, 'google')).status).toBe(403)
+      expect(
+        await count(`SELECT count(*)::int AS n FROM auth.account WHERE "userId" = $1`, [
+          mallory.id,
+        ]),
+      ).toBe(0)
+
+      // Mallory's Microsoft account no longer signs into what is now the owner's account.
+      const again = await socialSignIn(microsoft, 'microsoft')
+      expect(again.status).toBe(401)
+      expect(cookieHeader(again)).not.toContain('session_token')
+      expect(
+        await count(`SELECT count(*)::int AS n FROM auth.session WHERE "userId" = $1`, [
+          mallory.id,
+        ]),
+      ).toBe(0)
+
+      // The owner's Google sign-in links Google again.
+      expect((await socialSignIn(google, 'google')).status).toBe(200)
     })
 
     it('makes invitations require a proven email address', () => {

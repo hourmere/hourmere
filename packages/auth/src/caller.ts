@@ -1,4 +1,5 @@
 import type { Db } from '@hourmere/db'
+import { sql } from 'kysely'
 import type { Auth } from './index.ts'
 import { ensurePersonalOrganization, isUuid } from './organizations.ts'
 
@@ -48,21 +49,46 @@ const BEARER = /^Bearer[ \t]+(\S+)[ \t]*$/i
  * by it alone, so a bad key never falls back to a cookie the client happens to carry.
  */
 export function createCallerResolver({ auth, db }: { auth: Auth; db: Db }): CallerResolver {
+  type Membership = Omit<Principal, 'kind' | 'sessionId' | 'apiKeyId'> & {
+    emailVerified: boolean
+  }
+
+  /**
+   * The caller's user and organization, if the user is a member of it. With `apiKeyId`, the
+   * same statement also requires that key to still exist, belong to the user and be enabled:
+   * Better Auth's key check is an earlier statement, and the key may have been revoked since
+   * (e.g. deleted by the email-proof trigger while the request was in flight).
+   */
   async function inOrganization(
     userId: string,
     organizationId: string,
-  ): Promise<Omit<Principal, 'kind' | 'sessionId' | 'apiKeyId'> | undefined> {
+    apiKeyId?: string,
+  ): Promise<Membership | undefined> {
     if (!isUuid(userId) || !isUuid(organizationId)) return undefined
+    if (apiKeyId !== undefined && !isUuid(apiKeyId)) return undefined
     // The membership check matters even for ids we stored ourselves: people leave teams.
     const row = await db
       .selectFrom('auth.member as m')
       .innerJoin('auth.user as u', 'u.id', 'm.userId')
       .innerJoin('auth.organization as o', 'o.id', 'm.organizationId')
       .leftJoin('personal_organizations as p', 'p.organization_id', 'o.id')
+      .$if(apiKeyId !== undefined, (qb) =>
+        qb.where((eb) =>
+          eb.exists(
+            eb
+              .selectFrom('auth.apikey as k')
+              .select('k.id')
+              .where('k.id', '=', apiKeyId as string)
+              .where('k.referenceId', '=', userId)
+              .where(sql<boolean>`k.enabled IS DISTINCT FROM false`),
+          ),
+        ),
+      )
       .select([
         'u.id as userId',
         'u.name as userName',
         'u.email',
+        'u.emailVerified',
         'o.id as organizationId',
         'o.name as organizationName',
         'o.slug',
@@ -73,6 +99,7 @@ export function createCallerResolver({ auth, db }: { auth: Auth; db: Db }): Call
       .executeTakeFirst()
     if (!row) return undefined
     return {
+      emailVerified: row.emailVerified,
       user: { id: row.userId, name: row.userName, email: row.email },
       organization: {
         id: row.organizationId,
@@ -111,8 +138,13 @@ export function createCallerResolver({ auth, db }: { auth: Auth; db: Db }): Call
     const stored: unknown = result.key.metadata?.organizationId
     const organizationId =
       typeof stored === 'string' ? stored : await ensurePersonalOrganization(db, userId)
-    const caller = await inOrganization(userId, organizationId)
-    if (!caller) return { ok: false, error: 'unauthorized', setCookie: [] }
+    const membership = await inOrganization(userId, organizationId, result.key.id)
+    // Keys belong to verified users only; one from before that rule (or planted in an
+    // account whose real owner has not signed in yet) does not work. Read in the same
+    // statement as the key's existence, so a key deleted when the email was proven cannot
+    // slip through as belonging to a now-verified user.
+    if (!membership?.emailVerified) return { ok: false, error: 'unauthorized', setCookie: [] }
+    const { emailVerified: _, ...caller } = membership
     return {
       ok: true,
       principal: { ...caller, kind: 'api_key', apiKeyId: result.key.id },
@@ -130,10 +162,11 @@ export function createCallerResolver({ auth, db }: { auth: Auth; db: Db }): Call
     const userId = session.user.id
     const active = session.session.activeOrganizationId
     // A session whose active organization is gone (or was never set) acts in the personal one.
-    const caller =
+    const membership =
       (active ? await inOrganization(userId, active) : undefined) ??
       (await inOrganization(userId, await ensurePersonalOrganization(db, userId)))
-    if (!caller) return { ok: false, error: 'unauthorized', setCookie }
+    if (!membership) return { ok: false, error: 'unauthorized', setCookie }
+    const { emailVerified: _, ...caller } = membership
     return {
       ok: true,
       principal: { ...caller, kind: 'session', sessionId: session.session.id },
