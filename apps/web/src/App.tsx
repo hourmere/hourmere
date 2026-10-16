@@ -32,7 +32,12 @@ export function App() {
         if (r.ok) return setState({ kind: 'signed-in', me: (await r.json()) as Me })
         setState({
           kind: 'signed-out',
-          ...(linkError && { error: 'That sign-in link is invalid or has expired.' }),
+          ...(linkError && {
+            error:
+              linkError === 'SIGNUP_DISABLED'
+                ? 'This Hourmere instance does not accept new accounts for that email address.'
+                : 'That sign-in link is invalid or has expired.',
+          }),
         })
       })
       .catch(() => setState({ kind: 'signed-out', error: 'The server is unreachable.' }))

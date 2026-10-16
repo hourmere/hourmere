@@ -1,6 +1,11 @@
 import type { AddressInfo } from 'node:net'
 import { serve } from '@hono/node-server'
-import { createAuth, createAuthPool, createCallerResolver } from '@hourmere/auth'
+import {
+  assertSignupEnforced,
+  createAuth,
+  createAuthPool,
+  createCallerResolver,
+} from '@hourmere/auth'
 import { createDb, createPool, runMigrations } from '@hourmere/db'
 import { createLogMailer, createSmtpMailer, type Mailer } from '@hourmere/mail'
 import { sql } from 'kysely'
@@ -59,14 +64,35 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
     }
     mailer = createLogMailer()
   }
+  // Sign-in emails go out after the request is answered, and shutdown does not wait for them;
+  // the count is for saying how many it drops.
+  let sending = 0
+  const sender = mailer
+  const countingMailer: Mailer = {
+    async send(message) {
+      sending += 1
+      try {
+        await sender.send(message)
+      } finally {
+        sending -= 1
+      }
+    },
+  }
 
-  const authPool = createAuthPool(config.DATABASE_URL)
+  const authPool = createAuthPool(config.DATABASE_URL, config.signup)
+  try {
+    await assertSignupEnforced(authPool, config.signup)
+  } catch (err) {
+    await Promise.all([db.destroy(), authPool.end()])
+    throw err
+  }
   const auth = createAuth({
     pool: authPool,
     db,
     baseURL: config.PUBLIC_URL,
     secret: config.BETTER_AUTH_SECRET,
-    mailer,
+    mailer: countingMailer,
+    signup: config.signup,
     socialProviders: config.socialProviders,
   })
 
@@ -92,8 +118,10 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
   const server = await new Promise<ReturnType<typeof serve>>((resolve) => {
     const s = serve({ fetch: app.fetch, port: config.PORT }, (info: AddressInfo) => {
       const providers = Object.keys(config.socialProviders)
+      const { mode, allowedDomains } = config.signup
+      const signup = `${mode}${allowedDomains.length ? `, plus ${allowedDomains.join(', ')}` : ''}`
       console.log(
-        `Hourmere listening on :${info.port} (${config.PUBLIC_URL}); sign-in: email${providers.map((p) => `, ${p}`).join('')}`,
+        `Hourmere listening on :${info.port} (${config.PUBLIC_URL}); sign-in: email${providers.map((p) => `, ${p}`).join('')}; sign-up: ${signup}`,
       )
       resolve(s)
     })
@@ -105,6 +133,8 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
       new Promise<void>((resolve, reject) => {
         server.close(async (err) => {
           try {
+            if (sending)
+              console.warn(`shutting down: dropping ${sending} email(s) still being sent`)
             await Promise.all([db.destroy(), authPool.end()])
             restoreConsole()
             if (err) reject(err)

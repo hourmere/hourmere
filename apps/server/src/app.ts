@@ -13,6 +13,7 @@ import { requireCaller } from './caller.ts'
 import { clientIp, withClientIp } from './client-ip.ts'
 import { authenticated, ErrorBody, json, type RouteModule } from './openapi.ts'
 import { routeRateLimits } from './rate-limit.ts'
+import { MAGIC_LINK_CONFIRM_PATH, signInConfirmPage } from './sign-in-confirm.ts'
 
 export interface AppDeps {
   /** Resolves when the database answers; rejects otherwise. */
@@ -313,6 +314,9 @@ export function createApp({
   })
 
   app.all('/api/*', (c) => c.json({ error: 'not_found' }, 404))
+
+  // Where emailed sign-in links lead; served here, ahead of the web app.
+  app.get(MAGIC_LINK_CONFIRM_PATH, signInConfirmPage)
 
   if (webDist) {
     // serveStatic resolves paths against the working directory.

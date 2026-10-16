@@ -8,7 +8,8 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     // The API runs separately in development (npm run dev starts both). The browser only
-    // talks to this origin, so the session cookie is same-origin as in production.
-    proxy: { '/api': 'http://localhost:3000' },
+    // talks to this origin, so the session cookie is same-origin as in production. The server
+    // also serves the page that emailed sign-in links open.
+    proxy: { '/api': 'http://localhost:3000', '/sign-in/confirm': 'http://localhost:3000' },
   },
 })
