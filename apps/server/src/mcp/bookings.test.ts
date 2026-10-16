@@ -73,13 +73,16 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
   beforeAll(async () => {
     testDb = await createTestDatabase(serverUrl as string)
     db = createDb(testDb.pool)
-    authPool = createAuthPool(testDb.url)
+    // Users come from fixtures; the sign-up policy is not what these tests are about.
+    const signup = { mode: 'open', allowedDomains: [] } as const
+    authPool = createAuthPool(testDb.url, signup)
     auth = createAuth({
       pool: authPool,
       db,
       baseURL: PUBLIC_URL,
       secret: randomBytes(32).toString('base64'),
       mailer: { send: async () => {} },
+      signup,
     })
     f = createFixtures(db)
     ada = await f.host({ name: 'Ada Lovelace', handle: 'ada' })

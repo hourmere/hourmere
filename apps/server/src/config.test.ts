@@ -84,6 +84,65 @@ describe('loadConfig', () => {
     )
   })
 
+  describe('sign-up', () => {
+    it('defaults to first-user, also when compose passes the variables empty', () => {
+      const policy = { mode: 'first-user', allowedDomains: [] }
+      expect(loadConfig(base).signup).toEqual(policy)
+      expect(loadConfig({ ...base, SIGNUP: '', SIGNUP_ALLOWED_DOMAINS: '' }).signup).toEqual(policy)
+    })
+
+    it('accepts each mode and normalizes the domain list', () => {
+      expect(loadConfig({ ...base, SIGNUP: 'open' }).signup).toEqual({
+        mode: 'open',
+        allowedDomains: [],
+      })
+      expect(
+        loadConfig({
+          ...base,
+          SIGNUP: 'closed',
+          SIGNUP_ALLOWED_DOMAINS: ' Example.COM, team.example.org ,',
+        }).signup,
+      ).toEqual({ mode: 'closed', allowedDomains: ['example.com', 'team.example.org'] })
+      expect(
+        loadConfig({ ...base, SIGNUP: 'first-user', SIGNUP_ALLOWED_DOMAINS: 'xn--bcher-kva.de' })
+          .signup.allowedDomains,
+      ).toEqual(['xn--bcher-kva.de'])
+    })
+
+    it('rejects an unknown mode', () => {
+      for (const mode of ['Open', 'invite', 'first_user', 'none']) {
+        expect(() => loadConfig({ ...base, SIGNUP: mode }), mode).toThrow(
+          /SIGNUP must be open, first-user or closed/,
+        )
+      }
+    })
+
+    it('rejects anything but plain email domains', () => {
+      for (const domains of [
+        '@example.com',
+        '*.example.com',
+        'user@example.com',
+        'example',
+        'example.com/x',
+        'exa mple.com',
+        'example.com;evil.com',
+        'bücher.de',
+        '-c search_path=public',
+      ]) {
+        expect(
+          () => loadConfig({ ...base, SIGNUP: 'closed', SIGNUP_ALLOWED_DOMAINS: domains }),
+          domains,
+        ).toThrow(/SIGNUP_ALLOWED_DOMAINS must be comma-separated email domains/)
+      }
+    })
+
+    it('rejects allowed domains with SIGNUP=open, where they would not restrict anything', () => {
+      expect(() =>
+        loadConfig({ ...base, SIGNUP: 'open', SIGNUP_ALLOWED_DOMAINS: 'example.com' }),
+      ).toThrow(/SIGNUP_ALLOWED_DOMAINS has no effect with SIGNUP=open/)
+    })
+  })
+
   describe('social sign-in', () => {
     it('enables a provider when both its client id and secret are set', () => {
       const c = loadConfig({
