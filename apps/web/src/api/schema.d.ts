@@ -314,13 +314,13 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description The booking */
+                /** @description The booking, with its event type and hosts */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["Booking"];
+                        "application/json": components["schemas"]["ManagedBooking"];
                     };
                 };
                 /** @description Missing or unknown manage token (`booking_not_found`) */
@@ -506,6 +506,91 @@ export interface paths {
                 };
             };
         };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/bookings/manage/slots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Times the booking can move to
+         * @description The slots the booking behind the manage token can be rescheduled to, fully inside [start, end]: its event type's slots with the booking itself ignored, so they may overlap its current time. The same range limits as public slots (at most 62 days).
+         */
+        get: {
+            parameters: {
+                query: {
+                    /** @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix. */
+                    end: string;
+                    /** @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix. */
+                    start: string;
+                };
+                header?: {
+                    /** @description The invitee's secret: the `manageToken` the booking API returned, or the `token` in a link from a booking email (https://<app>/booking#token=…). A missing or unknown token gets 404 `booking_not_found`. After a reschedule, the token returned for the old booking shows that cancelled booking, while tokens from emails open the booking that replaced it. */
+                    "x-manage-token"?: string;
+                };
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Slots, sorted by start */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data: components["schemas"]["Slot"][];
+                        };
+                    };
+                };
+                /** @description Invalid parameters (`invalid_request`), end not after start (`invalid_range`), or a range that is too long (`range_too_long`) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Missing or unknown manage token (`booking_not_found`) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Already cancelled (`booking_cancelled`), already started (`booking_in_past`), the event type no longer takes bookings (`event_type_unavailable`) or the booking has no host (`booking_has_no_host`) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Too many requests from this address (`rate_limited`); see Retry-After */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1072,6 +1157,65 @@ export interface paths {
                 };
             };
         };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/{handle}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A host's public page
+         * @description What the page at /{handle} shows: the host and their bookable event types. A handle that is reserved (see the profile) has no page.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    handle: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The host and their event types */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PublicHost"];
+                    };
+                };
+                /** @description No such host (`host_not_found`) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Too many requests from this address (`rate_limited`); see Retry-After */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -2229,6 +2373,17 @@ export interface components {
                 microsoft: boolean;
             };
         };
+        ManagedBooking: components["schemas"]["Booking"] & {
+            /** @description The event type as it is now; null once it is deleted */
+            eventType: {
+                durationMinutes: number;
+                title: string;
+            } | null;
+            /** @description Who the invitee meets: each host's name */
+            hosts: {
+                name: string;
+            }[];
+        };
         Me: {
             /** @description The organization the caller acts in */
             organization: {
@@ -2302,6 +2457,26 @@ export interface components {
             questions: components["schemas"]["Question"][];
             slug: string;
             title: string;
+        };
+        PublicHost: {
+            /** @description Bookable event types, in the order the host arranged them */
+            eventTypes: {
+                description: string | null;
+                durationMinutes: number;
+                location: {
+                    /** @enum {string} */
+                    kind: "google_meet" | "zoom" | "phone" | "in_person" | "link";
+                } | null;
+                /** @description The booking page is /{handle}/{slug} */
+                slug: string;
+                title: string;
+            }[];
+            handle: string;
+            host: {
+                name: string;
+                /** @description The host's IANA time zone */
+                timeZone: string;
+            };
         };
         /** @description A booking-form field beyond name and email. Its answer goes in `responses` under `id`: text for short_text, long_text and phone; one of `options` for select; a list of distinct `options` for multi_select; true or false for checkbox (a required checkbox must be true). */
         Question: {
