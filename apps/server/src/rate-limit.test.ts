@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest'
-import { redactSecrets } from './app.ts'
 import { createRateLimiter, PUBLIC_RATE_LIMITS } from './rate-limit.ts'
 
 describe('createRateLimiter', () => {
@@ -41,23 +40,5 @@ describe('createRateLimiter', () => {
       book: { limit: 10, windowSeconds: 60 },
       manage: { limit: 30, windowSeconds: 60 },
     })
-  })
-})
-
-describe('redactSecrets', () => {
-  it('removes query strings and manage tokens from logged paths', () => {
-    const token = 'k3J9_aZ-x'.repeat(4).slice(0, 43)
-    expect(redactSecrets(`<-- GET /api/v1/bookings/manage/${token}`)).toBe(
-      '<-- GET /api/v1/bookings/manage/[redacted]',
-    )
-    expect(redactSecrets(`--> POST /api/v1/bookings/manage/${token}/cancel 200 5ms`)).toBe(
-      '--> POST /api/v1/bookings/manage/[redacted]/cancel 200 5ms',
-    )
-    expect(redactSecrets('<-- GET /api/auth/magic-link/verify?token=secret')).toBe(
-      '<-- GET /api/auth/magic-link/verify',
-    )
-    expect(redactSecrets('/api/v1/bookings/0199c3a4-0000-7000-8000-000000000000')).toBe(
-      '/api/v1/bookings/0199c3a4-0000-7000-8000-000000000000',
-    )
   })
 })

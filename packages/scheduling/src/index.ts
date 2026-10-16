@@ -13,9 +13,6 @@ export {
   listPublicSlots,
   MAX_SLOT_RANGE_DAYS,
   type PublicEventType,
-  QUESTION_TYPES,
-  type Question,
-  type QuestionType,
   type SlotView,
 } from './availability.ts'
 export {
@@ -39,9 +36,25 @@ export {
   MAX_GUESTS,
   MAX_PAGE_SIZE,
   type PersonInput,
-  type Responses,
-  type ResponseValue,
   rescheduleManagedBooking,
 } from './bookings.ts'
 export type { PublicContext, ServiceContext } from './context.ts'
 export { DomainError, type DomainErrorKind, RESERVED_ERROR_CODES } from './errors.ts'
+export {
+  MAX_ANSWER_LENGTH,
+  MAX_OPTION_LENGTH,
+  MAX_OPTIONS,
+  MAX_QUESTION_LABEL,
+  MAX_QUESTIONS,
+  parseQuestions,
+  QUESTION_TYPES,
+  type Question,
+  QuestionSchema,
+  QuestionsSchema,
+  type QuestionType,
+  type Responses,
+  ResponsesSchema,
+  type ResponseValue,
+  ResponseValueSchema,
+  validateResponses,
+} from './questions.ts'

@@ -14,6 +14,7 @@ import {
 import type { Db, Json } from '@hourmere/db'
 import type { PublicContext } from './context.ts'
 import { DomainError } from './errors.ts'
+import { parseQuestions, type Question } from './questions.ts'
 
 /** Longest range one public slots request may cover. */
 export const MAX_SLOT_RANGE_DAYS = 62
@@ -39,60 +40,10 @@ const later = (a: Temporal.Instant, b: Temporal.Instant) =>
 const earlier = (a: Temporal.Instant, b: Temporal.Instant) =>
   Temporal.Instant.compare(a, b) <= 0 ? a : b
 
-// --- Booking-form questions and locations (JSON columns of event_types) -------------------
-
-export const QUESTION_TYPES = [
-  'short_text',
-  'long_text',
-  'phone',
-  'select',
-  'multi_select',
-  'checkbox',
-] as const
-export type QuestionType = (typeof QUESTION_TYPES)[number]
-
-/**
- * An extra booking-form field (name and email are always asked). Stored in
- * `event_types.questions`; answers go to `bookings.responses` keyed by `id`.
- */
-export interface Question {
-  id: string
-  label: string
-  type: QuestionType
-  required: boolean
-  /** The choices of `select` and `multi_select`. */
-  options?: string[]
-}
+// --- Locations (JSON column of event_types and bookings) ---------------------------------
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
-
-/**
- * Reads `event_types.questions`. The owner-side API validates questions when it stores
- * them, so anything else is a bug and throws.
- */
-export function parseQuestions(value: Json): Question[] {
-  if (!Array.isArray(value)) throw new Error('event_types.questions is not an array')
-  const ids = new Set<string>()
-  return value.map((item, i) => {
-    const bad = (what: string) => new Error(`event_types.questions[${i}]: ${what}`)
-    if (!isRecord(item)) throw bad('not an object')
-    const { id, label, type, required, options } = item
-    if (typeof id !== 'string' || id === '' || ids.has(id)) throw bad('missing or repeated id')
-    ids.add(id)
-    if (typeof label !== 'string') throw bad('missing label')
-    if (!QUESTION_TYPES.includes(type as QuestionType)) throw bad('unknown type')
-    if (required !== undefined && typeof required !== 'boolean') throw bad('required')
-    const question: Question = { id, label, type: type as QuestionType, required: !!required }
-    if (type === 'select' || type === 'multi_select') {
-      if (!Array.isArray(options) || !options.every((o) => typeof o === 'string')) {
-        throw bad('options must be a list of strings')
-      }
-      question.options = options as string[]
-    }
-    return question
-  })
-}
 
 export const LOCATION_KINDS = ['google_meet', 'zoom', 'phone', 'in_person', 'link'] as const
 export type LocationKind = (typeof LOCATION_KINDS)[number]

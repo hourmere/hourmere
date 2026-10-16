@@ -11,7 +11,7 @@ const serverUrl = process.env.DATABASE_URL
 const NOW = Temporal.Instant.from('2026-11-01T12:00:00Z')
 
 interface Page {
-  bookings: { id: string; start: string; status: string; cancelReason: string | null }[]
+  data: { id: string; start: string; status: string; cancelReason: string | null }[]
   nextCursor: string | null
 }
 
@@ -109,16 +109,14 @@ describe.skipIf(!serverUrl)('host booking routes', () => {
     const first = await get('/api/v1/bookings?limit=2', 'alice')
     expect(first.status).toBe(200)
     const page1 = (await first.json()) as Page
-    expect(page1.bookings.map((b) => b.id)).toEqual(aliceBookings.slice(0, 2))
+    expect(page1.data.map((b) => b.id)).toEqual(aliceBookings.slice(0, 2))
     const second = (await (
       await get(`/api/v1/bookings?limit=2&cursor=${page1.nextCursor}`, 'alice')
     ).json()) as Page
-    expect(second).toMatchObject({ bookings: [{ id: aliceBookings[2] }], nextCursor: null })
+    expect(second).toMatchObject({ data: [{ id: aliceBookings[2] }], nextCursor: null })
 
     const ids = async (who: string, query = '') =>
-      ((await (await get(`/api/v1/bookings${query}`, who)).json()) as Page).bookings.map(
-        (b) => b.id,
-      )
+      ((await (await get(`/api/v1/bookings${query}`, who)).json()) as Page).data.map((b) => b.id)
     expect(await ids('alice-team')).toEqual([teamBooking])
     expect(await ids('bob-team')).toEqual([])
     expect(await ids('bob')).toEqual([bobBooking])
@@ -156,6 +154,11 @@ describe.skipIf(!serverUrl)('host booking routes', () => {
     }
     expect((await get('/api/v1/bookings/not-a-uuid', 'alice')).status).toBe(400)
 
+    // Request bodies are strict: a misspelled field is refused, not ignored.
+    const typo = await post(`/api/v1/bookings/${id}/cancel`, 'alice', { reasons: 'Out sick' })
+    expect(typo.status).toBe(400)
+    expect(await typo.json()).toMatchObject({ error: 'invalid_request' })
+
     const cancelled = await post(`/api/v1/bookings/${id}/cancel`, 'alice', { reason: 'Out sick' })
     expect(cancelled.status).toBe(200)
     expect(await cancelled.json()).toMatchObject({
@@ -167,6 +170,6 @@ describe.skipIf(!serverUrl)('host booking routes', () => {
     expect(again.status).toBe(409)
     expect(await again.json()).toMatchObject({ error: 'booking_cancelled' })
     const list = (await (await get('/api/v1/bookings?status=cancelled', 'alice')).json()) as Page
-    expect(list.bookings.map((b) => b.id)).toEqual([id])
+    expect(list.data.map((b) => b.id)).toEqual([id])
   })
 })

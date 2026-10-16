@@ -12,6 +12,7 @@
   "dependencies": {
     "@hourmere/auth": "*",
     "@hourmere/core": "*",
-    "@hourmere/db": "*"
+    "@hourmere/db": "*",
+    "zod": "4.6.7"
   }
 }

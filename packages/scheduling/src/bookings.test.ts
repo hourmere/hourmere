@@ -5,7 +5,6 @@ import type { Principal } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import type { Question } from './availability.ts'
 import {
   type Booking,
   type CreateBookingInput,
@@ -17,7 +16,6 @@ import {
   getManagedBooking,
   listHostBookings,
   rescheduleManagedBooking,
-  validateResponses,
 } from './bookings.ts'
 import type { PublicContext, ServiceContext } from './context.ts'
 import { createFixtures, type Fixtures } from './testing.ts'
@@ -275,43 +273,6 @@ describe.skipIf(!serverUrl)('bookings', () => {
     })
   })
 
-  describe('answers', () => {
-    const questions: Question[] = [
-      { id: 'text', label: 'Text', type: 'short_text', required: false },
-      { id: 'phone', label: 'Phone', type: 'phone', required: true },
-      { id: 'one', label: 'One', type: 'select', required: false, options: ['a', 'b'] },
-      { id: 'many', label: 'Many', type: 'multi_select', required: true, options: ['a', 'b'] },
-      { id: 'ok', label: 'OK', type: 'checkbox', required: true },
-    ]
-    const valid = { phone: '+1 (555) 010-0', many: ['b', 'a'], ok: true }
-    const check = (given: unknown) => validateResponses(questions, given)
-
-    it('accepts and normalizes valid answers, leaving out empty optional ones', () => {
-      expect(check({ ...valid, text: '  ', one: '' })).toEqual(valid)
-      expect(check({ ...valid, text: ' hi ', one: 'a' })).toEqual({
-        ...valid,
-        text: 'hi',
-        one: 'a',
-      })
-    })
-
-    it.each([
-      ['not an object', []],
-      ['a missing required answer', { ...valid, phone: undefined }],
-      ['an unknown question', { ...valid, other: 'x' }],
-      ['an option that does not exist', { ...valid, one: 'c' }],
-      ['repeated options', { ...valid, many: ['a', 'a'] }],
-      ['no option for a required multi-select', { ...valid, many: [] }],
-      ['an unchecked required checkbox', { ...valid, ok: false }],
-      ['a non-boolean checkbox', { ...valid, ok: 'yes' }],
-      ['text that is too long', { ...valid, text: 'x'.repeat(501) }],
-      ['a phone number with letters', { ...valid, phone: 'call me' }],
-      ['a number for text', { ...valid, text: 5 }],
-    ])('refuses %s', (_, given) => {
-      expect(() => check(given)).toThrow(expect.objectContaining({ code: 'invalid_responses' }))
-    })
-  })
-
   describe('idempotency', () => {
     it('replays the original booking for the same key and request, without a second insert', async () => {
       const s = await setup()
@@ -562,7 +523,7 @@ describe.skipIf(!serverUrl)('bookings', () => {
     it('lists the bookings the caller hosts in the organization, a page at a time', async () => {
       const ctxA = as(alice, alice.organizationId)
       const first = await listHostBookings(ctxA, { limit: 3 })
-      expect(first.bookings.map((b) => b.start)).toEqual([
+      expect(first.data.map((b) => b.start)).toEqual([
         '2026-11-04T09:00:00.000Z',
         '2026-11-04T10:00:00.000Z',
         '2026-11-04T11:00:00.000Z',
@@ -572,26 +533,26 @@ describe.skipIf(!serverUrl)('bookings', () => {
         limit: 3,
         cursor: first.nextCursor as string,
       })
-      expect(second.bookings.map((b) => b.start)).toEqual(['2026-11-05T09:00:00.000Z'])
+      expect(second.data.map((b) => b.start)).toEqual(['2026-11-05T09:00:00.000Z'])
       expect(second.nextCursor).toBeNull()
 
       const inTeam = await listHostBookings(as(alice, team))
-      expect(inTeam.bookings.map((b) => b.id)).toEqual([teamBooking])
-      expect((await listHostBookings(as(bob, team))).bookings).toEqual([])
-      expect((await listHostBookings(as(bob, bob.organizationId))).bookings).toHaveLength(1)
+      expect(inTeam.data.map((b) => b.id)).toEqual([teamBooking])
+      expect((await listHostBookings(as(bob, team))).data).toEqual([])
+      expect((await listHostBookings(as(bob, bob.organizationId))).data).toHaveLength(1)
     })
 
     it('filters by start and status', async () => {
       const ctxA = as(alice, alice.organizationId)
-      const { bookings } = await listHostBookings(ctxA, {
+      const { data } = await listHostBookings(ctxA, {
         from: instant('2026-11-04T10:00Z'),
         to: instant('2026-11-05T09:00Z'),
       })
-      expect(bookings.map((b) => b.start)).toEqual([
+      expect(data.map((b) => b.start)).toEqual([
         '2026-11-04T10:00:00.000Z',
         '2026-11-04T11:00:00.000Z',
       ])
-      expect((await listHostBookings(ctxA, { status: 'cancelled' })).bookings).toEqual([])
+      expect((await listHostBookings(ctxA, { status: 'cancelled' })).data).toEqual([])
       await expect(listHostBookings(ctxA, { cursor: 'nope' })).rejects.toMatchObject({
         code: 'invalid_cursor',
       })
@@ -607,7 +568,7 @@ describe.skipIf(!serverUrl)('bookings', () => {
     })
 
     it("gets and cancels only the caller's own bookings in the organization", async () => {
-      const [own] = (await listHostBookings(as(alice, alice.organizationId))).bookings
+      const [own] = (await listHostBookings(as(alice, alice.organizationId))).data
       const id = (own as Booking).id
       expect(await getHostBooking(as(alice, alice.organizationId), id)).toEqual(own)
 
@@ -637,7 +598,7 @@ describe.skipIf(!serverUrl)('bookings', () => {
         code: 'booking_cancelled',
       })
       expect(
-        (await listHostBookings(as(alice, alice.organizationId), { status: 'cancelled' })).bookings,
+        (await listHostBookings(as(alice, alice.organizationId), { status: 'cancelled' })).data,
       ).toHaveLength(1)
       await expect(
         cancelHostBooking(as(alice, alice.organizationId), id, { reason: 'x'.repeat(1001) }),

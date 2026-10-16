@@ -34,7 +34,10 @@ describe.skipIf(!serverUrl)('public routes', () => {
   const appWith = (rateLimits: PublicRoutesDeps['rateLimits']) =>
     createApp({
       ...noAuth,
-      routes: [publicRoutes({ db, now: () => NOW, rateLimits }), bookingRoutes({ db })],
+      routes: [
+        publicRoutes({ db, now: () => NOW, rateLimits }),
+        bookingRoutes({ db, now: () => NOW, rateLimits }),
+      ],
     })
 
   beforeAll(async () => {
@@ -102,7 +105,7 @@ describe.skipIf(!serverUrl)('public routes', () => {
     )
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({
-      slots: [
+      data: [
         { start: '2026-11-02T08:00:00.000Z', end: '2026-11-02T08:30:00.000Z' },
         { start: '2026-11-02T08:30:00.000Z', end: '2026-11-02T09:00:00.000Z' },
         { start: '2026-11-02T09:00:00.000Z', end: '2026-11-02T09:30:00.000Z' },
@@ -140,6 +143,20 @@ describe.skipIf(!serverUrl)('public routes', () => {
   })
 
   it.each([
+    [
+      'an unknown field',
+      { ...bookingRequest('2026-11-02T09:00:00Z'), notes: 'hi' },
+      400,
+      'invalid_request',
+    ],
+    [
+      'an unknown invitee field',
+      bookingRequest('2026-11-02T09:00:00Z', {
+        invitee: { name: 'G', email: 'g@example.com', timeZone: 'UTC', phone: '1' },
+      }),
+      400,
+      'invalid_request',
+    ],
     ['an invalid body', { start: '2026-11-02T09:00:00Z' }, 400, 'invalid_request'],
     [
       'a bad email',
@@ -217,15 +234,16 @@ describe.skipIf(!serverUrl)('public routes', () => {
     try {
       const created = (await (await book('2026-11-02T13:00:00Z')).json()) as BookingBody
       const token = created.manageToken as string
-      const manage = `/api/v1/bookings/manage/${token}`
+      const as = (t: string) => ({ 'x-manage-token': t })
+      const manage = '/api/v1/bookings/manage'
 
-      const shown = await get(manage)
+      const shown = await app.request(manage, { headers: as(token) })
       expect(shown.status).toBe(200)
       expect(shown.headers.get('cache-control')).toBe('no-store')
       expect(await shown.json()).toEqual(created.booking)
 
       // Onto a time overlapping the old one.
-      const moved = await post(`${manage}/reschedule`, { start: '2026-11-02T13:30:00Z' })
+      const moved = await post(`${manage}/reschedule`, { start: '2026-11-02T13:30:00Z' }, as(token))
       expect(moved.status).toBe(200)
       const next = (await moved.json()) as BookingBody
       expect(next.booking).toMatchObject({
@@ -235,32 +253,70 @@ describe.skipIf(!serverUrl)('public routes', () => {
       const newToken = next.manageToken as string
       tokens = [token, newToken]
 
-      expect(await (await get(manage)).json()).toMatchObject({ status: 'cancelled' })
-      const again = await post(`${manage}/reschedule`, { start: '2026-11-02T14:00:00Z' })
+      expect(await (await app.request(manage, { headers: as(token) })).json()).toMatchObject({
+        status: 'cancelled',
+      })
+      const again = await post(`${manage}/reschedule`, { start: '2026-11-02T14:00:00Z' }, as(token))
       expect(again.status).toBe(409)
       expect(await again.json()).toMatchObject({ error: 'booking_cancelled' })
 
       // Cancel without a body, then once more.
-      const cancelled = await post(`/api/v1/bookings/manage/${newToken}/cancel`)
+      const cancelled = await post(`${manage}/cancel`, undefined, as(newToken))
       expect(cancelled.status).toBe(200)
       expect(await cancelled.json()).toMatchObject({ status: 'cancelled', cancelReason: null })
-      const twice = await post(`/api/v1/bookings/manage/${newToken}/cancel`, { reason: 'Sorry' })
+      const twice = await post(`${manage}/cancel`, { reason: 'Sorry' }, as(newToken))
       expect(twice.status).toBe(409)
       expect(await twice.json()).toMatchObject({ error: 'booking_cancelled' })
-
-      const unknown = await get(`/api/v1/bookings/manage/${'A'.repeat(43)}`)
-      expect(unknown.status).toBe(404)
-      expect(await unknown.json()).toMatchObject({ error: 'booking_not_found' })
     } finally {
       for (const spy of spies) spy.mockRestore()
     }
     expect(tokens).toHaveLength(2)
-    expect(lines.some((l) => l.includes('/api/v1/bookings/manage/[redacted]/reschedule'))).toBe(
-      true,
-    )
+    // The request log ran, and no line of any log holds a token.
+    expect(lines.some((l) => l.includes('POST /api/v1/bookings/manage/reschedule'))).toBe(true)
     for (const token of tokens) {
       expect(lines.filter((l) => l.includes(token))).toEqual([])
     }
+  })
+
+  it('answers a missing, malformed or unknown manage token identically', async () => {
+    const bodies = new Set<string>()
+    for (const headers of [
+      {},
+      { 'x-manage-token': '' },
+      { 'x-manage-token': 'short' },
+      { 'x-manage-token': 'A'.repeat(43) },
+    ]) {
+      for (const [method, path, body] of [
+        ['GET', '/api/v1/bookings/manage', undefined],
+        ['POST', '/api/v1/bookings/manage/cancel', undefined],
+        ['POST', '/api/v1/bookings/manage/reschedule', { start: '2026-11-02T15:00:00Z' }],
+      ] as const) {
+        const res = await app.request(path, {
+          method,
+          headers: body ? { ...headers, 'content-type': 'application/json' } : headers,
+          body: body && JSON.stringify(body),
+        })
+        expect(res.status).toBe(404)
+        bodies.add(await res.text())
+      }
+    }
+    expect([...bodies]).toEqual([
+      JSON.stringify({ error: 'booking_not_found', message: 'No such booking' }),
+    ])
+  })
+
+  it('serves the manage endpoints whatever order the route modules are registered in', async () => {
+    const reversed = createApp({
+      ...noAuth,
+      routes: [bookingRoutes({ db, now: () => NOW }), publicRoutes({ db, now: () => NOW })],
+    })
+    const res = await reversed.request('/api/v1/bookings/manage', {
+      headers: { 'x-manage-token': 'A'.repeat(43) },
+    })
+    expect(res.status).toBe(404)
+    expect(await res.json()).toMatchObject({ error: 'booking_not_found' })
+    const cancel = await reversed.request('/api/v1/bookings/manage/cancel', { method: 'POST' })
+    expect(cancel.status).toBe(404)
   })
 
   it('rate limits each group per client address with 429 and Retry-After', async () => {
@@ -281,13 +337,12 @@ describe.skipIf(!serverUrl)('public routes', () => {
 
     // Another address has its own budget; other groups count separately.
     expect((await page('203.0.113.2')).status).toBe(200)
-    const manage = (ip: string) =>
-      limited.request(`/api/v1/bookings/manage/${'A'.repeat(43)}`, {}, from(ip))
+    const manage = (ip: string) => limited.request('/api/v1/bookings/manage', {}, from(ip))
     expect((await manage('203.0.113.1')).status).toBe(404)
     expect((await manage('203.0.113.1')).status).toBe(429)
     // Reschedule and cancel share the manage budget.
     const cancel = await limited.request(
-      `/api/v1/bookings/manage/${'A'.repeat(43)}/cancel`,
+      '/api/v1/bookings/manage/cancel',
       { method: 'POST' },
       from('203.0.113.1'),
     )
@@ -303,9 +358,9 @@ describe.skipIf(!serverUrl)('public routes', () => {
         '/api/v1/public/{handle}/{slug}',
         '/api/v1/public/{handle}/{slug}/slots',
         '/api/v1/public/{handle}/{slug}/bookings',
-        '/api/v1/bookings/manage/{token}',
-        '/api/v1/bookings/manage/{token}/cancel',
-        '/api/v1/bookings/manage/{token}/reschedule',
+        '/api/v1/bookings/manage',
+        '/api/v1/bookings/manage/cancel',
+        '/api/v1/bookings/manage/reschedule',
         '/api/v1/bookings',
         '/api/v1/bookings/{id}',
         '/api/v1/bookings/{id}/cancel',
@@ -313,5 +368,13 @@ describe.skipIf(!serverUrl)('public routes', () => {
     )
     expect(doc.paths['/api/v1/public/{handle}/{slug}/bookings']?.post?.security).toBeUndefined()
     expect(doc.paths['/api/v1/bookings']?.get?.security).toEqual([{ apiKey: [] }, { session: [] }])
+    expect(doc.paths['/api/v1/bookings/manage']?.get?.security).toBeUndefined()
+    const manage = doc.paths['/api/v1/bookings/manage']?.get as {
+      parameters?: { name: string; in: string }[]
+    }
+    expect(manage.parameters).toContainEqual(
+      expect.objectContaining({ name: 'x-manage-token', in: 'header' }),
+    )
+    expect(Object.keys(doc.paths).filter((p) => p.includes('{token}'))).toEqual([])
   })
 })

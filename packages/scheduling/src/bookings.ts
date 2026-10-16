@@ -9,18 +9,15 @@ import {
   findSlots,
   type Location,
   parseLocation,
-  type Question,
   toInstant,
   toIso,
 } from './availability.ts'
 import type { PublicContext, ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
+import { type Responses, validateResponses } from './questions.ts'
 
 export type BookingStatus = 'confirmed' | 'cancelled'
 export type BookingSource = 'web' | 'embed' | 'api' | 'mcp'
-export type ResponseValue = string | string[] | boolean
-/** Answers to the event type's questions, keyed by question id. */
-export type Responses = Record<string, ResponseValue>
 
 export interface Attendee {
   name: string
@@ -65,9 +62,7 @@ const MAX_NAME = 200
 const MAX_EMAIL = 254
 const MAX_LOCALE = 35
 const MAX_REASON = 1000
-const MAX_TEXT = { short_text: 500, long_text: 5000, phone: 32 } as const
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-const PHONE = /^\+?[0-9][0-9 ().-]*$/
 const IDEMPOTENCY_KEY = /^[\x21-\x7e]{1,255}$/
 const MANAGE_TOKEN = /^[A-Za-z0-9_-]{43}$/
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -78,81 +73,6 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const bookingNotFound = () => new DomainError('not_found', 'booking_not_found', 'No such booking')
 
 // --- Input validation -------------------------------------------------------------------
-
-/** Checks answers against the event type's questions; returns them trimmed. */
-export function validateResponses(questions: readonly Question[], given: unknown): Responses {
-  const invalid = (message: string) => new DomainError('invalid', 'invalid_responses', message)
-  if (!isRecord(given)) throw invalid('responses must be an object keyed by question id')
-  const byId = new Map(questions.map((q) => [q.id, q]))
-  if (Object.keys(given).some((id) => !byId.has(id))) {
-    throw invalid('responses answers a question this event type does not ask')
-  }
-  const result: Responses = {}
-  for (const q of questions) {
-    const value = given[q.id]
-    const name = `Question "${q.id}"`
-    const missing = () => invalid(`${name} is required`)
-    switch (q.type) {
-      case 'short_text':
-      case 'long_text':
-      case 'phone': {
-        if (value === undefined || value === null) {
-          if (q.required) throw missing()
-          break
-        }
-        if (typeof value !== 'string') throw invalid(`${name} takes text`)
-        const text = value.trim()
-        if (text === '') {
-          if (q.required) throw missing()
-          break
-        }
-        if (text.length > MAX_TEXT[q.type]) {
-          throw invalid(`${name} takes at most ${MAX_TEXT[q.type]} characters`)
-        }
-        if (q.type === 'phone' && !PHONE.test(text)) throw invalid(`${name} takes a phone number`)
-        result[q.id] = text
-        break
-      }
-      case 'select': {
-        if (value === undefined || value === null || value === '') {
-          if (q.required) throw missing()
-          break
-        }
-        if (typeof value !== 'string' || !q.options?.includes(value)) {
-          throw invalid(`${name} takes one of its options`)
-        }
-        result[q.id] = value
-        break
-      }
-      case 'multi_select': {
-        if (value === undefined || value === null || (Array.isArray(value) && !value.length)) {
-          if (q.required) throw missing()
-          break
-        }
-        if (
-          !Array.isArray(value) ||
-          !value.every((v) => typeof v === 'string' && q.options?.includes(v)) ||
-          new Set(value).size !== value.length
-        ) {
-          throw invalid(`${name} takes a list of distinct options`)
-        }
-        result[q.id] = value as string[]
-        break
-      }
-      case 'checkbox': {
-        if (value === undefined || value === null) {
-          if (q.required) throw missing()
-          break
-        }
-        if (typeof value !== 'boolean') throw invalid(`${name} takes true or false`)
-        if (q.required && !value) throw missing()
-        result[q.id] = value
-        break
-      }
-    }
-  }
-  return result
-}
 
 /** An IANA zone name in its canonical spelling; UTC offsets are refused (they ignore DST). */
 function validTimeZone(value: string): string | undefined {
@@ -249,11 +169,12 @@ function newManageToken(): { token: string; hash: Buffer } {
 }
 
 /**
- * The stored hash for a manage token, or undefined when it cannot be one. Lookups go by
- * hash, so response timing says nothing useful about the secret.
+ * The stored hash for a manage token, or undefined when it is missing or cannot be one
+ * (both end in the same booking_not_found as an unknown token). Lookups go by hash, so
+ * response timing says nothing useful about the secret.
  */
-function manageTokenHash(token: string): Buffer | undefined {
-  return MANAGE_TOKEN.test(token) ? sha256(token) : undefined
+function manageTokenHash(token: string | undefined): Buffer | undefined {
+  return token !== undefined && MANAGE_TOKEN.test(token) ? sha256(token) : undefined
 }
 
 interface IdempotencyScope {
@@ -630,8 +551,11 @@ export async function createPublicBooking(
 
 // --- Invitee links (manage token) ---------------------------------------------------------
 
-/** The booking behind a manage link; `booking_not_found` for unknown tokens. */
-export async function getManagedBooking(ctx: PublicContext, token: string): Promise<Booking> {
+/** The booking behind a manage token; `booking_not_found` when it is missing or unknown. */
+export async function getManagedBooking(
+  ctx: PublicContext,
+  token: string | undefined,
+): Promise<Booking> {
   const hash = manageTokenHash(token)
   const row =
     hash &&
@@ -647,7 +571,7 @@ export async function getManagedBooking(ctx: PublicContext, token: string): Prom
 /** Cancels through a manage link: `booking_cancelled` if already cancelled, `booking_in_past` once started. */
 export async function cancelManagedBooking(
   ctx: PublicContext,
-  token: string,
+  token: string | undefined,
   { reason }: { reason?: string | undefined } = {},
 ): Promise<Booking> {
   const hash = manageTokenHash(token)
@@ -673,7 +597,7 @@ export async function cancelManagedBooking(
  */
 export async function rescheduleManagedBooking(
   ctx: PublicContext,
-  token: string,
+  token: string | undefined,
   { start }: { start: Temporal.Instant },
 ): Promise<BookingWithToken> {
   const hash = manageTokenHash(token)
@@ -788,7 +712,7 @@ export interface ListBookingsInput {
 }
 
 export interface BookingPage {
-  bookings: Booking[]
+  data: Booking[]
   /** Pass as `cursor` for the next page; null on the last page. */
   nextCursor: string | null
 }
@@ -858,7 +782,7 @@ export async function listHostBookings(
   const page = rows.slice(0, limit)
   const last = page.at(-1)
   return {
-    bookings: await toBookings(ctx.db, page),
+    data: await toBookings(ctx.db, page),
     nextCursor: rows.length > limit && last ? encodeCursor(last) : null,
   }
 }

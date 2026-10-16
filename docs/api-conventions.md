@@ -88,18 +88,40 @@ A request is authenticated by one of:
 `GET /api/v1/me` returns the caller, the organization they act in and whether they used a
 session or an API key.
 
+## Validation
+
+Input is checked in two layers, so REST and MCP behave identically:
+
+- **Shape** (the route's zod schema): JSON syntax, types, required fields, string formats and
+  lengths. Request objects are strict: an unknown field (often a misspelling) is refused, not
+  ignored. Failures are 400 `invalid_request`, with `message` naming the fields.
+- **Values and meaning** (the service, shared with the MCP server): whatever needs the
+  database or domain rules, e.g. that a time zone exists, that answers fit the event type's
+  questions, or that a slot is still free. Failures use specific codes (400
+  `invalid_responses`, 409 `slot_taken`, …).
+
+## Lists
+
+A list response is `{ "data": [ … ] }`. Lists that can grow without bound use cursor
+pagination and add `nextCursor`: pass it as `cursor` (with the same filters) for the next page;
+it is null on the last page. Cursors are opaque; `limit` sets the page size (1–100, default
+50). Small lists return everything and have no `nextCursor`.
+
 ## Public endpoints
 
 Booking pages and invitee links work without credentials:
 
 - `/api/v1/public/{handle}/{slug}` (event page, `/slots`, `/bookings`) for personal event types.
-- `/api/v1/bookings/manage/{token}` (show, `/cancel`, `/reschedule`): the token is the secret
-  from the invitee's link. Only its SHA-256 is stored, so it is returned once, when the
-  booking is made, and it is never written to the server log.
+- `/api/v1/bookings/manage` (`GET` shows the booking, `POST …/cancel`, `POST …/reschedule`)
+  with the invitee's secret in the `X-Manage-Token` header. Invitee links carry it in the URL
+  fragment, `https://<app>/booking#token=<token>`, which browsers never send to servers or in
+  `Referer`; the web app reads it and sends the header. A missing, malformed or unknown token
+  gets the same 404 `booking_not_found`. Only the token's SHA-256 is stored, so it is returned
+  once, when the booking is made (and with the new booking after a reschedule).
 
 They are rate limited per client IP (`TRUSTED_PROXIES` decides which address that is): 120
 requests a minute for event pages and for slots, 10 for creating bookings, 30 for manage
-links; beyond that 429 `rate_limited` with `Retry-After`. The counters live in each server
+endpoints; beyond that 429 `rate_limited` with `Retry-After`. The counters live in each server
 process's memory, so with several instances a client gets that budget once per instance; a
 shared store comes with multi-instance deployments.
 
@@ -107,14 +129,8 @@ shared store comes with multi-instance deployments.
 
 `POST /api/v1/public/{handle}/{slug}/bookings` accepts an `Idempotency-Key` header (1–255
 printable ASCII characters). A retry with the same key and the same request returns the
-original booking with 200 instead of booking again (its `manageToken` is null: the secret is
-not stored); the same key with a different request is refused with 409
-`idempotency_key_reused`. Keys are scoped to the organization and the caller's API key, and
-all anonymous callers share one scope, so they must be random (e.g. a UUIDv4), never derived
-from the request.
-
-## Pagination
-
-Lists that can grow without bound, such as `GET /api/v1/bookings`, return a page and a
-`nextCursor`; pass it as `cursor` (with the same filters) for the next page. It is null on the
-last page. Cursors are opaque. `limit` sets the page size (1–100, default 50).
+original booking with 200 instead of booking again; its `manageToken` is null, because the
+secret is not stored and cannot be returned twice. The same key with a different request is
+refused with 409 `idempotency_key_reused`. Keys are scoped to the organization and the
+caller's API key, and all anonymous callers share one scope, so they must be random (e.g. a
+UUIDv4), never derived from the request.
