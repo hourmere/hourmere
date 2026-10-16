@@ -10,7 +10,11 @@ export default defineConfig({
       {
         test: {
           name: 'node',
-          include: ['apps/*/src/**/*.test.{ts,tsx}', 'packages/*/src/**/*.test.ts'],
+          include: [
+            'apps/*/src/**/*.test.{ts,tsx}',
+            'packages/*/src/**/*.test.ts',
+            'scripts/**/*.test.ts',
+          ],
           exclude: [...configDefaults.exclude, 'apps/web/**'],
         },
       },

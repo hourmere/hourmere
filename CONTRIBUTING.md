@@ -68,7 +68,7 @@ npm run db:types
   "Add booking cancellation endpoint", not "Added…" or "Adds…".
 - A body, wrapped at 72 characters, that explains why the change is needed when that is not
   obvious from the subject.
-- A DCO sign-off on every commit (see below).
+- A DCO sign-off on every commit, if you are an external contributor (see below).
 
 ## Pull requests
 
@@ -85,17 +85,38 @@ Hourmere is licensed under the [GNU Affero General Public License v3.0](LICENSE)
 (`AGPL-3.0-only`). Contributions are accepted under the same license (inbound = outbound).
 There is no Contributor License Agreement (CLA): you keep the copyright to your work.
 
-Instead, every commit must carry a sign-off certifying the
+Instead, external contributors sign off their commits, certifying the
 [Developer Certificate of Origin 1.1](https://developercertificate.org/): in short, that you
-wrote the change or otherwise have the right to submit it under the project's license. Add it
-with `git commit -s`, which appends a line using your `user.name` and `user.email`:
+wrote the change or otherwise have the right to submit it under the project's license.
+
+- **Who signs off:** every external contributor, on every commit in the pull request. The
+  sign-off must name the commit's author, with the same name and email address as the commit's
+  author fields (case does not matter).
+- **Who is exempt:** commits authored by the maintainer and by Dependabot. The maintainer
+  commits as `adrian@cobaltmere.com` (so do Cobaltmere's AI coding agents) and, in GitHub's
+  web UI, as `167077805+adrian-lee-dev@users.noreply.github.com`. That code is Cobaltmere's own
+  work, so there is no outside contribution to certify. The list is kept in
+  [`scripts/check-dco.ts`](scripts/check-dco.ts). In a pull request from a fork the exemptions
+  do not apply, because anyone can put any email address on a commit.
+- **Merge commits** need no sign-off. The commits a merge brings in are checked on their own,
+  and neither `git merge` nor GitHub's "Update branch" button adds a sign-off.
+
+CI checks this on every pull request ([`.github/workflows/dco.yml`](.github/workflows/dco.yml))
+and lists each commit that is missing a sign-off.
+
+Add the sign-off with `git commit -s`, which appends a line using your `user.name` and
+`user.email`:
 
 ```text
 Signed-off-by: Your Name <you@example.com>
 ```
 
-Use a name you are known by and an email address you can be reached at. If you forgot, add
-the sign-off to your last commit with `git commit --amend -s --no-edit`, or to every commit on
-your branch with `git rebase --signoff origin/main`. Both rewrite your branch, so update the
-pull request with `git push --force-with-lease`; this is the one case where rewriting a branch
-that is under review is fine.
+Use a name you are known by and an email address you can be reached at, and commit under the
+same identity so that the sign-off matches the author. Keep the line in the last paragraph of
+the message, where git looks for trailers.
+
+If you forgot, add the sign-off to your last commit with `git commit --amend -s --no-edit`, or
+to every commit on your branch with `git rebase --signoff origin/main`. Both rewrite your
+branch, so update the pull request with `git push --force-with-lease`; this is the one case
+where rewriting a branch that is under review is fine. To check your branch before you push,
+run `node scripts/check-dco.ts origin/main HEAD`.

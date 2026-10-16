@@ -12,4 +12,4 @@
 - [ ] Tests cover the change, and `npm run lint`, `npm run typecheck`, `npm test` and `npm run build` pass.
 - [ ] Any new migration is committed with regenerated table types (`npm run db:migrate && npm run db:types`).
 - [ ] Docs are updated where behavior or the API changed (README, `docs/`).
-- [ ] Every commit is signed off (`git commit -s`) under the [Developer Certificate of Origin](https://developercertificate.org/); see [CONTRIBUTING.md](https://github.com/cobaltmere/hourmere/blob/main/CONTRIBUTING.md#license-and-sign-off).
+- [ ] Signed off (external contributors): every commit has a `Signed-off-by:` line naming its author (`git commit -s`) under the [Developer Certificate of Origin](https://developercertificate.org/); see [CONTRIBUTING.md](https://github.com/cobaltmere/hourmere/blob/main/CONTRIBUTING.md#license-and-sign-off).

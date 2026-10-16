@@ -18,7 +18,7 @@
     "db:migrate": "node --env-file-if-exists=.env packages/db/src/migrate-cli.ts && node --env-file-if-exists=.env packages/jobs/src/migrate-cli.ts",
     "lint": "biome check .",
     "format": "biome check --write .",
-    "typecheck": "npm run typecheck --workspaces --if-present && tsc -p tools/api-types",
+    "typecheck": "npm run typecheck --workspaces --if-present && tsc -p tools/api-types && tsc -p scripts",
     "test": "vitest run",
     "build": "npm run build --workspaces --if-present",
     "start": "node apps/server/src/index.ts",
