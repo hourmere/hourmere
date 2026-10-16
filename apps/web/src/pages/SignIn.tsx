@@ -18,6 +18,8 @@ const loadInstance = (signal: AbortSignal) => unwrap(api.GET('/api/v1/instance',
 
 const INTERRUPTED = 'That sign-in attempt expired or was interrupted. Please try again.'
 const USE_EMAIL_LINK = 'Sign in with an email link instead.'
+const COULD_NOT_CREATE_ACCOUNT = 'Your account could not be created. Please try again.'
+const COULD_NOT_SIGN_IN = 'You could not be signed in. Please try again.'
 
 // Better Auth sends people back with ?error=CODE (and an error_description, which is never
 // shown: anyone can put text in a link to this page). Codes are matched case-insensitively,
@@ -39,6 +41,16 @@ const SIGN_IN_ERRORS = new Map<string, string>(
     no_code: INTERRUPTED,
     account_not_linked: `This email address already has an account. ${USE_EMAIL_LINK}`,
     unable_to_link_account: `This sign-in could not be connected to your account. ${USE_EMAIL_LINK}`,
+    email_does_not_match: `That account's email address does not match yours. ${USE_EMAIL_LINK}`,
+    account_already_linked_to_different_user: `That sign-in account is already connected to another Hourmere account. ${USE_EMAIL_LINK}`,
+    unable_to_get_user_info:
+      'Your sign-in provider did not send your account details. Please try again.',
+    // The magic link says failed_to_…, the provider callback unable_to_….
+    failed_to_create_user: COULD_NOT_CREATE_ACCOUNT,
+    unable_to_create_user: COULD_NOT_CREATE_ACCOUNT,
+    failed_to_create_session: COULD_NOT_SIGN_IN,
+    unable_to_create_session: COULD_NOT_SIGN_IN,
+    // Also SIGNUP_DISABLED (codes are matched case-insensitively).
     signup_disabled: 'New accounts cannot be created on this instance.',
     new_user_signup_disabled: 'New accounts cannot be created on this instance.',
   }),
@@ -66,11 +78,15 @@ export function SignInPage() {
   const next = safeNextPath(params.get('next'))
   if (state.status === 'loading') return <PageStatus>Loading…</PageStatus>
   if (state.status === 'signed-in') return <Navigate to={next} replace />
-  return <SignInForm next={next} />
+  const expired = state.status === 'signed-out' && state.reason === 'expired'
+  return <SignInForm next={next} expired={expired} />
 }
 
-/** `next`: where to land once signed in, already checked to be a path on this site. */
-function SignInForm({ next }: { next: string }) {
+/**
+ * `next`: where to land once signed in, already checked to be a path on this site.
+ * `expired`: the session ended while the app was open (not on a first visit).
+ */
+function SignInForm({ next, expired }: { next: string; expired: boolean }) {
   const [params, setParams] = useSearchParams()
   const [phase, setPhase] = useState<Phase>(() => ({
     kind: 'form',
@@ -154,6 +170,11 @@ function SignInForm({ next }: { next: string }) {
       <div className="card">
         <Logo size={32} />
         <h1>Sign in to Hourmere</h1>
+        {expired && (
+          <p className="alert alert-info" role="status">
+            Your session ended. Please sign in again.
+          </p>
+        )}
         {phase.kind === 'form' && phase.error && (
           <p className="alert alert-error" role="alert">
             {phase.error}

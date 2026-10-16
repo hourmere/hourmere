@@ -121,8 +121,19 @@ describe('the API keys page', () => {
 
     await user.click(within(reveal).getByRole('button', { name: 'I’ve saved my key' }))
     expect(screen.queryByRole('region', { name: /Copy your new key/ })).toBeNull()
+    // Gone from the page: not in its text, its markup, or any field's value (a hidden
+    // input would show in neither of the first two).
     expect(document.body.textContent).not.toContain(SECRET)
+    expect(document.body.innerHTML).not.toContain(SECRET)
+    for (const field of document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
+      'input, textarea',
+    )) {
+      expect(field.value).not.toContain(SECRET)
+      expect(field.defaultValue).not.toContain(SECRET)
+    }
     expect(screen.getByRole('heading', { name: 'Create a key' })).toBeDefined()
+    // Focus does not drop to the page: it goes to the list, which has the new key.
+    expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Your keys' }))
   })
 
   it('sends no expiry for a key that never expires', async () => {
@@ -230,6 +241,52 @@ describe('the API keys page', () => {
     expect(api.to('POST /api/auth/api-key/delete').map((c) => c.body)).toEqual([
       { keyId: existing.id },
     ])
+    expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Your keys' }))
+    expect(screen.getByText('Revoked “Claude Desktop”.').getAttribute('role')).toBe('status')
+  })
+
+  it('cancels revoking with Escape', async () => {
+    const user = userEvent.setup()
+    const api = keyServer()
+    renderApp('/api-keys')
+    await table()
+
+    await user.click(screen.getByRole('button', { name: 'Revoke Claude Desktop' }))
+    expect(screen.getByRole('group', { name: /Revoke “Claude Desktop”\?/ })).toBeDefined()
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('group', { name: /Revoke/ })).toBeNull()
+    expect(document.activeElement).toBe(
+      screen.getByRole('button', { name: 'Revoke Claude Desktop' }),
+    )
+    expect(api.to('POST /api/auth/api-key/delete')).toHaveLength(0)
+  })
+
+  it('explains, in plain words, a key refused because the organization changed', async () => {
+    const user = userEvent.setup()
+    let me: Me = IN_TEAM
+    const api = fakeApi({
+      'GET /api/v1/me': () => json(200, me),
+      ...organizations([ME.organization]),
+      'GET /api/auth/api-key/list': () => json(200, { apiKeys: [], total: 0 }),
+      'POST /api/auth/api-key/create': () =>
+        json(403, {
+          message: 'metadata.organizationId must be an organization you are a member of',
+        }),
+    })
+    renderApp('/api-keys')
+    await screen.findByText('You have no API keys yet.')
+    // Removed from the team meanwhile; the session now acts in the personal organization.
+    me = ME
+    await user.type(screen.getByLabelText('Name'), 'Team agent')
+    await user.click(screen.getByRole('button', { name: 'Create key' }))
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      "You're no longer a member of Acme, so no key was created. Keys you create now act in Ada.",
+    )
+    expect(screen.queryByText(/metadata\.organizationId/)).toBeNull()
+    expect(screen.getByRole('region', { name: 'Create a key' }).textContent).toContain(
+      'The key will act in Ada, your personal organization.',
+    )
+    expect(api.to('GET /api/v1/me').length).toBeGreaterThanOrEqual(2)
   })
 
   it('keeps the key when revoking is cancelled', async () => {

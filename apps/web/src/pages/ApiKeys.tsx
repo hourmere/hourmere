@@ -8,10 +8,10 @@ import {
   listApiKeys,
   listOrganizations,
 } from '../api/auth.ts'
-import { errorMessage } from '../api/errors.ts'
+import { errorMessage, RequestError } from '../api/errors.ts'
 import { CopyButton } from '../components/CopyButton.tsx'
 import { useLoad, usePageTitle } from '../hooks.ts'
-import { type Me, useMe } from '../session.tsx'
+import { type Me, useMe, useSession } from '../session.tsx'
 
 const DAY = 24 * 60 * 60
 
@@ -53,6 +53,8 @@ export function ApiKeysPage() {
   const me = useMe()
   const [keys, reload] = useLoad(loadKeys)
   const [created, setCreated] = useState<CreatedApiKey | null>(null)
+  const [notice, setNotice] = useState('')
+  const keysHeading = useRef<HTMLHeadingElement>(null)
 
   return (
     <>
@@ -68,12 +70,15 @@ export function ApiKeysPage() {
           apiKey={created}
           onDone={() => {
             setCreated(null)
+            // The panel (and the focused button) goes away; the new key is in the list.
+            keysHeading.current?.focus()
           }}
         />
       ) : (
         <CreateKeyForm
           organization={me.organization}
           onCreated={(key) => {
+            setNotice('')
             setCreated(key)
             reload()
           }}
@@ -81,7 +86,12 @@ export function ApiKeysPage() {
       )}
 
       <section aria-labelledby="keys-heading">
-        <h2 id="keys-heading">Your keys</h2>
+        <h2 id="keys-heading" ref={keysHeading} tabIndex={-1}>
+          Your keys
+        </h2>
+        <p className="copy-status" role="status">
+          {notice}
+        </p>
         {keys.status === 'loading' && <p role="status">Loading keys…</p>}
         {keys.status === 'error' && (
           <div className="alert alert-error" role="alert">
@@ -98,7 +108,12 @@ export function ApiKeysPage() {
             <KeyTable
               keys={keys.data.keys}
               organizations={keys.data.organizations}
-              onRevoked={reload}
+              onRevoked={(key) => {
+                setNotice(`Revoked “${key.name || key.start || 'the key'}”.`)
+                reload()
+                // Its row (and the focused button) goes away.
+                keysHeading.current?.focus()
+              }}
             />
           ))}
       </section>
@@ -136,6 +151,7 @@ function CreateKeyForm({
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const nameHint = useId()
+  const { refresh } = useSession()
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -146,9 +162,25 @@ function CreateKeyForm({
         await createApiKey(name.trim(), expiresIn ? Number(expiresIn) : null, organization.id),
       )
     } catch (err) {
-      setError(`Could not create the key. ${errorMessage(err)}`)
+      setError(await createErrorMessage(err))
       setCreating(false)
     }
+  }
+
+  /**
+   * A 403 other than an unverified email means the organization was not one the person
+   * belongs to (any more): they may have left it, or switched organizations in another tab.
+   * Ask who they are now, so the form shows where the next key would go.
+   */
+  async function createErrorMessage(err: unknown): Promise<string> {
+    if (!(err instanceof RequestError) || err.status !== 403 || err.code === 'EMAIL_NOT_VERIFIED') {
+      return `Could not create the key. ${errorMessage(err)}`
+    }
+    const now = await refresh()
+    if (now && now.organization.id !== organization.id) {
+      return `You're no longer a member of ${organization.name}, so no key was created. Keys you create now act in ${now.organization.name}.`
+    }
+    return `Could not create the key: you can't create keys in ${organization.name}.`
   }
 
   return (
@@ -257,7 +289,7 @@ function KeyTable({
   keys: ApiKey[]
   /** Organization names by id. */
   organizations: ReadonlyMap<string, string>
-  onRevoked: () => void
+  onRevoked: (key: ApiKey) => void
 }) {
   const now = Date.now()
   return (
@@ -317,7 +349,7 @@ function KeyTable({
 }
 
 /** Revoking asks for confirmation in place: the button turns into Revoke / Cancel. */
-function RevokeButton({ apiKey, onRevoked }: { apiKey: ApiKey; onRevoked: () => void }) {
+function RevokeButton({ apiKey, onRevoked }: { apiKey: ApiKey; onRevoked: (key: ApiKey) => void }) {
   const [confirming, setConfirming] = useState(false)
   const [revoking, setRevoking] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -339,7 +371,7 @@ function RevokeButton({ apiKey, onRevoked }: { apiKey: ApiKey; onRevoked: () => 
     setError(null)
     try {
       await deleteApiKey(apiKey.id)
-      onRevoked()
+      onRevoked(apiKey)
     } catch (err) {
       setError(`Could not revoke the key. ${errorMessage(err)}`)
       setRevoking(false)
@@ -361,7 +393,17 @@ function RevokeButton({ apiKey, onRevoked }: { apiKey: ApiKey; onRevoked: () => 
   }
   return (
     // biome-ignore lint/a11y/useSemanticElements: a fieldset would bring form styling for two buttons
-    <div className="confirm" role="group" aria-labelledby={promptId}>
+    <div
+      className="confirm"
+      role="group"
+      aria-labelledby={promptId}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape' && !revoking) {
+          e.stopPropagation()
+          setConfirming(false)
+        }
+      }}
+    >
       <p id={promptId}>
         Revoke “{label}”? Anything using it stops working at once. This cannot be undone.
       </p>

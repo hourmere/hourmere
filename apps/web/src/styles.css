@@ -19,7 +19,7 @@
   --text: var(--ink);
   --muted: #475066;
   --border: #d6deef;
-  --border-strong: #a9b6d3;
+  --border-strong: #7a8ab0; /* 3:1 or more against the light backgrounds (form borders) */
   --link: var(--cobalt);
   --accent: var(--cobalt);
   --accent-hover: var(--cobalt-strong);
@@ -62,14 +62,14 @@
     --text: #e9edf7;
     --muted: #a9b3c9;
     --border: #283252;
-    --border-strong: #3d4a72;
+    --border-strong: #64719a;
     --link: #8faeff;
     --accent: #3d68e6;
-    --accent-hover: #5279ea;
+    --accent-hover: #3360e0;
     --accent-soft: #16244a;
     --accent-soft-text: #dbe5ff;
-    --danger: #e5484d;
-    --danger-hover: #f0646a;
+    --danger: #d13438; /* white text 4.9:1 */
+    --danger-hover: #b42318;
     --danger-soft: #2c1517;
     --danger-border: #6b2a2d;
     --success-soft: #11261c;
@@ -510,6 +510,11 @@ input[readonly] {
 .alert-error {
   border-color: var(--danger-border);
   background: var(--danger-soft);
+}
+
+.alert-info {
+  border-color: var(--border);
+  background: var(--accent-soft);
 }
 
 .form-row + .alert,

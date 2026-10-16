@@ -4,7 +4,10 @@
 //
 // This is its own workspace because openapi-typescript builds the types with TypeScript's
 // JavaScript compiler API, which TypeScript 7 (the repository's compiler) no longer ships:
-// it gets TypeScript 5 here without changing the `tsc` the other workspaces use.
+// it gets TypeScript 5 here without changing the `tsc` the other workspaces use. That
+// TypeScript 5 is only openapi-typescript's: this file is checked by the root's TypeScript 7
+// (`npm run typecheck` runs `tsc -p tools/api-types`), since the server code it imports needs
+// TypeScript 7's Temporal types.
 import { writeFile } from 'node:fs/promises'
 import openapiTS, { astToString, type OpenAPI3 } from 'openapi-typescript'
 import { openApiDocument } from '../../apps/server/src/openapi-document.ts'

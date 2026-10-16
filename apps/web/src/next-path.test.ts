@@ -7,7 +7,9 @@ describe('safeNextPath', () => {
     ['/bookings?status=upcoming', '/bookings?status=upcoming'],
     ['/settings#profile', '/settings#profile'],
     ['/a/../api-keys', '/api-keys'],
-    ['/%2F%2Fexample.com', '/%2F%2Fexample.com'],
+    ['/api-keys', '/api-keys'],
+    ['/bookings?next=%2F%2Fexample.com', '/bookings?next=%2F%2Fexample.com'],
+    [`/${'a'.repeat(2047)}`, `/${'a'.repeat(2047)}`],
   ])('keeps the path on this site %s', (raw, expected) => {
     expect(safeNextPath(raw)).toBe(expected)
   })
@@ -30,6 +32,19 @@ describe('safeNextPath', () => {
     ['/\u0000x'],
     ['/sign-in'],
     ['/sign-in?next=/api-keys'],
+    // Better Auth refuses encoded separators in a callbackURL; sign-in would fail.
+    ['/%2F%2Fexample.com'],
+    ['/a%2fb'],
+    ['/%5Cexample.com'],
+    ['/a%5cb'],
+    // The API, not pages.
+    ['/api'],
+    ['/api/v1/me'],
+    ['/api/auth/sign-out'],
+    // Too long, before or after normalizing.
+    [`/${'a'.repeat(2048)}`],
+    [`/${'a/../'.repeat(500)}x`],
+    [`/${'é'.repeat(400)}`],
   ])('falls back to the start page for %j', (raw) => {
     expect(safeNextPath(raw)).toBe('/')
   })

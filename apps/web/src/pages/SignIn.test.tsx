@@ -189,6 +189,20 @@ describe('describeSignInError', () => {
     )
   })
 
+  it.each([
+    ['failed_to_create_user', 'Your account could not be created. Please try again.'],
+    ['unable_to_create_user', 'Your account could not be created. Please try again.'],
+    ['failed_to_create_session', 'You could not be signed in. Please try again.'],
+    ['unable_to_create_session', 'You could not be signed in. Please try again.'],
+    ['email_does_not_match', /email address does not match yours/],
+    ['account_already_linked_to_different_user', /already connected to another Hourmere account/],
+    ['unable_to_get_user_info', /did not send your account details/],
+    ['SIGNUP_DISABLED', 'New accounts cannot be created on this instance.'],
+  ])('explains %s', (code, message) => {
+    if (typeof message === 'string') expect(describeSignInError(code)).toBe(message)
+    else expect(describeSignInError(code)).toMatch(message)
+  })
+
   it.each(PROTOTYPE_KEYS)('treats %s as an unknown code, not an inherited property', (code) => {
     expect(describeSignInError(code)).toBe(`Sign-in did not work (${code}). Please try again.`)
   })
