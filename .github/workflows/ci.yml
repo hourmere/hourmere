@@ -43,6 +43,8 @@ jobs:
       - run: npm test
       - name: Generated table types match the migrations
         run: npm run db:migrate && npm run db:types -- --verify
+      - name: Generated API types match the server's OpenAPI document
+        run: npm run api:types && git diff --exit-code -- apps/web/src/api/schema.d.ts
       - run: npm run build
 
   docker:
