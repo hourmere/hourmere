@@ -1,25 +1,92 @@
 import { z } from 'zod'
 
-const schema = z.object({
-  DATABASE_URL: z
-    .string()
-    .min(1, 'DATABASE_URL is required')
-    .refine((v) => URL.canParse(v), {
-      message:
-        'DATABASE_URL is not a valid URL (percent-encode special characters in the password, or leave the password out and set PGPASSWORD)',
-    }),
-  PORT: z.coerce.number().int().positive().default(3000),
-  PUBLIC_URL: z.url().optional(),
-  // Self-hosted instances migrate on start; set to "false" to run `npm run db:migrate` yourself.
-  AUTO_MIGRATE: z
-    .enum(['true', 'false'])
-    .default('true')
-    .transform((v) => v === 'true'),
-  // Built web app to serve; unset in development, where Vite serves it.
-  WEB_DIST: z.string().optional(),
-})
+// docker compose passes unset optional variables as empty strings.
+const optional = <T extends z.ZodType>(schema: T) =>
+  z.preprocess((v) => (v === '' ? undefined : v), schema.optional())
 
-export type Config = z.infer<typeof schema> & { PUBLIC_URL: string }
+const schema = z
+  .object({
+    DATABASE_URL: z
+      .string()
+      .min(1, 'DATABASE_URL is required')
+      .refine((v) => URL.canParse(v), {
+        message:
+          'DATABASE_URL is not a valid URL (percent-encode special characters in the password, or leave the password out and set PGPASSWORD)',
+      }),
+    PORT: z.coerce.number().int().positive().default(3000),
+    // Where people reach Hourmere: sign-in links, OAuth redirects and cookies are built from it.
+    PUBLIC_URL: optional(
+      z
+        .url({ protocol: /^https?$/, error: 'PUBLIC_URL must be an http(s) URL' })
+        .refine((v) => new URL(v).pathname === '/' && !new URL(v).search, {
+          error: 'PUBLIC_URL must not have a path: Hourmere is served at the root of its domain',
+        }),
+    ),
+    BETTER_AUTH_SECRET: z
+      .string({
+        error:
+          'BETTER_AUTH_SECRET is required: a random string of at least 32 characters, e.g. the output of `openssl rand -base64 32`',
+      })
+      .min(32, {
+        error:
+          'BETTER_AUTH_SECRET must be at least 32 characters long; generate one with `openssl rand -base64 32`',
+      }),
+    // Without SMTP, emails (including sign-in links) are written to the server log.
+    SMTP_URL: optional(
+      z.url({
+        protocol: /^smtps?$/,
+        error:
+          'SMTP_URL must look like smtps://user:password@host:465 or smtp://user:password@host:587 (percent-encode special characters in the password)',
+      }),
+    ),
+    MAIL_FROM: optional(z.string()),
+    GOOGLE_CLIENT_ID: optional(z.string()),
+    GOOGLE_CLIENT_SECRET: optional(z.string()),
+    MICROSOFT_CLIENT_ID: optional(z.string()),
+    MICROSOFT_CLIENT_SECRET: optional(z.string()),
+    // Self-hosted instances migrate on start; set to "false" to run `npm run db:migrate` yourself.
+    AUTO_MIGRATE: z
+      .enum(['true', 'false'])
+      .default('true')
+      .transform((v) => v === 'true'),
+    // Built web app to serve; unset in development, where Vite serves it.
+    WEB_DIST: z.string().optional(),
+  })
+  .superRefine((c, ctx) => {
+    if (c.SMTP_URL && !c.MAIL_FROM) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['MAIL_FROM'],
+        message: 'MAIL_FROM is required with SMTP_URL, e.g. "Hourmere <hourmere@example.com>"',
+      })
+    }
+    for (const provider of ['GOOGLE', 'MICROSOFT'] as const) {
+      const id = c[`${provider}_CLIENT_ID`]
+      const secret = c[`${provider}_CLIENT_SECRET`]
+      if (Boolean(id) !== Boolean(secret)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: [id ? `${provider}_CLIENT_SECRET` : `${provider}_CLIENT_ID`],
+          message: `set both ${provider}_CLIENT_ID and ${provider}_CLIENT_SECRET, or neither`,
+        })
+      }
+    }
+  })
+
+export interface OAuthClient {
+  clientId: string
+  clientSecret: string
+}
+
+export type Config = Omit<z.infer<typeof schema>, 'PUBLIC_URL'> & {
+  PUBLIC_URL: string
+  /** Social sign-in providers whose credentials are set. */
+  socialProviders: { google?: OAuthClient; microsoft?: OAuthClient }
+}
+
+function oauthClient(clientId?: string, clientSecret?: string): OAuthClient | undefined {
+  return clientId && clientSecret ? { clientId, clientSecret } : undefined
+}
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const parsed = schema.safeParse(env)
@@ -27,5 +94,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     throw new Error(`invalid configuration: ${z.prettifyError(parsed.error)}`)
   }
   const c = parsed.data
-  return { ...c, PUBLIC_URL: c.PUBLIC_URL ?? `http://localhost:${c.PORT}` }
+  const google = oauthClient(c.GOOGLE_CLIENT_ID, c.GOOGLE_CLIENT_SECRET)
+  const microsoft = oauthClient(c.MICROSOFT_CLIENT_ID, c.MICROSOFT_CLIENT_SECRET)
+  return {
+    ...c,
+    PUBLIC_URL: c.PUBLIC_URL ? new URL(c.PUBLIC_URL).origin : `http://localhost:${c.PORT}`,
+    socialProviders: { ...(google && { google }), ...(microsoft && { microsoft }) },
+  }
 }

@@ -1,6 +1,8 @@
-# Self-hosting: copy .env.example to .env, set POSTGRES_PASSWORD (and PUBLIC_URL), then
+# Self-hosting: copy .env.example to .env, set POSTGRES_PASSWORD, BETTER_AUTH_SECRET and
+# PUBLIC_URL (optionally SMTP and Google/Microsoft sign-in), then
 #   docker compose up -d
-# The app listens on 127.0.0.1:3000; put a reverse proxy with TLS in front of it.
+# The app listens on 127.0.0.1:3000; put a reverse proxy with TLS in front of it. Until SMTP
+# is configured, sign-in links are printed by `docker compose logs app`.
 name: hourmere
 
 services:
@@ -12,6 +14,13 @@ services:
       DATABASE_URL: postgres://hourmere@db:5432/hourmere
       PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:3000}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set BETTER_AUTH_SECRET in .env (openssl rand -base64 32)}
+      SMTP_URL: ${SMTP_URL:-}
+      MAIL_FROM: ${MAIL_FROM:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      MICROSOFT_CLIENT_ID: ${MICROSOFT_CLIENT_ID:-}
+      MICROSOFT_CLIENT_SECRET: ${MICROSOFT_CLIENT_SECRET:-}
     ports:
       - "127.0.0.1:${PORT:-3000}:3000"
     depends_on:

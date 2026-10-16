@@ -102,6 +102,9 @@ Validated by the application (zod), not by the database:
 - `event_types.location` / `bookings.location`: `{ "kind": "google_meet" | "zoom" | "phone" | "in_person" | "link", ... }`.
 - `event_types.questions` / `bookings.responses`: booking-form fields and answers.
 - `calendars.sync_state`: provider sync token / delta link and push channel id + expiry.
+- `auth.apikey.metadata`: `{ "organizationId": "<uuid>" }`, the organization the key acts
+  in; set when the key is created (the owner's personal organization unless they name
+  another one they belong to) and re-checked against membership on every request.
 
 ## Planned additions (each a new migration)
 

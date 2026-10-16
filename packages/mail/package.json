@@ -1,0 +1,14 @@
+{
+  "name": "@hourmere/mail",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "nodemailer": "10.0.16"
+  }
+}
