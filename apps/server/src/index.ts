@@ -41,6 +41,7 @@ const app = createApp({
   },
   authHandler: auth.handler,
   resolveCaller: createCallerResolver({ auth, db }),
+  trustedProxies: config.trustedProxies,
   webDist: config.WEB_DIST,
 })
 

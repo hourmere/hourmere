@@ -4,6 +4,7 @@ import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi'
 import type { CallerResolver } from '@hourmere/auth'
 import { logger } from 'hono/logger'
 import { requireCaller } from './caller.ts'
+import { clientIp, withClientIp } from './client-ip.ts'
 
 export interface AppDeps {
   /** Resolves when the database answers; rejects otherwise. */
@@ -12,6 +13,8 @@ export interface AppDeps {
   authHandler: (request: Request) => Promise<Response>
   /** Identifies the caller of authenticated routes (session cookie or API key). */
   resolveCaller: CallerResolver
+  /** Reverse proxies (IPs or CIDR ranges) whose X-Forwarded-For names the client. */
+  trustedProxies?: readonly string[] | undefined
   /** Absolute path of the built web app, if this process should serve it. */
   webDist?: string | undefined
 }
@@ -39,7 +42,13 @@ const healthRoute = createRoute({
   },
 })
 
-const ErrorBody = z.object({ error: z.string() }).openapi('Error')
+// See docs/api-conventions.md.
+const ErrorBody = z
+  .object({
+    error: z.string().openapi({ description: 'Machine-readable code, e.g. unauthorized' }),
+    message: z.string().optional().openapi({ description: 'Human-readable detail' }),
+  })
+  .openapi('Error')
 
 const Me = z
   .object({
@@ -70,9 +79,16 @@ const authenticated: Record<string, string[]>[] = [{ apiKey: [] }, { session: []
 /** Logs requests without query strings: sign-in links and OAuth callbacks carry secrets there. */
 const requestLogger = logger((line, ...rest) => console.log(line.replace(/\?\S*/, ''), ...rest))
 
-export function createApp({ checkDb, authHandler, resolveCaller, webDist }: AppDeps) {
+export function createApp({
+  checkDb,
+  authHandler,
+  resolveCaller,
+  trustedProxies = [],
+  webDist,
+}: AppDeps) {
   const app = new OpenAPIHono()
   app.use('/api/*', requestLogger)
+  app.use('/api/*', clientIp(trustedProxies))
 
   app.openapi(healthRoute, async (c) => {
     try {
@@ -85,7 +101,9 @@ export function createApp({ checkDb, authHandler, resolveCaller, webDist }: AppD
 
   // Better Auth's own protocol (sign-in, sign-out, sessions, organizations, API keys); it
   // follows Better Auth's versioning, not ours, so it lives outside /api/v1.
-  app.on(['GET', 'POST'], '/api/auth/*', (c) => authHandler(c.req.raw))
+  app.on(['GET', 'POST'], '/api/auth/*', (c) =>
+    authHandler(withClientIp(c.req.raw, c.var.clientIp)),
+  )
 
   app.openAPIRegistry.registerComponent('securitySchemes', 'apiKey', {
     type: 'http',

@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { isTrustedProxyEntry } from './client-ip.ts'
 
 // docker compose passes unset optional variables as empty strings.
 const optional = <T extends z.ZodType>(schema: T) =>
@@ -44,6 +45,21 @@ const schema = z
     GOOGLE_CLIENT_SECRET: optional(z.string()),
     MICROSOFT_CLIENT_ID: optional(z.string()),
     MICROSOFT_CLIENT_SECRET: optional(z.string()),
+    // Reverse proxies in front of the app, comma-separated IPs or CIDR ranges. Only their
+    // X-Forwarded-For is believed when working out the client IP (rate limiting).
+    TRUSTED_PROXIES: optional(
+      z
+        .string()
+        .transform((v) =>
+          v
+            .split(',')
+            .map((e) => e.trim())
+            .filter(Boolean),
+        )
+        .refine((list) => list.every(isTrustedProxyEntry), {
+          error: 'TRUSTED_PROXIES must be comma-separated IP addresses or CIDR ranges',
+        }),
+    ),
     // Self-hosted instances migrate on start; set to "false" to run `npm run db:migrate` yourself.
     AUTO_MIGRATE: z
       .enum(['true', 'false'])
@@ -78,8 +94,9 @@ export interface OAuthClient {
   clientSecret: string
 }
 
-export type Config = Omit<z.infer<typeof schema>, 'PUBLIC_URL'> & {
+export type Config = Omit<z.infer<typeof schema>, 'PUBLIC_URL' | 'TRUSTED_PROXIES'> & {
   PUBLIC_URL: string
+  trustedProxies: string[]
   /** Social sign-in providers whose credentials are set. */
   socialProviders: { google?: OAuthClient; microsoft?: OAuthClient }
 }
@@ -96,8 +113,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const c = parsed.data
   const google = oauthClient(c.GOOGLE_CLIENT_ID, c.GOOGLE_CLIENT_SECRET)
   const microsoft = oauthClient(c.MICROSOFT_CLIENT_ID, c.MICROSOFT_CLIENT_SECRET)
+  const { TRUSTED_PROXIES, ...rest } = c
   return {
-    ...c,
+    ...rest,
+    trustedProxies: TRUSTED_PROXIES ?? [],
     PUBLIC_URL: c.PUBLIC_URL ? new URL(c.PUBLIC_URL).origin : `http://localhost:${c.PORT}`,
     socialProviders: { ...(google && { google }), ...(microsoft && { microsoft }) },
   }

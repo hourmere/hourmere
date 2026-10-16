@@ -59,6 +59,16 @@ describe('loadConfig', () => {
     ).toThrow(/SMTP_URL must look like/)
   })
 
+  it('parses TRUSTED_PROXIES and rejects entries that are not IPs or CIDR ranges', () => {
+    expect(loadConfig(base).trustedProxies).toEqual([])
+    expect(
+      loadConfig({ ...base, TRUSTED_PROXIES: ' 172.16.0.0/12, 10.0.0.5 ,' }).trustedProxies,
+    ).toEqual(['172.16.0.0/12', '10.0.0.5'])
+    expect(() => loadConfig({ ...base, TRUSTED_PROXIES: 'proxy.internal' })).toThrow(
+      /TRUSTED_PROXIES must be comma-separated IP addresses or CIDR ranges/,
+    )
+  })
+
   describe('social sign-in', () => {
     it('enables a provider when both its client id and secret are set', () => {
       const c = loadConfig({

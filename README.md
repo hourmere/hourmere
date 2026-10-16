@@ -35,7 +35,7 @@ cp .env.example .env   # set POSTGRES_PASSWORD, BETTER_AUTH_SECRET and PUBLIC_UR
 docker compose up -d
 ```
 
-The app listens on `127.0.0.1:3000` and applies database migrations on start. Put a reverse proxy with TLS in front of it.
+The app listens on `127.0.0.1:3000` and applies database migrations on start. Put a reverse proxy with TLS in front of it, and set `TRUSTED_PROXIES` to the proxy's address as the app sees it (for a proxy on the host or on the compose network that is the Docker network, e.g. `172.16.0.0/12`), so rate limits apply per visitor rather than to everyone behind the proxy.
 
 People sign in with a link sent by email (no passwords), or with Google or Microsoft once their
 client ids are set in `.env`. Until `SMTP_URL` and `MAIL_FROM` are set, the server prints each
@@ -45,7 +45,7 @@ start; configure SMTP before inviting anyone else.
 Agents use API keys (`hm_…`) sent as `Authorization: Bearer <key>`. For now keys are created
 with Better Auth's endpoints while signed in (`POST /api/auth/api-key/create`, `GET
 /api/auth/api-key/list`, `POST /api/auth/api-key/delete`). The API is described at
-`/api/v1/openapi.json`.
+`/api/v1/openapi.json`; its conventions are in [docs/api-conventions.md](docs/api-conventions.md).
 
 ## License
 

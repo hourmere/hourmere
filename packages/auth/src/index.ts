@@ -55,6 +55,35 @@ export interface AuthConfig {
 
 const MAGIC_LINK_MINUTES = 5
 
+/**
+ * The only header Better Auth reads the client IP from (rate limiting, session records).
+ * The server sets it from the TCP peer and trusted proxies and drops any value a client sends.
+ */
+export const CLIENT_IP_HEADER = 'x-hourmere-client-ip'
+
+/**
+ * Per-key limit written into each new key. A safety net against runaway agents, not the
+ * product's API limits, which belong in the API layer.
+ */
+export const API_KEY_RATE_LIMIT = { timeWindow: 60_000, maxRequests: 600 } as const
+
+/**
+ * Better Auth's default log format, except for rejected API keys: it logs each one as a
+ * multi-line error with a stack trace. A wrong key is the caller's problem, so it becomes
+ * one info line with the reason only (never the key).
+ */
+function log(level: 'debug' | 'info' | 'warn' | 'error', message: string, ...args: unknown[]) {
+  if (message.startsWith('Failed to validate API key')) {
+    const code = (args[0] as { body?: { code?: unknown } } | undefined)?.body?.code
+    console.info(`[auth] API key rejected: ${typeof code === 'string' ? code : 'INVALID_API_KEY'}`)
+    return
+  }
+  const line = `${new Date().toISOString()} ${level.toUpperCase()} [Better Auth]: ${message}`
+  if (level === 'error') console.error(line, ...args)
+  else if (level === 'warn') console.warn(line, ...args)
+  else console.log(line, ...args)
+}
+
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v)
 
@@ -114,7 +143,9 @@ export function createAuth({
       // Better Auth turns origin checks off when NODE_ENV is "test"; keep them on so tests
       // exercise the same CSRF protection as production.
       disableOriginCheck: false,
+      ipAddress: { ipAddressHeaders: [CLIENT_IP_HEADER] },
     },
+    logger: { log },
     // Sign-in providers' OAuth tokens are stored encrypted, not in plain text.
     account: { encryptOAuthTokens: true },
     // Passwordless: email magic links and social sign-in only (emailAndPassword stays off).
@@ -156,8 +187,30 @@ export function createAuth({
     },
     hooks: { before: apiKeyOrganizationHook(db) },
     plugins: [
-      organization(),
-      apiKey({ defaultPrefix: API_KEY_PREFIX, enableMetadata: true }),
+      organization({
+        organizationHooks: {
+          // The personal organization lives as long as its user (deleting the user deletes
+          // it); without it the user would have nowhere to act.
+          beforeDeleteOrganization: async ({ organization }) => {
+            const personal = await db
+              .selectFrom('personal_organizations')
+              .select('user_id')
+              .where('organization_id', '=', organization.id)
+              .executeTakeFirst()
+            if (personal) {
+              throw new APIError('FORBIDDEN', {
+                code: 'PERSONAL_ORGANIZATION',
+                message: 'A personal organization cannot be deleted',
+              })
+            }
+          },
+        },
+      }),
+      apiKey({
+        defaultPrefix: API_KEY_PREFIX,
+        enableMetadata: true,
+        rateLimit: { enabled: true, ...API_KEY_RATE_LIMIT },
+      }),
       magicLink({
         expiresIn: MAGIC_LINK_MINUTES * 60,
         // Only a hash is stored, so a database leak does not expose usable links.

@@ -1,7 +1,15 @@
 // Sign-in, sessions, personal organizations and API keys end to end: the real app, Better
 // Auth and migrations, against a throwaway database.
 import { randomBytes } from 'node:crypto'
-import { type Auth, createAuth, createAuthPool, createCallerResolver } from '@hourmere/auth'
+import {
+  API_KEY_RATE_LIMIT,
+  type Auth,
+  CLIENT_IP_HEADER,
+  createAuth,
+  createAuthPool,
+  createCallerResolver,
+  type OAuthClient,
+} from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import type { MailMessage } from '@hourmere/mail'
@@ -28,9 +36,16 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
   let db: Db
   let authPool: pg.Pool
   const outbox: MailMessage[] = []
-  const instances: Instance[] = []
 
-  function instance(publicUrl: string, socialProviders = {}): Instance {
+  interface InstanceOptions {
+    socialProviders?: { google?: OAuthClient; microsoft?: OAuthClient }
+    trustedProxies?: string[]
+  }
+
+  function instance(
+    publicUrl: string,
+    { socialProviders = {}, trustedProxies = [] }: InstanceOptions = {},
+  ): Instance {
     const auth = createAuth({
       pool: authPool,
       db,
@@ -43,10 +58,9 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
       checkDb: async () => {},
       authHandler: auth.handler,
       resolveCaller: createCallerResolver({ auth, db }),
+      trustedProxies,
     })
-    const i = { app, auth, publicUrl }
-    instances.push(i)
-    return i
+    return { app, auth, publicUrl }
   }
 
   let main: Instance
@@ -204,6 +218,29 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
       expect(members.rows).toEqual([{ role: 'owner', slug: 'grace' }])
     })
 
+    it('cannot be deleted, while team organizations can', async () => {
+      const cookie = await signIn('keeper@example.com')
+      const personal = (await me({ cookie })).body.organization
+      const remove = (organizationId: string) =>
+        main.app.request('/api/auth/organization/delete', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', cookie, origin },
+          body: JSON.stringify({ organizationId }),
+        })
+
+      const refused = await remove(personal.id)
+      expect(refused.status).toBe(403)
+      expect(await refused.json()).toMatchObject({ code: 'PERSONAL_ORGANIZATION' })
+      expect((await me({ cookie })).body.organization).toEqual(personal)
+
+      const team = await main.app.request('/api/auth/organization/create', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie, origin },
+        body: JSON.stringify({ name: 'Short-lived', slug: 'short-lived' }),
+      })
+      expect((await remove(((await team.json()) as { id: string }).id)).status).toBe(200)
+    })
+
     it('gets a different slug when the plain one is taken', async () => {
       const { body } = await me({ cookie: await signIn('ada@another.example') })
       expect(body.organization.name).toBe('ada')
@@ -232,6 +269,38 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
       expect(body.user.email).toBe('agent-owner@example.com')
       expect(body.organization).toEqual(personal)
       expect(body.principal).toEqual({ kind: 'api_key', apiKeyId: key.id })
+    })
+
+    it('get a per-key rate limit that normal use stays well within', async () => {
+      const key = (await (await createKey(cookie)).json()) as {
+        key: string
+        rateLimitEnabled: boolean
+        rateLimitMax: number
+        rateLimitTimeWindow: number
+      }
+      expect(key).toMatchObject({
+        rateLimitEnabled: true,
+        rateLimitMax: API_KEY_RATE_LIMIT.maxRequests,
+        rateLimitTimeWindow: API_KEY_RATE_LIMIT.timeWindow,
+      })
+      expect(API_KEY_RATE_LIMIT).toEqual({ maxRequests: 600, timeWindow: 60_000 })
+      for (let n = 0; n < 30; n++) {
+        expect((await me({ authorization: `Bearer ${key.key}` })).res.status).toBe(200)
+      }
+    })
+
+    it('log a rejected key as one line, without the key', async () => {
+      const bad = `hm_${'q'.repeat(64)}`
+      const info = vi.spyOn(console, 'info').mockImplementation(() => {})
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+      try {
+        expect((await me({ authorization: `Bearer ${bad}` })).res.status).toBe(401)
+        expect(error).not.toHaveBeenCalled()
+        expect(info.mock.calls).toEqual([['[auth] API key rejected: INVALID_API_KEY']])
+      } finally {
+        info.mockRestore()
+        error.mockRestore()
+      }
     })
 
     it('can be listed without their secret and revoked', async () => {
@@ -363,6 +432,51 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
     })
   })
 
+  describe('client IP', () => {
+    /** Signs in with the verify request arriving from `peer`; returns the IP the session records. */
+    async function sessionIp(i: Instance, email: string, peer: string | null, headers = {}) {
+      const link = await requestLink(email, i)
+      const socket = peer === null ? undefined : { incoming: { socket: { remoteAddress: peer } } }
+      const res = await i.app.request(link.toString(), { headers }, socket)
+      expect(res.status).toBe(302)
+      const row = await testDb.pool.query<{ ip: string }>(
+        `SELECT s."ipAddress" AS ip FROM auth.session s JOIN auth."user" u ON u.id = s."userId"
+          WHERE u.email = $1`,
+        [email],
+      )
+      return row.rows[0]?.ip
+    }
+
+    const spoofed = { 'x-forwarded-for': '6.6.6.6', [CLIENT_IP_HEADER]: '7.7.7.7' }
+
+    it('is the TCP peer, whatever an untrusted client claims', async () => {
+      expect(await sessionIp(main, 'ip-direct@example.com', '203.0.113.7', spoofed)).toBe(
+        '203.0.113.7',
+      )
+    })
+
+    it('comes from X-Forwarded-For only through a trusted proxy', async () => {
+      const proxied = instance(origin, { trustedProxies: ['10.0.0.0/8'] })
+      // The proxy appends the client it saw; what the client wrote itself stays on the left.
+      const headers = {
+        'x-forwarded-for': '6.6.6.6, 198.51.100.9, 10.1.2.3',
+        [CLIENT_IP_HEADER]: '7.7.7.7',
+      }
+      expect(await sessionIp(proxied, 'ip-proxied@example.com', '::ffff:10.0.0.2', headers)).toBe(
+        '198.51.100.9',
+      )
+      // The same headers from a peer that is not a trusted proxy are ignored.
+      expect(await sessionIp(proxied, 'ip-bypass@example.com', '203.0.113.8', headers)).toBe(
+        '203.0.113.8',
+      )
+    })
+
+    it('cannot be injected through the internal header, even without a known peer', async () => {
+      const injected = { [CLIENT_IP_HEADER]: '7.7.7.7' }
+      expect(await sessionIp(main, 'ip-injected@example.com', null, injected)).not.toBe('7.7.7.7')
+    })
+  })
+
   describe('social sign-in', () => {
     const providerIds = async (i: Instance) =>
       (await i.auth.$context).socialProviders.map((p) => p.id).sort()
@@ -370,11 +484,11 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
     it('enables only the configured providers', async () => {
       expect(await providerIds(main)).toEqual([])
       const client = { clientId: 'id', clientSecret: 'secret' }
-      expect(await providerIds(instance(origin, { google: client }))).toEqual(['google'])
-      expect(await providerIds(instance(origin, { google: client, microsoft: client }))).toEqual([
+      expect(await providerIds(instance(origin, { socialProviders: { google: client } }))).toEqual([
         'google',
-        'microsoft',
       ])
+      const both = instance(origin, { socialProviders: { google: client, microsoft: client } })
+      expect(await providerIds(both)).toEqual(['google', 'microsoft'])
     })
   })
 })
