@@ -1,0 +1,19 @@
+// hourmere.com: Cloudflare Workers static assets (Cloudflare's successor to Pages).
+// Deploy with `npm run deploy --workspace @hourmere/site` after `wrangler login`.
+{
+  "name": "hourmere-site",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./dist",
+    // /privacy serves privacy.html (the build writes flat .html files).
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "404-page"
+  },
+  // Custom domains: Cloudflare creates the DNS records and certificates.
+  "routes": [
+    { "pattern": "hourmere.com", "custom_domain": true },
+    { "pattern": "www.hourmere.com", "custom_domain": true }
+  ],
+  "workers_dev": false,
+  "preview_urls": false
+}

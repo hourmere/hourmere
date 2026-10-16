@@ -159,3 +159,6 @@ packages/auth/auth-schema.generated.sql
 
 # Claude Code agent worktrees
 .claude/worktrees/
+
+# Wrangler local state (wrangler dev / deploy)
+.wrangler/
