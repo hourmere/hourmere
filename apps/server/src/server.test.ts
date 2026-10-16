@@ -53,6 +53,18 @@ describe.skipIf(!serverUrl)('startServer', () => {
       try {
         const health = await fetch(`http://127.0.0.1:${server.port}/api/health`)
         expect(await health.json()).toEqual({ status: 'ok', database: 'ok' })
+        // The composition root registers the product routes.
+        const doc = (await (
+          await fetch(`http://127.0.0.1:${server.port}/api/v1/openapi.json`)
+        ).json()) as { paths: Record<string, unknown> }
+        expect(Object.keys(doc.paths)).toEqual(
+          expect.arrayContaining([
+            '/api/v1/public/{handle}/{slug}/slots',
+            '/api/v1/public/{handle}/{slug}/bookings',
+            '/api/v1/bookings/manage',
+            '/api/v1/bookings/{id}',
+          ]),
+        )
         console.error(new Error('boom\n[mail] {"forged":true}'))
       } finally {
         await server.close()

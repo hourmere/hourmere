@@ -20,7 +20,7 @@ export const authenticated: Record<string, string[]>[] = [{ apiKey: [] }, { sess
 export type CallerMiddleware = ReturnType<typeof requireCaller>
 
 /**
- * A group of /api/v1 routes. The composition root (index.ts) creates each module with the
+ * A group of /api/v1 routes. The composition root (server.ts) creates each module with the
  * services it needs; createApp registers it and passes what every route shares.
  *
  * Rules for modules:
