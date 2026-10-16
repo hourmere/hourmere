@@ -141,9 +141,15 @@ export interface BookingCalendarEvents {
 }
 
 export interface BookingHosts {
-  active: boolean;
+  /**
+   * Derived from the booking status by booking_host_slot(); any value written is replaced.
+   */
+  active: Generated<boolean>;
   booking_id: string;
-  period: string;
+  /**
+   * Derived from the booking by booking_host_slot(); any value written is replaced.
+   */
+  period: Generated<string>;
   user_id: string;
 }
 
