@@ -258,6 +258,47 @@ describe('the invitee’s manage page', () => {
     expect(screen.queryByRole('button', { name: 'Confirm new time' })).toBeNull()
   })
 
+  it.each([
+    ['reschedule', 'Confirm new time'],
+    ['cancel', 'Cancel booking'],
+  ] as const)(
+    'shows the booking again, without retrying, when a %s finds it just changed',
+    async (action, button) => {
+      const user = userEvent.setup()
+      const moved = managed({ start: '2026-11-04T14:00:00.000Z', end: '2026-11-04T14:30:00.000Z' })
+      let changed = false
+      const answer = () => {
+        changed = true
+        return json(409, {
+          error: 'booking_changed',
+          message: 'This booking was moved again while the request waited; try again',
+        })
+      }
+      const api = manageServer(managed(), {
+        more: {
+          'GET /api/v1/bookings/manage': () => json(200, changed ? moved : managed()),
+          'POST /api/v1/bookings/manage/reschedule': answer,
+          'POST /api/v1/bookings/manage/cancel': answer,
+        },
+      })
+      renderApp(`/booking#token=${TOKEN}&action=${action}`)
+      if (action === 'reschedule') {
+        await user.click(
+          await screen.findByRole('button', { name: 'Tuesday, November 3, available' }),
+        )
+        await user.click(screen.getByRole('button', { name: '11:00 AM' }))
+      }
+      await user.click(await screen.findByRole('button', { name: button }))
+
+      expect(await screen.findByText(/This booking just changed/)).toBeDefined()
+      expect(
+        plain(screen.getByText(/Wednesday, November 4, 2026/).parentElement?.textContent),
+      ).toMatch(/9:00 – 9:30 AM/)
+      expect(api.to(`POST /api/v1/bookings/manage/${action}`)).toHaveLength(1)
+      expect(api.to('GET /api/v1/bookings/manage')).toHaveLength(2)
+    },
+  )
+
   it('sends one reschedule at a time', async () => {
     const user = userEvent.setup()
     let answer: (response: Response) => void = () => {}

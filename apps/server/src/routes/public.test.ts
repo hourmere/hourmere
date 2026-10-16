@@ -499,6 +499,85 @@ describe.skipIf(!serverUrl)('public routes', () => {
     })
   })
 
+  it("follows the meeting with an email's token, for its details and the times it can move to", async () => {
+    const created = (await (await book('2026-11-03T12:00:00Z')).json()) as BookingBody
+    const own = created.manageToken as string
+    // The token an invitee email carried, stored as the notification job stores it.
+    const emailed = 'E'.repeat(43)
+    const invitee = await db
+      .selectFrom('booking_attendees')
+      .select('id')
+      .where('booking_id', '=', created.booking.id)
+      .where('is_booker', '=', true)
+      .executeTakeFirstOrThrow()
+    await db
+      .insertInto('booking_notifications')
+      .values({
+        booking_id: created.booking.id,
+        kind: 'confirmed',
+        recipient: `attendee:${invitee.id}`,
+        manage_token_hash: createHash('sha256').update(emailed).digest(),
+      })
+      .execute()
+    const as = (t: string) => ({ headers: { 'x-manage-token': t } })
+    const show = async (t: string) =>
+      (await (await app.request('/api/v1/bookings/manage', as(t))).json()) as {
+        id: string
+        status: string
+        start: string
+        eventType: unknown
+        hosts: unknown
+      }
+    const range = 'start=2026-11-03T11:00:00Z&end=2026-11-03T13:30:00Z'
+    const slots = (t: string) => app.request(`/api/v1/bookings/manage/slots?${range}`, as(t))
+
+    expect(await show(emailed)).toMatchObject({ id: created.booking.id, status: 'confirmed' })
+
+    // Moved with the booking's own token, onto a time overlapping the old one.
+    const moved = await post(
+      '/api/v1/bookings/manage/reschedule',
+      { start: '2026-11-03T12:30:00Z' },
+      { 'x-manage-token': own },
+    )
+    expect(moved.status).toBe(200)
+    const next = (await moved.json()) as BookingBody
+
+    // The email's link now opens the new booking; the old token stays with the old one.
+    expect(await show(emailed)).toMatchObject({
+      id: next.booking.id,
+      status: 'confirmed',
+      start: '2026-11-03T12:30:00.000Z',
+      eventType: { title: 'Intro call', durationMinutes: 30 },
+      hosts: [{ name: 'Ada Lovelace' }],
+    })
+    expect(await show(own)).toMatchObject({ id: created.booking.id, status: 'cancelled' })
+
+    // Times to move to: for the new booking, its own time included; none for the old token.
+    const offered = await slots(emailed)
+    expect(offered.status).toBe(200)
+    expect(
+      ((await offered.json()) as { data: { start: string }[] }).data.map((s) => s.start),
+    ).toEqual([
+      '2026-11-03T11:00:00.000Z',
+      '2026-11-03T11:30:00.000Z',
+      '2026-11-03T12:00:00.000Z',
+      '2026-11-03T12:30:00.000Z',
+      '2026-11-03T13:00:00.000Z',
+    ])
+    const stale = await slots(own)
+    expect(stale.status).toBe(409)
+    expect(await stale.json()).toMatchObject({ error: 'booking_cancelled' })
+
+    // Rescheduling through the email's link moves the new booking.
+    const again = await post(
+      '/api/v1/bookings/manage/reschedule',
+      { start: '2026-11-03T13:00:00Z' },
+      { 'x-manage-token': emailed },
+    )
+    expect(again.status).toBe(200)
+    expect(await show(emailed)).toMatchObject({ start: '2026-11-03T13:00:00.000Z' })
+  })
+
   it('answers a missing, malformed or unknown manage token identically', async () => {
     const bodies = new Set<string>()
     for (const headers of [

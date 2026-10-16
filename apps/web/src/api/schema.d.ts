@@ -306,7 +306,7 @@ export interface paths {
             parameters: {
                 query?: never;
                 header?: {
-                    /** @description The secret from the invitee's link (the `token` in https://<app>/booking#token=…). A missing or unknown token gets 404 `booking_not_found`. */
+                    /** @description The invitee's secret: the `manageToken` the booking API returned, or the `token` in a link from a booking email (https://<app>/booking#token=…). A missing or unknown token gets 404 `booking_not_found`. After a reschedule, the token returned for the old booking shows that cancelled booking, while tokens from emails open the booking that replaced it. */
                     "x-manage-token"?: string;
                 };
                 path?: never;
@@ -365,7 +365,7 @@ export interface paths {
             parameters: {
                 query?: never;
                 header?: {
-                    /** @description The secret from the invitee's link (the `token` in https://<app>/booking#token=…). A missing or unknown token gets 404 `booking_not_found`. */
+                    /** @description The invitee's secret: the `manageToken` the booking API returned, or the `token` in a link from a booking email (https://<app>/booking#token=…). A missing or unknown token gets 404 `booking_not_found`. After a reschedule, the token returned for the old booking shows that cancelled booking, while tokens from emails open the booking that replaced it. */
                     "x-manage-token"?: string;
                 };
                 path?: never;
@@ -404,7 +404,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description Already cancelled (`booking_cancelled`) or already started (`booking_in_past`) */
+                /** @description Already cancelled (`booking_cancelled`), already started (`booking_in_past`), or, with an email's token, the meeting kept being rescheduled while the request waited (`booking_changed`; try again) */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -441,13 +441,13 @@ export interface paths {
         put?: never;
         /**
          * Reschedule with the manage token
-         * @description Cancels the booking and books the new time in one step. The new time may overlap the old one. Returns the new booking and its manage token; the old token then shows the cancelled booking.
+         * @description Cancels the booking and books the new time in one step. The new time may overlap the old one. Returns the new booking and its manage token. The token returned for the old booking then shows the cancelled booking, so a retry after a lost response gets 409 `booking_cancelled`; tokens from booking emails open the new booking (and would move it again).
          */
         post: {
             parameters: {
                 query?: never;
                 header?: {
-                    /** @description The secret from the invitee's link (the `token` in https://<app>/booking#token=…). A missing or unknown token gets 404 `booking_not_found`. */
+                    /** @description The invitee's secret: the `manageToken` the booking API returned, or the `token` in a link from a booking email (https://<app>/booking#token=…). A missing or unknown token gets 404 `booking_not_found`. After a reschedule, the token returned for the old booking shows that cancelled booking, while tokens from emails open the booking that replaced it. */
                     "x-manage-token"?: string;
                 };
                 path?: never;
@@ -486,7 +486,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description Already cancelled (`booking_cancelled`), already started (`booking_in_past`), without a host (`booking_has_no_host`), the event type no longer takes bookings (`event_type_unavailable`), or the time is not offered (`slot_unavailable`, `slot_taken`) */
+                /** @description Already cancelled (`booking_cancelled`), already started (`booking_in_past`), without a host (`booking_has_no_host`), the event type no longer takes bookings (`event_type_unavailable`), the time is not offered (`slot_unavailable`, `slot_taken`), or, with an email's token, the meeting kept being rescheduled while the request waited (`booking_changed`; try again) */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -532,7 +532,7 @@ export interface paths {
                     start: string;
                 };
                 header?: {
-                    /** @description The secret from the invitee's link (the `token` in https://<app>/booking#token=…). A missing or unknown token gets 404 `booking_not_found`. */
+                    /** @description The invitee's secret: the `manageToken` the booking API returned, or the `token` in a link from a booking email (https://<app>/booking#token=…). A missing or unknown token gets 404 `booking_not_found`. After a reschedule, the token returned for the old booking shows that cancelled booking, while tokens from emails open the booking that replaced it. */
                     "x-manage-token"?: string;
                 };
                 path?: never;
@@ -1294,7 +1294,7 @@ export interface paths {
         put?: never;
         /**
          * Book a slot
-         * @description Books an offered slot and returns the booking with the secret of the invitee's manage link (`manageToken`, returned only this once). Send an `Idempotency-Key` to make retries safe: a retry with the same key and the same request returns the original booking (200) instead of booking again. All anonymous callers share one key space per organization, so the key must be random (e.g. a UUIDv4), never derived from the request.
+         * @description Books an offered slot and returns the booking with the booking's own manage token (`manageToken`, returned only this once; it stays with this booking, and emails carry their own). Send an `Idempotency-Key` to make retries safe: a retry with the same key and the same request returns the original booking (200) instead of booking again. All anonymous callers share one key space per organization, so the key must be random (e.g. a UUIDv4), never derived from the request.
          */
         post: {
             parameters: {
@@ -2102,7 +2102,7 @@ export interface components {
         };
         BookingWithToken: {
             booking: components["schemas"]["Booking"];
-            /** @description The secret of the invitee's manage link (https://<app>/booking#token=<token>), sent as X-Manage-Token to /api/v1/bookings/manage. Returned only once and never stored, so a replayed request (same Idempotency-Key) gets null. */
+            /** @description The booking's own manage token (it stays with this booking; emails carry their own), sent as X-Manage-Token to /api/v1/bookings/manage. Returned only once and never stored, so a replayed request (same Idempotency-Key) gets null. */
             manageToken: string | null;
         };
         CancelBooking: {

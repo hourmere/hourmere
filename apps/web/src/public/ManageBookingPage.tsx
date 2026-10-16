@@ -228,6 +228,17 @@ function ManageView({
 
   async function failed(err: unknown, during: Action) {
     const code = codeOf(err)
+    if (code === 'booking_changed') {
+      // An email's link follows the meeting, which kept being moved while this waited. Show
+      // it as it is now and let people decide; never send the change again by itself.
+      await onStale()
+      setMode({
+        kind: 'view',
+        message:
+          'This booking just changed. Here it is as it is now; check it before trying again.',
+      })
+      return true
+    }
     if (code === 'booking_cancelled' || code === 'booking_in_past') {
       await onStale()
       setMode({
