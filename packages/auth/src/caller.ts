@@ -48,10 +48,14 @@ const BEARER = /^Bearer[ \t]+(\S+)[ \t]*$/i
  * by it alone, so a bad key never falls back to a cookie the client happens to carry.
  */
 export function createCallerResolver({ auth, db }: { auth: Auth; db: Db }): CallerResolver {
+  type Membership = Omit<Principal, 'kind' | 'sessionId' | 'apiKeyId'> & {
+    emailVerified: boolean
+  }
+
   async function inOrganization(
     userId: string,
     organizationId: string,
-  ): Promise<Omit<Principal, 'kind' | 'sessionId' | 'apiKeyId'> | undefined> {
+  ): Promise<Membership | undefined> {
     if (!isUuid(userId) || !isUuid(organizationId)) return undefined
     // The membership check matters even for ids we stored ourselves: people leave teams.
     const row = await db
@@ -63,6 +67,7 @@ export function createCallerResolver({ auth, db }: { auth: Auth; db: Db }): Call
         'u.id as userId',
         'u.name as userName',
         'u.email',
+        'u.emailVerified',
         'o.id as organizationId',
         'o.name as organizationName',
         'o.slug',
@@ -73,6 +78,7 @@ export function createCallerResolver({ auth, db }: { auth: Auth; db: Db }): Call
       .executeTakeFirst()
     if (!row) return undefined
     return {
+      emailVerified: row.emailVerified,
       user: { id: row.userId, name: row.userName, email: row.email },
       organization: {
         id: row.organizationId,
@@ -111,8 +117,11 @@ export function createCallerResolver({ auth, db }: { auth: Auth; db: Db }): Call
     const stored: unknown = result.key.metadata?.organizationId
     const organizationId =
       typeof stored === 'string' ? stored : await ensurePersonalOrganization(db, userId)
-    const caller = await inOrganization(userId, organizationId)
-    if (!caller) return { ok: false, error: 'unauthorized', setCookie: [] }
+    const membership = await inOrganization(userId, organizationId)
+    // Keys belong to verified users only; one from before that rule (or planted in an
+    // account whose real owner has not signed in yet) does not work.
+    if (!membership?.emailVerified) return { ok: false, error: 'unauthorized', setCookie: [] }
+    const { emailVerified: _, ...caller } = membership
     return {
       ok: true,
       principal: { ...caller, kind: 'api_key', apiKeyId: result.key.id },
@@ -130,10 +139,11 @@ export function createCallerResolver({ auth, db }: { auth: Auth; db: Db }): Call
     const userId = session.user.id
     const active = session.session.activeOrganizationId
     // A session whose active organization is gone (or was never set) acts in the personal one.
-    const caller =
+    const membership =
       (active ? await inOrganization(userId, active) : undefined) ??
       (await inOrganization(userId, await ensurePersonalOrganization(db, userId)))
-    if (!caller) return { ok: false, error: 'unauthorized', setCookie }
+    if (!membership) return { ok: false, error: 'unauthorized', setCookie }
+    const { emailVerified: _, ...caller } = membership
     return {
       ok: true,
       principal: { ...caller, kind: 'session', sessionId: session.session.id },

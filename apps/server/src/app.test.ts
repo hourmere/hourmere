@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { type AppDeps, createApp } from './app.ts'
 
 // Sign-in is covered by auth.test.ts against a real database.
@@ -29,6 +29,23 @@ describe('GET /api/health', () => {
     const res = await app.request('/api/health')
     expect(res.status).toBe(503)
     expect(await res.json()).toEqual({ status: 'degraded', database: 'unreachable' })
+  })
+})
+
+describe('request log', () => {
+  it('has neither query strings nor terminal colors', async () => {
+    const app = createApp({ ...noAuth, checkDb: async () => {} })
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    try {
+      await app.request('/api/health?token=secret')
+      const lines = log.mock.calls.map((args) => args.join(' '))
+      expect(lines).toEqual([
+        '<-- GET /api/health',
+        expect.stringMatching(/^--> GET \/api\/health 200 \d+m?s$/),
+      ])
+    } finally {
+      log.mockRestore()
+    }
   })
 })
 

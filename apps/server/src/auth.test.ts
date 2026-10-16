@@ -315,6 +315,40 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
       expect(lines.filter((l) => l.startsWith('[mail]'))).toEqual([])
     })
 
+    it('accept only known sort and filter fields, and UUIDs for id filters', async () => {
+      const cookie = await signIn('lister@example.com')
+      const self = await userId('lister@example.com')
+      const forged = encodeURIComponent('zz\n[mail] {"forged":true}')
+      const get = (path: string) => main.app.request(path, { headers: { cookie } })
+      const cases: [string, number, string?][] = [
+        [
+          `/api/auth/organization/list-members?filterField=id&filterValue=${forged}`,
+          400,
+          'INVALID_ID',
+        ],
+        [
+          `/api/auth/organization/list-members?filterField=userId&filterValue=${self}&filterValue=zz`,
+          400,
+          'INVALID_ID',
+        ],
+        [`/api/auth/organization/list-members?sortBy=${forged}`, 400, 'INVALID_FIELD'],
+        [
+          '/api/auth/organization/list-members?filterField=nope&filterValue=1',
+          400,
+          'INVALID_FIELD',
+        ],
+        [`/api/auth/api-key/list?sortBy=${forged}`, 400, 'INVALID_FIELD'],
+        [`/api/auth/organization/list-members?filterField=userId&filterValue=${self}`, 200],
+        ['/api/auth/organization/list-members?sortBy=createdAt', 200],
+        ['/api/auth/api-key/list?sortBy=createdAt', 200],
+      ]
+      for (const [path, status, code] of cases) {
+        const res = await get(path)
+        expect(res.status, path).toBe(status)
+        if (code) expect(await res.json(), path).toMatchObject({ code })
+      }
+    })
+
     it('rejects ids that are not UUIDs before they reach the database (and the log)', async () => {
       const cookie = await signIn('ids@example.com')
       const forged =
@@ -725,6 +759,25 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
           mallory.id,
         ]),
       ).toBe(1)
+
+      // Switching a key off only takes power away, so it is allowed.
+      const disabled = await post('/api/auth/api-key/update', mallory.cookie, {
+        keyId: planted.id,
+        enabled: false,
+      })
+      expect(disabled.status).toBe(200)
+      const row = await testDb.pool.query(`SELECT enabled FROM auth.apikey WHERE id = $1`, [
+        planted.id,
+      ])
+      expect(row.rows).toEqual([{ enabled: false }])
+    })
+
+    it("do not authenticate while their owner's email is not verified", async () => {
+      const mallory = await unverifiedUser('unverified-bearer@example.com')
+      const planted = await plantKey(mallory.id, mallory.organizationId)
+      const { res, body } = await me({ authorization: `Bearer ${planted.key}` })
+      expect(res.status).toBe(401)
+      expect(body).toEqual({ error: 'unauthorized' })
     })
 
     it('do not survive the owner proving the email while key creation is under way', async () => {
@@ -1029,12 +1082,70 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
       // did not vouch for the address (and as a database could hold from before the rule).
       const mallory = await unverifiedUser('late@example.com')
       const planted = await plantKey(mallory.id, mallory.organizationId)
-      const bearer = { authorization: `Bearer ${planted.key}` }
-      expect((await me(bearer)).res.status).toBe(200)
+      const keys = () =>
+        count(`SELECT count(*)::int AS n FROM auth.apikey WHERE "referenceId" = $1`, [mallory.id])
+      expect(await keys()).toBe(1)
 
-      // The real owner signs in with an email link: Better Auth revokes the unproven access.
+      // The real owner signs in with an email link: Better Auth revokes the unproven access,
+      // and the database deletes the key.
       await signIn('late@example.com')
-      expect((await me(bearer)).res.status).toBe(401)
+      expect(await keys()).toBe(0)
+      expect((await me({ authorization: `Bearer ${planted.key}` })).res.status).toBe(401)
+    })
+
+    it('does not let a login of an unverified account outlive its owner proving the email', async () => {
+      // An old unverified account with Mallory's Microsoft account linked to it.
+      const mallory = await unverifiedUser('inflight@example.com')
+      await testDb.pool.query(
+        `INSERT INTO auth.account ("accountId", "providerId", "userId", "updatedAt")
+         VALUES ('ms-inflight', 'microsoft', $1, now())`,
+        [mallory.id],
+      )
+      // The real owner's email-link sign-in completes while Mallory's login is between loading
+      // the account and creating its session: a trigger does what that sign-in does (drop the
+      // linked accounts and sessions, mark the email verified) just before the login's session
+      // is stored.
+      await testDb.pool.query(`
+        CREATE FUNCTION test_owner_proves_email() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          IF EXISTS (SELECT 1 FROM auth."user" WHERE id = NEW."userId" AND NOT "emailVerified"
+                     AND email = 'inflight@example.com') THEN
+            DELETE FROM auth.account WHERE "userId" = NEW."userId";
+            DELETE FROM auth.session WHERE "userId" = NEW."userId";
+            UPDATE auth."user" SET "emailVerified" = true WHERE id = NEW."userId";
+          END IF;
+          RETURN NEW;
+        END $$;
+        CREATE TRIGGER test_owner_proves_email BEFORE INSERT ON auth.session
+          FOR EACH ROW EXECUTE FUNCTION test_owner_proves_email();`)
+      try {
+        const microsoft = instance(origin, {
+          socialProviders: { microsoft: client },
+          socialProviderOptions: {
+            microsoft: vouching({
+              id: 'ms-inflight',
+              email: 'inflight@example.com',
+              emailVerified: false,
+            }),
+          },
+        })
+        const login = await socialSignIn(microsoft, 'microsoft')
+        expect(login.status).toBe(403)
+        expect(await login.json()).toMatchObject({ code: 'EMAIL_NOT_VERIFIED' })
+        const cookie = cookieHeader(login)
+        expect(cookie).not.toContain('session_token')
+        const created = await post('/api/auth/api-key/create', cookie, { name: 'x' }, microsoft.app)
+        expect(created.status).not.toBe(200)
+        expect(
+          await count(`SELECT count(*)::int AS n FROM auth.apikey WHERE "referenceId" = $1`, [
+            mallory.id,
+          ]),
+        ).toBe(0)
+      } finally {
+        await testDb.pool.query(`
+          DROP TRIGGER test_owner_proves_email ON auth.session;
+          DROP FUNCTION test_owner_proves_email();`)
+      }
     })
 
     it('makes invitations require a proven email address', () => {
