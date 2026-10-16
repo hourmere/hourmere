@@ -3,11 +3,13 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { Schemas } from './api/client.ts'
 import {
+  emptyAccount,
   fakeApi,
   instance,
   json,
   ME,
   organizations,
+  profile,
   renderApp,
   signedIn,
   signedOut,
@@ -20,9 +22,9 @@ const TEAM_ID = '00000000-0000-7000-8000-0000000000c3'
 describe('the session gate', () => {
   it('sends visitors who are not signed in to sign-in, remembering the page', async () => {
     fakeApi({ ...signedOut, ...instance() })
-    renderApp('/api-keys?tab=new')
+    renderApp('/app/api-keys?tab=new')
     expect(await screen.findByRole('heading', { name: 'Sign in to Hourmere' })).toBeDefined()
-    expect(location()).toBe('/sign-in?next=%2Fapi-keys%3Ftab%3Dnew')
+    expect(location()).toBe('/sign-in?next=%2Fapp%2Fapi-keys%3Ftab%3Dnew')
     // A first visit, not a session that ended.
     expect(screen.queryByText(EXPIRED)).toBeNull()
   })
@@ -34,17 +36,35 @@ describe('the session gate', () => {
     expect(location()).toBe('/sign-in')
   })
 
+  it('does not remember the default page either', async () => {
+    fakeApi({ ...signedOut, ...instance() })
+    renderApp('/app')
+    await screen.findByRole('heading', { name: 'Sign in to Hourmere' })
+    expect(location()).toBe('/sign-in')
+  })
+
   it('shows signed-in people the app with its navigation', async () => {
-    fakeApi(signedIn)
+    fakeApi({ ...signedIn, ...emptyAccount })
     renderApp('/')
     expect(await screen.findByRole('heading', { name: 'Event types', level: 1 })).toBeDefined()
-    expect(location()).toBe('/event-types')
+    expect(location()).toBe('/app/event-types')
     const nav = screen.getByRole('navigation', { name: 'Main' })
     expect(
       within(nav)
         .getAllByRole('link')
         .map((a) => a.textContent),
     ).toEqual(['Event types', 'Availability', 'Bookings', 'API keys', 'Settings'])
+    expect(
+      within(nav)
+        .getAllByRole('link')
+        .map((a) => a.getAttribute('href')),
+    ).toEqual([
+      '/app/event-types',
+      '/app/availability',
+      '/app/bookings',
+      '/app/api-keys',
+      '/app/settings',
+    ])
     expect(screen.getByRole('link', { name: 'Event types' }).getAttribute('aria-current')).toBe(
       'page',
     )
@@ -52,12 +72,12 @@ describe('the session gate', () => {
   })
 
   it('moves between pages with the navigation', async () => {
-    fakeApi(signedIn)
-    renderApp('/event-types')
+    fakeApi({ ...signedIn, ...emptyAccount })
+    renderApp('/app/event-types')
     await screen.findByRole('heading', { name: 'Event types', level: 1 })
     await userEvent.click(screen.getByRole('link', { name: 'Settings' }))
     expect(await screen.findByRole('heading', { name: 'Settings', level: 1 })).toBeDefined()
-    expect(location()).toBe('/settings')
+    expect(location()).toBe('/app/settings')
     expect(document.activeElement?.id).toBe('main')
   })
 
@@ -68,8 +88,9 @@ describe('the session gate', () => {
         if (!up) throw new TypeError('Failed to fetch')
         return json(200, ME)
       },
+      ...profile(),
     })
-    renderApp('/settings')
+    renderApp('/app/settings')
     expect((await screen.findByRole('alert')).textContent).toMatch(/can't reach hourmere/i)
     up = true
     await userEvent.click(screen.getByRole('button', { name: 'Try again' }))
@@ -80,9 +101,10 @@ describe('the session gate', () => {
     const api = fakeApi({
       ...signedIn,
       ...instance(),
+      ...profile(),
       'POST /api/auth/sign-out': () => json(200, { success: true }),
     })
-    renderApp('/settings')
+    renderApp('/app/settings')
     await userEvent.click(await screen.findByRole('button', { name: 'Sign out' }))
     expect(await screen.findByRole('heading', { name: 'Sign in to Hourmere' })).toBeDefined()
     expect(location()).toBe('/sign-in')
@@ -100,12 +122,12 @@ describe('the session gate', () => {
         keys++ === 0 ? json(200, { apiKeys: [], total: 0 }) : json(401, { code: 'UNAUTHORIZED' }),
       'POST /api/auth/api-key/create': () => json(401, { code: 'UNAUTHORIZED' }),
     })
-    renderApp('/api-keys')
+    renderApp('/app/api-keys')
     await screen.findByText('You have no API keys yet.')
     await userEvent.type(screen.getByLabelText('Name'), 'Agent')
     await userEvent.click(screen.getByRole('button', { name: 'Create key' }))
     expect(await screen.findByRole('heading', { name: 'Sign in to Hourmere' })).toBeDefined()
-    expect(location()).toBe('/sign-in?next=%2Fapi-keys')
+    expect(location()).toBe('/sign-in?next=%2Fapp%2Fapi-keys')
     expect(screen.getByText(EXPIRED).getAttribute('role')).toBe('status')
   })
 
@@ -114,8 +136,9 @@ describe('the session gate', () => {
     const api = fakeApi({
       'GET /api/v1/me': () => json(200, me),
       ...instance(),
+      ...profile(),
     })
-    renderApp('/settings')
+    renderApp('/app/settings')
     await screen.findByRole('heading', { name: 'Settings', level: 1 })
     // The organization on the Settings page (a <dd> after its <dt>).
     const organization = () => screen.getByText('Organization').nextElementSibling?.textContent
@@ -135,7 +158,7 @@ describe('the session gate', () => {
       document.dispatchEvent(new Event('visibilitychange'))
     })
     expect(await screen.findByRole('heading', { name: 'Sign in to Hourmere' })).toBeDefined()
-    expect(location()).toBe('/sign-in?next=%2Fsettings')
+    expect(location()).toBe('/sign-in?next=%2Fapp%2Fsettings')
     expect(screen.getByText(EXPIRED)).toBeDefined()
     expect(api.to('GET /api/v1/me').length).toBeGreaterThanOrEqual(2)
   })
@@ -147,8 +170,9 @@ describe('the session gate', () => {
         if (!up) throw new TypeError('Failed to fetch')
         return json(200, ME)
       },
+      ...profile(),
     })
-    renderApp('/settings')
+    renderApp('/app/settings')
     await screen.findByRole('heading', { name: 'Settings', level: 1 })
     up = false
     act(() => {
@@ -171,9 +195,10 @@ describe('the session gate', () => {
         })
       },
       ...instance(),
+      ...profile(),
       'POST /api/auth/sign-out': () => json(200, { success: true }),
     })
-    renderApp('/settings')
+    renderApp('/app/settings')
     await screen.findByRole('heading', { name: 'Settings', level: 1 })
     pending = true
     act(() => {
@@ -197,6 +222,7 @@ describe('the session gate', () => {
       'GET /api/v1/me': () =>
         signedInElsewhere ? json(200, ME) : json(401, { error: 'unauthorized' }),
       ...instance(),
+      ...emptyAccount,
     })
     renderApp('/sign-in')
     await screen.findByRole('heading', { name: 'Sign in to Hourmere' })
@@ -256,7 +282,7 @@ describe('when the account or organization changes elsewhere', () => {
           key: SECRET,
         }),
     })
-    renderApp('/api-keys')
+    renderApp('/app/api-keys')
     await screen.findByRole('cell', { name: 'hm_Ada…' })
     await userEvent.type(screen.getByLabelText('Name'), 'Ada agent')
     await userEvent.click(screen.getByRole('button', { name: 'Create key' }))

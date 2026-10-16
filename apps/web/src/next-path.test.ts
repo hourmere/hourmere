@@ -3,63 +3,86 @@ import { safeNextPath, signInPath } from './next-path.ts'
 
 describe('safeNextPath', () => {
   it.each([
-    ['/api-keys', '/api-keys'],
-    ['/bookings?status=upcoming', '/bookings?status=upcoming'],
-    ['/settings#profile', '/settings#profile'],
-    ['/a/../api-keys', '/api-keys'],
-    ['/api-keys', '/api-keys'],
-    ['/bookings?next=%2F%2Fexample.com', '/bookings?next=%2F%2Fexample.com'],
-    [`/${'a'.repeat(2047)}`, `/${'a'.repeat(2047)}`],
-  ])('keeps the path on this site %s', (raw, expected) => {
+    ['/app', '/app'],
+    ['/app/', '/app/'],
+    ['/app/api-keys', '/app/api-keys'],
+    ['/app/bookings?tab=past', '/app/bookings?tab=past'],
+    ['/app/settings#profile', '/app/settings#profile'],
+    [
+      '/app/event-types/00000000-0000-7000-8000-000000000001',
+      '/app/event-types/00000000-0000-7000-8000-000000000001',
+    ],
+    ['/app/a/../api-keys', '/app/api-keys'],
+    ['/app/bookings?next=%2F%2Fexample.com', '/app/bookings?next=%2F%2Fexample.com'],
+    [`/app/${'a'.repeat(2043)}`, `/app/${'a'.repeat(2043)}`],
+  ])('keeps the signed-in page %s', (raw, expected) => {
     expect(safeNextPath(raw)).toBe(expected)
   })
 
   it.each([
     [null],
     [''],
-    ['api-keys'],
+    ['app/api-keys'],
     ['https://evil.example/'],
+    ['https://evil.example/app'],
     ['javascript:alert(1)'],
     ['//evil.example'],
+    ['//evil.example/app'],
     ['///evil.example'],
     ['/\\evil.example'],
     ['/\\/evil.example'],
     ['/.//evil.example'],
     ['/a/..//evil.example'],
+    ['/app/..//evil.example'],
     ['/\t/evil.example'],
     ['/\n/evil.example'],
     ['/ /evil.example'],
+    ['/app\t/x'],
     ['/\u0000x'],
+    // The start page and pages outside /app: public booking pages, old app addresses.
+    ['/'],
+    ['/ada/intro-call'],
+    ['/api-keys'],
+    ['/event-types'],
+    ['/settings?tab=profile'],
+    ['/apple'],
+    ['/app-keys'],
+    ['/application/x'],
+    ['/APP/settings'],
+    ['/app/../api-keys'],
+    ['/app/%2e%2e/api-keys'],
+    // Sign-in itself and the server's page for emailed links.
     ['/sign-in'],
-    ['/sign-in?next=/api-keys'],
-    // The server's page for emailed links, not one of the app's.
+    ['/sign-in?next=/app/api-keys'],
     ['/sign-in/confirm'],
     ['/sign-in/confirm#token=x'],
     // Better Auth refuses encoded separators in a callbackURL; sign-in would fail.
-    ['/%2F%2Fexample.com'],
-    ['/a%2fb'],
-    ['/%5Cexample.com'],
-    ['/a%5cb'],
+    ['/app/%2F%2Fexample.com'],
+    ['/app/a%2fb'],
+    ['/app/%5Cexample.com'],
+    ['/app/a%5cb'],
     // The API, not pages.
     ['/api'],
     ['/api/v1/me'],
-    ['/api/auth/sign-out'],
+    ['/app/../api/auth/sign-out'],
     // Too long, before or after normalizing.
-    [`/${'a'.repeat(2048)}`],
-    [`/${'a/../'.repeat(500)}x`],
-    [`/${'é'.repeat(400)}`],
-  ])('falls back to the start page for %j', (raw) => {
-    expect(safeNextPath(raw)).toBe('/')
+    [`/app/${'a'.repeat(2044)}`],
+    [`/app/${'a/../'.repeat(500)}x`],
+    [`/app/${'é'.repeat(400)}`],
+  ])('falls back to the default page for %j', (raw) => {
+    expect(safeNextPath(raw)).toBe('/app')
   })
 })
 
 describe('signInPath', () => {
   it('remembers the page to come back to', () => {
-    expect(signInPath('/api-keys?x=1')).toBe('/sign-in?next=%2Fapi-keys%3Fx%3D1')
+    expect(signInPath('/app/api-keys?x=1')).toBe('/sign-in?next=%2Fapp%2Fapi-keys%3Fx%3D1')
   })
 
-  it('leaves out the start page and anything unsafe', () => {
+  it('leaves out the default page and anything outside the app', () => {
+    expect(signInPath('/app')).toBe('/sign-in')
     expect(signInPath('/')).toBe('/sign-in')
+    expect(signInPath('/api-keys')).toBe('/sign-in')
     expect(signInPath('//evil.example')).toBe('/sign-in')
   })
 })

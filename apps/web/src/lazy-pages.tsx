@@ -38,19 +38,31 @@ export const ApiKeysPage = page(
   (m) => m.ApiKeysPage,
 )
 export const EventTypesPage = page(
-  () => import('./pages/Placeholders.tsx'),
+  () => import('./pages/event-types/EventTypes.tsx'),
   (m) => m.EventTypesPage,
 )
+export const EventTypeEditorPage = page(
+  () => import('./pages/event-types/EventTypeEditor.tsx'),
+  (m) => m.EventTypeEditorPage,
+)
 export const AvailabilityPage = page(
-  () => import('./pages/Placeholders.tsx'),
+  () => import('./pages/availability/Availability.tsx'),
   (m) => m.AvailabilityPage,
 )
+export const ScheduleEditorPage = page(
+  () => import('./pages/availability/ScheduleEditor.tsx'),
+  (m) => m.ScheduleEditorPage,
+)
 export const BookingsPage = page(
-  () => import('./pages/Placeholders.tsx'),
+  () => import('./pages/bookings/Bookings.tsx'),
   (m) => m.BookingsPage,
 )
+export const BookingDetailPage = page(
+  () => import('./pages/bookings/BookingDetail.tsx'),
+  (m) => m.BookingDetailPage,
+)
 export const SettingsPage = page(
-  () => import('./pages/Placeholders.tsx'),
+  () => import('./pages/Settings.tsx'),
   (m) => m.SettingsPage,
 )
 

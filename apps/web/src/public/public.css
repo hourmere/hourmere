@@ -10,42 +10,42 @@
   min-height: 100vh;
 }
 
-.public-main {
+.public .public-main {
   width: 100%;
   max-width: 720px;
   margin: 0 auto;
   padding: var(--space-5) var(--space-4) var(--space-6);
 }
 
-.public-main-wide {
+.public .public-main-wide {
   max-width: 1080px;
 }
 
-.public-footer {
+.public .public-footer {
   display: flex;
   justify-content: center;
   padding: var(--space-4);
   opacity: 0.8;
 }
 
-.public-footer .logo-word {
+.public .public-footer .logo-word {
   font-size: 0.95rem;
 }
 
-.public-card {
+.public .public-card {
   max-width: none;
 }
 
-.public-card h1 {
+.public .public-card h1 {
   margin-top: 0;
 }
 
-.optional {
+.public .optional {
   color: var(--muted);
   font-weight: 400;
 }
 
-.field-error {
+.public .field-error {
   margin: 0;
   color: var(--danger);
   font-size: 0.9rem;
@@ -53,18 +53,18 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  .field-error {
+  .public .field-error {
     color: #ff9b94; /* 4.5:1 or more on the dark surfaces */
   }
 }
 
-input[aria-invalid="true"],
-textarea[aria-invalid="true"],
-select[aria-invalid="true"] {
+.public input[aria-invalid="true"],
+.public textarea[aria-invalid="true"],
+.public select[aria-invalid="true"] {
   border-color: var(--danger);
 }
 
-textarea {
+.public textarea {
   width: 100%;
   min-height: 96px;
   padding: var(--space-2) var(--space-3);
@@ -76,23 +76,23 @@ textarea {
   resize: vertical;
 }
 
-textarea:focus-visible {
+.public textarea:focus-visible {
   outline: 3px solid var(--focus);
   outline-offset: 0;
   border-color: var(--focus);
 }
 
-.struck {
+.public .struck {
   text-decoration: line-through;
 }
 
 /* Host page */
 
-.host-header {
+.public .host-header {
   margin-bottom: var(--space-5);
 }
 
-.event-list {
+.public .event-list {
   display: grid;
   gap: var(--space-3);
   margin: 0;
@@ -100,7 +100,7 @@ textarea:focus-visible {
   list-style: none;
 }
 
-.event-card {
+.public .event-card {
   display: grid;
   gap: var(--space-1);
   padding: var(--space-4) var(--space-5);
@@ -111,24 +111,24 @@ textarea:focus-visible {
   text-decoration: none;
 }
 
-.event-card:hover {
+.public .event-card:hover {
   border-color: var(--accent);
 }
 
-.event-card-title {
+.public .event-card-title {
   color: var(--link);
   font-size: 1.1rem;
   font-weight: 700;
 }
 
-.event-card-meta,
-.event-card-description {
+.public .event-card-meta,
+.public .event-card-description {
   color: var(--muted);
 }
 
 /* Booking page: the event beside (wide) or above (narrow) the picker or the form */
 
-.booking-layout {
+.public .booking-layout {
   display: grid;
   gap: var(--space-5);
   background: var(--surface);
@@ -137,43 +137,43 @@ textarea:focus-visible {
   box-shadow: var(--shadow);
 }
 
-.event-info {
+.public .event-info {
   padding: var(--space-5) var(--space-5) 0;
 }
 
-.booking-main {
+.public .booking-main {
   min-width: 0;
   padding: 0 var(--space-4) var(--space-5);
 }
 
 @media (min-width: 900px) {
-  .booking-layout {
+  .public .booking-layout {
     grid-template-columns: 300px minmax(0, 1fr);
     gap: 0;
   }
 
-  .event-info {
+  .public .event-info {
     padding: var(--space-6) var(--space-5);
     border-right: 1px solid var(--border);
   }
 
-  .booking-main {
+  .public .booking-main {
     padding: var(--space-6) var(--space-5);
   }
 }
 
-.event-host {
+.public .event-host {
   margin: 0;
   color: var(--muted);
   font-weight: 600;
 }
 
-.event-title {
+.public .event-title {
   margin: var(--space-1) 0 var(--space-3);
   font-size: 1.5rem;
 }
 
-.event-facts {
+.public .event-facts {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2) var(--space-4);
@@ -183,11 +183,11 @@ textarea:focus-visible {
   list-style: none;
 }
 
-.event-description {
+.public .event-description {
   white-space: pre-line;
 }
 
-.chosen-time {
+.public .chosen-time {
   margin-top: var(--space-4);
   padding: var(--space-3) var(--space-4);
   background: var(--accent-soft);
@@ -195,30 +195,30 @@ textarea:focus-visible {
   color: var(--accent-soft-text);
 }
 
-.chosen-time .muted {
+.public .chosen-time .muted {
   color: inherit;
 }
 
-.step-title,
-.picker-title {
+.public .step-title,
+.public .picker-title {
   margin: 0 0 var(--space-4);
   font-size: 1.2rem;
 }
 
 /* Slot picker: calendar and the chosen day's times side by side from 640px */
 
-.picker-body {
+.public .picker-body {
   display: grid;
   gap: var(--space-5);
 }
 
 @media (min-width: 640px) {
-  .picker-body {
+  .public .picker-body {
     grid-template-columns: minmax(0, 1fr) 200px;
   }
 }
 
-.calendar-header {
+.public .calendar-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -226,17 +226,17 @@ textarea:focus-visible {
   margin-bottom: var(--space-2);
 }
 
-.calendar-month {
+.public .calendar-month {
   margin: 0;
   font-size: 1.05rem;
 }
 
-.calendar-nav {
+.public .calendar-nav {
   display: flex;
   gap: var(--space-2);
 }
 
-.icon-button {
+.public .icon-button {
   display: inline-grid;
   place-items: center;
   width: 44px;
@@ -250,23 +250,23 @@ textarea:focus-visible {
   cursor: pointer;
 }
 
-.icon-button:hover:not(:disabled) {
+.public .icon-button:hover:not(:disabled) {
   background: var(--surface-muted);
 }
 
-.icon-button:disabled {
+.public .icon-button:disabled {
   cursor: not-allowed;
   opacity: 0.4;
 }
 
-.calendar-grid {
+.public .calendar-grid {
   width: 100%;
   border-collapse: separate;
   border-spacing: 2px;
   table-layout: fixed;
 }
 
-.calendar-grid th {
+.public .calendar-grid th {
   padding: var(--space-1) 0;
   color: var(--muted);
   font-size: 0.8rem;
@@ -274,12 +274,12 @@ textarea:focus-visible {
   text-align: center;
 }
 
-.calendar-grid td {
+.public .calendar-grid td {
   padding: 0;
   text-align: center;
 }
 
-.day {
+.public .day {
   position: relative;
   width: 100%;
   max-width: 48px;
@@ -293,24 +293,24 @@ textarea:focus-visible {
   cursor: default;
 }
 
-.day-available {
+.public .day-available {
   background: var(--accent-soft);
   color: var(--accent-soft-text);
   font-weight: 700;
   cursor: pointer;
 }
 
-.day-available:hover {
+.public .day-available:hover {
   outline: 2px solid var(--accent);
 }
 
-.day-selected,
-.day-selected:hover {
+.public .day-selected,
+.public .day-selected:hover {
   background: var(--accent);
   color: var(--accent-text);
 }
 
-.day[aria-current="date"]::after {
+.public .day[aria-current="date"]::after {
   position: absolute;
   bottom: 5px;
   left: 50%;
@@ -322,18 +322,18 @@ textarea:focus-visible {
   content: "";
 }
 
-.calendar-grid[aria-busy="true"] .day {
+.public .calendar-grid[aria-busy="true"] .day {
   opacity: 0.55;
 }
 
-.picker-status {
+.public .picker-status {
   min-height: 1.55em;
   margin: var(--space-2) 0 var(--space-3);
   color: var(--muted);
   font-size: 0.9rem;
 }
 
-.picker-error {
+.public .picker-error {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -341,32 +341,32 @@ textarea:focus-visible {
   gap: var(--space-2);
 }
 
-.picker-error p {
+.public .picker-error p {
   margin: 0;
 }
 
-.picker-slots {
+.public .picker-slots {
   min-height: 120px;
 }
 
 @media (min-width: 640px) {
-  .picker-slots {
+  .public .picker-slots {
     min-height: 0;
   }
 
-  .slots {
+  .public .slots {
     max-height: 420px;
     overflow-y: auto;
     padding-right: var(--space-1);
   }
 }
 
-.slots-day {
+.public .slots-day {
   margin: 0 0 var(--space-3);
   font-size: 1rem;
 }
 
-.slots {
+.public .slots {
   display: grid;
   gap: var(--space-2);
   margin: 0;
@@ -374,7 +374,7 @@ textarea:focus-visible {
   list-style: none;
 }
 
-.slot {
+.public .slot {
   width: 100%;
   min-height: 44px;
   border: 1px solid var(--accent);
@@ -386,27 +386,27 @@ textarea:focus-visible {
   cursor: pointer;
 }
 
-.slot:hover {
+.public .slot:hover {
   background: var(--accent-soft);
 }
 
-.slot-selected,
-.slot-selected:hover {
+.public .slot-selected,
+.public .slot-selected:hover {
   background: var(--accent);
   color: var(--accent-text);
 }
 
-.slots-placeholder {
+.public .slots-placeholder {
   margin: 0;
 }
 
 /* Time zone */
 
-.tz-picker {
+.public .tz-picker {
   margin-top: var(--space-3);
 }
 
-.tz-toggle {
+.public .tz-toggle {
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 0 var(--space-3);
@@ -422,38 +422,38 @@ textarea:focus-visible {
   cursor: pointer;
 }
 
-.tz-toggle:hover {
+.public .tz-toggle:hover {
   background: var(--surface-muted);
 }
 
-.tz-caption {
+.public .tz-caption {
   grid-column: 1;
   color: var(--muted);
   font-size: 0.8rem;
 }
 
-.tz-current {
+.public .tz-current {
   grid-column: 1;
 }
 
-.tz-name {
+.public .tz-name {
   font-weight: 600;
 }
 
-.tz-offset {
+.public .tz-offset {
   color: var(--muted);
   font-size: 0.9rem;
   white-space: nowrap;
 }
 
-.tz-change {
+.public .tz-change {
   grid-column: 2;
   grid-row: 1 / span 2;
   color: var(--link);
   font-weight: 600;
 }
 
-.tz-panel {
+.public .tz-panel {
   margin-top: var(--space-2);
   padding: var(--space-2);
   border: 1px solid var(--border);
@@ -461,7 +461,7 @@ textarea:focus-visible {
   background: var(--surface);
 }
 
-.tz-options {
+.public .tz-options {
   max-height: 260px;
   margin: var(--space-2) 0 0;
   padding: 0;
@@ -469,7 +469,7 @@ textarea:focus-visible {
   list-style: none;
 }
 
-.tz-option {
+.public .tz-option {
   display: flex;
   justify-content: space-between;
   gap: var(--space-3);
@@ -478,35 +478,35 @@ textarea:focus-visible {
   cursor: pointer;
 }
 
-.tz-option[data-active="true"] {
+.public .tz-option[data-active="true"] {
   background: var(--accent-soft);
   color: var(--accent-soft-text);
 }
 
-.tz-option[aria-selected="true"] {
+.public .tz-option[aria-selected="true"] {
   font-weight: 700;
 }
 
-.tz-empty {
+.public .tz-empty {
   margin: var(--space-2) var(--space-3);
 }
 
 /* Booking form */
 
-.booking-form .guests,
-.booking-form .choices {
+.public .booking-form .guests,
+.public .booking-form .choices {
   margin: 0;
   padding: 0;
   border: 0;
 }
 
-.booking-form legend {
+.public .booking-form legend {
   padding: 0;
   margin-bottom: var(--space-2);
   font-weight: 600;
 }
 
-.guest {
+.public .guest {
   display: grid;
   gap: var(--space-2);
   margin-bottom: var(--space-3);
@@ -515,11 +515,11 @@ textarea:focus-visible {
   border-radius: var(--radius-small);
 }
 
-.guest-remove {
+.public .guest-remove {
   justify-self: start;
 }
 
-.choice {
+.public .choice {
   display: flex;
   align-items: flex-start;
   gap: var(--space-2);
@@ -527,7 +527,7 @@ textarea:focus-visible {
   cursor: pointer;
 }
 
-.choice input {
+.public .choice input {
   width: 20px;
   min-height: 20px;
   height: 20px;
@@ -537,43 +537,43 @@ textarea:focus-visible {
 
 /* Confirmation and manage page */
 
-.booking-details {
+.public .booking-details {
   display: grid;
   gap: var(--space-3);
   margin: var(--space-4) 0;
 }
 
-.details-row {
+.public .details-row {
   display: grid;
   gap: 2px;
 }
 
 @media (min-width: 560px) {
-  .details-row {
+  .public .details-row {
     grid-template-columns: 7rem minmax(0, 1fr);
     gap: var(--space-4);
   }
 }
 
-.booking-details dt {
+.public .booking-details dt {
   color: var(--muted);
 }
 
-.booking-details dd {
+.public .booking-details dd {
   margin: 0;
 }
 
-.add-to-calendar h2,
-.manage-link h2 {
+.public .add-to-calendar h2,
+.public .manage-link h2 {
   margin-top: var(--space-5);
   font-size: 1.05rem;
 }
 
-.manage-link {
+.public .manage-link {
   margin-bottom: 0;
 }
 
-.calendar-links {
+.public .calendar-links {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
@@ -582,25 +582,25 @@ textarea:focus-visible {
   list-style: none;
 }
 
-.calendar-links a {
+.public .calendar-links a {
   text-decoration: none;
 }
 
-.manage-actions {
+.public .manage-actions {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-3);
   margin-top: var(--space-4);
 }
 
-.reschedule {
+.public .reschedule {
   padding: var(--space-5) var(--space-4);
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
 
-.reschedule-header {
+.public .reschedule-header {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -609,6 +609,6 @@ textarea:focus-visible {
   margin-bottom: var(--space-4);
 }
 
-.reschedule-header p {
+.public .reschedule-header p {
   margin: 0;
 }

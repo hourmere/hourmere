@@ -1,0 +1,25 @@
+// Addresses of the app's pages. Signed-in pages live under /app; the root belongs to public
+// booking pages (/{handle}/{slug}), and /sign-in stays where it is.
+
+export const APP_BASE = '/app'
+
+export const PATHS = {
+  /** The default signed-in page (/app redirects there). */
+  home: APP_BASE,
+  eventTypes: `${APP_BASE}/event-types`,
+  newEventType: `${APP_BASE}/event-types/new`,
+  availability: `${APP_BASE}/availability`,
+  newSchedule: `${APP_BASE}/availability/new`,
+  bookings: `${APP_BASE}/bookings`,
+  apiKeys: `${APP_BASE}/api-keys`,
+  settings: `${APP_BASE}/settings`,
+  signIn: '/sign-in',
+} as const
+
+export const eventTypePath = (id: string) => `${PATHS.eventTypes}/${encodeURIComponent(id)}`
+export const schedulePath = (id: string) => `${PATHS.availability}/${encodeURIComponent(id)}`
+export const bookingPath = (id: string) => `${PATHS.bookings}/${encodeURIComponent(id)}`
+
+/** The public booking page of a personal event type, as a full URL to share. */
+export const publicPageUrl = (handle: string, slug: string) =>
+  `${window.location.origin}/${encodeURIComponent(handle)}/${encodeURIComponent(slug)}`

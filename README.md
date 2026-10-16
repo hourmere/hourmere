@@ -40,6 +40,8 @@ PUBLIC_URL=http://localhost:5173 SIGNUP=open npm run dev --workspace @hourmere/s
 npm run dev --workspace @hourmere/web
 ```
 
+Signed-in pages live under `/app` (`/app/event-types`, `/app/availability`, `/app/bookings`, `/app/api-keys`, `/app/settings`); `/sign-in` stays at the top level, and the rest of the root is for public booking pages (`/{handle}/{slug}`). After signing in, people only return to pages under `/app`.
+
 The web app only uses the public API (`/api/v1/*` and Better Auth's `/api/auth/*`). Its types for `/api/v1` are generated from the server's OpenAPI document: after changing a route, run `npm run api:types` (no database needed) and commit `apps/web/src/api/schema.d.ts`; CI fails if it is out of date.
 
 Other commands: `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`, `npm run db:migrate`, `npm run db:down`, `npm run api:types`.
@@ -106,7 +108,7 @@ in: email security scanners that open every link (such as Microsoft Safe Links) 
 otherwise use up the one-time link before the person clicks it.
 
 Agents use API keys (`hm_…`) sent as `Authorization: Bearer <key>`. Create them on the web
-app's API keys page, or with Better Auth's endpoints while signed in (`POST
+app's API keys page (`/app/api-keys`), or with Better Auth's endpoints while signed in (`POST
 /api/auth/api-key/create`, `GET /api/auth/api-key/list`, `POST /api/auth/api-key/delete`). The API is described at
 `/api/v1/openapi.json`; its conventions are in [docs/api-conventions.md](docs/api-conventions.md).
 The same keys connect MCP clients such as Claude Code to the remote MCP server at `/mcp`; see

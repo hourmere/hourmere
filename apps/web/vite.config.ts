@@ -16,7 +16,8 @@ export default defineConfig(({ mode }) => {
       strictPort: true,
       // The API runs separately in development (npm run dev starts both). The browser only
       // talks to this origin, so the session cookie is same-origin as in production. The
-      // trailing slash keeps app pages such as /api-keys with Vite. The server also serves
+      // trailing slash keeps pages that merely start with "/api" (a booking page such as
+      // /apiary/intro) with Vite. The server also serves
       // the page that emailed sign-in links open (not a page of this app).
       proxy: {
         '/api/': `http://localhost:${apiPort}`,

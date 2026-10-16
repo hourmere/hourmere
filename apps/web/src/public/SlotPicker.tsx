@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { TimeZonePicker } from '../components/TimeZonePicker.tsx'
 import { failureMessage, loadSlotsInRange, type Slot, type SlotLoader } from './api.ts'
 import {
   addMonths,
@@ -10,7 +11,6 @@ import {
   type YearMonth,
 } from './calendar.ts'
 import { MonthCalendar } from './MonthCalendar.tsx'
-import { TimeZonePicker } from './TimeZonePicker.tsx'
 import { dateKeyIn, formatDateKey, formatTime } from './time.ts'
 
 /** How far ahead people may page (the API has no notion of "the last month with slots"). */
