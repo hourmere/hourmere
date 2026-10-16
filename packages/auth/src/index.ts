@@ -7,11 +7,14 @@ import { magicLink } from 'better-auth/plugins/magic-link'
 import { organization } from 'better-auth/plugins/organization'
 import type { GoogleOptions, MicrosoftOptions } from 'better-auth/social-providers'
 import pg from 'pg'
+import { parse } from 'pg-connection-string'
 import { API_KEY_RATE_LIMIT } from './api-keys.ts'
 import { API_KEY_PREFIX } from './caller.ts'
 import { beforeHook } from './hooks.ts'
-import { betterAuthLog } from './log.ts'
+import { betterAuthLog, logMailFailure } from './log.ts'
+import { confirmLink } from './magic-link.ts'
 import { ensurePersonalOrganization, personalOrganizationGuards } from './organizations.ts'
+import { hasAccount, maySignUp, type SignupPolicy, signupConnectionOptions } from './signup.ts'
 
 export { API_KEY_RATE_LIMIT } from './api-keys.ts'
 export {
@@ -24,16 +27,37 @@ export {
   type Principal,
 } from './caller.ts'
 export { escapeControlCharacters } from './log.ts'
+export { MAGIC_LINK_CONFIRM_PATH, MAGIC_LINK_VERIFY_PARAMS } from './magic-link.ts'
 export { ensurePersonalOrganization } from './organizations.ts'
+export {
+  assertSignupEnforced,
+  EMAIL_DOMAIN,
+  SIGNUP_MODES,
+  type SignupMode,
+  type SignupPolicy,
+} from './signup.ts'
 
 /**
  * Better Auth owns the `auth` schema (its own table and column naming). Its pool only
  * sees that schema; application tables live in `public` and reference auth rows by id.
  * After changing plugins, regenerate the SQL with `npm run auth:sql` and add it as a
  * migration in packages/db/migrations.
+ *
+ * Its connections also carry the sign-up policy, which the database enforces when a user is
+ * inserted; pass createAuth the same policy, and check the settings arrive with
+ * assertSignupEnforced before serving requests.
  */
-export function createAuthPool(databaseUrl: string): pg.Pool {
-  const pool = new pg.Pool({ connectionString: databaseUrl, options: '-c search_path=auth' })
+export function createAuthPool(databaseUrl: string, signup: SignupPolicy): pg.Pool {
+  // Parsed here, the way node-postgres parses it, instead of passed as connectionString:
+  // node-postgres lets an `options` parameter in the URL replace the options given beside it,
+  // which would drop the sign-up settings and turn the database check off. The URL's options
+  // still apply, after our search_path (so they may change it) and before the sign-up
+  // settings (so they cannot).
+  const config = parse(databaseUrl)
+  const options = ['-c search_path=auth', config.options, signupConnectionOptions(signup)]
+    .filter(Boolean)
+    .join(' ')
+  const pool = new pg.Pool({ ...(config as pg.PoolConfig), options })
   // Same reason as createPool in @hourmere/db: an unhandled idle-client error would kill
   // the process.
   pool.on('error', (err) => console.error(`idle Postgres client error (auth): ${err.message}`))
@@ -55,6 +79,8 @@ export interface AuthConfig {
   secret: string
   /** Sends the sign-in links. */
   mailer: Mailer
+  /** Who may create an account (SIGNUP); the same policy the pool was created with. */
+  signup: SignupPolicy
   /** Each provider is enabled only when configured. */
   socialProviders?: { google?: OAuthClient | undefined; microsoft?: OAuthClient | undefined }
   /**
@@ -78,6 +104,7 @@ export function createAuth({
   baseURL,
   secret,
   mailer,
+  signup,
   socialProviders = {},
   socialProviderOptions = {},
 }: AuthConfig) {
@@ -135,10 +162,21 @@ export function createAuth({
     databaseHooks: {
       user: {
         create: {
-          // Every account starts from a proven email address. A provider that does not vouch
-          // for the address (Microsoft often does not) could otherwise create an account for
-          // someone else's email and mint API keys in it before the owner ever signs in.
           before: async (user) => {
+            // Every new user passes here, whatever the route (email link, Google, Microsoft),
+            // so this is where the sign-up policy applies. Better Auth runs this outside the
+            // insert's transaction, so two first sign-ups at the same moment could both pass;
+            // the database checks again inside it (migration 0006) and lets only one through.
+            if (!(await maySignUp(db, signup, user.email))) {
+              throw new APIError('FORBIDDEN', {
+                code: 'SIGNUP_DISABLED',
+                message:
+                  'This Hourmere instance does not accept new accounts for this email address. Ask its administrator for access.',
+              })
+            }
+            // Every account starts from a proven email address. A provider that does not vouch
+            // for the address (Microsoft often does not) could otherwise create an account for
+            // someone else's email and mint API keys in it before the owner ever signs in.
             if (!user.emailVerified) {
               throw new APIError('FORBIDDEN', {
                 code: 'EMAIL_NOT_VERIFIED',
@@ -182,9 +220,23 @@ export function createAuth({
         // Only a hash is stored, so a database leak does not expose usable links.
         storeToken: 'hashed',
         sendMagicLink: async ({ email, url }) => {
-          await mailer.send(
-            magicLinkEmail({ to: email, url, expiresInMinutes: MAGIC_LINK_MINUTES }),
-          )
+          // No email to an address that has no account and may not create one: the link could
+          // only fail. The request is answered the same either way, so this does not tell
+          // anyone whether an address has an account.
+          if (!(await maySignUp(db, signup, email)) && !(await hasAccount(db, email))) return
+          const message = magicLinkEmail({
+            to: email,
+            url: confirmLink(url),
+            expiresInMinutes: MAGIC_LINK_MINUTES,
+          })
+          // Sent after the answer, for any address: waiting for SMTP would make an address that
+          // gets an email answer later than one that does not, and an SMTP failure would answer
+          // with an error only for those. A failure is logged instead (nothing retries it yet).
+          setImmediate(() => {
+            void Promise.resolve()
+              .then(() => mailer.send(message))
+              .catch(logMailFailure)
+          })
         },
       }),
     ],
