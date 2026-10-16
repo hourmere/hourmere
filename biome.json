@@ -6,7 +6,13 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["**", "!**/dist", "!package-lock.json", "!apps/site/**/*.svg"]
+    "includes": [
+      "**",
+      "!**/dist",
+      "!package-lock.json",
+      "!packages/db/src/tables.ts",
+      "!apps/site/**/*.svg"
+    ]
   },
   "formatter": {
     "indentStyle": "space",

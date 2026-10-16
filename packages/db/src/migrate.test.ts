@@ -7,6 +7,12 @@ import { runMigrations } from './migrate.ts'
 
 const url = process.env.DATABASE_URL
 
+function withSearchPath(connectionString: string, schema: string) {
+  const u = new URL(connectionString)
+  u.searchParams.set('options', `-c search_path=${schema}`)
+  return u.toString()
+}
+
 describe.skipIf(!url)('runMigrations', () => {
   const schema = `test_${process.pid}_${Date.now()}`
   let dir: string
@@ -17,8 +23,7 @@ describe.skipIf(!url)('runMigrations', () => {
     const admin = createPool(url as string)
     await admin.query(`CREATE SCHEMA ${schema}`)
     await admin.end()
-    pool = createPool(url as string)
-    pool.on('connect', (client) => client.query(`SET search_path TO ${schema}`))
+    pool = createPool(withSearchPath(url as string, schema))
   })
 
   afterAll(async () => {
@@ -50,5 +55,46 @@ describe.skipIf(!url)('runMigrations', () => {
     expect(c.rows[0].t).toBeNull()
     const recorded = await pool.query('SELECT name FROM schema_migrations ORDER BY name')
     expect(recorded.rows.map((r) => r.name)).toEqual(['0001_a.sql', '0002_b.sql'])
+  })
+
+  it('refuses an applied migration whose contents changed', async () => {
+    await writeFile(join(dir, '0003_bad.sql'), 'SELECT 1;')
+    await runMigrations(pool, dir)
+    await writeFile(join(dir, '0001_a.sql'), 'CREATE TABLE a (id bigint PRIMARY KEY);')
+
+    await expect(runMigrations(pool, dir)).rejects.toThrow(
+      'migration 0001_a.sql was changed after it was applied',
+    )
+  })
+
+  it('rejects file names that break the NNNN_name.sql rule', async () => {
+    const other = await mkdtemp(join(tmpdir(), 'hourmere-migrations-'))
+    await writeFile(join(other, '10_late.sql'), 'SELECT 1;')
+    try {
+      await expect(runMigrations(pool, other)).rejects.toThrow(
+        'migration file name 10_late.sql does not match NNNN_name.sql',
+      )
+    } finally {
+      await rm(other, { recursive: true, force: true })
+    }
+  })
+
+  it('treats CRLF and LF copies of a migration as the same file', async () => {
+    const crlf = await mkdtemp(join(tmpdir(), 'hourmere-migrations-'))
+    const lf = await mkdtemp(join(tmpdir(), 'hourmere-migrations-'))
+    const otherSchema = `${schema}_eol`
+    await pool.query(`CREATE SCHEMA ${otherSchema}`)
+    const eolPool = createPool(withSearchPath(url as string, otherSchema))
+    try {
+      await writeFile(join(crlf, '0001_t.sql'), 'CREATE TABLE t (id int);\r\nSELECT 1;\r\n')
+      await writeFile(join(lf, '0001_t.sql'), 'CREATE TABLE t (id int);\nSELECT 1;\n')
+      expect(await runMigrations(eolPool, crlf)).toEqual(['0001_t.sql'])
+      expect(await runMigrations(eolPool, lf)).toEqual([])
+    } finally {
+      await eolPool.query(`DROP SCHEMA ${otherSchema} CASCADE`)
+      await eolPool.end()
+      await rm(crlf, { recursive: true, force: true })
+      await rm(lf, { recursive: true, force: true })
+    }
   })
 })

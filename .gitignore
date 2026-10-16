@@ -153,3 +153,9 @@ vite.config.ts.timestamp-*
 
 # Private planning docs, research data and company site (never commit; repo goes public at launch)
 temp/
+
+# Better Auth schema diff output (npm run auth:sql); copy into a migration
+packages/auth/auth-schema.generated.sql
+
+# Claude Code agent worktrees
+.claude/worktrees/

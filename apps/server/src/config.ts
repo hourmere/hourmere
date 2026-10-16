@@ -1,7 +1,13 @@
 import { z } from 'zod'
 
 const schema = z.object({
-  DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
+  DATABASE_URL: z
+    .string()
+    .min(1, 'DATABASE_URL is required')
+    .refine((v) => URL.canParse(v), {
+      message:
+        'DATABASE_URL is not a valid URL (percent-encode special characters in the password, or leave the password out and set PGPASSWORD)',
+    }),
   PORT: z.coerce.number().int().positive().default(3000),
   PUBLIC_URL: z.url().optional(),
   // Self-hosted instances migrate on start; set to "false" to run `npm run db:migrate` yourself.

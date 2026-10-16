@@ -20,7 +20,9 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "vitest run",
     "build": "npm run build --workspaces --if-present",
-    "start": "node apps/server/src/index.ts"
+    "start": "node apps/server/src/index.ts",
+    "auth:sql": "npm run --workspace @hourmere/auth schema:sql",
+    "db:types": "kysely-codegen --dialect postgres --date-parser string --default-schema public --exclude-pattern public.schema_migrations --out-file packages/db/src/tables.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",
