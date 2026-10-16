@@ -78,6 +78,25 @@ describe.skipIf(!serverUrl)('createJobs', () => {
     expect(migrations.rows.every((r) => /^\d{4}_[a-z0-9_]+\.sql$/.test(r.name))).toBe(true)
   })
 
+  it('says what to run when migrate is off and pg-boss is not installed', async () => {
+    const empty = await createTestDatabase(serverUrl as string)
+    try {
+      const jobs = createJobs({
+        connectionString: empty.url,
+        definitions: [],
+        work: true,
+        migrate: false,
+        log: () => {},
+      })
+      await expect(jobs.start()).rejects.toThrow(
+        /pg-boss is not installed .*migrate is off.*npm run db:migrate/,
+      )
+      expect(jobs.running).toBe(false)
+    } finally {
+      await empty.drop()
+    }
+  })
+
   it('runs a job with its validated payload', async () => {
     const received = deferred<{ to: string; count: number }>()
     const name = queueName('echo')

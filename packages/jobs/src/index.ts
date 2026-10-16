@@ -314,7 +314,12 @@ export function createJobs<const Defs extends readonly AnyJobDefinition[]>(
         state = 'stopping'
         await boss.stop({ graceful: false, close: true }).catch(() => {})
         state = 'stopped'
-        throw err
+        if (options.migrate) throw err
+        const reason = err instanceof Error ? err.message : String(err)
+        throw new Error(
+          `background jobs could not start: ${reason} (migrate is off, so pg-boss's schema must already be installed and current; \`npm run db:migrate\` does that)`,
+          { cause: err },
+        )
       }
     },
 
