@@ -13,7 +13,7 @@ const MAX_LENGTH = 2048
  * `raw` if it is a page of this app (normalized), else the start page. Refuses
  * protocol-relative and backslash forms (`//host`, `/\host`, which browsers treat as other
  * sites), absolute URLs, control characters and whitespace (which browsers drop, possibly
- * turning a harmless-looking value into one of the above), and the sign-in page itself.
+ * turning a harmless-looking value into one of the above), and the sign-in pages.
  *
  * Also refuses what Better Auth would refuse as a callbackURL, so a crafted link cannot
  * make sign-in fail: encoded separators (`%2F`, `%5C`) in the path. And paths under /api/,
@@ -32,7 +32,10 @@ export function safeNextPath(raw: string | null | undefined): string {
   const { pathname } = url
   if (
     url.origin !== BASE ||
+    // Sign-in itself, and the server's own pages under it (/sign-in/confirm, where emailed
+    // links lead): the app's router would only show "not found" there.
     pathname === SIGN_IN ||
+    pathname.startsWith(`${SIGN_IN}/`) ||
     // Normalizing can produce `//` again, e.g. from `/.//host`.
     pathname.startsWith('//') ||
     /%2f|%5c/i.test(pathname) ||

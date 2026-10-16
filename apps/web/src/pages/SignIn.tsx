@@ -20,6 +20,7 @@ const INTERRUPTED = 'That sign-in attempt expired or was interrupted. Please try
 const USE_EMAIL_LINK = 'Sign in with an email link instead.'
 const COULD_NOT_CREATE_ACCOUNT = 'Your account could not be created. Please try again.'
 const COULD_NOT_SIGN_IN = 'You could not be signed in. Please try again.'
+const NO_NEW_ACCOUNT = 'This Hourmere instance does not accept new accounts for that email address.'
 
 // Better Auth sends people back with ?error=CODE (and an error_description, which is never
 // shown: anyone can put text in a link to this page). Codes are matched case-insensitively,
@@ -50,9 +51,10 @@ const SIGN_IN_ERRORS = new Map<string, string>(
     unable_to_create_user: COULD_NOT_CREATE_ACCOUNT,
     failed_to_create_session: COULD_NOT_SIGN_IN,
     unable_to_create_session: COULD_NOT_SIGN_IN,
-    // Also SIGNUP_DISABLED (codes are matched case-insensitively).
-    signup_disabled: 'New accounts cannot be created on this instance.',
-    new_user_signup_disabled: 'New accounts cannot be created on this instance.',
+    // Also SIGNUP_DISABLED, the instance's sign-up policy (codes are matched
+    // case-insensitively); existing accounts can always sign in.
+    signup_disabled: NO_NEW_ACCOUNT,
+    new_user_signup_disabled: NO_NEW_ACCOUNT,
   }),
 )
 

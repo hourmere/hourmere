@@ -42,11 +42,20 @@ interface Session {
   /** Ends the session on the server; throws if that fails. */
   signOut: () => Promise<void>
   /**
-   * A message for the signed-in pages that must outlive them: they start over when the
-   * account or organization changes (see RequireSession), and this says why.
+   * A message for a signed-in page that must outlive it: pages start over when the account
+   * or organization changes (see RequireSession), and this says why.
    */
-  notice: string | null
-  setNotice: (notice: string | null) => void
+  notice: Notice | null
+  setNotice: (notice: Notice | null) => void
+}
+
+export interface Notice {
+  message: string
+  /**
+   * The page it is about (a pathname). It is shown only there and dropped once the person is
+   * elsewhere, including when it arrives after they left (a slow request).
+   */
+  path: string
 }
 
 const SessionContext = createContext<Session | null>(null)
@@ -72,7 +81,7 @@ async function fetchMe(signal: AbortSignal): Promise<MeResult> {
 /** Who is signed in, from GET /api/v1/me; the rest of the app reads it with useSession. */
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<SessionState>({ status: 'loading' })
-  const [notice, setNotice] = useState<string | null>(null)
+  const [notice, setNotice] = useState<Notice | null>(null)
   // Counts the moments the session ended (sign-out, or a 401). An answer to a request that
   // started before the latest one is stale: applying it would sign a signed-out person back
   // in, e.g. a background check that the server answered just before the sign-out.

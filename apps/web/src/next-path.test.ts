@@ -32,6 +32,9 @@ describe('safeNextPath', () => {
     ['/\u0000x'],
     ['/sign-in'],
     ['/sign-in?next=/api-keys'],
+    // The server's page for emailed links, not one of the app's.
+    ['/sign-in/confirm'],
+    ['/sign-in/confirm#token=x'],
     // Better Auth refuses encoded separators in a callbackURL; sign-in would fail.
     ['/%2F%2Fexample.com'],
     ['/a%2fb'],

@@ -1,4 +1,5 @@
 import { type FormEvent, useEffect, useId, useRef, useState } from 'react'
+import { useLocation } from 'react-router'
 import {
   API_KEY_NAME_MAX_LENGTH,
   type ApiKey,
@@ -152,6 +153,8 @@ function CreateKeyForm({
   const [error, setError] = useState<string | null>(null)
   const nameHint = useId()
   const { refresh, setNotice } = useSession()
+  // This page's address, kept by the handlers below even if the person has left meanwhile.
+  const { pathname } = useLocation()
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -181,9 +184,10 @@ function CreateKeyForm({
     }
     const now = await refresh()
     if (now && now.organization.id !== organization.id) {
-      setNotice(
-        `You're no longer a member of ${organization.name}, so no key was created. Keys you create now act in ${now.organization.name}.`,
-      )
+      setNotice({
+        message: `You're no longer a member of ${organization.name}, so no key was created. Keys you create now act in ${now.organization.name}.`,
+        path: pathname,
+      })
       return null
     }
     return `Could not create the key: you can't create keys in ${organization.name}.`

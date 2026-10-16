@@ -1,18 +1,46 @@
 import type { AddressInfo } from 'node:net'
 import { serve } from '@hono/node-server'
-import { createAuth, createAuthPool, createCallerResolver } from '@hourmere/auth'
-import { createDb, createPool, runMigrations } from '@hourmere/db'
+import {
+  assertSignupEnforced,
+  createAuth,
+  createAuthPool,
+  createCallerResolver,
+} from '@hourmere/auth'
+import { createDb, createPool, type Db, runMigrations } from '@hourmere/db'
 import { createLogMailer, createSmtpMailer, type Mailer } from '@hourmere/mail'
 import { sql } from 'kysely'
 import { createApp } from './app.ts'
-import { loadConfig } from './config.ts'
+import { type Config, loadConfig } from './config.ts'
 import { installOneLineConsole } from './one-line-console.ts'
+import type { RouteModule } from './openapi.ts'
 import { bookingRoutes } from './routes/bookings.ts'
 import { eventTypeRoutes } from './routes/event-types.ts'
 import { instanceRoutes } from './routes/instance.ts'
 import { profileRoutes } from './routes/profile.ts'
 import { publicRoutes } from './routes/public.ts'
 import { scheduleRoutes } from './routes/schedules.ts'
+
+/**
+ * The /api/v1 route groups, each created with what it needs. The OpenAPI document (and with
+ * it the web app's types, `npm run api:types`) is made from this same list. Route groups hold
+ * only db and in-memory rate limiters, and creating them touches neither.
+ */
+export function productRoutes({
+  db,
+  socialProviders,
+}: {
+  db: Db
+  socialProviders: Config['socialProviders']
+}): RouteModule[] {
+  return [
+    instanceRoutes({ socialProviders }),
+    profileRoutes({ db }),
+    scheduleRoutes({ db }),
+    eventTypeRoutes({ db }),
+    publicRoutes({ db }),
+    bookingRoutes({ db }),
+  ]
+}
 
 export interface RunningServer {
   port: number
@@ -60,14 +88,35 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
     }
     mailer = createLogMailer()
   }
+  // Sign-in emails go out after the request is answered, and shutdown does not wait for them;
+  // the count is for saying how many it drops.
+  let sending = 0
+  const sender = mailer
+  const countingMailer: Mailer = {
+    async send(message) {
+      sending += 1
+      try {
+        await sender.send(message)
+      } finally {
+        sending -= 1
+      }
+    },
+  }
 
-  const authPool = createAuthPool(config.DATABASE_URL)
+  const authPool = createAuthPool(config.DATABASE_URL, config.signup)
+  try {
+    await assertSignupEnforced(authPool, config.signup)
+  } catch (err) {
+    await Promise.all([db.destroy(), authPool.end()])
+    throw err
+  }
   const auth = createAuth({
     pool: authPool,
     db,
     baseURL: config.PUBLIC_URL,
     secret: config.BETTER_AUTH_SECRET,
-    mailer,
+    mailer: countingMailer,
+    signup: config.signup,
     socialProviders: config.socialProviders,
   })
 
@@ -80,22 +129,17 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
     publicUrl: config.PUBLIC_URL,
     trustedProxies: config.trustedProxies,
     webDist: config.WEB_DIST,
-    // Route groups hold only db (closed below) and in-memory rate limiters.
-    routes: [
-      instanceRoutes({ socialProviders: config.socialProviders }),
-      profileRoutes({ db }),
-      scheduleRoutes({ db }),
-      eventTypeRoutes({ db }),
-      publicRoutes({ db }),
-      bookingRoutes({ db }),
-    ],
+    // db is closed below.
+    routes: productRoutes({ db, socialProviders: config.socialProviders }),
   })
 
   const server = await new Promise<ReturnType<typeof serve>>((resolve) => {
     const s = serve({ fetch: app.fetch, port: config.PORT }, (info: AddressInfo) => {
       const providers = Object.keys(config.socialProviders)
+      const { mode, allowedDomains } = config.signup
+      const signup = `${mode}${allowedDomains.length ? `, plus ${allowedDomains.join(', ')}` : ''}`
       console.log(
-        `Hourmere listening on :${info.port} (${config.PUBLIC_URL}); sign-in: email${providers.map((p) => `, ${p}`).join('')}`,
+        `Hourmere listening on :${info.port} (${config.PUBLIC_URL}); sign-in: email${providers.map((p) => `, ${p}`).join('')}; sign-up: ${signup}`,
       )
       resolve(s)
     })
@@ -107,6 +151,8 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
       new Promise<void>((resolve, reject) => {
         server.close(async (err) => {
           try {
+            if (sending)
+              console.warn(`shutting down: dropping ${sending} email(s) still being sent`)
             await Promise.all([db.destroy(), authPool.end()])
             restoreConsole()
             if (err) reject(err)

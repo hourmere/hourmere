@@ -2,7 +2,7 @@ import { createServer, type Server } from 'node:net'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createLogMailer, createSmtpMailer, magicLinkEmail, smtpTransportOptions } from './index.ts'
 
-const url = 'https://cal.example.com/api/auth/magic-link/verify?token=abc&callbackURL=%2F'
+const url = 'https://cal.example.com/sign-in/confirm#token=abc&callbackURL=%2F'
 
 describe('magicLinkEmail', () => {
   it('puts the link in the text and, escaped, in the HTML', () => {
@@ -10,6 +10,9 @@ describe('magicLinkEmail', () => {
     expect(m).toMatchObject({ to: 'ada@example.com', subject: 'Sign in to Hourmere' })
     expect(m.text).toContain(url)
     expect(m.text).toContain('5 minutes')
+    // The link opens a page; its button signs in.
+    expect(m.text).toContain('then press "Sign in to Hourmere" on the page it opens')
+    expect(m.html).toContain('then "Sign in to Hourmere" on the page it opens')
     expect(m.html).toContain(`href="${url.replace('&', '&amp;')}"`)
     expect(m.html).not.toContain('token=abc&callbackURL')
   })
@@ -55,6 +58,14 @@ describe('smtpTransportOptions', () => {
     expect(requireTLS('smtp://127.0.0.1:25')).toBe(false)
     expect(requireTLS('smtp://[::1]:25')).toBe(false)
     expect(requireTLS('smtps://u:p@smtp.example.com:465')).toBe(false)
+  })
+
+  it('gives up on an unresponsive server within seconds, not nodemailer’s minutes', () => {
+    expect(smtpTransportOptions('smtp://u:p@smtp.example.com:587')).toMatchObject({
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 30_000,
+    })
   })
 })
 

@@ -1,3 +1,4 @@
+import { EMAIL_DOMAIN, SIGNUP_MODES, type SignupPolicy } from '@hourmere/auth'
 import { z } from 'zod'
 import { isTrustedProxyEntry } from './client-ip.ts'
 
@@ -51,6 +52,30 @@ const schema = z
     GOOGLE_CLIENT_SECRET: optional(z.string()),
     MICROSOFT_CLIENT_ID: optional(z.string()),
     MICROSOFT_CLIENT_SECRET: optional(z.string()),
+    // Who may create an account; existing users can always sign in. first-user suits a
+    // self-hosted instance: whoever signs in first, then only SIGNUP_ALLOWED_DOMAINS.
+    SIGNUP: z.preprocess(
+      (v) => (v === '' ? undefined : v),
+      z
+        .enum(SIGNUP_MODES, { error: 'SIGNUP must be open, first-user or closed' })
+        .default('first-user'),
+    ),
+    // Email domains whose addresses may always sign up, comma-separated; exact match, so
+    // subdomains must be listed too.
+    SIGNUP_ALLOWED_DOMAINS: optional(
+      z
+        .string()
+        .transform((v) =>
+          v
+            .split(',')
+            .map((e) => e.trim().toLowerCase())
+            .filter(Boolean),
+        )
+        .refine((list) => list.every((d) => EMAIL_DOMAIN.test(d)), {
+          error:
+            'SIGNUP_ALLOWED_DOMAINS must be comma-separated email domains such as example.com (no @, no wildcards)',
+        }),
+    ),
     // Reverse proxies in front of the app, comma-separated IPs or CIDR ranges. Only their
     // X-Forwarded-For is believed when working out the client IP (rate limiting).
     TRUSTED_PROXIES: optional(
@@ -82,6 +107,15 @@ const schema = z
         message: 'MAIL_FROM is required with SMTP_URL, e.g. "Hourmere <hourmere@example.com>"',
       })
     }
+    // Most likely meant to restrict sign-up, which open does not.
+    if (c.SIGNUP === 'open' && c.SIGNUP_ALLOWED_DOMAINS?.length) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['SIGNUP_ALLOWED_DOMAINS'],
+        message:
+          'SIGNUP_ALLOWED_DOMAINS has no effect with SIGNUP=open, where anyone can sign up; use SIGNUP=first-user or closed',
+      })
+    }
     for (const provider of ['GOOGLE', 'MICROSOFT'] as const) {
       const id = c[`${provider}_CLIENT_ID`]
       const secret = c[`${provider}_CLIENT_SECRET`]
@@ -100,9 +134,13 @@ export interface OAuthClient {
   clientSecret: string
 }
 
-export type Config = Omit<z.infer<typeof schema>, 'PUBLIC_URL' | 'TRUSTED_PROXIES'> & {
+export type Config = Omit<
+  z.infer<typeof schema>,
+  'PUBLIC_URL' | 'TRUSTED_PROXIES' | 'SIGNUP' | 'SIGNUP_ALLOWED_DOMAINS'
+> & {
   PUBLIC_URL: string
   trustedProxies: string[]
+  signup: SignupPolicy
   /** Social sign-in providers whose credentials are set. */
   socialProviders: { google?: OAuthClient; microsoft?: OAuthClient }
 }
@@ -119,10 +157,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const c = parsed.data
   const google = oauthClient(c.GOOGLE_CLIENT_ID, c.GOOGLE_CLIENT_SECRET)
   const microsoft = oauthClient(c.MICROSOFT_CLIENT_ID, c.MICROSOFT_CLIENT_SECRET)
-  const { TRUSTED_PROXIES, ...rest } = c
+  const { TRUSTED_PROXIES, SIGNUP, SIGNUP_ALLOWED_DOMAINS, ...rest } = c
   return {
     ...rest,
     trustedProxies: TRUSTED_PROXIES ?? [],
+    signup: { mode: SIGNUP, allowedDomains: SIGNUP_ALLOWED_DOMAINS ?? [] },
     PUBLIC_URL: c.PUBLIC_URL ? new URL(c.PUBLIC_URL).origin : `http://localhost:${c.PORT}`,
     socialProviders: { ...(google && { google }), ...(microsoft && { microsoft }) },
   }

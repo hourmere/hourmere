@@ -1,6 +1,6 @@
-import { screen, within } from '@testing-library/react'
+import { act, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { ApiKey } from '../api/auth.ts'
 import type { Me } from '../session.tsx'
 import { fakeApi, json, ME, organizations, renderApp, signedInAs } from '../test/fake-api.tsx'
@@ -289,6 +289,65 @@ describe('the API keys page', () => {
     expect(api.to('GET /api/v1/me').length).toBeGreaterThanOrEqual(2)
 
     await user.click(screen.getByRole('button', { name: 'Dismiss' }))
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('does not show that explanation on a page the person went to meanwhile', async () => {
+    const user = userEvent.setup()
+    let me: Me = IN_TEAM
+    let refuse: (res: Response) => void = () => {}
+    fakeApi({
+      'GET /api/v1/me': () => json(200, me),
+      ...organizations([ME.organization]),
+      'GET /api/auth/api-key/list': () => json(200, { apiKeys: [], total: 0 }),
+      // The server takes its time to refuse.
+      'POST /api/auth/api-key/create': () =>
+        new Promise<Response>((resolve) => {
+          refuse = resolve
+        }),
+    })
+    renderApp('/api-keys')
+    await screen.findByText('You have no API keys yet.')
+    me = ME
+    await user.type(screen.getByLabelText('Name'), 'Team agent')
+    await user.click(screen.getByRole('button', { name: 'Create key' }))
+
+    await user.click(screen.getByRole('link', { name: 'Settings' }))
+    await screen.findByRole('heading', { name: 'Settings', level: 1 })
+    // Not even for a moment: screen readers announce an alert as soon as it appears.
+    const alerts: string[] = []
+    // Records alerts that were added, even if removed again before the observer ran: a
+    // removed subtree keeps its contents, an added one may have lost them meanwhile.
+    const watch = new MutationObserver((records) => {
+      for (const node of records.flatMap((r) => [...r.addedNodes, ...r.removedNodes])) {
+        if (!(node instanceof Element)) continue
+        for (const el of [node, ...node.querySelectorAll('*')]) {
+          if (el.getAttribute('role') === 'alert') alerts.push(el.textContent)
+        }
+      }
+    })
+    watch.observe(document.body, { childList: true, subtree: true, characterData: true })
+    await act(async () => {
+      refuse(
+        json(403, {
+          message: 'metadata.organizationId must be an organization you are a member of',
+        }),
+      )
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    })
+    // The session moved to the personal organization; Settings shows it, with no warning.
+    await vi.waitFor(() =>
+      expect(screen.getByText('Organization').nextElementSibling?.textContent).toBe(
+        'Ada (personal)',
+      ),
+    )
+    watch.disconnect()
+    expect(alerts).toEqual([])
+    expect(screen.queryByRole('alert')).toBeNull()
+
+    // Nor does the keys page bring it back later.
+    await user.click(screen.getByRole('link', { name: 'API keys' }))
+    await screen.findByText('You have no API keys yet.')
     expect(screen.queryByRole('alert')).toBeNull()
   })
 

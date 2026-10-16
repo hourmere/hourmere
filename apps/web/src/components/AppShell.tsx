@@ -33,9 +33,14 @@ export function AppShell() {
     if (shownPath.current === pathname) return
     shownPath.current = pathname
     main.current?.focus()
-    // A notice is about the page it was shown on.
-    setNotice(null)
-  }, [pathname, setNotice])
+  }, [pathname])
+
+  // A notice belongs to one page: drop it once the person is elsewhere, also when it arrives
+  // after they left. (Not on the page starting over in place, which is what it explains.)
+  useEffect(() => {
+    if (notice && notice.path !== pathname) setNotice(null)
+  }, [notice, pathname, setNotice])
+  const shownNotice = notice?.path === pathname ? notice.message : null
 
   async function handleSignOut() {
     setSignOutError(null)
@@ -80,9 +85,9 @@ export function AppShell() {
           </ul>
         </nav>
         <main id="main" ref={main} tabIndex={-1}>
-          {notice && (
+          {shownNotice && (
             <div className="alert alert-info notice">
-              <p role="alert">{notice}</p>
+              <p role="alert">{shownNotice}</p>
               <button type="button" className="button button-small" onClick={() => setNotice(null)}>
                 Dismiss
               </button>

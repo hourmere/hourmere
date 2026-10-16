@@ -197,7 +197,10 @@ describe('describeSignInError', () => {
     ['email_does_not_match', /email address does not match yours/],
     ['account_already_linked_to_different_user', /already connected to another Hourmere account/],
     ['unable_to_get_user_info', /did not send your account details/],
-    ['SIGNUP_DISABLED', 'New accounts cannot be created on this instance.'],
+    [
+      'SIGNUP_DISABLED',
+      'This Hourmere instance does not accept new accounts for that email address.',
+    ],
   ])('explains %s', (code, message) => {
     if (typeof message === 'string') expect(describeSignInError(code)).toBe(message)
     else expect(describeSignInError(code)).toMatch(message)
