@@ -10,10 +10,11 @@ const COMPATIBLE = { disambiguation: 'compatible' } as const
  *
  * A slot is offered when all of these hold:
  * - it lies fully inside one working interval of its host-local day (date
- *   override if present, else weekly hours), and its start is a whole number of
- *   steps after that interval's start;
+ *   override if present, else weekly hours; touching intervals are joined first),
+ *   and its start is a whole number of steps after that interval's start;
  * - [start - bufferBefore, end + bufferAfter] overlaps no busy time and no booking
- *   (touching endpoints is fine; buffers may reach outside working hours);
+ *   (touching endpoints is fine; buffers may reach outside working hours; bookings
+ *   come pre-widened by their own buffers, see `AvailabilityInput.bookings`);
  * - now + minimumNotice <= start <= now + bookingWindowDays (calendar days in the
  *   host's zone);
  * - rangeStart <= start and end <= rangeEnd;

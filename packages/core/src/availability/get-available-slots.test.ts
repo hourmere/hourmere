@@ -128,6 +128,64 @@ describe('getAvailableSlots', () => {
         '2026-10-23T23:00-04:00/2026-10-24T00:00-04:00',
       ])
     })
+
+    it('joins touching intervals, so a slot can cross the join', () => {
+      const joined = { monday: [hours('10:30', '12:00'), hours('09:00', '10:30')] }
+      const expected = [
+        edt('2026-10-19', '09:00', '10:00'),
+        edt('2026-10-19', '10:00', '11:00'), // crosses the 10:30 join
+        edt('2026-10-19', '11:00', '12:00'),
+      ]
+      expect(slots({ weeklyHours: joined, range: MONDAY, now: LAST_SUNDAY })).toEqual(expected)
+      // Date overrides follow the same rule.
+      expect(
+        slots({
+          weeklyHours: {},
+          dateOverrides: [
+            { date: '2026-10-19', intervals: [hours('09:00', '10:30'), hours('10:30', '12:00')] },
+          ],
+          range: MONDAY,
+          now: LAST_SUNDAY,
+        }),
+      ).toEqual(expected)
+    })
+
+    it('aligns steps from the start of the joined interval', () => {
+      const pieces = {
+        monday: [hours('09:00', '10:00'), hours('10:00', '11:00'), hours('11:00', '12:00')],
+      }
+      const whole = { monday: [hours('09:00', '12:00')] }
+      const eventType = { durationMinutes: 45 }
+      const expected = [
+        edt('2026-10-19', '09:00', '09:45'),
+        edt('2026-10-19', '09:45', '10:30'), // separate pieces would restart at 10:00 instead
+        edt('2026-10-19', '10:30', '11:15'),
+        edt('2026-10-19', '11:15', '12:00'),
+      ]
+      expect(slots({ weeklyHours: pieces, eventType, range: MONDAY, now: LAST_SUNDAY })).toEqual(
+        expected,
+      )
+      expect(slots({ weeklyHours: whole, eventType, range: MONDAY, now: LAST_SUNDAY })).toEqual(
+        expected,
+      )
+    })
+
+    it('does not join hours across midnight', () => {
+      expect(
+        slots({
+          weeklyHours: { friday: [hours('22:00', '24:00')], saturday: [hours('00:00', '02:00')] },
+          eventType: { durationMinutes: 90, slotStepMinutes: 30 },
+          range: ['2026-10-23T00:00-04:00', '2026-10-25T00:00-04:00'],
+          now: LAST_SUNDAY,
+        }),
+      ).toEqual([
+        '2026-10-23T22:00-04:00/2026-10-23T23:30-04:00',
+        '2026-10-23T22:30-04:00/2026-10-24T00:00-04:00',
+        // No slot from 23:00 or 23:30: those would cross midnight into Saturday's hours.
+        '2026-10-24T00:00-04:00/2026-10-24T01:30-04:00',
+        '2026-10-24T00:30-04:00/2026-10-24T02:00-04:00',
+      ])
+    })
   })
 
   it('removes slots that overlap a busy interval, but not ones that only touch it', () => {
@@ -691,16 +749,21 @@ describe('getAvailableSlots', () => {
         /dateOverrides\[1\]\.date 2026-10-20 appears more than once/,
       ],
       [
+        'overlap next to a join',
+        () => monday(hours('09:00', '10:00'), hours('10:00', '11:00'), hours('10:30', '12:00')),
+        /monday has overlapping intervals 10:00–11:00 and 10:30–12:00/,
+      ],
+      [
         'zero duration',
         () => withEventType({ durationMinutes: 0 }),
-        /eventType\.durationMinutes must be a positive whole number, got 0/,
+        /eventType\.durationMinutes must be a whole number from 1 to 1440, got 0/,
       ],
       ['fractional duration', () => withEventType({ durationMinutes: 22.5 }), /durationMinutes/],
       ['negative step', () => withEventType({ slotStepMinutes: -15 }), /slotStepMinutes/],
       [
         'negative buffer',
         () => withEventType({ bufferBeforeMinutes: -5 }),
-        /bufferBeforeMinutes must be a whole number of 0 or more, got -5/,
+        /bufferBeforeMinutes must be a whole number from 0 to 1440, got -5/,
       ],
       [
         'negative notice',
@@ -709,10 +772,69 @@ describe('getAvailableSlots', () => {
       ],
       ['zero daily limit', () => withEventType({ maxBookingsPerDay: 0 }), /maxBookingsPerDay/],
       ['zero booking window', () => withEventType({ bookingWindowDays: 0 }), /bookingWindowDays/],
+      // Upper bounds, one past each maximum.
+      [
+        'duration over a day',
+        () => withEventType({ durationMinutes: 1441 }),
+        /durationMinutes must be a whole number from 1 to 1440, got 1441/,
+      ],
+      [
+        'step over a day',
+        () => withEventType({ slotStepMinutes: 1441 }),
+        /slotStepMinutes must be a whole number from 1 to 1440, got 1441/,
+      ],
+      [
+        'buffer before over a day',
+        () => withEventType({ bufferBeforeMinutes: 1441 }),
+        /bufferBeforeMinutes must be a whole number from 0 to 1440, got 1441/,
+      ],
+      [
+        'buffer after over a day',
+        () => withEventType({ bufferAfterMinutes: 1441 }),
+        /bufferAfterMinutes must be a whole number from 0 to 1440, got 1441/,
+      ],
+      [
+        'notice over 365 days',
+        () => withEventType({ minimumNoticeMinutes: 525_601 }),
+        /minimumNoticeMinutes must be a whole number from 0 to 525600, got 525601/,
+      ],
+      [
+        'booking window over 3650 days',
+        () => withEventType({ bookingWindowDays: 3651 }),
+        /bookingWindowDays must be a whole number from 1 to 3650, got 3651/,
+      ],
+      [
+        'daily limit over 1000',
+        () => withEventType({ maxBookingsPerDay: 1001 }),
+        /maxBookingsPerDay must be a whole number from 1 to 1000, got 1001/,
+      ],
+      [
+        'huge duration that Temporal could not add',
+        () => withEventType({ durationMinutes: Number.MAX_SAFE_INTEGER }),
+        /durationMinutes must be a whole number from 1 to 1440/,
+      ],
       [
         'empty range',
         () => ({ ...valid(), rangeEnd: valid().rangeStart }),
         /rangeEnd \(.+\) must be after rangeStart/,
+      ],
+      [
+        'range over 400 days',
+        () => ({
+          ...valid(),
+          rangeEnd: valid().rangeStart.add({ hours: 400 * 24, nanoseconds: 1 }),
+        }),
+        /rangeEnd \(.+\) must be at most 400 days after rangeStart/,
+      ],
+      [
+        'now past year 9999',
+        () => ({ ...valid(), now: at('+010000-01-01T00:00Z') }),
+        /now must be in the years 0001 to 9999, got \+010000-01-01T00:00:00Z/,
+      ],
+      [
+        'range start before year 1',
+        () => ({ ...valid(), rangeStart: at('0000-12-31T00:00Z') }),
+        /rangeStart must be in the years 0001 to 9999/,
       ],
       [
         'busy interval ending before it starts',
@@ -750,12 +872,38 @@ describe('getAvailableSlots', () => {
       expect(getAvailableSlots(withSchedule({ weeklyHours: { monday: undefined } }))).toEqual([])
     })
 
-    it('accepts touching intervals and keeps them separate', () => {
+    it('accepts every bound at its maximum, with a 400-day range ending in year 9999', () => {
+      const day = hours('00:00', '24:00')
       expect(
-        getAvailableSlots(monday(hours('09:00', '10:30'), hours('10:30', '12:00'))).map((s) =>
-          s.start.toZonedDateTimeISO(NEW_YORK).toPlainTime().toString({ smallestUnit: 'minute' }),
-        ),
-      ).toEqual(['09:00', '10:30'])
+        slots({
+          weeklyHours: { monday: [day], friday: [day] },
+          eventType: {
+            durationMinutes: 1440,
+            slotStepMinutes: 1440,
+            bufferBeforeMinutes: 1440,
+            bufferAfterMinutes: 1440,
+            minimumNoticeMinutes: 525_600,
+            bookingWindowDays: 3650,
+            maxBookingsPerDay: 1000,
+          },
+          // Exactly 400 days. Notice moves the earliest start to 9999-11-01T00:00Z
+          // (Sunday 20:00 EDT); the last start must leave a day before the range ends
+          // (Sunday 9999-12-05 19:00 EST). New York falls back on Sunday 9999-11-07.
+          range: ['9998-11-01T00:00Z', '9999-12-06T00:00Z'],
+          now: '9998-11-01T00:00Z',
+        }),
+      ).toEqual([
+        '9999-11-01T00:00-04:00/9999-11-02T00:00-04:00',
+        '9999-11-05T00:00-04:00/9999-11-06T00:00-04:00',
+        '9999-11-08T00:00-05:00/9999-11-09T00:00-05:00',
+        '9999-11-12T00:00-05:00/9999-11-13T00:00-05:00',
+        '9999-11-15T00:00-05:00/9999-11-16T00:00-05:00',
+        '9999-11-19T00:00-05:00/9999-11-20T00:00-05:00',
+        '9999-11-22T00:00-05:00/9999-11-23T00:00-05:00',
+        '9999-11-26T00:00-05:00/9999-11-27T00:00-05:00',
+        '9999-11-29T00:00-05:00/9999-11-30T00:00-05:00',
+        '9999-12-03T00:00-05:00/9999-12-04T00:00-05:00',
+      ])
     })
   })
 })

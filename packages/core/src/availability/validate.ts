@@ -14,9 +14,9 @@ export interface MinuteInterval {
 /** Input after validation, with defaults applied and wall-clock times parsed. */
 export interface NormalizedInput {
   readonly timeZone: string
-  /** Keyed by ISO weekday: 1 = Monday … 7 = Sunday. Intervals sorted by start. */
+  /** Keyed by ISO weekday: 1 = Monday … 7 = Sunday. Sorted, touching intervals joined. */
   readonly weeklyHours: ReadonlyMap<number, readonly MinuteInterval[]>
-  /** Keyed by `"YYYY-MM-DD"`. Intervals sorted by start; empty = unavailable. */
+  /** Keyed by `"YYYY-MM-DD"`. Sorted, touching intervals joined; empty = unavailable. */
   readonly dateOverrides: ReadonlyMap<string, readonly MinuteInterval[]>
   readonly durationMinutes: number
   readonly slotStepMinutes: number
@@ -43,6 +43,27 @@ const WEEKDAYS: readonly Weekday[] = [
 ]
 
 const MINUTES_PER_DAY = 24 * 60
+const NS_PER_DAY = 86_400_000_000_000n
+
+/**
+ * Upper bounds for numeric input. Besides rejecting nonsense, they keep every
+ * Temporal calculation inside its supported range, so bad input always ends in
+ * an AvailabilityInputError rather than a RangeError.
+ */
+const LIMITS = {
+  durationMinutes: MINUTES_PER_DAY,
+  slotStepMinutes: MINUTES_PER_DAY,
+  bufferMinutes: MINUTES_PER_DAY,
+  minimumNoticeMinutes: 365 * MINUTES_PER_DAY,
+  bookingWindowDays: 3650,
+  maxBookingsPerDay: 1000,
+  /** The engine visits every local day in the range. */
+  rangeDays: 400,
+}
+
+/** `now`, `rangeStart` and `rangeEnd` must lie in years 0001–9999. */
+const EARLIEST_QUERY_INSTANT = Temporal.Instant.from('0001-01-01T00:00:00Z')
+const LATEST_QUERY_INSTANT = Temporal.Instant.from('9999-12-31T23:59:59.999999999Z')
 
 export function normalizeInput(input: AvailabilityInput): NormalizedInput {
   if (typeof input !== 'object' || input === null) fail('input must be an object')
@@ -50,11 +71,24 @@ export function normalizeInput(input: AvailabilityInput): NormalizedInput {
   if (typeof schedule !== 'object' || schedule === null) fail('schedule must be an object')
   if (typeof eventType !== 'object' || eventType === null) fail('eventType must be an object')
 
-  const durationMinutes = positiveInteger(eventType.durationMinutes, 'eventType.durationMinutes')
-  const rangeStart = instant(input.rangeStart, 'rangeStart')
-  const rangeEnd = instant(input.rangeEnd, 'rangeEnd')
+  const durationMinutes = wholeNumber(
+    eventType.durationMinutes,
+    'eventType.durationMinutes',
+    1,
+    LIMITS.durationMinutes,
+  )
+  const rangeStart = queryInstant(input.rangeStart, 'rangeStart')
+  const rangeEnd = queryInstant(input.rangeEnd, 'rangeEnd')
   if (Temporal.Instant.compare(rangeEnd, rangeStart) <= 0) {
     fail(`rangeEnd (${rangeEnd}) must be after rangeStart (${rangeStart})`)
+  }
+  if (
+    rangeEnd.epochNanoseconds - rangeStart.epochNanoseconds >
+    BigInt(LIMITS.rangeDays) * NS_PER_DAY
+  ) {
+    fail(
+      `rangeEnd (${rangeEnd}) must be at most ${LIMITS.rangeDays} days after rangeStart (${rangeStart})`,
+    )
   }
 
   return {
@@ -62,40 +96,45 @@ export function normalizeInput(input: AvailabilityInput): NormalizedInput {
     weeklyHours: weeklyHours(schedule.weeklyHours),
     dateOverrides: dateOverrides(schedule.dateOverrides),
     durationMinutes,
-    slotStepMinutes:
-      eventType.slotStepMinutes === undefined
-        ? durationMinutes
-        : positiveInteger(eventType.slotStepMinutes, 'eventType.slotStepMinutes'),
-    bufferBeforeMinutes: optionalNonNegativeInteger(
-      eventType.bufferBeforeMinutes,
-      'eventType.bufferBeforeMinutes',
+    slotStepMinutes: optional(eventType.slotStepMinutes, durationMinutes, (v) =>
+      wholeNumber(v, 'eventType.slotStepMinutes', 1, LIMITS.slotStepMinutes),
     ),
-    bufferAfterMinutes: optionalNonNegativeInteger(
-      eventType.bufferAfterMinutes,
-      'eventType.bufferAfterMinutes',
+    bufferBeforeMinutes: optional(eventType.bufferBeforeMinutes, 0, (v) =>
+      wholeNumber(v, 'eventType.bufferBeforeMinutes', 0, LIMITS.bufferMinutes),
     ),
-    minimumNoticeMinutes: optionalNonNegativeInteger(
-      eventType.minimumNoticeMinutes,
-      'eventType.minimumNoticeMinutes',
+    bufferAfterMinutes: optional(eventType.bufferAfterMinutes, 0, (v) =>
+      wholeNumber(v, 'eventType.bufferAfterMinutes', 0, LIMITS.bufferMinutes),
     ),
-    maxBookingsPerDay:
-      eventType.maxBookingsPerDay === undefined
-        ? undefined
-        : positiveInteger(eventType.maxBookingsPerDay, 'eventType.maxBookingsPerDay'),
-    bookingWindowDays:
-      eventType.bookingWindowDays === undefined
-        ? undefined
-        : positiveInteger(eventType.bookingWindowDays, 'eventType.bookingWindowDays'),
+    minimumNoticeMinutes: optional(eventType.minimumNoticeMinutes, 0, (v) =>
+      wholeNumber(v, 'eventType.minimumNoticeMinutes', 0, LIMITS.minimumNoticeMinutes),
+    ),
+    maxBookingsPerDay: optional(eventType.maxBookingsPerDay, undefined, (v) =>
+      wholeNumber(v, 'eventType.maxBookingsPerDay', 1, LIMITS.maxBookingsPerDay),
+    ),
+    bookingWindowDays: optional(eventType.bookingWindowDays, undefined, (v) =>
+      wholeNumber(v, 'eventType.bookingWindowDays', 1, LIMITS.bookingWindowDays),
+    ),
     busy: instantIntervals(input.busy, 'busy'),
     bookings: instantIntervals(input.bookings, 'bookings'),
     rangeStart,
     rangeEnd,
-    now: instant(input.now, 'now'),
+    now: queryInstant(input.now, 'now'),
   }
 }
 
 function fail(message: string): never {
   throw new AvailabilityInputError(message)
+}
+
+function optional<T, D>(value: T | undefined, fallback: D, parse: (value: T) => number) {
+  return value === undefined ? fallback : parse(value)
+}
+
+function wholeNumber(value: unknown, path: string, min: number, max: number): number {
+  if (!Number.isSafeInteger(value) || (value as number) < min || (value as number) > max) {
+    fail(`${path} must be a whole number from ${min} to ${max}, got ${JSON.stringify(value)}`)
+  }
+  return value as number
 }
 
 function timeZone(value: unknown): string {
@@ -156,7 +195,10 @@ function plainDate(value: unknown, path: string): string {
   }
 }
 
-/** Parses one day's intervals, sorted by start, and rejects overlaps. */
+/**
+ * Parses one day's intervals, rejects overlaps, and joins touching intervals, so
+ * 09:00–10:30 plus 10:30–12:00 behaves exactly like 09:00–12:00.
+ */
 function dayIntervals(value: unknown, path: string): MinuteInterval[] {
   if (!Array.isArray(value)) fail(`${path} must be an array of { start, end } intervals`)
   const parsed = value.map((interval: unknown, i) => {
@@ -171,14 +213,19 @@ function dayIntervals(value: unknown, path: string): MinuteInterval[] {
     return { start: startMinutes, end: endMinutes, label: `${start}–${end}` }
   })
   parsed.sort((a, b) => a.start - b.start)
-  for (let i = 1; i < parsed.length; i++) {
-    const previous = parsed[i - 1]
-    const current = parsed[i]
-    if (previous && current && current.start < previous.end) {
+
+  const joined: { start: number; end: number }[] = []
+  let previous: (typeof parsed)[number] | undefined
+  for (const current of parsed) {
+    if (previous && current.start < previous.end) {
       fail(`${path} has overlapping intervals ${previous.label} and ${current.label}`)
     }
+    const last = joined.at(-1)
+    if (last && last.end === current.start) last.end = current.end
+    else joined.push({ start: current.start, end: current.end })
+    previous = current
   }
-  return parsed.map(({ start, end }) => ({ start, end }))
+  return joined
 }
 
 /** Returns minutes since local midnight. */
@@ -203,6 +250,18 @@ function instant(value: unknown, path: string): Temporal.Instant {
   return value
 }
 
+/** An instant the engine calculates with, so it must stay well inside Temporal's range. */
+function queryInstant(value: unknown, path: string): Temporal.Instant {
+  const result = instant(value, path)
+  if (
+    Temporal.Instant.compare(result, EARLIEST_QUERY_INSTANT) < 0 ||
+    Temporal.Instant.compare(result, LATEST_QUERY_INSTANT) > 0
+  ) {
+    fail(`${path} must be in the years 0001 to 9999, got ${result}`)
+  }
+  return result
+}
+
 function instantIntervals(value: unknown, path: string): InstantInterval[] {
   if (value === undefined) return []
   if (!Array.isArray(value)) fail(`${path} must be an array`)
@@ -217,19 +276,4 @@ function instantIntervals(value: unknown, path: string): InstantInterval[] {
     }
     return { start: startInstant, end: endInstant }
   })
-}
-
-function positiveInteger(value: unknown, path: string): number {
-  if (!Number.isSafeInteger(value) || (value as number) <= 0) {
-    fail(`${path} must be a positive whole number, got ${JSON.stringify(value)}`)
-  }
-  return value as number
-}
-
-function optionalNonNegativeInteger(value: unknown, path: string): number {
-  if (value === undefined) return 0
-  if (!Number.isSafeInteger(value) || (value as number) < 0) {
-    fail(`${path} must be a whole number of 0 or more, got ${JSON.stringify(value)}`)
-  }
-  return value as number
 }
