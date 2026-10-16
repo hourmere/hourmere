@@ -103,8 +103,8 @@ export function rateLimitKey(ip: string | undefined): string {
 }
 
 const LIMITER = Symbol('rate limiter')
-/** Requests whose route limits routeRateLimits already counted. */
-const counted = new WeakSet<Context>()
+/** The limiters routeRateLimits already counted each request against. */
+const counted = new WeakMap<Context, Set<RateLimiter>>()
 
 /** Counts the request against `limiter`; a 429 response when the client is over it. */
 function check(c: Context, limiter: RateLimiter): Response | undefined {
@@ -118,12 +118,12 @@ function check(c: Context, limiter: RateLimiter): Response | undefined {
  * Answers 429 `rate_limited` with Retry-After once the client (c.var.clientIp, which honors
  * TRUSTED_PROXIES; IPv6 by /64, see rateLimitKey) is over the limiter's limit. For routes'
  * `middleware`. createApp counts it earlier, in routeRateLimits, before the body is read;
- * the route middleware then lets the request through, and only counts it itself in an app
- * without routeRateLimits.
+ * the route middleware then lets the request through, and counts it itself whenever
+ * routeRateLimits did not (no routeRateLimits in the app, or it could not see this limiter).
  */
 export function rateLimit(limiter: RateLimiter): MiddlewareHandler {
   const middleware = createMiddleware(async (c, next) => {
-    if (!counted.has(c)) {
+    if (!counted.get(c)?.has(limiter)) {
       const refused = check(c, limiter)
       if (refused) return refused
     }
@@ -147,7 +147,7 @@ export function routeRateLimits(): MiddlewareHandler {
       const refused = check(c, limiter)
       if (refused) return refused
     }
-    counted.add(c)
+    counted.set(c, limiters)
     await next()
   })
 }

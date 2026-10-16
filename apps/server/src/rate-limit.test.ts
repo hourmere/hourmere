@@ -72,6 +72,13 @@ describe('createRateLimiter', () => {
     const routeOnly = new Hono()
     routeOnly.get('/x', limit(), (c) => c.text('ok'))
     expect(await statuses(routeOnly)).toEqual([200, 200, 429])
+    // A limiter routeRateLimits cannot see (here: wrapped in another middleware) is still
+    // counted by the route, so a route never silently loses its limit.
+    const hidden = new Hono()
+    hidden.use('*', routeRateLimits())
+    const wrapped = limit()
+    hidden.get('/x', (c, next) => wrapped(c, next), (c) => c.text('ok'))
+    expect(await statuses(hidden)).toEqual([200, 200, 429])
   })
 
   it('has the documented public limits', () => {
