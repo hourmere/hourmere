@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { goTo } from '../browser.ts'
 import {
+  emptyAccount,
   fakeApi,
   instance,
   json,
@@ -30,7 +31,7 @@ describe('the sign-in page', () => {
       ...instance(),
       'POST /api/auth/sign-in/magic-link': linkSent,
     })
-    renderApp('/sign-in?next=%2Fapi-keys')
+    renderApp('/sign-in?next=%2Fapp%2Fapi-keys')
     await heading()
     await userEvent.type(screen.getByLabelText('Email'), ' ada@example.com ')
     await userEvent.click(screen.getByRole('button', { name: 'Email me a sign-in link' }))
@@ -41,8 +42,8 @@ describe('the sign-in page', () => {
     expect(api.to('POST /api/auth/sign-in/magic-link').map((c) => c.body)).toEqual([
       {
         email: 'ada@example.com',
-        callbackURL: '/api-keys',
-        errorCallbackURL: '/sign-in?next=%2Fapi-keys',
+        callbackURL: '/app/api-keys',
+        errorCallbackURL: '/sign-in?next=%2Fapp%2Fapi-keys',
       },
     ])
 
@@ -88,7 +89,7 @@ describe('the sign-in page', () => {
       'POST /api/auth/sign-in/social': () =>
         json(200, { url: 'https://login.microsoftonline.com/authorize?x=1', redirect: true }),
     })
-    renderApp('/sign-in?next=%2Fbookings')
+    renderApp('/sign-in?next=%2Fapp%2Fbookings')
     await userEvent.click(await screen.findByRole('button', { name: 'Continue with Microsoft' }))
     await vi.waitFor(() =>
       expect(goTo).toHaveBeenCalledWith('https://login.microsoftonline.com/authorize?x=1'),
@@ -96,17 +97,17 @@ describe('the sign-in page', () => {
     expect(api.to('POST /api/auth/sign-in/social').map((c) => c.body)).toEqual([
       {
         provider: 'microsoft',
-        callbackURL: '/bookings',
-        errorCallbackURL: '/sign-in?next=%2Fbookings',
+        callbackURL: '/app/bookings',
+        errorCallbackURL: '/sign-in?next=%2Fapp%2Fbookings',
       },
     ])
   })
 
   it('explains a failed sign-in link and clears the error from the address', async () => {
     fakeApi({ ...signedOut, ...instance() })
-    renderApp('/sign-in?next=%2Fsettings&error=INVALID_TOKEN')
+    renderApp('/sign-in?next=%2Fapp%2Fsettings&error=INVALID_TOKEN')
     expect((await screen.findByRole('alert')).textContent).toMatch(/link is invalid, has expired/)
-    await vi.waitFor(() => expect(location()).toBe('/sign-in?next=%2Fsettings'))
+    await vi.waitFor(() => expect(location()).toBe('/sign-in?next=%2Fapp%2Fsettings'))
   })
 
   it('never shows the error description from the address (anyone can write it)', async () => {
@@ -119,12 +120,12 @@ describe('the sign-in page', () => {
 
   it.each(PROTOTYPE_KEYS)('shows the page for ?error=%s', async (code) => {
     fakeApi({ ...signedOut, ...instance() })
-    renderApp(`/sign-in?next=%2Fsettings&error=${code}`)
+    renderApp(`/sign-in?next=%2Fapp%2Fsettings&error=${code}`)
     expect((await screen.findByRole('alert')).textContent).toBe(
       `Sign-in did not work (${code}). Please try again.`,
     )
     expect(screen.getByRole('button', { name: 'Email me a sign-in link' })).toBeDefined()
-    await vi.waitFor(() => expect(location()).toBe('/sign-in?next=%2Fsettings'))
+    await vi.waitFor(() => expect(location()).toBe('/sign-in?next=%2Fapp%2Fsettings'))
   })
 
   it('reports a rate limit when sending the link', async () => {
@@ -148,9 +149,32 @@ describe('the sign-in page', () => {
       ...organizations(),
       'GET /api/auth/api-key/list': () => json(200, { apiKeys: [], total: 0 }),
     })
-    renderApp('/sign-in?next=%2Fapi-keys')
+    renderApp('/sign-in?next=%2Fapp%2Fapi-keys')
     expect(await screen.findByRole('heading', { name: 'API keys', level: 1 })).toBeDefined()
-    expect(location()).toBe('/api-keys')
+    expect(location()).toBe('/app/api-keys')
+  })
+
+  it('sends signed-in people to the default page instead of an old or public address', async () => {
+    fakeApi({ ...signedIn, ...emptyAccount })
+    renderApp('/sign-in?next=%2Fapi-keys')
+    expect(await screen.findByRole('heading', { name: 'Event types', level: 1 })).toBeDefined()
+    expect(location()).toBe('/app/event-types')
+  })
+
+  it('signs in back to the default page for a destination outside the app', async () => {
+    const api = fakeApi({
+      ...signedOut,
+      ...instance(),
+      'POST /api/auth/sign-in/magic-link': linkSent,
+    })
+    renderApp('/sign-in?next=%2Fada%2Fintro-call')
+    await userEvent.type(await screen.findByLabelText('Email'), 'ada@example.com')
+    await userEvent.click(screen.getByRole('button', { name: 'Email me a sign-in link' }))
+    await screen.findByRole('heading', { name: 'Check your email' })
+    expect(api.to('POST /api/auth/sign-in/magic-link')[0]?.body).toMatchObject({
+      callbackURL: '/app',
+      errorCallbackURL: '/sign-in',
+    })
   })
 
   it('ignores a destination on another site', async () => {
@@ -164,16 +188,16 @@ describe('the sign-in page', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Email me a sign-in link' }))
     await screen.findByRole('heading', { name: 'Check your email' })
     expect(api.to('POST /api/auth/sign-in/magic-link')[0]?.body).toMatchObject({
-      callbackURL: '/',
+      callbackURL: '/app',
       errorCallbackURL: '/sign-in',
     })
   })
 
-  it('sends signed-in people to the start page instead of another site', async () => {
-    fakeApi(signedIn)
+  it('sends signed-in people to the default page instead of another site', async () => {
+    fakeApi({ ...signedIn, ...emptyAccount })
     renderApp('/sign-in?next=https%3A%2F%2Fevil.example')
     expect(await screen.findByRole('heading', { name: 'Event types', level: 1 })).toBeDefined()
-    expect(location()).toBe('/event-types')
+    expect(location()).toBe('/app/event-types')
   })
 })
 

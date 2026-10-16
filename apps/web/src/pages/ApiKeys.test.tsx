@@ -3,7 +3,15 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { ApiKey } from '../api/auth.ts'
 import type { Me } from '../session.tsx'
-import { fakeApi, json, ME, organizations, renderApp, signedInAs } from '../test/fake-api.tsx'
+import {
+  fakeApi,
+  json,
+  ME,
+  organizations,
+  profile,
+  renderApp,
+  signedInAs,
+} from '../test/fake-api.tsx'
 
 const SECRET = 'hm_NewSecretValueThatIsOnlyShownOnce0123456789abcdefghijklmnopqrstuv'
 
@@ -70,7 +78,7 @@ const rowFor = async (name: string) =>
 describe('the API keys page', () => {
   it('lists keys by name and prefix, never by secret', async () => {
     keyServer()
-    renderApp('/api-keys')
+    renderApp('/app/api-keys')
     const row = await rowFor('Claude Desktop')
     expect(row).not.toBeNull()
     const cells = within(row as HTMLElement)
@@ -84,14 +92,14 @@ describe('the API keys page', () => {
 
   it('says when there are no keys yet', async () => {
     keyServer([])
-    renderApp('/api-keys')
+    renderApp('/app/api-keys')
     expect(await screen.findByText('You have no API keys yet.')).toBeDefined()
   })
 
   it('creates a key and shows its secret exactly once', async () => {
     const user = userEvent.setup()
     const api = keyServer()
-    renderApp('/api-keys')
+    renderApp('/app/api-keys')
     await table()
 
     await user.type(screen.getByLabelText('Name'), 'CI deploy bot')
@@ -139,7 +147,7 @@ describe('the API keys page', () => {
   it('sends no expiry for a key that never expires', async () => {
     const user = userEvent.setup()
     const api = keyServer([])
-    renderApp('/api-keys')
+    renderApp('/app/api-keys')
     await screen.findByText('You have no API keys yet.')
     await user.type(screen.getByLabelText('Name'), 'Laptop')
     await user.click(screen.getByRole('button', { name: 'Create key' }))
@@ -153,7 +161,7 @@ describe('the API keys page', () => {
   it('creates keys in the organization the person is working in', async () => {
     const user = userEvent.setup()
     const api = keyServer([], IN_TEAM)
-    renderApp('/api-keys')
+    renderApp('/app/api-keys')
     await screen.findByText('You have no API keys yet.')
     const form = screen.getByRole('region', { name: 'Create a key' })
     expect(form.textContent).toContain('The key will act in Acme.')
@@ -191,7 +199,7 @@ describe('the API keys page', () => {
         metadata: null,
       },
     ])
-    renderApp('/api-keys')
+    renderApp('/app/api-keys')
     const organizationIn = async (name: string) =>
       within((await rowFor(name)) as HTMLElement).getByText(
         (_, el) => el?.getAttribute('data-label') === 'Organization',
@@ -215,7 +223,7 @@ describe('the API keys page', () => {
             'Confirm your email address by signing in with an email link before using API keys',
         }),
     })
-    renderApp('/api-keys')
+    renderApp('/app/api-keys')
     await screen.findByText('You have no API keys yet.')
     await user.type(screen.getByLabelText('Name'), 'Agent')
     await user.click(screen.getByRole('button', { name: 'Create key' }))
@@ -228,7 +236,7 @@ describe('the API keys page', () => {
   it('revokes a key after confirmation', async () => {
     const user = userEvent.setup()
     const api = keyServer()
-    renderApp('/api-keys')
+    renderApp('/app/api-keys')
     await table()
 
     await user.click(screen.getByRole('button', { name: 'Revoke Claude Desktop' }))
@@ -248,7 +256,7 @@ describe('the API keys page', () => {
   it('cancels revoking with Escape', async () => {
     const user = userEvent.setup()
     const api = keyServer()
-    renderApp('/api-keys')
+    renderApp('/app/api-keys')
     await table()
 
     await user.click(screen.getByRole('button', { name: 'Revoke Claude Desktop' }))
@@ -273,7 +281,7 @@ describe('the API keys page', () => {
           message: 'metadata.organizationId must be an organization you are a member of',
         }),
     })
-    renderApp('/api-keys')
+    renderApp('/app/api-keys')
     await screen.findByText('You have no API keys yet.')
     // Removed from the team meanwhile; the session now acts in the personal organization.
     me = ME
@@ -299,6 +307,7 @@ describe('the API keys page', () => {
     fakeApi({
       'GET /api/v1/me': () => json(200, me),
       ...organizations([ME.organization]),
+      ...profile(),
       'GET /api/auth/api-key/list': () => json(200, { apiKeys: [], total: 0 }),
       // The server takes its time to refuse.
       'POST /api/auth/api-key/create': () =>
@@ -306,7 +315,7 @@ describe('the API keys page', () => {
           refuse = resolve
         }),
     })
-    renderApp('/api-keys')
+    renderApp('/app/api-keys')
     await screen.findByText('You have no API keys yet.')
     me = ME
     await user.type(screen.getByLabelText('Name'), 'Team agent')
@@ -354,7 +363,7 @@ describe('the API keys page', () => {
   it('keeps the key when revoking is cancelled', async () => {
     const user = userEvent.setup()
     const api = keyServer()
-    renderApp('/api-keys')
+    renderApp('/app/api-keys')
     await table()
 
     await user.click(screen.getByRole('button', { name: 'Revoke Claude Desktop' }))

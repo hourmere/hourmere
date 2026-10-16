@@ -1,26 +1,38 @@
-import { useEffect, useRef, useState } from 'react'
+import { type MouseEvent, useEffect, useRef, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router'
 import { errorMessage } from '../api/errors.ts'
+import { PATHS } from '../paths.ts'
 import { useMe, useSession } from '../session.tsx'
+import { leavesPage, UnsavedChangesProvider, useConfirmLeave } from '../unsaved-changes.tsx'
 import { Logo } from './Logo.tsx'
 
 export const NAV_ITEMS = [
-  { to: '/event-types', label: 'Event types' },
-  { to: '/availability', label: 'Availability' },
-  { to: '/bookings', label: 'Bookings' },
-  { to: '/api-keys', label: 'API keys' },
-  { to: '/settings', label: 'Settings' },
+  { to: PATHS.eventTypes, label: 'Event types' },
+  { to: PATHS.availability, label: 'Availability' },
+  { to: PATHS.bookings, label: 'Bookings' },
+  { to: PATHS.apiKeys, label: 'API keys' },
+  { to: PATHS.settings, label: 'Settings' },
 ] as const
 
 /** The frame around signed-in pages: header, navigation and the page itself. */
 export function AppShell() {
+  return (
+    <UnsavedChangesProvider>
+      <Shell />
+    </UnsavedChangesProvider>
+  )
+}
+
+function Shell() {
   const me = useMe()
   const { signOut, notice, setNotice } = useSession()
   const [signOutError, setSignOutError] = useState<string | null>(null)
   const main = useRef<HTMLElement>(null)
   const nav = useRef<HTMLElement>(null)
-  const { pathname } = useLocation()
+  const location = useLocation()
+  const { pathname } = location
   const shownPath = useRef(pathname)
+  const confirmLeave = useConfirmLeave()
 
   // After navigating, start keyboard and screen reader users at the new page's content,
   // as a full page load would. Not on the first page: focus starts at the top then.
@@ -42,7 +54,19 @@ export function AppShell() {
   }, [notice, pathname, setNotice])
   const shownNotice = notice?.path === pathname ? notice.message : null
 
+  // A link that leaves a page with unsaved changes asks first (see unsaved-changes.tsx).
+  // Capturing: this runs before the link's own handler, which then sees the click cancelled.
+  function guardLinks(event: MouseEvent<HTMLDivElement>) {
+    const anchor = (event.target as Element).closest?.('a[href]')
+    if (!(anchor instanceof HTMLAnchorElement) || !leavesPage(event, anchor, location)) return
+    if (!confirmLeave()) {
+      event.preventDefault()
+      event.stopPropagation()
+    }
+  }
+
   async function handleSignOut() {
+    if (!confirmLeave()) return
     setSignOutError(null)
     try {
       await signOut()
@@ -52,12 +76,12 @@ export function AppShell() {
   }
 
   return (
-    <div className="shell">
+    <div className="shell" onClickCapture={guardLinks}>
       <a className="skip-link" href="#main">
         Skip to content
       </a>
       <header className="topbar">
-        <Link to="/" className="brand" aria-label="Hourmere home">
+        <Link to={PATHS.home} className="brand" aria-label="Hourmere home">
           <Logo />
         </Link>
         <div className="account">

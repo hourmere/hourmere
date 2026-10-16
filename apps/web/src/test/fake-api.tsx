@@ -80,6 +80,35 @@ export const organizations = (
 ): Routes => ({
   'GET /api/auth/organization/list': () => json(200, list),
 })
+/** Ada's profile: her handle in booking links, her time zone and language. */
+export const PROFILE: Schemas['Profile'] = {
+  handle: 'ada',
+  timeZone: 'Europe/Berlin',
+  locale: 'en',
+  createdAt: '2026-10-01T09:00:00.000Z',
+  updatedAt: '2026-10-01T09:00:00.000Z',
+}
+
+export const profile = (value: Schemas['Profile'] | null = PROFILE): Routes => ({
+  'GET /api/v1/profile': () =>
+    value
+      ? json(200, value)
+      : json(404, {
+          error: 'profile_not_found',
+          message: 'Create a profile with PUT /api/v1/profile',
+        }),
+})
+
+/**
+ * What the admin pages read for an account with nothing set up yet: no profile, no
+ * schedules, no event types.
+ */
+export const emptyAccount: Routes = {
+  ...profile(null),
+  'GET /api/v1/schedules': () => json(200, { data: [] }),
+  'GET /api/v1/event-types': () => json(200, { data: [] }),
+}
+
 export const signedOut: Routes = {
   'GET /api/v1/me': () => json(401, { error: 'unauthorized' }),
 }

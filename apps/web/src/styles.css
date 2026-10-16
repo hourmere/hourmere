@@ -33,6 +33,8 @@
   --danger-border: #f4b8b0;
   --success-soft: #ecf8f1;
   --success-border: #9fd8b8;
+  --success-text: #11603a; /* 7:1 on --success-soft */
+  --error-text: var(--danger); /* 6:1 on white and on --danger-soft */
   --focus: var(--cobalt);
 
   /* Type, shape, space */
@@ -74,6 +76,8 @@
     --danger-border: #6b2a2d;
     --success-soft: #11261c;
     --success-border: #2b6a4a;
+    --success-text: #9fe0bd;
+    --error-text: #ff9a94; /* 7:1 on --surface */
     --focus: #8faeff;
     --shadow: none;
 
@@ -389,7 +393,8 @@ label {
 }
 
 input,
-select {
+select,
+textarea {
   width: 100%;
   min-height: 42px;
   padding: var(--space-2) var(--space-3);
@@ -401,7 +406,8 @@ select {
 }
 
 input:focus-visible,
-select:focus-visible {
+select:focus-visible,
+textarea:focus-visible {
   outline: 3px solid var(--focus);
   outline-offset: 0;
   border-color: var(--focus);
@@ -450,6 +456,7 @@ input[readonly] {
   font: inherit;
   font-weight: 600;
   line-height: 1.2;
+  text-decoration: none;
   cursor: pointer;
 }
 
@@ -753,4 +760,573 @@ input[readonly] {
   .table .actions {
     padding-top: var(--space-2);
   }
+}
+
+/* Admin pages: page headers, editors and their fields */
+
+.page-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.page-header h1 {
+  margin: 0;
+}
+
+.breadcrumb {
+  margin: 0 0 var(--space-2);
+  font-size: 0.9rem;
+}
+
+/* Status messages keep their place in the accessibility tree (live regions) but take no
+   room while empty. */
+.flash {
+  margin: 0 0 var(--space-3);
+  color: var(--success-text);
+  font-weight: 600;
+}
+
+.flash:empty {
+  margin: 0;
+}
+
+textarea {
+  min-height: 6rem;
+  resize: vertical;
+  line-height: 1.45;
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  flex: none;
+  width: 1.2rem;
+  height: 1.2rem;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--accent);
+}
+
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 34px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.optional {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.field-error {
+  margin: 0;
+  color: var(--error-text);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.error-summary {
+  border-width: 2px;
+  border-color: var(--danger);
+}
+
+.error-summary h2 {
+  margin: 0 0 var(--space-2);
+  font-size: 1.05rem;
+}
+
+.error-summary ul {
+  margin: 0;
+  padding-left: var(--space-5);
+}
+
+.error-summary a {
+  color: var(--error-text);
+  font-weight: 600;
+}
+
+.editor {
+  display: grid;
+}
+
+.editor > .panel:first-of-type {
+  margin-top: 0;
+}
+
+.panel-danger {
+  border-color: var(--danger-border);
+}
+
+.field-grid {
+  display: grid;
+  gap: var(--space-4);
+  align-items: start;
+}
+
+@media (min-width: 640px) {
+  .field-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-4) 0;
+}
+
+.form-status {
+  margin: 0;
+  color: var(--muted);
+}
+
+.preview {
+  overflow-wrap: anywhere;
+}
+
+.warning {
+  color: var(--error-text);
+}
+
+.plain-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
+.multiline {
+  white-space: pre-wrap;
+}
+
+.badge-success {
+  background: var(--success-soft);
+  color: var(--success-text);
+}
+
+.heading-badge {
+  vertical-align: middle;
+  font-size: 0.85rem;
+}
+
+.choice {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.choice legend {
+  margin-bottom: var(--space-1);
+  padding: 0;
+  font-weight: 600;
+}
+
+.date-field input {
+  max-width: 14rem;
+}
+
+/* Event types */
+
+.booking-link {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.booking-link a {
+  overflow-wrap: anywhere;
+}
+
+.questions {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.questions > .button {
+  justify-self: start;
+}
+
+.question-list {
+  display: grid;
+  gap: var(--space-3);
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.question-card {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+  margin: 0;
+  padding: var(--space-4);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-small);
+  background: var(--bg);
+}
+
+.question-legend {
+  padding: 0 var(--space-1);
+  font-weight: 700;
+}
+
+.question-fields {
+  display: grid;
+  gap: var(--space-3);
+}
+
+@media (min-width: 640px) {
+  .question-fields {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  }
+}
+
+.question-actions,
+.option-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.options {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: start;
+  padding-left: var(--space-3);
+  border-left: 3px solid var(--border);
+}
+
+.options-label {
+  margin: 0;
+  font-weight: 600;
+}
+
+.option-list {
+  display: grid;
+  gap: var(--space-2);
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.option {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.option-row input {
+  flex: 1 1 12rem;
+  width: auto;
+}
+
+/* Time zone picker (combobox) */
+
+.combobox {
+  position: relative;
+}
+
+.combobox-list {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  left: 0;
+  z-index: 20;
+  max-height: 18rem;
+  overflow-y: auto;
+  padding: var(--space-1) 0;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-small);
+  box-shadow: 0 4px 16px rgb(14 16 21 / 16%);
+}
+
+.combobox-option {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+}
+
+.combobox-option:hover,
+.combobox-option[aria-selected="true"] {
+  background: var(--accent-soft);
+  color: var(--accent-soft-text);
+}
+
+.combobox-option[aria-selected="true"] .muted,
+.combobox-option:hover .muted {
+  color: inherit;
+}
+
+.combobox-empty {
+  padding: var(--space-2) var(--space-3);
+  color: var(--muted);
+}
+
+/* Availability */
+
+.card-list {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.card-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.card-main {
+  min-width: 0;
+}
+
+.card-main p {
+  margin: 0;
+}
+
+.card-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-1);
+  font-size: 1.1rem;
+}
+
+.card-title .badge {
+  margin: 0;
+}
+
+.card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.card-error {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.default-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+  margin: 0 0 var(--space-4);
+}
+
+.default-status p {
+  margin: 0;
+}
+
+.default-status .badge {
+  margin: 0;
+}
+
+.week {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.weekday {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.weekday:last-child {
+  border-bottom: 0;
+}
+
+@media (min-width: 640px) {
+  .weekday {
+    grid-template-columns: 9rem minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
+.weekday-toggle {
+  font-weight: 600;
+}
+
+.weekday-off {
+  margin: 0;
+  padding-top: var(--space-1);
+}
+
+.intervals {
+  display: grid;
+  gap: var(--space-2);
+  justify-items: start;
+}
+
+.intervals > p {
+  margin: 0;
+}
+
+.interval-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.interval-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.time-input {
+  width: auto;
+  min-width: 8rem;
+}
+
+.override-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  list-style: none;
+}
+
+.override {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-2) 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.override-date {
+  min-width: 9rem;
+  font-weight: 600;
+}
+
+.override .alert {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.override-form {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border);
+}
+
+.override-form h3 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.override-form .form-actions {
+  margin: 0;
+}
+
+/* Bookings */
+
+.tabs ul {
+  display: flex;
+  gap: var(--space-1);
+  margin: 0 0 var(--space-4);
+  padding: 0;
+  border-bottom: 1px solid var(--border);
+  list-style: none;
+}
+
+.tab {
+  display: block;
+  margin-bottom: -1px;
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 3px solid transparent;
+  color: var(--muted);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.tab:hover {
+  color: var(--text);
+}
+
+.tab[aria-current="page"] {
+  border-bottom-color: var(--accent);
+  color: var(--text);
+}
+
+.zone-note {
+  font-size: 0.9rem;
+}
+
+.load-more {
+  margin: var(--space-4) 0;
+}
+
+.when {
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.details-stacked {
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-3);
+}
+
+.detail-pair dt {
+  font-size: 0.9rem;
+}
+
+@media (max-width: 480px) {
+  .details {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+
+  .details dd {
+    margin-bottom: var(--space-3);
+  }
+}
+
+/* Fields with errors: after the rules above, so these borders win. */
+
+.field-invalid > input,
+.field-invalid > select,
+.field-invalid > textarea,
+.field-invalid .combobox > input,
+input[aria-invalid="true"] {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 1px var(--danger);
 }
