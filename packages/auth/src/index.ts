@@ -7,8 +7,9 @@ import { magicLink } from 'better-auth/plugins/magic-link'
 import { organization } from 'better-auth/plugins/organization'
 import type { GoogleOptions, MicrosoftOptions } from 'better-auth/social-providers'
 import pg from 'pg'
-import { API_KEY_RATE_LIMIT, apiKeyHook } from './api-keys.ts'
+import { API_KEY_RATE_LIMIT } from './api-keys.ts'
 import { API_KEY_PREFIX } from './caller.ts'
+import { beforeHook } from './hooks.ts'
 import { betterAuthLog } from './log.ts'
 import { ensurePersonalOrganization, personalOrganizationGuards } from './organizations.ts'
 
@@ -94,6 +95,9 @@ export function createAuth({
       ipAddress: { ipAddressHeaders: [CLIENT_IP_HEADER] },
     },
     logger: { log: betterAuthLog },
+    // Unexpected errors go to the caller (the server's error handler logs them on one escaped
+    // line) instead of being printed raw by Better Auth's router.
+    onAPIError: { throw: true },
     // Sign-in providers' OAuth tokens are stored encrypted, not in plain text.
     account: { encryptOAuthTokens: true },
     // Passwordless: email magic links and social sign-in only (emailAndPassword stays off).
@@ -152,7 +156,7 @@ export function createAuth({
         },
       },
     },
-    hooks: { before: apiKeyHook(db) },
+    hooks: { before: beforeHook(db) },
     plugins: [
       organization({
         // An invitation is accepted only by someone who proved they own the invited address.

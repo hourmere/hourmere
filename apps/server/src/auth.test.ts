@@ -1,6 +1,6 @@
 // Sign-in, sessions, personal organizations and API keys end to end: the real app, Better
 // Auth and migrations, against a throwaway database.
-import { createHash, randomBytes } from 'node:crypto'
+import { createHash, createHmac, randomBytes } from 'node:crypto'
 import {
   API_KEY_RATE_LIMIT,
   type Auth,
@@ -33,6 +33,7 @@ interface Instance {
   app: ReturnType<typeof createApp>
   auth: Auth
   publicUrl: string
+  secret: string
 }
 
 describe.skipIf(!serverUrl)('sign-in and callers', () => {
@@ -51,11 +52,12 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
     publicUrl: string,
     { socialProviders = {}, socialProviderOptions = {}, trustedProxies = [] }: InstanceOptions = {},
   ): Instance {
+    const secret = randomBytes(32).toString('base64')
     const auth = createAuth({
       pool: authPool,
       db,
       baseURL: publicUrl,
-      secret: randomBytes(32).toString('base64'),
+      secret,
       mailer: { send: async (m) => void outbox.push(m) },
       socialProviders,
       socialProviderOptions,
@@ -67,7 +69,7 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
       publicUrl,
       trustedProxies,
     })
-    return { app, auth, publicUrl }
+    return { app, auth, publicUrl, secret }
   }
 
   let main: Instance
@@ -156,6 +158,50 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
     return ((await res.json()) as { id: string }).id
   }
 
+  /**
+   * An account whose email is not verified, with a signed-in session, as Better Auth keeps
+   * one from a sign-in provider that did not vouch for the address (or as old data could
+   * hold). The app no longer creates such accounts, so they are made by hand.
+   */
+  async function unverifiedUser(email: string, i: Instance = main) {
+    const user = await testDb.pool.query<{ id: string }>(
+      `INSERT INTO auth."user" (name, email, "emailVerified") VALUES ('Mallory', $1, false) RETURNING id`,
+      [email],
+    )
+    const id = user.rows[0]?.id as string
+    const organizationId = await ensurePersonalOrganization(db, id)
+    const token = randomBytes(24).toString('base64url')
+    await testDb.pool.query(
+      `INSERT INTO auth.session ("expiresAt", token, "updatedAt", "userId", "activeOrganizationId")
+       VALUES ($1, $2, now(), $3, $4)`,
+      [new Date(Date.now() + 3_600_000), token, id, organizationId],
+    )
+    const signature = createHmac('sha256', i.secret).update(token).digest('base64')
+    const cookie = `better-auth.session_token=${encodeURIComponent(`${token}.${signature}`)}`
+    return { id, organizationId, cookie }
+  }
+
+  /** Stores an API key directly, as Better Auth would (only its SHA-256 is kept). */
+  async function plantKey(userId: string, organizationId: string) {
+    const key = `hm_${randomBytes(48)
+      .toString('base64url')
+      .replace(/[^A-Za-z]/g, '')
+      .padEnd(64, 'x')
+      .slice(0, 64)}`
+    const row = await testDb.pool.query<{ id: string }>(
+      `INSERT INTO auth.apikey ("configId", name, start, "referenceId", prefix, key, enabled,
+         "rateLimitEnabled", "requestCount", "createdAt", "updatedAt", metadata)
+       VALUES ('default', 'planted', $1, $2, 'hm_', $3, true, false, 0, now(), now(), $4) RETURNING id`,
+      [
+        key.slice(0, 6),
+        userId,
+        createHash('sha256').update(key).digest('base64url'),
+        JSON.stringify({ organizationId }),
+      ],
+    )
+    return { id: row.rows[0]?.id as string, key }
+  }
+
   /** Captures everything printed while `fn` runs, split into lines. */
   async function printedLines(fn: () => Promise<unknown>): Promise<string[]> {
     const calls: unknown[][] = []
@@ -215,13 +261,16 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
     })
 
     it('stores only a hash of the token, valid for 5 minutes', async () => {
+      // Better Auth computes the expiry with this process's clock; so does the check (the
+      // database clock may differ, e.g. under Docker Desktop).
+      const before = Date.now()
       const link = await requestLink('hashed@example.com')
+      const after = Date.now()
       const token = link.searchParams.get('token') as string
       const hash = createHash('sha256').update(token).digest('base64url')
       const row = (
-        await testDb.pool.query<{ identifier: string; value: string; ttl: number }>(
-          `SELECT identifier, value, extract(epoch FROM "expiresAt" - now())::float8 AS ttl
-             FROM auth.verification WHERE identifier = $1`,
+        await testDb.pool.query<{ identifier: string; value: string; expiresAt: Date }>(
+          `SELECT identifier, value, "expiresAt" FROM auth.verification WHERE identifier = $1`,
           [`magic-link:${hash}`],
         )
       ).rows[0]
@@ -232,13 +281,14 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
           `%${token}%`,
         ]),
       ).toBe(0)
-      expect(row?.ttl).toBeGreaterThan(290)
-      expect(row?.ttl).toBeLessThanOrEqual(300)
+      const expiresAt = row?.expiresAt.getTime() ?? 0
+      expect(expiresAt).toBeGreaterThanOrEqual(before + 300_000 - 2_000)
+      expect(expiresAt).toBeLessThanOrEqual(after + 300_000 + 2_000)
 
       // Past its expiry the link no longer signs in.
       await testDb.pool.query(
-        `UPDATE auth.verification SET "expiresAt" = now() - interval '1 second' WHERE identifier = $1`,
-        [`magic-link:${hash}`],
+        `UPDATE auth.verification SET "expiresAt" = $1 WHERE identifier = $2`,
+        [new Date(Date.now() - 60_000), `magic-link:${hash}`],
       )
       const res = await main.app.request(link.toString())
       expect(res.headers.get('location')).toMatch(/[?&]error=/)
@@ -262,6 +312,31 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
       expect(lines.some((l) => l.includes('Invalid callbackURL') && l.includes('\\n[mail]'))).toBe(
         true,
       )
+      expect(lines.filter((l) => l.startsWith('[mail]'))).toEqual([])
+    })
+
+    it('rejects ids that are not UUIDs before they reach the database (and the log)', async () => {
+      const cookie = await signIn('ids@example.com')
+      const forged =
+        'zz\n[mail] {"links":["http://localhost:3000/api/auth/magic-link/verify?token=forged"]}'
+      const responses: Response[] = []
+      const lines = await printedLines(async () => {
+        responses.push(
+          await main.app.request(
+            `/api/auth/organization/get-full-organization?organizationId=${encodeURIComponent(forged)}`,
+            { headers: { cookie } },
+          ),
+          await post('/api/auth/organization/remove-member', cookie, {
+            memberIdOrEmail: forged,
+            organizationId: (await me({ cookie })).body.organization.id,
+          }),
+          await post('/api/auth/api-key/update', cookie, { keyId: forged }),
+        )
+      })
+      for (const res of responses) {
+        expect(res.status).toBe(400)
+        expect(await res.json()).toMatchObject({ code: 'INVALID_ID' })
+      }
       expect(lines.filter((l) => l.startsWith('[mail]'))).toEqual([])
     })
 
@@ -415,6 +490,10 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
             memberIdOrEmail: aliceMemberId,
             organizationId: personal.id,
           }),
+        )
+        // Leaving has no Better Auth hook; with a second owner its own rule would allow it.
+        await refused(
+          await post('/api/auth/organization/leave', alice, { organizationId: personal.id }),
         )
         expect((await me({ cookie: alice })).body.organization).toEqual(personal)
       })
@@ -615,14 +694,58 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
 
     it('need a session to be created', async () => {
       const victim = (await me({ cookie })).body.user.id
-      for (const body of [{}, { userId: victim }, { userId: 'not-a-uuid' }]) {
+      const cases: [Record<string, string>, number][] = [
+        [{}, 401],
+        [{ userId: victim }, 401],
+        [{ userId: 'not-a-uuid' }, 400],
+      ]
+      for (const [body, status] of cases) {
         const res = await main.app.request('/api/auth/api-key/create', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ name: 'anonymous', ...body }),
         })
-        expect(res.status, JSON.stringify(body)).toBe(401)
+        expect(res.status, JSON.stringify(body)).toBe(status)
       }
+    })
+
+    it('cannot be created or changed by a user whose email is not verified', async () => {
+      const mallory = await unverifiedUser('unverified-keys@example.com')
+      const created = await post('/api/auth/api-key/create', mallory.cookie, { name: 'mine' })
+      expect(created.status).toBe(403)
+      expect(await created.json()).toMatchObject({ code: 'EMAIL_NOT_VERIFIED' })
+      const planted = await plantKey(mallory.id, mallory.organizationId)
+      const updated = await post('/api/auth/api-key/update', mallory.cookie, {
+        keyId: planted.id,
+        name: 'renamed',
+      })
+      expect(updated.status).toBe(403)
+      expect(
+        await count(`SELECT count(*)::int AS n FROM auth.apikey WHERE "referenceId" = $1`, [
+          mallory.id,
+        ]),
+      ).toBe(1)
+    })
+
+    it('do not survive the owner proving the email while key creation is under way', async () => {
+      // The original race: requests from the unverified account's session interleaved with
+      // the real owner's email-link sign-in, which revokes that session and verifies the email.
+      const mallory = await unverifiedUser('race@example.com')
+      const link = await requestLink('race@example.com')
+      const creates = Array.from({ length: 10 }, () =>
+        post('/api/auth/api-key/create', mallory.cookie, { name: 'racer' }),
+      )
+      const [verify, ...results] = await Promise.all([
+        main.app.request(link.toString()),
+        ...creates,
+      ])
+      expect(verify?.status).toBe(302)
+      expect(results.map((r) => r.status).filter((s) => s === 200)).toEqual([])
+      expect(
+        await count(`SELECT count(*)::int AS n FROM auth.apikey WHERE "referenceId" = $1`, [
+          mallory.id,
+        ]),
+      ).toBe(0)
     })
 
     it('answer 429 when their rate limit is used up', async () => {
@@ -695,6 +818,9 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
         expect((await write({ cookie })).status).toBe(403)
         expect((await write({ cookie, origin: 'https://evil.example' })).status).toBe(403)
         expect((await write({ cookie, origin: 'null' })).status).toBe(403)
+        expect(
+          (await write({ cookie, origin: 'null', referer: `${origin}/settings` })).status,
+        ).toBe(403)
         expect((await write({ cookie, referer: 'https://evil.example/page' })).status).toBe(403)
         expect(
           await (await write({ cookie, origin: 'https://evil.example' })).json(),
@@ -772,6 +898,64 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
     })
   })
 
+  describe('unexpected errors', () => {
+    it('are logged on one escaped line', async () => {
+      const app = createApp({
+        checkDb: async () => {},
+        authHandler: async () => {
+          throw new Error('boom\n[mail] {"forged":true}')
+        },
+        resolveCaller: createCallerResolver({ auth: main.auth, db }),
+        publicUrl: origin,
+      })
+      let res: Response | undefined
+      const lines = await printedLines(async () => {
+        res = await app.request('/api/auth/whatever')
+      })
+      expect(res?.status).toBe(500)
+      expect(await res?.json()).toEqual({ error: 'internal_error' })
+      expect(lines.filter((l) => l.includes('boom'))).toHaveLength(1)
+      expect(lines.filter((l) => l.startsWith('[mail]') || l.startsWith('    at '))).toEqual([])
+    })
+
+    it('from Better Auth reach that handler instead of being printed raw', async () => {
+      // An SMTP failure inside a Better Auth endpoint, with request-like text in its message.
+      const auth = createAuth({
+        pool: authPool,
+        db,
+        baseURL: origin,
+        secret: randomBytes(32).toString('base64'),
+        mailer: {
+          send: async () => {
+            throw new Error('smtp down\n[mail] {"forged":true}')
+          },
+        },
+      })
+      const app = createApp({
+        checkDb: async () => {},
+        authHandler: auth.handler,
+        resolveCaller: createCallerResolver({ auth, db }),
+        publicUrl: origin,
+      })
+      let res: Response | undefined
+      const lines = await printedLines(async () => {
+        res = await app.request('/api/auth/sign-in/magic-link', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ email: 'nobody@example.com', callbackURL: '/' }),
+        })
+      })
+      expect(res?.status).toBe(500)
+      expect(await res?.json()).toEqual({ error: 'internal_error' })
+      expect(lines.some((l) => l.includes('ERROR POST /api/auth/sign-in/magic-link'))).toBe(true)
+      expect(
+        lines.filter(
+          (l) => l.startsWith('    at ') || l.startsWith('[mail]') || l.includes('# SERVER_ERROR'),
+        ),
+      ).toEqual([])
+    })
+  })
+
   describe('social sign-in', () => {
     const providerIds = async (i: Instance) =>
       (await i.auth.$context).socialProviders.map((p) => p.id).sort()
@@ -843,12 +1027,8 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
     it('revokes API keys made before the owner proved the email address', async () => {
       // An unverified account with a key in it, as Better Auth keeps one from a provider that
       // did not vouch for the address (and as a database could hold from before the rule).
-      const user = await testDb.pool.query<{ id: string }>(
-        `INSERT INTO auth."user" (name, email, "emailVerified") VALUES ('Mallory', 'late@example.com', false) RETURNING id`,
-      )
-      const id = user.rows[0]?.id as string
-      await ensurePersonalOrganization(db, id)
-      const planted = await main.auth.api.createApiKey({ body: { userId: id, name: 'planted' } })
+      const mallory = await unverifiedUser('late@example.com')
+      const planted = await plantKey(mallory.id, mallory.organizationId)
       const bearer = { authorization: `Bearer ${planted.key}` }
       expect((await me(bearer)).res.status).toBe(200)
 

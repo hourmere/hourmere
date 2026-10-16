@@ -1,7 +1,9 @@
 import { relative } from 'node:path'
+import { inspect } from 'node:util'
 import { serveStatic } from '@hono/node-server/serve-static'
 import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi'
-import type { CallerResolver } from '@hourmere/auth'
+import { type CallerResolver, escapeControlCharacters } from '@hourmere/auth'
+import { HTTPException } from 'hono/http-exception'
 import { logger } from 'hono/logger'
 import { requireCaller } from './caller.ts'
 import { clientIp, withClientIp } from './client-ip.ts'
@@ -90,6 +92,18 @@ export function createApp({
   webDist,
 }: AppDeps) {
   const app = new OpenAPIHono()
+  // Unexpected errors (including Better Auth's, which it rethrows) are logged on one line with
+  // control characters escaped: error messages can carry request input, e.g. Postgres echoing
+  // a malformed value, and must not be able to forge log lines.
+  app.onError((err, c) => {
+    if (err instanceof HTTPException) return err.getResponse()
+    // c.req.path is percent-decoded, so it is escaped too.
+    const detail = escapeControlCharacters(
+      `${c.req.method} ${c.req.path}: ${inspect(err, { breakLength: Number.POSITIVE_INFINITY })}`,
+    )
+    console.error(`${new Date().toISOString()} ERROR ${detail}`)
+    return c.json({ error: 'internal_error' }, 500)
+  })
   app.use('/api/*', requestLogger)
   app.use('/api/*', clientIp(trustedProxies))
 

@@ -41,6 +41,7 @@ is optional and may change. The HTTP status carries the category:
 | 404 `not_found` | No such resource or endpoint, or one the caller cannot see |
 | 409 | Conflict with the current state (e.g. the slot was just booked) |
 | 429 `rate_limited` | Too many requests; `Retry-After` gives the seconds to wait when known |
+| 500 `internal_error` | An unexpected server error; details go to the server log only |
 
 ## Authentication
 

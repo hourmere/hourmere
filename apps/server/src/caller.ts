@@ -6,10 +6,14 @@ export type CallerEnv = { Variables: { principal: Principal } }
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
 
-/** The origin a browser reports for the request: Origin, else that of the Referer. */
+/**
+ * The origin a browser reports for the request: Origin, else that of the Referer. An opaque
+ * `Origin: null` (sandboxed frames, some redirects) is no origin at all, whatever the Referer
+ * says.
+ */
 function requestOrigin(headers: Headers): string | undefined {
   const origin = headers.get('origin')
-  if (origin && origin !== 'null') return origin
+  if (origin !== null) return origin === 'null' ? undefined : origin
   const referer = headers.get('referer')
   return referer && URL.canParse(referer) ? new URL(referer).origin : undefined
 }

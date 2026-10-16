@@ -42,7 +42,10 @@ docker compose up -d
 The app listens on `127.0.0.1:3000` and applies database migrations on start. Put a reverse proxy with TLS in front of it, and set `TRUSTED_PROXIES` to the proxy's address as the app sees it (for a proxy on the host or on the compose network that is the Docker network, e.g. `172.16.0.0/12`), so rate limits apply per visitor rather than to everyone behind the proxy.
 
 People sign in with a link sent by email (no passwords), or with Google or Microsoft once their
-client ids are set in `.env`. Until `SMTP_URL` and `MAIL_FROM` are set, the server prints each
+client ids are set in `.env`. Accounts are only created for email addresses the provider
+confirms: for Microsoft, add the optional ID token claims `verified_primary_email` and
+`verified_secondary_email` in the Entra app registration (Token configuration), or Microsoft
+users get `EMAIL_NOT_VERIFIED` and have to use an email link. Until `SMTP_URL` and `MAIL_FROM` are set, the server prints each
 sign-in link to its log (`docker compose logs app`), so you can sign in right after the first
 start. Anyone who can read that log can sign in as anyone: configure SMTP before inviting
 anyone else, and always on a hosted or internet-facing instance.
