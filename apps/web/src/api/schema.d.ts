@@ -404,7 +404,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description Already cancelled (`booking_cancelled`) or already started (`booking_in_past`) */
+                /** @description Already cancelled (`booking_cancelled`), already started (`booking_in_past`), or, with an email's token, the meeting kept being rescheduled while the request waited (`booking_changed`; try again) */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -486,7 +486,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description Already cancelled (`booking_cancelled`), already started (`booking_in_past`), without a host (`booking_has_no_host`), the event type no longer takes bookings (`event_type_unavailable`), or the time is not offered (`slot_unavailable`, `slot_taken`) */
+                /** @description Already cancelled (`booking_cancelled`), already started (`booking_in_past`), without a host (`booking_has_no_host`), the event type no longer takes bookings (`event_type_unavailable`), the time is not offered (`slot_unavailable`, `slot_taken`), or, with an email's token, the meeting kept being rescheduled while the request waited (`booking_changed`; try again) */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -1150,7 +1150,7 @@ export interface paths {
         put?: never;
         /**
          * Book a slot
-         * @description Books an offered slot and returns the booking with the secret of the invitee's manage link (`manageToken`, returned only this once). Send an `Idempotency-Key` to make retries safe: a retry with the same key and the same request returns the original booking (200) instead of booking again. All anonymous callers share one key space per organization, so the key must be random (e.g. a UUIDv4), never derived from the request.
+         * @description Books an offered slot and returns the booking with the booking's own manage token (`manageToken`, returned only this once; it stays with this booking, and emails carry their own). Send an `Idempotency-Key` to make retries safe: a retry with the same key and the same request returns the original booking (200) instead of booking again. All anonymous callers share one key space per organization, so the key must be random (e.g. a UUIDv4), never derived from the request.
          */
         post: {
             parameters: {
@@ -1958,7 +1958,7 @@ export interface components {
         };
         BookingWithToken: {
             booking: components["schemas"]["Booking"];
-            /** @description The secret of the invitee's manage link (https://<app>/booking#token=<token>), sent as X-Manage-Token to /api/v1/bookings/manage. Returned only once and never stored, so a replayed request (same Idempotency-Key) gets null. */
+            /** @description The booking's own manage token (it stays with this booking; emails carry their own), sent as X-Manage-Token to /api/v1/bookings/manage. Returned only once and never stored, so a replayed request (same Idempotency-Key) gets null. */
             manageToken: string | null;
         };
         CancelBooking: {

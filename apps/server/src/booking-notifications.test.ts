@@ -513,6 +513,17 @@ describe.skipIf(!serverUrl)('booking notifications over REST and MCP', () => {
     await drain()
   })
 
+  it("judges the reminder by the booking service's clock, not the wall clock", async () => {
+    // 20 hours after the injected clock: too soon for a reminder. (By the wall clock, weeks
+    // ahead today, it would get one.)
+    const created = await book('2026-11-02T08:00:00Z')
+    const { booking } = created.body as unknown as Booked
+    expect((await jobsFor(booking.id)).map((j) => (j.data as { kind: string }).kind)).toEqual([
+      'confirmed',
+    ])
+    await drain()
+  })
+
   it('never opens the booking with the secret of an email refused for good', async () => {
     refuse.set('nobody@example.com', NO_SUCH_USER)
     try {

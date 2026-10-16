@@ -107,10 +107,10 @@ Every email goes to each host first (they most need to know), then the invitee, 
 guests, so a guest address that is slow to answer cannot hold up the others. Hosts are the
 booking's `booking_hosts` whose address is verified: accounts start verified, and one that
 is not (it should not exist; see data-model.md) is neither emailed nor named in the
-invitation, so a booking without a verified host sends nothing. Guests are addresses an
-anonymous booker typed (up to 10 per booking); limiting abuse of that is a product
-follow-up. Times are shown in the
-recipient's zone with its IANA name: the attendee's zone from `booking_attendees`, a
+invitation, so a booking without a verified host sends nothing (the job logs one WARN line
+naming the booking and the kind, since the invitee hears nothing either). Guests are
+addresses an anonymous booker typed (up to 10 per booking); limiting abuse of that is a
+product follow-up. Times are shown in the recipient's zone with its IANA name: the attendee's zone from `booking_attendees`, a
 host's from their profile, else their default schedule, else UTC. Host emails add the
 invitee's contact details, guests and answers; only the invitee's email has manage links.
 Confirmed and rescheduled emails carry an invitation (`METHOD:REQUEST`), cancellations a
@@ -222,19 +222,24 @@ up a token (below), and several valid secrets per booking, each 256 random bits.
 `/api/v1/bookings/manage…` with `X-Manage-Token`, and the MCP tools that take a
 `manageToken`) look a token up by its SHA-256 in one statement that probes both
 `bookings.manage_token_hash` and `booking_notifications.manage_token_hash` (each unique, so
-each probe is one index lookup) whatever the token is: looking up an unknown token costs
-the same as a known one of either kind, and all unknown, malformed or missing tokens get
-the same 404 `booking_not_found`. Only rows of emails that went out match
-(`outcome = 'sent'`); an email the mail server refused for good keeps no hash (a check
-constraint), so the secret it would have carried never opens anything.
+each probe is one index lookup) whatever the token is. So every unknown token costs the same
+(two probes that find nothing), whichever table it might have been looked for in, and all
+unknown, malformed or missing tokens get the same 404 `booking_not_found`. Only rows of
+emails that went out match (`outcome = 'sent'`); an email the mail server refused for good
+keeps no hash (a check constraint), so the secret it would have carried never opens
+anything. Showing and acting resolve the booking through the same function, so they
+always agree on which booking a token means.
 
 - **The API's token stays with its booking.** After a reschedule it shows the old, cancelled
   booking, and cancelling or rescheduling with it gets 409 `booking_cancelled`. That is the
   documented contract agents rely on: a reschedule retried after a lost response cannot move
   the meeting twice. The reschedule's response carries the new booking's token.
 - **An email's token stands for the meeting.** After the booking it was sent about is
-  rescheduled, it follows the chain (`rescheduled_from_id`, as far as it goes) to the booking
-  that replaced it, the latest one, and shows, cancels or reschedules that one. Why: the
+  rescheduled, it follows the chain (`rescheduled_from_id`) to the booking that replaced it,
+  the latest one, and shows, cancels or reschedules that one. The chain needs no hop limit:
+  the link is set once, at insert, to a booking that already exists, so it cannot loop, and
+  a reschedule locks and cancels what it replaces, so it cannot branch (a `CYCLE` clause
+  still keeps hand-edited data from looping the query). Why follow it at all: the
   email is what the invitee keeps; the reschedule email with a fresh link may come hours
   later (retries), or not at all (refused address), and the reschedule may have been made by
   an agent that kept the new token for itself. The person who holds an email about the old
@@ -247,8 +252,11 @@ constraint), so the secret it would have carried never opens anything.
 - **Locking.** Cancel and reschedule lock the booking they act on (`FOR UPDATE`). For an
   email's token, a reschedule that committed while the request waited for that lock has
   moved the meeting on, so the chain is followed again from the locked row until the locked
-  row is the latest (none can replace it while the lock is held). The API's token is locked
-  as before and then finds its booking cancelled.
+  row is the latest (none can replace it while the lock is held), and only that locked row
+  is checked and changed. Each further round means yet another reschedule committed while
+  the request waited; after ten the request gets 409 `booking_changed` (try again) instead
+  of chasing the meeting. The API's token is locked as before and then finds its booking
+  cancelled.
 
 Links put the secret in the URL fragment,
 `https://<app>/booking#token=<token>&action=reschedule` (or `action=cancel`), which browsers

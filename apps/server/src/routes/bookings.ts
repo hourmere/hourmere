@@ -90,7 +90,7 @@ export const BookingWithToken = z
     booking: Booking,
     manageToken: z.string().nullable().openapi({
       description:
-        "The secret of the invitee's manage link (https://<app>/booking#token=<token>), sent as X-Manage-Token to /api/v1/bookings/manage. Returned only once and never stored, so a replayed request (same Idempotency-Key) gets null.",
+        "The booking's own manage token (it stays with this booking; emails carry their own), sent as X-Manage-Token to /api/v1/bookings/manage. Returned only once and never stored, so a replayed request (same Idempotency-Key) gets null.",
     }),
   })
   .openapi('BookingWithToken')
@@ -218,7 +218,7 @@ export function bookingRoutes({
           400: invalidCancel,
           404: manageNotFound,
           409: error(
-            'Already cancelled (`booking_cancelled`) or already started (`booking_in_past`)',
+            "Already cancelled (`booking_cancelled`), already started (`booking_in_past`), or, with an email's token, the meeting kept being rescheduled while the request waited (`booking_changed`; try again)",
           ),
           429: rateLimited,
         },
@@ -254,7 +254,7 @@ export function bookingRoutes({
           400: error('Invalid request'),
           404: manageNotFound,
           409: error(
-            'Already cancelled (`booking_cancelled`), already started (`booking_in_past`), without a host (`booking_has_no_host`), the event type no longer takes bookings (`event_type_unavailable`), or the time is not offered (`slot_unavailable`, `slot_taken`)',
+            "Already cancelled (`booking_cancelled`), already started (`booking_in_past`), without a host (`booking_has_no_host`), the event type no longer takes bookings (`event_type_unavailable`), the time is not offered (`slot_unavailable`, `slot_taken`), or, with an email's token, the meeting kept being rescheduled while the request waited (`booking_changed`; try again)",
           ),
           429: rateLimited,
         },

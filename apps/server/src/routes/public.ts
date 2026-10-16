@@ -155,7 +155,7 @@ export function publicRoutes({
         path: '/api/v1/public/{handle}/{slug}/bookings',
         summary: 'Book a slot',
         description:
-          "Books an offered slot and returns the booking with the secret of the invitee's manage link (`manageToken`, returned only this once). Send an `Idempotency-Key` to make retries safe: a retry with the same key and the same request returns the original booking (200) instead of booking again. All anonymous callers share one key space per organization, so the key must be random (e.g. a UUIDv4), never derived from the request.",
+          "Books an offered slot and returns the booking with the booking's own manage token (`manageToken`, returned only this once; it stays with this booking, and emails carry their own). Send an `Idempotency-Key` to make retries safe: a retry with the same key and the same request returns the original booking (200) instead of booking again. All anonymous callers share one key space per organization, so the key must be random (e.g. a UUIDv4), never derived from the request.",
         middleware: [bookLimit, routeBodyLimit(BOOKING_BODY_LIMIT)],
         request: {
           params: PageParams,

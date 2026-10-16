@@ -179,7 +179,9 @@ everywhere a token is taken, REST and MCP:
 
 After a cancellation, any token still shows the booking (status `cancelled`); cancelling
 again or rescheduling gets 409 `booking_cancelled`. A token stops working only when its
-booking is deleted. Responses never contain an email's token.
+booking is deleted. Responses never contain an email's token. With an email's token, a
+cancel or reschedule that keeps finding the meeting rescheduled again while it waits gets
+409 `booking_changed`; trying again is safe.
 
 They are rate limited per client (`TRUSTED_PROXIES` decides which address that is; IPv6
 clients count per /64 network, since one subscriber usually has a whole /64): 120 requests a

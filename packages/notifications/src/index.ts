@@ -466,8 +466,17 @@ export async function sendBookingNotification(
   const { booking, hosts, attendees } = data
   const organizer = hosts[0]
   const invitee = attendees.find((a) => a.isBooker) ?? attendees[0]
-  // Nobody to send on behalf of, or nobody it is for.
-  if (!organizer || !invitee) return
+  const log = deps.log ?? ((line: string) => console.warn(line))
+  // Nobody to send on behalf of: no host with a verified address. Worth a line, since then
+  // the invitee hears nothing either.
+  if (!organizer) {
+    log(
+      `${new Date().toISOString()} WARN ${BOOKING_NOTIFICATION_JOB}: booking ${bookingId} has no host with a verified email address; not sending its ${kind} emails`,
+    )
+    return
+  }
+  // Nobody it is for.
+  if (!invitee) return
   const guests = attendees.filter((a) => a !== invitee)
 
   const meeting: BookingEmailMeeting = {
@@ -540,7 +549,6 @@ export async function sendBookingNotification(
   // collected and dealt with at the end. Anything else (the mail server unreachable, sign-in
   // or relaying refused, a sending limit, shutdown) would hit every remaining recipient the
   // same way, so it ends the attempt at once and the job is retried.
-  const log = deps.log ?? ((line: string) => console.warn(line))
   const refused: string[] = []
   const gone: { key: string; err: MailRejectedError }[] = []
   // Recipients this run tried to send to (not those done in an earlier attempt).

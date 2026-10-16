@@ -239,8 +239,22 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
       .where('id', '=', hostId)
       .execute()
     const later = testMailer()
-    await sendBookingNotification(deps(later.mailer), bookingId, 'reminder')
+    const lines: string[] = []
+    await sendBookingNotification(
+      { ...deps(later.mailer), log: (l) => lines.push(l) },
+      bookingId,
+      'reminder',
+    )
     expect(later.sent).toEqual([])
+    // Said once, with the booking, since the invitee hears nothing either.
+    expect(lines).toEqual([
+      expect.stringMatching(
+        new RegExp(
+          `WARN booking-notification: booking ${bookingId} has no host with a verified email address; not sending its reminder emails$`,
+        ),
+      ),
+    ])
+    expect(await records(bookingId)).toHaveLength(2)
   })
 
   it("gives the invitee a link secret of the email's own, stored only as a hash", async () => {

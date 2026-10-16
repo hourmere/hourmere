@@ -53,8 +53,9 @@ export interface Booking {
 export interface BookingWithToken {
   booking: Booking
   /**
-   * The secret of the invitee's manage link. Only its SHA-256 is stored, so it is returned
-   * once, when the booking is created; a replayed request (same Idempotency-Key) gets null.
+   * The booking's own manage token (it stays with this booking; emails carry their own).
+   * Only its SHA-256 is stored, so it is returned once, when the booking is created; a
+   * replayed request (same Idempotency-Key) gets null.
    */
   manageToken: string | null
 }
@@ -200,37 +201,39 @@ interface ManagedTarget {
 }
 
 /**
- * The booking a manage token acts on, found by the token's hash. One statement probes both
- * places a hash can be, each through its unique index, whatever the token turns out to be,
- * so an unknown token costs the same as a known one of either kind:
+ * The booking a manage token acts on; showing and acting both start here, so they resolve
+ * the same booking. The token is found by its hash in one statement that probes both places
+ * a hash can be, each through its unique index, whatever the token turns out to be, so every
+ * unknown token costs the same (two index probes that find nothing):
  * - `bookings.manage_token_hash`, the token the booking API returned: it stays with that
  *   booking. After a reschedule it shows the cancelled booking and acting on it gets
  *   `booking_cancelled`, so an agent retrying a reschedule cannot move the meeting twice.
  * - `booking_notifications.manage_token_hash`, the token in an invitee email (only emails
  *   that went out; one the mail server refused has no hash): it stands for the meeting the
- *   email was about. After a reschedule it follows the chain (`rescheduled_from_id`) to the
- *   booking that replaced it, the latest one, so a link in an older email keeps working.
+ *   email was about, so it opens the latest booking of that booking's reschedule chain and
+ *   a link in an older email keeps working.
  */
-async function findManagedTarget(db: Db, hash: Buffer): Promise<ManagedTarget | undefined> {
+async function resolveManagedTarget(db: Db, hash: Buffer): Promise<ManagedTarget | undefined> {
   const { rows } = await sql<{ id: string; from_email: boolean }>`
-    WITH RECURSIVE token (id, from_email) AS (
-      SELECT id, false FROM bookings WHERE manage_token_hash = ${hash}
-      UNION ALL
-      SELECT booking_id, true FROM booking_notifications
-       WHERE manage_token_hash = ${hash} AND outcome = 'sent'
-    ), chain (id, from_email, depth) AS (
-      SELECT id, from_email, 0 FROM token
-      UNION ALL
-      SELECT b.id, c.from_email, c.depth + 1
-        FROM bookings b JOIN chain c ON b.rescheduled_from_id = c.id
-       WHERE c.from_email AND c.depth < 1000
-    )
-    SELECT id, from_email FROM chain ORDER BY from_email, depth DESC LIMIT 1`.execute(db)
-  const row = rows[0]
-  return row && { id: row.id, fromEmail: row.from_email }
+    SELECT id, false AS from_email FROM bookings WHERE manage_token_hash = ${hash}
+    UNION ALL
+    SELECT booking_id, true FROM booking_notifications
+     WHERE manage_token_hash = ${hash} AND outcome = 'sent'`.execute(db)
+  // One hash in both tables would take 2^256 luck; the booking's own token would win.
+  const row = rows.find((r) => !r.from_email) ?? rows[0]
+  if (!row) return undefined
+  if (!row.from_email) return { id: row.id, fromEmail: false }
+  return { id: await latestInChain(db, row.id), fromEmail: true }
 }
 
-/** The latest booking of the reschedule chain from `id` on (`id` itself if not replaced). */
+/**
+ * The latest booking of the reschedule chain from `id` on (`id` itself if not replaced).
+ * No hop limit is needed: `rescheduled_from_id` is set once, when a booking is inserted, to
+ * a booking that already exists (a foreign key) and never changes, so a chain cannot loop;
+ * and a reschedule locks and cancels the booking it replaces, so each booking has at most
+ * one successor and the chain ends at the latest one. The CYCLE clause only keeps
+ * hand-edited data from looping, and the id only orders such data's branches.
+ */
 async function latestInChain(db: Db, id: string): Promise<string> {
   const { rows } = await sql<{ id: string }>`
     WITH RECURSIVE chain (id, depth) AS (
@@ -238,23 +241,28 @@ async function latestInChain(db: Db, id: string): Promise<string> {
       UNION ALL
       SELECT b.id, c.depth + 1
         FROM bookings b JOIN chain c ON b.rescheduled_from_id = c.id
-       WHERE c.depth < 1000
-    )
-    SELECT id FROM chain ORDER BY depth DESC LIMIT 1`.execute(db)
+    ) CYCLE id SET is_cycle USING path
+    SELECT id FROM chain WHERE NOT is_cycle ORDER BY depth DESC, id LIMIT 1`.execute(db)
   return rows[0]?.id ?? id
 }
+
+/** How often lockManagedBooking follows a meeting that keeps moving before giving up. */
+const MAX_FOLLOW_ROUNDS = 10
 
 /**
  * Locks (FOR UPDATE) and returns the booking a manage token acts on; call inside a
  * transaction. For an email's token, a reschedule that committed while this waited for the
  * lock has moved the meeting on, so the chain is followed again from the locked row until
- * the locked row is the latest (no reschedule can replace it while the lock is held).
+ * the locked row is the latest (no reschedule can replace it while the lock is held). Each
+ * further round means yet another reschedule of the meeting committed while this request
+ * waited; after MAX_FOLLOW_ROUNDS of those it answers `booking_changed` (try again) rather
+ * than chase the meeting indefinitely.
  */
 async function lockManagedBooking(trx: Db, hash: Buffer) {
-  const target = await findManagedTarget(trx, hash)
+  const target = await resolveManagedTarget(trx, hash)
   if (!target) return undefined
   let id = target.id
-  for (let attempt = 1; ; attempt++) {
+  for (let round = 1; ; round++) {
     const row = await trx
       .selectFrom('bookings')
       .select([
@@ -273,8 +281,13 @@ async function lockManagedBooking(trx: Db, hash: Buffer) {
     if (!row || !target.fromEmail) return row
     const latest = await latestInChain(trx, id)
     if (latest === id) return row
-    // Each round needs another reschedule to commit in between; this many cannot happen.
-    if (attempt === 10) throw new Error(`booking ${id}: its reschedule chain kept moving`)
+    if (round === MAX_FOLLOW_ROUNDS) {
+      throw new DomainError(
+        'conflict',
+        'booking_changed',
+        'This booking was moved again while the request waited; try again',
+      )
+    }
     id = latest
   }
 }
@@ -687,7 +700,7 @@ export async function createPublicBooking(
 // --- Invitee links (manage token) ---------------------------------------------------------
 
 /**
- * The booking behind a manage token (findManagedTarget says which), also once it is
+ * The booking behind a manage token (resolveManagedTarget says which), also once it is
  * cancelled; `booking_not_found` when the token is missing or unknown.
  */
 export async function getManagedBooking(
@@ -695,7 +708,7 @@ export async function getManagedBooking(
   token: string | undefined,
 ): Promise<Booking> {
   const hash = manageTokenHash(token)
-  const target = hash && (await findManagedTarget(ctx.db, hash))
+  const target = hash && (await resolveManagedTarget(ctx.db, hash))
   if (!target) throw bookingNotFound()
   return loadBooking(ctx.db, target.id)
 }

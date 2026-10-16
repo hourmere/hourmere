@@ -248,7 +248,7 @@ export function bookingTools({
     name: 'reschedule_booking',
     title: 'Reschedule a booking',
     description:
-      'Moves a booking you made (as the invitee) to a new time, using its manageToken. In one step the booking is cancelled and a new one is created at start, with the same invitee, guests and answers; the new time may overlap the old one. Returns the new booking and its new manageToken (the token returned for the old booking then belongs to the cancelled booking; tokens from emails follow the meeting to the new one). Not idempotent: with a token a tool returned, a retry after a lost response fails with booking_cancelled, because the booking has already moved; with a token from an email it would move the meeting again. Fails with booking_in_past once the meeting has started.',
+      "Moves a booking you made (as the invitee) to a new time, using its manageToken. In one step the booking is cancelled and a new one is created at start, with the same invitee, guests and answers; the new time may overlap the old one. Returns the new booking and its new manageToken (the token returned for the old booking then belongs to the cancelled booking; tokens from emails follow the meeting to the new one). Not idempotent: with a token a tool returned, a retry after a lost response fails with booking_cancelled, because the booking has already moved; with a token from an email it would move the meeting again. Fails with booking_in_past once the meeting has started, and with booking_changed (try again) if, with an email's token, the meeting kept being rescheduled while the call waited.",
     input: RescheduleInput,
     output: BookingWithToken,
     annotations: {
@@ -272,7 +272,7 @@ export function bookingTools({
     name: 'cancel_booking',
     title: 'Cancel a booking',
     description:
-      'Cancels a booking that has not started yet: either one you host, by bookingId, or one you made as the invitee, by its manageToken (give exactly one). Returns the cancelled booking. Cancelling cannot be undone; a booking that is already cancelled fails with booking_cancelled, one that has started with booking_in_past.',
+      "Cancels a booking that has not started yet: either one you host, by bookingId, or one you made as the invitee, by its manageToken (give exactly one). Returns the cancelled booking. Cancelling cannot be undone; a booking that is already cancelled fails with booking_cancelled, one that has started with booking_in_past (and booking_changed, try again, if with an email's token the meeting kept being rescheduled while the call waited).",
     input: CancelInput,
     output: Booking,
     annotations: {
