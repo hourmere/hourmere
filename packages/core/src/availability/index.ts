@@ -3,6 +3,7 @@ export type {
   AvailabilityInput,
   DateOverride,
   EventTypeRules,
+  ExistingBooking,
   HostSchedule,
   InstantInterval,
   Slot,

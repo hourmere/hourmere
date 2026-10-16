@@ -11,6 +11,12 @@ export interface MinuteInterval {
   readonly end: number
 }
 
+/** An existing booking with its buffers defaulted. */
+export interface NormalizedBooking extends InstantInterval {
+  readonly bufferBeforeMinutes: number
+  readonly bufferAfterMinutes: number
+}
+
 /** Input after validation, with defaults applied and wall-clock times parsed. */
 export interface NormalizedInput {
   readonly timeZone: string
@@ -26,7 +32,7 @@ export interface NormalizedInput {
   readonly maxBookingsPerDay: number | undefined
   readonly bookingWindowDays: number | undefined
   readonly busy: readonly InstantInterval[]
-  readonly bookings: readonly InstantInterval[]
+  readonly bookings: readonly NormalizedBooking[]
   readonly rangeStart: Temporal.Instant
   readonly rangeEnd: Temporal.Instant
   readonly now: Temporal.Instant
@@ -114,8 +120,8 @@ export function normalizeInput(input: AvailabilityInput): NormalizedInput {
     bookingWindowDays: optional(eventType.bookingWindowDays, undefined, (v) =>
       wholeNumber(v, 'eventType.bookingWindowDays', 1, LIMITS.bookingWindowDays),
     ),
-    busy: instantIntervals(input.busy, 'busy'),
-    bookings: instantIntervals(input.bookings, 'bookings'),
+    busy: list(input.busy, 'busy', instantInterval),
+    bookings: list(input.bookings, 'bookings', existingBooking),
     rangeStart,
     rangeEnd,
     now: queryInstant(input.now, 'now'),
@@ -262,18 +268,38 @@ function queryInstant(value: unknown, path: string): Temporal.Instant {
   return result
 }
 
-function instantIntervals(value: unknown, path: string): InstantInterval[] {
+function list<T>(value: unknown, path: string, parse: (item: object, itemPath: string) => T): T[] {
   if (value === undefined) return []
   if (!Array.isArray(value)) fail(`${path} must be an array`)
-  return value.map((interval: unknown, i) => {
+  return value.map((item: unknown, i) => {
     const itemPath = `${path}[${i}]`
-    if (typeof interval !== 'object' || interval === null) fail(`${itemPath} must be an object`)
-    const { start, end } = interval as { start?: unknown; end?: unknown }
-    const startInstant = instant(start, `${itemPath}.start`)
-    const endInstant = instant(end, `${itemPath}.end`)
-    if (Temporal.Instant.compare(endInstant, startInstant) <= 0) {
-      fail(`${itemPath}.end (${endInstant}) must be after start (${startInstant})`)
-    }
-    return { start: startInstant, end: endInstant }
+    if (typeof item !== 'object' || item === null) fail(`${itemPath} must be an object`)
+    return parse(item, itemPath)
   })
+}
+
+function instantInterval(item: object, path: string): InstantInterval {
+  const { start, end } = item as { start?: unknown; end?: unknown }
+  const startInstant = instant(start, `${path}.start`)
+  const endInstant = instant(end, `${path}.end`)
+  if (Temporal.Instant.compare(endInstant, startInstant) <= 0) {
+    fail(`${path}.end (${endInstant}) must be after start (${startInstant})`)
+  }
+  return { start: startInstant, end: endInstant }
+}
+
+function existingBooking(item: object, path: string): NormalizedBooking {
+  const { bufferBeforeMinutes, bufferAfterMinutes } = item as {
+    bufferBeforeMinutes?: unknown
+    bufferAfterMinutes?: unknown
+  }
+  return {
+    ...instantInterval(item, path),
+    bufferBeforeMinutes: optional(bufferBeforeMinutes, 0, (v) =>
+      wholeNumber(v, `${path}.bufferBeforeMinutes`, 0, LIMITS.bufferMinutes),
+    ),
+    bufferAfterMinutes: optional(bufferAfterMinutes, 0, (v) =>
+      wholeNumber(v, `${path}.bufferAfterMinutes`, 0, LIMITS.bufferMinutes),
+    ),
+  }
 }

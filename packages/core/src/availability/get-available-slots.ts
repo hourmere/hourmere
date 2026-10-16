@@ -1,5 +1,5 @@
 import type { AvailabilityInput, InstantInterval, Slot } from './types.ts'
-import { normalizeInput } from './validate.ts'
+import { type NormalizedBooking, normalizeInput } from './validate.ts'
 
 const COMPATIBLE = { disambiguation: 'compatible' } as const
 
@@ -13,8 +13,8 @@ const COMPATIBLE = { disambiguation: 'compatible' } as const
  *   override if present, else weekly hours; touching intervals are joined first),
  *   and its start is a whole number of steps after that interval's start;
  * - [start - bufferBefore, end + bufferAfter] overlaps no busy time and no booking
- *   (touching endpoints is fine; buffers may reach outside working hours; bookings
- *   come pre-widened by their own buffers, see `AvailabilityInput.bookings`);
+ *   (touching endpoints is fine; buffers may reach outside working hours; each
+ *   booking is first widened by its own buffers, see `AvailabilityInput.bookings`);
  * - now + minimumNotice <= start <= now + bookingWindowDays (calendar days in the
  *   host's zone);
  * - rangeStart <= start and end <= rangeEnd;
@@ -54,7 +54,7 @@ export function getAvailableSlots(input: AvailabilityInput): Slot[] {
   }
   if (Temporal.Instant.compare(earliest, latest) > 0) return []
 
-  const blocked = mergeIntervals([...q.busy, ...q.bookings])
+  const blocked = blockedIntervals(q.busy, q.bookings)
   const bookingsPerDay = countByLocalDate(q.bookings, timeZone)
   const slots: Slot[] = []
 
@@ -117,14 +117,34 @@ interface NsInterval {
   end: bigint
 }
 
+const NS_PER_MINUTE = 60_000_000_000n
+
+/**
+ * Times new slots must keep clear: busy intervals as given, bookings widened by
+ * their own buffers. Plain bigint math, so a booking near the edge of Temporal's
+ * range cannot overflow it.
+ */
+function blockedIntervals(
+  busy: readonly InstantInterval[],
+  bookings: readonly NormalizedBooking[],
+): NsInterval[] {
+  const fromBusy = busy.map((i) => ({
+    start: i.start.epochNanoseconds,
+    end: i.end.epochNanoseconds,
+  }))
+  const fromBookings = bookings.map((b) => ({
+    start: b.start.epochNanoseconds - BigInt(b.bufferBeforeMinutes) * NS_PER_MINUTE,
+    end: b.end.epochNanoseconds + BigInt(b.bufferAfterMinutes) * NS_PER_MINUTE,
+  }))
+  return mergeIntervals([...fromBusy, ...fromBookings])
+}
+
 /**
  * Sorts intervals and merges overlapping or touching ones. Merging touching ones
  * is lossless: a window that overlaps the merged interval overlaps one of the parts.
  */
-function mergeIntervals(intervals: readonly InstantInterval[]): NsInterval[] {
-  const sorted = intervals
-    .map((i) => ({ start: i.start.epochNanoseconds, end: i.end.epochNanoseconds }))
-    .sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : 0))
+function mergeIntervals(intervals: NsInterval[]): NsInterval[] {
+  const sorted = intervals.sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : 0))
   const merged: NsInterval[] = []
   for (const interval of sorted) {
     const last = merged.at(-1)
@@ -158,7 +178,7 @@ function overlapsAny(
   return candidate !== undefined && candidate.start < windowEnd
 }
 
-/** Counts intervals by the host-local date of their start. */
+/** Counts intervals by the host-local date of their (real, unbuffered) start. */
 function countByLocalDate(intervals: readonly InstantInterval[], timeZone: string) {
   const counts = new Map<string, number>()
   for (const { start } of intervals) {

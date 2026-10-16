@@ -86,23 +86,31 @@ export interface InstantInterval {
 /** A bookable time. `end - start` always equals `durationMinutes` of elapsed time. */
 export type Slot = InstantInterval
 
+/** An existing booking: the meeting itself, plus the buffers of its own event type. */
+export interface ExistingBooking extends InstantInterval {
+  /** Time kept free before this booking, 0–1440. Defaults to 0. */
+  readonly bufferBeforeMinutes?: number
+  /** Time kept free after this booking, 0–1440. Defaults to 0. */
+  readonly bufferAfterMinutes?: number
+}
+
 export interface AvailabilityInput {
   readonly schedule: HostSchedule
   readonly eventType: EventTypeRules
-  /** Busy times from connected calendars. They block slots but do not count toward the daily limit. */
+  /**
+   * Busy times from connected calendars, as plain intervals. They block slots but
+   * do not count toward the daily limit.
+   */
   readonly busy?: readonly InstantInterval[]
   /**
-   * Existing bookings. They block slots and count toward `maxBookingsPerDay`;
-   * pass bookings that should not count in `busy` instead.
-   *
-   * The engine applies only `eventType`'s buffers, around each candidate slot. It
-   * knows nothing about the buffers of existing bookings: the caller must pass
-   * each booking already widened by its own event type's buffers (start moved
-   * earlier by its bufferBefore, end moved later by its bufferAfter). The daily
-   * limit counts each booking on the local date of the start it is given, so a
-   * booking widened across local midnight counts toward the earlier day.
+   * Existing bookings, each with its own event type's buffers. A booking blocks
+   * [start - its bufferBefore, end + its bufferAfter]; a new slot's window
+   * [start - eventType.bufferBefore, end + eventType.bufferAfter] must not overlap
+   * that, so the buffers on both sides add up. A booking counts toward
+   * `maxBookingsPerDay` on the host-local date of its real `start` (buffers never
+   * move it to another day). Pass bookings that should not count in `busy` instead.
    */
-  readonly bookings?: readonly InstantInterval[]
+  readonly bookings?: readonly ExistingBooking[]
   /**
    * Only slots that lie fully inside [rangeStart, rangeEnd] are returned. The
    * range may span at most 400 days, and `rangeStart`, `rangeEnd` and `now` must

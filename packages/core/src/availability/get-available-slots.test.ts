@@ -4,6 +4,7 @@ import {
   AvailabilityInputError,
   type DateOverride,
   type EventTypeRules,
+  type ExistingBooking,
   getAvailableSlots,
   type WeeklyHours,
 } from './index.ts'
@@ -20,15 +21,18 @@ interface Scenario {
   /** Defaults to a 60-minute event with no other rules. */
   eventType?: Partial<EventTypeRules>
   busy?: [string, string][]
-  bookings?: [string, string][]
+  /** [start, end] or [start, end, { the booking's own buffers }]. */
+  bookings?: [string, string, BookingBuffers?][]
   range: [string, string]
   now: string
 }
 
+type BookingBuffers = Pick<ExistingBooking, 'bufferBeforeMinutes' | 'bufferAfterMinutes'>
+
 function toInput(s: Scenario): AvailabilityInput {
   const instant = (iso: string) => Temporal.Instant.from(iso)
-  const intervals = (list: [string, string][] = []) =>
-    list.map(([start, end]) => ({ start: instant(start), end: instant(end) }))
+  const intervals = (list: [string, string, BookingBuffers?][] = []) =>
+    list.map(([start, end, buffers]) => ({ start: instant(start), end: instant(end), ...buffers }))
   return {
     schedule: {
       timeZone: s.timeZone ?? NEW_YORK,
@@ -238,6 +242,61 @@ describe('getAvailableSlots', () => {
       // Bookings block buffer windows the same way.
       expect(slots({ ...scenario, eventType, busy: [], bookings: scenario.busy })).toEqual(expected)
     })
+
+    describe("an existing booking's own buffers", () => {
+      const base: Scenario = {
+        weeklyHours: { monday: [hours('09:00', '13:00')] },
+        eventType: { slotStepMinutes: 30 },
+        range: MONDAY,
+        now: LAST_SUNDAY,
+      }
+      const early: [string, string] = ['2026-10-19T09:00-04:00', '2026-10-19T09:30-04:00']
+      const late: [string, string] = ['2026-10-19T12:00-04:00', '2026-10-19T12:30-04:00']
+
+      it('without them, only the booking itself blocks', () => {
+        expect(slots({ ...base, bookings: [early, late] })).toEqual([
+          edt('2026-10-19', '09:30', '10:30'),
+          edt('2026-10-19', '10:00', '11:00'),
+          edt('2026-10-19', '10:30', '11:30'),
+          edt('2026-10-19', '11:00', '12:00'),
+        ])
+      })
+
+      it('blocks them too', () => {
+        expect(
+          slots({
+            ...base,
+            bookings: [
+              [...early, { bufferAfterMinutes: 30 }], // blocks 09:00–10:00
+              [...late, { bufferBeforeMinutes: 30 }], // blocks 11:30–12:30
+            ],
+          }),
+        ).toEqual([
+          // 09:30 is gone: it overlaps the early booking's after-buffer.
+          edt('2026-10-19', '10:00', '11:00'),
+          edt('2026-10-19', '10:30', '11:30'),
+          // 11:00 is gone: it overlaps the late booking's before-buffer.
+        ])
+      })
+
+      it("adds them to the new slot's buffers", () => {
+        // 15 minutes after the booking plus 15 minutes before the new slot: first start 10:30.
+        expect(
+          slots({
+            ...base,
+            weeklyHours: { monday: [hours('09:00', '12:00')] },
+            eventType: { bufferBeforeMinutes: 15, slotStepMinutes: 15 },
+            bookings: [
+              ['2026-10-19T09:00-04:00', '2026-10-19T10:00-04:00', { bufferAfterMinutes: 15 }],
+            ],
+          }),
+        ).toEqual([
+          edt('2026-10-19', '10:30', '11:30'),
+          edt('2026-10-19', '10:45', '11:45'),
+          edt('2026-10-19', '11:00', '12:00'),
+        ])
+      })
+    })
   })
 
   describe('minimum notice', () => {
@@ -361,6 +420,27 @@ describe('getAvailableSlots', () => {
         edt('2026-10-19', '10:00', '11:00'),
         edt('2026-10-19', '11:00', '12:00'),
         edt('2026-10-19', '12:00', '13:00'),
+      ])
+    })
+
+    it('counts a booking on the day of its real start, even when its buffer starts the day before', () => {
+      // Tuesday 00:10–00:40 with a 15-minute before-buffer blocks from Monday 23:55,
+      // but it is Tuesday's booking.
+      expect(
+        slots({
+          weeklyHours: weekdays(hours('09:00', '12:00'), hours('23:00', '24:00')),
+          eventType: { maxBookingsPerDay: 1 },
+          bookings: [
+            ['2026-10-20T00:10-04:00', '2026-10-20T00:40-04:00', { bufferBeforeMinutes: 15 }],
+          ],
+          range: ['2026-10-19T00:00-04:00', '2026-10-21T00:00-04:00'],
+          now: LAST_SUNDAY,
+        }),
+      ).toEqual([
+        edt('2026-10-19', '09:00', '10:00'),
+        edt('2026-10-19', '10:00', '11:00'),
+        edt('2026-10-19', '11:00', '12:00'),
+        // Monday 23:00–24:00 overlaps the buffer from 23:55. Tuesday already has its one booking.
       ])
     })
   })
@@ -858,6 +938,34 @@ describe('getAvailableSlots', () => {
         /bookings\[0\]\.start must be a Temporal\.Instant/,
       ],
       [
+        "booking's buffer over a day",
+        () => ({
+          ...valid(),
+          bookings: [
+            {
+              start: at('2026-10-19T10:00Z'),
+              end: at('2026-10-19T11:00Z'),
+              bufferAfterMinutes: 1441,
+            },
+          ],
+        }),
+        /bookings\[0\]\.bufferAfterMinutes must be a whole number from 0 to 1440, got 1441/,
+      ],
+      [
+        "negative booking's buffer",
+        () => ({
+          ...valid(),
+          bookings: [
+            {
+              start: at('2026-10-19T10:00Z'),
+              end: at('2026-10-19T11:00Z'),
+              bufferBeforeMinutes: -1,
+            },
+          ],
+        }),
+        /bookings\[0\]\.bufferBeforeMinutes must be a whole number from 0 to 1440, got -1/,
+      ],
+      [
         'now as a string',
         () => ({ ...valid(), now: '2026-10-18T12:00Z' as unknown as Temporal.Instant }),
         /now must be a Temporal\.Instant/,
@@ -866,6 +974,16 @@ describe('getAvailableSlots', () => {
       const input = build()
       expect(() => getAvailableSlots(input)).toThrow(AvailabilityInputError)
       expect(() => getAvailableSlots(input)).toThrow(message)
+    })
+
+    it('widens a booking at the very start of Temporal’s range without a RangeError', () => {
+      const earliest = Temporal.Instant.fromEpochNanoseconds(-8_640_000_000_000_000_000_000n)
+      const booking = {
+        start: earliest,
+        end: earliest.add({ hours: 1 }),
+        bufferBeforeMinutes: 1440,
+      }
+      expect(getAvailableSlots({ ...valid(), bookings: [booking] })).toHaveLength(3)
     })
 
     it('treats a weekday set to undefined as a day off', () => {
