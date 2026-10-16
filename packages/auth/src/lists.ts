@@ -39,6 +39,12 @@ interface Filter {
 
 const NON_NEGATIVE_INTEGER = /^\d{1,9}$/
 
+/** Over HTTP paging arrives as text; server-side `auth.api` calls may pass numbers. */
+const isPage = (v: unknown) =>
+  typeof v === 'string'
+    ? NON_NEGATIVE_INTEGER.test(v)
+    : typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= 999_999_999
+
 /**
  * Validates paging, sorting, the organization slug and the filter of a list request;
  * returns the filter, if any.
@@ -49,7 +55,7 @@ export function checkListQuery(path: string | undefined, query: unknown): Filter
   const { sortBy, filterField, filterValue, filterOperator, organizationSlug } = query
   for (const param of ['limit', 'offset']) {
     const value = query[param]
-    if (value !== undefined && !(typeof value === 'string' && NON_NEGATIVE_INTEGER.test(value))) {
+    if (value !== undefined && !isPage(value)) {
       throw bad('INVALID_QUERY', `${param} must be a non-negative integer`)
     }
   }

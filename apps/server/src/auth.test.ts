@@ -434,6 +434,22 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
         expect(res.status, path).toBe(status)
         if (code) expect(await res.json(), path).toMatchObject({ code })
       }
+
+      // Server-side calls pass paging as numbers, which Better Auth accepts too.
+      const headers = new Headers({ cookie })
+      const paging = { limit: 10, offset: 0 }
+      await expect(main.auth.api.listMembers({ headers, query: paging })).resolves.toMatchObject({
+        total: 1,
+      })
+      await expect(main.auth.api.listApiKeys({ headers, query: paging })).resolves.toMatchObject({
+        total: 0,
+      })
+      for (const query of [{ offset: -1 }, { offset: 0.5 }, { limit: 1e9 }]) {
+        await expect(
+          main.auth.api.listMembers({ headers, query }),
+          JSON.stringify(query),
+        ).rejects.toMatchObject({ body: { code: 'INVALID_QUERY' } })
+      }
     })
 
     it('list no members (instead of failing) when a filter or offset leaves nothing', async () => {
