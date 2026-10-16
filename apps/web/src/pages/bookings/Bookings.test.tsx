@@ -82,7 +82,7 @@ describe('the bookings list', () => {
     await user.click(screen.getByRole('button', { name: 'Show more bookings' }))
     await screen.findByRole('rowheader', { name: 'Call 4' })
     // Keyboard and screen reader users continue at the first new booking.
-    expect(document.activeElement).toBe(screen.getByRole('link', { name: 'Call 3' }))
+    await waitForFocus(screen.getByRole('link', { name: 'Call 3' }))
     expect(screen.getByText('Showing 4 bookings.')).toBeDefined()
     await user.click(screen.getByRole('button', { name: 'Show more bookings' }))
     await screen.findByRole('rowheader', { name: 'Call 5' })

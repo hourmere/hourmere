@@ -592,7 +592,8 @@ describe('editing an event type', () => {
     expect(await screen.findByText('Deleted “Intro call”.')).toBeDefined()
     expect(location()).toBe('/app/event-types')
     expect(api.to(`DELETE /api/v1/event-types/${EVENT_TYPE_ID}`)).toHaveLength(1)
-    expect(screen.getByText(/You have no event types yet/)).toBeDefined()
+    // The list loads again after the navigation.
+    expect(await screen.findByText(/You have no event types yet/)).toBeDefined()
   })
 })
 
