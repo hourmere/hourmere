@@ -87,3 +87,34 @@ A request is authenticated by one of:
 
 `GET /api/v1/me` returns the caller, the organization they act in and whether they used a
 session or an API key.
+
+## Public endpoints
+
+Booking pages and invitee links work without credentials:
+
+- `/api/v1/public/{handle}/{slug}` (event page, `/slots`, `/bookings`) for personal event types.
+- `/api/v1/bookings/manage/{token}` (show, `/cancel`, `/reschedule`): the token is the secret
+  from the invitee's link. Only its SHA-256 is stored, so it is returned once, when the
+  booking is made, and it is never written to the server log.
+
+They are rate limited per client IP (`TRUSTED_PROXIES` decides which address that is): 120
+requests a minute for event pages and for slots, 10 for creating bookings, 30 for manage
+links; beyond that 429 `rate_limited` with `Retry-After`. The counters live in each server
+process's memory, so with several instances a client gets that budget once per instance; a
+shared store comes with multi-instance deployments.
+
+## Retries
+
+`POST /api/v1/public/{handle}/{slug}/bookings` accepts an `Idempotency-Key` header (1–255
+printable ASCII characters). A retry with the same key and the same request returns the
+original booking with 200 instead of booking again (its `manageToken` is null: the secret is
+not stored); the same key with a different request is refused with 409
+`idempotency_key_reused`. Keys are scoped to the organization and the caller's API key, and
+all anonymous callers share one scope, so they must be random (e.g. a UUIDv4), never derived
+from the request.
+
+## Pagination
+
+Lists that can grow without bound, such as `GET /api/v1/bookings`, return a page and a
+`nextCursor`; pass it as `cursor` (with the same filters) for the next page. It is null on the
+last page. Cursors are opaque. `limit` sets the page size (1–100, default 50).

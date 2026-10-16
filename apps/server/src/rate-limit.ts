@@ -1,0 +1,93 @@
+import { createMiddleware } from 'hono/factory'
+
+/** At most `limit` requests per client IP in each `windowSeconds`. */
+export interface RateLimit {
+  limit: number
+  windowSeconds: number
+}
+
+/** Limits for the unauthenticated /api/v1 endpoints (public pages and invitee links). */
+export const PUBLIC_RATE_LIMITS = {
+  /** Public event page. */
+  page: { limit: 120, windowSeconds: 60 },
+  /** Available slots. */
+  slots: { limit: 120, windowSeconds: 60 },
+  /** Creating a booking. */
+  book: { limit: 10, windowSeconds: 60 },
+  /** Invitee manage links: show, cancel, reschedule. */
+  manage: { limit: 30, windowSeconds: 60 },
+} as const satisfies Record<string, RateLimit>
+
+export interface RateLimiter {
+  /** Counts a request from `key`. Returns the seconds to wait when it is over the limit. */
+  hit(key: string): number | undefined
+}
+
+/**
+ * A fixed-window counter per key, kept in this process's memory. Each server instance
+ * counts on its own, so with several instances a client gets the limit once per instance;
+ * a shared store (e.g. Postgres or Redis) comes with multi-instance deployments.
+ */
+export function createRateLimiter(
+  { limit, windowSeconds }: RateLimit,
+  {
+    now = Date.now,
+    maxKeys = 100_000,
+  }: {
+    /** The clock in milliseconds, injectable for tests. */
+    now?: () => number
+    /**
+     * Bounds memory when many addresses show up within one window: the oldest entries are
+     * then dropped (down to 90%, so this is rare) and those clients start a new window.
+     */
+    maxKeys?: number
+  } = {},
+): RateLimiter {
+  const windowMs = windowSeconds * 1000
+  const keysAfterEviction = Math.floor(maxKeys * 0.9)
+  const windows = new Map<string, { count: number; resetAt: number }>()
+  let nextSweep = now() + windowMs
+
+  function sweep(t: number) {
+    for (const [key, w] of windows) if (w.resetAt <= t) windows.delete(key)
+    if (windows.size < maxKeys) return
+    for (const key of windows.keys()) {
+      if (windows.size <= keysAfterEviction) break
+      windows.delete(key)
+    }
+  }
+
+  return {
+    hit(key) {
+      const t = now()
+      if (t >= nextSweep || windows.size >= maxKeys) {
+        sweep(t)
+        nextSweep = t + windowMs
+      }
+      let w = windows.get(key)
+      if (!w || w.resetAt <= t) {
+        w = { count: 0, resetAt: t + windowMs }
+        // Re-inserted, so the map stays ordered by window start for eviction.
+        windows.delete(key)
+        windows.set(key, w)
+      }
+      w.count++
+      return w.count > limit ? Math.max(1, Math.ceil((w.resetAt - t) / 1000)) : undefined
+    },
+  }
+}
+
+/**
+ * Answers 429 `rate_limited` with Retry-After once the client IP (c.var.clientIp, which
+ * honors TRUSTED_PROXIES) is over the limiter's limit. For routes' `middleware`.
+ */
+export function rateLimit(limiter: RateLimiter) {
+  return createMiddleware(async (c, next) => {
+    const retryAfter = limiter.hit(c.var.clientIp ?? 'unknown')
+    if (retryAfter !== undefined) {
+      c.header('Retry-After', String(retryAfter))
+      return c.json({ error: 'rate_limited' }, 429)
+    }
+    await next()
+  })
+}

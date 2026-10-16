@@ -102,8 +102,16 @@ const validationHook: Hook<unknown, Env, string, unknown> = (result, c) => {
   return c.json({ error: 'invalid_request', message }, 400)
 }
 
-/** Logs requests without query strings: sign-in links and OAuth callbacks carry secrets there. */
-const requestLogger = logger((line, ...rest) => console.log(line.replace(/\?\S*/, ''), ...rest))
+/**
+ * Removes secrets from a request path or log line: query strings (sign-in links and OAuth
+ * callbacks carry secrets there) and the token in invitee manage links
+ * (/api/v1/bookings/manage/{token}).
+ */
+export function redactSecrets(text: string): string {
+  return text.replace(/\?\S*/, '').replace(/(\/bookings\/manage\/)[^/\s]+/g, '$1[redacted]')
+}
+
+const requestLogger = logger((line, ...rest) => console.log(redactSecrets(line), ...rest))
 
 export function createApp({
   checkDb,
@@ -124,7 +132,7 @@ export function createApp({
   const logError = (c: Context, label: string, detail: unknown) =>
     console.error(
       `${new Date().toISOString()} ERROR ${escapeControlCharacters(
-        `${c.req.method} ${c.req.path}: ${label}${inspect(detail, { breakLength: Number.POSITIVE_INFINITY })}`,
+        `${c.req.method} ${redactSecrets(c.req.path)}: ${label}${inspect(detail, { breakLength: Number.POSITIVE_INFINITY })}`,
       )}`,
     )
 

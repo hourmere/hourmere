@@ -5,6 +5,8 @@ import { createLogMailer, createSmtpMailer, type Mailer } from '@hourmere/mail'
 import { sql } from 'kysely'
 import { createApp } from './app.ts'
 import { loadConfig } from './config.ts'
+import { bookingRoutes } from './routes/bookings.ts'
+import { publicRoutes } from './routes/public.ts'
 
 const config = loadConfig()
 const pool = createPool(config.DATABASE_URL)
@@ -53,6 +55,7 @@ const app = createApp({
   publicUrl: config.PUBLIC_URL,
   trustedProxies: config.trustedProxies,
   webDist: config.WEB_DIST,
+  routes: [publicRoutes({ db }), bookingRoutes({ db })],
 })
 
 const server = serve({ fetch: app.fetch, port: config.PORT }, (info) => {
