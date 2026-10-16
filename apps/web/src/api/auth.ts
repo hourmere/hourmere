@@ -65,6 +65,8 @@ export interface ApiKey {
   expiresAt: string | null
   /** When the key was last used, if ever. */
   lastRequest: string | null
+  /** The organization the key acts in; the server stores it on every key it creates. */
+  metadata: { organizationId?: string } | null
 }
 
 /** A key just created: the only time its secret is returned. */
@@ -83,16 +85,35 @@ export async function listApiKeys(signal?: AbortSignal): Promise<ApiKey[]> {
   return apiKeys
 }
 
-/** `expiresInSeconds` null: the key never expires. */
+/**
+ * Creates a key that acts in `organizationId` (the server refuses an organization the user
+ * is not a member of). Without it the server would pick the personal organization, which
+ * is not what someone working in a team expects. `expiresInSeconds` null: never expires.
+ */
 export function createApiKey(
   name: string,
   expiresInSeconds: number | null,
+  organizationId: string,
 ): Promise<CreatedApiKey> {
   return authRequest('/api-key/create', {
-    body: { name, ...(expiresInSeconds !== null && { expiresIn: expiresInSeconds }) },
+    body: {
+      name,
+      ...(expiresInSeconds !== null && { expiresIn: expiresInSeconds }),
+      metadata: { organizationId },
+    },
   })
 }
 
 export function deleteApiKey(keyId: string): Promise<unknown> {
   return authRequest('/api-key/delete', { body: { keyId } })
+}
+
+export interface Organization {
+  id: string
+  name: string
+}
+
+/** The organizations the signed-in user belongs to. */
+export function listOrganizations(signal?: AbortSignal): Promise<Organization[]> {
+  return authRequest('/organization/list', signal ? { signal } : {})
 }

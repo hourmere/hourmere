@@ -2,7 +2,8 @@ import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import type { ApiKey } from '../api/auth.ts'
-import { fakeApi, json, renderApp, signedIn } from '../test/fake-api.tsx'
+import type { Me } from '../session.tsx'
+import { fakeApi, json, ME, organizations, renderApp, signedInAs } from '../test/fake-api.tsx'
 
 const SECRET = 'hm_NewSecretValueThatIsOnlyShownOnce0123456789abcdefghijklmnopqrstuv'
 
@@ -14,16 +15,31 @@ const existing: ApiKey = {
   createdAt: '2026-10-01T09:00:00.000Z',
   expiresAt: null,
   lastRequest: '2026-10-15T17:30:00.000Z',
+  metadata: { organizationId: ME.organization.id },
 }
 
+const TEAM = {
+  id: '00000000-0000-7000-8000-0000000000c3',
+  name: 'Acme',
+  slug: 'acme',
+  personal: false,
+}
+/** Ada working in her team rather than her personal organization. */
+const IN_TEAM: Me = { ...ME, organization: TEAM }
+
 /** Better Auth's API key endpoints over an in-memory list. */
-function keyServer(initial: ApiKey[] = [existing]) {
+function keyServer(initial: ApiKey[] = [existing], me: Me = ME) {
   let keys = [...initial]
   return fakeApi({
-    ...signedIn,
+    ...signedInAs(me),
+    ...organizations([ME.organization, TEAM]),
     'GET /api/auth/api-key/list': () => json(200, { apiKeys: keys, total: keys.length }),
     'POST /api/auth/api-key/create': ({ body }) => {
-      const { name, expiresIn } = body as { name: string; expiresIn?: number }
+      const { name, expiresIn, metadata } = body as {
+        name: string
+        expiresIn?: number
+        metadata: { organizationId: string }
+      }
       const created = {
         id: '00000000-0000-7000-8000-0000000000b2',
         name,
@@ -34,6 +50,7 @@ function keyServer(initial: ApiKey[] = [existing]) {
           ? new Date(Date.parse('2026-10-16T10:00:00.000Z') + expiresIn * 1000).toISOString()
           : null,
         lastRequest: null,
+        metadata,
       }
       keys = [created, ...keys]
       return json(200, { ...created, key: SECRET })
@@ -58,6 +75,7 @@ describe('the API keys page', () => {
     expect(row).not.toBeNull()
     const cells = within(row as HTMLElement)
     expect(cells.getByText('hm_Old…')).toBeDefined()
+    expect(cells.getByText(ME.organization.name)).toBeDefined()
     expect(cells.getAllByText('Never')).toHaveLength(1) // expires never; it has been used
     expect(
       screen.getByText(/curl -H "Authorization: Bearer hm_…" http:\/\/localhost:\d+\/api\/v1\/me/),
@@ -81,7 +99,11 @@ describe('the API keys page', () => {
     await user.click(screen.getByRole('button', { name: 'Create key' }))
 
     expect(api.to('POST /api/auth/api-key/create').map((c) => c.body)).toEqual([
-      { name: 'CI deploy bot', expiresIn: 90 * 24 * 60 * 60 },
+      {
+        name: 'CI deploy bot',
+        expiresIn: 90 * 24 * 60 * 60,
+        metadata: { organizationId: ME.organization.id },
+      },
     ])
     const reveal = await screen.findByRole('region', { name: /Copy your new key “CI deploy bot”/ })
     expect(document.activeElement).toBe(within(reveal).getByRole('heading'))
@@ -111,13 +133,69 @@ describe('the API keys page', () => {
     await user.type(screen.getByLabelText('Name'), 'Laptop')
     await user.click(screen.getByRole('button', { name: 'Create key' }))
     await screen.findByRole('region', { name: /Copy your new key/ })
-    expect(api.to('POST /api/auth/api-key/create')[0]?.body).toEqual({ name: 'Laptop' })
+    expect(api.to('POST /api/auth/api-key/create')[0]?.body).toEqual({
+      name: 'Laptop',
+      metadata: { organizationId: ME.organization.id },
+    })
+  })
+
+  it('creates keys in the organization the person is working in', async () => {
+    const user = userEvent.setup()
+    const api = keyServer([], IN_TEAM)
+    renderApp('/api-keys')
+    await screen.findByText('You have no API keys yet.')
+    const form = screen.getByRole('region', { name: 'Create a key' })
+    expect(form.textContent).toContain('The key will act in Acme.')
+
+    await user.type(screen.getByLabelText('Name'), 'Team agent')
+    await user.click(screen.getByRole('button', { name: 'Create key' }))
+    await screen.findByRole('region', { name: /Copy your new key/ })
+    expect(api.to('POST /api/auth/api-key/create')[0]?.body).toEqual({
+      name: 'Team agent',
+      metadata: { organizationId: TEAM.id },
+    })
+    const row = await rowFor('Team agent')
+    expect(within(row as HTMLElement).getByText('Acme')).toBeDefined()
+  })
+
+  it('names the organization each key acts in', async () => {
+    keyServer([
+      existing,
+      {
+        ...existing,
+        id: '00000000-0000-7000-8000-0000000000a2',
+        name: 'Team bot',
+        metadata: { organizationId: TEAM.id },
+      },
+      {
+        ...existing,
+        id: '00000000-0000-7000-8000-0000000000a3',
+        name: 'Old bot',
+        metadata: { organizationId: '00000000-0000-7000-8000-0000000000ff' },
+      },
+      {
+        ...existing,
+        id: '00000000-0000-7000-8000-0000000000a4',
+        name: 'Legacy bot',
+        metadata: null,
+      },
+    ])
+    renderApp('/api-keys')
+    const organizationIn = async (name: string) =>
+      within((await rowFor(name)) as HTMLElement).getByText(
+        (_, el) => el?.getAttribute('data-label') === 'Organization',
+      ).textContent
+    expect(await organizationIn('Claude Desktop')).toBe(ME.organization.name)
+    expect(await organizationIn('Team bot')).toBe('Acme')
+    expect(await organizationIn('Old bot')).toBe('An organization you have left')
+    expect(await organizationIn('Legacy bot')).toBe('Personal organization')
   })
 
   it('shows why a key could not be created', async () => {
     const user = userEvent.setup()
     fakeApi({
-      ...signedIn,
+      ...signedInAs(ME),
+      ...organizations(),
       'GET /api/auth/api-key/list': () => json(200, { apiKeys: [], total: 0 }),
       'POST /api/auth/api-key/create': () =>
         json(403, {

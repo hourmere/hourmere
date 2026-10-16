@@ -1,7 +1,16 @@
 import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
-import { fakeApi, instance, json, ME, renderApp, signedIn, signedOut } from './test/fake-api.tsx'
+import {
+  fakeApi,
+  instance,
+  json,
+  ME,
+  organizations,
+  renderApp,
+  signedIn,
+  signedOut,
+} from './test/fake-api.tsx'
 
 const location = () => screen.getByTestId('location').textContent
 
@@ -80,6 +89,7 @@ describe('the session gate', () => {
     fakeApi({
       ...signedIn,
       ...instance(),
+      ...organizations(),
       'GET /api/auth/api-key/list': () =>
         keys++ === 0 ? json(200, { apiKeys: [], total: 0 }) : json(401, { code: 'UNAUTHORIZED' }),
       'POST /api/auth/api-key/create': () => json(401, { code: 'UNAUTHORIZED' }),

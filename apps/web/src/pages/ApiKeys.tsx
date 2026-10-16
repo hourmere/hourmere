@@ -6,11 +6,12 @@ import {
   createApiKey,
   deleteApiKey,
   listApiKeys,
+  listOrganizations,
 } from '../api/auth.ts'
 import { errorMessage } from '../api/errors.ts'
 import { CopyButton } from '../components/CopyButton.tsx'
 import { useLoad, usePageTitle } from '../hooks.ts'
-import { useMe } from '../session.tsx'
+import { type Me, useMe } from '../session.tsx'
 
 const DAY = 24 * 60 * 60
 
@@ -37,6 +38,12 @@ function formatDate(iso: string, format = dateFormat) {
   )
 }
 
+/** The keys, and the names of the organizations they act in (by id). */
+async function loadKeys(signal: AbortSignal) {
+  const [keys, organizations] = await Promise.all([listApiKeys(signal), listOrganizations(signal)])
+  return { keys, organizations: new Map(organizations.map((o) => [o.id, o.name])) }
+}
+
 /** The command that checks a key works: GET /api/v1/me answers with whom it acts as. */
 const curlExample = (key: string) =>
   `curl -H "Authorization: Bearer ${key}" ${window.location.origin}/api/v1/me`
@@ -44,15 +51,16 @@ const curlExample = (key: string) =>
 export function ApiKeysPage() {
   usePageTitle('API keys')
   const me = useMe()
-  const [keys, reload] = useLoad(listApiKeys)
+  const [keys, reload] = useLoad(loadKeys)
   const [created, setCreated] = useState<CreatedApiKey | null>(null)
 
   return (
     <>
       <h1>API keys</h1>
       <p className="lede">
-        API keys let AI agents and scripts use Hourmere for you, through the same API as this app. A
-        key can do anything you can do in {me.organization.name}, so treat it like a password.
+        API keys let AI agents and scripts use Hourmere for you, through the same API as this app.
+        Each key acts in one organization and can do anything you can do there, so treat it like a
+        password.
       </p>
 
       {created ? (
@@ -64,6 +72,7 @@ export function ApiKeysPage() {
         />
       ) : (
         <CreateKeyForm
+          organization={me.organization}
           onCreated={(key) => {
             setCreated(key)
             reload()
@@ -83,10 +92,14 @@ export function ApiKeysPage() {
           </div>
         )}
         {keys.status === 'ready' &&
-          (keys.data.length === 0 ? (
+          (keys.data.keys.length === 0 ? (
             <p className="muted">You have no API keys yet.</p>
           ) : (
-            <KeyTable keys={keys.data} onRevoked={reload} />
+            <KeyTable
+              keys={keys.data.keys}
+              organizations={keys.data.organizations}
+              onRevoked={reload}
+            />
           ))}
       </section>
 
@@ -110,7 +123,14 @@ export function ApiKeysPage() {
   )
 }
 
-function CreateKeyForm({ onCreated }: { onCreated: (key: CreatedApiKey) => void }) {
+function CreateKeyForm({
+  organization,
+  onCreated,
+}: {
+  /** The organization the person is working in (GET /api/v1/me); new keys act in it. */
+  organization: Me['organization']
+  onCreated: (key: CreatedApiKey) => void
+}) {
   const [name, setName] = useState('')
   const [expiresIn, setExpiresIn] = useState('')
   const [creating, setCreating] = useState(false)
@@ -122,7 +142,9 @@ function CreateKeyForm({ onCreated }: { onCreated: (key: CreatedApiKey) => void 
     setCreating(true)
     setError(null)
     try {
-      onCreated(await createApiKey(name.trim(), expiresIn ? Number(expiresIn) : null))
+      onCreated(
+        await createApiKey(name.trim(), expiresIn ? Number(expiresIn) : null, organization.id),
+      )
     } catch (err) {
       setError(`Could not create the key. ${errorMessage(err)}`)
       setCreating(false)
@@ -132,6 +154,10 @@ function CreateKeyForm({ onCreated }: { onCreated: (key: CreatedApiKey) => void 
   return (
     <section aria-labelledby="create-heading" className="panel">
       <h2 id="create-heading">Create a key</h2>
+      <p>
+        The key will act in <strong>{organization.name}</strong>
+        {organization.personal && ', your personal organization'}.
+      </p>
       <form className="form-row" onSubmit={submit}>
         <div className="field">
           <label htmlFor="key-name">Name</label>
@@ -214,7 +240,25 @@ function NewKey({ apiKey, onDone }: { apiKey: CreatedApiKey; onDone: () => void 
   )
 }
 
-function KeyTable({ keys, onRevoked }: { keys: ApiKey[]; onRevoked: () => void }) {
+/** The name of the organization a key acts in. */
+function organizationOf(apiKey: ApiKey, organizations: ReadonlyMap<string, string>) {
+  const id = apiKey.metadata?.organizationId
+  // Keys made before the server stored an organization on every key act in the personal one.
+  if (typeof id !== 'string') return <span className="muted">Personal organization</span>
+  // A key stops working when its owner leaves the organization.
+  return organizations.get(id) ?? <span className="muted">An organization you have left</span>
+}
+
+function KeyTable({
+  keys,
+  organizations,
+  onRevoked,
+}: {
+  keys: ApiKey[]
+  /** Organization names by id. */
+  organizations: ReadonlyMap<string, string>
+  onRevoked: () => void
+}) {
   const now = Date.now()
   return (
     <table className="table">
@@ -222,6 +266,7 @@ function KeyTable({ keys, onRevoked }: { keys: ApiKey[]; onRevoked: () => void }
         <tr>
           <th scope="col">Name</th>
           <th scope="col">Key</th>
+          <th scope="col">Organization</th>
           <th scope="col">Created</th>
           <th scope="col">Last used</th>
           <th scope="col">Expires</th>
@@ -240,6 +285,7 @@ function KeyTable({ keys, onRevoked }: { keys: ApiKey[]; onRevoked: () => void }
             <td data-label="Key">
               <code>{key.start ? `${key.start}…` : '…'}</code>
             </td>
+            <td data-label="Organization">{organizationOf(key, organizations)}</td>
             <td data-label="Created">{formatDate(key.createdAt)}</td>
             <td data-label="Last used">
               {key.lastRequest ? (

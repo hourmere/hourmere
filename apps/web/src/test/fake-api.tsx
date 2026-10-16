@@ -43,7 +43,8 @@ export function fakeApi(routes: Routes) {
       body: text ? JSON.parse(text) : undefined,
     }
     calls.push(call)
-    const handler = routes[`${request.method} ${url.pathname}`]
+    const route = `${request.method} ${url.pathname}`
+    const handler = Object.hasOwn(routes, route) ? routes[route] : undefined
     if (!handler) {
       recordUnexpectedRequest(`${request.method} ${call.path}`)
       throw new TypeError('Failed to fetch')
@@ -69,7 +70,16 @@ export const ME: Schemas['Me'] = {
   principal: { kind: 'session', apiKeyId: null },
 }
 
-export const signedIn: Routes = { 'GET /api/v1/me': () => json(200, ME) }
+export const signedInAs = (me: Schemas['Me']): Routes => ({
+  'GET /api/v1/me': () => json(200, me),
+})
+export const signedIn = signedInAs(ME)
+/** Better Auth's list of the signed-in user's organizations. */
+export const organizations = (
+  list: { id: string; name: string }[] = [ME.organization],
+): Routes => ({
+  'GET /api/auth/organization/list': () => json(200, list),
+})
 export const signedOut: Routes = {
   'GET /api/v1/me': () => json(401, { error: 'unauthorized' }),
 }

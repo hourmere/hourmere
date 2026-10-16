@@ -20,30 +20,34 @@ const INTERRUPTED = 'That sign-in attempt expired or was interrupted. Please try
 const USE_EMAIL_LINK = 'Sign in with an email link instead.'
 
 // Better Auth sends people back with ?error=CODE (and an error_description, which is never
-// shown: anyone can put text in a link to this page). Codes are matched case-insensitively.
-const SIGN_IN_ERRORS: Record<string, string> = {
-  invalid_token:
-    'That sign-in link is invalid, has expired or was already used. Request a new one below.',
-  expired_token: 'That sign-in link has expired. Request a new one below.',
-  email_not_verified: `Your sign-in provider did not confirm your email address. ${USE_EMAIL_LINK}`,
-  email_not_found: `Your sign-in provider did not share your email address. ${USE_EMAIL_LINK}`,
-  access_denied: 'Sign-in was cancelled.',
-  state_mismatch: INTERRUPTED,
-  state_not_found: INTERRUPTED,
-  please_restart_the_process: INTERRUPTED,
-  invalid_callback_request: INTERRUPTED,
-  invalid_code: INTERRUPTED,
-  no_code: INTERRUPTED,
-  account_not_linked: `This email address already has an account. ${USE_EMAIL_LINK}`,
-  unable_to_link_account: `This sign-in could not be connected to your account. ${USE_EMAIL_LINK}`,
-  signup_disabled: 'New accounts cannot be created on this instance.',
-  new_user_signup_disabled: 'New accounts cannot be created on this instance.',
-}
+// shown: anyone can put text in a link to this page). Codes are matched case-insensitively,
+// in a Map: the code comes from the URL, and a plain object would answer `constructor` or
+// `__proto__` with what it inherits.
+const SIGN_IN_ERRORS = new Map<string, string>(
+  Object.entries({
+    invalid_token:
+      'That sign-in link is invalid, has expired or was already used. Request a new one below.',
+    expired_token: 'That sign-in link has expired. Request a new one below.',
+    email_not_verified: `Your sign-in provider did not confirm your email address. ${USE_EMAIL_LINK}`,
+    email_not_found: `Your sign-in provider did not share your email address. ${USE_EMAIL_LINK}`,
+    access_denied: 'Sign-in was cancelled.',
+    state_mismatch: INTERRUPTED,
+    state_not_found: INTERRUPTED,
+    please_restart_the_process: INTERRUPTED,
+    invalid_callback_request: INTERRUPTED,
+    invalid_code: INTERRUPTED,
+    no_code: INTERRUPTED,
+    account_not_linked: `This email address already has an account. ${USE_EMAIL_LINK}`,
+    unable_to_link_account: `This sign-in could not be connected to your account. ${USE_EMAIL_LINK}`,
+    signup_disabled: 'New accounts cannot be created on this instance.',
+    new_user_signup_disabled: 'New accounts cannot be created on this instance.',
+  }),
+)
 
 /** What to tell someone sent back to sign-in with `?error=code`; null without an error. */
 export function describeSignInError(code: string | null): string | null {
   if (code === null) return null
-  const known = SIGN_IN_ERRORS[code.toLowerCase()]
+  const known = SIGN_IN_ERRORS.get(code.toLowerCase())
   if (known) return known
   // Unknown codes are named so people can report them, but only if they look like codes.
   const shown = /^[A-Za-z0-9_.-]{1,64}$/.test(code) ? ` (${code})` : ''
@@ -94,7 +98,7 @@ function SignInForm({ next }: { next: string }) {
   // Better Auth comes back here (keeping `next`) when the link or the provider fails.
   const redirects = { callbackURL: next, errorCallbackURL: signInPath(next) }
   const providers =
-    instance.status === 'ready' ? PROVIDERS.filter((p) => instance.data.signIn[p.id]) : []
+    instance.status === 'ready' ? PROVIDERS.filter((p) => instance.data.signIn[p.id] === true) : []
 
   async function requestLink(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()

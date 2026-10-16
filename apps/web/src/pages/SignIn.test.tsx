@@ -2,10 +2,20 @@ import { act, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { goTo } from '../browser.ts'
-import { fakeApi, instance, json, renderApp, signedIn, signedOut } from '../test/fake-api.tsx'
+import {
+  fakeApi,
+  instance,
+  json,
+  organizations,
+  renderApp,
+  signedIn,
+  signedOut,
+} from '../test/fake-api.tsx'
 import { describeSignInError } from './SignIn.tsx'
 
 vi.mock('../browser.ts', () => ({ goTo: vi.fn() }))
+
+const PROTOTYPE_KEYS = ['__proto__', 'constructor', 'toString', 'hasOwnProperty']
 
 const location = () => screen.getByTestId('location').textContent
 const heading = () => screen.findByRole('heading', { name: 'Sign in to Hourmere' })
@@ -107,6 +117,16 @@ describe('the sign-in page', () => {
     await vi.waitFor(() => expect(location()).toBe('/sign-in'))
   })
 
+  it.each(PROTOTYPE_KEYS)('shows the page for ?error=%s', async (code) => {
+    fakeApi({ ...signedOut, ...instance() })
+    renderApp(`/sign-in?next=%2Fsettings&error=${code}`)
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      `Sign-in did not work (${code}). Please try again.`,
+    )
+    expect(screen.getByRole('button', { name: 'Email me a sign-in link' })).toBeDefined()
+    await vi.waitFor(() => expect(location()).toBe('/sign-in?next=%2Fsettings'))
+  })
+
   it('reports a rate limit when sending the link', async () => {
     fakeApi({
       ...signedOut,
@@ -125,6 +145,7 @@ describe('the sign-in page', () => {
   it('sends people who are already signed in on to where they were going', async () => {
     fakeApi({
       ...signedIn,
+      ...organizations(),
       'GET /api/auth/api-key/list': () => json(200, { apiKeys: [], total: 0 }),
     })
     renderApp('/sign-in?next=%2Fapi-keys')
@@ -166,5 +187,9 @@ describe('describeSignInError', () => {
     expect(describeSignInError('Visit evil.example to fix your account now')).toBe(
       'Sign-in did not work. Please try again.',
     )
+  })
+
+  it.each(PROTOTYPE_KEYS)('treats %s as an unknown code, not an inherited property', (code) => {
+    expect(describeSignInError(code)).toBe(`Sign-in did not work (${code}). Please try again.`)
   })
 })
