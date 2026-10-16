@@ -1,7 +1,14 @@
 import type { Db } from '@hourmere/db'
 import { createTestUser, type TestUser } from '@hourmere/scheduling/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { createTestApp, documentedOperations, productApp, type TestApp } from './test-app.ts'
+import {
+  closedObjects,
+  createTestApp,
+  openApiDocument,
+  productApp,
+  responseAndRequestStrictness,
+  type TestApp,
+} from './test-app.ts'
 
 const serverUrl = process.env.DATABASE_URL
 
@@ -13,8 +20,28 @@ const ROUTES = {
 }
 
 describe('schedule routes in the OpenAPI document', () => {
+  it('documents open responses and strict request bodies, down to the intervals', async () => {
+    const doc = await openApiDocument(productApp({} as Db))
+    expect(responseAndRequestStrictness(doc, Object.keys(ROUTES))).toEqual({
+      closedResponses: [],
+      openRequests: [],
+    })
+    const body = (path: string, method: string) => {
+      const schema = doc.paths[path]?.[method]?.requestBody?.content?.['application/json']?.schema
+      if (!schema) throw new Error(`no request body for ${method} ${path}`)
+      return closedObjects(doc, schema)
+    }
+    expect(body('/api/v1/schedules', 'post')).toEqual(
+      expect.arrayContaining(['$', '$.weeklyHours', '$.weeklyHours.monday[]']),
+    )
+    expect(body('/api/v1/schedules/{id}', 'patch')).toEqual(
+      expect.arrayContaining(['$', '$.weeklyHours', '$.weeklyHours.sunday[]']),
+    )
+    expect(body('/api/v1/schedules/{id}/overrides/{date}', 'put')).toEqual(['$', '$.intervals[]'])
+  })
+
   it('lists every route as authenticated', async () => {
-    const paths = await documentedOperations(productApp({} as Db))
+    const { paths } = await openApiDocument(productApp({} as Db))
     for (const [path, methods] of Object.entries(ROUTES)) {
       expect(Object.keys(paths[path] ?? {})).toEqual(methods)
       for (const operation of Object.values(paths[path] ?? {})) {

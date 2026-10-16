@@ -3,17 +3,26 @@ import { createTestUser } from '@hourmere/scheduling/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
   createTestApp,
-  documentedOperations,
+  openApiDocument,
   PUBLIC_URL,
   productApp,
+  responseAndRequestStrictness,
   type TestApp,
 } from './test-app.ts'
 
 const serverUrl = process.env.DATABASE_URL
 
 describe('profile routes in the OpenAPI document', () => {
+  it('documents open responses and strict request bodies', async () => {
+    const doc = await openApiDocument(productApp({} as Db))
+    expect(responseAndRequestStrictness(doc, ['/api/v1/profile'])).toEqual({
+      closedResponses: [],
+      openRequests: [],
+    })
+  })
+
   it('lists every route as authenticated, with its error responses', async () => {
-    const paths = await documentedOperations(productApp({} as Db))
+    const { paths } = await openApiDocument(productApp({} as Db))
     expect(Object.keys(paths['/api/v1/profile'] ?? {})).toEqual(['get', 'put'])
     for (const operation of Object.values(paths['/api/v1/profile'] ?? {})) {
       expect(operation.security).toEqual([{ apiKey: [] }, { session: [] }])

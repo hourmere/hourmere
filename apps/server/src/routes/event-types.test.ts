@@ -1,13 +1,41 @@
 import type { Db } from '@hourmere/db'
 import { createTestTeam, createTestUser, type TestUser } from '@hourmere/scheduling/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { createTestApp, documentedOperations, productApp, type TestApp } from './test-app.ts'
+import {
+  closedObjects,
+  createTestApp,
+  openApiDocument,
+  productApp,
+  responseAndRequestStrictness,
+  type TestApp,
+} from './test-app.ts'
 
 const serverUrl = process.env.DATABASE_URL
 
 describe('event type routes in the OpenAPI document', () => {
+  it('documents open responses and strict request bodies, down to locations and questions', async () => {
+    const doc = await openApiDocument(productApp({} as Db))
+    const paths = ['/api/v1/event-types', '/api/v1/event-types/{id}']
+    expect(responseAndRequestStrictness(doc, paths)).toEqual({
+      closedResponses: [],
+      openRequests: [],
+    })
+    for (const [path, method] of [
+      ['/api/v1/event-types', 'post'],
+      ['/api/v1/event-types/{id}', 'patch'],
+    ] as const) {
+      const schema = doc.paths[path]?.[method]?.requestBody?.content?.['application/json']?.schema
+      if (!schema) throw new Error(`no request body for ${method} ${path}`)
+      expect(closedObjects(doc, schema)).toEqual([
+        '$',
+        ...[0, 1, 2, 3, 4].map((i) => `$.location|oneOf${i}`),
+        '$.questions[]',
+      ])
+    }
+  })
+
   it('lists every route as authenticated', async () => {
-    const paths = await documentedOperations(productApp({} as Db))
+    const { paths } = await openApiDocument(productApp({} as Db))
     expect(Object.keys(paths['/api/v1/event-types'] ?? {})).toEqual(['get', 'post'])
     expect(Object.keys(paths['/api/v1/event-types/{id}'] ?? {})).toEqual(['get', 'patch', 'delete'])
     for (const path of ['/api/v1/event-types', '/api/v1/event-types/{id}']) {
@@ -164,7 +192,7 @@ describe.skipIf(!serverUrl)('event type routes', () => {
     expect((await asAdmin.delete(`/api/v1/event-types/${id}`)).status).toBe(204)
   })
 
-  it("answers 400 schedule_not_found for a schedule that is not the host's", async () => {
+  it("answers 400 invalid_schedule_id for a schedule that is not the host's", async () => {
     const [user, other] = [await createTestUser(t.db), await createTestUser(t.db)]
     const schedule = await api(other).post('/api/v1/schedules', {
       name: 'Theirs',
@@ -175,7 +203,7 @@ describe.skipIf(!serverUrl)('event type routes', () => {
     expect(res).toEqual({
       status: 400,
       body: {
-        error: 'schedule_not_found',
+        error: 'invalid_schedule_id',
         message: "scheduleId must be one of the host's schedules",
       },
     })

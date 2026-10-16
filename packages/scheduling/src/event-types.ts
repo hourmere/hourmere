@@ -260,7 +260,8 @@ export async function updateEventType(
       const row = await visibleRow(trx, ctx, id, { lock: true })
       await assertCanWrite(trx, ctx, row)
       const scheduleId = validScheduleId(input.scheduleId)
-      if (Object.keys(changes).length > 0) {
+      if (Object.keys(changes).length > 0 || scheduleId !== undefined) {
+        // Also for a change of the host's schedule alone, so updatedAt moves with it.
         const fields = validFields({ ...fieldsOf(row), ...changes })
         await trx.updateTable('event_types').set(columns(fields)).where('id', '=', row.id).execute()
       }
@@ -380,12 +381,7 @@ async function withWriteErrors<T>(write: () => Promise<T>): Promise<T> {
         'event_type_hosts_schedule_id_user_id_fkey',
       )
     ) {
-      throw new DomainError(
-        'invalid',
-        'schedule_not_found',
-        "scheduleId must be one of the host's schedules",
-        { cause: error },
-      )
+      throw invalidScheduleId({ cause: error })
     }
     throw error
   }
@@ -470,15 +466,21 @@ function optionalText(value: unknown, path: string, max: number): string | null 
   return value.trim() || null
 }
 
+/**
+ * A `scheduleId` in the body that is not one of the host's schedules. Not
+ * `schedule_not_found`, which is the 404 for a schedule named in the path.
+ */
+const invalidScheduleId = (options?: { cause?: unknown }) =>
+  new DomainError(
+    'invalid',
+    'invalid_schedule_id',
+    "scheduleId must be one of the host's schedules",
+    options,
+  )
+
 function validScheduleId(value: unknown): string | null | undefined {
   if (value === undefined || value === null) return value
-  if (!isUuid(value)) {
-    throw new DomainError(
-      'invalid',
-      'schedule_not_found',
-      "scheduleId must be one of the host's schedules",
-    )
-  }
+  if (!isUuid(value)) throw invalidScheduleId()
   return value
 }
 
@@ -528,18 +530,16 @@ function validLocation(value: unknown): EventTypeLocation | null {
     }
     case 'link': {
       expect(['url'])
+      const max = EVENT_TYPE_LIMITS.urlMaxLength
       const { url } = value
-      if (
-        typeof url !== 'string' ||
-        url.length > EVENT_TYPE_LIMITS.urlMaxLength ||
-        !URL.canParse(url) ||
-        !['http:', 'https:'].includes(new URL(url).protocol)
-      ) {
-        return fail(
-          `location.url must be an http or https URL of at most ${EVENT_TYPE_LIMITS.urlMaxLength} characters`,
-        )
+      // The parsed form is what gets stored: the parser drops tabs and line breaks anywhere
+      // in the input, so the raw string could carry them past URL.canParse.
+      const href =
+        typeof url === 'string' && url.length <= max && URL.canParse(url) ? new URL(url) : undefined
+      if (!href || !['http:', 'https:'].includes(href.protocol) || href.href.length > max) {
+        return fail(`location.url must be an http or https URL of at most ${max} characters`)
       }
-      return { kind, url }
+      return { kind, url: href.href }
     }
     default:
       return fail(`location.kind must be one of ${LOCATION_KINDS.join(', ')}`)

@@ -93,14 +93,92 @@ export async function createTestApp(serverUrl: string): Promise<TestApp> {
   }
 }
 
-/** The operations of `doc` and their security, for checking that routes are documented. */
-export async function documentedOperations(app: ReturnType<typeof createApp>) {
-  const res = await app.request('/api/v1/openapi.json')
-  const doc = (await res.json()) as {
-    paths: Record<
+type Schema = Record<string, unknown>
+type Content = { content?: Record<string, { schema: Schema }> }
+
+export interface OpenApiDoc {
+  paths: Record<
+    string,
+    Record<
       string,
-      Record<string, { security?: unknown; responses: Record<string, unknown> }>
+      { security?: unknown; requestBody?: Content; responses: Record<string, Content> }
     >
+  >
+  components: { schemas: Record<string, Schema> }
+}
+
+/** The app's OpenAPI document, for checking that routes are documented. */
+export async function openApiDocument(app: ReturnType<typeof createApp>): Promise<OpenApiDoc> {
+  const res = await app.request('/api/v1/openapi.json')
+  return (await res.json()) as OpenApiDoc
+}
+
+/** Follows a `#/components/schemas/…` reference. */
+export function resolve(doc: OpenApiDoc, schema: Schema): Schema {
+  const ref = schema.$ref
+  if (typeof ref !== 'string') return schema
+  const target = doc.components.schemas[ref.replace('#/components/schemas/', '')]
+  if (!target) throw new Error(`unresolved ${ref}`)
+  return resolve(doc, target)
+}
+
+/**
+ * Where `schema` (references followed) contains an object that forbids properties it does
+ * not list (`additionalProperties: false`), as JSON-ish paths.
+ */
+export function closedObjects(
+  doc: OpenApiDoc,
+  schema: Schema,
+  path = '$',
+  /** The schemas being visited above this one, so a recursive schema ends. */
+  ancestors = new Set<Schema>(),
+): string[] {
+  const resolved = resolve(doc, schema)
+  if (ancestors.has(resolved)) return []
+  const found = resolved.additionalProperties === false ? [path] : []
+  const children: [string, unknown][] = [
+    ...Object.entries((resolved.properties as Record<string, Schema> | undefined) ?? {}).map(
+      ([name, child]): [string, unknown] => [`${path}.${name}`, child],
+    ),
+    [`${path}[]`, resolved.items],
+    ...(['oneOf', 'anyOf', 'allOf'] as const).flatMap((key) =>
+      ((resolved[key] as Schema[] | undefined) ?? []).map((child, i): [string, unknown] => [
+        `${path}|${key}${i}`,
+        child,
+      ]),
+    ),
+  ]
+  const below = new Set(ancestors).add(resolved)
+  for (const [childPath, child] of children) {
+    if (typeof child === 'object' && child !== null) {
+      found.push(...closedObjects(doc, child as Schema, childPath, below))
+    }
   }
-  return doc.paths
+  return found
+}
+
+/**
+ * Checks the operations under `paths`: every JSON response is open (clients must accept
+ * new fields, so the document must not promise there are none) and every JSON request body
+ * is strict at the top level.
+ */
+export function responseAndRequestStrictness(doc: OpenApiDoc, paths: string[]) {
+  const closedResponses: string[] = []
+  const openRequests: string[] = []
+  for (const path of paths) {
+    for (const [method, operation] of Object.entries(doc.paths[path] ?? {})) {
+      for (const [status, response] of Object.entries(operation.responses)) {
+        const schema = response.content?.['application/json']?.schema
+        if (!schema) continue
+        for (const where of closedObjects(doc, schema)) {
+          closedResponses.push(`${method} ${path} ${status} ${where}`)
+        }
+      }
+      const body = operation.requestBody?.content?.['application/json']?.schema
+      if (body && resolve(doc, body).additionalProperties !== false) {
+        openRequests.push(`${method} ${path}`)
+      }
+    }
+  }
+  return { closedResponses, openRequests }
 }

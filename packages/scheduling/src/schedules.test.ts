@@ -90,23 +90,125 @@ describe.skipIf(!serverUrl)('schedule service', () => {
       expect((await updateSchedule(ctx(user), a.id, { isDefault: false })).isDefault).toBe(false)
       expect(await defaults(user)).toEqual(['B'])
     })
+  })
 
-    it('keeps one default when schedules are created at the same moment', async () => {
-      const user = await createTestUser(db)
-      await Promise.all(
-        Array.from({ length: 5 }, (_, i) => createSchedule(ctx(user), input({ name: `S${i}` }))),
+  // Each test runs two service calls for one user with a fixed interleaving: a gate
+  // transaction holds a row lock the first call needs before it can commit, so the first
+  // call stops mid-transaction; the second runs until it blocks or finishes; then the gate
+  // opens. Without the per-user lock in the service, each of these ends with a unique
+  // violation or with a user who has schedules but no default.
+  describe('concurrent changes to the default', () => {
+    type Outcome = { ok: true; value: unknown } | { ok: false; error: unknown }
+    const settle = (promise: Promise<unknown>): Promise<Outcome> =>
+      promise.then(
+        (value) => ({ ok: true, value }),
+        (error: unknown) => ({ ok: false, error }),
       )
-      expect(await defaults(user)).toHaveLength(1)
+
+    /** Connections of this test database that are waiting for a lock. */
+    const lockWaiters = async () => {
+      const { rows } = await testDb.pool.query<{ n: number }>(
+        `SELECT count(*)::int AS n FROM pg_stat_activity
+          WHERE datname = current_database() AND wait_event_type = 'Lock'`,
+      )
+      return rows[0]?.n ?? 0
+    }
+
+    async function until(condition: () => Promise<boolean>, what: string) {
+      const deadline = Date.now() + 5000
+      while (!(await condition())) {
+        if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`)
+        await new Promise((resolve) => setTimeout(resolve, 5))
+      }
+    }
+
+    /** Runs `first` held at the gate (`gateSql` locks a row it needs), then `second`. */
+    async function interleave(
+      gateSql: string,
+      gateParams: unknown[],
+      first: () => Promise<unknown>,
+      second: () => Promise<unknown>,
+    ): Promise<[Outcome, Outcome]> {
+      const gate = await testDb.pool.connect()
+      try {
+        await gate.query('BEGIN')
+        await gate.query(gateSql, gateParams)
+        const firstOutcome = settle(first())
+        await until(async () => (await lockWaiters()) >= 1, 'the first call to reach the gate')
+        let secondDone = false
+        const secondOutcome = settle(second()).then((outcome) => {
+          secondDone = true
+          return outcome
+        })
+        await until(
+          async () => secondDone || (await lockWaiters()) >= 2,
+          'the second call to block or finish',
+        )
+        await gate.query('COMMIT')
+        return [await firstOutcome, await secondOutcome]
+      } finally {
+        gate.release()
+      }
+    }
+
+    const userRow = 'SELECT 1 FROM auth."user" WHERE id = $1 FOR UPDATE'
+    const ok = { ok: true, value: expect.anything() }
+
+    it('two first schedules: the first to commit is the default, both succeed', async () => {
+      const user = await createTestUser(db)
+      const outcomes = await interleave(
+        userRow, // the insert's foreign key check waits for it
+        [user.id],
+        () => createSchedule(ctx(user), input({ name: 'A' })),
+        () => createSchedule(ctx(user), input({ name: 'B' })),
+      )
+      expect(outcomes).toEqual([ok, ok])
+      expect(await defaults(user)).toEqual(['A'])
     })
 
-    it('keeps one default when several become the default at the same moment', async () => {
+    it('two schedules made the default: the later one wins, both succeed', async () => {
       const user = await createTestUser(db)
-      const schedules = []
-      for (const name of ['A', 'B', 'C', 'D']) {
-        schedules.push(await createSchedule(ctx(user), input({ name })))
-      }
-      await Promise.all(schedules.map((s) => updateSchedule(ctx(user), s.id, { isDefault: true })))
-      expect(await defaults(user)).toHaveLength(1)
+      await createSchedule(ctx(user), input({ name: 'Old' }))
+      const a = await createSchedule(ctx(user), input({ name: 'A' }))
+      const b = await createSchedule(ctx(user), input({ name: 'B' }))
+      const outcomes = await interleave(
+        'SELECT 1 FROM schedules WHERE id = $1 FOR UPDATE', // A's own update waits for it
+        [a.id],
+        () => updateSchedule(ctx(user), a.id, { isDefault: true }),
+        () => updateSchedule(ctx(user), b.id, { isDefault: true }),
+      )
+      expect(outcomes).toEqual([ok, ok])
+      expect(await defaults(user)).toEqual(['B'])
+    })
+
+    it('deleting the last schedule while another is created: the new one is the default', async () => {
+      const user = await createTestUser(db)
+      const last = await createSchedule(ctx(user), input({ name: 'Last' }))
+      await putScheduleOverride(ctx(user), last.id, '2026-12-24', [])
+      const outcomes = await interleave(
+        // The cascade to the overrides waits for it, after the schedule row is deleted.
+        'SELECT 1 FROM schedule_overrides WHERE schedule_id = $1 FOR UPDATE',
+        [last.id],
+        () => deleteSchedule(ctx(user), last.id),
+        () => createSchedule(ctx(user), input({ name: 'New' })),
+      )
+      expect(outcomes).toEqual([{ ok: true, value: undefined }, ok])
+      expect(await defaults(user)).toEqual(['New'])
+    })
+
+    it('creating a schedule while the last one is deleted: the delete is refused', async () => {
+      const user = await createTestUser(db)
+      const last = await createSchedule(ctx(user), input({ name: 'Last' }))
+      const [created, deleted] = await interleave(
+        userRow,
+        [user.id],
+        () => createSchedule(ctx(user), input({ name: 'New' })),
+        () => deleteSchedule(ctx(user), last.id),
+      )
+      expect(created).toEqual(ok)
+      expect(deleted).toMatchObject({ ok: false, error: { code: 'schedule_is_default' } })
+      expect(await defaults(user)).toEqual(['Last'])
+      expect((await listSchedules(ctx(user))).map((s) => s.name)).toEqual(['Last', 'New'])
     })
   })
 

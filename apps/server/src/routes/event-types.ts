@@ -25,41 +25,62 @@ import {
 // Schemas check the JSON shape (400 invalid_request); the service checks values (the rule
 // bounds are the availability engine's) and answers with specific codes, the same for REST
 // and MCP. Limits are documented here.
+//
+// Request bodies are strict (a misspelled field is an error, not ignored); responses are
+// open, because fields may be added to them within /api/v1.
 
 const L = EVENT_TYPE_LIMITS
 
-// Not a named component: zod-to-openapi would add the null of `.nullable()` to the
+const locationKinds = {
+  googleMeet: { kind: z.literal('google_meet') },
+  zoom: { kind: z.literal('zoom') },
+  phone: {
+    kind: z.literal('phone'),
+    number: z.string().openapi({
+      description: "The host's number in E.164",
+      pattern: PHONE_NUMBER_PATTERN.source,
+      example: '+14155550123',
+    }),
+  },
+  inPerson: {
+    kind: z.literal('in_person'),
+    address: z.string().openapi({ minLength: 1, maxLength: L.addressMaxLength }),
+  },
+  link: {
+    kind: z.literal('link'),
+    url: z.string().openapi({
+      description: 'An http or https URL, stored as parsed (normalized)',
+      format: 'uri',
+      maxLength: L.urlMaxLength,
+    }),
+  },
+}
+const locationDoc = {
+  description:
+    'Where the meeting happens, by kind; Meet and Zoom links are generated per booking. null = not set.',
+}
+// Not named components: zod-to-openapi would add the null of `.nullable()` to the
 // component itself, and flattens a union with null.
 const Location = z
   .discriminatedUnion('kind', [
-    z.strictObject({ kind: z.literal('google_meet') }),
-    z.strictObject({ kind: z.literal('zoom') }),
-    z.strictObject({
-      kind: z.literal('phone'),
-      number: z.string().openapi({
-        description: "The host's number in E.164",
-        pattern: PHONE_NUMBER_PATTERN.source,
-        example: '+14155550123',
-      }),
-    }),
-    z.strictObject({
-      kind: z.literal('in_person'),
-      address: z.string().openapi({ minLength: 1, maxLength: L.addressMaxLength }),
-    }),
-    z.strictObject({
-      kind: z.literal('link'),
-      url: z.string().openapi({
-        description: 'An http or https URL',
-        format: 'uri',
-        maxLength: L.urlMaxLength,
-      }),
-    }),
+    z.object(locationKinds.googleMeet),
+    z.object(locationKinds.zoom),
+    z.object(locationKinds.phone),
+    z.object(locationKinds.inPerson),
+    z.object(locationKinds.link),
   ])
   .nullable()
-  .openapi({
-    description:
-      'Where the meeting happens, by kind; Meet and Zoom links are generated per booking. null = not set.',
-  })
+  .openapi(locationDoc)
+const LocationInput = z
+  .discriminatedUnion('kind', [
+    z.strictObject(locationKinds.googleMeet),
+    z.strictObject(locationKinds.zoom),
+    z.strictObject(locationKinds.phone),
+    z.strictObject(locationKinds.inPerson),
+    z.strictObject(locationKinds.link),
+  ])
+  .nullable()
+  .openapi(locationDoc)
 
 const questionFields = {
   id: z.string().openapi({
@@ -160,7 +181,7 @@ const EventTypeInput = z
     minimumNoticeMinutes: fields.minimumNoticeMinutes.optional().openapi({ default: 0 }),
     bookingWindowDays: fields.bookingWindowDays.optional(),
     maxBookingsPerDay: fields.maxBookingsPerDay.optional(),
-    location: fields.location.optional(),
+    location: LocationInput.optional(),
     questions: questions.optional(),
     isActive: fields.isActive.optional().openapi({ default: true }),
     position: fields.position.optional().openapi({ default: 0 }),
@@ -180,7 +201,7 @@ const EventTypeUpdate = z
     minimumNoticeMinutes: fields.minimumNoticeMinutes.optional(),
     bookingWindowDays: fields.bookingWindowDays.optional(),
     maxBookingsPerDay: fields.maxBookingsPerDay.optional(),
-    location: fields.location.optional(),
+    location: LocationInput.optional(),
     questions: questions.optional(),
     isActive: fields.isActive.optional(),
     position: fields.position.optional(),
@@ -198,7 +219,7 @@ const tags = ['Event types']
 const notFound =
   'event_type_not_found: no such event type in the organization, or one the caller cannot see'
 const invalid =
-  'invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, or schedule_not_found (scheduleId is not one of the host’s schedules)'
+  'invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, or invalid_schedule_id (scheduleId is not one of the host’s schedules)'
 const forbidden = `insufficient_role: team event types need the owner or admin role; ${CROSS_ORIGIN_WRITE}`
 const slugTaken = 'slug_taken: another event type on the same page has this slug'
 

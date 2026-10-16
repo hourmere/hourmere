@@ -23,27 +23,33 @@ import {
 // Schemas check the JSON shape (400 invalid_request); the service checks values with the
 // availability engine's own rules and answers with specific codes, the same for REST and
 // MCP. Limits are documented here.
+//
+// Request bodies are strict (a misspelled field is an error, not ignored); responses are
+// open, because fields may be added to them within /api/v1.
 
-const WallClockInterval = z
-  .strictObject({
-    start: z.string().openapi({
-      description: 'Local time HH:MM, 00:00–23:59',
-      pattern: '^\\d{2}:\\d{2}$',
-      example: '09:00',
-    }),
-    end: z.string().openapi({
-      description: 'Local time HH:MM after start; 24:00 is the end of the day',
-      pattern: '^\\d{2}:\\d{2}$',
-      example: '17:00',
-    }),
-  })
-  .openapi('WallClockInterval', {
-    description: 'Intervals of one day must not overlap; touching ones are joined',
-  })
+const interval = {
+  start: z.string().openapi({
+    description: 'Local time HH:MM, 00:00–23:59',
+    pattern: '^\\d{2}:\\d{2}$',
+    example: '09:00',
+  }),
+  end: z.string().openapi({
+    description: 'Local time HH:MM after start; 24:00 is the end of the day',
+    pattern: '^\\d{2}:\\d{2}$',
+    example: '17:00',
+  }),
+}
+const intervalRules = {
+  description: 'Intervals of one day must not overlap; touching ones are joined',
+}
+const WallClockInterval = z.object(interval).openapi('WallClockInterval', intervalRules)
+const WallClockIntervalInput = z
+  .strictObject(interval)
+  .openapi('WallClockIntervalInput', intervalRules)
 
-const day = z.array(WallClockInterval).optional()
-const WeeklyHours = z
-  .strictObject({
+const week = <T extends z.ZodType>(interval: T) => {
+  const day = z.array(interval).optional()
+  return {
     monday: day,
     tuesday: day,
     wednesday: day,
@@ -51,8 +57,13 @@ const WeeklyHours = z
     friday: day,
     saturday: day,
     sunday: day,
-  })
-  .openapi('WeeklyHours', { description: 'A missing or empty weekday is unavailable' })
+  }
+}
+const weekRules = { description: 'A missing or empty weekday is unavailable' }
+const WeeklyHours = z.object(week(WallClockInterval)).openapi('WeeklyHours', weekRules)
+const WeeklyHoursInput = z
+  .strictObject(week(WallClockIntervalInput))
+  .openapi('WeeklyHoursInput', weekRules)
 
 const Schedule = z
   .object({
@@ -77,7 +88,7 @@ const ScheduleInput = z
   .strictObject({
     name,
     timeZone,
-    weeklyHours: WeeklyHours,
+    weeklyHours: WeeklyHoursInput,
     isDefault: z.boolean().optional().openapi({
       description:
         "Make it the default (the previous default stops being one). The user's first schedule is always the default.",
@@ -89,7 +100,7 @@ const ScheduleUpdate = z
   .strictObject({
     name: name.optional(),
     timeZone: timeZone.optional(),
-    weeklyHours: WeeklyHours.optional(),
+    weeklyHours: WeeklyHoursInput.optional(),
     isDefault: z.boolean().optional().openapi({
       description:
         'true makes it the default. The default cannot be set to false; make another schedule the default instead.',
@@ -110,7 +121,7 @@ const ScheduleOverride = z
 
 const ScheduleOverrideInput = z
   .strictObject({
-    intervals: z.array(WallClockInterval).openapi({
+    intervals: z.array(WallClockIntervalInput).openapi({
       description: 'Replace the weekly hours on this date; [] = unavailable all day',
     }),
   })

@@ -161,6 +161,47 @@ describe.skipIf(!serverUrl)('event type service', () => {
       }
     })
 
+    it('stores a link as parsed, without the tabs and line breaks the parser drops', async () => {
+      const user = await createTestUser(db)
+      const created = await createEventType(
+        personal(user),
+        input({ location: { kind: 'link', url: 'https://Example.com/ro\r\nom\t?q=1' } }),
+      )
+      const parsed = { kind: 'link', url: 'https://example.com/room?q=1' }
+      expect(created.location).toEqual(parsed)
+      const row = await db
+        .selectFrom('event_types')
+        .select('location')
+        .where('id', '=', created.id)
+        .executeTakeFirstOrThrow()
+      expect(row.location).toEqual(parsed)
+    })
+
+    it('bounds links at 2000 characters, as given and as parsed', async () => {
+      const user = await createTestUser(db)
+      const prefix = 'https://example.com/'
+      const url = (length: number) => `${prefix}${'a'.repeat(length - prefix.length)}`
+      const longest = await createEventType(
+        personal(user),
+        input({ slug: 'longest', location: { kind: 'link', url: url(2000) } }),
+      )
+      expect(longest.location).toEqual({ kind: 'link', url: url(2000) })
+      // 2000 characters as given, but each space becomes %20 when parsed.
+      const growing = `${prefix}${' x'.repeat(990)}`
+      expect(growing).toHaveLength(2000)
+      // 2001 characters as given, 1995 once the parser drops the tabs.
+      const shrinking = `${url(1995)}${'\t'.repeat(6)}`
+      for (const tooLong of [url(2001), growing, shrinking]) {
+        const error = await domainError(() =>
+          createEventType(
+            personal(user),
+            input({ slug: 'long', location: { kind: 'link', url: tooLong } }),
+          ),
+        )
+        expect(error.code).toBe('invalid_location')
+      }
+    })
+
     it('lists by position, then creation', async () => {
       const user = await createTestUser(db)
       await createEventType(personal(user), input({ slug: 'c', position: 2 }))
@@ -254,6 +295,25 @@ describe.skipIf(!serverUrl)('event type service', () => {
       expect(back.scheduleId).toBeNull()
     })
 
+    it('moves updatedAt when only the host schedule changes', async () => {
+      // Read in microseconds: the API's milliseconds can tie between two quick requests.
+      const updatedAt = async (id: string) => {
+        const { rows } = await testDb.pool.query<{ us: string }>(
+          'SELECT (extract(epoch FROM updated_at) * 1000000)::bigint::text AS us FROM event_types WHERE id = $1',
+          [id],
+        )
+        return BigInt(rows[0]?.us ?? '0')
+      }
+      const user = await createTestUser(db)
+      const created = await createEventType(personal(user), input())
+      const { id: scheduleId } = await schedule(user)
+      const before = await updatedAt(created.id)
+      const updated = await updateEventType(personal(user), created.id, { scheduleId })
+      expect(await updatedAt(created.id)).toBeGreaterThan(before)
+      expect(updated.updatedAt >= created.updatedAt).toBe(true)
+      expect(updated).toEqual({ ...created, scheduleId, updatedAt: updated.updatedAt })
+    })
+
     it('falls back to the default schedule when the host deletes the schedule', async () => {
       const user = await createTestUser(db)
       await schedule(user) // the default
@@ -270,7 +330,7 @@ describe.skipIf(!serverUrl)('event type service', () => {
         createEventType(personal(user), input({ scheduleId: theirs })),
       )
       expect(created.kind).toBe('invalid')
-      expect(created.code).toBe('schedule_not_found')
+      expect(created.code).toBe('invalid_schedule_id')
       expect(created.detail).not.toContain(theirs)
       expect(created.cause).toMatchObject({
         code: '23503',
@@ -283,13 +343,13 @@ describe.skipIf(!serverUrl)('event type service', () => {
       const updated = await domainError(() =>
         updateEventType(personal(user), eventType.id, { scheduleId: theirs, title: 'X' }),
       )
-      expect(updated.code).toBe('schedule_not_found')
+      expect(updated.code).toBe('invalid_schedule_id')
       expect(await getEventType(personal(user), eventType.id)).toEqual(eventType)
 
       const malformed = await domainError(() =>
         updateEventType(personal(user), eventType.id, { scheduleId: 'nope' }),
       )
-      expect(malformed.code).toBe('schedule_not_found')
+      expect(malformed.code).toBe('invalid_schedule_id')
       expect(malformed.kind).toBe('invalid')
     })
   })
@@ -445,7 +505,7 @@ describe.skipIf(!serverUrl)('event type service', () => {
       const error = await domainError(() =>
         updateEventType(inTeam(team, owner), created.id, { scheduleId: ownersSchedule }),
       )
-      expect(error.code).toBe('schedule_not_found')
+      expect(error.code).toBe('invalid_schedule_id')
       const { id: adminsSchedule } = await schedule(admin)
       const updated = await updateEventType(inTeam(team, owner), created.id, {
         scheduleId: adminsSchedule,
