@@ -7,17 +7,11 @@ import {
   MAX_GUESTS,
   MAX_SLOT_RANGE_DAYS,
   type PublicContext,
-  QuestionSchema,
 } from '@hourmere/scheduling'
 import { routeBodyLimit } from '../body-limit.ts'
-import { ErrorBody, json, type RouteModule } from '../openapi.ts'
+import { ErrorBody, json, Question, type RouteModule } from '../openapi.ts'
 import { createRateLimiter, PUBLIC_RATE_LIMITS, type RateLimit, rateLimit } from '../rate-limit.ts'
 import { BookingWithToken, Instant, LocationKind, Responses } from './bookings.ts'
-
-const Question = QuestionSchema.openapi('Question', {
-  description:
-    'A booking-form field beyond name and email. Its answer goes in `responses` under `id`: text for short_text, long_text and phone; one of `options` for select; a list of distinct `options` for multi_select; true or false for checkbox (a required checkbox must be true).',
-})
 
 const PublicEventType = z
   .object({
