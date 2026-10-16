@@ -1,8 +1,26 @@
 import { createServer, type Server } from 'node:net'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { createLogMailer, createSmtpMailer, magicLinkEmail, smtpTransportOptions } from './index.ts'
+import {
+  createLogMailer,
+  createSmtpMailer,
+  icsAttachment,
+  magicLinkEmail,
+  smtpTransportOptions,
+} from './index.ts'
 
 const url = 'https://cal.example.com/api/auth/magic-link/verify?token=abc&callbackURL=%2F'
+
+const invitation = icsAttachment({
+  method: 'REQUEST',
+  uid: 'booking-1@cal.example.com',
+  sequence: 0,
+  stamp: Temporal.Instant.from('2026-10-16T10:00:00Z'),
+  start: Temporal.Instant.from('2026-10-20T08:00:00Z'),
+  end: Temporal.Instant.from('2026-10-20T08:30:00Z'),
+  summary: 'Intro call with Grace Hopper',
+  organizer: { name: 'Grace Hopper', email: 'grace@example.com' },
+  attendees: [{ name: 'Ada Lovelace', email: 'ada@example.com' }],
+})
 
 describe('magicLinkEmail', () => {
   it('puts the link in the text and, escaped, in the HTML', () => {
@@ -31,6 +49,25 @@ describe('createLogMailer', () => {
       subject: 'Sign in to Hourmere',
       links: [url],
     })
+  })
+
+  it('names attachments and their sizes, not their contents', async () => {
+    const lines: string[] = []
+    await createLogMailer((l) => lines.push(l)).send({
+      to: 'ada@example.com',
+      subject: 'Confirmed',
+      text: 'Booked.',
+      attachments: [invitation],
+    })
+    const record = JSON.parse((lines[0] as string).slice('[mail] '.length))
+    expect(record.attachments).toEqual([
+      {
+        filename: 'invite.ics',
+        contentType: 'text/calendar; method=REQUEST; charset=UTF-8',
+        bytes: Buffer.byteLength(invitation.content),
+      },
+    ])
+    expect(lines[0]).not.toContain('BEGIN:VCALENDAR')
   })
 
   it('keeps hostile characters from breaking the line', async () => {
@@ -128,6 +165,46 @@ describe('createSmtpMailer', () => {
     expect(received.from).toContain('<hourmere@example.com>')
     expect(received.to).toEqual([expect.stringContaining('<ada@example.com>')])
     expect(received.data).toContain('Subject: Sign in to Hourmere')
+  })
+
+  it('attaches a calendar invitation with its method in the content type', async () => {
+    received.data = undefined
+    const mailer = createSmtpMailer({
+      url: `smtp://127.0.0.1:${port}`,
+      from: 'Hourmere <hourmere@example.com>',
+    })
+    await mailer.send({
+      to: 'ada@example.com',
+      subject: 'Confirmed',
+      text: 'Booked.',
+      attachments: [invitation],
+    })
+    const data = (received.data ?? '').replace(/\r\n\s+/g, ' ')
+    expect(data).toMatch(/Content-Type: text\/calendar; method=REQUEST; charset=UTF-8/)
+    expect(data).toMatch(/Content-Disposition: attachment; filename=invite\.ics/)
+  })
+
+  it('keeps the subject on one line and the recipient a single address', async () => {
+    received.data = undefined
+    received.to = []
+    const mailer = createSmtpMailer({
+      url: `smtp://127.0.0.1:${port}`,
+      from: 'Hourmere <hourmere@example.com>',
+    })
+    await mailer.send({
+      to: 'ada@example.com',
+      subject: 'Hello\r\nBcc: victim@example.com',
+      text: 'Hi',
+    })
+    expect(received.data).not.toMatch(/^Bcc:/im)
+    expect(received.data).toMatch(/^Subject: Hello Bcc: victim@example.com$/m)
+    expect(received.to).toEqual(['RCPT TO:<ada@example.com>'])
+
+    received.to = []
+    await mailer
+      .send({ to: 'attacker@example.com, victim@example.com', subject: 'x', text: 'x' })
+      .catch(() => {})
+    expect(received.to.some((r) => r.includes('<victim@example.com>'))).toBe(false)
   })
 
   it('refuses a server that does not offer STARTTLS when it is not on loopback', async () => {

@@ -1,10 +1,25 @@
 import nodemailer from 'nodemailer'
+import { escapeHtml } from './text.ts'
+
+export * from './booking.ts'
+export * from './ics.ts'
+export { escapeHtml, multiLine, singleLine, subjectLine } from './text.ts'
+
+export interface MailAttachment {
+  /** File name shown to the recipient, e.g. `invite.ics`. */
+  filename: string
+  /** Media type with its parameters, e.g. `text/calendar; method=REQUEST; charset=UTF-8`. */
+  contentType: string
+  content: string
+}
 
 export interface MailMessage {
+  /** One address. It is never parsed as a list, so a comma in it cannot add recipients. */
   to: string
   subject: string
   text: string
   html?: string
+  attachments?: readonly MailAttachment[]
 }
 
 /** Sends transactional email. Implementations: SMTP, the server log, and test doubles. */
@@ -52,8 +67,22 @@ export function smtpTransportOptions(url: string) {
 export function createSmtpMailer({ url, from }: SmtpMailerOptions): Mailer {
   const transport = nodemailer.createTransport(smtpTransportOptions(url), { from })
   return {
-    async send(message) {
-      await transport.sendMail(message)
+    async send({ to, subject, text, html, attachments }) {
+      await transport.sendMail({
+        // An address object is taken as one address; a string would be parsed as a list.
+        to: { name: '', address: to },
+        // nodemailer folds long headers but would keep a line break; a subject is one line.
+        subject: subject.replace(/[\r\n]+/g, ' '),
+        text,
+        ...(html !== undefined && { html }),
+        ...(attachments?.length && {
+          attachments: attachments.map(({ filename, contentType, content }) => ({
+            filename,
+            contentType,
+            content,
+          })),
+        }),
+      })
     },
   }
 }
@@ -75,21 +104,27 @@ const unicodeEscape = (c: string) => `\\u${c.charCodeAt(0).toString(16).padStart
  */
 export function createLogMailer(print: (line: string) => void = console.log): Mailer {
   return {
-    async send({ to, subject, text }) {
+    async send({ to, subject, text, attachments }) {
       const links = text.match(/https?:\/\/\S+/g) ?? []
-      const record = JSON.stringify({ notSent: 'SMTP_URL is not set', to, subject, links, text })
+      const record = JSON.stringify({
+        notSent: 'SMTP_URL is not set',
+        to,
+        subject,
+        links,
+        text,
+        // Names and sizes only: an invitation's body adds nothing a reader of the log needs.
+        ...(attachments?.length && {
+          attachments: attachments.map(({ filename, contentType, content }) => ({
+            filename,
+            contentType,
+            bytes: Buffer.byteLength(content, 'utf8'),
+          })),
+        }),
+      })
       print(`[mail] ${record.replace(LINE_BREAKING, unicodeEscape)}`)
     },
   }
 }
-
-const escapeHtml = (s: string) =>
-  s
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;')
 
 export function magicLinkEmail({
   to,
