@@ -1,8 +1,12 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createRoute, z } from '@hono/zod-openapi'
+import { DomainError, type DomainErrorKind } from '@hourmere/scheduling'
+import { HTTPException } from 'hono/http-exception'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { type AppDeps, createApp } from './app.ts'
+import { authenticated, json, type RouteModule } from './openapi.ts'
 
 // Sign-in is covered by auth.test.ts against a real database.
 const noAuth: Pick<AppDeps, 'authHandler' | 'resolveCaller' | 'publicUrl'> = {
@@ -113,5 +117,188 @@ describe('serving the built web app', () => {
     const res = await app.request('/assets/app-old999.js')
     expect(res.status).toBe(404)
     expect(res.headers.get('cache-control')).toBeNull()
+  })
+})
+
+describe('route modules and errors', () => {
+  // A stand-in for the product API: an authenticated OpenAPI route module, as real modules
+  // are written (see openapi.ts).
+  const principal = {
+    kind: 'api_key' as const,
+    apiKeyId: '00000000-0000-7000-8000-000000000001',
+    user: { id: '00000000-0000-7000-8000-000000000002', name: 'Ada', email: 'ada@example.com' },
+    organization: {
+      id: '00000000-0000-7000-8000-000000000003',
+      name: 'Ada',
+      slug: 'ada',
+      personal: true,
+    },
+  }
+  const thing: RouteModule = ({ app, caller }) => {
+    const Thing = z.object({ name: z.string().min(1), count: z.number().int() })
+    app.openapi(
+      createRoute({
+        method: 'post',
+        path: '/api/v1/things',
+        security: authenticated,
+        middleware: caller,
+        request: {
+          query: z.object({ fail: z.string().optional() }),
+          body: { content: json(Thing), required: true },
+        },
+        responses: { 200: { description: 'ok', content: json(Thing) } },
+      }),
+      (c) => {
+        const fail = c.req.valid('query').fail
+        if (fail === 'conflict')
+          throw new DomainError('conflict', 'slot_taken', 'Someone booked this time first')
+        if (fail === 'empty') throw new DomainError('invalid', 'bad_thing', '')
+        if (fail === 'weird') throw new DomainError('weird' as DomainErrorKind, 'weird')
+        if (fail === 'prepared')
+          throw new HTTPException(418, { res: new Response('teapot', { status: 418 }) })
+        if (fail === 'http500') throw new HTTPException(500, { message: 'db password is hunter2' })
+        if (fail === 'caused')
+          throw new DomainError('conflict', 'email_taken', 'That email is already in use', {
+            cause: new Error('duplicate key value violates unique constraint\nKey (email)=(a@b.c)'),
+          })
+        if (fail === 'bug') throw new Error('unexpected')
+        if (fail) throw new DomainError(fail as DomainErrorKind, `thing_${fail}`)
+        return c.json(
+          {
+            ...c.req.valid('json'),
+            name: `${c.var.principal.user.name}:${c.req.valid('json').name}`,
+          },
+          200,
+        )
+      },
+    )
+  }
+  const app = createApp({
+    ...noAuth,
+    checkDb: async () => {},
+    resolveCaller: async (headers) =>
+      headers.get('authorization') === 'Bearer hm_test'
+        ? { ok: true, principal, setCookie: [] }
+        : { ok: false, error: 'unauthorized', setCookie: [] },
+    routes: [thing],
+  })
+  const post = (query: string, body: string, auth = true) =>
+    app.request(`/api/v1/things${query}`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...(auth ? { authorization: 'Bearer hm_test' } : {}),
+      },
+      body,
+    })
+  const valid = JSON.stringify({ name: 'x', count: 1 })
+
+  it('serves module routes behind the caller middleware with a typed principal', async () => {
+    const res = await post('', valid)
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ name: 'Ada:x', count: 1 })
+    expect((await post('', valid, false)).status).toBe(401)
+  })
+
+  it('lists module routes with their security in the OpenAPI document', async () => {
+    const doc = (await (await app.request('/api/v1/openapi.json')).json()) as {
+      paths: Record<string, { post?: { security?: unknown } }>
+    }
+    expect(doc.paths['/api/v1/things']?.post?.security).toEqual([{ apiKey: [] }, { session: [] }])
+  })
+
+  it.each([
+    ['invalid', 400],
+    ['forbidden', 403],
+    ['not_found', 404],
+  ] as const)('maps a %s DomainError to %i with its code', async (kind, status) => {
+    const res = await post(`?fail=${kind}`, valid)
+    expect(res.status).toBe(status)
+    expect(await res.json()).toEqual({ error: `thing_${kind}` })
+  })
+
+  it('includes the message only when one was given', async () => {
+    const conflict = await post('?fail=conflict', valid)
+    expect(conflict.status).toBe(409)
+    expect(await conflict.json()).toEqual({
+      error: 'slot_taken',
+      message: 'Someone booked this time first',
+    })
+    expect(await (await post('?fail=empty', valid)).json()).toEqual({ error: 'bad_thing' })
+  })
+
+  it('treats a DomainError with an unknown kind as a bug', async () => {
+    const res = await post('?fail=weird', valid)
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: 'internal_error' })
+  })
+
+  it('answers invalid query, invalid body and malformed JSON with the documented shape', async () => {
+    const badBody = await post('', JSON.stringify({ name: '', count: 1.5 }))
+    expect(badBody.status).toBe(400)
+    const body = (await badBody.json()) as { error: string; message: string }
+    expect(body.error).toBe('invalid_request')
+    expect(body.message).toMatch(/name/)
+    expect(body.message).toMatch(/count/)
+
+    const badQuery = await post('?fail=1&fail=2', valid)
+    expect(badQuery.status).toBe(400)
+    expect(await badQuery.json()).toMatchObject({ error: 'invalid_request' })
+
+    const malformed = await post('', '{"name":')
+    expect(malformed.status).toBe(400)
+    expect(malformed.headers.get('content-type')).toMatch(/application\/json/)
+    expect(await malformed.json()).toMatchObject({ error: 'invalid_request' })
+  })
+
+  it('passes a prepared HTTPException response through unchanged', async () => {
+    const res = await post('?fail=prepared', valid)
+    expect(res.status).toBe(418)
+    expect(await res.text()).toBe('teapot')
+  })
+
+  it('keeps other errors opaque', async () => {
+    const res = await post('?fail=bug', valid)
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: 'internal_error' })
+  })
+
+  it('treats a DomainError whose kind is a prototype key as a bug', async () => {
+    const res = await post('?fail=__proto__', valid)
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: 'internal_error' })
+  })
+
+  it('never shows the message of a 5xx HTTPException', async () => {
+    const res = await post('?fail=http500', valid)
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: 'internal_error' })
+  })
+
+  it("logs a DomainError's cause on one line, without sending it to the client", async () => {
+    const logged: string[] = []
+    const spy = vi.spyOn(console, 'error').mockImplementation((...args) => {
+      logged.push(args.join(' '))
+    })
+    try {
+      const res = await post('?fail=caused', valid)
+      expect(res.status).toBe(409)
+      expect(await res.json()).toEqual({
+        error: 'email_taken',
+        message: 'That email is already in use',
+      })
+    } finally {
+      spy.mockRestore()
+    }
+    expect(logged).toHaveLength(1)
+    expect(logged[0]).toContain('email_taken caused by')
+    expect(logged[0]).toContain('Key (email)=(a@b.c)')
+    expect(logged[0]).not.toContain('\n')
+  })
+
+  it('refuses reserved codes for DomainError', () => {
+    expect(() => new DomainError('invalid', 'invalid_request')).toThrow(/reserved/)
+    expect(() => new DomainError('not_found', 'not_found')).toThrow(/reserved/)
+    expect(new DomainError('not_found', 'event_type_not_found').code).toBe('event_type_not_found')
   })
 })

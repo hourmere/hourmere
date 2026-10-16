@@ -12,6 +12,7 @@ Open-source scheduling for people and AI agents. Self-host or use the cloud.
 | `apps/site` | Website for hourmere.com (Astro + Starlight): homepage, legal pages, docs. Static; not part of the Docker image. |
 | `packages/core` | Scheduling logic with no I/O or framework code, such as the availability engine. |
 | `packages/db` | Database access (Kysely) and SQL migrations in `packages/db/migrations`. |
+| `packages/scheduling` | Service layer shared by the REST API and the MCP server: reads and writes the database, enforces permissions, throws `DomainError`. |
 | `packages/auth` | Sign-in (Better Auth: email links, Google, Microsoft), sessions, organizations, API keys. |
 | `packages/mail` | Outgoing email: SMTP, or the server log when SMTP is not configured. |
 
