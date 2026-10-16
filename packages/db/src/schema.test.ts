@@ -340,6 +340,26 @@ describe.skipIf(!url)('schema', () => {
       )
     })
 
+    it('rejects event type values the availability engine would refuse', async () => {
+      const insert = (column: string, value: number) =>
+        pool.query(
+          `INSERT INTO event_types (organization_id, slug, title, duration_minutes, ${column})
+           VALUES ($1, $2, 'T', 30, $3)`,
+          [orgId, `bounds-${++seq}`, value],
+        )
+      for (const [column, max] of [
+        ['slot_step_minutes', 1440],
+        ['buffer_before_minutes', 1440],
+        ['buffer_after_minutes', 1440],
+        ['minimum_notice_minutes', 525600],
+        ['booking_window_days', 3650],
+        ['max_bookings_per_day', 1000],
+      ] as const) {
+        await insert(column, max)
+        await expect(insert(column, max + 1)).rejects.toMatchObject({ code: '23514' })
+      }
+    })
+
     it('accepts only lowercase URL-safe handles', async () => {
       const insert = (handle: string) =>
         pool.query(`INSERT INTO profiles (user_id, handle, time_zone) VALUES ($1, $2, 'UTC')`, [

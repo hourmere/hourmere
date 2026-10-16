@@ -43,3 +43,13 @@ ALTER TABLE booking_hosts
   ALTER COLUMN active SET DEFAULT false;
 COMMENT ON COLUMN booking_hosts.period IS 'Derived from the booking by booking_host_slot(); any value written is replaced.';
 COMMENT ON COLUMN booking_hosts.active IS 'Derived from the booking status by booking_host_slot(); any value written is replaced.';
+
+-- 4. Upper bounds matching the availability engine (@hourmere/core), so a stored event
+--    type can never make every availability query fail validation.
+ALTER TABLE event_types
+  ADD CONSTRAINT event_types_slot_step_max CHECK (slot_step_minutes <= 1440),
+  ADD CONSTRAINT event_types_buffer_before_max CHECK (buffer_before_minutes <= 1440),
+  ADD CONSTRAINT event_types_buffer_after_max CHECK (buffer_after_minutes <= 1440),
+  ADD CONSTRAINT event_types_minimum_notice_max CHECK (minimum_notice_minutes <= 525600),
+  ADD CONSTRAINT event_types_booking_window_max CHECK (booking_window_days <= 3650),
+  ADD CONSTRAINT event_types_max_bookings_per_day_max CHECK (max_bookings_per_day <= 1000);
