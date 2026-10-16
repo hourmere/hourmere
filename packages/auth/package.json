@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@better-auth/api-key": "1.7.10",
+    "@hourmere/core": "*",
     "@hourmere/db": "*",
     "@hourmere/mail": "*",
     "better-auth": "1.7.10",

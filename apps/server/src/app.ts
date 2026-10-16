@@ -15,6 +15,11 @@ import type { McpModule } from './mcp/endpoint.ts'
 import { describeCaller, Me } from './me.ts'
 import { authenticated, ErrorBody, json, type RouteModule } from './openapi.ts'
 import { routeRateLimits } from './rate-limit.ts'
+import {
+  DEFAULT_HSTS_MAX_AGE,
+  securityHeaders,
+  strictTransportSecurity,
+} from './security-headers.ts'
 import { MAGIC_LINK_CONFIRM_PATH, signInConfirmPage } from './sign-in-confirm.ts'
 
 export interface AppDeps {
@@ -26,6 +31,11 @@ export interface AppDeps {
   resolveCaller: CallerResolver
   /** PUBLIC_URL: cookie-authenticated writes must come from its origin. */
   publicUrl: string
+  /**
+   * HSTS_MAX_AGE in seconds (default DEFAULT_HSTS_MAX_AGE); Strict-Transport-Security is only
+   * sent when publicUrl is https on a real host name.
+   */
+  hstsMaxAge?: number | undefined
   /** Reverse proxies (IPs or CIDR ranges) whose X-Forwarded-For names the client. */
   trustedProxies?: readonly string[] | undefined
   /** Absolute path of the built web app, if this process should serve it. */
@@ -116,6 +126,31 @@ export function hasUnsafeJsonText(value: unknown): boolean {
   return false
 }
 
+/**
+ * Whether `err` (or an error in its cause chain) is what a client's disconnect looks like to
+ * the code reading its request: Node's "aborted" (ECONNRESET), ECONNABORTED, an AbortError
+ * (e.g. a fetch given the request's signal), or a 4xx HTTPException, which is how a route's
+ * validator reports a body it could not read (and never a server error anyway).
+ */
+function isDisconnect(err: unknown): boolean {
+  let e: unknown = err
+  for (let depth = 0; depth < 5 && typeof e === 'object' && e !== null; depth++) {
+    if (e instanceof HTTPException && e.status < 500) return true
+    const { name, code, message } = e as { name?: unknown; code?: unknown; message?: unknown }
+    if (name === 'AbortError' || code === 'ECONNRESET' || code === 'ECONNABORTED') return true
+    if (message === 'aborted') return true
+    e = (e as { cause?: unknown }).cause
+  }
+  return false
+}
+
+/** An error's name, message and code, cut to 200 characters: enough to recognize it. */
+function summary(err: unknown): string {
+  if (!(err instanceof Error)) return String(err).slice(0, 200)
+  const code = (err as { code?: unknown }).code
+  return `${err.name}: ${err.message}${typeof code === 'string' ? ` (${code})` : ''}`.slice(0, 200)
+}
+
 const JSON_CONTENT_TYPE = /^application\/([a-z0-9.+-]+\+)?json/i
 
 /**
@@ -180,28 +215,37 @@ export function createApp({
   authHandler,
   resolveCaller,
   publicUrl,
+  hstsMaxAge = DEFAULT_HSTS_MAX_AGE,
   trustedProxies = [],
   webDist,
   routes = [],
   mcp,
 }: AppDeps) {
   const app = new OpenAPIHono({ defaultHook: validationHook })
-  // Unexpected errors (including Better Auth's, which it rethrows) are logged on one line with
-  // control characters escaped: error messages can carry request input, e.g. Postgres echoing
-  // a malformed value, and must not be able to forge log lines.
   // Logs one line with control characters escaped: error text can carry request input
   // (e.g. Postgres echoing a malformed value) and must not be able to forge log lines.
   // c.req.path is percent-decoded, so it is escaped too.
-  const logError = (c: Context, label: string, detail: unknown) =>
-    console.error(
-      `${new Date().toISOString()} ERROR ${escapeControlCharacters(
-        `${c.req.method} ${c.req.path}: ${label}${inspect(detail, { breakLength: Number.POSITIVE_INFINITY })}`,
-      )}`,
+  const logLine = (c: Context, level: 'ERROR' | 'WARN', text: string) =>
+    (level === 'ERROR' ? console.error : console.warn)(
+      `${new Date().toISOString()} ${level} ${escapeControlCharacters(`${c.req.method} ${c.req.path}: ${text}`)}`,
     )
+  const logError = (c: Context, label: string, detail: unknown) =>
+    logLine(c, 'ERROR', `${label}${inspect(detail, { breakLength: Number.POSITIVE_INFINITY })}`)
 
   // Unexpected errors (including Better Auth's, which it rethrows) are logged and answered
   // with an opaque 500; only failures the caller can act on get a specific code.
   app.onError((err, c) => {
+    // The client went away before it got an answer (it closed the connection, or the
+    // server's request timeout cut it off and Node answered it 408), and the error is that
+    // disconnect: reading the rest of the body failed (Better Auth throws "aborted", a
+    // /api/v1 validator refuses the JSON). That is no server error and nobody gets the
+    // answer: one WARN line naming the error, without a stack, and 499 (nginx's "client
+    // closed request") for the request log. Any other error is logged as usual, even when
+    // the client has left meanwhile.
+    if (c.req.raw.signal.aborted && isDisconnect(err)) {
+      logLine(c, 'WARN', `client closed the connection before the answer (${summary(err)})`)
+      return new Response(null, { status: 499 })
+    }
     if (err instanceof HTTPException && err.status < 500) {
       // A prepared response (e.g. from middleware) is sent as is; otherwise use our shape.
       if (err.res) return err.getResponse()
@@ -219,6 +263,8 @@ export function createApp({
     logError(c, '', err)
     return c.json({ error: 'internal_error' }, 500)
   })
+  // First, so it also covers what every later middleware, route and onError answers.
+  app.use('*', securityHeaders({ hsts: strictTransportSecurity(publicUrl, hstsMaxAge) }))
   app.use('/api/*', requestLogger)
   app.use('/api/*', clientIp(trustedProxies))
   // First on /api/v1, so it also covers what the middleware below and onError answer.

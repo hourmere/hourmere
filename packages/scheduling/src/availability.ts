@@ -8,6 +8,7 @@ import {
   type ExistingBooking,
   getAvailableSlots,
   type InstantInterval,
+  isReservedName,
   type Slot,
   type WeeklyHours,
 } from '@hourmere/core'
@@ -96,17 +97,28 @@ export interface PublicEventTypeRecord {
 }
 
 /**
+ * The handle as stored (lowercase), or undefined when no public page can have it: not a
+ * handle, or a reserved name. A stored handle that became reserved after it was chosen is not
+ * served, so nobody keeps a page at a path the app or the product now uses (/support, …).
+ */
+function servedHandle(handle: string): string | undefined {
+  const h = handle.toLowerCase()
+  return HANDLE.test(h) && !isReservedName(h) ? h : undefined
+}
+
+/**
  * Finds the active, non-deleted personal event type at /{handle}/{slug}. The owner must
- * have a profile and still belong to the event type's organization.
+ * have a profile with a handle that is not reserved, and still belong to the event type's
+ * organization.
  */
 export async function findPublicEventType(
   db: Db,
   handle: string,
   slug: string,
 ): Promise<PublicEventTypeRecord | undefined> {
-  const h = handle.toLowerCase()
+  const h = servedHandle(handle)
   const s = slug.toLowerCase()
-  if (!HANDLE.test(h) || !SLUG.test(s)) return undefined
+  if (h === undefined || !SLUG.test(s)) return undefined
   const row = await db
     .selectFrom('profiles as p')
     .innerJoin('auth.user as u', 'u.id', 'p.user_id')
@@ -190,9 +202,128 @@ export async function getPublicEventType(
   }
 }
 
+/** One event type as the host's page (/{handle}) lists it. */
+export interface PublicEventTypeSummary {
+  slug: string
+  title: string
+  description: string | null
+  durationMinutes: number
+  location: { kind: LocationKind } | null
+}
+
+/** What the host's page at /{handle} shows: who they are and what can be booked. */
+export interface PublicHost {
+  handle: string
+  host: { name: string; timeZone: string }
+  eventTypes: PublicEventTypeSummary[]
+}
+
+/**
+ * The host at /{handle} and their bookable personal event types (active, not deleted, in an
+ * organization they still belong to), in the order they arranged them. `host_not_found` for
+ * an unknown or reserved handle; a host with nothing to book has an empty list.
+ */
+export async function getPublicHost(
+  ctx: PublicContext,
+  { handle }: { handle: string },
+): Promise<PublicHost> {
+  const h = servedHandle(handle)
+  const profile =
+    h === undefined
+      ? undefined
+      : await ctx.db
+          .selectFrom('profiles as p')
+          .innerJoin('auth.user as u', 'u.id', 'p.user_id')
+          .select(['p.user_id', 'p.handle', 'p.time_zone', 'u.name'])
+          .where('p.handle', '=', h)
+          .executeTakeFirst()
+  if (!profile) throw new DomainError('not_found', 'host_not_found', 'No such booking page')
+  const rows = await ctx.db
+    .selectFrom('event_types as et')
+    .innerJoin('auth.member as m', (join) =>
+      join
+        .onRef('m.organizationId', '=', 'et.organization_id')
+        .on('m.userId', '=', profile.user_id),
+    )
+    .select(['et.slug', 'et.title', 'et.description', 'et.duration_minutes', 'et.location'])
+    .where('et.owner_user_id', '=', profile.user_id)
+    .where('et.is_active', '=', true)
+    .where('et.deleted_at', 'is', null)
+    .orderBy('et.position')
+    .orderBy('et.id')
+    .execute()
+  return {
+    handle: profile.handle,
+    host: { name: profile.name.trim() || profile.handle, timeZone: profile.time_zone },
+    eventTypes: rows.map((row) => {
+      const location = parseLocation(row.location)
+      return {
+        slug: row.slug,
+        title: row.title,
+        description: row.description,
+        durationMinutes: row.duration_minutes,
+        location: location && { kind: location.kind },
+      }
+    }),
+  }
+}
+
 export interface SlotView {
   start: string
   end: string
+}
+
+/**
+ * Checks a public slots request's range before anything is looked up: `invalid_range` when
+ * end is not after start, `range_too_long` beyond MAX_SLOT_RANGE_DAYS.
+ */
+export function checkSlotRange(start: Temporal.Instant, end: Temporal.Instant): void {
+  if (Temporal.Instant.compare(end, start) <= 0) {
+    throw new DomainError('invalid', 'invalid_range', 'end must be after start')
+  }
+  if (end.since(start).total('hours') > MAX_SLOT_RANGE_DAYS * 24) {
+    throw new DomainError(
+      'invalid',
+      'range_too_long',
+      `The range may span at most ${MAX_SLOT_RANGE_DAYS} days`,
+    )
+  }
+}
+
+/**
+ * Whether [start, end] has a part that can still be booked under these rules (from now plus
+ * the minimum notice to the end of the booking window). Throws `range_too_long` when that
+ * part holds more than MAX_SLOT_CANDIDATES start times at the slot step.
+ */
+export function hasBookablePart(
+  rules: {
+    minimumNoticeMinutes: number
+    bookingWindowDays: number | null
+    slotStepMinutes: number
+  },
+  start: Temporal.Instant,
+  end: Temporal.Instant,
+  now: Temporal.Instant,
+): boolean {
+  // Nothing before now plus the minimum notice, nothing after the booking window (calendar
+  // days in the host's zone, so one spare day here).
+  const bookableStart = later(start, now.add({ minutes: rules.minimumNoticeMinutes }))
+  const bookableEnd =
+    rules.bookingWindowDays === null
+      ? end
+      : earlier(end, now.add({ hours: (rules.bookingWindowDays + 1) * 24 }))
+  if (Temporal.Instant.compare(bookableEnd, bookableStart) <= 0) return false
+  if (
+    bookableEnd.since(bookableStart).total('minutes') / rules.slotStepMinutes >
+    MAX_SLOT_CANDIDATES
+  ) {
+    throw new DomainError(
+      'invalid',
+      'range_too_long',
+      'This event type offers too many start times in that range; ask for a shorter one',
+    )
+  }
+  return true
 }
 
 /**
@@ -204,37 +335,11 @@ export async function listPublicSlots(
   ctx: PublicContext,
   input: { handle: string; slug: string; start: Temporal.Instant; end: Temporal.Instant },
 ): Promise<SlotView[]> {
-  if (Temporal.Instant.compare(input.end, input.start) <= 0) {
-    throw new DomainError('invalid', 'invalid_range', 'end must be after start')
-  }
-  if (input.end.since(input.start).total('hours') > MAX_SLOT_RANGE_DAYS * 24) {
-    throw new DomainError(
-      'invalid',
-      'range_too_long',
-      `The range may span at most ${MAX_SLOT_RANGE_DAYS} days`,
-    )
-  }
+  checkSlotRange(input.start, input.end)
   const et = await findPublicEventType(ctx.db, input.handle, input.slug)
   if (!et) throw eventTypeNotFound()
   const now = ctx.now()
-  // What the engine can actually offer: nothing before now plus the minimum notice, nothing
-  // after the booking window (calendar days in the host's zone, so one spare day here).
-  const bookableStart = later(input.start, now.add({ minutes: et.minimumNoticeMinutes }))
-  const bookableEnd =
-    et.bookingWindowDays === null
-      ? input.end
-      : earlier(input.end, now.add({ hours: (et.bookingWindowDays + 1) * 24 }))
-  if (Temporal.Instant.compare(bookableEnd, bookableStart) <= 0) return []
-  if (
-    bookableEnd.since(bookableStart).total('minutes') / et.slotStepMinutes >
-    MAX_SLOT_CANDIDATES
-  ) {
-    throw new DomainError(
-      'invalid',
-      'range_too_long',
-      'This event type offers too many start times in that range; ask for a shorter one',
-    )
-  }
+  if (!hasBookablePart(et, input.start, input.end, now)) return []
   const slots = await findSlots(ctx.db, {
     eventTypeId: et.id,
     hostUserId: et.hostUserId,

@@ -7,6 +7,7 @@ export {
   buildAvailabilityInput,
   findSlots,
   getPublicEventType,
+  getPublicHost,
   LOCATION_KINDS,
   type Location,
   type LocationKind,
@@ -14,6 +15,8 @@ export {
   MAX_SLOT_CANDIDATES,
   MAX_SLOT_RANGE_DAYS,
   type PublicEventType,
+  type PublicEventTypeSummary,
+  type PublicHost,
   type SlotView,
 } from './availability.ts'
 export {
@@ -40,7 +43,12 @@ export {
   type PersonInput,
   rescheduleManagedBooking,
 } from './bookings.ts'
-export type { PublicContext, ServiceContext } from './context.ts'
+export type {
+  BookingEvent,
+  BookingNotifier,
+  PublicContext,
+  ServiceContext,
+} from './context.ts'
 export { DomainError, type DomainErrorKind, RESERVED_ERROR_CODES } from './errors.ts'
 export {
   createEventType,
@@ -59,6 +67,7 @@ export {
   updateEventType,
 } from './event-types.ts'
 export { validTimeZone } from './internal.ts'
+export { getManagedBookingDetails, listManagedSlots, type ManagedBooking } from './manage.ts'
 export {
   getProfile,
   HANDLE_MAX_LENGTH,

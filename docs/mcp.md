@@ -140,8 +140,14 @@ fields are those of the REST API (`/api/v1/openapi.json`). Results come as
   `endDate`, inclusive, at most 62 days), and gives each slot in that zone too
   (`localStart`: `2026-11-02T09:00:00+01:00`). Pass a slot's `start` unchanged to
   `create_booking` or `reschedule_booking`.
-- **Manage tokens** are the invitee's secret, as in their emailed link. Only a hash is
-  stored, so a token is returned once: keep it to reschedule or cancel later.
+- **Manage tokens** are the invitee's secret. Only a hash is stored, so a token is returned
+  once: keep it to reschedule or cancel later. The tools also take the token from a link in
+  one of the invitee's booking emails (`https://<host>/booking#token=<token>`); each email
+  has its own. A token a tool returned stays with its booking (after a reschedule it belongs
+  to the cancelled one), while an email's token follows the meeting to the booking that
+  replaced it ([api-conventions.md](api-conventions.md#public-endpoints)).
+- **Emails:** bookings made, moved or cancelled through MCP send the same emails as the
+  booking page (hosts, invitee, guests; [notifications.md](notifications.md)).
 - **Retries:** give `create_booking` an `idempotencyKey` (a new random value per booking,
   e.g. a UUIDv4). A retry with the same key and arguments returns the original booking with
   `replayed: true` and `manageToken: null`; the same key with other arguments fails with

@@ -76,8 +76,11 @@ types in `packages/db/src/tables.ts` are generated from the migrated database.
 - **Invitee links without accounts.** Reschedule/cancel links carry a random secret; only
   its SHA-256 is stored: `bookings.manage_token_hash` for the one the booking API returns,
   `booking_notifications.manage_token_hash` for the one each invitee email carries (minted
-  when the email is sent, so no raw secret ever sits in the job queue). Each stays valid as
-  long as the booking exists. See [notifications.md](notifications.md).
+  when the email is sent, so no raw secret ever sits in the job queue; an email refused for
+  good keeps none). Each stays valid as long as the booking exists. One statement looks a
+  token up in both, each through its unique index. The API's token stays with its booking;
+  an email's follows `rescheduled_from_id` forward to the latest booking of the chain. See
+  [notifications.md](notifications.md#which-booking-a-token-opens).
 - **An email is sent once, with a narrow duplicate window.** A notification job inserts its `booking_notifications` row
   (primary key: booking, kind, recipient) and keeps that transaction open while the mail
   server takes the email: a failed send rolls the row back for the retry, a concurrent

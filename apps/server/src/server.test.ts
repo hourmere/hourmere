@@ -1,13 +1,19 @@
 import { Console } from 'node:console'
 import { randomBytes } from 'node:crypto'
-import { createServer, type Socket } from 'node:net'
+import { once } from 'node:events'
+import { Server as HttpServer } from 'node:http'
+import { connect, createServer, type Socket } from 'node:net'
 import { Writable } from 'node:stream'
-import { createPool } from '@hourmere/db'
+import { createAuth, createAuthPool } from '@hourmere/auth'
+import { createDb, createPool } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createJobs } from '@hourmere/jobs'
 import { BOOKING_NOTIFICATION_JOB, bookingNotificationJob } from '@hourmere/notifications'
+import { createFixtures } from '@hourmere/scheduling/testing'
+import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { startServer } from './server.ts'
+import { type RunningServer, startServer } from './server.ts'
+import { trickle } from './slow-client-testing.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const METHODS = ['log', 'info', 'warn', 'error', 'debug', 'dir', 'dirxml'] as const
@@ -153,6 +159,143 @@ describe.skipIf(!serverUrl)('startServer', () => {
     expect(printed.warn.filter((l) => l.includes('dropping'))).toHaveLength(1)
   })
 
+  it('cuts off clients that send too slowly, after the configured timeouts', async () => {
+    await quietly(async () => {
+      const server = await startServer({
+        DATABASE_URL: testDb.url,
+        PORT: String(await freePort()),
+        BETTER_AUTH_SECRET: randomBytes(32).toString('base64'),
+        HTTP_HEADERS_TIMEOUT: '1',
+        HTTP_REQUEST_TIMEOUT: '2',
+      })
+      try {
+        const headers = await trickle(server.port, {
+          first: 'GET /api/health HTTP/1.1\r\nHost: localhost\r\n',
+          drip: 'X-Slow: 1\r\n',
+          everyMs: 100,
+        })
+        expect(headers.response).toMatch(/^HTTP\/1\.1 408 /)
+        // Checked every quarter of the shorter timeout; plus room for a busy machine.
+        expect(headers.closedAfterMs).toBeGreaterThanOrEqual(1000)
+        expect(headers.closedAfterMs).toBeLessThan(1000 + 250 + 500)
+
+        // A booking request whose JSON body never ends; the route waits for it to validate.
+        const body = await trickle(server.port, {
+          first:
+            'POST /api/v1/public/ada/intro/bookings HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 10000\r\n\r\n{',
+          drip: ' ',
+          everyMs: 100,
+        })
+        expect(body.response).toMatch(/^HTTP\/1\.1 408 /)
+        expect(body.closedAfterMs).toBeGreaterThanOrEqual(2000)
+        expect(body.closedAfterMs).toBeLessThan(2000 + 250 + 500)
+      } finally {
+        await server.close()
+      }
+    })
+  })
+
+  /**
+   * Closes `server` while a request is in progress on a kept-alive connection: one whole
+   * request to `path` first, then a second whose headers are finished only once close() has
+   * begun. Returns the second answer, whether the server then closed the connection, and how
+   * long after that answer close() resolved.
+   */
+  async function closeDuringRequest(server: RunningServer, path: string) {
+    const socket = connect(server.port, '127.0.0.1')
+    await once(socket, 'connect')
+    socket.setEncoding('utf8')
+    let received = ''
+    socket.on('data', (chunk) => {
+      received += chunk
+    })
+    const hungUp = once(socket, 'close')
+    socket.write(`GET ${path} HTTP/1.1\r\nHost: localhost\r\n\r\n`)
+    await vi.waitFor(() => expect(received).toMatch(/\r\n\r\n\{.*\}$/s))
+    const first = received
+    socket.write(`GET ${path} HTTP/1.1\r\nHost: localhost\r\n`)
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    const closed = server.close().then(() => Date.now())
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    socket.write('\r\n')
+    await hungUp
+    const answeredAt = Date.now()
+    const closedAt = await closed
+    return {
+      first,
+      second: received.slice(first.length),
+      closedAfterAnswerMs: closedAt - answeredAt,
+    }
+  }
+
+  it('closes once requests in progress are answered, keep-alive or not, in every role', async () => {
+    const env = { DATABASE_URL: testDb.url, BETTER_AUTH_SECRET: randomBytes(32).toString('base64') }
+    await quietly(async () => {
+      for (const role of ['all', 'worker'] as const) {
+        const server = await startServer({
+          ...env,
+          PORT: String(await freePort()),
+          HOURMERE_ROLE: role,
+        })
+        const { first, second, closedAfterAnswerMs } = await closeDuringRequest(
+          server,
+          '/api/health',
+        )
+        // Kept alive (for 125 s) before shutting down; answered and closed while shutting down.
+        expect(first, role).toMatch(/^HTTP\/1\.1 200 [\s\S]*\r\nKeep-Alive: timeout=125\r\n/)
+        expect(second, role).toMatch(/^HTTP\/1\.1 200 [\s\S]*\r\nConnection: close\r\n/)
+        expect(closedAfterAnswerMs, role).toBeLessThan(2000)
+      }
+    })
+  }, 20_000)
+
+  it('sends HSTS with the configured max-age when PUBLIC_URL is https', async () => {
+    await quietly(async () => {
+      const server = await startServer({
+        DATABASE_URL: testDb.url,
+        PORT: String(await freePort()),
+        PUBLIC_URL: 'https://hourmere.example',
+        BETTER_AUTH_SECRET: randomBytes(32).toString('base64'),
+        HSTS_MAX_AGE: '60',
+      })
+      try {
+        const res = await fetch(`http://127.0.0.1:${server.port}/api/health`)
+        expect(res.headers.get('strict-transport-security')).toBe('max-age=60')
+        await res.text()
+      } finally {
+        await server.close()
+      }
+    })
+  })
+
+  it('closes through closeServer, which sweeps idle connections and cuts off the rest', async () => {
+    // closeServer's sweep and cut-off are tested in shutdown.test.ts; this checks close()
+    // uses them (Connection: close alone covers the test above).
+    vi.resetModules()
+    const closeServer = vi.fn()
+    vi.doMock('./shutdown.ts', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('./shutdown.ts')>()
+      closeServer.mockImplementation(actual.closeServer)
+      return { ...actual, closeServer }
+    })
+    try {
+      const { startServer: start } = await import('./server.ts')
+      await quietly(async () => {
+        const server = await start({
+          DATABASE_URL: testDb.url,
+          PORT: String(await freePort()),
+          BETTER_AUTH_SECRET: randomBytes(32).toString('base64'),
+        })
+        await server.close()
+      })
+      expect(closeServer).toHaveBeenCalledOnce()
+      expect(closeServer.mock.calls[0]?.[0]).toBeInstanceOf(HttpServer)
+    } finally {
+      vi.doUnmock('./shutdown.ts')
+      vi.resetModules()
+    }
+  })
+
   it('refuses to start when database connections lose the sign-up settings', async () => {
     // As behind a connection pooler that drops startup parameters.
     vi.resetModules()
@@ -178,6 +321,131 @@ describe.skipIf(!serverUrl)('startServer', () => {
       vi.resetModules()
     }
   })
+
+  it('emails booking changes made over REST and MCP, from jobs it queues and runs', async () => {
+    const secret = randomBytes(32).toString('base64')
+    const db = createDb(testDb.pool)
+    const f = createFixtures(db)
+    const host = await f.host({
+      name: 'Grace Hopper',
+      handle: `mail-${randomBytes(3).toString('hex')}`,
+    })
+    await f.schedule(host.userId)
+    await f.eventType(host.organizationId, host.userId, { slug: 'intro', title: 'Intro call' })
+    // An API key for MCP, made the way the server's own Better Auth would.
+    const signup = { mode: 'open', allowedDomains: [] } as const
+    const authPool = createAuthPool(testDb.url, signup)
+    const agent = await f.host({ name: 'Assistant', handle: null })
+    const { key } = await createAuth({
+      pool: authPool,
+      db,
+      baseURL: 'http://localhost',
+      secret,
+      mailer: { send: async () => {} },
+      signup,
+    }).api.createApiKey({ body: { userId: agent.userId, name: 'agent' } })
+    await authPool.end()
+
+    // The log mailer prints one `[mail] {json}` line per email.
+    const lines: string[] = []
+    const spies = (['log', 'info', 'warn', 'error'] as const).map((m) =>
+      vi.spyOn(console, m).mockImplementation((...args: unknown[]) => {
+        lines.push(args.map(String).join(' '))
+      }),
+    )
+    type MailRecord = { to: string; subject: string; links: string[]; attachments?: unknown[] }
+    const mails = () =>
+      lines
+        .filter((l) => l.startsWith('[mail] '))
+        .map((l) => JSON.parse(l.slice('[mail] '.length)) as MailRecord)
+    const untilMails = async (count: number) => {
+      const deadline = Date.now() + 15_000
+      while (mails().length < count && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 100))
+      }
+      return mails()
+    }
+    try {
+      const port = await freePort()
+      const base = `http://127.0.0.1:${port}`
+      const server = await startServer({
+        DATABASE_URL: testDb.url,
+        PORT: String(port),
+        PUBLIC_URL: `http://localhost:${port}`,
+        BETTER_AUTH_SECRET: secret,
+      })
+      try {
+        const page = `${base}/api/v1/public/${host.handle}/intro`
+        const now = Temporal.Now.instant()
+        const slots = (await (
+          await fetch(`${page}/slots?start=${now}&end=${now.add({ hours: 14 * 24 })}`)
+        ).json()) as { data: { start: string }[] }
+        const [first, second] = slots.data
+        const invitee = { name: 'Ada Lovelace', email: 'ada@example.com', timeZone: 'UTC' }
+
+        const booked = await fetch(`${page}/bookings`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ start: first?.start, invitee }),
+        })
+        expect(booked.status).toBe(201)
+        const confirmations = await untilMails(2)
+        expect(confirmations.map((m) => m.subject)).toEqual([
+          expect.stringMatching(/^New booking: Intro call with Ada Lovelace/),
+          expect.stringMatching(/^Confirmed: Intro call with Grace Hopper/),
+        ])
+        expect(confirmations[1]?.attachments).toEqual([
+          {
+            filename: 'invite.ics',
+            contentType: 'text/calendar; method=REQUEST; charset=UTF-8',
+            bytes: expect.any(Number),
+          },
+        ])
+        const link = confirmations[1]?.links.find((l) => l.includes('action=cancel')) ?? ''
+        const token = /#token=([A-Za-z0-9_-]{43})&/.exec(link)?.[1] as string
+        expect(link.startsWith(`http://localhost:${port}/booking#token=`)).toBe(true)
+
+        const client = new Client({ name: 'test-agent', version: '1.0.0' })
+        await client.connect(
+          new StreamableHTTPClientTransport(new URL(`${base}/mcp`), {
+            requestInit: { headers: { authorization: `Bearer ${key}` } },
+          }),
+        )
+        try {
+          const result = await client.callTool({
+            name: 'create_booking',
+            arguments: { handle: host.handle, slug: 'intro', start: second?.start, invitee },
+          })
+          expect(result.isError, JSON.stringify(result.content)).toBeFalsy()
+        } finally {
+          await client.close()
+        }
+        expect((await untilMails(4)).slice(2).map((m) => m.to)).toEqual([
+          expect.stringMatching(/@example\.com$/),
+          'ada@example.com',
+        ])
+
+        // The emailed link's secret cancels the first booking.
+        const cancelled = await fetch(`${base}/api/v1/bookings/manage/cancel`, {
+          method: 'POST',
+          headers: { 'x-manage-token': token },
+        })
+        expect(cancelled.status).toBe(200)
+        const cancellations = (await untilMails(6)).slice(4)
+        expect(cancellations.map((m) => m.subject)).toEqual([
+          expect.stringMatching(/^Cancelled: Intro call with Ada Lovelace/),
+          expect.stringMatching(/^Cancelled: Intro call with Grace Hopper/),
+        ])
+        expect(cancellations[1]?.attachments).toEqual([
+          expect.objectContaining({ filename: 'cancel.ics' }),
+        ])
+      } finally {
+        await server.close()
+      }
+    } finally {
+      for (const spy of spies) spy.mockRestore()
+    }
+  }, 60_000)
 
   it('splits into a web role that only queues jobs and a worker role that runs them', async () => {
     const env = { DATABASE_URL: testDb.url, BETTER_AUTH_SECRET: randomBytes(32).toString('base64') }

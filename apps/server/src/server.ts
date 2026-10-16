@@ -1,3 +1,4 @@
+import type { Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { serve } from '@hono/node-server'
 import {
@@ -9,10 +10,12 @@ import {
 import { createDb, createPool, type Db, runMigrations } from '@hourmere/db'
 import { createJobs } from '@hourmere/jobs'
 import { createLogMailer, createSmtpMailer, type Mailer } from '@hourmere/mail'
-import { bookingNotificationJob } from '@hourmere/notifications'
+import { bookingNotificationJob, bookingNotifier } from '@hourmere/notifications'
+import type { BookingNotifier } from '@hourmere/scheduling'
 import { sql } from 'kysely'
 import { createApp } from './app.ts'
 import { type Config, loadConfig } from './config.ts'
+import { httpServerOptions } from './http-timeouts.ts'
 import { bookingTools } from './mcp/bookings.ts'
 import { mcpEndpoint } from './mcp/endpoint.ts'
 import { whoamiTool } from './mcp/whoami.ts'
@@ -24,27 +27,31 @@ import { instanceRoutes } from './routes/instance.ts'
 import { profileRoutes } from './routes/profile.ts'
 import { publicRoutes } from './routes/public.ts'
 import { scheduleRoutes } from './routes/schedules.ts'
+import { closeConnectionsWhen, closeServer } from './shutdown.ts'
 import { createWorkerHealthApp } from './worker-health.ts'
 
 /**
  * The /api/v1 route groups, each created with what it needs. The OpenAPI document (and with
  * it the web app's types, `npm run api:types`) is made from this same list. Route groups hold
- * only db and in-memory rate limiters, and creating them touches neither.
+ * only db, the notifier and in-memory rate limiters, and creating them touches none of them.
  */
 export function productRoutes({
   db,
   socialProviders,
+  notify,
 }: {
   db: Db
   socialProviders: Config['socialProviders']
+  /** Queues booking emails in the booking's transaction (the OpenAPI document needs none). */
+  notify?: BookingNotifier | undefined
 }): RouteModule[] {
   return [
     instanceRoutes({ socialProviders }),
     profileRoutes({ db }),
     scheduleRoutes({ db }),
     eventTypeRoutes({ db }),
-    publicRoutes({ db }),
-    bookingRoutes({ db }),
+    publicRoutes({ db, notify }),
+    bookingRoutes({ db, notify }),
   ]
 }
 
@@ -149,6 +156,8 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
   if (!authPool) {
     fetch = createWorkerHealthApp({ checkDb, checkJobs: () => jobs.check() }).fetch
   } else {
+    // Booking changes over REST and MCP queue their emails in their own transactions.
+    const notify: BookingNotifier = bookingNotifier(jobs)
     const auth = createAuth({
       pool: authPool,
       db,
@@ -163,16 +172,21 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
       authHandler: auth.handler,
       resolveCaller: createCallerResolver({ auth, db }),
       publicUrl: config.PUBLIC_URL,
+      hstsMaxAge: config.HSTS_MAX_AGE,
       trustedProxies: config.trustedProxies,
       webDist: config.WEB_DIST,
       // db is closed below.
-      routes: productRoutes({ db, socialProviders: config.socialProviders }),
-      mcp: mcpEndpoint({ tools: [whoamiTool, ...bookingTools({ db })] }),
+      routes: productRoutes({ db, socialProviders: config.socialProviders, notify }),
+      mcp: mcpEndpoint({ tools: [whoamiTool, ...bookingTools({ db, notify })] }),
     }).fetch
   }
 
-  const server = await new Promise<ReturnType<typeof serve>>((resolve) => {
-    const s = serve({ fetch, port: config.PORT }, (info: AddressInfo) => {
+  let closing = false
+  const server = await new Promise<Server>((resolve) => {
+    const serverOptions = httpServerOptions(config.httpTimeouts)
+    const answer = closeConnectionsWhen(() => closing, fetch)
+    // An http.Server: serve() makes one unless given a createServer.
+    const s = serve({ fetch: answer, port: config.PORT, serverOptions }, (info: AddressInfo) => {
       if (role === 'worker') {
         console.log(`Hourmere worker running jobs; health check on :${info.port}/api/health`)
       } else {
@@ -183,7 +197,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
           `Hourmere listening on :${info.port} (${config.PUBLIC_URL}); sign-in: email${providers.map((p) => `, ${p}`).join('')}; sign-up: ${signup}; jobs: ${role === 'all' ? 'run here' : 'queued for a worker'}`,
         )
       }
-      resolve(s)
+      resolve(s as Server)
     })
   })
 
@@ -192,8 +206,10 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
     close: () =>
       new Promise<void>((resolve, reject) => {
         // Requests first (one still running may queue a job), then jobs (waiting for running
-        // ones up to a timeout), then the pools the jobs use.
-        server.close(async (err) => {
+        // ones up to a timeout), then the pools the jobs use. Kept-alive connections do not
+        // hold this up (see shutdown.ts).
+        closing = true
+        const afterRequests = async (err?: unknown) => {
           try {
             if (sending)
               console.warn(`shutting down: dropping ${sending} email(s) still being sent`)
@@ -204,7 +220,8 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
           } catch (closeErr) {
             reject(closeErr)
           }
-        })
+        }
+        closeServer(server).then(() => afterRequests(), afterRequests)
       }),
   }
 }

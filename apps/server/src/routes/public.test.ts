@@ -1,4 +1,5 @@
 // Public booking pages and invitee links over HTTP, against a throwaway database.
+import { createHash } from 'node:crypto'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createFixtures, type Fixtures } from '@hourmere/scheduling/testing'
@@ -102,6 +103,91 @@ describe.skipIf(!serverUrl)('public routes', () => {
       error: 'event_type_not_found',
       message: 'No such event type',
     })
+  })
+
+  it("lists a host's bookable event types on their page", async () => {
+    // Without a name, the host is shown by their handle.
+    const grace = await f.host({ name: ' ', handle: 'grace' })
+    const second = await f.eventType(grace.organizationId, grace.userId, {
+      slug: 'second',
+      title: 'Second',
+      durationMinutes: 60,
+      location: { kind: 'zoom', url: 'https://zoom.example/j/1' },
+    })
+    await f.eventType(grace.organizationId, grace.userId, {
+      slug: 'first',
+      title: 'First',
+      description: 'Hello',
+    })
+    await f.eventType(grace.organizationId, grace.userId, { slug: 'off', isActive: false })
+    await f.eventType(grace.organizationId, grace.userId, {
+      slug: 'gone',
+      deletedAt: '2026-10-01T00:00:00Z',
+    })
+    // An event type in an organization she no longer belongs to.
+    await f.eventType(await f.organization(), grace.userId, { slug: 'elsewhere' })
+    await db.updateTable('event_types').set({ position: 1 }).where('id', '=', second).execute()
+
+    const res = await get('/api/v1/public/Grace')
+    expect(res.status).toBe(200)
+    expect(res.headers.get('cache-control')).toBe('no-store')
+    expect(await res.json()).toEqual({
+      handle: 'grace',
+      host: { name: 'grace', timeZone: 'Europe/Berlin' },
+      eventTypes: [
+        {
+          slug: 'first',
+          title: 'First',
+          description: 'Hello',
+          durationMinutes: 30,
+          location: null,
+        },
+        {
+          slug: 'second',
+          title: 'Second',
+          description: null,
+          durationMinutes: 60,
+          location: { kind: 'zoom' },
+        },
+      ],
+    })
+
+    // A host with nothing to book still has a page.
+    await f.host({ name: 'Empty', handle: 'empty' })
+    expect(await (await get('/api/v1/public/empty')).json()).toMatchObject({ eventTypes: [] })
+
+    for (const handle of ['nobody', 'not_a_handle', 'a'.repeat(41)]) {
+      const missing = await get(`/api/v1/public/${handle}`)
+      expect(missing.status).toBe(404)
+      expect(await missing.json()).toEqual({
+        error: 'host_not_found',
+        message: 'No such booking page',
+      })
+    }
+  })
+
+  it('serves no page for a stored handle that has become reserved', async () => {
+    // Written directly, as if stored before the name was reserved: the profile API refuses it.
+    for (const handle of ['pricing', 'event-types']) {
+      const host = await f.host({ name: 'Early Bird', handle })
+      await f.schedule(host.userId)
+      await f.eventType(host.organizationId, host.userId, { slug: 'call' })
+      for (const path of [
+        `/api/v1/public/${handle}`,
+        `/api/v1/public/${handle}/call`,
+        `/api/v1/public/${handle.toUpperCase()}/call`,
+        `/api/v1/public/${handle}/call/slots?start=2026-11-02T00:00:00Z&end=2026-11-03T00:00:00Z`,
+      ]) {
+        const res = await get(path)
+        expect(res.status, path).toBe(404)
+      }
+      const booked = await post(
+        `/api/v1/public/${handle}/call/bookings`,
+        bookingRequest('2026-11-02T08:00:00Z', { responses: {} }),
+      )
+      expect(booked.status).toBe(404)
+      expect(await booked.json()).toMatchObject({ error: 'event_type_not_found' })
+    }
   })
 
   it('lists slots for a range', async () => {
@@ -267,7 +353,12 @@ describe.skipIf(!serverUrl)('public routes', () => {
       const shown = await app.request(manage, { headers: as(token) })
       expect(shown.status).toBe(200)
       expect(shown.headers.get('cache-control')).toBe('no-store')
-      expect(await shown.json()).toEqual(created.booking)
+      // With what the invitee needs to recognize it: the event and who they meet.
+      expect(await shown.json()).toEqual({
+        ...created.booking,
+        eventType: { title: 'Intro call', durationMinutes: 30 },
+        hosts: [{ name: 'Ada Lovelace' }],
+      })
 
       // Onto a time overlapping the old one.
       const moved = await post(`${manage}/reschedule`, { start: '2026-11-02T13:30:00Z' }, as(token))
@@ -305,6 +396,188 @@ describe.skipIf(!serverUrl)('public routes', () => {
     }
   })
 
+  it('offers the times a booking can move to, its own time included', async () => {
+    const created = (await (await book('2026-11-03T09:00:00Z')).json()) as BookingBody
+    const token = created.manageToken as string
+    const range = 'start=2026-11-03T08:00:00Z&end=2026-11-03T10:00:00Z'
+    const slots = (t: string, query = range, a = app) =>
+      a.request(`/api/v1/bookings/manage/slots?${query}`, { headers: { 'x-manage-token': t } })
+    const starts = (body: unknown) =>
+      (body as { data: { start: string }[] }).data.map((s) => s.start)
+
+    const res = await slots(token)
+    expect(res.status).toBe(200)
+    expect(res.headers.get('cache-control')).toBe('no-store')
+    // Rescheduling ignores the booking itself, so its time and the overlapping ones are offered
+    // (the public page, which does not know whose booking it is, leaves 09:00 out).
+    expect(starts(await res.json())).toEqual([
+      '2026-11-03T08:00:00.000Z',
+      '2026-11-03T08:30:00.000Z',
+      '2026-11-03T09:00:00.000Z',
+      '2026-11-03T09:30:00.000Z',
+    ])
+    expect(starts(await (await get(`/api/v1/public/ada/intro/slots?${range}`)).json())).toEqual([
+      '2026-11-03T08:00:00.000Z',
+      '2026-11-03T08:30:00.000Z',
+      '2026-11-03T09:30:00.000Z',
+    ])
+    // Someone else's booking still blocks its time.
+    await book('2026-11-03T08:00:00Z', {
+      invitee: { name: 'Other', email: 'other@example.com', timeZone: 'UTC' },
+    })
+    expect(starts(await (await slots(token)).json())).not.toContain('2026-11-03T08:00:00.000Z')
+
+    for (const [query, error] of [
+      ['start=2026-11-03T08:00:00Z&end=2026-11-03T08:00:00Z', 'invalid_range'],
+      ['start=2026-11-03T00:00:00Z&end=2027-01-05T00:00:00Z', 'range_too_long'],
+      ['start=2026-11-03T00:00:00Z', 'invalid_request'],
+    ]) {
+      const refused = await slots(token, query)
+      expect(refused.status, query).toBe(400)
+      expect(await refused.json()).toMatchObject({ error })
+    }
+    const unknown = await slots('A'.repeat(43))
+    expect(unknown.status).toBe(404)
+    expect(await unknown.json()).toMatchObject({ error: 'booking_not_found' })
+
+    // Counted against the slots budget, not the (smaller) manage one.
+    const limited = appWith({
+      slots: { limit: 1, windowSeconds: 60 },
+      manage: { limit: 100, windowSeconds: 60 },
+    })
+    expect((await slots(token, range, limited)).status).toBe(200)
+    expect((await slots(token, range, limited)).status).toBe(429)
+
+    await post('/api/v1/bookings/manage/cancel', undefined, { 'x-manage-token': token })
+    const cancelled = await slots(token)
+    expect(cancelled.status).toBe(409)
+    expect(await cancelled.json()).toMatchObject({ error: 'booking_cancelled' })
+  })
+
+  it('offers no new times for a booking that started or whose event type was retired', async () => {
+    const as = (t: string) => ({ headers: { 'x-manage-token': t } })
+    const range = 'start=2026-11-03T08:00:00Z&end=2026-11-03T12:00:00Z'
+    // A booking that has already started, with a token we know.
+    const pastToken = 'P'.repeat(43)
+    const past = await f.booking(
+      ada.organizationId,
+      [ada.userId],
+      '2026-10-30T09:00:00Z',
+      '2026-10-30T09:30:00Z',
+    )
+    await db
+      .updateTable('bookings')
+      .set({ manage_token_hash: createHash('sha256').update(pastToken).digest() })
+      .where('id', '=', past)
+      .execute()
+    const started = await app.request(`/api/v1/bookings/manage/slots?${range}`, as(pastToken))
+    expect(started.status).toBe(409)
+    expect(await started.json()).toMatchObject({ error: 'booking_in_past' })
+
+    const retired = await f.eventType(ada.organizationId, ada.userId, { slug: 'retired' })
+    const booked = await post(
+      '/api/v1/public/ada/retired/bookings',
+      bookingRequest('2026-11-03T14:00:00Z', { responses: {} }),
+    )
+    expect(booked.status).toBe(201)
+    const { manageToken } = (await booked.json()) as BookingBody
+    await db
+      .updateTable('event_types')
+      .set({ is_active: false })
+      .where('id', '=', retired)
+      .execute()
+    const unavailable = await app.request(
+      `/api/v1/bookings/manage/slots?${range}`,
+      as(manageToken as string),
+    )
+    expect(unavailable.status).toBe(409)
+    expect(await unavailable.json()).toMatchObject({ error: 'event_type_unavailable' })
+    // The manage page still shows it, with the event type as it is now.
+    const shown = await app.request('/api/v1/bookings/manage', as(manageToken as string))
+    expect(await shown.json()).toMatchObject({
+      eventType: { title: 'Intro call', durationMinutes: 30 },
+    })
+  })
+
+  it("follows the meeting with an email's token, for its details and the times it can move to", async () => {
+    const created = (await (await book('2026-11-03T12:00:00Z')).json()) as BookingBody
+    const own = created.manageToken as string
+    // The token an invitee email carried, stored as the notification job stores it.
+    const emailed = 'E'.repeat(43)
+    const invitee = await db
+      .selectFrom('booking_attendees')
+      .select('id')
+      .where('booking_id', '=', created.booking.id)
+      .where('is_booker', '=', true)
+      .executeTakeFirstOrThrow()
+    await db
+      .insertInto('booking_notifications')
+      .values({
+        booking_id: created.booking.id,
+        kind: 'confirmed',
+        recipient: `attendee:${invitee.id}`,
+        manage_token_hash: createHash('sha256').update(emailed).digest(),
+      })
+      .execute()
+    const as = (t: string) => ({ headers: { 'x-manage-token': t } })
+    const show = async (t: string) =>
+      (await (await app.request('/api/v1/bookings/manage', as(t))).json()) as {
+        id: string
+        status: string
+        start: string
+        eventType: unknown
+        hosts: unknown
+      }
+    const range = 'start=2026-11-03T11:00:00Z&end=2026-11-03T13:30:00Z'
+    const slots = (t: string) => app.request(`/api/v1/bookings/manage/slots?${range}`, as(t))
+
+    expect(await show(emailed)).toMatchObject({ id: created.booking.id, status: 'confirmed' })
+
+    // Moved with the booking's own token, onto a time overlapping the old one.
+    const moved = await post(
+      '/api/v1/bookings/manage/reschedule',
+      { start: '2026-11-03T12:30:00Z' },
+      { 'x-manage-token': own },
+    )
+    expect(moved.status).toBe(200)
+    const next = (await moved.json()) as BookingBody
+
+    // The email's link now opens the new booking; the old token stays with the old one.
+    expect(await show(emailed)).toMatchObject({
+      id: next.booking.id,
+      status: 'confirmed',
+      start: '2026-11-03T12:30:00.000Z',
+      eventType: { title: 'Intro call', durationMinutes: 30 },
+      hosts: [{ name: 'Ada Lovelace' }],
+    })
+    expect(await show(own)).toMatchObject({ id: created.booking.id, status: 'cancelled' })
+
+    // Times to move to: for the new booking, its own time included; none for the old token.
+    const offered = await slots(emailed)
+    expect(offered.status).toBe(200)
+    expect(
+      ((await offered.json()) as { data: { start: string }[] }).data.map((s) => s.start),
+    ).toEqual([
+      '2026-11-03T11:00:00.000Z',
+      '2026-11-03T11:30:00.000Z',
+      '2026-11-03T12:00:00.000Z',
+      '2026-11-03T12:30:00.000Z',
+      '2026-11-03T13:00:00.000Z',
+    ])
+    const stale = await slots(own)
+    expect(stale.status).toBe(409)
+    expect(await stale.json()).toMatchObject({ error: 'booking_cancelled' })
+
+    // Rescheduling through the email's link moves the new booking.
+    const again = await post(
+      '/api/v1/bookings/manage/reschedule',
+      { start: '2026-11-03T13:00:00Z' },
+      { 'x-manage-token': emailed },
+    )
+    expect(again.status).toBe(200)
+    expect(await show(emailed)).toMatchObject({ start: '2026-11-03T13:00:00.000Z' })
+  })
+
   it('answers a missing, malformed or unknown manage token identically', async () => {
     const bodies = new Set<string>()
     for (const headers of [
@@ -315,6 +588,11 @@ describe.skipIf(!serverUrl)('public routes', () => {
     ]) {
       for (const [method, path, body] of [
         ['GET', '/api/v1/bookings/manage', undefined],
+        [
+          'GET',
+          '/api/v1/bookings/manage/slots?start=2026-11-03T08:00:00Z&end=2026-11-03T10:00:00Z',
+          undefined,
+        ],
         ['POST', '/api/v1/bookings/manage/cancel', undefined],
         ['POST', '/api/v1/bookings/manage/reschedule', { start: '2026-11-02T15:00:00Z' }],
       ] as const) {
@@ -519,12 +797,14 @@ describe.skipIf(!serverUrl)('public routes', () => {
     }
     expect(Object.keys(doc.paths)).toEqual(
       expect.arrayContaining([
+        '/api/v1/public/{handle}',
         '/api/v1/public/{handle}/{slug}',
         '/api/v1/public/{handle}/{slug}/slots',
         '/api/v1/public/{handle}/{slug}/bookings',
         '/api/v1/bookings/manage',
         '/api/v1/bookings/manage/cancel',
         '/api/v1/bookings/manage/reschedule',
+        '/api/v1/bookings/manage/slots',
         '/api/v1/bookings',
         '/api/v1/bookings/{id}',
         '/api/v1/bookings/{id}/cancel',
@@ -533,9 +813,13 @@ describe.skipIf(!serverUrl)('public routes', () => {
     expect(doc.paths['/api/v1/public/{handle}/{slug}/bookings']?.post?.security).toBeUndefined()
     expect(doc.paths['/api/v1/bookings']?.get?.security).toEqual([{ apiKey: [] }, { session: [] }])
     expect(doc.paths['/api/v1/bookings/manage']?.get?.security).toBeUndefined()
-    expect(doc.paths['/api/v1/bookings/manage']?.get?.parameters).toContainEqual(
-      expect.objectContaining({ name: 'x-manage-token', in: 'header' }),
-    )
+    for (const path of ['/api/v1/bookings/manage', '/api/v1/bookings/manage/slots']) {
+      expect(doc.paths[path]?.get?.security).toBeUndefined()
+      expect(doc.paths[path]?.get?.parameters).toContainEqual(
+        expect.objectContaining({ name: 'x-manage-token', in: 'header' }),
+      )
+    }
+    expect(doc.paths['/api/v1/public/{handle}']?.get?.security).toBeUndefined()
     expect(Object.keys(doc.paths).filter((p) => p.includes('{token}'))).toEqual([])
     const responses = (path: string, method: string) =>
       Object.keys(doc.paths[path]?.[method]?.responses ?? {})

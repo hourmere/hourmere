@@ -1,13 +1,16 @@
 import { createRoute, z } from '@hono/zod-openapi'
 import type { Db } from '@hourmere/db'
 import {
+  type BookingNotifier,
   cancelHostBooking,
   cancelManagedBooking,
   getHostBooking,
-  getManagedBooking,
+  getManagedBookingDetails,
   LOCATION_KINDS,
   listHostBookings,
+  listManagedSlots,
   MAX_PAGE_SIZE,
+  MAX_SLOT_RANGE_DAYS,
   type PublicContext,
   ResponsesSchema,
   rescheduleManagedBooking,
@@ -38,6 +41,9 @@ export const Instant = z.iso
   })
 
 export const LocationKind = z.enum(LOCATION_KINDS)
+
+/** A bookable time: public slots and the times a booking can move to. */
+export const Slot = z.object({ start: Instant, end: Instant }).openapi('Slot')
 
 export const BookingLocation = z.looseObject({ kind: LocationKind }).openapi('BookingLocation', {
   description:
@@ -84,12 +90,21 @@ export const Booking = z
   })
   .openapi('Booking')
 
+export const ManagedBooking = Booking.extend({
+  eventType: z.object({ title: z.string(), durationMinutes: z.number().int() }).nullable().openapi({
+    description: 'The event type as it is now; null once it is deleted',
+  }),
+  hosts: z.array(z.object({ name: z.string() })).openapi({
+    description: "Who the invitee meets: each host's name",
+  }),
+}).openapi('ManagedBooking')
+
 export const BookingWithToken = z
   .object({
     booking: Booking,
     manageToken: z.string().nullable().openapi({
       description:
-        "The secret of the invitee's manage link (https://<app>/booking#token=<token>), sent as X-Manage-Token to /api/v1/bookings/manage. Returned only once and never stored, so a replayed request (same Idempotency-Key) gets null.",
+        "The booking's own manage token (it stays with this booking; emails carry their own), sent as X-Manage-Token to /api/v1/bookings/manage. Returned only once and never stored, so a replayed request (same Idempotency-Key) gets null.",
     }),
   })
   .openapi('BookingWithToken')
@@ -127,7 +142,7 @@ const error = (description: string) => ({ description, content: json(ErrorBody) 
 const ManageToken = z.object({
   'x-manage-token': z.string().optional().openapi({
     description:
-      "The secret from the invitee's link (the `token` in https://<app>/booking#token=…). A missing or unknown token gets 404 `booking_not_found`.",
+      "The invitee's secret: the `manageToken` the booking API returned, or the `token` in a link from a booking email (https://<app>/booking#token=…). A missing or unknown token gets 404 `booking_not_found`. After a reschedule, the token returned for the old booking shows that cancelled booking, while tokens from emails open the booking that replaced it.",
   }),
 })
 const manageNotFound = error('Missing or unknown manage token (`booking_not_found`)')
@@ -150,7 +165,9 @@ const invalidCancel = error(
 export interface BookingRoutesDeps {
   db: Db
   now?: () => Temporal.Instant
-  /** Replaces PUBLIC_RATE_LIMITS.manage, e.g. in tests. */
+  /** Queues the booking emails in the transaction of each change; none are sent without it. */
+  notify?: BookingNotifier | undefined
+  /** Replaces PUBLIC_RATE_LIMITS.manage (and .slots for the reschedule slots), e.g. in tests. */
   rateLimits?: Partial<Record<keyof typeof PUBLIC_RATE_LIMITS, RateLimit>>
 }
 
@@ -162,16 +179,22 @@ export interface BookingRoutesDeps {
 export function bookingRoutes({
   db,
   now = () => Temporal.Now.instant(),
+  notify,
   rateLimits = {},
 }: BookingRoutesDeps): RouteModule {
-  const publicContext: PublicContext = { db, now }
+  const publicContext: PublicContext = { db, now, notify }
   const manageLimit = rateLimit(createRateLimiter(rateLimits.manage ?? PUBLIC_RATE_LIMITS.manage))
+  // Picking a new time pages through months of slots, so it counts like public slots.
+  const manageSlotsLimit = rateLimit(
+    createRateLimiter(rateLimits.slots ?? PUBLIC_RATE_LIMITS.slots),
+  )
 
   return ({ app, caller }) => {
     const context = (principal: ServiceContext['principal']): ServiceContext => ({
       db,
       principal,
       now,
+      notify,
     })
 
     // Registered before /api/v1/bookings/{id}…: Hono runs matching routes in registration
@@ -184,17 +207,60 @@ export function bookingRoutes({
         middleware: manageLimit,
         request: { headers: ManageToken },
         responses: {
-          200: { description: 'The booking', content: json(Booking) },
+          200: {
+            description: 'The booking, with its event type and hosts',
+            content: json(ManagedBooking),
+          },
           404: manageNotFound,
           429: rateLimited,
         },
       }),
       async (c) => {
-        const booking = await getManagedBooking(
+        const booking = await getManagedBookingDetails(
           publicContext,
           c.req.valid('header')['x-manage-token'],
         )
         return c.json(booking, 200)
+      },
+    )
+
+    app.openapi(
+      createRoute({
+        method: 'get',
+        path: '/api/v1/bookings/manage/slots',
+        summary: 'Times the booking can move to',
+        description: `The slots the booking behind the manage token can be rescheduled to, fully inside [start, end]: its event type's slots with the booking itself ignored, so they may overlap its current time. The same range limits as public slots (at most ${MAX_SLOT_RANGE_DAYS} days).`,
+        middleware: manageSlotsLimit,
+        request: {
+          headers: ManageToken,
+          query: z.object({ start: Instant, end: Instant }),
+        },
+        responses: {
+          200: {
+            description: 'Slots, sorted by start',
+            content: json(z.object({ data: z.array(Slot) })),
+          },
+          400: error(
+            'Invalid parameters (`invalid_request`), end not after start (`invalid_range`), or a range that is too long (`range_too_long`)',
+          ),
+          404: manageNotFound,
+          409: error(
+            'Already cancelled (`booking_cancelled`), already started (`booking_in_past`), the event type no longer takes bookings (`event_type_unavailable`) or the booking has no host (`booking_has_no_host`)',
+          ),
+          429: rateLimited,
+        },
+      }),
+      async (c) => {
+        const { start, end } = c.req.valid('query')
+        const slots = await listManagedSlots(
+          publicContext,
+          c.req.valid('header')['x-manage-token'],
+          {
+            start: Temporal.Instant.from(start),
+            end: Temporal.Instant.from(end),
+          },
+        )
+        return c.json({ data: slots }, 200)
       },
     )
 
@@ -213,7 +279,7 @@ export function bookingRoutes({
           400: invalidCancel,
           404: manageNotFound,
           409: error(
-            'Already cancelled (`booking_cancelled`) or already started (`booking_in_past`)',
+            "Already cancelled (`booking_cancelled`), already started (`booking_in_past`), or, with an email's token, the meeting kept being rescheduled while the request waited (`booking_changed`; try again)",
           ),
           429: rateLimited,
         },
@@ -235,7 +301,7 @@ export function bookingRoutes({
         path: '/api/v1/bookings/manage/reschedule',
         summary: 'Reschedule with the manage token',
         description:
-          'Cancels the booking and books the new time in one step. The new time may overlap the old one. Returns the new booking and its manage token; the old token then shows the cancelled booking.',
+          'Cancels the booking and books the new time in one step. The new time may overlap the old one. Returns the new booking and its manage token. The token returned for the old booking then shows the cancelled booking, so a retry after a lost response gets 409 `booking_cancelled`; tokens from booking emails open the new booking (and would move it again).',
         middleware: manageLimit,
         request: {
           headers: ManageToken,
@@ -249,7 +315,7 @@ export function bookingRoutes({
           400: error('Invalid request'),
           404: manageNotFound,
           409: error(
-            'Already cancelled (`booking_cancelled`), already started (`booking_in_past`), without a host (`booking_has_no_host`), the event type no longer takes bookings (`event_type_unavailable`), or the time is not offered (`slot_unavailable`, `slot_taken`)',
+            "Already cancelled (`booking_cancelled`), already started (`booking_in_past`), without a host (`booking_has_no_host`), the event type no longer takes bookings (`event_type_unavailable`), the time is not offered (`slot_unavailable`, `slot_taken`), or, with an email's token, the meeting kept being rescheduled while the request waited (`booking_changed`; try again)",
           ),
           429: rateLimited,
         },
