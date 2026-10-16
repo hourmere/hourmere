@@ -6,11 +6,14 @@ FROM node:26-slim AS base
 WORKDIR /app
 
 # Copies the whole workspace so new apps/packages need no Dockerfile changes.
+# Optional packages are pruned too: some production dependencies (better-auth) declare
+# optional peers that are also dev tools (react, vite, vitest), which npm keeps on
+# --omit=dev alone. Nothing the server runs is optional.
 FROM base AS build
 COPY . .
 RUN npm ci --ignore-scripts \
  && npm run build --workspace @hourmere/web \
- && npm prune --omit=dev --ignore-scripts
+ && npm prune --omit=dev --omit=optional --ignore-scripts
 
 FROM base AS runtime
 ENV NODE_ENV=production \
