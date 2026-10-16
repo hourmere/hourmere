@@ -51,4 +51,26 @@ describe.skipIf(!url)('runMigrations', () => {
     const recorded = await pool.query('SELECT name FROM schema_migrations ORDER BY name')
     expect(recorded.rows.map((r) => r.name)).toEqual(['0001_a.sql', '0002_b.sql'])
   })
+
+  it('refuses an applied migration whose contents changed', async () => {
+    await writeFile(join(dir, '0003_bad.sql'), 'SELECT 1;')
+    await runMigrations(pool, dir)
+    await writeFile(join(dir, '0001_a.sql'), 'CREATE TABLE a (id bigint PRIMARY KEY);')
+
+    await expect(runMigrations(pool, dir)).rejects.toThrow(
+      'migration 0001_a.sql was changed after it was applied',
+    )
+  })
+
+  it('rejects file names that break the NNNN_name.sql rule', async () => {
+    const other = await mkdtemp(join(tmpdir(), 'hourmere-migrations-'))
+    await writeFile(join(other, '10_late.sql'), 'SELECT 1;')
+    try {
+      await expect(runMigrations(pool, other)).rejects.toThrow(
+        'migration file name 10_late.sql does not match NNNN_name.sql',
+      )
+    } finally {
+      await rm(other, { recursive: true, force: true })
+    }
+  })
 })

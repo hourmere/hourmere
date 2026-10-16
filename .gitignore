@@ -156,3 +156,6 @@ temp/
 
 # Better Auth schema diff output (npm run auth:sql); copy into a migration
 packages/auth/auth-schema.generated.sql
+
+# Claude Code agent worktrees
+.claude/worktrees/
