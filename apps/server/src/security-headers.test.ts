@@ -92,6 +92,22 @@ describe('security headers', () => {
     await rm(dist, { recursive: true, force: true })
   })
 
+  it('allow the web app only its own files, plus inlined images', () => {
+    // Checked against the built app in a browser; see APP_CSP. Changes here need that again.
+    expect(APP_CSP.split('; ')).toEqual([
+      "default-src 'self'",
+      "script-src 'self'",
+      "style-src 'self'",
+      "img-src 'self' data:",
+      "font-src 'self'",
+      "connect-src 'self'",
+      "object-src 'none'",
+      "base-uri 'none'",
+      "frame-ancestors 'none'",
+      "form-action 'self'",
+    ])
+  })
+
   it('give the web app shell its CSP and opener isolation, at the root and on deep links', async () => {
     for (const path of ['/', '/index.html', '/event-types', '/acme/intro-call?month=2026-11']) {
       const res = await app.request(path)
