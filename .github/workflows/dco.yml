@@ -2,6 +2,8 @@ name: DCO
 
 on:
   pull_request:
+    # Retargeting a PR changes the checked commit range without pushing a new head.
+    types: [opened, synchronize, reopened, edited]
 
 permissions:
   contents: read
