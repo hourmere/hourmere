@@ -1,0 +1,29 @@
+# Dependency updates. Minor and patch versions arrive as one weekly pull request per
+# ecosystem; major versions get their own. Security updates (enabled in the repository's
+# settings) are not grouped, so each one can be merged on its own.
+version: 2
+updates:
+  # The root covers every workspace in apps/* and packages/* through package-lock.json.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      npm-minor-and-patch:
+        update-types: [minor, patch]
+
+  # Actions in .github/workflows, pinned to commit SHAs with the version in a comment.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions-minor-and-patch:
+        update-types: [minor, patch]
+
+  # Base image in the Dockerfile. Its tag (26-slim) names only the Node.js major, so this
+  # proposes new majors only: move .node-version, engines and the image together, or close it.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
