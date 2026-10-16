@@ -40,7 +40,12 @@ export {
   type PersonInput,
   rescheduleManagedBooking,
 } from './bookings.ts'
-export type { PublicContext, ServiceContext } from './context.ts'
+export type {
+  BookingEvent,
+  BookingNotifier,
+  PublicContext,
+  ServiceContext,
+} from './context.ts'
 export { DomainError, type DomainErrorKind, RESERVED_ERROR_CODES } from './errors.ts'
 export {
   createEventType,

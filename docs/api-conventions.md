@@ -166,6 +166,23 @@ Booking pages and invitee links work without credentials:
   gets the same 404 `booking_not_found`. Only the token's SHA-256 is stored, so it is returned
   once, when the booking is made (and with the new booking after a reschedule).
 
+Two kinds of manage token are accepted, alike in shape (43 base64url characters) and
+everywhere a token is taken, REST and MCP:
+
+- **The booking's own token**, the `manageToken` the create (or reschedule) response
+  returned. It stays with that booking: after a reschedule it shows the old booking as
+  cancelled, and cancelling or rescheduling with it gets 409 `booking_cancelled`.
+- **An email's token**, from the manage links in the invitee's booking emails; each email
+  carries its own ([notifications.md](notifications.md#which-booking-a-token-opens)). It
+  follows the meeting: after a reschedule it opens the booking that replaced it (the latest
+  of the chain), and cancels or reschedules that one.
+
+After a cancellation, any token still shows the booking (status `cancelled`); cancelling
+again or rescheduling gets 409 `booking_cancelled`. A token stops working only when its
+booking is deleted. Responses never contain an email's token. With an email's token, a
+cancel or reschedule that keeps finding the meeting rescheduled again while it waits gets
+409 `booking_changed`; trying again is safe.
+
 They are rate limited per client (`TRUSTED_PROXIES` decides which address that is; IPv6
 clients count per /64 network, since one subscriber usually has a whole /64): 120 requests a
 minute for event pages and for slots, 10 for creating bookings, 30 for manage endpoints;
@@ -188,6 +205,11 @@ refused with 409 `idempotency_key_reused`. Keys are scoped to the organization a
 caller's API key, and all anonymous callers share one scope, so they must be random (e.g. a
 UUIDv4), never derived from the request.
 
+A replay never sends the booking emails a second time: they are queued only in the
+transaction that creates the booking.
+
 Rescheduling is not idempotent: it cancels the booking and creates a new one with a new
-manage token, so retrying it after a lost response gets 409 `booking_cancelled`. Booking
-emails (coming later) will carry the new link, so the invitee does not lose it.
+manage token, so retrying it with the booking's own token after a lost response gets 409
+`booking_cancelled`. The invitee does not lose access: the reschedule email carries a new
+link, and links in earlier emails follow the meeting to the new booking. (So a retry with
+an email's token would move the meeting again; clients must not resubmit it on their own.)

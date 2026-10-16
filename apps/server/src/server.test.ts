@@ -4,10 +4,13 @@ import { once } from 'node:events'
 import { Server as HttpServer } from 'node:http'
 import { connect, createServer, type Socket } from 'node:net'
 import { Writable } from 'node:stream'
-import { createPool } from '@hourmere/db'
+import { createAuth, createAuthPool } from '@hourmere/auth'
+import { createDb, createPool } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createJobs } from '@hourmere/jobs'
 import { BOOKING_NOTIFICATION_JOB, bookingNotificationJob } from '@hourmere/notifications'
+import { createFixtures } from '@hourmere/scheduling/testing'
+import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { type RunningServer, startServer } from './server.ts'
 import { trickle } from './slow-client-testing.ts'
@@ -318,6 +321,131 @@ describe.skipIf(!serverUrl)('startServer', () => {
       vi.resetModules()
     }
   })
+
+  it('emails booking changes made over REST and MCP, from jobs it queues and runs', async () => {
+    const secret = randomBytes(32).toString('base64')
+    const db = createDb(testDb.pool)
+    const f = createFixtures(db)
+    const host = await f.host({
+      name: 'Grace Hopper',
+      handle: `mail-${randomBytes(3).toString('hex')}`,
+    })
+    await f.schedule(host.userId)
+    await f.eventType(host.organizationId, host.userId, { slug: 'intro', title: 'Intro call' })
+    // An API key for MCP, made the way the server's own Better Auth would.
+    const signup = { mode: 'open', allowedDomains: [] } as const
+    const authPool = createAuthPool(testDb.url, signup)
+    const agent = await f.host({ name: 'Assistant', handle: null })
+    const { key } = await createAuth({
+      pool: authPool,
+      db,
+      baseURL: 'http://localhost',
+      secret,
+      mailer: { send: async () => {} },
+      signup,
+    }).api.createApiKey({ body: { userId: agent.userId, name: 'agent' } })
+    await authPool.end()
+
+    // The log mailer prints one `[mail] {json}` line per email.
+    const lines: string[] = []
+    const spies = (['log', 'info', 'warn', 'error'] as const).map((m) =>
+      vi.spyOn(console, m).mockImplementation((...args: unknown[]) => {
+        lines.push(args.map(String).join(' '))
+      }),
+    )
+    type MailRecord = { to: string; subject: string; links: string[]; attachments?: unknown[] }
+    const mails = () =>
+      lines
+        .filter((l) => l.startsWith('[mail] '))
+        .map((l) => JSON.parse(l.slice('[mail] '.length)) as MailRecord)
+    const untilMails = async (count: number) => {
+      const deadline = Date.now() + 15_000
+      while (mails().length < count && Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 100))
+      }
+      return mails()
+    }
+    try {
+      const port = await freePort()
+      const base = `http://127.0.0.1:${port}`
+      const server = await startServer({
+        DATABASE_URL: testDb.url,
+        PORT: String(port),
+        PUBLIC_URL: `http://localhost:${port}`,
+        BETTER_AUTH_SECRET: secret,
+      })
+      try {
+        const page = `${base}/api/v1/public/${host.handle}/intro`
+        const now = Temporal.Now.instant()
+        const slots = (await (
+          await fetch(`${page}/slots?start=${now}&end=${now.add({ hours: 14 * 24 })}`)
+        ).json()) as { data: { start: string }[] }
+        const [first, second] = slots.data
+        const invitee = { name: 'Ada Lovelace', email: 'ada@example.com', timeZone: 'UTC' }
+
+        const booked = await fetch(`${page}/bookings`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ start: first?.start, invitee }),
+        })
+        expect(booked.status).toBe(201)
+        const confirmations = await untilMails(2)
+        expect(confirmations.map((m) => m.subject)).toEqual([
+          expect.stringMatching(/^New booking: Intro call with Ada Lovelace/),
+          expect.stringMatching(/^Confirmed: Intro call with Grace Hopper/),
+        ])
+        expect(confirmations[1]?.attachments).toEqual([
+          {
+            filename: 'invite.ics',
+            contentType: 'text/calendar; method=REQUEST; charset=UTF-8',
+            bytes: expect.any(Number),
+          },
+        ])
+        const link = confirmations[1]?.links.find((l) => l.includes('action=cancel')) ?? ''
+        const token = /#token=([A-Za-z0-9_-]{43})&/.exec(link)?.[1] as string
+        expect(link.startsWith(`http://localhost:${port}/booking#token=`)).toBe(true)
+
+        const client = new Client({ name: 'test-agent', version: '1.0.0' })
+        await client.connect(
+          new StreamableHTTPClientTransport(new URL(`${base}/mcp`), {
+            requestInit: { headers: { authorization: `Bearer ${key}` } },
+          }),
+        )
+        try {
+          const result = await client.callTool({
+            name: 'create_booking',
+            arguments: { handle: host.handle, slug: 'intro', start: second?.start, invitee },
+          })
+          expect(result.isError, JSON.stringify(result.content)).toBeFalsy()
+        } finally {
+          await client.close()
+        }
+        expect((await untilMails(4)).slice(2).map((m) => m.to)).toEqual([
+          expect.stringMatching(/@example\.com$/),
+          'ada@example.com',
+        ])
+
+        // The emailed link's secret cancels the first booking.
+        const cancelled = await fetch(`${base}/api/v1/bookings/manage/cancel`, {
+          method: 'POST',
+          headers: { 'x-manage-token': token },
+        })
+        expect(cancelled.status).toBe(200)
+        const cancellations = (await untilMails(6)).slice(4)
+        expect(cancellations.map((m) => m.subject)).toEqual([
+          expect.stringMatching(/^Cancelled: Intro call with Ada Lovelace/),
+          expect.stringMatching(/^Cancelled: Intro call with Grace Hopper/),
+        ])
+        expect(cancellations[1]?.attachments).toEqual([
+          expect.objectContaining({ filename: 'cancel.ics' }),
+        ])
+      } finally {
+        await server.close()
+      }
+    } finally {
+      for (const spy of spies) spy.mockRestore()
+    }
+  }, 60_000)
 
   it('splits into a web role that only queues jobs and a worker role that runs them', async () => {
     const env = { DATABASE_URL: testDb.url, BETTER_AUTH_SECRET: randomBytes(32).toString('base64') }

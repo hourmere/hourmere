@@ -10,7 +10,8 @@ import {
 import { createDb, createPool, type Db, runMigrations } from '@hourmere/db'
 import { createJobs } from '@hourmere/jobs'
 import { createLogMailer, createSmtpMailer, type Mailer } from '@hourmere/mail'
-import { bookingNotificationJob } from '@hourmere/notifications'
+import { bookingNotificationJob, bookingNotifier } from '@hourmere/notifications'
+import type { BookingNotifier } from '@hourmere/scheduling'
 import { sql } from 'kysely'
 import { createApp } from './app.ts'
 import { type Config, loadConfig } from './config.ts'
@@ -32,22 +33,25 @@ import { createWorkerHealthApp } from './worker-health.ts'
 /**
  * The /api/v1 route groups, each created with what it needs. The OpenAPI document (and with
  * it the web app's types, `npm run api:types`) is made from this same list. Route groups hold
- * only db and in-memory rate limiters, and creating them touches neither.
+ * only db, the notifier and in-memory rate limiters, and creating them touches none of them.
  */
 export function productRoutes({
   db,
   socialProviders,
+  notify,
 }: {
   db: Db
   socialProviders: Config['socialProviders']
+  /** Queues booking emails in the booking's transaction (the OpenAPI document needs none). */
+  notify?: BookingNotifier | undefined
 }): RouteModule[] {
   return [
     instanceRoutes({ socialProviders }),
     profileRoutes({ db }),
     scheduleRoutes({ db }),
     eventTypeRoutes({ db }),
-    publicRoutes({ db }),
-    bookingRoutes({ db }),
+    publicRoutes({ db, notify }),
+    bookingRoutes({ db, notify }),
   ]
 }
 
@@ -152,6 +156,8 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
   if (!authPool) {
     fetch = createWorkerHealthApp({ checkDb, checkJobs: () => jobs.check() }).fetch
   } else {
+    // Booking changes over REST and MCP queue their emails in their own transactions.
+    const notify: BookingNotifier = bookingNotifier(jobs)
     const auth = createAuth({
       pool: authPool,
       db,
@@ -170,8 +176,8 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
       trustedProxies: config.trustedProxies,
       webDist: config.WEB_DIST,
       // db is closed below.
-      routes: productRoutes({ db, socialProviders: config.socialProviders }),
-      mcp: mcpEndpoint({ tools: [whoamiTool, ...bookingTools({ db })] }),
+      routes: productRoutes({ db, socialProviders: config.socialProviders, notify }),
+      mcp: mcpEndpoint({ tools: [whoamiTool, ...bookingTools({ db, notify })] }),
     }).fetch
   }
 
