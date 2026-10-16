@@ -451,14 +451,14 @@ describe.skipIf(!serverUrl)('booking notifications over REST and MCP', () => {
   })
 
   it('emails both sides when the host cancels, over REST and MCP', async () => {
-    const auth = { authorization: `Bearer ${hostKey}` }
+    const asHost = { authorization: `Bearer ${hostKey}` }
     const first = (await book('2026-11-03T11:00:00Z')).body as unknown as Booked
     const second = (await book('2026-11-03T12:00:00Z')).body as unknown as Booked
     await drain()
 
     const byRest = await rest('POST', `/api/v1/bookings/${first.booking.id}/cancel`, {
       body: { reason: 'I am ill.' },
-      headers: auth,
+      headers: asHost,
     })
     expect(byRest).toMatchObject({ status: 200, body: { status: 'cancelled' } })
     const restEmails = await drain()

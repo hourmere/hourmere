@@ -107,8 +107,9 @@ Every email goes to each host first (they most need to know), then the invitee, 
 guests, so a guest address that is slow to answer cannot hold up the others. Hosts are the
 booking's `booking_hosts` whose address is verified: accounts start verified, and one that
 is not (it should not exist; see data-model.md) is neither emailed nor named in the
-invitation, so a booking without a verified host sends nothing. Guests are addresses an anonymous booker typed (up to 10 per booking); limiting
-abuse of that is a product follow-up. Times are shown in the
+invitation, so a booking without a verified host sends nothing. Guests are addresses an
+anonymous booker typed (up to 10 per booking); limiting abuse of that is a product
+follow-up. Times are shown in the
 recipient's zone with its IANA name: the attendee's zone from `booking_attendees`, a
 host's from their profile, else their default schedule, else UTC. Host emails add the
 invitee's contact details, guests and answers; only the invitee's email has manage links.
@@ -221,11 +222,11 @@ up a token (below), and several valid secrets per booking, each 256 random bits.
 `/api/v1/bookings/manage…` with `X-Manage-Token`, and the MCP tools that take a
 `manageToken`) look a token up by its SHA-256 in one statement that probes both
 `bookings.manage_token_hash` and `booking_notifications.manage_token_hash` (each unique, so
-each probe is one index lookup) whatever the token is: an unknown token costs the same as a
-known one of either kind, and all unknown, malformed or missing tokens get the same 404
-`booking_not_found`. Only rows of emails that went out match (`outcome = 'sent'`); an email
-the mail server refused for good keeps no hash (a check constraint), so the secret it would
-have carried never opens anything.
+each probe is one index lookup) whatever the token is: looking up an unknown token costs
+the same as a known one of either kind, and all unknown, malformed or missing tokens get
+the same 404 `booking_not_found`. Only rows of emails that went out match
+(`outcome = 'sent'`); an email the mail server refused for good keeps no hash (a check
+constraint), so the secret it would have carried never opens anything.
 
 - **The API's token stays with its booking.** After a reschedule it shows the old, cancelled
   booking, and cancelling or rescheduling with it gets 409 `booking_cancelled`. That is the
@@ -301,6 +302,8 @@ So the services pass only ids:
 
 If `notify` throws (the queue insert fails), the booking change fails with it: a booking
 never commits without its emails, and a job never exists for a booking that did not commit.
-Tests (`packages/scheduling/src/bookings.test.ts`, `apps/server/src/booking-notifications.test.ts`,
-`apps/server/src/server.test.ts`) cover both directions, replays, REST and MCP, and the
-token rules above.
+Tests cover both directions, replays, REST and MCP, and the token rules above:
+`packages/scheduling/src/bookings.test.ts` (the services, with a fake notifier),
+`apps/server/src/booking-notifications.test.ts` (REST and MCP with real jobs, the job
+handler run in-process and a capturing mailer) and `apps/server/src/server.test.ts` (the
+composition root, with the log mailer and a running worker).
