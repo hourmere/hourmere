@@ -329,6 +329,37 @@ describe.skipIf(!serverUrl)('availability', () => {
     expect(await slots('2026-11-02T00:00Z', '2026-11-07T00:00Z')).toEqual([])
   })
 
+  it('widens busy time and bookings with microsecond bounds to whole milliseconds', async () => {
+    const host = await f.host({ handle: 'micro' })
+    await f.schedule(host.userId)
+    const eventTypeId = await f.eventType(host.organizationId, host.userId)
+    // Both shorter than a millisecond and inside one: as Dates they would be empty.
+    await f.calendarBusy(host.userId, [
+      ['2026-11-04T10:00:00.000300Z', '2026-11-04T10:00:00.000700Z'],
+    ])
+    await f.booking(
+      host.organizationId,
+      [host.userId],
+      '2026-11-04T12:00:00.000300Z',
+      '2026-11-04T12:00:00.000700Z',
+    )
+    const starts = (
+      await findSlots(db, {
+        eventTypeId,
+        hostUserId: host.userId,
+        rangeStart: instant('2026-11-04T08:00:00Z'),
+        rangeEnd: instant('2026-11-04T16:00:00Z'),
+        now: NOW,
+      })
+    ).map((s) => iso(s).start)
+    // Each blocks the slot it falls into; the slots ending right before it stay.
+    expect(starts).toContain('2026-11-04T09:30:00.000Z')
+    expect(starts).not.toContain('2026-11-04T10:00:00.000Z')
+    expect(starts).toContain('2026-11-04T11:30:00.000Z')
+    expect(starts).not.toContain('2026-11-04T12:00:00.000Z')
+    expect(starts).toHaveLength(14)
+  })
+
   it('caps the candidate start times one request may make the engine check', async () => {
     const host = await f.host({ handle: 'fine-grained' })
     await f.schedule(host.userId)
@@ -347,6 +378,38 @@ describe.skipIf(!serverUrl)('availability', () => {
       kind: 'invalid',
       code: 'range_too_long',
     })
+    // Only the bookable part counts: 14 days of which 7 lie in the past are fine…
+    await expect(
+      listPublicSlots(ctx, {
+        handle: 'fine-grained',
+        slug: 'call',
+        start: NOW.subtract({ hours: 7 * 24 }),
+        end: NOW.add({ hours: 7 * 24 }),
+      }),
+    ).resolves.toBeInstanceOf(Array)
+    // …a range entirely in the past offers nothing rather than failing…
+    await expect(
+      listPublicSlots(ctx, {
+        handle: 'fine-grained',
+        slug: 'call',
+        start: NOW.subtract({ hours: 30 * 24 }),
+        end: NOW.subtract({ hours: 10 * 24 }),
+      }),
+    ).resolves.toEqual([])
+    // …and so does the part beyond the booking window (and before the minimum notice).
+    await f.eventType(host.organizationId, host.userId, {
+      slug: 'soon',
+      slotStepMinutes: 1,
+      bookingWindowDays: 5,
+      minimumNoticeMinutes: 24 * 60,
+    })
+    const soon = await listPublicSlots(ctx, {
+      handle: 'fine-grained',
+      slug: 'soon',
+      start: NOW,
+      end: NOW.add({ hours: 30 * 24 }),
+    })
+    expect(soon.length).toBeGreaterThan(0)
     // With 30-minute steps the full 62 days stay allowed.
     await expect(
       listPublicSlots(ctx, {

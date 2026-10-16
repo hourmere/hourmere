@@ -803,6 +803,20 @@ describe.skipIf(!serverUrl)('bookings', () => {
         '2026-11-04T11:00:00.000Z',
       ])
       expect((await listHostBookings(ctxA, { status: 'cancelled' })).data).toEqual([])
+      // Bounds keep their microseconds (a Date would cut them to milliseconds).
+      const starts = async (bounds: { from?: Temporal.Instant; to?: Temporal.Instant }) =>
+        (await listHostBookings(ctxA, bounds)).data.map((b) => b.start)
+      expect(await starts({ from: instant('2026-11-04T10:00:00.000001Z') })).toEqual([
+        '2026-11-04T11:00:00.000Z',
+        '2026-11-05T09:00:00.000Z',
+      ])
+      expect(await starts({ to: instant('2026-11-04T10:00:00.000001Z') })).toEqual([
+        '2026-11-04T09:00:00.000Z',
+        '2026-11-04T10:00:00.000Z',
+      ])
+      // Bounds beyond the years Postgres reads are the same as no bound.
+      expect(await starts({ from: instant('0000-06-01T00:00:00Z') })).toHaveLength(4)
+      expect(await starts({ to: instant('+010000-01-01T00:00:00Z') })).toHaveLength(4)
       await expect(listHostBookings(ctxA, { cursor: 'nope' })).rejects.toMatchObject({
         code: 'invalid_cursor',
       })
@@ -829,6 +843,25 @@ describe.skipIf(!serverUrl)('bookings', () => {
           to: instant('2026-11-04T00:00Z'),
         }),
       ).rejects.toMatchObject({ code: 'invalid_range' })
+    })
+
+    it('pages through bookings that differ only in microseconds without repeats', async () => {
+      const host = await setup()
+      const ids: string[] = []
+      // Adjacent one-microsecond bookings that all start in the same millisecond.
+      for (const us of [1, 2, 3]) {
+        const at = (n: number) => `2026-11-09T09:00:00.${String(n).padStart(6, '0')}Z`
+        ids.push(await f.booking(host.organizationId, [host.userId], at(us), at(us + 1)))
+      }
+      const seen: string[] = []
+      let cursor: string | undefined
+      for (let i = 0; i < 5; i++) {
+        const page = await listHostBookings(as(host, host.organizationId), { limit: 1, cursor })
+        seen.push(...page.data.map((b) => b.id))
+        if (!page.nextCursor) break
+        cursor = page.nextCursor
+      }
+      expect(seen).toEqual(ids)
     })
 
     it("gets and cancels only the caller's own bookings in the organization", async () => {

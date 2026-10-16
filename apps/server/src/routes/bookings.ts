@@ -13,16 +13,29 @@ import {
   rescheduleManagedBooking,
   type ServiceContext,
 } from '@hourmere/scheduling'
-import type { Context } from 'hono'
 import { authenticated, ErrorBody, json, type RouteModule } from '../openapi.ts'
 import { createRateLimiter, PUBLIC_RATE_LIMITS, type RateLimit, rateLimit } from '../rate-limit.ts'
 
 // Schemas shared with the public routes (public.ts).
 
-export const Instant = z.iso.datetime({ offset: true }).openapi({
-  description: 'An instant (RFC 3339). Responses always use UTC with a Z suffix.',
-  example: '2026-11-02T09:00:00.000Z',
-})
+/** Whether Temporal (and so every service) can read it: e.g. at most nine fractional digits. */
+const isTemporalInstant = (value: string) => {
+  try {
+    Temporal.Instant.from(value)
+    return true
+  } catch {
+    return false
+  }
+}
+
+export const Instant = z.iso
+  .datetime({ offset: true })
+  .refine(isTemporalInstant, 'must be an instant with at most nine fractional digits')
+  .openapi({
+    description:
+      'An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix.',
+    example: '2026-11-02T09:00:00.000Z',
+  })
 
 export const LocationKind = z.enum(LOCATION_KINDS)
 
@@ -96,9 +109,6 @@ const BookingPage = z
 
 const error = (description: string) => ({ description, content: json(ErrorBody) })
 
-/** Invitee data behind a secret: keep it out of shared caches and history. */
-export const noStore = (c: Context) => c.header('Cache-Control', 'no-store')
-
 const ManageToken = z.object({
   'x-manage-token': z.string().optional().openapi({
     description:
@@ -169,7 +179,6 @@ export function bookingRoutes({
           publicContext,
           c.req.valid('header')['x-manage-token'],
         )
-        noStore(c)
         return c.json(booking, 200)
       },
     )
@@ -201,7 +210,6 @@ export function bookingRoutes({
           c.req.valid('header')['x-manage-token'],
           { reason },
         )
-        noStore(c)
         return c.json(booking, 200)
       },
     )
@@ -237,7 +245,6 @@ export function bookingRoutes({
           c.req.valid('header')['x-manage-token'],
           { start: Temporal.Instant.from(c.req.valid('json').start) },
         )
-        noStore(c)
         return c.json(result, 200)
       },
     )

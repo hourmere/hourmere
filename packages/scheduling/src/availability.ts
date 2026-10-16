@@ -12,7 +12,7 @@ import {
   type WeeklyHours,
 } from '@hourmere/core'
 import type { Db, Json } from '@hourmere/db'
-import type { ExpressionBuilder } from 'kysely'
+import { type Expression, type ExpressionBuilder, sql } from 'kysely'
 import type { PublicContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { parseQuestions, type Question } from './questions.ts'
@@ -21,9 +21,11 @@ import { parseQuestions, type Question } from './questions.ts'
 export const MAX_SLOT_RANGE_DAYS = 62
 
 /**
- * Most candidate start times (range minutes / slot step) one public slots request may make
- * the engine check, so that 1-minute steps cannot keep a core busy: with a 30-minute step
- * the full 62 days fit, with a 1-minute step about 13 days.
+ * Most candidate start times (bookable minutes / slot step) one public slots request may
+ * make the engine check, so that 1-minute steps cannot keep a core busy. Only the part of
+ * the range that can be booked counts (from now plus the minimum notice to the end of the
+ * booking window): with a 30-minute step any 62 days fit, with a 1-minute step about 13
+ * bookable days.
  */
 export const MAX_SLOT_CANDIDATES = 20_000
 
@@ -85,6 +87,8 @@ export interface PublicEventTypeRecord {
   durationMinutes: number
   /** Distance between candidate starts (the duration unless set). */
   slotStepMinutes: number
+  minimumNoticeMinutes: number
+  bookingWindowDays: number | null
   location: Location | null
   questions: Question[]
   hostName: string
@@ -118,6 +122,8 @@ export async function findPublicEventType(
       'et.description',
       'et.duration_minutes',
       'et.slot_step_minutes',
+      'et.minimum_notice_minutes',
+      'et.booking_window_days',
       'et.location',
       'et.questions',
       'p.user_id',
@@ -141,6 +147,8 @@ export async function findPublicEventType(
     description: row.description,
     durationMinutes: row.duration_minutes,
     slotStepMinutes: row.slot_step_minutes ?? row.duration_minutes,
+    minimumNoticeMinutes: row.minimum_notice_minutes,
+    bookingWindowDays: row.booking_window_days,
     location: parseLocation(row.location),
     questions: parseQuestions(row.questions),
     hostName: row.name.trim() || row.handle,
@@ -190,7 +198,7 @@ export interface SlotView {
 /**
  * The slots a public page offers in [start, end]. Throws `invalid_range` when end is not
  * after start, and `range_too_long` for more than MAX_SLOT_RANGE_DAYS or more than
- * MAX_SLOT_CANDIDATES candidate starts at the event type's step.
+ * MAX_SLOT_CANDIDATES candidate starts at the event type's step in the bookable part.
  */
 export async function listPublicSlots(
   ctx: PublicContext,
@@ -208,7 +216,19 @@ export async function listPublicSlots(
   }
   const et = await findPublicEventType(ctx.db, input.handle, input.slug)
   if (!et) throw eventTypeNotFound()
-  if (input.end.since(input.start).total('minutes') / et.slotStepMinutes > MAX_SLOT_CANDIDATES) {
+  const now = ctx.now()
+  // What the engine can actually offer: nothing before now plus the minimum notice, nothing
+  // after the booking window (calendar days in the host's zone, so one spare day here).
+  const bookableStart = later(input.start, now.add({ minutes: et.minimumNoticeMinutes }))
+  const bookableEnd =
+    et.bookingWindowDays === null
+      ? input.end
+      : earlier(input.end, now.add({ hours: (et.bookingWindowDays + 1) * 24 }))
+  if (Temporal.Instant.compare(bookableEnd, bookableStart) <= 0) return []
+  if (
+    bookableEnd.since(bookableStart).total('minutes') / et.slotStepMinutes >
+    MAX_SLOT_CANDIDATES
+  ) {
     throw new DomainError(
       'invalid',
       'range_too_long',
@@ -220,7 +240,7 @@ export async function listPublicSlots(
     hostUserId: et.hostUserId,
     rangeStart: input.start,
     rangeEnd: input.end,
-    now: ctx.now(),
+    now,
   })
   return slots.map((s) => ({ start: toIso(s.start), end: toIso(s.end) }))
 }
@@ -302,6 +322,21 @@ export async function buildAvailabilityInput(
   const window = { start: rangeStart.subtract({ hours: 72 }), end: rangeEnd.add({ hours: 72 }) }
   const windowRange = <DB, TB extends keyof DB>(eb: ExpressionBuilder<DB, TB>) =>
     eb.fn<string>('tstzrange', [eb.val(window.start.toString()), eb.val(window.end.toString())])
+  // Postgres keeps microseconds, node-postgres Dates milliseconds: blocked time is widened to
+  // whole milliseconds in SQL (start down, end up), so converting it never shrinks or empties
+  // it (e.g. a range clipped to [10:00:00, 10:00:00.0005)).
+  const floorMs = <DB, TB extends keyof DB>(
+    eb: ExpressionBuilder<DB, TB>,
+    instant: Expression<unknown>,
+  ) => eb.fn<Date>('date_trunc', [eb.val('milliseconds'), instant])
+  const ceilMs = <DB, TB extends keyof DB>(
+    eb: ExpressionBuilder<DB, TB>,
+    instant: Expression<unknown>,
+  ) =>
+    eb.fn<Date>('date_trunc', [
+      eb.val('milliseconds'),
+      sql`${instant} + interval '999 microseconds'`,
+    ])
 
   const [overrides, busy, bookings] = await Promise.all([
     db
@@ -321,8 +356,8 @@ export async function buildAvailabilityInput(
       .select((eb) => {
         const clipped = eb('cb.period', '*', windowRange(eb))
         return [
-          eb.fn<Date>('lower', [clipped]).as('start'),
-          eb.fn<Date>('upper', [clipped]).as('end'),
+          floorMs(eb, eb.fn('lower', [clipped])).as('start'),
+          ceilMs(eb, eb.fn('upper', [clipped])).as('end'),
         ]
       })
       .where('cc.user_id', '=', hostUserId)
@@ -347,9 +382,9 @@ export async function buildAvailabilityInput(
       .selectFrom('booking_hosts as bh')
       .innerJoin('bookings as b', 'b.id', 'bh.booking_id')
       .leftJoin('event_types as bet', 'bet.id', 'b.event_type_id')
-      .select([
-        'b.start_at',
-        'b.end_at',
+      .select((eb) => [
+        floorMs(eb, eb.ref('b.start_at')).as('start_at'),
+        ceilMs(eb, eb.ref('b.end_at')).as('end_at'),
         'b.event_type_id',
         'bet.buffer_before_minutes',
         'bet.buffer_after_minutes',
@@ -361,10 +396,10 @@ export async function buildAvailabilityInput(
       .execute(),
   ])
 
-  const busyIntervals: InstantInterval[] = busy.map((row) => ({
-    start: toInstant(row.start),
-    end: toInstant(row.end),
-  }))
+  const busyIntervals: InstantInterval[] = busy
+    .map((row) => ({ start: toInstant(row.start), end: toInstant(row.end) }))
+    // Cannot happen after widening; the engine refuses empty intervals, so never pass one.
+    .filter((i) => Temporal.Instant.compare(i.end, i.start) > 0)
   const ownBookings: ExistingBooking[] = []
   for (const row of bookings) {
     const booking = {

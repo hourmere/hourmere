@@ -5,7 +5,8 @@ import { createRoute, z } from '@hono/zod-openapi'
 import { DomainError, type DomainErrorKind } from '@hourmere/scheduling'
 import { HTTPException } from 'hono/http-exception'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { type AppDeps, createApp, hasUnsafeJsonText, MAX_BODY_BYTES } from './app.ts'
+import { type AppDeps, createApp, hasUnsafeJsonText } from './app.ts'
+import { DEFAULT_BODY_LIMIT as MAX_BODY_BYTES } from './body-limit.ts'
 import { authenticated, json, type RouteModule } from './openapi.ts'
 
 // Sign-in is covered by auth.test.ts against a real database.
@@ -365,6 +366,32 @@ describe('route modules and errors', () => {
     const big = await send(JSON.stringify({ email: 'x'.repeat(MAX_BODY_BYTES) }))
     expect(big.status).toBe(413)
     expect(received).toBeUndefined()
+  })
+
+  it('leaves a Cache-Control that a route sets itself', async () => {
+    const cached: RouteModule = ({ app }) => {
+      app.openapi(
+        createRoute({
+          method: 'get',
+          path: '/api/v1/cacheable',
+          responses: { 200: { description: 'ok', content: json(z.object({ ok: z.boolean() })) } },
+        }),
+        (c) => {
+          c.header('Cache-Control', 'public, max-age=60')
+          return c.json({ ok: true }, 200)
+        },
+      )
+    }
+    const cachedApp = createApp({ ...noAuth, checkDb: async () => {}, routes: [cached] })
+    const res = await cachedApp.request('/api/v1/cacheable')
+    expect(res.headers.get('cache-control')).toBe('public, max-age=60')
+    // Everything else under /api/v1 is no-store, including errors raised by the HTTP layer.
+    const tooBig = await post('', JSON.stringify({ name: 'x'.repeat(MAX_BODY_BYTES), count: 1 }))
+    expect(tooBig.status).toBe(413)
+    expect(tooBig.headers.get('cache-control')).toBe('no-store')
+    const bug = await post('?fail=bug', valid)
+    expect(bug.status).toBe(500)
+    expect(bug.headers.get('cache-control')).toBe('no-store')
   })
 
   it('refuses reserved codes for DomainError', () => {

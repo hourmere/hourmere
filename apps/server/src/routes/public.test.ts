@@ -5,7 +5,7 @@ import { createFixtures, type Fixtures } from '@hourmere/scheduling/testing'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { type AppDeps, createApp } from '../app.ts'
 import { bookingRoutes } from './bookings.ts'
-import { type PublicRoutesDeps, publicRoutes } from './public.ts'
+import { BOOKING_BODY_LIMIT, type PublicRoutesDeps, publicRoutes } from './public.ts'
 
 const serverUrl = process.env.DATABASE_URL
 // Mon 2026-11-02; Berlin is on CET (+01:00), so 09:00–17:00 local is 08:00Z–16:00Z.
@@ -30,6 +30,7 @@ describe.skipIf(!serverUrl)('public routes', () => {
   let db: Db
   let f: Fixtures
   let app: ReturnType<typeof createApp>
+  let ada: Awaited<ReturnType<Fixtures['host']>>
 
   const appWith = (rateLimits: PublicRoutesDeps['rateLimits']) =>
     createApp({
@@ -47,6 +48,7 @@ describe.skipIf(!serverUrl)('public routes', () => {
     app = appWith({ page: plenty, slots: plenty, book: plenty, manage: plenty })
 
     const host = await f.host({ name: 'Ada Lovelace', handle: 'ada' })
+    ada = host
     await f.schedule(host.userId)
     await f.eventType(host.organizationId, host.userId, {
       slug: 'intro',
@@ -119,6 +121,8 @@ describe.skipIf(!serverUrl)('public routes', () => {
     ['?start=2026-11-02T00:00:00Z&end=2026-11-02T00:00:00Z', 'invalid_range'],
     ['?start=2026-11-02T00:00:00Z', 'invalid_request'],
     ['?start=tomorrow&end=2026-11-03T00:00:00Z', 'invalid_request'],
+    ['?start=2026-11-02T00:00:00.1234567890Z&end=2026-11-03T00:00:00Z', 'invalid_request'],
+    ['?start=2026-11-02T00:00:00Z&end=2026-11-03T00:00:00.0000000001Z', 'invalid_request'],
   ])('refuses slots%s with 400 %s', async (query, error) => {
     const res = await get(`/api/v1/public/ada/intro/slots${query}`)
     expect(res.status).toBe(400)
@@ -181,6 +185,12 @@ describe.skipIf(!serverUrl)('public routes', () => {
       'invalid_time_zone',
     ],
     ['a time that is not offered', bookingRequest('2026-11-02T09:10:00Z'), 409, 'slot_unavailable'],
+    [
+      'a start with ten fractional digits',
+      bookingRequest('2026-11-02T09:00:00.1234567890Z'),
+      400,
+      'invalid_request',
+    ],
   ])('refuses %s', async (_, body, status, error) => {
     const res = await post('/api/v1/public/ada/intro/bookings', body)
     expect(res.status).toBe(status)
@@ -366,6 +376,94 @@ describe.skipIf(!serverUrl)('public routes', () => {
       from('203.0.113.1'),
     )
     expect(cancel.status).toBe(429)
+  })
+
+  it('copes with busy time that Postgres clips to sub-millisecond bounds', async () => {
+    // With this range the window around it ends at 2026-11-10T10:00:00.0005Z, so the busy
+    // row is clipped to [10:00:00, 10:00:00.0005): one millisecond once widened, not empty.
+    await f.calendarBusy(ada.userId, [['2026-11-10T10:00:00Z', '2026-11-10T11:00:00Z']])
+    const slots = await get(
+      '/api/v1/public/ada/intro/slots?start=2026-11-06T00:00:00Z&end=2026-11-07T10:00:00.0005Z',
+    )
+    expect(slots.status).toBe(200)
+    expect(((await slots.json()) as { data: unknown[] }).data.length).toBeGreaterThan(0)
+
+    const odd = await book('2026-11-07T09:30:00.0005Z')
+    expect(odd.status).toBe(409)
+    expect(await odd.json()).toMatchObject({ error: 'slot_unavailable' })
+
+    const { manageToken } = (await (await book('2026-11-05T08:00:00Z')).json()) as BookingBody
+    const moved = await post(
+      '/api/v1/bookings/manage/reschedule',
+      { start: '2026-11-07T09:30:00.0005Z' },
+      { 'x-manage-token': manageToken as string },
+    )
+    expect(moved.status).toBe(409)
+    expect(await moved.json()).toMatchObject({ error: 'slot_unavailable' })
+  })
+
+  it('takes the largest legal booking, even with every character escaped', async () => {
+    // 20 multi-select questions, each with 50 distinct options of 200 non-ASCII characters.
+    const option = (i: number) => String.fromCharCode(0x4e00 + i) + 'é'.repeat(199)
+    const questions = Array.from({ length: 20 }, (_, q) => ({
+      id: `q${q}`.padEnd(64, 'x'),
+      label: `Question ${q}`,
+      type: 'multi_select',
+      required: true,
+      options: Array.from({ length: 50 }, (_, i) => option(i)),
+    }))
+    await f.eventType(ada.organizationId, ada.userId, { slug: 'everything', questions })
+    const email = `${'a'.repeat(64)}@${'b'.repeat(63)}.${'c'.repeat(63)}.${'d'.repeat(57)}.com`
+    expect(email).toHaveLength(254)
+    const request = {
+      start: '2026-11-04T13:00:00.000Z',
+      invitee: {
+        name: 'é'.repeat(200),
+        email,
+        timeZone: 'Europe/Berlin',
+        locale: 'abcdefgh-abcdefgh-abcdefgh-abcdefgh',
+      },
+      guests: Array.from({ length: 10 }, () => ({ name: 'ü'.repeat(200), email })),
+      responses: Object.fromEntries(questions.map((q) => [q.id, q.options])),
+    }
+    // What e.g. Python's json.dumps sends: every non-ASCII character as \uXXXX.
+    const body = JSON.stringify(request).replace(
+      /[\u0080-\uffff]/g,
+      (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`,
+    )
+    expect(body.length).toBeGreaterThan(1_200_000)
+    expect(body.length).toBeLessThanOrEqual(BOOKING_BODY_LIMIT)
+    const res = await app.request('/api/v1/public/ada/everything/bookings', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body,
+    })
+    expect(res.status).toBe(201)
+    const { booking } = (await res.json()) as { booking: { responses: Record<string, string[]> } }
+    expect(booking.responses[questions[0]?.id as string]).toHaveLength(50)
+
+    // The route's limit is exact: one byte more is refused before anything reads the body.
+    const padded = (size: number) => {
+      const json = JSON.stringify(bookingRequest('2026-11-04T14:00:00Z'))
+      return json + ' '.repeat(size - json.length)
+    }
+    const send = (size: number) =>
+      app.request('/api/v1/public/ada/intro/bookings', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: padded(size),
+      })
+    expect((await send(BOOKING_BODY_LIMIT)).status).toBe(201)
+    const tooBig = await send(BOOKING_BODY_LIMIT + 1)
+    expect(tooBig.status).toBe(413)
+    expect(await tooBig.json()).toEqual({ error: 'payload_too_large' })
+    // Other routes keep the 64 KB default.
+    const reschedule = await post(
+      '/api/v1/bookings/manage/reschedule',
+      { start: '2026-11-04T15:00:00Z', pad: 'x'.repeat(64 * 1024) },
+      { 'x-manage-token': 'A'.repeat(43) },
+    )
+    expect(reschedule.status).toBe(413)
   })
 
   it('documents the routes', async () => {

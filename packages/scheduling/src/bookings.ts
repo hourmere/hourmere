@@ -3,6 +3,7 @@
 // that writes, and the exclusion constraint on booking_hosts is the last word on overlaps.
 import { createHash, randomBytes } from 'node:crypto'
 import type { Db, Json } from '@hourmere/db'
+import type { ExpressionBuilder } from 'kysely'
 import {
   eventTypeNotFound,
   findPublicEventType,
@@ -755,17 +756,34 @@ export interface BookingPage {
   nextCursor: string | null
 }
 
-const toDate = (instant: Temporal.Instant | undefined) =>
-  new Date((instant as Temporal.Instant).epochMilliseconds)
+// Postgres reads ISO 8601 instants in years 0001–9999 (no year 0000).
+const EARLIEST_SQL = Temporal.Instant.from('0001-01-01T00:00:00Z')
+const LATEST_SQL = Temporal.Instant.from('9999-12-31T23:59:59.999999Z')
 
-function encodeCursor(row: { start_at: Date; id: string }): string {
-  return Buffer.from(JSON.stringify([row.start_at.toISOString(), row.id])).toString('base64url')
+/**
+ * An instant as a bound timestamptz value with its full precision (Postgres keeps
+ * microseconds and rounds beyond); a Date would cut it to milliseconds. Clamped to the years
+ * Postgres reads, which changes nothing for filters: no booking lies outside them.
+ */
+function timestamptz<DB, TB extends keyof DB>(
+  eb: ExpressionBuilder<DB, TB>,
+  instant: Temporal.Instant,
+) {
+  const clamped =
+    Temporal.Instant.compare(instant, EARLIEST_SQL) < 0
+      ? EARLIEST_SQL
+      : Temporal.Instant.compare(instant, LATEST_SQL) > 0
+        ? LATEST_SQL
+        : instant
+  return eb.cast<Date>(eb.val(clamped.toString()), 'timestamptz')
 }
 
-const EARLIEST_CURSOR = Temporal.Instant.from('0001-01-01T00:00:00Z')
-const LATEST_CURSOR = Temporal.Instant.from('9999-12-31T23:59:59.999Z')
+/** `start` keeps the microseconds of start_at (see listHostBookings), so pages never overlap. */
+function encodeCursor(row: { cursor_start: string; id: string }): string {
+  return Buffer.from(JSON.stringify([row.cursor_start, row.id])).toString('base64url')
+}
 
-function decodeCursor(cursor: string): { start: Date; id: string } {
+function decodeCursor(cursor: string): { start: Temporal.Instant; id: string } {
   const invalid = () => new DomainError('invalid', 'invalid_cursor', 'cursor is not valid')
   let parsed: unknown
   try {
@@ -782,14 +800,14 @@ function decodeCursor(cursor: string): { start: Date; id: string } {
   } catch {
     throw invalid()
   }
-  // Postgres and Date both need it; outside these years it can only be forged.
+  // Cursors are made from stored bookings; outside these years one can only be forged.
   if (
-    Temporal.Instant.compare(instant, EARLIEST_CURSOR) < 0 ||
-    Temporal.Instant.compare(instant, LATEST_CURSOR) > 0
+    Temporal.Instant.compare(instant, EARLIEST_SQL) < 0 ||
+    Temporal.Instant.compare(instant, LATEST_SQL) > 0
   ) {
     throw invalid()
   }
-  return { start: toDate(instant), id }
+  return { start: instant, id }
 }
 
 /**
@@ -814,15 +832,32 @@ export async function listHostBookings(
     .selectFrom('bookings as b')
     .innerJoin('booking_hosts as bh', 'bh.booking_id', 'b.id')
     .select(BOOKING_COLUMNS)
+    // start_at with its microseconds, for the cursor (node-postgres Dates have milliseconds).
+    .select((eb) =>
+      eb
+        .fn<string>('to_char', [
+          eb.fn('timezone', [eb.val('UTC'), 'b.start_at']),
+          eb.val('YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
+        ])
+        .as('cursor_start'),
+    )
     .where('bh.user_id', '=', ctx.principal.user.id)
     .where('b.organization_id', '=', ctx.principal.organization.id)
-    .$if(from !== undefined, (q) => q.where('b.start_at', '>=', toDate(from)))
-    .$if(to !== undefined, (q) => q.where('b.start_at', '<', toDate(to)))
+    .$if(from !== undefined, (q) =>
+      q.where((eb) => eb('b.start_at', '>=', timestamptz(eb, from as Temporal.Instant))),
+    )
+    .$if(to !== undefined, (q) =>
+      q.where((eb) => eb('b.start_at', '<', timestamptz(eb, to as Temporal.Instant))),
+    )
     .$if(status !== undefined, (q) => q.where('b.status', '=', status as string))
     .$if(after !== undefined, (q) =>
-      q.where(({ eb, refTuple, tuple }) =>
-        eb(refTuple('b.start_at', 'b.id'), '>', tuple(after?.start as Date, after?.id as string)),
-      ),
+      q.where((eb) => {
+        const start = timestamptz(eb, (after as { start: Temporal.Instant }).start)
+        return eb.or([
+          eb('b.start_at', '>', start),
+          eb.and([eb('b.start_at', '=', start), eb('b.id', '>', (after as { id: string }).id)]),
+        ])
+      }),
     )
     .orderBy('b.start_at')
     .orderBy('b.id')

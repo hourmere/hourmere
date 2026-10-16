@@ -9,9 +9,10 @@ import {
   type PublicContext,
   QuestionSchema,
 } from '@hourmere/scheduling'
+import { routeBodyLimit } from '../body-limit.ts'
 import { ErrorBody, json, type RouteModule } from '../openapi.ts'
 import { createRateLimiter, PUBLIC_RATE_LIMITS, type RateLimit, rateLimit } from '../rate-limit.ts'
-import { BookingWithToken, Instant, LocationKind, noStore, Responses } from './bookings.ts'
+import { BookingWithToken, Instant, LocationKind, Responses } from './bookings.ts'
 
 const Question = QuestionSchema.openapi('Question', {
   description:
@@ -61,6 +62,15 @@ const PageParams = z.object({
   handle: z.string().openapi({ example: 'ada' }),
   slug: z.string().openapi({ example: 'intro-call' }),
 })
+
+/**
+ * The largest legal booking request, with every string at its maximum length and every
+ * character escaped as \uXXXX (6 bytes), is about 1.23 MB: 20 multi_select answers, each
+ * choosing all 50 options of 200 characters (20 × 50 × (200 × 6 + 3) ≈ 1.20 MB), plus a
+ * 200-character name for the invitee and each of 10 guests (≈ 15 KB) and fixed-size fields.
+ * (Long text answers come to at most 20 × 5000 × 6 = 600 KB.) Rounded up.
+ */
+export const BOOKING_BODY_LIMIT = 2 * 1024 * 1024
 
 const error = (description: string) => ({ description, content: json(ErrorBody) })
 const rateLimited = error('Too many requests from this address (`rate_limited`); see Retry-After')
@@ -124,7 +134,7 @@ export function publicRoutes({
             content: json(z.object({ data: z.array(Slot) })),
           },
           400: error(
-            "Invalid parameters (`invalid_request`), end not after start (`invalid_range`), or a range that is too long (`range_too_long`: over 62 days, or over 20000 possible start times at the event type's step)",
+            "Invalid parameters (`invalid_request`), end not after start (`invalid_range`), or a range that is too long (`range_too_long`: over 62 days, or over 20000 possible start times at the event type's step in its bookable part)",
           ),
           404: eventTypeNotFound,
           429: rateLimited,
@@ -148,7 +158,7 @@ export function publicRoutes({
         summary: 'Book a slot',
         description:
           "Books an offered slot and returns the booking with the secret of the invitee's manage link (`manageToken`, returned only this once). Send an `Idempotency-Key` to make retries safe: a retry with the same key and the same request returns the original booking (200) instead of booking again. All anonymous callers share one key space per organization, so the key must be random (e.g. a UUIDv4), never derived from the request.",
-        middleware: bookLimit,
+        middleware: [bookLimit, routeBodyLimit(BOOKING_BODY_LIMIT)],
         request: {
           params: PageParams,
           headers: z.object({
@@ -184,7 +194,6 @@ export function publicRoutes({
           responses: body.responses,
           idempotencyKey: c.req.valid('header')['idempotency-key'],
         })
-        noStore(c)
         return replayed ? c.json(result, 200) : c.json(result, 201)
       },
     )

@@ -131,10 +131,48 @@ describe.skipIf(!serverUrl)('host booking routes', () => {
     ['?status=pending', 'invalid_request'],
     ['?cursor=garbage', 'invalid_cursor'],
     ['?from=2026-11-05T00:00:00Z&to=2026-11-04T00:00:00Z', 'invalid_range'],
+    // More fractional digits than Temporal reads.
+    ['?from=2026-11-04T10:00:00.1234567890Z', 'invalid_request'],
   ])('refuses %s with 400 %s', async (query, error) => {
     const res = await get(`/api/v1/bookings${query}`, 'alice')
     expect(res.status).toBe(400)
     expect(await res.json()).toMatchObject({ error })
+  })
+
+  it('filters with sub-millisecond precision', async () => {
+    const ids = async (query: string) =>
+      ((await (await get(`/api/v1/bookings${query}`, 'alice')).json()) as Page).data.map(
+        (b) => b.id,
+      )
+    // Alice's bookings start at 09:00, 10:00 and 11:00 on 2026-11-04.
+    expect(await ids('?from=2026-11-04T10:00:00.000001Z')).toEqual([aliceBookings[2]])
+    expect(await ids('?to=2026-11-04T10:00:00.000001Z')).toEqual(aliceBookings.slice(0, 2))
+  })
+
+  it('never lets a cache keep a response, errors included', async () => {
+    const id = aliceBookings[1] as string
+    for (const [what, res, status] of [
+      ['list', await get('/api/v1/bookings', 'alice'), 200],
+      ['detail', await get(`/api/v1/bookings/${id}`, 'alice'), 200],
+      ['not found (DomainError)', await get(`/api/v1/bookings/${id}`, 'bob'), 404],
+      ['unauthenticated', await get('/api/v1/bookings'), 401],
+      ['validation error', await get('/api/v1/bookings?limit=0', 'alice'), 400],
+      ['invitee link, bad token', await get('/api/v1/bookings/manage'), 404],
+      [
+        'invitee link, bad token',
+        await app.request('/api/v1/bookings/manage', {
+          headers: { 'x-manage-token': 'A'.repeat(43) },
+        }),
+        404,
+      ],
+      ['unknown path', await get('/api/v1/nope'), 404],
+      ['OpenAPI document', await get('/api/v1/openapi.json'), 200],
+    ] as const) {
+      expect(res.status, what).toBe(status)
+      expect(res.headers.get('cache-control'), what).toBe('no-store')
+    }
+    // Outside /api/v1 nothing is added: health is harmless, Better Auth manages its own.
+    expect((await get('/api/health')).headers.get('cache-control')).toBeNull()
   })
 
   it("gets and cancels only bookings the caller hosts in the caller's organization", async () => {

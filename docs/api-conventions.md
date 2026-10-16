@@ -19,8 +19,13 @@ additive within a version. The OpenAPI document is served at `/api/v1/openapi.js
   schemas and Better Auth. Enum values are lowercase snake_case (`api_key`, `round_robin`).
 - IDs are UUID strings.
 - Timestamps are RFC 3339 strings in UTC with a `Z` suffix, e.g. `2026-10-15T09:30:00.000Z`.
-  Calendar dates are `YYYY-MM-DD`; wall-clock times are `HH:MM` with an IANA time zone
-  alongside.
+  Requests may use any offset and up to nine fractional digits (more is 400
+  `invalid_request`); instants are stored and compared with microsecond precision (Postgres
+  rounds beyond). Calendar dates are `YYYY-MM-DD`; wall-clock times are `HH:MM` with an IANA
+  time zone alongside.
+- Every `/api/v1` response, errors included, is sent with `Cache-Control: no-store` (it may
+  hold private data, and a cached error could hide a later answer), unless its route sets a
+  `Cache-Control` of its own.
 
 ## Errors
 
@@ -106,8 +111,16 @@ multi-line fields (long answers, reasons) may contain tabs and line breaks. Serv
 anything else with the field's code (`invalid_invitee`, `invalid_guests`, `invalid_responses`,
 `invalid_reason`, `invalid_questions`), using the helpers in `packages/scheduling/src/text.ts`.
 As a safety net for every `/api/v1` route, a JSON body with NUL or a lone surrogate anywhere
-(values or keys) is refused with 400 `invalid_request` before the route runs. Request bodies
-over 64 KB get 413 `payload_too_large` on all of `/api`, sign-in included.
+(values or keys) is refused with 400 `invalid_request` before the route runs.
+
+Request bodies are limited to 64 KB on all of `/api`, sign-in included, unless a route
+declares more (`routeBodyLimit` in `apps/server/src/body-limit.ts`); beyond the limit, 413
+`payload_too_large`. A route's limit must be at least its largest legal request with every
+string at its maximum length and every character escaped as `\uXXXX` (6 bytes, as e.g.
+Python's `json.dumps` sends by default). Creating a booking allows 2 MB: its largest legal
+request (20 multi-select answers choosing all 50 options of 200 characters, plus the invitee
+and 10 guests) is about 1.23 MB that way. Cancel and reschedule bodies stay far below 64 KB
+(a reason is at most 1000 characters).
 
 ## Lists
 
@@ -135,8 +148,10 @@ beyond that 429 `rate_limited` with `Retry-After`. The counters live in each ser
 memory, so with several instances a client gets that budget once per instance; a shared store
 comes with multi-instance deployments.
 
-A slots request may span at most 62 days and at most 20 000 possible start times at the event
-type's slot step (about 13 days with 1-minute steps); beyond either, 400 `range_too_long`.
+A slots request may span at most 62 days, and its bookable part (from now plus the event
+type's minimum notice to the end of its booking window) at most 20 000 possible start times at
+the event type's slot step: about 13 days with 1-minute steps, any 62 days with 30-minute
+steps. Beyond either, 400 `range_too_long`; a range with no bookable part returns no slots.
 
 ## Retries
 
