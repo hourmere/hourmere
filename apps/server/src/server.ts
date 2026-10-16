@@ -1,3 +1,4 @@
+import type { Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { serve } from '@hono/node-server'
 import {
@@ -25,6 +26,7 @@ import { instanceRoutes } from './routes/instance.ts'
 import { profileRoutes } from './routes/profile.ts'
 import { publicRoutes } from './routes/public.ts'
 import { scheduleRoutes } from './routes/schedules.ts'
+import { closeConnectionsWhen, closeServer } from './shutdown.ts'
 import { createWorkerHealthApp } from './worker-health.ts'
 
 /**
@@ -173,9 +175,12 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
     }).fetch
   }
 
-  const server = await new Promise<ReturnType<typeof serve>>((resolve) => {
+  let closing = false
+  const server = await new Promise<Server>((resolve) => {
     const serverOptions = httpServerOptions(config.httpTimeouts)
-    const s = serve({ fetch, port: config.PORT, serverOptions }, (info: AddressInfo) => {
+    const answer = closeConnectionsWhen(() => closing, fetch)
+    // An http.Server: serve() makes one unless given a createServer.
+    const s = serve({ fetch: answer, port: config.PORT, serverOptions }, (info: AddressInfo) => {
       if (role === 'worker') {
         console.log(`Hourmere worker running jobs; health check on :${info.port}/api/health`)
       } else {
@@ -186,7 +191,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
           `Hourmere listening on :${info.port} (${config.PUBLIC_URL}); sign-in: email${providers.map((p) => `, ${p}`).join('')}; sign-up: ${signup}; jobs: ${role === 'all' ? 'run here' : 'queued for a worker'}`,
         )
       }
-      resolve(s)
+      resolve(s as Server)
     })
   })
 
@@ -195,8 +200,10 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
     close: () =>
       new Promise<void>((resolve, reject) => {
         // Requests first (one still running may queue a job), then jobs (waiting for running
-        // ones up to a timeout), then the pools the jobs use.
-        server.close(async (err) => {
+        // ones up to a timeout), then the pools the jobs use. Kept-alive connections do not
+        // hold this up (see shutdown.ts).
+        closing = true
+        const afterRequests = async (err?: unknown) => {
           try {
             if (sending)
               console.warn(`shutting down: dropping ${sending} email(s) still being sent`)
@@ -207,7 +214,8 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
           } catch (closeErr) {
             reject(closeErr)
           }
-        })
+        }
+        closeServer(server).then(() => afterRequests(), afterRequests)
       }),
   }
 }
