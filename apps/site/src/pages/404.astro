@@ -1,0 +1,33 @@
+---
+import Base from '../layouts/Base.astro'
+---
+
+<Base
+  title="Page not found | Hourmere"
+  description="The page you are looking for does not exist."
+  path="/404"
+>
+  <section class="container not-found">
+    <p class="eyebrow">404</p>
+    <h1>Page not found</h1>
+    <p>The page you are looking for does not exist or has moved.</p>
+    <a class="btn btn-primary" href="/">Go to the homepage</a>
+  </section>
+</Base>
+
+<style>
+  .not-found {
+    padding-block: 96px 120px;
+  }
+
+  h1 {
+    margin: 0 0 12px;
+    font-size: clamp(32px, 5vw, 44px);
+    font-weight: 800;
+  }
+
+  p:not(.eyebrow) {
+    margin: 0 0 28px;
+    color: var(--muted);
+  }
+</style>

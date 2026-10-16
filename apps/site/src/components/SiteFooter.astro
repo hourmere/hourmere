@@ -1,0 +1,135 @@
+---
+import { company, contact, site } from '../site'
+import Logo from './Logo.astro'
+
+const year = new Date().getFullYear()
+---
+
+<footer class="site-footer">
+  <div class="container">
+    <div class="columns">
+      <div class="about">
+        <a class="home" href="/" aria-label="Hourmere home"><Logo size={28} /></a>
+        <p>{site.tagline}</p>
+        <p>
+          Hourmere is made by <a href={company.url}>{company.name}</a>, a Delaware limited liability
+          company.
+        </p>
+      </div>
+      <nav aria-label="Product">
+        <h2>Product</h2>
+        <ul>
+          <li><a href="/#features">Features</a></li>
+          <li><a href="/#agents">AI agents</a></li>
+          <li><a href="/#self-host">Self-host</a></li>
+          <li><a href="/#pricing">Pricing</a></li>
+        </ul>
+      </nav>
+      <nav aria-label="Legal">
+        <h2>Legal</h2>
+        <ul>
+          <li><a href="/privacy">Privacy Policy</a></li>
+          <li><a href="/terms">Terms of Service</a></li>
+        </ul>
+      </nav>
+      <nav aria-label="Company">
+        <h2>Company</h2>
+        <ul>
+          <li><a href={company.url}>Cobaltmere</a></li>
+          <li><a href={site.github}>GitHub</a></li>
+        </ul>
+      </nav>
+      <div>
+        <h2>Contact</h2>
+        <ul>
+          <li><a href={`mailto:${contact.hello}`}>{contact.hello}</a></li>
+          <li><a href={`mailto:${contact.support}`}>{contact.support}</a></li>
+          <li><a href={`mailto:${contact.security}`}>{contact.security}</a></li>
+        </ul>
+      </div>
+    </div>
+    <p class="fine">
+      &copy; {year}
+      {company.name}. Hourmere is open-source software licensed under the{' '}
+      <a href={site.license.url}>{site.license.name}</a>.
+    </p>
+  </div>
+</footer>
+
+<style>
+  .site-footer {
+    padding-block: 48px 32px;
+    border-top: 1px solid var(--border);
+    background: var(--bg);
+    font-size: 15px;
+  }
+
+  .columns {
+    display: grid;
+    gap: 32px;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
+  }
+
+  .about {
+    grid-column: 1 / -1;
+    max-width: 420px;
+  }
+
+  @media (min-width: 960px) {
+    .columns {
+      grid-template-columns: 2fr repeat(4, 1fr);
+    }
+
+    .about {
+      grid-column: auto;
+    }
+  }
+
+  .home {
+    color: var(--text);
+    text-decoration: none;
+  }
+
+  p {
+    margin: 12px 0 0;
+    color: var(--muted);
+  }
+
+  h2 {
+    margin: 0 0 12px;
+    font-size: 14px;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  li + li {
+    margin-top: 6px;
+  }
+
+  li a {
+    display: inline-block;
+    padding-block: 2px;
+    color: var(--muted);
+    text-decoration: none;
+    overflow-wrap: anywhere;
+  }
+
+  li a:hover {
+    color: var(--text);
+    text-decoration: underline;
+  }
+
+  .fine {
+    margin-top: 40px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+    font-size: 14px;
+  }
+</style>

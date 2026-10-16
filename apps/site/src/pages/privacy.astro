@@ -1,0 +1,441 @@
+---
+import Legal from '../layouts/Legal.astro'
+import { company, contact, googlePolicies, site } from '../site'
+
+const sections = [
+  { id: 'scope', title: 'Who we are and what this policy covers' },
+  { id: 'information-we-collect', title: 'Information we collect' },
+  { id: 'how-we-use-information', title: 'How we use information' },
+  { id: 'google-user-data', title: 'Google user data' },
+  { id: 'microsoft-calendar-data', title: 'Microsoft 365 calendar data' },
+  { id: 'ai-assistants', title: 'AI assistants and API access' },
+  { id: 'sharing', title: 'How we share information' },
+  { id: 'invitees', title: 'If you book a meeting through Hourmere' },
+  { id: 'self-hosted', title: 'Self-hosted Hourmere' },
+  { id: 'retention', title: 'Retention and deletion' },
+  { id: 'security', title: 'Security' },
+  { id: 'international-transfers', title: 'International transfers' },
+  { id: 'your-rights', title: 'Your rights and choices' },
+  { id: 'this-website', title: 'This website, cookies and local storage' },
+  { id: 'children', title: 'Children' },
+  { id: 'changes', title: 'Changes to this policy' },
+  { id: 'contact', title: 'Contact' },
+]
+
+const privacyMail = `mailto:${contact.privacy}`
+---
+
+<Legal
+  title="Privacy Policy"
+  description="How Hourmere, operated by Cobaltmere, LLC, collects, uses, stores, shares and deletes personal data, including data from Google Calendar and Microsoft 365."
+  path="/privacy"
+  effective="2026-10-15"
+  sections={sections}
+>
+  <Fragment slot="intro">
+    <p>
+      This Privacy Policy explains how {company.name} ("{company.shortName}", "we", "us") collects,
+      uses, stores, shares and deletes personal data in connection with Hourmere: the website at
+      hourmere.com, the Hourmere cloud service that we host ("Hourmere Cloud"), and its API and
+      remote MCP server (together, the "Service").
+    </p>
+    <p class="callout">
+      Hourmere is in development and Hourmere Cloud has not launched yet. This policy describes how
+      we will handle personal data once it does. Until then, the only personal data we receive
+      through Hourmere is the website request data described in
+      <a href="#this-website">section 14</a> and any messages you choose to send us.
+    </p>
+    <section class="summary" aria-labelledby="summary-title">
+      <h2 id="summary-title">The short version</h2>
+      <ul>
+        <li>We use your data to run Hourmere and to provide the scheduling features you use.</li>
+        <li>
+          Calendar data from Google or Microsoft is used only to show your availability and manage
+          your bookings. We never sell it, never use it for advertising and never use it to train
+          generalized AI or machine learning models.
+        </li>
+        <li>AI assistants can access your account only after you authorize them.</li>
+        <li>If you self-host Hourmere, your data stays on your server and we do not receive it.</li>
+        <li>You can disconnect calendars and export or delete your data at any time.</li>
+      </ul>
+    </section>
+  </Fragment>
+
+  <h2 id="scope">1. Who we are and what this policy covers</h2>
+  <p>
+    Hourmere is open-source scheduling software. It is developed and operated by {company.name}, a
+    Delaware limited liability company. For Hourmere Cloud, {company.shortName} is responsible for
+    the personal data described in this policy, except where we process data on behalf of our
+    customers as described in <a href="#invitees">section 8</a>.
+  </p>
+  <p>
+    This policy does not cover Hourmere installations that other people or organizations run on
+    their own servers (see <a href="#self-hosted">section 9</a>), or services from third parties
+    that you connect to Hourmere, such as your calendar provider or your AI assistant. The company
+    website at cobaltmere.com has its own privacy policy.
+  </p>
+
+  <h2 id="information-we-collect">2. Information we collect</h2>
+  <ul>
+    <li>
+      <strong>Account information:</strong> your name, email address, time zone and settings, and
+      the credentials you use to sign in. If you sign in with a password, we store it only in hashed
+      form.
+    </li>
+    <li>
+      <strong>Calendar connection information:</strong> when you connect a Google or Microsoft
+      calendar, the access and refresh tokens the provider issues to Hourmere, and the email address
+      of the connected account.
+    </li>
+    <li>
+      <strong>Calendar data:</strong> free/busy information and the event data needed to work out
+      your availability and to create and manage events for your bookings. See <a
+        href="#google-user-data">section 4</a
+      > and <a href="#microsoft-calendar-data">section 5</a>.
+    </li>
+    <li>
+      <strong>Scheduling information:</strong> the event types, availability settings and booking pages
+      you set up.
+    </li>
+    <li>
+      <strong>Booking information:</strong> details that invitees enter when they book with you,
+      such as their name, email address and notes, and the time, time zone and status of each
+      booking.
+    </li>
+    <li>
+      <strong>API and agent access:</strong> the API keys you create and the OAuth authorizations you
+      grant to AI assistants and other applications, and records of the requests they make.
+    </li>
+    <li>
+      <strong>Billing information</strong> (paid plans only): your plan, number of seats, billing
+      country and transaction records. Card details are collected and processed by Stripe; we do not
+      store full card numbers.
+    </li>
+    <li>
+      <strong>Usage and diagnostic information:</strong> log data such as IP address, browser and
+      device type, the pages and API endpoints requested, timestamps and error reports.
+    </li>
+    <li>
+      <strong>Communications:</strong> messages you send to us, for example to our support address.
+    </li>
+  </ul>
+
+  <h2 id="how-we-use-information">3. How we use information</h2>
+  <ul>
+    <li>
+      To provide the Service: computing your availability, showing your booking pages, creating,
+      updating and cancelling calendar events for bookings, sending email confirmations and
+      reminders, and carrying out requests from applications you have authorized.
+    </li>
+    <li>To keep the Service secure, prevent fraud and abuse, and find and fix problems.</li>
+    <li>To process payments for paid plans.</li>
+    <li>To answer your questions and send you service-related notices.</li>
+    <li>
+      To understand how the Service is used and improve it, using usage and diagnostic information.
+    </li>
+    <li>To comply with legal obligations and enforce our terms.</li>
+  </ul>
+  <p>
+    We do not sell personal data. We do not use personal data for advertising, and we do not use
+    calendar data or booking information to train generalized AI or machine learning models. We send
+    marketing emails only if you ask to receive them.
+  </p>
+  <p>
+    If you are in the European Economic Area, the United Kingdom or Switzerland, our legal bases
+    for processing are: performance of our contract with you; our legitimate interests in
+    operating, securing and improving the Service; compliance with legal obligations; and your
+    consent where we ask for it.
+  </p>
+
+  <h2 id="google-user-data">4. Google user data</h2>
+  <p>
+    This section describes how Hourmere accesses, uses, stores, shares and deletes data it receives
+    from Google when you connect Google Calendar ("Google user data"). Connecting Google Calendar is
+    optional; Hourmere asks for access only when you choose to connect it.
+  </p>
+
+  <h3>What we access</h3>
+  <p>
+    Depending on the permissions you grant on Google's consent screen, Hourmere accesses:
+  </p>
+  <ul>
+    <li>the email address of your Google account, to show you which account is connected;</li>
+    <li>
+      the list of calendars in your account (such as their names, identifiers and time zones), so
+      you can choose which calendars to check for conflicts and which calendar receives new
+      bookings;
+    </li>
+    <li>free/busy information for the calendars you select;</li>
+    <li>
+      event data needed for scheduling, such as the start and end times and status of events on the
+      calendars you select, so Hourmere can work out when you are available; and
+    </li>
+    <li>
+      the events Hourmere creates on your calendar for bookings, including the details written to
+      them (such as the title, time, description and attendees), so that Hourmere can update or
+      remove them when a booking is rescheduled or cancelled.
+    </li>
+  </ul>
+  <p>
+    We request only the permissions these features need. Google's consent screen shows the exact
+    permissions before you agree.
+  </p>
+
+  <h3>How we use it</h3>
+  <p>
+    We use Google user data only to provide and improve Hourmere's user-facing scheduling features:
+    showing your available times on your booking pages and to applications you authorize,
+    preventing double-booking, adding booked meetings to your calendar, updating or removing those
+    events when bookings change, and showing you the status of your calendar connection.
+  </p>
+  <p>We do not:</p>
+  <ul>
+    <li>sell Google user data;</li>
+    <li>
+      use or transfer it for advertising, including retargeting and personalized or interest-based
+      advertising;
+    </li>
+    <li>transfer it to advertising platforms, data brokers or information resellers;</li>
+    <li>use it to determine credit-worthiness or for lending purposes; or</li>
+    <li>
+      use or transfer it to develop, improve or train generalized or non-personalized AI or machine
+      learning models.
+    </li>
+  </ul>
+
+  <h3>How we share it</h3>
+  <p>We do not share or transfer Google user data, except:</p>
+  <ul>
+    <li>
+      as needed to provide the features you use. For example, people who visit your booking page
+      see the times you are available, but not the details of your calendar events, and an AI
+      assistant or other application you authorize receives the results of the requests it makes
+      for you (see <a href="#ai-assistants">section 6</a>);
+    </li>
+    <li>
+      with service providers that host and run the Service for us, such as our cloud hosting and
+      database providers, who may process it only on our instructions and only to provide the
+      Service;
+    </li>
+    <li>when necessary for security purposes, such as investigating abuse;</li>
+    <li>to comply with applicable laws; or</li>
+    <li>
+      as part of a merger, acquisition or sale of assets, only after obtaining your explicit prior
+      consent.
+    </li>
+  </ul>
+
+  <h3>Who can read it</h3>
+  <p>
+    Our staff do not read your Google user data unless you give us explicit permission for specific
+    data (for example, to help with a support request), it is necessary for security purposes (such
+    as investigating a bug or abuse), it is necessary to comply with applicable law, or the data
+    has been aggregated and anonymized and is used for internal operations in line with applicable
+    law.
+  </p>
+
+  <h3>How we store and protect it</h3>
+  <p>
+    Google user data is stored on servers operated by our cloud hosting providers in the United
+    States and/or the European Union. It is encrypted in transit. Calendar connection tokens are
+    stored encrypted. Access is limited to the systems and personnel that need it to run the
+    Service. See <a href="#security">section 11</a>.
+  </p>
+
+  <h3>Retention and deletion</h3>
+  <p>
+    We keep Google user data only as long as we need it to provide the features described above.
+    Calendar data that Hourmere stores to compute availability is refreshed and replaced as your
+    calendar changes. When you disconnect Google Calendar, Hourmere stops accessing it and deletes
+    the connection tokens and the calendar data it stored from that connection within 30 days.
+    Events that Hourmere has already created on your calendar stay there, because they are part of
+    your calendar. When you delete your Hourmere account, we delete your Google user data within 30
+    days.
+  </p>
+  <p>
+    You can also remove Hourmere's access at any time from your Google Account's <a
+      href={googlePolicies.connections}>third-party connections page</a
+    >, and you can ask us to delete your data by emailing <a href={privacyMail}>{contact.privacy}</a
+    >.
+  </p>
+
+  <h3>Limited Use</h3>
+  <p class="callout">
+    Hourmere's use and transfer to any other app of information received from Google APIs will
+    adhere to the <a href={googlePolicies.userData}>Google API Services User Data Policy</a>,
+    including the Limited Use requirements. Hourmere's use of information received from Google
+    Workspace APIs, including the Google Calendar API, also adheres to the <a
+      href={googlePolicies.workspace}>Google Workspace API User Data and Developer Policy</a
+    >.
+  </p>
+  <p>
+    If we change how Hourmere uses Google user data, we will tell you and ask for your consent
+    before using it in a new way or for a different purpose.
+  </p>
+
+  <h2 id="microsoft-calendar-data">5. Microsoft 365 calendar data</h2>
+  <p>
+    When you connect a Microsoft 365 calendar, Hourmere accesses the same kinds of data
+    described for Google in section 4: the connected account's email address, your calendar list,
+    free/busy information and the event data needed to compute availability, and the events it
+    creates for bookings. We use, share, protect and delete Microsoft calendar data in the same way
+    and under the same restrictions: only to provide scheduling features, never sold, never used for
+    advertising and never used to train generalized AI or machine learning models. You can remove
+    Hourmere's access from your Microsoft account's app permissions, or ask your organization's
+    administrator.
+  </p>
+
+  <h2 id="ai-assistants">6. AI assistants and API access</h2>
+  <p>
+    Hourmere has an API and a remote MCP server that AI assistants and other applications can use.
+    They can access your account only after you authorize them, by creating an API key or by
+    approving an OAuth request. An authorized application can do what the API allows: list your
+    event types, check your availability, and book, reschedule or cancel meetings.
+  </p>
+  <p>
+    The availability Hourmere returns is calculated from your connected calendars. When an
+    application you authorized makes a request, we send it the results at your direction. That
+    application and the AI model behind it are operated by their own providers, and their handling
+    of data is governed by those providers' terms and privacy policies, not this one. You can revoke an
+    API key or an authorization at any time.
+  </p>
+
+  <h2 id="sharing">7. How we share information</h2>
+  <p>
+    We do not sell personal data. We share it only as described in this policy, including with:
+  </p>
+  <ul>
+    <li>
+      <strong>Service providers</strong> that help us run the Service under contracts that require
+      them to protect it and use it only on our instructions: cloud hosting and database providers
+      in the United States and/or the European Union, an email delivery provider for booking
+      confirmations and reminders, and Stripe for payment processing.
+    </li>
+    <li>
+      <strong>Calendar providers you connect</strong> (Google and Microsoft), to read your
+      availability and to create, update and remove events for your bookings.
+    </li>
+    <li>
+      <strong>Applications you authorize</strong>, such as AI assistants, as described in <a
+        href="#ai-assistants">section 6</a
+      >.
+    </li>
+    <li>
+      <strong>The other party to a booking.</strong> When someone books with you, the details they
+      enter are shared with you, and your name and the booking details are shared with them.
+    </li>
+    <li>
+      <strong>Legal and safety reasons:</strong> when required by law, or to protect the rights,
+      property or safety of our users, the public or {company.shortName}.
+    </li>
+    <li>
+      <strong>Business transfers:</strong> if {company.shortName} is involved in a merger,
+      acquisition or sale of assets, subject to this policy. For Google user data, we will first
+      obtain your explicit consent.
+    </li>
+  </ul>
+
+  <h2 id="invitees">8. If you book a meeting through Hourmere</h2>
+  <p>
+    If you book a meeting on someone's Hourmere booking page, the person or organization you are
+    booking with (the "host") decides what information to ask for and how to use it. We process
+    your booking information on the host's behalf to provide the Service, for example to add the
+    meeting to the host's calendar and send you confirmations and reminders. For questions about
+    how a host uses your information, contact the host. If you contact us, we will pass your
+    request on or help where we can.
+  </p>
+
+  <h2 id="self-hosted">9. Self-hosted Hourmere</h2>
+  <p>
+    Anyone can run the open-source Hourmere software on their own servers. A self-hosted instance is
+    operated by whoever runs it, and that operator is responsible for the data it holds and for its
+    connections to calendar providers. {company.shortName} does not receive data from self-hosted
+    instances. If we ever add telemetry to the software, it will be optional, opt-in and anonymous,
+    and we will document what it sends.
+  </p>
+
+  <h2 id="retention">10. Retention and deletion</h2>
+  <ul>
+    <li>
+      We keep account, scheduling and booking information while your account is active. You can
+      delete event types, bookings and calendar connections at any time.
+    </li>
+    <li>
+      When you delete your account, we delete your data, including booking information about your
+      invitees, within 30 days, except records we must keep for legal, tax or accounting purposes.
+      Those records never include calendar data.
+    </li>
+    <li>
+      Usage and diagnostic logs are kept for a limited period for security and troubleshooting, and
+      then deleted.
+    </li>
+    <li>Google user data is retained and deleted as described in section 4.</li>
+  </ul>
+
+  <h2 id="security">11. Security</h2>
+  <p>
+    We protect personal data with measures appropriate to the risk, including encryption in transit,
+    encrypted storage of calendar connection tokens, access controls and the principle of least
+    privilege. No system is completely secure. If a data breach affects your personal data, we will
+    notify you as required by law. To report a security issue, email <a
+      href={`mailto:${contact.security}`}>{contact.security}</a
+    >.
+  </p>
+
+  <h2 id="international-transfers">12. International transfers</h2>
+  <p>
+    We are based in the United States, and our cloud hosting providers store data in the United
+    States and/or the European Union. Where the law requires it, we protect international transfers
+    of personal data with appropriate safeguards, such as the European Commission's Standard
+    Contractual Clauses.
+  </p>
+
+  <h2 id="your-rights">13. Your rights and choices</h2>
+  <p>
+    Depending on where you live, you may have the right to access, correct, delete or export your
+    personal data, to restrict or object to its processing, and to withdraw consent at any time. You
+    can disconnect calendars, revoke API keys and authorizations, and delete your account in the
+    Service. To exercise any of these rights, email <a href={privacyMail}>{contact.privacy}</a>. We
+    will not discriminate against you for exercising them. You may also lodge a complaint with your
+    local data protection authority.
+  </p>
+  <p>
+    We do not sell personal information or share it for cross-context behavioral advertising, as
+    those terms are defined under California law.
+  </p>
+
+  <h2 id="this-website">14. This website, cookies and local storage</h2>
+  <p>
+    hourmere.com is a static website. It does not set cookies or use analytics or third-party trackers,
+    and its fonts are served from hourmere.com. Our website hosting provider processes standard
+    request data, such as IP address, browser type and the page requested, to deliver the site and
+    protect it from abuse. The documentation pages save small preferences, such as your light or
+    dark theme choice, in your browser's local storage; this stays on your device.
+  </p>
+  <p>
+    When Hourmere Cloud launches, it will use only cookies that are strictly necessary for it to
+    work, such as keeping you signed in. We do not use advertising cookies.
+  </p>
+
+  <h2 id="children">15. Children</h2>
+  <p>
+    The Service is not directed to children under 16, and we do not knowingly collect their personal
+    data. If you believe a child has given us personal data, contact us and we will delete it.
+  </p>
+
+  <h2 id="changes">16. Changes to this policy</h2>
+  <p>
+    We may update this policy. We will post the new version on this page with a new effective date
+    and, if the changes are material, notify you by email or in the Service before they take effect.
+    Changes to how we use Google user data are also subject to section 4.
+  </p>
+
+  <h2 id="contact">17. Contact</h2>
+  <p>
+    {company.name}<br />
+    Privacy questions and requests: <a href={privacyMail}>{contact.privacy}</a><br />
+    Support: <a href={`mailto:${contact.support}`}>{contact.support}</a><br />
+    Security reports: <a href={`mailto:${contact.security}`}>{contact.security}</a><br />
+    Website: <a href={site.url}>hourmere.com</a> · <a href={company.url}>cobaltmere.com</a>
+  </p>
+</Legal>
