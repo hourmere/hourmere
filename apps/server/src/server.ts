@@ -1,6 +1,11 @@
 import type { AddressInfo } from 'node:net'
 import { serve } from '@hono/node-server'
-import { createAuth, createAuthPool, createCallerResolver } from '@hourmere/auth'
+import {
+  assertSignupEnforced,
+  createAuth,
+  createAuthPool,
+  createCallerResolver,
+} from '@hourmere/auth'
 import { createDb, createPool, runMigrations } from '@hourmere/db'
 import { createLogMailer, createSmtpMailer, type Mailer } from '@hourmere/mail'
 import { sql } from 'kysely'
@@ -58,6 +63,12 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
   }
 
   const authPool = createAuthPool(config.DATABASE_URL, config.signup)
+  try {
+    await assertSignupEnforced(authPool, config.signup)
+  } catch (err) {
+    await Promise.all([db.destroy(), authPool.end()])
+    throw err
+  }
   const auth = createAuth({
     pool: authPool,
     db,

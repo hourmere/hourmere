@@ -1,4 +1,5 @@
 import type { Db } from '@hourmere/db'
+import type pg from 'pg'
 
 /** Who may create an account (SIGNUP). Existing users can always sign in. */
 export const SIGNUP_MODES = ['open', 'first-user', 'closed'] as const
@@ -57,4 +58,24 @@ export function signupConnectionOptions({ mode, allowedDomains }: SignupPolicy):
     options.push(`-c hourmere.signup_allowed_domains=${allowedDomains.join(',')}`)
   }
   return options.join(' ')
+}
+
+/**
+ * Rejects unless connections from `pool` carry `policy` for the database to enforce. Without
+ * the settings the database check allows every insert, so a connection pooler that drops
+ * startup parameters (PgBouncer refuses or ignores `options`) would silently turn it off; the
+ * server refuses to start instead.
+ */
+export async function assertSignupEnforced(pool: pg.Pool, policy: SignupPolicy): Promise<void> {
+  const { rows } = await pool.query<{ mode: string | null; domains: string | null }>(
+    `SELECT current_setting('hourmere.signup', true) AS mode,
+            current_setting('hourmere.signup_allowed_domains', true) AS domains`,
+  )
+  const mode = rows[0]?.mode || 'nothing'
+  const domains = rows[0]?.domains || ''
+  if (mode !== policy.mode || domains !== policy.allowedDomains.join(',')) {
+    throw new Error(
+      `the database connection does not carry the sign-up policy (hourmere.signup is ${mode}, expected ${policy.mode}; allowed domains "${domains}", expected "${policy.allowedDomains.join(',')}"). Connect to Postgres directly, or through a pooler that passes the "options" startup parameter.`,
+    )
+  }
 }

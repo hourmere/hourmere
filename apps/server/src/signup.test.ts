@@ -1,11 +1,17 @@
 // Sign-up control (SIGNUP, SIGNUP_ALLOWED_DOMAINS) end to end: the real app, Better Auth and
 // migrations, against a throwaway database that has no users at the start of each test.
 import { randomBytes } from 'node:crypto'
-import { createAuth, createAuthPool, createCallerResolver, type SignupPolicy } from '@hourmere/auth'
-import { createDb, type Db } from '@hourmere/db'
+import {
+  assertSignupEnforced,
+  createAuth,
+  createAuthPool,
+  createCallerResolver,
+  type SignupPolicy,
+} from '@hourmere/auth'
+import { createDb, createPool, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createLogMailer, type Mailer, type MailMessage } from '@hourmere/mail'
-import pg from 'pg'
+import type pg from 'pg'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.ts'
 import { pressConfirmButton } from './sign-in-confirm-testing.ts'
@@ -38,9 +44,16 @@ describe.skipIf(!serverUrl)('sign-up control', () => {
     outbox.length = 0
   })
 
+  /** The test database's URL with these query parameters. */
+  function urlWith(params: Record<string, string>) {
+    const url = new URL(testDb.url)
+    for (const [name, value] of Object.entries(params)) url.searchParams.set(name, value)
+    return url.toString()
+  }
+
   /** Better Auth's pool for `signup`, closed after the tests. */
-  function authPool(signup: SignupPolicy) {
-    const pool = createAuthPool(testDb.url, signup)
+  function authPool(signup: SignupPolicy, url = testDb.url) {
+    const pool = createAuthPool(url, signup)
     pools.push(pool)
     return pool
   }
@@ -297,6 +310,55 @@ describe.skipIf(!serverUrl)('sign-up control', () => {
       expect(answers[1]).toEqual(answers[0])
       expect(answers[2]).toEqual(answers[0])
     })
+
+    it('is not waited for: answers come at once and alike while SMTP hangs or fails', async () => {
+      await signIn(instance(OPEN), 'early@anywhere.example')
+      let failedLink = ''
+      const mailers: Record<string, Mailer> = {
+        hanging: { send: () => new Promise<void>(() => {}) },
+        failing: {
+          send: async ({ to, text }) => {
+            failedLink = text.match(/https?:\/\/\S+/)?.[0] ?? ''
+            // SMTP errors may quote the envelope and the message.
+            throw Object.assign(
+              new Error(`550 5.1.1 <${to}> rejected: ${text}\n[mail] {"forged":true}`),
+              { code: 'EENVELOPE' },
+            )
+          },
+        },
+      }
+      const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const answers: string[] = []
+      try {
+        for (const [name, mailer] of Object.entries(mailers)) {
+          const app = instance(CLOSED, { mailer })
+          // No account (no email) and an account (an email that hangs or fails).
+          for (const email of ['stranger@elsewhere.example', 'early@anywhere.example']) {
+            const started = performance.now()
+            const res = await askForLinkRequest(app, email)
+            answers.push(JSON.stringify({ status: res.status, body: await res.json() }))
+            expect(performance.now() - started, `${name}, ${email}`).toBeLessThan(2_000)
+          }
+        }
+        await vi.waitFor(() => expect(errors).toHaveBeenCalled())
+        const lines = errors.mock.calls.map((args) => args.join(' '))
+        expect(lines).toHaveLength(1)
+        const token = new URLSearchParams(new URL(failedLink).hash.slice(1)).get('token')
+        expect(token).toMatch(/^[A-Za-z]{32}$/)
+        expect(lines[0]).toMatch(
+          /^\[auth\] sign-in email not sent: EENVELOPE 550 5\.1\.1 <<address>> rejected: /,
+        )
+        expect(lines[0]).toContain('\\n[mail] {')
+        for (const secret of ['early@anywhere.example', token as string, '/sign-in/confirm']) {
+          expect(lines[0]).not.toContain(secret)
+        }
+      } finally {
+        errors.mockRestore()
+      }
+      expect(answers).toEqual(
+        Array(4).fill(JSON.stringify({ status: 200, body: { status: true } })),
+      )
+    })
   })
 
   describe('the first user', () => {
@@ -305,8 +367,8 @@ describe.skipIf(!serverUrl)('sign-up control', () => {
      * ahead together: by then each request has passed the create hook's check while no user
      * existed, the worst interleaving for the first-user rule.
      */
-    function userInsertBarrier(signup: SignupPolicy, n: number) {
-      const pool = authPool(signup)
+    function userInsertBarrier(signup: SignupPolicy, n: number, url?: string) {
+      const pool = authPool(signup, url)
       let waiting = 0
       let open = () => {}
       const opened = new Promise<void>((resolve) => {
@@ -344,9 +406,22 @@ describe.skipIf(!serverUrl)('sign-up control', () => {
       }
     }
 
-    it('is the only account created when several people sign up at the same moment', async () => {
+    // A DATABASE_URL may carry its own connection options (and other parameters); they must
+    // not displace the sign-up settings.
+    it.each([
+      ['a plain URL', () => testDb.url],
+      ['options in the URL', () => urlWith({ options: '-c search_path=auth,public' })],
+      [
+        'options and other parameters in the URL',
+        () =>
+          urlWith({
+            application_name: 'hourmere-test',
+            options: '-c search_path=auth,public -c hourmere.signup=open',
+          }),
+      ],
+    ])('is the only account created when several people sign up at once (%s)', async (_, url) => {
       const policy: SignupPolicy = { mode: 'first-user', allowedDomains: [] }
-      const barrier = userInsertBarrier(policy, 3)
+      const barrier = userInsertBarrier(policy, 3, url())
       const app = instance(policy, { pool: barrier.pool })
       const google = instance(policy, { pool: barrier.pool, google: 'racer@google.example' })
       const links = [
@@ -407,7 +482,7 @@ describe.skipIf(!serverUrl)('sign-up control', () => {
 
       await insert(authPool(OPEN), 'anyone@elsewhere.example')
       // An unknown mode refuses.
-      const bogus = new pg.Pool({ connectionString: testDb.url, options: '-c hourmere.signup=x' })
+      const bogus = createPool(urlWith({ options: '-c hourmere.signup=x' }))
       pools.push(bogus)
       await expect(insert(bogus, 'colleague2@team.example')).rejects.toMatchObject(refused)
       // Connections without the settings (migrations, psql, the application's pool) are not
@@ -418,6 +493,50 @@ describe.skipIf(!serverUrl)('sign-up control', () => {
         'anyone@elsewhere.example',
         'first@elsewhere.example',
       ])
+    })
+
+    const settings = async (pool: pg.Pool) =>
+      (
+        await pool.query(
+          `SELECT current_setting('search_path') AS search_path,
+                  current_setting('application_name') AS application_name,
+                  current_setting('hourmere.signup', true) AS signup,
+                  current_setting('hourmere.signup_allowed_domains', true) AS domains`,
+        )
+      ).rows[0]
+
+    it('keeps the sign-up settings when the URL brings its own options', async () => {
+      expect(await settings(authPool(CLOSED))).toMatchObject({
+        search_path: 'auth',
+        signup: 'closed',
+        domains: 'team.example',
+      })
+      // The URL's options and other parameters apply, except where they would change the
+      // sign-up settings.
+      const url = urlWith({
+        application_name: 'hourmere-test',
+        options: '-c search_path=auth,public -c hourmere.signup=open',
+      })
+      expect(await settings(authPool(CLOSED, url))).toEqual({
+        search_path: 'auth,public',
+        application_name: 'hourmere-test',
+        signup: 'closed',
+        domains: 'team.example',
+      })
+    })
+
+    it('is checked before serving: connections without the settings are refused', async () => {
+      await assertSignupEnforced(authPool(CLOSED), CLOSED)
+      await assertSignupEnforced(authPool(OPEN), OPEN)
+      const missing = /does not carry the sign-up policy.*through a pooler that passes/
+      // As behind a pooler that drops startup parameters.
+      await expect(assertSignupEnforced(testDb.pool, CLOSED)).rejects.toThrow(missing)
+      await expect(assertSignupEnforced(testDb.pool, OPEN)).rejects.toThrow(missing)
+      // Or carrying another policy.
+      await expect(assertSignupEnforced(authPool(FIRST_USER), CLOSED)).rejects.toThrow(missing)
+      await expect(
+        assertSignupEnforced(authPool(CLOSED), { mode: 'closed', allowedDomains: [] }),
+      ).rejects.toThrow(missing)
     })
   })
 })

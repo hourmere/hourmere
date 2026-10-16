@@ -7,10 +7,11 @@ import { magicLink } from 'better-auth/plugins/magic-link'
 import { organization } from 'better-auth/plugins/organization'
 import type { GoogleOptions, MicrosoftOptions } from 'better-auth/social-providers'
 import pg from 'pg'
+import { parse } from 'pg-connection-string'
 import { API_KEY_RATE_LIMIT } from './api-keys.ts'
 import { API_KEY_PREFIX } from './caller.ts'
 import { beforeHook } from './hooks.ts'
-import { betterAuthLog } from './log.ts'
+import { betterAuthLog, logMailFailure } from './log.ts'
 import { confirmLink } from './magic-link.ts'
 import { ensurePersonalOrganization, personalOrganizationGuards } from './organizations.ts'
 import { hasAccount, maySignUp, type SignupPolicy, signupConnectionOptions } from './signup.ts'
@@ -29,6 +30,7 @@ export { escapeControlCharacters } from './log.ts'
 export { MAGIC_LINK_CONFIRM_PATH, MAGIC_LINK_VERIFY_PARAMS } from './magic-link.ts'
 export { ensurePersonalOrganization } from './organizations.ts'
 export {
+  assertSignupEnforced,
   EMAIL_DOMAIN,
   SIGNUP_MODES,
   type SignupMode,
@@ -42,13 +44,20 @@ export {
  * migration in packages/db/migrations.
  *
  * Its connections also carry the sign-up policy, which the database enforces when a user is
- * inserted; pass createAuth the same policy.
+ * inserted; pass createAuth the same policy, and check the settings arrive with
+ * assertSignupEnforced before serving requests.
  */
 export function createAuthPool(databaseUrl: string, signup: SignupPolicy): pg.Pool {
-  const pool = new pg.Pool({
-    connectionString: databaseUrl,
-    options: `-c search_path=auth ${signupConnectionOptions(signup)}`,
-  })
+  // Parsed here, the way node-postgres parses it, instead of passed as connectionString:
+  // node-postgres lets an `options` parameter in the URL replace the options given beside it,
+  // which would drop the sign-up settings and turn the database check off. The URL's options
+  // still apply, after our search_path (so they may change it) and before the sign-up
+  // settings (so they cannot).
+  const config = parse(databaseUrl)
+  const options = ['-c search_path=auth', config.options, signupConnectionOptions(signup)]
+    .filter(Boolean)
+    .join(' ')
+  const pool = new pg.Pool({ ...(config as pg.PoolConfig), options })
   // Same reason as createPool in @hourmere/db: an unhandled idle-client error would kill
   // the process.
   pool.on('error', (err) => console.error(`idle Postgres client error (auth): ${err.message}`))
@@ -210,18 +219,22 @@ export function createAuth({
         expiresIn: MAGIC_LINK_MINUTES * 60,
         // Only a hash is stored, so a database leak does not expose usable links.
         storeToken: 'hashed',
-        sendMagicLink: async ({ email, url }) => {
+        sendMagicLink: async ({ email, url, token }) => {
           // No email to an address that has no account and may not create one: the link could
           // only fail. The request is answered the same either way, so this does not tell
           // anyone whether an address has an account.
           if (!(await maySignUp(db, signup, email)) && !(await hasAccount(db, email))) return
-          await mailer.send(
-            magicLinkEmail({
-              to: email,
-              url: confirmLink(url),
-              expiresInMinutes: MAGIC_LINK_MINUTES,
-            }),
-          )
+          // Not awaited, for any address: waiting for SMTP would make an address that gets an
+          // email answer later than one that does not, and an SMTP failure would answer with
+          // an error only for those. A failure is logged instead (nothing retries it yet).
+          const link = confirmLink(url)
+          void Promise.resolve()
+            .then(() =>
+              mailer.send(
+                magicLinkEmail({ to: email, url: link, expiresInMinutes: MAGIC_LINK_MINUTES }),
+              ),
+            )
+            .catch((err) => logMailFailure(err, [link, url, token]))
         },
       }),
     ],

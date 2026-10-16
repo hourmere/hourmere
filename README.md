@@ -58,7 +58,14 @@ addresses in `SIGNUP_ALLOWED_DOMAINS` (comma-separated email domains, e.g.
 after the first start: the first account should be yours. `closed` allows only those domains
 (nobody, if the list is empty); `open` lets anyone who can reach the instance sign up. A new
 address that may not sign up gets no sign-in email, and the request is answered the same way
-as for any other address.
+as for any other address. The request does not wait for the email either: if sending fails
+(e.g. wrong SMTP settings), the person sees the usual answer and the failure appears in the
+log.
+
+The database enforces the sign-up rules too, using settings the app passes when it connects.
+Connect the app to Postgres directly (as the compose file does), or through a connection
+pooler that passes the `options` startup parameter; PgBouncer, for one, does not. The app
+checks the settings arrive and refuses to start otherwise.
 
 Sign-in links open a page with a "Sign in to Hourmere" button, and only pressing it signs
 in: email security scanners that open every link (such as Microsoft Safe Links) would

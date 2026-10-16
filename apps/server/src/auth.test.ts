@@ -1318,18 +1318,23 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
     })
 
     it('from Better Auth reach that handler instead of being printed raw', async () => {
-      // An SMTP failure inside a Better Auth endpoint, with request-like text in its message.
+      // A database failure inside a Better Auth endpoint (the sign-up check before the email),
+      // with request-like text in its message.
+      const failing = new Proxy(db, {
+        get: (target, prop) =>
+          prop === 'selectFrom'
+            ? () => {
+                throw new Error('db down\n[mail] {"forged":true}')
+              }
+            : Reflect.get(target, prop),
+      })
       const auth = createAuth({
         pool: authPool,
-        db,
+        db: failing,
         baseURL: origin,
         secret: randomBytes(32).toString('base64'),
-        signup: OPEN,
-        mailer: {
-          send: async () => {
-            throw new Error('smtp down\n[mail] {"forged":true}')
-          },
-        },
+        signup: { mode: 'closed', allowedDomains: [] },
+        mailer: { send: async (m) => void outbox.push(m) },
       })
       const app = createApp({
         checkDb: async () => {},

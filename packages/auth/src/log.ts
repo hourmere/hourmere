@@ -19,6 +19,23 @@ export function escapeControlCharacters(text: string): string {
   )
 }
 
+// Anything shaped like an email address.
+const EMAIL_ADDRESS = /[^\s<>()[\]"',;:]+@[^\s<>()[\]"',;:]+/g
+
+/**
+ * Logs a sign-in email that could not be sent, as one line with control characters escaped
+ * and without the recipient or the link: SMTP errors often quote the envelope or the message.
+ * `secrets` (the link, the token) are cut out wherever they appear.
+ */
+export function logMailFailure(err: unknown, secrets: readonly string[]): void {
+  const code = (err as { code?: unknown } | null)?.code
+  let text = err instanceof Error ? err.message : 'unknown error'
+  if (typeof code === 'string') text = `${code} ${text}`
+  for (const secret of secrets) if (secret) text = text.replaceAll(secret, '<redacted>')
+  text = text.replace(EMAIL_ADDRESS, '<address>')
+  console.error(`[auth] sign-in email not sent: ${escapeControlCharacters(text)}`)
+}
+
 const format = (arg: unknown) =>
   typeof arg === 'string' ? arg : inspect(arg, { breakLength: Number.POSITIVE_INFINITY })
 

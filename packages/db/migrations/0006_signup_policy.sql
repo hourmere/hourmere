@@ -12,6 +12,11 @@
 -- hourmere.signup (open, first-user or closed) and hourmere.signup_allowed_domains
 -- (comma-separated, lowercase). Other connections (migrations, psql, the application's own
 -- pool) set neither and are not limited. An unknown mode refuses.
+--
+-- Connections without the settings are not limited, so anything that drops startup
+-- parameters (a connection pooler such as PgBouncer, which refuses or ignores `options`)
+-- would turn this check off. The server reads the settings back over Better Auth's pool at
+-- startup (assertSignupEnforced) and refuses to start if they are missing or differ.
 CREATE FUNCTION enforce_signup_policy() RETURNS trigger
 LANGUAGE plpgsql SET search_path = public, pg_temp AS $$
 DECLARE
