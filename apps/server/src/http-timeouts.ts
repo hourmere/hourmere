@@ -32,16 +32,17 @@ export interface HttpTimeouts {
  *
  * Keep-alive is long on purpose: a reverse proxy reuses idle connections to the app for as
  * long as its own idle timeout, and reusing one the app has just closed fails the request
- * (a 502). The app must therefore keep idle connections at least that long. 65 s covers the
- * common 60 s (nginx's upstream keepalive_timeout, cloud load balancers); proxies that keep
- * them longer by default (Traefik 90 s, Caddy 2 min) need HTTP_KEEP_ALIVE_TIMEOUT above that.
- * An idle connection costs a socket and little memory, and slow senders are bounded by the
- * headers and request timeouts, which keep-alive does not extend.
+ * (a 502; Caddy's and Traefik's Go transport retries only idempotent requests, so a booking's
+ * POST would fail). The app must therefore keep idle connections longer than the proxy does.
+ * 125 s is above the common defaults: 60 s (nginx's upstream keepalive_timeout, AWS ALB),
+ * 90 s (Traefik) and 120 s (Caddy). An idle connection costs a socket and little memory, and
+ * slow senders are bounded by the headers and request timeouts, which keep-alive does not
+ * extend.
  */
 export const DEFAULT_HTTP_TIMEOUTS: HttpTimeouts = {
   headers: 20_000,
   request: 60_000,
-  keepAlive: 65_000,
+  keepAlive: 125_000,
 }
 
 /**

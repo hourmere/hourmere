@@ -109,7 +109,7 @@ describe('loadConfig', () => {
   })
 
   it('takes HTTP timeouts in whole seconds and passes them on in milliseconds', () => {
-    const defaults = { headers: 20_000, request: 60_000, keepAlive: 65_000 }
+    const defaults = { headers: 20_000, request: 60_000, keepAlive: 125_000 }
     expect(loadConfig(base).httpTimeouts).toEqual(defaults)
     expect(
       loadConfig({
@@ -124,14 +124,14 @@ describe('loadConfig', () => {
         ...base,
         HTTP_HEADERS_TIMEOUT: '10',
         HTTP_REQUEST_TIMEOUT: '120',
-        HTTP_KEEP_ALIVE_TIMEOUT: '125',
+        HTTP_KEEP_ALIVE_TIMEOUT: '180',
       }).httpTimeouts,
-    ).toEqual({ headers: 10_000, request: 120_000, keepAlive: 125_000 })
+    ).toEqual({ headers: 10_000, request: 120_000, keepAlive: 180_000 })
     // Keep-alive is independent of the other two: idling is not part of a request.
     expect(
       loadConfig({ ...base, HTTP_HEADERS_TIMEOUT: '5', HTTP_REQUEST_TIMEOUT: '5' }).httpTimeouts
         .keepAlive,
-    ).toBe(65_000)
+    ).toBe(125_000)
     // Milliseconds by mistake, fractions, zero (which would turn Node's timeout off).
     for (const bad of ['60000', '0.5', '0', '-5', '1m']) {
       expect(() => loadConfig({ ...base, HTTP_REQUEST_TIMEOUT: bad }), bad).toThrow(

@@ -63,11 +63,11 @@ a `Referrer-Policy`, and on pages a Content-Security-Policy that lets only Hourm
 scripts, styles and requests run. When `PUBLIC_URL` is https, browsers are also told to use
 only https for that host, for 180 days (`HSTS_MAX_AGE`). Clients that send too slowly are
 disconnected: 20 s to send a request's headers and 60 s for the whole request
-(`HTTP_HEADERS_TIMEOUT`, `HTTP_REQUEST_TIMEOUT`). Idle connections stay open for 65 s
-(`HTTP_KEEP_ALIVE_TIMEOUT`): set it above your reverse proxy's idle timeout for connections to
-the app, or the proxy may reuse a connection the app has just closed and answer 502. 65 s
-covers proxies that keep them 60 s (nginx, AWS ALB); behind Traefik (90 s) or Caddy (2 min)
-set it to e.g. 125.
+(`HTTP_HEADERS_TIMEOUT`, `HTTP_REQUEST_TIMEOUT`). Idle connections stay open for 125 s
+(`HTTP_KEEP_ALIVE_TIMEOUT`): keep it above your reverse proxy's idle timeout for connections to
+the app, or the proxy may reuse a connection the app has just closed and answer 502. The
+default is above the usual ones: nginx's upstream keepalive and AWS ALB 60 s, Traefik 90 s,
+Caddy 120 s.
 
 People sign in with a link sent by email (no passwords), or with Google or Microsoft once their
 client ids are set in `.env`. Accounts are only created for email addresses the provider

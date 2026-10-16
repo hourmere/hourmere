@@ -10,7 +10,7 @@ describe('httpServerOptions', () => {
     expect(httpServerOptions(DEFAULT_HTTP_TIMEOUTS)).toEqual({
       headersTimeout: 20_000,
       requestTimeout: 60_000,
-      keepAliveTimeout: 65_000,
+      keepAliveTimeout: 125_000,
       connectionsCheckingInterval: 5_000,
     })
   })
