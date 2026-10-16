@@ -226,6 +226,13 @@ describe.skipIf(!serverUrl)('startServer', () => {
           for (const path of ['/', '/api/v1/openapi.json', '/api/auth/ok', '/api/health/x']) {
             expect((await fetch(`${base}${path}`)).status, path).toBe(404)
           }
+          // Nor the MCP endpoint, which the web role serves.
+          const mcp = await fetch(`${base}/mcp`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: '{}',
+          })
+          expect(mcp.status).toBe(404)
           const deadline = Date.now() + 15_000
           while ((await state(id)) !== 'completed' && Date.now() < deadline) {
             await new Promise((r) => setTimeout(r, 100))
