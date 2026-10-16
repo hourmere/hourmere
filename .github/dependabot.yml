@@ -17,6 +17,12 @@ updates:
     groups:
       npm-minor-and-patch:
         update-types: [minor, patch]
+    ignore:
+      # TypeScript majors are upgraded by hand: apps/site stays on the version @astrojs/check
+      # supports (its typecheck runs on TypeScript's JavaScript API), so a bot bump of one
+      # workspace's copy leaves package-lock.json inconsistent (see #19).
+      - dependency-name: typescript
+        update-types: [version-update:semver-major]
 
   # Actions in .github/workflows, pinned to commit SHAs with the version in a comment.
   - package-ecosystem: github-actions
