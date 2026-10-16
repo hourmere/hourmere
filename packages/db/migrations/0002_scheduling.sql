@@ -111,9 +111,9 @@ CREATE TABLE schedules (
   user_id uuid NOT NULL REFERENCES auth."user" (id) ON DELETE CASCADE,
   name text NOT NULL,
   time_zone text NOT NULL,
-  -- ISO weekday ("1" = Monday … "7" = Sunday) → local wall-clock intervals, e.g.
-  -- {"1": [{"start": "09:00", "end": "12:00"}, {"start": "13:00", "end": "17:00"}], "6": []}.
-  -- Shape is validated by the application (it is the availability engine's input).
+  -- Weekday name → local wall-clock intervals, e.g. {"monday": [{"start": "09:00",
+  -- "end": "12:00"}, {"start": "13:00", "end": "17:00"}], "saturday": []}. The shape is the
+  -- availability engine's WeeklyHours input and is validated by the application.
   weekly_hours jsonb NOT NULL,
   is_default boolean NOT NULL DEFAULT false,
   created_at timestamptz NOT NULL DEFAULT now(),

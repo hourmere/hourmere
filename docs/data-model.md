@@ -95,8 +95,9 @@ types in `packages/db/src/tables.ts` are generated from the migrated database.
 
 Validated by the application (zod), not by the database:
 
-- `schedules.weekly_hours`: ISO weekday `"1"`–`"7"` → `[{ "start": "09:00", "end": "17:00" }]`;
-  `"end"` may be `"24:00"`. Missing or empty day = unavailable.
+- `schedules.weekly_hours`: weekday name (`"monday"` … `"sunday"`) →
+  `[{ "start": "09:00", "end": "17:00" }]`; `"end"` may be `"24:00"`. Missing or empty
+  day = unavailable. This is `@hourmere/core`'s `WeeklyHours` type.
 - `schedule_overrides.intervals`: `[]` (unavailable) or the same interval list.
 - `event_types.location` / `bookings.location`: `{ "kind": "google_meet" | "zoom" | "phone" | "in_person" | "link", ... }`.
 - `event_types.questions` / `bookings.responses`: booking-form fields and answers.
