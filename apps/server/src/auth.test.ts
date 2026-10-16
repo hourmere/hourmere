@@ -957,7 +957,7 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
         `["${personal.id}"]`,
         `{"organizationId":"${personal.id}","note":"x"}`,
         '{"organizationId":"not-a-uuid"}',
-        `{"organizationId":"${'a'.repeat(100_000)}"}`,
+        `{"organizationId":"${'a'.repeat(50_000)}"}`,
         '"text"',
       ]) {
         const res = await post('/api/auth/api-key/create', cookie, raw(metadata))

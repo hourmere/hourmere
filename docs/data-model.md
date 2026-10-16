@@ -118,7 +118,22 @@ Validated by the application (zod), not by the database:
   day = unavailable. This is `@hourmere/core`'s `WeeklyHours` type.
 - `schedule_overrides.intervals`: `[]` (unavailable) or the same interval list.
 - `event_types.location` / `bookings.location`: `{ "kind": "google_meet" | "zoom" | "phone" | "in_person" | "link", ... }`.
-- `event_types.questions` / `bookings.responses`: booking-form fields and answers.
+- `event_types.questions`: booking-form fields beyond name and email, at most 20:
+  `[{ "id": "company", "label": "Company", "type": "short_text", "required": true }]`.
+  `id` is 1–64 letters, digits, `_` or `-`, unique within the event type, and not
+  `__proto__`; `label` 1–200 characters; `type` is `short_text`, `long_text`, `phone`,
+  `select`, `multi_select` or `checkbox`; `required` defaults to false; `options` (1–50
+  distinct strings of up to 200 characters) only for `select` and `multi_select`. Labels and
+  options are single-line text (no control characters, well-formed Unicode). Unknown fields
+  are refused.
+- `bookings.responses`: answers keyed by question id: a string for `short_text` (≤ 500
+  characters), `long_text` (≤ 5000) and `phone` (≤ 32), one of the options for `select`, a list
+  of distinct options for `multi_select`, a boolean for `checkbox` (true when required).
+  Text answers have no control characters; only `long_text` may contain tabs and line
+  breaks. Empty optional answers are left out.
+- Both are defined once, as zod schemas plus `validateQuestions` (for writes, code
+  `invalid_questions`), `parseQuestions` and `validateResponses`, in
+  `packages/scheduling/src/questions.ts`; writes of either go through them.
 - `calendars.sync_state`: provider sync token / delta link and push channel id + expiry.
 - `auth.apikey.metadata`: `{ "organizationId": "<uuid>" }`, the organization the key acts
   in; set when the key is created (the owner's personal organization unless they name

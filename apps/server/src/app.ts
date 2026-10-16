@@ -5,11 +5,14 @@ import { createRoute, type Hook, OpenAPIHono, z } from '@hono/zod-openapi'
 import { type CallerResolver, escapeControlCharacters } from '@hourmere/auth'
 import { DomainError, type DomainErrorKind } from '@hourmere/scheduling'
 import type { Context, Env } from 'hono'
+import { createMiddleware } from 'hono/factory'
 import { HTTPException } from 'hono/http-exception'
 import { logger } from 'hono/logger'
+import { apiBodyLimit } from './body-limit.ts'
 import { requireCaller } from './caller.ts'
 import { clientIp, withClientIp } from './client-ip.ts'
 import { authenticated, ErrorBody, json, type RouteModule } from './openapi.ts'
+import { routeRateLimits } from './rate-limit.ts'
 import { MAGIC_LINK_CONFIRM_PATH, signInConfirmPage } from './sign-in-confirm.ts'
 
 export interface AppDeps {
@@ -103,6 +106,71 @@ const validationHook: Hook<unknown, Env, string, unknown> = (result, c) => {
   return c.json({ error: 'invalid_request', message }, 400)
 }
 
+/**
+ * Whether a parsed JSON value has a string or object key containing NUL or a lone surrogate.
+ * Postgres refuses NUL in text and jsonb, and malformed Unicode breaks email, calendars and
+ * logs downstream; no route has a use for either. Iterative, so deep nesting cannot
+ * overflow the stack.
+ */
+export function hasUnsafeJsonText(value: unknown): boolean {
+  const unsafe = (text: string) => text.includes('\u0000') || !text.isWellFormed()
+  const pending: unknown[] = [value]
+  while (pending.length) {
+    const item = pending.pop()
+    if (typeof item === 'string') {
+      if (unsafe(item)) return true
+    } else if (Array.isArray(item)) {
+      // One by one: spreading a large array into push() exceeds V8's argument limit.
+      for (const child of item) pending.push(child)
+    } else if (typeof item === 'object' && item !== null) {
+      for (const [key, child] of Object.entries(item)) {
+        if (unsafe(key)) return true
+        pending.push(child)
+      }
+    }
+  }
+  return false
+}
+
+const JSON_CONTENT_TYPE = /^application\/([a-z0-9.+-]+\+)?json/i
+
+/**
+ * Defense in depth for every /api/v1 route, present and future: a JSON body with NUL or
+ * malformed Unicode anywhere is refused before any route sees it. Services still check each
+ * field's text with specific codes. Malformed JSON is left to the route's validator.
+ * Hono keeps the body text, so the route can still read it.
+ */
+const jsonTextGuard = createMiddleware(async (c, next) => {
+  if (!JSON_CONTENT_TYPE.test(c.req.header('content-type') ?? '')) return next()
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(await c.req.text())
+  } catch {
+    return next()
+  }
+  if (hasUnsafeJsonText(parsed)) {
+    return c.json(
+      {
+        error: 'invalid_request',
+        message: 'Text in the request must not contain NUL characters or malformed Unicode',
+      },
+      400,
+    )
+  }
+  await next()
+})
+
+/**
+ * Product API responses carry private data (attendees, answers, manage links) and depend on
+ * who asks, so no shared or browser cache may keep them, errors included: a cached 404 for a
+ * mistyped token must not hide the real booking later. A route that wants caching sets its
+ * own Cache-Control, which is left alone.
+ */
+const noStoreByDefault = createMiddleware(async (c, next) => {
+  await next()
+  if (!c.res.headers.has('Cache-Control')) c.res.headers.set('Cache-Control', 'no-store')
+})
+
 // Hono's terminal colors (ESC sequences around the status); the one-line console would
 // print them as visible escapes.
 // biome-ignore lint/suspicious/noControlCharactersInRegex: matching the ESC character is the point
@@ -161,6 +229,15 @@ export function createApp({
   })
   app.use('/api/*', requestLogger)
   app.use('/api/*', clientIp(trustedProxies))
+  // First on /api/v1, so it also covers what the middleware below and onError answer.
+  app.use('/api/v1/*', noStoreByDefault)
+  // 64 KB unless the route declares more (routeBodyLimit); before anything reads the body.
+  app.use('/api/*', apiBodyLimit())
+  // Routes' rate limits, before anything parses the body: a client over its limit gets 429
+  // without the server reading its JSON.
+  app.use('/api/v1/*', routeRateLimits())
+  // Not /api/auth: Better Auth reads the raw request body itself.
+  app.use('/api/v1/*', jsonTextGuard)
 
   app.openapi(healthRoute, async (c) => {
     try {
