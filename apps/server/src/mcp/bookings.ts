@@ -3,6 +3,7 @@
 import { z } from '@hono/zod-openapi'
 import type { Db } from '@hourmere/db'
 import {
+  type BookingNotifier,
   type BookingOrigin,
   cancelHostBooking,
   cancelManagedBooking,
@@ -39,7 +40,7 @@ const slug = PageParams.shape.slug.openapi({
 
 const manageToken = z.string().openapi({
   description:
-    'The manageToken that create_booking or reschedule_booking returned for this booking (also the token in the invitee link https://<host>/booking#token=<token>)',
+    "The manageToken that create_booking or reschedule_booking returned for this booking, or the token in a link from one of the invitee's booking emails (https://<host>/booking#token=<token>). A token from an email follows the meeting when it is rescheduled; one returned by a tool stays with its booking.",
 })
 
 /** RFC 3339 with the zone's offset, e.g. 2026-11-02T10:00:00+01:00. */
@@ -130,6 +131,8 @@ const ListBookingsInput = z.strictObject(ListBookingsQuery.shape)
 export interface BookingToolsDeps {
   db: Db
   now?: () => Temporal.Instant
+  /** Queues the booking emails in the transaction of each change, as for REST. */
+  notify?: BookingNotifier | undefined
   /**
    * Per-user limits for the tools that act on public booking pages; defaults to the public
    * endpoints' per-address limits (PUBLIC_RATE_LIMITS). Replaced in tests.
@@ -147,10 +150,11 @@ export interface BookingToolsDeps {
 export function bookingTools({
   db,
   now = () => Temporal.Now.instant(),
+  notify,
   rateLimits = {},
 }: BookingToolsDeps): Tool[] {
-  const pub: PublicContext = { db, now }
-  const context = (caller: McpCaller): ServiceContext => ({ db, principal: caller, now })
+  const pub: PublicContext = { db, now, notify }
+  const context = (caller: McpCaller): ServiceContext => ({ db, principal: caller, now, notify })
   const origin = (caller: McpCaller): BookingOrigin => ({
     source: 'mcp',
     apiKeyId: caller.apiKeyId,
@@ -244,7 +248,7 @@ export function bookingTools({
     name: 'reschedule_booking',
     title: 'Reschedule a booking',
     description:
-      'Moves a booking you made (as the invitee) to a new time, using its manageToken. In one step the booking is cancelled and a new one is created at start, with the same invitee, guests and answers; the new time may overlap the old one. Returns the new booking and its new manageToken (the old token then shows the cancelled booking). Not idempotent: a retry after a lost response fails with booking_cancelled, because the booking has already moved. Fails with booking_in_past once the meeting has started.',
+      'Moves a booking you made (as the invitee) to a new time, using its manageToken. In one step the booking is cancelled and a new one is created at start, with the same invitee, guests and answers; the new time may overlap the old one. Returns the new booking and its new manageToken (the token returned for the old booking then belongs to the cancelled booking; tokens from emails follow the meeting to the new one). Not idempotent: with a token a tool returned, a retry after a lost response fails with booking_cancelled, because the booking has already moved; with a token from an email it would move the meeting again. Fails with booking_in_past once the meeting has started.',
     input: RescheduleInput,
     output: BookingWithToken,
     annotations: {

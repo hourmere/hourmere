@@ -1,6 +1,6 @@
 // Booking writes against a throwaway database: creating from a public page, idempotent
 // retries, races, the invitee's manage link and the host's view.
-import { createHash } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import type { Principal } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
@@ -17,7 +17,7 @@ import {
   listHostBookings,
   rescheduleManagedBooking,
 } from './bookings.ts'
-import type { PublicContext, ServiceContext } from './context.ts'
+import type { BookingNotifier, PublicContext, ServiceContext } from './context.ts'
 import { createFixtures, type Fixtures } from './testing.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -85,17 +85,17 @@ describe.skipIf(!serverUrl)('bookings', () => {
     }
   }
 
-  /** Resolves once a session of this database waits for a lock. */
-  async function untilSomeoneWaits() {
+  /** Resolves once `sessions` sessions of this database wait for a lock. */
+  async function untilSomeoneWaits(sessions = 1) {
     for (let i = 0; i < 500; i++) {
       const waiting = await count(
         `SELECT count(*)::int AS n FROM pg_stat_activity
           WHERE datname = current_database() AND wait_event_type = 'Lock'`,
       )
-      if (waiting) return
+      if ((waiting ?? 0) >= sessions) return
       await new Promise((r) => setTimeout(r, 10))
     }
-    throw new Error('nobody waited for a lock')
+    throw new Error(`fewer than ${sessions} sessions waited for a lock`)
   }
 
   /** Runs `attempt` while the host's lock is held, calling `meanwhile` once it waits. */
@@ -586,6 +586,323 @@ describe.skipIf(!serverUrl)('bookings', () => {
         status: 'cancelled',
       })
     })
+  })
+
+  describe('notifying', () => {
+    /**
+     * A notifier that records each event, with whether it was called inside a transaction
+     * whose change other connections cannot see yet (so it commits or rolls back with it).
+     */
+    function recorder() {
+      const events: Record<string, unknown>[] = []
+      const notify: BookingNotifier = async (trx, event, now) => {
+        const committed = await count(
+          'SELECT count(*)::int AS n FROM bookings WHERE id = $1 AND status = $2',
+          [event.bookingId, event.type === 'cancelled' ? 'cancelled' : 'confirmed'],
+        )
+        events.push({
+          type: event.type,
+          bookingId: event.bookingId,
+          start: 'start' in event ? event.start.toString() : undefined,
+          now: now.toString(),
+          inTransaction: trx.isTransaction,
+          visibleOutside: committed === 1,
+        })
+      }
+      return { events, ctx: { db, now: () => NOW, notify } satisfies PublicContext }
+    }
+    const inTransaction = { now: NOW.toString(), inTransaction: true, visibleOutside: false }
+    const hostContext = (userId: string, organizationId: string, c: PublicContext) =>
+      ({
+        ...c,
+        principal: {
+          kind: 'session',
+          sessionId: 'session',
+          user: { id: userId, name: '', email: '' },
+          organization: { id: organizationId, name: '', slug: '', personal: true },
+        },
+      }) satisfies ServiceContext
+
+    it('tells about a new booking in its transaction, and not when replaying it', async () => {
+      const s = await setup()
+      const r = recorder()
+      const key = crypto.randomUUID()
+      const first = await s.book('2026-11-02T14:00:00Z', { idempotencyKey: key }, r.ctx)
+      const again = await s.book('2026-11-02T14:00:00Z', { idempotencyKey: key }, r.ctx)
+      expect(again.replayed).toBe(true)
+      expect(r.events).toEqual([
+        {
+          type: 'created',
+          bookingId: first.booking.id,
+          start: '2026-11-02T14:00:00Z',
+          ...inTransaction,
+        },
+      ])
+    })
+
+    it('tells once about concurrent retries of one request', SERIALIZED, async () => {
+      const s = await setup()
+      const r = recorder()
+      const key = crypto.randomUUID()
+      const results = await Promise.all(
+        Array.from({ length: 5 }, () =>
+          s.book('2026-11-02T15:00:00Z', { idempotencyKey: key }, r.ctx),
+        ),
+      )
+      expect(r.events.map((e) => e.bookingId)).toEqual([results[0]?.booking.id])
+    })
+
+    it('tells about reschedules and cancellations, never about refused changes', async () => {
+      const s = await setup()
+      const r = recorder()
+      const { booking, manageToken } = await s.book('2026-11-02T10:00:00Z')
+      await expect(
+        rescheduleManagedBooking(r.ctx, manageToken as string, {
+          start: instant('2026-11-02T20:00:00Z'),
+        }),
+      ).rejects.toMatchObject({ code: 'slot_unavailable' })
+      const moved = await rescheduleManagedBooking(r.ctx, manageToken as string, {
+        start: instant('2026-11-02T13:00:00Z'),
+      })
+      await expect(
+        rescheduleManagedBooking(r.ctx, manageToken as string, {
+          start: instant('2026-11-02T14:00:00Z'),
+        }),
+      ).rejects.toMatchObject({ code: 'booking_cancelled' })
+      await cancelManagedBooking(r.ctx, moved.manageToken as string)
+      await expect(cancelManagedBooking(r.ctx, moved.manageToken as string)).rejects.toMatchObject({
+        code: 'booking_cancelled',
+      })
+      // And the host cancelling.
+      const other = await s.book('2026-11-02T15:00:00Z')
+      const host = hostContext(s.userId, s.organizationId, r.ctx)
+      await cancelHostBooking(host, other.booking.id, { reason: 'Ill' })
+      await expect(cancelHostBooking(host, other.booking.id)).rejects.toMatchObject({
+        code: 'booking_cancelled',
+      })
+      expect(r.events).toEqual([
+        {
+          type: 'rescheduled',
+          bookingId: moved.booking.id,
+          start: '2026-11-02T13:00:00Z',
+          ...inTransaction,
+        },
+        { type: 'cancelled', bookingId: moved.booking.id, start: undefined, ...inTransaction },
+        { type: 'cancelled', bookingId: other.booking.id, start: undefined, ...inTransaction },
+      ])
+      expect(booking.id).not.toBe(moved.booking.id)
+    })
+
+    it('makes no change when telling fails', async () => {
+      const failing: PublicContext = {
+        db,
+        now: () => NOW,
+        notify: async () => {
+          throw new Error('the queue is down')
+        },
+      }
+      const s = await setup()
+      await expect(s.book('2026-11-02T10:00:00Z', {}, failing)).rejects.toThrow('queue is down')
+      expect(
+        await count('SELECT count(*)::int AS n FROM bookings WHERE event_type_id = $1', [
+          s.eventTypeId,
+        ]),
+      ).toBe(0)
+
+      const { booking, manageToken } = await s.book('2026-11-02T10:00:00Z')
+      await expect(
+        rescheduleManagedBooking(failing, manageToken as string, {
+          start: instant('2026-11-02T13:00:00Z'),
+        }),
+      ).rejects.toThrow('queue is down')
+      await expect(cancelManagedBooking(failing, manageToken as string)).rejects.toThrow(
+        'queue is down',
+      )
+      await expect(
+        cancelHostBooking(hostContext(s.userId, s.organizationId, failing), booking.id),
+      ).rejects.toThrow('queue is down')
+      expect(await getManagedBooking(ctx, manageToken as string)).toEqual(booking)
+      expect(
+        await count('SELECT count(*)::int AS n FROM bookings WHERE event_type_id = $1', [
+          s.eventTypeId,
+        ]),
+      ).toBe(1)
+    })
+  })
+
+  describe('manage links from emails', () => {
+    /**
+     * A token as an invitee email carries it: minted by the notification job, its SHA-256
+     * kept in that email's booking_notifications row.
+     */
+    async function emailToken(bookingId: string, kind = 'confirmed') {
+      const token = randomBytes(32).toString('base64url')
+      const invitee = await db
+        .selectFrom('booking_attendees')
+        .select('id')
+        .where('booking_id', '=', bookingId)
+        .where('is_booker', '=', true)
+        .executeTakeFirstOrThrow()
+      await db
+        .insertInto('booking_notifications')
+        .values({
+          booking_id: bookingId,
+          kind,
+          recipient: `attendee:${invitee.id}`,
+          manage_token_hash: createHash('sha256').update(token).digest(),
+        })
+        .execute()
+      return token
+    }
+
+    it("open, cancel and reschedule the booking, and the API's token keeps working", async () => {
+      const s = await setup()
+      const { booking, manageToken } = await s.book('2026-11-02T10:00:00Z')
+      const fromEmail = await emailToken(booking.id)
+      const fromReminder = await emailToken(booking.id, 'reminder')
+      expect(await getManagedBooking(ctx, fromEmail)).toEqual(booking)
+      expect(await getManagedBooking(ctx, fromReminder)).toEqual(booking)
+      expect(await getManagedBooking(ctx, manageToken as string)).toEqual(booking)
+
+      const moved = await rescheduleManagedBooking(ctx, fromEmail, {
+        start: instant('2026-11-02T13:00:00Z'),
+      })
+      expect(moved.booking).toMatchObject({ rescheduledFromId: booking.id, status: 'confirmed' })
+      expect(moved.manageToken).toMatch(/^[A-Za-z0-9_-]{43}$/)
+      expect([fromEmail, fromReminder, manageToken]).not.toContain(moved.manageToken)
+      expect(await getManagedBooking(ctx, moved.manageToken as string)).toEqual(moved.booking)
+
+      const cancelled = await cancelManagedBooking(ctx, fromReminder, { reason: 'Busy' })
+      expect(cancelled).toMatchObject({ id: moved.booking.id, status: 'cancelled' })
+    })
+
+    it('follow the meeting through reschedules, unlike the token the API returned', async () => {
+      const s = await setup()
+      const { booking, manageToken } = await s.book('2026-11-02T10:00:00Z')
+      const fromEmail = await emailToken(booking.id)
+      const first = await rescheduleManagedBooking(ctx, manageToken as string, {
+        start: instant('2026-11-02T13:00:00Z'),
+      })
+      // The email about the old booking opens the one that replaced it.
+      expect(await getManagedBooking(ctx, fromEmail)).toEqual(first.booking)
+      // The API's token stays with its booking, so a retried reschedule cannot move it again.
+      expect(await getManagedBooking(ctx, manageToken as string)).toMatchObject({
+        id: booking.id,
+        status: 'cancelled',
+      })
+      await expect(
+        rescheduleManagedBooking(ctx, manageToken as string, {
+          start: instant('2026-11-02T13:00:00Z'),
+        }),
+      ).rejects.toMatchObject({ code: 'booking_cancelled' })
+      await expect(cancelManagedBooking(ctx, manageToken as string)).rejects.toMatchObject({
+        code: 'booking_cancelled',
+      })
+
+      // Moved again through the old email: it acts on the latest booking of the chain.
+      const second = await rescheduleManagedBooking(ctx, fromEmail, {
+        start: instant('2026-11-02T14:00:00Z'),
+      })
+      expect(second.booking.rescheduledFromId).toBe(first.booking.id)
+      expect(await getManagedBooking(ctx, fromEmail)).toEqual(second.booking)
+      expect(await getManagedBooking(ctx, first.manageToken as string)).toMatchObject({
+        id: first.booking.id,
+        status: 'cancelled',
+      })
+
+      // Cancelled through it: still shown, read-only.
+      await cancelManagedBooking(ctx, fromEmail)
+      const shown = await getManagedBooking(ctx, fromEmail)
+      expect(shown).toMatchObject({ id: second.booking.id, status: 'cancelled' })
+      await expect(cancelManagedBooking(ctx, fromEmail)).rejects.toMatchObject({
+        kind: 'conflict',
+        code: 'booking_cancelled',
+      })
+      await expect(
+        rescheduleManagedBooking(ctx, fromEmail, { start: instant('2026-11-02T15:00:00Z') }),
+      ).rejects.toMatchObject({ code: 'booking_cancelled' })
+      expect(await getManagedBooking(ctx, second.manageToken as string)).toEqual(shown)
+    })
+
+    it('show a cancelled booking read-only', async () => {
+      const s = await setup()
+      const { booking, manageToken } = await s.book('2026-11-02T10:00:00Z')
+      const fromEmail = await emailToken(booking.id)
+      await cancelManagedBooking(ctx, manageToken as string, { reason: 'Conflict' })
+      expect(await getManagedBooking(ctx, fromEmail)).toMatchObject({
+        id: booking.id,
+        status: 'cancelled',
+        cancelReason: 'Conflict',
+      })
+      await expect(cancelManagedBooking(ctx, fromEmail)).rejects.toMatchObject({
+        code: 'booking_cancelled',
+      })
+      await expect(
+        rescheduleManagedBooking(ctx, fromEmail, { start: instant('2026-11-02T13:00:00Z') }),
+      ).rejects.toMatchObject({ code: 'booking_cancelled' })
+    })
+
+    it('never match an email the mail server refused, which keeps no hash', async () => {
+      const s = await setup()
+      const { booking } = await s.book('2026-11-02T10:00:00Z')
+      const invitee = await db
+        .selectFrom('booking_attendees')
+        .select('id')
+        .where('booking_id', '=', booking.id)
+        .executeTakeFirstOrThrow()
+      const refused = {
+        booking_id: booking.id,
+        kind: 'confirmed',
+        recipient: `attendee:${invitee.id}`,
+        outcome: 'rejected',
+      }
+      // The schema keeps a refused email's secret from ever being stored.
+      await expect(
+        db
+          .insertInto('booking_notifications')
+          .values({ ...refused, manage_token_hash: createHash('sha256').update('x').digest() })
+          .execute(),
+      ).rejects.toMatchObject({ code: '23514' })
+      await db.insertInto('booking_notifications').values(refused).execute()
+      for (const token of ['A'.repeat(43), randomBytes(32).toString('base64url')]) {
+        await expect(getManagedBooking(ctx, token)).rejects.toMatchObject({
+          code: 'booking_not_found',
+        })
+      }
+    })
+
+    it(
+      'cancel the booking that replaced theirs when a reschedule commits while they wait',
+      SERIALIZED,
+      async () => {
+        const s = await setup()
+        const { booking, manageToken } = await s.book('2026-11-02T10:00:00Z')
+        const fromEmail = await emailToken(booking.id)
+        const release = await holdHostLock(s.userId)
+        let moving: ReturnType<typeof rescheduleManagedBooking> | undefined
+        let byEmail: ReturnType<typeof cancelManagedBooking> | undefined
+        let byApi: ReturnType<typeof cancelManagedBooking> | undefined
+        try {
+          // The reschedule locks the booking, then waits for the host.
+          moving = rescheduleManagedBooking(ctx, manageToken as string, {
+            start: instant('2026-11-02T13:00:00Z'),
+          })
+          moving.catch(() => {})
+          await untilSomeoneWaits(1)
+          // Both cancels wait for the booking's row.
+          byEmail = cancelManagedBooking(ctx, fromEmail)
+          byEmail.catch(() => {})
+          byApi = cancelManagedBooking(ctx, manageToken as string)
+          byApi.catch(() => {})
+          await untilSomeoneWaits(3)
+        } finally {
+          await release()
+        }
+        const moved = await moving
+        expect(await byEmail).toMatchObject({ id: moved.booking.id, status: 'cancelled' })
+        await expect(byApi).rejects.toMatchObject({ code: 'booking_cancelled' })
+      },
+    )
   })
 
   describe('text', () => {

@@ -306,7 +306,7 @@ export interface paths {
             parameters: {
                 query?: never;
                 header?: {
-                    /** @description The secret from the invitee's link (the `token` in https://<app>/booking#token=…). A missing or unknown token gets 404 `booking_not_found`. */
+                    /** @description The invitee's secret: the `manageToken` the booking API returned, or the `token` in a link from a booking email (https://<app>/booking#token=…). A missing or unknown token gets 404 `booking_not_found`. After a reschedule, the token returned for the old booking shows that cancelled booking, while tokens from emails open the booking that replaced it. */
                     "x-manage-token"?: string;
                 };
                 path?: never;
@@ -365,7 +365,7 @@ export interface paths {
             parameters: {
                 query?: never;
                 header?: {
-                    /** @description The secret from the invitee's link (the `token` in https://<app>/booking#token=…). A missing or unknown token gets 404 `booking_not_found`. */
+                    /** @description The invitee's secret: the `manageToken` the booking API returned, or the `token` in a link from a booking email (https://<app>/booking#token=…). A missing or unknown token gets 404 `booking_not_found`. After a reschedule, the token returned for the old booking shows that cancelled booking, while tokens from emails open the booking that replaced it. */
                     "x-manage-token"?: string;
                 };
                 path?: never;
@@ -441,13 +441,13 @@ export interface paths {
         put?: never;
         /**
          * Reschedule with the manage token
-         * @description Cancels the booking and books the new time in one step. The new time may overlap the old one. Returns the new booking and its manage token; the old token then shows the cancelled booking.
+         * @description Cancels the booking and books the new time in one step. The new time may overlap the old one. Returns the new booking and its manage token. The token returned for the old booking then shows the cancelled booking, so a retry after a lost response gets 409 `booking_cancelled`; tokens from booking emails open the new booking (and would move it again).
          */
         post: {
             parameters: {
                 query?: never;
                 header?: {
-                    /** @description The secret from the invitee's link (the `token` in https://<app>/booking#token=…). A missing or unknown token gets 404 `booking_not_found`. */
+                    /** @description The invitee's secret: the `manageToken` the booking API returned, or the `token` in a link from a booking email (https://<app>/booking#token=…). A missing or unknown token gets 404 `booking_not_found`. After a reschedule, the token returned for the old booking shows that cancelled booking, while tokens from emails open the booking that replaced it. */
                     "x-manage-token"?: string;
                 };
                 path?: never;

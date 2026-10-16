@@ -3,7 +3,7 @@
 // that writes, and the exclusion constraint on booking_hosts is the last word on overlaps.
 import { createHash, randomBytes } from 'node:crypto'
 import type { Db, Json } from '@hourmere/db'
-import type { ExpressionBuilder } from 'kysely'
+import { type ExpressionBuilder, sql } from 'kysely'
 import {
   eventTypeNotFound,
   findPublicEventType,
@@ -13,7 +13,7 @@ import {
   toInstant,
   toIso,
 } from './availability.ts'
-import type { PublicContext, ServiceContext } from './context.ts'
+import type { BookingNotifier, PublicContext, ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { type Responses, validateResponses } from './questions.ts'
 import { cleanText } from './text.ts'
@@ -190,6 +190,93 @@ function newManageToken(): { token: string; hash: Buffer } {
  */
 function manageTokenHash(token: string | undefined): Buffer | undefined {
   return token !== undefined && MANAGE_TOKEN.test(token) ? sha256(token) : undefined
+}
+
+/** The booking a manage token acts on. */
+interface ManagedTarget {
+  id: string
+  /** The token came from an invitee email (booking_notifications), not the booking API. */
+  fromEmail: boolean
+}
+
+/**
+ * The booking a manage token acts on, found by the token's hash. One statement probes both
+ * places a hash can be, each through its unique index, whatever the token turns out to be,
+ * so an unknown token costs the same as a known one of either kind:
+ * - `bookings.manage_token_hash`, the token the booking API returned: it stays with that
+ *   booking. After a reschedule it shows the cancelled booking and acting on it gets
+ *   `booking_cancelled`, so an agent retrying a reschedule cannot move the meeting twice.
+ * - `booking_notifications.manage_token_hash`, the token in an invitee email (only emails
+ *   that went out; one the mail server refused has no hash): it stands for the meeting the
+ *   email was about. After a reschedule it follows the chain (`rescheduled_from_id`) to the
+ *   booking that replaced it, the latest one, so a link in an older email keeps working.
+ */
+async function findManagedTarget(db: Db, hash: Buffer): Promise<ManagedTarget | undefined> {
+  const { rows } = await sql<{ id: string; from_email: boolean }>`
+    WITH RECURSIVE token (id, from_email) AS (
+      SELECT id, false FROM bookings WHERE manage_token_hash = ${hash}
+      UNION ALL
+      SELECT booking_id, true FROM booking_notifications
+       WHERE manage_token_hash = ${hash} AND outcome = 'sent'
+    ), chain (id, from_email, depth) AS (
+      SELECT id, from_email, 0 FROM token
+      UNION ALL
+      SELECT b.id, c.from_email, c.depth + 1
+        FROM bookings b JOIN chain c ON b.rescheduled_from_id = c.id
+       WHERE c.from_email AND c.depth < 1000
+    )
+    SELECT id, from_email FROM chain ORDER BY from_email, depth DESC LIMIT 1`.execute(db)
+  const row = rows[0]
+  return row && { id: row.id, fromEmail: row.from_email }
+}
+
+/** The latest booking of the reschedule chain from `id` on (`id` itself if not replaced). */
+async function latestInChain(db: Db, id: string): Promise<string> {
+  const { rows } = await sql<{ id: string }>`
+    WITH RECURSIVE chain (id, depth) AS (
+      SELECT ${id}::uuid, 0
+      UNION ALL
+      SELECT b.id, c.depth + 1
+        FROM bookings b JOIN chain c ON b.rescheduled_from_id = c.id
+       WHERE c.depth < 1000
+    )
+    SELECT id FROM chain ORDER BY depth DESC LIMIT 1`.execute(db)
+  return rows[0]?.id ?? id
+}
+
+/**
+ * Locks (FOR UPDATE) and returns the booking a manage token acts on; call inside a
+ * transaction. For an email's token, a reschedule that committed while this waited for the
+ * lock has moved the meeting on, so the chain is followed again from the locked row until
+ * the locked row is the latest (no reschedule can replace it while the lock is held).
+ */
+async function lockManagedBooking(trx: Db, hash: Buffer) {
+  const target = await findManagedTarget(trx, hash)
+  if (!target) return undefined
+  let id = target.id
+  for (let attempt = 1; ; attempt++) {
+    const row = await trx
+      .selectFrom('bookings')
+      .select([
+        'id',
+        'organization_id',
+        'event_type_id',
+        'status',
+        'start_at',
+        'title',
+        'location',
+        'responses',
+      ])
+      .where('id', '=', id)
+      .forUpdate()
+      .executeTakeFirst()
+    if (!row || !target.fromEmail) return row
+    const latest = await latestInChain(trx, id)
+    if (latest === id) return row
+    // Each round needs another reschedule to commit in between; this many cannot happen.
+    if (attempt === 10) throw new Error(`booking ${id}: its reschedule chain kept moving`)
+    id = latest
+  }
 }
 
 interface IdempotencyScope {
@@ -450,6 +537,7 @@ async function cancelLocked(
   row: { id: string; status: string; start_at: Date },
   now: Temporal.Instant,
   reason: string | null,
+  notify: BookingNotifier | undefined,
 ): Promise<Booking> {
   assertChangeable(row, now)
   await db
@@ -457,6 +545,8 @@ async function cancelLocked(
     .set({ status: 'cancelled', cancelled_at: now.toString(), cancel_reason: reason })
     .where('id', '=', row.id)
     .execute()
+  // In this transaction: the cancellation email exists exactly when the cancellation does.
+  await notify?.(db, { type: 'cancelled', bookingId: row.id }, now)
   return loadBooking(db, row.id)
 }
 
@@ -578,6 +668,9 @@ export async function createPublicBooking(
         hostUserIds: [current.hostUserId],
         attendees: [invitee, ...guests],
       })
+      // In this transaction, and never on the replay paths: one set of emails per booking,
+      // queued only if the booking commits.
+      await ctx.notify?.(trx, { type: 'created', bookingId: id, start: input.start }, now)
       return { booking: await loadBooking(trx, id), manageToken, replayed: false }
     })
   } catch (err) {
@@ -593,21 +686,18 @@ export async function createPublicBooking(
 
 // --- Invitee links (manage token) ---------------------------------------------------------
 
-/** The booking behind a manage token; `booking_not_found` when it is missing or unknown. */
+/**
+ * The booking behind a manage token (findManagedTarget says which), also once it is
+ * cancelled; `booking_not_found` when the token is missing or unknown.
+ */
 export async function getManagedBooking(
   ctx: PublicContext,
   token: string | undefined,
 ): Promise<Booking> {
   const hash = manageTokenHash(token)
-  const row =
-    hash &&
-    (await ctx.db
-      .selectFrom('bookings')
-      .select('id')
-      .where('manage_token_hash', '=', hash)
-      .executeTakeFirst())
-  if (!row) throw bookingNotFound()
-  return loadBooking(ctx.db, row.id)
+  const target = hash && (await findManagedTarget(ctx.db, hash))
+  if (!target) throw bookingNotFound()
+  return loadBooking(ctx.db, target.id)
 }
 
 /** Cancels through a manage link: `booking_cancelled` if already cancelled, `booking_in_past` once started. */
@@ -620,14 +710,9 @@ export async function cancelManagedBooking(
   if (!hash) throw bookingNotFound()
   const cancelReason = normalizeReason(reason)
   return ctx.db.transaction().execute(async (trx) => {
-    const row = await trx
-      .selectFrom('bookings')
-      .select(['id', 'status', 'start_at'])
-      .where('manage_token_hash', '=', hash)
-      .forUpdate()
-      .executeTakeFirst()
+    const row = await lockManagedBooking(trx, hash)
     if (!row) throw bookingNotFound()
-    return cancelLocked(trx, row, ctx.now(), cancelReason)
+    return cancelLocked(trx, row, ctx.now(), cancelReason, ctx.notify)
   })
 }
 
@@ -635,7 +720,8 @@ export async function cancelManagedBooking(
  * Moves a booking through its manage link: in one transaction the booking is cancelled and
  * a new one (rescheduled_from_id → old) is created at `start`, which must be offered with
  * the old booking ignored (so the new time may overlap the old one). Returns the new
- * booking with a new manage token; the old link then shows the cancelled booking. The new
+ * booking with a new manage token. The token the API returned for the old booking then
+ * shows the cancelled booking; tokens from emails about it open the new one. The new
  * booking is recorded as made by `origin`.
  */
 export async function rescheduleManagedBooking(
@@ -647,21 +733,7 @@ export async function rescheduleManagedBooking(
   const hash = manageTokenHash(token)
   if (!hash) throw bookingNotFound()
   return ctx.db.transaction().execute(async (trx) => {
-    const old = await trx
-      .selectFrom('bookings')
-      .select([
-        'id',
-        'organization_id',
-        'event_type_id',
-        'status',
-        'start_at',
-        'title',
-        'location',
-        'responses',
-      ])
-      .where('manage_token_hash', '=', hash)
-      .forUpdate()
-      .executeTakeFirst()
+    const old = await lockManagedBooking(trx, hash)
     if (!old) throw bookingNotFound()
     // The status cannot change while the row is locked; the time check waits for the locks.
     if (old.status === 'cancelled') throw bookingCancelled()
@@ -745,6 +817,9 @@ export async function rescheduleManagedBooking(
         isBooker: a.is_booker,
       })),
     })
+    // In this transaction: the new booking's emails. The old booking's queued ones find it
+    // cancelled and replaced when they run, and send nothing.
+    await ctx.notify?.(trx, { type: 'rescheduled', bookingId: id, start }, now)
     return { booking: await loadBooking(trx, id), manageToken }
   })
 }
@@ -923,6 +998,6 @@ export async function cancelHostBooking(
       .forUpdate('b')
       .executeTakeFirst()
     if (!row) throw bookingNotFound()
-    return cancelLocked(trx, row, ctx.now(), cancelReason)
+    return cancelLocked(trx, row, ctx.now(), cancelReason, ctx.notify)
   })
 }

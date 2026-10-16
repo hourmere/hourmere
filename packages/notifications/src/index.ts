@@ -128,6 +128,19 @@ export async function enqueueBookingNotifications(
   }
 }
 
+/**
+ * The booking services' `notify` (BookingNotifier in @hourmere/scheduling, given in their
+ * contexts): queues each booking change's notifications through the transaction that makes
+ * the change, judged by the instant the service used for its checks.
+ */
+export function bookingNotifier(queue: NotificationQueue) {
+  return (
+    transaction: KyselyTransactionLike & { readonly isTransaction: boolean },
+    event: BookingEvent,
+    now: Temporal.Instant,
+  ): Promise<void> => enqueueBookingNotifications(queue, transaction, event, now)
+}
+
 // --- Sending ------------------------------------------------------------------------------
 
 /**
@@ -278,6 +291,9 @@ function loadNotificationData(db: Db, bookingId: string): Promise<NotificationDa
         's.time_zone as schedule_zone',
       ])
       .where('bh.booking_id', '=', bookingId)
+      // Only addresses their owner proved. Accounts start verified; should one not be, it
+      // gets nothing and is not named as organizer or attendee.
+      .where('u.emailVerified', '=', true)
       .orderBy('u.id')
       .execute()
     const attendees = await conn
