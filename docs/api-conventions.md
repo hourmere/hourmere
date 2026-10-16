@@ -94,7 +94,8 @@ A request is authenticated by one of:
 anyone signs in, such as which sign-in methods are enabled (`signIn.google`, …).
 
 `GET /api/v1/me` returns the caller, the organization they act in and whether they used a
-session or an API key.
+session or an API key. The MCP server at `/mcp` ([mcp.md](mcp.md)) takes API keys only, never
+session cookies, and answers with the same error codes.
 
 ## Validation
 

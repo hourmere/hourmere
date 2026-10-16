@@ -13,7 +13,7 @@ import { ErrorBody, json, Question, type RouteModule } from '../openapi.ts'
 import { createRateLimiter, PUBLIC_RATE_LIMITS, type RateLimit, rateLimit } from '../rate-limit.ts'
 import { BookingWithToken, Instant, LocationKind, Responses } from './bookings.ts'
 
-const PublicEventType = z
+export const PublicEventType = z
   .object({
     handle: z.string(),
     slug: z.string(),
@@ -33,12 +33,12 @@ const PublicEventType = z
   })
   .openapi('PublicEventType')
 
-const Slot = z.object({ start: Instant, end: Instant }).openapi('Slot')
+export const Slot = z.object({ start: Instant, end: Instant }).openapi('Slot')
 
 const name = z.string().min(1).max(200)
 const email = z.email().max(254)
 
-const CreateBooking = z
+export const CreateBooking = z
   .strictObject({
     start: Instant.openapi({ description: 'The start of an offered slot' }),
     invitee: z.strictObject({
@@ -52,7 +52,7 @@ const CreateBooking = z
   })
   .openapi('CreateBooking')
 
-const PageParams = z.object({
+export const PageParams = z.object({
   handle: z.string().openapi({ example: 'ada' }),
   slug: z.string().openapi({ example: 'intro-call' }),
 })

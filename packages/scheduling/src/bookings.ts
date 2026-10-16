@@ -476,19 +476,33 @@ export interface CreateBookingInput {
   idempotencyKey?: string | undefined
 }
 
+/**
+ * Who made a booking, for the audit trail (`bookings.source` and `bookings.api_key_id`). The
+ * booking page is `web` without a key; agents pass `api` or `mcp` with the key they used.
+ */
+export interface BookingOrigin {
+  source: BookingSource
+  /** The caller's API key. Idempotency keys are scoped to it; null shares one scope. */
+  apiKeyId: string | null
+}
+
+const BOOKING_PAGE: BookingOrigin = { source: 'web', apiKeyId: null }
+
 export interface CreateBookingResult extends BookingWithToken {
   /** True when an earlier request with the same Idempotency-Key created the booking. */
   replayed: boolean
 }
 
 /**
- * Books a public personal event type (source `web`). The start must be a slot the page
- * offers at this moment (`slot_unavailable`); a concurrent booking of the same time loses
- * with `slot_taken`. Returns the booking and its manage token.
+ * Books a public personal event type, recorded as made by `origin` (the booking page unless
+ * an agent says otherwise). The start must be a slot the page offers at this moment
+ * (`slot_unavailable`); a concurrent booking of the same time loses with `slot_taken`.
+ * Returns the booking and its manage token.
  */
 export async function createPublicBooking(
   ctx: PublicContext,
   input: CreateBookingInput,
+  origin: BookingOrigin = BOOKING_PAGE,
 ): Promise<CreateBookingResult> {
   const et = await findPublicEventType(ctx.db, input.handle, input.slug)
   if (!et) throw eventTypeNotFound()
@@ -513,7 +527,7 @@ export async function createPublicBooking(
     )
     scope = {
       organizationId: et.organizationId,
-      apiKeyId: null,
+      apiKeyId: origin.apiKeyId,
       key: input.idempotencyKey,
       fingerprint,
     }
@@ -558,8 +572,8 @@ export async function createPublicBooking(
         title: `${current.title} with ${invitee.name}`,
         location: current.location,
         responses,
-        source: 'web',
-        apiKeyId: null,
+        source: origin.source,
+        apiKeyId: origin.apiKeyId,
         idempotency: scope && { key: scope.key, fingerprint: scope.fingerprint },
         hostUserIds: [current.hostUserId],
         attendees: [invitee, ...guests],
@@ -621,12 +635,14 @@ export async function cancelManagedBooking(
  * Moves a booking through its manage link: in one transaction the booking is cancelled and
  * a new one (rescheduled_from_id → old) is created at `start`, which must be offered with
  * the old booking ignored (so the new time may overlap the old one). Returns the new
- * booking with a new manage token; the old link then shows the cancelled booking.
+ * booking with a new manage token; the old link then shows the cancelled booking. The new
+ * booking is recorded as made by `origin`.
  */
 export async function rescheduleManagedBooking(
   ctx: PublicContext,
   token: string | undefined,
   { start }: { start: Temporal.Instant },
+  origin: BookingOrigin = BOOKING_PAGE,
 ): Promise<BookingWithToken> {
   const hash = manageTokenHash(token)
   if (!hash) throw bookingNotFound()
@@ -717,8 +733,8 @@ export async function rescheduleManagedBooking(
       title: old.title,
       location: parseLocation(old.location),
       responses: (isRecord(old.responses) ? old.responses : {}) as Responses,
-      source: 'web',
-      apiKeyId: null,
+      source: origin.source,
+      apiKeyId: origin.apiKeyId,
       rescheduledFromId: old.id,
       hostUserIds,
       attendees: attendees.map((a) => ({
