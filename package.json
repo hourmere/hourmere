@@ -19,7 +19,7 @@
     "format": "biome check --write .",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "vitest run",
-    "build": "npm run build --workspace @hourmere/web",
+    "build": "npm run build --workspaces --if-present",
     "start": "node apps/server/src/index.ts"
   },
   "devDependencies": {

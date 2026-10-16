@@ -5,30 +5,22 @@
 FROM node:26-slim AS base
 WORKDIR /app
 
-# Manifests only, so dependency layers are cached until a package.json changes.
-FROM base AS manifests
-COPY package.json package-lock.json ./
-COPY apps/server/package.json apps/server/
-COPY apps/web/package.json apps/web/
-COPY packages/db/package.json packages/db/
-
-FROM manifests AS build
-RUN npm ci --ignore-scripts
+# Copies the whole workspace so new apps/packages need no Dockerfile changes.
+FROM base AS build
 COPY . .
-RUN npm run build
-
-FROM manifests AS prod-deps
-RUN npm ci --omit=dev --ignore-scripts
+RUN npm ci --ignore-scripts \
+ && npm run build --workspace @hourmere/web \
+ && npm prune --omit=dev --ignore-scripts
 
 FROM base AS runtime
 ENV NODE_ENV=production \
     PORT=3000 \
     WEB_DIST=/app/apps/web/dist
-COPY --from=prod-deps /app/node_modules ./node_modules
-COPY package.json ./
-COPY apps/server apps/server
-COPY packages/db packages/db
-COPY --from=build /app/apps/web/dist apps/web/dist
+COPY --from=build /app/package.json ./
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/packages ./packages
+COPY --from=build /app/apps/server ./apps/server
+COPY --from=build /app/apps/web/dist ./apps/web/dist
 USER node
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s \
