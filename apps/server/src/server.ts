@@ -10,7 +10,10 @@ import { createApp } from './app.ts'
 import { loadConfig } from './config.ts'
 import { installOneLineConsole } from './one-line-console.ts'
 import { bookingRoutes } from './routes/bookings.ts'
+import { eventTypeRoutes } from './routes/event-types.ts'
+import { profileRoutes } from './routes/profile.ts'
 import { publicRoutes } from './routes/public.ts'
+import { scheduleRoutes } from './routes/schedules.ts'
 import { createWorkerHealthApp } from './worker-health.ts'
 
 export interface RunningServer {
@@ -101,7 +104,13 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
       trustedProxies: config.trustedProxies,
       webDist: config.WEB_DIST,
       // Route groups hold only db (closed below) and in-memory rate limiters.
-      routes: [publicRoutes({ db }), bookingRoutes({ db })],
+      routes: [
+        profileRoutes({ db }),
+        scheduleRoutes({ db }),
+        eventTypeRoutes({ db }),
+        publicRoutes({ db }),
+        bookingRoutes({ db }),
+      ],
     }).fetch
   }
 
