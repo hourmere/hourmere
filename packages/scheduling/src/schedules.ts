@@ -21,6 +21,7 @@ import {
   timestamp,
   validTimeZone,
 } from './internal.ts'
+import { cleanText } from './text.ts'
 
 export interface Schedule {
   id: string
@@ -299,13 +300,14 @@ async function unsetDefault(trx: Db, userId: string) {
     .execute()
 }
 
+/** One line of text (see text.ts). */
 function validName(value: unknown): string {
-  const name = typeof value === 'string' ? value.trim() : ''
-  if (name === '' || name.length > SCHEDULE_NAME_MAX_LENGTH) {
+  const name = cleanText(value, { max: SCHEDULE_NAME_MAX_LENGTH })
+  if (name === undefined) {
     throw new DomainError(
       'invalid',
       'invalid_schedule',
-      `name must be 1–${SCHEDULE_NAME_MAX_LENGTH} characters`,
+      `name must be one line of 1–${SCHEDULE_NAME_MAX_LENGTH} characters without control characters`,
     )
   }
   return name

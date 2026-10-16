@@ -7,8 +7,10 @@ import { sql } from 'kysely'
 import { createApp } from './app.ts'
 import { loadConfig } from './config.ts'
 import { installOneLineConsole } from './one-line-console.ts'
+import { bookingRoutes } from './routes/bookings.ts'
 import { eventTypeRoutes } from './routes/event-types.ts'
 import { profileRoutes } from './routes/profile.ts'
+import { publicRoutes } from './routes/public.ts'
 import { scheduleRoutes } from './routes/schedules.ts'
 
 export interface RunningServer {
@@ -77,7 +79,14 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
     publicUrl: config.PUBLIC_URL,
     trustedProxies: config.trustedProxies,
     webDist: config.WEB_DIST,
-    routes: [profileRoutes({ db }), scheduleRoutes({ db }), eventTypeRoutes({ db })],
+    // Route groups hold only db (closed below) and in-memory rate limiters.
+    routes: [
+      profileRoutes({ db }),
+      scheduleRoutes({ db }),
+      eventTypeRoutes({ db }),
+      publicRoutes({ db }),
+      bookingRoutes({ db }),
+    ],
   })
 
   const server = await new Promise<ReturnType<typeof serve>>((resolve) => {

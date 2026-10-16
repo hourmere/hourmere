@@ -1,12 +1,14 @@
-// Test support for route modules: the real app with this branch's product routes over a
-// throwaway database, and a resolver that hands out real principals of inserted users.
+// Test support for route modules: the real app with every product route over a throwaway
+// database, and a resolver that hands out real principals of inserted users.
 import { randomUUID } from 'node:crypto'
 import type { Principal } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createApp } from '../app.ts'
+import { bookingRoutes } from './bookings.ts'
 import { eventTypeRoutes } from './event-types.ts'
 import { profileRoutes } from './profile.ts'
+import { publicRoutes } from './public.ts'
 import { scheduleRoutes } from './schedules.ts'
 
 export const PUBLIC_URL = 'http://localhost:3000'
@@ -23,10 +25,45 @@ export interface Client {
   post: (path: string, body: unknown) => Promise<Answer>
   put: (path: string, body: unknown) => Promise<Answer>
   patch: (path: string, body: unknown) => Promise<Answer>
+  /** Sends `json` as the body exactly as given, e.g. from escapedJson. */
+  raw: (method: string, path: string, json: string) => Promise<Answer>
 }
 
-/** The app as server.ts composes it, with `db` behind the routes (not touched by the doc). */
-export function productApp(db: Db, principals: ReadonlyMap<string, Principal> = new Map()) {
+/**
+ * `value` as JSON with every character of every string (keys too) escaped as \uXXXX: the
+ * largest encoding of a request, which body limits must allow (see body-limit.ts).
+ */
+export function escapedJson(value: unknown): string {
+  if (typeof value === 'string') {
+    const units = Array.from({ length: value.length }, (_, i) => value.charCodeAt(i))
+    return `"${units.map((u) => `\\u${u.toString(16).padStart(4, '0')}`).join('')}"`
+  }
+  if (Array.isArray(value)) return `[${value.map(escapedJson).join(',')}]`
+  if (typeof value === 'object' && value !== null) {
+    const entries = Object.entries(value).filter(([, v]) => v !== undefined)
+    return `{${entries.map(([k, v]) => `${escapedJson(k)}:${escapedJson(v)}`).join(',')}}`
+  }
+  return JSON.stringify(value)
+}
+
+/** The product route modules, in server.ts's order. */
+export const productRoutes = (db: Db) => [
+  profileRoutes({ db }),
+  scheduleRoutes({ db }),
+  eventTypeRoutes({ db }),
+  publicRoutes({ db }),
+  bookingRoutes({ db }),
+]
+
+/**
+ * The app as server.ts composes it, with `db` behind the routes (not touched by the doc).
+ * `routes` replaces the route modules, e.g. to register them in another order.
+ */
+export function productApp(
+  db: Db,
+  principals: ReadonlyMap<string, Principal> = new Map(),
+  routes = productRoutes(db),
+) {
   return createApp({
     checkDb: async () => {},
     authHandler: async () => new Response(null, { status: 404 }),
@@ -38,7 +75,7 @@ export function productApp(db: Db, principals: ReadonlyMap<string, Principal> = 
         : { ok: false, error: 'unauthorized', setCookie: [] }
     },
     publicUrl: PUBLIC_URL,
-    routes: [profileRoutes({ db }), scheduleRoutes({ db }), eventTypeRoutes({ db })],
+    routes,
   })
 }
 
@@ -59,24 +96,27 @@ export async function createTestApp(serverUrl: string): Promise<TestApp> {
   const app = productApp(db, principals)
 
   const client = (authorization: string | undefined, extra: Record<string, string> = {}) => {
-    const send = async (method: string, path: string, body?: unknown): Promise<Answer> => {
+    const sendText = async (method: string, path: string, json?: string): Promise<Answer> => {
       const headers: Record<string, string> = { ...extra }
       if (authorization) headers.authorization = authorization
-      if (body !== undefined) headers['content-type'] = 'application/json'
+      if (json !== undefined) headers['content-type'] = 'application/json'
       const res = await app.request(path, {
         method,
         headers,
-        ...(body !== undefined && { body: JSON.stringify(body) }),
+        ...(json !== undefined && { body: json }),
       })
       const text = await res.text()
       return { status: res.status, body: text ? JSON.parse(text) : null }
     }
+    const send = (method: string, path: string, body?: unknown) =>
+      sendText(method, path, body === undefined ? undefined : JSON.stringify(body))
     return {
       get: (path: string) => send('GET', path),
       delete: (path: string) => send('DELETE', path),
       post: (path: string, body: unknown) => send('POST', path, body),
       put: (path: string, body: unknown) => send('PUT', path, body),
       patch: (path: string, body: unknown) => send('PATCH', path, body),
+      raw: sendText,
     }
   }
 

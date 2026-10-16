@@ -1,9 +1,11 @@
 import type { Db } from '@hourmere/db'
 import { createTestUser, type TestUser } from '@hourmere/scheduling/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { SCHEDULE_BODY_LIMIT, SCHEDULE_OVERRIDE_BODY_LIMIT } from './schedules.ts'
 import {
   closedObjects,
   createTestApp,
+  escapedJson,
   openApiDocument,
   productApp,
   responseAndRequestStrictness,
@@ -253,5 +255,43 @@ describe.skipIf(!serverUrl)('schedule routes', () => {
     const res = await api(user).put(`/api/v1/schedules/${id}/overrides/${date}`, payload)
     expect(res.status).toBe(400)
     expect(res.body).toMatchObject({ error })
+  })
+  it('accepts the largest legal weekly hours and override, fully escaped, within their body limits', async () => {
+    const user = await createTestUser(t.db)
+    const hhmm = (minute: number) =>
+      `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`
+    // Every minute of the day as its own interval: the most intervals a day can hold.
+    const minutes = Array.from({ length: 1440 }, (_, m) => ({ start: hhmm(m), end: hhmm(m + 1) }))
+    const weekdays = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
+    const weeklyHours = Object.fromEntries(weekdays.map((day) => [day, minutes]))
+    const create = escapedJson({
+      name: 'x'.repeat(100),
+      timeZone: 'America/Argentina/Buenos_Aires',
+      weeklyHours,
+      isDefault: true,
+    })
+    expect(create.length).toBeGreaterThan(1_200_000)
+    expect(create.length).toBeLessThan(SCHEDULE_BODY_LIMIT)
+    const created = await api(user).raw('POST', '/api/v1/schedules', create)
+    expect(created.status).toBe(201)
+    const { id } = created.body as { id: string }
+    const changed = await api(user).raw(
+      'PATCH',
+      `/api/v1/schedules/${id}`,
+      escapedJson({ weeklyHours }),
+    )
+    expect(changed.status).toBe(200)
+
+    const override = escapedJson({ intervals: minutes })
+    expect(override.length).toBeGreaterThan(64 * 1024)
+    expect(override.length).toBeLessThan(SCHEDULE_OVERRIDE_BODY_LIMIT)
+    const put = await api(user).raw('PUT', `/api/v1/schedules/${id}/overrides/2026-12-24`, override)
+    expect(put.status).toBe(201)
+
+    const tooLarge = JSON.stringify(body({ name: 'x'.repeat(SCHEDULE_BODY_LIMIT) }))
+    expect(await api(user).raw('POST', '/api/v1/schedules', tooLarge)).toEqual({
+      status: 413,
+      body: { error: 'payload_too_large' },
+    })
   })
 })

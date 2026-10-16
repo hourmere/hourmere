@@ -5,7 +5,8 @@ import { createRoute, z } from '@hono/zod-openapi'
 import { DomainError, type DomainErrorKind } from '@hourmere/scheduling'
 import { HTTPException } from 'hono/http-exception'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { type AppDeps, createApp } from './app.ts'
+import { type AppDeps, createApp, hasUnsafeJsonText } from './app.ts'
+import { DEFAULT_BODY_LIMIT as MAX_BODY_BYTES } from './body-limit.ts'
 import { authenticated, json, type RouteModule } from './openapi.ts'
 
 // Sign-in is covered by auth.test.ts against a real database.
@@ -294,6 +295,108 @@ describe('route modules and errors', () => {
     expect(logged[0]).toContain('email_taken caused by')
     expect(logged[0]).toContain('Key (email)=(a@b.c)')
     expect(logged[0]).not.toContain('\n')
+  })
+
+  it('refuses JSON with NUL or malformed Unicode anywhere before the route runs', async () => {
+    for (const body of [
+      JSON.stringify({ name: 'A\u0000B', count: 1 }),
+      JSON.stringify({ name: 'a\ud800b', count: 1 }),
+      '{"name":"x","count":1,"extra":{"deep":[1,["\\u0000"]]}}',
+      '{"name":"x","count":1,"key\\udc00":true}',
+    ]) {
+      const res = await post('', body)
+      expect(res.status, body).toBe(400)
+      expect(await res.json()).toEqual({
+        error: 'invalid_request',
+        message: 'Text in the request must not contain NUL characters or malformed Unicode',
+      })
+    }
+    // Clean text, emoji included, reaches the route; malformed JSON is still the validator's.
+    expect((await post('', JSON.stringify({ name: 'Ada 👩‍💻', count: 1 }))).status).toBe(200)
+    expect(await (await post('', '{"name":')).json()).toMatchObject({ error: 'invalid_request' })
+  })
+
+  it('checks deeply nested JSON without overflowing the stack', () => {
+    const deep = JSON.parse(`${'['.repeat(50_000)}"\\u0000"${']'.repeat(50_000)}`)
+    expect(hasUnsafeJsonText(deep)).toBe(true)
+    expect(hasUnsafeJsonText({ a: [{ b: 'fine' }], 'c d': null, e: 1 })).toBe(false)
+    // Wide as well as deep: far more elements than a function call takes arguments.
+    const wide = new Array(300_000).fill('a')
+    expect(hasUnsafeJsonText(wide)).toBe(false)
+    expect(hasUnsafeJsonText([...wide, 'A\u0000B'])).toBe(true)
+    expect(hasUnsafeJsonText(Object.fromEntries(wide.map((v, i) => [`k${i}`, v])))).toBe(false)
+  })
+
+  it('refuses bodies over 64 KB with 413 payload_too_large', async () => {
+    const big = JSON.stringify({ name: 'x'.repeat(MAX_BODY_BYTES), count: 1 })
+    const declared = await app.request('/api/v1/things', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'content-length': String(big.length),
+        authorization: 'Bearer hm_test',
+      },
+      body: big,
+    })
+    expect(declared.status).toBe(413)
+    expect(await declared.json()).toEqual({ error: 'payload_too_large' })
+    // Without Content-Length the body is counted as it streams in.
+    const streamed = await post('', big)
+    expect(streamed.status).toBe(413)
+    // Just under the limit is fine.
+    const fits = JSON.stringify({ name: 'x'.repeat(MAX_BODY_BYTES - 100), count: 1 })
+    expect((await post('', fits)).status).toBe(200)
+  })
+
+  it('applies the body limit to sign-in routes too, and passes their bodies on intact', async () => {
+    let received: string | undefined
+    const authApp = createApp({
+      ...noAuth,
+      checkDb: async () => {},
+      authHandler: async (request) => {
+        received = await request.text()
+        return new Response(null, { status: 200 })
+      },
+    })
+    const send = (body: string) =>
+      authApp.request('/api/auth/sign-in/magic-link', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body,
+      })
+    const small = JSON.stringify({ email: 'ada@example.com', callbackURL: '/' })
+    expect((await send(small)).status).toBe(200)
+    expect(received).toBe(small)
+    received = undefined
+    const big = await send(JSON.stringify({ email: 'x'.repeat(MAX_BODY_BYTES) }))
+    expect(big.status).toBe(413)
+    expect(received).toBeUndefined()
+  })
+
+  it('leaves a Cache-Control that a route sets itself', async () => {
+    const cached: RouteModule = ({ app }) => {
+      app.openapi(
+        createRoute({
+          method: 'get',
+          path: '/api/v1/cacheable',
+          responses: { 200: { description: 'ok', content: json(z.object({ ok: z.boolean() })) } },
+        }),
+        (c) => {
+          c.header('Cache-Control', 'public, max-age=60')
+          return c.json({ ok: true }, 200)
+        },
+      )
+    }
+    const cachedApp = createApp({ ...noAuth, checkDb: async () => {}, routes: [cached] })
+    const res = await cachedApp.request('/api/v1/cacheable')
+    expect(res.headers.get('cache-control')).toBe('public, max-age=60')
+    // Everything else under /api/v1 is no-store, including errors raised by the HTTP layer.
+    const tooBig = await post('', JSON.stringify({ name: 'x'.repeat(MAX_BODY_BYTES), count: 1 }))
+    expect(tooBig.status).toBe(413)
+    expect(tooBig.headers.get('cache-control')).toBe('no-store')
+    const bug = await post('?fail=bug', valid)
+    expect(bug.status).toBe(500)
+    expect(bug.headers.get('cache-control')).toBe('no-store')
   })
 
   it('refuses reserved codes for DomainError', () => {

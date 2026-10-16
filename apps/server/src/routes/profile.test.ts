@@ -96,6 +96,14 @@ describe.skipIf(!serverUrl)('profile routes', () => {
     expect(res.body).toMatchObject({ error })
   })
 
+  it('keeps the default 64 KB body limit', async () => {
+    const user = await createTestUser(t.db)
+    const res = await t
+      .as(user.principal)
+      .put('/api/v1/profile', { ...valid, locale: 'x'.repeat(64 * 1024) })
+    expect(res).toEqual({ status: 413, body: { error: 'payload_too_large' } })
+  })
+
   it('answers 409 handle_taken for a handle another user has', async () => {
     const [a, b] = [await createTestUser(t.db), await createTestUser(t.db)]
     expect(

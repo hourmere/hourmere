@@ -6,17 +6,22 @@ import {
   EVENT_TYPE_LIMITS,
   getEventType,
   listEventTypes,
+  MAX_OPTION_LENGTH,
+  MAX_OPTIONS,
+  MAX_QUESTION_LABEL,
+  MAX_QUESTIONS,
   PHONE_NUMBER_PATTERN,
-  QUESTION_ID_PATTERN,
-  QUESTION_TYPES,
+  QuestionSchema,
   SLUG_PATTERN,
   updateEventType,
 } from '@hourmere/scheduling'
 import {
   authenticated,
   CROSS_ORIGIN_WRITE,
+  callerWithBodyLimit,
   errorResponses,
   json,
+  Question,
   type RouteModule,
   type ServiceDeps,
   serviceContext,
@@ -82,31 +87,32 @@ const LocationInput = z
   .nullable()
   .openapi(locationDoc)
 
-const questionFields = {
-  id: z.string().openapi({
-    description: 'Unique within the event type; answers are stored under it',
-    pattern: QUESTION_ID_PATTERN.source,
-    example: 'company',
-  }),
-  label: z.string().openapi({ minLength: 1, maxLength: L.questionLabelMaxLength }),
-  type: z.enum(QUESTION_TYPES),
-  options: z
-    .array(z.string().openapi({ minLength: 1, maxLength: L.optionMaxLength }))
-    .optional()
-    .openapi({
-      description: 'The distinct choices; only (and required) for select and multi_select',
-      minItems: 1,
-      maxItems: L.options,
-    }),
-}
-
-const Question = z
-  .object({ ...questionFields, required: z.boolean() })
-  .openapi('Question', { description: 'A booking-form field beyond name and email' })
-
+// Questions: responses show the shared Question component (openapi.ts). Writes are checked
+// for shape here and as a whole by validateQuestions in the service (400 invalid_questions),
+// so this schema takes its types and limits from questions.ts but enforces only the shape.
 const QuestionInput = z
-  .strictObject({ ...questionFields, required: z.boolean().optional().openapi({ default: false }) })
-  .openapi('QuestionInput')
+  .strictObject({
+    id: z.string().openapi({
+      description:
+        'Unique within the event type; answers are stored under it. 1–64 letters, digits, "_" or "-", not __proto__.',
+      maxLength: 64,
+      example: 'company',
+    }),
+    label: z.string().openapi({ minLength: 1, maxLength: MAX_QUESTION_LABEL }),
+    type: QuestionSchema.shape.type,
+    required: z.boolean().optional().openapi({ default: false }),
+    options: z
+      .array(z.string().openapi({ minLength: 1, maxLength: MAX_OPTION_LENGTH }))
+      .optional()
+      .openapi({
+        description: 'The distinct choices; only (and required) for select and multi_select',
+        minItems: 1,
+        maxItems: MAX_OPTIONS,
+      }),
+  })
+  .openapi('QuestionInput', {
+    description: 'A booking-form field beyond name and email, as written (see Question)',
+  })
 
 const rule = (name: keyof typeof EVENT_TYPE_RULE_BOUNDS, description: string) =>
   z.int().openapi({ description, ...minMax(EVENT_TYPE_RULE_BOUNDS[name]) })
@@ -167,7 +173,7 @@ const EventType = z
 
 const questions = z
   .array(QuestionInput)
-  .openapi({ description: 'Extra booking-form fields', maxItems: L.questions })
+  .openapi({ description: 'Extra booking-form fields', maxItems: MAX_QUESTIONS })
 
 const EventTypeInput = z
   .strictObject({
@@ -216,6 +222,16 @@ const EventTypeList = z.object({ data: z.array(EventType) }).openapi('EventTypeL
 const IdParams = z.object({ id: z.string().openapi({ format: 'uuid' }) })
 
 const tags = ['Event types']
+
+/**
+ * Body limit (see routeBodyLimit in body-limit.ts) for creating and changing an event type.
+ * Its largest legal request, with every string at its maximum length and every character
+ * escaped as \uXXXX (6 bytes), is about 1.29 MB: 20 questions with a 64-character id, a
+ * 200-character label and 50 options of 200 characters (20 × ≈ 62 KB ≈ 1.24 MB), a
+ * 5000-character description (30 KB), a 2000-character link (12 KB), a 200-character title
+ * and the keys and other fields (under 5 KB). Rounded up.
+ */
+export const EVENT_TYPE_BODY_LIMIT = 2 * 1024 * 1024
 const notFound =
   'event_type_not_found: no such event type in the organization, or one the caller cannot see'
 const invalid =
@@ -247,6 +263,7 @@ export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
     app.openapi(
       createRoute({
         ...route,
+        middleware: callerWithBodyLimit(caller, EVENT_TYPE_BODY_LIMIT),
         method: 'post',
         path: '/api/v1/event-types',
         summary: 'Create an event type',
@@ -287,6 +304,7 @@ export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
     app.openapi(
       createRoute({
         ...route,
+        middleware: callerWithBodyLimit(caller, EVENT_TYPE_BODY_LIMIT),
         method: 'patch',
         path: '/api/v1/event-types/{id}',
         summary: 'Change an event type',

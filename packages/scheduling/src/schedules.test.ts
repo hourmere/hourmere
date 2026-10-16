@@ -288,6 +288,8 @@ describe.skipIf(!serverUrl)('schedule service', () => {
     it.each<[string, Partial<ScheduleInput>, string, RegExp?]>([
       ['a blank name', { name: '  ' }, 'invalid_schedule'],
       ['a long name', { name: 'x'.repeat(101) }, 'invalid_schedule'],
+      ['a name with a line break', { name: 'Work\nhours' }, 'invalid_schedule'],
+      ['a name with NUL', { name: 'Work\u0000' }, 'invalid_schedule'],
       ['a non-boolean isDefault', { isDefault: 'yes' as unknown as boolean }, 'invalid_schedule'],
       ['an unknown time zone', { timeZone: 'Mars/Olympus' }, 'invalid_time_zone'],
       ['a UTC offset', { timeZone: '+02:00' }, 'invalid_time_zone'],

@@ -2,8 +2,10 @@ import type { OpenAPIHono } from '@hono/zod-openapi'
 import { z } from '@hono/zod-openapi'
 import type { Principal } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
-import type { ServiceContext } from '@hourmere/scheduling'
-import type { requireCaller } from './caller.ts'
+import { QuestionSchema, type ServiceContext } from '@hourmere/scheduling'
+import type { MiddlewareHandler } from 'hono'
+import { routeBodyLimit } from './body-limit.ts'
+import type { CallerEnv, requireCaller } from './caller.ts'
 
 // See docs/api-conventions.md.
 export const ErrorBody = z
@@ -21,6 +23,15 @@ export const authenticated: Record<string, string[]>[] = [{ apiKey: [] }, { sess
 
 /** The middleware that authenticates a route and provides c.var.principal. */
 export type CallerMiddleware = ReturnType<typeof requireCaller>
+
+/**
+ * `middleware` for an authenticated route that declares a body limit (routeBodyLimit). Typed
+ * as a tuple: a plain array would make createRoute lose c.var.principal.
+ */
+export const callerWithBodyLimit = (
+  caller: CallerMiddleware,
+  maxBytes: number,
+): [CallerMiddleware, MiddlewareHandler<CallerEnv>] => [caller, routeBodyLimit(maxBytes)]
 
 /**
  * A group of /api/v1 routes. The composition root (server.ts) creates each module with the
@@ -72,3 +83,12 @@ export function errorResponses(descriptions: Partial<Record<ErrorStatus, string>
 
 /** Cookie-authenticated writes from another origin are refused (CSRF protection). */
 export const CROSS_ORIGIN_WRITE = 'forbidden: a cookie-authenticated write from another origin'
+
+/**
+ * A booking-form question in responses (public pages and the owner-side API): the shared
+ * format of questions.ts, but open, since responses may gain fields within /api/v1.
+ */
+export const Question = z.object(QuestionSchema.shape).openapi('Question', {
+  description:
+    'A booking-form field beyond name and email. Its answer goes in `responses` under `id`: text for short_text, long_text and phone; one of `options` for select; a list of distinct `options` for multi_select; true or false for checkbox (a required checkbox must be true).',
+})

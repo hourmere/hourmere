@@ -161,11 +161,11 @@ describe.skipIf(!serverUrl)('event type service', () => {
       }
     })
 
-    it('stores a link as parsed, without the tabs and line breaks the parser drops', async () => {
+    it('stores a link trimmed and as parsed (normalized)', async () => {
       const user = await createTestUser(db)
       const created = await createEventType(
         personal(user),
-        input({ location: { kind: 'link', url: 'https://Example.com/ro\r\nom\t?q=1' } }),
+        input({ location: { kind: 'link', url: '  https://Example.COM/room?q=1  ' } }),
       )
       const parsed = { kind: 'link', url: 'https://example.com/room?q=1' }
       expect(created.location).toEqual(parsed)
@@ -175,6 +175,21 @@ describe.skipIf(!serverUrl)('event type service', () => {
         .where('id', '=', created.id)
         .executeTakeFirstOrThrow()
       expect(row.location).toEqual(parsed)
+    })
+
+    it.each([
+      ['line breaks', 'https://example.com/ro\r\nom'],
+      ['a tab', 'https://example.com/\troom'],
+      ['NUL', 'https://example.com/\u0000'],
+      ['a C1 control', 'https://example.com/\u0085'],
+      ['a line separator', 'https://example.com/a\u2028b'],
+      ['a lone surrogate', 'https://example.com/\ud800'],
+    ])('refuses a link with %s, which the parser would drop or encode', async (_, url) => {
+      const user = await createTestUser(db)
+      const error = await domainError(() =>
+        createEventType(personal(user), input({ location: { kind: 'link', url } })),
+      )
+      expect(error.code).toBe('invalid_location')
     })
 
     it('bounds links at 2000 characters, as given and as parsed', async () => {
@@ -189,9 +204,7 @@ describe.skipIf(!serverUrl)('event type service', () => {
       // 2000 characters as given, but each space becomes %20 when parsed.
       const growing = `${prefix}${' x'.repeat(990)}`
       expect(growing).toHaveLength(2000)
-      // 2001 characters as given, 1995 once the parser drops the tabs.
-      const shrinking = `${url(1995)}${'\t'.repeat(6)}`
-      for (const tooLong of [url(2001), growing, shrinking]) {
+      for (const tooLong of [url(2001), growing]) {
         const error = await domainError(() =>
           createEventType(
             personal(user),
@@ -200,6 +213,15 @@ describe.skipIf(!serverUrl)('event type service', () => {
         )
         expect(error.code).toBe('invalid_location')
       }
+    })
+
+    it('keeps tabs and line breaks in a description', async () => {
+      const user = await createTestUser(db)
+      const created = await createEventType(
+        personal(user),
+        input({ description: '  Agenda:\n\t1. Intro\r\n\t2. Questions  ' }),
+      )
+      expect(created.description).toBe('Agenda:\n\t1. Intro\r\n\t2. Questions')
     })
 
     it('lists by position, then creation', async () => {
@@ -575,6 +597,25 @@ describe.skipIf(!serverUrl)('event type service', () => {
       ['a blank title', { title: '   ' }, 'invalid_event_type'],
       ['a long title', { title: 'x'.repeat(201) }, 'invalid_event_type'],
       ['a long description', { description: 'x'.repeat(5001) }, 'invalid_event_type'],
+      ['a title with a line break', { title: 'Intro\ncall' }, 'invalid_event_type'],
+      ['a title with a control character', { title: 'Intro\u0007' }, 'invalid_event_type'],
+      ['a description with NUL', { description: 'Hi\u0000' }, 'invalid_event_type'],
+      ['a description with a lone surrogate', { description: 'Hi \ud800' }, 'invalid_event_type'],
+      [
+        'an address with a line break',
+        { location: { kind: 'in_person', address: '1 Main St\nSpringfield' } },
+        'invalid_location',
+      ],
+      [
+        'a question label with a line break',
+        { questions: [{ id: 'a', label: 'A\nB', type: 'short_text' }] },
+        'invalid_questions',
+      ],
+      [
+        '__proto__ as a question id',
+        { questions: [{ id: '__proto__', label: 'A', type: 'short_text' }] },
+        'invalid_questions',
+      ],
       ['a non-boolean isActive', { isActive: 'yes' }, 'invalid_event_type'],
       ['a fractional position', { position: 1.5 }, 'invalid_event_type'],
       ['a position beyond a Postgres integer', { position: 2 ** 31 }, 'invalid_event_type'],

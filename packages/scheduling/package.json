@@ -13,6 +13,7 @@
     "@hourmere/auth": "*",
     "@hourmere/core": "*",
     "@hourmere/db": "*",
-    "kysely": "0.29.6"
+    "kysely": "0.29.6",
+    "zod": "4.6.7"
   }
 }

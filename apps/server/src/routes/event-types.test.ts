@@ -1,9 +1,11 @@
 import type { Db } from '@hourmere/db'
 import { createTestTeam, createTestUser, type TestUser } from '@hourmere/scheduling/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { EVENT_TYPE_BODY_LIMIT } from './event-types.ts'
 import {
   closedObjects,
   createTestApp,
+  escapedJson,
   openApiDocument,
   productApp,
   responseAndRequestStrictness,
@@ -258,5 +260,40 @@ describe.skipIf(!serverUrl)('event type routes', () => {
         },
       },
     )
+  })
+
+  it('accepts the largest legal event type, fully escaped, within its declared body limit', async () => {
+    const user = await createTestUser(t.db)
+    const pad = (text: string, length: number) => text.padEnd(length, 'x')
+    const largest = {
+      title: pad('T', 200),
+      description: pad('D', 5000),
+      location: { kind: 'link', url: `https://example.com/${'a'.repeat(1980)}` },
+      questions: Array.from({ length: 20 }, (_, q) => ({
+        id: pad(`q${q}_`, 64),
+        label: pad(`Question ${q} `, 200),
+        type: 'multi_select',
+        required: false,
+        options: Array.from({ length: 50 }, (_, o) => pad(`${q}-${o}-`, 200)),
+      })),
+    }
+    const create = escapedJson({ ...body({ slug: pad('s', 64) }), ...largest })
+    expect(create.length).toBeGreaterThan(1_200_000)
+    expect(create.length).toBeLessThan(EVENT_TYPE_BODY_LIMIT)
+    const created = await api(user).raw('POST', '/api/v1/event-types', create)
+    expect(created.status).toBe(201)
+    expect((created.body as { questions: unknown[] }).questions).toHaveLength(20)
+    const changed = await api(user).raw(
+      'PATCH',
+      `/api/v1/event-types/${idOf(created)}`,
+      escapedJson({ ...largest, title: pad('U', 200) }),
+    )
+    expect(changed.status).toBe(200)
+
+    const tooLarge = JSON.stringify(body({ description: 'x'.repeat(EVENT_TYPE_BODY_LIMIT) }))
+    expect(await api(user).raw('POST', '/api/v1/event-types', tooLarge)).toEqual({
+      status: 413,
+      body: { error: 'payload_too_large' },
+    })
   })
 })

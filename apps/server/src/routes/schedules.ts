@@ -13,6 +13,7 @@ import {
 import {
   authenticated,
   CROSS_ORIGIN_WRITE,
+  callerWithBodyLimit,
   errorResponses,
   json,
   type RouteModule,
@@ -139,6 +140,16 @@ const OverrideParams = IdParams.extend({
 const tags = ['Schedules']
 const notFound = 'schedule_not_found: no such schedule among the caller’s'
 
+/**
+ * Body limits (see routeBodyLimit in body-limit.ts). A day holds at most 1440 one-minute
+ * intervals, and one interval is at most 122 bytes with every string character escaped as
+ * \uXXXX (`{"start":"HH:MM","end":"HH:MM"}`: 18 characters × 6 + 13, plus a comma). Weekly
+ * hours thus come to 7 × 1440 × 122 ≈ 1.23 MB and one date's intervals to ≈ 176 KB; the name,
+ * time zone and keys add under 2 KB. Rounded up.
+ */
+export const SCHEDULE_BODY_LIMIT = 2 * 1024 * 1024
+export const SCHEDULE_OVERRIDE_BODY_LIMIT = 256 * 1024
+
 export function scheduleRoutes(deps: ServiceDeps): RouteModule {
   return ({ app, caller }) => {
     const route = { security: authenticated, middleware: caller, tags }
@@ -161,6 +172,7 @@ export function scheduleRoutes(deps: ServiceDeps): RouteModule {
     app.openapi(
       createRoute({
         ...route,
+        middleware: callerWithBodyLimit(caller, SCHEDULE_BODY_LIMIT),
         method: 'post',
         path: '/api/v1/schedules',
         summary: 'Create a schedule',
@@ -202,6 +214,7 @@ export function scheduleRoutes(deps: ServiceDeps): RouteModule {
     app.openapi(
       createRoute({
         ...route,
+        middleware: callerWithBodyLimit(caller, SCHEDULE_BODY_LIMIT),
         method: 'patch',
         path: '/api/v1/schedules/{id}',
         summary: 'Change a schedule',
@@ -285,6 +298,7 @@ export function scheduleRoutes(deps: ServiceDeps): RouteModule {
     app.openapi(
       createRoute({
         ...route,
+        middleware: callerWithBodyLimit(caller, SCHEDULE_OVERRIDE_BODY_LIMIT),
         method: 'put',
         path: '/api/v1/schedules/{id}/overrides/{date}',
         summary: 'Set the hours of one date',

@@ -5,6 +5,7 @@
 // pointing at the event type they were made with.
 import { validateEventTypeRules } from '@hourmere/core'
 import type { Db, Json } from '@hourmere/db'
+import { LOCATION_KINDS } from './availability.ts'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import {
@@ -15,9 +16,8 @@ import {
   SQLSTATE,
   timestamp,
 } from './internal.ts'
-
-export const LOCATION_KINDS = ['google_meet', 'zoom', 'phone', 'in_person', 'link'] as const
-export type LocationKind = (typeof LOCATION_KINDS)[number]
+import { parseQuestions, type Question, validateQuestions } from './questions.ts'
+import { cleanText } from './text.ts'
 
 /** Where the meeting happens. Meet and Zoom links are generated per booking. */
 export type EventTypeLocation =
@@ -29,31 +29,7 @@ export type EventTypeLocation =
   /** Any other video or meeting link (http or https). */
   | { kind: 'link'; url: string }
 
-// The question format is shared with the booking flow, which will own it in questions.ts;
-// validQuestions is the one place to swap for it.
-export const QUESTION_TYPES = [
-  'short_text',
-  'long_text',
-  'phone',
-  'select',
-  'multi_select',
-  'checkbox',
-] as const
-export type QuestionType = (typeof QUESTION_TYPES)[number]
-/** The question types that offer choices. */
-const CHOICE_TYPES: readonly QuestionType[] = ['select', 'multi_select']
-
-/** A booking-form field beyond name and email; answers are stored under `id`. */
-export interface Question {
-  id: string
-  label: string
-  type: QuestionType
-  required: boolean
-  /** The choices of a `select` or `multi_select` question; absent for other types. */
-  options?: string[]
-}
-
-/** A question as written by the caller; `required` defaults to false. */
+/** A question as written by the caller (see questions.ts); `required` defaults to false. */
 export type QuestionInput = Omit<Question, 'required'> & { required?: boolean | undefined }
 
 export type SchedulingType = 'individual' | 'round_robin' | 'collective'
@@ -113,20 +89,17 @@ export type EventTypeUpdate = Partial<EventTypeInput>
 export const SLUG_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/
 /** E.164: a plus sign, then 7–15 digits. */
 export const PHONE_NUMBER_PATTERN = /^\+[1-9][0-9]{6,14}$/
-export const QUESTION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/
 
-/** Limits of the fields the availability engine does not read (its rules have their own). */
+/**
+ * Limits of the fields the availability engine does not read (its rules have their own;
+ * questions have theirs in questions.ts).
+ */
 export const EVENT_TYPE_LIMITS = {
   slugMaxLength: 64,
   titleMaxLength: 200,
   descriptionMaxLength: 5000,
   addressMaxLength: 500,
   urlMaxLength: 2000,
-  questions: 20,
-  questionIdMaxLength: 64,
-  questionLabelMaxLength: 200,
-  options: 50,
-  optionMaxLength: 200,
   /** position is a Postgres integer. */
   positionMin: -2_147_483_648,
   positionMax: 2_147_483_647,
@@ -424,8 +397,8 @@ function validFields(candidate: Partial<Record<keyof Fields, unknown>>): Fields 
   }
   return {
     slug: validSlug(c.slug),
-    title: requiredText(c.title, 'title', EVENT_TYPE_LIMITS.titleMaxLength),
-    description: optionalText(c.description, 'description', EVENT_TYPE_LIMITS.descriptionMaxLength),
+    title: validTitle(c.title),
+    description: validDescription(c.description),
     durationMinutes: c.durationMinutes as number,
     slotStepMinutes: (c.slotStepMinutes ?? null) as number | null,
     bufferBeforeMinutes: c.bufferBeforeMinutes as number,
@@ -434,7 +407,7 @@ function validFields(candidate: Partial<Record<keyof Fields, unknown>>): Fields 
     bookingWindowDays: (c.bookingWindowDays ?? null) as number | null,
     maxBookingsPerDay: (c.maxBookingsPerDay ?? null) as number | null,
     location: validLocation(c.location),
-    questions: validQuestions(c.questions),
+    questions: validateQuestions(c.questions),
     isActive: c.isActive,
     position: c.position as number,
   }
@@ -451,19 +424,27 @@ function validSlug(value: unknown): string {
   return value
 }
 
-function requiredText(value: unknown, path: string, max: number): string {
-  const text = typeof value === 'string' ? value.trim() : ''
-  if (text === '' || text.length > max) throw invalid(`${path} must be 1–${max} characters`)
-  return text
+/** One line of text (see text.ts). */
+function validTitle(value: unknown): string {
+  const max = EVENT_TYPE_LIMITS.titleMaxLength
+  const title = cleanText(value, { max })
+  if (title === undefined) {
+    throw invalid(`title must be one line of 1–${max} characters without control characters`)
+  }
+  return title
 }
 
-/** Trimmed; blank means none. */
-function optionalText(value: unknown, path: string, max: number): string | null {
-  if (value === null) return null
-  if (typeof value !== 'string' || value.trim().length > max) {
-    throw invalid(`${path} must be text of at most ${max} characters, or null`)
+/** Text that may span lines (see text.ts); blank means none. */
+function validDescription(value: unknown): string | null {
+  if (value === null || (typeof value === 'string' && value.trim() === '')) return null
+  const max = EVENT_TYPE_LIMITS.descriptionMaxLength
+  const description = cleanText(value, { multiline: true, max })
+  if (description === undefined) {
+    throw invalid(
+      `description must be text of at most ${max} characters without control characters other than tabs and line breaks, or null`,
+    )
   }
-  return value.trim() || null
+  return description
 }
 
 /**
@@ -521,83 +502,32 @@ function validLocation(value: unknown): EventTypeLocation | null {
     }
     case 'in_person': {
       expect(['address'])
-      const address = typeof value.address === 'string' ? value.address.trim() : ''
       const max = EVENT_TYPE_LIMITS.addressMaxLength
-      if (address === '' || address.length > max) {
-        return fail(`location.address must be 1–${max} characters`)
+      const address = cleanText(value.address, { max })
+      if (address === undefined) {
+        return fail(
+          `location.address must be one line of 1–${max} characters without control characters`,
+        )
       }
       return { kind, address }
     }
     case 'link': {
       expect(['url'])
       const max = EVENT_TYPE_LIMITS.urlMaxLength
-      const { url } = value
-      // The parsed form is what gets stored: the parser drops tabs and line breaks anywhere
-      // in the input, so the raw string could carry them past URL.canParse.
-      const href =
-        typeof url === 'string' && url.length <= max && URL.canParse(url) ? new URL(url) : undefined
+      // Checked as given, like other text (the parser would silently drop tabs and line
+      // breaks), then stored in its parsed, normalized form.
+      const given = cleanText(value.url, { max })
+      const href = given !== undefined && URL.canParse(given) ? new URL(given) : undefined
       if (!href || !['http:', 'https:'].includes(href.protocol) || href.href.length > max) {
-        return fail(`location.url must be an http or https URL of at most ${max} characters`)
+        return fail(
+          `location.url must be an http or https URL of at most ${max} characters without control characters`,
+        )
       }
       return { kind, url: href.href }
     }
     default:
       return fail(`location.kind must be one of ${LOCATION_KINDS.join(', ')}`)
   }
-}
-
-function validQuestions(value: unknown): Question[] {
-  const fail = (message: string): never => {
-    throw new DomainError('invalid', 'invalid_questions', message)
-  }
-  const L = EVENT_TYPE_LIMITS
-  if (!Array.isArray(value) || value.length > L.questions) {
-    return fail(`questions must be a list of at most ${L.questions} questions`)
-  }
-  const ids = new Set<string>()
-  return Array.from(value, (item: unknown, i): Question => {
-    const path = `questions[${i}]`
-    if (!isPlainObject(item)) return fail(`${path} must be an object`)
-    if (!onlyKeys(item, ['id', 'label', 'type', 'required', 'options'])) {
-      return fail(`${path} has only id, label, type, required and options`)
-    }
-    const { id, type, required = false, options } = item
-    if (typeof id !== 'string' || !QUESTION_ID_PATTERN.test(id)) {
-      return fail(
-        `${path}.id must be 1–${L.questionIdMaxLength} letters, digits, hyphens or underscores, starting with a letter or digit`,
-      )
-    }
-    if (ids.has(id)) return fail(`${path}.id ${id} appears more than once`)
-    ids.add(id)
-    const label = typeof item.label === 'string' ? item.label.trim() : ''
-    if (label === '' || label.length > L.questionLabelMaxLength) {
-      return fail(`${path}.label must be 1–${L.questionLabelMaxLength} characters`)
-    }
-    if (!QUESTION_TYPES.includes(type as QuestionType)) {
-      return fail(`${path}.type must be one of ${QUESTION_TYPES.join(', ')}`)
-    }
-    if (typeof required !== 'boolean') return fail(`${path}.required must be true or false`)
-    const question: Question = { id, label, type: type as QuestionType, required }
-    if (!CHOICE_TYPES.includes(question.type)) {
-      if (options !== undefined) {
-        return fail(`${path}.options is only for select and multi_select questions`)
-      }
-      return question
-    }
-    if (!Array.isArray(options) || options.length === 0 || options.length > L.options) {
-      return fail(`${path}.options must list 1–${L.options} choices`)
-    }
-    const choices = options.map((option: unknown) =>
-      typeof option === 'string' ? option.trim() : '',
-    )
-    if (choices.some((choice) => choice === '' || choice.length > L.optionMaxLength)) {
-      return fail(`${path}.options must each be 1–${L.optionMaxLength} characters`)
-    }
-    if (new Set(choices).size !== choices.length) {
-      return fail(`${path}.options must not repeat a choice`)
-    }
-    return { ...question, options: choices }
-  })
 }
 
 function fieldsOf(row: {
@@ -628,7 +558,7 @@ function fieldsOf(row: {
     bookingWindowDays: row.booking_window_days,
     maxBookingsPerDay: row.max_bookings_per_day,
     location: row.location as EventTypeLocation | null,
-    questions: row.questions as unknown as Question[],
+    questions: parseQuestions(row.questions),
     isActive: row.is_active,
     position: row.position,
   }
