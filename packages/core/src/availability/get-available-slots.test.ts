@@ -586,6 +586,175 @@ describe('getAvailableSlots', () => {
         '2026-03-08T04:00-04:00/2026-03-08T05:00-04:00',
       ])
     })
+
+    it('runs an interval ending inside the gap to its resolved end (02:30 = 03:30 EDT)', () => {
+      // [01:00 EST, 03:30 EDT) is one real hour; 03:00 EDT is after 02:30 on the wall clock
+      // but still ends by 03:30 EDT.
+      const eventType = { durationMinutes: 30 }
+      const expected = [
+        '2026-03-08T01:00-05:00/2026-03-08T01:30-05:00',
+        '2026-03-08T01:30-05:00/2026-03-08T03:00-04:00',
+        '2026-03-08T03:00-04:00/2026-03-08T03:30-04:00',
+      ]
+      const endingAt = (end: string) =>
+        slots({ weeklyHours: { sunday: [hours('01:00', end)] }, eventType, range: sunday, now })
+      expect(endingAt('02:30')).toEqual(expected)
+      expect(endingAt('03:30')).toEqual(expected)
+    })
+
+    it('offers a start once when such an interval overlaps the next one in real time', () => {
+      // 01:00–02:30 runs to 03:30 EDT, so it and 03:00–04:00 both yield 03:00 EDT.
+      expect(
+        slots({
+          weeklyHours: { sunday: [hours('01:00', '02:30'), hours('03:00', '04:00')] },
+          eventType: { durationMinutes: 30 },
+          range: sunday,
+          now,
+        }),
+      ).toEqual([
+        '2026-03-08T01:00-05:00/2026-03-08T01:30-05:00',
+        '2026-03-08T01:30-05:00/2026-03-08T03:00-04:00',
+        '2026-03-08T03:00-04:00/2026-03-08T03:30-04:00',
+        '2026-03-08T03:30-04:00/2026-03-08T04:00-04:00',
+      ])
+    })
+
+    it('sorts starts when such intervals interleave in real time', () => {
+      // 01:00–02:30 steps 01:00, 01:45, (02:30 missing), 03:15 EDT; 03:00–04:00 steps 03:00,
+      // 03:45. The first interval's 03:15 is generated before the second's 03:00.
+      expect(
+        slots({
+          weeklyHours: { sunday: [hours('01:00', '02:30'), hours('03:00', '04:00')] },
+          eventType: { durationMinutes: 15, slotStepMinutes: 45 },
+          range: sunday,
+          now,
+        }),
+      ).toEqual([
+        '2026-03-08T01:00-05:00/2026-03-08T01:15-05:00',
+        '2026-03-08T01:45-05:00/2026-03-08T03:00-04:00',
+        '2026-03-08T03:00-04:00/2026-03-08T03:15-04:00',
+        '2026-03-08T03:15-04:00/2026-03-08T03:30-04:00',
+        '2026-03-08T03:45-04:00/2026-03-08T04:00-04:00',
+      ])
+    })
+
+    it('applies a date override on the transition day', () => {
+      // The override replaces Sunday's 09:00–17:00. 01:30 EST to 03:30 EDT is one real hour.
+      expect(
+        slots({
+          weeklyHours: { sunday: [hours('09:00', '17:00')] },
+          dateOverrides: [{ date: '2026-03-08', intervals: [hours('01:30', '03:30')] }],
+          eventType: { slotStepMinutes: 30 },
+          range: sunday,
+          now,
+        }),
+      ).toEqual(['2026-03-08T01:30-05:00/2026-03-08T03:30-04:00'])
+    })
+  })
+
+  describe('transitions at midnight (America/Santiago, -04:00 standard, -03:00 summer)', () => {
+    const weeklyHours = {
+      saturday: [hours('22:00', '24:00')],
+      sunday: [hours('00:00', '02:00')],
+    }
+
+    it('spring forward 2026-09-06 (00:00 jumps to 01:00): "24:00" is Sunday 01:00', () => {
+      expect(
+        slots({
+          timeZone: 'America/Santiago',
+          weeklyHours,
+          range: ['2026-09-05T00:00-04:00', '2026-09-07T00:00-03:00'],
+          now: '2026-09-01T00:00-04:00',
+        }),
+      ).toEqual([
+        '2026-09-05T22:00-04:00/2026-09-05T23:00-04:00',
+        '2026-09-05T23:00-04:00/2026-09-06T01:00-03:00',
+        // Sunday 00:00 does not exist; the interval starts at 01:00 -03:00 and holds one hour.
+        '2026-09-06T01:00-03:00/2026-09-06T02:00-03:00',
+      ])
+    })
+
+    it('fall back 2026-04-05 (Saturday 24:00 returns to 23:00): 22:00–24:00 holds three hours', () => {
+      expect(
+        slots({
+          timeZone: 'America/Santiago',
+          weeklyHours,
+          range: ['2026-04-04T00:00-03:00', '2026-04-06T00:00-04:00'],
+          now: '2026-04-01T00:00-03:00',
+        }),
+      ).toEqual([
+        '2026-04-04T22:00-03:00/2026-04-04T23:00-03:00',
+        // The repeated 23:00 starts once, at its first occurrence.
+        '2026-04-04T23:00-03:00/2026-04-04T23:00-04:00',
+        '2026-04-05T00:00-04:00/2026-04-05T01:00-04:00',
+        '2026-04-05T01:00-04:00/2026-04-05T02:00-04:00',
+      ])
+    })
+  })
+
+  describe('30-minute DST shift (Australia/Lord_Howe, +10:30 standard, +11:00 summer)', () => {
+    it('spring forward 2026-10-04 (02:00 jumps to 02:30)', () => {
+      expect(
+        slots({
+          timeZone: 'Australia/Lord_Howe',
+          weeklyHours: { sunday: [hours('01:00', '04:00')] },
+          eventType: { slotStepMinutes: 30 },
+          range: ['2026-10-04T00:00+10:30', '2026-10-05T00:00+11:00'],
+          now: '2026-10-01T00:00+10:30',
+        }),
+      ).toEqual([
+        '2026-10-04T01:00+10:30/2026-10-04T02:30+11:00',
+        '2026-10-04T01:30+10:30/2026-10-04T03:00+11:00',
+        // 02:00 does not exist.
+        '2026-10-04T02:30+11:00/2026-10-04T03:30+11:00',
+        '2026-10-04T03:00+11:00/2026-10-04T04:00+11:00',
+      ])
+    })
+
+    it('fall back 2026-04-05 (02:00 returns to 01:30)', () => {
+      expect(
+        slots({
+          timeZone: 'Australia/Lord_Howe',
+          weeklyHours: { sunday: [hours('01:00', '03:00')] },
+          eventType: { durationMinutes: 30 },
+          range: ['2026-04-05T00:00+11:00', '2026-04-06T00:00+10:30'],
+          now: '2026-04-01T00:00+11:00',
+        }),
+      ).toEqual([
+        '2026-04-05T01:00+11:00/2026-04-05T01:30+11:00',
+        '2026-04-05T01:30+11:00/2026-04-05T01:30+10:30',
+        '2026-04-05T02:00+10:30/2026-04-05T02:30+10:30',
+        '2026-04-05T02:30+10:30/2026-04-05T03:00+10:30',
+      ])
+    })
+  })
+
+  describe('local dates that step backward (fall-back at 00:01)', () => {
+    it('America/Goose_Bay 2009-11-01: finds a slot when the range ends on the repeated day', () => {
+      // At 00:01 ADT (03:01Z) clocks went back to 23:01 AST on Oct 31, so the latest
+      // possible start (03:01Z) reads Oct 31 while the slot belongs to Nov 1.
+      expect(
+        slots({
+          timeZone: 'America/Goose_Bay',
+          weeklyHours: { sunday: [hours('00:00', '01:00')] },
+          range: ['2009-11-01T03:00Z', '2009-11-01T04:01Z'],
+          now: '2009-10-30T00:00Z',
+        }),
+      ).toEqual(['2009-11-01T00:00-03:00/2009-11-01T00:00-04:00'])
+    })
+
+    it('America/St_Johns 2006-10-29: finds a slot when the whole range reads the day before', () => {
+      // 02:00Z–03:00Z reads Oct 28 23:30 NDT … Oct 28 23:30 NST, yet contains Oct 29 00:00 NDT.
+      expect(
+        slots({
+          timeZone: 'America/St_Johns',
+          weeklyHours: { sunday: [hours('00:00', '01:00')] },
+          eventType: { durationMinutes: 1 },
+          range: ['2006-10-29T02:00Z', '2006-10-29T03:00Z'],
+          now: '2006-10-01T00:00Z',
+        }),
+      ).toEqual(['2006-10-29T00:00-02:30/2006-10-28T23:01-03:30'])
+    })
   })
 
   describe('fall back (America/New_York, 2026-11-01: 02:00 EDT falls back to 01:00 EST)', () => {
@@ -773,6 +942,18 @@ describe('getAvailableSlots', () => {
     const monday = (...intervals: { start: string; end: string }[]) =>
       withSchedule({ weeklyHours: { monday: intervals } })
     const at = (iso: string) => Temporal.Instant.from(iso)
+    const booking = () => ({ start: at('2026-10-19T10:00Z'), end: at('2026-10-19T11:00Z') })
+    /** [<hole>, item]: a sparse array whose first element is missing. */
+    const holey = <T>(item: T): T[] => {
+      const array = new Array<T>(2)
+      array[1] = item
+      return array
+    }
+    const circular = () => {
+      const value: Record<string, unknown> = {}
+      value.self = value
+      return value
+    }
 
     it.each<[string, () => AvailabilityInput, RegExp]>([
       [
@@ -970,6 +1151,94 @@ describe('getAvailableSlots', () => {
         () => ({ ...valid(), now: '2026-10-18T12:00Z' as unknown as Temporal.Instant }),
         /now must be a Temporal\.Instant/,
       ],
+      // Values JSON.stringify or String() cannot render must still give a clean error.
+      [
+        'BigInt duration',
+        () => withEventType({ durationMinutes: 60n as unknown as number }),
+        /durationMinutes must be a whole number from 1 to 1440, got 60n/,
+      ],
+      [
+        "BigInt booking's buffer",
+        () => ({
+          ...valid(),
+          bookings: [{ ...booking(), bufferBeforeMinutes: 5n as unknown as number }],
+        }),
+        /bookings\[0\]\.bufferBeforeMinutes must be a whole number from 0 to 1440, got 5n/,
+      ],
+      [
+        'BigInt wall-clock time',
+        () => monday({ start: 9n as unknown as string, end: '12:00' }),
+        /monday\[0\]\.start must be a time "HH:MM" from "00:00" to "23:59", got 9n/,
+      ],
+      [
+        'BigInt override date',
+        () =>
+          withSchedule({
+            dateOverrides: [{ date: 20261019n as unknown as string, intervals: [] }],
+          }),
+        /dateOverrides\[0\]\.date must be a date like "2026-03-08", got 20261019n/,
+      ],
+      [
+        'circular value',
+        () => withEventType({ durationMinutes: circular() as unknown as number }),
+        /durationMinutes must be a whole number from 1 to 1440, got \[object Object\]/,
+      ],
+      [
+        'object without a prototype',
+        () => monday({ start: Object.create(null) as string, end: '12:00' }),
+        /monday\[0\]\.start must be a time "HH:MM" from "00:00" to "23:59", got \{\}/,
+      ],
+      // Holes in sparse arrays are checked like any other element.
+      [
+        'hole in busy',
+        () => ({ ...valid(), busy: holey(booking()) }),
+        /busy\[0\] must be an object/,
+      ],
+      [
+        'hole in bookings',
+        () => ({ ...valid(), bookings: new Array(1) }),
+        /bookings\[0\] must be an object/,
+      ],
+      [
+        'hole in weekly hours',
+        () => withSchedule({ weeklyHours: { monday: holey(hours('09:00', '12:00')) } }),
+        /weeklyHours\.monday\[0\] must be an object/,
+      ],
+      [
+        'hole in date overrides',
+        () => withSchedule({ dateOverrides: holey({ date: '2026-10-20', intervals: [] }) }),
+        /dateOverrides\[0\] must be an object/,
+      ],
+      [
+        "hole in an override's intervals",
+        () =>
+          withSchedule({
+            dateOverrides: [{ date: '2026-10-20', intervals: holey(hours('09:00', '12:00')) }],
+          }),
+        /dateOverrides\[0\]\.intervals\[0\] must be an object/,
+      ],
+      // Containers that are not plain objects would otherwise read as empty.
+      [
+        'weekly hours as a Map',
+        () =>
+          withSchedule({
+            weeklyHours: new Map([['monday', [hours('09:00', '12:00')]]]) as unknown as WeeklyHours,
+          }),
+        /schedule\.weeklyHours must be a plain object keyed by weekday, got \[object Map\]/,
+      ],
+      [
+        'weekly hours as an array',
+        () => withSchedule({ weeklyHours: [] as unknown as WeeklyHours }),
+        /schedule\.weeklyHours must be a plain object keyed by weekday, got \[\]/,
+      ],
+      [
+        'override as a Map',
+        () =>
+          withSchedule({
+            dateOverrides: [new Map([['date', '2026-10-20']]) as unknown as DateOverride],
+          }),
+        /dateOverrides\[0\] must be a plain object, got \[object Map\]/,
+      ],
     ])('rejects %s', (_name, build, message) => {
       const input = build()
       expect(() => getAvailableSlots(input)).toThrow(AvailabilityInputError)
@@ -984,6 +1253,24 @@ describe('getAvailableSlots', () => {
         bufferBeforeMinutes: 1440,
       }
       expect(getAvailableSlots({ ...valid(), bookings: [booking] })).toHaveLength(3)
+    })
+
+    it('accepts weekly hours and overrides built with Object.create(null)', () => {
+      const weeklyHours: Record<string, unknown> = Object.create(null)
+      weeklyHours.monday = [hours('09:00', '12:00')]
+      const override: Record<string, unknown> = Object.create(null)
+      override.date = '2026-10-19'
+      override.intervals = [hours('10:00', '11:00')]
+      const input = withSchedule({
+        weeklyHours: weeklyHours as WeeklyHours,
+        dateOverrides: [override as unknown as DateOverride],
+      })
+      expect(getAvailableSlots(input).map((s) => s.start.toString())).toEqual([
+        '2026-10-19T14:00:00Z', // the override's 10:00–11:00 in New York
+      ])
+      expect(
+        getAvailableSlots(withSchedule({ weeklyHours: weeklyHours as WeeklyHours })),
+      ).toHaveLength(3)
     })
 
     it('treats a weekday set to undefined as a day off', () => {

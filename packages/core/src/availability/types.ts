@@ -115,6 +115,10 @@ export interface AvailabilityInput {
    * Only slots that lie fully inside [rangeStart, rangeEnd] are returned. The
    * range may span at most 400 days, and `rangeStart`, `rangeEnd` and `now` must
    * fall in the years 0001–9999.
+   *
+   * 400 days is a safety limit, not a sensible request size: the engine checks
+   * every candidate start, and 1-minute steps over 400 days take seconds. API
+   * callers must cap the range far lower for public requests.
    */
   readonly rangeStart: Temporal.Instant
   readonly rangeEnd: Temporal.Instant

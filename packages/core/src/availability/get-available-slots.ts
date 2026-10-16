@@ -2,6 +2,7 @@ import type { AvailabilityInput, InstantInterval, Slot } from './types.ts'
 import { type NormalizedBooking, normalizeInput } from './validate.ts'
 
 const COMPATIBLE = { disambiguation: 'compatible' } as const
+const MINUTES_PER_DAY = 24 * 60
 
 /**
  * Returns the bookable slots for one host and event type, sorted by start, with
@@ -34,7 +35,9 @@ const COMPATIBLE = { disambiguation: 'compatible' } as const
  *   ambiguous candidate uses its earlier occurrence ('compatible').
  * - A slot's end is its start plus exactly durationMinutes of elapsed time, so
  *   its wall-clock length differs from the duration when it crosses a transition.
- *   The slot must end by the interval's end instant.
+ *   The slot must end by the interval's resolved end instant, which for an end
+ *   inside a gap is later than the wall clock suggests: 01:00–02:30 on a New York
+ *   spring-forward day is [01:00 EST, 03:30 EDT) and offers 03:00 EDT.
  * - Consequences on transition days: the repeated hour of a fall-back day is not
  *   offered as a start a second time (slots that start earlier may still run into
  *   it), and after a gap two consecutive starts can be closer in real time than
@@ -58,10 +61,14 @@ export function getAvailableSlots(input: AvailabilityInput): Slot[] {
   const bookingsPerDay = countByLocalDate(q.bookings, timeZone)
   const slots: Slot[] = []
 
-  // A slot starts on the local date whose wall-clock time it was generated from,
-  // so only dates between the local dates of `earliest` and `latest` can have slots.
-  const lastDate = latest.toZonedDateTimeISO(timeZone).toPlainDate()
-  let date = earliest.toZonedDateTimeISO(timeZone).toPlainDate()
+  // A slot starts on the local date whose wall-clock time it was generated from.
+  // The local date is not monotonic in time: a fall-back across midnight (e.g.
+  // America/St_Johns at 00:01 until 2011) steps it back to the previous day, so
+  // `latest` can read an earlier date than `earliest`. No zone steps back more than
+  // 24 hours, so visiting one extra day on each side covers every date a slot in
+  // [earliest, latest] can start on; the per-candidate checks drop the rest.
+  const lastDate = latest.toZonedDateTimeISO(timeZone).toPlainDate().add({ days: 1 })
+  let date = earliest.toZonedDateTimeISO(timeZone).toPlainDate().subtract({ days: 1 })
   for (; Temporal.PlainDate.compare(date, lastDate) <= 0; date = date.add({ days: 1 })) {
     const key = date.toString()
     const bookedThatDay = bookingsPerDay.get(key) ?? 0
@@ -72,13 +79,17 @@ export function getAvailableSlots(input: AvailabilityInput): Slot[] {
       const intervalStart = boundaryInstant(date, interval.start, timeZone)
       const intervalEnd = boundaryInstant(date, interval.end, timeZone)
 
-      for (let minute = interval.start; minute < interval.end; minute += q.slotStepMinutes) {
+      // Not bounded by the interval's wall-clock end: an end inside a gap resolves
+      // later (02:30 becomes 03:30), so a candidate after 02:30 on the wall clock
+      // (03:00) can still end in time. The resolved end instant stops the loop.
+      for (let minute = interval.start; minute < MINUTES_PER_DAY; minute += q.slotStepMinutes) {
         const start = existingWallClockInstant(date, minute, timeZone)
         if (start === undefined) continue
         // Only possible when the interval's start fell into a gap and was moved forward.
         if (Temporal.Instant.compare(start, intervalStart) < 0) continue
         const end = start.add(duration)
-        // Candidate starts strictly increase, so once one fails these checks, all later ones do.
+        // Existing wall-clock times of one date map to strictly increasing instants,
+        // so once a candidate fails one of these two checks, every later one does.
         if (Temporal.Instant.compare(end, intervalEnd) > 0) break
         if (Temporal.Instant.compare(start, latest) > 0) break
         if (Temporal.Instant.compare(start, earliest) < 0) continue
@@ -96,7 +107,7 @@ export function getAvailableSlots(input: AvailabilityInput): Slot[] {
 
 /** Converts an interval boundary ('compatible' disambiguation; 1440 = start of the next day). */
 function boundaryInstant(date: Temporal.PlainDate, minute: number, timeZone: string) {
-  if (minute === 24 * 60) return date.add({ days: 1 }).toZonedDateTime(timeZone).toInstant()
+  if (minute === MINUTES_PER_DAY) return date.add({ days: 1 }).toZonedDateTime(timeZone).toInstant()
   return wallClock(date, minute).toZonedDateTime(timeZone, COMPATIBLE).toInstant()
 }
 
@@ -189,9 +200,11 @@ function countByLocalDate(intervals: readonly InstantInterval[], timeZone: strin
 }
 
 /**
- * Slots are generated in chronological order with distinct starts (existing
- * wall-clock times map to strictly increasing instants); this guards the output
- * contract against unusual zone rules.
+ * Intervals of one day are disjoint on the wall clock but can overlap in real
+ * time when an end falls into a gap: 01:00–02:30 resolves to [01:00 EST, 03:30 EDT)
+ * and overlaps a following 03:00–04:00, so their candidates can repeat (both yield
+ * 03:00 EDT) or interleave (03:15 from the first after 03:00 from the second).
+ * So sort, and drop repeated starts.
  */
 function sortedByUniqueStart(slots: Slot[]): Slot[] {
   slots.sort((a, b) => Temporal.Instant.compare(a.start, b.start))

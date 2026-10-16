@@ -120,8 +120,8 @@ export function normalizeInput(input: AvailabilityInput): NormalizedInput {
     bookingWindowDays: optional(eventType.bookingWindowDays, undefined, (v) =>
       wholeNumber(v, 'eventType.bookingWindowDays', 1, LIMITS.bookingWindowDays),
     ),
-    busy: list(input.busy, 'busy', instantInterval),
-    bookings: list(input.bookings, 'bookings', existingBooking),
+    busy: input.busy === undefined ? [] : list(input.busy, 'busy', instantInterval),
+    bookings: input.bookings === undefined ? [] : list(input.bookings, 'bookings', existingBooking),
     rangeStart,
     rangeEnd,
     now: queryInstant(input.now, 'now'),
@@ -132,13 +132,46 @@ function fail(message: string): never {
   throw new AvailabilityInputError(message)
 }
 
+/**
+ * Renders any input value for an error message without throwing: JSON.stringify
+ * throws on BigInt and circular values, and String() throws on objects without a
+ * prototype (Object.create(null)) or with a broken toString.
+ */
+function show(value: unknown): string {
+  if (typeof value === 'bigint') return `${value}n`
+  if (value === undefined) return 'undefined'
+  // JSON would render a Map or class instance as "{}"; name its type instead.
+  if (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    !isPlainObject(value)
+  ) {
+    return Object.prototype.toString.call(value)
+  }
+  try {
+    const json = JSON.stringify(value)
+    if (json !== undefined) return json
+  } catch {
+    // Not serializable (BigInt inside, circular); describe its type instead.
+  }
+  return Object.prototype.toString.call(value)
+}
+
+/** Whether `value` is a plain object literal (or Object.create(null)), not a Map, array or class instance. */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null) return false
+  const prototype = Object.getPrototypeOf(value)
+  return prototype === Object.prototype || prototype === null
+}
+
 function optional<T, D>(value: T | undefined, fallback: D, parse: (value: T) => number) {
   return value === undefined ? fallback : parse(value)
 }
 
 function wholeNumber(value: unknown, path: string, min: number, max: number): number {
   if (!Number.isSafeInteger(value) || (value as number) < min || (value as number) > max) {
-    fail(`${path} must be a whole number from ${min} to ${max}, got ${JSON.stringify(value)}`)
+    fail(`${path} must be a whole number from ${min} to ${max}, got ${show(value)}`)
   }
   return value as number
 }
@@ -153,20 +186,20 @@ function timeZone(value: unknown): string {
   try {
     return new Temporal.ZonedDateTime(0n, value).timeZoneId
   } catch {
-    return fail(`${path} is not a known IANA time zone: ${JSON.stringify(value)}`)
+    return fail(`${path} is not a known IANA time zone: ${show(value)}`)
   }
 }
 
 function weeklyHours(value: unknown): Map<number, MinuteInterval[]> {
   const path = 'schedule.weeklyHours'
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    fail(`${path} must be an object keyed by weekday`)
+  if (!isPlainObject(value)) {
+    fail(`${path} must be a plain object keyed by weekday, got ${show(value)}`)
   }
   const result = new Map<number, MinuteInterval[]>()
   for (const [key, intervals] of Object.entries(value)) {
     const index = WEEKDAYS.indexOf(key as Weekday)
     if (index === -1) {
-      fail(`${path} has unknown weekday ${JSON.stringify(key)}; use one of ${WEEKDAYS.join(', ')}`)
+      fail(`${path} has unknown weekday ${show(key)}; use one of ${WEEKDAYS.join(', ')}`)
     }
     if (intervals === undefined) continue
     result.set(index + 1, dayIntervals(intervals, `${path}.${key}`))
@@ -178,21 +211,18 @@ function dateOverrides(value: unknown): Map<string, MinuteInterval[]> {
   const path = 'schedule.dateOverrides'
   const result = new Map<string, MinuteInterval[]>()
   if (value === undefined) return result
-  if (!Array.isArray(value)) fail(`${path} must be an array`)
-  value.forEach((override: unknown, i) => {
-    const itemPath = `${path}[${i}]`
-    if (typeof override !== 'object' || override === null) fail(`${itemPath} must be an object`)
-    const { date, intervals } = override as { date?: unknown; intervals?: unknown }
-    const key = plainDate(date, `${itemPath}.date`)
+  list(value, path, (override, itemPath) => {
+    if (!isPlainObject(override)) fail(`${itemPath} must be a plain object, got ${show(override)}`)
+    const key = plainDate(override.date, `${itemPath}.date`)
     if (result.has(key)) fail(`${itemPath}.date ${key} appears more than once`)
-    result.set(key, dayIntervals(intervals, `${itemPath}.intervals`))
+    result.set(key, dayIntervals(override.intervals, `${itemPath}.intervals`))
   })
   return result
 }
 
 function plainDate(value: unknown, path: string): string {
   if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    fail(`${path} must be a date like "2026-03-08", got ${JSON.stringify(value)}`)
+    fail(`${path} must be a date like "2026-03-08", got ${show(value)}`)
   }
   try {
     return Temporal.PlainDate.from(value).toString()
@@ -207,9 +237,7 @@ function plainDate(value: unknown, path: string): string {
  */
 function dayIntervals(value: unknown, path: string): MinuteInterval[] {
   if (!Array.isArray(value)) fail(`${path} must be an array of { start, end } intervals`)
-  const parsed = value.map((interval: unknown, i) => {
-    const itemPath = `${path}[${i}]`
-    if (typeof interval !== 'object' || interval === null) fail(`${itemPath} must be an object`)
+  const parsed = list(value, path, (interval, itemPath) => {
     const { start, end } = interval as Partial<WallClockInterval>
     const startMinutes = wallClockTime(start, `${itemPath}.start`, false)
     const endMinutes = wallClockTime(end, `${itemPath}.end`, true)
@@ -246,7 +274,7 @@ function wallClockTime(value: unknown, path: string, isEnd: boolean): number {
     (minutesOfDay < MINUTES_PER_DAY || (isEnd && minutesOfDay === MINUTES_PER_DAY))
   if (!valid) {
     const allowed = isEnd ? '"00:00" to "24:00"' : '"00:00" to "23:59"'
-    fail(`${path} must be a time "HH:MM" from ${allowed}, got ${JSON.stringify(value)}`)
+    fail(`${path} must be a time "HH:MM" from ${allowed}, got ${show(value)}`)
   }
   return minutesOfDay
 }
@@ -268,10 +296,13 @@ function queryInstant(value: unknown, path: string): Temporal.Instant {
   return result
 }
 
+/**
+ * Parses every element of an array. Array.from visits holes in sparse arrays as
+ * `undefined`, so they fail the object check instead of being skipped.
+ */
 function list<T>(value: unknown, path: string, parse: (item: object, itemPath: string) => T): T[] {
-  if (value === undefined) return []
   if (!Array.isArray(value)) fail(`${path} must be an array`)
-  return value.map((item: unknown, i) => {
+  return Array.from(value, (item: unknown, i) => {
     const itemPath = `${path}[${i}]`
     if (typeof item !== 'object' || item === null) fail(`${itemPath} must be an object`)
     return parse(item, itemPath)
