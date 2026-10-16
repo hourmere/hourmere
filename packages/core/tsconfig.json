@@ -1,0 +1,8 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // Node 26 ships Temporal natively; TypeScript's own lib provides its types.
+    "lib": ["es2024", "esnext.temporal"]
+  },
+  "include": ["src"]
+}

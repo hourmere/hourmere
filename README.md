@@ -9,6 +9,7 @@ Open-source scheduling for people and AI agents. Self-host or use the cloud.
 |---|---|
 | `apps/server` | API server (Hono). Serves the built web app in production. |
 | `apps/web` | Web app (React + Vite). Talks to the server only through the public API. |
+| `packages/core` | Scheduling logic with no I/O or framework code, such as the availability engine. |
 | `packages/db` | Database access (Kysely) and SQL migrations in `packages/db/migrations`. |
 
 ## Development
