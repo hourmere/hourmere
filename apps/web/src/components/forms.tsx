@@ -91,7 +91,7 @@ export function ErrorSummary({
   attempt,
 }: {
   errors: FieldErrors
-  /** What to call each field in the list, by id; ids without a label are not listed. */
+  /** What to call each field in the list, by id; entries without one show the message alone. */
   labels?: Record<string, string>
   message?: string | null | undefined
   /** Changes with every submit, so the summary takes focus again. */
