@@ -296,8 +296,9 @@ export function createApp({
   for (const register of routes) register({ app, caller })
 
   // The product API is versioned under /api/v1 (agents depend on it for years);
-  // /api/health is operational and stays unversioned.
-  app.doc('/api/v1/openapi.json', {
+  // /api/health is operational and stays unversioned. doc31 renders schemas the 3.1 way:
+  // nullable fields as `type: [..., "null"]` (3.1 has no `nullable` keyword).
+  app.doc31('/api/v1/openapi.json', {
     openapi: '3.1.0',
     info: { title: 'Hourmere API', version: '0.0.0' },
   })
