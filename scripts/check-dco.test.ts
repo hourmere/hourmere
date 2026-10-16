@@ -20,6 +20,11 @@ interface Person {
 
 const jane: Person = { name: 'Jane Doe', email: 'jane@example.com' }
 const maintainer: Person = { name: 'Adrian Lee', email: 'adrian@cobaltmere.com' }
+// What GitHub puts on a commit the maintainer makes in its web UI.
+const maintainerOnGitHub: Person = {
+  name: 'adrian-lee-dev',
+  email: '167077805+adrian-lee-dev@users.noreply.github.com',
+}
 const dependabot: Person = {
   name: 'dependabot[bot]',
   email: '49699333+dependabot[bot]@users.noreply.github.com',
@@ -107,11 +112,16 @@ describe('checkCommit on commits read with readCommits', () => {
     })
   })
 
-  it('exempts the maintainer', () => {
+  it("exempts the maintainer, committing locally or in GitHub's web UI", () => {
     expect(EXEMPT_AUTHOR_EMAILS).toContain(maintainer.email)
+    expect(EXEMPT_AUTHOR_EMAILS).toContain(maintainerOnGitHub.email)
     const repo = scratchRepo()
     repo.commit(maintainer, 'Add a feature\n')
-    expect(repo.check()[0]?.result).toEqual({ status: 'exempt' })
+    repo.commit(maintainerOnGitHub, 'Apply suggestions from code review\n')
+    expect(repo.check().map(({ result }) => result)).toEqual([
+      { status: 'exempt' },
+      { status: 'exempt' },
+    ])
   })
 
   it('exempts Dependabot, whose own sign-off names a different address', () => {

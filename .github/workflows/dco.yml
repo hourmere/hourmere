@@ -14,6 +14,8 @@ jobs:
   # Every commit in the pull request needs a Developer Certificate of Origin sign-off unless
   # its author is exempt (the maintainer and Dependabot). The rule is in CONTRIBUTING.md
   # ("License and sign-off"); the check and the exemption list are in scripts/check-dco.ts.
+  # A pull request runs its own copy of this file and of the script, so changes to either one
+  # get extra scrutiny in review.
   sign-off:
     runs-on: ubuntu-latest
     steps:

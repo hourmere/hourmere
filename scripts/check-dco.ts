@@ -22,7 +22,11 @@ import { parseArgs } from 'node:util'
  * Keep CONTRIBUTING.md#license-and-sign-off in step with this list.
  */
 export const EXEMPT_AUTHOR_EMAILS: readonly string[] = [
+  // The maintainer, committing locally.
   'adrian@cobaltmere.com',
+  // The maintainer's GitHub account (adrian-lee-dev), on commits made in GitHub's web UI.
+  '167077805+adrian-lee-dev@users.noreply.github.com',
+  // Dependabot.
   '49699333+dependabot[bot]@users.noreply.github.com',
 ]
 

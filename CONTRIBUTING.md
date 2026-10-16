@@ -92,9 +92,10 @@ wrote the change or otherwise have the right to submit it under the project's li
 - **Who signs off:** every external contributor, on every commit in the pull request. The
   sign-off must name the commit's author, with the same name and email address as the commit's
   author fields (case does not matter).
-- **Who is exempt:** commits authored by the maintainer (`adrian@cobaltmere.com`; Cobaltmere's
-  AI coding agents commit under the same identity) and by Dependabot. That code is
-  Cobaltmere's own work, so there is no outside contribution to certify. The list is kept in
+- **Who is exempt:** commits authored by the maintainer and by Dependabot. The maintainer
+  commits as `adrian@cobaltmere.com` (so do Cobaltmere's AI coding agents) and, in GitHub's
+  web UI, as `167077805+adrian-lee-dev@users.noreply.github.com`. That code is Cobaltmere's own
+  work, so there is no outside contribution to certify. The list is kept in
   [`scripts/check-dco.ts`](scripts/check-dco.ts). In a pull request from a fork the exemptions
   do not apply, because anyone can put any email address on a commit.
 - **Merge commits** need no sign-off. The commits a merge brings in are checked on their own,
