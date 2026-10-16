@@ -129,15 +129,19 @@ declares more (`routeBodyLimit` in `apps/server/src/body-limit.ts`); beyond the 
 `payload_too_large`. A `Content-Length` over the limit is refused at once; any other body
 (e.g. sent chunked) is counted while the route reads it, which also stops a body longer than
 its `Content-Length`. Nothing reads the body before the route needs it: rate limits and
-authentication refuse a client (429, 401) without reading what it sends. A route's limit
-must be at least its largest legal request with every string at its maximum length and every
-character escaped as `\uXXXX` (6 bytes, as e.g. Python's `json.dumps` sends by default).
-Creating a booking allows 2 MB: its largest legal request (20 multi-select answers choosing
-all 50 options of 200 characters, plus the invitee and 10 guests) is about 1.23 MB that way. Cancel and reschedule bodies stay far below 64 KB
-(a reason is at most 1000 characters). Creating or changing an event type allows 2 MB (20
-questions with 50 options of 200 characters come to about 1.29 MB), as do creating or
-changing a schedule (a day can hold 1440 one-minute intervals: about 1.23 MB for a week);
-setting one date's override allows 256 KB (about 176 KB for 1440 intervals).
+authentication refuse a client (429, 401) without reading what it sends. Because the size
+and text checks decide while the body is read, a route reads (and validates) its body before
+doing anything with side effects, and never swallows a failed read. Limits count the bytes as
+sent: request bodies are never decompressed (`Content-Encoding` is not supported). A route's
+limit must be at least its largest legal request with every string at its maximum length and
+every character escaped as `\uXXXX` (6 bytes, as e.g. Python's `json.dumps` sends by
+default). Creating a booking allows 2 MB: its largest legal request (20 multi-select answers
+choosing all 50 options of 200 characters, plus the invitee and 10 guests) is about 1.23 MB
+that way. Cancel and reschedule bodies stay far below 64 KB (a reason is at most 1000
+characters). Creating or changing an event type allows 2 MB (20 questions with 50 options of
+200 characters come to about 1.29 MB), as do creating or changing a schedule (a day can hold
+1440 one-minute intervals: about 1.23 MB for a week); setting one date's override allows
+256 KB (about 176 KB for 1440 intervals).
 
 ## Lists
 

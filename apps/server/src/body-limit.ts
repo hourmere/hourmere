@@ -34,21 +34,37 @@ export interface BodyCheck {
 /**
  * Runs the rest of the request (`next`) with a body that `check` sees while it is read.
  * Nothing is read on check's behalf: a chunk passes through only when a reader asks for it,
- * so a request answered without reading its body (e.g. 401, 429) leaves it unread.
+ * so a request answered without reading its body (e.g. 401, 429) leaves it unread. Even the
+ * original body stream is left alone until then: on @hono/node-server, merely creating it
+ * starts reading the socket, and the server then cannot skip the unread body after the
+ * answer, so it closes the connection instead of keeping it alive.
  *
  * When check refuses, reading the body fails with check's HTTPException, and the request is
  * answered with that exception (by the app's error handler) whatever the reader made of the
  * failure: a route's validator turns any failed read into 400 "Malformed JSON", Better Auth
- * may answer with an error of its own.
+ * may answer with an error of its own. The reader's response is discarded, its headers too;
+ * headers set earlier with c.header() (e.g. the caller's Set-Cookie) stay.
+ *
+ * So the check decides only once the body has been read. Readers must therefore read (and
+ * validate) the body before doing anything with side effects, and must not swallow a failed
+ * read and carry on: whatever they did before or after it stands, only the response changes.
  */
 export async function checkBodyAsRead(c: Context, next: Next, check: BodyCheck): Promise<void> {
-  const body = c.req.raw.body
-  if (!body) return next()
-  const reader = body.getReader()
+  const original = c.req.raw
+  if (original.method === 'GET' || original.method === 'HEAD') return next()
+  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
   let refusal: unknown
   const checked = new ReadableStream<Uint8Array>(
     {
       async pull(controller) {
+        if (!reader) {
+          const body = original.body
+          if (!body) {
+            controller.close()
+            return
+          }
+          reader = body.getReader()
+        }
         const { done, value } = await reader.read()
         try {
           if (done) {
@@ -63,17 +79,27 @@ export async function checkBodyAsRead(c: Context, next: Next, check: BodyCheck):
           controller.error(err)
         }
       },
-      cancel: (reason) => reader.cancel(reason),
+      cancel: (reason) => reader?.cancel(reason),
     },
     // No read-ahead: pull runs only when a reader is waiting for a chunk.
     { highWaterMark: 0 },
   )
-  const init: RequestInit & { duplex: 'half' } = { body: checked, duplex: 'half' }
-  c.req.raw = new Request(c.req.raw, init)
+  // A new request rather than new Request(original, …), which would open the original body.
+  const init: RequestInit & { duplex: 'half' } = {
+    method: original.method,
+    headers: original.headers,
+    signal: original.signal,
+    body: checked,
+    duplex: 'half',
+  }
+  c.req.raw = new Request(original.url, init)
   await next()
   if (refusal !== undefined) {
-    // Drop the reader's answer, headers included, so the refusal's response replaces it.
+    // Drop the reader's answer, headers included, so the refusal's response replaces it; a
+    // streamed one is cancelled. finalized goes back so the error handler can set headers.
+    c.res.body?.cancel().catch(() => {})
     c.res = undefined
+    c.finalized = false
     throw refusal
   }
 }
@@ -89,6 +115,8 @@ export async function checkBodyAsRead(c: Context, next: Next, check: BodyCheck):
  */
 export function apiBodyLimit(): MiddlewareHandler {
   return createMiddleware(async (c, next) => {
+    // GET and HEAD carry no body to read, whatever their headers say.
+    if (c.req.method === 'GET' || c.req.method === 'HEAD') return next()
     let maxSize = DEFAULT_BODY_LIMIT
     for (const { handler } of matchedRoutes(c)) {
       const declared = (handler as { [DECLARED]?: number })[DECLARED]

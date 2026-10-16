@@ -458,6 +458,18 @@ describe('streamed request bodies', () => {
       }),
       async (c) => c.json({ bytes: (await c.req.arrayBuffer()).byteLength }, 200),
     )
+    // A handler that swallows a failed read and answers on its own (what routes must not do).
+    app.put('/api/v1/uploads', caller, async (c) => {
+      try {
+        await c.req.arrayBuffer()
+        return c.json({ ok: true }, 200)
+      } catch {
+        return new Response('{"error":"swallowed"}', {
+          status: 400,
+          headers: { 'content-type': 'application/json', 'x-handler': 'swallowed' },
+        })
+      }
+    })
   }
   const principal = {
     kind: 'api_key' as const,
@@ -547,6 +559,23 @@ describe('streamed request bodies', () => {
     expect(await (await send('DELETE', 'x'.repeat(MAX_BODY_BYTES)).res).json()).toEqual({
       bytes: MAX_BODY_BYTES,
     })
+  })
+
+  it("replaces a handler's own answer to a refused read, headers included", async () => {
+    const res = await send('PUT', 'x'.repeat(MAX_BODY_BYTES + 1)).res
+    expect(res.status).toBe(413)
+    expect(await res.json()).toEqual({ error: 'payload_too_large' })
+    expect(res.headers.get('x-handler')).toBeNull()
+  })
+
+  it('leaves GET and HEAD alone whatever their Content-Length says', async () => {
+    for (const method of ['GET', 'HEAD']) {
+      const res = await app.request('/api/health', {
+        method,
+        headers: { 'content-length': String(LIMIT + 1) },
+      })
+      expect(res.status, method).toBe(200)
+    }
   })
 
   it('applies the JSON text guard while the route reads the body', async () => {
