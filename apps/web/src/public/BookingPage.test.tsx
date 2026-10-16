@@ -1,0 +1,618 @@
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { fakeApi, json, renderApp } from '../test/fake-api.tsx'
+import {
+  ALL_QUESTIONS,
+  booking,
+  EVENT,
+  eventRoutes,
+  slotsAnswer,
+  TOKEN,
+} from '../test/public-fixtures.ts'
+
+// The visitor's zone, language and clock, as the browser would report them.
+const env = vi.hoisted(() => ({
+  zone: 'America/New_York',
+  locale: 'en-US',
+  now: Date.parse('2026-11-01T04:30:00Z'), // 00:30 EDT on Sunday, November 1
+}))
+vi.mock('./env.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./env.ts')>()),
+  detectTimeZone: () => env.zone,
+  preferredLocale: () => env.locale,
+  now: () => env.now,
+}))
+
+beforeEach(() => {
+  env.zone = 'America/New_York'
+  env.locale = 'en-US'
+  env.now = Date.parse('2026-11-01T04:30:00Z')
+})
+
+/** Narrow no-break spaces from Intl ("9:00 AM") as plain spaces. */
+const plain = (text: string | null | undefined) =>
+  (text ?? '').replace(/[\u2009\u202f\u00a0]/g, ' ')
+const slotButtons = () =>
+  within(screen.getByRole('list', { name: /^Times on/ }))
+    .getAllByRole('button')
+    .map((b) => plain(b.textContent))
+const day = (name: RegExp | string) => screen.findByRole('button', { name })
+
+// New York falls back from EDT to EST at 02:00 on November 1, 2026.
+const DST_SLOTS = [
+  '2026-11-01T05:30:00Z', // 01:30 EDT
+  '2026-11-01T06:30:00Z', // 01:30 EST, the same wall time an hour later
+  '2026-11-02T14:00:00Z', // 09:00 EST on Monday the 2nd
+  '2026-11-03T03:30:00Z', // 22:30 EST on Monday the 2nd (already the 3rd in UTC)
+  '2026-11-02T10:30:00Z', // 05:30 EST on the 2nd; 00:30 on the 3rd at UTC+14
+]
+
+async function chooseSlot(user: ReturnType<typeof userEvent.setup>, dayName: RegExp, time: string) {
+  await user.click(await day(dayName))
+  await user.click(screen.getByRole('button', { name: time }))
+}
+
+describe('the booking page', () => {
+  it('shows the event and offers times in the visitor’s zone across a DST change', async () => {
+    const user = userEvent.setup()
+    const api = fakeApi(eventRoutes(EVENT, DST_SLOTS))
+    renderApp('/ada/intro')
+
+    expect(await screen.findByRole('heading', { level: 1, name: 'Intro call' })).toBeDefined()
+    expect(screen.getByText('Ada Lovelace')).toBeDefined()
+    expect(screen.getByText('30 min')).toBeDefined()
+    expect(screen.getByText('Phone call')).toBeDefined()
+    expect(screen.getByText('A first conversation.')).toBeDefined()
+    expect(screen.getByRole('heading', { name: 'November 2026' })).toBeDefined()
+    // The zone is shown with its offset.
+    expect(plain(screen.getByRole('button', { name: /Time zone/ }).textContent)).toContain(
+      'America/New York',
+    )
+
+    expect(await day('Sunday, November 1, available')).toBeDefined()
+    expect(await day('Monday, November 2, available')).toBeDefined()
+    // 03:30Z on the 3rd is still the 2nd in New York.
+    expect(await day('Tuesday, November 3, no times available')).toBeDefined()
+
+    await user.click(await day(/November 1, available/))
+    // The wall time that happens twice is told apart by its zone abbreviation.
+    expect(slotButtons()).toEqual(['1:30 AM EDT', '1:30 AM EST'])
+    await user.click(await day(/November 2, available/))
+    expect(slotButtons()).toEqual(['5:30 AM', '9:00 AM', '10:30 PM'])
+    expect(screen.getByText(/3 times available on Monday, November 2/)).toBeDefined()
+
+    // One request covers the month in any zone: from now to the UTC month's end plus 14 hours
+    // and the meeting's length.
+    const requests = api.to('GET /api/v1/public/ada/intro/slots')
+    expect(requests).toHaveLength(1)
+    const query = new URL(requests[0]?.path ?? '', 'http://x').searchParams
+    expect(query.get('start')).toBe('2026-11-01T04:30:00.000Z')
+    expect(query.get('end')).toBe('2026-12-01T14:30:00.000Z')
+  })
+
+  it('regroups the same slots for a zone far from UTC without asking again', async () => {
+    const user = userEvent.setup()
+    env.zone = 'Pacific/Kiritimati' // UTC+14: already 18:30 on November 1
+    const api = fakeApi(eventRoutes(EVENT, DST_SLOTS))
+    renderApp('/ada/intro')
+
+    // 10:30Z and 14:00Z on the 2nd are 00:30 and 04:00 on the 3rd here, 03:30Z on the 3rd 17:30.
+    await user.click(await day('Tuesday, November 3, available'))
+    expect(slotButtons()).toEqual(['12:30 AM', '4:00 AM', '5:30 PM'])
+    expect(plain(screen.getByRole('button', { name: /Time zone/ }).textContent)).toContain(
+      'GMT+14:00',
+    )
+
+    // Switch to UTC through the searchable list.
+    await user.click(screen.getByRole('button', { name: /Time zone/ }))
+    const search = screen.getByRole('combobox', { name: 'Search time zones' })
+    await waitFor(() => expect(document.activeElement).toBe(search))
+    await user.type(search, 'utc')
+    await user.keyboard('{Enter}')
+    expect(plain(screen.getByRole('button', { name: /Time zone/ }).textContent)).toContain('UTC')
+    // Now the 2nd holds them, and the 3rd only the 03:30Z slot.
+    await user.click(await day('Monday, November 2, available'))
+    expect(slotButtons()).toEqual(['10:30 AM', '2:00 PM'])
+    expect(api.to('GET /api/v1/public/ada/intro/slots')).toHaveLength(1)
+  })
+
+  it('finds zones by city or offset and closes with Escape', async () => {
+    const user = userEvent.setup()
+    fakeApi(eventRoutes(EVENT, DST_SLOTS))
+    renderApp('/ada/intro')
+    const toggle = await screen.findByRole('button', { name: /Time zone/ })
+    await user.click(toggle)
+    const search = screen.getByRole('combobox', { name: 'Search time zones' })
+    await user.type(search, 'kolkata')
+    const options = within(screen.getByRole('listbox', { name: 'Time zones' })).getAllByRole(
+      'option',
+    )
+    expect(options.map((o) => o.textContent)).toEqual(['Asia/KolkataGMT+05:30'])
+    await user.clear(search)
+    await user.type(search, 'gmt+05:45')
+    expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual([
+      'Asia/KathmanduGMT+05:45',
+    ])
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('combobox')).toBeNull()
+    await waitFor(() => expect(document.activeElement).toBe(toggle))
+  })
+
+  it('moves through the calendar with the keyboard', async () => {
+    const user = userEvent.setup()
+    const api = fakeApi(eventRoutes(EVENT, DST_SLOTS))
+    renderApp('/ada/intro')
+    const first = await day(/November 1, available/)
+    // One tab stop: today.
+    expect(first.tabIndex).toBe(0)
+    first.focus()
+    await user.keyboard('{ArrowRight}')
+    expect(document.activeElement?.getAttribute('aria-label')).toMatch(/^Monday, November 2/)
+    await user.keyboard('{ArrowDown}')
+    expect(document.activeElement?.getAttribute('aria-label')).toMatch(/^Monday, November 9/)
+    await user.keyboard('{End}')
+    expect(document.activeElement?.getAttribute('aria-label')).toMatch(/^Saturday, November 14/)
+    await user.keyboard('{Home}')
+    expect(document.activeElement?.getAttribute('aria-label')).toMatch(/^Sunday, November 8/)
+    // Before the first day of the current month nothing happens.
+    await user.keyboard('{PageUp}')
+    expect(document.activeElement?.getAttribute('aria-label')).toMatch(/^Sunday, November 8/)
+    await user.keyboard('{PageDown}')
+    expect(await screen.findByRole('heading', { name: 'December 2026' })).toBeDefined()
+    await waitFor(() =>
+      expect(document.activeElement?.getAttribute('aria-label')).toMatch(/^Tuesday, December 8/),
+    )
+    expect(api.to('GET /api/v1/public/ada/intro/slots')).toHaveLength(2)
+    await user.keyboard('{PageUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowUp}{ArrowRight}')
+    expect(document.activeElement?.getAttribute('aria-label')).toMatch(/^Monday, November 2/)
+    await user.keyboard('{Enter}')
+    expect(slotButtons()).toEqual(['5:30 AM', '9:00 AM', '10:30 PM'])
+  })
+
+  it('keeps a long meeting that starts on the month’s last day in a zone behind UTC', async () => {
+    const user = userEvent.setup()
+    env.zone = 'Pacific/Pago_Pago' // UTC-11
+    env.now = Date.parse('2026-11-20T00:00:00Z')
+    // 09:00–17:00 UTC on December 1 starts at 22:00 on November 30 in Pago Pago.
+    fakeApi(eventRoutes({ ...EVENT, durationMinutes: 480 }, ['2026-12-01T09:00:00Z']))
+    renderApp('/ada/intro')
+    await user.click(await day('Monday, November 30, available'))
+    expect(slotButtons()).toEqual(['10:00 PM'])
+    // December does not show it again on its UTC day.
+    await user.click(screen.getByRole('button', { name: 'Next month' }))
+    expect(await screen.findByRole('heading', { name: 'December 2026' })).toBeDefined()
+    expect(await day('Tuesday, December 1, no times available')).toBeDefined()
+  })
+
+  it('keeps a meeting that starts on the 1st far ahead of UTC, still the month before there', async () => {
+    const user = userEvent.setup()
+    env.zone = 'Pacific/Kiritimati' // UTC+14
+    env.now = Date.parse('2026-11-25T00:00:00Z')
+    fakeApi(
+      eventRoutes({ ...EVENT, durationMinutes: 480 }, [
+        '2026-11-30T09:00:00Z', // 23:00 on November 30 there
+        '2026-11-30T10:00:00Z', // 00:00 on December 1 there
+      ]),
+    )
+    renderApp('/ada/intro')
+    await user.click(await day('Monday, November 30, available'))
+    expect(slotButtons()).toEqual(['11:00 PM'])
+    await user.click(screen.getByRole('button', { name: 'Next month' }))
+    await user.click(await day('Tuesday, December 1, available'))
+    expect(slotButtons()).toEqual(['12:00 AM'])
+  })
+
+  it.each([
+    // fa-IR defaults to the Persian calendar (2 November 2026 is 11 Aban 1405), th-TH to the
+    // Buddhist era (2569); the grid and every label must show the same Gregorian days.
+    ['fa-IR', 'نوامبر ۲۰۲۶', '۲', 'دوشنبه ۲ نوامبر ۲۰۲۶', /آبان|۱۴۰۵/],
+    ['th-TH', 'พฤศจิกายน 2026', '2', 'วันจันทร์ที่ 2 พฤศจิกายน 2026', /2569/],
+  ])(
+    'labels days in the Gregorian calendar for %s, from the grid to the confirmation',
+    async (locale, month, digit, date, otherCalendar) => {
+      const user = userEvent.setup()
+      env.locale = locale
+      fakeApi({
+        ...eventRoutes(EVENT, DST_SLOTS),
+        'POST /api/v1/public/ada/intro/bookings': () =>
+          json(201, { booking: booking(), manageToken: TOKEN }),
+      })
+      renderApp('/ada/intro')
+      expect(await screen.findByRole('heading', { name: month })).toBeDefined()
+      const nov2 = await waitFor(() => {
+        const button = document.querySelector<HTMLButtonElement>('[data-day="2026-11-02"]')
+        expect(button?.getAttribute('aria-label')).toMatch(/available$/)
+        return button as HTMLButtonElement
+      })
+      expect(nov2.textContent).toBe(digit)
+      expect(nov2.getAttribute('aria-label')).toContain(month.split(' ')[0])
+      await user.click(nov2)
+      expect(document.querySelector('.slots-day')?.textContent).toContain(month.split(' ')[0])
+      const times = within(screen.getByRole('list', { name: /^Times on/ })).getAllByRole('button')
+      await user.click(times[1] as HTMLElement) // 14:00 UTC
+      expect(document.body.textContent).toContain(date)
+      await user.type(screen.getByLabelText('Your name'), 'Grace Hopper')
+      await user.type(screen.getByLabelText('Email'), 'grace@example.com')
+      await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+      expect(await screen.findByRole('heading', { name: 'You’re booked' })).toBeDefined()
+      expect(document.body.textContent).toContain(date)
+      expect(document.body.textContent).not.toMatch(otherCalendar)
+    },
+  )
+
+  it('moves on to the next month when this one has nothing left, and says so when none has', async () => {
+    fakeApi(eventRoutes(EVENT, ['2026-12-15T15:00:00Z']))
+    renderApp('/ada/intro')
+    expect(await screen.findByRole('heading', { name: 'December 2026' })).toBeDefined()
+    expect(await day('Tuesday, December 15, available')).toBeDefined()
+  })
+
+  it('says when no times are available', async () => {
+    const user = userEvent.setup()
+    fakeApi(eventRoutes(EVENT, []))
+    renderApp('/ada/intro')
+    // November and the two months after it are empty: the page stops in January.
+    expect(await screen.findByRole('heading', { name: 'January 2027' })).toBeDefined()
+    expect(await screen.findByText('No available times this month.')).toBeDefined()
+    await user.click(screen.getByRole('button', { name: 'Show next month' }))
+    expect(await screen.findByRole('heading', { name: 'February 2027' })).toBeDefined()
+  })
+
+  it('checks the form as the API would before sending it', async () => {
+    const user = userEvent.setup()
+    const api = fakeApi(eventRoutes({ ...EVENT, questions: ALL_QUESTIONS }, DST_SLOTS))
+    renderApp('/ada/intro')
+    await chooseSlot(user, /November 2, available/, '9:00 AM')
+
+    const details = await screen.findByRole('heading', { name: 'Your details' })
+    await waitFor(() => expect(document.activeElement).toBe(details))
+    // The chosen time, in the visitor's zone.
+    expect(plain(screen.getByText(/Monday, November 2, 2026/).parentElement?.textContent)).toMatch(
+      /9:00 – 9:30 AM.*America\/New York \(GMT-05:00\)/,
+    )
+    // All six kinds of question.
+    expect(screen.getByLabelText('Topic').tagName).toBe('INPUT')
+    expect(screen.getByLabelText(/Anything else\?/).tagName).toBe('TEXTAREA')
+    expect(screen.getByLabelText(/Phone/)).toHaveProperty('type', 'tel')
+    expect(screen.getByLabelText('Team size').tagName).toBe('SELECT')
+    expect(screen.getByRole('group', { name: /Tools/ })).toBeDefined()
+    expect(screen.getByLabelText('I agree to the terms')).toHaveProperty('type', 'checkbox')
+
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+    expect(api.to('POST /api/v1/public/ada/intro/bookings')).toHaveLength(0)
+    const name = screen.getByLabelText('Your name')
+    expect(document.activeElement).toBe(name)
+    expect(name.getAttribute('aria-invalid')).toBe('true')
+    expect(screen.getByText('Enter your name.')).toBeDefined()
+    expect(screen.getByText('Enter an email address.')).toBeDefined()
+    expect(screen.getByText('This answer is required.')).toBeDefined()
+    expect(screen.getByText('Choose an option.')).toBeDefined()
+    expect(screen.getByText('Check this box to continue.')).toBeDefined()
+
+    // Errors follow corrections.
+    await user.type(name, 'Grace Hopper')
+    expect(screen.queryByText('Enter your name.')).toBeNull()
+    await user.type(screen.getByLabelText('Email'), 'grace@example')
+    expect(screen.getByText(/Enter a valid email address/)).toBeDefined()
+    await user.type(screen.getByLabelText(/Phone/), 'call me')
+    expect(screen.getByText(/Enter a phone number/)).toBeDefined()
+    fireEvent.change(screen.getByLabelText('Topic'), { target: { value: 'x'.repeat(501) } })
+    expect(screen.getByText('Use at most 500 characters.')).toBeDefined()
+
+    // Up to ten guests.
+    for (let i = 0; i < 10; i++)
+      await user.click(screen.getByRole('button', { name: 'Add a guest' }))
+    expect(screen.queryByRole('button', { name: 'Add a guest' })).toBeNull()
+    expect(screen.getByText('You can add up to 10 guests.')).toBeDefined()
+    expect(screen.getAllByRole('button', { name: /^Remove guest/ })).toHaveLength(10)
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+    expect(api.to('POST /api/v1/public/ada/intro/bookings')).toHaveLength(0)
+    expect(document.activeElement).toBe(screen.getByLabelText('Email'))
+  })
+
+  it('books with one Idempotency-Key per attempt and shows the confirmation', async () => {
+    const user = userEvent.setup()
+    const questions = ALL_QUESTIONS.slice(0, 1)
+    let attempts = 0
+    const made = booking({
+      attendees: [
+        {
+          name: 'Grace Hopper',
+          email: 'grace@example.com',
+          timeZone: 'America/New_York',
+          locale: 'en-US',
+          isBooker: true,
+        },
+        {
+          name: 'Alan',
+          email: 'alan@example.com',
+          timeZone: 'America/New_York',
+          locale: null,
+          isBooker: false,
+        },
+      ],
+    })
+    const api = fakeApi({
+      ...eventRoutes({ ...EVENT, questions }, DST_SLOTS),
+      'POST /api/v1/public/ada/intro/bookings': () => {
+        attempts += 1
+        // The first answer is lost on the way back; the retry is answered as a replay.
+        if (attempts === 1) throw new TypeError('Failed to fetch')
+        return json(attempts === 2 ? 200 : 201, {
+          booking: made,
+          manageToken: attempts === 2 ? null : TOKEN,
+        })
+      },
+    })
+    renderApp('/ada/intro')
+    await chooseSlot(user, /November 2, available/, '9:00 AM')
+    await user.type(screen.getByLabelText('Your name'), '  Grace Hopper ')
+    await user.type(screen.getByLabelText('Email'), 'grace@example.com')
+    await user.type(screen.getByLabelText('Topic'), ' Compilers ')
+    await user.click(screen.getByRole('button', { name: 'Add a guest' }))
+    await user.type(screen.getByLabelText('Guest 1 name'), 'Alan')
+    await user.type(screen.getByLabelText('Guest 1 email'), 'alan@example.com')
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+
+    expect(await screen.findByText(/Your booking is not confirmed yet/)).toBeDefined()
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+    expect(await screen.findByRole('heading', { name: 'You’re booked' })).toBeDefined()
+
+    const posts = api.to('POST /api/v1/public/ada/intro/bookings')
+    expect(posts).toHaveLength(2)
+    expect(posts[0]?.body).toEqual({
+      start: '2026-11-02T14:00:00.000Z',
+      invitee: {
+        name: 'Grace Hopper',
+        email: 'grace@example.com',
+        timeZone: 'America/New_York',
+        locale: 'en-US',
+      },
+      guests: [{ name: 'Alan', email: 'alan@example.com' }],
+      responses: { topic: 'Compilers' },
+    })
+    const key = posts[0]?.headers.get('idempotency-key')
+    expect(key).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+    // The retry of the same request reuses the key.
+    expect(posts[1]?.headers.get('idempotency-key')).toBe(key)
+    expect(posts[1]?.body).toEqual(posts[0]?.body)
+    // A replay has no manage token to show.
+    expect(screen.getByText(/already made by an earlier attempt/)).toBeDefined()
+    expect(screen.queryByLabelText(/Your link to change or cancel/)).toBeNull()
+  })
+
+  it('starts a new attempt when the request changes, and shows the manage link once', async () => {
+    const user = userEvent.setup()
+    let attempts = 0
+    const api = fakeApi({
+      ...eventRoutes(EVENT, DST_SLOTS),
+      'POST /api/v1/public/ada/intro/bookings': () => {
+        attempts += 1
+        if (attempts === 1) return json(503, { error: 'internal_error' })
+        return json(201, { booking: booking(), manageToken: TOKEN })
+      },
+    })
+    renderApp('/ada/intro')
+    await chooseSlot(user, /November 2, available/, '9:00 AM')
+    await user.type(screen.getByLabelText('Your name'), 'Grace Hopper')
+    await user.type(screen.getByLabelText('Email'), 'grace@example.com')
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+    expect(await screen.findByText(/Something went wrong on our side/)).toBeDefined()
+    await user.clear(screen.getByLabelText('Email'))
+    await user.type(screen.getByLabelText('Email'), 'grace.hopper@example.com')
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+
+    const heading = await screen.findByRole('heading', { name: 'You’re booked' })
+    await waitFor(() => expect(document.activeElement).toBe(heading))
+    const [first, second] = api.to('POST /api/v1/public/ada/intro/bookings')
+    expect(second?.headers.get('idempotency-key')).not.toBe(first?.headers.get('idempotency-key'))
+
+    // The details, in the visitor's zone.
+    expect(plain(screen.getByText(/Monday, November 2, 2026/).parentElement?.textContent)).toMatch(
+      /9:00 – 9:30 AM \(America\/New York, GMT-05:00\)/,
+    )
+    expect(screen.getByRole('link', { name: '+49 30 1234567' }).getAttribute('href')).toBe(
+      'tel:+49301234567',
+    )
+    const link = screen.getByLabelText<HTMLInputElement>(/Your link to change or cancel/)
+    expect(link.value).toBe(`${window.location.origin}/booking#token=${TOKEN}`)
+    // Calendar links carry the meeting, never the manage token.
+    const ics = screen.getByRole('link', { name: 'Download .ics file' }).getAttribute('href') ?? ''
+    expect(ics).toMatch(/^data:text\/calendar/)
+    expect(decodeURIComponent(ics)).toContain('UID:01900000-0000-7000-8000-0000000000b1@hourmere')
+    for (const name of ['Download .ics file', 'Google Calendar', 'Outlook']) {
+      const href = screen.getByRole('link', { name }).getAttribute('href') ?? ''
+      expect(decodeURIComponent(href)).not.toContain(TOKEN)
+    }
+    expect(screen.getByRole('link', { name: 'Google Calendar' }).getAttribute('rel')).toContain(
+      'noreferrer',
+    )
+  })
+
+  it('puts the server’s objections on the fields they are about', async () => {
+    const user = userEvent.setup()
+    const answers = [
+      json(400, { error: 'invalid_request', message: 'invitee.email: Invalid email address' }),
+      json(400, { error: 'invalid_responses', message: 'Question "topic" is required' }),
+      json(429, { error: 'rate_limited' }),
+    ]
+    fakeApi({
+      ...eventRoutes({ ...EVENT, questions: ALL_QUESTIONS.slice(0, 1) }, DST_SLOTS),
+      'POST /api/v1/public/ada/intro/bookings': () => {
+        const answer = answers.shift() as Response
+        if (answer.status === 429) answer.headers.set('Retry-After', '30')
+        return answer
+      },
+    })
+    renderApp('/ada/intro')
+    await chooseSlot(user, /November 2, available/, '9:00 AM')
+    await user.type(screen.getByLabelText('Your name'), 'Grace Hopper')
+    await user.type(screen.getByLabelText('Email'), "o'grace@example.com")
+    await user.type(screen.getByLabelText('Topic'), 'Compilers')
+    const confirm = () => user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+
+    await confirm()
+    const email = screen.getByLabelText('Email')
+    await waitFor(() => expect(email.getAttribute('aria-invalid')).toBe('true'))
+    await waitFor(() => expect(document.activeElement).toBe(email))
+    expect(screen.getByText(/Enter a valid email address/)).toBeDefined()
+
+    await confirm()
+    expect(await screen.findByText('“Topic” is required')).toBeDefined()
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Topic')))
+
+    await confirm()
+    expect(await screen.findByText(/Try again in 30 seconds/)).toBeDefined()
+  })
+
+  it('sends people back to pick another time when theirs was just taken', async () => {
+    const user = userEvent.setup()
+    let taken = false
+    const api = fakeApi({
+      ...eventRoutes(EVENT, DST_SLOTS),
+      'GET /api/v1/public/ada/intro/slots': (call) =>
+        slotsAnswer(taken ? DST_SLOTS.filter((s) => s !== '2026-11-02T14:00:00Z') : DST_SLOTS)(
+          call,
+        ),
+      'POST /api/v1/public/ada/intro/bookings': ({ body }) => {
+        if ((body as { start: string }).start === '2026-11-02T14:00:00.000Z') {
+          taken = true
+          return json(409, { error: 'slot_taken', message: 'Someone else just booked this time' })
+        }
+        return json(201, {
+          booking: booking({ start: '2026-11-02T10:30:00.000Z' }),
+          manageToken: TOKEN,
+        })
+      },
+    })
+    renderApp('/ada/intro')
+    await chooseSlot(user, /November 2, available/, '9:00 AM')
+    await user.type(screen.getByLabelText('Your name'), 'Grace Hopper')
+    await user.type(screen.getByLabelText('Email'), 'grace@example.com')
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+
+    expect(await screen.findByText(/Someone else just booked that time/)).toBeDefined()
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Pick a time' })),
+    )
+    await waitFor(() => expect(api.to('GET /api/v1/public/ada/intro/slots')).toHaveLength(2))
+    await user.click(await day(/November 2, available/))
+    expect(slotButtons()).toEqual(['5:30 AM', '10:30 PM'])
+    await user.click(screen.getByRole('button', { name: '5:30 AM' }))
+    // What they typed is still there.
+    expect(screen.getByLabelText<HTMLInputElement>('Your name').value).toBe('Grace Hopper')
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+    expect(await screen.findByRole('heading', { name: 'You’re booked' })).toBeDefined()
+    const posts = api.to('POST /api/v1/public/ada/intro/bookings')
+    expect(posts[1]?.headers.get('idempotency-key')).not.toBe(
+      posts[0]?.headers.get('idempotency-key'),
+    )
+  })
+
+  it('shows a not-found page for an unknown event, and asks nothing for impossible addresses', async () => {
+    fakeApi({
+      'GET /api/v1/public/ada/nope': () =>
+        json(404, { error: 'event_type_not_found', message: 'No such event type' }),
+    })
+    renderApp('/ada/nope')
+    expect(
+      await screen.findByRole('heading', { name: 'This booking page doesn’t exist' }),
+    ).toBeDefined()
+    // Not a handle: no request at all (an unexpected one would fail the test).
+    renderApp('/ada_l/intro')
+    expect(
+      await screen.findAllByRole('heading', { name: 'This booking page doesn’t exist' }),
+    ).toHaveLength(2)
+  })
+
+  it('offers to try again when the event cannot be loaded', async () => {
+    const user = userEvent.setup()
+    let fail = true
+    fakeApi({
+      ...eventRoutes(EVENT, DST_SLOTS),
+      'GET /api/v1/public/ada/intro': () => {
+        if (fail) {
+          fail = false
+          throw new TypeError('Failed to fetch')
+        }
+        return json(200, EVENT)
+      },
+    })
+    renderApp('/ada/intro')
+    expect(await screen.findByText(/Can't reach Hourmere/)).toBeDefined()
+    await user.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(await screen.findByRole('heading', { name: 'Intro call' })).toBeDefined()
+  })
+
+  it('keeps slot lists whole when the server asks for a shorter range', async () => {
+    const user = userEvent.setup()
+    // A one-minute step: the server refuses a whole month (range_too_long).
+    const api = fakeApi({
+      ...eventRoutes(EVENT),
+      'GET /api/v1/public/ada/intro/slots': (call) => {
+        const query = new URL(call.path, 'http://x').searchParams
+        const days =
+          (Date.parse(query.get('end') ?? '') - Date.parse(query.get('start') ?? '')) / 86_400_000
+        if (days > 13) return json(400, { error: 'range_too_long' })
+        return slotsAnswer(['2026-11-16T14:50:00Z'], 30)(call)
+      },
+    })
+    renderApp('/ada/intro')
+    await user.click(await day('Monday, November 16, available'))
+    expect(slotButtons()).toEqual(['9:50 AM'])
+    expect(api.to('GET /api/v1/public/ada/intro/slots').length).toBeGreaterThan(2)
+  })
+})
+
+describe('the host page', () => {
+  it('lists the host’s event types and links to their booking pages', async () => {
+    const user = userEvent.setup()
+    fakeApi({
+      'GET /api/v1/public/ada': () =>
+        json(200, {
+          handle: 'ada',
+          host: { name: 'Ada Lovelace', timeZone: 'Europe/Berlin' },
+          eventTypes: [
+            {
+              slug: 'intro',
+              title: 'Intro call',
+              description: null,
+              durationMinutes: 30,
+              location: { kind: 'zoom' },
+            },
+            {
+              slug: 'deep-dive',
+              title: 'Deep dive',
+              description: 'Bring code.',
+              durationMinutes: 90,
+              location: null,
+            },
+          ],
+        }),
+      ...eventRoutes(EVENT, DST_SLOTS),
+    })
+    renderApp('/Ada')
+    expect(await screen.findByRole('heading', { name: 'Ada Lovelace' })).toBeDefined()
+    expect(screen.getByTestId('location').textContent).toBe('/ada')
+    const deepDive = screen.getByRole('link', { name: /Deep dive/ })
+    expect(deepDive.getAttribute('href')).toBe('/ada/deep-dive')
+    expect(deepDive.textContent).toContain('1 h 30 min')
+    expect(screen.getByRole('link', { name: /Intro call/ }).textContent).toContain('30 min · Zoom')
+    await user.click(screen.getByRole('link', { name: /Intro call/ }))
+    expect(await screen.findByRole('heading', { level: 1, name: 'Intro call' })).toBeDefined()
+  })
+
+  it('says when a host has nothing to book, and when there is no such host', async () => {
+    fakeApi({
+      'GET /api/v1/public/empty': () =>
+        json(200, { handle: 'empty', host: { name: 'Empty', timeZone: 'UTC' }, eventTypes: [] }),
+      'GET /api/v1/public/nobody': () =>
+        json(404, { error: 'host_not_found', message: 'No such booking page' }),
+    })
+    renderApp('/empty')
+    expect(await screen.findByText('Empty has no events you can book right now.')).toBeDefined()
+    renderApp('/nobody')
+    expect(await screen.findByRole('heading', { name: 'Page not found' })).toBeDefined()
+  })
+})

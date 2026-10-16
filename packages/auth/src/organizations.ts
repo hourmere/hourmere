@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto'
+import { isReservedName } from '@hourmere/core'
 import type { Db } from '@hourmere/db'
 import { APIError } from 'better-auth/api'
 import type { OrganizationOptions } from 'better-auth/plugins/organization'
@@ -26,16 +27,24 @@ export function personalOrganizationName(user: { name: string; email: string }):
   return user.email.slice(0, user.email.lastIndexOf('@')) || user.email
 }
 
-/** Lowercase ASCII letters, digits and single hyphens, at most 32 characters. */
+/** Appended to a slug that would be a reserved name (see @hourmere/core's RESERVED_NAMES). */
+export const RESERVED_SLUG_SUFFIX = '-user'
+
+/**
+ * Lowercase ASCII letters, digits and single hyphens, at most 32 characters. Never a reserved
+ * name: an organization's slug may become a public path (/{slug}), like a profile handle, so
+ * `Admin` becomes `admin-user` rather than `admin`.
+ */
 export function slugify(value: string): string {
-  const slug = value
-    .normalize('NFKD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .slice(0, 32)
-    .replace(/^-+|-+$/g, '')
-  return slug || 'user'
+  const slug =
+    value
+      .normalize('NFKD')
+      .replace(/[̀-ͯ]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .slice(0, 32)
+      .replace(/^-+|-+$/g, '') || 'user'
+  return isReservedName(slug) ? `${slug}${RESERVED_SLUG_SUFFIX}` : slug
 }
 
 const ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789'
@@ -45,10 +54,12 @@ function randomSuffix(length = 6): string {
   return Array.from(randomBytes(length), (b) => ALPHABET[b % ALPHABET.length]).join('')
 }
 
-/** The plain slug first, then the slug with random suffixes. */
+/** The plain slug first, then the slug with random suffixes; never a reserved name. */
 export function* slugCandidates(base: string, attempts = 10): Generator<string> {
-  yield base
-  for (let i = 1; i < attempts; i++) yield `${base}-${randomSuffix()}`
+  for (let i = 0; i < attempts; i++) {
+    const candidate = i === 0 ? base : `${base}-${randomSuffix()}`
+    if (!isReservedName(candidate)) yield candidate
+  }
 }
 
 /**

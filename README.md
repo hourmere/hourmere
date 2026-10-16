@@ -58,6 +58,17 @@ the background jobs (booking emails); to run them in a container of their own, s
 `HOURMERE_ROLE=web` and enable the `worker` service in `docker-compose.yml` (same image,
 `HOURMERE_ROLE=worker`). Give containers about 30 seconds to stop, so running jobs can finish. Put a reverse proxy with TLS in front of it, and set `TRUSTED_PROXIES` to the proxy's address as the app sees it (for a proxy on the host or on the compose network that is the Docker network, e.g. `172.16.0.0/12`), so rate limits apply per visitor rather than to everyone behind the proxy.
 
+Responses carry security headers: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
+a `Referrer-Policy`, and on pages a Content-Security-Policy that lets only Hourmere's own
+scripts, styles and requests run. When `PUBLIC_URL` is https, browsers are also told to use
+only https for that host, for a year (`HSTS_MAX_AGE`). Clients that send too slowly are
+disconnected: 20 s to send a request's headers and 60 s for the whole request
+(`HTTP_HEADERS_TIMEOUT`, `HTTP_REQUEST_TIMEOUT`). Idle connections stay open for 125 s
+(`HTTP_KEEP_ALIVE_TIMEOUT`): keep it above your reverse proxy's idle timeout for connections to
+the app, or the proxy may reuse a connection the app has just closed and answer 502. The
+default is above the usual ones: nginx's upstream keepalive and AWS ALB 60 s, Traefik 90 s,
+Caddy 120 s.
+
 People sign in with a link sent by email (no passwords), or with Google or Microsoft once their
 client ids are set in `.env`. Accounts are only created for email addresses the provider
 confirms: for Microsoft, add the optional ID token claims `verified_primary_email` and

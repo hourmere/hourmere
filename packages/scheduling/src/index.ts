@@ -7,6 +7,7 @@ export {
   buildAvailabilityInput,
   findSlots,
   getPublicEventType,
+  getPublicHost,
   LOCATION_KINDS,
   type Location,
   type LocationKind,
@@ -14,6 +15,8 @@ export {
   MAX_SLOT_CANDIDATES,
   MAX_SLOT_RANGE_DAYS,
   type PublicEventType,
+  type PublicEventTypeSummary,
+  type PublicHost,
   type SlotView,
 } from './availability.ts'
 export {
@@ -64,6 +67,7 @@ export {
   updateEventType,
 } from './event-types.ts'
 export { validTimeZone } from './internal.ts'
+export { getManagedBookingDetails, listManagedSlots, type ManagedBooking } from './manage.ts'
 export {
   getProfile,
   HANDLE_MAX_LENGTH,

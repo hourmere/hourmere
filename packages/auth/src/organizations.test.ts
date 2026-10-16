@@ -1,7 +1,12 @@
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { ensurePersonalOrganization, personalOrganizationName, slugify } from './organizations.ts'
+import {
+  ensurePersonalOrganization,
+  personalOrganizationName,
+  slugCandidates,
+  slugify,
+} from './organizations.ts'
 
 describe('personal organization names', () => {
   it('prefers the user name and falls back to the email local part', () => {
@@ -20,6 +25,26 @@ describe('personal organization names', () => {
     expect(slugify('--  --')).toBe('user')
     expect(slugify('李雷')).toBe('user')
     expect(slugify('a'.repeat(40))).toHaveLength(32)
+  })
+
+  it('never slugifies to a reserved name, whatever the case or spelling', () => {
+    expect(slugify('Admin')).toBe('admin-user')
+    expect(slugify('API')).toBe('api-user')
+    expect(slugify('Sign In')).toBe('sign-in-user')
+    expect(slugify('Event Types')).toBe('event-types-user')
+    expect(slugify('Booking!')).toBe('booking-user')
+    expect(slugify('Ádmin')).toBe('admin-user')
+    // Close to a reserved name is fine.
+    expect(slugify('Admins')).toBe('admins')
+    expect(slugify('Ada')).toBe('ada')
+  })
+
+  it('offers no reserved slug among the candidates', () => {
+    expect([...slugCandidates('support', 3)]).toEqual([
+      expect.stringMatching(/^support-[a-z0-9]{6}$/),
+      expect.stringMatching(/^support-[a-z0-9]{6}$/),
+    ])
+    expect([...slugCandidates('ada', 2)]).toEqual(['ada', expect.stringMatching(/^ada-/)])
   })
 })
 
@@ -100,6 +125,16 @@ describe.skipIf(!serverUrl)('ensurePersonalOrganization', () => {
       'taken',
       expect.stringMatching(/^taken-[a-z0-9]{6}$/),
     ])
+  })
+
+  it('gives a user named like a reserved path a slug that is not reserved', async () => {
+    const orgId = await ensurePersonalOrganization(db, await user('Support'))
+    const org = await db
+      .selectFrom('auth.organization')
+      .select('slug')
+      .where('id', '=', orgId)
+      .executeTakeFirstOrThrow()
+    expect(org.slug).toBe('support-user')
   })
 
   it('refuses a user that does not exist', async () => {

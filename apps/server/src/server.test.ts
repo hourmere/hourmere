@@ -1,6 +1,8 @@
 import { Console } from 'node:console'
 import { randomBytes } from 'node:crypto'
-import { createServer, type Socket } from 'node:net'
+import { once } from 'node:events'
+import { Server as HttpServer } from 'node:http'
+import { connect, createServer, type Socket } from 'node:net'
 import { Writable } from 'node:stream'
 import { createAuth, createAuthPool } from '@hourmere/auth'
 import { createDb, createPool } from '@hourmere/db'
@@ -10,7 +12,8 @@ import { BOOKING_NOTIFICATION_JOB, bookingNotificationJob } from '@hourmere/noti
 import { createFixtures } from '@hourmere/scheduling/testing'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { startServer } from './server.ts'
+import { type RunningServer, startServer } from './server.ts'
+import { trickle } from './slow-client-testing.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const METHODS = ['log', 'info', 'warn', 'error', 'debug', 'dir', 'dirxml'] as const
@@ -154,6 +157,143 @@ describe.skipIf(!serverUrl)('startServer', () => {
       '[auth] sign-in email not sent (code=ECONNECTION, command=CONN)',
     ])
     expect(printed.warn.filter((l) => l.includes('dropping'))).toHaveLength(1)
+  })
+
+  it('cuts off clients that send too slowly, after the configured timeouts', async () => {
+    await quietly(async () => {
+      const server = await startServer({
+        DATABASE_URL: testDb.url,
+        PORT: String(await freePort()),
+        BETTER_AUTH_SECRET: randomBytes(32).toString('base64'),
+        HTTP_HEADERS_TIMEOUT: '1',
+        HTTP_REQUEST_TIMEOUT: '2',
+      })
+      try {
+        const headers = await trickle(server.port, {
+          first: 'GET /api/health HTTP/1.1\r\nHost: localhost\r\n',
+          drip: 'X-Slow: 1\r\n',
+          everyMs: 100,
+        })
+        expect(headers.response).toMatch(/^HTTP\/1\.1 408 /)
+        // Checked every quarter of the shorter timeout; plus room for a busy machine.
+        expect(headers.closedAfterMs).toBeGreaterThanOrEqual(1000)
+        expect(headers.closedAfterMs).toBeLessThan(1000 + 250 + 500)
+
+        // A booking request whose JSON body never ends; the route waits for it to validate.
+        const body = await trickle(server.port, {
+          first:
+            'POST /api/v1/public/ada/intro/bookings HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 10000\r\n\r\n{',
+          drip: ' ',
+          everyMs: 100,
+        })
+        expect(body.response).toMatch(/^HTTP\/1\.1 408 /)
+        expect(body.closedAfterMs).toBeGreaterThanOrEqual(2000)
+        expect(body.closedAfterMs).toBeLessThan(2000 + 250 + 500)
+      } finally {
+        await server.close()
+      }
+    })
+  })
+
+  /**
+   * Closes `server` while a request is in progress on a kept-alive connection: one whole
+   * request to `path` first, then a second whose headers are finished only once close() has
+   * begun. Returns the second answer, whether the server then closed the connection, and how
+   * long after that answer close() resolved.
+   */
+  async function closeDuringRequest(server: RunningServer, path: string) {
+    const socket = connect(server.port, '127.0.0.1')
+    await once(socket, 'connect')
+    socket.setEncoding('utf8')
+    let received = ''
+    socket.on('data', (chunk) => {
+      received += chunk
+    })
+    const hungUp = once(socket, 'close')
+    socket.write(`GET ${path} HTTP/1.1\r\nHost: localhost\r\n\r\n`)
+    await vi.waitFor(() => expect(received).toMatch(/\r\n\r\n\{.*\}$/s))
+    const first = received
+    socket.write(`GET ${path} HTTP/1.1\r\nHost: localhost\r\n`)
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    const closed = server.close().then(() => Date.now())
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    socket.write('\r\n')
+    await hungUp
+    const answeredAt = Date.now()
+    const closedAt = await closed
+    return {
+      first,
+      second: received.slice(first.length),
+      closedAfterAnswerMs: closedAt - answeredAt,
+    }
+  }
+
+  it('closes once requests in progress are answered, keep-alive or not, in every role', async () => {
+    const env = { DATABASE_URL: testDb.url, BETTER_AUTH_SECRET: randomBytes(32).toString('base64') }
+    await quietly(async () => {
+      for (const role of ['all', 'worker'] as const) {
+        const server = await startServer({
+          ...env,
+          PORT: String(await freePort()),
+          HOURMERE_ROLE: role,
+        })
+        const { first, second, closedAfterAnswerMs } = await closeDuringRequest(
+          server,
+          '/api/health',
+        )
+        // Kept alive (for 125 s) before shutting down; answered and closed while shutting down.
+        expect(first, role).toMatch(/^HTTP\/1\.1 200 [\s\S]*\r\nKeep-Alive: timeout=125\r\n/)
+        expect(second, role).toMatch(/^HTTP\/1\.1 200 [\s\S]*\r\nConnection: close\r\n/)
+        expect(closedAfterAnswerMs, role).toBeLessThan(2000)
+      }
+    })
+  }, 20_000)
+
+  it('sends HSTS with the configured max-age when PUBLIC_URL is https', async () => {
+    await quietly(async () => {
+      const server = await startServer({
+        DATABASE_URL: testDb.url,
+        PORT: String(await freePort()),
+        PUBLIC_URL: 'https://hourmere.example',
+        BETTER_AUTH_SECRET: randomBytes(32).toString('base64'),
+        HSTS_MAX_AGE: '60',
+      })
+      try {
+        const res = await fetch(`http://127.0.0.1:${server.port}/api/health`)
+        expect(res.headers.get('strict-transport-security')).toBe('max-age=60')
+        await res.text()
+      } finally {
+        await server.close()
+      }
+    })
+  })
+
+  it('closes through closeServer, which sweeps idle connections and cuts off the rest', async () => {
+    // closeServer's sweep and cut-off are tested in shutdown.test.ts; this checks close()
+    // uses them (Connection: close alone covers the test above).
+    vi.resetModules()
+    const closeServer = vi.fn()
+    vi.doMock('./shutdown.ts', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('./shutdown.ts')>()
+      closeServer.mockImplementation(actual.closeServer)
+      return { ...actual, closeServer }
+    })
+    try {
+      const { startServer: start } = await import('./server.ts')
+      await quietly(async () => {
+        const server = await start({
+          DATABASE_URL: testDb.url,
+          PORT: String(await freePort()),
+          BETTER_AUTH_SECRET: randomBytes(32).toString('base64'),
+        })
+        await server.close()
+      })
+      expect(closeServer).toHaveBeenCalledOnce()
+      expect(closeServer.mock.calls[0]?.[0]).toBeInstanceOf(HttpServer)
+    } finally {
+      vi.doUnmock('./shutdown.ts')
+      vi.resetModules()
+    }
   })
 
   it('refuses to start when database connections lose the sign-up settings', async () => {
