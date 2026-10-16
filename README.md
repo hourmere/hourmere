@@ -66,9 +66,8 @@ log.
 The database enforces the sign-up rules too, using settings the app passes in the `options`
 startup parameter when it connects (`search_path` and `hourmere.*`), and it needs read
 committed isolation (Postgres's default) or serializable. Connect the app to Postgres
-directly, as the compose file does. Older PgBouncer versions refuse or drop `options`; 1.20.0
-and later pass it only with `search_path`, `hourmere.signup` and
-`hourmere.signup_allowed_domains` listed in `track_extra_parameters`. Either way the app reads
+directly, as the compose file does; connection poolers such as PgBouncer are not supported,
+since they do not pass custom startup settings like `hourmere.*` on to Postgres. The app reads
 the settings back at startup and refuses to start if they are missing.
 
 That check looks at one connection, once, at startup: a pooler slipped in later at the same
