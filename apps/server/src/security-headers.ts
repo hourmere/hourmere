@@ -30,15 +30,19 @@ export const APP_CSP = [
   "form-action 'self'",
 ].join('; ')
 
-/** HSTS_MAX_AGE's default: 180 days, renewed by every response. */
-export const DEFAULT_HSTS_MAX_AGE = 180 * 24 * 60 * 60
+/**
+ * HSTS_MAX_AGE's default: a year, renewed by every response (scanners such as Mozilla's
+ * Observatory want at least six months).
+ */
+export const DEFAULT_HSTS_MAX_AGE = 365 * 24 * 60 * 60
 
 /**
  * The Strict-Transport-Security value for an instance at `publicUrl`, or undefined when it
  * should send none: only for https on a real host name. Browsers ignore it on IP addresses,
- * and on localhost it would hold every local port to https. Without includeSubDomains or
- * preload, which would bind other hosts of the domain: the reverse proxy can add those.
- * A max-age of 0 tells browsers to forget an earlier policy.
+ * and on localhost it would hold every local port to https. Host only: includeSubDomains
+ * would bind every host below PUBLIC_URL's, which for an instance at the apex (example.com)
+ * is the whole domain, and preload goes further; the reverse proxy can add them. A max-age
+ * of 0 tells browsers to forget an earlier policy.
  */
 export function strictTransportSecurity(publicUrl: string, maxAge: number): string | undefined {
   const { protocol, hostname } = new URL(publicUrl)
@@ -52,7 +56,7 @@ export function strictTransportSecurity(publicUrl: string, maxAge: number): stri
  * Referer at all. Its secret is in the fragment, which no Referer carries anyway; this keeps
  * that true if anything secret ever ends up in its path or query.
  */
-const NO_REFERRER_PAGES = /^\/booking(\/|$)/
+const NO_REFERRER_PAGES = /^\/booking(\/|$)/i
 
 const HTML = /^text\/html/i
 
@@ -62,22 +66,31 @@ export interface SecurityHeadersOptions {
 }
 
 /**
- * Adds the headers to every response, errors and 404s included, once it is made. A header the
- * response already has is left alone: the route set it on purpose (the sign-in confirm page's
- * own CSP and no-referrer, for instance). Every response: nosniff, X-Frame-Options DENY,
- * Referrer-Policy strict-origin-when-cross-origin (no-referrer on the manage page) and, when
- * given, HSTS. HTML pages also get APP_CSP and Cross-Origin-Opener-Policy same-origin.
+ * Adds the headers to every response, errors and 404s included, once it is made. Every
+ * response gets nosniff and, when given, HSTS, whatever it says itself; it also gets
+ * X-Frame-Options DENY and Referrer-Policy strict-origin-when-cross-origin (no-referrer on the
+ * manage page) unless it has a value of its own, which the route set on purpose (the sign-in
+ * confirm page's no-referrer, for instance). HTML pages also get APP_CSP and
+ * Cross-Origin-Opener-Policy same-origin, likewise unless they have their own (the confirm
+ * page's stricter CSP). An empty value counts as none.
  */
 export function securityHeaders({ hsts }: SecurityHeadersOptions = {}): MiddlewareHandler {
   return createMiddleware(async (c, next) => {
     await next()
-    const headers = c.res.headers
-    const setDefault = (name: string, value: string) => {
-      if (!headers.has(name)) headers.set(name, value)
+    let headers = c.res.headers
+    try {
+      headers.set('X-Content-Type-Options', 'nosniff')
+    } catch {
+      // Immutable headers, as Response.redirect() and fetch() make: copy the response.
+      c.res = new Response(c.res.body, c.res)
+      headers = c.res.headers
+      headers.set('X-Content-Type-Options', 'nosniff')
     }
-    setDefault('X-Content-Type-Options', 'nosniff')
+    const setDefault = (name: string, value: string) => {
+      if (!headers.get(name)?.trim()) headers.set(name, value)
+    }
+    if (hsts) headers.set('Strict-Transport-Security', hsts)
     setDefault('X-Frame-Options', 'DENY')
-    if (hsts) setDefault('Strict-Transport-Security', hsts)
     if (HTML.test(headers.get('content-type') ?? '')) {
       setDefault('Content-Security-Policy', APP_CSP)
       setDefault('Cross-Origin-Opener-Policy', 'same-origin')

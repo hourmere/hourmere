@@ -61,7 +61,7 @@ the background jobs (booking emails); to run them in a container of their own, s
 Responses carry security headers: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
 a `Referrer-Policy`, and on pages a Content-Security-Policy that lets only Hourmere's own
 scripts, styles and requests run. When `PUBLIC_URL` is https, browsers are also told to use
-only https for that host, for 180 days (`HSTS_MAX_AGE`). Clients that send too slowly are
+only https for that host, for a year (`HSTS_MAX_AGE`). Clients that send too slowly are
 disconnected: 20 s to send a request's headers and 60 s for the whole request
 (`HTTP_HEADERS_TIMEOUT`, `HTTP_REQUEST_TIMEOUT`). Idle connections stay open for 125 s
 (`HTTP_KEEP_ALIVE_TIMEOUT`): keep it above your reverse proxy's idle timeout for connections to

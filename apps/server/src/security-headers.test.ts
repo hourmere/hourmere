@@ -26,11 +26,28 @@ const resolveCaller = async (headers: Headers): Promise<CallerResult> =>
     ? { ok: true, principal, setCookie: [] }
     : { ok: false, error: 'unauthorized', setCookie: [] }
 
-/** Stands in for Better Auth: JSON, a redirect, and a response with headers of its own. */
+/**
+ * Stands in for Better Auth: JSON, redirects (one with immutable headers), and responses with
+ * headers of their own, sensible or not.
+ */
 const authHandler = async (request: Request) => {
   const { pathname } = new URL(request.url)
   if (pathname === '/api/auth/redirect') {
     return new Response(null, { status: 302, headers: { location: '/sign-in?error=x' } })
+  }
+  if (pathname === '/api/auth/immutable') {
+    return Response.redirect('http://localhost:3000/sign-in?error=x', 302)
+  }
+  if (pathname === '/api/auth/odd-headers') {
+    return new Response('{}', {
+      headers: {
+        'content-type': 'application/json',
+        'x-content-type-options': 'sniff-away',
+        'strict-transport-security': 'max-age=1',
+        'referrer-policy': '',
+        'x-frame-options': ' ',
+      },
+    })
   }
   if (pathname === '/api/auth/own-headers') {
     return new Response('{}', {
@@ -120,7 +137,7 @@ describe('security headers', () => {
   })
 
   it('send no Referer from the invitee manage page', async () => {
-    for (const path of ['/booking', '/booking/', '/booking/anything']) {
+    for (const path of ['/booking', '/booking/', '/booking/anything', '/Booking', '/BOOKING/x']) {
       const res = await app.request(path)
       expect(securityHeadersOf(res), path).toEqual({ ...APP_PAGE, referrer: 'no-referrer' })
     }
@@ -196,6 +213,25 @@ describe('security headers', () => {
     })
   })
 
+  it('rebuild a response whose headers cannot be changed, instead of failing it', async () => {
+    const res = await app.request('/api/auth/immutable')
+    expect(res.status).toBe(302)
+    expect(res.headers.get('location')).toBe('http://localhost:3000/sign-in?error=x')
+    expect(securityHeadersOf(res)).toEqual(NOT_HTML)
+  })
+
+  it('always send nosniff and HSTS, and fill in empty values', async () => {
+    expect(securityHeadersOf(await app.request('/api/auth/odd-headers'))).toEqual({
+      ...NOT_HTML,
+      hsts: 'max-age=1',
+    })
+    const https = createApp(deps({ publicUrl: 'https://cal.example.com' }))
+    expect(securityHeadersOf(await https.request('/api/auth/odd-headers'))).toEqual({
+      ...NOT_HTML,
+      hsts: `max-age=${DEFAULT_HSTS_MAX_AGE}`,
+    })
+  })
+
   it('cover the MCP endpoint, refused or answered', async () => {
     const initialize = {
       jsonrpc: '2.0',
@@ -248,7 +284,7 @@ describe('security headers', () => {
           `max-age=${DEFAULT_HSTS_MAX_AGE}`,
         )
       }
-      expect(DEFAULT_HSTS_MAX_AGE).toBe(15_552_000)
+      expect(DEFAULT_HSTS_MAX_AGE).toBe(31_536_000)
       const custom = createApp(deps({ publicUrl: 'https://cal.example.com', hstsMaxAge: 0 }))
       expect((await custom.request('/api/health')).headers.get('strict-transport-security')).toBe(
         'max-age=0',

@@ -96,10 +96,10 @@ describe('loadConfig', () => {
     }
   })
 
-  it('takes the HSTS max-age in seconds, 180 days unless set', () => {
-    expect(loadConfig(base).HSTS_MAX_AGE).toBe(15_552_000)
-    expect(loadConfig({ ...base, HSTS_MAX_AGE: '' }).HSTS_MAX_AGE).toBe(15_552_000)
-    expect(loadConfig({ ...base, HSTS_MAX_AGE: '31536000' }).HSTS_MAX_AGE).toBe(31_536_000)
+  it('takes the HSTS max-age in seconds, a year unless set', () => {
+    expect(loadConfig(base).HSTS_MAX_AGE).toBe(31_536_000)
+    expect(loadConfig({ ...base, HSTS_MAX_AGE: '' }).HSTS_MAX_AGE).toBe(31_536_000)
+    expect(loadConfig({ ...base, HSTS_MAX_AGE: '15768000' }).HSTS_MAX_AGE).toBe(15_768_000)
     expect(loadConfig({ ...base, HSTS_MAX_AGE: '0' }).HSTS_MAX_AGE).toBe(0)
     for (const bad of ['-1', '1.5', '1y', 'off']) {
       expect(() => loadConfig({ ...base, HSTS_MAX_AGE: bad }), bad).toThrow(
