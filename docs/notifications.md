@@ -68,8 +68,11 @@ database answers and its workers are running, and answers 404 to everything else
 publish a worker's port.
 
 On SIGTERM a process stops accepting requests, then stops taking jobs and waits up to 20
-seconds for running ones (any still running then are failed and retried later by another
-worker), then closes its pools. Give it time to do so: `stop_grace_period: 30s` in
+seconds for running ones. Any still running then are failed and retried later by another
+worker: the job's abort signal reaches the mailer, which stops waiting for the mail server,
+so the open transaction rolls back (the email stays owed) and its connection is returned.
+Then the pools close. (The SMTP exchange itself is not cut off and may still finish before
+the process exits, in which case the retry sends that email a second time.) Give it time to do so: `stop_grace_period: 30s` in
 `docker-compose.yml`, `docker stop -t 30`, or the orchestrator's equivalent; Docker's
 default of 10 seconds cuts long jobs short (they are retried, so nothing is lost).
 
@@ -118,8 +121,14 @@ event type gets both emails). For each recipient the job, in one transaction, in
 row (`ON CONFLICT DO NOTHING`); if it already exists the email was sent and is skipped;
 otherwise it sends the email and commits.
 
-- A failed send rolls the row back and fails the attempt; the retry sends to the
-  recipients still missing, not to everyone again.
+- A failed send rolls the row back. A refusal by the mail server (`MailRejectedError`,
+  e.g. a 4xx reply to `RCPT TO`) does not stop the others: every recipient is attempted,
+  and the job then fails, naming the refused recipients by role and id (never by address),
+  so the retry sends only to them. Any other failure (server unreachable, sign-in refused,
+  shutdown) would hit every remaining recipient alike, so it ends the attempt at once.
+- A permanent refusal (5xx) is kept with `outcome = 'rejected'` (and no token hash): it is
+  logged on one line (booking id, kind, role and id, no address) and never retried, and the
+  job succeeds if nothing else failed.
 - Two attempts at the same time (a job that ran past its expiry and was retried while still
   running): the second insert waits for the first transaction, then skips.
 - The only duplicate left: the mail server accepted the email and the commit then failed.

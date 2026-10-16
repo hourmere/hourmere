@@ -11,6 +11,7 @@ import {
   icsAttachment,
   type Mailer,
   type MailMessage,
+  MailRejectedError,
   type ManageLinks,
   type MeetingLocation,
   meetingLocationText,
@@ -46,6 +47,8 @@ export interface NotificationDeps {
   /** PUBLIC_URL: manage links and invitation UIDs are built from it. */
   publicUrl: string
   now?: (() => Temporal.Instant) | undefined
+  /** Receives a line for each email the mail server refused for good. Default: console.warn. */
+  log?: ((line: string) => void) | undefined
 }
 
 /** The job definition, with its handler bound to the database and mailer. */
@@ -60,7 +63,8 @@ export function bookingNotificationJob(deps: NotificationDeps) {
     retry: { limit: 12, delaySeconds: 60, backoff: true, maxDelaySeconds: 3600 },
     expireInSeconds: 300,
     concurrency: 2,
-    handler: ({ bookingId, kind }) => sendBookingNotification(deps, bookingId, kind),
+    handler: ({ bookingId, kind }, { signal }) =>
+      sendBookingNotification(deps, bookingId, kind, { signal }),
   })
 }
 
@@ -344,15 +348,17 @@ function stillTrue(kind: NotificationKind, data: NotificationData, now: Temporal
  * first and the transaction stays open while the mail server takes the email: a failed send
  * rolls the row back (the job retries it), and a concurrent attempt for the same recipient
  * waits on the row and then skips. Only if the commit fails after the server accepted the
- * email can it go out twice.
+ * email can it go out twice. A permanent refusal (SMTP 5xx) is kept as `rejected`, so it is
+ * not tried again.
  */
 async function sendOnce(
   deps: NotificationDeps,
   key: { bookingId: string; kind: NotificationKind; recipient: string },
   withManageLink: boolean,
   message: (manageToken: string | undefined) => MailMessage,
-): Promise<void> {
-  await deps.db.transaction().execute(async (trx) => {
+  signal: AbortSignal | undefined,
+): Promise<'sent' | 'done before' | 'rejected'> {
+  return deps.db.transaction().execute(async (trx) => {
     // The same format as the token the booking services issue (32 random bytes, base64url).
     const token = withManageLink ? randomBytes(32).toString('base64url') : undefined
     const claimed = await trx
@@ -366,9 +372,28 @@ async function sendOnce(
       .onConflict((oc) => oc.doNothing())
       .returning('recipient')
       .executeTakeFirst()
-    if (!claimed) return
-    await deps.mailer.send(message(token))
+    if (!claimed) return 'done before'
+    try {
+      // An abort (worker shutdown) rejects here and rolls the row back for another worker.
+      await deps.mailer.send(message(token), { signal })
+      return 'sent'
+    } catch (err) {
+      if (!(err instanceof MailRejectedError) || !err.permanent) throw err
+      await trx
+        .updateTable('booking_notifications')
+        .set({ outcome: 'rejected', manage_token_hash: null })
+        .where('booking_id', '=', key.bookingId)
+        .where('kind', '=', key.kind)
+        .where('recipient', '=', key.recipient)
+        .execute()
+      return 'rejected'
+    }
   })
+}
+
+/** Some recipients' emails were refused for now; a retry sends only those. */
+export class NotificationRetryError extends Error {
+  override name = 'NotificationRetryError'
 }
 
 /**
@@ -379,6 +404,7 @@ export async function sendBookingNotification(
   deps: NotificationDeps,
   bookingId: string,
   kind: NotificationKind,
+  { signal }: { signal?: AbortSignal | undefined } = {},
 ): Promise<void> {
   const now = (deps.now ?? (() => Temporal.Now.instant()))()
   const data = await loadNotificationData(deps.db, bookingId)
@@ -422,13 +448,11 @@ export async function sendBookingNotification(
           ],
         })
 
-  for (const attendee of attendees) {
-    const withLinks = attendee === invitee && kind !== 'cancelled'
-    await sendOnce(
-      deps,
-      { bookingId, kind, recipient: `attendee:${attendee.id}` },
-      withLinks,
-      (token) =>
+  const recipients = [
+    ...attendees.map((attendee) => ({
+      key: `attendee:${attendee.id}`,
+      withLinks: attendee === invitee && kind !== 'cancelled',
+      message: (token: string | undefined) =>
         bookingEmail(
           kind,
           meeting,
@@ -441,16 +465,49 @@ export async function sendBookingNotification(
           },
           { attachment: invitation(`${booking.eventName} with ${organizer.name}`) },
         ),
-    )
+    })),
+    ...hosts.map((host) => ({
+      key: `host:${host.id}`,
+      withLinks: false,
+      message: () =>
+        bookingEmail(
+          kind,
+          meeting,
+          { role: 'host', email: host.email, timeZone: host.timeZone, answers: booking.answers },
+          { attachment: invitation(`${booking.eventName} with ${invitee.name}`) },
+        ),
+    })),
+  ]
+
+  // One refused address must not hold up everyone else's email: refusals are collected and
+  // the job fails at the end, so a retry sends only to those. Any other failure (the mail
+  // server unreachable, sign-in refused, shutdown) would hit every remaining recipient the
+  // same way, so it ends the attempt at once.
+  const log = deps.log ?? ((line: string) => console.warn(line))
+  const refused: string[] = []
+  for (const r of recipients) {
+    signal?.throwIfAborted()
+    try {
+      const outcome = await sendOnce(
+        deps,
+        { bookingId, kind, recipient: r.key },
+        r.withLinks,
+        r.message,
+        signal,
+      )
+      if (outcome === 'rejected') {
+        log(
+          `${new Date().toISOString()} WARN ${BOOKING_NOTIFICATION_JOB}: the mail server refused the ${kind} email for booking ${bookingId} to ${r.key} for good; not retrying`,
+        )
+      }
+    } catch (err) {
+      if (!(err instanceof MailRejectedError)) throw err
+      refused.push(`${r.key} (${err.responseCode ?? 'no code'})`)
+    }
   }
-  for (const host of hosts) {
-    await sendOnce(deps, { bookingId, kind, recipient: `host:${host.id}` }, false, () =>
-      bookingEmail(
-        kind,
-        meeting,
-        { role: 'host', email: host.email, timeZone: host.timeZone, answers: booking.answers },
-        { attachment: invitation(`${booking.eventName} with ${invitee.name}`) },
-      ),
+  if (refused.length) {
+    throw new NotificationRetryError(
+      `the mail server refused ${refused.length} of ${recipients.length} emails for now: ${refused.join(', ')}`,
     )
   }
 }

@@ -51,7 +51,7 @@ types in `packages/db/src/tables.ts` are generated from the migrated database.
 | `booking_hosts` | organization | Hosts of a booking; carries the anti-double-booking constraint |
 | `booking_attendees` | organization | The invitee who booked plus guests |
 | `booking_calendar_events` | organization | The event each booking wrote to a host calendar, for idempotent updates and cancellation |
-| `booking_notifications` | organization | Each email sent about a booking (kind, recipient), so a retried job never sends it twice; the SHA-256 of the manage-link secret an invitee email carried |
+| `booking_notifications` | organization | Each email sent about a booking (kind, recipient), or refused for good by the mail server, so a retried job never sends it twice; the SHA-256 of the manage-link secret an invitee email carried |
 
 ## Guarantees and why
 

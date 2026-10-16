@@ -1,9 +1,10 @@
-import { createServer, type Server } from 'node:net'
+import { createServer, type Server, type Socket } from 'node:net'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
   createLogMailer,
   createSmtpMailer,
   icsAttachment,
+  MailRejectedError,
   magicLinkEmail,
   smtpTransportOptions,
 } from './index.ts'
@@ -95,10 +96,24 @@ describe('smtpTransportOptions', () => {
   })
 })
 
-/** Just enough of an SMTP server to accept one message with AUTH PLAIN. */
+/**
+ * Just enough of an SMTP server to accept one message with AUTH PLAIN. `rcptReplies` answers
+ * RCPT TO for an address with something other than 250; with `hangOnData` it never answers
+ * DATA, like a server that stalls.
+ */
 function fakeSmtpServer() {
-  const received: { auth?: string; from?: string; to: string[]; data?: string } = { to: [] }
+  const received: {
+    auth?: string
+    from?: string
+    to: string[]
+    data?: string
+    rcptReplies: Map<string, string>
+    hangOnData: boolean
+  } = { to: [], rcptReplies: new Map(), hangOnData: false }
+  const sockets = new Set<Socket>()
   const server = createServer((socket) => {
+    sockets.add(socket)
+    socket.on('close', () => sockets.delete(socket))
     let buffer = ''
     let inData = false
     socket.write('220 localhost ESMTP\r\n')
@@ -128,8 +143,10 @@ function fakeSmtpServer() {
           socket.write('250 ok\r\n')
         } else if (verb === 'RCPT') {
           received.to.push(line)
-          socket.write('250 ok\r\n')
+          const address = line.match(/<([^>]*)>/)?.[1] ?? ''
+          socket.write(`${received.rcptReplies.get(address) ?? '250 ok'}\r\n`)
         } else if (verb === 'DATA') {
+          if (received.hangOnData) continue
           inData = true
           socket.write('354 go\r\n')
         } else if (verb === 'QUIT') socket.end('221 bye\r\n')
@@ -139,11 +156,11 @@ function fakeSmtpServer() {
       }
     })
   })
-  return { server, received }
+  return { server, received, sockets }
 }
 
 describe('createSmtpMailer', () => {
-  const { server, received } = fakeSmtpServer()
+  const { server, received, sockets } = fakeSmtpServer()
   let port: number
 
   beforeAll(async () => {
@@ -152,6 +169,8 @@ describe('createSmtpMailer', () => {
   })
 
   afterAll(async () => {
+    // A client given up on (the abort test) keeps its connection until its own timeout.
+    for (const socket of sockets) socket.destroy()
     await new Promise((resolve) => (server as Server).close(resolve))
   })
 
@@ -205,6 +224,64 @@ describe('createSmtpMailer', () => {
       .send({ to: 'attacker@example.com, victim@example.com', subject: 'x', text: 'x' })
       .catch(() => {})
     expect(received.to.some((r) => r.includes('<victim@example.com>'))).toBe(false)
+  })
+
+  it('reports a refused recipient as a MailRejectedError, permanent for 5xx only', async () => {
+    const mailer = createSmtpMailer({
+      url: `smtp://127.0.0.1:${port}`,
+      from: 'Hourmere <hourmere@example.com>',
+    })
+    received.rcptReplies.set('gone@example.com', '550 5.1.1 <gone@example.com>: no such user')
+    received.rcptReplies.set('later@example.com', '450 4.2.0 <later@example.com>: try later')
+    try {
+      const gone = await mailer
+        .send({ to: 'gone@example.com', subject: 'x', text: 'x' })
+        .catch((err: unknown) => err)
+      expect(gone).toBeInstanceOf(MailRejectedError)
+      expect(gone).toMatchObject({ responseCode: 550, permanent: true })
+      // The reply text repeats the address; the error does not.
+      expect((gone as Error).message).toBe('the mail server refused the message (550)')
+      const later = await mailer
+        .send({ to: 'later@example.com', subject: 'x', text: 'x' })
+        .catch((err: unknown) => err)
+      expect(later).toMatchObject({
+        name: 'MailRejectedError',
+        responseCode: 450,
+        permanent: false,
+      })
+    } finally {
+      received.rcptReplies.clear()
+    }
+  })
+
+  it('stops waiting for a stalled server when the signal aborts', async () => {
+    const mailer = createSmtpMailer({
+      url: `smtp://127.0.0.1:${port}`,
+      from: 'Hourmere <hourmere@example.com>',
+    })
+    received.hangOnData = true
+    try {
+      const controller = new AbortController()
+      const sending = mailer.send(
+        { to: 'ada@example.com', subject: 'x', text: 'x' },
+        {
+          signal: controller.signal,
+        },
+      )
+      await new Promise((r) => setTimeout(r, 200))
+      const before = Date.now()
+      controller.abort(new Error('shutting down'))
+      await expect(sending).rejects.toThrow('shutting down')
+      expect(Date.now() - before).toBeLessThan(1000)
+      await expect(
+        mailer.send(
+          { to: 'ada@example.com', subject: 'x', text: 'x' },
+          { signal: controller.signal },
+        ),
+      ).rejects.toThrow('shutting down')
+    } finally {
+      received.hangOnData = false
+    }
   })
 
   it('refuses a server that does not offer STARTTLS when it is not on loopback', async () => {

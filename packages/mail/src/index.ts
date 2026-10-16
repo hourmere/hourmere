@@ -22,9 +22,63 @@ export interface MailMessage {
   attachments?: readonly MailAttachment[]
 }
 
-/** Sends transactional email. Implementations: SMTP, the server log, and test doubles. */
+export interface SendOptions {
+  /**
+   * Stops waiting for the mail server: send() then rejects with the signal's reason. The SMTP
+   * exchange already under way is not cut off and may still finish in the background.
+   */
+  signal?: AbortSignal | undefined
+}
+
+/**
+ * Sends transactional email. Implementations: SMTP, the server log, and test doubles. A send
+ * the mail server refuses with a reply (rather than failing to reach it) rejects with a
+ * MailRejectedError.
+ */
 export interface Mailer {
-  send(message: MailMessage): Promise<void>
+  send(message: MailMessage, options?: SendOptions): Promise<void>
+}
+
+/**
+ * The mail server refused this message or its recipient with a reply, as opposed to a failed
+ * connection, TLS or sign-in, which would affect every message. `permanent` for a 5xx reply:
+ * sending the same message again will not help. The message carries the reply code only,
+ * never the reply text, which usually repeats the address.
+ */
+export class MailRejectedError extends Error {
+  override name = 'MailRejectedError'
+  readonly responseCode: number | undefined
+  readonly permanent: boolean
+
+  constructor(responseCode: number | undefined) {
+    super(`the mail server refused the message${responseCode ? ` (${responseCode})` : ''}`)
+    this.responseCode = responseCode
+    this.permanent = responseCode !== undefined && responseCode >= 500 && responseCode < 600
+  }
+}
+
+/** A nodemailer error for a refused recipient (RCPT TO) or message (DATA), as our error. */
+function refusal(err: unknown): MailRejectedError | undefined {
+  const e = (typeof err === 'object' && err !== null ? err : {}) as {
+    code?: unknown
+    command?: unknown
+    responseCode?: unknown
+  }
+  const refused =
+    (e.code === 'EENVELOPE' && e.command === 'RCPT TO') ||
+    (e.code === 'EMESSAGE' && e.command === 'DATA')
+  if (!refused) return undefined
+  return new MailRejectedError(typeof e.responseCode === 'number' ? e.responseCode : undefined)
+}
+
+/** Settles like `promise`, or rejects with the signal's reason as soon as it is aborted. */
+function abortable<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
+  if (!signal) return promise
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason)
+    signal.addEventListener('abort', onAbort, { once: true })
+    promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort))
+  })
 }
 
 export interface SmtpMailerOptions {
@@ -67,8 +121,9 @@ export function smtpTransportOptions(url: string) {
 export function createSmtpMailer({ url, from }: SmtpMailerOptions): Mailer {
   const transport = nodemailer.createTransport(smtpTransportOptions(url), { from })
   return {
-    async send({ to, subject, text, html, attachments }) {
-      await transport.sendMail({
+    async send({ to, subject, text, html, attachments }, { signal } = {}) {
+      signal?.throwIfAborted()
+      const sending = transport.sendMail({
         // An address object is taken as one address; a string would be parsed as a list.
         to: { name: '', address: to },
         // nodemailer folds long headers but would keep a line break; a subject is one line.
@@ -83,6 +138,12 @@ export function createSmtpMailer({ url, from }: SmtpMailerOptions): Mailer {
           })),
         }),
       })
+      await abortable(
+        sending.catch((err: unknown) => {
+          throw refusal(err) ?? err
+        }),
+        signal,
+      )
     },
   }
 }
@@ -104,7 +165,8 @@ const unicodeEscape = (c: string) => `\\u${c.charCodeAt(0).toString(16).padStart
  */
 export function createLogMailer(print: (line: string) => void = console.log): Mailer {
   return {
-    async send({ to, subject, text, attachments }) {
+    async send({ to, subject, text, attachments }, { signal } = {}) {
+      signal?.throwIfAborted()
       const links = text.match(/https?:\/\/\S+/g) ?? []
       const record = JSON.stringify({
         notSent: 'SMTP_URL is not set',

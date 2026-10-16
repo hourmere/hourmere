@@ -1,10 +1,10 @@
 // Booking notifications against a throwaway database, with bookings made by the real booking
 // services: who gets which email, at most once, and only while it is still true.
 import { createHash } from 'node:crypto'
-import { createDb, type Db } from '@hourmere/db'
+import { createDb, createPool, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createJobs } from '@hourmere/jobs'
-import type { Mailer, MailMessage } from '@hourmere/mail'
+import { type Mailer, type MailMessage, MailRejectedError } from '@hourmere/mail'
 import {
   cancelManagedBooking,
   createPublicBooking,
@@ -20,6 +20,7 @@ import {
   bookingNotificationJob,
   enqueueBookingNotifications,
   type NotificationDeps,
+  NotificationRetryError,
   sendBookingNotification,
 } from './index.ts'
 
@@ -30,15 +31,34 @@ const NOW = instant('2026-11-01T12:00:00Z')
 const START = '2026-11-03T09:00:00Z'
 const PUBLIC_URL = 'https://cal.example.com'
 
-/** Records what it sends; `hold` makes sends wait, `failFor` makes sends to an address fail. */
+/**
+ * Records what it sends. `hold` makes sends wait (until the signal aborts), `failFor` makes
+ * sends to an address fail like an unreachable server, `refuse` like a server refusing it.
+ */
 function testMailer() {
   const sent: MailMessage[] = []
-  const state: { failFor?: string; hold?: Promise<void>; started?: () => void } = {}
+  const state: {
+    failFor?: string
+    refuse: Map<string, number>
+    hold?: Promise<void>
+    started?: () => void
+    aborted: number
+  } = { refuse: new Map(), aborted: 0 }
   const mailer: Mailer = {
-    async send(message) {
+    async send(message, { signal } = {}) {
       state.started?.()
-      await state.hold
+      if (state.hold) {
+        await new Promise<void>((resolve, reject) => {
+          state.hold?.then(resolve)
+          signal?.addEventListener('abort', () => {
+            state.aborted++
+            reject(signal.reason)
+          })
+        })
+      }
       if (message.to === state.failFor) throw new Error(`mailbox ${message.to} unavailable`)
+      const code = state.refuse.get(message.to)
+      if (code) throw new MailRejectedError(code)
       sent.push(message)
     },
   }
@@ -206,6 +226,64 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
     state.failFor = undefined
     await sendBookingNotification(deps(mailer), bookingId, 'confirmed')
     expect(sent.map((m) => m.to)).toEqual(['ada@example.com', hostEmail])
+  })
+
+  it('keeps going past a refused address, and the retry sends only to it', async () => {
+    const { bookingId, hostEmail } = await booked({ guests: true })
+    const { mailer, sent, state } = testMailer()
+    state.refuse.set('ada@example.com', 450)
+    const attempt = sendBookingNotification(deps(mailer), bookingId, 'confirmed')
+    await expect(attempt).rejects.toBeInstanceOf(NotificationRetryError)
+    await expect(attempt).rejects.toThrow(
+      /refused 1 of 3 emails for now: attendee:[0-9a-f-]{36} \(450\)/,
+    )
+    await expect(attempt).rejects.not.toThrow(/ada@example\.com/)
+    // The guest and the host got theirs on the first attempt.
+    expect(sent.map((m) => m.to)).toEqual(['charles@example.com', hostEmail])
+
+    state.refuse.clear()
+    await sendBookingNotification(deps(mailer), bookingId, 'confirmed')
+    expect(sent.map((m) => m.to)).toEqual(['charles@example.com', hostEmail, 'ada@example.com'])
+    expect(tokenIn(sent[2])).toBeTruthy()
+  })
+
+  it('gives up on an address refused for good, with one log line and no secret kept', async () => {
+    const { bookingId, hostEmail } = await booked({ guests: true })
+    const { mailer, sent, state } = testMailer()
+    state.refuse.set('ada@example.com', 550)
+    const lines: string[] = []
+    await sendBookingNotification(
+      { ...deps(mailer), log: (l) => lines.push(l) },
+      bookingId,
+      'confirmed',
+    )
+    expect(sent.map((m) => m.to)).toEqual(['charles@example.com', hostEmail])
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toMatch(
+      new RegExp(
+        `refused the confirmed email for booking ${bookingId} to attendee:[0-9a-f-]{36} for good`,
+      ),
+    )
+    expect(lines[0]).not.toContain('ada@example.com')
+    const rejected = (await records(bookingId)).filter((r) => r.outcome === 'rejected')
+    expect(rejected).toHaveLength(1)
+    expect(rejected[0]?.manage_token_hash).toBeNull()
+
+    // Not tried again.
+    state.refuse.clear()
+    await sendBookingNotification(deps(mailer), bookingId, 'confirmed')
+    expect(sent).toHaveLength(2)
+  })
+
+  it('stops at once when the mail server fails for everyone', async () => {
+    const { bookingId } = await booked({ guests: true })
+    const { mailer, sent, state } = testMailer()
+    state.failFor = 'ada@example.com'
+    await expect(sendBookingNotification(deps(mailer), bookingId, 'confirmed')).rejects.toThrow(
+      'unavailable',
+    )
+    expect(sent).toEqual([])
+    expect(await records(bookingId)).toEqual([])
   })
 
   it('sends one email when two attempts run at the same time', async () => {
@@ -376,6 +454,47 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
       } finally {
         await jobs.stop()
       }
+    })
+
+    it('rolls back and lets go of the database when a worker stops during a slow send', async () => {
+      const { bookingId, apiToken } = await booked()
+      await cancelManagedBooking(ctx, apiToken, {})
+      const { mailer, sent, state } = testMailer()
+      state.hold = new Promise(() => {})
+      const started = new Promise<void>((r) => {
+        state.started = r
+      })
+      // Its own pool, closed afterwards as the server closes its own on shutdown.
+      const pool = createPool(testDb.url)
+      const jobs = createJobs({
+        connectionString: testDb.url,
+        definitions: [bookingNotificationJob({ ...deps(mailer), db: createDb(pool) })],
+        work: true,
+        migrate: true,
+        pollingIntervalSeconds: 0.5,
+        shutdownTimeoutMs: 1000,
+        log: () => {},
+      })
+      await jobs.start()
+      await db
+        .transaction()
+        .execute((trx) =>
+          enqueueBookingNotifications(jobs, trx, { type: 'cancelled', bookingId }, NOW),
+        )
+      await started
+      const before = Date.now()
+      await jobs.stop()
+      await pool.end()
+      expect(Date.now() - before).toBeLessThan(5000)
+      expect(state.aborted).toBe(1)
+      expect(sent).toEqual([])
+      // Rolled back: the email is still owed, and the job will run again.
+      expect(await records(bookingId)).toEqual([])
+      const job = await testDb.pool.query<{ state: string }>(
+        "SELECT state FROM pgboss.job WHERE name = $1 AND data->>'bookingId' = $2",
+        [BOOKING_NOTIFICATION_JOB, bookingId],
+      )
+      expect(job.rows.map((r) => r.state)).toEqual(['retry'])
     })
 
     it('skips the reminder when the meeting is less than a day away', async () => {

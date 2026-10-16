@@ -1,5 +1,6 @@
 -- Emails sent about bookings (docs/notifications.md). One row per email: a notification job
--- that runs again (retry, crash, duplicate) finds the row and does not send it twice. Invitee
+-- that runs again (retry, crash, duplicate) finds the row and does not send it twice, nor
+-- try again an address the mail server refused for good. Invitee
 -- emails carry a manage-link secret of their own, minted when the email is sent; only its
 -- SHA-256 is kept here, so no raw secret is ever stored, in the job queue or anywhere else.
 
@@ -18,6 +19,10 @@ CREATE TABLE booking_notifications (
   -- SHA-256 of the manage-link secret in this email (invitee emails only). It opens the
   -- booking like bookings.manage_token_hash does, for as long as the booking exists.
   manage_token_hash bytea UNIQUE,
-  sent_at timestamptz NOT NULL DEFAULT now(),
-  PRIMARY KEY (booking_id, kind, recipient)
+  -- 'sent', or 'rejected': the mail server refused it for good (SMTP 5xx), so it is not
+  -- tried again, and no secret went out with it.
+  outcome text NOT NULL DEFAULT 'sent' CHECK (outcome IN ('sent', 'rejected')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (booking_id, kind, recipient),
+  CHECK (outcome = 'sent' OR manage_token_hash IS NULL)
 );

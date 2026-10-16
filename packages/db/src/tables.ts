@@ -155,10 +155,11 @@ export interface BookingHosts {
 
 export interface BookingNotifications {
   booking_id: string;
+  created_at: Generated<Timestamp>;
   kind: string;
   manage_token_hash: Buffer | null;
+  outcome: Generated<string>;
   recipient: string;
-  sent_at: Generated<Timestamp>;
 }
 
 export interface Bookings {
