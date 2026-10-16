@@ -395,6 +395,23 @@ describe.skipIf(!url)('schema', () => {
       expect(counts).toEqual({ orgs: 0, bookings: 0, attendees: 0, keys: 0 })
     })
 
+    it('keeps the organization when only the personal marker is removed', async () => {
+      const u = await user()
+      const o = await org()
+      await pool.query(
+        `INSERT INTO personal_organizations (user_id, organization_id) VALUES ($1, $2)`,
+        [u, o],
+      )
+      const b = await book([u], '2026-11-08T13:00Z', '2026-11-08T13:30Z', { organization: o })
+      await pool.query(`DELETE FROM personal_organizations WHERE user_id = $1`, [u])
+      const left = await one<{ orgs: number; bookings: number }>(
+        `SELECT (SELECT count(*)::int FROM auth.organization WHERE id = $1) AS orgs,
+                (SELECT count(*)::int FROM bookings WHERE id = $2) AS bookings`,
+        [o, b],
+      )
+      expect(left).toEqual({ orgs: 1, bookings: 1 })
+    })
+
     it('removes event types and bookings with their organization', async () => {
       const o = await org()
       const u = await user()
@@ -411,6 +428,12 @@ describe.skipIf(!url)('schema', () => {
       )
       expect(Number(left.n)).toBe(0)
     })
+  })
+
+  it('reports a host row for a missing booking as a foreign-key violation', async () => {
+    await expect(
+      pool.query(`INSERT INTO booking_hosts (booking_id, user_id) VALUES (uuidv7(), $1)`, [hostA]),
+    ).rejects.toMatchObject({ code: '23503' })
   })
 
   it('returns DATE columns as plain YYYY-MM-DD strings, independent of the time zone', async () => {
