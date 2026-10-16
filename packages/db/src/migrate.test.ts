@@ -73,4 +73,24 @@ describe.skipIf(!url)('runMigrations', () => {
       await rm(other, { recursive: true, force: true })
     }
   })
+
+  it('treats CRLF and LF copies of a migration as the same file', async () => {
+    const crlf = await mkdtemp(join(tmpdir(), 'hourmere-migrations-'))
+    const lf = await mkdtemp(join(tmpdir(), 'hourmere-migrations-'))
+    const otherSchema = `${schema}_eol`
+    await pool.query(`CREATE SCHEMA ${otherSchema}`)
+    const eolPool = createPool(url as string)
+    eolPool.on('connect', (client) => client.query(`SET search_path TO ${otherSchema}`))
+    try {
+      await writeFile(join(crlf, '0001_t.sql'), 'CREATE TABLE t (id int);\r\nSELECT 1;\r\n')
+      await writeFile(join(lf, '0001_t.sql'), 'CREATE TABLE t (id int);\nSELECT 1;\n')
+      expect(await runMigrations(eolPool, crlf)).toEqual(['0001_t.sql'])
+      expect(await runMigrations(eolPool, lf)).toEqual([])
+    } finally {
+      await eolPool.query(`DROP SCHEMA ${otherSchema} CASCADE`)
+      await eolPool.end()
+      await rm(crlf, { recursive: true, force: true })
+      await rm(lf, { recursive: true, force: true })
+    }
+  })
 })
