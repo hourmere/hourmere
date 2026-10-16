@@ -200,6 +200,63 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
     expect(toInvitee?.attachments?.[0]?.content).not.toContain('token')
   })
 
+  it('leaves out hosts whose address is not verified', async () => {
+    const { bookingId, hostId, hostEmail } = await booked()
+    // A second host on the booking, whose address nobody proved.
+    const other = await f.user('Mallory')
+    await db
+      .updateTable('auth.user')
+      .set({ emailVerified: false })
+      .where('id', '=', other)
+      .execute()
+    await db.insertInto('booking_hosts').values({ booking_id: bookingId, user_id: other }).execute()
+    const otherEmail = (
+      await db
+        .selectFrom('auth.user')
+        .select('email')
+        .where('id', '=', other)
+        .executeTakeFirstOrThrow()
+    ).email
+    const { mailer, sent } = testMailer()
+    await sendBookingNotification(deps(mailer), bookingId, 'confirmed')
+    expect(sent.map((m) => m.to)).toEqual([hostEmail, 'ada@example.com'])
+    for (const m of sent) {
+      const event = new ICAL.Component(
+        ICAL.parse(m.attachments?.[0]?.content ?? ''),
+      ).getFirstSubcomponent('vevent')
+      const people = [
+        event?.getFirstPropertyValue('organizer'),
+        ...(event?.getAllProperties('attendee') ?? []).map((p) => p.getFirstValue()),
+      ].map(String)
+      expect(people).toContain(`mailto:${hostEmail}`)
+      expect(people).not.toContain(`mailto:${otherEmail}`)
+    }
+
+    // Without a verified host there is nobody to send on behalf of.
+    await db
+      .updateTable('auth.user')
+      .set({ emailVerified: false })
+      .where('id', '=', hostId)
+      .execute()
+    const later = testMailer()
+    const lines: string[] = []
+    await sendBookingNotification(
+      { ...deps(later.mailer), log: (l) => lines.push(l) },
+      bookingId,
+      'reminder',
+    )
+    expect(later.sent).toEqual([])
+    // Said once, with the booking, since the invitee hears nothing either.
+    expect(lines).toEqual([
+      expect.stringMatching(
+        new RegExp(
+          `WARN booking-notification: booking ${bookingId} has no host with a verified email address; not sending its reminder emails$`,
+        ),
+      ),
+    ])
+    expect(await records(bookingId)).toHaveLength(2)
+  })
+
   it("gives the invitee a link secret of the email's own, stored only as a hash", async () => {
     const { bookingId, apiToken } = await booked()
     const { mailer, sent } = testMailer()

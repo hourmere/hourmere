@@ -4,11 +4,11 @@ Booking emails (confirmed, rescheduled, cancelled, reminder) are sent by a backg
 never from the request that changed the booking: a slow or broken mail server must not slow
 down or fail a booking, and a failed send must be retried.
 
-What exists today: the job infrastructure (`@hourmere/jobs`), the worker process role, the
-email templates and calendar invitations (`@hourmere/mail`), the notification job and the
-queueing helper (`@hourmere/notifications`), and the `booking_notifications` table. The
-booking services (`packages/scheduling/src/bookings.ts`) do not queue anything yet; the last
-section lists the changes that wire them in.
+The pieces: the job infrastructure (`@hourmere/jobs`), the worker process role, the email
+templates and calendar invitations (`@hourmere/mail`), the notification job and the queueing
+helper (`@hourmere/notifications`), the `booking_notifications` table, and the booking
+services (`packages/scheduling/src/bookings.ts`), which queue the jobs in the transaction of
+every booking change, whether it came over REST or MCP (last section).
 
 ## Jobs
 
@@ -92,19 +92,25 @@ All notifications go through one job, `booking-notification`, with payload
 | Event (service) | Jobs queued in its transaction |
 |---|---|
 | Booking created (`createPublicBooking`, not on an idempotent replay) | `confirmed` now; `reminder` 24 hours before the start, unless that is less than an hour away |
-| Booking rescheduled (`rescheduleManagedBooking`) | for the **new** booking: `rescheduled` now; `reminder` as above |
+| Booking rescheduled (`rescheduleManagedBooking`) | for the **new** booking: `rescheduled` now; `reminder` as above. Nothing for the old one (see below) |
 | Booking cancelled (`cancelManagedBooking`, `cancelHostBooking`) | `cancelled` now |
+
+The same services serve the booking page, the REST API and the MCP tools, so a booking an
+agent makes, moves or cancels sends exactly the emails a person's would.
 
 `enqueueBookingNotifications(jobs, trx, event, now)` does exactly this, and refuses to run
 outside a transaction. The reminder offset is an absolute 24 hours, so across a daylight
 saving change it arrives an hour earlier or later on the recipient's clock; a booking made
 less than 25 hours ahead gets no reminder, as it would come right after the confirmation.
 
-Every email goes to each host first (verified addresses, and they most need to know), then
-the invitee, then the guests, so a guest address that is slow to answer cannot hold up the
-others. Guests are addresses an anonymous booker typed (up to 10 per booking); limiting
-abuse of that is a product follow-up. Times are shown in the
-recipient's zone with its IANA name: the attendee's zone from `booking_attendees`, a
+Every email goes to each host first (they most need to know), then the invitee, then the
+guests, so a guest address that is slow to answer cannot hold up the others. Hosts are the
+booking's `booking_hosts` whose address is verified: accounts start verified, and one that
+is not (it should not exist; see data-model.md) is neither emailed nor named in the
+invitation, so a booking without a verified host sends nothing (the job logs one WARN line
+naming the booking and the kind, since the invitee hears nothing either). Guests are
+addresses an anonymous booker typed (up to 10 per booking); limiting abuse of that is a
+product follow-up. Times are shown in the recipient's zone with its IANA name: the attendee's zone from `booking_attendees`, a
 host's from their profile, else their default schedule, else UTC. Host emails add the
 invitee's contact details, guests and answers; only the invitee's email has manage links.
 Confirmed and rescheduled emails carry an invitation (`METHOD:REQUEST`), cancellations a
@@ -210,6 +216,48 @@ exists. No raw secret is stored anywhere, encrypted or not, and the queue holds 
 worst an unused hash); reminders carry working links. The cost is a second place to look
 up a token (below), and several valid secrets per booking, each 256 random bits.
 
+### Which booking a token opens
+
+`getManagedBooking`, `cancelManagedBooking` and `rescheduleManagedBooking` (REST
+`/api/v1/bookings/manage…` with `X-Manage-Token`, and the MCP tools that take a
+`manageToken`) look a token up by its SHA-256 in one statement that probes both
+`bookings.manage_token_hash` and `booking_notifications.manage_token_hash` (each unique, so
+each probe is one index lookup) whatever the token is. So every unknown token costs the same
+(two probes that find nothing), whichever table it might have been looked for in, and all
+unknown, malformed or missing tokens get the same 404 `booking_not_found`. Only rows of
+emails that went out match (`outcome = 'sent'`); an email the mail server refused for good
+keeps no hash (a check constraint), so the secret it would have carried never opens
+anything. Showing and acting resolve the booking through the same function, so they
+always agree on which booking a token means.
+
+- **The API's token stays with its booking.** After a reschedule it shows the old, cancelled
+  booking, and cancelling or rescheduling with it gets 409 `booking_cancelled`. That is the
+  documented contract agents rely on: a reschedule retried after a lost response cannot move
+  the meeting twice. The reschedule's response carries the new booking's token.
+- **An email's token stands for the meeting.** After the booking it was sent about is
+  rescheduled, it follows the chain (`rescheduled_from_id`) to the booking that replaced it,
+  the latest one, and shows, cancels or reschedules that one. The chain needs no hop limit:
+  the link is set once, at insert, to a booking that already exists, so it cannot loop, and
+  a reschedule locks and cancels what it replaces, so it cannot branch (a `CYCLE` clause
+  still keeps hand-edited data from looping the query). Why follow it at all: the
+  email is what the invitee keeps; the reschedule email with a fresh link may come hours
+  later (retries), or not at all (refused address), and the reschedule may have been made by
+  an agent that kept the new token for itself. The person who holds an email about the old
+  booking is the invitee of the new one (a reschedule copies invitee and guests unchanged),
+  so the link keeps the authority it had. The cost: a reschedule through an email's link is
+  not retry-safe (a second submission moves the meeting again, to the same time if repeated
+  as is), so the web app must not resubmit it on its own.
+- **After a cancellation** every token still shows the booking, read-only (status
+  `cancelled`); cancelling again or rescheduling gets 409 `booking_cancelled`.
+- **Locking.** Cancel and reschedule lock the booking they act on (`FOR UPDATE`). For an
+  email's token, a reschedule that committed while the request waited for that lock has
+  moved the meeting on, so the chain is followed again from the locked row until the locked
+  row is the latest (none can replace it while the lock is held), and only that locked row
+  is checked and changed. Each further round means yet another reschedule committed while
+  the request waited; after ten the request gets 409 `booking_changed` (try again) instead
+  of chasing the meeting. The API's token is locked as before and then finds its booking
+  cancelled.
+
 Links put the secret in the URL fragment,
 `https://<app>/booking#token=<token>&action=reschedule` (or `action=cancel`), which browsers
 send neither to the server nor in `Referer`, so it stays out of logs; the web app reads it
@@ -233,29 +281,37 @@ host; attendees are the invitee, guests and any other hosts, all `PARTSTAT=ACCEP
 part: clients that turn such a part into a meeting item would hide the email's own text and
 links.
 
-## Wiring it into the booking services (follow-up)
+## How the booking services queue them
 
-The booking services already load everything the decision needs inside their
-transactions; the job loads the rest when it runs (event type title, question labels, host
-names, emails and zones, the reschedule chain), which it must do anyway to check the
-booking's current state. So the services pass only ids:
+The booking services load everything their decision needs inside their transactions; the
+job loads the rest when it runs (event type title, question labels, host names, emails and
+zones, the reschedule chain), which it must do anyway to check the booking's current state.
+So the services pass only ids:
 
-1. `PublicContext` and `ServiceContext` get an optional
-   `notify?: (trx: Db, event: BookingEvent) => Promise<void>`; scheduling stays free of
-   pg-boss and mail, and tests can pass a fake.
-2. `createPublicBooking`: after `insertBooking`, inside the transaction, and not on the
-   replay paths: `notify(trx, { type: 'created', bookingId: id, start: input.start })`.
-3. `rescheduleManagedBooking`: after `insertBooking`:
-   `notify(trx, { type: 'rescheduled', bookingId: id, start })`.
-4. `cancelLocked` (shared by `cancelManagedBooking` and `cancelHostBooking`): after the
-   update: `notify(trx, { type: 'cancelled', bookingId: row.id })`.
-5. `server.ts` builds `notify = (trx, event) => enqueueBookingNotifications(jobs, trx, event,
-   now())` and passes it to `publicRoutes` and `bookingRoutes`, which put it in the
-   contexts they build. The `jobs` instance is already started in every role.
-6. Token lookups (`getManagedBooking`, `cancelManagedBooking`, `rescheduleManagedBooking`
-   match `bookings.manage_token_hash`) also accept a hash found in
-   `booking_notifications.manage_token_hash` (unique, indexed), keeping the `FOR UPDATE`
-   lock on the booking row.
-7. Tests: a booking, reschedule and cancel each queue the expected jobs in their
-   transaction (and none on a replay or a failed booking); an email's token opens, cancels
-   and reschedules the booking; the API's token keeps working after emails went out.
+- `PublicContext` and `ServiceContext` carry an optional `notify` (`BookingNotifier` in
+  `@hourmere/scheduling`): `(trx, event, now) => Promise<void>`, called with the
+  transaction that makes the change and the instant the service used for its checks (read
+  after it waited for its locks), which also decides whether a reminder is queued.
+  Scheduling stays free of pg-boss and mail; tests pass a fake.
+- `createPublicBooking` calls it after `insertBooking`, inside the transaction, so never on
+  the replay paths (a replay found before or after the host lock returns before it, and
+  a concurrent duplicate's unique violation rolls back its jobs with it):
+  `{ type: 'created', bookingId, start }`.
+- `rescheduleManagedBooking`, after `insertBooking`: `{ type: 'rescheduled', bookingId:
+  <new booking>, start }`. The old booking gets no job of its own: its queued confirmation
+  and reminder find it cancelled when they run, and a `cancelled` job would find it
+  replaced and send nothing either.
+- `cancelLocked` (shared by `cancelManagedBooking` and `cancelHostBooking`), after the
+  update: `{ type: 'cancelled', bookingId }`.
+- `server.ts` builds `notify = bookingNotifier(jobs)` (`@hourmere/notifications`, which
+  calls `enqueueBookingNotifications`) for the `all` and `web` roles and passes it to
+  `publicRoutes`, `bookingRoutes` and the MCP `bookingTools`, which put it in the contexts
+  they build. A worker serves no bookings and needs none.
+
+If `notify` throws (the queue insert fails), the booking change fails with it: a booking
+never commits without its emails, and a job never exists for a booking that did not commit.
+Tests cover both directions, replays, REST and MCP, and the token rules above:
+`packages/scheduling/src/bookings.test.ts` (the services, with a fake notifier),
+`apps/server/src/booking-notifications.test.ts` (REST and MCP with real jobs, the job
+handler run in-process and a capturing mailer) and `apps/server/src/server.test.ts` (the
+composition root, with the log mailer and a running worker).
