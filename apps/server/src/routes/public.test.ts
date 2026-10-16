@@ -4,6 +4,7 @@ import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createFixtures, type Fixtures } from '@hourmere/scheduling/testing'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { type AppDeps, createApp } from '../app.ts'
+import { CHUNK_SIZE, chunkedBody } from '../chunked-body.ts'
 import { bookingRoutes } from './bookings.ts'
 import { BOOKING_BODY_LIMIT, type PublicRoutesDeps, publicRoutes } from './public.ts'
 
@@ -496,6 +497,15 @@ describe.skipIf(!serverUrl)('public routes', () => {
     const refused = await send(big)
     expect(refused.status).toBe(429)
     expect(await refused.json()).toEqual({ error: 'rate_limited' })
+    // Streamed without Content-Length, the body is left unread too.
+    const streamed = chunkedBody(JSON.stringify({ pad: 'x'.repeat(1_900_000) }))
+    const refusedStream = await limited.request('/api/v1/public/ada/intro/bookings', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      ...streamed.init,
+    })
+    expect(refusedStream.status).toBe(429)
+    expect(streamed.pulled()).toBeLessThanOrEqual(CHUNK_SIZE)
   })
 
   it('documents the routes', async () => {

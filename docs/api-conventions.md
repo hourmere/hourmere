@@ -121,15 +121,19 @@ Services refuse anything else with the field's code (`invalid_invitee`, `invalid
 `invalid_event_type`, `invalid_location`), using the helpers in
 `packages/scheduling/src/text.ts`.
 As a safety net for every `/api/v1` route, a JSON body with NUL or a lone surrogate anywhere
-(values or keys) is refused with 400 `invalid_request` before the route runs.
+(values or keys) is refused with 400 `invalid_request` when the route reads it, before the
+route can use it.
 
 Request bodies are limited to 64 KB on all of `/api`, sign-in included, unless a route
 declares more (`routeBodyLimit` in `apps/server/src/body-limit.ts`); beyond the limit, 413
-`payload_too_large`. A route's limit must be at least its largest legal request with every
-string at its maximum length and every character escaped as `\uXXXX` (6 bytes, as e.g.
-Python's `json.dumps` sends by default). Creating a booking allows 2 MB: its largest legal
-request (20 multi-select answers choosing all 50 options of 200 characters, plus the invitee
-and 10 guests) is about 1.23 MB that way. Cancel and reschedule bodies stay far below 64 KB
+`payload_too_large`. A `Content-Length` over the limit is refused at once; any other body
+(e.g. sent chunked) is counted while the route reads it, which also stops a body longer than
+its `Content-Length`. Nothing reads the body before the route needs it: rate limits and
+authentication refuse a client (429, 401) without reading what it sends. A route's limit
+must be at least its largest legal request with every string at its maximum length and every
+character escaped as `\uXXXX` (6 bytes, as e.g. Python's `json.dumps` sends by default).
+Creating a booking allows 2 MB: its largest legal request (20 multi-select answers choosing
+all 50 options of 200 characters, plus the invitee and 10 guests) is about 1.23 MB that way. Cancel and reschedule bodies stay far below 64 KB
 (a reason is at most 1000 characters). Creating or changing an event type allows 2 MB (20
 questions with 50 options of 200 characters come to about 1.29 MB), as do creating or
 changing a schedule (a day can hold 1440 one-minute intervals: about 1.23 MB for a week);
@@ -158,7 +162,7 @@ They are rate limited per client (`TRUSTED_PROXIES` decides which address that i
 clients count per /64 network, since one subscriber usually has a whole /64): 120 requests a
 minute for event pages and for slots, 10 for creating bookings, 30 for manage endpoints;
 beyond that 429 `rate_limited` with `Retry-After`, decided before the request body is read
-(only its size is checked first). The counters live in each server process's memory, so with several instances a client gets that budget once per instance; a shared store
+(only a `Content-Length` over the body limit is refused first). The counters live in each server process's memory, so with several instances a client gets that budget once per instance; a shared store
 comes with multi-instance deployments.
 
 A slots request may span at most 62 days, and its bookable part (from now plus the event

@@ -7,7 +7,8 @@ import { HTTPException } from 'hono/http-exception'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { type AppDeps, createApp, hasUnsafeJsonText } from './app.ts'
 import { DEFAULT_BODY_LIMIT as MAX_BODY_BYTES } from './body-limit.ts'
-import { authenticated, json, type RouteModule } from './openapi.ts'
+import { CHUNK_SIZE, chunkedBody } from './chunked-body.ts'
+import { authenticated, callerWithBodyLimit, json, type RouteModule } from './openapi.ts'
 
 // Sign-in is covered by auth.test.ts against a real database.
 const noAuth: Pick<AppDeps, 'authHandler' | 'resolveCaller' | 'publicUrl'> = {
@@ -371,6 +372,22 @@ describe('route modules and errors', () => {
     const big = await send(JSON.stringify({ email: 'x'.repeat(MAX_BODY_BYTES) }))
     expect(big.status).toBe(413)
     expect(received).toBeUndefined()
+
+    // Streamed bodies too: the handler reads them through the counting stream.
+    const sendChunked = (body: string) =>
+      authApp.request('/api/auth/sign-in/magic-link', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        ...chunkedBody(body).init,
+      })
+    const longEmail = JSON.stringify({ email: `${'a'.repeat(CHUNK_SIZE)}@example.com` })
+    expect((await sendChunked(longEmail)).status).toBe(200)
+    expect(received).toBe(longEmail)
+    received = undefined
+    const bigChunked = await sendChunked(JSON.stringify({ email: 'x'.repeat(MAX_BODY_BYTES) }))
+    expect(bigChunked.status).toBe(413)
+    expect(await bigChunked.json()).toEqual({ error: 'payload_too_large' })
+    expect(received).toBeUndefined()
   })
 
   it('leaves a Cache-Control that a route sets itself', async () => {
@@ -403,5 +420,144 @@ describe('route modules and errors', () => {
     expect(() => new DomainError('invalid', 'invalid_request')).toThrow(/reserved/)
     expect(() => new DomainError('not_found', 'not_found')).toThrow(/reserved/)
     expect(new DomainError('not_found', 'event_type_not_found').code).toBe('event_type_not_found')
+  })
+})
+
+describe('streamed request bodies', () => {
+  // A route with a large declared limit, as real create routes have, and another method on
+  // the same path that keeps the default and reads the body itself instead of declaring it.
+  const LIMIT = 2 * 1024 * 1024
+  const uploads: RouteModule = ({ app, caller }) => {
+    app.openapi(
+      createRoute({
+        method: 'post',
+        path: '/api/v1/uploads',
+        security: authenticated,
+        middleware: callerWithBodyLimit(caller, LIMIT),
+        request: { body: { content: json(z.object({ data: z.string() })), required: true } },
+        responses: { 200: { description: 'ok', content: json(z.object({ length: z.number() })) } },
+      }),
+      (c) => c.json({ length: c.req.valid('json').data.length }, 200),
+    )
+    app.openapi(
+      createRoute({
+        method: 'delete',
+        path: '/api/v1/uploads',
+        security: authenticated,
+        middleware: caller,
+        responses: { 200: { description: 'ok', content: json(z.object({ bytes: z.number() })) } },
+      }),
+      async (c) => c.json({ bytes: (await c.req.arrayBuffer()).byteLength }, 200),
+    )
+  }
+  const principal = {
+    kind: 'api_key' as const,
+    apiKeyId: '00000000-0000-7000-8000-000000000001',
+    user: { id: '00000000-0000-7000-8000-000000000002', name: 'Ada', email: 'ada@example.com' },
+    organization: {
+      id: '00000000-0000-7000-8000-000000000003',
+      name: 'Ada',
+      slug: 'ada',
+      personal: true,
+    },
+  }
+  const app = createApp({
+    ...noAuth,
+    checkDb: async () => {},
+    resolveCaller: async (headers) =>
+      headers.get('authorization') === 'Bearer hm_test'
+        ? { ok: true, principal, setCookie: [] }
+        : { ok: false, error: 'unauthorized', setCookie: [] },
+    routes: [uploads],
+  })
+  const send = (
+    method: string,
+    body: string,
+    { auth = true, headers = {} }: { auth?: boolean; headers?: Record<string, string> } = {},
+  ) => {
+    const chunked = chunkedBody(body)
+    const res = app.request('/api/v1/uploads', {
+      method,
+      headers: {
+        'content-type': 'application/json',
+        ...(auth ? { authorization: 'Bearer hm_test' } : {}),
+        ...headers,
+      },
+      ...chunked.init,
+    })
+    return { res, pulled: chunked.pulled }
+  }
+  const upload = (length: number) => JSON.stringify({ data: 'x'.repeat(length) })
+
+  it('refuses an unknown caller without reading its body', async () => {
+    const sent = send('POST', upload(1_900_000), { auth: false })
+    const res = await sent.res
+    expect(res.status).toBe(401)
+    expect(await res.json()).toEqual({ error: 'unauthorized' })
+    // At most one chunk of read-ahead, not the 1.9 MB the route's limit would allow.
+    expect(sent.pulled()).toBeLessThanOrEqual(CHUNK_SIZE)
+  })
+
+  it("counts the body against the route's limit while the route reads it", async () => {
+    const fits = send('POST', upload(1_900_000))
+    expect(await (await fits.res).json()).toEqual({ length: 1_900_000 })
+    const tooBig = send('POST', upload(LIMIT))
+    const res = await tooBig.res
+    expect(res.status).toBe(413)
+    expect(await res.json()).toEqual({ error: 'payload_too_large' })
+    expect(res.headers.get('cache-control')).toBe('no-store')
+    // Reading stops at the limit.
+    expect(tooBig.pulled()).toBeLessThanOrEqual(LIMIT + CHUNK_SIZE)
+  })
+
+  it('caps a body longer than its Content-Length', async () => {
+    const lying = send('POST', upload(LIMIT), { headers: { 'content-length': '100' } })
+    const res = await lying.res
+    expect(res.status).toBe(413)
+    expect(await res.json()).toEqual({ error: 'payload_too_large' })
+    // A declared size over the limit is refused before the caller is even identified.
+    const declared = send('POST', upload(10), {
+      auth: false,
+      headers: { 'content-length': String(LIMIT + 1) },
+    })
+    expect((await declared.res).status).toBe(413)
+    expect(declared.pulled()).toBe(0)
+  })
+
+  it('answers 413, not 500, when a handler reads an oversized body itself', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      // DELETE keeps the default limit although POST on the same path declares more.
+      const res = await send('DELETE', 'x'.repeat(MAX_BODY_BYTES + 1)).res
+      expect(res.status).toBe(413)
+      expect(await res.json()).toEqual({ error: 'payload_too_large' })
+      expect(error).not.toHaveBeenCalled()
+    } finally {
+      error.mockRestore()
+    }
+    expect(await (await send('DELETE', 'x'.repeat(MAX_BODY_BYTES)).res).json()).toEqual({
+      bytes: MAX_BODY_BYTES,
+    })
+  })
+
+  it('applies the JSON text guard while the route reads the body', async () => {
+    const unsafe = {
+      error: 'invalid_request',
+      message: 'Text in the request must not contain NUL characters or malformed Unicode',
+    }
+    // The NUL is in the last chunk: the guard refuses at the end, whoever reads the body.
+    const late = JSON.stringify({ data: 'x'.repeat(100_000), other: 'A\u0000B' })
+    const viaValidator = await send('POST', late).res
+    expect(viaValidator.status).toBe(400)
+    expect(await viaValidator.json()).toEqual(unsafe)
+    const viaHandler = await send('DELETE', JSON.stringify({ other: 'A\u0000B' })).res
+    expect(viaHandler.status).toBe(400)
+    expect(await viaHandler.json()).toEqual(unsafe)
+    // A character split across chunks reaches the route whole.
+    const prefix = '{"data":"'
+    const split = `${prefix}${'x'.repeat(CHUNK_SIZE - prefix.length - 2)}👩‍💻"}`
+    expect(await (await send('POST', split).res).json()).toEqual({
+      length: CHUNK_SIZE - prefix.length - 2 + '👩‍💻'.length,
+    })
   })
 })
