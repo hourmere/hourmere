@@ -13,6 +13,8 @@ export interface AppDeps {
   authHandler: (request: Request) => Promise<Response>
   /** Identifies the caller of authenticated routes (session cookie or API key). */
   resolveCaller: CallerResolver
+  /** PUBLIC_URL: cookie-authenticated writes must come from its origin. */
+  publicUrl: string
   /** Reverse proxies (IPs or CIDR ranges) whose X-Forwarded-For names the client. */
   trustedProxies?: readonly string[] | undefined
   /** Absolute path of the built web app, if this process should serve it. */
@@ -83,6 +85,7 @@ export function createApp({
   checkDb,
   authHandler,
   resolveCaller,
+  publicUrl,
   trustedProxies = [],
   webDist,
 }: AppDeps) {
@@ -118,7 +121,7 @@ export function createApp({
   })
 
   // Authenticated routes list this middleware; it provides c.var.principal.
-  const caller = requireCaller(resolveCaller)
+  const caller = requireCaller(resolveCaller, { allowedOrigin: new URL(publicUrl).origin })
 
   const meRoute = createRoute({
     method: 'get',

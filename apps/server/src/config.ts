@@ -5,6 +5,9 @@ import { isTrustedProxyEntry } from './client-ip.ts'
 const optional = <T extends z.ZodType>(schema: T) =>
   z.preprocess((v) => (v === '' ? undefined : v), schema.optional())
 
+const SMTP_URL_FORMAT =
+  'SMTP_URL must look like smtps://user:password@host:465 or smtp://user:password@host:587, with no path (percent-encode special characters in the password)'
+
 const schema = z
   .object({
     DATABASE_URL: z
@@ -28,17 +31,20 @@ const schema = z
         error:
           'BETTER_AUTH_SECRET is required: a random string of at least 32 characters, e.g. the output of `openssl rand -base64 32`',
       })
-      .min(32, {
+      // Whitespace does not count: a padded short secret is still short.
+      .refine((v) => v.replace(/\s/g, '').length >= 32, {
         error:
-          'BETTER_AUTH_SECRET must be at least 32 characters long; generate one with `openssl rand -base64 32`',
+          'BETTER_AUTH_SECRET must have at least 32 non-whitespace characters; generate one with `openssl rand -base64 32`',
       }),
     // Without SMTP, emails (including sign-in links) are written to the server log.
     SMTP_URL: optional(
-      z.url({
-        protocol: /^smtps?$/,
-        error:
-          'SMTP_URL must look like smtps://user:password@host:465 or smtp://user:password@host:587 (percent-encode special characters in the password)',
-      }),
+      z.url({ protocol: /^smtps?$/, error: SMTP_URL_FORMAT }).refine(
+        (v) => {
+          const u = new URL(v)
+          return u.hostname !== '' && (u.pathname === '' || u.pathname === '/') && !u.hash
+        },
+        { error: SMTP_URL_FORMAT },
+      ),
     ),
     MAIL_FROM: optional(z.string()),
     GOOGLE_CLIENT_ID: optional(z.string()),

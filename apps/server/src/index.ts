@@ -19,8 +19,17 @@ let mailer: Mailer
 if (config.SMTP_URL && config.MAIL_FROM) {
   mailer = createSmtpMailer({ url: config.SMTP_URL, from: config.MAIL_FROM })
 } else {
+  const bar = '!'.repeat(78)
   console.warn(
-    'WARNING: email is not configured (SMTP_URL is not set); sign-in links are printed to this log instead of being sent',
+    [
+      bar,
+      '!! EMAIL IS NOT CONFIGURED: SMTP_URL is not set.',
+      '!! Sign-in links are printed to this log instead of being emailed, so anyone who can',
+      '!! read this log can sign in as any user. Fine for trying Hourmere on your own; set',
+      '!! SMTP_URL and MAIL_FROM before anyone else uses this instance. Hosted and',
+      '!! internet-facing deployments must always set them.',
+      bar,
+    ].join('\n'),
   )
   mailer = createLogMailer()
 }
@@ -41,6 +50,7 @@ const app = createApp({
   },
   authHandler: auth.handler,
   resolveCaller: createCallerResolver({ auth, db }),
+  publicUrl: config.PUBLIC_URL,
   trustedProxies: config.trustedProxies,
   webDist: config.WEB_DIST,
 })

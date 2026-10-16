@@ -20,10 +20,12 @@ describe('loadConfig', () => {
     )
   })
 
-  it('rejects a BETTER_AUTH_SECRET shorter than 32 characters', () => {
-    expect(() => loadConfig({ ...base, BETTER_AUTH_SECRET: 'a'.repeat(31) })).toThrow(
-      /BETTER_AUTH_SECRET must be at least 32 characters/,
-    )
+  it('rejects a BETTER_AUTH_SECRET with fewer than 32 non-whitespace characters', () => {
+    for (const secret of ['a'.repeat(31), `${' '.repeat(40)}short`, `${'ab \t'.repeat(15)}`]) {
+      expect(() => loadConfig({ ...base, BETTER_AUTH_SECRET: secret }), secret).toThrow(
+        /BETTER_AUTH_SECRET must have at least 32 non-whitespace characters/,
+      )
+    }
   })
 
   it('treats empty variables (as docker compose passes them) as unset', () => {
@@ -54,9 +56,22 @@ describe('loadConfig', () => {
     expect(loadConfig({ ...smtp, MAIL_FROM: 'Hourmere <hi@example.com>' }).SMTP_URL).toBe(
       smtp.SMTP_URL,
     )
-    expect(() =>
-      loadConfig({ ...base, SMTP_URL: 'https://smtp.example.com', MAIL_FROM: 'a@example.com' }),
-    ).toThrow(/SMTP_URL must look like/)
+    for (const bad of [
+      'https://smtp.example.com',
+      'smtp:',
+      'smtp://',
+      'smtp:smtp.example.com',
+      'smtps://u:p@smtp.example.com/inbox',
+      'smtps://u:p@smtp.example.com#frag',
+    ]) {
+      expect(() => loadConfig({ ...base, SMTP_URL: bad, MAIL_FROM: 'a@example.com' }), bad).toThrow(
+        /SMTP_URL must look like/,
+      )
+    }
+    expect(
+      loadConfig({ ...base, SMTP_URL: 'smtp://relay:25/?pool=true', MAIL_FROM: 'a@example.com' })
+        .SMTP_URL,
+    ).toBe('smtp://relay:25/?pool=true')
   })
 
   it('parses TRUSTED_PROXIES and rejects entries that are not IPs or CIDR ranges', () => {

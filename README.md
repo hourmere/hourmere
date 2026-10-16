@@ -43,7 +43,8 @@ The app listens on `127.0.0.1:3000` and applies database migrations on start. Pu
 People sign in with a link sent by email (no passwords), or with Google or Microsoft once their
 client ids are set in `.env`. Until `SMTP_URL` and `MAIL_FROM` are set, the server prints each
 sign-in link to its log (`docker compose logs app`), so you can sign in right after the first
-start; configure SMTP before inviting anyone else.
+start. Anyone who can read that log can sign in as anyone: configure SMTP before inviting
+anyone else, and always on a hosted or internet-facing instance.
 
 Agents use API keys (`hm_…`) sent as `Authorization: Bearer <key>`. For now keys are created
 with Better Auth's endpoints while signed in (`POST /api/auth/api-key/create`, `GET

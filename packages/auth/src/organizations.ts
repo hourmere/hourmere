@@ -1,5 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import type { Db } from '@hourmere/db'
+import { APIError } from 'better-auth/api'
+import type { OrganizationOptions } from 'better-auth/plugins/organization'
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
@@ -110,4 +112,57 @@ export async function ensurePersonalOrganization(db: Db, userId: string): Promis
       .execute()
     return organizationId
   })
+}
+
+/** The user a personal organization belongs to; undefined for a team organization. */
+export async function personalOwner(db: Db, organizationId: string): Promise<string | undefined> {
+  if (!isUuid(organizationId)) return undefined
+  const row = await db
+    .selectFrom('personal_organizations')
+    .select('user_id')
+    .where('organization_id', '=', organizationId)
+    .executeTakeFirst()
+  return row?.user_id
+}
+
+const refuse = (message: string) =>
+  new APIError('FORBIDDEN', { code: 'PERSONAL_ORGANIZATION', message })
+
+/**
+ * Better Auth organization hooks that keep a personal organization its user's alone. Without
+ * them a user could invite someone as owner who then removes them, leaving the user's
+ * session and API keys without an organization. Team work belongs in a team organization.
+ * (Leaving is not hooked: Better Auth refuses to let the only owner leave.)
+ */
+export function personalOrganizationGuards(
+  db: Db,
+): NonNullable<OrganizationOptions['organizationHooks']> {
+  const isPersonal = async (organizationId: string) =>
+    (await personalOwner(db, organizationId)) !== undefined
+  const noOneElse = async ({ organization }: { organization: { id: string } }) => {
+    if (await isPersonal(organization.id)) {
+      throw refuse('A personal organization has no other members; create a team organization')
+    }
+  }
+  return {
+    // It lives as long as its user: deleting the user deletes it.
+    beforeDeleteOrganization: async ({ organization }) => {
+      if (await isPersonal(organization.id)) {
+        throw refuse('A personal organization cannot be deleted')
+      }
+    },
+    beforeCreateInvitation: noOneElse,
+    beforeAcceptInvitation: noOneElse,
+    beforeAddMember: noOneElse,
+    beforeRemoveMember: async ({ member, organization }) => {
+      if ((await personalOwner(db, organization.id)) === member.userId) {
+        throw refuse('The owner cannot be removed from their personal organization')
+      }
+    },
+    beforeUpdateMemberRole: async ({ member, organization }) => {
+      if ((await personalOwner(db, organization.id)) === member.userId) {
+        throw refuse('The owner of a personal organization keeps the owner role')
+      }
+    },
+  }
 }

@@ -51,10 +51,10 @@ A request is authenticated by one of:
   default). If the Authorization header is present it alone decides: a bad key is a 401
   even when a session cookie is also sent.
 - **Session cookie** (the web app, same origin): set by signing in through `/api/auth/*`.
-  Requests act in the session's active organization. Cookie-authenticated writes must come
-  from the app's own `Origin` (CSRF protection): Better Auth checks this for `/api/auth/*`,
-  and the first `/api/v1` write endpoint has to add the same check (today `/api/v1` is
-  read-only).
+  Requests act in the session's active organization. Cookie-authenticated requests other
+  than GET, HEAD and OPTIONS must come from the app's own `Origin` (CSRF protection), or they
+  get a 403: Better Auth checks this for `/api/auth/*`, the shared `requireCaller` middleware
+  for `/api/v1`. API key requests are exempt.
 
 `GET /api/v1/me` returns the caller, the organization they act in and whether they used a
 session or an API key.

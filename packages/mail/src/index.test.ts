@@ -1,6 +1,6 @@
 import { createServer, type Server } from 'node:net'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { createLogMailer, createSmtpMailer, magicLinkEmail } from './index.ts'
+import { createLogMailer, createSmtpMailer, magicLinkEmail, smtpTransportOptions } from './index.ts'
 
 const url = 'https://cal.example.com/api/auth/magic-link/verify?token=abc&callbackURL=%2F'
 
@@ -16,13 +16,45 @@ describe('magicLinkEmail', () => {
 })
 
 describe('createLogMailer', () => {
-  it('prints the whole message, including the link', async () => {
+  it('prints each message as one [mail] line with the link', async () => {
     const lines: string[] = []
     await createLogMailer((l) => lines.push(l)).send(
       magicLinkEmail({ to: 'ada@example.com', url, expiresInMinutes: 5 }),
     )
-    expect(lines.join('\n')).toContain('To: ada@example.com')
-    expect(lines.join('\n')).toContain(url)
+    expect(lines).toHaveLength(1)
+    const line = lines[0] as string
+    expect(line).not.toMatch(/[\n\r\u2028\u2029\u0085]/)
+    expect(line.startsWith('[mail] {')).toBe(true)
+    const record = JSON.parse(line.slice('[mail] '.length))
+    expect(record).toMatchObject({
+      to: 'ada@example.com',
+      subject: 'Sign in to Hourmere',
+      links: [url],
+    })
+  })
+
+  it('keeps hostile characters from breaking the line', async () => {
+    const lines: string[] = []
+    await createLogMailer((l) => lines.push(l)).send({
+      to: 'x@example.com',
+      subject: 'a\u2028b\u0085c',
+      text: 'one\r\n[mail] {"forged":true}',
+    })
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).not.toMatch(/[\n\r\u2028\u0085]/)
+    expect(JSON.parse((lines[0] as string).slice(7)).subject).toBe('a\u2028b\u0085c')
+  })
+})
+
+describe('smtpTransportOptions', () => {
+  it('requires STARTTLS for smtp: except on loopback; smtps: is TLS anyway', () => {
+    const requireTLS = (u: string) => smtpTransportOptions(u).requireTLS
+    expect(requireTLS('smtp://u:p@smtp.example.com:587')).toBe(true)
+    expect(requireTLS('smtp://u:p@10.0.0.5:587')).toBe(true)
+    expect(requireTLS('smtp://localhost:25')).toBe(false)
+    expect(requireTLS('smtp://127.0.0.1:25')).toBe(false)
+    expect(requireTLS('smtp://[::1]:25')).toBe(false)
+    expect(requireTLS('smtps://u:p@smtp.example.com:465')).toBe(false)
   })
 })
 
@@ -64,6 +96,8 @@ function fakeSmtpServer() {
           inData = true
           socket.write('354 go\r\n')
         } else if (verb === 'QUIT') socket.end('221 bye\r\n')
+        // Like a server without TLS support.
+        else if (verb === 'STARTTLS') socket.write('502 5.5.1 STARTTLS not supported\r\n')
         else socket.write('250 ok\r\n')
       }
     })
@@ -94,5 +128,19 @@ describe('createSmtpMailer', () => {
     expect(received.from).toContain('<hourmere@example.com>')
     expect(received.to).toEqual([expect.stringContaining('<ada@example.com>')])
     expect(received.data).toContain('Subject: Sign in to Hourmere')
+  })
+
+  it('refuses a server that does not offer STARTTLS when it is not on loopback', async () => {
+    received.data = undefined
+    // 0.0.0.0 reaches this machine without being a loopback name, so the mailer treats the
+    // fake server like a remote one.
+    const mailer = createSmtpMailer({
+      url: `smtp://resend:secret@0.0.0.0:${port}`,
+      from: 'Hourmere <hourmere@example.com>',
+    })
+    await expect(
+      mailer.send(magicLinkEmail({ to: 'ada@example.com', url, expiresInMinutes: 5 })),
+    ).rejects.toThrow(/TLS/)
+    expect(received.data).toBeUndefined()
   })
 })

@@ -1,21 +1,25 @@
 // Sign-in, sessions, personal organizations and API keys end to end: the real app, Better
 // Auth and migrations, against a throwaway database.
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import {
   API_KEY_RATE_LIMIT,
   type Auth,
+  type AuthConfig,
   CLIENT_IP_HEADER,
   createAuth,
   createAuthPool,
   createCallerResolver,
+  ensurePersonalOrganization,
   type OAuthClient,
 } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import type { MailMessage } from '@hourmere/mail'
+import { Hono } from 'hono'
 import type pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.ts'
+import { requireCaller } from './caller.ts'
 
 const serverUrl = process.env.DATABASE_URL
 
@@ -39,12 +43,13 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
 
   interface InstanceOptions {
     socialProviders?: { google?: OAuthClient; microsoft?: OAuthClient }
+    socialProviderOptions?: AuthConfig['socialProviderOptions']
     trustedProxies?: string[]
   }
 
   function instance(
     publicUrl: string,
-    { socialProviders = {}, trustedProxies = [] }: InstanceOptions = {},
+    { socialProviders = {}, socialProviderOptions = {}, trustedProxies = [] }: InstanceOptions = {},
   ): Instance {
     const auth = createAuth({
       pool: authPool,
@@ -53,11 +58,13 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
       secret: randomBytes(32).toString('base64'),
       mailer: { send: async (m) => void outbox.push(m) },
       socialProviders,
+      socialProviderOptions,
     })
     const app = createApp({
       checkDb: async () => {},
       authHandler: auth.handler,
       resolveCaller: createCallerResolver({ auth, db }),
+      publicUrl,
       trustedProxies,
     })
     return { app, auth, publicUrl }
@@ -125,8 +132,48 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
     })
   }
 
+  /** A cookie-authenticated POST from the web app's own origin. */
+  const post = (path: string, cookie: string, body: unknown, app = main.app) =>
+    app.request(path, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie, origin },
+      body: typeof body === 'string' ? body : JSON.stringify(body),
+    })
+
   const count = async (sql: string, params: unknown[]) =>
     (await testDb.pool.query<{ n: number }>(sql, params)).rows[0]?.n
+
+  const userId = async (email: string) =>
+    (
+      await testDb.pool.query<{ id: string }>(`SELECT id FROM auth."user" WHERE email = $1`, [
+        email,
+      ])
+    ).rows[0]?.id as string
+
+  async function createTeam(cookie: string, slug: string) {
+    const res = await post('/api/auth/organization/create', cookie, { name: slug, slug })
+    expect(res.status).toBe(200)
+    return ((await res.json()) as { id: string }).id
+  }
+
+  /** Captures everything printed while `fn` runs, split into lines. */
+  async function printedLines(fn: () => Promise<unknown>): Promise<string[]> {
+    const calls: unknown[][] = []
+    const spies = (['log', 'info', 'warn', 'error'] as const).map((m) =>
+      vi.spyOn(console, m).mockImplementation((...args) => void calls.push(args)),
+    )
+    try {
+      await fn()
+    } finally {
+      for (const spy of spies) spy.mockRestore()
+    }
+    return calls.flatMap((args) =>
+      args
+        .map(String)
+        .join(' ')
+        .split(/\r\n|[\n\r\u2028\u2029\u0085]/),
+    )
+  }
 
   describe('magic link', () => {
     it('signs in and reaches /api/v1/me with the session cookie', async () => {
@@ -165,6 +212,57 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
       const again = await main.app.request(link.toString())
       expect(again.headers.get('location')).toBe(`${origin}/?error=INVALID_TOKEN`)
       expect(cookieHeader(again)).not.toContain('session_token')
+    })
+
+    it('stores only a hash of the token, valid for 5 minutes', async () => {
+      const link = await requestLink('hashed@example.com')
+      const token = link.searchParams.get('token') as string
+      const hash = createHash('sha256').update(token).digest('base64url')
+      const row = (
+        await testDb.pool.query<{ identifier: string; value: string; ttl: number }>(
+          `SELECT identifier, value, extract(epoch FROM "expiresAt" - now())::float8 AS ttl
+             FROM auth.verification WHERE identifier = $1`,
+          [`magic-link:${hash}`],
+        )
+      ).rows[0]
+      expect(row).toBeDefined()
+      expect(`${row?.identifier}${row?.value}`).not.toContain(token)
+      expect(
+        await count(`SELECT count(*)::int AS n FROM auth.verification WHERE identifier LIKE $1`, [
+          `%${token}%`,
+        ]),
+      ).toBe(0)
+      expect(row?.ttl).toBeGreaterThan(290)
+      expect(row?.ttl).toBeLessThanOrEqual(300)
+
+      // Past its expiry the link no longer signs in.
+      await testDb.pool.query(
+        `UPDATE auth.verification SET "expiresAt" = now() - interval '1 second' WHERE identifier = $1`,
+        [`magic-link:${hash}`],
+      )
+      const res = await main.app.request(link.toString())
+      expect(res.headers.get('location')).toMatch(/[?&]error=/)
+      expect(cookieHeader(res)).not.toContain('session_token')
+    })
+
+    it('cannot be imitated in the server log through a hostile callback URL', async () => {
+      const fake = `${origin}/api/auth/magic-link/verify?token=forged&callbackURL=%2F`
+      const forged = `https://evil.example/\n[mail] {"to":"admin@example.com","links":["${fake}"]}\r\n[mail] ${fake}`
+      let status = 0
+      const lines = await printedLines(async () => {
+        const res = await main.app.request('/api/auth/sign-in/magic-link', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ email: 'admin@example.com', callbackURL: forged }),
+        })
+        status = res.status
+      })
+      expect(status).toBe(403)
+      // Better Auth logs the rejected URL, but on one line with the breaks escaped.
+      expect(lines.some((l) => l.includes('Invalid callbackURL') && l.includes('\\n[mail]'))).toBe(
+        true,
+      )
+      expect(lines.filter((l) => l.startsWith('[mail]'))).toEqual([])
     })
 
     it('rejects an unknown token', async () => {
@@ -239,6 +337,87 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
         body: JSON.stringify({ name: 'Short-lived', slug: 'short-lived' }),
       })
       expect((await remove(((await team.json()) as { id: string }).id)).status).toBe(200)
+    })
+
+    describe("stays its owner's alone", () => {
+      let alice: string
+      let bob: string
+      let personal: Me['organization']
+      let aliceMemberId: string
+
+      beforeAll(async () => {
+        alice = await signIn('alice@example.com')
+        bob = await signIn('bob@example.com')
+        personal = (await me({ cookie: alice })).body.organization
+        aliceMemberId = (
+          await testDb.pool.query<{ id: string }>(
+            `SELECT id FROM auth.member WHERE "organizationId" = $1`,
+            [personal.id],
+          )
+        ).rows[0]?.id as string
+      })
+
+      const refused = async (res: Response) => {
+        expect(res.status).toBe(403)
+        expect(await res.json()).toMatchObject({ code: 'PERSONAL_ORGANIZATION' })
+      }
+
+      it('refuses invitations', async () => {
+        await refused(
+          await post('/api/auth/organization/invite-member', alice, {
+            email: 'bob@example.com',
+            role: 'owner',
+            organizationId: personal.id,
+          }),
+        )
+      })
+
+      it('refuses accepting an invitation that exists anyway', async () => {
+        const invitation = await testDb.pool.query<{ id: string }>(
+          `INSERT INTO auth.invitation ("organizationId", email, role, status, "expiresAt", "inviterId")
+           VALUES ($1, 'bob@example.com', 'owner', 'pending', now() + interval '1 day', $2) RETURNING id`,
+          [personal.id, await userId('alice@example.com')],
+        )
+        await refused(
+          await post('/api/auth/organization/accept-invitation', bob, {
+            invitationId: invitation.rows[0]?.id,
+          }),
+        )
+      })
+
+      it('refuses adding members', async () => {
+        await expect(
+          main.auth.api.addMember({
+            body: {
+              userId: await userId('bob@example.com'),
+              organizationId: personal.id,
+              role: 'owner',
+            },
+          }),
+        ).rejects.toMatchObject({ body: { code: 'PERSONAL_ORGANIZATION' } })
+      })
+
+      it('keeps its owner even if a second owner exists', async () => {
+        // Not possible through the API any more; a row like this could only predate the rule.
+        await testDb.pool.query(
+          `INSERT INTO auth.member ("organizationId", "userId", role, "createdAt") VALUES ($1, $2, 'owner', now())`,
+          [personal.id, await userId('bob@example.com')],
+        )
+        await refused(
+          await post('/api/auth/organization/update-member-role', bob, {
+            memberId: aliceMemberId,
+            role: 'member',
+            organizationId: personal.id,
+          }),
+        )
+        await refused(
+          await post('/api/auth/organization/remove-member', bob, {
+            memberIdOrEmail: aliceMemberId,
+            organizationId: personal.id,
+          }),
+        )
+        expect((await me({ cookie: alice })).body.organization).toEqual(personal)
+      })
     })
 
     it('gets a different slug when the plain one is taken', async () => {
@@ -363,8 +542,64 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
         personal: false,
       })
 
-      await testDb.pool.query(`DELETE FROM auth.member WHERE "organizationId" = $1`, [team.id])
+      // Someone else stays a member; only the key's owner leaves.
+      await signIn('acme-colleague@example.com')
+      await testDb.pool.query(
+        `INSERT INTO auth.member ("organizationId", "userId", role, "createdAt") VALUES ($1, $2, 'owner', now())`,
+        [team.id, await userId('acme-colleague@example.com')],
+      )
+      await testDb.pool.query(
+        `DELETE FROM auth.member WHERE "organizationId" = $1 AND "userId" = $2`,
+        [team.id, await userId('agent-owner@example.com')],
+      )
       expect((await me(bearer)).res.status).toBe(401)
+    })
+
+    it('cannot be moved to an organization the user does not belong to', async () => {
+      const key = (await (await createKey(cookie)).json()) as { id: string; key: string }
+      const theirs = (await me({ cookie: await signIn('neighbour@example.com') })).body.organization
+      const res = await post('/api/auth/api-key/update', cookie, {
+        keyId: key.id,
+        metadata: { organizationId: theirs.id },
+      })
+      expect(res.status).toBe(403)
+      expect((await me({ authorization: `Bearer ${key.key}` })).body.organization).toEqual(personal)
+    })
+
+    it('accept only { organizationId } as metadata', async () => {
+      const raw = (metadata: string) => `{"name":"agent","metadata":${metadata}}`
+      for (const metadata of [
+        `{"__proto__":{"organizationId":"${personal.id}"}}`,
+        `{"organizationId":"${personal.id}","__proto__":{"admin":true}}`,
+        '[]',
+        `["${personal.id}"]`,
+        `{"organizationId":"${personal.id}","note":"x"}`,
+        '{"organizationId":"not-a-uuid"}',
+        `{"organizationId":"${'a'.repeat(100_000)}"}`,
+        '"text"',
+      ]) {
+        const res = await post('/api/auth/api-key/create', cookie, raw(metadata))
+        expect(res.status, metadata.slice(0, 80)).toBe(400)
+      }
+      const key = (await (await createKey(cookie)).json()) as { id: string }
+      const update = await post(
+        '/api/auth/api-key/update',
+        cookie,
+        `{"keyId":"${key.id}","metadata":{"__proto__":{"x":1}}}`,
+      )
+      expect(update.status).toBe(400)
+      // The owner's key list still works.
+      const list = await main.app.request('/api/auth/api-key/list', { headers: { cookie } })
+      expect(list.status).toBe(200)
+      // null means "the personal organization".
+      const reset = await post('/api/auth/api-key/update', cookie, {
+        keyId: key.id,
+        metadata: null,
+      })
+      expect(reset.status).toBe(200)
+      expect(((await reset.json()) as { metadata: unknown }).metadata).toEqual({
+        organizationId: personal.id,
+      })
     })
 
     it('cannot be created for an organization the user does not belong to', async () => {
@@ -418,6 +653,66 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
         body: JSON.stringify({ name: 'stolen' }),
       })
       expect(res.status).toBe(403)
+    })
+
+    it('acts in the active organization only while the user is a member of it', async () => {
+      const cookie = await signIn('switcher@example.com')
+      const personal = (await me({ cookie })).body.organization
+      const team = await createTeam(cookie, 'switchers')
+      const switched = await post('/api/auth/organization/set-active', cookie, {
+        organizationId: team,
+      })
+      expect(switched.status).toBe(200)
+      expect((await me({ cookie })).body.organization.id).toBe(team)
+
+      await signIn('switcher-colleague@example.com')
+      await testDb.pool.query(
+        `INSERT INTO auth.member ("organizationId", "userId", role, "createdAt") VALUES ($1, $2, 'owner', now())`,
+        [team, await userId('switcher-colleague@example.com')],
+      )
+      await testDb.pool.query(
+        `DELETE FROM auth.member WHERE "organizationId" = $1 AND "userId" = $2`,
+        [team, await userId('switcher@example.com')],
+      )
+      expect((await me({ cookie })).body.organization).toEqual(personal)
+    })
+
+    describe('writes through requireCaller', () => {
+      // A stand-in for future /api/v1 write endpoints.
+      let writer: Hono
+      beforeAll(() => {
+        writer = new Hono()
+        const caller = requireCaller(createCallerResolver({ auth: main.auth, db }), {
+          allowedOrigin: origin,
+        })
+        writer.on(['GET', 'POST'], '/write', caller, (c) => c.json({ kind: c.var.principal.kind }))
+      })
+      const write = (headers: Record<string, string>, method = 'POST') =>
+        writer.request('/write', { method, headers })
+
+      it("need the app's own origin when authenticated by the session cookie", async () => {
+        const cookie = await signIn('writer@example.com')
+        expect((await write({ cookie })).status).toBe(403)
+        expect((await write({ cookie, origin: 'https://evil.example' })).status).toBe(403)
+        expect((await write({ cookie, origin: 'null' })).status).toBe(403)
+        expect((await write({ cookie, referer: 'https://evil.example/page' })).status).toBe(403)
+        expect(
+          await (await write({ cookie, origin: 'https://evil.example' })).json(),
+        ).toMatchObject({
+          error: 'forbidden',
+        })
+        expect((await write({ cookie, origin })).status).toBe(200)
+        expect((await write({ cookie, referer: `${origin}/settings` })).status).toBe(200)
+        expect((await write({ cookie }, 'GET')).status).toBe(200)
+      })
+
+      it('do not need an origin with an API key', async () => {
+        const cookie = await signIn('writer-agent@example.com')
+        const key = (await (await createKey(cookie)).json()) as { key: string }
+        const res = await write({ authorization: `Bearer ${key.key}` })
+        expect(res.status).toBe(200)
+        expect(await res.json()).toEqual({ kind: 'api_key' })
+      })
     })
 
     it('ends the session on sign-out', async () => {
@@ -481,9 +776,96 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
     const providerIds = async (i: Instance) =>
       (await i.auth.$context).socialProviders.map((p) => p.id).sort()
 
+    const client = { clientId: 'id', clientSecret: 'secret' }
+
+    /** A provider whose (already verified) ID token says the user is `profile`. */
+    const vouching = (profile: { id: string; email: string; emailVerified: boolean }) => ({
+      verifyIdToken: async () => true,
+      getUserInfo: async () => ({
+        user: { email: profile.email, emailVerified: profile.emailVerified, name: 'From provider' },
+        // Only the claims the account key is read from (Microsoft: oid, Google: sub).
+        data: { oid: profile.id, sub: profile.id } as never,
+      }),
+    })
+
+    const socialSignIn = (i: Instance, provider: 'google' | 'microsoft') =>
+      i.app.request('/api/auth/sign-in/social', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ provider, idToken: { token: 'header.payload.signature' } }),
+      })
+
+    it('creates an account when the provider confirms the email address', async () => {
+      const google = instance(origin, {
+        socialProviders: { google: client },
+        socialProviderOptions: {
+          google: vouching({ id: 'g-1', email: 'social@example.com', emailVerified: true }),
+        },
+      })
+      const res = await socialSignIn(google, 'google')
+      expect(res.status).toBe(200)
+      const { body } = await me({ cookie: cookieHeader(res) }, google.app)
+      expect(body.user.email).toBe('social@example.com')
+      expect(body.organization.personal).toBe(true)
+    })
+
+    it('refuses an unconfirmed email address, so nobody can take over its future owner', async () => {
+      // Mallory's Microsoft account claims the victim's address without Microsoft confirming it.
+      const microsoft = instance(origin, {
+        socialProviders: { microsoft: client },
+        socialProviderOptions: {
+          microsoft: vouching({
+            id: 'ms-mallory',
+            email: 'victim@example.com',
+            emailVerified: false,
+          }),
+        },
+      })
+      const first = await socialSignIn(microsoft, 'microsoft')
+      expect(first.status).toBe(403)
+      expect(await first.json()).toMatchObject({ code: 'EMAIL_NOT_VERIFIED' })
+      expect(cookieHeader(first)).not.toContain('session_token')
+      expect(await userId('victim@example.com')).toBeUndefined()
+
+      // The victim signs up with an email link; Mallory still cannot get in through Microsoft.
+      const victim = await signIn('victim@example.com', microsoft)
+      const again = await socialSignIn(microsoft, 'microsoft')
+      expect(again.status).toBe(401)
+      expect(cookieHeader(again)).not.toContain('session_token')
+      expect(
+        await count(`SELECT count(*)::int AS n FROM auth.account WHERE "userId" = $1`, [
+          await userId('victim@example.com'),
+        ]),
+      ).toBe(0)
+      expect((await me({ cookie: victim }, microsoft.app)).res.status).toBe(200)
+    })
+
+    it('revokes API keys made before the owner proved the email address', async () => {
+      // An unverified account with a key in it, as Better Auth keeps one from a provider that
+      // did not vouch for the address (and as a database could hold from before the rule).
+      const user = await testDb.pool.query<{ id: string }>(
+        `INSERT INTO auth."user" (name, email, "emailVerified") VALUES ('Mallory', 'late@example.com', false) RETURNING id`,
+      )
+      const id = user.rows[0]?.id as string
+      await ensurePersonalOrganization(db, id)
+      const planted = await main.auth.api.createApiKey({ body: { userId: id, name: 'planted' } })
+      const bearer = { authorization: `Bearer ${planted.key}` }
+      expect((await me(bearer)).res.status).toBe(200)
+
+      // The real owner signs in with an email link: Better Auth revokes the unproven access.
+      await signIn('late@example.com')
+      expect((await me(bearer)).res.status).toBe(401)
+    })
+
+    it('makes invitations require a proven email address', () => {
+      const org = main.auth.options.plugins.find((p) => p.id === 'organization') as {
+        options?: { requireEmailVerificationOnInvitation?: boolean }
+      }
+      expect(org.options?.requireEmailVerificationOnInvitation).toBe(true)
+    })
+
     it('enables only the configured providers', async () => {
       expect(await providerIds(main)).toEqual([])
-      const client = { clientId: 'id', clientSecret: 'secret' }
       expect(await providerIds(instance(origin, { socialProviders: { google: client } }))).toEqual([
         'google',
       ])

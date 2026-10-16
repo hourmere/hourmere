@@ -2,13 +2,17 @@ import { apiKey } from '@better-auth/api-key'
 import type { Db } from '@hourmere/db'
 import { type Mailer, magicLinkEmail } from '@hourmere/mail'
 import { betterAuth } from 'better-auth'
-import { APIError, createAuthMiddleware, getSessionFromCtx } from 'better-auth/api'
+import { APIError } from 'better-auth/api'
 import { magicLink } from 'better-auth/plugins/magic-link'
 import { organization } from 'better-auth/plugins/organization'
+import type { GoogleOptions, MicrosoftOptions } from 'better-auth/social-providers'
 import pg from 'pg'
+import { API_KEY_RATE_LIMIT, apiKeyHook } from './api-keys.ts'
 import { API_KEY_PREFIX } from './caller.ts'
-import { ensurePersonalOrganization, isMember, isUuid } from './organizations.ts'
+import { betterAuthLog } from './log.ts'
+import { ensurePersonalOrganization, personalOrganizationGuards } from './organizations.ts'
 
+export { API_KEY_RATE_LIMIT } from './api-keys.ts'
 export {
   API_KEY_PREFIX,
   type CallerOrganization,
@@ -18,6 +22,7 @@ export {
   createCallerResolver,
   type Principal,
 } from './caller.ts'
+export { escapeControlCharacters } from './log.ts'
 export { ensurePersonalOrganization } from './organizations.ts'
 
 /**
@@ -51,6 +56,11 @@ export interface AuthConfig {
   mailer: Mailer
   /** Each provider is enabled only when configured. */
   socialProviders?: { google?: OAuthClient | undefined; microsoft?: OAuthClient | undefined }
+  /**
+   * Better Auth provider options applied over ours. Tests use it to replace the provider's
+   * token check and profile lookup; production configuration does not set it.
+   */
+  socialProviderOptions?: { google?: Partial<GoogleOptions>; microsoft?: Partial<MicrosoftOptions> }
 }
 
 const MAGIC_LINK_MINUTES = 5
@@ -61,69 +71,6 @@ const MAGIC_LINK_MINUTES = 5
  */
 export const CLIENT_IP_HEADER = 'x-hourmere-client-ip'
 
-/**
- * Per-key limit written into each new key. A safety net against runaway agents, not the
- * product's API limits, which belong in the API layer.
- */
-export const API_KEY_RATE_LIMIT = { timeWindow: 60_000, maxRequests: 600 } as const
-
-/**
- * Better Auth's default log format, except for rejected API keys: it logs each one as a
- * multi-line error with a stack trace. A wrong key is the caller's problem, so it becomes
- * one info line with the reason only (never the key).
- */
-function log(level: 'debug' | 'info' | 'warn' | 'error', message: string, ...args: unknown[]) {
-  if (message.startsWith('Failed to validate API key')) {
-    const code = (args[0] as { body?: { code?: unknown } } | undefined)?.body?.code
-    console.info(`[auth] API key rejected: ${typeof code === 'string' ? code : 'INVALID_API_KEY'}`)
-    return
-  }
-  const line = `${new Date().toISOString()} ${level.toUpperCase()} [Better Auth]: ${message}`
-  if (level === 'error') console.error(line, ...args)
-  else if (level === 'warn') console.warn(line, ...args)
-  else console.log(line, ...args)
-}
-
-const isRecord = (v: unknown): v is Record<string, unknown> =>
-  typeof v === 'object' && v !== null && !Array.isArray(v)
-
-/**
- * API keys belong to a user and act in one organization, stored in the key's metadata as
- * `organizationId`: the personal organization unless the creator names another
- * organization they belong to. Keys always carry the `hm_` prefix.
- */
-function apiKeyOrganizationHook(db: Db) {
-  return createAuthMiddleware(async (ctx) => {
-    const creating = ctx.path === '/api-key/create'
-    if (!creating && ctx.path !== '/api-key/update') return
-    const body: unknown = ctx.body
-    // Malformed bodies are left to the endpoint's own validation.
-    if (!isRecord(body)) return
-    if (creating && body.prefix !== undefined && body.prefix !== API_KEY_PREFIX) {
-      throw new APIError('BAD_REQUEST', { message: `API keys always start with ${API_KEY_PREFIX}` })
-    }
-    if (!creating && body.metadata === undefined) return
-    const metadata = body.metadata ?? {}
-    if (!isRecord(metadata)) return
-    const session = await getSessionFromCtx(ctx)
-    // body.userId counts only in server-side calls (auth.api.*); the endpoint refuses it from
-    // clients, and without a user it answers 401 itself.
-    const fromServer = !ctx.request && typeof body.userId === 'string' ? body.userId : undefined
-    const userId = session?.user.id ?? fromServer
-    if (!userId || !isUuid(userId)) return
-    const requested = metadata.organizationId
-    if (requested === undefined) {
-      const organizationId = await ensurePersonalOrganization(db, userId)
-      return { context: { body: { ...body, metadata: { ...metadata, organizationId } } } }
-    }
-    if (typeof requested !== 'string' || !(await isMember(db, userId, requested))) {
-      throw new APIError('FORBIDDEN', {
-        message: 'metadata.organizationId must be an organization you are a member of',
-      })
-    }
-  })
-}
-
 export function createAuth({
   pool,
   db,
@@ -131,6 +78,7 @@ export function createAuth({
   secret,
   mailer,
   socialProviders = {},
+  socialProviderOptions = {},
 }: AuthConfig) {
   const { google, microsoft } = socialProviders
   return betterAuth({
@@ -145,13 +93,19 @@ export function createAuth({
       disableOriginCheck: false,
       ipAddress: { ipAddressHeaders: [CLIENT_IP_HEADER] },
     },
-    logger: { log },
+    logger: { log: betterAuthLog },
     // Sign-in providers' OAuth tokens are stored encrypted, not in plain text.
     account: { encryptOAuthTokens: true },
     // Passwordless: email magic links and social sign-in only (emailAndPassword stays off).
     // Sign-in asks only for identity; calendar access is a separate connection.
     socialProviders: {
-      ...(google && { google: { clientId: google.clientId, clientSecret: google.clientSecret } }),
+      ...(google && {
+        google: {
+          clientId: google.clientId,
+          clientSecret: google.clientSecret,
+          ...socialProviderOptions.google,
+        },
+      }),
       ...(microsoft && {
         microsoft: {
           clientId: microsoft.clientId,
@@ -161,12 +115,25 @@ export function createAuth({
           // The photo needs the Graph User.Read scope; Better Auth would store it in the user
           // row as a data URL.
           disableProfilePhoto: true,
+          ...socialProviderOptions.microsoft,
         },
       }),
     },
     databaseHooks: {
       user: {
         create: {
+          // Every account starts from a proven email address. A provider that does not vouch
+          // for the address (Microsoft often does not) could otherwise create an account for
+          // someone else's email and mint API keys in it before the owner ever signs in.
+          before: async (user) => {
+            if (!user.emailVerified) {
+              throw new APIError('FORBIDDEN', {
+                code: 'EMAIL_NOT_VERIFIED',
+                message:
+                  'This sign-in provider did not confirm your email address. Sign in with an email link first; you can use this provider afterwards if it confirms the address.',
+              })
+            }
+          },
           // Runs after the user row is committed.
           after: async (user) => {
             await ensurePersonalOrganization(db, user.id)
@@ -185,26 +152,12 @@ export function createAuth({
         },
       },
     },
-    hooks: { before: apiKeyOrganizationHook(db) },
+    hooks: { before: apiKeyHook(db) },
     plugins: [
       organization({
-        organizationHooks: {
-          // The personal organization lives as long as its user (deleting the user deletes
-          // it); without it the user would have nowhere to act.
-          beforeDeleteOrganization: async ({ organization }) => {
-            const personal = await db
-              .selectFrom('personal_organizations')
-              .select('user_id')
-              .where('organization_id', '=', organization.id)
-              .executeTakeFirst()
-            if (personal) {
-              throw new APIError('FORBIDDEN', {
-                code: 'PERSONAL_ORGANIZATION',
-                message: 'A personal organization cannot be deleted',
-              })
-            }
-          },
-        },
+        // An invitation is accepted only by someone who proved they own the invited address.
+        requireEmailVerificationOnInvitation: true,
+        organizationHooks: personalOrganizationGuards(db),
       }),
       apiKey({
         defaultPrefix: API_KEY_PREFIX,

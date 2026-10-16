@@ -22,14 +22,35 @@ export interface SmtpMailerOptions {
   from: string
 }
 
+const isLoopback = (hostname: string) => {
+  const h = hostname.toLowerCase().replace(/^\[|\]$/g, '')
+  return (
+    h === 'localhost' || h.endsWith('.localhost') || h === '::1' || /^127(\.\d{1,3}){3}$/.test(h)
+  )
+}
+
+/**
+ * nodemailer options for SMTP_URL. `smtps:` is TLS from the first byte. `smtp:` upgrades
+ * with STARTTLS, which nodemailer silently skips when a server (or someone in between) does
+ * not offer it, sending the password and sign-in links in clear text; so it is required,
+ * except for a relay on this machine. A `?requireTLS=false` in the URL still opts out.
+ */
+export function smtpTransportOptions(url: string) {
+  const { protocol, hostname } = new URL(url)
+  return {
+    url,
+    // nodemailer's defaults wait minutes for an unreachable server; a sign-in request should
+    // fail within seconds. Query parameters in the URL (e.g. ?connectionTimeout=…) override.
+    connectionTimeout: 10_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 30_000,
+    requireTLS: protocol === 'smtp:' && !isLoopback(hostname),
+  }
+}
+
 /** Works with any SMTP provider, including Resend, Postmark and Amazon SES SMTP endpoints. */
 export function createSmtpMailer({ url, from }: SmtpMailerOptions): Mailer {
-  // nodemailer's defaults wait minutes for an unreachable server; a sign-in request should
-  // fail within seconds. Query parameters in the URL (e.g. ?connectionTimeout=…) override these.
-  const transport = nodemailer.createTransport(
-    { url, connectionTimeout: 10_000, greetingTimeout: 10_000, socketTimeout: 30_000 },
-    { from },
-  )
+  const transport = nodemailer.createTransport(smtpTransportOptions(url), { from })
   return {
     async send(message) {
       await transport.sendMail(message)
@@ -37,17 +58,24 @@ export function createSmtpMailer({ url, from }: SmtpMailerOptions): Mailer {
   }
 }
 
+/** Characters JSON leaves alone but terminals or log tools may treat as line breaks. */
+const LINE_BREAKING = /[\u007f-\u009f\u2028\u2029]/g
+const unicodeEscape = (c: string) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`
+
 /**
  * Prints messages to the log instead of sending them, so a fresh self-hosted instance can
  * sign in before email is configured. Sign-in links appear in the log in full: only use it
  * where whoever can read the log may sign in as anyone.
+ *
+ * Each message is one line, `[mail] {json}`. Other log output has its control characters
+ * escaped, so nothing a request gets into the log can imitate such a line.
  */
 export function createLogMailer(print: (line: string) => void = console.log): Mailer {
   return {
     async send({ to, subject, text }) {
-      print(
-        `[mail] not sent (SMTP_URL is not set)\nTo: ${to}\nSubject: ${subject}\n\n${text}\n[mail] end`,
-      )
+      const links = text.match(/https?:\/\/\S+/g) ?? []
+      const record = JSON.stringify({ notSent: 'SMTP_URL is not set', to, subject, links, text })
+      print(`[mail] ${record.replace(LINE_BREAKING, unicodeEscape)}`)
     },
   }
 }

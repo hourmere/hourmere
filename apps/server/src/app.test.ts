@@ -5,7 +5,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { type AppDeps, createApp } from './app.ts'
 
 // Sign-in is covered by auth.test.ts against a real database.
-const noAuth: Pick<AppDeps, 'authHandler' | 'resolveCaller'> = {
+const noAuth: Pick<AppDeps, 'authHandler' | 'resolveCaller' | 'publicUrl'> = {
+  publicUrl: 'http://localhost:3000',
   authHandler: async () => new Response(null, { status: 404 }),
   resolveCaller: async () => ({ ok: false, error: 'unauthorized', setCookie: [] }),
 }
