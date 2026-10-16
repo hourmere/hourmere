@@ -45,6 +45,17 @@ jobs:
 
   docker:
     runs-on: ubuntu-latest
+    env:
+      # Deliberately contains URL-special characters: self-hosters' passwords will.
+      POSTGRES_PASSWORD: ci/pass#word?with+specials=
     steps:
       - uses: actions/checkout@v7
-      - run: docker build --tag hourmere:ci .
+      - name: Build and start the self-hosting stack
+        run: docker compose up -d --build --wait --wait-timeout 120
+      - name: Smoke test
+        run: |
+          curl --fail --silent --show-error http://127.0.0.1:3000/api/health
+          curl --fail --silent --show-error http://127.0.0.1:3000/ | grep -q '<title>Hourmere</title>'
+      - name: Logs
+        if: failure()
+        run: docker compose logs

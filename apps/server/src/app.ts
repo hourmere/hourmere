@@ -46,7 +46,9 @@ export function createApp({ checkDb, webDist }: AppDeps) {
     }
   })
 
-  app.doc('/api/openapi.json', {
+  // The product API is versioned under /api/v1 (agents depend on it for years);
+  // /api/health is operational and stays unversioned.
+  app.doc('/api/v1/openapi.json', {
     openapi: '3.1.0',
     info: { title: 'Hourmere API', version: '0.0.0' },
   })
@@ -56,6 +58,15 @@ export function createApp({ checkDb, webDist }: AppDeps) {
   if (webDist) {
     // serveStatic resolves paths against the working directory.
     const root = relative(process.cwd(), webDist) || '.'
+    // Vite's hashed bundles never change, so cache them for a year. A missing bundle (an old
+    // tab asking for a file from the previous deploy) is a real 404, not the app's HTML.
+    app.use('/assets/*', async (c, next) => {
+      await next()
+      if (c.res.status === 200)
+        c.res.headers.set('Cache-Control', 'public, max-age=31536000, immutable')
+    })
+    app.get('/assets/*', serveStatic({ root }))
+    app.get('/assets/*', (c) => c.text('Not found', 404))
     app.use('*', serveStatic({ root }))
     app.get('*', serveStatic({ root, path: 'index.html' }))
   }
