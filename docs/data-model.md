@@ -85,9 +85,9 @@ types in `packages/db/src/tables.ts` are generated from the migrated database.
 - **Accounts start from a proven email address.** The application refuses to create a user
   whose email the sign-in provider did not verify. Should an unverified user exist anyway,
   they get no social sign-in session, cannot create or change API keys (only switch them
-  off), and their keys do not authenticate; a trigger deletes those keys the moment the
-  email becomes verified, so a key minted by whoever held the account before cannot act as
-  the real owner.
+  off), and their keys do not authenticate. The moment the email becomes verified, by any
+  route, triggers delete their API keys and sessions, so nothing obtained by whoever held
+  the account before can act as the real owner.
 - **A personal organization is its user's alone**: no invitations or other members, the
   owner cannot be removed or demoted, and it cannot be deleted on its own.
 - **Ownership is enforced where it is cheap to do so.** Composite foreign keys keep a

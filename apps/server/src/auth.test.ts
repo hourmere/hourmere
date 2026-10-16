@@ -1148,6 +1148,58 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
       }
     })
 
+    it('ends sessions from before the owner proved the email through a verifying provider', async () => {
+      // An old unverified account in which Mallory holds a session. The owner's Google
+      // account is linked to it (from back when Google did not confirm the address; linking a
+      // provider to an unverified account now is refused by Better Auth's
+      // requireLocalEmailVerified).
+      const mallory = await unverifiedUser('proof@example.com')
+      await testDb.pool.query(
+        `INSERT INTO auth.account ("accountId", "providerId", "userId", "updatedAt")
+         VALUES ('g-proof', 'google', $1, now())`,
+        [mallory.id],
+      )
+      expect((await me({ cookie: mallory.cookie })).res.status).toBe(200)
+
+      // The owner signs in with Google, which now confirms the address: Better Auth marks the
+      // email verified, without revoking anything itself.
+      const google = instance(origin, {
+        socialProviders: { google: client },
+        socialProviderOptions: {
+          google: vouching({ id: 'g-proof', email: 'proof@example.com', emailVerified: true }),
+        },
+      })
+      const first = await socialSignIn(google, 'google')
+      // Better Auth judges this login by the account as it loaded it (still unverified), so
+      // this first one is refused; the email is verified from now on.
+      expect(first.status).toBe(403)
+      const user = await testDb.pool.query(
+        `SELECT u."emailVerified", a."providerId" FROM auth."user" u
+           JOIN auth.account a ON a."userId" = u.id WHERE u.id = $1`,
+        [mallory.id],
+      )
+      expect(user.rows).toEqual([{ emailVerified: true, providerId: 'google' }])
+
+      // Mallory's session ended with the proof, so it can neither read nor mint keys.
+      expect((await me({ cookie: mallory.cookie })).res.status).toBe(401)
+      const minted = await post('/api/auth/api-key/create', mallory.cookie, { name: 'late' })
+      expect(minted.status).toBe(401)
+
+      // The owner's next sign-in gets a session that works.
+      const owner = await socialSignIn(google, 'google')
+      expect(owner.status).toBe(200)
+      const cookie = cookieHeader(owner)
+      expect((await me({ cookie }, google.app)).body.user.email).toBe('proof@example.com')
+      expect(
+        (await post('/api/auth/api-key/create', cookie, { name: 'owner' }, google.app)).status,
+      ).toBe(200)
+      expect(
+        await count(`SELECT count(*)::int AS n FROM auth.apikey WHERE "referenceId" = $1`, [
+          mallory.id,
+        ]),
+      ).toBe(1)
+    })
+
     it('makes invitations require a proven email address', () => {
       const org = main.auth.options.plugins.find((p) => p.id === 'organization') as {
         options?: { requireEmailVerificationOnInvitation?: boolean }
