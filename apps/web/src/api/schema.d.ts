@@ -512,6 +512,339 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/event-types": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Event types of the organization the caller acts in
+         * @description Team event types, and the personal ones the caller owns, by position. Deleted ones are left out.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description By position */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["EventTypeList"];
+                    };
+                };
+                /** @description No valid session or API key */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The API key's rate limit is used up */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Create an event type
+         * @description Created in the organization the caller acts in and hosted by the caller: on the caller's personal page in a personal organization, on the team page in a team (owners and admins only).
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["EventTypeInput"];
+                };
+            };
+            responses: {
+                /** @description The new event type */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["EventType"];
+                    };
+                };
+                /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No valid session or API key */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description insufficient_role: team event types need the owner or admin role; forbidden: a cookie-authenticated write from another origin */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description slug_taken: another event type on the same page has this slug */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The API key's rate limit is used up */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/event-types/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** An event type */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The event type */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["EventType"];
+                    };
+                };
+                /** @description No valid session or API key */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description event_type_not_found: no such event type in the organization, or one the caller cannot see */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The API key's rate limit is used up */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        /**
+         * Delete an event type
+         * @description It disappears from the API and its slug becomes free; past bookings keep pointing at it.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Deleted */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description No valid session or API key */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description insufficient_role: team event types need the owner or admin role; forbidden: a cookie-authenticated write from another origin */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description event_type_not_found: no such event type in the organization, or one the caller cannot see */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The API key's rate limit is used up */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        /** Change an event type */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["EventTypeUpdate"];
+                };
+            };
+            responses: {
+                /** @description The changed event type */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["EventType"];
+                    };
+                };
+                /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No valid session or API key */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description insufficient_role: team event types need the owner or admin role; forbidden: a cookie-authenticated write from another origin */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description event_type_not_found: no such event type in the organization, or one the caller cannot see */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description slug_taken: another event type on the same page has this slug */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The API key's rate limit is used up */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
     "/api/v1/instance": {
         parameters: {
             query?: never;
@@ -595,6 +928,150 @@ export interface paths {
             };
         };
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/profile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The caller's profile */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The profile */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Profile"];
+                    };
+                };
+                /** @description No valid session or API key */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description profile_not_found: no profile yet (see PUT) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The API key's rate limit is used up */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        /**
+         * Create or replace the caller's profile
+         * @description The time zone and locale are stored normalized (europe/berlin → Europe/Berlin).
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ProfileInput"];
+                };
+            };
+            responses: {
+                /** @description The profile was replaced */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Profile"];
+                    };
+                };
+                /** @description The profile was created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Profile"];
+                    };
+                };
+                /** @description invalid_request, invalid_handle, handle_reserved, invalid_time_zone or invalid_locale */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No valid session or API key */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description forbidden: a cookie-authenticated write from another origin */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description handle_taken: another user has this handle */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The API key's rate limit is used up */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
         post?: never;
         delete?: never;
         options?: never;
@@ -832,6 +1309,580 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/schedules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The caller's schedules */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Oldest first */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ScheduleList"];
+                    };
+                };
+                /** @description No valid session or API key */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The API key's rate limit is used up */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /** Create a schedule */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ScheduleInput"];
+                };
+            };
+            responses: {
+                /** @description The new schedule */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Schedule"];
+                    };
+                };
+                /** @description invalid_request, invalid_schedule, invalid_time_zone or invalid_weekly_hours */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No valid session or API key */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description forbidden: a cookie-authenticated write from another origin */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The API key's rate limit is used up */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/schedules/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A schedule */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The schedule */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Schedule"];
+                    };
+                };
+                /** @description No valid session or API key */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description schedule_not_found: no such schedule among the caller’s */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The API key's rate limit is used up */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        /**
+         * Delete a schedule
+         * @description Its overrides go with it; event types that used it fall back to the host's default schedule.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Deleted */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description No valid session or API key */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description forbidden: a cookie-authenticated write from another origin */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description schedule_not_found: no such schedule among the caller’s */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description schedule_is_default: the default schedule while the user has others */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The API key's rate limit is used up */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        /** Change a schedule */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ScheduleUpdate"];
+                };
+            };
+            responses: {
+                /** @description The changed schedule */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Schedule"];
+                    };
+                };
+                /** @description invalid_request, invalid_schedule, invalid_time_zone or invalid_weekly_hours */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No valid session or API key */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description forbidden: a cookie-authenticated write from another origin */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description schedule_not_found: no such schedule among the caller’s */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description schedule_is_default: isDefault false on the default schedule */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The API key's rate limit is used up */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/api/v1/schedules/{id}/overrides": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A schedule's date overrides */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description First date, inclusive */
+                    from?: string;
+                    /** @description Last date, inclusive */
+                    to?: string;
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description By date */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ScheduleOverrideList"];
+                    };
+                };
+                /** @description invalid_request, invalid_date or invalid_date_range */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No valid session or API key */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description schedule_not_found: no such schedule among the caller’s */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The API key's rate limit is used up */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/schedules/{id}/overrides/{date}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set the hours of one date */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Local date in the schedule’s time zone */
+                    date: string;
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ScheduleOverrideInput"];
+                };
+            };
+            responses: {
+                /** @description The override was replaced */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ScheduleOverride"];
+                    };
+                };
+                /** @description The override was created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ScheduleOverride"];
+                    };
+                };
+                /** @description invalid_request, invalid_date or invalid_intervals */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No valid session or API key */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description forbidden: a cookie-authenticated write from another origin */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description schedule_not_found: no such schedule among the caller’s */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The API key's rate limit is used up */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /**
+         * Remove the override of one date
+         * @description The weekly hours apply to the date again.
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Local date in the schedule’s time zone */
+                    date: string;
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Removed */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description invalid_date */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No valid session or API key */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description forbidden: a cookie-authenticated write from another origin */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description schedule_not_found: no such schedule among the caller’s; schedule_override_not_found: the date has no override */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The API key's rate limit is used up */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -941,6 +1992,228 @@ export interface components {
             /** @description Human-readable detail */
             message?: string;
         };
+        EventType: {
+            /** @description How many days ahead can be booked; null = no limit */
+            bookingWindowDays: number | null;
+            /** @description Free time kept after a meeting */
+            bufferAfterMinutes: number;
+            /** @description Free time kept before a meeting */
+            bufferBeforeMinutes: number;
+            /** Format: date-time */
+            createdAt: string;
+            description: string | null;
+            /** @description Length of a meeting */
+            durationMinutes: number;
+            /** Format: uuid */
+            id: string;
+            /** @description Whether invitees can book it */
+            isActive: boolean;
+            /** @description Where the meeting happens, by kind; Meet and Zoom links are generated per booking. null = not set. */
+            location: {
+                /** @enum {string} */
+                kind: "google_meet";
+            } | {
+                /** @enum {string} */
+                kind: "zoom";
+            } | {
+                /** @enum {string} */
+                kind: "phone";
+                /**
+                 * @description The host's number in E.164
+                 * @example +14155550123
+                 */
+                number: string;
+            } | {
+                address: string;
+                /** @enum {string} */
+                kind: "in_person";
+            } | {
+                /** @enum {string} */
+                kind: "link";
+                /**
+                 * Format: uri
+                 * @description An http or https URL, stored as parsed (normalized)
+                 */
+                url: string;
+            } | null;
+            /** @description Bookings per host's day; null = no limit */
+            maxBookingsPerDay: number | null;
+            /** @description How far ahead a meeting must be booked */
+            minimumNoticeMinutes: number;
+            /** Format: uuid */
+            organizationId: string;
+            /**
+             * Format: uuid
+             * @description The user whose personal page lists it; null for a team event type
+             */
+            ownerUserId: string | null;
+            /** @description Order on the page, ascending */
+            position: number;
+            questions: components["schemas"]["Question"][];
+            /**
+             * Format: uuid
+             * @description One of the host's schedules; null = the host's default schedule
+             */
+            scheduleId: string | null;
+            /** @enum {string} */
+            schedulingType: "individual" | "round_robin" | "collective";
+            /** @description Distance between start times; null = the duration */
+            slotStepMinutes: number | null;
+            /**
+             * @description The last part of the booking URL, unique on its page: lowercase letters, digits and hyphens, starting and ending with a letter or digit
+             * @example intro-call
+             */
+            slug: string;
+            /** @example Intro call */
+            title: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        EventTypeInput: {
+            /** @description How many days ahead can be booked; null = no limit */
+            bookingWindowDays?: number | null;
+            /**
+             * @description Free time kept after a meeting
+             * @default 0
+             */
+            bufferAfterMinutes: number;
+            /**
+             * @description Free time kept before a meeting
+             * @default 0
+             */
+            bufferBeforeMinutes: number;
+            description?: string | null;
+            /** @description Length of a meeting */
+            durationMinutes: number;
+            /**
+             * @description Whether invitees can book it
+             * @default true
+             */
+            isActive: boolean;
+            /** @description Where the meeting happens, by kind; Meet and Zoom links are generated per booking. null = not set. */
+            location?: {
+                /** @enum {string} */
+                kind: "google_meet";
+            } | {
+                /** @enum {string} */
+                kind: "zoom";
+            } | {
+                /** @enum {string} */
+                kind: "phone";
+                /**
+                 * @description The host's number in E.164
+                 * @example +14155550123
+                 */
+                number: string;
+            } | {
+                address: string;
+                /** @enum {string} */
+                kind: "in_person";
+            } | {
+                /** @enum {string} */
+                kind: "link";
+                /**
+                 * Format: uri
+                 * @description An http or https URL, stored as parsed (normalized)
+                 */
+                url: string;
+            } | null;
+            /** @description Bookings per host's day; null = no limit */
+            maxBookingsPerDay?: number | null;
+            /**
+             * @description How far ahead a meeting must be booked
+             * @default 0
+             */
+            minimumNoticeMinutes: number;
+            /**
+             * @description Order on the page, ascending
+             * @default 0
+             */
+            position: number;
+            /** @description Extra booking-form fields */
+            questions?: components["schemas"]["QuestionInput"][];
+            /**
+             * Format: uuid
+             * @description One of the host's schedules; null = the host's default schedule
+             */
+            scheduleId?: string | null;
+            /** @description Distance between start times; null = the duration */
+            slotStepMinutes?: number | null;
+            /**
+             * @description The last part of the booking URL, unique on its page: lowercase letters, digits and hyphens, starting and ending with a letter or digit
+             * @example intro-call
+             */
+            slug: string;
+            /** @example Intro call */
+            title: string;
+        };
+        EventTypeList: {
+            data: components["schemas"]["EventType"][];
+        };
+        /** @description Omitted fields stay as they are; null clears a nullable field */
+        EventTypeUpdate: {
+            /** @description How many days ahead can be booked; null = no limit */
+            bookingWindowDays?: number | null;
+            /** @description Free time kept after a meeting */
+            bufferAfterMinutes?: number;
+            /** @description Free time kept before a meeting */
+            bufferBeforeMinutes?: number;
+            description?: string | null;
+            /** @description Length of a meeting */
+            durationMinutes?: number;
+            /** @description Whether invitees can book it */
+            isActive?: boolean;
+            /** @description Where the meeting happens, by kind; Meet and Zoom links are generated per booking. null = not set. */
+            location?: {
+                /** @enum {string} */
+                kind: "google_meet";
+            } | {
+                /** @enum {string} */
+                kind: "zoom";
+            } | {
+                /** @enum {string} */
+                kind: "phone";
+                /**
+                 * @description The host's number in E.164
+                 * @example +14155550123
+                 */
+                number: string;
+            } | {
+                address: string;
+                /** @enum {string} */
+                kind: "in_person";
+            } | {
+                /** @enum {string} */
+                kind: "link";
+                /**
+                 * Format: uri
+                 * @description An http or https URL, stored as parsed (normalized)
+                 */
+                url: string;
+            } | null;
+            /** @description Bookings per host's day; null = no limit */
+            maxBookingsPerDay?: number | null;
+            /** @description How far ahead a meeting must be booked */
+            minimumNoticeMinutes?: number;
+            /** @description Order on the page, ascending */
+            position?: number;
+            /** @description Extra booking-form fields */
+            questions?: components["schemas"]["QuestionInput"][];
+            /**
+             * Format: uuid
+             * @description One of the host's schedules; null = the host's default schedule
+             */
+            scheduleId?: string | null;
+            /** @description Distance between start times; null = the duration */
+            slotStepMinutes?: number | null;
+            /**
+             * @description The last part of the booking URL, unique on its page: lowercase letters, digits and hyphens, starting and ending with a letter or digit
+             * @example intro-call
+             */
+            slug?: string;
+            /** @example Intro call */
+            title?: string;
+        };
         Health: {
             /** @enum {string} */
             database: "ok" | "unreachable";
@@ -982,6 +2255,35 @@ export interface components {
                 name: string;
             };
         };
+        Profile: {
+            /** Format: date-time */
+            createdAt: string;
+            /** @example ada */
+            handle: string;
+            /** @example en */
+            locale: string;
+            /** @example Europe/Berlin */
+            timeZone: string;
+            /** Format: date-time */
+            updatedAt: string;
+        };
+        ProfileInput: {
+            /**
+             * @description Forms the booking URLs (/{handle}/{slug}): lowercase letters, digits and hyphens, starting and ending with a letter or digit. Some handles are reserved.
+             * @example ada
+             */
+            handle: string;
+            /**
+             * @description BCP 47 language tag
+             * @example en
+             */
+            locale: string;
+            /**
+             * @description IANA time zone name
+             * @example Europe/Berlin
+             */
+            timeZone: string;
+        };
         PublicEventType: {
             description: string | null;
             durationMinutes: number;
@@ -1011,6 +2313,21 @@ export interface components {
             /** @enum {string} */
             type: "short_text" | "long_text" | "phone" | "select" | "multi_select" | "checkbox";
         };
+        /** @description A booking-form field beyond name and email, as written (see Question) */
+        QuestionInput: {
+            /**
+             * @description Unique within the event type; answers are stored under it. 1–64 letters, digits, "_" or "-", not __proto__.
+             * @example company
+             */
+            id: string;
+            label: string;
+            /** @description The distinct choices; only (and required) for select and multi_select */
+            options?: string[];
+            /** @default false */
+            required: boolean;
+            /** @enum {string} */
+            type: "short_text" | "long_text" | "phone" | "select" | "multi_select" | "checkbox";
+        };
         Reschedule: {
             /**
              * Format: date-time
@@ -1022,6 +2339,61 @@ export interface components {
         /** @description Answers to the event type's questions, keyed by question id: text for short_text, long_text and phone; one option for select; a list of options for multi_select; true or false for checkbox */
         Responses: {
             [key: string]: string | string[] | boolean;
+        };
+        Schedule: {
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: uuid */
+            id: string;
+            /** @description Event types use the default schedule unless they name another */
+            isDefault: boolean;
+            name: string;
+            /** @example Europe/Berlin */
+            timeZone: string;
+            /** Format: date-time */
+            updatedAt: string;
+            weeklyHours: components["schemas"]["WeeklyHours"];
+        };
+        ScheduleInput: {
+            /** @description Make it the default (the previous default stops being one). The user's first schedule is always the default. */
+            isDefault?: boolean;
+            name: string;
+            /**
+             * @description IANA time zone name
+             * @example Europe/Berlin
+             */
+            timeZone: string;
+            weeklyHours: components["schemas"]["WeeklyHoursInput"];
+        };
+        ScheduleList: {
+            data: components["schemas"]["Schedule"][];
+        };
+        ScheduleOverride: {
+            /**
+             * Format: date
+             * @example 2026-12-24
+             */
+            date: string;
+            /** @description Empty: unavailable all day */
+            intervals: components["schemas"]["WallClockInterval"][];
+        };
+        ScheduleOverrideInput: {
+            /** @description Replace the weekly hours on this date; [] = unavailable all day */
+            intervals: components["schemas"]["WallClockIntervalInput"][];
+        };
+        ScheduleOverrideList: {
+            data: components["schemas"]["ScheduleOverride"][];
+        };
+        ScheduleUpdate: {
+            /** @description true makes it the default. The default cannot be set to false; make another schedule the default instead. */
+            isDefault?: boolean;
+            name?: string;
+            /**
+             * @description IANA time zone name
+             * @example Europe/Berlin
+             */
+            timeZone?: string;
+            weeklyHours?: components["schemas"]["WeeklyHoursInput"];
         };
         Slot: {
             /**
@@ -1036,6 +2408,52 @@ export interface components {
              * @example 2026-11-02T09:00:00.000Z
              */
             start: string;
+        };
+        /** @description Intervals of one day must not overlap; touching ones are joined */
+        WallClockInterval: {
+            /**
+             * @description Local time HH:MM after start; 24:00 is the end of the day
+             * @example 17:00
+             */
+            end: string;
+            /**
+             * @description Local time HH:MM, 00:00–23:59
+             * @example 09:00
+             */
+            start: string;
+        };
+        /** @description Intervals of one day must not overlap; touching ones are joined */
+        WallClockIntervalInput: {
+            /**
+             * @description Local time HH:MM after start; 24:00 is the end of the day
+             * @example 17:00
+             */
+            end: string;
+            /**
+             * @description Local time HH:MM, 00:00–23:59
+             * @example 09:00
+             */
+            start: string;
+        };
+        /** @description A missing or empty weekday is unavailable */
+        WeeklyHours: {
+            friday?: components["schemas"]["WallClockInterval"][];
+            monday?: components["schemas"]["WallClockInterval"][];
+            saturday?: components["schemas"]["WallClockInterval"][];
+            sunday?: components["schemas"]["WallClockInterval"][];
+            thursday?: components["schemas"]["WallClockInterval"][];
+            tuesday?: components["schemas"]["WallClockInterval"][];
+            wednesday?: components["schemas"]["WallClockInterval"][];
+        };
+        /** @description A missing or empty weekday is unavailable */
+        WeeklyHoursInput: {
+            friday?: components["schemas"]["WallClockIntervalInput"][];
+            monday?: components["schemas"]["WallClockIntervalInput"][];
+            saturday?: components["schemas"]["WallClockIntervalInput"][];
+            sunday?: components["schemas"]["WallClockIntervalInput"][];
+            thursday?: components["schemas"]["WallClockIntervalInput"][];
+            tuesday?: components["schemas"]["WallClockIntervalInput"][];
+            wednesday?: components["schemas"]["WallClockIntervalInput"][];
         };
     };
     responses: never;

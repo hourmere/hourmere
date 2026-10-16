@@ -1,4 +1,11 @@
-import type { AvailabilityInput, InstantInterval, WallClockInterval, Weekday } from './types.ts'
+import type {
+  AvailabilityInput,
+  EventTypeRules,
+  InstantInterval,
+  WallClockInterval,
+  Weekday,
+  WeeklyHours,
+} from './types.ts'
 
 /** Thrown when `getAvailableSlots` receives input it cannot interpret. */
 export class AvailabilityInputError extends Error {
@@ -52,20 +59,23 @@ const MINUTES_PER_DAY = 24 * 60
 const NS_PER_DAY = 86_400_000_000_000n
 
 /**
- * Upper bounds for numeric input. Besides rejecting nonsense, they keep every
- * Temporal calculation inside its supported range, so bad input always ends in
- * an AvailabilityInputError rather than a RangeError.
+ * Bounds of each event type rule (inclusive). Besides rejecting nonsense, they keep every
+ * Temporal calculation inside its supported range, so bad input always ends in an
+ * AvailabilityInputError rather than a RangeError. The database CHECKs on `event_types`
+ * mirror them, so a stored event type always passes validation.
  */
-const LIMITS = {
-  durationMinutes: MINUTES_PER_DAY,
-  slotStepMinutes: MINUTES_PER_DAY,
-  bufferMinutes: MINUTES_PER_DAY,
-  minimumNoticeMinutes: 365 * MINUTES_PER_DAY,
-  bookingWindowDays: 3650,
-  maxBookingsPerDay: 1000,
-  /** The engine visits every local day in the range. */
-  rangeDays: 400,
-}
+export const EVENT_TYPE_RULE_BOUNDS = {
+  durationMinutes: { min: 1, max: MINUTES_PER_DAY },
+  slotStepMinutes: { min: 1, max: MINUTES_PER_DAY },
+  bufferBeforeMinutes: { min: 0, max: MINUTES_PER_DAY },
+  bufferAfterMinutes: { min: 0, max: MINUTES_PER_DAY },
+  minimumNoticeMinutes: { min: 0, max: 365 * MINUTES_PER_DAY },
+  maxBookingsPerDay: { min: 1, max: 1000 },
+  bookingWindowDays: { min: 1, max: 3650 },
+} as const satisfies Record<keyof EventTypeRules, { min: number; max: number }>
+
+/** The engine visits every local day in the range. */
+const MAX_RANGE_DAYS = 400
 
 /** `now`, `rangeStart` and `rangeEnd` must lie in years 0001–9999. */
 const EARLIEST_QUERY_INSTANT = Temporal.Instant.from('0001-01-01T00:00:00Z')
@@ -77,12 +87,7 @@ export function normalizeInput(input: AvailabilityInput): NormalizedInput {
   if (typeof schedule !== 'object' || schedule === null) fail('schedule must be an object')
   if (typeof eventType !== 'object' || eventType === null) fail('eventType must be an object')
 
-  const durationMinutes = wholeNumber(
-    eventType.durationMinutes,
-    'eventType.durationMinutes',
-    1,
-    LIMITS.durationMinutes,
-  )
+  const durationMinutes = bounded(eventType.durationMinutes, 'eventType', 'durationMinutes')
   const rangeStart = queryInstant(input.rangeStart, 'rangeStart')
   const rangeEnd = queryInstant(input.rangeEnd, 'rangeEnd')
   if (Temporal.Instant.compare(rangeEnd, rangeStart) <= 0) {
@@ -90,42 +95,84 @@ export function normalizeInput(input: AvailabilityInput): NormalizedInput {
   }
   if (
     rangeEnd.epochNanoseconds - rangeStart.epochNanoseconds >
-    BigInt(LIMITS.rangeDays) * NS_PER_DAY
+    BigInt(MAX_RANGE_DAYS) * NS_PER_DAY
   ) {
     fail(
-      `rangeEnd (${rangeEnd}) must be at most ${LIMITS.rangeDays} days after rangeStart (${rangeStart})`,
+      `rangeEnd (${rangeEnd}) must be at most ${MAX_RANGE_DAYS} days after rangeStart (${rangeStart})`,
     )
   }
 
   return {
-    timeZone: timeZone(schedule.timeZone),
-    weeklyHours: weeklyHours(schedule.weeklyHours),
+    timeZone: timeZone(schedule.timeZone, 'schedule.timeZone'),
+    weeklyHours: weeklyHours(schedule.weeklyHours, 'schedule.weeklyHours'),
     dateOverrides: dateOverrides(schedule.dateOverrides),
+    ...optionalRules(eventType, 'eventType', durationMinutes),
     durationMinutes,
-    slotStepMinutes: optional(eventType.slotStepMinutes, durationMinutes, (v) =>
-      wholeNumber(v, 'eventType.slotStepMinutes', 1, LIMITS.slotStepMinutes),
-    ),
-    bufferBeforeMinutes: optional(eventType.bufferBeforeMinutes, 0, (v) =>
-      wholeNumber(v, 'eventType.bufferBeforeMinutes', 0, LIMITS.bufferMinutes),
-    ),
-    bufferAfterMinutes: optional(eventType.bufferAfterMinutes, 0, (v) =>
-      wholeNumber(v, 'eventType.bufferAfterMinutes', 0, LIMITS.bufferMinutes),
-    ),
-    minimumNoticeMinutes: optional(eventType.minimumNoticeMinutes, 0, (v) =>
-      wholeNumber(v, 'eventType.minimumNoticeMinutes', 0, LIMITS.minimumNoticeMinutes),
-    ),
-    maxBookingsPerDay: optional(eventType.maxBookingsPerDay, undefined, (v) =>
-      wholeNumber(v, 'eventType.maxBookingsPerDay', 1, LIMITS.maxBookingsPerDay),
-    ),
-    bookingWindowDays: optional(eventType.bookingWindowDays, undefined, (v) =>
-      wholeNumber(v, 'eventType.bookingWindowDays', 1, LIMITS.bookingWindowDays),
-    ),
     busy: input.busy === undefined ? [] : list(input.busy, 'busy', instantInterval),
     bookings: input.bookings === undefined ? [] : list(input.bookings, 'bookings', existingBooking),
     rangeStart,
     rangeEnd,
     now: queryInstant(input.now, 'now'),
   }
+}
+
+/** The optional event type rules, with defaults applied. */
+function optionalRules(eventType: EventTypeRules, path: string, durationMinutes: number) {
+  const rule = (name: keyof EventTypeRules) => (v: unknown) => bounded(v, path, name)
+  return {
+    slotStepMinutes: optional(eventType.slotStepMinutes, durationMinutes, rule('slotStepMinutes')),
+    bufferBeforeMinutes: optional(eventType.bufferBeforeMinutes, 0, rule('bufferBeforeMinutes')),
+    bufferAfterMinutes: optional(eventType.bufferAfterMinutes, 0, rule('bufferAfterMinutes')),
+    minimumNoticeMinutes: optional(eventType.minimumNoticeMinutes, 0, rule('minimumNoticeMinutes')),
+    maxBookingsPerDay: optional(eventType.maxBookingsPerDay, undefined, rule('maxBookingsPerDay')),
+    bookingWindowDays: optional(eventType.bookingWindowDays, undefined, rule('bookingWindowDays')),
+  }
+}
+
+// Validators for data that is stored and later handed to the engine (schedules, date
+// overrides, event types), so it is checked by exactly the rules the engine applies. Each
+// throws AvailabilityInputError with a message naming the offending field under `path`.
+
+/**
+ * Checks an IANA time zone name the engine accepts (not a UTC offset) and returns its
+ * normalized id, e.g. `"europe/berlin"` → `"Europe/Berlin"`.
+ */
+export function validateTimeZone(value: unknown, path = 'timeZone'): string {
+  return timeZone(value, path)
+}
+
+/** Checks weekly hours: weekday keys, `"HH:MM"` times, end after start, no overlaps. */
+export function validateWeeklyHours(
+  value: unknown,
+  path = 'weeklyHours',
+): asserts value is WeeklyHours {
+  weeklyHours(value, path)
+}
+
+/** Checks the intervals of one day (a date override): the same rules as one weekday. */
+export function validateDayIntervals(
+  value: unknown,
+  path = 'intervals',
+): asserts value is readonly WallClockInterval[] {
+  dayIntervals(value, path)
+}
+
+/** Checks a calendar date `"YYYY-MM-DD"` and returns it normalized. */
+export function validateDate(value: unknown, path = 'date'): string {
+  return plainDate(value, path)
+}
+
+/**
+ * Checks event type rules against `EVENT_TYPE_RULE_BOUNDS`; omitted optional rules are fine.
+ * Messages name each rule under `path`, or alone when `path` is ''.
+ */
+export function validateEventTypeRules(
+  value: unknown,
+  path = 'eventType',
+): asserts value is EventTypeRules {
+  if (!isPlainObject(value)) fail(`${path || 'rules'} must be a plain object, got ${show(value)}`)
+  const rules = value as unknown as EventTypeRules
+  optionalRules(rules, path, bounded(rules.durationMinutes, path, 'durationMinutes'))
 }
 
 function fail(message: string): never {
@@ -169,6 +216,12 @@ function optional<T, D>(value: T | undefined, fallback: D, parse: (value: T) => 
   return value === undefined ? fallback : parse(value)
 }
 
+/** `path` is the event type's own path; '' names the rule alone. */
+function bounded(value: unknown, path: string, rule: keyof EventTypeRules): number {
+  const { min, max } = EVENT_TYPE_RULE_BOUNDS[rule]
+  return wholeNumber(value, path ? `${path}.${rule}` : rule, min, max)
+}
+
 function wholeNumber(value: unknown, path: string, min: number, max: number): number {
   if (!Number.isSafeInteger(value) || (value as number) < min || (value as number) > max) {
     fail(`${path} must be a whole number from ${min} to ${max}, got ${show(value)}`)
@@ -176,8 +229,7 @@ function wholeNumber(value: unknown, path: string, min: number, max: number): nu
   return value as number
 }
 
-function timeZone(value: unknown): string {
-  const path = 'schedule.timeZone'
+function timeZone(value: unknown, path: string): string {
   if (typeof value !== 'string' || value === '') fail(`${path} must be a non-empty string`)
   // Temporal also accepts fixed UTC offsets as zone ids; they ignore DST, so require a zone name.
   if (/^[+-]/.test(value)) {
@@ -190,8 +242,7 @@ function timeZone(value: unknown): string {
   }
 }
 
-function weeklyHours(value: unknown): Map<number, MinuteInterval[]> {
-  const path = 'schedule.weeklyHours'
+function weeklyHours(value: unknown, path: string): Map<number, MinuteInterval[]> {
   if (!isPlainObject(value)) {
     fail(`${path} must be a plain object keyed by weekday, got ${show(value)}`)
   }
@@ -327,10 +378,10 @@ function existingBooking(item: object, path: string): NormalizedBooking {
   return {
     ...instantInterval(item, path),
     bufferBeforeMinutes: optional(bufferBeforeMinutes, 0, (v) =>
-      wholeNumber(v, `${path}.bufferBeforeMinutes`, 0, LIMITS.bufferMinutes),
+      bounded(v, path, 'bufferBeforeMinutes'),
     ),
     bufferAfterMinutes: optional(bufferAfterMinutes, 0, (v) =>
-      wholeNumber(v, `${path}.bufferAfterMinutes`, 0, LIMITS.bufferMinutes),
+      bounded(v, path, 'bufferAfterMinutes'),
     ),
   }
 }
