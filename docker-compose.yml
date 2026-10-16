@@ -1,0 +1,38 @@
+# Self-hosting: copy .env.example to .env, set POSTGRES_PASSWORD (and PUBLIC_URL), then
+#   docker compose up -d
+# The app listens on 127.0.0.1:3000; put a reverse proxy with TLS in front of it.
+name: hourmere
+
+services:
+  app:
+    build: .
+    environment:
+      # The password stays out of the URL so it may contain any characters (/, #, ?, …);
+      # the Postgres client reads PGPASSWORD when the URL has none.
+      DATABASE_URL: postgres://hourmere@db:5432/hourmere
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:3000}
+    ports:
+      - "127.0.0.1:${PORT:-3000}:3000"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: hourmere
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: hourmere
+    volumes:
+      - db-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hourmere -d hourmere"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+volumes:
+  db-data:

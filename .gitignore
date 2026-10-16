@@ -153,3 +153,6 @@ vite.config.ts.timestamp-*
 
 # Private planning docs, research data and company site (never commit; repo goes public at launch)
 temp/
+
+# Claude Code agent worktrees
+.claude/worktrees/

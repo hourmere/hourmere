@@ -1,0 +1,17 @@
+{
+  "name": "@hourmere/server",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --env-file-if-exists=../../.env --watch src/index.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@hono/node-server": "2.1.5",
+    "@hono/zod-openapi": "1.6.3",
+    "@hourmere/db": "*",
+    "hono": "4.13.13",
+    "kysely": "0.29.6",
+    "zod": "4.6.7"
+  }
+}
