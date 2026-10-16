@@ -78,7 +78,7 @@ types in `packages/db/src/tables.ts` are generated from the migrated database.
   `booking_notifications.manage_token_hash` for the one each invitee email carries (minted
   when the email is sent, so no raw secret ever sits in the job queue). Each stays valid as
   long as the booking exists. See [notifications.md](notifications.md).
-- **An email is sent once.** A notification job inserts its `booking_notifications` row
+- **An email is sent once, with a narrow duplicate window.** A notification job inserts its `booking_notifications` row
   (primary key: booking, kind, recipient) and keeps that transaction open while the mail
   server takes the email: a failed send rolls the row back for the retry, a concurrent
   attempt waits on the row and skips. The row's foreign key to the booking is checked at

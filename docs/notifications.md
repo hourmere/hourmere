@@ -64,15 +64,23 @@ One image; `HOURMERE_ROLE` decides what a process runs:
 `all` is the simplest self-hosting setup: one container. Larger deployments run `web` and
 `worker` containers from the same image. Every role listens on `PORT`, so the image's one
 `HEALTHCHECK` (`GET /api/health`) works for all of them; a worker is healthy when the
-database answers and its workers are running, and answers 404 to everything else. Do not
-publish a worker's port.
+database answers, its workers are running and pg-boss's own pool answers, and it answers
+404 to everything else. Do not publish a worker's port.
+
+Database connections per process: the app pool (up to 10), Better Auth's pool (up to 10;
+not in a worker) and pg-boss's pool (up to 5). A running notification job holds at most
+two app-pool connections: one for reading the booking, one for the send transaction. With
+two notification jobs at a time, a worker or `all` process keeps most of its app pool for
+requests. Size Postgres's `max_connections` for 25 per `all` or `web` process and 15 per
+worker, plus headroom.
 
 On SIGTERM a process stops accepting requests, then stops taking jobs and waits up to 20
 seconds for running ones. Any still running then are failed and retried later by another
 worker: the job's abort signal reaches the mailer, which stops waiting for the mail server,
 so the open transaction rolls back (the email stays owed) and its connection is returned.
 Then the pools close. (The SMTP exchange itself is not cut off and may still finish before
-the process exits, in which case the retry sends that email a second time.) Give it time to do so: `stop_grace_period: 30s` in
+the process exits, in which case the retry sends that email a second time.) The job logs
+one line saying it was stopped, not an error. Give it time to do so: `stop_grace_period: 30s` in
 `docker-compose.yml`, `docker stop -t 30`, or the orchestrator's equivalent; Docker's
 default of 10 seconds cuts long jobs short (they are retried, so nothing is lost).
 
@@ -83,12 +91,19 @@ All notifications go through one job, `booking-notification`, with payload
 
 | Event (service) | Jobs queued in its transaction |
 |---|---|
-| Booking created (`createPublicBooking`, not on an idempotent replay) | `confirmed` now; `reminder` 24 hours before the start, if that is still ahead |
+| Booking created (`createPublicBooking`, not on an idempotent replay) | `confirmed` now; `reminder` 24 hours before the start, unless that is less than an hour away |
 | Booking rescheduled (`rescheduleManagedBooking`) | for the **new** booking: `rescheduled` now; `reminder` as above |
 | Booking cancelled (`cancelManagedBooking`, `cancelHostBooking`) | `cancelled` now |
 
-`enqueueBookingNotifications(jobs, trx, event, now)` does exactly this. Every email goes to
-each attendee (the invitee and their guests) and each host. Times are shown in the
+`enqueueBookingNotifications(jobs, trx, event, now)` does exactly this, and refuses to run
+outside a transaction. The reminder offset is an absolute 24 hours, so across a daylight
+saving change it arrives an hour earlier or later on the recipient's clock; a booking made
+less than 25 hours ahead gets no reminder, as it would come right after the confirmation.
+
+Every email goes to each host first (verified addresses, and they most need to know), then
+the invitee, then the guests, so a guest address that is slow to answer cannot hold up the
+others. Guests are addresses an anonymous booker typed (up to 10 per booking); limiting
+abuse of that is a product follow-up. Times are shown in the
 recipient's zone with its IANA name: the attendee's zone from `booking_attendees`, a
 host's from their profile, else their default schedule, else UTC. Host emails add the
 invitee's contact details, guests and answers; only the invitee's email has manage links.
@@ -102,9 +117,14 @@ The job reads the booking when it runs and sends only what is still true:
 | Kind | Sent only if |
 |---|---|
 | `confirmed` | the booking is confirmed and has not started |
-| `rescheduled` | the booking is confirmed, replaced an earlier one, and has not started |
+| `rescheduled` | the booking is confirmed, has not started, and replaced an earlier booking that is cancelled |
 | `reminder` | the booking is confirmed and has not started |
 | `cancelled` | the booking is cancelled and no booking replaced it |
+
+The status and start are read again inside each recipient's send transaction (without a
+lock, which would hold up a cancel), so a booking cancelled while the first emails go out
+gets no further confirmations; the cancellation email follows. The job also stops between
+recipients once the worker is shutting down.
 
 So nothing has to be un-queued. A reschedule cancels the old booking and creates a new one,
 so the old booking's reminder finds it cancelled and sends nothing, and the new booking has
@@ -113,7 +133,7 @@ send a cancellation for the old booking (it has a successor): the reschedule ema
 it. This is more robust than deleting jobs by key, which would have to happen in the same
 transaction and would miss any path that changes a booking without knowing about jobs.
 
-### Sent at most once
+### Sent once, with a narrow duplicate window
 
 `booking_notifications` has one row per email: primary key (booking, kind, recipient), the
 recipient being `host:<user id>` or `attendee:<attendee id>` (so someone who books their own
@@ -121,17 +141,32 @@ event type gets both emails). For each recipient the job, in one transaction, in
 row (`ON CONFLICT DO NOTHING`); if it already exists the email was sent and is skipped;
 otherwise it sends the email and commits.
 
-- A failed send rolls the row back. A refusal by the mail server (`MailRejectedError`,
-  e.g. a 4xx reply to `RCPT TO`) does not stop the others: every recipient is attempted,
-  and the job then fails, naming the refused recipients by role and id (never by address),
-  so the retry sends only to them. Any other failure (server unreachable, sign-in refused,
-  shutdown) would hit every remaining recipient alike, so it ends the attempt at once.
-- A permanent refusal (5xx) is kept with `outcome = 'rejected'` (and no token hash): it is
-  logged on one line (booking id, kind, role and id, no address) and never retried, and the
-  job succeeds if nothing else failed.
+- A failed send rolls the row back, and the retry sends to the recipients still missing.
 - Two attempts at the same time (a job that ran past its expiry and was retried while still
   running): the second insert waits for the first transaction, then skips.
-- The only duplicate left: the mail server accepted the email and the commit then failed.
+- The duplicate window: the mail server accepted the email and the commit then failed (lost
+  connection, crash, shutdown mid-send). The retry sends it again. If it is an invitee
+  email, the first copy's manage link does not work, since its hash was rolled back; the
+  second copy's does.
+- A connection the database drops while the transaction waits for the mail server (restart,
+  failover, `idle_in_transaction_session_timeout`) only fails that attempt: every pool
+  listens for errors on its checked-out clients (`guardPoolErrors`), so the process lives.
+
+Refusals by the mail server (`MailRejectedError`, which carries the reply codes but never the
+reply text, which repeats the address):
+
+- **About this address**: at `RCPT TO` with a mailbox or domain status (x.1.x, x.2.x), or
+  without an enhanced code a 450, 550, 551, 552 or 553. The others are still attempted.
+  - **Permanent** (5.1.x no such mailbox or domain, 5.2.1 mailbox disabled, or bare 550,
+    551, 553): kept with `outcome = 'rejected'` (no token hash), logged on one line
+    (booking id, kind, role and id, the codes, no address) and never retried.
+  - **Temporary** (4xx, or a full mailbox 5.2.2 / 552): the job fails at the end, naming
+    those recipients by role and id, so the retry sends only to them.
+  - If every recipient would be refused for good, the job fails and retries instead: that
+    says more about the mail server than about the addresses.
+- **Anything else** (relaying or policy 5.7.x, sending limits 5.4.x / 5.5.x, a refusal at
+  `DATA`, the server unreachable, sign-in refused, shutdown) would hit every remaining
+  recipient alike, so it ends the attempt at once and the job is retried.
 - Since the reschedule creates a new booking, booking id + kind already identifies an event;
   no sequence number is needed in the key.
 - The row's foreign key to the booking is `DEFERRABLE INITIALLY DEFERRED`: an immediate check
@@ -187,8 +222,10 @@ the same rule applies (only where whoever reads the log may act as anyone).
 
 `buildIcs` writes RFC 5545 with CRLF line endings, lines folded at 75 octets (never inside
 a UTF-8 sequence), TEXT values escaped (`\\`, `\;`, `\,`, `\n`), control characters
-removed and names quoted. The UID is `<first booking of the reschedule chain>@<PUBLIC_URL
-host>`, so a reschedule updates the same calendar entry; `SEQUENCE` is the number of
+removed and names quoted. The UID is `<first booking of the reschedule chain>@hourmere`
+(fixed, so a change of PUBLIC_URL does not orphan calendar entries made before; calendar
+write-sync must use the same iCalUID for the events it creates), so a reschedule updates the
+same calendar entry; `SEQUENCE` is the number of
 reschedules in the chain, plus one for a cancellation. Times are UTC. The organizer is the
 host; attendees are the invitee, guests and any other hosts, all `PARTSTAT=ACCEPTED`,
 `RSVP=FALSE`. It is attached as `invite.ics` (`cancel.ics`) with content type

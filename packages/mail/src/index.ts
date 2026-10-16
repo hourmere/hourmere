@@ -39,36 +39,85 @@ export interface Mailer {
   send(message: MailMessage, options?: SendOptions): Promise<void>
 }
 
+export interface MailRefusal {
+  /** The SMTP reply code, e.g. 550. */
+  responseCode?: number | undefined
+  /** The RFC 3463 enhanced status code, e.g. `5.1.1`. */
+  enhancedCode?: string | undefined
+  /** Refused at RCPT TO (this address), rather than at DATA (the message). */
+  atRecipient: boolean
+}
+
 /**
  * The mail server refused this message or its recipient with a reply, as opposed to a failed
- * connection, TLS or sign-in, which would affect every message. `permanent` for a 5xx reply:
- * sending the same message again will not help. The message carries the reply code only,
- * never the reply text, which usually repeats the address.
+ * connection, TLS or sign-in. The message carries the reply codes only, never the reply
+ * text, which usually repeats the address.
+ *
+ * Most refusals say nothing about the address: relaying or policy (5.7.x), quotas and rate
+ * limits (5.2.2, 5.4.x, 5.5.x), a refused message at DATA. They can change, and they hit every
+ * recipient alike, so callers should treat them like an unreachable server: stop and retry.
  */
 export class MailRejectedError extends Error {
   override name = 'MailRejectedError'
   readonly responseCode: number | undefined
+  readonly enhancedCode: string | undefined
+  readonly atRecipient: boolean
+  /**
+   * The refusal is about this address only, so other recipients may still be sent to: at
+   * RCPT TO, with a mailbox or domain status (x.1.x, x.2.x), or without an enhanced code a
+   * 450, 550, 551, 552 or 553.
+   */
+  readonly recipientOnly: boolean
+  /**
+   * The address itself will never take mail: a recipient-only refusal with 5.1.x (no such
+   * mailbox or domain) or 5.2.1 (mailbox disabled), or without an enhanced code 550, 551 or
+   * 553. A full mailbox (5.2.2, 552) may empty, so it is not permanent.
+   */
   readonly permanent: boolean
 
-  constructor(responseCode: number | undefined) {
-    super(`the mail server refused the message${responseCode ? ` (${responseCode})` : ''}`)
+  constructor({ responseCode, enhancedCode, atRecipient }: MailRefusal) {
+    const codes = [responseCode, enhancedCode].filter(Boolean).join(' ')
+    super(
+      `the mail server refused the ${atRecipient ? 'recipient' : 'message'}${codes ? ` (${codes})` : ''}`,
+    )
     this.responseCode = responseCode
-    this.permanent = responseCode !== undefined && responseCode >= 500 && responseCode < 600
+    this.enhancedCode = enhancedCode
+    this.atRecipient = atRecipient
+    this.recipientOnly =
+      atRecipient &&
+      (enhancedCode
+        ? /^[45]\.[12]\.\d{1,3}$/.test(enhancedCode)
+        : [450, 550, 551, 552, 553].includes(responseCode ?? 0))
+    this.permanent =
+      this.recipientOnly &&
+      (enhancedCode
+        ? /^5\.1\.\d{1,3}$/.test(enhancedCode) || enhancedCode === '5.2.1'
+        : [550, 551, 553].includes(responseCode ?? 0))
   }
 }
 
-/** A nodemailer error for a refused recipient (RCPT TO) or message (DATA), as our error. */
+/**
+ * A nodemailer error for a refused recipient (RCPT TO) or message (DATA), as our error. Only
+ * the numeric codes are read from the reply.
+ */
 function refusal(err: unknown): MailRejectedError | undefined {
   const e = (typeof err === 'object' && err !== null ? err : {}) as {
     code?: unknown
     command?: unknown
     responseCode?: unknown
+    response?: unknown
   }
-  const refused =
-    (e.code === 'EENVELOPE' && e.command === 'RCPT TO') ||
-    (e.code === 'EMESSAGE' && e.command === 'DATA')
-  if (!refused) return undefined
-  return new MailRejectedError(typeof e.responseCode === 'number' ? e.responseCode : undefined)
+  const atRecipient = e.code === 'EENVELOPE' && e.command === 'RCPT TO'
+  if (!atRecipient && !(e.code === 'EMESSAGE' && e.command === 'DATA')) return undefined
+  const enhancedCode =
+    typeof e.response === 'string'
+      ? e.response.match(/^\d{3}[ -]([245]\.\d{1,3}\.\d{1,3})(?:\s|$)/)?.[1]
+      : undefined
+  return new MailRejectedError({
+    responseCode: typeof e.responseCode === 'number' ? e.responseCode : undefined,
+    enhancedCode,
+    atRecipient,
+  })
 }
 
 /** Settles like `promise`, or rejects with the signal's reason as soon as it is aborted. */

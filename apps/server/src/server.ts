@@ -86,7 +86,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
   const authPool = role === 'worker' ? undefined : createAuthPool(config.DATABASE_URL)
   let fetch: Parameters<typeof serve>[0]['fetch']
   if (!authPool) {
-    fetch = createWorkerHealthApp({ checkDb, jobsRunning: () => jobs.running }).fetch
+    fetch = createWorkerHealthApp({ checkDb, checkJobs: () => jobs.check() }).fetch
   } else {
     const auth = createAuth({
       pool: authPool,

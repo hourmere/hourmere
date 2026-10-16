@@ -259,15 +259,17 @@ describe.skipIf(!serverUrl)('createJobs', () => {
       payload: z.object({}),
       async handler(_payload, { signal }) {
         entered.resolve()
-        await new Promise<void>((resolve) =>
+        // Like a mailer that stops waiting: rejects with the signal's reason.
+        await new Promise<void>((_resolve, reject) =>
           signal.addEventListener('abort', () => {
             aborted = true
-            resolve()
+            reject(signal.reason)
           }),
         )
       },
     })
-    const jobs = await start([stuck], { shutdownTimeoutMs: 1000 })
+    const lines: string[] = []
+    const jobs = await start([stuck], { shutdownTimeoutMs: 1000, lines })
     await jobs.enqueue(name, {})
     await entered.promise
     const before = Date.now()
@@ -275,6 +277,19 @@ describe.skipIf(!serverUrl)('createJobs', () => {
     expect(Date.now() - before).toBeLessThan(5000)
     expect(aborted).toBe(true)
     expect((await jobRows(name))[0]?.state).toBe('retry')
+    // One plain line, not an abort error's stack.
+    const mine = lines.filter((l) => l.includes(name))
+    expect(mine).toHaveLength(1)
+    expect(mine[0]).toMatch(
+      /WARN job .* attempt 1 of 4 stopped: the worker is shutting down \(will retry\)$/,
+    )
+  })
+
+  it("checks pg-boss's own pool while running", async () => {
+    const jobs = await start([], { work: false })
+    await expect(jobs.check()).resolves.toBeUndefined()
+    await jobs.stop()
+    await expect(jobs.check()).rejects.toThrow(/not running/)
   })
 
   it('refuses to change the policy of an existing queue', async () => {

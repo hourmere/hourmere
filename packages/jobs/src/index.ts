@@ -108,6 +108,8 @@ export interface Jobs<Defs extends readonly AnyJobDefinition[]> {
   stop(): Promise<void>
   /** True between a successful start() and the beginning of stop(). */
   readonly running: boolean
+  /** Resolves when pg-boss's own connection pool answers a query; rejects otherwise. */
+  check(): Promise<void>
 }
 
 export interface JobsOptions<Defs extends readonly AnyJobDefinition[]> {
@@ -259,7 +261,16 @@ export function createJobs<const Defs extends readonly AnyJobDefinition[]>(
     try {
       await definition.handler(parsed.data, { id: job.id, attempt, signal: job.signal })
     } catch (err) {
-      fail('failed', err)
+      if (job.signal.aborted) {
+        // A shutdown, not a failure worth a stack trace.
+        const next = attempt <= limit ? 'will retry' : 'giving up'
+        log(
+          'warn',
+          `${new Date().toISOString()} WARN job ${definition.name} ${job.id} attempt ${attempt} of ${limit + 1} stopped: the worker is shutting down (${next})`,
+        )
+      } else {
+        fail('failed', err)
+      }
       throw err
     }
   }
@@ -267,6 +278,11 @@ export function createJobs<const Defs extends readonly AnyJobDefinition[]>(
   return {
     get running() {
       return state === 'running'
+    },
+
+    async check() {
+      if (state !== 'running') throw new Error(`jobs are not running (${state})`)
+      await boss.getDb().executeSql('SELECT 1')
     },
 
     async enqueue(name, payload, enqueueOptions = {}) {

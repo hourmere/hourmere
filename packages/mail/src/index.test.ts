@@ -109,6 +109,7 @@ function fakeSmtpServer() {
     data?: string
     rcptReplies: Map<string, string>
     hangOnData: boolean
+    dataReply?: string
   } = { to: [], rcptReplies: new Map(), hangOnData: false }
   const sockets = new Set<Socket>()
   const server = createServer((socket) => {
@@ -126,7 +127,7 @@ function fakeSmtpServer() {
           received.data = buffer.slice(0, end)
           buffer = buffer.slice(end + 5)
           inData = false
-          socket.write('250 queued\r\n')
+          socket.write(`${received.dataReply ?? '250 queued'}\r\n`)
           continue
         }
         const eol = buffer.indexOf('\r\n')
@@ -158,6 +159,40 @@ function fakeSmtpServer() {
   })
   return { server, received, sockets }
 }
+
+describe('MailRejectedError', () => {
+  it('is permanent only when the address itself is refused', () => {
+    const cases: [number | undefined, string | undefined, boolean, boolean, boolean][] = [
+      // code, enhanced, at RCPT TO, recipient only, permanent
+      [550, '5.1.1', true, true, true],
+      [553, '5.1.3', true, true, true],
+      [550, '5.2.1', true, true, true],
+      [552, '5.2.2', true, true, false],
+      [450, '4.2.0', true, true, false],
+      [550, '5.7.1', true, false, false],
+      [554, '5.7.1', true, false, false],
+      [550, '5.4.5', true, false, false],
+      [550, '5.5.0', true, false, false],
+      [421, '4.7.0', true, false, false],
+      [550, undefined, true, true, true],
+      [551, undefined, true, true, true],
+      [553, undefined, true, true, true],
+      [552, undefined, true, true, false],
+      [554, undefined, true, false, false],
+      [451, undefined, true, false, false],
+      [550, '5.1.1', false, false, false],
+      [550, undefined, false, false, false],
+      [undefined, undefined, true, false, false],
+    ]
+    for (const [responseCode, enhancedCode, atRecipient, recipientOnly, permanent] of cases) {
+      const err = new MailRejectedError({ responseCode, enhancedCode, atRecipient })
+      expect(
+        { recipientOnly: err.recipientOnly, permanent: err.permanent },
+        `${responseCode} ${enhancedCode} ${atRecipient}`,
+      ).toEqual({ recipientOnly, permanent })
+    }
+  })
+})
 
 describe('createSmtpMailer', () => {
   const { server, received, sockets } = fakeSmtpServer()
@@ -226,31 +261,54 @@ describe('createSmtpMailer', () => {
     expect(received.to.some((r) => r.includes('<victim@example.com>'))).toBe(false)
   })
 
-  it('reports a refused recipient as a MailRejectedError, permanent for 5xx only', async () => {
+  it('reports refusals as MailRejectedError with their codes, never the reply text', async () => {
     const mailer = createSmtpMailer({
       url: `smtp://127.0.0.1:${port}`,
       from: 'Hourmere <hourmere@example.com>',
     })
+    const send = (to: string) =>
+      mailer.send({ to, subject: 'x', text: 'x' }).catch((err: unknown) => err)
     received.rcptReplies.set('gone@example.com', '550 5.1.1 <gone@example.com>: no such user')
-    received.rcptReplies.set('later@example.com', '450 4.2.0 <later@example.com>: try later')
+    received.rcptReplies.set('later@example.com', '450 4.2.0 <later@example.com>: greylisted')
+    received.rcptReplies.set(
+      'relay@example.com',
+      '554 5.7.1 <relay@example.com>: Relay access denied',
+    )
     try {
-      const gone = await mailer
-        .send({ to: 'gone@example.com', subject: 'x', text: 'x' })
-        .catch((err: unknown) => err)
+      const gone = await send('gone@example.com')
       expect(gone).toBeInstanceOf(MailRejectedError)
-      expect(gone).toMatchObject({ responseCode: 550, permanent: true })
+      expect(gone).toMatchObject({
+        responseCode: 550,
+        enhancedCode: '5.1.1',
+        atRecipient: true,
+        recipientOnly: true,
+        permanent: true,
+      })
       // The reply text repeats the address; the error does not.
-      expect((gone as Error).message).toBe('the mail server refused the message (550)')
-      const later = await mailer
-        .send({ to: 'later@example.com', subject: 'x', text: 'x' })
-        .catch((err: unknown) => err)
-      expect(later).toMatchObject({
-        name: 'MailRejectedError',
-        responseCode: 450,
+      expect((gone as Error).message).toBe('the mail server refused the recipient (550 5.1.1)')
+      expect(await send('later@example.com')).toMatchObject({
+        enhancedCode: '4.2.0',
+        recipientOnly: true,
+        permanent: false,
+      })
+      // Relaying refused: the server's problem, for every recipient.
+      expect(await send('relay@example.com')).toMatchObject({
+        enhancedCode: '5.7.1',
+        recipientOnly: false,
+        permanent: false,
+      })
+      // A daily sending limit, reported after DATA.
+      received.dataReply = '550 5.4.5 Daily user sending quota exceeded'
+      expect(await send('ada@example.com')).toMatchObject({
+        responseCode: 550,
+        enhancedCode: '5.4.5',
+        atRecipient: false,
+        recipientOnly: false,
         permanent: false,
       })
     } finally {
       received.rcptReplies.clear()
+      received.dataReply = undefined
     }
   })
 

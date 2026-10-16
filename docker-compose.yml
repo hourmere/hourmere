@@ -9,6 +9,9 @@ name: hourmere
 services:
   app:
     build: .
+    # Built here, never pulled; the optional worker below runs the same image.
+    image: hourmere:local
+    pull_policy: never
     environment:
       # The password stays out of the URL so it may contain any characters (/, #, ?, …);
       # the Postgres client reads PGPASSWORD when the URL has none.
@@ -38,6 +41,7 @@ services:
   # health check.
   # worker:
   #   extends: app
+  #   build: !reset null
   #   environment:
   #     HOURMERE_ROLE: worker
   #   ports: !reset []
