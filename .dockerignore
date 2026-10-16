@@ -1,0 +1,11 @@
+.git
+.github
+**/node_modules
+**/dist
+**/*.test.ts
+temp
+.env
+.env.*
+!.env.example
+.DS_Store
+coverage
