@@ -11,6 +11,8 @@ import { logger } from 'hono/logger'
 import { apiBodyLimit, checkBodyAsRead } from './body-limit.ts'
 import { requireCaller } from './caller.ts'
 import { clientIp, withClientIp } from './client-ip.ts'
+import type { McpModule } from './mcp/endpoint.ts'
+import { describeCaller, Me } from './me.ts'
 import { authenticated, ErrorBody, json, type RouteModule } from './openapi.ts'
 import { routeRateLimits } from './rate-limit.ts'
 import { MAGIC_LINK_CONFIRM_PATH, signInConfirmPage } from './sign-in-confirm.ts'
@@ -30,6 +32,8 @@ export interface AppDeps {
   webDist?: string | undefined
   /** Groups of /api/v1 routes, created by the composition root with their services. */
   routes?: readonly RouteModule[]
+  /** The remote MCP server, served at /mcp (see apps/server/src/mcp). */
+  mcp?: McpModule | undefined
 }
 
 const Health = z
@@ -54,26 +58,6 @@ const healthRoute = createRoute({
     },
   },
 })
-
-const Me = z
-  .object({
-    user: z.object({ id: z.uuid(), name: z.string(), email: z.string() }),
-    organization: z
-      .object({
-        id: z.uuid(),
-        name: z.string(),
-        slug: z.string(),
-        personal: z.boolean().openapi({
-          description: 'A personal organization (every user has one) rather than a team',
-        }),
-      })
-      .openapi({ description: 'The organization the caller acts in' }),
-    principal: z.object({
-      kind: z.enum(['session', 'api_key']),
-      apiKeyId: z.uuid().nullable().openapi({ description: 'The key used, for kind api_key' }),
-    }),
-  })
-  .openapi('Me')
 
 // HTTP status for each kind of DomainError (see docs/api-conventions.md).
 const domainStatus = {
@@ -199,6 +183,7 @@ export function createApp({
   trustedProxies = [],
   webDist,
   routes = [],
+  mcp,
 }: AppDeps) {
   const app = new OpenAPIHono({ defaultHook: validationHook })
   // Unexpected errors (including Better Auth's, which it rethrows) are logged on one line with
@@ -248,6 +233,9 @@ export function createApp({
   // Checks the body while the route reads it. Not /api/auth: Better Auth reads the raw
   // request body itself.
   app.use('/api/v1/*', jsonTextGuard)
+  // The MCP endpoint (and anything under it) is logged, body-limited and never cached like
+  // /api/v1, 413s included; it applies its own checks.
+  app.use('/mcp/*', noStoreByDefault, requestLogger, clientIp(trustedProxies), apiBodyLimit())
 
   app.openapi(healthRoute, async (c) => {
     try {
@@ -291,19 +279,10 @@ export function createApp({
       429: { description: "The API key's rate limit is used up", content: json(ErrorBody) },
     },
   })
-  app.openapi(meRoute, (c) => {
-    const p = c.var.principal
-    return c.json(
-      {
-        user: p.user,
-        organization: p.organization,
-        principal: { kind: p.kind, apiKeyId: p.kind === 'api_key' ? p.apiKeyId : null },
-      },
-      200,
-    )
-  })
+  app.openapi(meRoute, (c) => c.json(describeCaller(c.var.principal), 200))
 
   for (const register of routes) register({ app, caller })
+  mcp?.({ app, resolveCaller, publicUrl })
 
   // The product API is versioned under /api/v1 (agents depend on it for years);
   // /api/health is operational and stays unversioned. doc31 renders schemas the 3.1 way:
