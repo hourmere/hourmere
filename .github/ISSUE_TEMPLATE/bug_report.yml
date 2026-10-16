@@ -1,0 +1,60 @@
+name: Bug report
+description: Something in Hourmere does not work as documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. **Security vulnerabilities must not be
+        reported here:** follow [SECURITY.md](https://github.com/cobaltmere/hourmere/blob/main/SECURITY.md) instead.
+
+        Please remove secrets (`BETTER_AUTH_SECRET`, passwords, API keys, sign-in links) and
+        other people's personal data from anything you paste.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. …
+        2. …
+        3. …
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The release, Docker image tag or commit you are running.
+      placeholder: e.g. v0.3.0, or commit abc1234
+    validations:
+      required: true
+  - type: dropdown
+    id: setup
+    attributes:
+      label: How are you running Hourmere?
+      options:
+        - Self-hosted with Docker Compose
+        - Self-hosted another way
+        - Local development (npm run dev)
+        - Hosted service
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Browser, operating system, reverse proxy, or the agent / API client involved, if relevant.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or error output
+      description: Relevant server log lines or API responses, with secrets removed.
+      render: text
