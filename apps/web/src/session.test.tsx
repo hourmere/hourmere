@@ -158,4 +158,155 @@ describe('the session gate', () => {
     expect(screen.getByRole('heading', { name: 'Settings', level: 1 })).toBeDefined()
     expect(screen.queryByRole('alert')).toBeNull()
   })
+
+  it('ignores a background check the server answered before signing out', async () => {
+    let answer: (res: Response) => void = () => {}
+    let pending = false
+    const api = fakeApi({
+      'GET /api/v1/me': () => {
+        if (!pending) return json(200, ME)
+        // The server answers this check only after the sign-out has gone through.
+        return new Promise<Response>((resolve) => {
+          answer = resolve
+        })
+      },
+      ...instance(),
+      'POST /api/auth/sign-out': () => json(200, { success: true }),
+    })
+    renderApp('/settings')
+    await screen.findByRole('heading', { name: 'Settings', level: 1 })
+    pending = true
+    act(() => {
+      window.dispatchEvent(new Event('focus'))
+    })
+    await vi.waitFor(() => expect(api.to('GET /api/v1/me')).toHaveLength(2))
+
+    await userEvent.click(screen.getByRole('button', { name: 'Sign out' }))
+    await screen.findByRole('heading', { name: 'Sign in to Hourmere' })
+    await act(async () => {
+      answer(json(200, ME))
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    })
+    expect(screen.getByRole('heading', { name: 'Sign in to Hourmere' })).toBeDefined()
+    expect(location()).toBe('/sign-in')
+  })
+
+  it('goes into the app when a check after signing out finds a new sign-in', async () => {
+    let signedInElsewhere = false
+    fakeApi({
+      'GET /api/v1/me': () =>
+        signedInElsewhere ? json(200, ME) : json(401, { error: 'unauthorized' }),
+      ...instance(),
+    })
+    renderApp('/sign-in')
+    await screen.findByRole('heading', { name: 'Sign in to Hourmere' })
+    // Signed in from the email link in another tab, then back here.
+    signedInElsewhere = true
+    act(() => {
+      window.dispatchEvent(new Event('focus'))
+    })
+    expect(await screen.findByRole('heading', { name: 'Event types', level: 1 })).toBeDefined()
+  })
+})
+
+describe('when the account or organization changes elsewhere', () => {
+  const SECRET = 'hm_AdasSecretShownOnlyOnce0123456789abcdefghijklmnopqrstuvwxyzABCDEF'
+  const GRACE: Schemas['Me'] = {
+    user: { id: '00000000-0000-7000-8000-0000000000d1', name: 'Grace', email: 'grace@example.com' },
+    organization: {
+      id: '00000000-0000-7000-8000-0000000000d2',
+      name: 'Grace',
+      slug: 'grace',
+      personal: true,
+    },
+    principal: { kind: 'session', apiKeyId: null },
+  }
+  const ADA_KEY = {
+    id: '00000000-0000-7000-8000-0000000000a1',
+    name: 'Ada laptop',
+    start: 'hm_Ada',
+    enabled: true,
+    createdAt: '2026-10-01T09:00:00.000Z',
+    expiresAt: null,
+    lastRequest: null,
+    metadata: { organizationId: ME.organization.id },
+  }
+
+  /** Ada, who has one key, creates another and is looking at its secret. */
+  async function adaLookingAtANewKey(me: { current: Schemas['Me'] }) {
+    const api = fakeApi({
+      'GET /api/v1/me': () => json(200, me.current),
+      'GET /api/auth/organization/list': () =>
+        json(
+          200,
+          me.current.user.id === ME.user.id ? [ME.organization, TEAM] : [GRACE.organization],
+        ),
+      'GET /api/auth/api-key/list': () =>
+        json(
+          200,
+          me.current.user.id === ME.user.id
+            ? { apiKeys: [ADA_KEY], total: 1 }
+            : { apiKeys: [], total: 0 },
+        ),
+      'POST /api/auth/api-key/create': ({ body }) =>
+        json(200, {
+          ...ADA_KEY,
+          id: '00000000-0000-7000-8000-0000000000a2',
+          name: (body as { name: string }).name,
+          key: SECRET,
+        }),
+    })
+    renderApp('/api-keys')
+    await screen.findByRole('cell', { name: 'hm_Ada…' })
+    await userEvent.type(screen.getByLabelText('Name'), 'Ada agent')
+    await userEvent.click(screen.getByRole('button', { name: 'Create key' }))
+    await screen.findByRole('region', { name: /Copy your new key/ })
+    expect(document.body.innerHTML).toContain(SECRET)
+    return api
+  }
+
+  const TEAM = { id: TEAM_ID, name: 'Acme', slug: 'acme', personal: false }
+
+  const nothingOf = (text: string) => {
+    expect(document.body.innerHTML).not.toContain(text)
+    for (const field of document.querySelectorAll('input')) expect(field.value).not.toContain(text)
+  }
+
+  it("does not show the previous account's keys or secret under another account", async () => {
+    const me = { current: ME }
+    await adaLookingAtANewKey(me)
+
+    // Ada signed out in another tab and Grace signed in; back here:
+    me.current = GRACE
+    act(() => {
+      window.dispatchEvent(new Event('focus'))
+    })
+    expect(await screen.findByText('You have no API keys yet.')).toBeDefined()
+    expect(screen.getByText(GRACE.user.email)).toBeDefined()
+    nothingOf(SECRET)
+    nothingOf('hm_Ada')
+    nothingOf(ME.user.email)
+    expect(screen.queryByRole('region', { name: /Copy your new key/ })).toBeNull()
+  })
+
+  it('starts the keys page over in the new organization', async () => {
+    const me = { current: ME }
+    const api = await adaLookingAtANewKey(me)
+    const lists = api.to('GET /api/auth/api-key/list').length
+
+    me.current = { ...ME, organization: TEAM }
+    act(() => {
+      window.dispatchEvent(new Event('focus'))
+    })
+    await vi.waitFor(() =>
+      expect(screen.getByRole('region', { name: 'Create a key' }).textContent).toContain(
+        'The key will act in Acme.',
+      ),
+    )
+    nothingOf(SECRET)
+    expect(screen.queryByRole('region', { name: /Copy your new key/ })).toBeNull()
+    await vi.waitFor(() =>
+      expect(api.to('GET /api/auth/api-key/list').length).toBeGreaterThan(lists),
+    )
+  })
 })

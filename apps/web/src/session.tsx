@@ -1,5 +1,6 @@
 import {
   createContext,
+  Fragment,
   type ReactNode,
   useCallback,
   useContext,
@@ -40,6 +41,12 @@ interface Session {
   refresh: () => Promise<Me | null>
   /** Ends the session on the server; throws if that fails. */
   signOut: () => Promise<void>
+  /**
+   * A message for the signed-in pages that must outlive them: they start over when the
+   * account or organization changes (see RequireSession), and this says why.
+   */
+  notice: string | null
+  setNotice: (notice: string | null) => void
 }
 
 const SessionContext = createContext<Session | null>(null)
@@ -65,12 +72,28 @@ async function fetchMe(signal: AbortSignal): Promise<MeResult> {
 /** Who is signed in, from GET /api/v1/me; the rest of the app reads it with useSession. */
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<SessionState>({ status: 'loading' })
-  const refreshing = useRef<Promise<Me | null> | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  // Counts the moments the session ended (sign-out, or a 401). An answer to a request that
+  // started before the latest one is stale: applying it would sign a signed-out person back
+  // in, e.g. a background check that the server answered just before the sign-out.
+  const epoch = useRef(0)
+  const refreshing = useRef<{ promise: Promise<Me | null>; controller: AbortController } | null>(
+    null,
+  )
+
+  /** Makes every request in flight stale and cancels the background check. */
+  const invalidate = useCallback(() => {
+    epoch.current += 1
+    refreshing.current?.controller.abort()
+    refreshing.current = null
+    setNotice(null)
+  }, [])
 
   const load = useCallback((signal: AbortSignal) => {
+    const started = epoch.current
     fetchMe(signal).then(
       (result) => {
-        if (signal.aborted) return
+        if (signal.aborted || epoch.current !== started) return
         if (result.ok) setState({ status: 'signed-in', me: result.me })
         else if (result.status === 401) setState(lapsed)
         else setState({ status: 'error', message: result.message })
@@ -88,7 +111,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [load])
 
   // A request that finds the session gone (it expired, or was revoked elsewhere).
-  useEffect(() => onUnauthorized(() => setState(lapsed)), [])
+  useEffect(
+    () =>
+      onUnauthorized(() => {
+        invalidate()
+        setState(lapsed)
+      }),
+    [invalidate],
+  )
 
   const reload = useCallback(() => {
     setState({ status: 'loading' })
@@ -96,9 +126,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [load])
 
   const refresh = useCallback(() => {
-    refreshing.current ??= fetchMe(new AbortController().signal)
+    if (refreshing.current) return refreshing.current.promise
+    const started = epoch.current
+    const controller = new AbortController()
+    const promise: Promise<Me | null> = fetchMe(controller.signal)
       .then(
         (result) => {
+          // The session ended after this check started (see epoch).
+          if (epoch.current !== started) return null
           if (result.ok) {
             setState({ status: 'signed-in', me: result.me })
             return result.me
@@ -106,13 +141,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           if (result.status === 401) setState(lapsed)
           return null
         },
-        // Offline for a moment: what is on screen stays.
+        // Offline for a moment, or cancelled: what is on screen stays.
         () => null,
       )
       .finally(() => {
-        refreshing.current = null
+        if (refreshing.current?.promise === promise) refreshing.current = null
       })
-    return refreshing.current
+    refreshing.current = { promise, controller }
+    return promise
   }, [])
 
   // Coming back to the app (another tab, another window): check who is signed in and in
@@ -131,13 +167,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [refresh])
 
   const signOut = useCallback(async () => {
+    // Before (a check answered while signing out is stale) and after (one started meanwhile).
+    invalidate()
     await endSession()
+    invalidate()
     setState({ status: 'signed-out', reason: 'signed-out' })
-  }, [])
+  }, [invalidate])
 
   const session = useMemo(
-    () => ({ state, reload, refresh, signOut }),
-    [state, reload, refresh, signOut],
+    () => ({ state, reload, refresh, signOut, notice, setNotice }),
+    [state, reload, refresh, signOut, notice],
   )
   return <SessionContext value={session}>{children}</SessionContext>
 }
@@ -187,5 +226,13 @@ export function RequireSession() {
       state.reason === 'signed-out' ? '/sign-in' : signInPath(location.pathname + location.search)
     return <Navigate to={to} replace />
   }
-  return <Outlet />
+  // Pages keep state for the account and organization they started with (a key list, a key
+  // shown once). When either changes, e.g. after signing in as someone else in another tab,
+  // everything below starts over rather than showing one account's data under another.
+  const { user, organization } = state.me
+  return (
+    <Fragment key={`${user.id}:${organization.id}`}>
+      <Outlet />
+    </Fragment>
+  )
 }

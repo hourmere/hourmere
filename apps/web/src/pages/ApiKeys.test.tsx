@@ -287,6 +287,9 @@ describe('the API keys page', () => {
       'The key will act in Ada, your personal organization.',
     )
     expect(api.to('GET /api/v1/me').length).toBeGreaterThanOrEqual(2)
+
+    await user.click(screen.getByRole('button', { name: 'Dismiss' }))
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 
   it('keeps the key when revoking is cancelled', async () => {

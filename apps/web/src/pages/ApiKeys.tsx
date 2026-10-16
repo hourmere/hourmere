@@ -53,7 +53,7 @@ export function ApiKeysPage() {
   const me = useMe()
   const [keys, reload] = useLoad(loadKeys)
   const [created, setCreated] = useState<CreatedApiKey | null>(null)
-  const [notice, setNotice] = useState('')
+  const [status, setStatus] = useState('')
   const keysHeading = useRef<HTMLHeadingElement>(null)
 
   return (
@@ -78,7 +78,7 @@ export function ApiKeysPage() {
         <CreateKeyForm
           organization={me.organization}
           onCreated={(key) => {
-            setNotice('')
+            setStatus('')
             setCreated(key)
             reload()
           }}
@@ -90,7 +90,7 @@ export function ApiKeysPage() {
           Your keys
         </h2>
         <p className="copy-status" role="status">
-          {notice}
+          {status}
         </p>
         {keys.status === 'loading' && <p role="status">Loading keys…</p>}
         {keys.status === 'error' && (
@@ -109,7 +109,7 @@ export function ApiKeysPage() {
               keys={keys.data.keys}
               organizations={keys.data.organizations}
               onRevoked={(key) => {
-                setNotice(`Revoked “${key.name || key.start || 'the key'}”.`)
+                setStatus(`Revoked “${key.name || key.start || 'the key'}”.`)
                 reload()
                 // Its row (and the focused button) goes away.
                 keysHeading.current?.focus()
@@ -151,7 +151,7 @@ function CreateKeyForm({
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const nameHint = useId()
-  const { refresh } = useSession()
+  const { refresh, setNotice } = useSession()
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -162,7 +162,9 @@ function CreateKeyForm({
         await createApiKey(name.trim(), expiresIn ? Number(expiresIn) : null, organization.id),
       )
     } catch (err) {
-      setError(await createErrorMessage(err))
+      // Null when the page starts over in another organization (and says why).
+      const message = await createErrorMessage(err)
+      setError(message)
       setCreating(false)
     }
   }
@@ -170,15 +172,19 @@ function CreateKeyForm({
   /**
    * A 403 other than an unverified email means the organization was not one the person
    * belongs to (any more): they may have left it, or switched organizations in another tab.
-   * Ask who they are now, so the form shows where the next key would go.
+   * Ask who they are now. If the organization changed, the page starts over in the new one
+   * (this form goes away), so the explanation goes to the session's notice instead.
    */
-  async function createErrorMessage(err: unknown): Promise<string> {
+  async function createErrorMessage(err: unknown): Promise<string | null> {
     if (!(err instanceof RequestError) || err.status !== 403 || err.code === 'EMAIL_NOT_VERIFIED') {
       return `Could not create the key. ${errorMessage(err)}`
     }
     const now = await refresh()
     if (now && now.organization.id !== organization.id) {
-      return `You're no longer a member of ${organization.name}, so no key was created. Keys you create now act in ${now.organization.name}.`
+      setNotice(
+        `You're no longer a member of ${organization.name}, so no key was created. Keys you create now act in ${now.organization.name}.`,
+      )
+      return null
     }
     return `Could not create the key: you can't create keys in ${organization.name}.`
   }

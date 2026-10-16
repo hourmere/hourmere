@@ -15,7 +15,7 @@ export const NAV_ITEMS = [
 /** The frame around signed-in pages: header, navigation and the page itself. */
 export function AppShell() {
   const me = useMe()
-  const { signOut } = useSession()
+  const { signOut, notice, setNotice } = useSession()
   const [signOutError, setSignOutError] = useState<string | null>(null)
   const main = useRef<HTMLElement>(null)
   const nav = useRef<HTMLElement>(null)
@@ -33,7 +33,9 @@ export function AppShell() {
     if (shownPath.current === pathname) return
     shownPath.current = pathname
     main.current?.focus()
-  }, [pathname])
+    // A notice is about the page it was shown on.
+    setNotice(null)
+  }, [pathname, setNotice])
 
   async function handleSignOut() {
     setSignOutError(null)
@@ -78,6 +80,14 @@ export function AppShell() {
           </ul>
         </nav>
         <main id="main" ref={main} tabIndex={-1}>
+          {notice && (
+            <div className="alert alert-info notice">
+              <p role="alert">{notice}</p>
+              <button type="button" className="button button-small" onClick={() => setNotice(null)}>
+                Dismiss
+              </button>
+            </div>
+          )}
           <Outlet />
         </main>
       </div>

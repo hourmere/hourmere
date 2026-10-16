@@ -517,6 +517,18 @@ input[readonly] {
   background: var(--accent-soft);
 }
 
+.notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.notice p {
+  margin: 0;
+}
+
 .form-row + .alert,
 .confirm .alert {
   margin: var(--space-3) 0 0;
