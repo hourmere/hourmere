@@ -118,7 +118,20 @@ describe.skipIf(!serverUrl)('profile service', () => {
   it('refuses reserved handles', async () => {
     const user = await createTestUser(db)
     expect(RESERVED_HANDLES).toContain('api')
-    for (const handle of ['api', 'admin', 't', 'mcp', 'assets']) {
+    for (const handle of [
+      'api',
+      'admin',
+      't',
+      'mcp',
+      'assets',
+      'booking',
+      'sign-in',
+      'event-types',
+      'api-keys',
+      // Regardless of case: refused as reserved, not just as uppercase.
+      'Admin',
+      'SIGN-UP',
+    ]) {
       const error = await domainError(() => putProfile(ctx(user), input({ handle })))
       expect(error.code).toBe('handle_reserved')
       expect(error.kind).toBe('invalid')

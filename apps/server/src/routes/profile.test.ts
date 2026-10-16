@@ -81,6 +81,10 @@ describe.skipIf(!serverUrl)('profile routes', () => {
 
   it.each<[string, Record<string, unknown>, number, string]>([
     ['a reserved handle', { handle: 'admin' }, 400, 'handle_reserved'],
+    ['a reserved handle in capitals', { handle: 'SIGN-IN' }, 400, 'handle_reserved'],
+    ["the web app's booking page", { handle: 'booking' }, 400, 'handle_reserved'],
+    ["one of the app's top-level pages", { handle: 'event-types' }, 400, 'handle_reserved'],
+    ['a static file at the root', { handle: 'robots.txt' }, 400, 'handle_reserved'],
     ['a malformed handle', { handle: 'Ada!' }, 400, 'invalid_handle'],
     ['an unknown time zone', { timeZone: 'Mars/Olympus' }, 400, 'invalid_time_zone'],
     ['a malformed locale', { locale: 'en_US' }, 400, 'invalid_locale'],

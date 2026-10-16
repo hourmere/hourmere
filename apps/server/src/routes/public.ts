@@ -3,6 +3,7 @@ import type { Db } from '@hourmere/db'
 import {
   createPublicBooking,
   getPublicEventType,
+  getPublicHost,
   listPublicSlots,
   MAX_GUESTS,
   MAX_SLOT_RANGE_DAYS,
@@ -11,7 +12,7 @@ import {
 import { routeBodyLimit } from '../body-limit.ts'
 import { ErrorBody, json, Question, type RouteModule } from '../openapi.ts'
 import { createRateLimiter, PUBLIC_RATE_LIMITS, type RateLimit, rateLimit } from '../rate-limit.ts'
-import { BookingWithToken, Instant, LocationKind, Responses } from './bookings.ts'
+import { BookingWithToken, Instant, LocationKind, Responses, Slot } from './bookings.ts'
 
 export const PublicEventType = z
   .object({
@@ -33,7 +34,28 @@ export const PublicEventType = z
   })
   .openapi('PublicEventType')
 
-export const Slot = z.object({ start: Instant, end: Instant }).openapi('Slot')
+export const PublicHost = z
+  .object({
+    handle: z.string(),
+    host: z.object({
+      name: z.string(),
+      timeZone: z.string().openapi({ description: "The host's IANA time zone" }),
+    }),
+    eventTypes: z
+      .array(
+        z.object({
+          slug: z.string().openapi({ description: 'The booking page is /{handle}/{slug}' }),
+          title: z.string(),
+          description: z.string().nullable(),
+          durationMinutes: z.number().int(),
+          location: z.object({ kind: LocationKind }).nullable(),
+        }),
+      )
+      .openapi({ description: 'Bookable event types, in the order the host arranged them' }),
+  })
+  .openapi('PublicHost')
+
+export { Slot }
 
 const name = z.string().min(1).max(200)
 const email = z.email().max(254)
@@ -51,6 +73,8 @@ export const CreateBooking = z
     responses: Responses.optional(),
   })
   .openapi('CreateBooking')
+
+export const HostParams = z.object({ handle: z.string().openapi({ example: 'ada' }) })
 
 export const PageParams = z.object({
   handle: z.string().openapi({ example: 'ada' }),
@@ -73,7 +97,7 @@ const eventTypeNotFound = error('No such public event type (`event_type_not_foun
 export interface PublicRoutesDeps {
   db: Db
   now?: () => Temporal.Instant
-  /** Replaces PUBLIC_RATE_LIMITS.page, .slots and .book, e.g. in tests. */
+  /** Replaces PUBLIC_RATE_LIMITS.page (host and event pages), .slots and .book, e.g. in tests. */
   rateLimits?: Partial<Record<keyof typeof PUBLIC_RATE_LIMITS, RateLimit>>
 }
 
@@ -94,6 +118,24 @@ export function publicRoutes({
   const bookLimit = limit('book')
 
   return ({ app }) => {
+    app.openapi(
+      createRoute({
+        method: 'get',
+        path: '/api/v1/public/{handle}',
+        summary: "A host's public page",
+        description:
+          'What the page at /{handle} shows: the host and their bookable event types. A handle that is reserved (see the profile) has no page.',
+        middleware: pageLimit,
+        request: { params: HostParams },
+        responses: {
+          200: { description: 'The host and their event types', content: json(PublicHost) },
+          404: error('No such host (`host_not_found`)'),
+          429: rateLimited,
+        },
+      }),
+      async (c) => c.json(await getPublicHost(ctx, c.req.valid('param')), 200),
+    )
+
     app.openapi(
       createRoute({
         method: 'get',

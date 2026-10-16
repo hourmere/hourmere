@@ -1,5 +1,6 @@
 // The caller's profile: the public handle in their booking URLs (/{handle}/{slug}), their
 // time zone and locale. It belongs to the user, not to an organization.
+import { isReservedName, RESERVED_NAMES } from '@hourmere/core'
 import { sql } from 'kysely'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
@@ -27,41 +28,12 @@ export const HANDLE_MAX_LENGTH = 40
 export const LOCALE_MAX_LENGTH = 35
 
 /**
- * Handles that are, or will be, top-level paths of the app and the API (/{handle} is a
- * booking page), so nobody can claim one and shadow or impersonate it.
+ * Handles nobody can claim, because /{handle} would shadow or pass for a page of the app, the
+ * API or the product (@hourmere/core's RESERVED_NAMES, checked case-insensitively). A stored
+ * handle that became reserved later is not served: its booking pages answer 404 (see
+ * findPublicEventType), and saving the profile again needs a new handle.
  */
-export const RESERVED_HANDLES: ReadonlySet<string> = new Set([
-  'about',
-  'account',
-  'admin',
-  'api',
-  'app',
-  'assets',
-  'auth',
-  'billing',
-  'blog',
-  'booking',
-  'bookings',
-  'dashboard',
-  'docs',
-  'embed',
-  'help',
-  'hourmere',
-  'login',
-  'logout',
-  'mcp',
-  'oauth',
-  'pricing',
-  'privacy',
-  'settings',
-  'signin',
-  'signup',
-  'status',
-  'support',
-  't',
-  'terms',
-  'www',
-])
+export const RESERVED_HANDLES: ReadonlySet<string> = RESERVED_NAMES
 
 const notFound = () =>
   new DomainError('not_found', 'profile_not_found', 'Create a profile with PUT /api/v1/profile')
@@ -122,15 +94,16 @@ export async function putProfile(
 }
 
 function validHandle(value: unknown): string {
+  // First, and regardless of case: `Admin` is refused as reserved, not just as uppercase.
+  if (typeof value === 'string' && isReservedName(value)) {
+    throw new DomainError('invalid', 'handle_reserved', 'This handle is reserved')
+  }
   if (typeof value !== 'string' || !HANDLE_PATTERN.test(value)) {
     throw new DomainError(
       'invalid',
       'invalid_handle',
       'handle must be 1–40 lowercase letters, digits or hyphens, and start and end with a letter or digit',
     )
-  }
-  if (RESERVED_HANDLES.has(value)) {
-    throw new DomainError('invalid', 'handle_reserved', 'This handle is reserved')
   }
   return value
 }

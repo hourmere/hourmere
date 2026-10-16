@@ -4,10 +4,12 @@ import {
   cancelHostBooking,
   cancelManagedBooking,
   getHostBooking,
-  getManagedBooking,
+  getManagedBookingDetails,
   LOCATION_KINDS,
   listHostBookings,
+  listManagedSlots,
   MAX_PAGE_SIZE,
+  MAX_SLOT_RANGE_DAYS,
   type PublicContext,
   ResponsesSchema,
   rescheduleManagedBooking,
@@ -38,6 +40,9 @@ export const Instant = z.iso
   })
 
 export const LocationKind = z.enum(LOCATION_KINDS)
+
+/** A bookable time: public slots and the times a booking can move to. */
+export const Slot = z.object({ start: Instant, end: Instant }).openapi('Slot')
 
 export const BookingLocation = z.looseObject({ kind: LocationKind }).openapi('BookingLocation', {
   description:
@@ -83,6 +88,15 @@ export const Booking = z
     createdAt: Instant,
   })
   .openapi('Booking')
+
+export const ManagedBooking = Booking.extend({
+  eventType: z.object({ title: z.string(), durationMinutes: z.number().int() }).nullable().openapi({
+    description: 'The event type as it is now; null once it is deleted',
+  }),
+  hosts: z.array(z.object({ name: z.string() })).openapi({
+    description: "Who the invitee meets: each host's name",
+  }),
+}).openapi('ManagedBooking')
 
 export const BookingWithToken = z
   .object({
@@ -150,7 +164,7 @@ const invalidCancel = error(
 export interface BookingRoutesDeps {
   db: Db
   now?: () => Temporal.Instant
-  /** Replaces PUBLIC_RATE_LIMITS.manage, e.g. in tests. */
+  /** Replaces PUBLIC_RATE_LIMITS.manage (and .slots for the reschedule slots), e.g. in tests. */
   rateLimits?: Partial<Record<keyof typeof PUBLIC_RATE_LIMITS, RateLimit>>
 }
 
@@ -166,6 +180,10 @@ export function bookingRoutes({
 }: BookingRoutesDeps): RouteModule {
   const publicContext: PublicContext = { db, now }
   const manageLimit = rateLimit(createRateLimiter(rateLimits.manage ?? PUBLIC_RATE_LIMITS.manage))
+  // Picking a new time pages through months of slots, so it counts like public slots.
+  const manageSlotsLimit = rateLimit(
+    createRateLimiter(rateLimits.slots ?? PUBLIC_RATE_LIMITS.slots),
+  )
 
   return ({ app, caller }) => {
     const context = (principal: ServiceContext['principal']): ServiceContext => ({
@@ -184,17 +202,60 @@ export function bookingRoutes({
         middleware: manageLimit,
         request: { headers: ManageToken },
         responses: {
-          200: { description: 'The booking', content: json(Booking) },
+          200: {
+            description: 'The booking, with its event type and hosts',
+            content: json(ManagedBooking),
+          },
           404: manageNotFound,
           429: rateLimited,
         },
       }),
       async (c) => {
-        const booking = await getManagedBooking(
+        const booking = await getManagedBookingDetails(
           publicContext,
           c.req.valid('header')['x-manage-token'],
         )
         return c.json(booking, 200)
+      },
+    )
+
+    app.openapi(
+      createRoute({
+        method: 'get',
+        path: '/api/v1/bookings/manage/slots',
+        summary: 'Times the booking can move to',
+        description: `The slots the booking behind the manage token can be rescheduled to, fully inside [start, end]: its event type's slots with the booking itself ignored, so they may overlap its current time. The same range limits as public slots (at most ${MAX_SLOT_RANGE_DAYS} days).`,
+        middleware: manageSlotsLimit,
+        request: {
+          headers: ManageToken,
+          query: z.object({ start: Instant, end: Instant }),
+        },
+        responses: {
+          200: {
+            description: 'Slots, sorted by start',
+            content: json(z.object({ data: z.array(Slot) })),
+          },
+          400: error(
+            'Invalid parameters (`invalid_request`), end not after start (`invalid_range`), or a range that is too long (`range_too_long`)',
+          ),
+          404: manageNotFound,
+          409: error(
+            'Already cancelled (`booking_cancelled`), already started (`booking_in_past`), the event type no longer takes bookings (`event_type_unavailable`) or the booking has no host (`booking_has_no_host`)',
+          ),
+          429: rateLimited,
+        },
+      }),
+      async (c) => {
+        const { start, end } = c.req.valid('query')
+        const slots = await listManagedSlots(
+          publicContext,
+          c.req.valid('header')['x-manage-token'],
+          {
+            start: Temporal.Instant.from(start),
+            end: Temporal.Instant.from(end),
+          },
+        )
+        return c.json({ data: slots }, 200)
       },
     )
 
