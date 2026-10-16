@@ -19,6 +19,7 @@ export {
 export {
   type Attendee,
   type Booking,
+  type BookingOrigin,
   type BookingPage,
   type BookingSource,
   type BookingStatus,
