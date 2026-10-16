@@ -23,7 +23,7 @@ export const authenticated: Record<string, string[]>[] = [{ apiKey: [] }, { sess
 export type CallerMiddleware = ReturnType<typeof requireCaller>
 
 /**
- * A group of /api/v1 routes. The composition root (index.ts) creates each module with the
+ * A group of /api/v1 routes. The composition root (server.ts) creates each module with the
  * services it needs; createApp registers it and passes what every route shares.
  *
  * Rules for modules:
@@ -36,7 +36,7 @@ export type CallerMiddleware = ReturnType<typeof requireCaller>
  */
 export type RouteModule = (shared: { app: OpenAPIHono; caller: CallerMiddleware }) => void
 
-/** What a route module needs to call the service layer; index.ts provides it. */
+/** What a route module needs to call the service layer; server.ts provides it. */
 export interface ServiceDeps {
   db: Db
   /** The clock; defaults to the real one. */

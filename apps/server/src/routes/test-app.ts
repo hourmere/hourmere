@@ -25,7 +25,7 @@ export interface Client {
   patch: (path: string, body: unknown) => Promise<Answer>
 }
 
-/** The app as index.ts composes it, with `db` behind the routes (not touched by the doc). */
+/** The app as server.ts composes it, with `db` behind the routes (not touched by the doc). */
 export function productApp(db: Db, principals: ReadonlyMap<string, Principal> = new Map()) {
   return createApp({
     checkDb: async () => {},

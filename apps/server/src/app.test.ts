@@ -36,6 +36,23 @@ describe('GET /api/health', () => {
   })
 })
 
+describe('request log', () => {
+  it('has neither query strings nor terminal colors', async () => {
+    const app = createApp({ ...noAuth, checkDb: async () => {} })
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    try {
+      await app.request('/api/health?token=secret')
+      const lines = log.mock.calls.map((args) => args.join(' '))
+      expect(lines).toEqual([
+        '<-- GET /api/health',
+        expect.stringMatching(/^--> GET \/api\/health 200 \d+m?s$/),
+      ])
+    } finally {
+      log.mockRestore()
+    }
+  })
+})
+
 describe('API surface', () => {
   const app = createApp({ ...noAuth, checkDb: async () => {} })
 

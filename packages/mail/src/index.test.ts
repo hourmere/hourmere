@@ -37,12 +37,12 @@ describe('createLogMailer', () => {
     const lines: string[] = []
     await createLogMailer((l) => lines.push(l)).send({
       to: 'x@example.com',
-      subject: 'a\u2028b\u0085c',
+      subject: 'a\u2028b\u0085c\u202ed\u2066e',
       text: 'one\r\n[mail] {"forged":true}',
     })
     expect(lines).toHaveLength(1)
-    expect(lines[0]).not.toMatch(/[\n\r\u2028\u0085]/)
-    expect(JSON.parse((lines[0] as string).slice(7)).subject).toBe('a\u2028b\u0085c')
+    expect(lines[0]).not.toMatch(/[\n\r\u2028\u0085\u202e\u2066]/)
+    expect(JSON.parse((lines[0] as string).slice(7)).subject).toBe('a\u2028b\u0085c\u202ed\u2066e')
   })
 })
 
