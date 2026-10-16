@@ -88,7 +88,7 @@ export function When({
 
 export function DetailList({ items }: { items: [string, ReactNode][] }) {
   return (
-    <dl className="details booking-details">
+    <dl className="booking-details">
       {items.map(([term, value]) => (
         <div key={term} className="details-row">
           <dt>{term}</dt>

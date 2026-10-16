@@ -67,7 +67,9 @@ export function TimeZonePicker({ value, onChange, now, error }: TimeZonePickerPr
   function close() {
     setOpen(false)
     setQuery('')
-    toggle.current?.focus()
+    // After the key that closed it is done: a button focused while Enter is still going on
+    // takes the rest of the keystroke as a click and opens the list again.
+    setTimeout(() => toggle.current?.focus(), 0)
   }
 
   function pick(zone: string) {

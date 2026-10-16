@@ -106,7 +106,7 @@ describe('the booking page', () => {
     // Switch to UTC through the searchable list.
     await user.click(screen.getByRole('button', { name: /Time zone/ }))
     const search = screen.getByRole('combobox', { name: 'Search time zones' })
-    expect(document.activeElement).toBe(search)
+    await waitFor(() => expect(document.activeElement).toBe(search))
     await user.type(search, 'utc')
     await user.keyboard('{Enter}')
     expect(plain(screen.getByRole('button', { name: /Time zone/ }).textContent)).toContain('UTC')
@@ -135,7 +135,7 @@ describe('the booking page', () => {
     ])
     await user.keyboard('{Escape}')
     expect(screen.queryByRole('combobox')).toBeNull()
-    expect(document.activeElement).toBe(toggle)
+    await waitFor(() => expect(document.activeElement).toBe(toggle))
   })
 
   it('moves through the calendar with the keyboard', async () => {
@@ -194,7 +194,7 @@ describe('the booking page', () => {
     await chooseSlot(user, /November 2, available/, '9:00 AM')
 
     const details = await screen.findByRole('heading', { name: 'Your details' })
-    expect(document.activeElement).toBe(details)
+    await waitFor(() => expect(document.activeElement).toBe(details))
     // The chosen time, in the visitor's zone.
     expect(plain(screen.getByText(/Monday, November 2, 2026/).parentElement?.textContent)).toMatch(
       /9:00 – 9:30 AM.*America\/New York \(GMT-05:00\)/,
@@ -332,7 +332,7 @@ describe('the booking page', () => {
     await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
 
     const heading = await screen.findByRole('heading', { name: 'You’re booked' })
-    expect(document.activeElement).toBe(heading)
+    await waitFor(() => expect(document.activeElement).toBe(heading))
     const [first, second] = api.to('POST /api/v1/public/ada/intro/bookings')
     expect(second?.headers.get('idempotency-key')).not.toBe(first?.headers.get('idempotency-key'))
 
@@ -383,12 +383,12 @@ describe('the booking page', () => {
     await confirm()
     const email = screen.getByLabelText('Email')
     await waitFor(() => expect(email.getAttribute('aria-invalid')).toBe('true'))
-    expect(document.activeElement).toBe(email)
+    await waitFor(() => expect(document.activeElement).toBe(email))
     expect(screen.getByText(/Enter a valid email address/)).toBeDefined()
 
     await confirm()
     expect(await screen.findByText('“Topic” is required')).toBeDefined()
-    expect(document.activeElement).toBe(screen.getByLabelText('Topic'))
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Topic')))
 
     await confirm()
     expect(await screen.findByText(/Try again in 30 seconds/)).toBeDefined()
@@ -421,7 +421,9 @@ describe('the booking page', () => {
     await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
 
     expect(await screen.findByText(/Someone else just booked that time/)).toBeDefined()
-    expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Pick a time' }))
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Pick a time' })),
+    )
     await waitFor(() => expect(api.to('GET /api/v1/public/ada/intro/slots')).toHaveLength(2))
     await user.click(await day(/November 2, available/))
     expect(slotButtons()).toEqual(['5:30 AM', '10:30 PM'])

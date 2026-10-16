@@ -15,7 +15,6 @@ export function PublicLayout({ children, wide = false }: { children: ReactNode; 
       </main>
       <footer className="public-footer">
         <Logo size={18} />
-        <span className="visually-hidden">Hourmere</span>
       </footer>
     </div>
   )

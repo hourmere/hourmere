@@ -43,19 +43,29 @@ export function parseManageFragment(hash: string): { token: string | null; actio
 export function ManageBookingPage() {
   const location = useLocation()
   const navigate = useNavigate()
-  const [link, setLink] = useState(() => parseManageFragment(location.hash))
+  const [link, setLink] = useState(() => ({ ...parseManageFragment(location.hash), visit: 0 }))
+  // The fragment this page started with, already read above. Any other one is a link opened
+  // into this tab later (even the same link again), which starts the page over.
+  const read = useRef<string | null>(location.hash)
 
   useEffect(() => {
-    if (!location.hash) return
+    if (!location.hash) {
+      read.current = null
+      return
+    }
     const parsed = parseManageFragment(location.hash)
-    if (parsed.token) setLink(parsed)
+    if (parsed.token && location.hash !== read.current) {
+      setLink((current) => ({ ...parsed, visit: current.visit + 1 }))
+    }
     navigate({ pathname: location.pathname, search: location.search }, { replace: true })
   }, [location.hash, location.pathname, location.search, navigate])
 
   if (!link.token) {
     return <NoToken />
   }
-  return <ManageBooking key={link.token} token={link.token} action={link.action} />
+  return (
+    <ManageBooking key={`${link.visit}:${link.token}`} token={link.token} action={link.action} />
+  )
 }
 
 function NoToken() {
@@ -213,7 +223,7 @@ function ManageView({
     if (fresh.status === 'cancelled') {
       return 'We could not confirm the change. This link now shows the booking as cancelled: if it was moved, the email about the new time has its link.'
     }
-    return 'Your booking was not moved: we could not reach Hourmere. Try again when you are back online.'
+    return 'Your booking was not moved: the request did not go through. You can try again.'
   }
 
   async function failed(err: unknown, during: Action) {
@@ -444,7 +454,7 @@ function BookingSummary({
             : []),
         ]}
       />
-      {newToken && (
+      {newToken && !cancelled && (
         <ManageLink
           token={newToken}
           intro="Moving the booking gave it a new link. Links in Hourmere’s emails keep working; the link shown when you first booked now shows the old, cancelled time."

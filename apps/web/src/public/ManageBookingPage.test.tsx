@@ -121,7 +121,7 @@ describe('the invitee’s manage page', () => {
     openLink(`/booking#token=${TOKEN}&action=cancel`)
 
     const heading = await screen.findByRole('heading', { name: 'Cancel this booking?' })
-    expect(document.activeElement).toBe(heading)
+    await waitFor(() => expect(document.activeElement).toBe(heading))
     expect(window.location.hash).toBe('')
     const reason = screen.getByLabelText(/Reason/)
     await user.type(reason, 'Something came up.')
@@ -157,7 +157,7 @@ describe('the invitee’s manage page', () => {
     openLink(`/booking#token=${TOKEN}&action=reschedule`)
 
     const title = await screen.findByRole('heading', { name: 'Pick a new time' })
-    expect(document.activeElement).toBe(title)
+    await waitFor(() => expect(document.activeElement).toBe(title))
     await user.click(await screen.findByRole('button', { name: 'Tuesday, November 3, available' }))
     await user.click(screen.getByRole('button', { name: '11:00 AM' }))
     expect(await screen.findByRole('heading', { name: 'Move your booking?' })).toBeDefined()
@@ -297,6 +297,38 @@ describe('the invitee’s manage page', () => {
     openLink('/booking#token=nope')
     expect(await screen.findByRole('heading', { name: 'This link doesn’t work' })).toBeDefined()
     expect(window.location.hash).toBe('')
+  })
+
+  it('starts over when another link (or the same one again) is opened in the tab', async () => {
+    const other = managed({ id: '01900000-0000-7000-8000-0000000000b9', title: 'Deep dive' })
+    const api = fakeApi({
+      'GET /api/v1/bookings/manage': ({ headers }) =>
+        json(
+          200,
+          headers.get('x-manage-token') === NEW_TOKEN
+            ? { ...other, eventType: { title: 'Deep dive', durationMinutes: 60 } }
+            : managed(),
+        ),
+    })
+    openLink(`/booking#token=${TOKEN}`)
+    expect(await screen.findByText('Intro call')).toBeDefined()
+    const open = (url: string) => {
+      window.history.pushState(null, '', url)
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    }
+    open(`/booking#token=${NEW_TOKEN}`)
+    expect(await screen.findByText('Deep dive')).toBeDefined()
+    expect(window.location.hash).toBe('')
+    open(`/booking#token=${TOKEN}`)
+    expect(await screen.findByText('Intro call')).toBeDefined()
+    open(`/booking#token=${TOKEN}`)
+    await waitFor(() => expect(api.to('GET /api/v1/bookings/manage')).toHaveLength(4))
+    expect(api.calls.map((c) => c.headers.get('x-manage-token'))).toEqual([
+      TOKEN,
+      NEW_TOKEN,
+      TOKEN,
+      TOKEN,
+    ])
   })
 
   it('asks for the link when there is none, without asking the server', async () => {
