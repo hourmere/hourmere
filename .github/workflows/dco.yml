@@ -1,0 +1,45 @@
+name: DCO
+
+on:
+  pull_request:
+    # Retargeting a PR changes the checked commit range without pushing a new head.
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dco-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Every commit in the pull request needs a Developer Certificate of Origin sign-off unless
+  # its author is exempt (the maintainer and Dependabot). The rule is in CONTRIBUTING.md
+  # ("License and sign-off"); the check and the exemption list are in scripts/check-dco.ts.
+  # A pull request runs its own copy of this file and of the script, so changes to either one
+  # get extra scrutiny in review.
+  sign-off:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+      - name: Check sign-offs
+        # Commit text reaches the script only through git, never through ${{ }} in the shell.
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          # Exemptions go by author email, which anyone can set, so they apply only to branches
+          # pushed to this repository (that takes write access). In a pull request from a fork,
+          # every commit needs a sign-off.
+          FROM_FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+        run: |
+          if [ "$FROM_FORK" = false ]; then
+            node scripts/check-dco.ts "$BASE_SHA" "$HEAD_SHA"
+          else
+            node scripts/check-dco.ts --no-exemptions "$BASE_SHA" "$HEAD_SHA"
+          fi
