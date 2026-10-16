@@ -2,17 +2,23 @@ import type { AddressInfo } from 'node:net'
 import { serve } from '@hono/node-server'
 import { createAuth, createAuthPool, createCallerResolver } from '@hourmere/auth'
 import { createDb, createPool, runMigrations } from '@hourmere/db'
+import { createJobs } from '@hourmere/jobs'
 import { createLogMailer, createSmtpMailer, type Mailer } from '@hourmere/mail'
+import { bookingNotificationJob } from '@hourmere/notifications'
 import { sql } from 'kysely'
 import { createApp } from './app.ts'
 import { loadConfig } from './config.ts'
 import { installOneLineConsole } from './one-line-console.ts'
 import { bookingRoutes } from './routes/bookings.ts'
 import { publicRoutes } from './routes/public.ts'
+import { createWorkerHealthApp } from './worker-health.ts'
 
 export interface RunningServer {
   port: number
-  /** Stops accepting requests, closes the database pools and restores the console. */
+  /**
+   * Stops accepting requests, stops the job workers (waiting for running jobs up to a
+   * timeout), closes the database pools and restores the console.
+   */
   close(): Promise<void>
 }
 
@@ -57,35 +63,58 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
     mailer = createLogMailer()
   }
 
-  const authPool = createAuthPool(config.DATABASE_URL)
-  const auth = createAuth({
-    pool: authPool,
-    db,
-    baseURL: config.PUBLIC_URL,
-    secret: config.BETTER_AUTH_SECRET,
-    mailer,
-    socialProviders: config.socialProviders,
+  const role = config.HOURMERE_ROLE
+  // Background jobs: every role queues them, `all` and `worker` run them.
+  const jobs = createJobs({
+    connectionString: config.DATABASE_URL,
+    definitions: [bookingNotificationJob({ db, mailer, publicUrl: config.PUBLIC_URL })],
+    work: role !== 'web',
+    // pg-boss installs and upgrades its own `pgboss` schema; with AUTO_MIGRATE=false,
+    // `npm run db:migrate` does that too.
+    migrate: config.AUTO_MIGRATE,
+    instanceName: role,
   })
+  await jobs.start()
+  const checkDb = async () => {
+    await sql`SELECT 1`.execute(db)
+  }
 
-  const app = createApp({
-    checkDb: async () => {
-      await sql`SELECT 1`.execute(db)
-    },
-    authHandler: auth.handler,
-    resolveCaller: createCallerResolver({ auth, db }),
-    publicUrl: config.PUBLIC_URL,
-    trustedProxies: config.trustedProxies,
-    webDist: config.WEB_DIST,
-    // Route groups hold only db (closed below) and in-memory rate limiters.
-    routes: [publicRoutes({ db }), bookingRoutes({ db })],
-  })
+  // A worker serves only /api/health, for the container health check: no sign-in, no API.
+  const authPool = role === 'worker' ? undefined : createAuthPool(config.DATABASE_URL)
+  let fetch: Parameters<typeof serve>[0]['fetch']
+  if (!authPool) {
+    fetch = createWorkerHealthApp({ checkDb, jobsRunning: () => jobs.running }).fetch
+  } else {
+    const auth = createAuth({
+      pool: authPool,
+      db,
+      baseURL: config.PUBLIC_URL,
+      secret: config.BETTER_AUTH_SECRET,
+      mailer,
+      socialProviders: config.socialProviders,
+    })
+    fetch = createApp({
+      checkDb,
+      authHandler: auth.handler,
+      resolveCaller: createCallerResolver({ auth, db }),
+      publicUrl: config.PUBLIC_URL,
+      trustedProxies: config.trustedProxies,
+      webDist: config.WEB_DIST,
+      // Route groups hold only db (closed below) and in-memory rate limiters.
+      routes: [publicRoutes({ db }), bookingRoutes({ db })],
+    }).fetch
+  }
 
   const server = await new Promise<ReturnType<typeof serve>>((resolve) => {
-    const s = serve({ fetch: app.fetch, port: config.PORT }, (info: AddressInfo) => {
-      const providers = Object.keys(config.socialProviders)
-      console.log(
-        `Hourmere listening on :${info.port} (${config.PUBLIC_URL}); sign-in: email${providers.map((p) => `, ${p}`).join('')}`,
-      )
+    const s = serve({ fetch, port: config.PORT }, (info: AddressInfo) => {
+      if (role === 'worker') {
+        console.log(`Hourmere worker running jobs; health check on :${info.port}/api/health`)
+      } else {
+        const providers = Object.keys(config.socialProviders)
+        console.log(
+          `Hourmere listening on :${info.port} (${config.PUBLIC_URL}); sign-in: email${providers.map((p) => `, ${p}`).join('')}; jobs: ${role === 'all' ? 'run here' : 'queued for a worker'}`,
+        )
+      }
       resolve(s)
     })
   })
@@ -94,9 +123,11 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
     port: (server.address() as AddressInfo).port,
     close: () =>
       new Promise<void>((resolve, reject) => {
+        // Requests first (one still running may queue a job), then jobs (waiting for running
+        // ones up to a timeout), then the pools the jobs use.
         server.close(async (err) => {
           try {
-            await Promise.all([db.destroy(), authPool.end()])
+            await jobs.stop().finally(() => Promise.all([db.destroy(), authPool?.end()]))
             restoreConsole()
             if (err) reject(err)
             else resolve()

@@ -84,6 +84,18 @@ describe('loadConfig', () => {
     )
   })
 
+  it('runs everything in one process unless HOURMERE_ROLE says otherwise', () => {
+    expect(loadConfig(base).HOURMERE_ROLE).toBe('all')
+    expect(loadConfig({ ...base, HOURMERE_ROLE: '' }).HOURMERE_ROLE).toBe('all')
+    expect(loadConfig({ ...base, HOURMERE_ROLE: 'web' }).HOURMERE_ROLE).toBe('web')
+    expect(loadConfig({ ...base, HOURMERE_ROLE: 'worker' }).HOURMERE_ROLE).toBe('worker')
+    for (const bad of ['Worker', 'api', 'web,worker']) {
+      expect(() => loadConfig({ ...base, HOURMERE_ROLE: bad }), bad).toThrow(
+        /HOURMERE_ROLE must be all, web or worker/,
+      )
+    }
+  })
+
   describe('social sign-in', () => {
     it('enables a provider when both its client id and secret are set', () => {
       const c = loadConfig({

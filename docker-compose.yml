@@ -2,7 +2,8 @@
 # PUBLIC_URL (optionally SMTP and Google/Microsoft sign-in), then
 #   docker compose up -d
 # The app listens on 127.0.0.1:3000; put a reverse proxy with TLS in front of it. Until SMTP
-# is configured, sign-in links are printed by `docker compose logs app`.
+# is configured, sign-in links are printed by `docker compose logs app`. Background jobs
+# (booking emails) run inside `app` unless you split them out (the `worker` service below).
 name: hourmere
 
 services:
@@ -22,12 +23,27 @@ services:
       MICROSOFT_CLIENT_ID: ${MICROSOFT_CLIENT_ID:-}
       MICROSOFT_CLIENT_SECRET: ${MICROSOFT_CLIENT_SECRET:-}
       TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
+      HOURMERE_ROLE: ${HOURMERE_ROLE:-}
     ports:
       - "127.0.0.1:${PORT:-3000}:3000"
     depends_on:
       db:
         condition: service_healthy
+    # Running jobs get up to 20 s to finish on shutdown; Docker's default is 10 s.
+    stop_grace_period: 30s
     restart: unless-stopped
+
+  # To run background jobs in a container of their own (same image), set HOURMERE_ROLE=web
+  # in .env and uncomment this service. Its port stays unpublished: it only answers the
+  # health check.
+  # worker:
+  #   extends: app
+  #   environment:
+  #     HOURMERE_ROLE: worker
+  #   ports: !reset []
+  #   depends_on:
+  #     db:
+  #       condition: service_healthy
 
   db:
     image: postgres:18-alpine

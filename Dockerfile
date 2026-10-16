@@ -27,6 +27,9 @@ COPY --from=build /app/apps/server ./apps/server
 COPY --from=build /app/apps/web/dist ./apps/web/dist
 USER node
 EXPOSE 3000
+# HOURMERE_ROLE (all, web or worker; default all) picks what a container runs. Every role
+# listens on PORT and answers /api/health (a worker answers nothing else), so this one check
+# fits all of them. On SIGTERM running jobs get up to 20 s: allow about 30 s to stop.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s \
   CMD ["node", "-e", "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/api/health').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
 CMD ["node", "apps/server/src/index.ts"]
