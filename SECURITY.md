@@ -52,7 +52,7 @@ is public) and credit you unless you prefer to remain anonymous.
 In scope:
 
 - The code in this repository.
-- The official Docker image built from this repository's `Dockerfile`.
+- Docker images built from this repository's `Dockerfile`.
 
 Out of scope:
 

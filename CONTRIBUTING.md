@@ -96,5 +96,6 @@ Signed-off-by: Your Name <you@example.com>
 
 Use a name you are known by and an email address you can be reached at. If you forgot, add
 the sign-off to your last commit with `git commit --amend -s --no-edit`, or to every commit on
-your branch with `git rebase --signoff main`, then update your pull request with
-`git push --force-with-lease`.
+your branch with `git rebase --signoff origin/main`. Both rewrite your branch, so update the
+pull request with `git push --force-with-lease`; this is the one case where rewriting a branch
+that is under review is fine.
