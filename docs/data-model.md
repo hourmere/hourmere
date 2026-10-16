@@ -39,6 +39,7 @@ types in `packages/db/src/tables.ts` are generated from the migrated database.
 | Table | Owner | Purpose |
 |---|---|---|
 | `profiles` | user | Public handle (`hourmere.com/{handle}/{event}`), time zone, locale, default destination calendar |
+| `personal_organizations` | user | Marks the organization created for each user; deleting the user deletes it |
 | `schedules` | user | Named working hours: time zone + weekly intervals (JSON); one default per user |
 | `schedule_overrides` | user | Per-date exceptions: unavailable, or replacement intervals |
 | `calendar_connections` | user | A connected Google / Microsoft / CalDAV account; credentials encrypted (AES-256-GCM) |
@@ -56,12 +57,19 @@ types in `packages/db/src/tables.ts` are generated from the migrated database.
 - **No double-booking.** `booking_hosts` has
   `EXCLUDE USING gist (user_id WITH =, period WITH &&) WHERE (active)`. Two invitees
   submitting the same slot at the same moment cannot both succeed. Back-to-back meetings
-  are allowed (ranges are half-open). A trigger keeps `period`/`active` in step with the
-  booking, so cancelling frees the slot and rescheduling moves it. Buffers are enforced by
-  the availability engine, not by the constraint.
-- **Safe agent retries.** `bookings (organization_id, idempotency_key)` is unique: an agent
-  that retries "create booking" after a timeout gets the original booking back instead of
-  a second meeting.
+  are allowed (ranges are half-open). `period` and `active` are never trusted from the
+  application: a `BEFORE INSERT OR UPDATE` trigger derives them from the booking (locking
+  it `FOR SHARE` against a concurrent reschedule), and a trigger on `bookings` re-derives
+  them when the time or status changes. Every status except `cancelled` occupies the
+  host. A multi-host booking is inserted in one transaction, so one taken host rolls back
+  the whole booking. Buffers are enforced by the availability engine, not the constraint.
+- **Rescheduling** cancels the booking and inserts a new one with `rescheduled_from_id`,
+  in one transaction (cancel first, so the new time may overlap the old one).
+- **Safe agent retries.** `(organization_id, api_key_id, idempotency_key)` is unique
+  (`NULLS NOT DISTINCT`, so anonymous callers share one scope and must use random keys).
+  A retry with the same key gets the original booking back; `idempotency_fingerprint`
+  (SHA-256 of the request) lets the API refuse a *different* request reusing a key.
+  Scoping by caller means two unrelated agents cannot receive each other's booking.
 - **Agent audit trail.** `bookings.source` and `bookings.api_key_id` record whether a
   person or an agent made the booking, and with which key.
 - **Invitee links without accounts.** Reschedule/cancel links carry a random secret; only
@@ -71,7 +79,17 @@ types in `packages/db/src/tables.ts` are generated from the migrated database.
 - **History survives edits.** Event types are soft-deleted; bookings keep their
   `event_type_id`. A rescheduled booking is a new row linked by `rescheduled_from_id`.
 - **Deleting an account** cascades to the user's own data (profile, schedules,
-  connections). Organization data is deleted with the organization.
+  connections), deletes their personal organization with its bookings and invitee data,
+  and deletes their API keys (Better Auth stores the owner as text, so a trigger does it).
+  Team organization data is deleted with the organization.
+- **Ownership is enforced where it is cheap to do so.** Composite foreign keys keep a
+  booking in its event type's organization and a host's schedule among that host's own
+  schedules. Membership of `event_types.owner_user_id` and destination calendars
+  belonging to the host are checked by the application.
+- **Triggers pin `search_path`**, because they also run on Better Auth's auth-only
+  connection (e.g. when it deletes a user).
+- **Dates** (`DATE` columns) are returned as `YYYY-MM-DD` strings, never as `Date`
+  objects shifted by the server's time zone.
 
 ## JSON columns
 
@@ -90,7 +108,9 @@ Validated by the application (zod), not by the database:
 |---|---|
 | Cloud billing | `subscriptions` (organization ↔ Stripe customer/subscription, plan, seats) |
 | Weeks 5–8 | `webhooks`, `webhook_deliveries`; Better Auth teams (sub-groups for round-robin pools) |
+| With Google/Microsoft sign-in | Already configured: Better Auth encrypts sign-in OAuth tokens (`encryptOAuthTokens`) |
 | After launch | Better Auth `two-factor`; OAuth 2.1 provider tables for claude.ai / ChatGPT connectors |
+| Group events (seats) | Move `manage_token_hash` and `responses` from bookings to attendees |
 | Year 2 (enterprise) | Better Auth `sso`; `audit_events` |
 
 Background jobs (reminders, calendar sync, webhook retries) use pg-boss, which manages its

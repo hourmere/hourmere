@@ -10,6 +10,10 @@ export type Database = DB
 
 export type Db = Kysely<Database>
 
+// node-postgres turns DATE into a Date at local midnight, which shifts the day in any time
+// zone west or east of UTC. Calendar dates stay 'YYYY-MM-DD' strings.
+pg.types.setTypeParser(pg.types.builtins.DATE, (v) => v)
+
 export function createPool(connectionString: string): pg.Pool {
   const pool = new pg.Pool({ connectionString })
   // Without a listener, an idle client dropped by the server (Postgres restart, failover)

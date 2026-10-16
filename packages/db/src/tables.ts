@@ -141,7 +141,7 @@ export interface BookingCalendarEvents {
 }
 
 export interface BookingHosts {
-  active: Generated<boolean>;
+  active: boolean;
   booking_id: string;
   period: string;
   user_id: string;
@@ -155,6 +155,7 @@ export interface Bookings {
   end_at: Timestamp;
   event_type_id: string | null;
   id: Generated<string>;
+  idempotency_fingerprint: Buffer | null;
   idempotency_key: string | null;
   location: Json | null;
   manage_token_hash: Buffer;
@@ -231,6 +232,11 @@ export interface EventTypes {
   updated_at: Generated<Timestamp>;
 }
 
+export interface PersonalOrganizations {
+  organization_id: string;
+  user_id: string;
+}
+
 export interface Profiles {
   created_at: Generated<Timestamp>;
   destination_calendar_id: string | null;
@@ -242,7 +248,7 @@ export interface Profiles {
 }
 
 export interface ScheduleOverrides {
-  date: Timestamp;
+  date: string;
   intervals: Json;
   schedule_id: string;
 }
@@ -276,6 +282,7 @@ export interface DB {
   calendars: Calendars;
   event_type_hosts: EventTypeHosts;
   event_types: EventTypes;
+  personal_organizations: PersonalOrganizations;
   profiles: Profiles;
   schedule_overrides: ScheduleOverrides;
   schedules: Schedules;

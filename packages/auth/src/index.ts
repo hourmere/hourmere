@@ -25,6 +25,8 @@ export function createAuth({ pool, baseURL, secret }: AuthConfig) {
     baseURL,
     secret,
     advanced: { database: { generateId: 'uuid' } },
+    // Sign-in providers' OAuth tokens are stored encrypted, not in plain text.
+    account: { encryptOAuthTokens: true },
     plugins: [organization(), apiKey()],
   })
 }
