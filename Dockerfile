@@ -6,9 +6,10 @@ FROM node:26-slim AS base
 WORKDIR /app
 
 # Copies the whole workspace so new apps/packages need no Dockerfile changes.
-# Optional packages are pruned too: some production dependencies (better-auth) declare
-# optional peers that are also dev tools (react, vite, vitest), which npm keeps on
-# --omit=dev alone. Nothing the server runs is optional.
+# Optional packages are pruned too: better-auth declares optional peers that are also
+# dev tools (react, react-dom, vitest, which brings in vite), and npm keeps them on
+# --omit=dev alone. So everything the server imports at run time must be a regular
+# dependency of some workspace, as pg is, although better-auth lists it as optional.
 FROM base AS build
 COPY . .
 RUN npm ci --ignore-scripts \
