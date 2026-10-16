@@ -4,6 +4,9 @@ name: hourmere-dev
 services:
   db:
     image: postgres:18-alpine
+    # The test suite creates a throwaway database per test file and runs files in parallel;
+    # a full run peaks near Postgres's default of 100 connections.
+    command: ["postgres", "-c", "max_connections=300"]
     environment:
       POSTGRES_USER: hourmere
       POSTGRES_PASSWORD: hourmere
