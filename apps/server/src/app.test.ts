@@ -62,6 +62,13 @@ describe('serving the built web app', () => {
     const res = await app.request('/acme/intro-call')
     expect(res.status).toBe(200)
     expect(await res.text()).toContain('<title>Hourmere</title>')
+    expect(res.headers.get('cache-control')).toBe('no-cache')
+  })
+
+  it('asks browsers to revalidate the app shell at the root too', async () => {
+    const res = await app.request('/')
+    expect(res.status).toBe(200)
+    expect(res.headers.get('cache-control')).toBe('no-cache')
   })
 
   it('serves hashed bundles with a long-lived cache header', async () => {

@@ -39,7 +39,9 @@ export async function runMigrations(pool: pg.Pool, dir = migrationsDir): Promise
     )
     for (const file of entries) {
       const sql = await readFile(join(dir, file), 'utf8')
-      const checksum = createHash('sha256').update(sql).digest('hex')
+      // Line endings are normalized so a CRLF checkout (Git for Windows) and the official
+      // image agree on the checksum of the same migration.
+      const checksum = createHash('sha256').update(sql.replaceAll('\r\n', '\n')).digest('hex')
       const recorded = done.get(file)
       if (recorded !== undefined) {
         if (recorded !== checksum) {

@@ -41,6 +41,8 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
+      - name: Generated table types match the migrations
+        run: npm run db:migrate && npm run db:types -- --verify
       - run: npm run build
 
   docker:
