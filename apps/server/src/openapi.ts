@@ -22,5 +22,13 @@ export type CallerMiddleware = ReturnType<typeof requireCaller>
 /**
  * A group of /api/v1 routes. The composition root (index.ts) creates each module with the
  * services it needs; createApp registers it and passes what every route shares.
+ *
+ * Rules for modules:
+ * - Only register routes (`app.openapi(createRoute(...), handler)`); never `app.use` or
+ *   `app.onError`, which would leak into routes registered after the module.
+ * - Authenticated routes set both `security: authenticated` (so they are documented) and
+ *   `middleware: caller` (which provides `c.var.principal`).
+ * - Declare inputs as zod schemas on the route; failures answer 400 `invalid_request`.
+ * - Call the service layer and let its DomainErrors propagate; createApp maps them.
  */
 export type RouteModule = (shared: { app: OpenAPIHono; caller: CallerMiddleware }) => void

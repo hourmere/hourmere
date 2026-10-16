@@ -1,9 +1,10 @@
 import { relative } from 'node:path'
 import { inspect } from 'node:util'
 import { serveStatic } from '@hono/node-server/serve-static'
-import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi'
+import { createRoute, type Hook, OpenAPIHono, z } from '@hono/zod-openapi'
 import { type CallerResolver, escapeControlCharacters } from '@hourmere/auth'
 import { DomainError, type DomainErrorKind } from '@hourmere/scheduling'
+import type { Env } from 'hono'
 import { HTTPException } from 'hono/http-exception'
 import { logger } from 'hono/logger'
 import { requireCaller } from './caller.ts'
@@ -78,6 +79,28 @@ const domainStatus = {
   conflict: 409,
 } as const satisfies Record<DomainErrorKind, number>
 
+// Codes for errors raised by the framework itself (e.g. malformed JSON), so every error
+// response has the documented `{ "error": code }` shape.
+const httpErrorCodes: Record<number, string> = {
+  400: 'invalid_request',
+  401: 'unauthorized',
+  403: 'forbidden',
+  404: 'not_found',
+  405: 'method_not_allowed',
+  413: 'payload_too_large',
+  415: 'unsupported_media_type',
+  429: 'rate_limited',
+}
+
+// Request validation failures (zod schemas on routes) answer like every other client error.
+const validationHook: Hook<unknown, Env, string, unknown> = (result, c) => {
+  if (result.success) return
+  const message = result.error.issues
+    .map((i) => (i.path.length ? `${i.path.join('.')}: ${i.message}` : i.message))
+    .join('; ')
+  return c.json({ error: 'invalid_request', message }, 400)
+}
+
 /** Logs requests without query strings: sign-in links and OAuth callbacks carry secrets there. */
 const requestLogger = logger((line, ...rest) => console.log(line.replace(/\?\S*/, ''), ...rest))
 
@@ -90,16 +113,21 @@ export function createApp({
   webDist,
   routes = [],
 }: AppDeps) {
-  const app = new OpenAPIHono()
+  const app = new OpenAPIHono({ defaultHook: validationHook })
   // Unexpected errors (including Better Auth's, which it rethrows) are logged on one line with
   // control characters escaped: error messages can carry request input, e.g. Postgres echoing
   // a malformed value, and must not be able to forge log lines.
   app.onError((err, c) => {
-    if (err instanceof HTTPException) return err.getResponse()
-    // Failures the caller can act on, thrown by the service layer.
-    if (err instanceof DomainError) {
-      const body =
-        err.message === err.code ? { error: err.code } : { error: err.code, message: err.message }
+    if (err instanceof HTTPException) {
+      // A prepared response (e.g. from middleware) is sent as is; otherwise use our shape.
+      if (err.res) return err.getResponse()
+      const error = httpErrorCodes[err.status] ?? 'error'
+      return c.json(err.message ? { error, message: err.message } : { error }, err.status)
+    }
+    // Failures the caller can act on, thrown by the service layer. An unknown kind (only
+    // possible by bypassing the type) is a bug and falls through to the 500 below.
+    if (err instanceof DomainError && Object.hasOwn(domainStatus, err.kind)) {
+      const body = err.detail ? { error: err.code, message: err.detail } : { error: err.code }
       return c.json(body, domainStatus[err.kind])
     }
     // c.req.path is percent-decoded, so it is escaped too.

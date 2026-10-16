@@ -30,18 +30,24 @@ Every error response has the same shape:
 { "error": "unauthorized", "message": "optional human-readable detail" }
 ```
 
-`error` is a stable, machine-readable lowercase code that clients may branch on; `message`
-is optional and may change. The HTTP status carries the category:
+`error` is a stable, machine-readable snake_case code that clients may branch on; `message`
+is optional and may change. The HTTP status carries the category and the code names the
+specific case, e.g. 404 `event_type_not_found`, 409 `slot_taken`. These codes are reserved
+for the generic cases in the table below: `invalid_request`, `unauthorized`, `forbidden`,
+`not_found` (unknown endpoint), `rate_limited`, `internal_error`. Codes are never renamed
+within `/api/v1`.
 
 | Status | Meaning |
 |---|---|
-| 400 | The request is malformed or fails validation |
+| 400 `invalid_request` | The request is malformed (e.g. invalid JSON) or fails schema validation; `message` names the offending fields. Service-level validation uses specific codes |
 | 401 `unauthorized` | No valid credentials: missing, unknown, expired or revoked session or API key. Sent with `WWW-Authenticate: Bearer` |
 | 403 `forbidden` | Valid credentials, but the caller may not do this (e.g. not a member of the organization, or a role that lacks the permission) |
 | 404 `not_found` | No such resource or endpoint, or one the caller cannot see |
 | 409 | Conflict with the current state (e.g. the slot was just booked) |
 | 429 `rate_limited` | Too many requests; `Retry-After` gives the seconds to wait when known |
 | 500 `internal_error` | An unexpected server error; details go to the server log only |
+
+`message` is written for people and is safe to show: it never contains internal error text.
 
 ### Where errors come from
 
@@ -59,7 +65,7 @@ for failures the caller can act on; the server maps the kind to a status and ans
 
 Anything else a service throws is a bug: 500 `internal_error`, logged on one escaped line.
 New route groups are `RouteModule`s (`apps/server/src/openapi.ts`) created in `index.ts` with
-their services and registered by `createApp`.
+their services and registered by `createApp`; `apps/server/src/app.test.ts` has a template.
 
 ## Authentication
 
