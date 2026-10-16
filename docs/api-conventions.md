@@ -95,15 +95,22 @@ session or an API key.
 
 ## Validation
 
-Input is checked in two layers, so REST and MCP behave identically:
+Input is checked in two layers:
 
-- **Shape** (the route's zod schema): JSON syntax, types, required fields, string formats and
-  lengths. Request objects are strict: an unknown field (often a misspelling) is refused, not
-  ignored. Failures are 400 `invalid_request`, with `message` naming the fields.
-- **Values and meaning** (the service, shared with the MCP server): whatever needs the
+- **Shape** (the route's zod schema): JSON syntax, types and required fields. Request objects
+  are strict: an unknown field (often a misspelling) is refused, not ignored. A route may also
+  pre-check simple formats and lengths. Failures are 400 `invalid_request`, with `message`
+  naming the fields.
+- **Values and meaning** (the service, shared with the MCP server): the service validates
+  every value it relies on, formats, lengths and ranges as well as anything that needs the
   database or domain rules, e.g. that a time zone exists, that answers fit the event type's
-  questions, or that a slot is still free. Failures use specific codes (400
-  `invalid_responses`, 409 `slot_taken`, …).
+  questions, or that a slot is still free. Failures use specific codes (400 `invalid_slug`,
+  `invalid_questions`, `invalid_responses`, 409 `slot_taken`, …). Services never rely on a
+  route having checked something.
+
+MCP tools reuse the routes' zod schemas, so the same input fails the same way over REST and
+MCP. The OpenAPI document still describes limits (`maxLength`, `pattern`, `minimum`, …) as
+metadata where only the service enforces them.
 
 Free text (names, emails, answers, reasons, question labels and options, schedule names, event
 type titles and descriptions, location addresses and links) must be well-formed Unicode
