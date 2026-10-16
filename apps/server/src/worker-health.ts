@@ -1,4 +1,5 @@
 import { Hono } from 'hono'
+import { securityHeaders } from './security-headers.ts'
 
 export interface WorkerHealthDeps {
   /** Resolves when the database answers; rejects otherwise. */
@@ -14,6 +15,8 @@ export interface WorkerHealthDeps {
  */
 export function createWorkerHealthApp({ checkDb, checkJobs }: WorkerHealthDeps) {
   const app = new Hono()
+  // The same headers as the web role's (no HSTS: nothing but health checks reaches a worker).
+  app.use(securityHeaders())
   app.use(async (c, next) => {
     await next()
     c.res.headers.set('Cache-Control', 'no-store')
