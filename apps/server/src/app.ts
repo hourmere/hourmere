@@ -126,6 +126,24 @@ export function hasUnsafeJsonText(value: unknown): boolean {
   return false
 }
 
+/**
+ * Whether `err` (or an error in its cause chain) is what a client's disconnect looks like to
+ * the code reading its request: Node's "aborted" (ECONNRESET), ECONNABORTED, an AbortError
+ * (e.g. a fetch given the request's signal), or a 4xx HTTPException, which is how a route's
+ * validator reports a body it could not read (and never a server error anyway).
+ */
+function isDisconnect(err: unknown): boolean {
+  let e: unknown = err
+  for (let depth = 0; depth < 5 && typeof e === 'object' && e !== null; depth++) {
+    if (e instanceof HTTPException && e.status < 500) return true
+    const { name, code, message } = e as { name?: unknown; code?: unknown; message?: unknown }
+    if (name === 'AbortError' || code === 'ECONNRESET' || code === 'ECONNABORTED') return true
+    if (message === 'aborted') return true
+    e = (e as { cause?: unknown }).cause
+  }
+  return false
+}
+
 /** An error's name, message and code, cut to 200 characters: enough to recognize it. */
 function summary(err: unknown): string {
   if (!(err instanceof Error)) return String(err).slice(0, 200)
@@ -217,13 +235,14 @@ export function createApp({
   // Unexpected errors (including Better Auth's, which it rethrows) are logged and answered
   // with an opaque 500; only failures the caller can act on get a specific code.
   app.onError((err, c) => {
-    // The client went away before it got an answer: it closed the connection, or the
-    // server's request timeout cut it off (Node has then answered it 408). Whatever failed
-    // after that, typically reading the rest of the body (Better Auth throws "aborted", a
-    // /api/v1 validator refuses the JSON), is no server error and nobody gets the answer:
-    // one WARN line naming the error, without a stack, and 499 (nginx's "client closed
-    // request") for the request log.
-    if (c.req.raw.signal.aborted) {
+    // The client went away before it got an answer (it closed the connection, or the
+    // server's request timeout cut it off and Node answered it 408), and the error is that
+    // disconnect: reading the rest of the body failed (Better Auth throws "aborted", a
+    // /api/v1 validator refuses the JSON). That is no server error and nobody gets the
+    // answer: one WARN line naming the error, without a stack, and 499 (nginx's "client
+    // closed request") for the request log. Any other error is logged as usual, even when
+    // the client has left meanwhile.
+    if (c.req.raw.signal.aborted && isDisconnect(err)) {
       logLine(c, 'WARN', `client closed the connection before the answer (${summary(err)})`)
       return new Response(null, { status: 499 })
     }

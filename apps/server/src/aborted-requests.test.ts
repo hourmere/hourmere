@@ -10,7 +10,10 @@ import { httpServerOptions } from './http-timeouts.ts'
 import { json, type RouteModule } from './openapi.ts'
 import { trickle } from './slow-client-testing.ts'
 
-/** An /api/v1 route that reads a JSON body, and one that fails on its own. */
+/**
+ * /api/v1 routes: one that reads a JSON body, one that wraps a failed read in its own error,
+ * and ones that fail on their own, at once or after the client may have left.
+ */
 const echo: RouteModule = ({ app }) => {
   app.openapi(
     createRoute({
@@ -21,12 +24,41 @@ const echo: RouteModule = ({ app }) => {
     }),
     (c) => c.json(c.req.valid('json'), 200),
   )
+  app.post('/api/v1/wrapped', async (c) => {
+    try {
+      await c.req.text()
+    } catch (err) {
+      throw new Error('could not read the request', { cause: err })
+    }
+    return c.text('read')
+  })
   app.get('/api/v1/bug', () => {
     throw new Error('unexpected')
+  })
+  app.get('/api/v1/slow-bug', async (c) => {
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    if (c.req.query('kind') === 'refused') {
+      throw Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:5432'), {
+        code: 'ECONNREFUSED',
+      })
+    }
+    // A bug: reading a property of undefined.
+    return c.text((undefined as unknown as { x: string }).x)
   })
 }
 
 const timeouts = { headers: 300, request: 600, keepAlive: 900 }
+
+/** Sends a GET and closes the connection before the answer. */
+function getAndLeave(port: number, path: string) {
+  return new Promise<void>((resolve) => {
+    const socket = connect(port, '127.0.0.1', () => {
+      socket.write(`GET ${path} HTTP/1.1\r\nHost: localhost\r\n\r\n`)
+      setTimeout(() => socket.destroy(), 50)
+    })
+    socket.on('close', () => resolve())
+  })
+}
 
 /** Sends the headers and part of the body, then closes the connection. */
 function sendHalfAndLeave(port: number, path: string) {
@@ -82,10 +114,10 @@ describe('a client that goes away mid-request', () => {
   })
 
   /** Waits until the request log has the answer to `path`; returns that line. */
-  const answered = (path: string) =>
+  const answered = (path: string, method = 'POST') =>
     vi.waitFor(
       () => {
-        const line = logged.log.find((l) => l.startsWith(`--> POST ${path} `))
+        const line = logged.log.find((l) => l.startsWith(`--> ${method} ${path} `))
         if (!line) throw new Error(`${path} not answered yet`)
         return line
       },
@@ -125,6 +157,31 @@ describe('a client that goes away mid-request', () => {
     expect(logged.error).toEqual([])
     expect(logged.warn).toHaveLength(2)
     for (const line of logged.warn) expect(line).toMatch(WARNING)
+  })
+
+  it('is one WARN line when a route wraps the failed read in an error of its own', async () => {
+    await sendHalfAndLeave(port, '/api/v1/wrapped')
+    expect(await answered('/api/v1/wrapped')).toMatch(/ 499 /)
+    expect(logged.error).toEqual([])
+    expect(logged.warn).toEqual([
+      expect.stringMatching(/WARN POST \/api\/v1\/wrapped: .*could not read the request/),
+    ])
+  })
+
+  it('keeps errors that are not the disconnect as errors with a stack, client gone or not', async () => {
+    // The client leaves after 50 ms; the route fails after 300 ms, for its own reasons.
+    for (const path of ['/api/v1/slow-bug', '/api/v1/slow-bug?kind=refused']) {
+      await getAndLeave(port, path)
+      expect(await answered(path.split('?')[0] as string, 'GET'), path).toMatch(/ 500 /)
+      logged.log = []
+    }
+    expect(logged.warn).toEqual([])
+    expect(logged.error).toEqual([
+      expect.stringMatching(/ ERROR GET \/api\/v1\/slow-bug: TypeError: .*\\n {4}at /),
+      expect.stringMatching(
+        / ERROR GET \/api\/v1\/slow-bug: Error: connect ECONNREFUSED .*\\n {4}at /,
+      ),
+    ])
   })
 
   it('still logs real failures of clients that stay as errors', async () => {
