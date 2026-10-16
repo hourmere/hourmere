@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { errorMessage } from './api/errors.ts'
 
 export type Loaded<T> =
@@ -39,4 +39,20 @@ export function usePageTitle(title: string) {
   useEffect(() => {
     document.title = `${title} · Hourmere`
   }, [title])
+}
+
+/**
+ * True while the calling component is mounted. Async work (a save, a delete) checks it
+ * before acting on its result: once the person has left the page, a late answer must not
+ * navigate away from where they are now, or touch what they are editing there.
+ */
+export function useMounted() {
+  const mounted = useRef(false)
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
+  }, [])
+  return mounted
 }

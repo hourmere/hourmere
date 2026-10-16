@@ -6,6 +6,7 @@ import {
   emptyAccount,
   fakeApi,
   json,
+  later,
   profile,
   type Routes,
   renderApp,
@@ -695,5 +696,123 @@ describe('the unsaved-changes guard', () => {
     await user.keyboard('{/Control}')
     expect(location()).toBe(`/app/event-types/${EVENT_TYPE_ID}`)
     expect(confirm).not.toHaveBeenCalled()
+  })
+})
+
+describe('answers that arrive after leaving or editing on', () => {
+  const disabled = (element: Element) => element.matches(':disabled')
+
+  it('does not leave the page the person went to when a create finishes late', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const create = later()
+    eventTypeServer([], { 'POST /api/v1/event-types': () => create.response })
+    await openNew()
+    await user.type(field('Title'), 'Intro call')
+    await user.click(screen.getByRole('button', { name: 'Create event type' }))
+    expect(screen.getByRole('button', { name: 'Saving…' })).toBeDefined()
+
+    // On to Settings (agreeing to leave), and editing there.
+    await user.click(screen.getByRole('link', { name: 'Settings' }))
+    await user.type(await screen.findByLabelText('Handle'), '-l')
+    await create.answer(json(201, eventType()))
+
+    expect(location()).toBe('/app/settings')
+    expect(field('Handle').value).toBe('ada-l')
+    expect(screen.queryByText(/Created “Intro call”/)).toBeNull()
+  })
+
+  it('does not leave the page the person went to when a delete finishes late', async () => {
+    const user = userEvent.setup()
+    const remove = later()
+    eventTypeServer([eventType()], {
+      [`DELETE /api/v1/event-types/${EVENT_TYPE_ID}`]: () => remove.response,
+    })
+    await openExisting()
+    await user.click(screen.getByRole('button', { name: 'Delete event type' }))
+    await user.click(
+      within(screen.getByRole('group', { name: /Delete “Intro call”/ })).getByRole('button', {
+        name: 'Delete event type',
+      }),
+    )
+    await user.click(screen.getByRole('link', { name: 'Settings' }))
+    await user.type(await screen.findByLabelText('Handle'), '-l')
+    await remove.answer(new Response(null, { status: 204 }))
+
+    expect(location()).toBe('/app/settings')
+    expect(field('Handle').value).toBe('ada-l')
+  })
+
+  it('locks the form while saving, so no edit is overwritten by the answer', async () => {
+    const user = userEvent.setup()
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const save = later()
+    const api = eventTypeServer([eventType()], {
+      [`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`]: () => save.response,
+    })
+    await openExisting()
+    await user.type(field('Title'), ' (new)')
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+
+    // Focus moves to the status, which says what is happening; the fields are locked.
+    const status = screen.getByText('Saving…', { selector: '[role="status"]' })
+    expect(document.activeElement).toBe(status)
+    expect(disabled(field('Title'))).toBe(true)
+    expect(disabled(screen.getByRole('button', { name: 'Add a question' }))).toBe(true)
+    await user.type(field('Title'), ' again')
+    await user.type(field(/Description/), 'Typed while saving')
+    expect(field('Title').value).toBe('Intro call (new)')
+    expect(field(/Description/).value).toBe('')
+
+    // The server stores the title normalized (trimmed); the form shows what was saved.
+    await save.answer(json(200, eventType({ title: 'Intro call (new)', description: null })))
+    expect(api.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`)).toHaveLength(1)
+    expect(screen.getByText('Saved.')).toBeDefined()
+    expect(disabled(field('Title'))).toBe(false)
+    expect(field('Title').value).toBe('Intro call (new)')
+    // Saved means nothing is left unsaved: leaving does not ask.
+    await user.click(screen.getByRole('link', { name: 'Back to event types' }))
+    expect(await screen.findByRole('heading', { name: 'Event types', level: 1 })).toBeDefined()
+    expect(confirm).not.toHaveBeenCalled()
+  })
+
+  it('unlocks the form with the edits kept when saving fails', async () => {
+    const user = userEvent.setup()
+    const save = later()
+    eventTypeServer([eventType()], {
+      [`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`]: () => save.response,
+    })
+    await openExisting()
+    await user.type(field('Title'), ' (new)')
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    await save.answer(json(500, { error: 'internal_error' }))
+    expect(screen.getByRole('alert').textContent).toContain('Could not save the event type.')
+    expect(disabled(field('Title'))).toBe(false)
+    expect(field('Title').value).toBe('Intro call (new)')
+    expect(screen.queryByText('Saving…', { selector: '[role="status"]' })).toBeNull()
+    expect(screen.getByText('Unsaved changes')).toBeDefined()
+  })
+
+  it('keeps asking after a sign-out that failed', async () => {
+    const user = userEvent.setup()
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    eventTypeServer([eventType()], {
+      'POST /api/auth/sign-out': () => json(500, { message: 'Database unavailable' }),
+    })
+    await openExisting()
+    await user.type(field('Title'), ' (new)')
+    await user.click(screen.getByRole('button', { name: 'Sign out' }))
+    expect((await screen.findByRole('alert')).textContent).toMatch(/Could not sign out/)
+    expect(confirm).toHaveBeenCalledTimes(1)
+
+    // Still here with the draft, so leaving still asks.
+    confirm.mockReturnValue(false)
+    await user.click(screen.getByRole('link', { name: 'Bookings' }))
+    expect(confirm).toHaveBeenCalledTimes(2)
+    expect(location()).toBe(`/app/event-types/${EVENT_TYPE_ID}`)
+    expect(field('Title').value).toBe('Intro call (new)')
+    const unload = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(unload)
+    expect(unload.defaultPrevented).toBe(true)
   })
 })

@@ -856,8 +856,21 @@ input[type="radio"] {
   display: grid;
 }
 
-.editor > .panel:first-of-type {
+/* Groups a form's fields so they can be locked together while it saves. */
+.form-fieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.form-fieldset > .panel:first-child {
   margin-top: 0;
+}
+
+.override-fields {
+  display: grid;
+  gap: var(--space-3);
 }
 
 .panel-danger {

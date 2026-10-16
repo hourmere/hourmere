@@ -5,7 +5,7 @@ import { loadProfile, type Profile } from '../api/resources.ts'
 import { ErrorSummary, Field, type FieldErrors } from '../components/forms.tsx'
 import { TimeZonePicker } from '../components/TimeZonePicker.tsx'
 import { browserLocale, browserTimeZone, isKnownTimeZone } from '../format.ts'
-import { useLoad, usePageTitle } from '../hooks.ts'
+import { useLoad, useMounted, usePageTitle } from '../hooks.ts'
 import { PROFILE } from '../limits.ts'
 import { type Me, useMe } from '../session.tsx'
 import { useUnsavedChanges } from '../unsaved-changes.tsx'
@@ -149,13 +149,13 @@ function ProfileForm({ profile, me }: { profile: Profile | null; me: Me }) {
   const [saving, setSaving] = useState(false)
   const [status, setStatus] = useState('')
   const statusRef = useRef<HTMLParagraphElement>(null)
+  const mounted = useMounted()
 
-  // A new profile is unsaved even with the suggested values: nothing exists yet.
+  // Before the first save the baseline is the suggestion: changing it is unsaved work too.
   const dirty =
-    saved !== null &&
-    (draft.handle !== baseline.handle ||
-      draft.timeZone !== baseline.timeZone ||
-      draft.locale !== baseline.locale)
+    draft.handle !== baseline.handle ||
+    draft.timeZone !== baseline.timeZone ||
+    draft.locale !== baseline.locale
   useUnsavedChanges(dirty)
 
   const set = (name: keyof ProfileDraft, value: string) => {
@@ -171,6 +171,9 @@ function ProfileForm({ profile, me }: { profile: Profile | null; me: Me }) {
     const problems = validateProfile(draft)
     setErrors(problems)
     if (Object.keys(problems).length > 0) return
+    // Locked until the answer comes, so it cannot overwrite later edits (see EventTypeForm).
+    setStatus('Saving…')
+    statusRef.current?.focus()
     setSaving(true)
     try {
       const result = await unwrap(
@@ -182,6 +185,7 @@ function ProfileForm({ profile, me }: { profile: Profile | null; me: Me }) {
           },
         }),
       )
+      if (!mounted.current) return
       const next = { handle: result.handle, timeZone: result.timeZone, locale: result.locale }
       setStatus(saved ? 'Saved.' : 'Profile created. Your booking links are ready.')
       setSaved(result)
@@ -189,6 +193,8 @@ function ProfileForm({ profile, me }: { profile: Profile | null; me: Me }) {
       setDraft(next)
       statusRef.current?.focus()
     } catch (err) {
+      if (!mounted.current) return
+      setStatus('')
       const fields = profileServerErrors(err)
       setErrors(fields ?? {})
       setFormError(fields ? null : `Could not save your profile. ${errorMessage(err)}`)
@@ -210,71 +216,76 @@ function ProfileForm({ profile, me }: { profile: Profile | null; me: Me }) {
         </p>
       )}
       <ErrorSummary errors={errors} labels={LABELS} message={formError} attempt={attempt} />
-      <Field
-        id="handle"
-        label="Handle"
-        error={errors.handle}
-        hint={
-          <>
-            Your booking links start with{' '}
-            <span className="mono preview">
-              {origin}/{handle || 'your-handle'}/
-            </span>
-            . Lowercase letters, digits and hyphens, up to {PROFILE.handleMaxLength}.
-            {changingHandle && (
-              <strong className="warning"> Links you have already shared will stop working.</strong>
-            )}
-          </>
-        }
-      >
-        {(props) => (
-          <input
-            {...props}
-            className="mono"
-            value={draft.handle}
-            autoComplete="off"
-            autoCapitalize="none"
-            spellCheck={false}
-            onChange={(e) => set('handle', e.target.value)}
-          />
-        )}
-      </Field>
-      <Field
-        id="timeZone"
-        label="Time zone"
-        error={errors.timeZone}
-        hint="Bookings are shown in this zone. Type to search, e.g. “Berlin”."
-      >
-        {(props) => (
-          <TimeZonePicker
-            value={draft.timeZone}
-            onChange={(v) => set('timeZone', v)}
-            control={props}
-          />
-        )}
-      </Field>
-      <Field
-        id="locale"
-        label="Language"
-        error={errors.locale}
-        hint={
-          <>
-            A language tag such as en, en-GB or pt-BR
-            {language && !errors.locale ? <>: {language}</> : ''}.
-          </>
-        }
-      >
-        {(props) => (
-          <input
-            {...props}
-            value={draft.locale}
-            autoComplete="off"
-            autoCapitalize="none"
-            spellCheck={false}
-            onChange={(e) => set('locale', e.target.value)}
-          />
-        )}
-      </Field>
+      <fieldset className="form-fieldset stack" disabled={saving} role="presentation">
+        <Field
+          id="handle"
+          label="Handle"
+          error={errors.handle}
+          hint={
+            <>
+              Your booking links start with{' '}
+              <span className="mono preview">
+                {origin}/{handle || 'your-handle'}/
+              </span>
+              . Lowercase letters, digits and hyphens, up to {PROFILE.handleMaxLength}.
+              {changingHandle && (
+                <strong className="warning">
+                  {' '}
+                  Links you have already shared will stop working.
+                </strong>
+              )}
+            </>
+          }
+        >
+          {(props) => (
+            <input
+              {...props}
+              className="mono"
+              value={draft.handle}
+              autoComplete="off"
+              autoCapitalize="none"
+              spellCheck={false}
+              onChange={(e) => set('handle', e.target.value)}
+            />
+          )}
+        </Field>
+        <Field
+          id="timeZone"
+          label="Time zone"
+          error={errors.timeZone}
+          hint="Bookings are shown in this zone. Type to search, e.g. “Berlin”."
+        >
+          {(props) => (
+            <TimeZonePicker
+              value={draft.timeZone}
+              onChange={(v) => set('timeZone', v)}
+              control={props}
+            />
+          )}
+        </Field>
+        <Field
+          id="locale"
+          label="Language"
+          error={errors.locale}
+          hint={
+            <>
+              A language tag such as en, en-GB or pt-BR
+              {language && !errors.locale ? <>: {language}</> : ''}.
+            </>
+          }
+        >
+          {(props) => (
+            <input
+              {...props}
+              value={draft.locale}
+              autoComplete="off"
+              autoCapitalize="none"
+              spellCheck={false}
+              onChange={(e) => set('locale', e.target.value)}
+            />
+          )}
+        </Field>
+      </fieldset>
       <div className="form-actions">
         <button type="submit" className="button button-primary" disabled={saving}>
           {saving ? 'Saving…' : saved ? 'Save profile' : 'Create profile'}

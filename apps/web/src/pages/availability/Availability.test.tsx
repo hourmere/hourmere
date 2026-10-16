@@ -1,8 +1,16 @@
 import { fireEvent, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { Schedule } from '../../api/resources.ts'
-import { fakeApi, json, profile, type Routes, renderApp, signedIn } from '../../test/fake-api.tsx'
+import {
+  fakeApi,
+  json,
+  later,
+  profile,
+  type Routes,
+  renderApp,
+  signedIn,
+} from '../../test/fake-api.tsx'
 import { OTHER_SCHEDULE_ID, SCHEDULE_ID, schedule } from '../../test/fixtures.ts'
 import { todayIn } from './weekly-hours.ts'
 
@@ -510,5 +518,88 @@ describe('date overrides', () => {
     renderApp('/app/availability/new')
     const section = await overridesSection()
     expect(section.textContent).toContain('Create the schedule first')
+  })
+})
+
+describe('answers that arrive after leaving or editing on', () => {
+  it('does not leave the page the person went to when a create finishes late', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const create = later()
+    scheduleServer([], { extra: { 'POST /api/v1/schedules': () => create.response } })
+    renderApp('/app/availability/new')
+    await user.click(await screen.findByRole('button', { name: 'Create schedule' }))
+    await user.click(screen.getByRole('link', { name: 'Settings' }))
+    await user.type(await screen.findByLabelText('Handle'), '-l')
+    await create.answer(json(201, schedule({ id: NEW_ID })))
+
+    expect(location()).toBe('/app/settings')
+    expect(input('Handle').value).toBe('ada-l')
+  })
+
+  it('does not leave the page the person went to when a delete finishes late', async () => {
+    const user = userEvent.setup()
+    const remove = later()
+    scheduleServer([schedule(), evenings], {
+      extra: { [`DELETE /api/v1/schedules/${OTHER_SCHEDULE_ID}`]: () => remove.response },
+    })
+    renderApp(`/app/availability/${OTHER_SCHEDULE_ID}`)
+    await user.click(await screen.findByRole('button', { name: 'Delete schedule' }))
+    await user.click(
+      within(screen.getByRole('group', { name: /Delete “Evenings”/ })).getByRole('button', {
+        name: 'Delete schedule',
+      }),
+    )
+    await user.click(screen.getByRole('link', { name: 'Settings' }))
+    await user.type(await screen.findByLabelText('Handle'), '-l')
+    await remove.answer(new Response(null, { status: 204 }))
+
+    expect(location()).toBe('/app/settings')
+    expect(input('Handle').value).toBe('ada-l')
+  })
+
+  it('locks the weekly hours while saving, so no edit is overwritten', async () => {
+    const user = userEvent.setup()
+    const save = later()
+    scheduleServer([schedule()], {
+      extra: { [`PATCH /api/v1/schedules/${SCHEDULE_ID}`]: () => save.response },
+    })
+    renderApp(`/app/availability/${SCHEDULE_ID}`)
+    await screen.findByRole('heading', { name: 'Edit “Working hours”', level: 1 })
+    await user.type(input('Name'), ' 2')
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    expect(document.activeElement?.textContent).toBe('Saving…')
+    expect(input('Name').matches(':disabled')).toBe(true)
+    expect(input('Monday, hours 1, from').matches(':disabled')).toBe(true)
+    await user.type(input('Name'), ' more')
+    expect(input('Name').value).toBe('Working hours 2')
+
+    await save.answer(json(200, schedule({ name: 'Working hours 2' })))
+    expect(screen.getByText('Saved.')).toBeDefined()
+    expect(input('Name').matches(':disabled')).toBe(false)
+    expect(input('Name').value).toBe('Working hours 2')
+  })
+
+  it('locks the override form while saving it', async () => {
+    const user = userEvent.setup()
+    const save = later()
+    scheduleServer([schedule()], {
+      extra: {
+        [`PUT /api/v1/schedules/${SCHEDULE_ID}/overrides/2030-12-24`]: () => save.response,
+      },
+    })
+    renderApp(`/app/availability/${SCHEDULE_ID}`)
+    const section = await screen.findByRole('region', { name: 'Date overrides' })
+    await within(section).findByText('No upcoming date overrides.')
+    fireEvent.change(within(section).getByLabelText('Date'), { target: { value: '2030-12-24' } })
+    const button = within(section).getByRole('button', { name: 'Save override' })
+    await user.click(button)
+    expect(within(section).getByLabelText('Date').matches(':disabled')).toBe(true)
+    expect(document.activeElement).toBe(button)
+    expect(button.textContent).toBe('Saving…')
+    // A second press does not send it again.
+    await user.click(button)
+    await save.answer(json(201, { date: '2030-12-24', intervals: [] }))
+    expect(within(section).getByLabelText('Date').matches(':disabled')).toBe(false)
   })
 })

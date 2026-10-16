@@ -44,10 +44,9 @@ export function UnsavedChangesProvider({ children }: { children: ReactNode }) {
 
   const confirmLeave = useCallback(() => {
     if (dirty.current.size === 0) return true
-    const leave = window.confirm(LEAVE_WITH_UNSAVED_CHANGES)
-    // Agreed: the page is going away, and what it had is discarded.
-    if (leave) dirty.current.clear()
-    return leave
+    // Registrations stay until their page unmounts: leaving can still fail (a sign-out the
+    // server refuses), and the page, still there, must keep asking.
+    return window.confirm(LEAVE_WITH_UNSAVED_CHANGES)
   }, [])
 
   const value = useMemo(() => ({ set, confirmLeave }), [set, confirmLeave])

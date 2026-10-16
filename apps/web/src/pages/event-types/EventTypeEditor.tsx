@@ -14,7 +14,7 @@ import { ConfirmAction } from '../../components/ConfirmAction.tsx'
 import { ErrorSummary, Field, type FieldErrors, parseWhole } from '../../components/forms.tsx'
 import { flash } from '../../flash.ts'
 import { formatMinutes } from '../../format.ts'
-import { useLoad, usePageTitle } from '../../hooks.ts'
+import { useLoad, useMounted, usePageTitle } from '../../hooks.ts'
 import { EVENT_TYPE, RULES } from '../../limits.ts'
 import { PATHS, publicPageUrl } from '../../paths.ts'
 import { type Me, useMe } from '../../session.tsx'
@@ -113,6 +113,7 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
   const [saving, setSaving] = useState(false)
   const [status, setStatus] = useState('')
   const statusRef = useRef<HTMLParagraphElement>(null)
+  const mounted = useMounted()
 
   const dirty = comparable(draft) !== comparable(baseline)
   useUnsavedChanges(dirty)
@@ -133,6 +134,10 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
     const problems = validateDraft(draft)
     setErrors(problems)
     if (Object.keys(problems).length > 0) return
+    // The fields are locked until the answer comes, so it cannot overwrite later edits.
+    // Focus moves off them first (a disabled field drops it) to the status, which says so.
+    setStatus('Saving…')
+    statusRef.current?.focus()
     setSaving(true)
     const body = toInput(draft)
     try {
@@ -140,6 +145,8 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
         const updated = await unwrap(
           api.PATCH('/api/v1/event-types/{id}', { params: { path: { id: saved.id } }, body }),
         )
+        // Left meanwhile: the answer is for a page that is gone.
+        if (!mounted.current) return
         const next = draftFromEventType(updated)
         setSaved(updated)
         setBaseline(next)
@@ -148,11 +155,15 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
         statusRef.current?.focus()
       } else {
         const created = await unwrap(api.POST('/api/v1/event-types', { body }))
+        // Left meanwhile: don't pull the person away from the page they are on now.
+        if (!mounted.current) return
         setBaseline(draft)
         navigate(PATHS.eventTypes, { state: flash(`Created “${created.title}”.`) })
         return
       }
     } catch (err) {
+      if (!mounted.current) return
+      setStatus('')
       const mapped = serverErrors(err, draft)
       setErrors(mapped.fields)
       setFormError(
@@ -168,6 +179,7 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
   async function remove() {
     if (!saved) return
     await unwrap(api.DELETE('/api/v1/event-types/{id}', { params: { path: { id: saved.id } } }))
+    if (!mounted.current) return
     setBaseline(draft)
     navigate(PATHS.eventTypes, { state: flash(`Deleted “${saved.title}”.`) })
   }
@@ -189,236 +201,238 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
           attempt={attempt}
         />
 
-        <section className="panel" aria-labelledby="basics-heading">
-          <h2 id="basics-heading">Basics</h2>
-          <div className="stack">
-            <Field id="title" label="Title" error={errors.title} hint="For example “Intro call”.">
-              {(props) => (
-                <input
-                  {...props}
-                  value={draft.title}
-                  autoComplete="off"
-                  onChange={(e) => {
-                    const value = e.target.value
-                    setDraft((d) => ({
-                      ...d,
-                      title: value,
-                      ...(!slugTouched && { slug: slugify(value) }),
-                    }))
-                    setStatus('')
-                  }}
-                />
-              )}
-            </Field>
-            <Field
-              id="slug"
-              label="Booking link"
-              error={errors.slug}
-              hint={
-                <>
-                  Lowercase letters, digits and hyphens.{' '}
-                  <span className="mono preview">{slugPreview}</span>
-                </>
-              }
-            >
-              {(props) => (
-                <input
-                  {...props}
-                  className="mono"
-                  value={draft.slug}
-                  autoComplete="off"
-                  autoCapitalize="none"
-                  spellCheck={false}
-                  onChange={(e) => {
-                    setSlugTouched(true)
-                    set('slug', e.target.value)
-                  }}
-                />
-              )}
-            </Field>
-            <Field
-              id="description"
-              label="Description"
-              optional
-              error={errors.description}
-              hint="Shown on the booking page. Line breaks are kept."
-            >
-              {(props) => (
-                <textarea
-                  {...props}
-                  rows={4}
-                  value={draft.description}
-                  onChange={(e) => set('description', e.target.value)}
-                />
-              )}
-            </Field>
-            <div className="field-grid">
-              <MinutesField
-                id="durationMinutes"
-                label="Duration"
-                value={draft.durationMinutes}
-                error={errors.durationMinutes}
-                onChange={(v) => set('durationMinutes', v)}
-                rule={RULES.durationMinutes}
-              />
-              <Field
-                id="position"
-                label="Position"
-                error={errors.position}
-                hint="Lower numbers come first on your booking page."
-              >
+        <fieldset className="form-fieldset" disabled={saving} role="presentation">
+          <section className="panel" aria-labelledby="basics-heading">
+            <h2 id="basics-heading">Basics</h2>
+            <div className="stack">
+              <Field id="title" label="Title" error={errors.title} hint="For example “Intro call”.">
                 {(props) => (
                   <input
                     {...props}
-                    inputMode="numeric"
-                    value={draft.position}
-                    onChange={(e) => set('position', e.target.value)}
+                    value={draft.title}
+                    autoComplete="off"
+                    onChange={(e) => {
+                      const value = e.target.value
+                      setDraft((d) => ({
+                        ...d,
+                        title: value,
+                        ...(!slugTouched && { slug: slugify(value) }),
+                      }))
+                      setStatus('')
+                    }}
                   />
                 )}
               </Field>
-            </div>
-            <label className="checkbox">
-              <input
-                type="checkbox"
-                checked={draft.isActive}
-                onChange={(e) => set('isActive', e.target.checked)}
-              />
-              Active: invitees can book it
-            </label>
-          </div>
-        </section>
-
-        <section className="panel" aria-labelledby="location-heading">
-          <h2 id="location-heading">Location</h2>
-          <LocationFields draft={draft} errors={errors} set={set} />
-        </section>
-
-        <section className="panel" aria-labelledby="questions-heading">
-          <h2 id="questions-heading">Booking form</h2>
-          <QuestionsEditor
-            questions={draft.questions}
-            onChange={(questions) => set('questions', questions)}
-            errors={errors}
-          />
-        </section>
-
-        <section className="panel" aria-labelledby="rules-heading">
-          <h2 id="rules-heading">When people can book</h2>
-          <div className="stack">
-            <Field
-              id="scheduleId"
-              label="Schedule"
-              error={errors.scheduleId}
-              hint={
-                schedules.length === 0 ? (
+              <Field
+                id="slug"
+                label="Booking link"
+                error={errors.slug}
+                hint={
                   <>
-                    You have no schedule yet, so no times are offered.{' '}
-                    <Link to={PATHS.newSchedule}>Set your availability</Link>.
+                    Lowercase letters, digits and hyphens.{' '}
+                    <span className="mono preview">{slugPreview}</span>
                   </>
-                ) : (
-                  <>
-                    The weekly hours times are offered in.{' '}
-                    <Link to={PATHS.availability}>Manage schedules</Link>
-                  </>
-                )
-              }
-            >
-              {(props) => (
-                <select
-                  {...props}
-                  value={draft.scheduleId}
-                  onChange={(e) => set('scheduleId', e.target.value)}
-                >
-                  <option value="">
-                    Your default schedule
-                    {defaultName(schedules) ? ` (${defaultName(schedules)})` : ''}
-                  </option>
-                  {schedules.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                  {draft.scheduleId && !schedules.some((s) => s.id === draft.scheduleId) && (
-                    <option value={draft.scheduleId}>A schedule that no longer exists</option>
-                  )}
-                </select>
-              )}
-            </Field>
-            <div className="field-grid">
-              <MinutesField
-                id="slotStepMinutes"
-                label="Start times every"
-                optional
-                value={draft.slotStepMinutes}
-                error={errors.slotStepMinutes}
-                onChange={(v) => set('slotStepMinutes', v)}
-                rule={RULES.slotStepMinutes}
-                empty={
-                  duration ? `every ${formatMinutes(duration)} (the duration)` : 'the duration'
                 }
-              />
-              <MinutesField
-                id="minimumNoticeMinutes"
-                label="Minimum notice"
-                value={draft.minimumNoticeMinutes}
-                error={errors.minimumNoticeMinutes}
-                onChange={(v) => set('minimumNoticeMinutes', v)}
-                rule={RULES.minimumNoticeMinutes}
-                extra="How far ahead a meeting must be booked."
-              />
-              <Field
-                id="bookingWindowDays"
-                label="Booking window"
-                optional
-                error={errors.bookingWindowDays}
-                hint={`Days ahead people can book, ${RULES.bookingWindowDays.min}–${RULES.bookingWindowDays.max}. Empty: no limit.`}
               >
                 {(props) => (
                   <input
                     {...props}
-                    inputMode="numeric"
-                    value={draft.bookingWindowDays}
-                    onChange={(e) => set('bookingWindowDays', e.target.value)}
+                    className="mono"
+                    value={draft.slug}
+                    autoComplete="off"
+                    autoCapitalize="none"
+                    spellCheck={false}
+                    onChange={(e) => {
+                      setSlugTouched(true)
+                      set('slug', e.target.value)
+                    }}
                   />
                 )}
               </Field>
               <Field
-                id="maxBookingsPerDay"
-                label="Daily limit"
+                id="description"
+                label="Description"
                 optional
-                error={errors.maxBookingsPerDay}
-                hint={`Bookings per day, ${RULES.maxBookingsPerDay.min}–${RULES.maxBookingsPerDay.max}. Empty: no limit.`}
+                error={errors.description}
+                hint="Shown on the booking page. Line breaks are kept."
               >
                 {(props) => (
-                  <input
+                  <textarea
                     {...props}
-                    inputMode="numeric"
-                    value={draft.maxBookingsPerDay}
-                    onChange={(e) => set('maxBookingsPerDay', e.target.value)}
+                    rows={4}
+                    value={draft.description}
+                    onChange={(e) => set('description', e.target.value)}
                   />
                 )}
               </Field>
-              <MinutesField
-                id="bufferBeforeMinutes"
-                label="Buffer before"
-                value={draft.bufferBeforeMinutes}
-                error={errors.bufferBeforeMinutes}
-                onChange={(v) => set('bufferBeforeMinutes', v)}
-                rule={RULES.bufferBeforeMinutes}
-                extra="Free time kept before each meeting."
-              />
-              <MinutesField
-                id="bufferAfterMinutes"
-                label="Buffer after"
-                value={draft.bufferAfterMinutes}
-                error={errors.bufferAfterMinutes}
-                onChange={(v) => set('bufferAfterMinutes', v)}
-                rule={RULES.bufferAfterMinutes}
-                extra="Free time kept after each meeting."
-              />
+              <div className="field-grid">
+                <MinutesField
+                  id="durationMinutes"
+                  label="Duration"
+                  value={draft.durationMinutes}
+                  error={errors.durationMinutes}
+                  onChange={(v) => set('durationMinutes', v)}
+                  rule={RULES.durationMinutes}
+                />
+                <Field
+                  id="position"
+                  label="Position"
+                  error={errors.position}
+                  hint="Lower numbers come first on your booking page."
+                >
+                  {(props) => (
+                    <input
+                      {...props}
+                      inputMode="numeric"
+                      value={draft.position}
+                      onChange={(e) => set('position', e.target.value)}
+                    />
+                  )}
+                </Field>
+              </div>
+              <label className="checkbox">
+                <input
+                  type="checkbox"
+                  checked={draft.isActive}
+                  onChange={(e) => set('isActive', e.target.checked)}
+                />
+                Active: invitees can book it
+              </label>
             </div>
-          </div>
-        </section>
+          </section>
+
+          <section className="panel" aria-labelledby="location-heading">
+            <h2 id="location-heading">Location</h2>
+            <LocationFields draft={draft} errors={errors} set={set} />
+          </section>
+
+          <section className="panel" aria-labelledby="questions-heading">
+            <h2 id="questions-heading">Booking form</h2>
+            <QuestionsEditor
+              questions={draft.questions}
+              onChange={(questions) => set('questions', questions)}
+              errors={errors}
+            />
+          </section>
+
+          <section className="panel" aria-labelledby="rules-heading">
+            <h2 id="rules-heading">When people can book</h2>
+            <div className="stack">
+              <Field
+                id="scheduleId"
+                label="Schedule"
+                error={errors.scheduleId}
+                hint={
+                  schedules.length === 0 ? (
+                    <>
+                      You have no schedule yet, so no times are offered.{' '}
+                      <Link to={PATHS.newSchedule}>Set your availability</Link>.
+                    </>
+                  ) : (
+                    <>
+                      The weekly hours times are offered in.{' '}
+                      <Link to={PATHS.availability}>Manage schedules</Link>
+                    </>
+                  )
+                }
+              >
+                {(props) => (
+                  <select
+                    {...props}
+                    value={draft.scheduleId}
+                    onChange={(e) => set('scheduleId', e.target.value)}
+                  >
+                    <option value="">
+                      Your default schedule
+                      {defaultName(schedules) ? ` (${defaultName(schedules)})` : ''}
+                    </option>
+                    {schedules.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                    {draft.scheduleId && !schedules.some((s) => s.id === draft.scheduleId) && (
+                      <option value={draft.scheduleId}>A schedule that no longer exists</option>
+                    )}
+                  </select>
+                )}
+              </Field>
+              <div className="field-grid">
+                <MinutesField
+                  id="slotStepMinutes"
+                  label="Start times every"
+                  optional
+                  value={draft.slotStepMinutes}
+                  error={errors.slotStepMinutes}
+                  onChange={(v) => set('slotStepMinutes', v)}
+                  rule={RULES.slotStepMinutes}
+                  empty={
+                    duration ? `every ${formatMinutes(duration)} (the duration)` : 'the duration'
+                  }
+                />
+                <MinutesField
+                  id="minimumNoticeMinutes"
+                  label="Minimum notice"
+                  value={draft.minimumNoticeMinutes}
+                  error={errors.minimumNoticeMinutes}
+                  onChange={(v) => set('minimumNoticeMinutes', v)}
+                  rule={RULES.minimumNoticeMinutes}
+                  extra="How far ahead a meeting must be booked."
+                />
+                <Field
+                  id="bookingWindowDays"
+                  label="Booking window"
+                  optional
+                  error={errors.bookingWindowDays}
+                  hint={`Days ahead people can book, ${RULES.bookingWindowDays.min}–${RULES.bookingWindowDays.max}. Empty: no limit.`}
+                >
+                  {(props) => (
+                    <input
+                      {...props}
+                      inputMode="numeric"
+                      value={draft.bookingWindowDays}
+                      onChange={(e) => set('bookingWindowDays', e.target.value)}
+                    />
+                  )}
+                </Field>
+                <Field
+                  id="maxBookingsPerDay"
+                  label="Daily limit"
+                  optional
+                  error={errors.maxBookingsPerDay}
+                  hint={`Bookings per day, ${RULES.maxBookingsPerDay.min}–${RULES.maxBookingsPerDay.max}. Empty: no limit.`}
+                >
+                  {(props) => (
+                    <input
+                      {...props}
+                      inputMode="numeric"
+                      value={draft.maxBookingsPerDay}
+                      onChange={(e) => set('maxBookingsPerDay', e.target.value)}
+                    />
+                  )}
+                </Field>
+                <MinutesField
+                  id="bufferBeforeMinutes"
+                  label="Buffer before"
+                  value={draft.bufferBeforeMinutes}
+                  error={errors.bufferBeforeMinutes}
+                  onChange={(v) => set('bufferBeforeMinutes', v)}
+                  rule={RULES.bufferBeforeMinutes}
+                  extra="Free time kept before each meeting."
+                />
+                <MinutesField
+                  id="bufferAfterMinutes"
+                  label="Buffer after"
+                  value={draft.bufferAfterMinutes}
+                  error={errors.bufferAfterMinutes}
+                  onChange={(v) => set('bufferAfterMinutes', v)}
+                  rule={RULES.bufferAfterMinutes}
+                  extra="Free time kept after each meeting."
+                />
+              </div>
+            </div>
+          </section>
+        </fieldset>
 
         <div className="form-actions">
           <button type="submit" className="button button-primary" disabled={saving}>

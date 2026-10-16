@@ -8,7 +8,7 @@ import { ErrorSummary, Field, type FieldErrors } from '../../components/forms.ts
 import { TimeZonePicker } from '../../components/TimeZonePicker.tsx'
 import { flash, useFlash } from '../../flash.ts'
 import { browserTimeZone } from '../../format.ts'
-import { useLoad, usePageTitle } from '../../hooks.ts'
+import { useLoad, useMounted, usePageTitle } from '../../hooks.ts'
 import { PATHS, schedulePath } from '../../paths.ts'
 import { useUnsavedChanges } from '../../unsaved-changes.tsx'
 import { MissingRecord } from '../NotFound.tsx'
@@ -115,6 +115,7 @@ function ScheduleForm({ schedule, schedules, defaultTimeZone }: Loaded) {
   const [saving, setSaving] = useState(false)
   const [status, setStatus] = useState(message ?? '')
   const statusRef = useRef<HTMLParagraphElement>(null)
+  const mounted = useMounted()
 
   const dirty = comparable(draft) !== comparable(baseline) || makeDefault
   useUnsavedChanges(dirty)
@@ -139,6 +140,9 @@ function ScheduleForm({ schedule, schedules, defaultTimeZone }: Loaded) {
     const problems = validateSchedule(draft)
     setErrors(problems)
     if (Object.keys(problems).length > 0) return
+    // Locked until the answer comes, so it cannot overwrite later edits (see EventTypeForm).
+    setStatus('Saving…')
+    statusRef.current?.focus()
     setSaving(true)
     const body = toScheduleBody(draft)
     try {
@@ -146,6 +150,7 @@ function ScheduleForm({ schedule, schedules, defaultTimeZone }: Loaded) {
         const updated = await unwrap(
           api.PATCH('/api/v1/schedules/{id}', { params: { path: { id: saved.id } }, body }),
         )
+        if (!mounted.current) return
         const next = draftFromSchedule(updated)
         setSaved(updated)
         setBaseline(next)
@@ -158,6 +163,8 @@ function ScheduleForm({ schedule, schedules, defaultTimeZone }: Loaded) {
             body: { ...body, ...(makeDefault && { isDefault: true }) },
           }),
         )
+        // Left meanwhile: don't pull the person away from the page they are on now.
+        if (!mounted.current) return
         setBaseline(draft)
         setMakeDefault(false)
         // On to the new schedule's page, where date overrides can be added.
@@ -168,6 +175,8 @@ function ScheduleForm({ schedule, schedules, defaultTimeZone }: Loaded) {
         return
       }
     } catch (err) {
+      if (!mounted.current) return
+      setStatus('')
       const mapped = scheduleServerErrors(err)
       setErrors(mapped.fields)
       setFormError(
@@ -183,6 +192,7 @@ function ScheduleForm({ schedule, schedules, defaultTimeZone }: Loaded) {
   async function remove() {
     if (!saved) return
     await unwrap(api.DELETE('/api/v1/schedules/{id}', { params: { path: { id: saved.id } } }))
+    if (!mounted.current) return
     setBaseline(draft)
     navigate(PATHS.availability, { state: flash(`Deleted “${saved.name}”.`) })
   }
@@ -210,98 +220,100 @@ function ScheduleForm({ schedule, schedules, defaultTimeZone }: Loaded) {
           message={formError}
           attempt={attempt}
         />
-        <section className="panel" aria-labelledby="schedule-heading">
-          <h2 id="schedule-heading">Name and time zone</h2>
-          <div className="field-grid">
-            <Field
-              id="name"
-              label="Name"
-              error={errors.name}
-              hint="For you only, e.g. “Working hours”."
-            >
-              {(props) => (
+        <fieldset className="form-fieldset" disabled={saving} role="presentation">
+          <section className="panel" aria-labelledby="schedule-heading">
+            <h2 id="schedule-heading">Name and time zone</h2>
+            <div className="field-grid">
+              <Field
+                id="name"
+                label="Name"
+                error={errors.name}
+                hint="For you only, e.g. “Working hours”."
+              >
+                {(props) => (
+                  <input
+                    {...props}
+                    value={draft.name}
+                    autoComplete="off"
+                    onChange={(e) => set('name', e.target.value)}
+                  />
+                )}
+              </Field>
+              <Field
+                id="timeZone"
+                label="Time zone"
+                error={errors.timeZone}
+                hint="The hours below are in this zone. Type to search, e.g. “Berlin”."
+              >
+                {(props) => (
+                  <TimeZonePicker
+                    value={draft.timeZone}
+                    onChange={(v) => set('timeZone', v)}
+                    control={props}
+                  />
+                )}
+              </Field>
+            </div>
+            {!saved && !isFirst && (
+              <label className="checkbox">
                 <input
-                  {...props}
-                  value={draft.name}
-                  autoComplete="off"
-                  onChange={(e) => set('name', e.target.value)}
+                  type="checkbox"
+                  checked={makeDefault}
+                  onChange={(e) => setMakeDefault(e.target.checked)}
                 />
-              )}
-            </Field>
-            <Field
-              id="timeZone"
-              label="Time zone"
-              error={errors.timeZone}
-              hint="The hours below are in this zone. Type to search, e.g. “Berlin”."
-            >
-              {(props) => (
-                <TimeZonePicker
-                  value={draft.timeZone}
-                  onChange={(v) => set('timeZone', v)}
-                  control={props}
-                />
-              )}
-            </Field>
-          </div>
-          {!saved && !isFirst && (
-            <label className="checkbox">
-              <input
-                type="checkbox"
-                checked={makeDefault}
-                onChange={(e) => setMakeDefault(e.target.checked)}
-              />
-              Make this my default schedule
-            </label>
-          )}
-          {!saved && isFirst && (
-            <p className="hint">Your first schedule is your default schedule.</p>
-          )}
-        </section>
+                Make this my default schedule
+              </label>
+            )}
+            {!saved && isFirst && (
+              <p className="hint">Your first schedule is your default schedule.</p>
+            )}
+          </section>
 
-        <section className="panel" aria-labelledby="hours-heading">
-          <h2 id="hours-heading">Weekly hours</h2>
-          <p className="hint">
-            An end time of 00:00 (12:00 AM) means midnight at the end of the day.
-          </p>
-          <ul className="week">
-            {WEEKDAYS.map(({ day, label }) => {
-              const d = draft.days[day]
-              return (
-                <li key={day} className="weekday" id={dayField(day)} tabIndex={-1}>
-                  <label className="checkbox weekday-toggle">
-                    <input
-                      type="checkbox"
-                      checked={d.available}
-                      onChange={(e) => {
-                        const available = e.target.checked
-                        setDay(day, {
-                          available,
-                          // Turning a day on starts with 9 to 5 if it had no hours.
-                          ...(available &&
-                            d.intervals.length === 0 && {
-                              intervals: [intervalDraft()],
-                            }),
-                        })
-                      }}
-                    />
-                    {label}
-                  </label>
-                  {d.available ? (
-                    <IntervalsEditor
-                      prefix={dayField(day)}
-                      label={label}
-                      intervals={d.intervals}
-                      onChange={(intervals) => setDay(day, { intervals })}
-                      errors={errors}
-                    />
-                  ) : (
-                    <p className="muted weekday-off">Unavailable</p>
-                  )}
-                </li>
-              )
-            })}
-          </ul>
-        </section>
+          <section className="panel" aria-labelledby="hours-heading">
+            <h2 id="hours-heading">Weekly hours</h2>
+            <p className="hint">
+              An end time of 00:00 (12:00 AM) means midnight at the end of the day.
+            </p>
+            <ul className="week">
+              {WEEKDAYS.map(({ day, label }) => {
+                const d = draft.days[day]
+                return (
+                  <li key={day} className="weekday" id={dayField(day)} tabIndex={-1}>
+                    <label className="checkbox weekday-toggle">
+                      <input
+                        type="checkbox"
+                        checked={d.available}
+                        onChange={(e) => {
+                          const available = e.target.checked
+                          setDay(day, {
+                            available,
+                            // Turning a day on starts with 9 to 5 if it had no hours.
+                            ...(available &&
+                              d.intervals.length === 0 && {
+                                intervals: [intervalDraft()],
+                              }),
+                          })
+                        }}
+                      />
+                      {label}
+                    </label>
+                    {d.available ? (
+                      <IntervalsEditor
+                        prefix={dayField(day)}
+                        label={label}
+                        intervals={d.intervals}
+                        onChange={(intervals) => setDay(day, { intervals })}
+                        errors={errors}
+                      />
+                    ) : (
+                      <p className="muted weekday-off">Unavailable</p>
+                    )}
+                  </li>
+                )
+              })}
+            </ul>
+          </section>
+        </fieldset>
 
         <div className="form-actions">
           <button type="submit" className="button button-primary" disabled={saving}>

@@ -1,14 +1,18 @@
 import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { Schemas } from '../api/client.ts'
-import { fakeApi, json, PROFILE, profile, renderApp, signedIn } from '../test/fake-api.tsx'
+import { fakeApi, json, later, PROFILE, profile, renderApp, signedIn } from '../test/fake-api.tsx'
+import { LEAVE_WITH_UNSAVED_CHANGES } from '../unsaved-changes.tsx'
 import { suggestHandle } from './Settings.tsx'
 
 const input = (name: string) => screen.getByLabelText<HTMLInputElement>(name)
 const zone = () => screen.getByRole<HTMLInputElement>('combobox', { name: 'Time zone' })
 
-function profileServer(current: Schemas['Profile'] | null, put = defaultPut) {
+function profileServer(
+  current: Schemas['Profile'] | null,
+  put: (call: { body: unknown }) => Response | Promise<Response> = defaultPut,
+) {
   return fakeApi({ ...signedIn, ...profile(current), 'PUT /api/v1/profile': put })
 }
 
@@ -138,6 +142,77 @@ describe('the profile settings', () => {
     const account = await screen.findByRole('region', { name: 'Account' })
     expect(account.textContent).toContain('ada@example.com')
     expect(account.textContent).toContain('Ada (personal)')
+  })
+})
+
+describe('unsaved profile changes', () => {
+  const leaving = () => {
+    const event = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(event)
+    return event.defaultPrevented
+  }
+
+  it('are protected before the first save', async () => {
+    const user = userEvent.setup()
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const api = fakeApi({
+      ...signedIn,
+      ...profile(null),
+      'GET /api/v1/bookings': () => json(200, { data: [], nextCursor: null }),
+      'POST /api/auth/sign-out': () => json(200, { success: true }),
+    })
+    renderApp('/app/settings')
+    await screen.findByText(/Choose a handle to get booking links/)
+    // The suggestions alone are nothing to lose.
+    expect(leaving()).toBe(false)
+    await user.click(screen.getByRole('link', { name: 'Bookings' }))
+    await screen.findByText('No upcoming bookings.')
+    expect(confirm).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('link', { name: 'Settings' }))
+
+    await user.clear(await screen.findByLabelText('Handle'))
+    await user.type(input('Handle'), 'ada-lovelace')
+    expect(screen.getByText('Unsaved changes')).toBeDefined()
+    expect(leaving()).toBe(true)
+    await user.click(screen.getByRole('link', { name: 'Bookings' }))
+    expect(confirm).toHaveBeenCalledWith(LEAVE_WITH_UNSAVED_CHANGES)
+    await user.click(screen.getByRole('button', { name: 'Sign out' }))
+    expect(confirm).toHaveBeenCalledTimes(2)
+    expect(api.to('POST /api/auth/sign-out')).toHaveLength(0)
+    expect(input('Handle').value).toBe('ada-lovelace')
+  })
+
+  it('are still protected after a failed create', async () => {
+    const user = userEvent.setup()
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    profileServer(null, () => json(500, { error: 'internal_error' }))
+    renderApp('/app/settings')
+    await user.clear(await screen.findByLabelText('Handle'))
+    await user.type(input('Handle'), 'ada-lovelace')
+    await user.click(screen.getByRole('button', { name: 'Create profile' }))
+    expect((await screen.findByRole('alert')).textContent).toContain('Could not save your profile.')
+    expect(leaving()).toBe(true)
+    await user.click(screen.getByRole('link', { name: 'Bookings' }))
+    expect(confirm).toHaveBeenCalledTimes(1)
+    expect(screen.getByTestId('location').textContent).toBe('/app/settings')
+  })
+
+  it('are locked while saving, so none is overwritten', async () => {
+    const user = userEvent.setup()
+    const save = later()
+    profileServer(PROFILE, () => save.response)
+    renderApp('/app/settings')
+    await screen.findByDisplayValue('ada')
+    await user.type(input('Handle'), '-l')
+    await user.click(screen.getByRole('button', { name: 'Save profile' }))
+    expect(document.activeElement?.textContent).toBe('Saving…')
+    expect(input('Handle').matches(':disabled')).toBe(true)
+    await user.type(input('Handle'), 'x')
+    expect(input('Handle').value).toBe('ada-l')
+    await save.answer(json(200, { ...PROFILE, handle: 'ada-l' }))
+    expect(screen.getByText('Saved.')).toBeDefined()
+    expect(input('Handle').matches(':disabled')).toBe(false)
+    expect(screen.queryByText('Unsaved changes')).toBeNull()
   })
 })
 

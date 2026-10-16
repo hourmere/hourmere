@@ -184,6 +184,7 @@ function AddOverride({
   const [formError, setFormError] = useState<string | null>(null)
   const [attempt, setAttempt] = useState(0)
   const [saving, setSaving] = useState(false)
+  const submitButton = useRef<HTMLButtonElement>(null)
   useUnsavedChanges(date !== '')
 
   const replaces = existing.some((o) => o.date === date)
@@ -202,9 +203,13 @@ function AddOverride({
     e.preventDefault()
     setAttempt((n) => n + 1)
     setFormError(null)
+    if (saving) return
     const problems = validate()
     setErrors(problems)
     if (Object.keys(problems).length > 0) return
+    // The fields are locked while saving (the form resets after), so focus waits on the
+    // button rather than being dropped by a disabled field.
+    submitButton.current?.focus()
     setSaving(true)
     try {
       const { data, error, response } = await api.PUT('/api/v1/schedules/{id}/overrides/{date}', {
@@ -244,62 +249,69 @@ function AddOverride({
     <form className="override-form" onSubmit={submit} noValidate aria-labelledby="add-override">
       <h3 id="add-override">Add a date override</h3>
       <ErrorSummary errors={errors} labels={labels} message={formError} attempt={attempt} />
-      <Field
-        id="override-date"
-        label="Date"
-        error={errors['override-date']}
-        hint={replaces ? 'This date has an override already; saving replaces it.' : undefined}
-        className="date-field"
-      >
-        {(props) => (
-          <input
-            {...props}
-            type="date"
-            min={today}
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-          />
+      <fieldset className="form-fieldset override-fields" disabled={saving} role="presentation">
+        <Field
+          id="override-date"
+          label="Date"
+          error={errors['override-date']}
+          hint={replaces ? 'This date has an override already; saving replaces it.' : undefined}
+          className="date-field"
+        >
+          {(props) => (
+            <input
+              {...props}
+              type="date"
+              min={today}
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+            />
+          )}
+        </Field>
+        <fieldset className="choice">
+          <legend>Hours on that date</legend>
+          <label className="checkbox">
+            <input
+              type="radio"
+              name="override-mode"
+              value="unavailable"
+              checked={mode === 'unavailable'}
+              onChange={() => setMode('unavailable')}
+            />
+            Unavailable all day
+          </label>
+          <label className="checkbox">
+            <input
+              type="radio"
+              name="override-mode"
+              value="hours"
+              checked={mode === 'hours'}
+              onChange={() => setMode('hours')}
+            />
+            Other hours
+          </label>
+        </fieldset>
+        {mode === 'hours' && (
+          <div id={PREFIX} tabIndex={-1}>
+            <IntervalsEditor
+              prefix={PREFIX}
+              label="That date"
+              intervals={intervals}
+              onChange={setIntervals}
+              errors={errors}
+            />
+          </div>
         )}
-      </Field>
-      <fieldset className="choice">
-        <legend>Hours on that date</legend>
-        <label className="checkbox">
-          <input
-            type="radio"
-            name="override-mode"
-            value="unavailable"
-            checked={mode === 'unavailable'}
-            onChange={() => setMode('unavailable')}
-          />
-          Unavailable all day
-        </label>
-        <label className="checkbox">
-          <input
-            type="radio"
-            name="override-mode"
-            value="hours"
-            checked={mode === 'hours'}
-            onChange={() => setMode('hours')}
-          />
-          Other hours
-        </label>
+        {mode === 'unavailable' && errors[PREFIX] && (
+          <FieldError id={`${PREFIX}-error`}>{errors[PREFIX]}</FieldError>
+        )}
       </fieldset>
-      {mode === 'hours' && (
-        <div id={PREFIX} tabIndex={-1}>
-          <IntervalsEditor
-            prefix={PREFIX}
-            label="That date"
-            intervals={intervals}
-            onChange={setIntervals}
-            errors={errors}
-          />
-        </div>
-      )}
-      {mode === 'unavailable' && errors[PREFIX] && (
-        <FieldError id={`${PREFIX}-error`}>{errors[PREFIX]}</FieldError>
-      )}
       <div className="form-actions">
-        <button type="submit" className="button button-primary" disabled={saving}>
+        <button
+          ref={submitButton}
+          type="submit"
+          className="button button-primary"
+          aria-disabled={saving}
+        >
           {saving ? 'Saving…' : 'Save override'}
         </button>
       </div>
