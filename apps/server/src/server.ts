@@ -7,6 +7,7 @@ import { sql } from 'kysely'
 import { createApp } from './app.ts'
 import { loadConfig } from './config.ts'
 import { installOneLineConsole } from './one-line-console.ts'
+import { instanceRoutes } from './routes/instance.ts'
 
 export interface RunningServer {
   port: number
@@ -74,6 +75,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
     publicUrl: config.PUBLIC_URL,
     trustedProxies: config.trustedProxies,
     webDist: config.WEB_DIST,
+    routes: [instanceRoutes({ socialProviders: config.socialProviders })],
   })
 
   const server = await new Promise<ReturnType<typeof serve>>((resolve) => {
