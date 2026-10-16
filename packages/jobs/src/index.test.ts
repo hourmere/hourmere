@@ -1,6 +1,6 @@
 import { createDb } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { createJobs, defineJob, type JobDefinition, JobPayloadError } from './index.ts'
 
@@ -34,8 +34,12 @@ describe.skipIf(!serverUrl)('createJobs', () => {
     testDb = await createTestDatabase(serverUrl as string)
   })
 
+  // Stopped after each test, so a shared Postgres never holds every instance's pool at once.
+  afterEach(async () => {
+    for (const jobs of started.splice(0)) await jobs.stop()
+  })
+
   afterAll(async () => {
-    for (const jobs of started) await jobs.stop()
     await testDb?.drop()
   })
 
@@ -50,6 +54,7 @@ describe.skipIf(!serverUrl)('createJobs', () => {
       work: options.work ?? true,
       migrate: true,
       pollingIntervalSeconds: 0.5,
+      maxConnections: 2,
       shutdownTimeoutMs: options.shutdownTimeoutMs ?? 5000,
       log: (_level, line) => options.lines?.push(line),
     })
