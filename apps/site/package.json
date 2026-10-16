@@ -1,0 +1,18 @@
+{
+  "name": "@hourmere/site",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "typecheck": "node scripts/check.ts"
+  },
+  "devDependencies": {
+    "@astrojs/check": "0.9.10",
+    "@astrojs/starlight": "0.42.6",
+    "@fontsource-variable/manrope": "5.3.0",
+    "astro": "7.3.8",
+    "typescript": "6.0.3"
+  }
+}

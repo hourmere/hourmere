@@ -1,0 +1,59 @@
+---
+import mark from '../assets/brand/hourmere-mark.svg'
+import markWhite from '../assets/brand/hourmere-mark-white.svg'
+
+interface Props {
+  /** Mark size in pixels. */
+  size?: number
+}
+
+const { size = 30 } = Astro.props
+---
+
+<span class="logo" style={`--logo-size: ${size}px`}>
+  <img class="mark mark-light" src={mark.src} width={size} height={size} alt="" />
+  <img class="mark mark-dark" src={markWhite.src} width={size} height={size} alt="" />
+  <span class="word">Hourmere</span>
+</span>
+
+<style>
+  .logo {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .mark {
+    display: block;
+    width: var(--logo-size);
+    height: var(--logo-size);
+  }
+
+  .word {
+    font-size: calc(var(--logo-size) * 0.68);
+    font-weight: 800;
+    letter-spacing: -0.02em;
+  }
+
+  .mark-dark {
+    display: none;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .mark-light {
+      display: none;
+    }
+
+    :root:not([data-theme="light"]) .mark-dark {
+      display: block;
+    }
+  }
+
+  :root[data-theme="dark"] .mark-light {
+    display: none;
+  }
+
+  :root[data-theme="dark"] .mark-dark {
+    display: block;
+  }
+</style>
