@@ -1,0 +1,16 @@
+{
+  "name": "@hourmere/scheduling",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@hourmere/auth": "*",
+    "@hourmere/core": "*",
+    "@hourmere/db": "*"
+  }
+}

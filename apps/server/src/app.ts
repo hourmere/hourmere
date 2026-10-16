@@ -3,10 +3,12 @@ import { inspect } from 'node:util'
 import { serveStatic } from '@hono/node-server/serve-static'
 import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi'
 import { type CallerResolver, escapeControlCharacters } from '@hourmere/auth'
+import { DomainError, type DomainErrorKind } from '@hourmere/scheduling'
 import { HTTPException } from 'hono/http-exception'
 import { logger } from 'hono/logger'
 import { requireCaller } from './caller.ts'
 import { clientIp, withClientIp } from './client-ip.ts'
+import { authenticated, ErrorBody, json, type RouteModule } from './openapi.ts'
 
 export interface AppDeps {
   /** Resolves when the database answers; rejects otherwise. */
@@ -21,6 +23,8 @@ export interface AppDeps {
   trustedProxies?: readonly string[] | undefined
   /** Absolute path of the built web app, if this process should serve it. */
   webDist?: string | undefined
+  /** Groups of /api/v1 routes, created by the composition root with their services. */
+  routes?: readonly RouteModule[]
 }
 
 const Health = z
@@ -46,14 +50,6 @@ const healthRoute = createRoute({
   },
 })
 
-// See docs/api-conventions.md.
-const ErrorBody = z
-  .object({
-    error: z.string().openapi({ description: 'Machine-readable code, e.g. unauthorized' }),
-    message: z.string().optional().openapi({ description: 'Human-readable detail' }),
-  })
-  .openapi('Error')
-
 const Me = z
   .object({
     user: z.object({ id: z.uuid(), name: z.string(), email: z.string() }),
@@ -74,11 +70,13 @@ const Me = z
   })
   .openapi('Me')
 
-const json = <T extends z.ZodType>(schema: T) => ({ 'application/json': { schema } })
-
-// Typed explicitly: an inferred literal type here makes createRoute lose the middleware's
-// types (c.var.principal).
-const authenticated: Record<string, string[]>[] = [{ apiKey: [] }, { session: [] }]
+// HTTP status for each kind of DomainError (see docs/api-conventions.md).
+const domainStatus = {
+  invalid: 400,
+  forbidden: 403,
+  not_found: 404,
+  conflict: 409,
+} as const satisfies Record<DomainErrorKind, number>
 
 /** Logs requests without query strings: sign-in links and OAuth callbacks carry secrets there. */
 const requestLogger = logger((line, ...rest) => console.log(line.replace(/\?\S*/, ''), ...rest))
@@ -90,6 +88,7 @@ export function createApp({
   publicUrl,
   trustedProxies = [],
   webDist,
+  routes = [],
 }: AppDeps) {
   const app = new OpenAPIHono()
   // Unexpected errors (including Better Auth's, which it rethrows) are logged on one line with
@@ -97,6 +96,12 @@ export function createApp({
   // a malformed value, and must not be able to forge log lines.
   app.onError((err, c) => {
     if (err instanceof HTTPException) return err.getResponse()
+    // Failures the caller can act on, thrown by the service layer.
+    if (err instanceof DomainError) {
+      const body =
+        err.message === err.code ? { error: err.code } : { error: err.code, message: err.message }
+      return c.json(body, domainStatus[err.kind])
+    }
     // c.req.path is percent-decoded, so it is escaped too.
     const detail = escapeControlCharacters(
       `${c.req.method} ${c.req.path}: ${inspect(err, { breakLength: Number.POSITIVE_INFINITY })}`,
@@ -160,6 +165,8 @@ export function createApp({
       200,
     )
   })
+
+  for (const register of routes) register({ app, caller })
 
   // The product API is versioned under /api/v1 (agents depend on it for years);
   // /api/health is operational and stays unversioned.

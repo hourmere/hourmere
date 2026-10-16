@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { DomainError, type DomainErrorKind } from '@hourmere/scheduling'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { type AppDeps, createApp } from './app.ts'
 
@@ -96,5 +97,50 @@ describe('serving the built web app', () => {
     const res = await app.request('/assets/app-old999.js')
     expect(res.status).toBe(404)
     expect(res.headers.get('cache-control')).toBeNull()
+  })
+})
+
+describe('route modules and domain errors', () => {
+  const app = createApp({
+    ...noAuth,
+    checkDb: async () => {},
+    routes: [
+      ({ app }) => {
+        app.get('/api/v1/test/fail/:kind', (c) => {
+          const kind = c.req.param('kind') as DomainErrorKind
+          throw kind === 'conflict'
+            ? new DomainError(kind, 'slot_taken', 'Someone booked this time first')
+            : new DomainError(kind, `${kind}_code`)
+        })
+        app.get('/api/v1/test/bug', () => {
+          throw new Error('unexpected')
+        })
+      },
+    ],
+  })
+
+  it.each([
+    ['invalid', 400],
+    ['forbidden', 403],
+    ['not_found', 404],
+  ] as const)('maps a %s DomainError to %i with its code', async (kind, status) => {
+    const res = await app.request(`/api/v1/test/fail/${kind}`)
+    expect(res.status).toBe(status)
+    expect(await res.json()).toEqual({ error: `${kind}_code` })
+  })
+
+  it('includes the message when one was given', async () => {
+    const res = await app.request('/api/v1/test/fail/conflict')
+    expect(res.status).toBe(409)
+    expect(await res.json()).toEqual({
+      error: 'slot_taken',
+      message: 'Someone booked this time first',
+    })
+  })
+
+  it('keeps other errors opaque', async () => {
+    const res = await app.request('/api/v1/test/bug')
+    expect(res.status).toBe(500)
+    expect(await res.json()).toEqual({ error: 'internal_error' })
   })
 })

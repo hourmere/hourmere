@@ -43,6 +43,24 @@ is optional and may change. The HTTP status carries the category:
 | 429 `rate_limited` | Too many requests; `Retry-After` gives the seconds to wait when known |
 | 500 `internal_error` | An unexpected server error; details go to the server log only |
 
+### Where errors come from
+
+Routes call the service layer (`@hourmere/scheduling`), shared with the MCP server so that
+people and agents get the same behavior. Services throw `DomainError(kind, code, message?)`
+for failures the caller can act on; the server maps the kind to a status and answers
+`{ "error": code }` (plus `message` when given):
+
+| `DomainError` kind | Status |
+|---|---|
+| `invalid` | 400 |
+| `forbidden` | 403 |
+| `not_found` | 404 |
+| `conflict` | 409 |
+
+Anything else a service throws is a bug: 500 `internal_error`, logged on one escaped line.
+New route groups are `RouteModule`s (`apps/server/src/openapi.ts`) created in `index.ts` with
+their services and registered by `createApp`.
+
 ## Authentication
 
 A request is authenticated by one of:
