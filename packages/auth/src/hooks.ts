@@ -1,6 +1,7 @@
 import type { Db } from '@hourmere/db'
 import { APIError, createAuthMiddleware, getSessionFromCtx } from 'better-auth/api'
 import { type AuthMiddlewareContext, apiKeyRules } from './api-keys.ts'
+import { checkListQuery, emptyMemberList } from './lists.ts'
 import { isUuid, personalOwner } from './organizations.ts'
 
 /** Request fields that Better Auth looks up in uuid columns. */
@@ -30,47 +31,6 @@ function requireUuidIds(source: unknown) {
 }
 
 /**
- * Fields that list endpoints may sort or filter by, per endpoint, and which of them hold
- * UUIDs. Better Auth hands sortBy / filterField to its database adapter as column names and
- * filterValue to Postgres as is: unknown names and malformed ids would be 500s with the
- * request text in the error.
- */
-const LIST_FIELDS: Record<string, { fields: string[]; uuids: string[] }> = {
-  '/organization/list-members': {
-    fields: ['id', 'organizationId', 'userId', 'role', 'createdAt'],
-    uuids: ['id', 'organizationId', 'userId'],
-  },
-  '/api-key/list': {
-    fields: ['name', 'start', 'prefix', 'enabled', 'expiresAt', 'createdAt', 'updatedAt'],
-    uuids: [],
-  },
-}
-
-function requireListFields(path: string | undefined, query: unknown) {
-  const list = path === undefined ? undefined : LIST_FIELDS[path]
-  if (!list || !isRecord(query)) return
-  for (const param of ['sortBy', 'filterField']) {
-    const value = query[param]
-    if (value !== undefined && (typeof value !== 'string' || !list.fields.includes(value))) {
-      throw new APIError('BAD_REQUEST', {
-        code: 'INVALID_FIELD',
-        message: `${param} must be one of ${list.fields.join(', ')}`,
-      })
-    }
-  }
-  const field = query.filterField
-  if (typeof field === 'string' && list.uuids.includes(field) && query.filterValue !== undefined) {
-    const values = Array.isArray(query.filterValue) ? query.filterValue : [query.filterValue]
-    if (!values.every((v) => typeof v === 'string' && isUuid(v))) {
-      throw new APIError('BAD_REQUEST', {
-        code: 'INVALID_ID',
-        message: `filterValue must be a UUID (or UUIDs) for ${field}`,
-      })
-    }
-  }
-}
-
-/**
  * Better Auth's organization plugin has no hook for leaving. Its own rule (the only owner
  * cannot leave) protects a personal organization only while nobody else is an owner, which
  * the other guards ensure for new data but which old or hand-made rows could break.
@@ -93,7 +53,9 @@ export function beforeHook(db: Db) {
   return createAuthMiddleware(async (ctx) => {
     requireUuidIds(ctx.query)
     requireUuidIds(ctx.body)
-    requireListFields(ctx.path, ctx.query)
+    const filter = checkListQuery(ctx.path, ctx.query)
+    const empty = await emptyMemberList(ctx, db, filter)
+    if (empty) return empty
     await personalOwnerStays(ctx, db)
     return apiKeyRules(ctx, db)
   })
