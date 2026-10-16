@@ -421,6 +421,30 @@ describe.skipIf(!serverUrl)('availability', () => {
     ).resolves.toBeInstanceOf(Array)
   })
 
+  it('offers the last slots of a booking window that spans a DST change', async () => {
+    // Sat 2026-10-31 09:00 EDT. New York falls back on Sun 2026-11-01, so three calendar days
+    // later is Tue 2026-11-03 09:00 EST = 14:00Z: 73 hours, not 72.
+    const now = instant('2026-10-31T13:00:00Z')
+    const host = await f.host({ handle: 'window-end', timeZone: 'America/New_York' })
+    await f.schedule(host.userId, { timeZone: 'America/New_York' })
+    await f.eventType(host.organizationId, host.userId, {
+      slug: 'call',
+      slotStepMinutes: 1,
+      bookingWindowDays: 3,
+    })
+    const slots = await listPublicSlots(
+      { db, now: () => now },
+      {
+        handle: 'window-end',
+        slug: 'call',
+        start: instant('2026-11-03T13:30:00Z'),
+        end: instant('2026-11-03T15:00:00Z'),
+      },
+    )
+    // Starts may be at most the window's end; 14:00Z is exactly it.
+    expect(slots.map((s) => s.start)).toEqual(['2026-11-03T14:00:00.000Z'])
+  })
+
   describe('date overrides far from UTC', () => {
     // A range whose local dates differ from its UTC dates: the override for that local date
     // must still be loaded.

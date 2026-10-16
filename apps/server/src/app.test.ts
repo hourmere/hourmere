@@ -320,6 +320,11 @@ describe('route modules and errors', () => {
     const deep = JSON.parse(`${'['.repeat(50_000)}"\\u0000"${']'.repeat(50_000)}`)
     expect(hasUnsafeJsonText(deep)).toBe(true)
     expect(hasUnsafeJsonText({ a: [{ b: 'fine' }], 'c d': null, e: 1 })).toBe(false)
+    // Wide as well as deep: far more elements than a function call takes arguments.
+    const wide = new Array(300_000).fill('a')
+    expect(hasUnsafeJsonText(wide)).toBe(false)
+    expect(hasUnsafeJsonText([...wide, 'A\u0000B'])).toBe(true)
+    expect(hasUnsafeJsonText(Object.fromEntries(wide.map((v, i) => [`k${i}`, v])))).toBe(false)
   })
 
   it('refuses bodies over 64 KB with 413 payload_too_large', async () => {

@@ -1,5 +1,12 @@
+import { Hono } from 'hono'
 import { describe, expect, it } from 'vitest'
-import { createRateLimiter, PUBLIC_RATE_LIMITS, rateLimitKey } from './rate-limit.ts'
+import {
+  createRateLimiter,
+  PUBLIC_RATE_LIMITS,
+  rateLimit,
+  rateLimitKey,
+  routeRateLimits,
+} from './rate-limit.ts'
 
 describe('createRateLimiter', () => {
   it('allows the limit per window, then says how long to wait', () => {
@@ -49,6 +56,22 @@ describe('createRateLimiter', () => {
     expect(rateLimitKey('::1')).toBe('0:0:0:0::/64')
     expect(rateLimitKey('fe80::1%eth0')).toBe('fe80:0:0:0::/64')
     expect(rateLimitKey('1::')).toBe('1:0:0:0::/64')
+  })
+
+  it('counts each request once, up front when routeRateLimits runs, else in the route', async () => {
+    const limit = () => rateLimit(createRateLimiter({ limit: 2, windowSeconds: 60 }))
+    const statuses = async (app: Hono) => {
+      const out: number[] = []
+      for (let i = 0; i < 3; i++) out.push((await app.request('/x')).status)
+      return out
+    }
+    const both = new Hono()
+    both.use('*', routeRateLimits())
+    both.get('/x', limit(), (c) => c.text('ok'))
+    expect(await statuses(both)).toEqual([200, 200, 429])
+    const routeOnly = new Hono()
+    routeOnly.get('/x', limit(), (c) => c.text('ok'))
+    expect(await statuses(routeOnly)).toEqual([200, 200, 429])
   })
 
   it('has the documented public limits', () => {

@@ -12,6 +12,7 @@ import { apiBodyLimit } from './body-limit.ts'
 import { requireCaller } from './caller.ts'
 import { clientIp, withClientIp } from './client-ip.ts'
 import { authenticated, ErrorBody, json, type RouteModule } from './openapi.ts'
+import { routeRateLimits } from './rate-limit.ts'
 
 export interface AppDeps {
   /** Resolves when the database answers; rejects otherwise. */
@@ -118,7 +119,8 @@ export function hasUnsafeJsonText(value: unknown): boolean {
     if (typeof item === 'string') {
       if (unsafe(item)) return true
     } else if (Array.isArray(item)) {
-      pending.push(...item)
+      // One by one: spreading a large array into push() exceeds V8's argument limit.
+      for (const child of item) pending.push(child)
     } else if (typeof item === 'object' && item !== null) {
       for (const [key, child] of Object.entries(item)) {
         if (unsafe(key)) return true
@@ -230,6 +232,9 @@ export function createApp({
   app.use('/api/v1/*', noStoreByDefault)
   // 64 KB unless the route declares more (routeBodyLimit); before anything reads the body.
   app.use('/api/*', apiBodyLimit())
+  // Routes' rate limits, before anything parses the body: a client over its limit gets 429
+  // without the server reading its JSON.
+  app.use('/api/v1/*', routeRateLimits())
   // Not /api/auth: Better Auth reads the raw request body itself.
   app.use('/api/v1/*', jsonTextGuard)
 

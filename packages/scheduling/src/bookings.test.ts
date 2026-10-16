@@ -21,6 +21,8 @@ import type { PublicContext, ServiceContext } from './context.ts'
 import { createFixtures, type Fixtures } from './testing.ts'
 
 const serverUrl = process.env.DATABASE_URL
+/** For tests whose bookings wait on each other's locks: room to finish on a busy machine. */
+const SERIALIZED = { timeout: 20_000 }
 const instant = (iso: string) => Temporal.Instant.from(iso)
 // Mon 2026-11-02; Berlin is on CET (+01:00), so 09:00–17:00 local is 08:00Z–16:00Z.
 const NOW = instant('2026-11-01T12:00:00Z')
@@ -223,56 +225,64 @@ describe.skipIf(!serverUrl)('bookings', () => {
       await expect(s.book('2026-11-02T10:00:00Z')).resolves.toMatchObject({ replayed: false })
     })
 
-    it('answers slot_taken when a concurrent booking commits the same time first', async () => {
-      const s = await setup()
-      // Another writer holds an uncommitted booking of the same time, so our availability
-      // check cannot see it and only the exclusion constraint stops the second booking.
-      const other = await testDb.pool.connect()
-      try {
-        await other.query('BEGIN')
-        const b = await other.query<{ id: string }>(
-          `INSERT INTO bookings (organization_id, start_at, end_at, title, manage_token_hash, source)
+    it(
+      'answers slot_taken when a concurrent booking commits the same time first',
+      SERIALIZED,
+      async () => {
+        const s = await setup()
+        // Another writer holds an uncommitted booking of the same time, so our availability
+        // check cannot see it and only the exclusion constraint stops the second booking.
+        const other = await testDb.pool.connect()
+        try {
+          await other.query('BEGIN')
+          const b = await other.query<{ id: string }>(
+            `INSERT INTO bookings (organization_id, start_at, end_at, title, manage_token_hash, source)
            VALUES ($1, '2026-11-02T11:00Z', '2026-11-02T11:30Z', 'Racer', sha256('racer'::bytea), 'api')
            RETURNING id`,
-          [s.organizationId],
-        )
-        await other.query('INSERT INTO booking_hosts (booking_id, user_id) VALUES ($1, $2)', [
-          b.rows[0]?.id,
-          s.userId,
-        ])
-        const attempt = s.book('2026-11-02T11:00:00Z')
-        attempt.catch(() => {})
-        // Wait until our insert is blocked on the other transaction, then let it commit.
-        for (let i = 0; i < 200; i++) {
-          const waiting = await count(
-            `SELECT count(*)::int AS n FROM pg_stat_activity
-              WHERE datname = current_database() AND wait_event_type = 'Lock'`,
+            [s.organizationId],
           )
-          if (waiting) break
-          await new Promise((r) => setTimeout(r, 10))
+          await other.query('INSERT INTO booking_hosts (booking_id, user_id) VALUES ($1, $2)', [
+            b.rows[0]?.id,
+            s.userId,
+          ])
+          const attempt = s.book('2026-11-02T11:00:00Z')
+          attempt.catch(() => {})
+          // Wait until our insert is blocked on the other transaction, then let it commit.
+          for (let i = 0; i < 200; i++) {
+            const waiting = await count(
+              `SELECT count(*)::int AS n FROM pg_stat_activity
+              WHERE datname = current_database() AND wait_event_type = 'Lock'`,
+            )
+            if (waiting) break
+            await new Promise((r) => setTimeout(r, 10))
+          }
+          await other.query('COMMIT')
+          await expect(attempt).rejects.toMatchObject({ kind: 'conflict', code: 'slot_taken' })
+        } finally {
+          other.release()
         }
-        await other.query('COMMIT')
-        await expect(attempt).rejects.toMatchObject({ kind: 'conflict', code: 'slot_taken' })
-      } finally {
-        other.release()
-      }
-      expect(
-        await count('SELECT count(*)::int AS n FROM bookings WHERE event_type_id = $1', [
-          s.eventTypeId,
-        ]),
-      ).toBe(0)
-    })
+        expect(
+          await count('SELECT count(*)::int AS n FROM bookings WHERE event_type_id = $1', [
+            s.eventTypeId,
+          ]),
+        ).toBe(0)
+      },
+    )
 
-    it('keeps the daily limit under concurrent bookings of different times', async () => {
-      const s = await setup({ maxBookingsPerDay: 1 })
-      const results = await Promise.allSettled(
-        ['09:00', '10:00', '11:00', '12:00', '13:00'].map((t) => s.book(`2026-11-03T${t}:00Z`)),
-      )
-      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1)
-      for (const r of results) {
-        if (r.status === 'rejected') expect(r.reason).toMatchObject({ code: 'slot_unavailable' })
-      }
-    })
+    it(
+      'keeps the daily limit under concurrent bookings of different times',
+      SERIALIZED,
+      async () => {
+        const s = await setup({ maxBookingsPerDay: 1 })
+        const results = await Promise.allSettled(
+          ['09:00', '10:00', '11:00', '12:00', '13:00'].map((t) => s.book(`2026-11-03T${t}:00Z`)),
+        )
+        expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1)
+        for (const r of results) {
+          if (r.status === 'rejected') expect(r.reason).toMatchObject({ code: 'slot_unavailable' })
+        }
+      },
+    )
 
     it('validates the invitee, guests and answers', async () => {
       const s = await setup({
@@ -365,7 +375,7 @@ describe.skipIf(!serverUrl)('bookings', () => {
       expect(second.manageToken).not.toBeNull()
     })
 
-    it('replays concurrent retries of one request as one booking', async () => {
+    it('replays concurrent retries of one request as one booking', SERIALIZED, async () => {
       const s = await setup()
       const key = crypto.randomUUID()
       const results = await Promise.all(
@@ -647,25 +657,29 @@ describe.skipIf(!serverUrl)('bookings', () => {
   })
 
   describe('waiting for the host lock', () => {
-    it('books with the event type as it is once the lock is held, not as read before', async () => {
-      const s = await setup()
-      const { booking } = await whileWaiting(
-        s.userId,
-        () => s.book('2026-11-02T09:00:00Z'),
-        () =>
-          db
-            .updateTable('event_types')
-            .set({ duration_minutes: 60 })
-            .where('id', '=', s.eventTypeId)
-            .execute(),
-      )
-      expect([booking.start, booking.end]).toEqual([
-        '2026-11-02T09:00:00.000Z',
-        '2026-11-02T10:00:00.000Z',
-      ])
-    })
+    it(
+      'books with the event type as it is once the lock is held, not as read before',
+      SERIALIZED,
+      async () => {
+        const s = await setup()
+        const { booking } = await whileWaiting(
+          s.userId,
+          () => s.book('2026-11-02T09:00:00Z'),
+          () =>
+            db
+              .updateTable('event_types')
+              .set({ duration_minutes: 60 })
+              .where('id', '=', s.eventTypeId)
+              .execute(),
+        )
+        expect([booking.start, booking.end]).toEqual([
+          '2026-11-02T09:00:00.000Z',
+          '2026-11-02T10:00:00.000Z',
+        ])
+      },
+    )
 
-    it('reschedules with the event type as it is once the lock is held', async () => {
+    it('reschedules with the event type as it is once the lock is held', SERIALIZED, async () => {
       const s = await setup()
       const { manageToken } = await s.book('2026-11-02T10:00:00Z')
       const { booking } = await whileWaiting(
@@ -684,7 +698,7 @@ describe.skipIf(!serverUrl)('bookings', () => {
       expect(booking.end).toBe('2026-11-02T14:00:00.000Z')
     })
 
-    it('reads the clock after waiting when booking', async () => {
+    it('reads the clock after waiting when booking', SERIALIZED, async () => {
       const s = await setup()
       let clock = NOW
       const ticking: PublicContext = { db, now: () => clock }
@@ -698,7 +712,7 @@ describe.skipIf(!serverUrl)('bookings', () => {
       await expect(attempt).rejects.toMatchObject({ code: 'slot_unavailable' })
     })
 
-    it('reads the clock after waiting when rescheduling', async () => {
+    it('reads the clock after waiting when rescheduling', SERIALIZED, async () => {
       const s = await setup()
       const { manageToken } = await s.book('2026-11-02T10:00:00Z')
       let clock = NOW
@@ -716,24 +730,28 @@ describe.skipIf(!serverUrl)('bookings', () => {
       await expect(attempt).rejects.toMatchObject({ code: 'booking_in_past' })
     })
 
-    it('lets only one of two bookings that collide only through buffers succeed', async () => {
-      // 09:00 keeps 09:00–10:00 busy with its 30-minute buffer after; 09:30 does not overlap
-      // the 09:00 meeting itself, so the exclusion constraint alone would let both in.
-      const s = await setup({ bufferAfterMinutes: 30 })
-      const days = ['02', '03', '04', '05', '06']
-      const results = await Promise.allSettled(
-        days.flatMap((d) => [s.book(`2026-11-${d}T08:00:00Z`), s.book(`2026-11-${d}T08:30:00Z`)]),
-      )
-      for (const [i, d] of days.entries()) {
-        const pair = results.slice(i * 2, i * 2 + 2)
-        expect(
-          pair.filter((r) => r.status === 'fulfilled'),
-          d,
-        ).toHaveLength(1)
-        const refused = pair.find((r) => r.status === 'rejected')
-        expect(refused?.reason).toMatchObject({ code: 'slot_unavailable' })
-      }
-    })
+    it(
+      'lets only one of two bookings that collide only through buffers succeed',
+      SERIALIZED,
+      async () => {
+        // 09:00 keeps 09:00–10:00 busy with its 30-minute buffer after; 09:30 does not overlap
+        // the 09:00 meeting itself, so the exclusion constraint alone would let both in.
+        const s = await setup({ bufferAfterMinutes: 30 })
+        const days = ['02', '03', '04', '05', '06']
+        const results = await Promise.allSettled(
+          days.flatMap((d) => [s.book(`2026-11-${d}T08:00:00Z`), s.book(`2026-11-${d}T08:30:00Z`)]),
+        )
+        for (const [i, d] of days.entries()) {
+          const pair = results.slice(i * 2, i * 2 + 2)
+          expect(
+            pair.filter((r) => r.status === 'fulfilled'),
+            d,
+          ).toHaveLength(1)
+          const refused = pair.find((r) => r.status === 'rejected')
+          expect(refused?.reason).toMatchObject({ code: 'slot_unavailable' })
+        }
+      },
+    )
   })
 
   describe('host side', () => {

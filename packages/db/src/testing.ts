@@ -19,6 +19,9 @@ export async function createTestDatabase(serverUrl: string): Promise<TestDatabas
   const admin = createPool(serverUrl)
   try {
     await admin.query(`CREATE DATABASE ${name}`)
+    // Throwaway data: commits need not wait for the disk (tests stay fast under load). Takes
+    // effect for every connection opened from here on, the migration pool's included.
+    await admin.query(`ALTER DATABASE ${name} SET synchronous_commit = off`)
   } finally {
     await admin.end()
   }

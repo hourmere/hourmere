@@ -8,6 +8,8 @@ import { bookingRoutes } from './bookings.ts'
 import { BOOKING_BODY_LIMIT, type PublicRoutesDeps, publicRoutes } from './public.ts'
 
 const serverUrl = process.env.DATABASE_URL
+/** For tests whose bookings wait on each other's locks: room to finish on a busy machine. */
+const SERIALIZED = { timeout: 20_000 }
 // Mon 2026-11-02; Berlin is on CET (+01:00), so 09:00–17:00 local is 08:00Z–16:00Z.
 const NOW = Temporal.Instant.from('2026-11-01T12:00:00Z')
 
@@ -226,7 +228,7 @@ describe.skipIf(!serverUrl)('public routes', () => {
     expect(await different.json()).toMatchObject({ error: 'idempotency_key_reused' })
   })
 
-  it('lets exactly one of many concurrent bookings of one slot succeed', async () => {
+  it('lets exactly one of many concurrent bookings of one slot succeed', SERIALIZED, async () => {
     const results = await Promise.all(
       Array.from({ length: 10 }, (_, i) =>
         book('2026-11-02T11:00:00Z', {
@@ -464,6 +466,36 @@ describe.skipIf(!serverUrl)('public routes', () => {
       { 'x-manage-token': 'A'.repeat(43) },
     )
     expect(reschedule.status).toBe(413)
+  })
+
+  it('answers huge flat arrays and objects with a client error, never a 500', async () => {
+    // About 1.2 MB each, inside the booking route's 2 MB limit.
+    const array = await book('2026-11-02T15:00:00Z', {
+      responses: { topic: 'x', q: new Array(300_000).fill('a') },
+    })
+    expect(array.status).toBe(400)
+    expect(await array.json()).toMatchObject({ error: 'invalid_responses' })
+    const object = await book('2026-11-02T15:00:00Z', {
+      responses: Object.fromEntries(Array.from({ length: 150_000 }, (_, i) => [`k${i}`, 'a'])),
+    })
+    expect(object.status).toBe(400)
+    expect(await object.json()).toMatchObject({ error: 'invalid_responses' })
+  })
+
+  it('refuses a client over its booking limit before reading its body', async () => {
+    const limited = appWith({ book: { limit: 1, windowSeconds: 60 } })
+    const send = (body: string) =>
+      limited.request('/api/v1/public/ada/intro/bookings', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body,
+      })
+    expect((await send('{}')).status).toBe(400)
+    // NUL would make the JSON guard answer 400 if it looked at this body: it must not get to.
+    const big = JSON.stringify({ pad: 'x'.repeat(1_500_000), name: 'A\u0000B' })
+    const refused = await send(big)
+    expect(refused.status).toBe(429)
+    expect(await refused.json()).toEqual({ error: 'rate_limited' })
   })
 
   it('documents the routes', async () => {

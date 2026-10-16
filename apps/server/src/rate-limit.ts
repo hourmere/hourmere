@@ -1,5 +1,8 @@
 import { isIP } from 'node:net'
+import type { Context } from 'hono'
 import { createMiddleware } from 'hono/factory'
+import { matchedRoutes } from 'hono/route'
+import type { MiddlewareHandler } from 'hono/types'
 
 /** At most `limit` requests per client IP in each `windowSeconds`. */
 export interface RateLimit {
@@ -99,18 +102,52 @@ export function rateLimitKey(ip: string | undefined): string {
     .join(':')}::/64`
 }
 
+const LIMITER = Symbol('rate limiter')
+/** Requests whose route limits routeRateLimits already counted. */
+const counted = new WeakSet<Context>()
+
+/** Counts the request against `limiter`; a 429 response when the client is over it. */
+function check(c: Context, limiter: RateLimiter): Response | undefined {
+  const retryAfter = limiter.hit(rateLimitKey(c.var.clientIp))
+  if (retryAfter === undefined) return undefined
+  c.header('Retry-After', String(retryAfter))
+  return c.json({ error: 'rate_limited' }, 429)
+}
+
 /**
  * Answers 429 `rate_limited` with Retry-After once the client (c.var.clientIp, which honors
  * TRUSTED_PROXIES; IPv6 by /64, see rateLimitKey) is over the limiter's limit. For routes'
- * `middleware`.
+ * `middleware`. createApp counts it earlier, in routeRateLimits, before the body is read;
+ * the route middleware then lets the request through, and only counts it itself in an app
+ * without routeRateLimits.
  */
-export function rateLimit(limiter: RateLimiter) {
-  return createMiddleware(async (c, next) => {
-    const retryAfter = limiter.hit(rateLimitKey(c.var.clientIp))
-    if (retryAfter !== undefined) {
-      c.header('Retry-After', String(retryAfter))
-      return c.json({ error: 'rate_limited' }, 429)
+export function rateLimit(limiter: RateLimiter): MiddlewareHandler {
+  const middleware = createMiddleware(async (c, next) => {
+    if (!counted.has(c)) {
+      const refused = check(c, limiter)
+      if (refused) return refused
     }
+    await next()
+  })
+  return Object.assign(middleware, { [LIMITER]: limiter })
+}
+
+/**
+ * Applies the rate limits of the matched route (its rateLimit middleware) up front, before
+ * any app-wide middleware reads, parses or checks the body.
+ */
+export function routeRateLimits(): MiddlewareHandler {
+  return createMiddleware(async (c, next) => {
+    const limiters = new Set<RateLimiter>()
+    for (const { handler } of matchedRoutes(c)) {
+      const limiter = (handler as { [LIMITER]?: RateLimiter })[LIMITER]
+      if (limiter) limiters.add(limiter)
+    }
+    for (const limiter of limiters) {
+      const refused = check(c, limiter)
+      if (refused) return refused
+    }
+    counted.add(c)
     await next()
   })
 }

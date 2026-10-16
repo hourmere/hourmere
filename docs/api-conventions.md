@@ -144,8 +144,8 @@ Booking pages and invitee links work without credentials:
 They are rate limited per client (`TRUSTED_PROXIES` decides which address that is; IPv6
 clients count per /64 network, since one subscriber usually has a whole /64): 120 requests a
 minute for event pages and for slots, 10 for creating bookings, 30 for manage endpoints;
-beyond that 429 `rate_limited` with `Retry-After`. The counters live in each server process's
-memory, so with several instances a client gets that budget once per instance; a shared store
+beyond that 429 `rate_limited` with `Retry-After`, decided before the request body is read
+(only its size is checked first). The counters live in each server process's memory, so with several instances a client gets that budget once per instance; a shared store
 comes with multi-instance deployments.
 
 A slots request may span at most 62 days, and its bookable part (from now plus the event
