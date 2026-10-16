@@ -4,11 +4,16 @@
 # The app listens on 127.0.0.1:3000; put a reverse proxy with TLS in front of it. Until SMTP
 # is configured, sign-in links are printed by `docker compose logs app`. With the default
 # SIGNUP=first-user, sign in right after the first start: the first account should be yours.
+# Background jobs (booking emails) run inside `app` unless you split them out (the `worker`
+# service below).
 name: hourmere
 
 services:
   app:
     build: .
+    # Built here, never pulled; the optional worker below runs the same image.
+    image: hourmere:local
+    pull_policy: never
     environment:
       # The password stays out of the URL so it may contain any characters (/, #, ?, …);
       # the Postgres client reads PGPASSWORD when the URL has none.
@@ -26,12 +31,28 @@ services:
       SIGNUP: ${SIGNUP:-}
       SIGNUP_ALLOWED_DOMAINS: ${SIGNUP_ALLOWED_DOMAINS:-}
       TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
+      HOURMERE_ROLE: ${HOURMERE_ROLE:-}
     ports:
       - "127.0.0.1:${PORT:-3000}:3000"
     depends_on:
       db:
         condition: service_healthy
+    # Running jobs get up to 20 s to finish on shutdown; Docker's default is 10 s.
+    stop_grace_period: 30s
     restart: unless-stopped
+
+  # To run background jobs in a container of their own (same image), set HOURMERE_ROLE=web
+  # in .env and uncomment this service. Its port stays unpublished: it only answers the
+  # health check.
+  # worker:
+  #   extends: app
+  #   build: !reset null
+  #   environment:
+  #     HOURMERE_ROLE: worker
+  #   ports: !reset []
+  #   depends_on:
+  #     db:
+  #       condition: service_healthy
 
   db:
     image: postgres:18-alpine

@@ -15,7 +15,7 @@
     "dev": "node scripts/dev.ts",
     "db:up": "docker compose -f docker-compose.dev.yml up -d --wait",
     "db:down": "docker compose -f docker-compose.dev.yml down",
-    "db:migrate": "node --env-file-if-exists=.env packages/db/src/migrate-cli.ts",
+    "db:migrate": "node --env-file-if-exists=.env packages/db/src/migrate-cli.ts && node --env-file-if-exists=.env packages/jobs/src/migrate-cli.ts",
     "lint": "biome check .",
     "format": "biome check --write .",
     "typecheck": "npm run typecheck --workspaces --if-present && tsc -p tools/api-types",
@@ -24,7 +24,7 @@
     "start": "node apps/server/src/index.ts",
     "auth:sql": "npm run --workspace @hourmere/auth schema:sql",
     "api:types": "npm run --silent --workspace @hourmere/api-types generate",
-    "db:types": "kysely-codegen --dialect postgres --date-parser string --default-schema public --exclude-pattern public.schema_migrations --out-file packages/db/src/tables.ts"
+    "db:types": "kysely-codegen --dialect postgres --date-parser string --default-schema public --exclude-pattern \"{public.schema_migrations,pgboss.*}\" --out-file packages/db/src/tables.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",

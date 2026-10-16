@@ -1,5 +1,5 @@
 import { apiKey } from '@better-auth/api-key'
-import type { Db } from '@hourmere/db'
+import { type Db, guardPoolErrors } from '@hourmere/db'
 import { type Mailer, magicLinkEmail } from '@hourmere/mail'
 import { betterAuth } from 'better-auth'
 import { APIError } from 'better-auth/api'
@@ -58,9 +58,9 @@ export function createAuthPool(databaseUrl: string, signup: SignupPolicy): pg.Po
     .filter(Boolean)
     .join(' ')
   const pool = new pg.Pool({ ...(config as pg.PoolConfig), options })
-  // Same reason as createPool in @hourmere/db: an unhandled idle-client error would kill
-  // the process.
-  pool.on('error', (err) => console.error(`idle Postgres client error (auth): ${err.message}`))
+  // Same reason as createPool in @hourmere/db: an unhandled client error would kill the
+  // process.
+  guardPoolErrors(pool, ' (auth)')
   return pool
 }
 

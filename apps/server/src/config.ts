@@ -98,6 +98,14 @@ const schema = z
       .transform((v) => v === 'true'),
     // Built web app to serve; unset in development, where Vite serves it.
     WEB_DIST: z.string().optional(),
+    // What this process runs: `all` (the default: API and background jobs in one process),
+    // `web` (API only, jobs are only queued) or `worker` (background jobs only, with
+    // /api/health on PORT for container health checks).
+    HOURMERE_ROLE: optional(
+      z.enum(['all', 'web', 'worker'], {
+        error: 'HOURMERE_ROLE must be all, web or worker',
+      }),
+    ).transform((v) => v ?? 'all'),
   })
   .superRefine((c, ctx) => {
     if (c.SMTP_URL && !c.MAIL_FROM) {

@@ -7,7 +7,9 @@ import {
   createCallerResolver,
 } from '@hourmere/auth'
 import { createDb, createPool, type Db, runMigrations } from '@hourmere/db'
+import { createJobs } from '@hourmere/jobs'
 import { createLogMailer, createSmtpMailer, type Mailer } from '@hourmere/mail'
+import { bookingNotificationJob } from '@hourmere/notifications'
 import { sql } from 'kysely'
 import { createApp } from './app.ts'
 import { type Config, loadConfig } from './config.ts'
@@ -22,6 +24,7 @@ import { instanceRoutes } from './routes/instance.ts'
 import { profileRoutes } from './routes/profile.ts'
 import { publicRoutes } from './routes/public.ts'
 import { scheduleRoutes } from './routes/schedules.ts'
+import { createWorkerHealthApp } from './worker-health.ts'
 
 /**
  * The /api/v1 route groups, each created with what it needs. The OpenAPI document (and with
@@ -47,7 +50,10 @@ export function productRoutes({
 
 export interface RunningServer {
   port: number
-  /** Stops accepting requests, closes the database pools and restores the console. */
+  /**
+   * Stops accepting requests, stops the job workers (waiting for running jobs up to a
+   * timeout), closes the database pools and restores the console.
+   */
   close(): Promise<void>
 }
 
@@ -106,45 +112,77 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
     },
   }
 
-  const authPool = createAuthPool(config.DATABASE_URL, config.signup)
+  const role = config.HOURMERE_ROLE
+  // A worker serves only /api/health, for the container health check: no sign-in, no API.
+  const authPool =
+    role === 'worker' ? undefined : createAuthPool(config.DATABASE_URL, config.signup)
+  if (authPool) {
+    try {
+      await assertSignupEnforced(authPool, config.signup)
+    } catch (err) {
+      await Promise.all([db.destroy(), authPool.end()])
+      throw err
+    }
+  }
+
+  // Background jobs: every role queues them, `all` and `worker` run them.
+  const jobs = createJobs({
+    connectionString: config.DATABASE_URL,
+    definitions: [bookingNotificationJob({ db, mailer, publicUrl: config.PUBLIC_URL })],
+    work: role !== 'web',
+    // pg-boss installs and upgrades its own `pgboss` schema; with AUTO_MIGRATE=false,
+    // `npm run db:migrate` does that too.
+    migrate: config.AUTO_MIGRATE,
+    instanceName: role,
+  })
   try {
-    await assertSignupEnforced(authPool, config.signup)
+    await jobs.start()
   } catch (err) {
-    await Promise.all([db.destroy(), authPool.end()])
+    await Promise.all([db.destroy(), authPool?.end()])
     throw err
   }
-  const auth = createAuth({
-    pool: authPool,
-    db,
-    baseURL: config.PUBLIC_URL,
-    secret: config.BETTER_AUTH_SECRET,
-    mailer: countingMailer,
-    signup: config.signup,
-    socialProviders: config.socialProviders,
-  })
+  const checkDb = async () => {
+    await sql`SELECT 1`.execute(db)
+  }
 
-  const app = createApp({
-    checkDb: async () => {
-      await sql`SELECT 1`.execute(db)
-    },
-    authHandler: auth.handler,
-    resolveCaller: createCallerResolver({ auth, db }),
-    publicUrl: config.PUBLIC_URL,
-    trustedProxies: config.trustedProxies,
-    webDist: config.WEB_DIST,
-    // db is closed below.
-    routes: productRoutes({ db, socialProviders: config.socialProviders }),
-    mcp: mcpEndpoint({ tools: [whoamiTool, ...bookingTools({ db })] }),
-  })
+  let fetch: Parameters<typeof serve>[0]['fetch']
+  if (!authPool) {
+    fetch = createWorkerHealthApp({ checkDb, checkJobs: () => jobs.check() }).fetch
+  } else {
+    const auth = createAuth({
+      pool: authPool,
+      db,
+      baseURL: config.PUBLIC_URL,
+      secret: config.BETTER_AUTH_SECRET,
+      mailer: countingMailer,
+      signup: config.signup,
+      socialProviders: config.socialProviders,
+    })
+    fetch = createApp({
+      checkDb,
+      authHandler: auth.handler,
+      resolveCaller: createCallerResolver({ auth, db }),
+      publicUrl: config.PUBLIC_URL,
+      trustedProxies: config.trustedProxies,
+      webDist: config.WEB_DIST,
+      // db is closed below.
+      routes: productRoutes({ db, socialProviders: config.socialProviders }),
+      mcp: mcpEndpoint({ tools: [whoamiTool, ...bookingTools({ db })] }),
+    }).fetch
+  }
 
   const server = await new Promise<ReturnType<typeof serve>>((resolve) => {
-    const s = serve({ fetch: app.fetch, port: config.PORT }, (info: AddressInfo) => {
-      const providers = Object.keys(config.socialProviders)
-      const { mode, allowedDomains } = config.signup
-      const signup = `${mode}${allowedDomains.length ? `, plus ${allowedDomains.join(', ')}` : ''}`
-      console.log(
-        `Hourmere listening on :${info.port} (${config.PUBLIC_URL}); sign-in: email${providers.map((p) => `, ${p}`).join('')}; sign-up: ${signup}`,
-      )
+    const s = serve({ fetch, port: config.PORT }, (info: AddressInfo) => {
+      if (role === 'worker') {
+        console.log(`Hourmere worker running jobs; health check on :${info.port}/api/health`)
+      } else {
+        const providers = Object.keys(config.socialProviders)
+        const { mode, allowedDomains } = config.signup
+        const signup = `${mode}${allowedDomains.length ? `, plus ${allowedDomains.join(', ')}` : ''}`
+        console.log(
+          `Hourmere listening on :${info.port} (${config.PUBLIC_URL}); sign-in: email${providers.map((p) => `, ${p}`).join('')}; sign-up: ${signup}; jobs: ${role === 'all' ? 'run here' : 'queued for a worker'}`,
+        )
+      }
       resolve(s)
     })
   })
@@ -153,11 +191,13 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
     port: (server.address() as AddressInfo).port,
     close: () =>
       new Promise<void>((resolve, reject) => {
+        // Requests first (one still running may queue a job), then jobs (waiting for running
+        // ones up to a timeout), then the pools the jobs use.
         server.close(async (err) => {
           try {
             if (sending)
               console.warn(`shutting down: dropping ${sending} email(s) still being sent`)
-            await Promise.all([db.destroy(), authPool.end()])
+            await jobs.stop().finally(() => Promise.all([db.destroy(), authPool?.end()]))
             restoreConsole()
             if (err) reject(err)
             else resolve()

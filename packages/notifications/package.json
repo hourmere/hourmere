@@ -1,0 +1,22 @@
+{
+  "name": "@hourmere/notifications",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@hourmere/db": "*",
+    "@hourmere/jobs": "*",
+    "@hourmere/mail": "*",
+    "kysely": "0.29.6",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@hourmere/scheduling": "*",
+    "ical.js": "2.2.1"
+  }
+}

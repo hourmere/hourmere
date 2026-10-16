@@ -4,6 +4,8 @@ import { createServer, type Socket } from 'node:net'
 import { Writable } from 'node:stream'
 import { createPool } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import { createJobs } from '@hourmere/jobs'
+import { BOOKING_NOTIFICATION_JOB, bookingNotificationJob } from '@hourmere/notifications'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { startServer } from './server.ts'
 
@@ -176,4 +178,74 @@ describe.skipIf(!serverUrl)('startServer', () => {
       vi.resetModules()
     }
   })
+
+  it('splits into a web role that only queues jobs and a worker role that runs them', async () => {
+    const env = { DATABASE_URL: testDb.url, BETTER_AUTH_SECRET: randomBytes(32).toString('base64') }
+    const state = async (id: string) =>
+      (
+        await testDb.pool.query<{ state: string }>('SELECT state FROM pgboss.job WHERE id = $1', [
+          id,
+        ])
+      ).rows[0]?.state
+    await quietly(async () => {
+      const web = await startServer({
+        ...env,
+        PORT: String(await freePort()),
+        HOURMERE_ROLE: 'web',
+      })
+      const producer = createJobs({
+        connectionString: testDb.url,
+        definitions: [bookingNotificationJob({} as never)],
+        work: false,
+        migrate: false,
+        log: () => {},
+      })
+      await producer.start()
+      try {
+        const doc = await fetch(`http://127.0.0.1:${web.port}/api/v1/openapi.json`)
+        expect(doc.status).toBe(200)
+        // A booking that does not exist: the job has nothing to send and completes.
+        const id = (await producer.enqueue(BOOKING_NOTIFICATION_JOB, {
+          bookingId: '0199f0c4-7a2b-7000-8000-00000000abcd',
+          kind: 'confirmed',
+        })) as string
+        await new Promise((r) => setTimeout(r, 2500))
+        expect(await state(id)).toBe('created')
+
+        const worker = await startServer({
+          ...env,
+          PORT: String(await freePort()),
+          HOURMERE_ROLE: 'worker',
+        })
+        const base = `http://127.0.0.1:${worker.port}`
+        try {
+          const health = await fetch(`${base}/api/health`)
+          expect(health.status).toBe(200)
+          expect(health.headers.get('cache-control')).toBe('no-store')
+          expect(await health.json()).toEqual({ status: 'ok', database: 'ok', jobs: 'running' })
+          for (const path of ['/', '/api/v1/openapi.json', '/api/auth/ok', '/api/health/x']) {
+            expect((await fetch(`${base}${path}`)).status, path).toBe(404)
+          }
+          // Nor the MCP endpoint, which the web role serves.
+          const mcp = await fetch(`${base}/mcp`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: '{}',
+          })
+          expect(mcp.status).toBe(404)
+          const deadline = Date.now() + 15_000
+          while ((await state(id)) !== 'completed' && Date.now() < deadline) {
+            await new Promise((r) => setTimeout(r, 100))
+          }
+          expect(await state(id)).toBe('completed')
+        } finally {
+          await worker.close()
+        }
+        await expect(fetch(`${base}/api/health`)).rejects.toThrow()
+      } finally {
+        await producer.stop()
+        await web.close()
+      }
+    })
+  }, 40_000)
 })

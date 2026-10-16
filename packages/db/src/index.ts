@@ -14,12 +14,26 @@ export type Db = Kysely<Database>
 // zone west or east of UTC. Calendar dates stay 'YYYY-MM-DD' strings.
 pg.types.setTypeParser(pg.types.builtins.DATE, (v) => v)
 
+/**
+ * Keeps a dropped connection (Postgres restart, failover, pg_terminate_backend,
+ * idle_in_transaction_session_timeout) from killing the process with an unhandled 'error'.
+ * pg-pool listens only on idle clients, re-emitting their errors on the pool and discarding
+ * them; a checked-out client (e.g. a transaction kept open while a mail server answers) has
+ * no listener of its own, so it gets one while it is out. Its next query then fails, which
+ * its caller handles. Each error is logged once; `label` names the pool.
+ */
+export function guardPoolErrors(pool: pg.Pool, label = ''): void {
+  pool.on('error', (err) => console.error(`idle Postgres client error${label}: ${err.message}`))
+  const inUse = (err: Error) =>
+    console.error(`Postgres client error while in use${label}: ${err.message}`)
+  pool.on('acquire', (client) => client.on('error', inUse))
+  pool.on('release', (_err, client) => client.removeListener('error', inUse))
+}
+
 export function createPool(connectionString: string): pg.Pool {
   const pool = new pg.Pool({ connectionString })
-  // Without a listener, an idle client dropped by the server (Postgres restart, failover)
-  // emits an unhandled 'error' and kills the process. The pool discards that client and
-  // opens a new one on the next query.
-  pool.on('error', (err) => console.error(`idle Postgres client error: ${err.message}`))
+  // The pool discards a broken client and opens a new one on the next query.
+  guardPoolErrors(pool)
   return pool
 }
 

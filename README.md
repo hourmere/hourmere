@@ -14,7 +14,9 @@ Open-source scheduling for people and AI agents. Self-host or use the cloud.
 | `packages/db` | Database access (Kysely) and SQL migrations in `packages/db/migrations`. |
 | `packages/scheduling` | Service layer shared by the REST API and the MCP server: reads and writes the database, enforces permissions, throws `DomainError`. |
 | `packages/auth` | Sign-in (Better Auth: email links, Google, Microsoft), sessions, organizations, API keys. |
-| `packages/mail` | Outgoing email: SMTP, or the server log when SMTP is not configured. |
+| `packages/mail` | Outgoing email: SMTP, or the server log when SMTP is not configured; booking email templates and calendar invitations. |
+| `packages/jobs` | Background jobs on Postgres (pg-boss): typed job definitions, enqueueing inside a transaction, workers. |
+| `packages/notifications` | The booking notification job: who gets which email, sent once. See [docs/notifications.md](docs/notifications.md). |
 | `tools/api-types` | Generates the web app's API types from the server's OpenAPI document (`npm run api:types`). |
 
 ## Development
@@ -51,7 +53,10 @@ cp .env.example .env   # set POSTGRES_PASSWORD, BETTER_AUTH_SECRET and PUBLIC_UR
 docker compose up -d
 ```
 
-The app listens on `127.0.0.1:3000` and applies database migrations on start. Put a reverse proxy with TLS in front of it, and set `TRUSTED_PROXIES` to the proxy's address as the app sees it (for a proxy on the host or on the compose network that is the Docker network, e.g. `172.16.0.0/12`), so rate limits apply per visitor rather than to everyone behind the proxy.
+The app listens on `127.0.0.1:3000` and applies database migrations on start. It also runs
+the background jobs (booking emails); to run them in a container of their own, set
+`HOURMERE_ROLE=web` and enable the `worker` service in `docker-compose.yml` (same image,
+`HOURMERE_ROLE=worker`). Give containers about 30 seconds to stop, so running jobs can finish. Put a reverse proxy with TLS in front of it, and set `TRUSTED_PROXIES` to the proxy's address as the app sees it (for a proxy on the host or on the compose network that is the Docker network, e.g. `172.16.0.0/12`), so rate limits apply per visitor rather than to everyone behind the proxy.
 
 People sign in with a link sent by email (no passwords), or with Google or Microsoft once their
 client ids are set in `.env`. Accounts are only created for email addresses the provider
