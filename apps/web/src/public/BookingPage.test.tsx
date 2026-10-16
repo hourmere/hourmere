@@ -82,12 +82,13 @@ describe('the booking page', () => {
     expect(slotButtons()).toEqual(['5:30 AM', '9:00 AM', '10:30 PM'])
     expect(screen.getByText(/3 times available on Monday, November 2/)).toBeDefined()
 
-    // One request covers the month in any zone: from now to the UTC month's end plus 14 hours.
+    // One request covers the month in any zone: from now to the UTC month's end plus 14 hours
+    // and the meeting's length.
     const requests = api.to('GET /api/v1/public/ada/intro/slots')
     expect(requests).toHaveLength(1)
     const query = new URL(requests[0]?.path ?? '', 'http://x').searchParams
     expect(query.get('start')).toBe('2026-11-01T04:30:00.000Z')
-    expect(query.get('end')).toBe('2026-12-01T14:00:00.000Z')
+    expect(query.get('end')).toBe('2026-12-01T14:30:00.000Z')
   })
 
   it('regroups the same slots for a zone far from UTC without asking again', async () => {
@@ -168,6 +169,77 @@ describe('the booking page', () => {
     await user.keyboard('{Enter}')
     expect(slotButtons()).toEqual(['5:30 AM', '9:00 AM', '10:30 PM'])
   })
+
+  it('keeps a long meeting that starts on the month’s last day in a zone behind UTC', async () => {
+    const user = userEvent.setup()
+    env.zone = 'Pacific/Pago_Pago' // UTC-11
+    env.now = Date.parse('2026-11-20T00:00:00Z')
+    // 09:00–17:00 UTC on December 1 starts at 22:00 on November 30 in Pago Pago.
+    fakeApi(eventRoutes({ ...EVENT, durationMinutes: 480 }, ['2026-12-01T09:00:00Z']))
+    renderApp('/ada/intro')
+    await user.click(await day('Monday, November 30, available'))
+    expect(slotButtons()).toEqual(['10:00 PM'])
+    // December does not show it again on its UTC day.
+    await user.click(screen.getByRole('button', { name: 'Next month' }))
+    expect(await screen.findByRole('heading', { name: 'December 2026' })).toBeDefined()
+    expect(await day('Tuesday, December 1, no times available')).toBeDefined()
+  })
+
+  it('keeps a meeting that starts on the 1st far ahead of UTC, still the month before there', async () => {
+    const user = userEvent.setup()
+    env.zone = 'Pacific/Kiritimati' // UTC+14
+    env.now = Date.parse('2026-11-25T00:00:00Z')
+    fakeApi(
+      eventRoutes({ ...EVENT, durationMinutes: 480 }, [
+        '2026-11-30T09:00:00Z', // 23:00 on November 30 there
+        '2026-11-30T10:00:00Z', // 00:00 on December 1 there
+      ]),
+    )
+    renderApp('/ada/intro')
+    await user.click(await day('Monday, November 30, available'))
+    expect(slotButtons()).toEqual(['11:00 PM'])
+    await user.click(screen.getByRole('button', { name: 'Next month' }))
+    await user.click(await day('Tuesday, December 1, available'))
+    expect(slotButtons()).toEqual(['12:00 AM'])
+  })
+
+  it.each([
+    // fa-IR defaults to the Persian calendar (2 November 2026 is 11 Aban 1405), th-TH to the
+    // Buddhist era (2569); the grid and every label must show the same Gregorian days.
+    ['fa-IR', 'نوامبر ۲۰۲۶', '۲', 'دوشنبه ۲ نوامبر ۲۰۲۶', /آبان|۱۴۰۵/],
+    ['th-TH', 'พฤศจิกายน 2026', '2', 'วันจันทร์ที่ 2 พฤศจิกายน 2026', /2569/],
+  ])(
+    'labels days in the Gregorian calendar for %s, from the grid to the confirmation',
+    async (locale, month, digit, date, otherCalendar) => {
+      const user = userEvent.setup()
+      env.locale = locale
+      fakeApi({
+        ...eventRoutes(EVENT, DST_SLOTS),
+        'POST /api/v1/public/ada/intro/bookings': () =>
+          json(201, { booking: booking(), manageToken: TOKEN }),
+      })
+      renderApp('/ada/intro')
+      expect(await screen.findByRole('heading', { name: month })).toBeDefined()
+      const nov2 = await waitFor(() => {
+        const button = document.querySelector<HTMLButtonElement>('[data-day="2026-11-02"]')
+        expect(button?.getAttribute('aria-label')).toMatch(/available$/)
+        return button as HTMLButtonElement
+      })
+      expect(nov2.textContent).toBe(digit)
+      expect(nov2.getAttribute('aria-label')).toContain(month.split(' ')[0])
+      await user.click(nov2)
+      expect(document.querySelector('.slots-day')?.textContent).toContain(month.split(' ')[0])
+      const times = within(screen.getByRole('list', { name: /^Times on/ })).getAllByRole('button')
+      await user.click(times[1] as HTMLElement) // 14:00 UTC
+      expect(document.body.textContent).toContain(date)
+      await user.type(screen.getByLabelText('Your name'), 'Grace Hopper')
+      await user.type(screen.getByLabelText('Email'), 'grace@example.com')
+      await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+      expect(await screen.findByRole('heading', { name: 'You’re booked' })).toBeDefined()
+      expect(document.body.textContent).toContain(date)
+      expect(document.body.textContent).not.toMatch(otherCalendar)
+    },
+  )
 
   it('moves on to the next month when this one has nothing left, and says so when none has', async () => {
     fakeApi(eventRoutes(EVENT, ['2026-12-15T15:00:00Z']))

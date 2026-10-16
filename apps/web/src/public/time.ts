@@ -5,15 +5,27 @@ import { type DateKey, toDateKey } from './calendar.ts'
 
 const cache = new Map<string, Intl.DateTimeFormat>()
 
-/** A cached Intl.DateTimeFormat: creating one is slow, and the pages format a lot. */
+/**
+ * A cached Intl.DateTimeFormat: creating one is slow, and the pages format a lot. Always the
+ * Gregorian calendar, whatever the locale's default (Persian for fa-IR, Buddhist for th-TH):
+ * the month grid, the slots and the API's dates are Gregorian, so a label in another calendar
+ * would name a different day and month than the grid shows. The locale still decides the
+ * language, the order and the digits (the grid writes its day numbers with the same digits,
+ * see formatDayNumber).
+ */
 function formatter(locale: string, options: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
   const key = `${locale}|${JSON.stringify(options)}`
   let f = cache.get(key)
   if (!f) {
-    f = new Intl.DateTimeFormat(locale, options)
+    f = new Intl.DateTimeFormat(locale, { ...options, calendar: 'gregory' })
     cache.set(key, f)
   }
   return f
+}
+
+/** A calendar date's day of the month, in the locale's digits (`1`, or `۱` in fa-IR). */
+export function formatDayNumber(key: DateKey, locale: string): string {
+  return formatDateKey(key, locale, { day: 'numeric' })
 }
 
 export interface WallTime {

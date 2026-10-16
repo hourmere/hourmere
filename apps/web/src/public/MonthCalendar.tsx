@@ -11,7 +11,7 @@ import {
   weekdayOf,
   type YearMonth,
 } from './calendar.ts'
-import { formatDateKey, formatMonth } from './time.ts'
+import { formatDateKey, formatDayNumber, formatMonth } from './time.ts'
 
 interface MonthCalendarProps {
   month: YearMonth
@@ -189,7 +189,7 @@ export function MonthCalendar({
                         if (isAvailable) onSelect(day)
                       }}
                     >
-                      {Number(day.slice(8))}
+                      {formatDayNumber(day, locale)}
                     </button>
                   </td>
                 )

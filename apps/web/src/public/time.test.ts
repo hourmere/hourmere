@@ -1,6 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import { addMonths, firstDayOfWeek, monthGrid, sameDayIn } from './calendar.ts'
-import { dateKeyIn, formatDuration, formatTime, instantOf, offsetLabel, wallTime } from './time.ts'
+import { monthRequestRange } from './SlotPicker.tsx'
+import {
+  dateKeyIn,
+  formatDate,
+  formatDayNumber,
+  formatDuration,
+  formatMonth,
+  formatTime,
+  instantOf,
+  offsetLabel,
+  wallTime,
+} from './time.ts'
 
 const at = (iso: string) => Date.parse(iso)
 /** Intl puts narrow no-break spaces in some times ("9:00 AM"); compare with plain spaces. */
@@ -65,6 +76,19 @@ describe('wall-clock time in a zone', () => {
 })
 
 describe('formatting', () => {
+  it('labels dates in the Gregorian calendar, with the locale’s language and digits', () => {
+    const nov1 = at('2026-11-01T12:00:00Z')
+    // fa-IR defaults to the Persian calendar (1 November 2026 is 10 Aban 1405).
+    expect(formatMonth(2026, 11, 'fa-IR')).toBe('نوامبر ۲۰۲۶')
+    expect(formatDate(nov1, 'UTC', 'fa-IR')).toBe('یکشنبه ۱ نوامبر ۲۰۲۶')
+    expect(formatDayNumber('2026-11-01', 'fa-IR')).toBe('۱')
+    // th-TH defaults to the Buddhist era (2569).
+    expect(formatMonth(2026, 11, 'th-TH')).toBe('พฤศจิกายน 2026')
+    expect(formatDate(nov1, 'UTC', 'th-TH')).toBe('วันอาทิตย์ที่ 1 พฤศจิกายน 2026')
+    expect(formatDayNumber('2026-11-01', 'th-TH')).toBe('1')
+    expect(formatDayNumber('2026-11-01', 'en-US')).toBe('1')
+  })
+
   it('writes times with 12 or 24 hours as the locale does', () => {
     const instant = at('2026-11-02T14:05:00Z')
     expect(plain(formatTime(instant, 'UTC', 'en-US'))).toBe('2:05 PM')
@@ -79,6 +103,32 @@ describe('formatting', () => {
     expect(formatDuration(15)).toBe('15 min')
     expect(formatDuration(60)).toBe('1 h')
     expect(formatDuration(90)).toBe('1 h 30 min')
+  })
+})
+
+describe('a month’s slots request', () => {
+  const nov = { year: 2026, month: 11 }
+  const iso = ({ start, end }: { start: number; end: number }) => ({
+    start: new Date(start).toISOString(),
+    end: new Date(end).toISOString(),
+  })
+
+  it('covers every slot starting in the month in any zone, however long', () => {
+    // 30 minutes: the UTC month widened by 14 hours and the meeting's length.
+    expect(iso(monthRequestRange(nov, 30, 0))).toEqual({
+      start: '2026-10-31T09:30:00.000Z',
+      end: '2026-12-01T14:30:00.000Z',
+    })
+    // A day-long meeting at 23:00 on November 30 in Pago Pago (UTC-11) ends on December 2.
+    const range = monthRequestRange(nov, 1440, 0)
+    expect(range.end).toBeGreaterThanOrEqual(at('2026-12-01T10:00:00Z') + 1440 * 60_000)
+    // A meeting at 00:00 on November 1 in Kiritimati (UTC+14) starts on October 31 in UTC.
+    expect(range.start).toBeLessThanOrEqual(at('2026-10-31T10:00:00Z'))
+    // Within the API's 62 days, and never before now.
+    expect((range.end - range.start) / 86_400_000).toBeLessThan(62)
+    expect(monthRequestRange(nov, 30, at('2026-11-20T00:00:00Z')).start).toBe(
+      at('2026-11-20T00:00:00Z'),
+    )
   })
 })
 

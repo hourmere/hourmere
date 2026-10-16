@@ -17,9 +17,29 @@ import { dateKeyIn, formatDateKey, formatTime } from './time.ts'
 const MONTHS_AHEAD = 24
 /** Months skipped automatically when the first one shown has nothing left. */
 const AUTO_ADVANCE = 2
-// UTC offsets lie within -12 and +14 hours: a month in any zone falls inside the UTC month
-// widened by 14 hours on each side, so one request covers it whatever zone is picked later.
+// UTC offsets lie within -12 and +14 hours, so 14 hours either way covers every zone.
 const ZONE_MARGIN = 14 * 3_600_000
+
+/**
+ * What one month's slots request asks for: every slot that starts in the month in any zone
+ * (so changing the zone never needs another request), however long it is. The API returns
+ * only slots that lie fully inside the range, so the UTC month is widened by the largest zone
+ * offset plus the meeting's length on both sides: an 8-hour meeting at 09:00 UTC on the 1st
+ * starts on the last day of the month before in Pago Pago (UTC-11) and ends after the
+ * 14-hour margin. Slots are then sorted into days by their start in the chosen zone, and
+ * those of other months left out. Nothing before `now` is asked for.
+ */
+export function monthRequestRange(
+  { year, month }: YearMonth,
+  durationMinutes: number,
+  now: number,
+): { start: number; end: number } {
+  const margin = ZONE_MARGIN + durationMinutes * 60_000
+  return {
+    start: Math.max(Date.UTC(year, month - 1, 1) - margin, now),
+    end: Date.UTC(year, month, 1) + margin,
+  }
+}
 
 type Loaded =
   | { status: 'loading' }
@@ -97,9 +117,7 @@ export function SlotPicker({
 
   useEffect(() => {
     const controller = new AbortController()
-    const { year: y, month: m } = month
-    const start = Math.max(Date.UTC(y, m - 1, 1) - ZONE_MARGIN, now)
-    const end = Date.UTC(y, m, 1) + ZONE_MARGIN
+    const { start, end } = monthRequestRange(month, durationMinutes, now)
     if (end <= start) {
       setLoaded({ request, status: 'ready', slots: [] })
       return

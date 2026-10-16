@@ -21,6 +21,7 @@ vi.mock('./env.ts', async (importOriginal) => ({
 
 beforeEach(() => {
   env.zone = 'America/New_York'
+  env.locale = 'en-US'
   env.now = Date.parse('2026-11-01T04:30:00Z')
 })
 afterEach(() => {
@@ -384,6 +385,34 @@ describe('the invitee’s manage page', () => {
     await user.click(screen.getByRole('button', { name: 'Cancel booking' }))
     expect(await screen.findByText('This booking was already cancelled.')).toBeDefined()
     expect(screen.getByRole('heading', { name: 'Cancelled booking' })).toBeDefined()
+  })
+
+  it('offers a long meeting at the month boundary for rescheduling, in a zone behind UTC', async () => {
+    const user = userEvent.setup()
+    env.zone = 'Pacific/Pago_Pago'
+    env.now = Date.parse('2026-11-20T00:00:00Z')
+    const long = {
+      ...managed({ start: '2026-11-24T09:00:00.000Z', end: '2026-11-24T17:00:00.000Z' }),
+      eventType: { title: 'Workshop', durationMinutes: 480 },
+    }
+    manageServer(long, {
+      more: { 'GET /api/v1/bookings/manage/slots': slotsAnswer(['2026-12-01T09:00:00Z'], 480) },
+    })
+    renderApp(`/booking#token=${TOKEN}&action=reschedule`)
+    await user.click(await screen.findByRole('button', { name: 'Monday, November 30, available' }))
+    expect(
+      within(screen.getByRole('list', { name: /^Times on/ }))
+        .getAllByRole('button')
+        .map((b) => plain(b.textContent)),
+    ).toEqual(['10:00 PM'])
+  })
+
+  it('shows the booking in the Gregorian calendar whatever the locale’s default', async () => {
+    env.locale = 'fa-IR'
+    manageServer()
+    renderApp(`/booking#token=${TOKEN}`)
+    expect(await screen.findByText(/دوشنبه ۲ نوامبر ۲۰۲۶/)).toBeDefined()
+    expect(document.body.textContent).not.toMatch(/آبان|۱۴۰۵/)
   })
 
   it('parses the fragment strictly', () => {
