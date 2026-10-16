@@ -102,8 +102,18 @@ const validationHook: Hook<unknown, Env, string, unknown> = (result, c) => {
   return c.json({ error: 'invalid_request', message }, 400)
 }
 
-/** Logs requests without query strings: sign-in links and OAuth callbacks carry secrets there. */
-const requestLogger = logger((line, ...rest) => console.log(line.replace(/\?\S*/, ''), ...rest))
+// Hono's terminal colors (ESC sequences around the status); the one-line console would
+// print them as visible escapes.
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matching the ESC character is the point
+const COLORS = /\u001b\[[0-9;]*m/g
+
+/**
+ * Logs requests without query strings (sign-in links and OAuth callbacks carry secrets
+ * there) and without colors.
+ */
+const requestLogger = logger((line, ...rest) =>
+  console.log(line.replace(/\?\S*/, '').replace(COLORS, ''), ...rest),
+)
 
 export function createApp({
   checkDb,

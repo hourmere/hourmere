@@ -1,8 +1,10 @@
 import { inspect } from 'node:util'
 
-// C0 and C1 control characters plus the Unicode line and paragraph separators.
+// C0 and C1 control characters, the Unicode line and paragraph separators, and the bidi
+// embedding, override and isolate characters (which can make a log line read differently
+// from what it contains).
 // biome-ignore lint/suspicious/noControlCharactersInRegex: finding control characters is the point
-const CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g
+const CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g
 const NAMED: Record<string, string> = { '\n': '\\n', '\r': '\\r', '\t': '\\t' }
 
 /**

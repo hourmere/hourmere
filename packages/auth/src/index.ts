@@ -102,11 +102,19 @@ export function createAuth({
     account: { encryptOAuthTokens: true },
     // Passwordless: email magic links and social sign-in only (emailAndPassword stays off).
     // Sign-in asks only for identity; calendar access is a separate connection.
+    //
+    // requireEmailVerification: no session for an account whose email is not verified, on
+    // sign-in as well as sign-up. New accounts are verified by construction (see the user
+    // hook below), but an old unverified account's provider login could otherwise finish
+    // after its real owner proved the address (which revokes sessions) and hand out a fresh
+    // session in what is now the owner's verified account. Better Auth checks the account as
+    // it loaded it at the start of the login.
     socialProviders: {
       ...(google && {
         google: {
           clientId: google.clientId,
           clientSecret: google.clientSecret,
+          requireEmailVerification: true,
           ...socialProviderOptions.google,
         },
       }),
@@ -119,6 +127,7 @@ export function createAuth({
           // The photo needs the Graph User.Read scope; Better Auth would store it in the user
           // row as a data URL.
           disableProfilePhoto: true,
+          requireEmailVerification: true,
           ...socialProviderOptions.microsoft,
         },
       }),
