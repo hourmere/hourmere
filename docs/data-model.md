@@ -51,6 +51,7 @@ types in `packages/db/src/tables.ts` are generated from the migrated database.
 | `booking_hosts` | organization | Hosts of a booking; carries the anti-double-booking constraint |
 | `booking_attendees` | organization | The invitee who booked plus guests |
 | `booking_calendar_events` | organization | The event each booking wrote to a host calendar, for idempotent updates and cancellation |
+| `booking_notifications` | organization | Each email sent about a booking (kind, recipient), so a retried job never sends it twice; the SHA-256 of the manage-link secret an invitee email carried |
 
 ## Guarantees and why
 
@@ -73,7 +74,15 @@ types in `packages/db/src/tables.ts` are generated from the migrated database.
 - **Agent audit trail.** `bookings.source` and `bookings.api_key_id` record whether a
   person or an agent made the booking, and with which key.
 - **Invitee links without accounts.** Reschedule/cancel links carry a random secret; only
-  its SHA-256 (`manage_token_hash`) is stored.
+  its SHA-256 is stored: `bookings.manage_token_hash` for the one the booking API returns,
+  `booking_notifications.manage_token_hash` for the one each invitee email carries (minted
+  when the email is sent, so no raw secret ever sits in the job queue). Each stays valid as
+  long as the booking exists. See [notifications.md](notifications.md).
+- **An email is sent once.** A notification job inserts its `booking_notifications` row
+  (primary key: booking, kind, recipient) and keeps that transaction open while the mail
+  server takes the email: a failed send rolls the row back for the retry, a concurrent
+  attempt waits on the row and skips. The row's foreign key to the booking is checked at
+  commit (deferred), so the open transaction never locks the booking against a cancel.
 - **Credentials at rest.** Calendar tokens and CalDAV passwords are stored only as
   ciphertext (`calendar_connections.credentials`), with the key from the environment.
 - **History survives edits.** Event types are soft-deleted; bookings keep their
@@ -142,8 +151,11 @@ Validated by the application (zod), not by the database:
 | Group events (seats) | Move `manage_token_hash` and `responses` from bookings to attendees |
 | Year 2 (enterprise) | Better Auth `sso`; `audit_events` |
 
-Background jobs (reminders, calendar sync, webhook retries) use pg-boss, which manages its
-own `pgboss` schema.
+Background jobs (notification emails and reminders now; calendar sync and webhook retries
+later) use pg-boss (`@hourmere/jobs`), which keeps its queue in its own `pgboss` schema and
+installs and upgrades it itself (on start, or with `npm run db:migrate` when
+`AUTO_MIGRATE=false`). Our migration runner never touches that schema, `db:types` leaves it
+out, and nothing of ours references its tables.
 
 ## Changing the schema
 

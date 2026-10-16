@@ -153,6 +153,14 @@ export interface BookingHosts {
   user_id: string;
 }
 
+export interface BookingNotifications {
+  booking_id: string;
+  kind: string;
+  manage_token_hash: Buffer | null;
+  recipient: string;
+  sent_at: Generated<Timestamp>;
+}
+
 export interface Bookings {
   api_key_id: string | null;
   cancel_reason: string | null;
@@ -282,6 +290,7 @@ export interface DB {
   booking_attendees: BookingAttendees;
   booking_calendar_events: BookingCalendarEvents;
   booking_hosts: BookingHosts;
+  booking_notifications: BookingNotifications;
   bookings: Bookings;
   calendar_busy: CalendarBusy;
   calendar_connections: CalendarConnections;
