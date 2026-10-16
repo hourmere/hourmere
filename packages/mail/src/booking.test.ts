@@ -58,7 +58,9 @@ describe('formatMeetingTime', () => {
   it('names both dates when the meeting crosses midnight', () => {
     expect(
       formatMeetingTime(at('2026-10-20T21:30:00Z'), at('2026-10-20T22:30:00Z'), 'Europe/Berlin'),
-    ).toBe('Tuesday, October 20, 2026, 11:30 PM – Wednesday, October 21, 2026, 12:30 AM (Europe/Berlin)')
+    ).toBe(
+      'Tuesday, October 20, 2026, 11:30 PM – Wednesday, October 21, 2026, 12:30 AM (Europe/Berlin)',
+    )
   })
 
   it('follows daylight saving time', () => {
@@ -108,16 +110,24 @@ describe('bookingEmail', () => {
   })
 
   it("tells the host in the host's zone, with the invitee's answers and no manage links", () => {
-    const m = bookingEmail('confirmed', { ...meeting, guests: [{ name: 'Charles', email: 'cb@example.com' }] }, host)
+    const m = bookingEmail(
+      'confirmed',
+      { ...meeting, guests: [{ name: 'Charles', email: 'cb@example.com' }] },
+      host,
+    )
     expect(m.to).toBe('grace@example.com')
     expect(m.subject).toBe(
       'New booking: Intro call with Ada Lovelace on Tue, Oct 20, 4:00 AM (America/New_York)',
     )
     expect(m.text).toContain('Ada Lovelace booked a meeting with you.')
-    expect(m.text).toContain('When: Tuesday, October 20, 2026, 4:00 AM – 4:30 AM (America/New_York)')
+    expect(m.text).toContain(
+      'When: Tuesday, October 20, 2026, 4:00 AM – 4:30 AM (America/New_York)',
+    )
     expect(m.text).toContain('Invitee: Ada Lovelace <ada@example.com>')
     expect(m.text).toContain('Guests: Charles <cb@example.com>')
-    expect(m.text).toContain('Answers\nWhat should we talk about?\n  Engines.\n  Analytical ones.\nPhone\n  +44 20 7946 0000')
+    expect(m.text).toContain(
+      'Answers\nWhat should we talk about?\n  Engines.\n  Analytical ones.\nPhone\n  +44 20 7946 0000',
+    )
     expect(m.text).not.toContain('token=')
     expect(m.html).toContain('Engines.<br>Analytical ones.')
     expect(m.html).not.toContain('token=')
@@ -126,7 +136,10 @@ describe('bookingEmail', () => {
   it('shows the old time of a rescheduled meeting', () => {
     const m = bookingEmail(
       'rescheduled',
-      { ...meeting, previous: { start: at('2026-10-19T08:00:00Z'), end: at('2026-10-19T08:30:00Z') } },
+      {
+        ...meeting,
+        previous: { start: at('2026-10-19T08:00:00Z'), end: at('2026-10-19T08:30:00Z') },
+      },
       invitee,
     )
     expect(m.subject).toBe(
@@ -169,7 +182,9 @@ describe('bookingEmail', () => {
 
   it('shows each kind of location', () => {
     const where = (location: BookingEmailMeeting['location']) =>
-      bookingEmail('confirmed', { ...meeting, location }, invitee).text.match(/^Where: .*(\n  .*)*/m)?.[0]
+      bookingEmail('confirmed', { ...meeting, location }, invitee).text.match(
+        /^Where: .*(\n {2}.*)*/m,
+      )?.[0]
     expect(where({ kind: 'phone', number: '+1 555 0100' })).toBe('Where: Phone +1 555 0100')
     expect(where({ kind: 'address', address: '1 Main St\nSpringfield' })).toBe(
       'Where: 1 Main St\n  Springfield',
@@ -242,7 +257,9 @@ describe('bookingEmail', () => {
     it('keeps one-line fields from starting lines of their own in the text', () => {
       const { text } = bookingEmail('confirmed', hostile, host)
       expect(text).not.toMatch(/^(Reschedule|Cancel|Bcc): /m)
-      expect(text).toContain("Invitee: Ada Reschedule: https://evil.example/'x' Cancel: https://evil.example <ada@example.com>")
+      expect(text).toContain(
+        "Invitee: Ada Reschedule: https://evil.example/'x' Cancel: https://evil.example <ada@example.com>",
+      )
     })
 
     it('loads nothing from elsewhere', () => {

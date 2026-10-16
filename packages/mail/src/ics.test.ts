@@ -97,9 +97,7 @@ describe('buildIcs', () => {
     expectWellFormed(ics)
     const lines = contentLines(ics)
     expect(lines).toContain('SUMMARY:a\\,b\\;c\\\\d')
-    expect(lines).toContain(
-      'DESCRIPTION:line 1\\nline 2\\nline 3\\nline 4\\\\n is not a break',
-    )
+    expect(lines).toContain('DESCRIPTION:line 1\\nline 2\\nline 3\\nline 4\\\\n is not a break')
     expect(lines).toContain('LOCATION:Room 1\\, Floor 2\\; Building \\\\ A')
     const { event } = parse(ics)
     expect(event.getFirstPropertyValue('summary')).toBe('a,b;c\\d')
@@ -115,6 +113,7 @@ describe('buildIcs', () => {
       summary: 'bell\u0007 nul\u0000 esc\u001b del\u007f sep\u2028 bidi\u202e tab\tend',
     })
     expectWellFormed(ics)
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: checking they are gone is the point
     expect(ics).not.toMatch(/[\u0000\u0007\u001b\u007f\u2028\u202e]/)
     // A line separator is a line break; the bidi override is dropped.
     expect(parse(ics).event.getFirstPropertyValue('summary')).toBe(
