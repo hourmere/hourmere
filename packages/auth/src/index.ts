@@ -93,6 +93,12 @@ export interface AuthConfig {
 const MAGIC_LINK_MINUTES = 5
 
 /**
+ * The web app's sign-in page (apps/web; keep the two in step). It shows a message for the
+ * ?error=CODE that Better Auth adds when it sends people back.
+ */
+const SIGN_IN_PATH = '/sign-in'
+
+/**
  * The only header Better Auth reads the client IP from (rate limiting, session records).
  * The server sets it from the TCP peer and trusted proxies and drops any value a client sends.
  */
@@ -122,9 +128,18 @@ export function createAuth({
       ipAddress: { ipAddressHeaders: [CLIENT_IP_HEADER] },
     },
     logger: { log: betterAuthLog },
-    // Unexpected errors go to the caller (the server's error handler logs them on one escaped
-    // line) instead of being printed raw by Better Auth's router.
-    onAPIError: { throw: true },
+    onAPIError: {
+      // Unexpected errors go to the caller (the server's error handler logs them on one
+      // escaped line) instead of being printed raw by Better Auth's router.
+      throw: true,
+      // Where sign-in failures go when Better Auth does not know the app's errorCallbackURL,
+      // e.g. an OAuth callback whose state is missing or forged (or expired, for a sign-in
+      // started without one): the app's sign-in page, which explains the code, instead of
+      // Better Auth's own error page. A fixed URL on our origin, so nothing in the request can
+      // point it elsewhere; Better Auth adds only ?error=CODE (and error_description, which
+      // the page never shows).
+      errorURL: new URL(SIGN_IN_PATH, baseURL).href,
+    },
     // Sign-in providers' OAuth tokens are stored encrypted, not in plain text.
     account: { encryptOAuthTokens: true },
     // Passwordless: email magic links and social sign-in only (emailAndPassword stays off).

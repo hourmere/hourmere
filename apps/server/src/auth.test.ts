@@ -1628,6 +1628,106 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
       expect((await socialSignIn(google, 'google')).status).toBe(200)
     })
 
+    describe('failures Better Auth cannot send back to where the app asked', () => {
+      const withGoogle = () => instance(origin, { socialProviders: { google: client } })
+      const signInPage = (error: string) => `${origin}/sign-in?error=${error}`
+
+      /** Starts Google sign-in; returns the OAuth state and the cookie that goes with it. */
+      async function startGoogle(i: Instance, redirects: Record<string, string>) {
+        const res = await i.app.request('/api/auth/sign-in/social', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ provider: 'google', ...redirects }),
+        })
+        expect(res.status).toBe(200)
+        const { url } = (await res.json()) as { url: string }
+        return { state: new URL(url).searchParams.get('state'), cookie: cookieHeader(res) }
+      }
+
+      it("land on the app's sign-in page when the OAuth state is missing or forged", async () => {
+        const { app } = withGoogle()
+        const lines = await printedLines(async () => {
+          for (const [path, error] of [
+            ['/api/auth/callback/google?code=abc', 'state_not_found'],
+            ['/api/auth/callback/google?state=forged&code=abc', 'state_mismatch'],
+            // What the provider says is not believed without a valid state either.
+            [
+              '/api/auth/callback/google?state=forged&error=access_denied&error_description=%3Cb%3EHi%3C%2Fb%3E',
+              'state_mismatch',
+            ],
+          ] as const) {
+            const res = await app.request(path)
+            expect(res.status, path).toBe(302)
+            expect(res.headers.get('location'), path).toBe(signInPage(error))
+            expect(cookieHeader(res), path).not.toContain('session_token')
+          }
+        })
+        // Better Auth logs each, on one line.
+        expect(lines.filter((l) => l.includes('[Better Auth]'))).toHaveLength(3)
+      })
+
+      it('land on the sign-in page when the OAuth state has expired', async () => {
+        const i = withGoogle()
+        // An API client that gave no errorCallbackURL: the sign-in page.
+        const bare = await startGoogle(i, { callbackURL: '/' })
+        // The web app gives one (the sign-in page, remembering where to go): it is used.
+        const app = await startGoogle(i, {
+          callbackURL: '/bookings',
+          errorCallbackURL: '/sign-in?next=%2Fbookings',
+        })
+        const later = Date.now() + 11 * 60 * 1000
+        const now = vi.spyOn(Date, 'now').mockReturnValue(later)
+        try {
+          await printedLines(async () => {
+            const res = await i.app.request(
+              `/api/auth/callback/google?state=${bare.state}&code=abc`,
+              { headers: { cookie: bare.cookie } },
+            )
+            expect(res.headers.get('location')).toBe(signInPage('state_mismatch'))
+            const fromApp = await i.app.request(
+              `/api/auth/callback/google?state=${app.state}&code=abc`,
+              { headers: { cookie: app.cookie } },
+            )
+            expect(fromApp.headers.get('location')).toBe(
+              '/sign-in?next=%2Fbookings&error=state_mismatch',
+            )
+          })
+        } finally {
+          now.mockRestore()
+        }
+      })
+
+      it("redirect Better Auth's own error page there, with nothing but a code-like error", async () => {
+        const plain = await main.app.request('/api/auth/error?error=state_mismatch')
+        expect(plain.status).toBe(302)
+        expect(plain.headers.get('location')).toBe(signInPage('state_mismatch'))
+
+        const hostile = await main.app.request(
+          '/api/auth/error?error=%3Cscript%3Ealert(1)%3C%2Fscript%3E&error_description=Call+555-0100&errorURL=https%3A%2F%2Fevil.example',
+          { headers: { host: 'evil.example' } },
+        )
+        expect(hostile.status).toBe(302)
+        expect(hostile.headers.get('content-type')).toBeNull()
+        const location = new URL(hostile.headers.get('location') as string)
+        // Always our sign-in page, whatever the request says.
+        expect(`${location.origin}${location.pathname}`).toBe(`${origin}/sign-in`)
+        expect(location.searchParams.get('error')).toBe('UNKNOWN')
+        // The description rides along URL-encoded; the sign-in page never shows it.
+        expect([...location.searchParams.keys()]).toEqual(['error', 'error_description'])
+      })
+
+      it('get the security headers, as every response does', async () => {
+        const res = await main.app.request('/api/auth/callback/google?code=abc')
+        expect(res.status).toBe(302)
+        expect(res.headers.get('x-content-type-options')).toBe('nosniff')
+        expect(res.headers.get('x-frame-options')).toBe('DENY')
+        expect(res.headers.get('referrer-policy')).toBe('strict-origin-when-cross-origin')
+        const session = await main.app.request('/api/auth/get-session')
+        expect(session.status).toBe(200)
+        expect(session.headers.get('x-content-type-options')).toBe('nosniff')
+      })
+    })
+
     it('makes invitations require a proven email address', () => {
       const org = main.auth.options.plugins.find((p) => p.id === 'organization') as {
         options?: { requireEmailVerificationOnInvitation?: boolean }
