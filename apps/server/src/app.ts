@@ -8,7 +8,7 @@ import type { Context, Env } from 'hono'
 import { createMiddleware } from 'hono/factory'
 import { HTTPException } from 'hono/http-exception'
 import { logger } from 'hono/logger'
-import { apiBodyLimit } from './body-limit.ts'
+import { apiBodyLimit, checkBodyAsRead } from './body-limit.ts'
 import { requireCaller } from './caller.ts'
 import { clientIp, withClientIp } from './client-ip.ts'
 import type { McpModule } from './mcp/endpoint.ts'
@@ -120,28 +120,35 @@ const JSON_CONTENT_TYPE = /^application\/([a-z0-9.+-]+\+)?json/i
 
 /**
  * Defense in depth for every /api/v1 route, present and future: a JSON body with NUL or
- * malformed Unicode anywhere is refused before any route sees it. Services still check each
- * field's text with specific codes. Malformed JSON is left to the route's validator.
- * Hono keeps the body text, so the route can still read it.
+ * malformed Unicode anywhere is refused when it is read, so no route gets to use it. The
+ * check rides along as the route reads the body (checkBodyAsRead) instead of reading it up
+ * front, which would happen before the route authenticates the caller. Services still check
+ * each field's text with specific codes. Malformed JSON is left to the route's validator.
  */
 const jsonTextGuard = createMiddleware(async (c, next) => {
   if (!JSON_CONTENT_TYPE.test(c.req.header('content-type') ?? '')) return next()
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(await c.req.text())
-  } catch {
-    return next()
-  }
-  if (hasUnsafeJsonText(parsed)) {
-    return c.json(
-      {
-        error: 'invalid_request',
-        message: 'Text in the request must not contain NUL characters or malformed Unicode',
-      },
-      400,
-    )
-  }
-  await next()
+  const decoder = new TextDecoder()
+  let text = ''
+  return checkBodyAsRead(c, next, {
+    chunk(bytes) {
+      text += decoder.decode(bytes, { stream: true })
+    },
+    end() {
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(text + decoder.decode())
+      } catch {
+        return
+      } finally {
+        text = ''
+      }
+      if (hasUnsafeJsonText(parsed)) {
+        throw new HTTPException(400, {
+          message: 'Text in the request must not contain NUL characters or malformed Unicode',
+        })
+      }
+    },
+  })
 })
 
 /**
@@ -216,12 +223,15 @@ export function createApp({
   app.use('/api/*', clientIp(trustedProxies))
   // First on /api/v1, so it also covers what the middleware below and onError answer.
   app.use('/api/v1/*', noStoreByDefault)
-  // 64 KB unless the route declares more (routeBodyLimit); before anything reads the body.
+  // 64 KB unless the route declares more (routeBodyLimit). A Content-Length over the limit
+  // gets 413 here; any other body is counted while whoever needs it reads it, so the size
+  // check precedes every read without reading anything itself.
   app.use('/api/*', apiBodyLimit())
-  // Routes' rate limits, before anything parses the body: a client over its limit gets 429
-  // without the server reading its JSON.
+  // Routes' rate limits. Neither they nor the route's authentication read the body: a client
+  // over its limit gets 429, an unknown one 401, before the server reads what it sends.
   app.use('/api/v1/*', routeRateLimits())
-  // Not /api/auth: Better Auth reads the raw request body itself.
+  // Checks the body while the route reads it. Not /api/auth: Better Auth reads the raw
+  // request body itself.
   app.use('/api/v1/*', jsonTextGuard)
   // The MCP endpoint (and anything under it) is logged, body-limited and never cached like
   // /api/v1, 413s included; it applies its own checks.

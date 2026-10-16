@@ -43,6 +43,9 @@ export const callerWithBodyLimit = (
  * - Authenticated routes set both `security: authenticated` (so they are documented) and
  *   `middleware: caller` (which provides `c.var.principal`).
  * - Declare inputs as zod schemas on the route; failures answer 400 `invalid_request`.
+ * - Read the body (the zod schema does) before anything with side effects, and never swallow
+ *   a failed read: the body limit and the JSON text guard refuse a body while it is read
+ *   (see checkBodyAsRead in body-limit.ts).
  * - Call the service layer and let its DomainErrors propagate; createApp maps them.
  */
 export type RouteModule = (shared: { app: OpenAPIHono; caller: CallerMiddleware }) => void

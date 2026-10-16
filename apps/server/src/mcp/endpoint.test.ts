@@ -10,6 +10,7 @@ import { DomainError, type DomainErrorKind } from '@hourmere/scheduling'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { type AppDeps, createApp } from '../app.ts'
+import { CHUNK_SIZE, chunkedBody } from '../chunked-body.ts'
 import { createRateLimiter } from '../rate-limit.ts'
 import { MCP_BODY_LIMIT, mcpEndpoint } from './endpoint.ts'
 import { clip, defineTool, type Tool } from './tools.ts'
@@ -278,6 +279,47 @@ describe('MCP transport', () => {
     expect(res.status).toBe(200)
     expect(await message(res)).toMatchObject({
       id: 3,
+      result: { structuredContent: { outcome: 'ok', caller: 'Ada' } },
+    })
+  })
+
+  it('counts streamed bodies while the SDK reads them, after authentication', async () => {
+    const stream = (body: string, headers: Record<string, string> = {}) => {
+      const sent = chunkedBody(body)
+      const res = app.request(url, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          accept: 'application/json, text/event-stream',
+          ...headers,
+        },
+        ...sent.init,
+      })
+      return { res, pulled: sent.pulled }
+    }
+    const call = (text: string) =>
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: 4,
+        method: 'tools/call',
+        params: { name: 'probe', arguments: { outcome: 'ok', text } },
+      })
+    // No key: refused without reading the body (at most one chunk of read-ahead).
+    const anonymous = stream(call('x'.repeat(1_900_000)))
+    expect((await anonymous.res).status).toBe(401)
+    expect(anonymous.pulled()).toBeLessThanOrEqual(CHUNK_SIZE)
+    // With a key: over the limit is the REST-shaped 413, whatever the SDK made of the read.
+    const tooBig = await stream(call('x'.repeat(MCP_BODY_LIMIT)), {
+      authorization: 'Bearer hm_good',
+    }).res
+    expect(tooBig.status).toBe(413)
+    expect(await tooBig.json()).toEqual({ error: 'payload_too_large' })
+    expect(tooBig.headers.get('cache-control')).toBe('no-store')
+    // Within the limit, the call works.
+    const fits = await stream(call('x'.repeat(1_900_000)), { authorization: 'Bearer hm_good' }).res
+    expect(fits.status).toBe(200)
+    expect(await message(fits)).toMatchObject({
+      id: 4,
       result: { structuredContent: { outcome: 'ok', caller: 'Ada' } },
     })
   })

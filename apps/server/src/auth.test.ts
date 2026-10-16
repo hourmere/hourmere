@@ -21,6 +21,7 @@ import type pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.ts'
 import { requireCaller } from './caller.ts'
+import { chunkedBody } from './chunked-body.ts'
 import { pressConfirmButton } from './sign-in-confirm-testing.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -315,6 +316,28 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
         [body.user.id],
       )
       expect(session.rows).toEqual([{ org: body.organization.id }])
+    })
+
+    it('can be requested with a streamed body, within the 64 KB limit', async () => {
+      const send = (body: string) =>
+        main.app.request('/api/auth/sign-in/magic-link', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          ...chunkedBody(body).init,
+        })
+      const before = outbox.length
+      const small = await send(JSON.stringify({ email: 'streamed@example.com', callbackURL: '/' }))
+      expect(small.status).toBe(200)
+      expect(await small.json()).toEqual({ status: true })
+      await afterSend()
+      expect(outbox.slice(before).map((m) => m.to)).toEqual(['streamed@example.com'])
+      const big = await send(
+        JSON.stringify({ email: 'big@example.com', callbackURL: `/${'x'.repeat(64 * 1024)}` }),
+      )
+      expect(big.status).toBe(413)
+      expect(await big.json()).toEqual({ error: 'payload_too_large' })
+      await afterSend()
+      expect(outbox.slice(before).map((m) => m.to)).toEqual(['streamed@example.com'])
     })
 
     it('sends the link as plain text and HTML', async () => {

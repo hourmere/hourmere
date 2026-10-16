@@ -1,6 +1,8 @@
+import { randomUUID } from 'node:crypto'
 import type { Db } from '@hourmere/db'
 import { createTestTeam, createTestUser, type TestUser } from '@hourmere/scheduling/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { CHUNK_SIZE, chunkedBody } from '../chunked-body.ts'
 import { EVENT_TYPE_BODY_LIMIT } from './event-types.ts'
 import {
   closedObjects,
@@ -49,6 +51,18 @@ describe('event type routes in the OpenAPI document', () => {
     expect(Object.keys(paths['/api/v1/event-types']?.post?.responses ?? {})).toEqual(
       expect.arrayContaining(['201', '400', '403', '409']),
     )
+  })
+
+  it('refuses an unknown caller without reading its streamed body', async () => {
+    const sent = chunkedBody(JSON.stringify({ slug: 'intro', description: 'x'.repeat(1_900_000) }))
+    const res = await productApp({} as Db).request('/api/v1/event-types', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      ...sent.init,
+    })
+    expect(res.status).toBe(401)
+    // Not the 1.9 MB that the route's 2 MB limit would let through.
+    expect(sent.pulled()).toBeLessThanOrEqual(CHUNK_SIZE)
   })
 })
 
@@ -295,5 +309,34 @@ describe.skipIf(!serverUrl)('event type routes', () => {
       status: 413,
       body: { error: 'payload_too_large' },
     })
+  })
+
+  it('counts streamed bodies against the declared limit', async () => {
+    const user = await createTestUser(t.db)
+    const token = `hm_${randomUUID()}`
+    const app = productApp(t.db, new Map([[token, user.principal]]))
+    const send = (json: string, headers: Record<string, string> = {}) =>
+      app.request('/api/v1/event-types', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${token}`,
+          ...headers,
+        },
+        ...chunkedBody(json).init,
+      })
+    // Under the limit (padded with whitespace, which JSON ignores): handled as usual.
+    const fits = JSON.stringify(body({ slug: 'streamed' })).padEnd(1_900_000, ' ')
+    const created = await send(fits)
+    expect(created.status).toBe(201)
+    expect(await created.json()).toMatchObject({ slug: 'streamed' })
+    const tooLarge = JSON.stringify(body({ description: 'x'.repeat(EVENT_TYPE_BODY_LIMIT) }))
+    const refused = await send(tooLarge)
+    expect(refused.status).toBe(413)
+    expect(await refused.json()).toEqual({ error: 'payload_too_large' })
+    // A Content-Length smaller than the body does not get it past the limit.
+    const lying = await send(tooLarge, { 'content-length': '100' })
+    expect(lying.status).toBe(413)
+    expect(await lying.json()).toEqual({ error: 'payload_too_large' })
   })
 })
