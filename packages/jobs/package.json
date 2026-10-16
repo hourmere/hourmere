@@ -1,0 +1,19 @@
+{
+  "name": "@hourmere/jobs",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "pg-boss": "12.38.0",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@hourmere/db": "*",
+    "kysely": "0.29.6"
+  }
+}
