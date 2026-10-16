@@ -77,7 +77,11 @@ describe('createRateLimiter', () => {
     const hidden = new Hono()
     hidden.use('*', routeRateLimits())
     const wrapped = limit()
-    hidden.get('/x', (c, next) => wrapped(c, next), (c) => c.text('ok'))
+    hidden.get(
+      '/x',
+      (c, next) => wrapped(c, next),
+      (c) => c.text('ok'),
+    )
     expect(await statuses(hidden)).toEqual([200, 200, 429])
   })
 
