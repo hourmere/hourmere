@@ -13,6 +13,7 @@ export interface Call {
   path: string
   /** The parsed JSON body, if any. */
   body: unknown
+  headers: Headers
 }
 
 export type Handler = (call: Call) => Response | Promise<Response>
@@ -41,6 +42,7 @@ export function fakeApi(routes: Routes) {
       method: request.method,
       path: url.pathname + url.search,
       body: text ? JSON.parse(text) : undefined,
+      headers: request.headers,
     }
     calls.push(call)
     const route = `${request.method} ${url.pathname}`

@@ -1,0 +1,100 @@
+import type { ReactNode } from 'react'
+import type { Booking } from './api.ts'
+import { formatDate, formatTimeRange, offsetLabel, zoneName } from './time.ts'
+
+export const LOCATION_LABELS: Record<string, string> = {
+  google_meet: 'Google Meet',
+  zoom: 'Zoom',
+  phone: 'Phone call',
+  in_person: 'In person',
+  link: 'Online meeting',
+}
+
+export const locationLabel = (kind: string) => LOCATION_LABELS[kind] ?? 'To be confirmed'
+
+/** Only http(s) links become clickable: a host-entered value must never run script. */
+function safeUrl(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.href : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** Where a booked meeting happens, with the details the booking reveals (number, address, link). */
+export function LocationDetails({ location }: { location: Booking['location'] }) {
+  if (!location) return <>To be confirmed by the host</>
+  const url = safeUrl(location.url)
+  const number = typeof location.number === 'string' ? location.number : undefined
+  const address = typeof location.address === 'string' ? location.address : undefined
+  return (
+    <>
+      {locationLabel(location.kind)}
+      {number && (
+        <>
+          {': '}
+          <a href={`tel:${number.replace(/[^+\d]/g, '')}`}>{number}</a>
+        </>
+      )}
+      {address && <>: {address}</>}
+      {url && (
+        <>
+          {': '}
+          <a href={url} target="_blank" rel="noopener noreferrer">
+            {url}
+          </a>
+        </>
+      )}
+    </>
+  )
+}
+
+/** The plain-text location for a calendar entry. */
+export function locationText(location: Booking['location']): string | undefined {
+  if (!location) return undefined
+  const detail = [location.number, location.address, location.url].find(
+    (v): v is string => typeof v === 'string' && v !== '',
+  )
+  return detail ? `${locationLabel(location.kind)}: ${detail}` : locationLabel(location.kind)
+}
+
+/** `Tuesday, November 3, 2026, 9:00 – 9:30 AM (Europe/Berlin, GMT+01:00)` in parts. */
+export function When({
+  start,
+  end,
+  timeZone,
+  locale,
+}: {
+  start: string
+  end: string
+  timeZone: string
+  locale: string
+}) {
+  const s = Date.parse(start)
+  const e = Date.parse(end)
+  return (
+    <>
+      <time dateTime={start}>{formatDate(s, timeZone, locale)}</time>
+      <br />
+      {formatTimeRange(s, e, timeZone, locale)}{' '}
+      <span className="muted">
+        ({zoneName(timeZone)}, {offsetLabel(timeZone, s)})
+      </span>
+    </>
+  )
+}
+
+export function DetailList({ items }: { items: [string, ReactNode][] }) {
+  return (
+    <dl className="details booking-details">
+      {items.map(([term, value]) => (
+        <div key={term} className="details-row">
+          <dt>{term}</dt>
+          <dd>{value}</dd>
+        </div>
+      ))}
+    </dl>
+  )
+}

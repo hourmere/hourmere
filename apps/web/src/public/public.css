@@ -1,0 +1,614 @@
+/*
+ * Public pages: booking pages and the invitee's manage page. Mobile first; the design tokens
+ * come from styles.css, so light and dark follow the system as elsewhere. Loaded with these
+ * pages only (Vite splits CSS with the code).
+ */
+
+.public {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  min-height: 100vh;
+}
+
+.public-main {
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: var(--space-5) var(--space-4) var(--space-6);
+}
+
+.public-main-wide {
+  max-width: 1080px;
+}
+
+.public-footer {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-4);
+  opacity: 0.8;
+}
+
+.public-footer .logo-word {
+  font-size: 0.95rem;
+}
+
+.public-card {
+  max-width: none;
+}
+
+.public-card h1 {
+  margin-top: 0;
+}
+
+.optional {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.field-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+@media (prefers-color-scheme: dark) {
+  .field-error {
+    color: #ff9b94; /* 4.5:1 or more on the dark surfaces */
+  }
+}
+
+input[aria-invalid="true"],
+textarea[aria-invalid="true"],
+select[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+textarea {
+  width: 100%;
+  min-height: 96px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-small);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  resize: vertical;
+}
+
+textarea:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 0;
+  border-color: var(--focus);
+}
+
+.struck {
+  text-decoration: line-through;
+}
+
+/* Host page */
+
+.host-header {
+  margin-bottom: var(--space-5);
+}
+
+.event-list {
+  display: grid;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.event-card {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-4) var(--space-5);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  text-decoration: none;
+}
+
+.event-card:hover {
+  border-color: var(--accent);
+}
+
+.event-card-title {
+  color: var(--link);
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.event-card-meta,
+.event-card-description {
+  color: var(--muted);
+}
+
+/* Booking page: the event beside (wide) or above (narrow) the picker or the form */
+
+.booking-layout {
+  display: grid;
+  gap: var(--space-5);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.event-info {
+  padding: var(--space-5) var(--space-5) 0;
+}
+
+.booking-main {
+  min-width: 0;
+  padding: 0 var(--space-4) var(--space-5);
+}
+
+@media (min-width: 900px) {
+  .booking-layout {
+    grid-template-columns: 300px minmax(0, 1fr);
+    gap: 0;
+  }
+
+  .event-info {
+    padding: var(--space-6) var(--space-5);
+    border-right: 1px solid var(--border);
+  }
+
+  .booking-main {
+    padding: var(--space-6) var(--space-5);
+  }
+}
+
+.event-host {
+  margin: 0;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.event-title {
+  margin: var(--space-1) 0 var(--space-3);
+  font-size: 1.5rem;
+}
+
+.event-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  color: var(--muted);
+  list-style: none;
+}
+
+.event-description {
+  white-space: pre-line;
+}
+
+.chosen-time {
+  margin-top: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  background: var(--accent-soft);
+  border-radius: var(--radius-small);
+  color: var(--accent-soft-text);
+}
+
+.chosen-time .muted {
+  color: inherit;
+}
+
+.step-title,
+.picker-title {
+  margin: 0 0 var(--space-4);
+  font-size: 1.2rem;
+}
+
+/* Slot picker: calendar and the chosen day's times side by side from 640px */
+
+.picker-body {
+  display: grid;
+  gap: var(--space-5);
+}
+
+@media (min-width: 640px) {
+  .picker-body {
+    grid-template-columns: minmax(0, 1fr) 200px;
+  }
+}
+
+.calendar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+.calendar-month {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.calendar-nav {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.icon-button:hover:not(:disabled) {
+  background: var(--surface-muted);
+}
+
+.icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.calendar-grid {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 2px;
+  table-layout: fixed;
+}
+
+.calendar-grid th {
+  padding: var(--space-1) 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-align: center;
+}
+
+.calendar-grid td {
+  padding: 0;
+  text-align: center;
+}
+
+.day {
+  position: relative;
+  width: 100%;
+  max-width: 48px;
+  aspect-ratio: 1;
+  min-height: 40px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  cursor: default;
+}
+
+.day-available {
+  background: var(--accent-soft);
+  color: var(--accent-soft-text);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.day-available:hover {
+  outline: 2px solid var(--accent);
+}
+
+.day-selected,
+.day-selected:hover {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.day[aria-current="date"]::after {
+  position: absolute;
+  bottom: 5px;
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentcolor;
+  transform: translateX(-50%);
+  content: "";
+}
+
+.calendar-grid[aria-busy="true"] .day {
+  opacity: 0.55;
+}
+
+.picker-status {
+  min-height: 1.55em;
+  margin: var(--space-2) 0 var(--space-3);
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.picker-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.picker-error p {
+  margin: 0;
+}
+
+.picker-slots {
+  min-height: 120px;
+}
+
+@media (min-width: 640px) {
+  .picker-slots {
+    min-height: 0;
+  }
+
+  .slots {
+    max-height: 420px;
+    overflow-y: auto;
+    padding-right: var(--space-1);
+  }
+}
+
+.slots-day {
+  margin: 0 0 var(--space-3);
+  font-size: 1rem;
+}
+
+.slots {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.slot {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-small);
+  background: var(--surface);
+  color: var(--link);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.slot:hover {
+  background: var(--accent-soft);
+}
+
+.slot-selected,
+.slot-selected:hover {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.slots-placeholder {
+  margin: 0;
+}
+
+/* Time zone */
+
+.tz-picker {
+  margin-top: var(--space-3);
+}
+
+.tz-toggle {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0 var(--space-3);
+  align-items: center;
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.tz-toggle:hover {
+  background: var(--surface-muted);
+}
+
+.tz-caption {
+  grid-column: 1;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.tz-current {
+  grid-column: 1;
+}
+
+.tz-name {
+  font-weight: 600;
+}
+
+.tz-offset {
+  color: var(--muted);
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.tz-change {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  color: var(--link);
+  font-weight: 600;
+}
+
+.tz-panel {
+  margin-top: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  background: var(--surface);
+}
+
+.tz-options {
+  max-height: 260px;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.tz-option {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-small);
+  cursor: pointer;
+}
+
+.tz-option[data-active="true"] {
+  background: var(--accent-soft);
+  color: var(--accent-soft-text);
+}
+
+.tz-option[aria-selected="true"] {
+  font-weight: 700;
+}
+
+.tz-empty {
+  margin: var(--space-2) var(--space-3);
+}
+
+/* Booking form */
+
+.booking-form .guests,
+.booking-form .choices {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.booking-form legend {
+  padding: 0;
+  margin-bottom: var(--space-2);
+  font-weight: 600;
+}
+
+.guest {
+  display: grid;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+}
+
+.guest-remove {
+  justify-self: start;
+}
+
+.choice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  font-weight: 400;
+  cursor: pointer;
+}
+
+.choice input {
+  width: 20px;
+  min-height: 20px;
+  height: 20px;
+  margin: 2px 0 0;
+  flex: none;
+}
+
+/* Confirmation and manage page */
+
+.booking-details {
+  display: grid;
+  gap: var(--space-3);
+  margin: var(--space-4) 0;
+}
+
+.details-row {
+  display: grid;
+  gap: 2px;
+}
+
+@media (min-width: 560px) {
+  .details-row {
+    grid-template-columns: 7rem minmax(0, 1fr);
+    gap: var(--space-4);
+  }
+}
+
+.booking-details dt {
+  color: var(--muted);
+}
+
+.booking-details dd {
+  margin: 0;
+}
+
+.add-to-calendar h2,
+.manage-link h2 {
+  margin-top: var(--space-5);
+  font-size: 1.05rem;
+}
+
+.manage-link {
+  margin-bottom: 0;
+}
+
+.calendar-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.calendar-links a {
+  text-decoration: none;
+}
+
+.manage-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.reschedule {
+  padding: var(--space-5) var(--space-4);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.reschedule-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.reschedule-header p {
+  margin: 0;
+}
