@@ -107,11 +107,11 @@ export function magicLinkEmail({
   return {
     to,
     subject: 'Sign in to Hourmere',
-    text: `To sign in to Hourmere, open this link and press "Sign in to Hourmere" on the page:\n\n${url}\n\n${expiry}\n`,
+    text: `To sign in to Hourmere, open this link, then press "Sign in to Hourmere" on the page it opens:\n\n${url}\n\n${expiry}\n`,
     html: `<!doctype html>
 <html lang="en">
 <body style="font-family: system-ui, sans-serif; line-height: 1.5; color: #111;">
-<p>To sign in to Hourmere, open this link and press "Sign in to Hourmere" on the page:</p>
+<p>To sign in to Hourmere, press the button below, then "Sign in to Hourmere" on the page it opens.</p>
 <p><a href="${link}" style="display: inline-block; padding: 10px 16px; background: #111; color: #fff; text-decoration: none; border-radius: 6px;">Sign in</a></p>
 <p style="color: #555;">${escapeHtml(expiry)}</p>
 <p style="color: #555; font-size: 13px;">If the button does not work, copy this link into your browser:<br>${link}</p>

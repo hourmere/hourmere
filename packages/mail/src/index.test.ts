@@ -11,7 +11,8 @@ describe('magicLinkEmail', () => {
     expect(m.text).toContain(url)
     expect(m.text).toContain('5 minutes')
     // The link opens a page; its button signs in.
-    expect(m.text).toContain('press "Sign in to Hourmere"')
+    expect(m.text).toContain('then press "Sign in to Hourmere" on the page it opens')
+    expect(m.html).toContain('then "Sign in to Hourmere" on the page it opens')
     expect(m.html).toContain(`href="${url.replace('&', '&amp;')}"`)
     expect(m.html).not.toContain('token=abc&callbackURL')
   })
