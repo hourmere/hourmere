@@ -49,6 +49,469 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/bookings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Bookings the caller hosts
+         * @description Bookings in the organization the caller acts in where the caller is a host, ordered by start time. Paginated with a cursor: pass `nextCursor` from one page as `cursor` for the next (keep the other parameters the same).
+         */
+        get: {
+            parameters: {
+                query?: {
+                    cursor?: string;
+                    /** @description Only bookings starting at or after */
+                    from?: string;
+                    /** @description Page size, 1–100 (default 50) */
+                    limit?: number;
+                    status?: "confirmed" | "cancelled";
+                    /** @description Only bookings starting before */
+                    to?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description A page of bookings */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingPage"];
+                    };
+                };
+                /** @description Invalid parameters (`invalid_request`, `invalid_range`, `invalid_cursor`) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No valid session or API key */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The API key's rate limit is used up (`rate_limited`); see Retry-After */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/bookings/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** A booking the caller hosts */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The booking */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Booking"];
+                    };
+                };
+                /** @description The id is not a UUID (`invalid_request`) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No valid session or API key */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such booking among those the caller hosts in this organization (`booking_not_found`) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The API key's rate limit is used up (`rate_limited`); see Retry-After */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/bookings/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel a booking the caller hosts */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["CancelBooking"];
+                };
+            };
+            responses: {
+                /** @description The cancelled booking */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Booking"];
+                    };
+                };
+                /** @description Invalid request (`invalid_request`), or a reason over 1000 characters or with control characters (`invalid_reason`) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No valid session or API key */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description A cookie-authenticated write that does not come from the app itself (`forbidden`) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such booking among those the caller hosts in this organization (`booking_not_found`) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Already cancelled (`booking_cancelled`) or already started (`booking_in_past`) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The API key's rate limit is used up (`rate_limited`); see Retry-After */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/bookings/manage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** The booking behind an invitee's manage token */
+        get: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description The secret from the invitee's link (the `token` in https://<app>/booking#token=…). A missing or unknown token gets 404 `booking_not_found`. */
+                    "x-manage-token"?: string;
+                };
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The booking */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Booking"];
+                    };
+                };
+                /** @description Missing or unknown manage token (`booking_not_found`) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Too many requests from this address (`rate_limited`); see Retry-After */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/bookings/manage/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel with the manage token */
+        post: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description The secret from the invitee's link (the `token` in https://<app>/booking#token=…). A missing or unknown token gets 404 `booking_not_found`. */
+                    "x-manage-token"?: string;
+                };
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: {
+                content: {
+                    "application/json": components["schemas"]["CancelBooking"];
+                };
+            };
+            responses: {
+                /** @description The cancelled booking */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Booking"];
+                    };
+                };
+                /** @description Invalid request (`invalid_request`), or a reason over 1000 characters or with control characters (`invalid_reason`) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Missing or unknown manage token (`booking_not_found`) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Already cancelled (`booking_cancelled`) or already started (`booking_in_past`) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Too many requests from this address (`rate_limited`); see Retry-After */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/bookings/manage/reschedule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reschedule with the manage token
+         * @description Cancels the booking and books the new time in one step. The new time may overlap the old one. Returns the new booking and its manage token; the old token then shows the cancelled booking.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description The secret from the invitee's link (the `token` in https://<app>/booking#token=…). A missing or unknown token gets 404 `booking_not_found`. */
+                    "x-manage-token"?: string;
+                };
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["Reschedule"];
+                };
+            };
+            responses: {
+                /** @description The new booking */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingWithToken"];
+                    };
+                };
+                /** @description Invalid request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Missing or unknown manage token (`booking_not_found`) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Already cancelled (`booking_cancelled`), already started (`booking_in_past`), without a host (`booking_has_no_host`), the event type no longer takes bookings (`event_type_unavailable`), or the time is not offered (`slot_unavailable`, `slot_taken`) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Too many requests from this address (`rate_limited`); see Retry-After */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/instance": {
         parameters: {
             query?: never;
@@ -139,10 +602,339 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/public/{handle}/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A public event type
+         * @description What the booking page at /{handle}/{slug} shows.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    handle: string;
+                    slug: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The event type */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PublicEventType"];
+                    };
+                };
+                /** @description No such public event type (`event_type_not_found`) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Too many requests from this address (`rate_limited`); see Retry-After */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/{handle}/{slug}/bookings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Book a slot
+         * @description Books an offered slot and returns the booking with the secret of the invitee's manage link (`manageToken`, returned only this once). Send an `Idempotency-Key` to make retries safe: a retry with the same key and the same request returns the original booking (200) instead of booking again. All anonymous callers share one key space per organization, so the key must be random (e.g. a UUIDv4), never derived from the request.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description A random key (1–255 printable ASCII characters), e.g. a UUIDv4 */
+                    "idempotency-key"?: string;
+                };
+                path: {
+                    handle: string;
+                    slug: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CreateBooking"];
+                };
+            };
+            responses: {
+                /** @description A retry of an earlier request with the same Idempotency-Key */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingWithToken"];
+                    };
+                };
+                /** @description Booked */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingWithToken"];
+                    };
+                };
+                /** @description Invalid request (`invalid_request`, `invalid_responses`, `invalid_invitee`, `invalid_guests`, `invalid_time_zone`, `too_many_guests`, `invalid_idempotency_key`) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such public event type (`event_type_not_found`) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The time is not offered (`slot_unavailable`) or was just booked by someone else (`slot_taken`), or the Idempotency-Key was used for a different request (`idempotency_key_reused`) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Too many requests from this address (`rate_limited`); see Retry-After */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/{handle}/{slug}/slots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Available slots
+         * @description Bookable slots that lie fully inside [start, end]. The range may span at most 62 days.
+         */
+        get: {
+            parameters: {
+                query: {
+                    /** @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix. */
+                    end: string;
+                    /** @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix. */
+                    start: string;
+                };
+                header?: never;
+                path: {
+                    handle: string;
+                    slug: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Slots, sorted by start */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data: components["schemas"]["Slot"][];
+                        };
+                    };
+                };
+                /** @description Invalid parameters (`invalid_request`), end not after start (`invalid_range`), or a range that is too long (`range_too_long`: over 62 days, or over 20000 possible start times at the event type's step in its bookable part) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such public event type (`event_type_not_found`) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Too many requests from this address (`rate_limited`); see Retry-After */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        Attendee: {
+            email: string;
+            /** @description The invitee who made the booking; the others are guests they added */
+            isBooker: boolean;
+            locale: string | null;
+            name: string;
+            /** @description IANA time zone */
+            timeZone: string;
+        };
+        Booking: {
+            /** @description The invitee first, then guests */
+            attendees: components["schemas"]["Attendee"][];
+            /**
+             * Format: date-time
+             * @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix.
+             * @example 2026-11-02T09:00:00.000Z
+             */
+            cancelledAt: string | null;
+            cancelReason: string | null;
+            /**
+             * Format: date-time
+             * @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix.
+             * @example 2026-11-02T09:00:00.000Z
+             */
+            createdAt: string;
+            /**
+             * Format: date-time
+             * @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix.
+             * @example 2026-11-02T09:00:00.000Z
+             */
+            end: string;
+            /** Format: uuid */
+            eventTypeId: string | null;
+            /** Format: uuid */
+            id: string;
+            location: components["schemas"]["BookingLocation"];
+            /**
+             * Format: uuid
+             * @description The booking this one replaced when it was rescheduled
+             */
+            rescheduledFromId: string | null;
+            responses: components["schemas"]["Responses"];
+            /**
+             * @description How the booking was made; api and mcp are agents
+             * @enum {string}
+             */
+            source: "web" | "embed" | "api" | "mcp";
+            /**
+             * Format: date-time
+             * @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix.
+             * @example 2026-11-02T09:00:00.000Z
+             */
+            start: string;
+            /** @enum {string} */
+            status: "confirmed" | "cancelled";
+            title: string;
+        };
+        /** @description Where the meeting happens. Details depend on the kind: `number` (phone), `address` (in_person), `url` (link) */
+        BookingLocation: ({
+            /** @enum {string} */
+            kind: "google_meet" | "zoom" | "phone" | "in_person" | "link";
+        } & {
+            [key: string]: unknown;
+        }) | null;
+        BookingPage: {
+            data: components["schemas"]["Booking"][];
+            /** @description Pass as `cursor` to get the next page; null on the last page */
+            nextCursor: string | null;
+        };
+        BookingWithToken: {
+            booking: components["schemas"]["Booking"];
+            /** @description The secret of the invitee's manage link (https://<app>/booking#token=<token>), sent as X-Manage-Token to /api/v1/bookings/manage. Returned only once and never stored, so a replayed request (same Idempotency-Key) gets null. */
+            manageToken: string | null;
+        };
+        CancelBooking: {
+            reason?: string;
+        };
+        CreateBooking: {
+            guests?: {
+                /** Format: email */
+                email: string;
+                name: string;
+            }[];
+            invitee: {
+                /** Format: email */
+                email: string;
+                locale?: string;
+                name: string;
+                /** @description IANA time zone */
+                timeZone: string;
+            };
+            responses?: components["schemas"]["Responses"];
+            /**
+             * Format: date-time
+             * @description The start of an offered slot
+             * @example 2026-11-02T09:00:00.000Z
+             */
+            start: string;
+        };
         Error: {
             /** @description Machine-readable code, e.g. unauthorized */
             error: string;
@@ -189,6 +981,61 @@ export interface components {
                 id: string;
                 name: string;
             };
+        };
+        PublicEventType: {
+            description: string | null;
+            durationMinutes: number;
+            handle: string;
+            host: {
+                name: string;
+                /** @description The host's IANA time zone */
+                timeZone: string;
+            };
+            /** @description Only the kind; details such as a phone number come with the booking */
+            location: {
+                /** @enum {string} */
+                kind: "google_meet" | "zoom" | "phone" | "in_person" | "link";
+            } | null;
+            /** @description Booking-form fields beyond name and email */
+            questions: components["schemas"]["Question"][];
+            slug: string;
+            title: string;
+        };
+        /** @description A booking-form field beyond name and email. Its answer goes in `responses` under `id`: text for short_text, long_text and phone; one of `options` for select; a list of distinct `options` for multi_select; true or false for checkbox (a required checkbox must be true). */
+        Question: {
+            id: string;
+            label: string;
+            options?: string[];
+            /** @default false */
+            required: boolean;
+            /** @enum {string} */
+            type: "short_text" | "long_text" | "phone" | "select" | "multi_select" | "checkbox";
+        };
+        Reschedule: {
+            /**
+             * Format: date-time
+             * @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix.
+             * @example 2026-11-02T09:00:00.000Z
+             */
+            start: string;
+        };
+        /** @description Answers to the event type's questions, keyed by question id: text for short_text, long_text and phone; one option for select; a list of options for multi_select; true or false for checkbox */
+        Responses: {
+            [key: string]: string | string[] | boolean;
+        };
+        Slot: {
+            /**
+             * Format: date-time
+             * @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix.
+             * @example 2026-11-02T09:00:00.000Z
+             */
+            end: string;
+            /**
+             * Format: date-time
+             * @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix.
+             * @example 2026-11-02T09:00:00.000Z
+             */
+            start: string;
         };
     };
     responses: never;

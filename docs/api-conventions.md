@@ -19,8 +19,13 @@ additive within a version. The OpenAPI document is served at `/api/v1/openapi.js
   schemas and Better Auth. Enum values are lowercase snake_case (`api_key`, `round_robin`).
 - IDs are UUID strings.
 - Timestamps are RFC 3339 strings in UTC with a `Z` suffix, e.g. `2026-10-15T09:30:00.000Z`.
-  Calendar dates are `YYYY-MM-DD`; wall-clock times are `HH:MM` with an IANA time zone
-  alongside.
+  Requests may use any offset and up to nine fractional digits (more is 400
+  `invalid_request`); instants are stored and compared with microsecond precision (Postgres
+  rounds beyond). Calendar dates are `YYYY-MM-DD`; wall-clock times are `HH:MM` with an IANA
+  time zone alongside.
+- Every `/api/v1` response, errors included, is sent with `Cache-Control: no-store` (it may
+  hold private data, and a cached error could hide a later answer), unless its route sets a
+  `Cache-Control` of its own.
 
 ## Errors
 
@@ -68,7 +73,7 @@ for failures the caller can act on; the server maps the kind to a status and ans
 Anything else a service throws is a bug: 500 `internal_error`, logged on one escaped line.
 A lower-level error wrapped as a DomainError's `cause` is logged the same way and never sent
 to the client.
-New route groups are `RouteModule`s (`apps/server/src/openapi.ts`) created in `index.ts` with
+New route groups are `RouteModule`s (`apps/server/src/openapi.ts`) created in `server.ts` with
 their services and registered by `createApp`; `apps/server/src/app.test.ts` has a template.
 
 ## Authentication
@@ -90,3 +95,77 @@ anyone signs in, such as which sign-in methods are enabled (`signIn.google`, …
 
 `GET /api/v1/me` returns the caller, the organization they act in and whether they used a
 session or an API key.
+
+## Validation
+
+Input is checked in two layers, so REST and MCP behave identically:
+
+- **Shape** (the route's zod schema): JSON syntax, types, required fields, string formats and
+  lengths. Request objects are strict: an unknown field (often a misspelling) is refused, not
+  ignored. Failures are 400 `invalid_request`, with `message` naming the fields.
+- **Values and meaning** (the service, shared with the MCP server): whatever needs the
+  database or domain rules, e.g. that a time zone exists, that answers fit the event type's
+  questions, or that a slot is still free. Failures use specific codes (400
+  `invalid_responses`, 409 `slot_taken`, …).
+
+Free text (names, emails, answers, reasons, question labels and options) must be well-formed
+Unicode without control characters: no NUL, C0 or C1 controls, DEL, U+2028 or U+2029; only
+multi-line fields (long answers, reasons) may contain tabs and line breaks. Services refuse
+anything else with the field's code (`invalid_invitee`, `invalid_guests`, `invalid_responses`,
+`invalid_reason`, `invalid_questions`), using the helpers in `packages/scheduling/src/text.ts`.
+As a safety net for every `/api/v1` route, a JSON body with NUL or a lone surrogate anywhere
+(values or keys) is refused with 400 `invalid_request` before the route runs.
+
+Request bodies are limited to 64 KB on all of `/api`, sign-in included, unless a route
+declares more (`routeBodyLimit` in `apps/server/src/body-limit.ts`); beyond the limit, 413
+`payload_too_large`. A route's limit must be at least its largest legal request with every
+string at its maximum length and every character escaped as `\uXXXX` (6 bytes, as e.g.
+Python's `json.dumps` sends by default). Creating a booking allows 2 MB: its largest legal
+request (20 multi-select answers choosing all 50 options of 200 characters, plus the invitee
+and 10 guests) is about 1.23 MB that way. Cancel and reschedule bodies stay far below 64 KB
+(a reason is at most 1000 characters).
+
+## Lists
+
+A list response is `{ "data": [ … ] }`. Lists that can grow without bound use cursor
+pagination and add `nextCursor`: pass it as `cursor` (with the same filters) for the next page;
+it is null on the last page. Cursors are opaque; `limit` sets the page size (1–100, default
+50). Small lists return everything and have no `nextCursor`.
+
+## Public endpoints
+
+Booking pages and invitee links work without credentials:
+
+- `/api/v1/public/{handle}/{slug}` (event page, `/slots`, `/bookings`) for personal event types.
+- `/api/v1/bookings/manage` (`GET` shows the booking, `POST …/cancel`, `POST …/reschedule`)
+  with the invitee's secret in the `X-Manage-Token` header. Invitee links carry it in the URL
+  fragment, `https://<app>/booking#token=<token>`, which browsers never send to servers or in
+  `Referer`; the web app reads it and sends the header. A missing, malformed or unknown token
+  gets the same 404 `booking_not_found`. Only the token's SHA-256 is stored, so it is returned
+  once, when the booking is made (and with the new booking after a reschedule).
+
+They are rate limited per client (`TRUSTED_PROXIES` decides which address that is; IPv6
+clients count per /64 network, since one subscriber usually has a whole /64): 120 requests a
+minute for event pages and for slots, 10 for creating bookings, 30 for manage endpoints;
+beyond that 429 `rate_limited` with `Retry-After`, decided before the request body is read
+(only its size is checked first). The counters live in each server process's memory, so with several instances a client gets that budget once per instance; a shared store
+comes with multi-instance deployments.
+
+A slots request may span at most 62 days, and its bookable part (from now plus the event
+type's minimum notice to the end of its booking window) at most 20 000 possible start times at
+the event type's slot step: about 13 days with 1-minute steps, any 62 days with 30-minute
+steps. Beyond either, 400 `range_too_long`; a range with no bookable part returns no slots.
+
+## Retries
+
+`POST /api/v1/public/{handle}/{slug}/bookings` accepts an `Idempotency-Key` header (1–255
+printable ASCII characters). A retry with the same key and the same request returns the
+original booking with 200 instead of booking again; its `manageToken` is null, because the
+secret is not stored and cannot be returned twice. The same key with a different request is
+refused with 409 `idempotency_key_reused`. Keys are scoped to the organization and the
+caller's API key, and all anonymous callers share one scope, so they must be random (e.g. a
+UUIDv4), never derived from the request.
+
+Rescheduling is not idempotent: it cancels the booking and creates a new one with a new
+manage token, so retrying it after a lost response gets 409 `booking_cancelled`. Booking
+emails (coming later) will carry the new link, so the invitee does not lose it.
