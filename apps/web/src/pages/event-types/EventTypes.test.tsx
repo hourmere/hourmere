@@ -1,4 +1,4 @@
-import { screen, within } from '@testing-library/react'
+import { createEvent, fireEvent, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { EventType } from '../../api/resources.ts'
@@ -608,13 +608,16 @@ describe('the unsaved-changes guard', () => {
     await openExisting()
     await user.type(field('Title'), ' (new)')
 
-    await user.click(screen.getByRole('link', { name: 'Bookings' }))
+    const link = screen.getByRole('link', { name: 'Bookings' })
+    const click = createEvent.click(link)
+    expect(fireEvent(link, click)).toBe(false)
+    expect(click.defaultPrevented).toBe(true)
     expect(confirm).toHaveBeenCalledWith(LEAVE_WITH_UNSAVED_CHANGES)
     expect(location()).toBe(`/app/event-types/${EVENT_TYPE_ID}`)
     expect(field('Title').value).toBe('Intro call (new)')
 
     // The page's own back link asks too.
-    await user.click(screen.getByRole('link', { name: 'Back to event types' }))
+    expect(fireEvent.click(screen.getByRole('link', { name: 'Back to event types' }))).toBe(false)
     expect(confirm).toHaveBeenCalledTimes(2)
     expect(location()).toBe(`/app/event-types/${EVENT_TYPE_ID}`)
 

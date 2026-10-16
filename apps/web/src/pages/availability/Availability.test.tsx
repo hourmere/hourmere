@@ -398,6 +398,26 @@ describe('deleting a schedule', () => {
 describe('date overrides', () => {
   const overridesSection = () => screen.findByRole('region', { name: 'Date overrides' })
 
+  it.each([
+    ['Pacific/Kiritimati', '2030-01-01T10:30:00Z', '2030-01-02'],
+    ['Pacific/Honolulu', '2030-01-01T00:30:00Z', '2029-12-31'],
+  ])('uses today in %s for the query and date input', async (timeZone, now, today) => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(now))
+    try {
+      const api = scheduleServer([schedule({ timeZone })])
+      renderApp(`/app/availability/${SCHEDULE_ID}`)
+      const section = await overridesSection()
+      await within(section).findByText('No upcoming date overrides.')
+      expect(api.to(`GET /api/v1/schedules/${SCHEDULE_ID}/overrides`)[0]?.path).toBe(
+        `/api/v1/schedules/${SCHEDULE_ID}/overrides?from=${today}`,
+      )
+      expect(within(section).getByLabelText('Date').getAttribute('min')).toBe(today)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('lists upcoming overrides from today in the schedule’s zone', async () => {
     const api = scheduleServer([schedule()], {
       overrides: [

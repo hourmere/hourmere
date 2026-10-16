@@ -1,7 +1,8 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import * as time from '../public/time.ts'
 import { matchTimeZones, TimeZonePicker, timeZoneNames } from './TimeZonePicker.tsx'
 
 function Picker({ initial = '' }: { initial?: string }) {
@@ -19,6 +20,15 @@ const box = () => screen.getByRole<HTMLInputElement>('combobox', { name: 'Time z
 const value = () => screen.getByTestId('value').textContent
 
 describe('the time zone picker', () => {
+  it('reuses zone offsets while typing a search', async () => {
+    const offsets = vi.spyOn(time, 'offsetLabel')
+    const user = userEvent.setup()
+    render(<Picker />)
+    const initial = offsets.mock.calls.length
+    expect(initial).toBeGreaterThan(0)
+    await user.type(box(), 'atlantis')
+    expect(offsets).toHaveBeenCalledTimes(initial)
+  })
   it('suggests zones while typing and picks one with the keyboard', async () => {
     const user = userEvent.setup()
     render(<Picker />)

@@ -160,6 +160,37 @@ describe('the bookings list', () => {
     expect(screen.getByRole('rowheader', { name: 'Call 1' })).toBeDefined()
     expect(screen.getByRole('button', { name: 'Show more bookings' })).toBeDefined()
   })
+
+  it('starts each tab with its own first page after pagination', async () => {
+    const user = userEvent.setup()
+    const api = fakeApi({
+      ...signedIn,
+      ...profile(),
+      'GET /api/v1/bookings': ({ path }) => {
+        const q = query(path)
+        if (q.to) return json(200, { data: [booking({ title: 'Past call' })], nextCursor: null })
+        return json(
+          200,
+          q.cursor
+            ? { data: numbered(2, 1), nextCursor: null }
+            : { data: numbered(1, 1), nextCursor: 'next' },
+        )
+      },
+    })
+    renderApp('/app/bookings')
+    await screen.findByRole('rowheader', { name: 'Call 1' })
+    await user.click(screen.getByRole('button', { name: 'Show more bookings' }))
+    await screen.findByRole('rowheader', { name: 'Call 2' })
+    await user.click(screen.getByRole('link', { name: 'Past' }))
+    await screen.findByRole('rowheader', { name: 'Past call' })
+    expect(screen.queryByRole('rowheader', { name: 'Call 2' })).toBeNull()
+    await user.click(screen.getByRole('link', { name: 'Upcoming' }))
+    await screen.findByRole('rowheader', { name: 'Call 1' })
+    expect(screen.queryByRole('rowheader', { name: 'Call 2' })).toBeNull()
+    expect(screen.queryByRole('rowheader', { name: 'Past call' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Show more bookings' })).toBeDefined()
+    expect(query(api.to('GET /api/v1/bookings').at(-1)?.path ?? '').cursor).toBeUndefined()
+  })
 })
 
 describe('a booking', () => {
@@ -217,7 +248,9 @@ describe('a booking', () => {
     const people = screen.getByRole('region', { name: 'People' })
     expect(within(people).getByRole('link', { name: 'grace@example.com' })).toBeDefined()
     // The invitee's own zone, and the time there.
-    expect(people.textContent).toMatch(/Time zone: America\/New York \(4:00\sAM – 4:30\sAM there\)/)
+    expect(people.textContent).toMatch(
+      /Time zone: America\/New York \(Mar 4, 2030, 4:00\sAM – Mar 4, 2030, 4:30\sAM there\)/,
+    )
     expect(people.textContent).toContain('Alan Turing (alan@example.com)')
 
     const answers = within(screen.getByRole('region', { name: 'Answers' }))
@@ -226,6 +259,13 @@ describe('a booking', () => {
     expect(terms).toEqual(['Company', 'Plans', 'I agree', 'retired'])
     const values = answers.getAllByRole('definition').map((dd) => dd.textContent)
     expect(values).toEqual(['Acme', 'Pro, Team', 'Yes', 'Old answer'])
+  })
+
+  it('shows the date at both ends when the invitee’s local meeting crosses midnight', async () => {
+    bookingServer(booking({ start: '2030-03-05T04:45:00.000Z', end: '2030-03-05T05:15:00.000Z' }))
+    renderApp(`/app/bookings/${BOOKING_ID}`)
+    const people = await screen.findByRole('region', { name: 'People' })
+    expect(people.textContent).toMatch(/Mar 4, 2030, 11:45\sPM – Mar 5, 2030, 12:15\sAM there/)
   })
 
   it('labels answers by id when the event type is gone', async () => {

@@ -5,18 +5,23 @@ import { isReservedName } from '@hourmere/core/reserved'
 import { screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { NAV_ITEMS } from '../components/AppShell.tsx'
-import { fakeApi, json, organizations, renderApp, signedIn } from '../test/fake-api.tsx'
+import { fakeApi, json, organizations, profile, renderApp, signedIn } from '../test/fake-api.tsx'
 import { EVENT, eventRoutes } from '../test/public-fixtures.ts'
 
 describe('routing between the app and the public pages', () => {
-  it.each(NAV_ITEMS.map((item) => item.to))('keeps the app page %s', async (path) => {
+  it.each(NAV_ITEMS)('keeps the app page $to', async ({ to: path, label }) => {
     fakeApi({
       ...signedIn,
       ...organizations(),
+      ...profile(),
+      'GET /api/v1/event-types': () => json(200, { data: [] }),
+      'GET /api/v1/schedules': () => json(200, { data: [] }),
+      'GET /api/v1/bookings': () => json(200, { data: [], nextCursor: null }),
       'GET /api/auth/api-key/list': () => json(200, { apiKeys: [], total: 0 }),
     })
     renderApp(path)
     expect(await screen.findByRole('navigation', { name: 'Main' })).toBeDefined()
+    expect(await screen.findByRole('heading', { name: label, level: 1 })).toBeDefined()
     expect(screen.getByTestId('location').textContent).toBe(path)
   })
 

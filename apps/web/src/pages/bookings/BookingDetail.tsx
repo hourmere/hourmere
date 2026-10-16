@@ -207,7 +207,10 @@ function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loa
                 <span className="muted">
                   Time zone: {invitee.timeZone.replaceAll('_', ' ')}
                   {invitee.timeZone !== format.timeZone && (
-                    <> ({zoned(invitee.timeZone).timeRange(booking.start, booking.end)} there)</>
+                    <>
+                      {' '}
+                      ({zoned(invitee.timeZone).dateTimeRange(booking.start, booking.end)} there)
+                    </>
                   )}
                 </span>
               </>

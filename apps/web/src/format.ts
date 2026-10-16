@@ -73,6 +73,9 @@ export function zoned(timeZone: string) {
     time: (iso: string) => time.format(new Date(iso)),
     /** "2 Nov 2026, 09:00" */
     dateTime: (iso: string) => dateTime.format(new Date(iso)),
+    /** Includes each endpoint's date, so a range across midnight is unambiguous. */
+    dateTimeRange: (start: string, end: string) =>
+      `${dateTime.format(new Date(start))} – ${dateTime.format(new Date(end))}`,
     /** "09:00 – 09:30" */
     timeRange: (start: string, end: string) =>
       `${time.format(new Date(start))} – ${time.format(new Date(end))}`,

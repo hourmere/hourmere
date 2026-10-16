@@ -1,180 +1,247 @@
-// A searchable list of IANA time zones: a text field with suggestions (the ARIA combobox
-// pattern). The value is the text itself, so the form validates it like any other field;
-// picking a suggestion fills it in.
-import { useEffect, useId, useMemo, useState } from 'react'
-import { isKnownTimeZone, utcOffset } from '../format.ts'
+// One searchable IANA picker for public slot selection and editable admin fields.
+import { type KeyboardEvent, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { isKnownTimeZone } from '../format.ts'
+import { availableTimeZones } from '../public/env.ts'
+import { currentZoneId, offsetLabel, zoneName } from '../public/time.ts'
 import type { ControlProps } from './forms.tsx'
 
-/** Suggestions shown at once while typing; more typing narrows them down. */
-const MAX_SHOWN = 100
-
-/** The time zones the browser knows, with UTC, sorted. */
-export function timeZoneNames(): string[] {
-  let names: string[] = []
-  try {
-    names = Intl.supportedValuesOf('timeZone')
-  } catch {
-    // Very old browsers: people can still type a name.
-  }
-  return [...new Set([...names, 'UTC'])].sort()
-}
-
-const searchable = (zone: string) => zone.toLowerCase().replaceAll('_', ' ')
-
-/** Zones whose name contains every word of `query` ("new york", "europe ber", "kolkata"). */
-export function matchTimeZones(zones: readonly string[], query: string): string[] {
-  const words = query
-    .toLowerCase()
-    .replaceAll('_', ' ')
-    .split(/[\s/]+/)
-    .filter(Boolean)
-  if (!words.length) return [...zones]
-  return zones.filter((zone) => {
-    const name = searchable(zone)
-    return words.every((word) => name.includes(word))
-  })
-}
-
-export function TimeZonePicker({
-  value,
-  onChange,
-  control,
-}: {
+interface TimeZonePickerProps {
   value: string
   onChange: (value: string) => void
-  /** From the surrounding Field: id, description, invalid state. */
-  control: ControlProps
-}) {
+  /** With a field control, allow free typing so the surrounding form can validate it. */
+  control?: ControlProps
+  /** Otherwise show a toggle and a separate search field, for public slot selection. */
+  now?: number
+  error?: string | undefined
+}
+
+const MAX_SHOWN = 100
+const normalize = (text: string) => text.toLowerCase().replaceAll('_', ' ')
+
+export function timeZoneNames(): string[] {
+  try {
+    return [...new Set(availableTimeZones())].sort()
+  } catch {
+    return ['UTC']
+  }
+}
+
+export function matchTimeZones(zones: readonly string[], query: string): string[] {
+  const words = normalize(query)
+    .split(/[\s/]+/)
+    .filter(Boolean)
+  return zones.filter((zone) => words.every((word) => normalize(zone).includes(word)))
+}
+
+interface Zone {
+  id: string
+  name: string
+  offset: string
+  canonical: string
+  haystack: string
+}
+
+function zoneInfo(id: string, now: number): Zone {
+  const name = zoneName(id)
+  const offset = offsetLabel(id, now)
+  return {
+    id,
+    name,
+    offset,
+    canonical: currentZoneId(id),
+    haystack: normalize(`${name} ${id} ${offset}`),
+  }
+}
+
+export function TimeZonePicker({ value, onChange, control, now, error }: TimeZonePickerProps) {
+  const editable = control !== undefined
+  const id = useId()
+  const [mountedAt] = useState(Date.now)
+  const at = now ?? mountedAt
+  // Typing changes only the search: offsets for all zones are computed once per instant.
+  const listed = useMemo(() => timeZoneNames().map((zone) => zoneInfo(zone, at)), [at])
   const zones = useMemo(() => {
-    const names = timeZoneNames()
-    // An alias the browser does not list (e.g. a stored "Asia/Calcutta") is still offered.
-    return value && !names.includes(value) && isKnownTimeZone(value)
-      ? [...names, value].sort()
-      : names
-  }, [value])
-  const offsets = useMemo(() => {
-    const now = new Date()
-    return new Map(zones.map((zone) => [zone, utcOffset(zone, now)]))
-  }, [zones])
-
+    if (!value || listed.some((zone) => zone.id === value) || !isKnownTimeZone(value)) return listed
+    const alias = zoneInfo(value, at)
+    return [...listed.filter((zone) => zone.canonical !== alias.canonical), alias].sort((a, b) =>
+      a.id.localeCompare(b.id),
+    )
+  }, [listed, value, at])
   const [open, setOpen] = useState(false)
-  // Typing filters the list; opening it otherwise shows every zone, the current one active.
+  const [query, setQuery] = useState('')
   const [filtering, setFiltering] = useState(false)
-  const [active, setActive] = useState(-1)
-  const listId = useId()
-  const optionId = (index: number) => `${listId}-option-${index}`
+  const [active, setActive] = useState(0)
+  const toggle = useRef<HTMLButtonElement>(null)
+  const search = useRef<HTMLInputElement>(null)
+  const list = useRef<HTMLDivElement>(null)
+  const text = editable ? value : query
+  const words = normalize(text)
+    .split(/[\s/]+/)
+    .filter(Boolean)
+  const matches =
+    !editable || filtering
+      ? zones.filter((zone) => words.every((word) => zone.haystack.includes(word)))
+      : zones
+  const shown = editable && filtering ? matches.slice(0, MAX_SHOWN) : matches
+  const optionId = (index: number) => `${id}-option-${index}`
+  const current = zones.find((zone) => zone.id === value)
 
-  const matches = filtering ? matchTimeZones(zones, value) : zones
-  // Opened without typing, the whole list scrolls (to the current zone); typing caps it.
-  const shown = filtering ? matches.slice(0, MAX_SHOWN) : matches
-
-  // Keep the active suggestion in view while moving through the list with the keyboard.
   useEffect(() => {
-    if (!open || active < 0) return
-    document.getElementById(optionId(active))?.scrollIntoView?.({ block: 'nearest' })
+    if (open && !editable) search.current?.focus()
+  }, [open, editable])
+  useEffect(() => {
+    if (open)
+      list.current?.querySelector('[data-active="true"]')?.scrollIntoView?.({ block: 'nearest' })
   })
 
-  function show(fromTyping: boolean) {
-    setOpen(true)
-    setFiltering(fromTyping)
-    setActive(fromTyping ? 0 : Math.max(0, zones.indexOf(value)))
+  function close() {
+    setOpen(false)
+    setQuery('')
+    setFiltering(false)
+    if (!editable) setTimeout(() => toggle.current?.focus(), 0)
   }
-
   function pick(zone: string) {
     onChange(zone)
-    setOpen(false)
-    setFiltering(false)
-    setActive(-1)
+    close()
   }
-
-  function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    switch (e.key) {
-      case 'ArrowDown':
-        e.preventDefault()
-        if (!open) show(false)
-        else setActive((i) => Math.min(i + 1, shown.length - 1))
-        break
-      case 'ArrowUp':
-        e.preventDefault()
-        if (open) setActive((i) => Math.max(i - 1, 0))
-        break
-      case 'Enter': {
-        const zone = shown[active]
-        if (open && zone) {
-          // Picking a suggestion, not submitting the form.
-          e.preventDefault()
-          pick(zone)
-        }
-        break
+  function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault()
+      if (!open && event.key === 'ArrowDown') {
+        setOpen(true)
+        setFiltering(false)
+        setActive(
+          Math.max(
+            0,
+            zones.findIndex((zone) => zone.id === value),
+          ),
+        )
+      } else if (open) {
+        const step = event.key === 'ArrowDown' ? 1 : -1
+        setActive((index) => Math.min(Math.max(index + step, 0), Math.max(shown.length - 1, 0)))
       }
-      case 'Escape':
-        if (open) {
-          e.preventDefault()
-          e.stopPropagation()
-          setOpen(false)
-        }
-        break
+    } else if (event.key === 'Enter' && open) {
+      event.preventDefault()
+      const zone = shown[active]
+      if (zone) pick(zone.id)
+    } else if (event.key === 'Escape' && open) {
+      event.preventDefault()
+      event.stopPropagation()
+      close()
     }
   }
 
-  const activeZone = open ? shown[active] : undefined
   return (
-    <div className="combobox">
-      <input
-        {...control}
-        type="text"
-        role="combobox"
-        aria-autocomplete="list"
-        aria-expanded={open}
-        aria-controls={listId}
-        {...(activeZone && { 'aria-activedescendant': optionId(active) })}
-        autoComplete="off"
-        spellCheck={false}
-        value={value}
-        onChange={(e) => {
-          onChange(e.target.value)
-          show(true)
-        }}
-        onKeyDown={onKeyDown}
-        onBlur={() => {
-          setOpen(false)
-          // A name typed in another case is still that zone.
-          const exact = zones.find((z) => z.toLowerCase() === value.trim().toLowerCase())
-          if (exact && exact !== value) onChange(exact)
-        }}
-      />
-      <div
-        id={listId}
-        role="listbox"
-        aria-label="Time zones"
-        className="combobox-list"
-        hidden={!open || shown.length === 0}
-      >
-        {open &&
-          shown.map((zone, index) => (
-            // biome-ignore lint/a11y/useKeyWithClickEvents: the combobox's input handles keys
-            <div
-              key={zone}
-              id={optionId(index)}
-              role="option"
-              aria-selected={index === active}
-              // Never in the tab order: the input keeps focus (aria-activedescendant).
-              tabIndex={-1}
-              className="combobox-option"
-              // Keeps focus in the input, so the list stays a suggestion of it.
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => pick(zone)}
-            >
-              <span>{zone.replaceAll('_', ' ')}</span>
-              <span className="muted">{offsets.get(zone)}</span>
-            </div>
-          ))}
-      </div>
-      {open && shown.length === 0 && (
-        <div className="combobox-list combobox-empty">No time zone matches “{value}”.</div>
+    <div className={editable ? 'combobox' : 'tz-picker'}>
+      {!editable && (
+        <button
+          type="button"
+          ref={toggle}
+          className="tz-toggle"
+          aria-expanded={open}
+          aria-controls={`${id}-panel`}
+          aria-describedby={error ? `${id}-error` : undefined}
+          onClick={() => {
+            if (open) close()
+            else {
+              setActive(0)
+              setOpen(true)
+            }
+          }}
+        >
+          <span className="tz-caption">Time zone</span>
+          <span className="tz-current">
+            <span className="tz-name">{current?.name ?? zoneName(value)}</span>{' '}
+            <span className="tz-offset">{current?.offset}</span>
+          </span>
+          <span className="tz-change">{open ? 'Close' : 'Change'}</span>
+        </button>
       )}
-      {open && shown.length < matches.length && (
-        <p className="hint">Type to narrow down the {matches.length} time zones.</p>
+      {error && (
+        <p className="field-error" id={`${id}-error`}>
+          {error}
+        </p>
+      )}
+      {(editable || open) && (
+        <div className={editable ? undefined : 'tz-panel'} id={`${id}-panel`}>
+          {!editable && (
+            <label htmlFor={`${id}-search`} className="visually-hidden">
+              Search time zones
+            </label>
+          )}
+          <input
+            {...control}
+            id={control?.id ?? `${id}-search`}
+            ref={search}
+            type="text"
+            role="combobox"
+            aria-expanded={open}
+            aria-controls={`${id}-options`}
+            aria-autocomplete="list"
+            aria-activedescendant={open && shown[active] ? optionId(active) : undefined}
+            placeholder={editable ? undefined : 'Search by city or offset'}
+            autoComplete="off"
+            spellCheck={false}
+            value={text}
+            onChange={(event) => {
+              if (editable) onChange(event.target.value)
+              else setQuery(event.target.value)
+              setFiltering(true)
+              setOpen(true)
+              setActive(0)
+            }}
+            onKeyDown={onKeyDown}
+            onBlur={() => {
+              if (!editable) return
+              close()
+              const exact =
+                listed.find((zone) => zone.id.toLowerCase() === value.trim().toLowerCase()) ??
+                zones.find((zone) => zone.id.toLowerCase() === value.trim().toLowerCase())
+              if (exact && exact.id !== value) onChange(exact.id)
+            }}
+          />
+          <div
+            className={editable ? 'combobox-list' : 'tz-options'}
+            id={`${id}-options`}
+            role="listbox"
+            aria-label="Time zones"
+            ref={list}
+            hidden={!open || shown.length === 0}
+          >
+            {open &&
+              shown.map((zone, index) => (
+                // biome-ignore lint/a11y/useKeyWithClickEvents: the combobox input handles keys
+                <div
+                  key={zone.id}
+                  id={optionId(index)}
+                  role="option"
+                  aria-selected={editable ? index === active : zone.id === value}
+                  data-active={index === active}
+                  tabIndex={-1}
+                  className={editable ? 'combobox-option' : 'tz-option'}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => pick(zone.id)}
+                  onMouseMove={() => index !== active && setActive(index)}
+                >
+                  <span>{zone.name}</span>
+                  <span className={editable ? 'muted' : 'tz-offset'}>{zone.offset}</span>
+                </div>
+              ))}
+          </div>
+          {!editable && (
+            <p className="visually-hidden" role="status">
+              {matches.length === 1 ? '1 time zone' : `${matches.length} time zones`}
+            </p>
+          )}
+          {open && shown.length === 0 && (
+            <div className={editable ? 'combobox-list combobox-empty' : 'muted tz-empty'}>
+              No time zone matches “{text}”.
+            </div>
+          )}
+          {editable && open && shown.length < matches.length && (
+            <p className="hint">Type to narrow down the {matches.length} time zones.</p>
+          )}
+        </div>
       )}
     </div>
   )
