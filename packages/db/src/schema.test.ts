@@ -67,16 +67,23 @@ describe.skipIf(!url)('schema', () => {
   })
 
   it('allows back-to-back bookings and overlaps across different hosts', async () => {
-    await expect(book(userA, '2026-11-02T10:30Z', '2026-11-02T11:00Z')).resolves.toBeTypeOf('string')
-    await expect(book(userB, '2026-11-02T10:00Z', '2026-11-02T10:30Z')).resolves.toBeTypeOf('string')
+    await expect(book(userA, '2026-11-02T10:30Z', '2026-11-02T11:00Z')).resolves.toBeTypeOf(
+      'string',
+    )
+    await expect(book(userB, '2026-11-02T10:00Z', '2026-11-02T10:30Z')).resolves.toBeTypeOf(
+      'string',
+    )
   })
 
   it('frees the slot when a booking is cancelled', async () => {
     const id = await book(userA, '2026-11-03T09:00Z', '2026-11-03T09:30Z')
-    await pool.query(`UPDATE bookings SET status = 'cancelled', cancelled_at = now() WHERE id = $1`, [
-      id,
-    ])
-    await expect(book(userA, '2026-11-03T09:00Z', '2026-11-03T09:30Z')).resolves.toBeTypeOf('string')
+    await pool.query(
+      `UPDATE bookings SET status = 'cancelled', cancelled_at = now() WHERE id = $1`,
+      [id],
+    )
+    await expect(book(userA, '2026-11-03T09:00Z', '2026-11-03T09:30Z')).resolves.toBeTypeOf(
+      'string',
+    )
   })
 
   it('moves the host period with the booking when it is rescheduled', async () => {
@@ -91,7 +98,9 @@ describe.skipIf(!url)('schema', () => {
     )
     expect(new Date(host.rows[0].start).toISOString()).toBe('2026-11-04T14:00:00.000Z')
     // The old time is free again; the new one is taken.
-    await expect(book(userA, '2026-11-04T09:00Z', '2026-11-04T09:30Z')).resolves.toBeTypeOf('string')
+    await expect(book(userA, '2026-11-04T09:00Z', '2026-11-04T09:30Z')).resolves.toBeTypeOf(
+      'string',
+    )
     await expect(book(userA, '2026-11-04T14:00Z', '2026-11-04T14:30Z')).rejects.toMatchObject({
       code: '23P01',
     })
