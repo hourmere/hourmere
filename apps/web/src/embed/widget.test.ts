@@ -56,6 +56,9 @@ describe('standalone booking widget', () => {
     'https://hourmere.test/ada/intro#token=secret',
     'https://hourmere.test/ada/intro?token=secret',
     'http://external.test/ada/intro',
+    'https://%2a/ada/intro',
+    'https://%2A.example.invalid/ada/intro',
+    'https://＊.example.invalid/ada/intro',
     '/ada/intro',
   ])('refuses unsafe or sensitive URL %s', (raw) =>
     expect(() => iframeUrl(raw, window.location.origin, 'abcdefghijklmnop')).toThrow(),
@@ -174,6 +177,42 @@ describe('standalone booking widget', () => {
     trigger.click()
     closePopup()
     expect(document.activeElement).toBe(trigger)
+  })
+  it('ignores queued native close events and handles from a retired popup', async () => {
+    Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
+      configurable: true,
+      value: function (this: HTMLDialogElement) {
+        this.setAttribute('open', '')
+      },
+    })
+    Object.defineProperty(HTMLDialogElement.prototype, 'close', {
+      configurable: true,
+      value: function (this: HTMLDialogElement) {
+        if (!this.hasAttribute('open')) return
+        this.removeAttribute('open')
+        queueMicrotask(() => this.dispatchEvent(new Event('close')))
+      },
+    })
+    const first = openPopup({ url }),
+      retired = document.querySelector('dialog') as HTMLDialogElement
+    openPopup({ url: 'https://hourmere.test/ada/second' })
+    const replacement = document.querySelector('dialog') as HTMLDialogElement
+    await Promise.resolve()
+    expect(replacement.isConnected).toBe(true)
+    expect(replacement.hasAttribute('open')).toBe(true)
+    expect(document.querySelectorAll('dialog')).toHaveLength(1)
+    first.close()
+    retired.dispatchEvent(new Event('cancel', { cancelable: true }))
+    retired.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(replacement.isConnected).toBe(true)
+    closePopup()
+    openPopup({ url })
+    const reopened = document.querySelector('dialog') as HTMLDialogElement
+    await Promise.resolve()
+    expect(reopened.isConnected).toBe(true)
+    reopened.close()
+    await Promise.resolve()
+    expect(document.querySelector('dialog')).toBeNull()
   })
   it('initializes declarative inline placeholders once', () => {
     const element = document.createElement('div')

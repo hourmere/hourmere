@@ -113,3 +113,17 @@ The public booking request may include `source: "embed"`. This is an anonymous a
 hint, not proof of an embedding origin and never authorization. The default remains `web`;
 API-key/OAuth attribution cannot be chosen through this field. Anonymous retries retain
 their existing idempotency scope and preserve the original booking's source.
+
+## Local development
+
+On a fresh checkout, generate the standalone script before starting the development server:
+
+```sh
+npm exec --workspace @hourmere/web -- vite build --config vite.embed.config.ts
+npm run dev
+```
+
+The ignored `apps/web/public/hourmere-embed.js` is generated automatically by production
+builds. Rerun the first command after changing widget sources during development. Use a
+separate loopback origin for the parent test page and include its exact origin in
+`EMBED_ALLOWED_ORIGINS`.

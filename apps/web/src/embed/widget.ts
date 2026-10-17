@@ -151,14 +151,18 @@ export function openPopup({ url }: { url: string }) {
     padding: '8px 16px',
     cursor: 'pointer',
   })
-  close.addEventListener('click', closePopup)
+  // A retiring dialog's queued events and stale handle cannot close its replacement.
+  const closeCurrent = () => {
+    if (popup?.dialog === dialog) closePopup()
+  }
+  close.addEventListener('click', closeCurrent)
   dialog.addEventListener('cancel', (event) => {
     event.preventDefault()
-    closePopup()
+    closeCurrent()
   })
-  dialog.addEventListener('close', closePopup)
+  dialog.addEventListener('close', closeCurrent)
   dialog.addEventListener('click', (event) => {
-    if (event.target === dialog) closePopup()
+    if (event.target === dialog) closeCurrent()
   })
   dialog.append(title, close, holder)
   document.body.append(dialog)
@@ -168,7 +172,7 @@ export function openPopup({ url }: { url: string }) {
     popup = { dialog, handle, previous }
     dialog.showModal()
     close.focus()
-    return { close: closePopup }
+    return { close: closeCurrent }
   } catch (error) {
     popup?.handle.destroy()
     popup = undefined

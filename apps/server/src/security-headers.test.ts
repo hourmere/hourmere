@@ -147,6 +147,23 @@ describe('security headers', () => {
     }
   })
 
+  it('rejects normalized wildcard parents even if supplied directly in dependencies', async () => {
+    for (const parentOrigin of [
+      'https://%2a',
+      'https://%2A.example.invalid',
+      'https://＊.example.invalid',
+    ]) {
+      const enabled = createApp(
+        deps({ webDist: dist, embedOrigins: [new URL(parentOrigin).origin] }),
+      )
+      const query = new URLSearchParams({ parentOrigin, embedId: 'abcdefghijklmnop1234' })
+      const response = await enabled.request(`/embed/ada/intro?${query}`)
+      expect(response.status).toBe(403)
+      expect(response.headers.get('X-Frame-Options')).toBe('DENY')
+      expect(response.headers.get('Content-Security-Policy')).toBeNull()
+    }
+  })
+
   it('allow the web app only its own files, plus inlined images', () => {
     // Checked against the built app in a browser; see APP_CSP. Changes here need that again.
     expect(APP_CSP.split('; ')).toEqual([
