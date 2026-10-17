@@ -137,7 +137,8 @@ export function createAuth({
   const { google, microsoft } = socialProviders
   return betterAuth({
     database: pool,
-    disabledPaths: mcpOAuth ? ['/token'] : [],
+    // Consent changes must also retire Hourmere's grant generation and refresh tokens.
+    disabledPaths: mcpOAuth ? ['/token', '/oauth2/delete-consent', '/oauth2/update-consent'] : [],
     baseURL,
     secret,
     advanced: {

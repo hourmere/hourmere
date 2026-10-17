@@ -615,6 +615,41 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
     expect((await app().request(mcpRequest(tokens.access_token))).status).toBe(401)
     expect((await exchange(pending, oldCode)).status >= 400).toBe(true)
   })
+  it('disables native consent mutation endpoints so they cannot bypass grant revocation', async () => {
+    const s = await session(),
+      tokens = await connected(s),
+      list = await api('connections', s, undefined, 'GET')
+    const connections = (await list.json()) as { data: { id: string }[] },
+      id = connections.data[0]?.id as string
+    const headers = new Headers(s.headers)
+    headers.set('content-type', 'application/json')
+    for (const endpoint of ['delete-consent', 'update-consent'])
+      for (const suffix of ['', '/']) {
+        const response = await request(`/api/auth/oauth2/${endpoint}${suffix}`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ id, update: { scopes: ['offline_access'] } }),
+        })
+        expect(response.status).toBe(404)
+      }
+    expect((await app().request(mcpRequest(tokens.access_token))).status).toBe(200)
+    expect((await api(`connections/${id}`, s, undefined, 'DELETE')).status).toBe(200)
+    await connected(s)
+    expect((await app().request(mcpRequest(tokens.access_token))).status).toBe(401)
+  })
+  it('honors the session liveness of session-bound access tokens', async () => {
+    const s = await session(),
+      tokens = await connected(s)
+    expect((await app().request(mcpRequest(tokens.access_token))).status).toBe(200)
+    await db
+      .updateTable('auth.session')
+      .set({ expiresAt: new Date(0) })
+      .where('id', '=', s.sessionId)
+      .execute()
+    expect((await app().request(mcpRequest(tokens.access_token))).status).toBe(401)
+    await db.deleteFrom('auth.session').where('id', '=', s.sessionId).execute()
+    expect((await app().request(mcpRequest(tokens.access_token))).status).toBe(401)
+  })
   it('immediately rejects removed members and disabled OAuth clients', async () => {
     const s = await session(),
       team = await createTestTeam(db, [{ user: s.user, role: 'owner' }]),

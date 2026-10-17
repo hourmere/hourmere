@@ -81,13 +81,17 @@ one-time intent; restart from the connector if the attempt expires or the page i
 Access tokens last five minutes. Refresh tokens last 30 days and rotate on use; a 30-second
 reuse window permits lost-response retries (the replay response is encrypted). Signing keys
 are encrypted with `BETTER_AUTH_SECRET`, refresh tokens are hashed. Keep that secret stable.
-DPoP-bound tokens require a matching request proof and use PostgreSQL-backed replay
+Reuse detection after that window invalidates refresh tokens for the same client/user
+pair across organizations; reconnect affected apps. Direct JWT revocation through the
+provider token-revocation endpoint reports `unsupported_token_type`; Connected apps revokes
+the whole grant immediately. DPoP-bound tokens require a matching request proof and use PostgreSQL-backed replay
 reservations across web instances. Unbound bearer tokens are also supported.
 
 Manage your connections at `/app/connected-apps`. Revocation removes the grant and consent
 and revokes its refresh tokens; old JWTs and pending codes remain invalid after reconnection.
-Each MCP request checks the current grant, consent, client, email verification and team
-membership. OAuth attribution and idempotency use their own consent identifier, separate
+Each MCP request checks the current grant, consent, client, email verification, team
+membership and any session binding. Native browser consent update/delete endpoints are
+disabled: use Connected apps so revocation also retires the grant and refresh tokens. OAuth attribution and idempotency use their own consent identifier, separate
 from API keys and anonymous public requests. Historical booking attribution survives revocation.
 
 OAuth requests are limited to 120 per minute per consent per web process; the existing

@@ -9,6 +9,7 @@ import { APIError } from 'better-auth/api'
 import {
   createDpopReplayStore,
   enforceDpopBinding,
+  getConfirmationJkt,
   isDpopBindingError,
   parseAccessTokenAuthorization,
   verifyJwsAccessToken,
@@ -191,6 +192,8 @@ export function createMcpOAuthResolver({
           typ: 'at+jwt',
           algorithms: ['EdDSA'],
           requiredClaims: ['exp', 'iat', 'sub', 'client_id', 'scope'],
+          maxTokenAge: 300,
+          clockTolerance: 5,
         },
       })
     } catch (error) {
@@ -203,6 +206,14 @@ export function createMcpOAuthResolver({
         return invalid
       throw error
     }
+    if (
+      typeof payload.iat !== 'number' ||
+      typeof payload.exp !== 'number' ||
+      payload.exp - payload.iat > 305 ||
+      payload.exp <= payload.iat ||
+      (payload.cnf !== undefined && !getConfirmationJkt(payload.cnf))
+    )
+      return invalid
     const context = await auth.$context
     try {
       await enforceDpopBinding({
@@ -230,6 +241,17 @@ export function createMcpOAuthResolver({
       typeof payload.scope !== 'string'
     )
       return invalid
+    if (payload.sid !== undefined) {
+      if (typeof payload.sid !== 'string' || !isUuid(payload.sid)) return invalid
+      const active = await db
+        .selectFrom('auth.session')
+        .select('id')
+        .where('id', '=', payload.sid)
+        .where('userId', '=', payload.sub)
+        .where('expiresAt', '>', new Date())
+        .executeTakeFirst()
+      if (!active) return invalid
+    }
     const scopes = payload.scope.split(' ')
     if (!scopes.includes(MCP_OAUTH_SCOPE)) return { ok: false, error: 'insufficient_scope' }
     const row = await db

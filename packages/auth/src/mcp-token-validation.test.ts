@@ -94,6 +94,14 @@ describe.skipIf(!serverUrl)('MCP access-token profile validation', () => {
   it('accepts a correctly signed current grant', async () =>
     expect((await resolve(await token())).ok).toBe(true))
   it.each([
+    [
+      'future-issued-at',
+      { iat: Math.floor(Date.now() / 1000) + 3600, exp: Math.floor(Date.now() / 1000) + 3900 },
+    ],
+    ['excessive-lifetime', { exp: Math.floor(Date.now() / 1000) + 3600 }],
+    ['unknown-confirmation', { cnf: { method: 'unsupported' } }],
+    ['empty-confirmation-key', { cnf: { jkt: '' } }],
+    ['missing-session', { sid: '00000000-0000-7000-8000-000000000001' }],
     ['audience', { aud: 'https://other.test/mcp' }],
     ['issuer', { iss: 'https://other.test/api/auth' }],
     ['expiry', { exp: 1 }],
