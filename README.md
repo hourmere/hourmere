@@ -14,7 +14,7 @@ Open-source scheduling for people and AI agents. Self-host or use the cloud.
 | `packages/db` | Database access (Kysely) and SQL migrations in `packages/db/migrations`. |
 | `packages/scheduling` | Service layer shared by the REST API and the MCP server: reads and writes the database, enforces permissions, throws `DomainError`. |
 | `packages/auth` | Sign-in (Better Auth: email links, Google, Microsoft), sessions, organizations, API keys. |
-| `packages/calendars` | Separate Google Calendar connections, encrypted OAuth credentials and calendar lists. See [docs/google-calendar.md](docs/google-calendar.md). |
+| `packages/calendars` | Separate Google Calendar OAuth, encrypted credentials, incremental busy-time sync and booking writeback. See [docs/google-calendar.md](docs/google-calendar.md). |
 | `packages/mail` | Outgoing email: SMTP, or the server log when SMTP is not configured; booking email templates and calendar invitations. |
 | `packages/jobs` | Background jobs on Postgres (pg-boss): typed job definitions, enqueueing inside a transaction, workers. |
 | `packages/notifications` | The booking notification job: who gets which email, sent once. See [docs/notifications.md](docs/notifications.md). |
