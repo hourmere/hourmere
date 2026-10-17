@@ -69,6 +69,7 @@ export interface EventTypeDraft {
   bookingWindowDays: string
   position: string
   isActive: boolean
+  isHidden: boolean
 }
 
 let nextKey = 0
@@ -106,6 +107,7 @@ export function emptyDraft(): EventTypeDraft {
     bookingWindowDays: '',
     position: '0',
     isActive: true,
+    isHidden: false,
   }
 }
 
@@ -139,6 +141,7 @@ export function draftFromEventType(e: EventType): EventTypeDraft {
     bookingWindowDays: text(e.bookingWindowDays),
     position: String(e.position),
     isActive: e.isActive,
+    isHidden: e.isHidden,
   }
 }
 
@@ -322,6 +325,7 @@ export function toInput(draft: EventTypeDraft): EventTypeBody {
     scheduleId: draft.scheduleId || null,
     position: whole(draft.position) as number,
     isActive: draft.isActive,
+    isHidden: draft.isHidden,
   }
 }
 

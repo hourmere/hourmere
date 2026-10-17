@@ -146,6 +146,10 @@ const fields = {
   ).nullable(),
   location: Location,
   isActive: z.boolean().openapi({ description: 'Whether invitees can book it' }),
+  isHidden: z.boolean().openapi({
+    description:
+      'Hidden from public listings; anyone with the direct link can still book it. This is not access control.',
+  }),
   position: z.int().openapi({
     description: 'Order on the page, ascending',
     ...minMax({ min: L.positionMin, max: L.positionMax }),
@@ -190,6 +194,7 @@ const EventTypeInput = z
     location: LocationInput.optional(),
     questions: questions.optional(),
     isActive: fields.isActive.optional().openapi({ default: true }),
+    isHidden: fields.isHidden.optional().openapi({ default: false }),
     position: fields.position.optional().openapi({ default: 0 }),
     scheduleId: fields.scheduleId.optional(),
   })
@@ -210,6 +215,7 @@ const EventTypeUpdate = z
     location: LocationInput.optional(),
     questions: questions.optional(),
     isActive: fields.isActive.optional(),
+    isHidden: fields.isHidden.optional(),
     position: fields.position.optional(),
     scheduleId: fields.scheduleId.optional(),
   })

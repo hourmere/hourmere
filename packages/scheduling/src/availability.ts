@@ -219,7 +219,7 @@ export interface PublicHost {
 }
 
 /**
- * The host at /{handle} and their bookable personal event types (active, not deleted, in an
+ * The host at /{handle} and their listed, bookable personal event types (active, not hidden or deleted, in an
  * organization they still belong to), in the order they arranged them. `host_not_found` for
  * an unknown or reserved handle; a host with nothing to book has an empty list.
  */
@@ -248,6 +248,7 @@ export async function getPublicHost(
     .select(['et.slug', 'et.title', 'et.description', 'et.duration_minutes', 'et.location'])
     .where('et.owner_user_id', '=', profile.user_id)
     .where('et.is_active', '=', true)
+    .where('et.is_hidden', '=', false)
     .where('et.deleted_at', 'is', null)
     .orderBy('et.position')
     .orderBy('et.id')
