@@ -81,7 +81,7 @@ so the open transaction rolls back (the email stays owed) and its connection is 
 Then the pools close. (The SMTP exchange itself is not cut off and may still finish before
 the process exits, in which case the retry sends that email a second time.) The job logs
 one line saying it was stopped, not an error. Give it time to do so: `stop_grace_period: 35s` in
-`docker-compose.yml`, `docker stop -t 30`, or the orchestrator's equivalent; Docker's
+`docker-compose.yml`, `docker stop -t 35`, or the orchestrator's equivalent; Docker's
 default of 10 seconds cuts long jobs short (they are retried, so nothing is lost).
 
 ## Events and their jobs

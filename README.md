@@ -55,7 +55,6 @@ The Starlight documentation includes a [self-hosting guide](apps/site/src/conten
 [configuration reference](apps/site/src/content/docs/docs/configuration.md),
 and [REST](apps/site/src/content/docs/docs/rest.md) / [MCP](apps/site/src/content/docs/docs/mcp.md) quickstarts.
 
-
 ```sh
 cp .env.example .env   # set POSTGRES_PASSWORD, BETTER_AUTH_SECRET and PUBLIC_URL
 docker compose up -d
