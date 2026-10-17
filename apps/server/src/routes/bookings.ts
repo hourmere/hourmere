@@ -124,13 +124,9 @@ export const BookingPage = z
 
 /** Filters and paging for the host's bookings (GET /api/v1/bookings, MCP list_bookings). */
 export const ListBookingsQuery = z.object({
-  order: z
-    .enum(['asc', 'desc'])
-    .optional()
-    .openapi({
-      description:
-        'Order by start time and id: asc (default) or desc. Keep unchanged between pages.',
-    }),
+  order: z.enum(['asc', 'desc']).optional().openapi({
+    description: 'Order by start time and id: asc (default) or desc. Keep unchanged between pages.',
+  }),
   from: Instant.optional().openapi({ description: 'Only bookings starting at or after' }),
   to: Instant.optional().openapi({ description: 'Only bookings starting before' }),
   status: z.enum(['confirmed', 'cancelled']).optional(),
