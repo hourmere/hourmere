@@ -117,6 +117,8 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
     await f.schedule(host.userId)
     await f.eventType(host.organizationId, host.userId, {
       slug: 'intro',
+      // These scenarios exercise a host that explicitly enabled guests.
+      allowGuests: true,
       title: 'Intro call',
       location: { kind: 'link', url: 'https://meet.example.com/abc' },
       questions: [

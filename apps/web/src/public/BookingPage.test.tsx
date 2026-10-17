@@ -55,6 +55,58 @@ async function chooseSlot(user: ReturnType<typeof userEvent.setup>, dayName: Reg
 }
 
 describe('the booking page', () => {
+  it('hides guest collection when the host has not opted in and books only the invitee', async () => {
+    const user = userEvent.setup()
+    const api = fakeApi({
+      ...eventRoutes({ ...EVENT, allowGuests: false }, DST_SLOTS),
+      'POST /api/v1/public/ada/intro/bookings': () =>
+        json(201, { booking: booking(), manageToken: TOKEN }),
+    })
+    renderApp('/ada/intro')
+    await chooseSlot(user, /November 2, available/, '9:00 AM')
+    expect(screen.queryByRole('group', { name: /Guests/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Add a guest' })).toBeNull()
+    await user.type(screen.getByLabelText('Your name'), 'Invitee')
+    await user.type(screen.getByLabelText('Email'), 'invitee@example.com')
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+    await screen.findByRole('heading', { name: 'You’re booked' })
+    expect(api.to('POST /api/v1/public/ada/intro/bookings')[0]?.body).not.toHaveProperty('guests')
+  })
+  it('lets a stale form remove guests and retry with a new key after host opt-out', async () => {
+    const user = userEvent.setup()
+    let first = true
+    const api = fakeApi({
+      ...eventRoutes(EVENT, DST_SLOTS),
+      'POST /api/v1/public/ada/intro/bookings': () => {
+        if (first) {
+          first = false
+          return json(400, { error: 'guests_not_allowed' })
+        }
+        return json(201, { booking: booking(), manageToken: TOKEN })
+      },
+    })
+    renderApp('/ada/intro')
+    await chooseSlot(user, /November 2, available/, '9:00 AM')
+    await user.type(screen.getByLabelText('Your name'), 'Invitee')
+    await user.type(screen.getByLabelText('Email'), 'invitee@example.com')
+    await user.click(screen.getByRole('button', { name: 'Add a guest' }))
+    await user.type(screen.getByLabelText('Guest 1 name'), 'Guest')
+    await user.type(screen.getByLabelText('Guest 1 email'), 'guest@example.com')
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+    expect(
+      await screen.findByText('The host no longer allows guests. Remove the guests to continue.'),
+    ).toBeDefined()
+    await user.click(screen.getByRole('button', { name: 'Remove guest 1' }))
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+    await screen.findByRole('heading', { name: 'You’re booked' })
+    const calls = api.to('POST /api/v1/public/ada/intro/bookings')
+    expect(calls).toHaveLength(2)
+    expect(calls[1]?.body).not.toHaveProperty('guests')
+    expect(calls[0]?.headers.get('Idempotency-Key')).not.toBe(
+      calls[1]?.headers.get('Idempotency-Key'),
+    )
+  })
+
   it('books through a team link without a session, preserving team case and retry identity', async () => {
     const user = userEvent.setup()
     let first = true

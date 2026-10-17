@@ -327,3 +327,18 @@ path; a worker decides account/registration eligibility. Job JSON carries only a
 ID, and the expiring outbox encrypts the recipient and scanner-safe fragment URL. See
 [data-model.md](data-model.md#sign-in-email-outbox) for storage and cleanup. Web-only
 processes need a worker for sign-in mail, just as they do for booking notifications.
+
+## Guest email controls
+
+Guests are additional recipients supplied by an invitee. New bookings can add them only
+when the host enables **Allow invitees to add guests** on that event type; the default is
+off, including for event types created before migration 0015. REST and MCP expose the
+`allowGuests` flag on event-type detail and authenticated discovery. Nonempty guests on
+a disabled event type return `400 guests_not_allowed` before any booking, attendee or
+notification is stored. Enabled types retain the ten-guest cap and existing rate limits.
+
+Turning the setting off affects new bookings. Existing guests still receive reminders and
+calendar updates/cancellations so their invitations do not become stale; retries of a
+successfully committed booking preserve the original result. This opt-in limits anonymous
+guest email amplification; it does not verify the main invitee's email address or eliminate
+all email abuse.

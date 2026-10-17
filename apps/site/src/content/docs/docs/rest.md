@@ -47,7 +47,10 @@ unknown busy data is free.
 
 ## Create and manage one booking
 
-Bookings send email to the host/invitee (and supplied guests) when workers are enabled. Use
+Bookings send email to the host/invitee when workers are enabled. Additional guests require
+the host to enable `allowGuests` on the event type (off by default, at most ten). Otherwise
+nonempty `guests` return `400 guests_not_allowed`. Existing guests keep receiving updates
+and cancellations after the host disables new guests. Use
 an address you control for a test. Use a new idempotency key per intended booking and keep
 the same body/key for retries:
 

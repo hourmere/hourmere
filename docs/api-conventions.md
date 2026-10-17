@@ -279,3 +279,12 @@ work when it is active. Anyone who knows or guesses the link can book it; hiding
 authentication or access control. Inactive or deleted event types remain unbookable.
 Authenticated REST and MCP catalog reads retain hidden configurations and their `isHidden`
 flag so owners and authorized team members can manage them.
+
+### Additional guest recipients
+
+Event types default `allowGuests` to false. Only the personal owner or a team owner/admin
+can enable it. Public personal/team detail and authenticated event-type detail/catalog
+report the flag. Sending nonempty `guests` while it is off returns `400 guests_not_allowed`
+from both REST and MCP, without creating a booking or email jobs. The maximum remains ten
+after opt-in. A settings change is serialized with booking approval; idempotent replays
+of committed bookings and existing attendees on reschedule/cancel remain intact.

@@ -180,6 +180,9 @@ export function bookingErrors(err: RequestError, questions: readonly Question[])
       else if (/email/i.test(message)) fields.email = EMAIL_HINT
       else return { fields, form: message }
       return { fields, form: null }
+    case 'guests_not_allowed':
+      fields.guests = 'The host no longer allows guests. Remove the guests to continue.'
+      return { fields, form: null }
     case 'invalid_guests':
     case 'too_many_guests':
       fields.guests =

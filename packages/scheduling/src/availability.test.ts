@@ -518,6 +518,7 @@ describe.skipIf(!serverUrl)('availability', () => {
       await f.eventType(host.organizationId, host.userId, {
         slug: 'chat',
         title: 'Chat',
+        allowGuests: false,
         description: 'A quick chat',
         durationMinutes: 20,
         location: { kind: 'phone', number: '+1 555 0100' },
@@ -540,6 +541,7 @@ describe.skipIf(!serverUrl)('availability', () => {
         handle: 'linus',
         slug: 'chat',
         title: 'Chat',
+        allowGuests: false,
         description: 'A quick chat',
         durationMinutes: 20,
         location: { kind: 'phone' },
