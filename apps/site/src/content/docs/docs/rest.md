@@ -60,8 +60,8 @@ curl --fail-with-body "$HOURMERE_URL/api/v1/public/ada/intro/bookings" \
 ```
 
 Save the returned `manageToken` privately. Only its hash is stored; it is returned once. A
-same-key retry returns HTTP 200 (rather than 201) with the original booking and `manageToken: null`. Reusing the key with different
-arguments fails with `idempotency_key_reused`; use a new key for a genuinely new booking.
+same-key retry returns HTTP 200 (rather than 201) with the original booking and
+`manageToken: null`. Reusing the key with different arguments fails with `idempotency_key_reused`; use a new key for a genuinely new booking.
 
 The public booking and invitee management endpoints do not require an API key; the examples
 include it for consistency with the authenticated calls above. A public create request's
