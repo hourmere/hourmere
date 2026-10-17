@@ -1,2 +1,2 @@
 export * from './availability/index.ts'
-export { isReservedName, RESERVED_NAMES } from './reserved.ts'
+export { isPublicTeamSlug, isReservedName, RESERVED_NAMES } from './reserved.ts'

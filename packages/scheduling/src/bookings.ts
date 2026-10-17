@@ -7,6 +7,7 @@ import { type ExpressionBuilder, sql } from 'kysely'
 import {
   eventTypeNotFound,
   findPublicEventType,
+  findPublicTeamEventType,
   findSlots,
   type Location,
   parseLocation,
@@ -617,7 +618,25 @@ export async function createPublicBooking(
   input: CreateBookingInput,
   origin: BookingOrigin = BOOKING_PAGE,
 ): Promise<CreateBookingResult> {
-  const et = await findPublicEventType(ctx.db, input.handle, input.slug)
+  return publicBooking(ctx, input, origin, findPublicEventType)
+}
+
+/** Books an individual team event through the same locked transaction and idempotency path. */
+export async function createPublicTeamBooking(
+  ctx: PublicContext,
+  input: CreateBookingInput,
+  origin: BookingOrigin = BOOKING_PAGE,
+): Promise<CreateBookingResult> {
+  return publicBooking(ctx, input, origin, findPublicTeamEventType)
+}
+
+async function publicBooking(
+  ctx: PublicContext,
+  input: CreateBookingInput,
+  origin: BookingOrigin,
+  resolve: typeof findPublicEventType,
+): Promise<CreateBookingResult> {
+  const et = await resolve(ctx.db, input.handle, input.slug)
   if (!et) throw eventTypeNotFound()
 
   let scope: IdempotencyScope | undefined
@@ -663,7 +682,7 @@ export async function createPublicBooking(
       }
       // The event type may have changed while we waited (duration, questions, rules), and
       // waiting took time: read both again now that the host is locked.
-      const current = await findPublicEventType(trx, input.handle, input.slug)
+      const current = await resolve(trx, input.handle, input.slug)
       if (!current || current.id !== et.id || current.hostUserId !== et.hostUserId) {
         throw eventTypeNotFound()
       }

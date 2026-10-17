@@ -79,6 +79,10 @@ export const BookingPage = page(
   () => import('./public/BookingPage.tsx'),
   (m) => m.BookingPage,
 )
+export const TeamBookingPage = page(
+  () => import('./public/BookingPage.tsx'),
+  (m) => m.TeamBookingPage,
+)
 export const ManageBookingPage = page(
   () => import('./public/ManageBookingPage.tsx'),
   (m) => m.ManageBookingPage,
