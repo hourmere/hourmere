@@ -65,8 +65,10 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
   }
   let app: ReturnType<typeof createApp>
 
-  async function createKey(userId: string, name: string) {
-    const created = await auth.api.createApiKey({ body: { userId, name } })
+  async function createKey(userId: string, name: string, organizationId?: string) {
+    const created = await auth.api.createApiKey({
+      body: { userId, name, ...(organizationId && { metadata: { organizationId } }) },
+    })
     return { key: created.key, keyId: created.id }
   }
 
@@ -164,6 +166,157 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
     invitee: { name: 'Grace Hopper', email: 'grace@example.com', timeZone: 'America/New_York' },
     responses: { topic: 'Compilers' },
     ...more,
+  })
+
+  async function hostedBooking() {
+    const host = await f.host()
+    await f.schedule(host.userId)
+    await f.eventType(host.organizationId, host.userId, {
+      slug: 'intro',
+      durationMinutes: 30,
+      slotStepMinutes: 15,
+    })
+    const key = await createKey(host.userId, 'host-move')
+    const booked = ok<Booked>(
+      await call(
+        'create_booking',
+        bookingArgs('2026-11-02T09:00:00Z', {
+          handle: host.handle,
+          responses: {},
+        }),
+      ),
+    )
+    return { host, key, booked }
+  }
+
+  describe('rescheduling as the host', () => {
+    it('moves by bookingId and attributes the withdrawal/new booking to the host key', async () => {
+      const { host, key, booked } = await hostedBooking()
+      const moved = ok<Booked>(
+        await call(
+          'reschedule_booking',
+          { bookingId: booked.booking.id, start: '2026-11-02T09:15:00Z' },
+          key.key,
+        ),
+      )
+      expect(moved.booking).toMatchObject({
+        status: 'confirmed',
+        start: '2026-11-02T09:15:00.000Z',
+        rescheduledFromId: booked.booking.id,
+        source: 'mcp',
+      })
+      expect(moved.manageToken).toMatch(/^[A-Za-z0-9_-]{43}$/)
+      const old = await db
+        .selectFrom('bookings')
+        .select(['source', 'api_key_id', 'cancelled_source', 'cancelled_api_key_id'])
+        .where('id', '=', booked.booking.id)
+        .executeTakeFirstOrThrow()
+      expect(old).toEqual({
+        source: 'mcp',
+        api_key_id: agent.keyId,
+        cancelled_source: 'mcp',
+        cancelled_api_key_id: key.keyId,
+      })
+      expect(
+        (
+          await db
+            .selectFrom('bookings')
+            .select('api_key_id')
+            .where('id', '=', moved.booking.id)
+            .executeTakeFirstOrThrow()
+        ).api_key_id,
+      ).toBe(key.keyId)
+      expect(
+        errorOf(
+          await call(
+            'reschedule_booking',
+            { bookingId: booked.booking.id, start: '2026-11-02T10:00:00Z' },
+            key.key,
+          ),
+        ).error,
+      ).toBe('booking_cancelled')
+      const listed = ok<{ data: { id: string }[] }>(await call('list_bookings', {}, key.key))
+      expect(listed.data.some((b) => b.id === moved.booking.id)).toBe(true)
+      expect(host.userId).not.toBe(agent.userId)
+    })
+
+    it('requires exactly one selector and refuses forged audit fields', async () => {
+      const { key, booked } = await hostedBooking()
+      for (const args of [
+        { start: '2026-11-02T10:00:00Z' },
+        {
+          bookingId: booked.booking.id,
+          manageToken: booked.manageToken,
+          start: '2026-11-02T10:00:00Z',
+        },
+        { bookingId: 'bad-id', start: '2026-11-02T10:00:00Z' },
+        { bookingId: booked.booking.id, start: '2026-11-02T10:00:00Z', source: 'web' },
+      ])
+        expect(errorOf(await call('reschedule_booking', args, key.key)).error).toBe(
+          'invalid_request',
+        )
+      expect(
+        (
+          await db
+            .selectFrom('bookings')
+            .select('status')
+            .where('id', '=', booked.booking.id)
+            .executeTakeFirstOrThrow()
+        ).status,
+      ).toBe('confirmed')
+    })
+
+    it('hides another host booking and a booking outside the key organization', async () => {
+      const { host, booked } = await hostedBooking()
+      const elsewhere = await f.organization()
+      await f.member(host.userId, elsewhere)
+      const wrongOrg = await createKey(host.userId, 'other-org', elsewhere)
+      for (const key of [agent.key, wrongOrg.key]) {
+        expect(
+          errorOf(
+            await call(
+              'reschedule_booking',
+              { bookingId: booked.booking.id, start: '2026-11-02T10:00:00Z' },
+              key,
+            ),
+          ).error,
+        ).toBe('booking_not_found')
+      }
+      expect(
+        (
+          await db
+            .selectFrom('bookings')
+            .select('status')
+            .where('id', '=', booked.booking.id)
+            .executeTakeFirstOrThrow()
+        ).status,
+      ).toBe('confirmed')
+    })
+
+    it('shares the per-user manage limit across host/invitee moves and keys', async () => {
+      const { host, key, booked } = await hostedBooking()
+      const second = await createKey(host.userId, 'second-host-move')
+      const limited = appWith({ manage: { limit: 1, windowSeconds: 60 } })
+      const moved = ok<Booked>(
+        await call(
+          'reschedule_booking',
+          { bookingId: booked.booking.id, start: '2026-11-02T10:00:00Z' },
+          key.key,
+          limited,
+        ),
+      )
+      expect(
+        errorOf(
+          await call(
+            'reschedule_booking',
+            { manageToken: moved.manageToken, start: '2026-11-02T11:00:00Z' },
+            second.key,
+            limited,
+          ),
+        ).error,
+      ).toBe('rate_limited')
+      ok(await call('cancel_booking', { manageToken: moved.manageToken }, agent.key, limited))
+    })
   })
 
   describe('API keys', () => {

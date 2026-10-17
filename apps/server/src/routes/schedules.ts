@@ -66,7 +66,7 @@ const WeeklyHoursInput = z
   .strictObject(week(WallClockIntervalInput))
   .openapi('WeeklyHoursInput', weekRules)
 
-const Schedule = z
+export const Schedule = z
   .object({
     id: z.uuid(),
     name: z.string(),
