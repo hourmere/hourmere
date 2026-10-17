@@ -20,6 +20,7 @@ Restart/recreate affected processes after changing configuration.
 | `BETTER_AUTH_SECRET` | Required | At least 32 non-whitespace random characters. Signs sessions and protects sign-in tokens. Changing it signs people out. |
 | `AUTO_MIGRATE` | `true` | Apply SQL/job migrations on startup. `false` requires manual migrations first; startup still needs database access. Not forwarded by the default Compose file. |
 | `WEB_DIST` | Unset | Built SPA directory. Docker sets `/app/apps/web/dist`; development uses Vite instead. |
+| `MCP_OAUTH_ENABLED` | `false` | Enable MCP OAuth connectors alongside API keys. Requires HTTPS except on loopback; explicit organization approval and revocation at `/app/connected-apps`. No calendar/provider client credentials needed. Set identically on web and worker. |
 | `HOURMERE_ROLE` | `all` | `all`: API and workers; `web`: API/queues only; `worker`: jobs and health endpoint only. |
 
 `npm run dev` points the application at Vite (`http://localhost:5173`) and defaults signup to

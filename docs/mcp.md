@@ -37,6 +37,7 @@ covers the connection values and booking flow.
 
 A missing key gets **401** with `WWW-Authenticate: Bearer`; a malformed, unknown, disabled
 or deleted one gets 401 with `WWW-Authenticate: Bearer error="invalid_token"` (RFC 6750).
+With OAuth disabled, discovery documents return 404.
 Session cookies are never accepted on `/mcp`, even alongside a
 key: a JSON-RPC endpoint that cookies could authenticate would let any web page act as a
 signed-in visitor (CSRF).
@@ -53,6 +54,51 @@ pages are also limited per user, all of their keys together, with the numbers th
 endpoints apply per address: `find_available_slots` 120 a minute, `create_booking` 10,
 `reschedule_booking` (by host ID or manage token) and `cancel_booking` by manage token 30 together. Beyond those, the tool
 answers `rate_limited` (see [Errors](#errors)).
+
+## OAuth 2.1 connectors
+
+Set `MCP_OAUTH_ENABLED=true` on web and worker processes, with a stable HTTPS `PUBLIC_URL`
+(loopback HTTP is accepted for development). The default is `false`; API keys keep working.
+No Google/Microsoft account, OAuth client registration or calendar credentials are needed:
+Hourmere is the authorization server. Restart after configuration changes.
+
+Give the connector `<PUBLIC_URL>/mcp`. Discovery is available at
+`/.well-known/oauth-protected-resource/mcp` (also the root alias) and
+`/.well-known/oauth-authorization-server/api/auth`; 401 challenges name the resource document.
+The issuer is `<PUBLIC_URL>/api/auth`. Clients use Authorization Code with mandatory S256
+PKCE and the exact `<PUBLIC_URL>/mcp` resource in authorization and token requests. HTTPS
+Client ID Metadata Documents (CIMD) are preferred; Dynamic Client Registration is supported
+for older connectors. The bundled transport rejects special-use IPs, pins validated DNS
+addresses and refuses redirects. Application metadata is untrusted; no remote logos load.
+
+Sign in, explicitly choose one organization, then approve `mcp:tools` and optionally
+`offline_access`. The permission covers all current MCP tools with the user's current
+permissions, including attendee data and booking mutations; it grants no REST API or
+account/key administration access. Another tab changing the active organization cannot
+change that choice. The browser flow uses short-lived signed requests and a session-bound,
+one-time intent; restart from the connector if the attempt expires or the page is refreshed.
+
+Access tokens last five minutes. Refresh tokens last 30 days and rotate on use; a 30-second
+reuse window permits lost-response retries (the replay response is encrypted). Signing keys
+are encrypted with `BETTER_AUTH_SECRET`, refresh tokens are hashed. Keep that secret stable.
+DPoP-bound tokens require a matching request proof and use PostgreSQL-backed replay
+reservations across web instances. Unbound bearer tokens are also supported.
+
+Manage your connections at `/app/connected-apps`. Revocation removes the grant and consent
+and revokes its refresh tokens; old JWTs and pending codes remain invalid after reconnection.
+Each MCP request checks the current grant, consent, client, email verification and team
+membership. OAuth attribution and idempotency use their own consent identifier, separate
+from API keys and anonymous public requests. Historical booking attribution survives revocation.
+
+OAuth requests are limited to 120 per minute per consent per web process; the existing
+per-user tool limits also apply. Browser connection endpoints allow 30 requests per minute
+per IP per process. Provider endpoints use Better Auth's own rate limits. The worker cleans
+expired intents and token/assertion records every 15 minutes. Keep workers running.
+
+Protocol integration tests use synthetic HTTPS metadata, real temporary PostgreSQL databases
+and in-process requests. Hosted ChatGPT/claude.ai connections still require an externally
+reachable HTTPS deployment and a real connector account; those are not implied by local
+protocol tests. Connector availability and setup screens can change.
 
 ## Connecting a client
 
@@ -208,11 +254,6 @@ is `-32700` (HTTP 400), an unknown tool `-32602`. Refusals before the protocol l
 
 ## What's next
 
-- **OAuth 2.1**, so claude.ai and ChatGPT connectors can sign in without copying a key. It
-  will be added next to API keys, which keep working: the server will publish its protected
-  resource metadata at `/.well-known/oauth-protected-resource/mcp` (now a 404) and name it in
-  the 401's `WWW-Authenticate` header, and access tokens will resolve to the same kind of
-  caller as keys. The seam is `apps/server/src/mcp/endpoint.ts`.
 - Configuration write tools (profile, schedules, event types), on the services the REST API
   now uses for them. Read-only discovery is available today.
 

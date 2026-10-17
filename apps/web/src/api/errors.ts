@@ -38,10 +38,20 @@ export function requestError(status: number, body: unknown): RequestError {
       : typeof record.code === 'string'
         ? record.code
         : undefined
+  const oauthMessages: Record<string, string> = {
+    mcp_oauth_disabled: 'MCP OAuth is disabled on this Hourmere instance.',
+    oauth_request_expired:
+      'This connection attempt expired or was already used. Restart it from your AI app.',
+    invalid_oauth_request:
+      'This connection request is invalid or expired. Restart it from your AI app.',
+    oauth_organization_forbidden: 'You no longer have access to the selected organization.',
+  }
+  const oauthMessage = code && Object.hasOwn(oauthMessages, code) ? oauthMessages[code] : undefined
   const message =
-    typeof record.message === 'string' && record.message.trim()
+    oauthMessage ??
+    (typeof record.message === 'string' && record.message.trim()
       ? record.message
-      : messageForStatus(status)
+      : messageForStatus(status))
   return new RequestError(status, code, message)
 }
 

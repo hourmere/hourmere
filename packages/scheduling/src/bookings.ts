@@ -299,6 +299,8 @@ interface IdempotencyScope {
   organizationId: string
   /** The caller's API key; null for anonymous callers, who all share one scope. */
   apiKeyId: string | null
+  /** OAuth grants have their own retry and audit scope, separate from keys and anonymous callers. */
+  oauthConsentId?: string | null | undefined
   key: string
   fingerprint: Buffer
 }
@@ -313,6 +315,11 @@ async function findReplay(db: Db, scope: IdempotencyScope): Promise<BookingWithT
     .select(['id', 'idempotency_fingerprint'])
     .where('organization_id', '=', scope.organizationId)
     .where('api_key_id', scope.apiKeyId === null ? 'is' : '=', scope.apiKeyId)
+    .where(
+      'oauth_consent_id',
+      scope.oauthConsentId == null ? 'is' : '=',
+      scope.oauthConsentId ?? null,
+    )
     .where('idempotency_key', '=', scope.key)
     .executeTakeFirst()
   if (!row) return undefined
@@ -477,6 +484,8 @@ interface NewBooking {
   responses: Responses
   source: BookingSource
   apiKeyId: string | null
+  /** OAuth grants have their own retry and audit scope, separate from keys and anonymous callers. */
+  oauthConsentId?: string | null | undefined
   idempotency?: { key: string; fingerprint: Buffer } | undefined
   rescheduledFromId?: string | undefined
   hostUserIds: readonly string[]
@@ -499,6 +508,7 @@ async function insertBooking(db: Db, b: NewBooking): Promise<{ id: string; manag
       manage_token_hash: hash,
       source: b.source,
       api_key_id: b.apiKeyId,
+      oauth_consent_id: b.oauthConsentId ?? null,
       idempotency_key: b.idempotency?.key ?? null,
       idempotency_fingerprint: b.idempotency?.fingerprint ?? null,
       rescheduled_from_id: b.rescheduledFromId ?? null,
@@ -565,6 +575,7 @@ async function cancelLocked(
       cancel_reason: reason,
       cancelled_source: origin.source,
       cancelled_api_key_id: origin.apiKeyId,
+      cancelled_oauth_consent_id: origin.oauthConsentId ?? null,
     })
     .where('id', '=', row.id)
     .execute()
@@ -598,6 +609,8 @@ export interface BookingOrigin {
   source: BookingSource
   /** The caller's API key. Idempotency keys are scoped to it; null shares one scope. */
   apiKeyId: string | null
+  /** OAuth grants have their own retry and audit scope, separate from keys and anonymous callers. */
+  oauthConsentId?: string | null | undefined
 }
 
 const BOOKING_PAGE: BookingOrigin = { source: 'web', apiKeyId: null }
@@ -660,6 +673,7 @@ async function publicBooking(
     scope = {
       organizationId: et.organizationId,
       apiKeyId: origin.apiKeyId,
+      oauthConsentId: origin.oauthConsentId ?? null,
       key: input.idempotencyKey,
       fingerprint,
     }
@@ -713,6 +727,7 @@ async function publicBooking(
         responses,
         source: origin.source,
         apiKeyId: origin.apiKeyId,
+        oauthConsentId: origin.oauthConsentId ?? null,
         idempotency: scope && { key: scope.key, fingerprint: scope.fingerprint },
         hostUserIds: [current.hostUserId],
         attendees: [invitee, ...guests],
@@ -861,6 +876,7 @@ async function rescheduleLocked(
       cancelled_at: now.toString(),
       cancelled_source: origin.source,
       cancelled_api_key_id: origin.apiKeyId,
+      cancelled_oauth_consent_id: origin.oauthConsentId ?? null,
     })
     .where('id', '=', old.id)
     .execute()
@@ -874,6 +890,7 @@ async function rescheduleLocked(
     responses: (isRecord(old.responses) ? old.responses : {}) as Responses,
     source: origin.source,
     apiKeyId: origin.apiKeyId,
+    oauthConsentId: origin.oauthConsentId ?? null,
     rescheduledFromId: old.id,
     hostUserIds,
     attendees: attendees.map((a) => ({
@@ -1087,8 +1104,10 @@ export async function rescheduleHostBooking(
       old,
       start,
       origin ?? {
-        source: ctx.principal.kind === 'api_key' ? 'api' : 'web',
+        source:
+          ctx.principal.kind === 'api_key' ? 'api' : ctx.principal.kind === 'oauth' ? 'mcp' : 'web',
         apiKeyId: ctx.principal.kind === 'api_key' ? ctx.principal.apiKeyId : null,
+        oauthConsentId: ctx.principal.kind === 'oauth' ? ctx.principal.oauthConsentId : null,
       },
     )
   })
@@ -1121,8 +1140,10 @@ export async function cancelHostBooking(
       cancelReason,
       ctx.notify,
       origin ?? {
-        source: ctx.principal.kind === 'api_key' ? 'api' : 'web',
+        source:
+          ctx.principal.kind === 'api_key' ? 'api' : ctx.principal.kind === 'oauth' ? 'mcp' : 'web',
         apiKeyId: ctx.principal.kind === 'api_key' ? ctx.principal.apiKeyId : null,
+        oauthConsentId: ctx.principal.kind === 'oauth' ? ctx.principal.oauthConsentId : null,
       },
     )
   })

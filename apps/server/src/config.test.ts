@@ -7,6 +7,24 @@ const base = {
 }
 
 describe('loadConfig', () => {
+  it('keeps MCP OAuth opt-in and requires a secure canonical origin when enabled', () => {
+    expect(loadConfig(base).MCP_OAUTH_ENABLED).toBe(false)
+    expect(loadConfig({ ...base, MCP_OAUTH_ENABLED: '' }).MCP_OAUTH_ENABLED).toBe(false)
+    for (const PUBLIC_URL of [
+      'https://hourmere.example.com',
+      'http://localhost:4197',
+      'http://127.0.0.1:4197',
+      'http://[::1]:4197',
+    ])
+      expect(loadConfig({ ...base, MCP_OAUTH_ENABLED: 'true', PUBLIC_URL }).MCP_OAUTH_ENABLED).toBe(
+        true,
+      )
+    expect(() =>
+      loadConfig({ ...base, MCP_OAUTH_ENABLED: 'true', PUBLIC_URL: 'http://192.168.1.1' }),
+    ).toThrow(/MCP OAuth requires HTTPS/)
+    expect(loadConfig({ ...base, PUBLIC_URL: 'http://192.168.1.1' }).MCP_OAUTH_ENABLED).toBe(false)
+    expect(() => loadConfig({ ...base, MCP_OAUTH_ENABLED: 'yes' })).toThrow(/MCP_OAUTH_ENABLED/)
+  })
   it.each(['GOOGLE', 'MICROSOFT'] as const)(
     'configures %s calendar OAuth independently of sign-in and requires encryption',
     (provider) => {

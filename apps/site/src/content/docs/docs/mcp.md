@@ -101,3 +101,16 @@ notification and per-user management limits.
 A move creates a new booking with `rescheduledFromId` pointing to the old one. Retrying the
 old ID fails with `booking_cancelled`. If an answer is lost, inspect `list_bookings` before
 trying another move. The returned new manage token is shown once, as with an invitee move.
+
+## Connect with OAuth
+
+For browser-based AI connectors, the instance operator can set `MCP_OAUTH_ENABLED=true`
+with a stable HTTPS `PUBLIC_URL`. Use the same `/mcp` server URL. Hourmere serves OAuth
+resource/issuer discovery, supports HTTPS Client ID Metadata Documents and dynamic client
+registration, and requires Authorization Code with S256 PKCE and the MCP resource indicator.
+
+Sign in, choose an organization explicitly, and review the app's requested access. MCP
+access includes booking details and mutations with your current permissions in that
+organization. Optional offline access keeps the connection for up to 30 days. Revoke an
+app at **Connected apps**; old tokens stop working immediately. API keys remain available
+when OAuth is disabled. Calendar connections are configured separately.
