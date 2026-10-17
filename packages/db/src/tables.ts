@@ -140,6 +140,12 @@ export interface BookingCalendarEvents {
   external_event_id: string;
 }
 
+export interface BookingCalendarTargets {
+  calendar_id: string;
+  root_booking_id: string;
+  user_id: string;
+}
+
 export interface BookingHosts {
   /**
    * Derived from the booking status by booking_host_slot(); any value written is replaced.
@@ -205,6 +211,7 @@ export interface CalendarConnections {
 }
 
 export interface CalendarOauthStates {
+  access: Generated<string>;
   claimed: Generated<boolean>;
   created_at: Generated<Timestamp>;
   expires_at: Timestamp;
@@ -215,6 +222,7 @@ export interface CalendarOauthStates {
 }
 
 export interface Calendars {
+  access_role: Generated<string>;
   check_conflicts: Generated<boolean>;
   connection_id: string;
   external_id: string;
@@ -222,7 +230,9 @@ export interface Calendars {
   is_primary: Generated<boolean>;
   last_synced_at: Timestamp | null;
   name: string;
+  sync_error: string | null;
   sync_state: Json | null;
+  time_zone: string | null;
 }
 
 export interface EventTypeHosts {
@@ -300,6 +310,7 @@ export interface DB {
   "auth.verification": AuthVerification;
   booking_attendees: BookingAttendees;
   booking_calendar_events: BookingCalendarEvents;
+  booking_calendar_targets: BookingCalendarTargets;
   booking_hosts: BookingHosts;
   booking_notifications: BookingNotifications;
   bookings: Bookings;

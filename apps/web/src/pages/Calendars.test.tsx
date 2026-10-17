@@ -11,10 +11,19 @@ const connection: Schemas['CalendarConnection'] = {
   provider: 'google',
   accountEmail: 'calendar@example.com',
   status: 'active',
+  syncAuthorized: false,
   createdAt: '2026-10-16T10:00:00Z',
   updatedAt: '2026-10-16T10:00:00Z',
   calendars: [
-    { id: 'c0000000-0000-7000-8000-000000000001', name: 'Work calendar', isPrimary: true },
+    {
+      id: 'c0000000-0000-7000-8000-000000000001',
+      name: 'Work calendar',
+      isPrimary: true,
+      checkConflicts: false,
+      accessRole: 'owner',
+      lastSyncedAt: null,
+      syncError: null,
+    },
   ],
 }
 const list = (data = [connection], googleEnabled = true) => ({
@@ -33,11 +42,13 @@ describe('the calendars page', () => {
     renderApp('/app/calendars')
     expect(await screen.findByText('Work calendar (primary)')).toBeDefined()
     expect(screen.getByText(/separate from signing in/).textContent).toContain(
-      'does not allow Hourmere to read or change your events',
+      'event read access and permission to',
     )
     await user.click(screen.getByRole('button', { name: 'Connect Google Calendar' }))
     await vi.waitFor(() => expect(goTo).toHaveBeenCalledWith(authorizationUrl))
-    expect(requests.to('POST /api/v1/calendar-connections/google/authorize')[0]?.body).toEqual({})
+    expect(requests.to('POST /api/v1/calendar-connections/google/authorize')[0]?.body).toEqual({
+      access: 'sync',
+    })
   })
 
   it('shows a disabled instance without hiding existing connections', async () => {
@@ -104,6 +115,93 @@ describe('the calendars page', () => {
     renderApp('/app/calendars')
     await user.click(await screen.findByRole('button', { name: 'Refresh calendar list' }))
     expect((await screen.findByRole('alert')).textContent).toContain('Reconnect Google Calendar')
+  })
+
+  it('selects conflict calendars, synchronizes and saves an owned booking destination', async () => {
+    const user = userEvent.setup()
+    let enabled = false,
+      synced = false,
+      destination: string | null = null
+    const calendar = connection.calendars[0] as NonNullable<(typeof connection.calendars)[0]>
+    const requests = fakeApi({
+      ...signedIn,
+      'GET /api/v1/calendar-connections': () =>
+        json(200, {
+          googleEnabled: true,
+          destinationCalendarId: destination,
+          data: [
+            {
+              ...connection,
+              syncAuthorized: true,
+              calendars: [
+                {
+                  ...calendar,
+                  checkConflicts: enabled,
+                  lastSyncedAt: synced ? '2026-10-16T12:00:00Z' : null,
+                },
+              ],
+            },
+          ],
+        }),
+      [`PATCH /api/v1/calendars/${calendar.id}`]: () => {
+        enabled = true
+        return new Response(null, { status: 204 })
+      },
+      [`POST /api/v1/calendars/${calendar.id}/sync`]: () => {
+        synced = true
+        return new Response(null, { status: 204 })
+      },
+      'PUT /api/v1/calendar-destination': () => {
+        destination = calendar.id
+        return new Response(null, { status: 204 })
+      },
+    })
+    renderApp('/app/calendars')
+    await user.click(
+      await screen.findByRole('checkbox', { name: 'Check conflicts in Work calendar' }),
+    )
+    expect(await screen.findByText(/Waiting for the first synchronization/)).toBeDefined()
+    expect(requests.to(`PATCH /api/v1/calendars/${calendar.id}`)[0]?.body).toEqual({
+      checkConflicts: true,
+    })
+    await user.click(screen.getByRole('button', { name: 'Sync Work calendar now' }))
+    expect(await screen.findByText(/Last synchronized:/)).toBeDefined()
+    await user.click(screen.getByRole('button', { name: 'Write new bookings to Work calendar' }))
+    expect(
+      await screen.findByRole('button', { name: 'Stop writing bookings to Work calendar' }),
+    ).toBeDefined()
+    expect(requests.to('PUT /api/v1/calendar-destination')[0]?.body).toEqual({
+      calendarId: calendar.id,
+    })
+  })
+  it('keeps a failed conflict selection unchecked and reports the server reason', async () => {
+    const user = userEvent.setup()
+    const calendar = connection.calendars[0] as NonNullable<(typeof connection.calendars)[0]>
+    fakeApi({
+      ...signedIn,
+      ...list([{ ...connection, syncAuthorized: true }]),
+      [`PATCH /api/v1/calendars/${calendar.id}`]: () =>
+        json(409, {
+          error: 'google_calendar_permissions_missing',
+          message: 'Reconnect before enabling busy times.',
+        }),
+    })
+    renderApp('/app/calendars')
+    await user.click(
+      await screen.findByRole('checkbox', { name: 'Check conflicts in Work calendar' }),
+    )
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'Reconnect before enabling busy times.',
+    )
+    await vi.waitFor(() =>
+      expect(
+        (
+          screen.getByRole('checkbox', {
+            name: 'Check conflicts in Work calendar',
+          }) as HTMLInputElement
+        ).checked,
+      ).toBe(false),
+    )
   })
 
   it('does not follow a late authorization response after the person leaves', async () => {

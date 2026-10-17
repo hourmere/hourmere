@@ -156,6 +156,22 @@ describe.skipIf(!databaseUrl)('calendar HTTP routes (real Postgres)', () => {
     expect(replay.headers.get('location')).toBe('/app/calendars?connection=invalid_state')
   })
 
+  it('protects settings and sync writes before parsing bodies', async () => {
+    const id = 'a0000000-0000-7000-8000-000000000001'
+    const paths: [string, string][] = [
+      [`/api/v1/calendars/${id}`, 'PATCH'],
+      [`/api/v1/calendars/${id}/sync`, 'POST'],
+      ['/api/v1/calendar-destination', 'PUT'],
+    ]
+    const headersCases: Record<string, string>[] = [
+      { origin: 'https://attacker.example' },
+      { authorization: 'Bearer hm_test' },
+    ]
+    for (const [path, method] of paths)
+      for (const headers of headersCases)
+        expect((await request(path, method, '{broken', headers)).status).toBe(403)
+  })
+
   it('bounds authorization attempts before reading a large body', async () => {
     for (let i = 0; i < 30; i++)
       expect(

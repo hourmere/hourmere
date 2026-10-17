@@ -622,6 +622,8 @@ export interface paths {
                     content: {
                         "application/json": {
                             data: components["schemas"]["CalendarConnection"][];
+                            /** Format: uuid */
+                            destinationCalendarId: string | null;
                             googleEnabled: boolean;
                         };
                     };
@@ -846,7 +848,7 @@ export interface paths {
         put?: never;
         /**
          * Start a separate Google Calendar connection
-         * @description Requires a browser session and same-origin request. Follow authorizationUrl; the attempt expires after ten minutes and can only finish in this session. Requests identity and calendar-list read access; does not request event read/write access.
+         * @description Requires a browser session and same-origin request. Follow authorizationUrl; the attempt expires after ten minutes and can only finish in this session. Default access=list requests identity and calendar-list access. access=sync additionally requests event read access and event writes on owned calendars; reconnect existing accounts to upgrade.
          */
         post: {
             parameters: {
@@ -857,7 +859,10 @@ export interface paths {
             };
             requestBody: {
                 content: {
-                    "application/json": Record<string, never>;
+                    "application/json": {
+                        /** @enum {string} */
+                        access?: "list" | "sync";
+                    };
                 };
             };
             responses: {
@@ -901,6 +906,273 @@ export interface paths {
                     };
                 };
                 /** @description google_calendar_disabled */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The API key's rate limit is used up */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/calendar-destination": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Choose the owned Google calendar for new booking events */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        calendarId: string | null;
+                    };
+                };
+            };
+            responses: {
+                /** @description Default booking calendar saved */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description No valid session or API key */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description session_required */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description calendar_not_found or profile_not_found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description calendar_not_writable */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The API key's rate limit is used up */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/calendars/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Select a calendar for busy-time conflict checks */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        checkConflicts: boolean;
+                    };
+                };
+            };
+            responses: {
+                /** @description Selection saved; enabled calendars synchronize in the background */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description invalid_request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No valid session or API key */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description session_required */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description calendar_not_found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description google_calendar_permissions_missing or calendar_events_unreadable */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The API key's rate limit is used up */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/api/v1/calendars/{id}/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Synchronize selected calendar busy intervals now */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            responses: {
+                /** @description Busy intervals synchronized */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description No valid session or API key */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description session_required */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description calendar_not_found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description calendar_sync_disabled or google_calendar_provider_unavailable */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -2437,10 +2709,15 @@ export interface components {
         CalendarConnection: {
             accountEmail: string | null;
             calendars: {
+                accessRole: string;
+                checkConflicts: boolean;
                 /** Format: uuid */
                 id: string;
                 isPrimary: boolean;
+                /** Format: date-time */
+                lastSyncedAt: string | null;
                 name: string;
+                syncError: string | null;
             }[];
             /** Format: date-time */
             createdAt: string;
@@ -2450,6 +2727,7 @@ export interface components {
             provider: "google";
             /** @enum {string} */
             status: "active" | "needs_reauth" | "revoked";
+            syncAuthorized: boolean;
             /** Format: date-time */
             updatedAt: string;
         };

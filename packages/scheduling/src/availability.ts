@@ -425,6 +425,49 @@ export async function buildAvailabilityInput(
   // extra local day on each side (UTC offsets stay within ±14 hours), and a booking's
   // buffers plus the new slot's reach at most 2 × 1440 minutes.
   const window = { start: rangeStart.subtract({ hours: 72 }), end: rangeEnd.add({ hours: 72 }) }
+  const googleCalendars = await db
+    .selectFrom('calendars as c')
+    .innerJoin('calendar_connections as cc', 'cc.id', 'c.connection_id')
+    .select(['cc.status', 'c.last_synced_at', 'c.sync_state', 'c.sync_error'])
+    .where('cc.user_id', '=', hostUserId)
+    .where('cc.provider', '=', 'google')
+    .where('c.check_conflicts', '=', true)
+    .execute()
+  for (const calendar of googleCalendars) {
+    const unavailable = () =>
+      new DomainError(
+        'conflict',
+        'calendar_sync_unavailable',
+        'The host calendar is temporarily unavailable. Try again shortly.',
+      )
+    if (
+      calendar.status !== 'active' ||
+      calendar.sync_error ||
+      !calendar.last_synced_at ||
+      calendar.last_synced_at.getTime() > now.epochMilliseconds + 60_000 ||
+      now.epochMilliseconds - calendar.last_synced_at.getTime() > 10 * 60_000
+    )
+      throw unavailable()
+    const state = calendar.sync_state
+    if (
+      !state ||
+      typeof state !== 'object' ||
+      Array.isArray(state) ||
+      state.version !== 1 ||
+      typeof state.start !== 'string' ||
+      typeof state.end !== 'string'
+    )
+      throw unavailable()
+    try {
+      if (
+        Temporal.Instant.compare(Temporal.Instant.from(state.start), window.start) > 0 ||
+        Temporal.Instant.compare(Temporal.Instant.from(state.end), window.end) < 0
+      )
+        throw unavailable()
+    } catch {
+      throw unavailable()
+    }
+  }
   const windowRange = <DB, TB extends keyof DB>(eb: ExpressionBuilder<DB, TB>) =>
     eb.fn<string>('tstzrange', [eb.val(window.start.toString()), eb.val(window.end.toString())])
   // Postgres keeps microseconds, node-postgres Dates milliseconds: blocked time is widened to
@@ -475,7 +518,12 @@ export async function buildAvailabilityInput(
             exists(
               selectFrom('booking_calendar_events as bce')
                 .select('bce.booking_id')
-                .where('bce.booking_id', '=', excludeBookingId as string)
+                .where(sql<boolean>`bce.booking_id IN (
+                  WITH RECURSIVE ancestors(id,rescheduled_from_id) AS (
+                    SELECT id,rescheduled_from_id FROM bookings WHERE id=${excludeBookingId as string}::uuid
+                    UNION ALL SELECT b.id,b.rescheduled_from_id FROM bookings b JOIN ancestors a ON b.id=a.rescheduled_from_id
+                  ) CYCLE id SET is_cycle USING path SELECT id FROM ancestors WHERE NOT is_cycle
+                )`)
                 .whereRef('bce.calendar_id', '=', 'cb.calendar_id')
                 .whereRef('bce.external_event_id', '=', 'cb.external_event_id'),
             ),
