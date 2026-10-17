@@ -51,6 +51,10 @@ The website runs on its own: `npm run dev --workspace @hourmere/site` (http://lo
 
 ## Self-hosting
 
+The Starlight documentation includes a [self-hosting guide](apps/site/src/content/docs/docs/self-hosting.md),
+[configuration reference](apps/site/src/content/docs/docs/configuration.md),
+and [REST](apps/site/src/content/docs/docs/rest.md) / [MCP](apps/site/src/content/docs/docs/mcp.md) quickstarts.
+
 ```sh
 cp .env.example .env   # set POSTGRES_PASSWORD, BETTER_AUTH_SECRET and PUBLIC_URL
 docker compose up -d
@@ -59,7 +63,7 @@ docker compose up -d
 The app listens on `127.0.0.1:3000` and applies database migrations on start. It also runs
 the background jobs (booking emails); to run them in a container of their own, set
 `HOURMERE_ROLE=web` and enable the `worker` service in `docker-compose.yml` (same image,
-`HOURMERE_ROLE=worker`). Give containers about 30 seconds to stop, so running jobs can finish. Put a reverse proxy with TLS in front of it, and set `TRUSTED_PROXIES` to the proxy's address as the app sees it (for a proxy on the host or on the compose network that is the Docker network, e.g. `172.16.0.0/12`), so rate limits apply per visitor rather than to everyone behind the proxy.
+`HOURMERE_ROLE=worker`). Give containers at least 35 seconds to stop, so running jobs can finish. Put a reverse proxy with TLS in front of it, and set `TRUSTED_PROXIES` to the proxy's address as the app sees it (for a proxy on the host or on the compose network that is the Docker network, e.g. `172.16.0.0/12`), so rate limits apply per visitor rather than to everyone behind the proxy.
 
 Responses carry security headers: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
 a `Referrer-Policy`, and on pages a Content-Security-Policy that lets only Hourmere's own

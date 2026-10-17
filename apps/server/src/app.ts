@@ -128,7 +128,7 @@ export function hasUnsafeJsonText(value: unknown): boolean {
 
 /**
  * Whether `err` (or an error in its cause chain) is what a client's disconnect looks like to
- * the code reading its request: Node's "aborted" (ECONNRESET), ECONNABORTED, an AbortError
+ * the code reading its request: Node's exact "aborted" message, an AbortError
  * (e.g. a fetch given the request's signal), or a 4xx HTTPException, which is how a route's
  * validator reports a body it could not read (and never a server error anyway).
  */
@@ -136,8 +136,9 @@ function isDisconnect(err: unknown): boolean {
   let e: unknown = err
   for (let depth = 0; depth < 5 && typeof e === 'object' && e !== null; depth++) {
     if (e instanceof HTTPException && e.status < 500) return true
-    const { name, code, message } = e as { name?: unknown; code?: unknown; message?: unknown }
-    if (name === 'AbortError' || code === 'ECONNRESET' || code === 'ECONNABORTED') return true
+    const { name, message } = e as { name?: unknown; message?: unknown }
+    // Transport codes alone also describe database and upstream failures.
+    if (name === 'AbortError') return true
     if (message === 'aborted') return true
     e = (e as { cause?: unknown }).cause
   }

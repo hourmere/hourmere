@@ -31,17 +31,9 @@ Authorization: Bearer hm_…
 
 The key acts as the user who created it, in the organization chosen when it was created
 (their personal organization by default); `whoami` shows which. Keys are created while signed
-in to the web app, through Better Auth's endpoint. Until the app has a page for it, run this
-in the browser console on your Hourmere site while signed in, and copy `key` from the result
-(it is shown only once):
-
-```js
-await (await fetch('/api/auth/api-key/create', {
-  method: 'POST',
-  headers: { 'content-type': 'application/json' },
-  body: JSON.stringify({ name: 'Claude' }),
-})).json()
-```
+in to the web app at `/app/api-keys`. Choose the intended organization, create a key and
+copy it once into your secret store. The self-hosted [MCP quickstart](../apps/site/src/content/docs/docs/mcp.md)
+covers the connection values and booking flow.
 
 A missing key gets **401** with `WWW-Authenticate: Bearer`; a malformed, unknown, disabled
 or deleted one gets 401 with `WWW-Authenticate: Bearer error="invalid_token"` (RFC 6750).
