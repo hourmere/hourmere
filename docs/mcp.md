@@ -140,6 +140,11 @@ fields are those of the REST API (`/api/v1/openapi.json`). Results come as
   `endDate`, inclusive, at most 62 days), and gives each slot in that zone too
   (`localStart`: `2026-11-02T09:00:00+01:00`). Pass a slot's `start` unchanged to
   `create_booking` or `reschedule_booking`.
+- **Slot pages:** `find_available_slots` returns at most `maxSlots` entries (default 100,
+  maximum 500). If `nextAfter` is non-null, repeat the same handle, slug, dates and time zone
+  with `after=nextAfter`. The cursor excludes the previous start, and `nextAfter: null`
+  marks the end. Availability is recalculated each time and can change between pages;
+  recheck the chosen time before booking. This bounds both JSON result copies.
 - **Manage tokens** are the invitee's secret. Only a hash is stored, so a token is returned
   once: keep it to reschedule or cancel later. The tools also take the token from a link in
   one of the invitee's booking emails (`https://<host>/booking#token=<token>`); each email
