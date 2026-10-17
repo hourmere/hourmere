@@ -53,6 +53,9 @@ In scope:
 
 - The code in this repository.
 - Docker images built from this repository's `Dockerfile`.
+- The hourmere.com website and Hourmere hosted services operated by Cobaltmere, LLC,
+  including vulnerabilities in their application code or service configuration. Report
+  these through the same private channels above.
 
 Out of scope:
 
@@ -67,8 +70,11 @@ Out of scope:
   instance without SMTP (which prints sign-in links to the server log, as the README warns)
   or exposing the database to the internet.
 
-Test against an instance you run yourself (see [Self-hosting](README.md#self-hosting)). Do
-not test instances that you do not own or do not have permission to test.
+Test against an instance you run yourself (see [Self-hosting](README.md#self-hosting)), using
+synthetic accounts and data. Obtain explicit permission before security testing a live
+Cobaltmere service or anyone else's instance. If you notice a potential hosted-service issue
+through ordinary use, report what you observed privately and stop before accessing another
+person's data. We can coordinate any further testing through the reporting channels above.
 
 ## Safe harbor
 
