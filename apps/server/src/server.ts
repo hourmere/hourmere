@@ -7,7 +7,14 @@ import {
   createAuthPool,
   createCallerResolver,
 } from '@hourmere/auth'
-import { type CalendarDeps, createGoogleCalendarClient } from '@hourmere/calendars'
+import {
+  bookingCalendarJob,
+  type CalendarDeps,
+  calendarBookingNotifier,
+  calendarDispatchJob,
+  calendarSyncJob,
+  createGoogleCalendarClient,
+} from '@hourmere/calendars'
 import { createDb, createPool, type Db, runMigrations } from '@hourmere/db'
 import { createJobs } from '@hourmere/jobs'
 import { createLogMailer, createSmtpMailer, type Mailer } from '@hourmere/mail'
@@ -42,16 +49,18 @@ export function productRoutes({
   socialProviders,
   notify,
   googleCalendar,
+  enqueueCalendarSync,
 }: {
   db: Db
   socialProviders: Config['socialProviders']
   /** Queues booking emails in the booking's transaction (the OpenAPI document needs none). */
   notify?: BookingNotifier | undefined
   googleCalendar?: CalendarDeps['google']
+  enqueueCalendarSync?: CalendarDeps['enqueueSync']
 }): RouteModule[] {
   return [
     instanceRoutes({ socialProviders }),
-    calendarRoutes({ db, google: googleCalendar }),
+    calendarRoutes({ db, google: googleCalendar, enqueueSync: enqueueCalendarSync }),
     profileRoutes({ db }),
     scheduleRoutes({ db }),
     eventTypeRoutes({ db }),
@@ -137,16 +146,37 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
     }
   }
 
+  const googleCalendar =
+    config.GOOGLE_CALENDAR_CLIENT_ID &&
+    config.GOOGLE_CALENDAR_CLIENT_SECRET &&
+    config.CALENDAR_ENCRYPTION_KEY
+      ? {
+          client: createGoogleCalendarClient({
+            clientId: config.GOOGLE_CALENDAR_CLIENT_ID,
+            clientSecret: config.GOOGLE_CALENDAR_CLIENT_SECRET,
+            publicUrl: config.PUBLIC_URL,
+          }),
+          encryptionKey: config.CALENDAR_ENCRYPTION_KEY,
+        }
+      : undefined
+  const calendarDeps: CalendarDeps = { db, google: googleCalendar }
+  let enqueueCalendar: (calendarId: string) => Promise<unknown> = async () => {}
   // Background jobs: every role queues them, `all` and `worker` run them.
   const jobs = createJobs({
     connectionString: config.DATABASE_URL,
-    definitions: [bookingNotificationJob({ db, mailer, publicUrl: config.PUBLIC_URL })],
+    definitions: [
+      bookingNotificationJob({ db, mailer, publicUrl: config.PUBLIC_URL }),
+      calendarSyncJob(calendarDeps),
+      bookingCalendarJob(calendarDeps),
+      calendarDispatchJob(calendarDeps, (id) => enqueueCalendar(id)),
+    ],
     work: role !== 'web',
     // pg-boss installs and upgrades its own `pgboss` schema; with AUTO_MIGRATE=false,
     // `npm run db:migrate` does that too.
     migrate: config.AUTO_MIGRATE,
     instanceName: role,
   })
+  enqueueCalendar = (id) => jobs.enqueue('calendar-sync', { calendarId: id }, { singletonKey: id })
   try {
     await jobs.start()
   } catch (err) {
@@ -162,7 +192,12 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
     fetch = createWorkerHealthApp({ checkDb, checkJobs: () => jobs.check() }).fetch
   } else {
     // Booking changes over REST and MCP queue their emails in their own transactions.
-    const notify: BookingNotifier = bookingNotifier(jobs)
+    const emailNotifier = bookingNotifier(jobs)
+    const calendarNotifier = calendarBookingNotifier(jobs)
+    const notify: BookingNotifier = async (trx, event, now) => {
+      await emailNotifier(trx, event, now)
+      if (googleCalendar) await calendarNotifier(trx, event)
+    }
     const auth = createAuth({
       pool: authPool,
       db,
@@ -185,19 +220,9 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
         db,
         socialProviders: config.socialProviders,
         notify,
-        googleCalendar:
-          config.GOOGLE_CALENDAR_CLIENT_ID &&
-          config.GOOGLE_CALENDAR_CLIENT_SECRET &&
-          config.CALENDAR_ENCRYPTION_KEY
-            ? {
-                client: createGoogleCalendarClient({
-                  clientId: config.GOOGLE_CALENDAR_CLIENT_ID,
-                  clientSecret: config.GOOGLE_CALENDAR_CLIENT_SECRET,
-                  publicUrl: config.PUBLIC_URL,
-                }),
-                encryptionKey: config.CALENDAR_ENCRYPTION_KEY,
-              }
-            : undefined,
+        googleCalendar,
+        enqueueCalendarSync: (id, trx) =>
+          jobs.enqueue('calendar-sync', { calendarId: id }, { singletonKey: id, transaction: trx }),
       }),
       mcp: mcpEndpoint({ tools: [whoamiTool, ...bookingTools({ db, notify })] }),
     }).fetch

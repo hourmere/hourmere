@@ -2,12 +2,15 @@ import { createRoute, z } from '@hono/zod-openapi'
 import {
   beginGoogleConnection,
   type CalendarDeps,
+  configureCalendar,
   disconnectCalendar,
   finishGoogleConnection,
   GOOGLE_CALENDAR_CALLBACK,
   listCalendarConnections,
   refreshGoogleCalendars,
   requireCalendarSession,
+  setCalendarDestination,
+  syncOwnedCalendar,
 } from '@hourmere/calendars'
 import type { MiddlewareHandler } from 'hono'
 import { createMiddleware } from 'hono/factory'
@@ -29,7 +32,18 @@ const CalendarConnection = z
     status: z.enum(['active', 'needs_reauth', 'revoked']),
     createdAt: z.iso.datetime(),
     updatedAt: z.iso.datetime(),
-    calendars: z.array(z.object({ id: z.uuid(), name: z.string(), isPrimary: z.boolean() })),
+    syncAuthorized: z.boolean(),
+    calendars: z.array(
+      z.object({
+        id: z.uuid(),
+        name: z.string(),
+        isPrimary: z.boolean(),
+        checkConflicts: z.boolean(),
+        accessRole: z.string(),
+        lastSyncedAt: z.iso.datetime().nullable(),
+        syncError: z.string().nullable(),
+      }),
+    ),
   })
   .openapi('CalendarConnection')
 const ConnectionId = z.object({ id: z.uuid() })
@@ -59,7 +73,11 @@ export function calendarRoutes(deps: CalendarDeps): RouteModule {
           200: {
             description: 'Connection metadata only; never OAuth credentials',
             content: json(
-              z.object({ googleEnabled: z.boolean(), data: z.array(CalendarConnection) }),
+              z.object({
+                googleEnabled: z.boolean(),
+                destinationCalendarId: z.uuid().nullable(),
+                data: z.array(CalendarConnection),
+              }),
             ),
           },
           ...errorResponses({}),
@@ -75,10 +93,15 @@ export function calendarRoutes(deps: CalendarDeps): RouteModule {
         tags: ['Calendars'],
         summary: 'Start a separate Google Calendar connection',
         description:
-          'Requires a browser session and same-origin request. Follow authorizationUrl; the attempt expires after ten minutes and can only finish in this session. Requests identity and calendar-list read access; does not request event read/write access.',
+          'Requires a browser session and same-origin request. Follow authorizationUrl; the attempt expires after ten minutes and can only finish in this session. Default access=list requests identity and calendar-list access. access=sync additionally requests event read access and event writes on owned calendars; reconnect existing accounts to upgrade.',
         security: [{ session: [] }],
         middleware: protectedWrite,
-        request: emptyBody,
+        request: {
+          body: {
+            required: true,
+            content: json(z.strictObject({ access: z.enum(['list', 'sync']).optional() })),
+          },
+        },
         responses: {
           200: {
             description: 'The fixed Google authorization endpoint with state and PKCE',
@@ -91,7 +114,92 @@ export function calendarRoutes(deps: CalendarDeps): RouteModule {
           }),
         },
       }),
-      async (c) => c.json(await beginGoogleConnection(deps, c.var.principal), 200),
+      async (c) =>
+        c.json(await beginGoogleConnection(deps, c.var.principal, c.req.valid('json').access), 200),
+    )
+
+    app.openapi(
+      createRoute({
+        method: 'patch',
+        path: '/api/v1/calendars/{id}',
+        tags: ['Calendars'],
+        summary: 'Select a calendar for busy-time conflict checks',
+        security: [{ session: [] }],
+        middleware: protectedWrite,
+        request: {
+          params: ConnectionId,
+          body: { required: true, content: json(z.strictObject({ checkConflicts: z.boolean() })) },
+        },
+        responses: {
+          204: { description: 'Selection saved; enabled calendars synchronize in the background' },
+          ...errorResponses({
+            400: 'invalid_request',
+            403: 'session_required',
+            404: 'calendar_not_found',
+            409: 'google_calendar_permissions_missing or calendar_events_unreadable',
+          }),
+        },
+      }),
+      async (c) => {
+        await configureCalendar(
+          deps,
+          c.var.principal,
+          c.req.valid('param').id,
+          c.req.valid('json').checkConflicts,
+        )
+        return c.body(null, 204)
+      },
+    )
+    app.openapi(
+      createRoute({
+        method: 'post',
+        path: '/api/v1/calendars/{id}/sync',
+        tags: ['Calendars'],
+        summary: 'Synchronize selected calendar busy intervals now',
+        security: [{ session: [] }],
+        middleware: protectedWrite,
+        request: { ...emptyBody, params: ConnectionId },
+        responses: {
+          204: { description: 'Busy intervals synchronized' },
+          ...errorResponses({
+            403: 'session_required',
+            404: 'calendar_not_found',
+            409: 'calendar_sync_disabled or google_calendar_provider_unavailable',
+          }),
+        },
+      }),
+      async (c) => {
+        await syncOwnedCalendar(deps, c.var.principal, c.req.valid('param').id)
+        return c.body(null, 204)
+      },
+    )
+    app.openapi(
+      createRoute({
+        method: 'put',
+        path: '/api/v1/calendar-destination',
+        tags: ['Calendars'],
+        summary: 'Choose the owned Google calendar for new booking events',
+        security: [{ session: [] }],
+        middleware: protectedWrite,
+        request: {
+          body: {
+            required: true,
+            content: json(z.strictObject({ calendarId: z.uuid().nullable() })),
+          },
+        },
+        responses: {
+          204: { description: 'Default booking calendar saved' },
+          ...errorResponses({
+            403: 'session_required',
+            404: 'calendar_not_found or profile_not_found',
+            409: 'calendar_not_writable',
+          }),
+        },
+      }),
+      async (c) => {
+        await setCalendarDestination(deps, c.var.principal, c.req.valid('json').calendarId)
+        return c.body(null, 204)
+      },
     )
 
     app.openapi(
