@@ -1,9 +1,9 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { BrowserRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from '../App.tsx'
-import { type Call, fakeApi, json, type Routes, renderApp } from '../test/fake-api.tsx'
+import { type Call, fakeApi, json, later, type Routes, renderApp } from '../test/fake-api.tsx'
 import { booking, managed, NEW_TOKEN, slotsAnswer, TOKEN } from '../test/public-fixtures.ts'
 import { parseManageFragment } from './ManageBookingPage.tsx'
 
@@ -186,6 +186,22 @@ describe('the invitee’s manage page', () => {
     await screen.findByRole('heading', { name: 'Cancelled booking' })
     const [cancel] = api.to('POST /api/v1/bookings/manage/cancel')
     expect(cancel?.headers.get('x-manage-token')).toBe(NEW_TOKEN)
+    // Every network request across read, slots, move and cancel keeps both secrets in headers.
+    expect(new Set(api.calls.map((call) => call.path.split('?')[0]))).toEqual(
+      new Set([
+        '/api/v1/bookings/manage',
+        '/api/v1/bookings/manage/slots',
+        '/api/v1/bookings/manage/reschedule',
+        '/api/v1/bookings/manage/cancel',
+      ]),
+    )
+    for (const call of api.calls) {
+      expect([TOKEN, NEW_TOKEN]).toContain(call.headers.get('x-manage-token'))
+      for (const secret of [TOKEN, NEW_TOKEN]) {
+        expect(call.path).not.toContain(secret)
+        expect(JSON.stringify(call.body) ?? '').not.toContain(secret)
+      }
+    }
   })
 
   it('goes back to the picker when the new time was just taken', async () => {
@@ -371,6 +387,73 @@ describe('the invitee’s manage page', () => {
       TOKEN,
       TOKEN,
     ])
+  })
+
+  it.each(['#token=', '#action=cancel', '#other=unknown'])(
+    'clears a previous booking when a new fragment has no token (%s)',
+    async (fragment) => {
+      const api = manageServer()
+      openLink(`/booking#token=${TOKEN}`)
+      await screen.findByText('Intro call')
+      act(() => {
+        window.history.pushState(null, '', `/booking${fragment}`)
+        window.dispatchEvent(new PopStateEvent('popstate'))
+      })
+      await screen.findByRole('heading', { name: 'Open your booking link' })
+      expect(screen.queryByText('Intro call')).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Cancel booking' })).toBeNull()
+      expect(window.location.hash).toBe('')
+      expect(api.to('GET /api/v1/bookings/manage')).toHaveLength(1)
+      act(() => {
+        window.history.pushState(null, '', `/booking#token=${TOKEN}`)
+        window.dispatchEvent(new PopStateEvent('popstate'))
+      })
+      await screen.findByText('Intro call')
+      expect(api.to('GET /api/v1/bookings/manage')).toHaveLength(2)
+    },
+  )
+
+  it('ignores a slow old-booking response after a tokenless fragment clears it', async () => {
+    const pending = later()
+    const api = fakeApi({ 'GET /api/v1/bookings/manage': () => pending.response })
+    openLink(`/booking#token=${TOKEN}`)
+    await screen.findByText('Loading your booking…')
+    act(() => {
+      window.history.pushState(null, '', '/booking#token=')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    })
+    await screen.findByRole('heading', { name: 'Open your booking link' })
+    await pending.answer(json(200, managed()))
+    expect(screen.queryByText('Intro call')).toBeNull()
+    expect(screen.getByRole('heading', { name: 'Open your booking link' })).toBeDefined()
+    expect(api.calls).toHaveLength(1)
+  })
+
+  it('excludes the original instant from new times, regardless of its ISO spelling', async () => {
+    const user = userEvent.setup()
+    manageServer(managed({ start: '2026-11-02T09:00:00-05:00' }), {
+      slots: ['2026-11-02T14:00:00Z', '2026-11-02T15:00:00Z'],
+    })
+    renderApp(`/booking#token=${TOKEN}&action=reschedule`)
+    await user.click(await screen.findByRole('button', { name: 'Monday, November 2, available' }))
+    const times = within(screen.getByRole('list', { name: /^Times on/ }))
+    expect(times.queryByRole('button', { name: '9:00 AM' })).toBeNull()
+    await user.click(times.getByRole('button', { name: '10:00 AM' }))
+    expect(await screen.findByRole('heading', { name: 'Move your booking?' })).toBeDefined()
+  })
+
+  it('does not mark a day available when only the original time remains', async () => {
+    const user = userEvent.setup()
+    manageServer(managed(), { slots: ['2026-11-02T14:00:00Z', '2026-11-03T15:00:00Z'] })
+    renderApp(`/booking#token=${TOKEN}&action=reschedule`)
+    const originalDay = await screen.findByRole('button', {
+      name: 'Monday, November 2, no times available',
+    })
+    expect(originalDay.getAttribute('aria-disabled')).toBe('true')
+    await user.click(originalDay)
+    expect(screen.queryByRole('list', { name: /^Times on/ })).toBeNull()
+    await user.click(await screen.findByRole('button', { name: 'Tuesday, November 3, available' }))
+    expect(screen.getByRole('button', { name: '10:00 AM' })).toBeDefined()
   })
 
   it('asks for the link when there is none, without asking the server', async () => {

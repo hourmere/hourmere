@@ -56,6 +56,8 @@ interface SlotPickerProps {
   locale: string
   /** The current time; slots before it are not asked for. */
   now: number
+  /** A reschedule must choose a different time from the booking it replaces. */
+  excludeStart?: string | undefined
   selected: Slot | null
   onSelect: (slot: Slot) => void
   /** Changing it reloads the slots, e.g. after the chosen one was taken. */
@@ -84,6 +86,7 @@ export function SlotPicker({
   locale,
   now,
   selected,
+  excludeStart,
   onSelect,
   version,
   title = 'Pick a time',
@@ -140,14 +143,18 @@ export function SlotPicker({
     const days = new Map<DateKey, Slot[]>()
     if (state.status !== 'ready') return days
     for (const slot of state.slots) {
+      if (excludeStart !== undefined && Date.parse(slot.start) === Date.parse(excludeStart))
+        continue
       const key = dateKeyIn(Date.parse(slot.start), timeZone)
       if (compareMonths(monthOf(key), month) !== 0) continue
       const list = days.get(key) ?? []
       list.push(slot)
       days.set(key, list)
     }
+    for (const slots of days.values())
+      slots.sort((a, b) => Date.parse(a.start) - Date.parse(b.start))
     return days
-  }, [state, timeZone, month])
+  }, [state, timeZone, month, excludeStart])
   const available = useMemo(() => new Set(byDay.keys()), [byDay])
   const ready = state.status === 'ready'
 
