@@ -81,6 +81,25 @@ describe('Microsoft OAuth and Graph response boundary', () => {
     expect(fake.calls.filter((c) => c.url.pathname.endsWith('/calendars'))).toHaveLength(2)
   })
 
+  it('uses initial requested scopes only when the code response omits the optional scope', async () => {
+    const fake = fakeMicrosoft()
+    delete fake.controls.token.scope
+    expect((await fake.client.exchange('fake-code', 'fake-verifier', signal())).scopes).toEqual([
+      'openid',
+      'email',
+      'offline_access',
+      'Calendars.ReadBasic',
+    ])
+    expect((await fake.client.refresh('fake-refresh', signal())).scopes).toBeUndefined()
+    fake.controls.token.scope = ''
+    expect((await fake.client.exchange('fake-code', 'fake-verifier', signal())).scopes).toEqual([])
+    fake.controls.token.scope = 'openid email'
+    expect((await fake.client.exchange('fake-code', 'fake-verifier', signal())).scopes).toEqual([
+      'openid',
+      'email',
+    ])
+  })
+
   it.each([
     'https://attacker.example/v1.0/me/calendars',
     'http://graph.microsoft.com/v1.0/me/calendars',

@@ -214,6 +214,21 @@ describe.skipIf(!url)('separate Microsoft calendar connections (real Postgres)',
     expect(row.external_account_id).toBe('microsoft-account-1')
   })
 
+  it('connects and refreshes when a successful response omits scope, but refuses an explicit empty grant', async () => {
+    delete microsoft.controls.token.scope
+    const row = await connect()
+    expect(row.scopes).toContain('Calendars.ReadBasic')
+    now += 3_600_001
+    microsoft.controls.token.expires_in = 7200
+    await refreshCalendarList(deps, owner, row.id)
+    expect((await listCalendarConnections(deps, owner)).data[0]?.status).toBe('active')
+    microsoft.controls.token.scope = ''
+    expect(await finishMicrosoftConnection(deps, owner, query(await start()))).toBe(
+      'permissions_missing',
+    )
+    expect((await listCalendarConnections(deps, owner)).data).toHaveLength(1)
+  })
+
   it('keeps rotated credentials when listing fails and reuses them on retry', async () => {
     const row = await connect()
     now += 3_600_001

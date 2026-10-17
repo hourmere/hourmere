@@ -114,11 +114,17 @@ export function createMicrosoftCalendarClient(
     )
     if (!parsed.success) throw new MicrosoftCalendarError('provider_unavailable')
     const t = parsed.data
+    // Microsoft's successful code response may omit scope when it matches the initial
+    // request. An explicitly empty/partial scope is still authoritative. Refresh responses
+    // without scope keep the connection's previously recorded grant in the service layer.
+    const scope =
+      t.scope ??
+      (body.grant_type === 'authorization_code' ? MICROSOFT_CALENDAR_SCOPES.join(' ') : undefined)
     return {
       accessToken: t.access_token,
       refreshToken: t.refresh_token,
       expiresAt: Date.now() + t.expires_in * 1000,
-      scopes: t.scope
+      scopes: scope
         ?.split(/\s+/)
         .filter(Boolean)
         .map((s) => s.replace(/^https:\/\/graph\.microsoft\.com\//, '')),
