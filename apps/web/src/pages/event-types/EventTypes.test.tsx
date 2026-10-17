@@ -388,8 +388,8 @@ describe('the questions editor', () => {
     await screen.findByText('Created “Intro call”.')
     expect(api.to('POST /api/v1/event-types')[0]?.body).toMatchObject({
       questions: [
-        { id: 'topic', label: 'Topic', type: 'short_text', required: false },
-        { id: 'company', label: 'Company', type: 'long_text', required: true },
+        { id: expect.any(String), label: 'Topic', type: 'short_text', required: false },
+        { id: expect.any(String), label: 'Company', type: 'long_text', required: true },
       ],
     })
   })
@@ -427,7 +427,7 @@ describe('the questions editor', () => {
     await screen.findByText('Created “Intro call”.')
     expect(api.to('POST /api/v1/event-types')[0]?.body).toMatchObject({
       questions: [
-        { id: 'team-size', label: 'Team size', type: 'select', options: ['1–10', 'More'] },
+        { id: expect.any(String), label: 'Team size', type: 'select', options: ['1–10', 'More'] },
       ],
     })
   })
@@ -559,6 +559,62 @@ describe('editing an event type', () => {
         isActive: true,
       },
     ])
+  })
+
+  it('uses a fresh identity after deleting, saving and re-adding a question with the same label', async () => {
+    const user = userEvent.setup()
+    const api = eventTypeServer([saved])
+    await openExisting()
+    await user.click(screen.getByRole('button', { name: 'Remove question: question 1, “Company”' }))
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    await screen.findByText('Saved.')
+    await user.click(screen.getByRole('link', { name: 'Back to event types' }))
+    await user.click(await screen.findByRole('link', { name: 'Edit Intro call' }))
+    await screen.findByLabelText('Question')
+    await user.click(screen.getByRole('button', { name: 'Add a question' }))
+    await user.type(screen.getAllByLabelText('Question')[1] as HTMLElement, 'Company')
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    await screen.findByText('Saved.')
+    const calls = api
+      .to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`)
+      .map((call) => call.body as EventType)
+    expect(calls).toHaveLength(2)
+    const added = calls[1]?.questions[1]
+    expect(added?.id).toMatch(/^[A-Za-z0-9_-]{1,64}$/)
+    expect(added?.id).not.toBe('company')
+    expect(calls[1]?.questions[0]?.id).toBe('plan')
+    await user.type(screen.getAllByLabelText('Question')[1] as HTMLElement, ' renamed')
+    await user.click(screen.getByRole('button', { name: 'Move up: question 2, “Company renamed”' }))
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    await screen.findByText('Saved.')
+    const renamed =
+      api.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`).map((call) => call.body as EventType)[2]
+        ?.questions ?? []
+    expect(renamed.map((q) => q.id)).toEqual([added?.id, 'plan'])
+    expect(renamed[0]?.label).toBe('Company renamed')
+  })
+
+  it('reuses a new question identity when a failed save is retried', async () => {
+    const user = userEvent.setup()
+    let attempts = 0
+    const api = eventTypeServer([saved], {
+      [`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`]: ({ body }) =>
+        ++attempts === 1
+          ? json(500, { error: 'internal_error' })
+          : json(200, { ...saved, ...(body as object) }),
+    })
+    await openExisting()
+    await user.click(screen.getByRole('button', { name: 'Add a question' }))
+    await user.type(screen.getAllByLabelText('Question')[2] as HTMLElement, 'Company')
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    await screen.findByRole('alert')
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    await screen.findByText('Saved.')
+    const [first, second] = api.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`)
+    expect(second?.body).toEqual(first?.body)
+    const questions = (second?.body as EventType | undefined)?.questions ?? []
+    expect(questions[0]?.id).toBe('company')
+    expect(questions[2]?.id).not.toBe('company')
   })
 
   it('says when the event type does not exist', async () => {

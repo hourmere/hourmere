@@ -41,6 +41,7 @@ export {
   MAX_GUESTS,
   MAX_PAGE_SIZE,
   type PersonInput,
+  rescheduleHostBooking,
   rescheduleManagedBooking,
 } from './bookings.ts'
 export {

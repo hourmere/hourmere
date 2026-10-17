@@ -59,7 +59,7 @@ with `find_available_slots` before booking an event found in the catalog.
 | `whoami` | No arguments; shows the key's user, organization and key ID. |
 | `find_available_slots` | A booking page's `handle`, `slug`, `startDate`, `endDate`, `timeZone`; returns event details and slots. Dates span at most 62 days inclusive. |
 | `create_booking` | `handle`, `slug`, a returned slot's `start`, `invitee`, and an optional `idempotencyKey`; returns the booking and manage token. |
-| `reschedule_booking` | `manageToken` and new `start`; returns a replacement booking and token. |
+| `reschedule_booking` | Exactly one of hosted `bookingId` or invitee `manageToken`, plus new `start`; returns a replacement booking and token. |
 | `cancel_booking` | Either a hosted `bookingId` or an invitee `manageToken`; cancels the booking. |
 | `list_bookings` | Lists bookings hosted by the key owner in its organization, with pagination. `order` defaults to `asc`; use `desc` for newest first and keep it unchanged between pages. |
 
@@ -89,4 +89,15 @@ Tool results include `structuredContent` and a JSON text copy. Tool failures set
 and return the same stable error codes as REST, such as `slot_unavailable`, `slot_taken`,
 `calendar_sync_unavailable` or `idempotency_key_reused`. Use the live `tools/list` schemas for
 required fields and limits. The [REST guide](/docs/rest) covers token handling and booking
-semantics shared by both interfaces. Host-side rescheduling is not implemented yet.
+semantics shared by both interfaces.
+
+## Reschedule as the host
+
+Use `list_bookings` to find a booking you host, then call `reschedule_booking` with
+`bookingId` and the new `start`. The key must act in that booking's organization. Give
+exactly one of `bookingId` or `manageToken`; both forms share the same availability,
+notification and per-user management limits.
+
+A move creates a new booking with `rescheduledFromId` pointing to the old one. Retrying the
+old ID fails with `booking_cancelled`. If an answer is lost, inspect `list_bookings` before
+trying another move. The returned new manage token is shown once, as with an invitee move.
