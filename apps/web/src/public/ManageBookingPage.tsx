@@ -54,7 +54,7 @@ export function ManageBookingPage() {
       return
     }
     const parsed = parseManageFragment(location.hash)
-    if (parsed.token && location.hash !== read.current) {
+    if (location.hash !== read.current) {
       setLink((current) => ({ ...parsed, visit: current.visit + 1 }))
     }
     navigate({ pathname: location.pathname, search: location.search }, { replace: true })
@@ -305,6 +305,7 @@ function ManageView({
             locale={locale}
             now={now}
             selected={null}
+            excludeStart={booking.start}
             onSelect={(slot) => setMode({ kind: 'confirm-reschedule', slot })}
             version={version}
             title="Pick a new time"

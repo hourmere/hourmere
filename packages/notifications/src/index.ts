@@ -287,6 +287,7 @@ function loadNotificationData(db: Db, bookingId: string): Promise<NotificationDa
         'u.id',
         'u.name',
         'u.email',
+        'p.handle as profile_handle',
         'p.time_zone as profile_zone',
         's.time_zone as schedule_zone',
       ])
@@ -340,7 +341,7 @@ function loadNotificationData(db: Db, bookingId: string): Promise<NotificationDa
       // Times in the host's profile zone, else their default schedule's, else UTC.
       hosts: hosts.map((h) => ({
         id: h.id,
-        name: h.name,
+        name: h.name.trim() || h.profile_handle || h.email,
         email: h.email,
         timeZone: timeZone(h.profile_zone) ?? timeZone(h.schedule_zone) ?? 'UTC',
       })),

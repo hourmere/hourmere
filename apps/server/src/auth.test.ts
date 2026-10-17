@@ -9,6 +9,7 @@ import {
   createAuth,
   createAuthPool,
   createCallerResolver,
+  DISPLAY_NAME_MAX_LENGTH,
   ensurePersonalOrganization,
   type OAuthClient,
   type SignupPolicy,
@@ -351,7 +352,7 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
       const link = await requestLink('once@example.com')
       expect((await main.app.request(link.toString())).status).toBe(302)
       const again = await main.app.request(link.toString())
-      expect(again.headers.get('location')).toBe(`${origin}/?error=INVALID_TOKEN`)
+      expect(again.headers.get('location')).toBe(`${origin}/sign-in?error=INVALID_TOKEN`)
       expect(cookieHeader(again)).not.toContain('session_token')
     })
 
@@ -574,8 +575,76 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
 
     it('rejects an unknown token', async () => {
       const res = await main.app.request('/api/auth/magic-link/verify?token=nope&callbackURL=/')
-      expect(res.headers.get('location')).toBe(`${origin}/?error=INVALID_TOKEN`)
+      expect(res.headers.get('location')).toBe(`${origin}/sign-in?error=INVALID_TOKEN`)
       expect(cookieHeader(res)).not.toContain('session_token')
+    })
+
+    it.each(['/app/settings', '/welcome?tab=1', ''])(
+      'defaults magic-link failure to sign-in instead of the success destination (%s)',
+      async (callbackURL) => {
+        const query = new URLSearchParams({
+          token: 'unknown-token',
+          callbackURL,
+          errorCallbackURL: '',
+        })
+        const response = await main.app.request(`/api/auth/magic-link/verify?${query}`)
+        expect(response.status).toBe(302)
+        expect(response.headers.get('location')).toBe(`${origin}/sign-in?error=INVALID_TOKEN`)
+        expect(cookieHeader(response)).not.toContain('session_token')
+      },
+    )
+
+    it('uses the same default for server-side verification calls', async () => {
+      const response = await main.auth.api.magicLinkVerify({
+        query: { token: 'unknown-server-token', callbackURL: '/app/settings' },
+        headers: new Headers(),
+        method: 'GET',
+        asResponse: true,
+      })
+      expect(response.status).toBe(302)
+      expect(response.headers.get('location')).toBe(`${origin}/sign-in?error=INVALID_TOKEN`)
+    })
+
+    it('lands an expired emailed link on sign-in without creating a user or session', async () => {
+      const email = 'expired-default-landing@example.com'
+      const submit = await requestLink(email)
+      const token = submit.searchParams.get('token') as string
+      const hash = createHash('sha256').update(token).digest('base64url')
+      await testDb.pool.query(
+        `UPDATE auth.verification SET "expiresAt" = now() - interval '1 minute' WHERE identifier = $1`,
+        [`magic-link:${hash}`],
+      )
+      const response = await main.app.request(submit.toString())
+      expect(response.status).toBe(302)
+      expect(response.headers.get('location')).toBe(`${origin}/sign-in?error=INVALID_TOKEN`)
+      expect(cookieHeader(response)).not.toContain('session_token')
+      expect(
+        await count('SELECT count(*)::int AS n FROM auth."user" WHERE email = $1', [email]),
+      ).toBe(0)
+    })
+
+    it('keeps the success destination but sends a replay to the default error page', async () => {
+      const submit = await requestLink('used-default-landing@example.com')
+      submit.searchParams.set('callbackURL', '/app/settings')
+      const first = await main.app.request(submit.toString())
+      expect(first.status).toBe(302)
+      expect(first.headers.get('location')).toBe(`${origin}/app/settings`)
+      const replay = await main.app.request(submit.toString())
+      expect(replay.headers.get('location')).toBe(`${origin}/sign-in?error=INVALID_TOKEN`)
+      expect(cookieHeader(replay)).not.toContain('session_token')
+      expect((await me({ cookie: cookieHeader(first) })).res.status).toBe(200)
+    })
+
+    it('still refuses an untrusted explicit error callback before consuming the link', async () => {
+      const submit = await requestLink('untrusted-error-landing@example.com')
+      submit.searchParams.set('errorCallbackURL', 'https://evil.example/sign-in')
+      const refused = await main.app.request(submit.toString())
+      expect(refused.status).toBe(403)
+      expect(refused.headers.get('location')).toBeNull()
+      submit.searchParams.delete('errorCallbackURL')
+      const valid = await main.app.request(submit.toString())
+      expect(valid.status).toBe(302)
+      expect(valid.headers.get('location')).toBe(`${origin}/`)
     })
 
     it('keeps the token out of the log from the request to the signed-in redirect', async () => {
@@ -937,6 +1006,120 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
           .where('id', '=', id)
           .executeTakeFirstOrThrow(),
       ).toEqual({ name: 'Legacy display name', slug: 'privacy' })
+    })
+  })
+
+  describe('display name updates', () => {
+    let cookie: string
+    let id: string
+    const email = 'display-name@example.com'
+    beforeAll(async () => {
+      cookie = await signIn(email)
+      id = await userId(email)
+    })
+    const stored = () =>
+      db
+        .selectFrom('auth.user')
+        .select(['name', 'email'])
+        .where('id', '=', id)
+        .executeTakeFirstOrThrow()
+
+    it('lets a magic-link user set a trimmed Unicode name, preserving identity and later sign-ins', async () => {
+      const before = (await me({ cookie })).body
+      expect(before.user.name).toBe('')
+      const response = await post('/api/auth/update-user', cookie, {
+        name: '  Ada Lovelace 👩‍💻  ',
+      })
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual({ status: true })
+      expect(await stored()).toEqual({ name: 'Ada Lovelace 👩‍💻', email })
+      const after = (await me({ cookie })).body
+      expect(after.user).toEqual({ ...before.user, name: 'Ada Lovelace 👩‍💻' })
+      expect(after.organization).toEqual(before.organization)
+      const laterCookie = await signIn(email)
+      expect((await me({ cookie: laterCookie })).body.user.name).toBe('Ada Lovelace 👩‍💻')
+    })
+
+    it.each([
+      null,
+      false,
+      42,
+      {},
+      [],
+      '',
+      '   ',
+      'A\nB',
+      'A\u0000B',
+      'A\u0085B',
+      'A\u2028B',
+      'A\u2029B',
+      'A\ud800B',
+      'A'.repeat(DISPLAY_NAME_MAX_LENGTH + 1),
+    ])('rejects an invalid name without changing data or reflecting it (%#)', async (name) => {
+      const before = await stored()
+      const response = await post('/api/auth/update-user', cookie, { name })
+      expect(response.status).toBe(400)
+      expect(await response.json()).toEqual({
+        code: 'INVALID_DISPLAY_NAME',
+        message: `Name must be a single line of text between 1 and ${DISPLAY_NAME_MAX_LENGTH} characters.`,
+      })
+      expect(await stored()).toEqual(before)
+    })
+
+    it('accepts the exact UTF-16 length bound', async () => {
+      const name = '😀'.repeat(DISPLAY_NAME_MAX_LENGTH / 2)
+      const response = await post('/api/auth/update-user', cookie, { name })
+      expect(response.status).toBe(200)
+      expect((await stored()).name).toBe(name)
+    })
+
+    it('retains session and origin checks, and cannot target another user', async () => {
+      expect((await post('/api/auth/update-user', '', { name: 'No session' })).status).toBe(401)
+      const key = await plantKey(id, (await me({ cookie })).body.organization.id)
+      const apiOnly = await main.app.request('/api/auth/update-user', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${key.key}`, origin },
+        body: JSON.stringify({ name: 'API only' }),
+      })
+      expect(apiOnly.status).toBe(401)
+      const before = await stored()
+      const foreignOrigin = await main.app.request('/api/auth/update-user', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie, origin: 'https://evil.example' },
+        body: JSON.stringify({ name: 'Foreign origin' }),
+      })
+      expect(foreignOrigin.status).toBe(403)
+      expect(await stored()).toEqual(before)
+      const otherCookie = await signIn('other-display-name@example.com')
+      const other = (await me({ cookie: otherCookie })).body.user
+      const response = await post('/api/auth/update-user', cookie, {
+        name: 'Only me',
+        userId: other.id,
+      })
+      expect(response.status).toBe(200)
+      expect((await stored()).name).toBe('Only me')
+      expect((await me({ cookie: otherCookie })).body.user).toEqual(other)
+    })
+
+    it('also validates and normalizes server-side auth API calls', async () => {
+      const headers = new Headers({ cookie, origin })
+      const before = await stored()
+      await expect(
+        main.auth.api.updateUser({ headers, body: { name: 'A\rB' } }),
+      ).rejects.toMatchObject({
+        status: 'BAD_REQUEST',
+        body: { code: 'INVALID_DISPLAY_NAME' },
+      })
+      expect(await stored()).toEqual(before)
+      await main.auth.api.updateUser({ headers, body: { name: '  Server name  ' } })
+      expect((await stored()).name).toBe('Server name')
+    })
+
+    it('allows other supported profile updates for an unnamed legacy account', async () => {
+      const legacyCookie = await signIn('unnamed-profile@example.com')
+      const response = await post('/api/auth/update-user', legacyCookie, { image: null })
+      expect(response.status).toBe(200)
+      expect((await me({ cookie: legacyCookie })).body.user.name).toBe('')
     })
   })
 

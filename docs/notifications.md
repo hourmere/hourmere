@@ -315,3 +315,7 @@ Tests cover both directions, replays, REST and MCP, and the token rules above:
 `apps/server/src/booking-notifications.test.ts` (REST and MCP with real jobs, the job
 handler run in-process and a capturing mailer) and `apps/server/src/server.test.ts` (the
 composition root, with the log mailer and a running worker).
+
+Hosts can edit their display name in Settings. Notifications read the current name when
+sent; an empty legacy name falls back to the profile handle, then the verified email
+address. The same label is used in email subjects and calendar organizer names.

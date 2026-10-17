@@ -1,4 +1,4 @@
-import { act, screen, within } from '@testing-library/react'
+import { act, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { Schemas } from './api/client.ts'
@@ -79,7 +79,7 @@ describe('the session gate', () => {
     await userEvent.click(screen.getByRole('link', { name: 'Settings' }))
     expect(await screen.findByRole('heading', { name: 'Settings', level: 1 })).toBeDefined()
     expect(location()).toBe('/app/settings')
-    expect(document.activeElement?.id).toBe('main')
+    await waitFor(() => expect(document.activeElement?.id).toBe('main'))
   })
 
   it('offers a retry when the server cannot be reached', async () => {
