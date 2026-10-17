@@ -44,8 +44,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    # Running jobs get up to 20 s to finish on shutdown; Docker's default is 10 s.
-    stop_grace_period: 30s
+    # Allow a 10 s HTTP drain, 20 s job drain and 5 s margin before Docker kills it.
+    stop_grace_period: 35s
     restart: unless-stopped
 
   # To run background jobs in a container of their own (same image), set HOURMERE_ROLE=web
