@@ -54,13 +54,11 @@ const ProfileInput = z
 const DisplayName = z.object({ name: z.string() }).openapi('DisplayName')
 const DisplayNameInput = z
   .strictObject({
-    name: z
-      .string()
-      .openapi({
-        description: 'Trimmed, well-formed Unicode on one line',
-        minLength: 1,
-        maxLength: DISPLAY_NAME_MAX_LENGTH,
-      }),
+    name: z.string().openapi({
+      description: 'Trimmed, well-formed Unicode on one line',
+      minLength: 1,
+      maxLength: DISPLAY_NAME_MAX_LENGTH,
+    }),
   })
   .openapi('DisplayNameInput')
 
