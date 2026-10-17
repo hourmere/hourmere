@@ -40,8 +40,8 @@ export interface OptionDraft {
 
 export interface QuestionDraft {
   key: string
-  /** The saved id answers are stored under; null until the question is first saved. */
-  id: string | null
+  /** Stable answer identity, allocated when added; existing saved ids are preserved. */
+  id: string
   label: string
   type: QuestionType
   required: boolean
@@ -75,7 +75,12 @@ let nextKey = 0
 export const newKey = (prefix: string) => `${prefix}${++nextKey}`
 
 export function newQuestion(): QuestionDraft {
-  return { key: newKey('q'), id: null, label: '', type: 'short_text', required: false, options: [] }
+  // A label or list counter can reuse a deleted question's id and attach its old answers.
+  // getRandomValues also works on plain HTTP self-hosted instances.
+  const id = `q_${Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) =>
+    b.toString(16).padStart(2, '0'),
+  ).join('')}`
+  return { key: newKey('q'), id, label: '', type: 'short_text', required: false, options: [] }
 }
 
 export const newOption = (text = ''): OptionDraft => ({ key: newKey('o'), text })
@@ -158,19 +163,6 @@ export function slugify(title: string): string {
     .replace(/^-+|-+$/g, '')
     .slice(0, EVENT_TYPE.slugMaxLength)
     .replace(/-+$/g, '')
-}
-
-/** Ids for questions saved for the first time, from their labels, unique in the list. */
-export function questionIds(questions: readonly QuestionDraft[]): string[] {
-  const taken = new Set(questions.flatMap((q) => (q.id ? [q.id] : [])))
-  return questions.map((q) => {
-    if (q.id) return q.id
-    const base = slugify(q.label).slice(0, 48).replace(/-+$/g, '') || 'question'
-    let id = base
-    for (let n = 2; taken.has(id); n++) id = `${base}-${n}`
-    taken.add(id)
-    return id
-  })
 }
 
 // Field ids, which are also the keys of FieldErrors.
@@ -294,7 +286,6 @@ const whole = (value: string) => parseWhole(value)
 
 /** The API body for a draft that passed validateDraft. */
 export function toInput(draft: EventTypeDraft): EventTypeBody {
-  const ids = questionIds(draft.questions)
   const location: EventTypeBody['location'] = (() => {
     switch (draft.locationKind) {
       case '':
@@ -321,8 +312,8 @@ export function toInput(draft: EventTypeDraft): EventTypeBody {
     maxBookingsPerDay: whole(draft.maxBookingsPerDay),
     bookingWindowDays: whole(draft.bookingWindowDays),
     location,
-    questions: draft.questions.map((q, i) => ({
-      id: ids[i] as string,
+    questions: draft.questions.map((q) => ({
+      id: q.id,
       label: q.label.trim(),
       type: q.type,
       required: q.required,

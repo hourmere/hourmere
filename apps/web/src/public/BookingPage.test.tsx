@@ -7,6 +7,7 @@ import {
   booking,
   EVENT,
   eventRoutes,
+  slot,
   slotsAnswer,
   TOKEN,
 } from '../test/public-fixtures.ts'
@@ -380,6 +381,44 @@ describe('the booking page', () => {
     // A replay has no manage token to show.
     expect(screen.getByText(/already made by an earlier attempt/)).toBeDefined()
     expect(screen.queryByLabelText(/Your link to change or cancel/)).toBeNull()
+  })
+
+  it('uses a new key after an idempotency conflict even if the form is unchanged', async () => {
+    const user = userEvent.setup()
+    let attempts = 0
+    const api = fakeApi({
+      ...eventRoutes(EVENT, DST_SLOTS),
+      'POST /api/v1/public/ada/intro/bookings': () =>
+        ++attempts === 1
+          ? json(409, { error: 'idempotency_key_reused' })
+          : json(201, { booking: booking(), manageToken: TOKEN }),
+    })
+    renderApp('/ada/intro')
+    await chooseSlot(user, /November 2, available/, '9:00 AM')
+    await user.type(screen.getByLabelText('Your name'), 'Grace Hopper')
+    await user.type(screen.getByLabelText('Email'), 'grace@example.com')
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+    await screen.findByText('Something went wrong with this attempt. Please try again.')
+    expect(api.to('POST /api/v1/public/ada/intro/bookings')).toHaveLength(1)
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+    await screen.findByRole('heading', { name: 'You’re booked' })
+    const [first, second] = api.to('POST /api/v1/public/ada/intro/bookings')
+    expect(second?.body).toEqual(first?.body)
+    expect(first?.headers.get('idempotency-key')).toBeTruthy()
+    expect(second?.headers.get('idempotency-key')).toBeTruthy()
+    expect(second?.headers.get('idempotency-key')).not.toBe(first?.headers.get('idempotency-key'))
+  })
+
+  it('sorts unsorted response times by instant, including a repeated DST wall time', async () => {
+    const user = userEvent.setup()
+    fakeApi({
+      ...eventRoutes(EVENT, []),
+      'GET /api/v1/public/ada/intro/slots': () =>
+        json(200, { data: [slot('2026-11-01T06:30:00Z'), slot('2026-11-01T05:30:00Z')] }),
+    })
+    renderApp('/ada/intro')
+    await user.click(await day(/November 1, available/))
+    expect(slotButtons()).toEqual(['1:30 AM EDT', '1:30 AM EST'])
   })
 
   it('starts a new attempt when the request changes, and shows the manage link once', async () => {
