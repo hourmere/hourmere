@@ -1,6 +1,7 @@
 // The shapes of handles and event type slugs (packages/scheduling: profile.ts, event-types.ts),
 // so an address that cannot be a booking page shows "not found" without asking the server.
 // Both are lowercase; the server also finds them case-insensitively.
+import { isPublicTeamSlug } from '@hourmere/core/reserved'
 import { useCallback, useEffect, useState } from 'react'
 
 const HANDLE = /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/
@@ -10,6 +11,11 @@ const SLUG = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/
 export function normalizedHandle(value: string): string | undefined {
   const lower = value.toLowerCase()
   return HANDLE.test(lower) ? lower : undefined
+}
+
+/** Team organization slugs preserve case, matching their case-sensitive unique constraint. */
+export function teamSlug(value: string): string | undefined {
+  return isPublicTeamSlug(value) ? value : undefined
 }
 
 export function normalizedSlug(value: string): string | undefined {

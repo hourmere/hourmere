@@ -8,6 +8,7 @@ import {
   type ExistingBooking,
   getAvailableSlots,
   type InstantInterval,
+  isPublicTeamSlug,
   isReservedName,
   type Slot,
   type WeeklyHours,
@@ -75,11 +76,11 @@ export function parseLocation(value: Json | null): Location | null {
 
 // --- Public event types ----------------------------------------------------------------
 
-/** A bookable personal event type, as the public page and the booking path need it. */
+/** A bookable single-host event type, as the public page and booking path need it. */
 export interface PublicEventTypeRecord {
   id: string
   organizationId: string
-  /** The owner, who hosts every booking of a personal event type. */
+  /** The assigned host, or the owner on a personal page. */
   hostUserId: string
   handle: string
   slug: string
@@ -94,6 +95,7 @@ export interface PublicEventTypeRecord {
   questions: Question[]
   hostName: string
   hostTimeZone: string
+  team?: { name: string; slug: string }
 }
 
 /**
@@ -168,6 +170,91 @@ export async function findPublicEventType(
   }
 }
 
+/**
+ * A team link has its own namespace, /team/{teamSlug}/{slug}. Organization slugs use exact
+ * stored case (their unique constraint is case-sensitive), unlike lowercase personal handles.
+ * Only existing individual types with exactly one current team member as host are served.
+ */
+export async function findPublicTeamEventType(
+  db: Db,
+  teamSlug: string,
+  slug: string,
+): Promise<PublicEventTypeRecord | undefined> {
+  const s = slug.toLowerCase()
+  if (!isPublicTeamSlug(teamSlug) || !SLUG.test(s)) return undefined
+  const row = await db
+    .selectFrom('auth.organization as o')
+    .innerJoin('event_types as et', 'et.organization_id', 'o.id')
+    .innerJoin('event_type_hosts as eh', 'eh.event_type_id', 'et.id')
+    .innerJoin('auth.user as u', 'u.id', 'eh.user_id')
+    .innerJoin('auth.member as m', (join) =>
+      join.onRef('m.userId', '=', 'eh.user_id').onRef('m.organizationId', '=', 'o.id'),
+    )
+    .leftJoin('profiles as p', 'p.user_id', 'eh.user_id')
+    .leftJoin('schedules as sc', (join) =>
+      join.on((eb) =>
+        eb.or([
+          eb('sc.id', '=', eb.ref('eh.schedule_id')),
+          eb.and([
+            eb('eh.schedule_id', 'is', null),
+            eb('sc.user_id', '=', eb.ref('eh.user_id')),
+            eb('sc.is_default', '=', true),
+          ]),
+        ]),
+      ),
+    )
+    .select([
+      'et.id',
+      'et.organization_id',
+      'et.slug',
+      'et.title',
+      'et.description',
+      'et.duration_minutes',
+      'et.slot_step_minutes',
+      'et.minimum_notice_minutes',
+      'et.booking_window_days',
+      'et.location',
+      'et.questions',
+      'eh.user_id',
+      'o.slug as team_slug',
+      'o.name as team_name',
+      'u.name',
+      sql<string>`coalesce(p.time_zone, sc.time_zone, 'UTC')`.as('time_zone'),
+    ])
+    .where('o.slug', '=', teamSlug)
+    .where('o.id', 'not in', (eb) =>
+      eb.selectFrom('personal_organizations').select('organization_id'),
+    )
+    .where('et.slug', '=', s)
+    .where('et.owner_user_id', 'is', null)
+    .where('et.is_active', '=', true)
+    .where('et.deleted_at', 'is', null)
+    .where('et.scheduling_type', '=', 'individual')
+    .where(
+      sql<boolean>`(SELECT count(*) FROM event_type_hosts all_hosts WHERE all_hosts.event_type_id = et.id) = 1`,
+    )
+    .executeTakeFirst()
+  if (!row) return undefined
+  return {
+    id: row.id,
+    organizationId: row.organization_id,
+    hostUserId: row.user_id,
+    handle: row.team_slug,
+    slug: row.slug,
+    title: row.title,
+    description: row.description,
+    durationMinutes: row.duration_minutes,
+    slotStepMinutes: row.slot_step_minutes ?? row.duration_minutes,
+    minimumNoticeMinutes: row.minimum_notice_minutes,
+    bookingWindowDays: row.booking_window_days,
+    location: parseLocation(row.location),
+    questions: parseQuestions(row.questions),
+    hostName: row.name.trim() || row.team_name,
+    hostTimeZone: row.time_zone,
+    team: { name: row.team_name, slug: row.team_slug },
+  }
+}
+
 export function eventTypeNotFound(): DomainError {
   return new DomainError('not_found', 'event_type_not_found', 'No such event type')
 }
@@ -182,13 +269,24 @@ export interface PublicEventType {
   location: { kind: LocationKind } | null
   questions: Question[]
   host: { name: string; timeZone: string }
+  team?: { name: string; slug: string }
 }
 
 export async function getPublicEventType(
   ctx: PublicContext,
   { handle, slug }: { handle: string; slug: string },
 ): Promise<PublicEventType> {
-  const et = await findPublicEventType(ctx.db, handle, slug)
+  return publicEventType(await findPublicEventType(ctx.db, handle, slug))
+}
+
+export async function getPublicTeamEventType(
+  ctx: PublicContext,
+  { handle, slug }: { handle: string; slug: string },
+): Promise<PublicEventType> {
+  return publicEventType(await findPublicTeamEventType(ctx.db, handle, slug))
+}
+
+function publicEventType(et: PublicEventTypeRecord | undefined): PublicEventType {
   if (!et) throw eventTypeNotFound()
   return {
     handle: et.handle,
@@ -199,6 +297,7 @@ export async function getPublicEventType(
     location: et.location && { kind: et.location.kind },
     questions: et.questions,
     host: { name: et.hostName, timeZone: et.hostTimeZone },
+    ...(et.team && { team: et.team }),
   }
 }
 
@@ -335,8 +434,23 @@ export async function listPublicSlots(
   ctx: PublicContext,
   input: { handle: string; slug: string; start: Temporal.Instant; end: Temporal.Instant },
 ): Promise<SlotView[]> {
+  return publicSlots(ctx, input, findPublicEventType)
+}
+
+export async function listPublicTeamSlots(
+  ctx: PublicContext,
+  input: { handle: string; slug: string; start: Temporal.Instant; end: Temporal.Instant },
+): Promise<SlotView[]> {
+  return publicSlots(ctx, input, findPublicTeamEventType)
+}
+
+async function publicSlots(
+  ctx: PublicContext,
+  input: { handle: string; slug: string; start: Temporal.Instant; end: Temporal.Instant },
+  resolve: typeof findPublicEventType,
+): Promise<SlotView[]> {
   checkSlotRange(input.start, input.end)
-  const et = await findPublicEventType(ctx.db, input.handle, input.slug)
+  const et = await resolve(ctx.db, input.handle, input.slug)
   if (!et) throw eventTypeNotFound()
   const now = ctx.now()
   if (!hasBookablePart(et, input.start, input.end, now)) return []

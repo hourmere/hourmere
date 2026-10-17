@@ -7,10 +7,12 @@ import {
   fakeApi,
   json,
   later,
+  ME,
   profile,
   type Routes,
   renderApp,
   signedIn,
+  signedInAs,
 } from '../../test/fake-api.tsx'
 import {
   EVENT_TYPE_ID,
@@ -873,5 +875,66 @@ describe('answers that arrive after leaving or editing on', () => {
     const unload = new Event('beforeunload', { cancelable: true })
     window.dispatchEvent(unload)
     expect(unload.defaultPrevented).toBe(true)
+  })
+})
+
+describe('team booking links', () => {
+  it('shares and previews a team link without requiring a personal profile', async () => {
+    const user = userEvent.setup()
+    const me = {
+      ...ME,
+      organization: { ...ME.organization, name: 'Cobaltmere', slug: 'Cobaltmere', personal: false },
+    }
+    eventTypeServer([eventType({ ownerUserId: null, organizationId: me.organization.id })], {
+      ...signedInAs(me),
+      'GET /api/v1/profile': () => json(404, { error: 'profile_not_found' }),
+    })
+    renderApp('/app/event-types')
+    const row = within(
+      (await screen.findByRole('rowheader', { name: 'Intro call' })).closest('tr') as HTMLElement,
+    )
+    const url = `${window.location.origin}/team/Cobaltmere/intro-call`
+    expect(
+      row.getByRole('link', { name: /team\/Cobaltmere\/intro-call/ }).getAttribute('href'),
+    ).toBe(url)
+    await user.click(row.getByRole('button', { name: 'Copy link for Intro call' }))
+    expect(await navigator.clipboard.readText()).toBe(url)
+    expect(screen.queryByText(/Choose your handle/)).toBeNull()
+    await user.click(row.getByRole('link', { name: 'Edit Intro call' }))
+    await screen.findByRole('heading', { name: 'Edit “Intro call”' })
+    expect(screen.getByText(url)).toBeDefined()
+  })
+})
+
+describe('unavailable team booking links', () => {
+  it.each([
+    { slug: 'Team_Name', mode: 'individual' },
+    { slug: 'a'.repeat(65), mode: 'individual' },
+    { slug: 'api', mode: 'individual' },
+    { slug: 'Team', mode: 'round_robin' },
+    { slug: 'Team', mode: 'collective' },
+  ] as const)('does not advertise a dead link for $slug/$mode', async ({ slug, mode }) => {
+    const user = userEvent.setup()
+    const me = { ...ME, organization: { ...ME.organization, slug, personal: false } }
+    eventTypeServer([eventType({ ownerUserId: null, schedulingType: mode })], {
+      ...signedInAs(me),
+      'GET /api/v1/profile': () => json(404, { error: 'profile_not_found' }),
+    })
+    renderApp('/app/event-types')
+    const row = within(
+      (await screen.findByRole('rowheader', { name: 'Intro call' })).closest('tr') as HTMLElement,
+    )
+    expect(row.queryByRole('button', { name: 'Copy link for Intro call' })).toBeNull()
+    expect(row.queryByRole('link', { name: /\/team\// })).toBeNull()
+    await user.click(row.getByRole('link', { name: 'Edit Intro call' }))
+    await screen.findByRole('heading', { name: 'Edit “Intro call”' })
+    expect(screen.queryByText(`${window.location.origin}/team/${slug}/intro-call`)).toBeNull()
+    expect(
+      screen.getByText(
+        mode === 'individual'
+          ? /Choose a non-reserved team slug/
+          : 'Public booking links for this scheduling mode are not available yet.',
+      ),
+    ).toBeDefined()
   })
 })

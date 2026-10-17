@@ -25,28 +25,42 @@ import {
 import { BookingForm, type BookingFormValues } from './BookingForm.tsx'
 import { now as currentTime, detectTimeZone, preferredLocale } from './env.ts'
 import { FocusHeading, PublicLayout, PublicNotFound, PublicStatus } from './PublicLayout.tsx'
-import { normalizedHandle, normalizedSlug, useRequest } from './paths.ts'
+import { normalizedHandle, normalizedSlug, teamSlug, useRequest } from './paths.ts'
 import { SlotPicker } from './SlotPicker.tsx'
 import { formatDate, formatDuration, formatTimeRange, offsetLabel, zoneName } from './time.ts'
 import { bookingErrors, bookingLocale, type FieldErrors, responsesFor } from './validation.ts'
 
 /** /{handle}/{slug}: pick a time, fill in the form, get the confirmation. */
-export function BookingPage() {
+export function TeamBookingPage() {
+  return <BookingPage team />
+}
+
+export function BookingPage({ team = false }: { team?: boolean } = {}) {
   const params = useParams()
-  const rawHandle = params.handle ?? ''
+  const rawHandle = (team ? params.teamSlug : params.handle) ?? ''
   const rawSlug = params.slug ?? ''
-  const handle = normalizedHandle(rawHandle)
+  const handle = team ? teamSlug(rawHandle) : normalizedHandle(rawHandle)
   const slug = normalizedSlug(rawSlug)
   if (handle === undefined || slug === undefined) return <PublicNotFound what="event" />
   if (handle !== rawHandle || slug !== rawSlug)
-    return <Navigate to={`/${handle}/${slug}`} replace />
-  return <BookingPageContent key={`${handle}/${slug}`} handle={handle} slug={slug} />
+    return <Navigate to={`${team ? '/team' : ''}/${handle}/${slug}`} replace />
+  return (
+    <BookingPageContent key={`${team}/${handle}/${slug}`} handle={handle} slug={slug} team={team} />
+  )
 }
 
-function BookingPageContent({ handle, slug }: { handle: string; slug: string }) {
+function BookingPageContent({
+  handle,
+  slug,
+  team,
+}: {
+  handle: string
+  slug: string
+  team: boolean
+}) {
   const load = useCallback(
-    (signal: AbortSignal) => getEventType(handle, slug, signal),
-    [handle, slug],
+    (signal: AbortSignal) => getEventType(handle, slug, signal, team),
+    [handle, slug, team],
   )
   const [state, reload] = useRequest(load)
   usePageTitle(
@@ -73,7 +87,7 @@ function BookingPageContent({ handle, slug }: { handle: string; slug: string }) 
       </PublicLayout>
     )
   }
-  return <BookingFlow event={state.data} handle={handle} slug={slug} />
+  return <BookingFlow event={state.data} handle={handle} slug={slug} team={team} />
 }
 
 const EMPTY_FORM: BookingFormValues = { name: '', email: '', guests: [], answers: {} }
@@ -88,10 +102,12 @@ function BookingFlow({
   event,
   handle,
   slug,
+  team,
 }: {
   event: PublicEventType
   handle: string
   slug: string
+  team: boolean
 }) {
   const locale = useMemo(preferredLocale, [])
   const [timeZone, setTimeZone] = useState(detectTimeZone)
@@ -110,7 +126,7 @@ function BookingFlow({
   // error or a lost answer) reuses it, so the server answers with the booking it may already
   // have made instead of booking twice; any change to the request starts a new attempt.
   const attempt = useRef<{ key: string; body: string } | null>(null)
-  const loadSlots = useMemo(() => eventSlots(handle, slug), [handle, slug])
+  const loadSlots = useMemo(() => eventSlots(handle, slug, team), [handle, slug, team])
 
   if (gone) return <PublicNotFound what="event" />
   if (confirmed) return <Confirmation event={event} confirmed={confirmed} locale={locale} />
@@ -149,7 +165,13 @@ function BookingFlow({
     setFormError(null)
     setServerErrors({})
     try {
-      const { result, replayed } = await createBooking(handle, slug, body, attempt.current.key)
+      const { result, replayed } = await createBooking(
+        handle,
+        slug,
+        body,
+        attempt.current.key,
+        team,
+      )
       setConfirmed({ ...result, replayed, timeZone })
     } catch (err) {
       const code = codeOf(err)
@@ -194,7 +216,7 @@ function BookingFlow({
     <PublicLayout wide>
       <div className="booking-layout">
         <aside className="event-info" aria-label="About this event">
-          <p className="event-host">{event.host.name}</p>
+          <p className="event-host">{event.team?.name ?? event.host.name}</p>
           <h1 className="event-title">{event.title}</h1>
           <ul className="event-facts">
             <li>{formatDuration(event.durationMinutes)}</li>

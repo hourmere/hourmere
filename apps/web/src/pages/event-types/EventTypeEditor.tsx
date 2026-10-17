@@ -1,3 +1,4 @@
+import { isPublicTeamSlug } from '@hourmere/core/reserved'
 import { type FormEvent, useCallback, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { api, unwrap } from '../../api/client.ts'
@@ -16,7 +17,7 @@ import { flash } from '../../flash.ts'
 import { formatMinutes } from '../../format.ts'
 import { useLoad, useMounted, usePageTitle } from '../../hooks.ts'
 import { EVENT_TYPE, RULES } from '../../limits.ts'
-import { PATHS, publicPageUrl } from '../../paths.ts'
+import { PATHS, publicPageUrl, publicTeamPageUrl, TEAM_LINK_SLUG_HINT } from '../../paths.ts'
 import { type Me, useMe } from '../../session.tsx'
 import { useUnsavedChanges } from '../../unsaved-changes.tsx'
 import { MissingRecord } from '../NotFound.tsx'
@@ -184,7 +185,7 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
     navigate(PATHS.eventTypes, { state: flash(`Deleted “${saved.title}”.`) })
   }
 
-  const slugPreview = bookingLinkPreview(me, profile, draft.slug.trim())
+  const slugPreview = bookingLinkPreview(me, profile, draft.slug.trim(), saved?.schedulingType)
   const duration = parseWhole(draft.durationMinutes)
 
   return (
@@ -471,8 +472,17 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
 const defaultName = (schedules: Schedule[]) => schedules.find((s) => s.isDefault)?.name
 
 /** What the booking link will be, or why there is none yet. */
-function bookingLinkPreview(me: Me, profile: Profile | null, slug: string): string {
-  if (!me.organization.personal) return 'Booking pages for teams are not available yet.'
+function bookingLinkPreview(
+  me: Me,
+  profile: Profile | null,
+  slug: string,
+  schedulingType: EventType['schedulingType'] = 'individual',
+): string {
+  if (!me.organization.personal && schedulingType !== 'individual')
+    return 'Public booking links for this scheduling mode are not available yet.'
+  if (!me.organization.personal && !isPublicTeamSlug(me.organization.slug))
+    return TEAM_LINK_SLUG_HINT
+  if (!me.organization.personal) return publicTeamPageUrl(me.organization.slug, slug || 'your-link')
   if (!profile) return 'Choose your handle in Settings to get booking links.'
   return publicPageUrl(profile.handle, slug || 'your-link')
 }

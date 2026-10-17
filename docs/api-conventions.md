@@ -254,3 +254,19 @@ manage token, so retrying it with the booking's own token after a lost response 
 `booking_cancelled`. The invitee does not lose access: the reschedule email carries a new
 link, and links in earlier emails follow the meeting to the new booking. (So a retry with
 an email's token would move the meeting again; clients must not resubmit it on their own.)
+
+### Team booking links
+
+Single-host team event types have a public page at `/team/{teamSlug}/{slug}`. The matching
+API is `GET /api/v1/public/teams/{handle}/{slug}`, with `/slots` and `POST /bookings` suffixes
+as on personal pages; `handle` here is the organization slug in its exact stored case.
+Organization slug uniqueness is case-sensitive, so these routes preserve case and never
+choose a different team by lowercasing it. Event type slugs remain lowercase. Team slugs
+are 1–64 ASCII letters/digits/inner hyphens and may not be reserved names.
+
+The event response includes `team: { name, slug }` in addition to its host and the usual
+public fields. Personal organizations and personal event types cannot be reached through
+this namespace. Only active, non-deleted `individual` team types with exactly one assigned
+host who is still a member are served. Round-robin and collective modes need their own
+availability/assignment implementation. Team bookings use the same availability rules,
+locks, idempotency scope, notifications and manage links as personal bookings.

@@ -80,9 +80,16 @@ export async function getEventType(
   handle: string,
   slug: string,
   signal: AbortSignal,
+  team = false,
 ): Promise<PublicEventType> {
   const { data } = await call(
-    () => api.GET('/api/v1/public/{handle}/{slug}', { params: { path: { handle, slug } }, signal }),
+    () =>
+      team
+        ? api.GET('/api/v1/public/teams/{handle}/{slug}', {
+            params: { path: { handle, slug } },
+            signal,
+          })
+        : api.GET('/api/v1/public/{handle}/{slug}', { params: { path: { handle, slug } }, signal }),
     signal,
   )
   return data
@@ -91,14 +98,19 @@ export async function getEventType(
 /** Loads the slots that lie fully inside [start, end] (ISO instants). */
 export type SlotLoader = (start: string, end: string, signal: AbortSignal) => Promise<Slot[]>
 
-export function eventSlots(handle: string, slug: string): SlotLoader {
+export function eventSlots(handle: string, slug: string, team = false): SlotLoader {
   return async (start, end, signal) => {
     const { data } = await call(
       () =>
-        api.GET('/api/v1/public/{handle}/{slug}/slots', {
-          params: { path: { handle, slug }, query: { start, end } },
-          signal,
-        }),
+        team
+          ? api.GET('/api/v1/public/teams/{handle}/{slug}/slots', {
+              params: { path: { handle, slug }, query: { start, end } },
+              signal,
+            })
+          : api.GET('/api/v1/public/{handle}/{slug}/slots', {
+              params: { path: { handle, slug }, query: { start, end } },
+              signal,
+            }),
       signal,
     )
     return data.data
@@ -152,12 +164,18 @@ export async function createBooking(
   slug: string,
   body: CreateBooking,
   idempotencyKey: string,
+  team = false,
 ): Promise<{ result: BookingWithToken; replayed: boolean }> {
   const { data, status } = await call(() =>
-    api.POST('/api/v1/public/{handle}/{slug}/bookings', {
-      params: { path: { handle, slug }, header: { 'idempotency-key': idempotencyKey } },
-      body,
-    }),
+    team
+      ? api.POST('/api/v1/public/teams/{handle}/{slug}/bookings', {
+          params: { path: { handle, slug }, header: { 'idempotency-key': idempotencyKey } },
+          body,
+        })
+      : api.POST('/api/v1/public/{handle}/{slug}/bookings', {
+          params: { path: { handle, slug }, header: { 'idempotency-key': idempotencyKey } },
+          body,
+        }),
   )
   return { result: data, replayed: status === 200 }
 }

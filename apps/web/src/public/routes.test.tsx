@@ -60,6 +60,7 @@ describe('routing between the app and the public pages', () => {
       '/api',
       '/assets',
       '/mcp',
+      '/team',
     ].map((path) => path.split('/')[1] as string)
     for (const segment of topLevel) expect(isReservedName(segment), segment).toBe(true)
   })
