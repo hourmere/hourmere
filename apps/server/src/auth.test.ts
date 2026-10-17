@@ -9,6 +9,7 @@ import {
   createAuth,
   createAuthPool,
   createCallerResolver,
+  DISPLAY_NAME_MAX_LENGTH,
   ensurePersonalOrganization,
   type OAuthClient,
   type SignupPolicy,
@@ -834,6 +835,120 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
       const { body } = await me({ cookie: await signIn('ada@another.example') })
       expect(body.organization.name).toBe('ada')
       expect(body.organization.slug).toMatch(/^ada-[a-z0-9]{6}$/)
+    })
+  })
+
+  describe('display name updates', () => {
+    let cookie: string
+    let id: string
+    const email = 'display-name@example.com'
+    beforeAll(async () => {
+      cookie = await signIn(email)
+      id = await userId(email)
+    })
+    const stored = () =>
+      db
+        .selectFrom('auth.user')
+        .select(['name', 'email'])
+        .where('id', '=', id)
+        .executeTakeFirstOrThrow()
+
+    it('lets a magic-link user set a trimmed Unicode name, preserving identity and later sign-ins', async () => {
+      const before = (await me({ cookie })).body
+      expect(before.user.name).toBe('')
+      const response = await post('/api/auth/update-user', cookie, {
+        name: '  Ada Lovelace 👩‍💻  ',
+      })
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual({ status: true })
+      expect(await stored()).toEqual({ name: 'Ada Lovelace 👩‍💻', email })
+      const after = (await me({ cookie })).body
+      expect(after.user).toEqual({ ...before.user, name: 'Ada Lovelace 👩‍💻' })
+      expect(after.organization).toEqual(before.organization)
+      const laterCookie = await signIn(email)
+      expect((await me({ cookie: laterCookie })).body.user.name).toBe('Ada Lovelace 👩‍💻')
+    })
+
+    it.each([
+      null,
+      false,
+      42,
+      {},
+      [],
+      '',
+      '   ',
+      'A\nB',
+      'A\u0000B',
+      'A\u0085B',
+      'A\u2028B',
+      'A\u2029B',
+      'A\ud800B',
+      'A'.repeat(DISPLAY_NAME_MAX_LENGTH + 1),
+    ])('rejects an invalid name without changing data or reflecting it (%#)', async (name) => {
+      const before = await stored()
+      const response = await post('/api/auth/update-user', cookie, { name })
+      expect(response.status).toBe(400)
+      expect(await response.json()).toEqual({
+        code: 'INVALID_DISPLAY_NAME',
+        message: `Name must be a single line of text between 1 and ${DISPLAY_NAME_MAX_LENGTH} characters.`,
+      })
+      expect(await stored()).toEqual(before)
+    })
+
+    it('accepts the exact UTF-16 length bound', async () => {
+      const name = '😀'.repeat(DISPLAY_NAME_MAX_LENGTH / 2)
+      const response = await post('/api/auth/update-user', cookie, { name })
+      expect(response.status).toBe(200)
+      expect((await stored()).name).toBe(name)
+    })
+
+    it('retains session and origin checks, and cannot target another user', async () => {
+      expect((await post('/api/auth/update-user', '', { name: 'No session' })).status).toBe(401)
+      const key = await plantKey(id, (await me({ cookie })).body.organization.id)
+      const apiOnly = await main.app.request('/api/auth/update-user', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${key.key}`, origin },
+        body: JSON.stringify({ name: 'API only' }),
+      })
+      expect(apiOnly.status).toBe(401)
+      const before = await stored()
+      const foreignOrigin = await main.app.request('/api/auth/update-user', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie, origin: 'https://evil.example' },
+        body: JSON.stringify({ name: 'Foreign origin' }),
+      })
+      expect(foreignOrigin.status).toBe(403)
+      expect(await stored()).toEqual(before)
+      const otherCookie = await signIn('other-display-name@example.com')
+      const other = (await me({ cookie: otherCookie })).body.user
+      const response = await post('/api/auth/update-user', cookie, {
+        name: 'Only me',
+        userId: other.id,
+      })
+      expect(response.status).toBe(200)
+      expect((await stored()).name).toBe('Only me')
+      expect((await me({ cookie: otherCookie })).body.user).toEqual(other)
+    })
+
+    it('also validates and normalizes server-side auth API calls', async () => {
+      const headers = new Headers({ cookie, origin })
+      const before = await stored()
+      await expect(
+        main.auth.api.updateUser({ headers, body: { name: 'A\rB' } }),
+      ).rejects.toMatchObject({
+        status: 'BAD_REQUEST',
+        body: { code: 'INVALID_DISPLAY_NAME' },
+      })
+      expect(await stored()).toEqual(before)
+      await main.auth.api.updateUser({ headers, body: { name: '  Server name  ' } })
+      expect((await stored()).name).toBe('Server name')
+    })
+
+    it('allows other supported profile updates for an unnamed legacy account', async () => {
+      const legacyCookie = await signIn('unnamed-profile@example.com')
+      const response = await post('/api/auth/update-user', legacyCookie, { image: null })
+      expect(response.status).toBe(200)
+      expect((await me({ cookie: legacyCookie })).body.user.name).toBe('')
     })
   })
 

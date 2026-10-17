@@ -1,8 +1,17 @@
 // The web app checks the API's documented limits in its forms before sending
 // (apps/web/src/limits.ts). This compares them with the OpenAPI document the server
 // publishes, so a limit changed on one side fails here instead of drifting apart.
+import { DISPLAY_NAME_MAX_LENGTH } from '@hourmere/auth'
 import { describe, expect, it } from 'vitest'
-import { BOOKING, EVENT_TYPE, PROFILE, QUESTIONS, RULES, SCHEDULE } from '../../web/src/limits.ts'
+import {
+  ACCOUNT,
+  BOOKING,
+  EVENT_TYPE,
+  PROFILE,
+  QUESTIONS,
+  RULES,
+  SCHEDULE,
+} from '../../web/src/limits.ts'
 import { openApiDocument } from './openapi-document.ts'
 
 interface SchemaObject {
@@ -39,6 +48,10 @@ function locationVariant(eventTypeInput: SchemaObject, kind: string): SchemaObje
 }
 
 describe("the web app's form limits", () => {
+  it('match the display-name limit outside OpenAPI', () => {
+    expect(ACCOUNT.nameMaxLength).toBe(DISPLAY_NAME_MAX_LENGTH)
+  })
+
   it('match the event type schema', async () => {
     const s = await schemas()
     const input = s.EventTypeInput

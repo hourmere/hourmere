@@ -1,8 +1,17 @@
-import { screen, within } from '@testing-library/react'
+import { fireEvent, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { Schemas } from '../api/client.ts'
-import { fakeApi, json, later, PROFILE, profile, renderApp, signedIn } from '../test/fake-api.tsx'
+import {
+  fakeApi,
+  json,
+  later,
+  ME,
+  PROFILE,
+  profile,
+  renderApp,
+  signedIn,
+} from '../test/fake-api.tsx'
 import { LEAVE_WITH_UNSAVED_CHANGES } from '../unsaved-changes.tsx'
 import { suggestHandle } from './Settings.tsx'
 
@@ -213,6 +222,145 @@ describe('unsaved profile changes', () => {
     expect(screen.getByText('Saved.')).toBeDefined()
     expect(input('Handle').matches(':disabled')).toBe(false)
     expect(screen.queryByText('Unsaved changes')).toBeNull()
+  })
+})
+
+describe('display name settings', () => {
+  const leaving = () => {
+    const event = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(event)
+    return event.defaultPrevented
+  }
+
+  it('saves a trimmed name for an unnamed account, refreshes identity and preserves an unsaved profile', async () => {
+    const user = userEvent.setup()
+    let name = ''
+    const api = fakeApi({
+      ...profile(PROFILE),
+      'GET /api/v1/me': () => json(200, { ...ME, user: { ...ME.user, name } }),
+      'POST /api/auth/update-user': ({ body }) => {
+        name = (body as { name: string }).name
+        return json(200, { status: true })
+      },
+      'PUT /api/v1/profile': defaultPut,
+    })
+    renderApp('/app/settings')
+    await screen.findByDisplayValue('ada')
+    expect(input('Display name').value).toBe('')
+    expect(leaving()).toBe(false)
+    await user.type(input('Handle'), '-new')
+    await user.type(input('Display name'), '  Ada Lovelace  ')
+    await user.click(screen.getByRole('button', { name: 'Save display name' }))
+    expect(await screen.findByText('Display name saved.')).toBeDefined()
+    expect(input('Display name').value).toBe('Ada Lovelace')
+    expect(api.to('POST /api/auth/update-user').map((call) => call.body)).toEqual([
+      { name: 'Ada Lovelace' },
+    ])
+    expect(api.to('GET /api/v1/me')).toHaveLength(2)
+    expect(input('Handle').value).toBe('ada-new')
+    expect(leaving()).toBe(true)
+    await user.click(screen.getByRole('button', { name: 'Save profile' }))
+    expect(await screen.findByText('Saved.')).toBeDefined()
+    expect(leaving()).toBe(false)
+  })
+
+  it.each(['', '   ', 'A'.repeat(201), 'A\u0000B', 'A\ud800B'])(
+    'checks a bad display name before sending (%#)',
+    async (value) => {
+      const api = profileServer(PROFILE)
+      renderApp('/app/settings')
+      const control = await screen.findByLabelText('Display name')
+      fireEvent.change(control, { target: { value } })
+      fireEvent.submit(screen.getByRole('form', { name: 'Edit display name' }))
+      expect((await screen.findByRole('alert')).textContent).toContain(
+        'Display name: Enter a name on one line, up to 200 characters.',
+      )
+      expect(control.getAttribute('aria-invalid')).toBe('true')
+      expect(api.to('POST /api/auth/update-user')).toHaveLength(0)
+    },
+  )
+
+  it('retains the draft and leave guard after a server refusal, then allows retry', async () => {
+    const user = userEvent.setup()
+    let fail = true
+    const api = fakeApi({
+      ...signedIn,
+      ...profile(PROFILE),
+      'POST /api/auth/update-user': () =>
+        fail ? json(400, { code: 'INVALID_DISPLAY_NAME' }) : json(200, { status: true }),
+    })
+    renderApp('/app/settings')
+    await user.clear(await screen.findByLabelText('Display name'))
+    await user.type(input('Display name'), 'New name')
+    await user.click(screen.getByRole('button', { name: 'Save display name' }))
+    const alert = await screen.findByRole('alert')
+    expect(within(alert).getByRole('link').textContent).toContain('Display name:')
+    expect(input('Display name').value).toBe('New name')
+    expect(leaving()).toBe(true)
+    fail = false
+    await user.click(screen.getByRole('button', { name: 'Save display name' }))
+    await screen.findByText('Display name saved.')
+    expect(api.to('POST /api/auth/update-user')).toHaveLength(2)
+    expect(leaving()).toBe(false)
+  })
+
+  it('shows request failures without claiming a save', async () => {
+    const user = userEvent.setup()
+    fakeApi({
+      ...signedIn,
+      ...profile(PROFILE),
+      'POST /api/auth/update-user': () => json(500, { error: 'internal_error' }),
+    })
+    renderApp('/app/settings')
+    await user.type(await screen.findByLabelText('Display name'), ' new')
+    await user.click(screen.getByRole('button', { name: 'Save display name' }))
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'Could not save your display name.',
+    )
+    expect(screen.queryByText('Display name saved.')).toBeNull()
+    expect(leaving()).toBe(true)
+  })
+
+  it('locks the name through the save and refresh while keeping it protected', async () => {
+    const user = userEvent.setup()
+    const save = later()
+    const refresh = later()
+    let reads = 0
+    fakeApi({
+      ...profile(PROFILE),
+      'GET /api/v1/me': () => (++reads === 1 ? json(200, ME) : refresh.response),
+      'POST /api/auth/update-user': () => save.response,
+    })
+    renderApp('/app/settings')
+    await user.type(await screen.findByLabelText('Display name'), ' new')
+    await user.click(screen.getByRole('button', { name: 'Save display name' }))
+    expect(input('Display name').matches(':disabled')).toBe(true)
+    expect(document.activeElement?.textContent).toBe('Saving…')
+    expect(leaving()).toBe(true)
+    await user.type(input('Display name'), 'x')
+    expect(input('Display name').value).toBe('Ada new')
+    await save.answer(json(200, { status: true }))
+    expect(input('Display name').matches(':disabled')).toBe(true)
+    await refresh.answer(json(200, { ...ME, user: { ...ME.user, name: 'Ada new' } }))
+    expect(screen.getByText('Display name saved.')).toBeDefined()
+    expect(input('Display name').matches(':disabled')).toBe(false)
+    expect(leaving()).toBe(false)
+  })
+
+  it('does not clear an unsaved name when the separate profile form is saved', async () => {
+    const user = userEvent.setup()
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    profileServer(PROFILE)
+    renderApp('/app/settings')
+    await screen.findByDisplayValue('ada')
+    await user.type(input('Display name'), ' new')
+    await user.click(screen.getByRole('button', { name: 'Save profile' }))
+    await screen.findByText('Saved.')
+    await user.click(screen.getByRole('link', { name: 'Bookings' }))
+    expect(confirm).toHaveBeenCalledWith(LEAVE_WITH_UNSAVED_CHANGES)
+    expect(screen.getByTestId('location').textContent).toBe('/app/settings')
+    expect(input('Display name').value).toBe('Ada new')
+    expect(leaving()).toBe(true)
   })
 })
 

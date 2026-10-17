@@ -90,6 +90,7 @@ function invitation(message: MailMessage | undefined) {
     sequence: event?.getFirstPropertyValue('sequence'),
     summary: event?.getFirstPropertyValue('summary'),
     location: event?.getFirstPropertyValue('location'),
+    organizerName: event?.getFirstProperty('organizer')?.getParameter('cn'),
   }
 }
 
@@ -199,6 +200,35 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
     expect(invitation(toHost)?.summary).toBe('Intro call with Ada Lovelace')
     expect(toInvitee?.attachments?.[0]?.content).not.toContain('token')
   })
+
+  it.each([
+    ['', true],
+    ['   ', true],
+    ['', false],
+    ['Updated display name', true],
+  ])(
+    'uses the current name, handle or email for the host in mail and ICS (%#)',
+    async (name, hasProfile) => {
+      const { bookingId, hostId, hostEmail } = await booked()
+      const profile = await db
+        .selectFrom('profiles')
+        .select('handle')
+        .where('user_id', '=', hostId)
+        .executeTakeFirstOrThrow()
+      await db.updateTable('auth.user').set({ name }).where('id', '=', hostId).execute()
+      if (!hasProfile) await db.deleteFrom('profiles').where('user_id', '=', hostId).execute()
+      const expected = name.trim() || (hasProfile ? profile.handle : hostEmail)
+      const { mailer, sent } = testMailer()
+      await sendBookingNotification(deps(mailer), bookingId, 'confirmed')
+      const invitee = sent.find(to('ada@example.com'))
+      expect(invitee?.subject).toContain(`Intro call with ${expected} on `)
+      expect(invitation(invitee)).toMatchObject({
+        summary: `Intro call with ${expected}`,
+        organizerName: expected,
+      })
+      expect(sent.every((message) => invitation(message)?.organizerName === expected)).toBe(true)
+    },
+  )
 
   it('leaves out hosts whose address is not verified', async () => {
     const { bookingId, hostId, hostEmail } = await booked()
