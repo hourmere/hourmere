@@ -298,6 +298,18 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
                 />
                 Active: invitees can book it
               </label>
+              <label className="checkbox">
+                <input
+                  type="checkbox"
+                  checked={draft.isHidden}
+                  onChange={(e) => set('isHidden', e.target.checked)}
+                  aria-describedby="hidden-hint"
+                />
+                Hide from your booking page
+              </label>
+              <p className="hint" id="hidden-hint">
+                Anyone with the direct link can still book it. This does not restrict access.
+              </p>
             </div>
           </section>
 

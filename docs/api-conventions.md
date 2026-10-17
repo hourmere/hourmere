@@ -254,3 +254,12 @@ manage token, so retrying it with the booking's own token after a lost response 
 `booking_cancelled`. The invitee does not lose access: the reschedule email carries a new
 link, and links in earlier emails follow the meeting to the new booking. (So a retry with
 an email's token would move the meeting again; clients must not resubmit it on their own.)
+
+### Unlisted event types
+
+Event type writes accept `isHidden` (default `false`). A hidden event type is omitted from
+the host's public event list, while its direct page, slots and booking endpoints continue to
+work when it is active. Anyone who knows or guesses the link can book it; hiding is not
+authentication or access control. Inactive or deleted event types remain unbookable.
+Authenticated REST and MCP catalog reads retain hidden configurations and their `isHidden`
+flag so owners and authorized team members can manage them.
