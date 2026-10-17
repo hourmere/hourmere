@@ -1,7 +1,9 @@
 import type { Db } from '@hourmere/db'
 import { APIError, createAuthMiddleware, getSessionFromCtx } from 'better-auth/api'
 import { type AuthMiddlewareContext, apiKeyRules } from './api-keys.ts'
+import { displayNameRules } from './display-name.ts'
 import { checkListQuery, emptyMemberList } from './lists.ts'
+import { defaultMagicLinkErrorRedirect } from './magic-link.ts'
 import { isUuid, personalOwner } from './organizations.ts'
 
 /** Request fields that Better Auth looks up in uuid columns. */
@@ -57,6 +59,6 @@ export function beforeHook(db: Db) {
     const empty = await emptyMemberList(ctx, db, filter)
     if (empty) return empty
     await personalOwnerStays(ctx, db)
-    return apiKeyRules(ctx, db)
+    return defaultMagicLinkErrorRedirect(ctx) ?? displayNameRules(ctx) ?? apiKeyRules(ctx, db)
   })
 }

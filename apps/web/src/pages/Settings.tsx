@@ -1,4 +1,5 @@
 import { type FormEvent, useRef, useState } from 'react'
+import { updateDisplayName } from '../api/auth.ts'
 import { api, unwrap } from '../api/client.ts'
 import { errorMessage, RequestError } from '../api/errors.ts'
 import { loadProfile, type Profile } from '../api/resources.ts'
@@ -6,8 +7,8 @@ import { ErrorSummary, Field, type FieldErrors } from '../components/forms.tsx'
 import { TimeZonePicker } from '../components/TimeZonePicker.tsx'
 import { browserLocale, browserTimeZone, isKnownTimeZone } from '../format.ts'
 import { useLoad, useMounted, usePageTitle } from '../hooks.ts'
-import { PROFILE } from '../limits.ts'
-import { type Me, useMe } from '../session.tsx'
+import { ACCOUNT, PROFILE } from '../limits.ts'
+import { type Me, useMe, useSession } from '../session.tsx'
 import { useUnsavedChanges } from '../unsaved-changes.tsx'
 
 export function SettingsPage() {
@@ -34,9 +35,8 @@ export function SettingsPage() {
 
       <section className="panel" aria-labelledby="account-heading">
         <h2 id="account-heading">Account</h2>
+        <DisplayNameForm name={me.user.name} />
         <dl className="details">
-          <dt>Name</dt>
-          <dd>{me.user.name || <span className="muted">Not set</span>}</dd>
           <dt>Email</dt>
           <dd>{me.user.email}</dd>
           <dt>Organization</dt>
@@ -45,9 +45,101 @@ export function SettingsPage() {
             {me.organization.personal && <span className="muted"> (personal)</span>}
           </dd>
         </dl>
-        <p className="hint">Your name and email come from how you sign in.</p>
+        <p className="hint">Your email comes from how you sign in.</p>
       </section>
     </>
+  )
+}
+
+function DisplayNameForm({ name }: { name: string }) {
+  const { refresh } = useSession()
+  const [baseline, setBaseline] = useState(name)
+  const [draft, setDraft] = useState(name)
+  const [errors, setErrors] = useState<FieldErrors>({})
+  const [message, setMessage] = useState<string | null>(null)
+  const [attempt, setAttempt] = useState(0)
+  const [saving, setSaving] = useState(false)
+  const [status, setStatus] = useState('')
+  const statusRef = useRef<HTMLParagraphElement>(null)
+  const mounted = useMounted()
+  const dirty = draft !== baseline
+  useUnsavedChanges(dirty)
+
+  async function submit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault()
+    setAttempt((n) => n + 1)
+    setMessage(null)
+    setStatus('')
+    const next = draft.trim()
+    const invalid =
+      !next ||
+      next.length > ACCOUNT.nameMaxLength ||
+      !next.isWellFormed() ||
+      /[\p{Cc}\p{Zl}\p{Zp}]/u.test(next)
+    const nameError = `Enter a name on one line, up to ${ACCOUNT.nameMaxLength} characters.`
+    setErrors(invalid ? { displayName: nameError } : {})
+    if (invalid) return
+    setSaving(true)
+    setStatus('Saving…')
+    statusRef.current?.focus()
+    try {
+      await updateDisplayName(next)
+      // Refreshes session data without unmounting another unsaved settings form.
+      await refresh()
+      if (!mounted.current) return
+      setBaseline(next)
+      setDraft(next)
+      setStatus('Display name saved.')
+      statusRef.current?.focus()
+    } catch (err) {
+      if (!mounted.current) return
+      setStatus('')
+      if (err instanceof RequestError && err.code === 'INVALID_DISPLAY_NAME') {
+        setErrors({ displayName: nameError })
+      } else setMessage(`Could not save your display name. ${errorMessage(err)}`)
+      setAttempt((n) => n + 1)
+    }
+    setSaving(false)
+  }
+
+  return (
+    <form className="stack" onSubmit={submit} noValidate aria-label="Edit display name">
+      <ErrorSummary
+        errors={errors}
+        labels={{ displayName: 'Display name' }}
+        message={message}
+        attempt={attempt}
+      />
+      <fieldset className="form-fieldset" disabled={saving} role="presentation">
+        <Field
+          id="displayName"
+          label="Display name"
+          error={errors.displayName}
+          hint="Shown on booking pages, in emails and in calendar invitations."
+        >
+          {(props) => (
+            <input
+              {...props}
+              value={draft}
+              autoComplete="name"
+              maxLength={ACCOUNT.nameMaxLength}
+              onChange={(e) => {
+                setDraft(e.target.value)
+                setStatus('')
+              }}
+            />
+          )}
+        </Field>
+      </fieldset>
+      <div className="form-actions">
+        <button type="submit" className="button button-primary" disabled={saving}>
+          {saving ? 'Saving…' : 'Save display name'}
+        </button>
+        <p className="form-status" role="status" tabIndex={-1} ref={statusRef}>
+          {status || (dirty ? 'Unsaved changes' : '')}
+        </p>
+      </div>
+    </form>
   )
 }
 
