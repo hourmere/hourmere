@@ -54,10 +54,6 @@ export function signOut(): Promise<unknown> {
   return authRequest('/sign-out', { body: {} })
 }
 
-export function updateDisplayName(name: string): Promise<unknown> {
-  return authRequest('/update-user', { body: { name } })
-}
-
 /** An API key as Better Auth lists it; the secret itself is never stored or listed. */
 export interface ApiKey {
   id: string

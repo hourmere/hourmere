@@ -1,7 +1,13 @@
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { getProfile, type ProfileInput, putProfile, RESERVED_HANDLES } from './profile.ts'
+import {
+  getProfile,
+  type ProfileInput,
+  putProfile,
+  RESERVED_HANDLES,
+  updateDisplayName,
+} from './profile.ts'
 import { createTestUser, domainError, type TestUser, testContext } from './testing.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -25,6 +31,84 @@ describe.skipIf(!serverUrl)('profile service', () => {
     timeZone: 'Europe/Berlin',
     locale: 'en',
     ...overrides,
+  })
+
+  it('updates only the caller name before onboarding, preserving identity and timestamps', async () => {
+    const a = await createTestUser(db, 'Old name')
+    const b = await createTestUser(db, 'Peer name')
+    const now = Temporal.Instant.from('2026-10-16T12:00:00Z')
+    const before = await db
+      .selectFrom('auth.user')
+      .select(['email', 'emailVerified', 'createdAt'])
+      .where('id', '=', a.id)
+      .executeTakeFirstOrThrow()
+    expect(
+      await updateDisplayName(
+        testContext(db, a.principal, () => now),
+        '  Ada 👩‍💻  ',
+      ),
+    ).toEqual({ name: 'Ada 👩‍💻' })
+    const after = await db
+      .selectFrom('auth.user')
+      .select(['name', 'email', 'emailVerified', 'createdAt', 'updatedAt'])
+      .where('id', '=', a.id)
+      .executeTakeFirstOrThrow()
+    expect(after).toEqual({
+      ...before,
+      name: 'Ada 👩‍💻',
+      updatedAt: new Date(now.epochMilliseconds),
+    })
+    expect(
+      (
+        await db
+          .selectFrom('auth.user')
+          .select('name')
+          .where('id', '=', b.id)
+          .executeTakeFirstOrThrow()
+      ).name,
+    ).toBe('Peer name')
+    expect((await domainError(() => getProfile(ctx(a)))).code).toBe('profile_not_found')
+  })
+
+  it.each([
+    null,
+    false,
+    42,
+    {},
+    [],
+    '',
+    '   ',
+    'A'.repeat(201),
+    'A\nB',
+    'A\u0000B',
+    'A\u0085B',
+    'A\u2028B',
+    'A\u2029B',
+    'A\ud800B',
+  ])('rejects invalid display names without any write or input echo (%#)', async (value) => {
+    const user = await createTestUser(db, 'Keep me')
+    const before = await db
+      .selectFrom('auth.user')
+      .selectAll()
+      .where('id', '=', user.id)
+      .executeTakeFirstOrThrow()
+    const error = await domainError(() => updateDisplayName(ctx(user), value))
+    expect(error.code).toBe('invalid_display_name')
+    expect(error.detail).toBe('Name must be a single line of text between 1 and 200 characters.')
+    expect(
+      await db
+        .selectFrom('auth.user')
+        .selectAll()
+        .where('id', '=', user.id)
+        .executeTakeFirstOrThrow(),
+    ).toEqual(before)
+  })
+
+  it('accepts the exact name length boundary and an unchanged retry', async () => {
+    const user = await createTestUser(db)
+    const name = '😀'.repeat(100)
+    expect(await updateDisplayName(ctx(user), name)).toEqual({ name })
+    expect(await updateDisplayName(ctx(user), name)).toEqual({ name })
   })
 
   it('has no profile before onboarding', async () => {

@@ -1,8 +1,7 @@
 import { type FormEvent, useRef, useState } from 'react'
-import { updateDisplayName } from '../api/auth.ts'
 import { api, unwrap } from '../api/client.ts'
 import { errorMessage, RequestError } from '../api/errors.ts'
-import { loadProfile, type Profile } from '../api/resources.ts'
+import { loadProfile, type Profile, updateDisplayName } from '../api/resources.ts'
 import { ErrorSummary, Field, type FieldErrors } from '../components/forms.tsx'
 import { TimeZonePicker } from '../components/TimeZonePicker.tsx'
 import { browserLocale, browserTimeZone, isKnownTimeZone } from '../format.ts'
@@ -94,7 +93,7 @@ function DisplayNameForm({ name }: { name: string }) {
     } catch (err) {
       if (!mounted.current) return
       setStatus('')
-      if (err instanceof RequestError && err.code === 'INVALID_DISPLAY_NAME') {
+      if (err instanceof RequestError && err.code === 'invalid_display_name') {
         setErrors({ displayName: nameError })
       } else setMessage(`Could not save your display name. ${errorMessage(err)}`)
       setAttempt((n) => n + 1)

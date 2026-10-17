@@ -244,3 +244,11 @@ manage token, so retrying it with the booking's own token after a lost response 
 `booking_cancelled`. The invitee does not lose access: the reschedule email carries a new
 link, and links in earlier emails follow the meeting to the new booking. (So a retry with
 an email's token would move the meeting again; clients must not resubmit it on their own.)
+
+Account display names are updated with `PATCH /api/v1/profile/name` and a strict
+`{ "name": "Ada Lovelace" }` body (4096-byte maximum). The shared service trims and validates
+1–200 UTF-16 code units of well-formed single-line text, returning `invalid_display_name`
+on invalid values. The result is `{ "name": "Ada Lovelace" }`. This affects only the caller,
+works before profile onboarding and across acting organizations, and accepts the same
+session/API-key authentication as profile updates. The legacy Better Auth update-user guard
+remains enforced so that endpoint cannot bypass the text rules.

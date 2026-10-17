@@ -3,6 +3,7 @@ import { createTestUser } from '@hourmere/scheduling/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
   createTestApp,
+  escapedJson,
   openApiDocument,
   PUBLIC_URL,
   productApp,
@@ -15,7 +16,7 @@ const serverUrl = process.env.DATABASE_URL
 describe('profile routes in the OpenAPI document', () => {
   it('documents open responses and strict request bodies', async () => {
     const doc = await openApiDocument(productApp({} as Db))
-    expect(responseAndRequestStrictness(doc, ['/api/v1/profile'])).toEqual({
+    expect(responseAndRequestStrictness(doc, ['/api/v1/profile', '/api/v1/profile/name'])).toEqual({
       closedResponses: [],
       openRequests: [],
     })
@@ -24,6 +25,11 @@ describe('profile routes in the OpenAPI document', () => {
   it('lists every route as authenticated, with its error responses', async () => {
     const { paths } = await openApiDocument(productApp({} as Db))
     expect(Object.keys(paths['/api/v1/profile'] ?? {})).toEqual(['get', 'put'])
+    expect(Object.keys(paths['/api/v1/profile/name'] ?? {})).toEqual(['patch'])
+    expect(paths['/api/v1/profile/name']?.patch?.security).toEqual([
+      { apiKey: [] },
+      { session: [] },
+    ])
     for (const operation of Object.values(paths['/api/v1/profile'] ?? {})) {
       expect(operation.security).toEqual([{ apiKey: [] }, { session: [] }])
       expect(Object.keys(operation.responses)).toEqual(expect.arrayContaining(['401', '429']))
@@ -46,6 +52,81 @@ describe.skipIf(!serverUrl)('profile routes', () => {
   })
 
   const valid = { handle: 'ada', timeZone: 'europe/berlin', locale: 'en-gb' }
+
+  it('updates only the caller name through the independent API before onboarding', async () => {
+    const user = await createTestUser(t.db, 'Old name')
+    const peer = await createTestUser(t.db, 'Peer name')
+    expect(
+      await t.as(user.principal).patch('/api/v1/profile/name', { name: '  Ada 👩‍💻  ' }),
+    ).toEqual({ status: 200, body: { name: 'Ada 👩‍💻' } })
+    expect((await t.as(user.principal).get('/api/v1/profile')).status).toBe(404)
+    expect(
+      (
+        await t.db
+          .selectFrom('auth.user')
+          .select('name')
+          .where('id', '=', peer.id)
+          .executeTakeFirstOrThrow()
+      ).name,
+    ).toBe('Peer name')
+  })
+
+  it.each([
+    [{ name: '' }, 'invalid_display_name'],
+    [{ name: 'A'.repeat(201) }, 'invalid_display_name'],
+    [{ name: 'A\nB' }, 'invalid_display_name'],
+    [{ name: 'A\u0085B' }, 'invalid_display_name'],
+    [{ name: 'A\u2028B' }, 'invalid_display_name'],
+    [{ name: 'A\ud800B' }, 'invalid_request'],
+    [{ name: null }, 'invalid_request'],
+    [{ name: 'Ada', userId: 'other' }, 'invalid_request'],
+    [{ name: 'Ada', email: 'other@example.com' }, 'invalid_request'],
+    [{}, 'invalid_request'],
+  ])('rejects invalid name bodies with no mutation (%#)', async (body, code) => {
+    const user = await createTestUser(t.db, 'Unchanged')
+    const result = await t.as(user.principal).patch('/api/v1/profile/name', body)
+    expect(result.status).toBe(400)
+    expect(result.body).toMatchObject({ error: code })
+    expect(
+      (
+        await t.db
+          .selectFrom('auth.user')
+          .select('name')
+          .where('id', '=', user.id)
+          .executeTakeFirstOrThrow()
+      ).name,
+    ).toBe('Unchanged')
+  })
+
+  it('authenticates before parsing and enforces same-origin session writes', async () => {
+    expect((await t.anonymous.raw('PATCH', '/api/v1/profile/name', '{')).status).toBe(401)
+    const user = await createTestUser(t.db)
+    const session = { ...user.principal, kind: 'session' as const, sessionId: 'name-session' }
+    expect(
+      (
+        await t
+          .as(session, { origin: 'https://evil.example' })
+          .patch('/api/v1/profile/name', { name: 'Wrong' })
+      ).status,
+    ).toBe(403)
+    expect(
+      (await t.as(session, { origin: PUBLIC_URL }).patch('/api/v1/profile/name', { name: 'Own' }))
+        .status,
+    ).toBe(200)
+  })
+
+  it('allows maximally escaped valid names but caps larger bodies', async () => {
+    const user = await createTestUser(t.db)
+    const client = t.as(user.principal)
+    expect(
+      (await client.raw('PATCH', '/api/v1/profile/name', escapedJson({ name: '😀'.repeat(100) })))
+        .status,
+    ).toBe(200)
+    expect((await client.patch('/api/v1/profile/name', { name: 'x'.repeat(5000) })).status).toBe(
+      413,
+    )
+    expect((await client.raw('PATCH', '/api/v1/profile/name', '{')).status).toBe(400)
+  })
 
   it('requires a caller', async () => {
     expect(await t.anonymous.get('/api/v1/profile')).toEqual({

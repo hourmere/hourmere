@@ -77,6 +77,7 @@ export {
   type ProfileInput,
   putProfile,
   RESERVED_HANDLES,
+  updateDisplayName,
 } from './profile.ts'
 export {
   MAX_ANSWER_LENGTH,

@@ -1,14 +1,18 @@
 import { createRoute, z } from '@hono/zod-openapi'
+import { DISPLAY_NAME_MAX_LENGTH } from '@hourmere/auth'
 import {
   getProfile,
   HANDLE_MAX_LENGTH,
   HANDLE_PATTERN,
   LOCALE_MAX_LENGTH,
   putProfile,
+  updateDisplayName,
 } from '@hourmere/scheduling'
 import {
   authenticated,
   CROSS_ORIGIN_WRITE,
+  callerWithBodyLimit,
+  ErrorBody,
   errorResponses,
   json,
   type RouteModule,
@@ -47,8 +51,49 @@ const ProfileInput = z
   })
   .openapi('ProfileInput')
 
+const DisplayName = z.object({ name: z.string() }).openapi('DisplayName')
+const DisplayNameInput = z
+  .strictObject({
+    name: z
+      .string()
+      .openapi({
+        description: 'Trimmed, well-formed Unicode on one line',
+        minLength: 1,
+        maxLength: DISPLAY_NAME_MAX_LENGTH,
+      }),
+  })
+  .openapi('DisplayNameInput')
+
 export function profileRoutes(deps: ServiceDeps): RouteModule {
   return ({ app, caller }) => {
+    app.openapi(
+      createRoute({
+        method: 'patch',
+        path: '/api/v1/profile/name',
+        summary: "Update the caller's account display name",
+        description:
+          'Works before creating a booking-page profile and across acting organizations. Only changes the caller’s name. Requests are limited to 4096 bytes.',
+        tags: ['Profile'],
+        security: authenticated,
+        middleware: callerWithBodyLimit(caller, 4096),
+        request: { body: { content: json(DisplayNameInput), required: true } },
+        responses: {
+          200: { description: 'The canonical display name', content: json(DisplayName) },
+          413: { description: 'Request body exceeds 4096 bytes', content: json(ErrorBody) },
+          ...errorResponses({
+            400: 'invalid_request or invalid_display_name',
+            403: CROSS_ORIGIN_WRITE,
+            404: 'user_not_found: the caller was deleted concurrently',
+          }),
+        },
+      }),
+      async (c) =>
+        c.json(
+          await updateDisplayName(serviceContext(deps, c.var.principal), c.req.valid('json').name),
+          200,
+        ),
+    )
+
     app.openapi(
       createRoute({
         method: 'get',

@@ -1,10 +1,12 @@
 // The caller's profile: the public handle in their booking URLs (/{handle}/{slug}), their
 // time zone and locale. It belongs to the user, not to an organization.
+import { DISPLAY_NAME_MAX_LENGTH } from '@hourmere/auth'
 import { isReservedName, RESERVED_NAMES } from '@hourmere/core'
 import { sql } from 'kysely'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { isConstraintViolation, SQLSTATE, timestamp, validTimeZone } from './internal.ts'
+import { cleanText } from './text.ts'
 
 export interface Profile {
   handle: string
@@ -91,6 +93,29 @@ export async function putProfile(
     }
     throw error
   }
+}
+
+/** Account display name, independently of profile onboarding and acting organization. */
+export async function updateDisplayName(
+  ctx: ServiceContext,
+  value: unknown,
+): Promise<{ name: string }> {
+  const name = cleanText(value, { max: DISPLAY_NAME_MAX_LENGTH })
+  if (name === undefined) {
+    throw new DomainError(
+      'invalid',
+      'invalid_display_name',
+      `Name must be a single line of text between 1 and ${DISPLAY_NAME_MAX_LENGTH} characters.`,
+    )
+  }
+  const row = await ctx.db
+    .updateTable('auth.user')
+    .set({ name, updatedAt: new Date(ctx.now().epochMilliseconds) })
+    .where('id', '=', ctx.principal.user.id)
+    .returning('name')
+    .executeTakeFirst()
+  if (!row) throw new DomainError('not_found', 'user_not_found')
+  return row
 }
 
 function validHandle(value: unknown): string {

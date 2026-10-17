@@ -1859,6 +1859,103 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/profile/name": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update the caller's account display name
+         * @description Works before creating a booking-page profile and across acting organizations. Only changes the caller’s name. Requests are limited to 4096 bytes.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["DisplayNameInput"];
+                };
+            };
+            responses: {
+                /** @description The canonical display name */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DisplayName"];
+                    };
+                };
+                /** @description invalid_request or invalid_display_name */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No valid session or API key */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description forbidden: a cookie-authenticated write from another origin */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description user_not_found: the caller was deleted concurrently */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Request body exceeds 4096 bytes */
+                413: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The API key's rate limit is used up */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        trace?: never;
+    };
     "/api/v1/public/{handle}": {
         parameters: {
             query?: never;
@@ -2849,6 +2946,13 @@ export interface components {
              * @example 2026-11-02T09:00:00.000Z
              */
             start: string;
+        };
+        DisplayName: {
+            name: string;
+        };
+        DisplayNameInput: {
+            /** @description Trimmed, well-formed Unicode on one line */
+            name: string;
         };
         Error: {
             /** @description Machine-readable code, e.g. unauthorized */
