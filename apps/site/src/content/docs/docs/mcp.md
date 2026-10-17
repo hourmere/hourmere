@@ -48,6 +48,12 @@ For example, after confirming the booking page, test recipient and time zone wit
 {"handle":"ada","slug":"intro","startDate":"2026-11-02","endDate":"2026-11-03","timeZone":"America/Los_Angeles"}
 ```
 
+Slot results are paginated: `maxSlots` defaults to 100 and accepts 1–500. When `nextAfter`
+is non-null, repeat the same query with `after` set to that returned instant. Keep the dates,
+handle, slug and time zone unchanged. `nextAfter: null` marks the final page. Both the
+structured result and its text copy contain only this page. Availability is recalculated
+on every request and can change between pages, so recheck the chosen slot before booking.
+
 Dates must still be in the future and within the event type's booking window. Ask for an
 available slot, then pass its exact UTC `start` to `create_booking` with an invitee name,
 email and IANA time zone. Booking actions send the normal notifications and project onto a
