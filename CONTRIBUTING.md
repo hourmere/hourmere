@@ -26,7 +26,7 @@ npm run dev            # API on :3000, web app on http://localhost:5173
 The server applies database migrations when it starts. `npm run db:down` stops the database
 and keeps its data.
 
-The repository is one npm workspace (`apps/*` and `packages/*`) with a single
+The repository is one npm workspace (`apps/*`, `packages/*` and `tools/*`) with a single
 `package-lock.json` at the root. Add a dependency to the workspace that uses it, e.g.
 `npm install <package> --workspace @hourmere/scheduling`, and commit the updated lockfile.
 
@@ -48,6 +48,41 @@ When you add a migration, apply it and regenerate the table types, then commit
 npm run db:migrate
 npm run db:types
 ```
+
+## Browser tests
+
+Install Google Chrome separately if it is not already available. The Playwright suite uses
+that installed browser through its `chrome` channel, with fresh isolated contexts; it does
+not download a browser or use an existing profile. Build the web app, then run:
+
+```sh
+npm run build --workspace @hourmere/web
+HOURMERE_E2E_BOOTSTRAP_URL=postgres://hourmere:hourmere@localhost:5432/hourmere npm run test:e2e
+```
+
+The bootstrap PostgreSQL account must be able to create and drop databases. Every test
+creates and migrates its own disposable database, runs the real web server on a random
+unused port, and closes its servers and drops the database in teardown. The bootstrap
+connection is used only for database creation/deletion. There is no `DATABASE_URL` or `.env`
+fallback. The fixture uses synthetic identities, closed signup and the web-only role, so
+queued notifications are never delivered. Browser requests outside the two owned local
+origins are blocked. No real mailbox, calendar credentials or external API is required.
+
+`tools/e2e/specs/*.spec.ts` covers public personal/team booking, private-link rescheduling
+and cancellation, a stale-form booking conflict, cross-origin popup/privacy behavior and
+the account sign-in gate. Each scenario runs at desktop and mobile viewport sizes. These
+are genuine SPA/HTTP/PostgreSQL flows, without API response mocks. CI runs the suite in a
+separate job with its own PostgreSQL service and the runner's installed Chrome.
+
+Traces, videos, screenshots and automatic failure DOM snapshots are disabled to keep
+one-time management capabilities out of artifacts. Playwright's pinned
+`PLAYWRIGHT_NO_COPY_PROMPT` switch disables its failure DOM capture; recheck that behavior
+when upgrading the dependency. `npm run test:e2e:privacy` verifies the failure path using
+a non-secret DOM marker and a removed-guard control; CI runs it after the browser suite.
+Its intentional failures are checked internally and all probe files are deleted. Per-test
+artifacts under ignored `temp/` are not retained; runner status metadata can remain. No
+browser artifacts are uploaded by CI. Do not enable debugging artifacts or log request
+headers, management fragments or response bodies containing capabilities.
 
 ## Conventions
 
