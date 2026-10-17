@@ -12,6 +12,9 @@ additive within a version. The OpenAPI document is served at `/api/v1/openapi.js
 - `/api/auth/*` is [Better Auth](https://www.better-auth.com)'s own protocol (sign-in,
   sessions, organizations, API keys). It follows Better Auth's conventions, including its
   error shape (`{ "message", "code" }`), not the ones below.
+- `/api/calendar/google/callback` is the separate calendar OAuth protocol callback. The
+  owner-side connection API is versioned under `/api/v1/calendar-connections`; see
+  [Google Calendar connections](google-calendar.md).
 
 ## JSON
 

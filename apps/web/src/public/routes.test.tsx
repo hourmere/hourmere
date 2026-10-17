@@ -17,6 +17,7 @@ describe('routing between the app and the public pages', () => {
       'GET /api/v1/event-types': () => json(200, { data: [] }),
       'GET /api/v1/schedules': () => json(200, { data: [] }),
       'GET /api/v1/bookings': () => json(200, { data: [], nextCursor: null }),
+      'GET /api/v1/calendar-connections': () => json(200, { googleEnabled: false, data: [] }),
       'GET /api/auth/api-key/list': () => json(200, { apiKeys: [], total: 0 }),
     })
     renderApp(path)

@@ -53,7 +53,7 @@ describe('the session gate', () => {
       within(nav)
         .getAllByRole('link')
         .map((a) => a.textContent),
-    ).toEqual(['Event types', 'Availability', 'Bookings', 'API keys', 'Settings'])
+    ).toEqual(['Event types', 'Availability', 'Bookings', 'Calendars', 'API keys', 'Settings'])
     expect(
       within(nav)
         .getAllByRole('link')
@@ -62,6 +62,7 @@ describe('the session gate', () => {
       '/app/event-types',
       '/app/availability',
       '/app/bookings',
+      '/app/calendars',
       '/app/api-keys',
       '/app/settings',
     ])

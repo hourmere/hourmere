@@ -43,6 +43,7 @@ types in `packages/db/src/tables.ts` are generated from the migrated database.
 | `schedules` | user | Named working hours: time zone + weekly intervals (JSON); one default per user |
 | `schedule_overrides` | user | Per-date exceptions: unavailable, or replacement intervals |
 | `calendar_connections` | user | A connected Google / Microsoft / CalDAV account; credentials encrypted (AES-256-GCM) |
+| `calendar_oauth_states` | user + session | Short-lived, single-use calendar connection attempts: state digest, encrypted PKCE verifier and expiry; separate from sign-in |
 | `calendars` | user | Calendars inside a connection: conflict checking on/off, sync cursor and push channel |
 | `calendar_busy` | user | Busy intervals mirrored by incremental sync (recurring events expanded) |
 | `event_types` | organization | What can be booked: duration, step, buffers, notice, window, daily limit, location, questions; soft-deleted |

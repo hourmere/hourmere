@@ -65,6 +65,10 @@ export const SettingsPage = page(
   () => import('./pages/Settings.tsx'),
   (m) => m.SettingsPage,
 )
+export const CalendarsPage = page(
+  () => import('./pages/Calendars.tsx'),
+  (m) => m.CalendarsPage,
+)
 
 // Public pages: booking pages and the invitee's manage page.
 export const HostPage = page(

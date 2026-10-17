@@ -1,4 +1,5 @@
 import { EMAIL_DOMAIN, SIGNUP_MODES, type SignupPolicy } from '@hourmere/auth'
+import { calendarEncryptionKey } from '@hourmere/calendars'
 import { z } from 'zod'
 import { isTrustedProxyEntry } from './client-ip.ts'
 import { DEFAULT_HTTP_TIMEOUTS, type HttpTimeouts } from './http-timeouts.ts'
@@ -68,6 +69,21 @@ const schema = z
     MAIL_FROM: optional(z.string()),
     GOOGLE_CLIENT_ID: optional(z.string()),
     GOOGLE_CLIENT_SECRET: optional(z.string()),
+    GOOGLE_CALENDAR_CLIENT_ID: optional(z.string().trim().min(1)),
+    GOOGLE_CALENDAR_CLIENT_SECRET: optional(z.string().trim().min(1)),
+    CALENDAR_ENCRYPTION_KEY: optional(
+      z.string().refine(
+        (value) => {
+          try {
+            calendarEncryptionKey(value)
+            return true
+          } catch {
+            return false
+          }
+        },
+        { error: 'CALENDAR_ENCRYPTION_KEY must be 32 random bytes encoded as base64' },
+      ),
+    ),
     MICROSOFT_CLIENT_ID: optional(z.string()),
     MICROSOFT_CLIENT_SECRET: optional(z.string()),
     // Who may create an account; existing users can always sign in. first-user suits a
@@ -144,6 +160,33 @@ const schema = z
     ).transform((v) => v ?? 'all'),
   })
   .superRefine((c, ctx) => {
+    if (c.GOOGLE_CALENDAR_CLIENT_ID || c.GOOGLE_CALENDAR_CLIENT_SECRET) {
+      for (const key of [
+        'GOOGLE_CALENDAR_CLIENT_ID',
+        'GOOGLE_CALENDAR_CLIENT_SECRET',
+        'CALENDAR_ENCRYPTION_KEY',
+      ] as const) {
+        if (!c[key])
+          ctx.addIssue({
+            code: 'custom',
+            path: [key],
+            message:
+              'Google Calendar requires GOOGLE_CALENDAR_CLIENT_ID, GOOGLE_CALENDAR_CLIENT_SECRET and CALENDAR_ENCRYPTION_KEY together',
+          })
+      }
+      if (c.PUBLIC_URL) {
+        const url = new URL(c.PUBLIC_URL)
+        if (
+          url.protocol !== 'https:' &&
+          !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)
+        )
+          ctx.addIssue({
+            code: 'custom',
+            path: ['PUBLIC_URL'],
+            message: 'Google Calendar requires HTTPS except on loopback development hosts',
+          })
+      }
+    }
     if (c.SMTP_URL && !c.MAIL_FROM) {
       ctx.addIssue({
         code: 'custom',
