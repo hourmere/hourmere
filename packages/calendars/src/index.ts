@@ -8,11 +8,20 @@ import { calendarEncryptionKey, decryptCredential, encryptCredential } from './c
 import {
   GOOGLE_CALENDAR_SCOPES,
   GOOGLE_CALENDAR_SYNC_SCOPES,
-  type GoogleCalendar,
   type GoogleCalendarClient,
   GoogleCalendarError,
-  type GoogleTokens,
 } from './google.ts'
+import {
+  hasMicrosoftCalendarListAccess,
+  type MicrosoftCalendarClient,
+  MicrosoftCalendarError,
+} from './microsoft.ts'
+import {
+  type CalendarProvider,
+  CalendarProviderError,
+  type CalendarTokens,
+  type ProviderCalendar,
+} from './provider.ts'
 
 export { calendarBookingNotifier } from './booking-events.ts'
 export { calendarEncryptionKey } from './credentials.ts'
@@ -23,6 +32,11 @@ export {
   GOOGLE_CALENDAR_SYNC_SCOPES,
 } from './google.ts'
 export { bookingCalendarJob, calendarDispatchJob, calendarSyncJob } from './jobs.ts'
+export {
+  createMicrosoftCalendarClient,
+  MICROSOFT_CALENDAR_CALLBACK,
+  MICROSOFT_CALENDAR_SCOPES,
+} from './microsoft.ts'
 export {
   configureCalendar,
   setCalendarDestination,
@@ -44,6 +58,7 @@ export function requireCalendarSession(principal: Principal): SessionPrincipal {
 export interface CalendarDeps {
   db: Db
   google?: { client: GoogleCalendarClient; encryptionKey: string } | undefined
+  microsoft?: { client: MicrosoftCalendarClient; encryptionKey: string } | undefined
   now?: () => number
   enqueueSync?: ((calendarId: string, transaction: Db) => Promise<unknown>) | undefined
 }
@@ -54,8 +69,10 @@ const storedTokens = z.object({
 })
 type StoredTokens = z.infer<typeof storedTokens>
 const digest = (state: string) => createHash('sha256').update(state).digest('hex')
-export const tokenAad = (user: string, account: string) => `google:${user}:${account}`
-const stateAad = (user: string, session: string, hash: string) => `state:${user}:${session}:${hash}`
+export const tokenAad = (user: string, account: string, provider: CalendarProvider = 'google') =>
+  `${provider}:${user}:${account}`
+const stateAad = (user: string, session: string, hash: string, provider: CalendarProvider) =>
+  `${provider === 'google' ? 'state' : 'microsoft:state'}:${user}:${session}:${hash}`
 const notFound = () =>
   new DomainError(
     'not_found',
@@ -68,14 +85,15 @@ const invalidState = () =>
     'invalid_oauth_state',
     'This connection attempt has expired or was already used. Start again.',
   )
-const configured = (deps: CalendarDeps) => {
-  if (!deps.google)
+const configured = (deps: CalendarDeps, provider: CalendarProvider = 'google') => {
+  const config = provider === 'google' ? deps.google : deps.microsoft
+  if (!config)
     throw new DomainError(
       'conflict',
-      'google_calendar_disabled',
-      'Google Calendar is not configured on this instance.',
+      `${provider}_calendar_disabled`,
+      `${provider === 'google' ? 'Google' : 'Microsoft'} Calendar is not configured on this instance.`,
     )
-  return { client: deps.google.client, key: calendarEncryptionKey(deps.google.encryptionKey) }
+  return { client: config.client, key: calendarEncryptionKey(config.encryptionKey) }
 }
 
 /** All connection mutations lock the owner, including the final phase of a callback. */
@@ -106,22 +124,32 @@ export function readTokens(
   user: string,
   account: string,
   credentials: Buffer,
+  provider: CalendarProvider = 'google',
 ): StoredTokens {
   try {
     return storedTokens.parse(
-      JSON.parse(decryptCredential(key, tokenAad(user, account), credentials)),
+      JSON.parse(decryptCredential(key, tokenAad(user, account, provider), credentials)),
     )
   } catch {
     throw new Error('Stored calendar credentials are invalid')
   }
 }
-function requireScopes(scopes: string[] | undefined, access = 'list'): asserts scopes is string[] {
+function requireScopes(
+  scopes: string[] | undefined,
+  access = 'list',
+  provider: CalendarProvider = 'google',
+): asserts scopes is string[] {
+  if (provider === 'microsoft') {
+    if (access !== 'list' || !hasMicrosoftCalendarListAccess(scopes))
+      throw new MicrosoftCalendarError('permissions_missing')
+    return
+  }
   const required = access === 'sync' ? GOOGLE_CALENDAR_SYNC_SCOPES : GOOGLE_CALENDAR_SCOPES
   if (!scopes || !required.every((scope) => scopes.includes(scope)))
     throw new GoogleCalendarError('permissions_missing')
 }
 
-async function saveCalendars(db: Db, connectionId: string, calendars: GoogleCalendar[]) {
+async function saveCalendars(db: Db, connectionId: string, calendars: ProviderCalendar[]) {
   if (calendars.length) {
     await db
       .insertInto('calendars')
@@ -165,9 +193,9 @@ export async function listCalendarConnections(deps: CalendarDeps, principal: Pri
     .executeTakeFirst()
   const connections = await deps.db
     .selectFrom('calendar_connections')
-    .select(['id', 'account_email', 'status', 'created_at', 'updated_at', 'scopes'])
+    .select(['id', 'provider', 'account_email', 'status', 'created_at', 'updated_at', 'scopes'])
     .where('user_id', '=', principal.user.id)
-    .where('provider', '=', 'google')
+    .where('provider', 'in', ['google', 'microsoft'])
     .orderBy('created_at')
     .orderBy('id')
     .execute()
@@ -195,17 +223,18 @@ export async function listCalendarConnections(deps: CalendarDeps, principal: Pri
     : []
   return {
     googleEnabled: deps.google !== undefined,
+    microsoftEnabled: deps.microsoft !== undefined,
     destinationCalendarId: profile?.destination_calendar_id ?? null,
     data: connections.map((connection) => ({
       id: connection.id,
-      provider: 'google' as const,
+      provider: connection.provider as CalendarProvider,
       accountEmail: connection.account_email,
       status: connection.status as 'active' | 'needs_reauth' | 'revoked',
       createdAt: connection.created_at.toISOString(),
       updatedAt: connection.updated_at.toISOString(),
-      syncAuthorized: GOOGLE_CALENDAR_SYNC_SCOPES.every((scope) =>
-        connection.scopes.includes(scope),
-      ),
+      syncAuthorized:
+        connection.provider === 'google' &&
+        GOOGLE_CALENDAR_SYNC_SCOPES.every((scope) => connection.scopes.includes(scope)),
       calendars: calendars
         .filter((c) => c.connection_id === connection.id)
         .map((c) => ({
@@ -226,10 +255,23 @@ export async function beginGoogleConnection(
   principal: Principal,
   access: 'list' | 'sync' = 'list',
 ) {
+  return beginConnection(deps, principal, access, 'google')
+}
+
+export async function beginMicrosoftConnection(deps: CalendarDeps, principal: Principal) {
+  return beginConnection(deps, principal, 'list', 'microsoft')
+}
+
+async function beginConnection(
+  deps: CalendarDeps,
+  principal: Principal,
+  access: 'list' | 'sync',
+  provider: CalendarProvider,
+) {
   if (access !== 'list' && access !== 'sync')
     throw new DomainError('invalid', 'invalid_calendar_access')
   const session = requireCalendarSession(principal)
-  const { client, key } = configured(deps)
+  const { client, key } = configured(deps, provider)
   const now = (deps.now ?? Date.now)()
   const state = randomBytes(32).toString('base64url')
   const verifier = randomBytes(32).toString('base64url')
@@ -265,9 +307,10 @@ export async function beginGoogleConnection(
         state_hash: hash,
         user_id: session.user.id,
         session_id: session.sessionId,
+        provider,
         verifier: encryptCredential(
           key,
-          stateAad(session.user.id, session.sessionId, hash),
+          stateAad(session.user.id, session.sessionId, hash, provider),
           verifier,
         ),
         access,
@@ -292,8 +335,25 @@ export async function finishGoogleConnection(
   principal: Principal,
   query: URLSearchParams,
 ): Promise<ConnectionOutcome> {
+  return finishConnection(deps, principal, query, 'google')
+}
+
+export async function finishMicrosoftConnection(
+  deps: CalendarDeps,
+  principal: Principal,
+  query: URLSearchParams,
+): Promise<ConnectionOutcome> {
+  return finishConnection(deps, principal, query, 'microsoft')
+}
+
+async function finishConnection(
+  deps: CalendarDeps,
+  principal: Principal,
+  query: URLSearchParams,
+  provider: CalendarProvider,
+): Promise<ConnectionOutcome> {
   const session = requireCalendarSession(principal)
-  const { client, key } = configured(deps)
+  const { client, key } = configured(deps, provider)
   const clock = deps.now ?? Date.now
   const state = query.get('state')
   if (!state || !/^[A-Za-z0-9_-]{43}$/.test(state) || query.getAll('state').length !== 1)
@@ -305,6 +365,7 @@ export async function finishGoogleConnection(
     .where('state_hash', '=', hash)
     .where('user_id', '=', session.user.id)
     .where('session_id', '=', session.sessionId)
+    .where('provider', '=', provider)
     .where('claimed', '=', false)
     .where('expires_at', '>', new Date(clock()))
     .returning(['verifier', 'access'])
@@ -329,10 +390,14 @@ export async function finishGoogleConnection(
     const signal = AbortSignal.timeout(15_000)
     const tokens = await client.exchange(
       code,
-      decryptCredential(key, stateAad(session.user.id, session.sessionId, hash), attempt.verifier),
+      decryptCredential(
+        key,
+        stateAad(session.user.id, session.sessionId, hash, provider),
+        attempt.verifier,
+      ),
       signal,
     )
-    requireScopes(tokens.scopes, attempt.access)
+    requireScopes(tokens.scopes, attempt.access, provider)
     const identity = await client.identity(tokens.accessToken, signal)
     const calendars = await client.calendars(tokens.accessToken, signal)
     await deps.db.transaction().execute(async (trx) => {
@@ -350,17 +415,18 @@ export async function finishGoogleConnection(
         .selectFrom('calendar_connections')
         .select(['id', 'credentials'])
         .where('user_id', '=', session.user.id)
-        .where('provider', '=', 'google')
+        .where('provider', '=', provider)
         .where('external_account_id', '=', identity.id)
         .executeTakeFirst()
       const refreshToken =
         tokens.refreshToken ??
         (previous &&
-          readTokens(key, session.user.id, identity.id, previous.credentials).refreshToken)
-      if (!refreshToken) throw new GoogleCalendarError('needs_reauth')
+          readTokens(key, session.user.id, identity.id, previous.credentials, provider)
+            .refreshToken)
+      if (!refreshToken) throw new CalendarProviderError('needs_reauth')
       const credentials = encryptCredential(
         key,
-        tokenAad(session.user.id, identity.id),
+        tokenAad(session.user.id, identity.id, provider),
         JSON.stringify({
           accessToken: tokens.accessToken,
           refreshToken,
@@ -371,7 +437,7 @@ export async function finishGoogleConnection(
         .insertInto('calendar_connections')
         .values({
           user_id: session.user.id,
-          provider: 'google',
+          provider,
           external_account_id: identity.id,
           account_email: identity.email,
           credentials,
@@ -393,7 +459,7 @@ export async function finishGoogleConnection(
     })
     return 'connected'
   } catch (error) {
-    if (error instanceof GoogleCalendarError) return error.code
+    if (error instanceof CalendarProviderError) return error.code
     if (error instanceof DomainError && error.code === 'invalid_oauth_state') return 'invalid_state'
     throw error
   } finally {
@@ -410,7 +476,7 @@ export async function disconnectCalendar(deps: CalendarDeps, principal: Principa
       .deleteFrom('calendar_connections')
       .where('id', '=', id)
       .where('user_id', '=', session.user.id)
-      .where('provider', '=', 'google')
+      .where('provider', 'in', ['google', 'microsoft'])
       .returning('id')
       .executeTakeFirst()
     if (!deleted) throw notFound()
@@ -420,8 +486,39 @@ export async function disconnectCalendar(deps: CalendarDeps, principal: Principa
 
 /** Refresh/list under the same owner lock as disconnect and reconnect; never lose a rotation. */
 export async function refreshGoogleCalendars(deps: CalendarDeps, principal: Principal, id: string) {
+  return refreshCalendarProvider(deps, principal, id, 'google')
+}
+
+export async function refreshMicrosoftCalendars(
+  deps: CalendarDeps,
+  principal: Principal,
+  id: string,
+) {
+  return refreshCalendarProvider(deps, principal, id, 'microsoft')
+}
+
+export async function refreshCalendarList(deps: CalendarDeps, principal: Principal, id: string) {
   const session = requireCalendarSession(principal)
-  const { client, key } = configured(deps)
+  if (!z.uuid().safeParse(id).success) throw notFound()
+  const connection = await deps.db
+    .selectFrom('calendar_connections')
+    .select('provider')
+    .where('id', '=', id)
+    .where('user_id', '=', session.user.id)
+    .where('provider', 'in', ['google', 'microsoft'])
+    .executeTakeFirst()
+  if (!connection) throw notFound()
+  return refreshCalendarProvider(deps, principal, id, connection.provider as CalendarProvider)
+}
+
+async function refreshCalendarProvider(
+  deps: CalendarDeps,
+  principal: Principal,
+  id: string,
+  provider: CalendarProvider,
+) {
+  const session = requireCalendarSession(principal)
+  const { client, key } = configured(deps, provider)
   if (!z.uuid().safeParse(id).success) throw notFound()
   const outcome = await deps.db.transaction().execute(async (trx) => {
     await lockUser(trx, session, (deps.now ?? Date.now)())
@@ -430,7 +527,7 @@ export async function refreshGoogleCalendars(deps: CalendarDeps, principal: Prin
       .selectAll()
       .where('id', '=', id)
       .where('user_id', '=', session.user.id)
-      .where('provider', '=', 'google')
+      .where('provider', '=', provider)
       .executeTakeFirst()
     if (!connection) throw notFound()
     if (connection.status !== 'active') return 'needs_reauth'
@@ -440,17 +537,18 @@ export async function refreshGoogleCalendars(deps: CalendarDeps, principal: Prin
         session.user.id,
         connection.external_account_id,
         connection.credentials,
+        provider,
       )
       const signal = AbortSignal.timeout(15_000)
-      const tokens: GoogleTokens =
+      const tokens: CalendarTokens =
         previous.expiresAt > (deps.now ?? Date.now)() + 60_000
           ? previous
           : await client.refresh(previous.refreshToken, signal)
       const scopes = tokens.scopes ?? connection.scopes
-      requireScopes(scopes)
+      requireScopes(scopes, 'list', provider)
       const credentials = encryptCredential(
         key,
-        tokenAad(session.user.id, connection.external_account_id),
+        tokenAad(session.user.id, connection.external_account_id, provider),
         JSON.stringify({
           accessToken: tokens.accessToken,
           refreshToken: tokens.refreshToken ?? previous.refreshToken,
@@ -468,7 +566,7 @@ export async function refreshGoogleCalendars(deps: CalendarDeps, principal: Prin
       await saveCalendars(trx, id, calendars)
       return 'ok'
     } catch (error) {
-      if (!(error instanceof GoogleCalendarError)) throw error
+      if (!(error instanceof CalendarProviderError)) throw error
       if (error.code !== 'provider_unavailable')
         await trx
           .updateTable('calendar_connections')
@@ -481,9 +579,9 @@ export async function refreshGoogleCalendars(deps: CalendarDeps, principal: Prin
   if (outcome !== 'ok')
     throw new DomainError(
       'conflict',
-      `google_calendar_${outcome}`,
+      `${provider}_calendar_${outcome}`,
       outcome === 'provider_unavailable'
-        ? 'Google Calendar could not be reached. Try again shortly.'
-        : 'Reconnect Google Calendar to restore access.',
+        ? `${provider === 'google' ? 'Google' : 'Microsoft'} Calendar could not be reached. Try again shortly.`
+        : `Reconnect ${provider === 'google' ? 'Google' : 'Microsoft'} Calendar to restore access.`,
     )
 }

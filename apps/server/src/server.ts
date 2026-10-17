@@ -14,6 +14,7 @@ import {
   calendarDispatchJob,
   calendarSyncJob,
   createGoogleCalendarClient,
+  createMicrosoftCalendarClient,
 } from '@hourmere/calendars'
 import { createDb, createPool, type Db, runMigrations } from '@hourmere/db'
 import { createJobs } from '@hourmere/jobs'
@@ -159,7 +160,20 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
           encryptionKey: config.CALENDAR_ENCRYPTION_KEY,
         }
       : undefined
-  const calendarDeps: CalendarDeps = { db, google: googleCalendar }
+  const microsoftCalendar =
+    config.MICROSOFT_CALENDAR_CLIENT_ID &&
+    config.MICROSOFT_CALENDAR_CLIENT_SECRET &&
+    config.CALENDAR_ENCRYPTION_KEY
+      ? {
+          client: createMicrosoftCalendarClient({
+            clientId: config.MICROSOFT_CALENDAR_CLIENT_ID,
+            clientSecret: config.MICROSOFT_CALENDAR_CLIENT_SECRET,
+            publicUrl: config.PUBLIC_URL,
+          }),
+          encryptionKey: config.CALENDAR_ENCRYPTION_KEY,
+        }
+      : undefined
+  const calendarDeps: CalendarDeps = { db, google: googleCalendar, microsoft: microsoftCalendar }
   let enqueueCalendar: (calendarId: string) => Promise<unknown> = async () => {}
   // Background jobs: every role queues them, `all` and `worker` run them.
   const jobs = createJobs({
