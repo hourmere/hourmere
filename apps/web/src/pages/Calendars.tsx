@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { useSearchParams } from 'react-router'
+import { useLocation, useSearchParams } from 'react-router'
 import { api, type Schemas, unwrap } from '../api/client.ts'
 import { errorMessage } from '../api/errors.ts'
 import { goTo } from '../browser.ts'
 import { ConfirmAction } from '../components/ConfirmAction.tsx'
 import { useLoad, useMounted, usePageTitle } from '../hooks.ts'
+import { leavesPage } from '../unsaved-changes.tsx'
 
 type Connection = Schemas['CalendarConnection']
 const load = (signal: AbortSignal) => unwrap(api.GET('/api/v1/calendar-connections', { signal }))
@@ -30,19 +31,55 @@ export function CalendarsPage() {
   const [pending, setPending] = useState<string | null>(null)
   const mounted = useMounted()
   const accountsHeading = useRef<HTMLHeadingElement>(null)
+  const connectionRequest = useRef<AbortController | null>(null)
+  const location = useLocation()
+  const currentLocation = useRef(location)
+  currentLocation.current = location
+
+  useEffect(() => {
+    const cancel = () => connectionRequest.current?.abort()
+    const clicked = (event: MouseEvent) => {
+      const anchor = event.target instanceof Element ? event.target.closest('a[href]') : null
+      if (anchor instanceof HTMLAnchorElement && leavesPage(event, anchor, currentLocation.current))
+        cancel()
+    }
+    // A suspended lazy route can keep this page mounted after navigation starts. Cancel
+    // at the user's navigation intent, rather than waiting for React's eventual unmount.
+    document.addEventListener('click', clicked, true)
+    window.addEventListener('popstate', cancel)
+    window.addEventListener('beforeunload', cancel)
+    return () => {
+      cancel()
+      document.removeEventListener('click', clicked, true)
+      window.removeEventListener('popstate', cancel)
+      window.removeEventListener('beforeunload', cancel)
+    }
+  }, [])
 
   useEffect(() => {
     if (search.has('connection')) setSearch({}, { replace: true })
   }, [search, setSearch])
 
   async function connect() {
+    connectionRequest.current?.abort()
+    const request = new AbortController()
+    connectionRequest.current = request
+    const startedAt = window.location.pathname + window.location.search
     setPending('connect')
     setError(null)
     try {
       const { authorizationUrl } = await unwrap(
-        api.POST('/api/v1/calendar-connections/google/authorize', { body: {} }),
+        api.POST('/api/v1/calendar-connections/google/authorize', {
+          body: {},
+          signal: request.signal,
+        }),
       )
-      if (!mounted.current) return
+      if (
+        !mounted.current ||
+        request.signal.aborted ||
+        window.location.pathname + window.location.search !== startedAt
+      )
+        return
       const target = new URL(authorizationUrl)
       if (
         target.origin !== 'https://accounts.google.com' ||
@@ -51,7 +88,8 @@ export function CalendarsPage() {
         throw new Error('Invalid authorization endpoint')
       goTo(target.href)
     } catch (err) {
-      if (mounted.current) setError(`Could not connect Google Calendar. ${errorMessage(err)}`)
+      if (mounted.current && !request.signal.aborted)
+        setError(`Could not connect Google Calendar. ${errorMessage(err)}`)
     } finally {
       if (mounted.current) setPending(null)
     }
