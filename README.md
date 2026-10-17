@@ -99,7 +99,8 @@ new accounts. A new
 address that may not sign up gets no sign-in email, and the request is answered the same way
 as for any other address. Every request queues an encrypted, short-lived email job before eligibility is checked by
 a worker; the request does not wait for SMTP or check whether the address has an account.
-Workers retry temporary failures until the link expires. In web-only mode, a separate worker
+Workers make at most four delivery attempts and discard expired links. Request a new link
+if delivery fails. In web-only mode, a separate worker
 is required for sign-in emails as well as booking notifications. Failures appear in the log
 without the recipient or link.
 
