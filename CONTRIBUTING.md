@@ -76,13 +76,17 @@ separate job with its own PostgreSQL service and the runner's installed Chrome.
 
 Traces, videos, screenshots and automatic failure DOM snapshots are disabled to keep
 one-time management capabilities out of artifacts. Playwright's pinned
-`PLAYWRIGHT_NO_COPY_PROMPT` switch disables its failure DOM capture; recheck that behavior
-when upgrading the dependency. `npm run test:e2e:privacy` verifies the failure path using
-a non-secret DOM marker and a removed-guard control; CI runs it after the browser suite.
-Its intentional failures are checked internally and all probe files are deleted. Per-test
-artifacts under ignored `temp/` are not retained; runner status metadata can remain. No
-browser artifacts are uploaded by CI. Do not enable debugging artifacts or log request
-headers, management fragments or response bodies containing capabilities.
+`PLAYWRIGHT_NO_COPY_PROMPT` switch disables fallback DOM capture. Always import `test` and
+`expect` from the project fixture: its automatic teardown also removes matcher-generated
+DOM diagnostics before context artifacts are finalized, keeping the failure/message/stack.
+Recheck both protections when upgrading the dependency. `npm run test:e2e:privacy` uses a
+non-secret DOM marker and a removed-guard control to verify actual locator assertion
+failures. CI runs it after the browser suite; intentional failures are checked internally
+and all probe files are deleted. Per-test artifacts under ignored `temp/` are not retained;
+runner status metadata can remain. No browser artifacts are uploaded by CI. Do not enable
+debugging artifacts or log request headers, management fragments or response bodies
+containing capabilities. Assert capability handling as booleans rather than comparing or
+printing the actual token strings.
 
 ## Conventions
 

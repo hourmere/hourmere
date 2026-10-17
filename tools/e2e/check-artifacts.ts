@@ -36,17 +36,17 @@ export default {...config,testDir:'.',testMatch:'guard.spec.ts',projects:[{name:
   )
   await writeFile(
     join(directory, 'guard.spec.ts'),
-    `import {test,expect} from '@playwright/test'
+    `import {test,expect} from ${JSON.stringify(join(root, 'tools/e2e/fixtures.ts'))}
 test('intentional non-secret failure artifact probe',async({page})=>{
   await page.route('**/*',route=>route.abort('blockedbyclient'))
   const marker=['DOM','PRIVACY','CANARY','NONSECRET'].join('_')
   await page.setContent(\`<label>Private link<input readonly value="\${marker}"></label><p>\${marker}</p>\`)
-  expect(0).toBe(1)
+  await expect(page.getByRole('heading',{name:'Absent non-secret heading'})).toBeVisible({timeout:500})
 })
 `,
   )
   for (const control of [false, true]) {
-    const reportPath = join(directory, 'report.json')
+    const reportPath = join(directory, control ? 'control-report.json' : 'guarded-report.json')
     const env: NodeJS.ProcessEnv = { ...process.env, PLAYWRIGHT_JSON_OUTPUT_FILE: reportPath }
     if (control) env.HOURMERE_ARTIFACT_GUARD_CONTROL = '1'
     else delete env.HOURMERE_ARTIFACT_GUARD_CONTROL
@@ -59,9 +59,13 @@ test('intentional non-secret failure artifact probe',async({page})=>{
       child.once('error', reject)
       child.once('close', resolve)
     })
-    const report = JSON.parse(await readFile(reportPath, 'utf8')) as ProbeReport
+    const reportText = await readFile(reportPath, 'utf8')
+    const marker = ['DOM', 'PRIVACY', 'CANARY', 'NONSECRET'].join('_')
+    if (!control && reportText.includes(marker))
+      throw new Error('Guarded locator failure leaked DOM into its JSON report')
+    const report = JSON.parse(reportText) as ProbeReport
     const expectedFailure = messages(report).some(
-      (message) => message.includes('toBe') && message.includes('Expected:'),
+      (message) => message.includes('toBeVisible') && message.includes('Expected:'),
     )
     if (
       exit !== 1 ||
@@ -77,7 +81,7 @@ test('intentional non-secret failure artifact probe',async({page})=>{
     for (const path of await readdir(output, { recursive: true })) {
       if (!path.endsWith('.md')) continue
       const text = await readFile(join(output, path), 'utf8')
-      captured ||= text.includes(['DOM', 'PRIVACY', 'CANARY', 'NONSECRET'].join('_'))
+      captured ||= text.includes(marker)
     }
     if (captured !== control)
       throw new Error('Failure DOM capture does not match the guarded/control expectation')

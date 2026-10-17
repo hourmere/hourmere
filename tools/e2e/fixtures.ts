@@ -33,7 +33,21 @@ interface FixtureApp {
   teamPath: string
   rows: () => Promise<{ source: string; status: string }[]>
 }
-export const test = base.extend<{ app: FixtureApp }>({
+export const test = base.extend<{ app: FixtureApp; suppressFailureDom: undefined }>({
+  suppressFailureDom: [
+    async ({ context }, use, testInfo) => {
+      // Depending on context runs this teardown before its artifact finalization.
+      void context
+      try {
+        await use(undefined)
+      } finally {
+        // Pinned Playwright attaches locator snapshots before its fallback-capture switch.
+        // Keep the assertion, message and stack; discard only its private DOM diagnostic.
+        for (const error of testInfo.errors) Reflect.deleteProperty(error, 'errorContext')
+      }
+    },
+    { auto: true },
+  ],
   app: async ({ context }, use) => {
     const bootstrap = process.env.HOURMERE_E2E_BOOTSTRAP_URL
     if (!bootstrap)

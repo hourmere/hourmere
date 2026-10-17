@@ -1,6 +1,6 @@
 import { defineConfig } from '@playwright/test'
 
-// Pinned Playwright exposes this switch to suppress automatic failure DOM snapshots.
+// Together with fixture teardown, suppress fallback and matcher failure DOM snapshots.
 // Booking confirmations can contain a one-time private management link.
 process.env.PLAYWRIGHT_NO_COPY_PROMPT = '1'
 
