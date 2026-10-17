@@ -66,7 +66,10 @@ the background jobs (booking emails); to run them in a container of their own, s
 `HOURMERE_ROLE=web` and enable the `worker` service in `docker-compose.yml` (same image,
 `HOURMERE_ROLE=worker`). Give containers at least 35 seconds to stop, so running jobs can finish. Put a reverse proxy with TLS in front of it, and set `TRUSTED_PROXIES` to the proxy's address as the app sees it (for a proxy on the host or on the compose network that is the Docker network, e.g. `172.16.0.0/12`), so rate limits apply per visitor rather than to everyone behind the proxy.
 
-Responses carry security headers: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
+Website widgets support inline and popup booking; see [embedding](docs/embedding.md) for the
+explicit parent-origin allow list, integration snippets and privacy contract.
+
+Responses carry security headers: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY` (except explicitly approved dedicated embed pages),
 a `Referrer-Policy`, and on pages a Content-Security-Policy that lets only Hourmere's own
 scripts, styles and requests run. When `PUBLIC_URL` is https, browsers are also told to use
 only https for that host, for a year (`HSTS_MAX_AGE`). Clients that send too slowly are

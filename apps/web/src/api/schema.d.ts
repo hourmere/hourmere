@@ -3635,6 +3635,11 @@ export interface components {
             };
             responses?: components["schemas"]["Responses"];
             /**
+             * @description Optional untrusted attribution hint for an embedded public booking; never grants privileges
+             * @enum {string}
+             */
+            source?: "embed";
+            /**
              * Format: date-time
              * @description The start of an offered slot
              * @example 2026-11-02T09:00:00.000Z

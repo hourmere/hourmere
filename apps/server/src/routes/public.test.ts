@@ -221,6 +221,35 @@ describe.skipIf(!serverUrl)('public routes', () => {
     expect(await res.json()).toMatchObject({ error })
   })
 
+  it('records only a public embed attribution hint and keeps anonymous retry scope and permissions', async () => {
+    const host = await f.host({ handle: 'embed-source' })
+    await f.schedule(host.userId)
+    await f.eventType(host.organizationId, host.userId, { slug: 'intro' })
+    const body = {
+      start: '2026-11-02T08:00:00Z',
+      invitee: { name: 'Invitee', email: 'invitee@example.com', timeZone: 'UTC' },
+      source: 'embed',
+    }
+    const endpoint = '/api/v1/public/embed-source/intro/bookings',
+      headers = { 'Idempotency-Key': 'embed-retry-same-visitor' }
+    const created = await post(endpoint, body, headers)
+    expect(created.status).toBe(201)
+    const result = (await created.json()) as BookingBody
+    expect(result.booking).toMatchObject({ source: 'embed' })
+    const row = await db
+      .selectFrom('bookings')
+      .select(['source', 'api_key_id'])
+      .where('id', '=', result.booking.id)
+      .executeTakeFirstOrThrow()
+    expect(row).toEqual({ source: 'embed', api_key_id: null })
+    const replay = await post(endpoint, { ...body, source: undefined }, headers)
+    expect(replay.status).toBe(200)
+    expect(((await replay.json()) as BookingBody).booking.id).toBe(result.booking.id)
+    for (const source of ['api', 'mcp', 'constructor', 'web'])
+      expect((await post(endpoint, { ...body, source })).status).toBe(400)
+    expect((await post(endpoint, { ...body, apiKeyId: host.userId })).status).toBe(400)
+  })
+
   it('books a slot and returns the manage token', async () => {
     const res = await book('2026-11-02T08:00:00Z')
     expect(res.status).toBe(201)

@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
-import { Navigate, useParams } from 'react-router'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Navigate, useLocation, useParams } from 'react-router'
 import { usePageTitle } from '../hooks.ts'
 import { AddToCalendar, ManageLink } from './AddToCalendar.tsx'
 import {
@@ -23,6 +23,7 @@ import {
   When,
 } from './BookingDetails.tsx'
 import { BookingForm, type BookingFormValues } from './BookingForm.tsx'
+import { notifyEmbedBooked, useEmbedded } from './embed-context.ts'
 import { now as currentTime, detectTimeZone, preferredLocale } from './env.ts'
 import { FocusHeading, PublicLayout, PublicNotFound, PublicStatus } from './PublicLayout.tsx'
 import { normalizedHandle, normalizedSlug, teamSlug, useRequest } from './paths.ts'
@@ -37,13 +38,20 @@ export function TeamBookingPage() {
 
 export function BookingPage({ team = false }: { team?: boolean } = {}) {
   const params = useParams()
+  const location = useLocation()
+  const embedded = useEmbedded()
   const rawHandle = (team ? params.teamSlug : params.handle) ?? ''
   const rawSlug = params.slug ?? ''
   const handle = team ? teamSlug(rawHandle) : normalizedHandle(rawHandle)
   const slug = normalizedSlug(rawSlug)
   if (handle === undefined || slug === undefined) return <PublicNotFound what="event" />
   if (handle !== rawHandle || slug !== rawSlug)
-    return <Navigate to={`${team ? '/team' : ''}/${handle}/${slug}`} replace />
+    return (
+      <Navigate
+        to={`${embedded ? '/embed' : ''}${team ? '/team' : ''}/${handle}/${slug}${embedded ? location.search : ''}`}
+        replace
+      />
+    )
   return (
     <BookingPageContent key={`${team}/${handle}/${slug}`} handle={handle} slug={slug} team={team} />
   )
@@ -109,6 +117,7 @@ function BookingFlow({
   slug: string
   team: boolean
 }) {
+  const embedded = useEmbedded()
   const locale = useMemo(preferredLocale, [])
   const [timeZone, setTimeZone] = useState(detectTimeZone)
   const [now, setNow] = useState(currentTime)
@@ -147,6 +156,7 @@ function BookingFlow({
     const inviteeLocale = bookingLocale(locale)
     const guests = values.guests.map((g) => ({ name: g.name.trim(), email: g.email.trim() }))
     const body: CreateBooking = {
+      ...(embedded && { source: 'embed' as const }),
       start: slot.start,
       invitee: {
         name: values.name.trim(),
@@ -291,6 +301,14 @@ function Confirmation({
   locale: string
 }) {
   usePageTitle('Booking confirmed')
+  const embedded = useEmbedded()
+  const notified = useRef(false)
+  useEffect(() => {
+    if (embedded && !notified.current) {
+      notified.current = true
+      notifyEmbedBooked()
+    }
+  }, [embedded])
   const { booking, manageToken, replayed, timeZone } = confirmed
   const invitee = booking.attendees.find((a) => a.isBooker)
   const guests = booking.attendees.filter((a) => !a.isBooker)

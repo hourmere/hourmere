@@ -1,5 +1,6 @@
 import { EMAIL_DOMAIN, SIGNUP_MODES, type SignupPolicy } from '@hourmere/auth'
 import { calendarEncryptionKey } from '@hourmere/calendars'
+import { embedOrigin } from '@hourmere/core/embed'
 import { z } from 'zod'
 import { isTrustedProxyEntry } from './client-ip.ts'
 import { DEFAULT_HTTP_TIMEOUTS, type HttpTimeouts } from './http-timeouts.ts'
@@ -37,6 +38,22 @@ const schema = z
         message:
           'DATABASE_URL is not a valid URL (percent-encode special characters in the password, or leave the password out and set PGPASSWORD)',
       }),
+    EMBED_ALLOWED_ORIGINS: optional(
+      z
+        .string()
+        .max(16384)
+        .transform((s) =>
+          s
+            .split(',')
+            .map((v) => v.trim())
+            .filter(Boolean),
+        )
+        .refine((list) => list.length <= 32 && list.every((v) => embedOrigin(v) !== undefined), {
+          error:
+            'EMBED_ALLOWED_ORIGINS must contain at most 32 exact HTTPS origins (loopback HTTP is allowed); no wildcards or paths',
+        })
+        .transform((list) => [...new Set(list.map((v) => embedOrigin(v) as string))]),
+    ).transform((v) => v ?? []),
     MCP_OAUTH_ENABLED: optional(z.enum(['true', 'false'])).transform((v) => v === 'true'),
     PORT: z.coerce.number().int().positive().default(3000),
     // Where people reach Hourmere: sign-in links, OAuth redirects and cookies are built from it.
@@ -163,6 +180,12 @@ const schema = z
     ).transform((v) => v ?? 'all'),
   })
   .superRefine((c, ctx) => {
+    if (c.EMBED_ALLOWED_ORIGINS.length && c.PUBLIC_URL && !embedOrigin(c.PUBLIC_URL))
+      ctx.addIssue({
+        code: 'custom',
+        path: ['PUBLIC_URL'],
+        message: 'Embedding requires an HTTPS PUBLIC_URL except on loopback development hosts',
+      })
     if (c.MCP_OAUTH_ENABLED && c.PUBLIC_URL) {
       const url = new URL(c.PUBLIC_URL)
       if (url.protocol !== 'https:' && !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname))

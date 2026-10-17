@@ -26,6 +26,7 @@ vi.mock('./env.ts', async (importOriginal) => ({
 }))
 
 beforeEach(() => {
+  window.history.replaceState(null, '', '/')
   env.zone = 'America/New_York'
   env.locale = 'en-US'
   env.now = Date.parse('2026-11-01T04:30:00Z')
@@ -55,6 +56,69 @@ async function chooseSlot(user: ReturnType<typeof userEvent.setup>, dayName: Reg
 }
 
 describe('the booking page', () => {
+  it.each([false, true])(
+    'books inside an embedded personal/team page without a session and sends no private data to its parent (team=%s)',
+    async (team) => {
+      const user = userEvent.setup(),
+        postMessage = vi.fn(),
+        q = '?parentOrigin=https%3A%2F%2Fparent.example&embedId=abcdefghijklmnop1234'
+      vi.spyOn(window, 'parent', 'get').mockReturnValue({ postMessage } as unknown as Window)
+      window.history.replaceState(null, '', `/embed${team ? '/team/Alpha' : '/ada'}/intro${q}`)
+      const prefix = team ? '/api/v1/public/teams/Alpha/intro' : '/api/v1/public/ada/intro'
+      const api = fakeApi({
+        [`GET ${prefix}`]: () =>
+          json(200, {
+            ...EVENT,
+            allowGuests: false,
+            ...(team ? { handle: 'Alpha', team: { name: 'Alpha Team', slug: 'Alpha' } } : {}),
+          }),
+        [`GET ${prefix}/slots`]: slotsAnswer(DST_SLOTS),
+        [`POST ${prefix}/bookings`]: () => json(201, { booking: booking(), manageToken: TOKEN }),
+      })
+      renderApp(`/embed${team ? '/team/Alpha' : '/ada'}/intro${q}`)
+      await chooseSlot(user, /November 2, available/, '9:00 AM')
+      await user.type(screen.getByLabelText('Your name'), 'Invitee')
+      await user.type(screen.getByLabelText('Email'), 'invitee@example.com')
+      await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+      await screen.findByRole('heading', { name: 'You’re booked' })
+      expect(api.to(`POST ${prefix}/bookings`)[0]?.body).toHaveProperty('source', 'embed')
+      const messages = postMessage.mock.calls.filter(([data]) => data.type === 'hourmere:booked')
+      expect(messages).toEqual([
+        [{ type: 'hourmere:booked', id: 'abcdefghijklmnop1234' }, 'https://parent.example'],
+      ])
+      expect(JSON.stringify(postMessage.mock.calls).includes(TOKEN)).toBe(false)
+      expect(JSON.stringify(postMessage.mock.calls).includes('invitee@example.com')).toBe(false)
+      expect(
+        screen
+          .getByLabelText<HTMLInputElement>('Your link to change or cancel this booking')
+          .value.endsWith(TOKEN),
+      ).toBe(true)
+      expect(
+        screen.getByRole('link', { name: /Powered by Hourmere/ }).getAttribute('rel'),
+      ).toContain('noreferrer')
+      const consumed = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true })
+      consumed.preventDefault()
+      window.dispatchEvent(consumed)
+      expect(
+        postMessage.mock.calls.filter(([data]) => data.type === 'hourmere:close'),
+      ).toHaveLength(0)
+      fireEvent.keyDown(window, { key: 'Escape' })
+      expect(postMessage.mock.calls.filter(([data]) => data.type === 'hourmere:close')).toEqual([
+        [{ type: 'hourmere:close', id: 'abcdefghijklmnop1234' }, 'https://parent.example'],
+      ])
+      expect(api.to('GET /api/v1/me')).toHaveLength(0)
+    },
+  )
+  it('normalizes embedded routes without losing the iframe boundary or correlation query', async () => {
+    fakeApi(eventRoutes(EVENT, DST_SLOTS))
+    renderApp(
+      '/embed/ADA/INTRO?parentOrigin=https%3A%2F%2Fparent.example&embedId=abcdefghijklmnop1234',
+    )
+    await screen.findByRole('heading', { name: 'Intro call', level: 1 })
+    expect(screen.getByTestId('location').textContent).toBe(
+      '/embed/ada/intro?parentOrigin=https%3A%2F%2Fparent.example&embedId=abcdefghijklmnop1234',
+    )
+  })
   it('hides guest collection when the host has not opted in and books only the invitee', async () => {
     const user = userEvent.setup()
     const api = fakeApi({

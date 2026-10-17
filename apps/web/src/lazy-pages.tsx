@@ -88,6 +88,14 @@ export const ManageBookingPage = page(
   (m) => m.ManageBookingPage,
 )
 
+export const EmbeddedBookingPage = page(
+  () => import('./public/Embed.tsx'),
+  (m) => m.EmbeddedBookingPage,
+)
+export const EmbeddedTeamBookingPage = page(
+  () => import('./public/Embed.tsx'),
+  (m) => m.EmbeddedTeamBookingPage,
+)
 export const McpAuthorizePage = page(
   () => import('./pages/McpOAuth.tsx'),
   (m) => m.McpAuthorizePage,

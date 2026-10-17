@@ -7,6 +7,36 @@ const base = {
 }
 
 describe('loadConfig', () => {
+  it('defaults embedding off and accepts only bounded exact secure origins', () => {
+    expect(loadConfig(base).EMBED_ALLOWED_ORIGINS).toEqual([])
+    expect(
+      loadConfig({
+        ...base,
+        EMBED_ALLOWED_ORIGINS:
+          'https://www.example.com, https://www.example.com/,http://localhost:5001',
+      }).EMBED_ALLOWED_ORIGINS,
+    ).toEqual(['https://www.example.com', 'http://localhost:5001'])
+    for (const EMBED_ALLOWED_ORIGINS of [
+      '*',
+      'null',
+      'https://*.example.com',
+      'https://%2a',
+      'https://%2A.example.invalid',
+      'https://＊.example.invalid',
+      'http://example.com',
+      'https://example.com/path',
+      'https://user:secret@example.com',
+      Array.from({ length: 33 }, (_, i) => `https://a${i}.example.com`).join(','),
+    ])
+      expect(() => loadConfig({ ...base, EMBED_ALLOWED_ORIGINS })).toThrow(/EMBED_ALLOWED_ORIGINS/)
+    expect(() =>
+      loadConfig({
+        ...base,
+        PUBLIC_URL: 'http://192.168.1.1',
+        EMBED_ALLOWED_ORIGINS: 'https://example.com',
+      }),
+    ).toThrow(/Embedding requires/)
+  })
   it('keeps MCP OAuth opt-in and requires a secure canonical origin when enabled', () => {
     expect(loadConfig(base).MCP_OAUTH_ENABLED).toBe(false)
     expect(loadConfig({ ...base, MCP_OAUTH_ENABLED: '' }).MCP_OAUTH_ENABLED).toBe(false)

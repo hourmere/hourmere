@@ -83,6 +83,10 @@ export const CreateBooking = z
         'Up to ten additional email recipients, only when the event type has allowGuests enabled; otherwise guests_not_allowed',
     }),
     responses: Responses.optional(),
+    source: z.literal('embed').optional().openapi({
+      description:
+        'Optional untrusted attribution hint for an embedded public booking; never grants privileges',
+    }),
   })
   .openapi('CreateBooking')
 
@@ -280,14 +284,18 @@ export function publicRoutes({
         }),
         async (c) => {
           const body = c.req.valid('json')
-          const { replayed, ...result } = await target.book(ctx, {
-            ...c.req.valid('param'),
-            start: Temporal.Instant.from(body.start),
-            invitee: body.invitee,
-            guests: body.guests,
-            responses: body.responses,
-            idempotencyKey: c.req.valid('header')['idempotency-key'],
-          })
+          const { replayed, ...result } = await target.book(
+            ctx,
+            {
+              ...c.req.valid('param'),
+              start: Temporal.Instant.from(body.start),
+              invitee: body.invitee,
+              guests: body.guests,
+              responses: body.responses,
+              idempotencyKey: c.req.valid('header')['idempotency-key'],
+            },
+            { source: body.source ?? 'web', apiKeyId: null },
+          )
           return replayed ? c.json(result, 200) : c.json(result, 201)
         },
       )

@@ -168,6 +168,14 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
     ...more,
   })
 
+  it('keeps the anonymous embed hint out of MCP booking arguments', async () => {
+    expect(
+      errorOf(
+        await call('create_booking', bookingArgs('2026-11-02T06:00:00Z', { source: 'embed' })),
+      ).error,
+    ).toBe('invalid_request')
+  })
+
   async function hostedBooking() {
     const host = await f.host()
     await f.schedule(host.userId)

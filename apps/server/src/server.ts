@@ -253,6 +253,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
       authHandler: auth.handler,
       resolveCaller: createCallerResolver({ auth, db }),
       publicUrl: config.PUBLIC_URL,
+      embedOrigins: config.EMBED_ALLOWED_ORIGINS,
       hstsMaxAge: config.HSTS_MAX_AGE,
       trustedProxies: config.trustedProxies,
       webDist: config.WEB_DIST,

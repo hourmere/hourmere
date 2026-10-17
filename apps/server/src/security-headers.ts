@@ -1,6 +1,8 @@
 // Response headers that tell browsers how to treat what the server sends: on every response,
 // and a Content-Security-Policy and opener isolation on HTML pages.
+
 import { isIP } from 'node:net'
+import { embedParent } from '@hourmere/core/embed'
 import type { MiddlewareHandler } from 'hono'
 import { createMiddleware } from 'hono/factory'
 
@@ -12,10 +14,8 @@ import { createMiddleware } from 'hono/factory'
  * does not restrict. Sign-in with Google or Microsoft leaves the page by navigation, which
  * no directive here limits.
  *
- * frame-ancestors 'none' (and X-Frame-Options: DENY below) keep every page out of frames.
- * When public booking pages become embeddable, decide framing per route in securityHeaders:
- * those pages get frame-ancestors with the allowed origins and no X-Frame-Options (which
- * cannot express an allow list); everything else keeps 'none' and DENY.
+ * Normal pages keep frame-ancestors 'none' and X-Frame-Options DENY. Only dedicated
+ * public embed routes with a configured exact parent get a route-specific ancestor policy.
  */
 export const APP_CSP = [
   "default-src 'self'",
@@ -63,6 +63,7 @@ const HTML = /^text\/html/i
 export interface SecurityHeadersOptions {
   /** The Strict-Transport-Security value (see strictTransportSecurity); none if undefined. */
   hsts?: string | undefined
+  embedOrigins?: readonly string[] | undefined
 }
 
 /**
@@ -74,7 +75,10 @@ export interface SecurityHeadersOptions {
  * Cross-Origin-Opener-Policy same-origin, likewise unless they have their own (the confirm
  * page's stricter CSP). An empty value counts as none.
  */
-export function securityHeaders({ hsts }: SecurityHeadersOptions = {}): MiddlewareHandler {
+export function securityHeaders({
+  hsts,
+  embedOrigins = [],
+}: SecurityHeadersOptions = {}): MiddlewareHandler {
   return createMiddleware(async (c, next) => {
     await next()
     let headers = c.res.headers
@@ -92,7 +96,15 @@ export function securityHeaders({ hsts }: SecurityHeadersOptions = {}): Middlewa
     if (hsts) headers.set('Strict-Transport-Security', hsts)
     setDefault('X-Frame-Options', 'DENY')
     if (HTML.test(headers.get('content-type') ?? '')) {
-      setDefault('Content-Security-Policy', APP_CSP)
+      const parent = embedParent(new URL(c.req.url), embedOrigins)
+      if (parent) {
+        headers.delete('X-Frame-Options')
+        headers.set(
+          'Content-Security-Policy',
+          APP_CSP.replace("frame-ancestors 'none'", `frame-ancestors ${parent}`),
+        )
+        headers.set('Referrer-Policy', 'no-referrer')
+      } else setDefault('Content-Security-Policy', APP_CSP)
       setDefault('Cross-Origin-Opener-Policy', 'same-origin')
       if (NO_REFERRER_PAGES.test(c.req.path)) setDefault('Referrer-Policy', 'no-referrer')
     }

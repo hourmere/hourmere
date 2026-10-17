@@ -104,7 +104,7 @@ const FindSlotsOutput = z.object({
 const CreateBookingInput = z.strictObject({
   handle,
   slug,
-  ...CreateBooking.shape,
+  ...CreateBooking.omit({ source: true }).shape,
   start: CreateBooking.shape.start.openapi({
     description: 'The exact `start` of a slot from find_available_slots, unchanged',
   }),
