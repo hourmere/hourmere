@@ -1,5 +1,5 @@
 import { Console } from 'node:console'
-import { randomBytes } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { once } from 'node:events'
 import { Server as HttpServer } from 'node:http'
 import { connect, createServer, type Socket } from 'node:net'
@@ -142,21 +142,112 @@ describe.skipIf(!serverUrl)('startServer', () => {
         expect(await res.json()).toEqual({ status: true })
         await sending
       } finally {
-        // Does not wait for the email, and says so.
-        await server.close()
-        expect(vi.mocked(console.warn)).toHaveBeenLastCalledWith(
-          'shutting down: dropping 1 email(s) still being sent',
-        )
+        // The request already completed while SMTP was blocked. Shutdown now waits for
+        // this durable worker attempt; release only this test's SMTP sockets to finish it.
+        const closing = server.close()
+        for (const socket of sockets) socket.destroy()
+        await new Promise((resolve) => smtp.close(resolve))
+        await closing
       }
-      // The SMTP server goes away; the failure is logged, without the address.
-      for (const socket of sockets) socket.destroy()
-      await new Promise((resolve) => smtp.close(resolve))
-      await vi.waitFor(() => expect(vi.mocked(console.error)).toHaveBeenCalled())
+      // The failed delivery remains available for a worker retry, without a raw link log.
+      const pending = await testDb.pool.query<{ id: string }>('SELECT id FROM sign_in_emails')
+      expect(pending.rows).toHaveLength(1)
+      for (const row of pending.rows) {
+        await testDb.pool.query(
+          "DELETE FROM pgboss.job WHERE name = $1 AND data->>'emailId' = $2",
+          ['sign-in-email', row.id],
+        )
+        await testDb.pool.query('DELETE FROM sign_in_emails WHERE id = $1', [row.id])
+      }
     })
-    expect(printed.error).toEqual([
-      '[auth] sign-in email not sent (code=ECONNECTION, command=CONN)',
-    ])
-    expect(printed.warn.filter((l) => l.includes('dropping'))).toHaveLength(1)
+    expect(
+      printed.error.some((line) => line.includes('Sign-in email could not be sent (ECONNECTION)')),
+    ).toBe(true)
+    expect(printed.error.join(' ')).not.toContain('ada@example.com')
+    expect(printed.error.join(' ')).not.toContain('token=')
+    expect(printed.warn.filter((l) => l.includes('dropping'))).toHaveLength(0)
+  })
+
+  it('queues both addresses in web role, persists through shutdown, and delivers only eligible mail in worker role', async () => {
+    const email = `queue-${randomUUID()}@example.com`
+    const denied = `denied-${randomUUID()}@example.com`
+    const user = (
+      await testDb.pool.query<{ id: string }>(
+        `INSERT INTO auth."user" (name, email, "emailVerified") VALUES ('Queue owner', $1, true) RETURNING id`,
+        [email],
+      )
+    ).rows[0]
+    const printed = await quietly(async () => {
+      let web: RunningServer | undefined
+      let worker: RunningServer | undefined
+      let ids: string[] = []
+      const port = await freePort()
+      const publicUrl = `http://localhost:${port}`
+      const config = {
+        DATABASE_URL: testDb.url,
+        PORT: String(port),
+        PUBLIC_URL: publicUrl,
+        BETTER_AUTH_SECRET: randomBytes(32).toString('base64'),
+        SIGNUP: 'closed',
+      }
+      try {
+        web = await startServer({ ...config, HOURMERE_ROLE: 'web' })
+        const answers = []
+        for (const to of [email, denied]) {
+          const response = await fetch(`http://127.0.0.1:${web.port}/api/auth/sign-in/magic-link`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', origin: publicUrl },
+            body: JSON.stringify({ email: to, callbackURL: '/app' }),
+          })
+          answers.push({ status: response.status, body: await response.json() })
+        }
+        expect(answers).toEqual(Array(2).fill({ status: 200, body: { status: true } }))
+        ids = (await testDb.pool.query<{ id: string }>('SELECT id FROM sign_in_emails')).rows.map(
+          (row) => row.id,
+        )
+        expect(ids).toHaveLength(2)
+        const webClosing = web
+        web = undefined
+        await webClosing.close()
+        expect((await testDb.pool.query('SELECT id FROM sign_in_emails')).rows).toHaveLength(2)
+        // Read the spy after the server restores the console it temporarily wraps.
+        expect(
+          vi.mocked(console.log).mock.calls.some((args) => args.join(' ').startsWith('[mail]')),
+        ).toBe(false)
+        worker = await startServer({
+          ...config,
+          PORT: String(await freePort()),
+          HOURMERE_ROLE: 'worker',
+        })
+        await vi.waitFor(
+          async () =>
+            expect((await testDb.pool.query('SELECT id FROM sign_in_emails')).rows).toHaveLength(0),
+          { timeout: 6_000 },
+        )
+        const workerClosing = worker
+        worker = undefined
+        await workerClosing.close()
+        const messages = vi
+          .mocked(console.log)
+          .mock.calls.map((args) => args.join(' '))
+          .filter((line) => line.startsWith('[mail]'))
+        expect(messages).toHaveLength(1)
+        expect(messages[0]).toContain(email)
+        expect(messages[0]).not.toContain(denied)
+      } finally {
+        await worker?.close()
+        await web?.close()
+        if (ids.length) {
+          await testDb.pool.query(
+            "DELETE FROM pgboss.job WHERE name = $1 AND data->>'emailId' = ANY($2::text[])",
+            ['sign-in-email', ids],
+          )
+          await testDb.pool.query('DELETE FROM sign_in_emails WHERE id = ANY($1::uuid[])', [ids])
+        }
+        if (user) await testDb.pool.query('DELETE FROM auth."user" WHERE id = $1', [user.id])
+      }
+    })
+    expect(printed.error).toEqual([])
   })
 
   it('cuts off clients that send too slowly, after the configured timeouts', async () => {

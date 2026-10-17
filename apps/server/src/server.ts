@@ -19,7 +19,12 @@ import {
 import { createDb, createPool, type Db, runMigrations } from '@hourmere/db'
 import { createJobs } from '@hourmere/jobs'
 import { createLogMailer, createSmtpMailer, type Mailer } from '@hourmere/mail'
-import { bookingNotificationJob, bookingNotifier } from '@hourmere/notifications'
+import {
+  bookingNotificationJob,
+  bookingNotifier,
+  queuedSignInEmail,
+  signInEmailJobs,
+} from '@hourmere/notifications'
 import type { BookingNotifier } from '@hourmere/scheduling'
 import { sql } from 'kysely'
 import { createApp } from './app.ts'
@@ -180,6 +185,13 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
   const jobs = createJobs({
     connectionString: config.DATABASE_URL,
     definitions: [
+      ...signInEmailJobs({
+        db,
+        mailer,
+        publicUrl: config.PUBLIC_URL,
+        secret: config.BETTER_AUTH_SECRET,
+        signup: config.signup,
+      }),
       bookingNotificationJob({ db, mailer, publicUrl: config.PUBLIC_URL }),
       calendarSyncJob(calendarDeps),
       bookingCalendarJob(calendarDeps),
@@ -219,6 +231,11 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
       baseURL: config.PUBLIC_URL,
       secret: config.BETTER_AUTH_SECRET,
       mailer: countingMailer,
+      queueSignInEmail: queuedSignInEmail(jobs, {
+        db,
+        secret: config.BETTER_AUTH_SECRET,
+        publicUrl: config.PUBLIC_URL,
+      }),
       signup: config.signup,
       socialProviders: config.socialProviders,
     })
