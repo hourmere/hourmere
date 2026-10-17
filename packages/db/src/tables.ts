@@ -256,6 +256,7 @@ export interface EventTypes {
   duration_minutes: number;
   id: Generated<string>;
   is_active: Generated<boolean>;
+  is_hidden: Generated<boolean>;
   location: Json | null;
   max_bookings_per_day: number | null;
   minimum_notice_minutes: Generated<number>;

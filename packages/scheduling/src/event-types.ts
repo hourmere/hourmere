@@ -62,6 +62,8 @@ export interface EventType {
   location: EventTypeLocation | null
   questions: Question[]
   isActive: boolean
+  /** Hidden from public listings; the direct link remains bookable. */
+  isHidden: boolean
   position: number
   /** The host's schedule; null = the host's default schedule. */
   scheduleId: string | null
@@ -83,6 +85,7 @@ export interface EventTypeInput {
   location?: EventTypeLocation | null | undefined
   questions?: QuestionInput[] | undefined
   isActive?: boolean | undefined
+  isHidden?: boolean | undefined
   position?: number | undefined
   /** One of the host's schedules; null or omitted = the host's default schedule. */
   scheduleId?: string | null | undefined
@@ -126,6 +129,8 @@ interface Fields {
   location: EventTypeLocation | null
   questions: Question[]
   isActive: boolean
+  /** Hidden from public listings; the direct link remains bookable. */
+  isHidden: boolean
   position: number
 }
 
@@ -143,6 +148,7 @@ const FIELD_NAMES = [
   'location',
   'questions',
   'isActive',
+  'isHidden',
   'position',
 ] as const satisfies readonly (keyof Fields)[]
 
@@ -157,6 +163,7 @@ const DEFAULTS = {
   location: null,
   questions: [],
   isActive: true,
+  isHidden: false,
   position: 0,
 } as const satisfies Partial<Fields>
 
@@ -199,6 +206,7 @@ export type EventTypeSummary = Pick<
   | 'durationMinutes'
   | 'schedulingType'
   | 'isActive'
+  | 'isHidden'
   | 'position'
 >
 
@@ -219,6 +227,7 @@ export async function listEventTypeCatalog(
       'duration_minutes',
       'scheduling_type',
       'is_active',
+      'is_hidden',
       'position',
     ])
     .where('organization_id', '=', ctx.principal.organization.id)
@@ -241,6 +250,7 @@ export async function listEventTypeCatalog(
       durationMinutes: r.duration_minutes,
       schedulingType: r.scheduling_type as SchedulingType,
       isActive: r.is_active,
+      isHidden: r.is_hidden,
       position: r.position,
     })),
     limit,
@@ -452,6 +462,7 @@ function validFields(candidate: Partial<Record<keyof Fields, unknown>>): Fields 
     ),
   )
   if (typeof c.isActive !== 'boolean') throw invalid('isActive must be true or false')
+  if (typeof c.isHidden !== 'boolean') throw invalid('isHidden must be true or false')
   const { positionMin, positionMax } = EVENT_TYPE_LIMITS
   if (
     !Number.isSafeInteger(c.position) ||
@@ -474,6 +485,7 @@ function validFields(candidate: Partial<Record<keyof Fields, unknown>>): Fields 
     location: validLocation(c.location),
     questions: validateQuestions(c.questions),
     isActive: c.isActive,
+    isHidden: c.isHidden,
     position: c.position as number,
   }
 }
@@ -609,6 +621,7 @@ function fieldsOf(row: {
   location: Json | null
   questions: Json
   is_active: boolean
+  is_hidden: boolean
   position: number
 }): Fields {
   return {
@@ -625,6 +638,7 @@ function fieldsOf(row: {
     location: row.location as EventTypeLocation | null,
     questions: parseQuestions(row.questions),
     isActive: row.is_active,
+    isHidden: row.is_hidden,
     position: row.position,
   }
 }
@@ -644,6 +658,7 @@ function columns(fields: Fields) {
     location: fields.location === null ? null : jsonb(fields.location),
     questions: jsonb(fields.questions),
     is_active: fields.isActive,
+    is_hidden: fields.isHidden,
     position: fields.position,
   }
 }

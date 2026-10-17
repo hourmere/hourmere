@@ -119,6 +119,7 @@ describe.skipIf(!serverUrl)('event type routes', () => {
       location: { kind: 'phone', number: '+14155550123' },
       questions: [{ id: 'company', label: 'Company', type: 'short_text', required: false }],
       isActive: true,
+      isHidden: false,
       position: 0,
       scheduleId: null,
       createdAt: expect.stringMatching(/Z$/),
@@ -162,6 +163,32 @@ describe.skipIf(!serverUrl)('event type routes', () => {
         message: 'Another event type on this page already uses this slug',
       },
     })
+  })
+
+  it('persists hidden state through REST reads and unrelated edits, and rejects invalid shapes', async () => {
+    const user = await createTestUser(t.db)
+    const created = await api(user).post('/api/v1/event-types', body({ isHidden: true }))
+    expect(created).toMatchObject({ status: 201, body: { isHidden: true, isActive: true } })
+    const id = idOf(created)
+    expect(await api(user).get(`/api/v1/event-types/${id}`)).toEqual({
+      status: 200,
+      body: created.body,
+    })
+    expect(
+      (await api(user).patch(`/api/v1/event-types/${id}`, { title: 'Still unlisted' })).body,
+    ).toMatchObject({ isHidden: true })
+    expect((await api(user).get('/api/v1/event-types')).body).toMatchObject({
+      data: [{ id, isHidden: true }],
+    })
+    for (const isHidden of [null, 'true', 0, {}, []]) {
+      expect((await api(user).patch(`/api/v1/event-types/${id}`, { isHidden })).status).toBe(400)
+      expect(
+        (await api(user).post('/api/v1/event-types', body({ slug: 'invalid', isHidden }))).status,
+      ).toBe(400)
+    }
+    expect(
+      (await api(user).patch(`/api/v1/event-types/${id}`, { isHidden: false })).body,
+    ).toMatchObject({ isHidden: false })
   })
 
   it("answers 404 for another organization's event types", async () => {

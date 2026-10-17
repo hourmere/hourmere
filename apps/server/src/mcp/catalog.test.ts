@@ -264,6 +264,7 @@ describe.skipIf(!serverUrl)('MCP configuration catalog with real keys', () => {
         'durationMinutes',
         'schedulingType',
         'isActive',
+        'isHidden',
         'position',
       ].sort(),
     )
