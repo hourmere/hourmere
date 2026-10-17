@@ -182,7 +182,8 @@ export function bookingTools({
   const context = (caller: McpCaller): ServiceContext => ({ db, principal: caller, now, notify })
   const origin = (caller: McpCaller): BookingOrigin => ({
     source: 'mcp',
-    apiKeyId: caller.apiKeyId,
+    apiKeyId: caller.kind === 'api_key' ? caller.apiKeyId : null,
+    oauthConsentId: caller.kind === 'oauth' ? caller.oauthConsentId : null,
   })
   const limiter = (group: keyof typeof PUBLIC_RATE_LIMITS) =>
     createRateLimiter(rateLimits[group] ?? PUBLIC_RATE_LIMITS[group])

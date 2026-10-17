@@ -53,7 +53,15 @@ describe('the session gate', () => {
       within(nav)
         .getAllByRole('link')
         .map((a) => a.textContent),
-    ).toEqual(['Event types', 'Availability', 'Bookings', 'Calendars', 'API keys', 'Settings'])
+    ).toEqual([
+      'Event types',
+      'Availability',
+      'Bookings',
+      'Calendars',
+      'API keys',
+      'Connected apps',
+      'Settings',
+    ])
     expect(
       within(nav)
         .getAllByRole('link')
@@ -64,6 +72,7 @@ describe('the session gate', () => {
       '/app/bookings',
       '/app/calendars',
       '/app/api-keys',
+      '/app/connected-apps',
       '/app/settings',
     ])
     expect(screen.getByRole('link', { name: 'Event types' }).getAttribute('aria-current')).toBe(

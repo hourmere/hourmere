@@ -54,6 +54,7 @@ const schema = z
         })
         .transform((list) => [...new Set(list.map((v) => embedOrigin(v) as string))]),
     ).transform((v) => v ?? []),
+    MCP_OAUTH_ENABLED: optional(z.enum(['true', 'false'])).transform((v) => v === 'true'),
     PORT: z.coerce.number().int().positive().default(3000),
     // Where people reach Hourmere: sign-in links, OAuth redirects and cookies are built from it.
     PUBLIC_URL: optional(
@@ -185,6 +186,15 @@ const schema = z
         path: ['PUBLIC_URL'],
         message: 'Embedding requires an HTTPS PUBLIC_URL except on loopback development hosts',
       })
+    if (c.MCP_OAUTH_ENABLED && c.PUBLIC_URL) {
+      const url = new URL(c.PUBLIC_URL)
+      if (url.protocol !== 'https:' && !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname))
+        ctx.addIssue({
+          code: 'custom',
+          path: ['PUBLIC_URL'],
+          message: 'MCP OAuth requires HTTPS except on loopback development hosts',
+        })
+    }
     if (c.MICROSOFT_CALENDAR_CLIENT_ID || c.MICROSOFT_CALENDAR_CLIENT_SECRET) {
       for (const key of [
         'MICROSOFT_CALENDAR_CLIENT_ID',

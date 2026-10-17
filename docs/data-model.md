@@ -217,3 +217,20 @@ the current setting in the booking transaction, holding an event-type share lock
 commit. Settings changes wait for an already approved booking; a booking waiting behind a
 settings change reads its committed value. Existing `booking_attendees` are preserved for
 reminders, rescheduling and cancellation, and successful idempotent replays still work.
+
+## MCP OAuth
+
+Migration 0016 adds the version-matched Better Auth JWT/OAuth provider tables in `auth`.
+`mcp_oauth_grants` binds a user, client and organization to an opaque grant ID; native
+consent/refresh-token `referenceId` uses that ID. Reconnection after revocation creates a
+new ID, so outstanding codes/JWTs cannot revive. `mcp_oauth_intents` binds one signed
+request hash and organization to one session for at most five minutes. It is immutable
+apart from consumption. These correlation records deliberately avoid cascading foreign
+keys: browser approval locks its intent while Better Auth uses a separate connection.
+Current sessions, verified email and membership are checked explicitly before approval.
+
+Bookings retain `oauth_consent_id` and `cancelled_oauth_consent_id` as historical attribution,
+without cascading on credential deletion. OAuth origins require `source=mcp` and no API
+key ID. The idempotency index includes both nullable credential columns, preserving existing
+anonymous/API-key scopes while isolating each OAuth consent. Public booking representations
+expose neither credential identifier.

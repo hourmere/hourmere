@@ -22,6 +22,7 @@ export const auth = createAuth({
   secret: 'schema-generation-only-not-a-real-secret',
   mailer: createLogMailer(),
   signup,
+  mcpOAuth: true,
   // Every optional feature on, so the generated schema covers all of them.
   socialProviders: { google: placeholder, microsoft: placeholder },
 })

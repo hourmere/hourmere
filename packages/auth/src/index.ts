@@ -13,6 +13,7 @@ import { API_KEY_PREFIX } from './caller.ts'
 import { beforeHook } from './hooks.ts'
 import { betterAuthLog, logMailFailure } from './log.ts'
 import { confirmLink, SIGN_IN_PATH } from './magic-link.ts'
+import { mcpOAuthPlugins } from './mcp-oauth.ts'
 import { ensurePersonalOrganization, organizationGuards } from './organizations.ts'
 import { hasAccount, maySignUp, type SignupPolicy, signupConnectionOptions } from './signup.ts'
 
@@ -29,6 +30,15 @@ export {
 export { DISPLAY_NAME_MAX_LENGTH } from './display-name.ts'
 export { escapeControlCharacters } from './log.ts'
 export { MAGIC_LINK_CONFIRM_PATH, MAGIC_LINK_VERIFY_PARAMS } from './magic-link.ts'
+export {
+  type BoundMcpOAuthIntent,
+  createMcpOAuthResolver,
+  hasMcpOAuthIntent,
+  MCP_OAUTH_SCOPE,
+  MCP_OAUTH_SCOPES,
+  mcpOAuthUrls,
+  withMcpOAuthIntent,
+} from './mcp-oauth.ts'
 export { ensurePersonalOrganization } from './organizations.ts'
 export {
   assertSignupEnforced,
@@ -96,6 +106,10 @@ export interface AuthConfig {
    * Better Auth provider options applied over ours. Tests use it to replace the provider's
    * token check and profile lookup; production configuration does not set it.
    */
+  /** Optional MCP OAuth authorization server, separate from social/calendar providers. */
+  mcpOAuth?: boolean | undefined
+  /** Injected only by isolated client-metadata tests; runtime uses the pinned DNS transport. */
+  mcpMetadataFetcher?: Parameters<typeof mcpOAuthPlugins>[2]
   socialProviderOptions?: { google?: Partial<GoogleOptions>; microsoft?: Partial<MicrosoftOptions> }
 }
 
@@ -117,10 +131,14 @@ export function createAuth({
   signup,
   socialProviders = {},
   socialProviderOptions = {},
+  mcpOAuth = false,
+  mcpMetadataFetcher,
 }: AuthConfig) {
   const { google, microsoft } = socialProviders
   return betterAuth({
     database: pool,
+    // Consent changes must also retire Hourmere's grant generation and refresh tokens.
+    disabledPaths: mcpOAuth ? ['/token', '/oauth2/delete-consent', '/oauth2/update-consent'] : [],
     baseURL,
     secret,
     advanced: {
@@ -224,6 +242,7 @@ export function createAuth({
     },
     hooks: { before: beforeHook(db) },
     plugins: [
+      ...(mcpOAuth ? mcpOAuthPlugins(db, baseURL, mcpMetadataFetcher) : []),
       organization({
         // An invitation is accepted only by someone who proved they own the invited address.
         requireEmailVerificationOnInvitation: true,

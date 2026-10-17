@@ -8,12 +8,14 @@ import {
   BookingPage,
   BookingsPage,
   CalendarsPage,
+  ConnectedAppsPage,
   EmbeddedBookingPage,
   EmbeddedTeamBookingPage,
   EventTypeEditorPage,
   EventTypesPage,
   HostPage,
   ManageBookingPage,
+  McpAuthorizePage,
   RequireSession,
   ScheduleEditorPage,
   SessionLayout,
@@ -45,6 +47,8 @@ export function App() {
       <Routes>
         <Route path="/" element={<Navigate to={PATHS.home} replace />} />
         <Route element={<SessionLayout />}>
+          <Route path="/oauth/authorize" element={<McpAuthorizePage />} />
+          <Route path="/oauth/consent" element={<McpAuthorizePage />} />
           <Route path="/sign-in" element={<SignInPage />} />
           <Route path="/app" element={<RequireSession />}>
             <Route element={<AppShell />}>
@@ -58,6 +62,7 @@ export function App() {
               <Route path="bookings" element={<BookingsPage />} />
               <Route path="bookings/:id" element={<BookingDetailPage />} />
               <Route path="calendars" element={<CalendarsPage />} />
+              <Route path="connected-apps" element={<ConnectedAppsPage />} />
               <Route path="api-keys" element={<ApiKeysPage />} />
               <Route path="settings" element={<SettingsPage />} />
               <Route path="*" element={<AppNotFoundPage />} />

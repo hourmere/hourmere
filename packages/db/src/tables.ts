@@ -75,12 +75,143 @@ export interface AuthInvitation {
   status: string;
 }
 
+export interface AuthJwks {
+  alg: string | null;
+  createdAt: Timestamp;
+  crv: string | null;
+  expiresAt: Timestamp | null;
+  id: Generated<string>;
+  privateKey: string;
+  publicKey: string;
+}
+
 export interface AuthMember {
   createdAt: Timestamp;
   id: Generated<string>;
   organizationId: string;
   role: string;
   userId: string;
+}
+
+export interface AuthOauthAccessToken {
+  authorizationCodeId: string | null;
+  clientId: string;
+  confirmation: Json | null;
+  createdAt: Timestamp;
+  expiresAt: Timestamp;
+  id: Generated<string>;
+  referenceId: string | null;
+  refreshId: string | null;
+  requestedUserInfoClaims: Json | null;
+  resources: Json | null;
+  revoked: Timestamp | null;
+  scopes: Json;
+  sessionId: string | null;
+  token: string;
+  userId: string | null;
+}
+
+export interface AuthOauthClient {
+  applicationType: string | null;
+  backchannelLogoutSessionRequired: boolean | null;
+  backchannelLogoutUri: string | null;
+  clientCredentialsScopes: Json | null;
+  clientDiscoveryId: string | null;
+  clientId: string;
+  clientSecret: string | null;
+  contacts: Json | null;
+  createdAt: Timestamp | null;
+  disabled: boolean | null;
+  dpopBoundAccessTokens: boolean | null;
+  enableEndSession: boolean | null;
+  grantTypes: Json | null;
+  icon: string | null;
+  id: Generated<string>;
+  jwks: string | null;
+  jwksUri: string | null;
+  metadata: Json | null;
+  name: string | null;
+  policy: string | null;
+  postLogoutRedirectUris: Json | null;
+  redirectUris: Json;
+  referenceId: string | null;
+  requirePKCE: boolean | null;
+  responseTypes: Json | null;
+  scopes: Json | null;
+  skipConsent: boolean | null;
+  softwareId: string | null;
+  softwareStatement: string | null;
+  softwareVersion: string | null;
+  subjectType: string | null;
+  tokenEndpointAuthMethod: string | null;
+  tos: string | null;
+  updatedAt: Timestamp | null;
+  uri: string | null;
+  userId: string | null;
+}
+
+export interface AuthOauthClientAssertion {
+  expiresAt: Timestamp;
+  id: Generated<string>;
+}
+
+export interface AuthOauthClientResource {
+  clientId: string;
+  createdAt: Timestamp | null;
+  id: Generated<string>;
+  metadata: Json | null;
+  resourceId: string;
+}
+
+export interface AuthOauthConsent {
+  clientId: string;
+  createdAt: Timestamp;
+  id: Generated<string>;
+  referenceId: string | null;
+  requestedUserInfoClaims: Json | null;
+  resources: Json | null;
+  scopes: Json;
+  updatedAt: Timestamp;
+  userId: string | null;
+}
+
+export interface AuthOauthRefreshToken {
+  authorizationCodeId: string | null;
+  authTime: Timestamp | null;
+  clientId: string;
+  confirmation: Json | null;
+  createdAt: Timestamp;
+  expiresAt: Timestamp;
+  id: Generated<string>;
+  referenceId: string | null;
+  requestedUserInfoClaims: Json | null;
+  resources: Json | null;
+  revoked: Timestamp | null;
+  rotatedAt: Timestamp | null;
+  rotationReplayExpiresAt: Timestamp | null;
+  rotationReplayResponse: string | null;
+  scopes: Json;
+  sessionId: string | null;
+  token: string;
+  userId: string;
+}
+
+export interface AuthOauthResource {
+  accessTokenTtl: number | null;
+  allowedScopes: Json | null;
+  createdAt: Timestamp | null;
+  customClaims: Json | null;
+  disabled: boolean | null;
+  dpopBoundAccessTokensRequired: boolean | null;
+  id: Generated<string>;
+  identifier: string;
+  metadata: Json | null;
+  name: string;
+  policyVersion: number | null;
+  refreshTokenTtl: number | null;
+  signingAlgorithm: string | null;
+  signingKeyId: string | null;
+  updatedAt: Timestamp | null;
 }
 
 export interface AuthOrganization {
@@ -173,6 +304,7 @@ export interface Bookings {
   cancel_reason: string | null;
   cancelled_api_key_id: string | null;
   cancelled_at: Timestamp | null;
+  cancelled_oauth_consent_id: string | null;
   cancelled_source: string | null;
   created_at: Generated<Timestamp>;
   end_at: Timestamp;
@@ -182,6 +314,7 @@ export interface Bookings {
   idempotency_key: string | null;
   location: Json | null;
   manage_token_hash: Buffer;
+  oauth_consent_id: string | null;
   organization_id: string;
   rescheduled_from_id: string | null;
   responses: Generated<Json>;
@@ -272,6 +405,26 @@ export interface EventTypes {
   updated_at: Generated<Timestamp>;
 }
 
+export interface McpOauthGrants {
+  client_id: string;
+  created_at: Generated<Timestamp>;
+  id: Generated<string>;
+  organization_id: string;
+  user_id: string;
+}
+
+export interface McpOauthIntents {
+  created_at: Generated<Timestamp>;
+  expires_at: Timestamp;
+  grant_id: string;
+  id: Generated<string>;
+  organization_id: string;
+  request_hash: Buffer;
+  session_id: string;
+  used_at: Timestamp | null;
+  user_id: string;
+}
+
 export interface PersonalOrganizations {
   organization_id: string;
   user_id: string;
@@ -315,7 +468,15 @@ export interface DB {
   "auth.account": AuthAccount;
   "auth.apikey": AuthApikey;
   "auth.invitation": AuthInvitation;
+  "auth.jwks": AuthJwks;
   "auth.member": AuthMember;
+  "auth.oauthAccessToken": AuthOauthAccessToken;
+  "auth.oauthClient": AuthOauthClient;
+  "auth.oauthClientAssertion": AuthOauthClientAssertion;
+  "auth.oauthClientResource": AuthOauthClientResource;
+  "auth.oauthConsent": AuthOauthConsent;
+  "auth.oauthRefreshToken": AuthOauthRefreshToken;
+  "auth.oauthResource": AuthOauthResource;
   "auth.organization": AuthOrganization;
   "auth.session": AuthSession;
   "auth.user": AuthUser;
@@ -332,6 +493,8 @@ export interface DB {
   calendars: Calendars;
   event_type_hosts: EventTypeHosts;
   event_types: EventTypes;
+  mcp_oauth_grants: McpOauthGrants;
+  mcp_oauth_intents: McpOauthIntents;
   personal_organizations: PersonalOrganizations;
   profiles: Profiles;
   schedule_overrides: ScheduleOverrides;

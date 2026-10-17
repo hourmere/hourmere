@@ -6,6 +6,7 @@ import {
   createAuth,
   createAuthPool,
   createCallerResolver,
+  createMcpOAuthResolver,
 } from '@hourmere/auth'
 import {
   bookingCalendarJob,
@@ -33,6 +34,7 @@ import { httpServerOptions } from './http-timeouts.ts'
 import { bookingTools } from './mcp/bookings.ts'
 import { catalogTools } from './mcp/catalog.ts'
 import { mcpEndpoint } from './mcp/endpoint.ts'
+import { mcpOAuthCleanupJob, mcpOAuthRoutes } from './mcp/oauth.ts'
 import { whoamiTool } from './mcp/whoami.ts'
 import { installOneLineConsole } from './one-line-console.ts'
 import type { RouteModule } from './openapi.ts'
@@ -57,8 +59,12 @@ export function productRoutes({
   notify,
   googleCalendar,
   enqueueCalendarSync,
+  mcpAuth,
+  publicUrl = 'http://localhost',
 }: {
   db: Db
+  mcpAuth?: Pick<ReturnType<typeof createAuth>, 'handler'> | undefined
+  publicUrl?: string
   socialProviders: Config['socialProviders']
   /** Queues booking emails in the booking's transaction (the OpenAPI document needs none). */
   notify?: BookingNotifier | undefined
@@ -66,6 +72,7 @@ export function productRoutes({
   enqueueCalendarSync?: CalendarDeps['enqueueSync']
 }): RouteModule[] {
   return [
+    mcpOAuthRoutes({ auth: mcpAuth, db, publicUrl }),
     instanceRoutes({ socialProviders }),
     calendarRoutes({ db, google: googleCalendar, enqueueSync: enqueueCalendarSync }),
     profileRoutes({ db }),
@@ -185,6 +192,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
   const jobs = createJobs({
     connectionString: config.DATABASE_URL,
     definitions: [
+      ...(config.MCP_OAUTH_ENABLED ? [mcpOAuthCleanupJob(db)] : []),
       ...signInEmailJobs({
         db,
         mailer,
@@ -238,6 +246,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
       }),
       signup: config.signup,
       socialProviders: config.socialProviders,
+      mcpOAuth: config.MCP_OAUTH_ENABLED,
     })
     fetch = createApp({
       checkDb,
@@ -250,6 +259,8 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
       webDist: config.WEB_DIST,
       // db is closed below.
       routes: productRoutes({
+        mcpAuth: config.MCP_OAUTH_ENABLED ? auth : undefined,
+        publicUrl: config.PUBLIC_URL,
         db,
         socialProviders: config.socialProviders,
         notify,
@@ -258,6 +269,14 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
           jobs.enqueue('calendar-sync', { calendarId: id }, { singletonKey: id, transaction: trx }),
       }),
       mcp: mcpEndpoint({
+        ...(config.MCP_OAUTH_ENABLED
+          ? {
+              oauth: {
+                resolve: createMcpOAuthResolver({ auth, db, publicUrl: config.PUBLIC_URL }),
+                handler: auth.handler,
+              },
+            }
+          : {}),
         tools: [whoamiTool, ...bookingTools({ db, notify }), ...catalogTools({ db })],
       }),
     }).fetch

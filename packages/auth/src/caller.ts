@@ -27,6 +27,7 @@ export interface CallerOrganization {
 export type Principal = { user: CallerUser; organization: CallerOrganization } & (
   | { kind: 'session'; sessionId: string }
   | { kind: 'api_key'; apiKeyId: string }
+  | { kind: 'oauth'; oauthConsentId: string; clientId: string; scopes: readonly string[] }
 )
 
 export type CallerResult = {
@@ -160,7 +161,11 @@ export function createCallerResolver({ auth, db }: { auth: Auth; db: Db }): Call
     const setCookie = responseHeaders.getSetCookie()
     if (!session) return { ok: false, error: 'unauthorized', setCookie }
     const userId = session.user.id
-    const active = session.session.activeOrganizationId
+    const active =
+      'activeOrganizationId' in session.session &&
+      typeof session.session.activeOrganizationId === 'string'
+        ? session.session.activeOrganizationId
+        : undefined
     // A session whose active organization is gone (or was never set) acts in the personal one.
     const membership =
       (active ? await inOrganization(userId, active) : undefined) ??

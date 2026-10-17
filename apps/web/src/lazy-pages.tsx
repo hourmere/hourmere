@@ -96,3 +96,11 @@ export const EmbeddedTeamBookingPage = page(
   () => import('./public/Embed.tsx'),
   (m) => m.EmbeddedTeamBookingPage,
 )
+export const McpAuthorizePage = page(
+  () => import('./pages/McpOAuth.tsx'),
+  (m) => m.McpAuthorizePage,
+)
+export const ConnectedAppsPage = page(
+  () => import('./pages/McpOAuth.tsx'),
+  (m) => m.ConnectedAppsPage,
+)

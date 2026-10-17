@@ -17,7 +17,7 @@ import type { RateLimiter } from '../rate-limit.ts'
  * Who calls a tool. MCP accepts API keys only for now; OAuth access tokens (later) will
  * resolve to the same kind of principal, so tools do not change.
  */
-export type McpCaller = Extract<Principal, { kind: 'api_key' }>
+export type McpCaller = Extract<Principal, { kind: 'api_key' | 'oauth' }>
 
 /** What a tool's handler gets besides its arguments. */
 export interface ToolCall {

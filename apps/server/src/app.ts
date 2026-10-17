@@ -280,6 +280,11 @@ export function createApp({
       return c.json({ error: 'embedding_not_allowed' }, 403)
     await next()
   })
+  app.use('/oauth/*', async (c, next) => {
+    await next()
+    c.res.headers.set('Cache-Control', 'no-store')
+    c.res.headers.set('Referrer-Policy', 'no-referrer')
+  })
   app.use('/api/*', requestLogger)
   app.use('/api/*', clientIp(trustedProxies))
   // First on /api/v1, so it also covers what the middleware below and onError answer.
