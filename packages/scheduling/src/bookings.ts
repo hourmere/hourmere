@@ -1,5 +1,5 @@
 // Bookings: created from public pages, managed by invitees through their secret link, and
-// listed and cancelled by hosts. Availability is always recomputed inside the transaction
+// listed, rescheduled and cancelled by hosts. Availability is always recomputed inside the transaction
 // that writes, and the exclusion constraint on booking_hosts is the last word on overlaps.
 import { createHash, randomBytes } from 'node:crypto'
 import type { Db, Json } from '@hourmere/db'
@@ -249,6 +249,17 @@ async function latestInChain(db: Db, id: string): Promise<string> {
 /** How often lockManagedBooking follows a meeting that keeps moving before giving up. */
 const MAX_FOLLOW_ROUNDS = 10
 
+const RESCHEDULE_COLUMNS = [
+  'id',
+  'organization_id',
+  'event_type_id',
+  'status',
+  'start_at',
+  'title',
+  'location',
+  'responses',
+] as const
+
 /**
  * Locks (FOR UPDATE) and returns the booking a manage token acts on; call inside a
  * transaction. For an email's token, a reschedule that committed while this waited for the
@@ -265,16 +276,7 @@ async function lockManagedBooking(trx: Db, hash: Buffer) {
   for (let round = 1; ; round++) {
     const row = await trx
       .selectFrom('bookings')
-      .select([
-        'id',
-        'organization_id',
-        'event_type_id',
-        'status',
-        'start_at',
-        'title',
-        'location',
-        'responses',
-      ])
+      .select(RESCHEDULE_COLUMNS)
       .where('id', '=', id)
       .forUpdate()
       .executeTakeFirst()
@@ -757,98 +759,109 @@ export async function rescheduleManagedBooking(
   return ctx.db.transaction().execute(async (trx) => {
     const old = await lockManagedBooking(trx, hash)
     if (!old) throw bookingNotFound()
-    // The status cannot change while the row is locked; the time check waits for the locks.
-    if (old.status === 'cancelled') throw bookingCancelled()
+    return rescheduleLocked(ctx, trx, old, start, origin)
+  })
+}
 
-    const [hosts, attendees] = await Promise.all([
-      trx.selectFrom('booking_hosts').select('user_id').where('booking_id', '=', old.id).execute(),
-      trx
-        .selectFrom('booking_attendees')
-        .select(['name', 'email', 'time_zone', 'locale', 'is_booker'])
-        .where('booking_id', '=', old.id)
-        .orderBy('is_booker', 'desc')
-        .orderBy('id')
-        .execute(),
-    ])
-    const hostUserIds = hosts.map((h) => h.user_id)
-    // Without a host there is nobody whose availability could be checked.
-    if (!hostUserIds.length) {
-      throw new DomainError(
-        'conflict',
-        'booking_has_no_host',
-        'This booking has no host, so it cannot be rescheduled',
-      )
-    }
-    await lockHosts(trx, hostUserIds)
-    // Read after the locks: waiting for them takes time, and the rules may have changed.
-    const now = ctx.now()
-    assertChangeable(old, now)
+/** The same transactional move for a locked invitee or authenticated host booking. */
+async function rescheduleLocked(
+  ctx: PublicContext,
+  trx: Db,
+  old: NonNullable<Awaited<ReturnType<typeof lockManagedBooking>>>,
+  start: Temporal.Instant,
+  origin: BookingOrigin,
+): Promise<BookingWithToken> {
+  // The status cannot change while the row is locked; the time check waits for the locks.
+  if (old.status === 'cancelled') throw bookingCancelled()
 
-    const eventType =
-      old.event_type_id === null
-        ? undefined
-        : await trx
-            .selectFrom('event_types')
-            .select(['id', 'duration_minutes'])
-            .where('id', '=', old.event_type_id)
-            .where('is_active', '=', true)
-            .where('deleted_at', 'is', null)
-            .executeTakeFirst()
-    if (!eventType) {
-      throw new DomainError(
-        'conflict',
-        'event_type_unavailable',
-        'This event type no longer takes bookings',
-      )
-    }
-    const end = start.add({ minutes: eventType.duration_minutes })
-    for (const hostUserId of hostUserIds) {
-      await requireOfferedSlot(trx, {
-        eventTypeId: eventType.id,
-        hostUserId,
-        start,
-        end,
-        now,
-        excludeBookingId: old.id,
-      })
-    }
+  const [hosts, attendees] = await Promise.all([
+    trx.selectFrom('booking_hosts').select('user_id').where('booking_id', '=', old.id).execute(),
+    trx
+      .selectFrom('booking_attendees')
+      .select(['name', 'email', 'time_zone', 'locale', 'is_booker'])
+      .where('booking_id', '=', old.id)
+      .orderBy('is_booker', 'desc')
+      .orderBy('id')
+      .execute(),
+  ])
+  const hostUserIds = hosts.map((h) => h.user_id)
+  // Without a host there is nobody whose availability could be checked.
+  if (!hostUserIds.length) {
+    throw new DomainError(
+      'conflict',
+      'booking_has_no_host',
+      'This booking has no host, so it cannot be rescheduled',
+    )
+  }
+  await lockHosts(trx, hostUserIds)
+  // Read after the locks: waiting for them takes time, and the rules may have changed.
+  const now = ctx.now()
+  assertChangeable(old, now)
 
-    // Cancel first: the trigger frees the old host rows, so the new time may overlap them.
-    await trx
-      .updateTable('bookings')
-      .set({
-        status: 'cancelled',
-        cancelled_at: now.toString(),
-        cancelled_source: origin.source,
-        cancelled_api_key_id: origin.apiKeyId,
-      })
-      .where('id', '=', old.id)
-      .execute()
-    const { id, manageToken } = await insertBooking(trx, {
-      organizationId: old.organization_id,
+  const eventType =
+    old.event_type_id === null
+      ? undefined
+      : await trx
+          .selectFrom('event_types')
+          .select(['id', 'duration_minutes'])
+          .where('id', '=', old.event_type_id)
+          .where('is_active', '=', true)
+          .where('deleted_at', 'is', null)
+          .executeTakeFirst()
+  if (!eventType) {
+    throw new DomainError(
+      'conflict',
+      'event_type_unavailable',
+      'This event type no longer takes bookings',
+    )
+  }
+  const end = start.add({ minutes: eventType.duration_minutes })
+  for (const hostUserId of hostUserIds) {
+    await requireOfferedSlot(trx, {
       eventTypeId: eventType.id,
+      hostUserId,
       start,
       end,
-      title: old.title,
-      location: parseLocation(old.location),
-      responses: (isRecord(old.responses) ? old.responses : {}) as Responses,
-      source: origin.source,
-      apiKeyId: origin.apiKeyId,
-      rescheduledFromId: old.id,
-      hostUserIds,
-      attendees: attendees.map((a) => ({
-        name: a.name,
-        email: a.email,
-        timeZone: a.time_zone,
-        locale: a.locale,
-        isBooker: a.is_booker,
-      })),
+      now,
+      excludeBookingId: old.id,
     })
-    // In this transaction: the new booking's emails. The old booking's queued ones find it
-    // cancelled and replaced when they run, and send nothing.
-    await ctx.notify?.(trx, { type: 'rescheduled', bookingId: id, start }, now)
-    return { booking: await loadBooking(trx, id), manageToken }
+  }
+
+  // Cancel first: the trigger frees the old host rows, so the new time may overlap them.
+  await trx
+    .updateTable('bookings')
+    .set({
+      status: 'cancelled',
+      cancelled_at: now.toString(),
+      cancelled_source: origin.source,
+      cancelled_api_key_id: origin.apiKeyId,
+    })
+    .where('id', '=', old.id)
+    .execute()
+  const { id, manageToken } = await insertBooking(trx, {
+    organizationId: old.organization_id,
+    eventTypeId: eventType.id,
+    start,
+    end,
+    title: old.title,
+    location: parseLocation(old.location),
+    responses: (isRecord(old.responses) ? old.responses : {}) as Responses,
+    source: origin.source,
+    apiKeyId: origin.apiKeyId,
+    rescheduledFromId: old.id,
+    hostUserIds,
+    attendees: attendees.map((a) => ({
+      name: a.name,
+      email: a.email,
+      timeZone: a.time_zone,
+      locale: a.locale,
+      isBooker: a.is_booker,
+    })),
   })
+  // In this transaction: the new booking's emails. The old booking's queued ones find it
+  // cancelled and replaced when they run, and send nothing.
+  await ctx.notify?.(trx, { type: 'rescheduled', bookingId: id, start }, now)
+  return { booking: await loadBooking(trx, id), manageToken }
 }
 
 // --- Host side ----------------------------------------------------------------------------
@@ -1014,6 +1027,45 @@ export async function getHostBooking(ctx: ServiceContext, id: string): Promise<B
   if (!row) throw bookingNotFound()
   const [booking] = await toBookings(ctx.db, [row])
   return booking as Booking
+}
+
+/** Moves a booking in the caller's organization that the caller hosts; never follows an old id. */
+export async function rescheduleHostBooking(
+  ctx: ServiceContext,
+  id: string,
+  { start }: { start: Temporal.Instant },
+  origin?: BookingOrigin,
+): Promise<BookingWithToken> {
+  if (!UUID.test(id)) throw bookingNotFound()
+  return ctx.db.transaction().execute(async (trx) => {
+    const old = await trx
+      .selectFrom('bookings')
+      .select(RESCHEDULE_COLUMNS)
+      .where('id', '=', id)
+      .where('organization_id', '=', ctx.principal.organization.id)
+      .where((eb) =>
+        eb.exists(
+          eb
+            .selectFrom('booking_hosts')
+            .select('booking_id')
+            .whereRef('booking_hosts.booking_id', '=', 'bookings.id')
+            .where('booking_hosts.user_id', '=', ctx.principal.user.id),
+        ),
+      )
+      .forUpdate()
+      .executeTakeFirst()
+    if (!old) throw bookingNotFound()
+    return rescheduleLocked(
+      ctx,
+      trx,
+      old,
+      start,
+      origin ?? {
+        source: ctx.principal.kind === 'api_key' ? 'api' : 'web',
+        apiKeyId: ctx.principal.kind === 'api_key' ? ctx.principal.apiKeyId : null,
+      },
+    )
+  })
 }
 
 /** Cancels a booking the caller hosts, with the same rules as the invitee's link. */

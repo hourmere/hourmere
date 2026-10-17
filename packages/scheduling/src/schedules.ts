@@ -10,6 +10,12 @@ import {
 } from '@hourmere/core'
 import type { Db, Json } from '@hourmere/db'
 import { sql } from 'kysely'
+import {
+  type CatalogPage,
+  type CatalogPageInput,
+  catalogPage,
+  checkedCatalogPage,
+} from './catalog-page.ts'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import {
@@ -68,6 +74,29 @@ export async function listSchedules(ctx: ServiceContext): Promise<Schedule[]> {
 
 export async function getSchedule(ctx: ServiceContext, id: string): Promise<Schedule> {
   return toSchedule(await ownSchedule(ctx.db, ctx, id))
+}
+
+export type ScheduleSummary = Pick<Schedule, 'id' | 'name' | 'timeZone' | 'isDefault'>
+
+/** Compact, bounded discovery of the caller's schedules, which follow them across organizations. */
+export async function listScheduleCatalog(
+  ctx: ServiceContext,
+  input: CatalogPageInput = {},
+): Promise<CatalogPage<ScheduleSummary>> {
+  const { limit, after } = checkedCatalogPage(input)
+  let query = ctx.db
+    .selectFrom('schedules')
+    .select(['id', 'name', 'time_zone', 'is_default'])
+    .where('user_id', '=', ctx.principal.user.id)
+  if (after !== undefined) query = query.where('id', '>', after)
+  const rows = await query
+    .orderBy('id')
+    .limit(limit + 1)
+    .execute()
+  return catalogPage(
+    rows.map((r) => ({ id: r.id, name: r.name, timeZone: r.time_zone, isDefault: r.is_default })),
+    limit,
+  )
 }
 
 /**

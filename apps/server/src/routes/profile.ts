@@ -19,7 +19,7 @@ import {
 // Schemas check the JSON shape (400 invalid_request); the service checks values and answers
 // with specific codes, the same for REST and MCP. Limits are documented here.
 
-const Profile = z
+export const Profile = z
   .object({
     handle: z.string().openapi({ example: 'ada' }),
     timeZone: z.string().openapi({ example: 'Europe/Berlin' }),

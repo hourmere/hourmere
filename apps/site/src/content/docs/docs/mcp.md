@@ -31,6 +31,27 @@ Ask the client to list tools, then call `whoami` to verify the user and organiza
 changing bookings. The endpoint is stateless: it does not issue a session ID or maintain a
 standing GET event stream. Authentication failures return HTTP 401; rate limits return 429.
 
+## Discover your configuration
+
+Call `whoami` to check the key's organization and `get_profile` for your booking-page handle,
+time zone and language. No profile yet returns `profile_not_found`; create one in the web
+app or through REST.
+
+| Tool | Input and result |
+|---|---|
+| `list_event_types` | Optional `limit` and `after`; compact summaries of team types and your personal types in the key's organization. Includes inactive configurations, excludes deleted types. |
+| `get_event_type` | An `id` from the list; full configuration, including questions, location and rules. |
+| `list_schedules` | Optional `limit` and `after`; summaries of your schedules. Schedules belong to your user across organizations. |
+| `get_schedule` | An `id` from the list; weekly working hours in the schedule's IANA time zone. Date overrides are separate. |
+
+Catalog lists return `{ data, nextAfter }`, sorted by ID, with 20 summaries by default and at
+most 100 (`limit: 1`–`100`). Pass `after: nextAfter` with the same key and organization until
+`nextAfter` is null. Cursors exclude the previous row, even if that row was deleted. Pages
+are recalculated, so configuration changes may affect later pages. The list omits large
+detail fields; use the corresponding detail tool when needed. Configuration writes and date
+overrides remain available through REST and the web app. Always check public availability
+with `find_available_slots` before booking an event found in the catalog.
+
 ## Book and manage time
 
 | Tool | Input and result |
@@ -38,7 +59,7 @@ standing GET event stream. Authentication failures return HTTP 401; rate limits 
 | `whoami` | No arguments; shows the key's user, organization and key ID. |
 | `find_available_slots` | A booking page's `handle`, `slug`, `startDate`, `endDate`, `timeZone`; returns event details and slots. Dates span at most 62 days inclusive. |
 | `create_booking` | `handle`, `slug`, a returned slot's `start`, `invitee`, and an optional `idempotencyKey`; returns the booking and manage token. |
-| `reschedule_booking` | `manageToken` and new `start`; returns a replacement booking and token. |
+| `reschedule_booking` | Exactly one of hosted `bookingId` or invitee `manageToken`, plus new `start`; returns a replacement booking and token. |
 | `cancel_booking` | Either a hosted `bookingId` or an invitee `manageToken`; cancels the booking. |
 | `list_bookings` | Lists bookings hosted by the key owner in its organization, with pagination. `order` defaults to `asc`; use `desc` for newest first and keep it unchanged between pages. |
 
@@ -68,5 +89,15 @@ Tool results include `structuredContent` and a JSON text copy. Tool failures set
 and return the same stable error codes as REST, such as `slot_unavailable`, `slot_taken`,
 `calendar_sync_unavailable` or `idempotency_key_reused`. Use the live `tools/list` schemas for
 required fields and limits. The [REST guide](/docs/rest) covers token handling and booking
-semantics shared by both interfaces. Hosting/catalog tools and host-side rescheduling are
-not implemented yet.
+semantics shared by both interfaces.
+
+## Reschedule as the host
+
+Use `list_bookings` to find a booking you host, then call `reschedule_booking` with
+`bookingId` and the new `start`. The key must act in that booking's organization. Give
+exactly one of `bookingId` or `manageToken`; both forms share the same availability,
+notification and per-user management limits.
+
+A move creates a new booking with `rescheduledFromId` pointing to the old one. Retrying the
+old ID fails with `booking_cancelled`. If an answer is lost, inspect `list_bookings` before
+trying another move. The returned new manage token is shown once, as with an invitee move.
