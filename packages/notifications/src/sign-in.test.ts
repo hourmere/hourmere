@@ -220,11 +220,12 @@ describe.skipIf(!serverUrl)('queued sign-in email', () => {
   })
 
   it('does not send an expired, consumed, mismatched or now-revoked link', async () => {
+    await existing()
     for (const mode of ['expired', 'consumed', 'mismatched', 'revoked']) {
       await db.deleteFrom('sign_in_emails').execute()
       await db.deleteFrom('auth.verification').execute()
       const auth = authWith({ policy: { mode: 'open', allowedDomains: [] } })
-      await request(auth, 'new@example.com')
+      await request(auth, mode === 'revoked' ? 'new@example.com' : 'existing@example.com')
       const row = (await rows())[0] as Awaited<ReturnType<typeof enqueueExisting>>
       if (mode === 'expired')
         await db
@@ -406,6 +407,44 @@ describe.skipIf(!serverUrl)('queued sign-in email', () => {
     )
     expect(await rows()).toEqual([])
     expect(sent).toEqual([])
+  })
+
+  it('rolls back the real job as well as the outbox when commit fails', async () => {
+    await existing()
+    const producer = createJobs({
+      connectionString: owned.url,
+      definitions: signInEmailJobs(deps()),
+      work: false,
+      migrate: true,
+    })
+    try {
+      await producer.start()
+      const before = (
+        await owned.pool.query('SELECT id FROM pgboss.job WHERE name = $1 ORDER BY id', [
+          SIGN_IN_EMAIL_JOB,
+        ])
+      ).rows
+      await owned.pool.query(
+        `CREATE FUNCTION test_fail_outbox_commit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'forced outbox commit failure'; END $$`,
+      )
+      await owned.pool.query(
+        'CREATE CONSTRAINT TRIGGER test_fail_outbox AFTER INSERT ON sign_in_emails DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION test_fail_outbox_commit()',
+      )
+      const auth = authWith({ sender: queuedSignInEmail(producer, deps()) })
+      await expect(request(auth)).rejects.toThrow('Sign-in email could not be queued')
+      expect(await rows()).toEqual([])
+      expect(
+        (
+          await owned.pool.query('SELECT id FROM pgboss.job WHERE name = $1 ORDER BY id', [
+            SIGN_IN_EMAIL_JOB,
+          ])
+        ).rows,
+      ).toEqual(before)
+    } finally {
+      await owned.pool.query('DROP TRIGGER IF EXISTS test_fail_outbox ON sign_in_emails')
+      await owned.pool.query('DROP FUNCTION IF EXISTS test_fail_outbox_commit()')
+      await producer.stop()
+    }
   })
 
   it('uses real pg-boss producer and worker processes with only ids in stored job payloads', async () => {
