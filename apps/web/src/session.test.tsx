@@ -99,7 +99,9 @@ describe('the session gate', () => {
       toJSON: () => ({}),
     })
     const original = Element.prototype.getBoundingClientRect
-    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function () {
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: Element,
+    ) {
       if (this.matches('nav ul')) return rect(100, 300)
       if (this.matches('nav a[aria-current="page"]')) {
         const offset = this.closest('ul')?.scrollLeft ?? 0
@@ -107,7 +109,7 @@ describe('the session gate', () => {
       }
       return original.call(this)
     })
-    vi.spyOn(Element.prototype, 'clientWidth', 'get').mockImplementation(function () {
+    vi.spyOn(Element.prototype, 'clientWidth', 'get').mockImplementation(function (this: Element) {
       return this.matches('nav ul') ? 200 : 0
     })
     fakeApi({ ...signedIn, ...emptyAccount })
