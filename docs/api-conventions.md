@@ -136,7 +136,7 @@ As a safety net for every `/api/v1` route, a JSON body with NUL or a lone surrog
 route can use it.
 
 Request bodies are limited to 64 KB on all of `/api`, sign-in included, unless a route
-declares more (`routeBodyLimit` in `apps/server/src/body-limit.ts`); beyond the limit, 413
+declares a different limit (`routeBodyLimit` in `apps/server/src/body-limit.ts`); beyond the limit, 413
 `payload_too_large`. A `Content-Length` over the limit is refused at once; any other body
 (e.g. sent chunked) is counted while the route reads it, which also stops a body longer than
 its `Content-Length`. Nothing reads the body before the route needs it: rate limits and
@@ -153,6 +153,16 @@ characters). Creating or changing an event type allows 2 MB (20 questions with 5
 200 characters come to about 1.29 MB), as do creating or changing a schedule (a day can hold
 1440 one-minute intervals: about 1.23 MB for a week); setting one date's override allows
 256 KB (about 176 KB for 1440 intervals).
+
+### Display names
+
+Account display names are updated with `PATCH /api/v1/profile/name` and a strict
+`{ "name": "Ada Lovelace" }` body (4096-byte maximum). The shared service trims and validates
+1–200 UTF-16 code units of well-formed single-line text, returning `invalid_display_name`
+on invalid values. The result is `{ "name": "Ada Lovelace" }`. This affects only the caller,
+works before profile onboarding and across acting organizations, and accepts the same
+session/API-key authentication as profile updates. The legacy Better Auth update-user guard
+remains enforced so that endpoint cannot bypass the text rules.
 
 ## Lists
 

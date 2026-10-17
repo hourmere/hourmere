@@ -23,6 +23,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.ts'
 import { requireCaller } from './caller.ts'
 import { chunkedBody } from './chunked-body.ts'
+import { profileRoutes } from './routes/profile.ts'
 import { pressConfirmButton } from './sign-in-confirm-testing.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -1007,6 +1008,37 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
           .executeTakeFirstOrThrow(),
       ).toEqual({ name: 'Legacy display name', slug: 'privacy' })
     })
+  })
+
+  it('refreshes real sessions and API-key identity after the independent name API', async () => {
+    const email = 'display-name-rest@example.com'
+    const cookie = await signIn(email)
+    const id = await userId(email)
+    const app = createApp({
+      checkDb: async () => {},
+      authHandler: main.auth.handler,
+      resolveCaller: createCallerResolver({ auth: main.auth, db }),
+      publicUrl: origin,
+      routes: [profileRoutes({ db })],
+    })
+    const response = await app.request('/api/v1/profile/name', {
+      method: 'PATCH',
+      headers: { cookie, origin, 'content-type': 'application/json' },
+      body: JSON.stringify({ name: '  REST name  ' }),
+    })
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ name: 'REST name' })
+    expect((await me({ cookie })).body.user).toMatchObject({ id, email, name: 'REST name' })
+    const key = await main.auth.api.createApiKey({ body: { userId: id, name: 'name-api-test' } })
+    const changed = await app.request('/api/v1/profile/name', {
+      method: 'PATCH',
+      headers: { authorization: `Bearer ${key.key}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Agent name' }),
+    })
+    expect(changed.status).toBe(200)
+    expect((await me({ cookie })).body.user.name).toBe('Agent name')
+    const laterCookie = await signIn(email)
+    expect((await me({ cookie: laterCookie })).body.user.name).toBe('Agent name')
   })
 
   describe('display name updates', () => {

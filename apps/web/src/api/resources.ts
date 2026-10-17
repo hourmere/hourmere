@@ -27,3 +27,8 @@ export async function loadEventTypes(signal: AbortSignal): Promise<EventType[]> 
 /** Whether `err` is the API's 404 with `code`, e.g. a record deleted meanwhile. */
 export const isNotFound = (err: unknown, code: string) =>
   err instanceof RequestError && err.status === 404 && err.code === code
+
+/** Updates only the caller's display name through the validated application API. */
+export async function updateDisplayName(name: string) {
+  return unwrap(api.PATCH('/api/v1/profile/name', { body: { name } }))
+}

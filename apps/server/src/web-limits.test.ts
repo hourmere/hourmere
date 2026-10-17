@@ -48,8 +48,11 @@ function locationVariant(eventTypeInput: SchemaObject, kind: string): SchemaObje
 }
 
 describe("the web app's form limits", () => {
-  it('match the display-name limit outside OpenAPI', () => {
+  it('match the display-name service and OpenAPI limits', async () => {
     expect(ACCOUNT.nameMaxLength).toBe(DISPLAY_NAME_MAX_LENGTH)
+    expect(property((await schemas()).DisplayNameInput, 'name').maxLength).toBe(
+      ACCOUNT.nameMaxLength,
+    )
   })
 
   it('match the event type schema', async () => {
