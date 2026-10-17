@@ -1,14 +1,17 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { RequestError } from '../../api/errors.ts'
+import { eventType } from '../../test/fixtures.ts'
 import {
+  comparable,
+  draftFromEventType,
   emptyDraft,
   newOption,
   newQuestion,
   optionField,
   questionField,
-  questionIds,
   serverErrors,
   slugify,
+  toInput,
   validateDraft,
 } from './event-type-form.ts'
 
@@ -24,18 +27,45 @@ describe('slugify', () => {
   })
 })
 
-describe('questionIds', () => {
-  it('keeps saved ids and derives unique new ones from labels', () => {
+describe('question identity', () => {
+  it('allocates distinct valid identities for same-label and replacement questions', () => {
+    const first = { ...newQuestion(), label: 'Company' }
+    const second = { ...newQuestion(), label: 'Company' }
+    const replacement = { ...newQuestion(), label: 'Company' }
+    expect(new Set([first.id, second.id, replacement.id]).size).toBe(3)
+    for (const q of [first, second, replacement]) {
+      expect(q.id).toMatch(/^[A-Za-z0-9_-]{1,64}$/)
+      expect(q.id).not.toBe('company')
+    }
+  })
+
+  it('does not reuse identities when the editor is loaded in a new page', async () => {
+    vi.resetModules()
+    const firstPage = await import('./event-type-form.ts')
+    const old = firstPage.newQuestion().id
+    vi.resetModules()
+    const nextPage = await import('./event-type-form.ts')
+    expect(nextPage.newQuestion().id).not.toBe(old)
+  })
+
+  it('keeps ids through renames, reordering, repeated serialization and server round trips', () => {
     const saved = { ...newQuestion(), id: 'company', label: 'Company' }
-    const again = { ...newQuestion(), label: 'Company' }
-    const blank = { ...newQuestion(), label: '¿?' }
-    const blank2 = { ...newQuestion(), label: '' }
-    expect(questionIds([saved, again, blank, blank2])).toEqual([
-      'company',
-      'company-2',
-      'question',
-      'question-2',
-    ])
+    const added = { ...newQuestion(), label: 'Company' }
+    const draft = { ...emptyDraft(), questions: [saved, added] }
+    expect(toInput(draft).questions?.map((q) => q.id)).toEqual(['company', added.id])
+    expect(toInput(draft)).toEqual(toInput(draft))
+    const changed = { ...draft, questions: [{ ...added, label: 'New question' }, saved] }
+    expect(toInput(changed).questions?.map((q) => q.id)).toEqual([added.id, 'company'])
+    const reloaded = draftFromEventType(eventType(toInput(changed)))
+    expect(toInput(reloaded).questions).toEqual(toInput(changed).questions)
+    expect(comparable(reloaded)).toBe(comparable(draftFromEventType(eventType(toInput(changed)))))
+  })
+
+  it('preserves a saved id without allocating a new one on load', () => {
+    const persisted = eventType({
+      questions: [{ id: 'legacy-question', label: 'Renamed', type: 'short_text', required: false }],
+    })
+    expect(toInput(draftFromEventType(persisted)).questions).toEqual(persisted.questions)
   })
 })
 

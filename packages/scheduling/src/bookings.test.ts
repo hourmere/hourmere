@@ -16,6 +16,7 @@ import {
   getHostBooking,
   getManagedBooking,
   listHostBookings,
+  rescheduleHostBooking,
   rescheduleManagedBooking,
 } from './bookings.ts'
 import type { BookingNotifier, PublicContext, ServiceContext } from './context.ts'
@@ -1492,6 +1493,261 @@ describe.skipIf(!serverUrl)('bookings', () => {
       await f.member(alice.userId, team)
       await f.member(bob.userId, team)
       teamBooking = await f.booking(team, [alice.userId], '2026-11-06T09:00Z', '2026-11-06T09:30Z')
+    })
+
+    it.each(['session', 'api', 'mcp'] as const)(
+      'reschedules as a host through %s, retaining attendees and creation attribution',
+      async (via) => {
+        const h = await setup({
+          slotStepMinutes: 15,
+          questions: [{ id: 'topic', label: 'Topic', type: 'short_text' }],
+        })
+        const creator = crypto.randomUUID()
+        const { booking: old, manageToken } = await h.book(
+          '2026-11-02T09:00Z',
+          {
+            guests: [{ name: 'Guest', email: 'guest@example.com' }],
+            responses: { topic: 'Compilers' },
+          },
+          ctx,
+          { source: 'mcp', apiKeyId: creator },
+        )
+        const key = crypto.randomUUID()
+        const base = as(h, h.organizationId)
+        const caller: ServiceContext =
+          via === 'session'
+            ? base
+            : {
+                ...base,
+                principal: {
+                  kind: 'api_key',
+                  apiKeyId: key,
+                  user: base.principal.user,
+                  organization: base.principal.organization,
+                },
+              }
+        const moved = await rescheduleHostBooking(
+          caller,
+          old.id,
+          { start: instant('2026-11-02T09:15Z') },
+          via === 'mcp' ? { source: 'mcp', apiKeyId: key } : undefined,
+        )
+        expect(moved.booking).toMatchObject({
+          status: 'confirmed',
+          start: '2026-11-02T09:15:00.000Z',
+          rescheduledFromId: old.id,
+          title: old.title,
+          attendees: old.attendees,
+          responses: old.responses,
+          location: old.location,
+          source: via === 'session' ? 'web' : via,
+        })
+        expect(moved.manageToken).toMatch(/^[A-Za-z0-9_-]{43}$/)
+        expect(moved.manageToken).not.toBe(manageToken)
+        expect((await getManagedBooking(ctx, manageToken as string)).status).toBe('cancelled')
+        expect((await getManagedBooking(ctx, moved.manageToken as string)).id).toBe(
+          moved.booking.id,
+        )
+        expect(
+          await db
+            .selectFrom('bookings')
+            .select(['source', 'api_key_id', 'cancelled_source', 'cancelled_api_key_id'])
+            .where('id', '=', old.id)
+            .executeTakeFirstOrThrow(),
+        ).toEqual({
+          source: 'mcp',
+          api_key_id: creator,
+          cancelled_source: via === 'session' ? 'web' : via,
+          cancelled_api_key_id: via === 'session' ? null : key,
+        })
+        expect(
+          await db
+            .selectFrom('bookings')
+            .select('api_key_id')
+            .where('id', '=', moved.booking.id)
+            .executeTakeFirstOrThrow(),
+        ).toEqual({ api_key_id: via === 'session' ? null : key })
+        await expect(
+          rescheduleHostBooking(caller, old.id, { start: instant('2026-11-02T10:00Z') }),
+        ).rejects.toMatchObject({ code: 'booking_cancelled' })
+      },
+    )
+
+    it('requires both the caller host and the acting organization, with opaque not-found errors', async () => {
+      const h = await setup()
+      const peer = await setup()
+      const { booking: old } = await h.book('2026-11-02T09:00Z')
+      const elsewhere = await f.organization()
+      for (const caller of [as(peer, h.organizationId), as(h, elsewhere), as(peer, elsewhere)]) {
+        await expect(
+          rescheduleHostBooking(caller, old.id, { start: instant('2026-11-02T10:00Z') }),
+        ).rejects.toMatchObject({
+          kind: 'not_found',
+          code: 'booking_not_found',
+          detail: 'No such booking',
+        })
+      }
+      for (const id of ['not-a-uuid', crypto.randomUUID()]) {
+        await expect(
+          rescheduleHostBooking(as(h, h.organizationId), id, {
+            start: instant('2026-11-02T10:00Z'),
+          }),
+        ).rejects.toMatchObject({ code: 'booking_not_found' })
+      }
+      expect((await getHostBooking(as(h, h.organizationId), old.id)).status).toBe('confirmed')
+      expect(
+        await count('SELECT count(*)::int AS n FROM bookings WHERE rescheduled_from_id = $1', [
+          old.id,
+        ]),
+      ).toBe(0)
+    })
+
+    it.each(['cancelled', 'past'] as const)(
+      'refuses a %s booking without a successor',
+      async (status) => {
+        const h = await setup()
+        const { booking: old, manageToken } = await h.book('2026-11-02T09:00Z')
+        if (status === 'cancelled') await cancelManagedBooking(ctx, manageToken as string)
+        const caller = {
+          ...as(h, h.organizationId),
+          now: () => (status === 'past' ? instant('2026-11-02T09:00Z') : NOW),
+        }
+        await expect(
+          rescheduleHostBooking(caller, old.id, { start: instant('2026-11-02T10:00Z') }),
+        ).rejects.toMatchObject({
+          code: status === 'past' ? 'booking_in_past' : 'booking_cancelled',
+        })
+        expect(
+          await count('SELECT count(*)::int AS n FROM bookings WHERE rescheduled_from_id = $1', [
+            old.id,
+          ]),
+        ).toBe(0)
+      },
+    )
+
+    it('checks current availability and leaves the old booking intact when a slot is occupied', async () => {
+      const h = await setup()
+      const { booking: old } = await h.book('2026-11-02T09:00Z')
+      await h.book('2026-11-02T10:00Z')
+      await expect(
+        rescheduleHostBooking(as(h, h.organizationId), old.id, {
+          start: instant('2026-11-02T10:00Z'),
+        }),
+      ).rejects.toMatchObject({ code: 'slot_unavailable' })
+      expect((await getHostBooking(as(h, h.organizationId), old.id)).status).toBe('confirmed')
+      expect(
+        await count('SELECT count(*)::int AS n FROM bookings WHERE rescheduled_from_id = $1', [
+          old.id,
+        ]),
+      ).toBe(0)
+    })
+
+    it.each(['inactive', 'deleted'] as const)('refuses a now-%s event type', async (state) => {
+      const h = await setup()
+      const { booking: old } = await h.book('2026-11-02T09:00Z')
+      await db
+        .updateTable('event_types')
+        .set(state === 'inactive' ? { is_active: false } : { deleted_at: NOW.toString() })
+        .where('id', '=', h.eventTypeId)
+        .execute()
+      await expect(
+        rescheduleHostBooking(as(h, h.organizationId), old.id, {
+          start: instant('2026-11-02T10:00Z'),
+        }),
+      ).rejects.toMatchObject({ code: 'event_type_unavailable' })
+      expect((await getHostBooking(as(h, h.organizationId), old.id)).status).toBe('confirmed')
+    })
+
+    it('passes the same transaction to notifications and rolls back a failed notification', async () => {
+      const h = await setup()
+      const { booking: old } = await h.book('2026-11-02T09:00Z')
+      let calls = 0
+      const caller = {
+        ...as(h, h.organizationId),
+        notify: async (trx: Db, event: Parameters<BookingNotifier>[1]) => {
+          calls++
+          expect(event.type).toBe('rescheduled')
+          expect(
+            (
+              await trx
+                .selectFrom('bookings')
+                .select('status')
+                .where('id', '=', old.id)
+                .executeTakeFirstOrThrow()
+            ).status,
+          ).toBe('cancelled')
+          expect(
+            (
+              await trx
+                .selectFrom('bookings')
+                .select('rescheduled_from_id')
+                .where('id', '=', event.bookingId)
+                .executeTakeFirstOrThrow()
+            ).rescheduled_from_id,
+          ).toBe(old.id)
+          throw new Error('queue unavailable')
+        },
+      }
+      await expect(
+        rescheduleHostBooking(caller, old.id, { start: instant('2026-11-02T10:00Z') }),
+      ).rejects.toThrow('queue unavailable')
+      expect(calls).toBe(1)
+      expect((await getHostBooking(as(h, h.organizationId), old.id)).status).toBe('confirmed')
+      expect(
+        await count('SELECT count(*)::int AS n FROM bookings WHERE rescheduled_from_id = $1', [
+          old.id,
+        ]),
+      ).toBe(0)
+    })
+
+    it.each(['host', 'invitee'] as const)(
+      'commits one successor when a host races another %s move',
+      SERIALIZED,
+      async (other) => {
+        const h = await setup()
+        const { booking: old, manageToken } = await h.book('2026-11-02T09:00Z')
+        const caller = as(h, h.organizationId)
+        const release = await holdHostLock(h.userId)
+        const pending = Promise.allSettled([
+          rescheduleHostBooking(caller, old.id, { start: instant('2026-11-02T10:00Z') }),
+          other === 'host'
+            ? rescheduleHostBooking(caller, old.id, { start: instant('2026-11-02T11:00Z') })
+            : rescheduleManagedBooking(ctx, manageToken as string, {
+                start: instant('2026-11-02T11:00Z'),
+              }),
+        ])
+        try {
+          await untilSomeoneWaits(2)
+        } finally {
+          await release()
+        }
+        const results = await pending
+        expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1)
+        expect(results.find((r) => r.status === 'rejected')).toMatchObject({
+          reason: { code: 'booking_cancelled' },
+        })
+        expect(
+          await count('SELECT count(*)::int AS n FROM bookings WHERE rescheduled_from_id = $1', [
+            old.id,
+          ]),
+        ).toBe(1)
+      },
+    )
+
+    it('checks the clock after waiting for the host lock', SERIALIZED, async () => {
+      const h = await setup()
+      const { booking: old } = await h.book('2026-11-02T09:00Z')
+      let now = NOW
+      const caller = { ...as(h, h.organizationId), now: () => now }
+      const pending = whileWaiting(
+        h.userId,
+        () => rescheduleHostBooking(caller, old.id, { start: instant('2026-11-02T10:00Z') }),
+        async () => {
+          now = instant('2026-11-02T09:00Z')
+        },
+      )
+      await expect(pending).rejects.toMatchObject({ code: 'booking_in_past' })
+      expect((await getHostBooking(as(h, h.organizationId), old.id)).status).toBe('confirmed')
     })
 
     it('lists the bookings the caller hosts in the organization, a page at a time', async () => {

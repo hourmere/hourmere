@@ -153,7 +153,9 @@ Validated by the application (zod), not by the database:
   `select`, `multi_select` or `checkbox`; `required` defaults to false; `options` (1–50
   distinct strings of up to 200 characters) only for `select` and `multi_select`. Labels and
   options are single-line text (no control characters, well-formed Unicode). Unknown fields
-  are refused.
+  are refused. The web editor allocates an opaque random ID when a question is added and
+  keeps it through edits, retries and saves. Existing saved IDs stay unchanged; deleting and
+  re-adding the same label gets a new identity so historical answers do not attach to it.
 - `bookings.responses`: answers keyed by question id: a string for `short_text` (≤ 500
   characters), `long_text` (≤ 5000) and `phone` (≤ 32), one of the options for `select`, a list
   of distinct options for `multi_select`, a boolean for `checkbox` (true when required).

@@ -14,6 +14,7 @@ import {
   listPublicSlots,
   MAX_SLOT_RANGE_DAYS,
   type PublicContext,
+  rescheduleHostBooking,
   rescheduleManagedBooking,
   type ServiceContext,
   validTimeZone,
@@ -120,13 +121,22 @@ const CreateBookingOutput = BookingWithToken.extend({
   }),
 })
 
-const RescheduleInput = z.strictObject({
-  manageToken,
-  start: Instant.openapi({
-    description:
-      'The new start: the exact `start` of a slot from find_available_slots for the same event type',
-  }),
-})
+const RescheduleInput = z
+  .strictObject({
+    bookingId: z
+      .uuid()
+      .optional()
+      .openapi({ description: 'Move a booking you host, by its id (see list_bookings)' }),
+    manageToken: manageToken.optional(),
+    start: Instant.openapi({
+      description:
+        'The new start: the exact `start` of a slot from find_available_slots for the same event type',
+    }),
+  })
+  .refine((v) => (v.bookingId === undefined) !== (v.manageToken === undefined), {
+    message:
+      'Give exactly one of bookingId (to move as the host) or manageToken (to move as the invitee)',
+  })
 
 const CancelInput = CancelBody.extend({
   bookingId: z.uuid().optional().openapi({
@@ -149,7 +159,7 @@ export interface BookingToolsDeps {
   /** Queues the booking emails in the transaction of each change, as for REST. */
   notify?: BookingNotifier | undefined
   /**
-   * Per-user limits for the tools that act on public booking pages; defaults to the public
+   * Per-user limits for discovery, booking and both reschedule modes; defaults to the public
    * endpoints' per-address limits (PUBLIC_RATE_LIMITS). Replaced in tests.
    */
   rateLimits?: Partial<Record<keyof typeof PUBLIC_RATE_LIMITS, RateLimit>>
@@ -157,7 +167,7 @@ export interface BookingToolsDeps {
 
 /**
  * Tools for booking someone's public event type (as the invitee, like the booking page)
- * and for the bookings the caller hosts. Tools that act on public pages are limited per
+ * and for the bookings the caller hosts. Public-page actions and host reschedules are limited per
  * user (all of their API keys together) with the numbers the public endpoints apply per
  * address: an agent behind a shared address (a hosted assistant) is not throttled by other
  * people's agents, and a person gets no more through agents than the booking page gives.
@@ -271,7 +281,7 @@ export function bookingTools({
     name: 'reschedule_booking',
     title: 'Reschedule a booking',
     description:
-      "Moves a booking you made (as the invitee) to a new time, using its manageToken. In one step the booking is cancelled and a new one is created at start, with the same invitee, guests and answers; the new time may overlap the old one. Returns the new booking and its new manageToken (the token returned for the old booking then belongs to the cancelled booking; tokens from emails follow the meeting to the new one). Not idempotent: with a token a tool returned, a retry after a lost response fails with booking_cancelled, because the booking has already moved; with a token from an email it would move the meeting again. Fails with booking_in_past once the meeting has started, and with booking_changed (try again) if, with an email's token, the meeting kept being rescheduled while the call waited.",
+      "Moves a booking you host by bookingId, or one you made as the invitee by manageToken (give exactly one). In one step the booking is cancelled and a new one is created at start, with the same invitee, guests and answers; the new time may overlap the old one. Returns the new booking and its new manageToken (the token returned for the old booking then belongs to the cancelled booking; tokens from emails follow the meeting to the new one). Not idempotent: with a bookingId or a token a tool returned, a retry after a lost response fails with booking_cancelled, because the booking has already moved; with a token from an email it would move the meeting again. Fails with booking_in_past once the meeting has started, and with booking_changed (try again) if, with an email's token, the meeting kept being rescheduled while the call waited.",
     input: RescheduleInput,
     output: BookingWithToken,
     annotations: {
@@ -282,6 +292,14 @@ export function bookingTools({
     },
     async run(args, call) {
       call.rateLimit(manageLimit)
+      if (args.bookingId !== undefined) {
+        return rescheduleHostBooking(
+          context(call.caller),
+          args.bookingId,
+          { start: Temporal.Instant.from(args.start) },
+          origin(call.caller),
+        )
+      }
       return rescheduleManagedBooking(
         pub,
         args.manageToken,
