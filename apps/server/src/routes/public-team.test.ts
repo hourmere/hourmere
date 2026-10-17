@@ -47,6 +47,18 @@ describe.skipIf(!serverUrl)('public single-host team booking', () => {
       headers: { 'content-type': 'application/json', ...(key && { 'idempotency-key': key }) },
       body: JSON.stringify(body),
     })
+  it('advertises and enforces the guest setting on the team HTTP namespace', async () => {
+    const s = await setup()
+    const app = appWith()
+    expect(await (await app.request(s.path)).json()).toMatchObject({ allowGuests: false })
+    const body = { ...input(), guests: [{ name: 'Guest', email: 'guest@example.com' }] }
+    const refused = await post(app, `${s.path}/bookings`, body)
+    expect(refused.status).toBe(400)
+    expect(await refused.json()).toMatchObject({ error: 'guests_not_allowed' })
+    await db.updateTable('event_types').set({ allow_guests: true }).where('id', '=', s.id).execute()
+    expect((await post(app, `${s.path}/bookings`, body)).status).toBe(201)
+  })
+
   async function setup({
     slug = 'intro',
     teamSlug = `team-${randomUUID().slice(0, 8)}`,

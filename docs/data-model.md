@@ -207,3 +207,13 @@ eligibility, serializes delivery through the outbox row, and deletes it on succe
 it cannot be used. A periodic job removes expired rows even if their delivery job was lost.
 The encryption key is derived from the auth secret, separately from calendar encryption;
 row ID and public origin are authenticated associated data.
+
+## Guest recipients
+
+`event_types.allow_guests` is a non-null boolean, default `false` for both new and existing
+event types (migration 0015). Hosts explicitly enable it to let new bookings add up to ten
+guest email recipients. Public personal/team pages and REST/MCP booking creation enforce
+the current setting in the booking transaction, holding an event-type share lock until
+commit. Settings changes wait for an already approved booking; a booking waiting behind a
+settings change reads its committed value. Existing `booking_attendees` are preserved for
+reminders, rescheduling and cancellation, and successful idempotent replays still work.

@@ -93,6 +93,7 @@ export interface PublicEventTypeRecord {
   bookingWindowDays: number | null
   location: Location | null
   questions: Question[]
+  allowGuests: boolean
   hostName: string
   hostTimeZone: string
   team?: { name: string; slug: string }
@@ -117,11 +118,12 @@ export async function findPublicEventType(
   db: Db,
   handle: string,
   slug: string,
+  options: { lock?: boolean } = {},
 ): Promise<PublicEventTypeRecord | undefined> {
   const h = servedHandle(handle)
   const s = slug.toLowerCase()
   if (h === undefined || !SLUG.test(s)) return undefined
-  const row = await db
+  let query = db
     .selectFrom('profiles as p')
     .innerJoin('auth.user as u', 'u.id', 'p.user_id')
     .innerJoin('event_types as et', 'et.owner_user_id', 'p.user_id')
@@ -140,6 +142,7 @@ export async function findPublicEventType(
       'et.booking_window_days',
       'et.location',
       'et.questions',
+      'et.allow_guests',
       'p.user_id',
       'p.handle',
       'p.time_zone',
@@ -149,7 +152,9 @@ export async function findPublicEventType(
     .where('et.slug', '=', s)
     .where('et.is_active', '=', true)
     .where('et.deleted_at', 'is', null)
-    .executeTakeFirst()
+  // Serialize host settings changes with approval of a new booking.
+  if (options.lock) query = query.forShare('et')
+  const row = await query.executeTakeFirst()
   if (!row) return undefined
   return {
     id: row.id,
@@ -165,6 +170,7 @@ export async function findPublicEventType(
     bookingWindowDays: row.booking_window_days,
     location: parseLocation(row.location),
     questions: parseQuestions(row.questions),
+    allowGuests: row.allow_guests,
     hostName: row.name.trim() || row.handle,
     hostTimeZone: row.time_zone,
   }
@@ -179,10 +185,11 @@ export async function findPublicTeamEventType(
   db: Db,
   teamSlug: string,
   slug: string,
+  options: { lock?: boolean } = {},
 ): Promise<PublicEventTypeRecord | undefined> {
   const s = slug.toLowerCase()
   if (!isPublicTeamSlug(teamSlug) || !SLUG.test(s)) return undefined
-  const row = await db
+  let query = db
     .selectFrom('auth.organization as o')
     .innerJoin('event_types as et', 'et.organization_id', 'o.id')
     .innerJoin('event_type_hosts as eh', 'eh.event_type_id', 'et.id')
@@ -215,6 +222,7 @@ export async function findPublicTeamEventType(
       'et.booking_window_days',
       'et.location',
       'et.questions',
+      'et.allow_guests',
       'eh.user_id',
       'o.slug as team_slug',
       'o.name as team_name',
@@ -233,7 +241,9 @@ export async function findPublicTeamEventType(
     .where(
       sql<boolean>`(SELECT count(*) FROM event_type_hosts all_hosts WHERE all_hosts.event_type_id = et.id) = 1`,
     )
-    .executeTakeFirst()
+  // Serialize host settings changes with approval of a new booking.
+  if (options.lock) query = query.forShare('et')
+  const row = await query.executeTakeFirst()
   if (!row) return undefined
   return {
     id: row.id,
@@ -249,6 +259,7 @@ export async function findPublicTeamEventType(
     bookingWindowDays: row.booking_window_days,
     location: parseLocation(row.location),
     questions: parseQuestions(row.questions),
+    allowGuests: row.allow_guests,
     hostName: row.name.trim() || row.team_name,
     hostTimeZone: row.time_zone,
     team: { name: row.team_name, slug: row.team_slug },
@@ -268,6 +279,7 @@ export interface PublicEventType {
   durationMinutes: number
   location: { kind: LocationKind } | null
   questions: Question[]
+  allowGuests: boolean
   host: { name: string; timeZone: string }
   team?: { name: string; slug: string }
 }
@@ -296,6 +308,7 @@ function publicEventType(et: PublicEventTypeRecord | undefined): PublicEventType
     durationMinutes: et.durationMinutes,
     location: et.location && { kind: et.location.kind },
     questions: et.questions,
+    allowGuests: et.allowGuests,
     host: { name: et.hostName, timeZone: et.hostTimeZone },
     ...(et.team && { team: et.team }),
   }

@@ -2125,7 +2125,7 @@ export interface paths {
                         "application/json": components["schemas"]["BookingWithToken"];
                     };
                 };
-                /** @description Invalid request (`invalid_request`, `invalid_responses`, `invalid_invitee`, `invalid_guests`, `invalid_time_zone`, `too_many_guests`, `invalid_idempotency_key`) */
+                /** @description Invalid request (`invalid_request`, `invalid_responses`, `invalid_invitee`, `invalid_guests`, `invalid_time_zone`, `too_many_guests`, `guests_not_allowed`, `invalid_idempotency_key`) */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -2357,7 +2357,7 @@ export interface paths {
                         "application/json": components["schemas"]["BookingWithToken"];
                     };
                 };
-                /** @description Invalid request (`invalid_request`, `invalid_responses`, `invalid_invitee`, `invalid_guests`, `invalid_time_zone`, `too_many_guests`, `invalid_idempotency_key`) */
+                /** @description Invalid request (`invalid_request`, `invalid_responses`, `invalid_invitee`, `invalid_guests`, `invalid_time_zone`, `too_many_guests`, `guests_not_allowed`, `invalid_idempotency_key`) */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -3159,6 +3159,7 @@ export interface components {
             reason?: string;
         };
         CreateBooking: {
+            /** @description Up to ten additional email recipients, only when the event type has allowGuests enabled; otherwise guests_not_allowed */
             guests?: {
                 /** Format: email */
                 email: string;
@@ -3194,6 +3195,8 @@ export interface components {
             message?: string;
         };
         EventType: {
+            /** @description Whether new bookings may add up to ten guest email recipients; existing booking attendees are preserved */
+            allowGuests: boolean;
             /** @description How many days ahead can be booked; null = no limit */
             bookingWindowDays: number | null;
             /** @description Free time kept after a meeting */
@@ -3273,6 +3276,11 @@ export interface components {
             updatedAt: string;
         };
         EventTypeInput: {
+            /**
+             * @description Whether new bookings may add up to ten guest email recipients; existing booking attendees are preserved
+             * @default false
+             */
+            allowGuests: boolean;
             /** @description How many days ahead can be booked; null = no limit */
             bookingWindowDays?: number | null;
             /**
@@ -3360,6 +3368,8 @@ export interface components {
         };
         /** @description Omitted fields stay as they are; null clears a nullable field */
         EventTypeUpdate: {
+            /** @description Whether new bookings may add up to ten guest email recipients; existing booking attendees are preserved */
+            allowGuests?: boolean;
             /** @description How many days ahead can be booked; null = no limit */
             bookingWindowDays?: number | null;
             /** @description Free time kept after a meeting */
@@ -3506,6 +3516,8 @@ export interface components {
             timeZone: string;
         };
         PublicEventType: {
+            /** @description Whether invitees may add guest recipients */
+            allowGuests: boolean;
             description: string | null;
             durationMinutes: number;
             handle: string;

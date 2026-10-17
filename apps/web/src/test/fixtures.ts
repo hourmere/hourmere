@@ -29,6 +29,7 @@ export function eventType(over: Partial<EventType> = {}): EventType {
     questions: [],
     isActive: true,
     isHidden: false,
+    allowGuests: false,
     position: 0,
     scheduleId: null,
     createdAt: CREATED,

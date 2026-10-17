@@ -321,6 +321,19 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
 
           <section className="panel" aria-labelledby="questions-heading">
             <h2 id="questions-heading">Booking form</h2>
+            <label className="checkbox">
+              <input
+                type="checkbox"
+                checked={draft.allowGuests}
+                onChange={(e) => set('allowGuests', e.target.checked)}
+                aria-describedby="guests-hint"
+              />
+              Allow invitees to add guests
+            </label>
+            <p className="hint" id="guests-hint">
+              Guests receive confirmation emails and calendar invitations. Off by default; changing
+              this does not remove guests from existing bookings.
+            </p>
             <QuestionsEditor
               questions={draft.questions}
               onChange={(questions) => set('questions', questions)}

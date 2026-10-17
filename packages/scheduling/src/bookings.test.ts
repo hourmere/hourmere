@@ -54,6 +54,8 @@ describe.skipIf(!serverUrl)('bookings', () => {
     await f.schedule(host.userId)
     const eventTypeId = await f.eventType(host.organizationId, host.userId, {
       slug: 'intro',
+      // These scenarios exercise a host that explicitly enabled guests.
+      allowGuests: true,
       title: 'Intro call',
       durationMinutes: 30,
       location: { kind: 'phone', number: '+49 30 1234567' },

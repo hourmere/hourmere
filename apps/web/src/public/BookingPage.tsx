@@ -247,6 +247,7 @@ function BookingFlow({
                 Your details
               </FocusHeading>
               <BookingForm
+                allowGuests={event.allowGuests}
                 questions={event.questions}
                 values={values}
                 onChange={(next) => {

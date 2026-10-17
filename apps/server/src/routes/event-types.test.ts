@@ -120,6 +120,7 @@ describe.skipIf(!serverUrl)('event type routes', () => {
       questions: [{ id: 'company', label: 'Company', type: 'short_text', required: false }],
       isActive: true,
       isHidden: false,
+      allowGuests: false,
       position: 0,
       scheduleId: null,
       createdAt: expect.stringMatching(/Z$/),
@@ -163,6 +164,31 @@ describe.skipIf(!serverUrl)('event type routes', () => {
         message: 'Another event type on this page already uses this slug',
       },
     })
+  })
+
+  it('defaults guest recipients off and persists explicit opt-in through REST', async () => {
+    const user = await createTestUser(t.db)
+    const created = await api(user).post('/api/v1/event-types', body())
+    expect(created).toMatchObject({ status: 201, body: { allowGuests: false } })
+    const id = idOf(created)
+    expect(await api(user).patch(`/api/v1/event-types/${id}`, { allowGuests: true })).toMatchObject(
+      { status: 200, body: { allowGuests: true } },
+    )
+    expect(
+      (await api(user).patch(`/api/v1/event-types/${id}`, { title: 'Renamed' })).body,
+    ).toMatchObject({ allowGuests: true })
+    expect((await api(user).get(`/api/v1/event-types/${id}`)).body).toMatchObject({
+      allowGuests: true,
+    })
+    for (const allowGuests of [null, 'true', 0, {}, []]) {
+      expect((await api(user).patch(`/api/v1/event-types/${id}`, { allowGuests })).status).toBe(400)
+      expect(
+        (await api(user).post('/api/v1/event-types', body({ slug: 'bad', allowGuests }))).status,
+      ).toBe(400)
+    }
+    expect(
+      (await api(user).patch(`/api/v1/event-types/${id}`, { allowGuests: false })).body,
+    ).toMatchObject({ allowGuests: false })
   })
 
   it('persists hidden state through REST reads and unrelated edits, and rejects invalid shapes', async () => {

@@ -45,6 +45,7 @@ const EventTypeSummary = z.object({
   schedulingType: z.enum(['individual', 'round_robin', 'collective']),
   isActive: z.boolean(),
   isHidden: z.boolean(),
+  allowGuests: z.boolean(),
   position: z.number().int(),
 })
 const ScheduleSummary = z.object({

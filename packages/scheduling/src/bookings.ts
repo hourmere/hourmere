@@ -682,9 +682,16 @@ async function publicBooking(
       }
       // The event type may have changed while we waited (duration, questions, rules), and
       // waiting took time: read both again now that the host is locked.
-      const current = await resolve(trx, input.handle, input.slug)
+      const current = await resolve(trx, input.handle, input.slug, { lock: true })
       if (!current || current.id !== et.id || current.hostUserId !== et.hostUserId) {
         throw eventTypeNotFound()
+      }
+      if (guests.length > 0 && !current.allowGuests) {
+        throw new DomainError(
+          'invalid',
+          'guests_not_allowed',
+          'This event type does not allow guests',
+        )
       }
       const now = ctx.now()
       const responses = validateResponses(current.questions, input.responses ?? {})
