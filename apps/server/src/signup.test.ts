@@ -162,7 +162,7 @@ describe.skipIf(!serverUrl)('sign-up control', () => {
   function expectSignupDisabled(res: Response) {
     expect(res.status).toBe(302)
     const location = new URL(res.headers.get('location') as string)
-    expect(`${location.origin}${location.pathname}`).toBe(`${origin}/`)
+    expect(`${location.origin}${location.pathname}`).toBe(`${origin}/sign-in`)
     expect(location.searchParams.get('error')).toBe('SIGNUP_DISABLED')
     expect(hasSession(res)).toBe(false)
   }

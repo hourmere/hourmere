@@ -12,7 +12,7 @@ import { API_KEY_RATE_LIMIT } from './api-keys.ts'
 import { API_KEY_PREFIX } from './caller.ts'
 import { beforeHook } from './hooks.ts'
 import { betterAuthLog, logMailFailure } from './log.ts'
-import { confirmLink } from './magic-link.ts'
+import { confirmLink, SIGN_IN_PATH } from './magic-link.ts'
 import { ensurePersonalOrganization, organizationGuards } from './organizations.ts'
 import { hasAccount, maySignUp, type SignupPolicy, signupConnectionOptions } from './signup.ts'
 
@@ -92,12 +92,6 @@ export interface AuthConfig {
 }
 
 const MAGIC_LINK_MINUTES = 5
-
-/**
- * The web app's sign-in page (apps/web; keep the two in step). It shows a message for the
- * ?error=CODE that Better Auth adds when it sends people back.
- */
-const SIGN_IN_PATH = '/sign-in'
 
 /**
  * The only header Better Auth reads the client IP from (rate limiting, session records).
