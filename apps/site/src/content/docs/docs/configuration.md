@@ -110,3 +110,19 @@ for example `docker compose run --rm --no-deps app npm run db:migrate` while Pos
 already running and application traffic/workers are stopped. Keep the database, signing
 secret and calendar key consistent across all roles. Never commit a rendered Compose config
 containing secrets.
+
+## Queued sign-in emails
+
+All sign-in link requests use the same durable queue path, including addresses that cannot
+register. Workers check the current registration policy, invitations and existing accounts
+before delivery. `HOURMERE_ROLE=web` therefore requires a separate worker for sign-in email.
+The five-minute token lifetime starts when the link is requested, not when a worker sends
+it; expired or consumed links are discarded.
+
+Jobs store only an outbox ID. The outbox encrypts the recipient and fragment URL with a
+purpose-specific key derived from `BETTER_AUTH_SECRET`, and binds the ciphertext to its row
+and `PUBLIC_URL` origin. Delivery removes the row; a worker cleans expired rows every minute.
+Changing the secret or public origin makes pending mail unreadable, so request new links
+after such a change. An SMTP acceptance followed by a lost database commit can produce a
+duplicate copy of the same one-time link. Configure SMTP before inviting others: the log
+mailer still prints delivered links, and anyone reading them can sign in.

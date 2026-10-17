@@ -197,7 +197,18 @@ out, and nothing of ours references its tables.
    `packages/auth/auth-schema.generated.sql`; prefix it with
    `SET LOCAL search_path TO auth, public;` and save it as the next migration.
 
-### Guest recipients
+## Sign-in email outbox
+
+`sign_in_emails` is instance-wide authentication delivery state. Every link request writes
+an ID, authenticated ciphertext and the actual verification expiry, then enqueues only that
+ID in the same transaction. No plaintext recipient or link is stored in the outbox/job JSON.
+The worker rechecks token existence/expiry, current signup rules and account/invitation
+eligibility, serializes delivery through the outbox row, and deletes it on success or when
+it cannot be used. A periodic job removes expired rows even if their delivery job was lost.
+The encryption key is derived from the auth secret, separately from calendar encryption;
+row ID and public origin are authenticated associated data.
+
+## Guest recipients
 
 `event_types.allow_guests` is a non-null boolean, default `false` for both new and existing
 event types (migration 0015). Hosts explicitly enable it to let new bookings add up to ten
