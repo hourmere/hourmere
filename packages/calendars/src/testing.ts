@@ -3,6 +3,7 @@ import type { Principal } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
 import { createTestUser } from '../../scheduling/src/testing.ts'
 import { createGoogleCalendarClient, GOOGLE_CALENDAR_SCOPES } from './google.ts'
+import { createMicrosoftCalendarClient } from './microsoft.ts'
 
 export const TEST_CALENDAR_KEY = Buffer.alloc(32, 7).toString('base64')
 export const TEST_PUBLIC_URL = 'http://localhost:5173'
@@ -114,6 +115,68 @@ export function fakeGoogle() {
       {
         clientId: 'fake-calendar-client',
         clientSecret: 'fake-client-secret',
+        publicUrl: TEST_PUBLIC_URL,
+      },
+      request,
+    ),
+  }
+}
+
+/** Fake Microsoft responses through the actual OAuth/Graph adapter. */
+export function fakeMicrosoft() {
+  const controls = {
+    token: {
+      access_token: 'fake-microsoft-access',
+      refresh_token: 'fake-microsoft-refresh',
+      expires_in: 3600,
+      token_type: 'Bearer',
+      scope: 'openid email Calendars.ReadBasic',
+    } as Record<string, unknown>,
+    tokenStatus: 200,
+    identity: { sub: 'microsoft-account-1', email: 'outlook@example.com' } as Record<
+      string,
+      unknown
+    >,
+    pages: [
+      {
+        value: [
+          {
+            id: 'microsoft-calendar-1',
+            name: 'Outlook calendar',
+            isDefaultCalendar: true,
+            canEdit: true,
+            canViewPrivateItems: true,
+          },
+        ],
+      },
+    ] as Record<string, unknown>[],
+    listStatus: 200,
+    listHook: undefined as ((url: URL) => Promise<Response>) | undefined,
+  }
+  const calls: { url: URL; init: RequestInit }[] = []
+  const request: typeof fetch = async (input, init = {}) => {
+    const url = new URL(String(input))
+    calls.push({ url, init })
+    if (url.href === 'https://login.microsoftonline.com/common/oauth2/v2.0/token')
+      return Response.json(controls.token, { status: controls.tokenStatus })
+    if (url.href === 'https://graph.microsoft.com/oidc/userinfo')
+      return Response.json(controls.identity)
+    if (url.origin === 'https://graph.microsoft.com' && url.pathname === '/v1.0/me/calendars') {
+      if (controls.listHook) return controls.listHook(url)
+      return Response.json(
+        controls.pages[Number(url.searchParams.get('$skiptoken') ?? '0')] ?? {},
+        { status: controls.listStatus },
+      )
+    }
+    throw new Error('Unexpected provider endpoint')
+  }
+  return {
+    controls,
+    calls,
+    client: createMicrosoftCalendarClient(
+      {
+        clientId: 'fake-microsoft-client',
+        clientSecret: 'fake-microsoft-secret',
         publicUrl: TEST_PUBLIC_URL,
       },
       request,

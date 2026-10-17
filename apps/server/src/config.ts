@@ -86,6 +86,8 @@ const schema = z
     ),
     MICROSOFT_CLIENT_ID: optional(z.string()),
     MICROSOFT_CLIENT_SECRET: optional(z.string()),
+    MICROSOFT_CALENDAR_CLIENT_ID: optional(z.string().trim().min(1)),
+    MICROSOFT_CALENDAR_CLIENT_SECRET: optional(z.string().trim().min(1)),
     // Who may create an account; existing users can always sign in. first-user suits a
     // self-hosted instance: whoever signs in first, then only SIGNUP_ALLOWED_DOMAINS.
     SIGNUP: z.preprocess(
@@ -160,6 +162,33 @@ const schema = z
     ).transform((v) => v ?? 'all'),
   })
   .superRefine((c, ctx) => {
+    if (c.MICROSOFT_CALENDAR_CLIENT_ID || c.MICROSOFT_CALENDAR_CLIENT_SECRET) {
+      for (const key of [
+        'MICROSOFT_CALENDAR_CLIENT_ID',
+        'MICROSOFT_CALENDAR_CLIENT_SECRET',
+        'CALENDAR_ENCRYPTION_KEY',
+      ] as const) {
+        if (!c[key])
+          ctx.addIssue({
+            code: 'custom',
+            path: [key],
+            message:
+              'Microsoft Calendar requires MICROSOFT_CALENDAR_CLIENT_ID, MICROSOFT_CALENDAR_CLIENT_SECRET and CALENDAR_ENCRYPTION_KEY together',
+          })
+      }
+      if (c.PUBLIC_URL) {
+        const url = new URL(c.PUBLIC_URL)
+        if (
+          url.protocol !== 'https:' &&
+          !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)
+        )
+          ctx.addIssue({
+            code: 'custom',
+            path: ['PUBLIC_URL'],
+            message: 'Microsoft Calendar requires HTTPS except on loopback development hosts',
+          })
+      }
+    }
     if (c.GOOGLE_CALENDAR_CLIENT_ID || c.GOOGLE_CALENDAR_CLIENT_SECRET) {
       for (const key of [
         'GOOGLE_CALENDAR_CLIENT_ID',

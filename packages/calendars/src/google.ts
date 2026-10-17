@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { isSingleLineText } from '@hourmere/scheduling/text'
 import { z } from 'zod'
 import { googleEventMethods } from './google-events.ts'
+import { CalendarProviderError, type CalendarTokens, type ProviderCalendar } from './provider.ts'
 
 export const GOOGLE_CALENDAR_CALLBACK = '/api/calendar/google/callback'
 export const GOOGLE_CALENDAR_SCOPES = [
@@ -15,17 +16,13 @@ export const GOOGLE_CALENDAR_SYNC_SCOPES = [
   'https://www.googleapis.com/auth/calendar.events.owned',
 ] as const
 
-export class GoogleCalendarError extends Error {
-  readonly code: 'provider_unavailable' | 'needs_reauth' | 'permissions_missing'
-  readonly status: number | undefined
+export class GoogleCalendarError extends CalendarProviderError {
   constructor(
     code: 'provider_unavailable' | 'needs_reauth' | 'permissions_missing',
     status?: number,
   ) {
-    super(code)
+    super(code, status)
     this.name = 'GoogleCalendarError'
-    this.code = code
-    this.status = status
   }
 }
 
@@ -59,19 +56,8 @@ const calendarPage = z.object({
     .max(250)
     .optional(),
 })
-export interface GoogleTokens {
-  accessToken: string
-  refreshToken?: string | undefined
-  expiresAt: number
-  scopes?: string[] | undefined
-}
-export interface GoogleCalendar {
-  id: string
-  name: string
-  isPrimary: boolean
-  accessRole: 'freeBusyReader' | 'reader' | 'writer' | 'writerWithoutPrivateAccess' | 'owner'
-  timeZone: string | null
-}
+export type GoogleTokens = CalendarTokens
+export type GoogleCalendar = ProviderCalendar
 export interface GoogleCalendarConfig {
   clientId: string
   clientSecret: string

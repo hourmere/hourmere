@@ -38,6 +38,7 @@ export default defineConfig({
         { label: 'REST quickstart', link: '/docs/rest' },
         { label: 'MCP quickstart', link: '/docs/mcp' },
         { label: 'Google Calendar', link: '/docs/google-calendar' },
+        { label: 'Microsoft Calendar', link: '/docs/microsoft-calendar' },
       ],
       customCss: ['@fontsource-variable/manrope', './src/styles/starlight.css'],
       components: { Footer: './src/components/DocsFooter.astro' },

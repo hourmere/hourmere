@@ -217,6 +217,7 @@ export interface CalendarOauthStates {
   claimed: Generated<boolean>;
   created_at: Generated<Timestamp>;
   expires_at: Timestamp;
+  provider: Generated<string>;
   session_id: string;
   state_hash: string;
   user_id: string;
