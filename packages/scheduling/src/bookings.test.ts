@@ -7,6 +7,7 @@ import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
   type Booking,
+  type BookingOrigin,
   type CreateBookingInput,
   cancelHostBooking,
   cancelManagedBooking,
@@ -57,14 +58,27 @@ describe.skipIf(!serverUrl)('bookings', () => {
       location: { kind: 'phone', number: '+49 30 1234567' },
       ...eventType,
     })
-    const book = (start: string, more: Partial<CreateBookingInput> = {}, c = ctx) =>
-      createPublicBooking(c, {
-        handle: host.handle,
-        slug: 'intro',
-        start: instant(start),
-        invitee: { name: 'Grace Hopper', email: 'grace@example.com', timeZone: 'America/New_York' },
-        ...more,
-      })
+    const book = (
+      start: string,
+      more: Partial<CreateBookingInput> = {},
+      c = ctx,
+      origin?: BookingOrigin,
+    ) =>
+      createPublicBooking(
+        c,
+        {
+          handle: host.handle,
+          slug: 'intro',
+          start: instant(start),
+          invitee: {
+            name: 'Grace Hopper',
+            email: 'grace@example.com',
+            timeZone: 'America/New_York',
+          },
+          ...more,
+        },
+        origin,
+      )
     return { ...host, eventTypeId, book }
   }
 
@@ -588,6 +602,168 @@ describe.skipIf(!serverUrl)('bookings', () => {
     })
   })
 
+  describe('change attribution', () => {
+    const audit = (id: string) =>
+      db
+        .selectFrom('bookings')
+        .select(['source', 'api_key_id', 'cancelled_source', 'cancelled_api_key_id'])
+        .where('id', '=', id)
+        .executeTakeFirstOrThrow()
+    const hostContext = (
+      s: Awaited<ReturnType<typeof setup>>,
+      apiKeyId?: string,
+    ): ServiceContext => ({
+      ...ctx,
+      principal: {
+        ...(apiKeyId
+          ? { kind: 'api_key' as const, apiKeyId }
+          : { kind: 'session' as const, sessionId: 'session' }),
+        user: { id: s.userId, name: '', email: '' },
+        organization: { id: s.organizationId, name: '', slug: '', personal: true },
+      },
+    })
+
+    it('keeps creation attribution when the invitee cancels on the web', async () => {
+      const s = await setup()
+      const creator = crypto.randomUUID()
+      const { booking, manageToken } = await s.book('2026-11-02T10:00Z', {}, ctx, {
+        source: 'mcp',
+        apiKeyId: creator,
+      })
+      const cancelled = await cancelManagedBooking(ctx, manageToken as string)
+      expect(await audit(booking.id)).toEqual({
+        source: 'mcp',
+        api_key_id: creator,
+        cancelled_source: 'web',
+        cancelled_api_key_id: null,
+      })
+      expect(cancelled.source).toBe('mcp')
+      for (const field of [
+        'apiKeyId',
+        'cancelledSource',
+        'cancelledApiKeyId',
+        'cancelled_source',
+        'cancelled_api_key_id',
+      ]) {
+        expect(cancelled).not.toHaveProperty(field)
+      }
+      expect(JSON.stringify(await getManagedBooking(ctx, manageToken as string))).not.toContain(
+        creator,
+      )
+    })
+
+    it(
+      'records only the winning cancellation when different callers race',
+      SERIALIZED,
+      async () => {
+        const s = await setup()
+        const { booking, manageToken } = await s.book('2026-11-02T10:00Z')
+        const origins: BookingOrigin[] = [
+          { source: 'mcp', apiKeyId: crypto.randomUUID() },
+          { source: 'api', apiKeyId: crypto.randomUUID() },
+        ]
+        const results = await Promise.allSettled(
+          origins.map((origin) => cancelManagedBooking(ctx, manageToken as string, {}, origin)),
+        )
+        expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1)
+        expect(results.find((r) => r.status === 'rejected')).toMatchObject({
+          reason: { code: 'booking_cancelled' },
+        })
+        const winner = origins[results.findIndex((r) => r.status === 'fulfilled')] as BookingOrigin
+        expect(await audit(booking.id)).toEqual({
+          source: 'web',
+          api_key_id: null,
+          cancelled_source: winner.source,
+          cancelled_api_key_id: winner.apiKeyId,
+        })
+      },
+    )
+
+    it('attributes a reschedule withdrawal and its new booking to that caller', async () => {
+      const s = await setup()
+      const creator = crypto.randomUUID()
+      const mover = crypto.randomUUID()
+      const { booking: old, manageToken } = await s.book('2026-11-02T10:00Z', {}, ctx, {
+        source: 'mcp',
+        apiKeyId: creator,
+      })
+      const moved = await rescheduleManagedBooking(
+        ctx,
+        manageToken as string,
+        { start: instant('2026-11-02T11:00Z') },
+        { source: 'api', apiKeyId: mover },
+      )
+      expect(await audit(old.id)).toEqual({
+        source: 'mcp',
+        api_key_id: creator,
+        cancelled_source: 'api',
+        cancelled_api_key_id: mover,
+      })
+      expect(await audit(moved.booking.id)).toEqual({
+        source: 'api',
+        api_key_id: mover,
+        cancelled_source: null,
+        cancelled_api_key_id: null,
+      })
+      await cancelManagedBooking(ctx, moved.manageToken as string)
+      expect(await audit(moved.booking.id)).toEqual({
+        source: 'api',
+        api_key_id: mover,
+        cancelled_source: 'web',
+        cancelled_api_key_id: null,
+      })
+    })
+
+    it.each(['session', 'api', 'mcp'] as const)(
+      'attributes a host cancellation through %s',
+      async (via) => {
+        const s = await setup()
+        const { booking } = await s.book('2026-11-02T10:00Z')
+        const key = crypto.randomUUID()
+        await cancelHostBooking(
+          hostContext(s, via === 'session' ? undefined : key),
+          booking.id,
+          {},
+          via === 'mcp' ? { source: 'mcp', apiKeyId: key } : undefined,
+        )
+        expect(await audit(booking.id)).toEqual({
+          source: 'web',
+          api_key_id: null,
+          cancelled_source: via === 'session' ? 'web' : via,
+          cancelled_api_key_id: via === 'session' ? null : key,
+        })
+      },
+    )
+
+    it('rejects inconsistent audit data while preserving unknown legacy cancellations', async () => {
+      const s = await setup()
+      const { booking } = await s.book('2026-11-02T10:00Z')
+      const key = crypto.randomUUID()
+      for (const values of [
+        { cancelled_source: 'web' },
+        { status: 'cancelled', cancelled_source: 'unknown' },
+        { status: 'cancelled', cancelled_source: null, cancelled_api_key_id: key },
+        { status: 'cancelled', cancelled_source: 'web', cancelled_api_key_id: key },
+        { status: 'cancelled', cancelled_source: 'embed', cancelled_api_key_id: key },
+      ]) {
+        await expect(
+          db.updateTable('bookings').set(values).where('id', '=', booking.id).execute(),
+        ).rejects.toMatchObject({ code: '23514' })
+      }
+      await db
+        .updateTable('bookings')
+        .set({ status: 'cancelled', cancelled_at: NOW.toString() })
+        .where('id', '=', booking.id)
+        .execute()
+      expect(await audit(booking.id)).toEqual({
+        source: 'web',
+        api_key_id: null,
+        cancelled_source: null,
+        cancelled_api_key_id: null,
+      })
+    })
+  })
+
   describe('notifying', () => {
     /**
      * A notifier that records each event, with whether it was called inside a transaction
@@ -785,18 +961,31 @@ describe.skipIf(!serverUrl)('bookings', () => {
       ).toBe(0)
 
       const { booking, manageToken } = await s.book('2026-11-02T10:00:00Z')
+      const origin: BookingOrigin = { source: 'mcp', apiKeyId: crypto.randomUUID() }
       await expect(
-        rescheduleManagedBooking(failing, manageToken as string, {
-          start: instant('2026-11-02T13:00:00Z'),
-        }),
+        rescheduleManagedBooking(
+          failing,
+          manageToken as string,
+          {
+            start: instant('2026-11-02T13:00:00Z'),
+          },
+          origin,
+        ),
       ).rejects.toThrow('queue is down')
-      await expect(cancelManagedBooking(failing, manageToken as string)).rejects.toThrow(
-        'queue is down',
-      )
       await expect(
-        cancelHostBooking(hostContext(s.userId, s.organizationId, failing), booking.id),
+        cancelManagedBooking(failing, manageToken as string, {}, origin),
+      ).rejects.toThrow('queue is down')
+      await expect(
+        cancelHostBooking(hostContext(s.userId, s.organizationId, failing), booking.id, {}, origin),
       ).rejects.toThrow('queue is down')
       expect(await getManagedBooking(ctx, manageToken as string)).toEqual(booking)
+      expect(
+        await db
+          .selectFrom('bookings')
+          .select(['cancelled_source', 'cancelled_api_key_id'])
+          .where('id', '=', booking.id)
+          .executeTakeFirstOrThrow(),
+      ).toEqual({ cancelled_source: null, cancelled_api_key_id: null })
       expect(
         await count('SELECT count(*)::int AS n FROM bookings WHERE event_type_id = $1', [
           s.eventTypeId,

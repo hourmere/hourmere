@@ -430,6 +430,22 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
           await call('cancel_booking', { manageToken: moved.manageToken, reason: 'Plans changed' }),
         )
         expect(cancelled).toMatchObject({ status: 'cancelled', cancelReason: 'Plans changed' })
+        const attribution = await db
+          .selectFrom('bookings')
+          .select(['id', 'source', 'api_key_id', 'cancelled_source', 'cancelled_api_key_id'])
+          .where('id', 'in', [booked.booking.id, moved.booking.id])
+          .execute()
+        expect(attribution).toEqual(
+          expect.arrayContaining(
+            [booked.booking.id, moved.booking.id].map((id) => ({
+              id,
+              source: 'mcp',
+              api_key_id: agent.keyId,
+              cancelled_source: 'mcp',
+              cancelled_api_key_id: agent.keyId,
+            })),
+          ),
+        )
         const twice = await call('cancel_booking', { manageToken: moved.manageToken })
         expect(errorOf(twice).error).toBe('booking_cancelled')
         const unknown = await call('cancel_booking', { manageToken: 'x'.repeat(43) })
@@ -464,6 +480,87 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
         await call('cancel_booking', { bookingId: booked.booking.id }, adaKey.key),
       )
       expect(cancelled).toMatchObject({ id: booked.booking.id, status: 'cancelled' })
+      expect(
+        await db
+          .selectFrom('bookings')
+          .select(['source', 'api_key_id', 'cancelled_source', 'cancelled_api_key_id'])
+          .where('id', '=', booked.booking.id)
+          .executeTakeFirstOrThrow(),
+      ).toEqual({
+        source: 'mcp',
+        api_key_id: agent.keyId,
+        cancelled_source: 'mcp',
+        cancelled_api_key_id: adaKey.keyId,
+      })
+    })
+
+    it('records the cancelling MCP key on a web booking, retaining it after key deletion', async () => {
+      const response = await app.request('/api/v1/public/ada/intro/bookings', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          start: '2026-11-03T10:00:00Z',
+          invitee: { name: 'Grace Hopper', email: 'grace@example.com', timeZone: 'UTC' },
+          responses: { topic: 'Compilers' },
+        }),
+      })
+      expect(response.status).toBe(201)
+      const booked = (await response.json()) as Booked
+      const key = await createKey(agent.userId, 'cancellation audit')
+      const cancelled = ok<Record<string, unknown>>(
+        await call('cancel_booking', { manageToken: booked.manageToken }, key.key),
+      )
+      expect(cancelled).toMatchObject({ id: booked.booking.id, status: 'cancelled', source: 'web' })
+      for (const field of [
+        'apiKeyId',
+        'cancelledSource',
+        'cancelledApiKeyId',
+        'cancelled_source',
+        'cancelled_api_key_id',
+      ]) {
+        expect(cancelled).not.toHaveProperty(field)
+      }
+      expect(JSON.stringify(cancelled)).not.toContain(key.keyId)
+      await testDb.pool.query('DELETE FROM auth.apikey WHERE id = $1', [key.keyId])
+      expect(
+        await db
+          .selectFrom('bookings')
+          .select(['source', 'api_key_id', 'cancelled_source', 'cancelled_api_key_id'])
+          .where('id', '=', booked.booking.id)
+          .executeTakeFirstOrThrow(),
+      ).toEqual({
+        source: 'web',
+        api_key_id: null,
+        cancelled_source: 'mcp',
+        cancelled_api_key_id: key.keyId,
+      })
+    })
+
+    it('records api rather than mcp when the host cancels through REST', async () => {
+      const booked = ok<Booked>(await call('create_booking', bookingArgs('2026-11-03T11:00:00Z')))
+      const response = await app.request(`/api/v1/bookings/${booked.booking.id}/cancel`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${adaKey.key}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ reason: 'Host cancelled through REST' }),
+      })
+      expect(response.status).toBe(200)
+      expect(await response.json()).toMatchObject({
+        id: booked.booking.id,
+        status: 'cancelled',
+        source: 'mcp',
+      })
+      expect(
+        await db
+          .selectFrom('bookings')
+          .select(['source', 'api_key_id', 'cancelled_source', 'cancelled_api_key_id'])
+          .where('id', '=', booked.booking.id)
+          .executeTakeFirstOrThrow(),
+      ).toEqual({
+        source: 'mcp',
+        api_key_id: agent.keyId,
+        cancelled_source: 'api',
+        cancelled_api_key_id: adaKey.keyId,
+      })
     })
 
     it('needs exactly one of bookingId and manageToken to cancel', async () => {

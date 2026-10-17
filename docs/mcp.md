@@ -145,6 +145,8 @@ fields are those of the REST API (`/api/v1/openapi.json`). Results come as
   `replayed: true` and `manageToken: null`; the same key with other arguments fails with
   `idempotency_key_reused`. Keys are scoped to your API key. Rescheduling is not idempotent.
 - Bookings made through MCP are recorded with source `mcp` and the API key used.
+  Cancellation and reschedule withdrawals keep their own source/key attribution without
+  replacing the original creation attribution, including invitee manage-token calls.
 
 ## Errors
 

@@ -283,10 +283,20 @@ export function bookingTools({
     },
     async run(args, call) {
       if (args.bookingId !== undefined) {
-        return cancelHostBooking(context(call.caller), args.bookingId, { reason: args.reason })
+        return cancelHostBooking(
+          context(call.caller),
+          args.bookingId,
+          { reason: args.reason },
+          origin(call.caller),
+        )
       }
       call.rateLimit(manageLimit)
-      return cancelManagedBooking(pub, args.manageToken, { reason: args.reason })
+      return cancelManagedBooking(
+        pub,
+        args.manageToken,
+        { reason: args.reason },
+        origin(call.caller),
+      )
     },
   })
 
