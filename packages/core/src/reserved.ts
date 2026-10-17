@@ -14,6 +14,9 @@ export const RESERVED_NAMES: ReadonlySet<string> = new Set([
   // manage page, and today's top-level app routes.
   'app',
   'booking',
+  'book',
+  'manage',
+  'me',
   'bookings',
   'event-types',
   'availability',
@@ -50,6 +53,8 @@ export const RESERVED_NAMES: ReadonlySet<string> = new Set([
   'verify',
   // Server paths: the API, Better Auth, the MCP endpoint, the web app's bundles.
   'api',
+  'health',
+  'webhooks',
   'auth',
   'oauth',
   'mcp',
