@@ -16,7 +16,8 @@ export function embedOrigin(value: string): string | undefined {
     url.search ||
     url.hash ||
     url.origin === 'null' ||
-    url.hostname.includes('*')
+    url.hostname.includes('*') ||
+    url.hostname.includes('%')
   )
     return undefined
   if (

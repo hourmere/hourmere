@@ -63,6 +63,38 @@ describe('standalone booking widget', () => {
   ])('refuses unsafe or sensitive URL %s', (raw) =>
     expect(() => iframeUrl(raw, window.location.origin, 'abcdefghijklmnop')).toThrow(),
   )
+  it('rejects wildcard hosts that browser URL parsers expose as percent escapes', () => {
+    // Chrome 155 represents wildcard hosts as %2A; Node 26 exposes a literal *.
+    // Preserve that independently observed browser representation in the DOM regression.
+    const NativeURL = URL
+    class BrowserURL extends NativeURL {
+      override get hostname() {
+        return super.hostname.replaceAll('*', '%2A')
+      }
+      override get origin() {
+        return super.origin.replaceAll('*', '%2A')
+      }
+    }
+    vi.stubGlobal('URL', BrowserURL)
+    try {
+      expect(() => iframeUrl(url, window.location.origin, 'abcdefghijklmnop')).not.toThrow()
+      for (const origin of [
+        'https://*',
+        'https://*.example.invalid',
+        'https://%2a',
+        'https://%2A.example.invalid',
+        'https://＊.example.invalid',
+        'https://%EF%BC%8A.example.invalid',
+        'https://foo.%2a.example.invalid',
+        'https://＊。example.invalid',
+      ])
+        expect(() =>
+          iframeUrl(`${origin}/ada/intro`, window.location.origin, 'abcdefghijklmnop'),
+        ).toThrow()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
   it('accepts resize/completion only from the exact frame, origin and instance', () => {
     const a = mount(),
       b = mount(),
