@@ -38,7 +38,7 @@ standing GET event stream. Authentication failures return HTTP 401; rate limits 
 | `whoami` | No arguments; shows the key's user, organization and key ID. |
 | `find_available_slots` | A booking page's `handle`, `slug`, `startDate`, `endDate`, `timeZone`; returns event details and slots. Dates span at most 62 days inclusive. |
 | `create_booking` | `handle`, `slug`, a returned slot's `start`, `invitee`, and an optional `idempotencyKey`; returns the booking and manage token. |
-| `reschedule_booking` | `manageToken` and new `start`; returns a replacement booking and token. |
+| `reschedule_booking` | Exactly one of hosted `bookingId` or invitee `manageToken`, plus new `start`; returns a replacement booking and token. |
 | `cancel_booking` | Either a hosted `bookingId` or an invitee `manageToken`; cancels the booking. |
 | `list_bookings` | Lists bookings hosted by the key owner in its organization, with pagination. `order` defaults to `asc`; use `desc` for newest first and keep it unchanged between pages. |
 
