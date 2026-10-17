@@ -265,12 +265,111 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
           handle: 'ada',
           slug: 'intro',
           timeZone: 'America/New_York',
+          maxSlots: 500,
           startDate: '2026-10-02',
           endDate: '2026-12-02',
         }),
       )
       expect(result.slots.length).toBeGreaterThan(100)
       expect(result.slots.at(-1)?.start.startsWith('2026-12-02')).toBe(true)
+    })
+
+    it('bounds both structured and text slot results by default and returns a continuation', async () => {
+      const raw = await call('find_available_slots', {
+        handle: 'ada',
+        slug: 'intro',
+        timeZone: 'Europe/Berlin',
+        startDate: '2026-11-02',
+        endDate: '2027-01-01',
+      })
+      const result = ok<{ slots: { start: string }[]; nextAfter: string | null }>(raw)
+      expect(result.slots).toHaveLength(100)
+      expect(result.nextAfter).toBe(result.slots.at(-1)?.start)
+      const text = JSON.parse((raw.content as { text: string }[])[0]?.text ?? 'null')
+      expect(text).toEqual(result)
+      expect(JSON.stringify(raw).length).toBeLessThan(50_000)
+    })
+
+    it.each([7, 16])(
+      'paginates in pages of %s without gaps and terminates at the end',
+      async (limit) => {
+        const query = {
+          handle: 'ada',
+          slug: 'intro',
+          timeZone: 'Europe/Berlin',
+          startDate: '2026-11-02',
+          endDate: '2026-11-06',
+        }
+        type Page = {
+          slots: { start: string; end: string; localStart: string; localEnd: string }[]
+          nextAfter: string | null
+        }
+        const all = ok<Page>(await call('find_available_slots', { ...query, maxSlots: 500 }))
+        expect(all.nextAfter).toBeNull()
+        expect(all.slots.length).toBeGreaterThan(7)
+        const collected: Page['slots'] = []
+        let after: string | undefined
+        for (let count = 0; count < 20; count++) {
+          const page = ok<Page>(
+            await call('find_available_slots', {
+              ...query,
+              maxSlots: limit,
+              ...(after && { after }),
+            }),
+          )
+          expect(page.slots.length).toBeLessThanOrEqual(limit)
+          collected.push(...page.slots)
+          if (page.nextAfter === null) break
+          expect(page.nextAfter).toBe(page.slots.at(-1)?.start)
+          expect(page.nextAfter).not.toBe(after)
+          after = page.nextAfter
+        }
+        expect(collected).toEqual(all.slots)
+        const empty = ok<Page>(
+          await call('find_available_slots', { ...query, after: '2026-11-07T00:00:00Z' }),
+        )
+        expect(empty.slots).toEqual([])
+        expect(empty.nextAfter).toBeNull()
+      },
+    )
+
+    it('compares continuation instants by time rather than their UTC-offset spelling', async () => {
+      const query = {
+        handle: 'ada',
+        slug: 'intro',
+        timeZone: 'Europe/Berlin',
+        startDate: '2026-11-02',
+        endDate: '2026-11-02',
+        maxSlots: 3,
+      }
+      type Page = { slots: { start: string }[]; nextAfter: string }
+      const first = ok<Page>(await call('find_available_slots', query))
+      const after = Temporal.Instant.from(first.nextAfter)
+        .toZonedDateTimeISO('Asia/Tokyo')
+        .toString({ timeZoneName: 'never' })
+      const offset = ok<Page>(await call('find_available_slots', { ...query, after }))
+      const utc = ok<Page>(await call('find_available_slots', { ...query, after: first.nextAfter }))
+      expect(offset).toEqual(utc)
+      expect(offset.slots[0]?.start).toBe('2026-11-02T09:30:00.000Z')
+    })
+
+    it.each([
+      [{ maxSlots: 0 }],
+      [{ maxSlots: 501 }],
+      [{ maxSlots: 1.5 }],
+      [{ maxSlots: '10' }],
+      [{ after: 'not-an-instant' }],
+      [{ after: '2026-11-02' }],
+    ])('refuses invalid pagination input %j', async (change) => {
+      const result = await call('find_available_slots', {
+        handle: 'ada',
+        slug: 'intro',
+        timeZone: 'Europe/Berlin',
+        startDate: '2026-11-02',
+        endDate: '2026-11-02',
+        ...change,
+      })
+      expect(errorOf(result).error).toBe('invalid_request')
     })
 
     it.each([
