@@ -6,6 +6,7 @@ import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createApp } from '../app.ts'
 import { bookingRoutes } from './bookings.ts'
+import { calendarRoutes } from './calendars.ts'
 import { eventTypeRoutes } from './event-types.ts'
 import { profileRoutes } from './profile.ts'
 import { publicRoutes } from './public.ts'
@@ -48,6 +49,7 @@ export function escapedJson(value: unknown): string {
 
 /** The product route modules, in server.ts's order. */
 export const productRoutes = (db: Db) => [
+  calendarRoutes({ db }),
   profileRoutes({ db }),
   scheduleRoutes({ db }),
   eventTypeRoutes({ db }),

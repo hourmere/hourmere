@@ -7,6 +7,7 @@ import {
   BookingDetailPage,
   BookingPage,
   BookingsPage,
+  CalendarsPage,
   EventTypeEditorPage,
   EventTypesPage,
   HostPage,
@@ -53,6 +54,7 @@ export function App() {
               <Route path="availability/:id" element={<ScheduleEditorPage />} />
               <Route path="bookings" element={<BookingsPage />} />
               <Route path="bookings/:id" element={<BookingDetailPage />} />
+              <Route path="calendars" element={<CalendarsPage />} />
               <Route path="api-keys" element={<ApiKeysPage />} />
               <Route path="settings" element={<SettingsPage />} />
               <Route path="*" element={<AppNotFoundPage />} />

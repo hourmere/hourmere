@@ -7,6 +7,7 @@ import {
   createAuthPool,
   createCallerResolver,
 } from '@hourmere/auth'
+import { type CalendarDeps, createGoogleCalendarClient } from '@hourmere/calendars'
 import { createDb, createPool, type Db, runMigrations } from '@hourmere/db'
 import { createJobs } from '@hourmere/jobs'
 import { createLogMailer, createSmtpMailer, type Mailer } from '@hourmere/mail'
@@ -22,6 +23,7 @@ import { whoamiTool } from './mcp/whoami.ts'
 import { installOneLineConsole } from './one-line-console.ts'
 import type { RouteModule } from './openapi.ts'
 import { bookingRoutes } from './routes/bookings.ts'
+import { calendarRoutes } from './routes/calendars.ts'
 import { eventTypeRoutes } from './routes/event-types.ts'
 import { instanceRoutes } from './routes/instance.ts'
 import { profileRoutes } from './routes/profile.ts'
@@ -39,14 +41,17 @@ export function productRoutes({
   db,
   socialProviders,
   notify,
+  googleCalendar,
 }: {
   db: Db
   socialProviders: Config['socialProviders']
   /** Queues booking emails in the booking's transaction (the OpenAPI document needs none). */
   notify?: BookingNotifier | undefined
+  googleCalendar?: CalendarDeps['google']
 }): RouteModule[] {
   return [
     instanceRoutes({ socialProviders }),
+    calendarRoutes({ db, google: googleCalendar }),
     profileRoutes({ db }),
     scheduleRoutes({ db }),
     eventTypeRoutes({ db }),
@@ -176,7 +181,24 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
       trustedProxies: config.trustedProxies,
       webDist: config.WEB_DIST,
       // db is closed below.
-      routes: productRoutes({ db, socialProviders: config.socialProviders, notify }),
+      routes: productRoutes({
+        db,
+        socialProviders: config.socialProviders,
+        notify,
+        googleCalendar:
+          config.GOOGLE_CALENDAR_CLIENT_ID &&
+          config.GOOGLE_CALENDAR_CLIENT_SECRET &&
+          config.CALENDAR_ENCRYPTION_KEY
+            ? {
+                client: createGoogleCalendarClient({
+                  clientId: config.GOOGLE_CALENDAR_CLIENT_ID,
+                  clientSecret: config.GOOGLE_CALENDAR_CLIENT_SECRET,
+                  publicUrl: config.PUBLIC_URL,
+                }),
+                encryptionKey: config.CALENDAR_ENCRYPTION_KEY,
+              }
+            : undefined,
+      }),
       mcp: mcpEndpoint({ tools: [whoamiTool, ...bookingTools({ db, notify })] }),
     }).fetch
   }
