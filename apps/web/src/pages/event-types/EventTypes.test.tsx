@@ -156,6 +156,8 @@ describe('creating an event type', () => {
     await user.clear(field('Position'))
     await user.type(field('Position'), '2')
     await user.click(screen.getByRole('checkbox', { name: 'Active: invitees can book it' }))
+    expect(field('Hide from your booking page').checked).toBe(false)
+    await user.click(field('Hide from your booking page'))
     await user.selectOptions(screen.getByLabelText('Where the meeting happens'), 'phone')
     await user.type(field('Your phone number'), '+14155550123')
     await user.selectOptions(screen.getByLabelText('Schedule'), 'Evenings')
@@ -189,6 +191,7 @@ describe('creating an event type', () => {
         scheduleId: OTHER_SCHEDULE_ID,
         position: 2,
         isActive: false,
+        isHidden: true,
       },
     ])
   })
@@ -559,8 +562,37 @@ describe('editing an event type', () => {
         scheduleId: SCHEDULE_ID,
         position: 0,
         isActive: true,
+        isHidden: false,
       },
     ])
+  })
+
+  it('loads and changes hidden state, preserves it on unrelated saves, and keeps the copy link', async () => {
+    const user = userEvent.setup()
+    const api = eventTypeServer([eventType({ isHidden: true })])
+    await openExisting()
+    expect(field('Hide from your booking page').checked).toBe(true)
+    expect(screen.getByText(/Anyone with the direct link can still book it/)).toBeDefined()
+    await user.clear(field('Title'))
+    await user.type(field('Title'), 'Unlisted call')
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    await screen.findByText('Saved.')
+    expect(api.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`)[0]?.body).toMatchObject({
+      isHidden: true,
+    })
+    await user.click(screen.getByRole('link', { name: 'Back to event types' }))
+    expect(await screen.findByText('Unlisted')).toBeDefined()
+    await user.click(screen.getByRole('button', { name: 'Copy link for Unlisted call' }))
+    expect(await navigator.clipboard.readText()).toBe(`${window.location.origin}/ada/intro-call`)
+    await user.click(screen.getByRole('link', { name: 'Edit Unlisted call' }))
+    await screen.findByRole('heading', { name: 'Edit “Unlisted call”' })
+    await user.click(field('Hide from your booking page'))
+    expect(screen.getByText('Unsaved changes')).toBeDefined()
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    await screen.findByText('Saved.')
+    expect(api.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`)[1]?.body).toMatchObject({
+      isHidden: false,
+    })
   })
 
   it('uses a fresh identity after deleting, saving and re-adding a question with the same label', async () => {

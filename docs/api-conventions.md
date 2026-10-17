@@ -270,3 +270,12 @@ this namespace. Only active, non-deleted `individual` team types with exactly on
 host who is still a member are served. Round-robin and collective modes need their own
 availability/assignment implementation. Team bookings use the same availability rules,
 locks, idempotency scope, notifications and manage links as personal bookings.
+
+### Unlisted event types
+
+Event type writes accept `isHidden` (default `false`). A hidden event type is omitted from
+the host's public event list, while its direct page, slots and booking endpoints continue to
+work when it is active. Anyone who knows or guesses the link can book it; hiding is not
+authentication or access control. Inactive or deleted event types remain unbookable.
+Authenticated REST and MCP catalog reads retain hidden configurations and their `isHidden`
+flag so owners and authorized team members can manage them.

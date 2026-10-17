@@ -3209,6 +3209,8 @@ export interface components {
             id: string;
             /** @description Whether invitees can book it */
             isActive: boolean;
+            /** @description Hidden from public listings; anyone with the direct link can still book it. This is not access control. */
+            isHidden: boolean;
             /** @description Where the meeting happens, by kind; Meet and Zoom links are generated per booking. null = not set. */
             location: {
                 /** @enum {string} */
@@ -3291,6 +3293,11 @@ export interface components {
              * @default true
              */
             isActive: boolean;
+            /**
+             * @description Hidden from public listings; anyone with the direct link can still book it. This is not access control.
+             * @default false
+             */
+            isHidden: boolean;
             /** @description Where the meeting happens, by kind; Meet and Zoom links are generated per booking. null = not set. */
             location?: {
                 /** @enum {string} */
@@ -3364,6 +3371,8 @@ export interface components {
             durationMinutes?: number;
             /** @description Whether invitees can book it */
             isActive?: boolean;
+            /** @description Hidden from public listings; anyone with the direct link can still book it. This is not access control. */
+            isHidden?: boolean;
             /** @description Where the meeting happens, by kind; Meet and Zoom links are generated per booking. null = not set. */
             location?: {
                 /** @enum {string} */

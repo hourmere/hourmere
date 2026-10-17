@@ -75,6 +75,7 @@ describe.skipIf(!serverUrl)('event type service', () => {
         location: null,
         questions: [],
         isActive: true,
+        isHidden: false,
         position: 0,
         scheduleId: null,
         createdAt: expect.stringMatching(/Z$/),

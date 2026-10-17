@@ -175,6 +175,7 @@ function EventTypeTable({
                 )}
               </td>
               <td data-label="Status">
+                {e.isHidden && <span className="badge">Unlisted</span>}
                 {e.isActive ? (
                   <span className="badge badge-success">Active</span>
                 ) : (
