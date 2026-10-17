@@ -7,36 +7,40 @@ const base = {
 }
 
 describe('loadConfig', () => {
-  it('configures calendar OAuth independently of Google sign-in and requires encryption', () => {
-    const calendar = {
-      GOOGLE_CALENDAR_CLIENT_ID: 'calendar-client',
-      GOOGLE_CALENDAR_CLIENT_SECRET: 'calendar-secret',
-      CALENDAR_ENCRYPTION_KEY: Buffer.alloc(32, 8).toString('base64'),
-    }
-    expect(loadConfig({ ...base, ...calendar }).socialProviders).toEqual({})
-    for (const missing of Object.keys(calendar)) {
-      expect(() => loadConfig({ ...base, ...calendar, [missing]: '' })).toThrow(
-        /Google Calendar requires/,
-      )
-    }
-    expect(() =>
-      loadConfig({ ...base, ...calendar, PUBLIC_URL: 'http://app.example.com' }),
-    ).toThrow(/requires HTTPS/)
-    expect(() =>
-      loadConfig({ ...base, ...calendar, CALENDAR_ENCRYPTION_KEY: 'private-invalid-value' }),
-    ).toThrow(/32 random bytes/)
-    expect(() =>
-      loadConfig({ ...base, ...calendar, CALENDAR_ENCRYPTION_KEY: 'private-invalid-value' }),
-    ).not.toThrow(/private-invalid-value/)
-    expect(
-      loadConfig({
-        ...base,
-        GOOGLE_CALENDAR_CLIENT_ID: '',
-        GOOGLE_CALENDAR_CLIENT_SECRET: '',
-        CALENDAR_ENCRYPTION_KEY: '',
-      }).GOOGLE_CALENDAR_CLIENT_ID,
-    ).toBeUndefined()
-  })
+  it.each(['GOOGLE', 'MICROSOFT'] as const)(
+    'configures %s calendar OAuth independently of sign-in and requires encryption',
+    (provider) => {
+      const name = provider === 'GOOGLE' ? 'Google' : 'Microsoft'
+      const calendar = {
+        [`${provider}_CALENDAR_CLIENT_ID`]: 'calendar-client',
+        [`${provider}_CALENDAR_CLIENT_SECRET`]: 'calendar-secret',
+        CALENDAR_ENCRYPTION_KEY: Buffer.alloc(32, 8).toString('base64'),
+      }
+      expect(loadConfig({ ...base, ...calendar }).socialProviders).toEqual({})
+      for (const missing of Object.keys(calendar)) {
+        expect(() => loadConfig({ ...base, ...calendar, [missing]: '' })).toThrow(
+          new RegExp(`${name} Calendar requires`),
+        )
+      }
+      expect(() =>
+        loadConfig({ ...base, ...calendar, PUBLIC_URL: 'http://app.example.com' }),
+      ).toThrow(/requires HTTPS/)
+      expect(() =>
+        loadConfig({ ...base, ...calendar, CALENDAR_ENCRYPTION_KEY: 'private-invalid-value' }),
+      ).toThrow(/32 random bytes/)
+      expect(() =>
+        loadConfig({ ...base, ...calendar, CALENDAR_ENCRYPTION_KEY: 'private-invalid-value' }),
+      ).not.toThrow(/private-invalid-value/)
+      expect(
+        loadConfig({
+          ...base,
+          [`${provider}_CALENDAR_CLIENT_ID`]: '',
+          [`${provider}_CALENDAR_CLIENT_SECRET`]: '',
+          CALENDAR_ENCRYPTION_KEY: '',
+        })[`${provider}_CALENDAR_CLIENT_ID`],
+      ).toBeUndefined()
+    },
+  )
   it('accepts the minimal configuration', () => {
     const c = loadConfig(base)
     expect(c.PUBLIC_URL).toBe('http://localhost:3000')

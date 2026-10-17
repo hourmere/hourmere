@@ -13,40 +13,53 @@ vi.mock('../lazy-pages.tsx', async (importOriginal) => {
   return { ...actual, SettingsPage: lazy(() => new Promise(() => {})) }
 })
 
-it('cancels Google navigation as soon as a route transition starts, even before unmount', async () => {
-  const user = userEvent.setup()
-  let finish: (response: Response) => void = () => {}
-  fakeApi({
-    ...signedIn,
-    'GET /api/v1/calendar-connections': () => json(200, { data: [], googleEnabled: true }),
-    'POST /api/v1/calendar-connections/google/authorize': () =>
-      new Promise<Response>((resolve) => {
-        finish = resolve
-      }),
-  })
-  const initialUrl = window.location.href
-  try {
-    window.history.replaceState({}, '', '/app/calendars')
-    render(
-      <BrowserRouter>
-        <App />
-      </BrowserRouter>,
-    )
-    await user.click(await screen.findByRole('button', { name: 'Connect Google Calendar' }))
-    await user.click(screen.getByRole('link', { name: 'Settings' }))
-    expect(window.location.pathname).toBe('/app/settings')
-    // This is the important case: the old page has not unmounted yet.
-    expect(screen.getByRole('heading', { name: 'Calendars', level: 1 })).toBeDefined()
-    await act(async () => {
-      finish(
+it.each(['google', 'microsoft'] as const)(
+  'cancels %s navigation as soon as a route transition starts, even before unmount',
+  async (provider) => {
+    const name = provider === 'google' ? 'Google' : 'Microsoft'
+    const user = userEvent.setup()
+    let finish: (response: Response) => void = () => {}
+    fakeApi({
+      ...signedIn,
+      'GET /api/v1/calendar-connections': () =>
         json(200, {
-          authorizationUrl: 'https://accounts.google.com/o/oauth2/v2/auth?state=fake-state',
+          data: [],
+          googleEnabled: true,
+          microsoftEnabled: true,
+          destinationCalendarId: null,
         }),
-      )
-      await new Promise((resolve) => setTimeout(resolve, 20))
+      [`POST /api/v1/calendar-connections/${provider}/authorize`]: () =>
+        new Promise<Response>((resolve) => {
+          finish = resolve
+        }),
     })
-    expect(goTo).not.toHaveBeenCalled()
-  } finally {
-    window.history.replaceState({}, '', initialUrl)
-  }
-})
+    const initialUrl = window.location.href
+    try {
+      window.history.replaceState({}, '', '/app/calendars')
+      render(
+        <BrowserRouter>
+          <App />
+        </BrowserRouter>,
+      )
+      await user.click(await screen.findByRole('button', { name: `Connect ${name} Calendar` }))
+      await user.click(screen.getByRole('link', { name: 'Settings' }))
+      expect(window.location.pathname).toBe('/app/settings')
+      // This is the important case: the old page has not unmounted yet.
+      expect(screen.getByRole('heading', { name: 'Calendars', level: 1 })).toBeDefined()
+      await act(async () => {
+        finish(
+          json(200, {
+            authorizationUrl:
+              provider === 'google'
+                ? 'https://accounts.google.com/o/oauth2/v2/auth?state=fake-state'
+                : 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize?state=fake-state',
+          }),
+        )
+        await new Promise((resolve) => setTimeout(resolve, 20))
+      })
+      expect(goTo).not.toHaveBeenCalled()
+    } finally {
+      window.history.replaceState({}, '', initialUrl)
+    }
+  },
+)

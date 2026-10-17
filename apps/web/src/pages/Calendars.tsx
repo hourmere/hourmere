@@ -21,12 +21,18 @@ const outcomes = new Map([
   ['provider_unavailable', 'Google Calendar could not be reached. Try connecting again shortly.'],
   ['session_required', 'Sign in again, then start a new calendar connection.'],
 ])
+const providerName = (connection: Connection) =>
+  connection.provider === 'microsoft' ? 'Microsoft' : 'Google'
+const noticeFor = (search: URLSearchParams) =>
+  outcomes
+    .get(search.get('connection') ?? '')
+    ?.replaceAll('Google', search.get('provider') === 'microsoft' ? 'Microsoft' : 'Google') ?? null
 
 export function CalendarsPage() {
   usePageTitle('Calendars')
   const [state, reload] = useLoad(load)
   const [search, setSearch] = useSearchParams()
-  const [notice, setNotice] = useState(() => outcomes.get(search.get('connection') ?? '') ?? null)
+  const [notice, setNotice] = useState(() => noticeFor(search))
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState<string | null>(null)
   const mounted = useMounted()
@@ -60,19 +66,27 @@ export function CalendarsPage() {
     if (search.has('connection')) setSearch({}, { replace: true })
   }, [search, setSearch])
 
-  async function connect(access: 'list' | 'sync' = 'sync') {
+  async function connect(
+    access: 'list' | 'sync' = 'sync',
+    provider: 'google' | 'microsoft' = 'google',
+  ) {
     connectionRequest.current?.abort()
     const request = new AbortController()
     connectionRequest.current = request
     const startedAt = window.location.pathname + window.location.search
-    setPending('connect')
+    setPending(provider === 'google' ? 'connect' : 'connect-microsoft')
     setError(null)
     try {
       const { authorizationUrl } = await unwrap(
-        api.POST('/api/v1/calendar-connections/google/authorize', {
-          body: { access },
-          signal: request.signal,
-        }),
+        provider === 'google'
+          ? api.POST('/api/v1/calendar-connections/google/authorize', {
+              body: { access },
+              signal: request.signal,
+            })
+          : api.POST('/api/v1/calendar-connections/microsoft/authorize', {
+              body: {},
+              signal: request.signal,
+            }),
       )
       if (
         !mounted.current ||
@@ -81,15 +95,20 @@ export function CalendarsPage() {
       )
         return
       const target = new URL(authorizationUrl)
-      if (
-        target.origin !== 'https://accounts.google.com' ||
-        target.pathname !== '/o/oauth2/v2/auth'
-      )
+      const valid =
+        provider === 'google'
+          ? target.origin === 'https://accounts.google.com' &&
+            target.pathname === '/o/oauth2/v2/auth'
+          : target.origin === 'https://login.microsoftonline.com' &&
+            target.pathname === '/common/oauth2/v2.0/authorize'
+      if (!valid || target.username || target.password || target.hash)
         throw new Error('Invalid authorization endpoint')
       goTo(target.href)
     } catch (err) {
       if (mounted.current && !request.signal.aborted)
-        setError(`Could not connect Google Calendar. ${errorMessage(err)}`)
+        setError(
+          `Could not connect ${provider === 'google' ? 'Google' : 'Microsoft'} Calendar. ${errorMessage(err)}`,
+        )
     } finally {
       if (mounted.current) setPending(null)
     }
@@ -157,7 +176,7 @@ export function CalendarsPage() {
       if (!mounted.current) return
       setNotice(
         disconnect
-          ? 'Google Calendar disconnected. Stored credentials and local calendar data were deleted.'
+          ? `${providerName(connection)} Calendar disconnected. Stored credentials and local calendar data were deleted.`
           : 'Calendar list refreshed.',
       )
       if (disconnect) accountsHeading.current?.focus()
@@ -227,21 +246,55 @@ export function CalendarsPage() {
               to enable it.
             </p>
           )}
+          {state.data.microsoftEnabled ? (
+            <section className="stack" aria-label="Connect Microsoft Calendar">
+              <p>
+                Microsoft will ask for your account identity, continuing access and permission to
+                read basic calendar details. This connection lists your calendars; busy-time
+                synchronization and booking event writes are not yet available. Connecting is
+                separate from signing in.
+              </p>
+              <div>
+                <button
+                  type="button"
+                  className="button button-primary"
+                  disabled={pending !== null}
+                  onClick={() => connect('list', 'microsoft')}
+                >
+                  {pending === 'connect-microsoft'
+                    ? 'Opening Microsoft…'
+                    : 'Connect Microsoft Calendar'}
+                </button>
+              </div>
+            </section>
+          ) : (
+            <p className="alert alert-info">
+              Microsoft Calendar is not configured on this Hourmere instance. Contact its
+              administrator to enable it.
+            </p>
+          )}
           <section className="stack" aria-label="Connected accounts">
             <h2 ref={accountsHeading} tabIndex={-1}>
               Connected accounts
             </h2>
-            {state.data.data.length === 0 && <p>No Google accounts connected yet.</p>}
+            {state.data.data.length === 0 && <p>No calendar accounts connected yet.</p>}
             {state.data.data.map((connection) => (
               <article className="panel stack" key={connection.id}>
-                <h3>{connection.accountEmail ?? 'Google account'}</h3>
+                <h3>{connection.accountEmail ?? `${providerName(connection)} account`}</h3>
+                <p>{providerName(connection)} Calendar</p>
                 {connection.status !== 'active' && (
                   <p className="alert alert-error">
-                    Access has expired or been removed. Connect this Google account again to restore
-                    it.
+                    Access has expired or been removed. Connect this {providerName(connection)}{' '}
+                    account again to restore it.
                   </p>
                 )}
-                {!connection.syncAuthorized && (
+                {connection.provider === 'microsoft' && (
+                  <p>
+                    This connection lists calendars only. Busy-time synchronization and booking
+                    writes are not yet available.
+                  </p>
+                )}
+                {connection.provider === 'google' && !connection.syncAuthorized && (
                   <div className="stack">
                     <p>
                       This connection has calendar-list access only. Enable synchronization to use
@@ -339,7 +392,9 @@ export function CalendarsPage() {
                 {!connection.calendars.length && <p>No calendars found in this account.</p>}
                 <fieldset className="form-fieldset" disabled={pending !== null}>
                   <div className="form-actions">
-                    {state.data.googleEnabled && (
+                    {(connection.provider === 'google'
+                      ? state.data.googleEnabled
+                      : state.data.microsoftEnabled) && (
                       <button
                         type="button"
                         className="button"
@@ -351,11 +406,11 @@ export function CalendarsPage() {
                     )}
                     <ConfirmAction
                       label="Disconnect"
-                      accessibleLabel={`Disconnect ${connection.accountEmail ?? 'Google account'}`}
-                      prompt={`Disconnect ${connection.accountEmail ?? 'this Google account'}? This deletes stored credentials and local calendar data. You can also remove Hourmere’s access in Google Account settings.`}
+                      accessibleLabel={`Disconnect ${connection.accountEmail ?? `${providerName(connection)} account`}`}
+                      prompt={`Disconnect ${connection.accountEmail ?? `this ${providerName(connection)} account`}? This deletes stored credentials and local calendar data. You can also remove Hourmere’s access in ${providerName(connection)} account settings.`}
                       confirmLabel="Disconnect account"
                       busyLabel="Disconnecting…"
-                      failure="Could not disconnect Google Calendar."
+                      failure={`Could not disconnect ${providerName(connection)} Calendar.`}
                       onConfirm={() => update(connection, true)}
                     />
                   </div>

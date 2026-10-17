@@ -26,12 +26,77 @@ const connection: Schemas['CalendarConnection'] = {
     },
   ],
 }
-const list = (data = [connection], googleEnabled = true) => ({
-  'GET /api/v1/calendar-connections': () => json(200, { data, googleEnabled }),
+const list = (data = [connection], googleEnabled = true, microsoftEnabled = false) => ({
+  'GET /api/v1/calendar-connections': () =>
+    json(200, { data, googleEnabled, microsoftEnabled, destinationCalendarId: null }),
 })
 const authorizationUrl = 'https://accounts.google.com/o/oauth2/v2/auth?state=fake-state'
 
 describe('the calendars page', () => {
+  it('connects Microsoft separately and exposes only its available calendar-list actions', async () => {
+    const user = userEvent.setup()
+    const microsoft: Schemas['CalendarConnection'] = {
+      ...connection,
+      id: 'b0000000-0000-7000-8000-000000000001',
+      provider: 'microsoft',
+      accountEmail: 'outlook@example.com',
+    }
+    const microsoftUrl =
+      'https://login.microsoftonline.com/common/oauth2/v2.0/authorize?state=fake-microsoft-state'
+    const requests = fakeApi({
+      ...signedIn,
+      ...list([microsoft], false, true),
+      'POST /api/v1/calendar-connections/microsoft/authorize': () =>
+        json(200, { authorizationUrl: microsoftUrl }),
+    })
+    renderApp('/app/calendars')
+    const article = (await screen.findByRole('heading', { name: 'outlook@example.com' })).closest(
+      'article',
+    ) as HTMLElement
+    expect(within(article).getByText(/lists calendars only/)).toBeDefined()
+    expect(
+      within(article).queryByRole('button', { name: 'Enable calendar synchronization' }),
+    ).toBeNull()
+    expect(within(article).queryByRole('checkbox')).toBeNull()
+    expect(within(article).queryByRole('button', { name: /Write new bookings/ })).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Connect Microsoft Calendar' }))
+    await vi.waitFor(() => expect(goTo).toHaveBeenCalledWith(microsoftUrl))
+    expect(requests.to('POST /api/v1/calendar-connections/microsoft/authorize')[0]?.body).toEqual(
+      {},
+    )
+    expect(requests.to('POST /api/v1/calendar-connections/google/authorize')).toHaveLength(0)
+  })
+
+  it.each([
+    'https://attacker.example/authorize',
+    'https://accounts.google.com/o/oauth2/v2/auth',
+    'https://login.microsoftonline.com/other/oauth2/v2.0/authorize',
+  ])('refuses an unexpected Microsoft authorization URL: %s', async (authorizationUrl) => {
+    const user = userEvent.setup()
+    fakeApi({
+      ...signedIn,
+      ...list([], false, true),
+      'POST /api/v1/calendar-connections/microsoft/authorize': () =>
+        json(200, { authorizationUrl }),
+    })
+    renderApp('/app/calendars')
+    await user.click(await screen.findByRole('button', { name: 'Connect Microsoft Calendar' }))
+    expect((await screen.findByRole('alert')).textContent).toContain(
+      'Could not connect Microsoft Calendar.',
+    )
+    expect(goTo).not.toHaveBeenCalled()
+  })
+
+  it('names a successful Microsoft callback without rendering arbitrary provider text', async () => {
+    fakeApi({ ...signedIn, ...list([]) })
+    renderApp('/app/calendars?connection=connected&provider=microsoft')
+    expect(
+      await screen.findByText('Microsoft Calendar connected. Your calendar list is ready.'),
+    ).toBeDefined()
+    await vi.waitFor(() =>
+      expect(screen.getByTestId('location').textContent).toBe('/app/calendars'),
+    )
+  })
   it('lists calendars and explains the current permissions before connecting', async () => {
     const user = userEvent.setup()
     const requests = fakeApi({
@@ -54,7 +119,9 @@ describe('the calendars page', () => {
   it('shows a disabled instance without hiding existing connections', async () => {
     fakeApi({ ...signedIn, ...list([connection], false) })
     renderApp('/app/calendars')
-    expect(await screen.findByText(/not configured on this Hourmere instance/)).toBeDefined()
+    expect(
+      await screen.findByText(/Google Calendar is not configured on this Hourmere instance/),
+    ).toBeDefined()
     expect(screen.getByText('Work calendar (primary)')).toBeDefined()
     expect(screen.queryByRole('button', { name: 'Connect Google Calendar' })).toBeNull()
     expect(screen.getByRole('button', { name: 'Disconnect calendar@example.com' })).toBeDefined()
@@ -72,7 +139,7 @@ describe('the calendars page', () => {
   it('does not render arbitrary callback text', async () => {
     fakeApi({ ...signedIn, ...list([]) })
     renderApp('/app/calendars?connection=private-untrusted-provider-error')
-    await screen.findByText('No Google accounts connected yet.')
+    await screen.findByText('No calendar accounts connected yet.')
     expect(document.body.textContent).not.toContain('private-untrusted-provider-error')
   })
 
@@ -82,7 +149,11 @@ describe('the calendars page', () => {
     const requests = fakeApi({
       ...signedIn,
       'GET /api/v1/calendar-connections': () =>
-        json(200, { data: connected ? [connection] : [], googleEnabled: true }),
+        json(200, {
+          data: connected ? [connection] : [],
+          googleEnabled: true,
+          microsoftEnabled: false,
+        }),
       [`DELETE /api/v1/calendar-connections/${connection.id}`]: () => {
         connected = false
         return new Response(null, { status: 204 })
@@ -94,7 +165,7 @@ describe('the calendars page', () => {
     expect(requests.to(`DELETE /api/v1/calendar-connections/${connection.id}`)).toHaveLength(0)
     expect(document.activeElement).toBe(within(confirm).getByRole('button', { name: 'Cancel' }))
     await user.click(within(confirm).getByRole('button', { name: 'Disconnect account' }))
-    expect(await screen.findByText('No Google accounts connected yet.')).toBeDefined()
+    expect(await screen.findByText('No calendar accounts connected yet.')).toBeDefined()
     expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Connected accounts' }))
     expect(
       screen.getByText(/Stored credentials and local calendar data were deleted/),
@@ -128,6 +199,7 @@ describe('the calendars page', () => {
       'GET /api/v1/calendar-connections': () =>
         json(200, {
           googleEnabled: true,
+          microsoftEnabled: false,
           destinationCalendarId: destination,
           data: [
             {
@@ -215,6 +287,7 @@ describe('the calendars page', () => {
         'GET /api/v1/calendar-connections': () =>
           json(200, {
             googleEnabled: false,
+            microsoftEnabled: false,
             destinationCalendarId: null,
             data: [
               {

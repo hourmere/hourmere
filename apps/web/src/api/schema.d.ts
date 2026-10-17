@@ -606,7 +606,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** The caller's connected Google accounts and calendars */
+        /** The caller's connected Google and Microsoft accounts and calendars */
         get: {
             parameters: {
                 query?: never;
@@ -627,6 +627,7 @@ export interface paths {
                             /** Format: uuid */
                             destinationCalendarId: string | null;
                             googleEnabled: boolean;
+                            microsoftEnabled: boolean;
                         };
                     };
                 };
@@ -669,8 +670,8 @@ export interface paths {
         put?: never;
         post?: never;
         /**
-         * Disconnect a Google account and delete its local credentials and calendars
-         * @description Requires a browser session. Cancels outstanding connection attempts. Does not revoke the Google-wide grant, which may also be used by other connections; access can be removed in Google Account settings.
+         * Disconnect a calendar account and delete its local credentials and calendars
+         * @description Requires a browser session. Cancels outstanding connection attempts. Does not revoke the provider-wide grant, which may also be used by other connections; access can be removed in the Google or Microsoft account settings.
          */
         delete: {
             parameters: {
@@ -752,7 +753,7 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Refresh the Google calendar list
+         * Refresh the connected account’s calendar list
          * @description Refreshes an expired access token when necessary. Does not fetch events or busy intervals.
          */
         post: {
@@ -813,7 +814,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description google_calendar_disabled, google_calendar_needs_reauth, google_calendar_permissions_missing or google_calendar_provider_unavailable */
+                /** @description The provider calendar integration is disabled, needs reauthorization, lacks permissions or is unavailable */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -908,6 +909,97 @@ export interface paths {
                     };
                 };
                 /** @description google_calendar_disabled */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The API key's rate limit is used up */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/calendar-connections/microsoft/authorize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start a separate Microsoft Calendar connection
+         * @description Requires a same-origin browser session. Requests identity, continuing access and Calendars.ReadBasic to list calendars. This connection does not synchronize busy times or write events.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            responses: {
+                /** @description The fixed Microsoft authorization endpoint with session-bound state and PKCE */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uri */
+                            authorizationUrl: string;
+                        };
+                    };
+                };
+                /** @description invalid_request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No valid session or API key */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description session_required or a cross-origin write */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description microsoft_calendar_disabled */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -2726,7 +2818,7 @@ export interface components {
             /** Format: uuid */
             id: string;
             /** @enum {string} */
-            provider: "google";
+            provider: "google" | "microsoft";
             /** @enum {string} */
             status: "active" | "needs_reauth" | "revoked";
             syncAuthorized: boolean;

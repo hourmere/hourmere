@@ -74,9 +74,12 @@ together or leave them unset. See [Google Calendar](/docs/google-calendar).
 |---|---|---|
 | `GOOGLE_CALENDAR_CLIENT_ID` | Unset | Web client for `{PUBLIC_URL}/api/calendar/google/callback`. |
 | `GOOGLE_CALENDAR_CLIENT_SECRET` | Unset | Matching OAuth client secret. |
+| `MICROSOFT_CALENDAR_CLIENT_ID` | Unset | Separate Entra Web client for `{PUBLIC_URL}/api/calendar/microsoft/callback`; supports organizational and personal accounts. |
+| `MICROSOFT_CALENDAR_CLIENT_SECRET` | Unset | Matching Entra secret value. Requests delegated `Calendars.ReadBasic` with identity and offline access; lists calendars only, without busy-time synchronization or event writes. |
 | `CALENDAR_ENCRYPTION_KEY` | Unset | Exactly 32 random bytes in base64 (`openssl rand -base64 32`). Back up securely; losing/changing it makes saved tokens unreadable. |
 
-Google Calendar requires HTTPS except on loopback development hosts. Disabled configuration
+Each provider requires its client ID, secret and `CALENDAR_ENCRYPTION_KEY` together. Calendar
+connections require HTTPS except on loopback development hosts. Disabled configuration
 keeps local connections visible so people can disconnect or stop using their calendars.
 
 ## Compose-only settings and overrides

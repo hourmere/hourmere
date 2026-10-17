@@ -14,6 +14,8 @@ from your Hourmere instance.
 - [MCP quickstart](/docs/mcp): connect a client with an API key and use the booking tools.
 - [Google Calendar](/docs/google-calendar): configure separate calendar authorization and
   choose busy-time calendars and a booking destination.
+- [Microsoft Calendar](/docs/microsoft-calendar): register an Entra application and connect,
+  refresh or disconnect an Outlook calendar list. Busy-time sync and event writes are pending.
 
 The software is licensed under AGPL-3.0. Report vulnerabilities privately to
 [security@hourmere.com](mailto:security@hourmere.com).

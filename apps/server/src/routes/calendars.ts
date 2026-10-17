@@ -1,13 +1,16 @@
 import { createRoute, z } from '@hono/zod-openapi'
 import {
   beginGoogleConnection,
+  beginMicrosoftConnection,
   type CalendarDeps,
   configureCalendar,
   disconnectCalendar,
   finishGoogleConnection,
+  finishMicrosoftConnection,
   GOOGLE_CALENDAR_CALLBACK,
   listCalendarConnections,
-  refreshGoogleCalendars,
+  MICROSOFT_CALENDAR_CALLBACK,
+  refreshCalendarList,
   requireCalendarSession,
   setCalendarDestination,
   syncOwnedCalendar,
@@ -27,7 +30,7 @@ import { createRateLimiter, rateLimit } from '../rate-limit.ts'
 const CalendarConnection = z
   .object({
     id: z.uuid(),
-    provider: z.literal('google'),
+    provider: z.enum(['google', 'microsoft']),
     accountEmail: z.string().nullable(),
     status: z.enum(['active', 'needs_reauth', 'revoked']),
     createdAt: z.iso.datetime(),
@@ -66,7 +69,7 @@ export function calendarRoutes(deps: CalendarDeps): RouteModule {
         method: 'get',
         path: '/api/v1/calendar-connections',
         tags: ['Calendars'],
-        summary: "The caller's connected Google accounts and calendars",
+        summary: "The caller's connected Google and Microsoft accounts and calendars",
         security: authenticated,
         middleware: caller,
         responses: {
@@ -75,6 +78,7 @@ export function calendarRoutes(deps: CalendarDeps): RouteModule {
             content: json(
               z.object({
                 googleEnabled: z.boolean(),
+                microsoftEnabled: z.boolean(),
                 destinationCalendarId: z.uuid().nullable(),
                 data: z.array(CalendarConnection),
               }),
@@ -116,6 +120,33 @@ export function calendarRoutes(deps: CalendarDeps): RouteModule {
       }),
       async (c) =>
         c.json(await beginGoogleConnection(deps, c.var.principal, c.req.valid('json').access), 200),
+    )
+
+    app.openapi(
+      createRoute({
+        method: 'post',
+        path: '/api/v1/calendar-connections/microsoft/authorize',
+        tags: ['Calendars'],
+        summary: 'Start a separate Microsoft Calendar connection',
+        description:
+          'Requires a same-origin browser session. Requests identity, continuing access and Calendars.ReadBasic to list calendars. This connection does not synchronize busy times or write events.',
+        security: [{ session: [] }],
+        middleware: protectedWrite,
+        request: emptyBody,
+        responses: {
+          200: {
+            description:
+              'The fixed Microsoft authorization endpoint with session-bound state and PKCE',
+            content: json(z.object({ authorizationUrl: z.url() })),
+          },
+          ...errorResponses({
+            400: 'invalid_request',
+            403: 'session_required or a cross-origin write',
+            409: 'microsoft_calendar_disabled',
+          }),
+        },
+      }),
+      async (c) => c.json(await beginMicrosoftConnection(deps, c.var.principal), 200),
     )
 
     app.openapi(
@@ -207,9 +238,9 @@ export function calendarRoutes(deps: CalendarDeps): RouteModule {
         method: 'delete',
         path: '/api/v1/calendar-connections/{id}',
         tags: ['Calendars'],
-        summary: 'Disconnect a Google account and delete its local credentials and calendars',
+        summary: 'Disconnect a calendar account and delete its local credentials and calendars',
         description:
-          'Requires a browser session. Cancels outstanding connection attempts. Does not revoke the Google-wide grant, which may also be used by other connections; access can be removed in Google Account settings.',
+          'Requires a browser session. Cancels outstanding connection attempts. Does not revoke the provider-wide grant, which may also be used by other connections; access can be removed in the Google or Microsoft account settings.',
         security: [{ session: [] }],
         middleware: [caller, sessionOnly] as const,
         request: { params: ConnectionId },
@@ -233,7 +264,7 @@ export function calendarRoutes(deps: CalendarDeps): RouteModule {
         method: 'post',
         path: '/api/v1/calendar-connections/{id}/refresh',
         tags: ['Calendars'],
-        summary: 'Refresh the Google calendar list',
+        summary: 'Refresh the connected account’s calendar list',
         description:
           'Refreshes an expired access token when necessary. Does not fetch events or busy intervals.',
         security: [{ session: [] }],
@@ -245,12 +276,12 @@ export function calendarRoutes(deps: CalendarDeps): RouteModule {
             400: 'invalid_request',
             403: 'session_required or a cross-origin write',
             404: 'calendar_connection_not_found',
-            409: 'google_calendar_disabled, google_calendar_needs_reauth, google_calendar_permissions_missing or google_calendar_provider_unavailable',
+            409: 'The provider calendar integration is disabled, needs reauthorization, lacks permissions or is unavailable',
           }),
         },
       }),
       async (c) => {
-        await refreshGoogleCalendars(deps, c.var.principal, c.req.valid('param').id)
+        await refreshCalendarList(deps, c.var.principal, c.req.valid('param').id)
         return c.body(null, 204)
       },
     )
@@ -270,6 +301,14 @@ export function calendarRoutes(deps: CalendarDeps): RouteModule {
         new URL(c.req.url).searchParams,
       )
       return c.redirect(`/app/calendars?connection=${outcome}`, 303)
+    })
+    app.get(MICROSOFT_CALENDAR_CALLBACK, callbackHeaders, limit, caller, sessionOnly, async (c) => {
+      const outcome = await finishMicrosoftConnection(
+        deps,
+        c.var.principal,
+        new URL(c.req.url).searchParams,
+      )
+      return c.redirect(`/app/calendars?connection=${outcome}&provider=microsoft`, 303)
     })
   }
 }
