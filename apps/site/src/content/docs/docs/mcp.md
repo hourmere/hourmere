@@ -68,8 +68,7 @@ Tool results include `structuredContent` and a JSON text copy. Tool failures set
 and return the same stable error codes as REST, such as `slot_unavailable`, `slot_taken`,
 `calendar_sync_unavailable` or `idempotency_key_reused`. Use the live `tools/list` schemas for
 required fields and limits. The [REST guide](/docs/rest) covers token handling and booking
-semantics shared by both interfaces. Hosting/catalog tools and host-side rescheduling are
-not implemented yet.
+semantics shared by both interfaces.
 
 ## Reschedule as the host
 
