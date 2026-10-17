@@ -37,8 +37,11 @@ not a separate Hourmere mode switch.
 | `SIGNUP_ALLOWED_DOMAINS` | Unset | Comma-separated exact email domains, without `@` or wildcards. These domains may register even with `closed`. List subdomains separately. Invalid with `open`. |
 
 With `first-user`, the first person who signs in can register; after that the domain allowlist
-applies. With `closed` and no domains, nobody new can register. New addresses that are not
-allowed get the same sign-in response, but no email.
+applies. In either restricted mode, a pending, unexpired team invitation also permits its
+exact email address to register. With `closed` and no domains, only these invitees can
+register. They must still prove ownership of the email address and accept the invitation
+separately to join the team. Canceled, expired and accepted invitations grant no registration
+exception. New addresses that are not allowed get the same sign-in response, but no email.
 
 ## Proxy, security headers and timeouts
 

@@ -90,7 +90,11 @@ anyone else, and always on a hosted or internet-facing instance.
 addresses in `SIGNUP_ALLOWED_DOMAINS` (comma-separated email domains, e.g.
 `example.com,example.org`; exact match, so list subdomains separately). So sign in right
 after the first start: the first account should be yours. `closed` allows only those domains
-(nobody, if the list is empty); `open` lets anyone who can reach the instance sign up. A new
+(only invitees, if the list is empty); `open` lets anyone who can reach the instance sign up.
+A pending, unexpired team invitation allows its exact email address in either restricted
+mode. Sign-up still requires proving that email address; joining the team requires accepting
+the invitation separately. Expired, canceled or already accepted invitations do not allow
+new accounts. A new
 address that may not sign up gets no sign-in email, and the request is answered the same way
 as for any other address. The request does not wait for the email either: if sending fails
 (e.g. wrong SMTP settings), the person sees the usual answer and the failure appears in the
