@@ -598,3 +598,12 @@ export async function sendBookingNotification(
     )
   }
 }
+
+export {
+  deliverSignInEmail,
+  queuedSignInEmail,
+  SIGN_IN_EMAIL_JOB,
+  type SignInEmailDeps,
+  SignInEmailPayload,
+  signInEmailJobs,
+} from './sign-in.ts'

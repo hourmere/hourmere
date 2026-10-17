@@ -9,6 +9,7 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@hourmere/auth": "*",
     "@hourmere/db": "*",
     "@hourmere/jobs": "*",
     "@hourmere/mail": "*",

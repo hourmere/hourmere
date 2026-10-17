@@ -33,6 +33,8 @@ export { ensurePersonalOrganization } from './organizations.ts'
 export {
   assertSignupEnforced,
   EMAIL_DOMAIN,
+  hasAccount,
+  maySignUp,
   SIGNUP_MODES,
   type SignupMode,
   type SignupPolicy,
@@ -80,6 +82,12 @@ export interface AuthConfig {
   secret: string
   /** Sends the sign-in links. */
   mailer: Mailer
+  /**
+   * Production delivery queues every request uniformly before any account/policy lookup.
+   * Omitted only by standalone auth fixtures and schema generation, which use direct mail.
+   * The URL already uses the scanner-safe confirmation page and a fragment token.
+   */
+  queueSignInEmail?: ((request: { email: string; url: string }) => Promise<void>) | undefined
   /** Who may create an account (SIGNUP); the same policy the pool was created with. */
   signup: SignupPolicy
   /** Each provider is enabled only when configured. */
@@ -105,6 +113,7 @@ export function createAuth({
   baseURL,
   secret,
   mailer,
+  queueSignInEmail,
   signup,
   socialProviders = {},
   socialProviderOptions = {},
@@ -230,6 +239,12 @@ export function createAuth({
         // Only a hash is stored, so a database leak does not expose usable links.
         storeToken: 'hashed',
         sendMagicLink: async ({ email, url }) => {
+          // No address-dependent reads or SMTP work on the production request path.
+          if (queueSignInEmail) {
+            await queueSignInEmail({ email, url: confirmLink(url) })
+            return
+          }
+          // Standalone auth fixtures/schema generation use the direct-mail fallback.
           // No email to an address that has no account and may not create one: the link could
           // only fail. The request is answered the same either way, so this does not tell
           // anyone whether an address has an account.
