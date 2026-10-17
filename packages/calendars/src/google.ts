@@ -201,6 +201,7 @@ export function createGoogleCalendarClient(
         const url = new URL('https://www.googleapis.com/calendar/v3/users/me/calendarList')
         url.search = new URLSearchParams({
           maxResults: '250',
+          showHidden: 'true',
           fields: 'items(id,summary,primary,accessRole,timeZone),nextPageToken',
           ...(pageToken && { pageToken }),
         }).toString()

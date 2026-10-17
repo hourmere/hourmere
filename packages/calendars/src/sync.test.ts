@@ -14,6 +14,7 @@ import {
   disconnectCalendar,
   finishGoogleConnection,
   readTokens,
+  refreshGoogleCalendars,
 } from './index.ts'
 import { bookingCalendarJob, calendarDispatchJob, calendarSyncJob } from './jobs.ts'
 import {
@@ -251,6 +252,49 @@ describe.skipIf(!url)('Google busy and booking synchronization (real Postgres)',
     const call = provider.calls.filter((c) => c.url.pathname.endsWith('/events')).at(-1)?.url
     expect(call?.searchParams.get('syncToken')).toBe('first')
     expect(call?.searchParams.has('timeMin')).toBe(false)
+  })
+  it('preserves selected hidden calendars and their busy data and booking targets on list refresh', async () => {
+    await select()
+    await setCalendarDestination(deps, owner, calendarId)
+    await booking()
+    provider.controls.eventPages = [{ items: [timed('hidden-busy')], nextSyncToken: 'hidden' }]
+    await syncGoogleCalendar(deps, calendarId)
+    provider.controls.listHook = async (url) =>
+      Response.json({
+        items:
+          url.searchParams.get('showHidden') === 'true'
+            ? [
+                {
+                  id: 'primary-calendar',
+                  summary: 'Hidden calendar',
+                  hidden: true,
+                  accessRole: 'owner',
+                  timeZone: 'America/Los_Angeles',
+                },
+              ]
+            : [],
+      })
+    await refreshGoogleCalendars(deps, owner, connectionId)
+    expect(
+      await db
+        .selectFrom('calendars')
+        .select(['id', 'check_conflicts'])
+        .where('id', '=', calendarId)
+        .executeTakeFirst(),
+    ).toEqual({ id: calendarId, check_conflicts: true })
+    expect((await busy()).map((row) => row.external_event_id)).toEqual(['hidden-busy'])
+    expect(await db.selectFrom('booking_calendar_targets').select('calendar_id').execute()).toEqual(
+      [{ calendar_id: calendarId }],
+    )
+    expect(
+      (
+        await db
+          .selectFrom('profiles')
+          .select('destination_calendar_id')
+          .where('user_id', '=', owner.user.id)
+          .executeTakeFirstOrThrow()
+      ).destination_calendar_id,
+    ).toBe(calendarId)
   })
   it('recovers a 410 with a complete replacement rather than publishing half a sync', async () => {
     await select()

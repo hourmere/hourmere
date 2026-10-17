@@ -58,6 +58,7 @@ export function fakeGoogle() {
       },
     ] as Record<string, unknown>[],
     listStatus: 200,
+    listHook: undefined as ((url: URL) => Promise<Response>) | undefined,
     eventPages: [{ items: [], nextSyncToken: 'cursor-1' }] as Record<string, unknown>[],
     eventStatus: 200,
     eventHook: undefined as ((url: URL, init: RequestInit) => Promise<Response>) | undefined,
@@ -75,6 +76,7 @@ export function fakeGoogle() {
       url.origin === 'https://www.googleapis.com' &&
       url.pathname === '/calendar/v3/users/me/calendarList'
     ) {
+      if (controls.listHook) return controls.listHook(url)
       const page = Number(url.searchParams.get('pageToken') ?? '0')
       return Response.json(controls.pages[page] ?? {}, { status: controls.listStatus })
     }
