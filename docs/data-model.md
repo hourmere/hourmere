@@ -80,7 +80,11 @@ types in `packages/db/src/tables.ts` are generated from the migrated database.
   (SHA-256 of the request) lets the API refuse a *different* request reusing a key.
   Scoping by caller means two unrelated agents cannot receive each other's booking.
 - **Agent audit trail.** `bookings.source` and `bookings.api_key_id` record whether a
-  person or an agent made the booking, and with which key.
+  person or an agent made the booking, and with which key. Withdrawals (cancellation or
+  the old row of a reschedule) separately record `cancelled_source` and
+  `cancelled_api_key_id` in the same transaction. Existing legacy withdrawals remain null;
+  key identifiers survive key deletion. These internal fields are not included in public
+  booking responses and never overwrite the creation origin.
 - **Invitee links without accounts.** Reschedule/cancel links carry a random secret; only
   its SHA-256 is stored: `bookings.manage_token_hash` for the one the booking API returns,
   `booking_notifications.manage_token_hash` for the one each invitee email carries (minted
