@@ -3,6 +3,7 @@ import { inspect } from 'node:util'
 import { serveStatic } from '@hono/node-server/serve-static'
 import { createRoute, type Hook, OpenAPIHono, z } from '@hono/zod-openapi'
 import { type CallerResolver, escapeControlCharacters } from '@hourmere/auth'
+import { embedParent } from '@hourmere/core/embed'
 import { DomainError, type DomainErrorKind } from '@hourmere/scheduling'
 import type { Context, Env } from 'hono'
 import { createMiddleware } from 'hono/factory'
@@ -31,6 +32,8 @@ export interface AppDeps {
   resolveCaller: CallerResolver
   /** PUBLIC_URL: cookie-authenticated writes must come from its origin. */
   publicUrl: string
+  /** Exact parent origins allowed to embed dedicated public booking pages. */
+  embedOrigins?: readonly string[] | undefined
   /**
    * HSTS_MAX_AGE in seconds (default DEFAULT_HSTS_MAX_AGE); Strict-Transport-Security is only
    * sent when publicUrl is https on a real host name.
@@ -216,6 +219,7 @@ export function createApp({
   authHandler,
   resolveCaller,
   publicUrl,
+  embedOrigins = [],
   hstsMaxAge = DEFAULT_HSTS_MAX_AGE,
   trustedProxies = [],
   webDist,
@@ -265,7 +269,17 @@ export function createApp({
     return c.json({ error: 'internal_error' }, 500)
   })
   // First, so it also covers what every later middleware, route and onError answers.
-  app.use('*', securityHeaders({ hsts: strictTransportSecurity(publicUrl, hstsMaxAge) }))
+  app.use(
+    '*',
+    securityHeaders({ hsts: strictTransportSecurity(publicUrl, hstsMaxAge), embedOrigins }),
+  )
+  app.use('/embed/*', async (c, next) => {
+    c.header('Cache-Control', 'no-store')
+    c.header('Referrer-Policy', 'no-referrer')
+    if (!embedParent(new URL(c.req.url), embedOrigins))
+      return c.json({ error: 'embedding_not_allowed' }, 403)
+    await next()
+  })
   app.use('/api/*', requestLogger)
   app.use('/api/*', clientIp(trustedProxies))
   // First on /api/v1, so it also covers what the middleware below and onError answer.
@@ -361,7 +375,7 @@ export function createApp({
     app.use('*', async (c, next) => {
       await next()
       if (c.res.headers.get('content-type')?.startsWith('text/html')) {
-        c.res.headers.set('Cache-Control', 'no-cache')
+        if (!c.res.headers.has('Cache-Control')) c.res.headers.set('Cache-Control', 'no-cache')
       }
     })
     app.use('*', serveStatic({ root }))

@@ -37,6 +37,7 @@ export default defineConfig({
         { label: 'Configuration', link: '/docs/configuration' },
         { label: 'REST quickstart', link: '/docs/rest' },
         { label: 'MCP quickstart', link: '/docs/mcp' },
+        { label: 'Website widgets', link: '/docs/embedding' },
         { label: 'Google Calendar', link: '/docs/google-calendar' },
         { label: 'Microsoft Calendar', link: '/docs/microsoft-calendar' },
       ],

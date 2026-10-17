@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useRef } from 'react'
 import { Logo } from '../components/Logo.tsx'
 import { usePageTitle } from '../hooks.ts'
+import { useEmbedded } from './embed-context.ts'
 import './public.css'
 
 /**
@@ -8,13 +9,20 @@ import './public.css'
  * page itself and a small footer. These pages load nothing of the signed-in app.
  */
 export function PublicLayout({ children, wide = false }: { children: ReactNode; wide?: boolean }) {
+  const embedded = useEmbedded()
   return (
-    <div className="public">
+    <div className={`public${embedded ? ' public-embedded' : ''}`}>
       <main id="main" className={`public-main${wide ? ' public-main-wide' : ''}`}>
         {children}
       </main>
       <footer className="public-footer">
-        <Logo size={18} />
+        {embedded ? (
+          <a href="https://hourmere.com" target="_blank" rel="noopener noreferrer">
+            Powered by <Logo size={18} />
+          </a>
+        ) : (
+          <Logo size={18} />
+        )}
       </footer>
     </div>
   )

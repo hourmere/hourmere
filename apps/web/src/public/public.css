@@ -612,3 +612,17 @@
 .public .reschedule-header p {
   margin: 0;
 }
+
+.public.public-embedded {
+  min-height: 0;
+}
+.public-embedded .public-main {
+  padding-top: var(--space-4);
+}
+.public-embedded .public-footer a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  text-decoration: none;
+  color: inherit;
+}

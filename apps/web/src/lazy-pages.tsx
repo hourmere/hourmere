@@ -87,3 +87,12 @@ export const ManageBookingPage = page(
   () => import('./public/ManageBookingPage.tsx'),
   (m) => m.ManageBookingPage,
 )
+
+export const EmbeddedBookingPage = page(
+  () => import('./public/Embed.tsx'),
+  (m) => m.EmbeddedBookingPage,
+)
+export const EmbeddedTeamBookingPage = page(
+  () => import('./public/Embed.tsx'),
+  (m) => m.EmbeddedTeamBookingPage,
+)

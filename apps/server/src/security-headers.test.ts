@@ -109,6 +109,44 @@ describe('security headers', () => {
     await rm(dist, { recursive: true, force: true })
   })
 
+  it('permits only dedicated booking HTML in an explicitly approved exact parent', async () => {
+    const enabled = createApp(deps({ webDist: dist, embedOrigins: ['https://site.example'] }))
+    const query = '?parentOrigin=https%3A%2F%2Fsite.example&embedId=abcdefghijklmnop1234'
+    for (const path of ['/embed/ada/intro', '/embed/team/Alpha/intro']) {
+      const response = await enabled.request(path + query)
+      expect(response.status).toBe(200)
+      expect(response.headers.get('X-Frame-Options')).toBeNull()
+      expect(response.headers.get('Content-Security-Policy')).toBe(
+        APP_CSP.replace("frame-ancestors 'none'", 'frame-ancestors https://site.example'),
+      )
+      expect(response.headers.get('Referrer-Policy')).toBe('no-referrer')
+      expect(response.headers.get('Cache-Control')).toBe('no-store')
+      expect((await app.request(path + query)).status).toBe(403)
+    }
+    for (const path of [
+      '/embed/ada/intro',
+      `/embed/app/settings${query}`,
+      `/embed/oauth/consent${query}`,
+      `/embed/ada/intro${query.replace('site.example', 'evil.example')}`,
+      `/embed/ada/intro${query}&parentOrigin=https://site.example`,
+    ]) {
+      const response = await enabled.request(path)
+      expect(response.status).toBe(403)
+      expect(response.headers.get('X-Frame-Options')).toBe('DENY')
+    }
+    for (const path of [
+      '/app/settings',
+      '/sign-in',
+      '/booking',
+      '/ada/intro',
+      '/oauth/authorize',
+    ]) {
+      const response = await enabled.request(path + query)
+      expect(response.headers.get('X-Frame-Options')).toBe('DENY')
+      expect(response.headers.get('Content-Security-Policy')).toContain("frame-ancestors 'none'")
+    }
+  })
+
   it('allow the web app only its own files, plus inlined images', () => {
     // Checked against the built app in a browser; see APP_CSP. Changes here need that again.
     expect(APP_CSP.split('; ')).toEqual([

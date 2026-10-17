@@ -7,6 +7,33 @@ const base = {
 }
 
 describe('loadConfig', () => {
+  it('defaults embedding off and accepts only bounded exact secure origins', () => {
+    expect(loadConfig(base).EMBED_ALLOWED_ORIGINS).toEqual([])
+    expect(
+      loadConfig({
+        ...base,
+        EMBED_ALLOWED_ORIGINS:
+          'https://www.example.com, https://www.example.com/,http://localhost:5001',
+      }).EMBED_ALLOWED_ORIGINS,
+    ).toEqual(['https://www.example.com', 'http://localhost:5001'])
+    for (const EMBED_ALLOWED_ORIGINS of [
+      '*',
+      'null',
+      'https://*.example.com',
+      'http://example.com',
+      'https://example.com/path',
+      'https://user:secret@example.com',
+      Array.from({ length: 33 }, (_, i) => `https://a${i}.example.com`).join(','),
+    ])
+      expect(() => loadConfig({ ...base, EMBED_ALLOWED_ORIGINS })).toThrow(/EMBED_ALLOWED_ORIGINS/)
+    expect(() =>
+      loadConfig({
+        ...base,
+        PUBLIC_URL: 'http://192.168.1.1',
+        EMBED_ALLOWED_ORIGINS: 'https://example.com',
+      }),
+    ).toThrow(/Embedding requires/)
+  })
   it.each(['GOOGLE', 'MICROSOFT'] as const)(
     'configures %s calendar OAuth independently of sign-in and requires encryption',
     (provider) => {

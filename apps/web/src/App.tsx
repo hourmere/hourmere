@@ -8,6 +8,8 @@ import {
   BookingPage,
   BookingsPage,
   CalendarsPage,
+  EmbeddedBookingPage,
+  EmbeddedTeamBookingPage,
   EventTypeEditorPage,
   EventTypesPage,
   HostPage,
@@ -63,6 +65,8 @@ export function App() {
           </Route>
         </Route>
         {/* Public pages, outside the session: they never ask who is signed in. */}
+        <Route path="/embed/team/:teamSlug/:slug" element={<EmbeddedTeamBookingPage />} />
+        <Route path="/embed/:handle/:slug" element={<EmbeddedBookingPage />} />
         <Route path="/booking" element={<ManageBookingPage />} />
         <Route path="/team/:teamSlug/:slug" element={<TeamBookingPage />} />
         <Route path="/:handle" element={<HostPage />} />
