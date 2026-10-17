@@ -126,6 +126,7 @@ describe.skipIf(!serverUrl)('host booking routes', () => {
   })
 
   it.each([
+    ['?order=newest', 'invalid_request'],
     ['?limit=0', 'invalid_request'],
     ['?limit=101', 'invalid_request'],
     ['?status=pending', 'invalid_request'],
@@ -137,6 +138,32 @@ describe.skipIf(!serverUrl)('host booking routes', () => {
     const res = await get(`/api/v1/bookings${query}`, 'alice')
     expect(res.status).toBe(400)
     expect(await res.json()).toMatchObject({ error })
+  })
+
+  it('preserves descending order and time filters on every REST page', async () => {
+    const ids: string[] = []
+    let cursor: string | null = null
+    for (let page = 0; page < 3; page++) {
+      const params = new URLSearchParams({
+        order: 'desc',
+        limit: '1',
+        from: '2026-11-04T00:00:00Z',
+        to: '2026-11-05T00:00:00Z',
+        ...(cursor && { cursor }),
+      })
+      const response = await get(`/api/v1/bookings?${params}`, 'alice')
+      expect(response.status).toBe(200)
+      const result = (await response.json()) as Page
+      ids.push(...result.data.map((b) => b.id))
+      cursor = result.nextCursor
+      if (page < 2) expect(cursor).not.toBeNull()
+    }
+    expect(ids).toEqual(aliceBookings.toReversed())
+    expect(cursor).toBeNull()
+    expect((await (await get('/api/v1/bookings?order=desc', 'bob-team')).json()) as Page).toEqual({
+      data: [],
+      nextCursor: null,
+    })
   })
 
   it('filters with sub-millisecond precision', async () => {

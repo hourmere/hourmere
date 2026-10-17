@@ -116,7 +116,7 @@ describe('the bookings list', () => {
     expect(calls.every((q) => q.limit === String(PAGE_SIZE))).toBe(true)
   })
 
-  it('shows past bookings, oldest first, before now', async () => {
+  it('shows past bookings, newest first, before now', async () => {
     const user = userEvent.setup()
     const api = fakeApi({
       ...signedIn,
@@ -137,10 +137,40 @@ describe('the bookings list', () => {
     expect(await screen.findByRole('rowheader', { name: 'Intro call' })).toBeDefined()
     expect(location()).toBe('/app/bookings?tab=past')
     expect(screen.getByRole('link', { name: 'Past' }).getAttribute('aria-current')).toBe('page')
-    expect(screen.getByText(/Oldest first\./)).toBeDefined()
+    expect(screen.getByText(/Newest first\./)).toBeDefined()
     const past = query(api.to('GET /api/v1/bookings')[1]?.path ?? '')
     expect(Date.parse(past.to ?? '')).toBeLessThanOrEqual(Date.now())
     expect(past.from).toBeUndefined()
+    expect(past.order).toBe('desc')
+  })
+
+  it('continues past pages newest first while keeping the same instant and direction', async () => {
+    const user = userEvent.setup()
+    const api = fakeApi({
+      ...signedIn,
+      ...profile(),
+      'GET /api/v1/bookings': ({ path }) =>
+        json(
+          200,
+          query(path).cursor
+            ? { data: numbered(1, 1), nextCursor: null }
+            : { data: numbered(2, 2).toReversed(), nextCursor: 'older-page' },
+        ),
+    })
+    renderApp('/app/bookings?tab=past')
+    await screen.findByRole('rowheader', { name: 'Call 3' })
+    await user.click(screen.getByRole('button', { name: 'Show more bookings' }))
+    await screen.findByRole('rowheader', { name: 'Call 1' })
+    expect(screen.getAllByRole('rowheader').map((row) => row.textContent)).toEqual([
+      'Call 3',
+      'Call 2',
+      'Call 1',
+    ])
+    const calls = api.to('GET /api/v1/bookings').map((call) => query(call.path))
+    expect(calls.map((q) => q.order)).toEqual(['desc', 'desc'])
+    expect(calls[1]?.to).toBe(calls[0]?.to)
+    expect(calls[1]?.cursor).toBe('older-page')
+    expect(screen.queryByRole('button', { name: 'Show more bookings' })).toBeNull()
   })
 
   it('says when there are no past bookings, in the browser’s zone without a profile', async () => {

@@ -124,6 +124,13 @@ export const BookingPage = z
 
 /** Filters and paging for the host's bookings (GET /api/v1/bookings, MCP list_bookings). */
 export const ListBookingsQuery = z.object({
+  order: z
+    .enum(['asc', 'desc'])
+    .optional()
+    .openapi({
+      description:
+        'Order by start time and id: asc (default) or desc. Keep unchanged between pages.',
+    }),
   from: Instant.optional().openapi({ description: 'Only bookings starting at or after' }),
   to: Instant.optional().openapi({ description: 'Only bookings starting before' }),
   status: z.enum(['confirmed', 'cancelled']).optional(),
@@ -336,7 +343,7 @@ export function bookingRoutes({
         path: '/api/v1/bookings',
         summary: 'Bookings the caller hosts',
         description:
-          'Bookings in the organization the caller acts in where the caller is a host, ordered by start time. Paginated with a cursor: pass `nextCursor` from one page as `cursor` for the next (keep the other parameters the same).',
+          'Bookings in the organization the caller acts in where the caller is a host, ordered by start time and id, ascending by default. Use order=desc for newest first. Paginated with a cursor: pass `nextCursor` from one page as `cursor` for the next (keep the other parameters, including order, the same).',
         security: authenticated,
         middleware: caller,
         request: { query: ListBookingsQuery },
@@ -350,6 +357,7 @@ export function bookingRoutes({
       async (c) => {
         const q = c.req.valid('query')
         const page = await listHostBookings(context(c.var.principal), {
+          order: q.order,
           from: q.from === undefined ? undefined : Temporal.Instant.from(q.from),
           to: q.to === undefined ? undefined : Temporal.Instant.from(q.to),
           status: q.status,

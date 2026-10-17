@@ -81,7 +81,11 @@ function BookingList({
       const page = await unwrap(
         api.GET('/api/v1/bookings', {
           params: {
-            query: { ...(tab === 'upcoming' ? { from: now } : { to: now }), limit: PAGE_SIZE },
+            query: {
+              ...(tab === 'upcoming' ? { from: now } : { to: now }),
+              order: tab === 'past' ? 'desc' : 'asc',
+              limit: PAGE_SIZE,
+            },
           },
           signal,
         }),
@@ -125,7 +129,14 @@ function BookingList({
     try {
       const page = await unwrap(
         api.GET('/api/v1/bookings', {
-          params: { query: { ...range, limit: PAGE_SIZE, cursor: shown.nextCursor } },
+          params: {
+            query: {
+              ...range,
+              order: tab === 'past' ? 'desc' : 'asc',
+              limit: PAGE_SIZE,
+              cursor: shown.nextCursor,
+            },
+          },
         }),
       )
       const bookings = [...shown.bookings, ...page.data]
@@ -145,7 +156,7 @@ function BookingList({
         {tab === 'upcoming' ? 'Upcoming bookings' : 'Past bookings'}
       </h2>
       <p className="muted zone-note">
-        {tab === 'past' ? 'Oldest first. ' : ''}Times are in {format.timeZone.replaceAll('_', ' ')}
+        {tab === 'past' ? 'Newest first. ' : ''}Times are in {format.timeZone.replaceAll('_', ' ')}
         {fromProfile ? (
           ', your time zone.'
         ) : (

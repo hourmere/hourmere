@@ -857,6 +857,8 @@ export const DEFAULT_PAGE_SIZE = 50
 export const MAX_PAGE_SIZE = 100
 
 export interface ListBookingsInput {
+  /** Chronological direction for start and id; default asc. Keep it unchanged between pages. */
+  order?: 'asc' | 'desc' | undefined
   /** Only bookings that start at or after this instant. */
   from?: Temporal.Instant | undefined
   /** Only bookings that start before this instant. */
@@ -929,7 +931,8 @@ function decodeCursor(cursor: string): { start: Temporal.Instant; id: string } {
 }
 
 /**
- * Bookings of the caller's organization that the caller hosts, ordered by start (then id),
+ * Bookings of the caller's organization that the caller hosts, ordered by start (then id)
+ * in the requested direction (ascending by default),
  * a page at a time (keyset pagination, so pages stay stable while bookings are added).
  */
 export async function listHostBookings(
@@ -940,6 +943,10 @@ export async function listHostBookings(
   if (!Number.isInteger(limit) || limit < 1 || limit > MAX_PAGE_SIZE) {
     throw new DomainError('invalid', 'invalid_limit', `limit must be from 1 to ${MAX_PAGE_SIZE}`)
   }
+  const order = input.order ?? 'asc'
+  if (order !== 'asc' && order !== 'desc')
+    throw new DomainError('invalid', 'invalid_order', 'order must be asc or desc')
+  const comparison = order === 'desc' ? '<' : '>'
   const { from, to, status } = input
   if (from && to && Temporal.Instant.compare(to, from) <= 0) {
     throw new DomainError('invalid', 'invalid_range', 'to must be after from')
@@ -972,13 +979,16 @@ export async function listHostBookings(
       q.where((eb) => {
         const start = timestamptz(eb, (after as { start: Temporal.Instant }).start)
         return eb.or([
-          eb('b.start_at', '>', start),
-          eb.and([eb('b.start_at', '=', start), eb('b.id', '>', (after as { id: string }).id)]),
+          eb('b.start_at', comparison, start),
+          eb.and([
+            eb('b.start_at', '=', start),
+            eb('b.id', comparison, (after as { id: string }).id),
+          ]),
         ])
       }),
     )
-    .orderBy('b.start_at')
-    .orderBy('b.id')
+    .orderBy('b.start_at', order)
+    .orderBy('b.id', order)
     .limit(limit + 1)
     .execute()
 
