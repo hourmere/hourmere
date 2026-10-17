@@ -2245,6 +2245,239 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/public/teams/{handle}/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * A public event type
+         * @description The single-host team page at /team/{handle}/{slug}. handle is the exact-case organization slug; personal organizations and unsupported scheduling modes are not served.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Exact-case organization slug (1–64 ASCII letters/digits/inner hyphens) */
+                    handle: string;
+                    slug: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description The event type */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PublicEventType"];
+                    };
+                };
+                /** @description No such public event type (`event_type_not_found`) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Too many requests from this address (`rate_limited`); see Retry-After */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/teams/{handle}/{slug}/bookings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Book a slot
+         * @description Books an offered slot and returns the booking with the booking's own manage token (`manageToken`, returned only this once; it stays with this booking, and emails carry their own). Send an `Idempotency-Key` to make retries safe: a retry with the same key and the same request returns the original booking (200) instead of booking again. All anonymous callers share one key space per organization, so the key must be random (e.g. a UUIDv4), never derived from the request.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: {
+                    /** @description A random key (1–255 printable ASCII characters), e.g. a UUIDv4 */
+                    "idempotency-key"?: string;
+                };
+                path: {
+                    /** @description Exact-case organization slug */
+                    handle: string;
+                    slug: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CreateBooking"];
+                };
+            };
+            responses: {
+                /** @description A retry of an earlier request with the same Idempotency-Key */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingWithToken"];
+                    };
+                };
+                /** @description Booked */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingWithToken"];
+                    };
+                };
+                /** @description Invalid request (`invalid_request`, `invalid_responses`, `invalid_invitee`, `invalid_guests`, `invalid_time_zone`, `too_many_guests`, `invalid_idempotency_key`) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such public event type (`event_type_not_found`) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The time is not offered (`slot_unavailable`) or was just booked by someone else (`slot_taken`), or the Idempotency-Key was used for a different request (`idempotency_key_reused`) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Too many requests from this address (`rate_limited`); see Retry-After */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/public/teams/{handle}/{slug}/slots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Available slots
+         * @description Bookable slots that lie fully inside [start, end]. The range may span at most 62 days.
+         */
+        get: {
+            parameters: {
+                query: {
+                    /** @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix. */
+                    end: string;
+                    /** @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix. */
+                    start: string;
+                };
+                header?: never;
+                path: {
+                    /** @description Exact-case organization slug */
+                    handle: string;
+                    slug: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Slots, sorted by start */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data: components["schemas"]["Slot"][];
+                        };
+                    };
+                };
+                /** @description Invalid parameters (`invalid_request`), end not after start (`invalid_range`), or a range that is too long (`range_too_long`: over 62 days, or over 20000 possible start times at the event type's step in its bookable part) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such public event type (`event_type_not_found`) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Too many requests from this address (`rate_limited`); see Retry-After */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/schedules": {
         parameters: {
             query?: never;
@@ -3289,6 +3522,11 @@ export interface components {
             /** @description Booking-form fields beyond name and email */
             questions: components["schemas"]["Question"][];
             slug: string;
+            /** @description Present for a team booking link */
+            team?: {
+                name: string;
+                slug: string;
+            };
             title: string;
         };
         PublicHost: {

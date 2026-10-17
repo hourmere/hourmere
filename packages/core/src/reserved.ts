@@ -95,3 +95,8 @@ export const RESERVED_NAMES: ReadonlySet<string> = new Set([
 export function isReservedName(name: string): boolean {
   return RESERVED_NAMES.has(name.toLowerCase())
 }
+
+/** Exact-case organization slug eligible for the separate public team URL namespace. */
+export function isPublicTeamSlug(value: string): boolean {
+  return /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/i.test(value) && !isReservedName(value)
+}

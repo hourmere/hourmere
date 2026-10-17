@@ -17,6 +17,7 @@ import {
   SessionLayout,
   SettingsPage,
   SignInPage,
+  TeamBookingPage,
 } from './lazy-pages.tsx'
 import { AppNotFoundPage, NotFoundPage } from './pages/NotFound.tsx'
 import { PATHS } from './paths.ts'
@@ -63,6 +64,7 @@ export function App() {
         </Route>
         {/* Public pages, outside the session: they never ask who is signed in. */}
         <Route path="/booking" element={<ManageBookingPage />} />
+        <Route path="/team/:teamSlug/:slug" element={<TeamBookingPage />} />
         <Route path="/:handle" element={<HostPage />} />
         <Route path="/:handle/:slug" element={<BookingPage />} />
         <Route path="*" element={<NotFoundPage />} />

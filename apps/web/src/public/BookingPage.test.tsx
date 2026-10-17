@@ -55,6 +55,52 @@ async function chooseSlot(user: ReturnType<typeof userEvent.setup>, dayName: Reg
 }
 
 describe('the booking page', () => {
+  it('books through a team link without a session, preserving team case and retry identity', async () => {
+    const user = userEvent.setup()
+    let first = true
+    const api = fakeApi({
+      'GET /api/v1/public/teams/Cobaltmere/intro': () =>
+        json(200, {
+          ...EVENT,
+          handle: 'Cobaltmere',
+          team: { name: 'Cobaltmere team', slug: 'Cobaltmere' },
+        }),
+      'GET /api/v1/public/teams/Cobaltmere/intro/slots': slotsAnswer(['2026-11-02T14:00Z']),
+      'POST /api/v1/public/teams/Cobaltmere/intro/bookings': () => {
+        if (first) {
+          first = false
+          throw new TypeError('lost answer')
+        }
+        return json(201, { booking: booking(), manageToken: TOKEN })
+      },
+    })
+    renderApp('/team/Cobaltmere/INTRO')
+    expect(await screen.findByRole('heading', { level: 1, name: 'Intro call' })).toBeDefined()
+    expect(screen.getByText('Cobaltmere team')).toBeDefined()
+    expect(screen.getByTestId('location').textContent).toBe('/team/Cobaltmere/intro')
+    await chooseSlot(user, /Monday, November 2, available/, '9:00 AM')
+    await user.type(screen.getByLabelText('Your name'), 'Grace Hopper')
+    await user.type(screen.getByLabelText('Email'), 'grace@example.com')
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+    await screen.findByText(/Your booking is not confirmed yet/)
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+    expect(await screen.findByRole('heading', { name: 'You’re booked' })).toBeDefined()
+    const calls = api.to('POST /api/v1/public/teams/Cobaltmere/intro/bookings')
+    expect(calls).toHaveLength(2)
+    expect(calls[0]?.headers.get('idempotency-key')).toBeTruthy()
+    expect(calls[1]?.headers.get('idempotency-key')).toBe(calls[0]?.headers.get('idempotency-key'))
+    expect(calls[1]?.body).toEqual(calls[0]?.body)
+    expect(
+      api.calls.some(
+        (call) =>
+          call.path.startsWith('/api/v1/me') || call.path.startsWith('/api/v1/public/Cobaltmere/'),
+      ),
+    ).toBe(false)
+    expect(
+      screen.getByLabelText<HTMLInputElement>('Your link to change or cancel this booking').value,
+    ).toContain('#token=')
+  })
+
   it('shows the event and offers times in the visitor’s zone across a DST change', async () => {
     const user = userEvent.setup()
     const api = fakeApi(eventRoutes(EVENT, DST_SLOTS))

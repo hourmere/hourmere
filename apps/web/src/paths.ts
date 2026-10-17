@@ -24,3 +24,10 @@ export const bookingPath = (id: string) => `${PATHS.bookings}/${encodeURICompone
 /** The public booking page of a personal event type, as a full URL to share. */
 export const publicPageUrl = (handle: string, slug: string) =>
   `${window.location.origin}/${encodeURIComponent(handle)}/${encodeURIComponent(slug)}`
+
+/** A single-host team event in a separate namespace from personal handles. */
+export const publicTeamPageUrl = (teamSlug: string, slug: string) =>
+  `${window.location.origin}/team/${encodeURIComponent(teamSlug)}/${encodeURIComponent(slug)}`
+
+export const TEAM_LINK_SLUG_HINT =
+  'Choose a non-reserved team slug of 1–64 letters, numbers or hyphens, starting and ending with a letter or number.'

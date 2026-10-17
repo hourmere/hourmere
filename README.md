@@ -41,7 +41,8 @@ PUBLIC_URL=http://localhost:5173 SIGNUP=open npm run dev --workspace @hourmere/s
 npm run dev --workspace @hourmere/web
 ```
 
-Signed-in pages live under `/app` (`/app/event-types`, `/app/availability`, `/app/bookings`, `/app/api-keys`, `/app/settings`); `/sign-in` stays at the top level, and the rest of the root is for public booking pages (`/{handle}/{slug}`). After signing in, people only return to pages under `/app`.
+Signed-in pages live under `/app` (`/app/event-types`, `/app/availability`, `/app/bookings`, `/app/api-keys`, `/app/settings`); `/sign-in` stays at the top level, and the rest of the root is for public booking pages (`/{handle}/{slug}` for personal types and
+`/team/{teamSlug}/{slug}` for single-host team types). After signing in, people only return to pages under `/app`.
 
 The web app only uses the public API (`/api/v1/*` and Better Auth's `/api/auth/*`). Its types for `/api/v1` are generated from the server's OpenAPI document: after changing a route, run `npm run api:types` (no database needed) and commit `apps/web/src/api/schema.d.ts`; CI fails if it is out of date.
 

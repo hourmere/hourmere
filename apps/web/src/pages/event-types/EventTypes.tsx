@@ -1,3 +1,4 @@
+import { isPublicTeamSlug } from '@hourmere/core/reserved'
 import { Link } from 'react-router'
 import {
   type EventType,
@@ -10,7 +11,13 @@ import { CopyButton } from '../../components/CopyButton.tsx'
 import { useFlash } from '../../flash.ts'
 import { formatMinutes } from '../../format.ts'
 import { useLoad, usePageTitle } from '../../hooks.ts'
-import { eventTypePath, PATHS, publicPageUrl } from '../../paths.ts'
+import {
+  eventTypePath,
+  PATHS,
+  publicPageUrl,
+  publicTeamPageUrl,
+  TEAM_LINK_SLUG_HINT,
+} from '../../paths.ts'
 import { type Me, useMe } from '../../session.tsx'
 
 async function loadPage(signal: AbortSignal) {
@@ -129,9 +136,15 @@ function EventTypeTable({
       </thead>
       <tbody>
         {eventTypes.map((e) => {
-          // Only personal event types have a page at /{handle}/{slug} so far.
           const url =
-            profile && e.ownerUserId === me.user.id ? publicPageUrl(profile.handle, e.slug) : null
+            e.ownerUserId === null &&
+            !me.organization.personal &&
+            e.schedulingType === 'individual' &&
+            isPublicTeamSlug(me.organization.slug)
+              ? publicTeamPageUrl(me.organization.slug, e.slug)
+              : profile && e.ownerUserId === me.user.id
+                ? publicPageUrl(profile.handle, e.slug)
+                : null
           return (
             <tr key={e.id}>
               <th scope="row" data-label="Title">
@@ -153,7 +166,11 @@ function EventTypeTable({
                   </span>
                 ) : (
                   <span className="muted">
-                    {e.ownerUserId === null ? 'Team pages are not available yet' : `/${e.slug}`}
+                    {e.ownerUserId === null
+                      ? e.schedulingType === 'individual' && !isPublicTeamSlug(me.organization.slug)
+                        ? TEAM_LINK_SLUG_HINT
+                        : 'No public booking link'
+                      : `/${e.slug}`}
                   </span>
                 )}
               </td>
