@@ -72,6 +72,52 @@ describe('the session gate', () => {
     expect(screen.getByText(ME.user.email)).toBeDefined()
   })
 
+  it('starts keyboard navigation at the skip link on the first page', async () => {
+    fakeApi({ ...signedIn, ...emptyAccount })
+    renderApp('/app/event-types')
+    await screen.findByRole('heading', { name: 'Event types', level: 1 })
+    await userEvent.tab()
+    expect(document.activeElement).toBe(screen.getByRole('link', { name: 'Skip to content' }))
+  })
+
+  it.each([
+    ['beyond the right edge', 350, 450, 150],
+    ['beyond the left edge', 50, 150, -50],
+    ['already visible', 150, 250, 0],
+  ])('keeps the active navigation link visible when it is %s', async (_, start, end, expected) => {
+    // Simulate a narrow, horizontally scrolling list. Rectangles move as it scrolls,
+    // so repeated effects cannot move a link which is already visible.
+    const rect = (left: number, right: number) => ({
+      left,
+      right,
+      top: 10,
+      bottom: 50,
+      width: right - left,
+      height: 40,
+      x: left,
+      y: 10,
+      toJSON: () => ({}),
+    })
+    const original = Element.prototype.getBoundingClientRect
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function () {
+      if (this.matches('nav ul')) return rect(100, 300)
+      if (this.matches('nav a[aria-current="page"]')) {
+        const offset = this.closest('ul')?.scrollLeft ?? 0
+        return rect(start - offset, end - offset)
+      }
+      return original.call(this)
+    })
+    vi.spyOn(Element.prototype, 'clientWidth', 'get').mockImplementation(function () {
+      return this.matches('nav ul') ? 200 : 0
+    })
+    fakeApi({ ...signedIn, ...emptyAccount })
+    renderApp('/app/event-types')
+    await screen.findByRole('heading', { name: 'Event types', level: 1 })
+    const list = within(screen.getByRole('navigation', { name: 'Main' })).getByRole('list')
+    expect(list.scrollLeft).toBe(expected)
+    expect(document.activeElement).toBe(document.body)
+  })
+
   it('moves between pages with the navigation', async () => {
     fakeApi({ ...signedIn, ...emptyAccount })
     renderApp('/app/event-types')
