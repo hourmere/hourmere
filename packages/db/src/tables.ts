@@ -204,6 +204,16 @@ export interface CalendarConnections {
   user_id: string;
 }
 
+export interface CalendarOauthStates {
+  claimed: Generated<boolean>;
+  created_at: Generated<Timestamp>;
+  expires_at: Timestamp;
+  session_id: string;
+  state_hash: string;
+  user_id: string;
+  verifier: Buffer;
+}
+
 export interface Calendars {
   check_conflicts: Generated<boolean>;
   connection_id: string;
@@ -295,6 +305,7 @@ export interface DB {
   bookings: Bookings;
   calendar_busy: CalendarBusy;
   calendar_connections: CalendarConnections;
+  calendar_oauth_states: CalendarOauthStates;
   calendars: Calendars;
   event_type_hosts: EventTypeHosts;
   event_types: EventTypes;

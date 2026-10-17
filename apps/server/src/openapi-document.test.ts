@@ -15,6 +15,8 @@ describe('openApiDocument', () => {
         '/api/v1/event-types',
         '/api/v1/public/{handle}/{slug}',
         '/api/v1/bookings',
+        '/api/v1/calendar-connections',
+        '/api/v1/calendar-connections/google/authorize',
       ]),
     )
   })

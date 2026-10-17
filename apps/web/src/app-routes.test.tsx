@@ -52,7 +52,10 @@ describe('the app under /app', () => {
     renderApp('/app/nothing-here')
     expect(await screen.findByRole('heading', { name: 'Page not found', level: 1 })).toBeDefined()
     const nav = screen.getByRole('navigation', { name: 'Main' })
-    expect(within(nav).getAllByRole('link')).toHaveLength(5)
+    expect(within(nav).getAllByRole('link')).toHaveLength(6)
+    expect(within(nav).getByRole('link', { name: 'Calendars' }).getAttribute('href')).toBe(
+      '/app/calendars',
+    )
   })
 
   it('sends visitors to sign in from any page under /app, remembering it', async () => {
