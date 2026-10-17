@@ -16,6 +16,10 @@ additive within a version. The OpenAPI document is served at `/api/v1/openapi.js
   owner-side connection API is versioned under `/api/v1/calendar-connections`; see
   [Google Calendar connections](google-calendar.md).
 
+Magic-link verification failures default to `/sign-in?error=CODE`, where the app explains
+the failure and offers a new link. An explicit `errorCallbackURL` still applies (subject
+to Better Auth's trusted-origin check); the successful `callbackURL` is unchanged.
+
 ## JSON
 
 - Field names are camelCase (`apiKeyId`, `startAt`), matching the TypeScript and zod

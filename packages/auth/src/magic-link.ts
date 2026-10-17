@@ -1,3 +1,5 @@
+import type { AuthMiddlewareContext } from './api-keys.ts'
+
 /**
  * Where an emailed sign-in link leads: a page with a button that submits Better Auth's verify
  * request. Mail scanners (e.g. Microsoft Safe Links) open every link in an email; opening this
@@ -25,4 +27,16 @@ export const MAGIC_LINK_VERIFY_PARAMS = [
 export function confirmLink(verifyUrl: string): string {
   const url = new URL(verifyUrl)
   return `${url.origin}${MAGIC_LINK_CONFIRM_PATH}#${url.search.slice(1)}`
+}
+
+/** The app explains sign-in error codes here and lets the person request another link. */
+export const SIGN_IN_PATH = '/sign-in'
+
+/** Better Auth otherwise sends a failed magic link to its success callback URL. */
+export function defaultMagicLinkErrorRedirect(ctx: AuthMiddlewareContext) {
+  if (ctx.path !== '/magic-link/verify') return
+  const errorCallback = ctx.query?.errorCallbackURL
+  // Explicit callbacks remain Better Auth's to validate. Empty has the same meaning as absent.
+  if (errorCallback !== undefined && errorCallback !== '') return
+  return { context: { query: { ...ctx.query, errorCallbackURL: SIGN_IN_PATH } } }
 }

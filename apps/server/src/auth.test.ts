@@ -351,7 +351,7 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
       const link = await requestLink('once@example.com')
       expect((await main.app.request(link.toString())).status).toBe(302)
       const again = await main.app.request(link.toString())
-      expect(again.headers.get('location')).toBe(`${origin}/?error=INVALID_TOKEN`)
+      expect(again.headers.get('location')).toBe(`${origin}/sign-in?error=INVALID_TOKEN`)
       expect(cookieHeader(again)).not.toContain('session_token')
     })
 
@@ -574,8 +574,76 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
 
     it('rejects an unknown token', async () => {
       const res = await main.app.request('/api/auth/magic-link/verify?token=nope&callbackURL=/')
-      expect(res.headers.get('location')).toBe(`${origin}/?error=INVALID_TOKEN`)
+      expect(res.headers.get('location')).toBe(`${origin}/sign-in?error=INVALID_TOKEN`)
       expect(cookieHeader(res)).not.toContain('session_token')
+    })
+
+    it.each(['/app/settings', '/welcome?tab=1', ''])(
+      'defaults magic-link failure to sign-in instead of the success destination (%s)',
+      async (callbackURL) => {
+        const query = new URLSearchParams({
+          token: 'unknown-token',
+          callbackURL,
+          errorCallbackURL: '',
+        })
+        const response = await main.app.request(`/api/auth/magic-link/verify?${query}`)
+        expect(response.status).toBe(302)
+        expect(response.headers.get('location')).toBe(`${origin}/sign-in?error=INVALID_TOKEN`)
+        expect(cookieHeader(response)).not.toContain('session_token')
+      },
+    )
+
+    it('uses the same default for server-side verification calls', async () => {
+      const response = await main.auth.api.magicLinkVerify({
+        query: { token: 'unknown-server-token', callbackURL: '/app/settings' },
+        headers: new Headers(),
+        method: 'GET',
+        asResponse: true,
+      })
+      expect(response.status).toBe(302)
+      expect(response.headers.get('location')).toBe(`${origin}/sign-in?error=INVALID_TOKEN`)
+    })
+
+    it('lands an expired emailed link on sign-in without creating a user or session', async () => {
+      const email = 'expired-default-landing@example.com'
+      const submit = await requestLink(email)
+      const token = submit.searchParams.get('token') as string
+      const hash = createHash('sha256').update(token).digest('base64url')
+      await testDb.pool.query(
+        `UPDATE auth.verification SET "expiresAt" = now() - interval '1 minute' WHERE identifier = $1`,
+        [`magic-link:${hash}`],
+      )
+      const response = await main.app.request(submit.toString())
+      expect(response.status).toBe(302)
+      expect(response.headers.get('location')).toBe(`${origin}/sign-in?error=INVALID_TOKEN`)
+      expect(cookieHeader(response)).not.toContain('session_token')
+      expect(
+        await count('SELECT count(*)::int AS n FROM auth."user" WHERE email = $1', [email]),
+      ).toBe(0)
+    })
+
+    it('keeps the success destination but sends a replay to the default error page', async () => {
+      const submit = await requestLink('used-default-landing@example.com')
+      submit.searchParams.set('callbackURL', '/app/settings')
+      const first = await main.app.request(submit.toString())
+      expect(first.status).toBe(302)
+      expect(first.headers.get('location')).toBe(`${origin}/app/settings`)
+      const replay = await main.app.request(submit.toString())
+      expect(replay.headers.get('location')).toBe(`${origin}/sign-in?error=INVALID_TOKEN`)
+      expect(cookieHeader(replay)).not.toContain('session_token')
+      expect((await me({ cookie: cookieHeader(first) })).res.status).toBe(200)
+    })
+
+    it('still refuses an untrusted explicit error callback before consuming the link', async () => {
+      const submit = await requestLink('untrusted-error-landing@example.com')
+      submit.searchParams.set('errorCallbackURL', 'https://evil.example/sign-in')
+      const refused = await main.app.request(submit.toString())
+      expect(refused.status).toBe(403)
+      expect(refused.headers.get('location')).toBeNull()
+      submit.searchParams.delete('errorCallbackURL')
+      const valid = await main.app.request(submit.toString())
+      expect(valid.status).toBe(302)
+      expect(valid.headers.get('location')).toBe(`${origin}/`)
     })
 
     it('keeps the token out of the log from the request to the signed-in redirect', async () => {
