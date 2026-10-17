@@ -45,9 +45,24 @@ export function fakeGoogle() {
       email_verified: true,
     } as Record<string, unknown>,
     pages: [
-      { items: [{ id: 'primary-calendar', summary: 'My calendar', primary: true }] },
+      {
+        items: [
+          {
+            id: 'primary-calendar',
+            summary: 'My calendar',
+            primary: true,
+            accessRole: 'owner',
+            timeZone: 'America/Los_Angeles',
+          },
+        ],
+      },
     ] as Record<string, unknown>[],
     listStatus: 200,
+    listHook: undefined as ((url: URL) => Promise<Response>) | undefined,
+    eventPages: [{ items: [], nextSyncToken: 'cursor-1' }] as Record<string, unknown>[],
+    eventStatus: 200,
+    eventHook: undefined as ((url: URL, init: RequestInit) => Promise<Response>) | undefined,
+    storedEvents: new Map<string, Record<string, unknown>>(),
   }
   const calls: { url: URL; init: RequestInit }[] = []
   const request: typeof fetch = async (input, init = {}) => {
@@ -61,8 +76,34 @@ export function fakeGoogle() {
       url.origin === 'https://www.googleapis.com' &&
       url.pathname === '/calendar/v3/users/me/calendarList'
     ) {
+      if (controls.listHook) return controls.listHook(url)
       const page = Number(url.searchParams.get('pageToken') ?? '0')
       return Response.json(controls.pages[page] ?? {}, { status: controls.listStatus })
+    }
+    if (url.origin === 'https://www.googleapis.com' && url.pathname.includes('/events')) {
+      if (controls.eventHook) return controls.eventHook(url, init)
+      if (init.method === 'POST') {
+        const value = JSON.parse(String(init.body))
+        const stored = { ...value, id: `event-${controls.storedEvents.size + 1}`, etag: '"v1"' }
+        controls.storedEvents.set(stored.id, stored)
+        return Response.json(stored)
+      }
+      if (init.method === 'PATCH') {
+        const id = decodeURIComponent(url.pathname.split('/').at(-1) ?? '')
+        const prior = controls.storedEvents.get(id)
+        if (!prior) return Response.json({}, { status: 404 })
+        const stored = { ...prior, ...JSON.parse(String(init.body)), etag: '"v2"' }
+        controls.storedEvents.set(id, stored)
+        return Response.json(stored)
+      }
+      if (url.searchParams.has('iCalUID'))
+        return Response.json({
+          items: [...controls.storedEvents.values()].filter(
+            (e) => e.iCalUID === url.searchParams.get('iCalUID') && e.status !== 'cancelled',
+          ),
+        })
+      const page = Number(url.searchParams.get('pageToken') ?? '0')
+      return Response.json(controls.eventPages[page] ?? {}, { status: controls.eventStatus })
     }
     throw new Error('Unexpected provider endpoint')
   }

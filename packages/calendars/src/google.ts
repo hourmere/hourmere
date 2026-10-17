@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { isSingleLineText } from '@hourmere/scheduling/text'
 import { z } from 'zod'
+import { googleEventMethods } from './google-events.ts'
 
 export const GOOGLE_CALENDAR_CALLBACK = '/api/calendar/google/callback'
 export const GOOGLE_CALENDAR_SCOPES = [
@@ -8,13 +9,23 @@ export const GOOGLE_CALENDAR_SCOPES = [
   'email',
   'https://www.googleapis.com/auth/calendar.calendarlist.readonly',
 ] as const
+export const GOOGLE_CALENDAR_SYNC_SCOPES = [
+  ...GOOGLE_CALENDAR_SCOPES,
+  'https://www.googleapis.com/auth/calendar.events.readonly',
+  'https://www.googleapis.com/auth/calendar.events.owned',
+] as const
 
 export class GoogleCalendarError extends Error {
   readonly code: 'provider_unavailable' | 'needs_reauth' | 'permissions_missing'
-  constructor(code: 'provider_unavailable' | 'needs_reauth' | 'permissions_missing') {
+  readonly status: number | undefined
+  constructor(
+    code: 'provider_unavailable' | 'needs_reauth' | 'permissions_missing',
+    status?: number,
+  ) {
     super(code)
     this.name = 'GoogleCalendarError'
     this.code = code
+    this.status = status
   }
 }
 
@@ -34,7 +45,17 @@ const userSchema = z.object({
 const calendarPage = z.object({
   nextPageToken: z.string().min(1).max(4096).optional(),
   items: z
-    .array(z.object({ id: text, summary: text.optional(), primary: z.boolean().optional() }))
+    .array(
+      z.object({
+        id: text,
+        summary: text.optional(),
+        primary: z.boolean().optional(),
+        accessRole: z
+          .enum(['freeBusyReader', 'reader', 'writer', 'writerWithoutPrivateAccess', 'owner'])
+          .optional(),
+        timeZone: text.optional(),
+      }),
+    )
     .max(250)
     .optional(),
 })
@@ -48,6 +69,8 @@ export interface GoogleCalendar {
   id: string
   name: string
   isPrimary: boolean
+  accessRole: 'freeBusyReader' | 'reader' | 'writer' | 'writerWithoutPrivateAccess' | 'owner'
+  timeZone: string | null
 }
 export interface GoogleCalendarConfig {
   clientId: string
@@ -71,7 +94,10 @@ export function createGoogleCalendarClient(
         throw new GoogleCalendarError(
           response.status === 401 || response.status === 400
             ? 'needs_reauth'
-            : 'provider_unavailable',
+            : response.status === 403
+              ? 'permissions_missing'
+              : 'provider_unavailable',
+          response.status,
         )
       }
       if (!response.body) throw new GoogleCalendarError('provider_unavailable')
@@ -126,13 +152,13 @@ export function createGoogleCalendarClient(
   }
 
   return {
-    authorizationUrl(state: string, verifier: string) {
+    authorizationUrl(state: string, verifier: string, access: 'list' | 'sync' = 'list') {
       const url = new URL('https://accounts.google.com/o/oauth2/v2/auth')
       url.search = new URLSearchParams({
         client_id: config.clientId,
         redirect_uri: redirectUri,
         response_type: 'code',
-        scope: GOOGLE_CALENDAR_SCOPES.join(' '),
+        scope: (access === 'sync' ? GOOGLE_CALENDAR_SYNC_SCOPES : GOOGLE_CALENDAR_SCOPES).join(' '),
         state,
         code_challenge: createHash('sha256').update(verifier).digest('base64url'),
         code_challenge_method: 'S256',
@@ -175,7 +201,8 @@ export function createGoogleCalendarClient(
         const url = new URL('https://www.googleapis.com/calendar/v3/users/me/calendarList')
         url.search = new URLSearchParams({
           maxResults: '250',
-          fields: 'items(id,summary,primary),nextPageToken',
+          showHidden: 'true',
+          fields: 'items(id,summary,primary,accessRole,timeZone),nextPageToken',
           ...(pageToken && { pageToken }),
         }).toString()
         const result = calendarPage.safeParse(
@@ -187,6 +214,8 @@ export function createGoogleCalendarClient(
             id: item.id,
             name: item.summary ?? item.id,
             isPrimary: item.primary ?? false,
+            accessRole: item.accessRole ?? 'reader',
+            timeZone: item.timeZone ?? null,
           })
         if (calendars.length > 2000) throw new GoogleCalendarError('provider_unavailable')
         pageToken = result.data.nextPageToken
@@ -200,6 +229,7 @@ export function createGoogleCalendarClient(
       }
       throw new GoogleCalendarError('provider_unavailable')
     },
+    ...googleEventMethods(json),
   }
 }
 

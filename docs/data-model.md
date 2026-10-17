@@ -1,5 +1,12 @@
 # Data model
 
+Google synchronization also records `booking_calendar_targets`: one destination per
+reschedule-chain root and host, saved in the booking transaction. It survives changes to the
+profile's default calendar and provider retries, and cascades away on booking/user/calendar
+deletion. `booking_calendar_events` maps each written booking version to the same external
+event. See [Google Calendar synchronization](google-calendar.md) for the cursor, freshness
+and writeback rules.
+
 PostgreSQL is the system of record. The schema is defined by the SQL files in
 `packages/db/migrations` (applied in order, never edited once applied); TypeScript table
 types in `packages/db/src/tables.ts` are generated from the migrated database.

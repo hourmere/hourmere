@@ -59,6 +59,8 @@ export interface JobDefinition<Name extends string = string, Schema extends z.Zo
   policy?: JobPolicy | undefined
   /** Jobs of this kind run at the same time in one process. Default 1. */
   concurrency?: number | undefined
+  /** Optional recurring dispatch, installed idempotently by worker processes. */
+  schedule?: { cron: string; payload: z.input<Schema> } | undefined
   /**
    * Runs one job. Throwing fails the attempt, which is retried by the retry policy; a job
    * may therefore run more than once, so handlers must be idempotent.
@@ -312,6 +314,18 @@ export function createJobs<const Defs extends readonly AnyJobDefinition[]>(
         for (const definition of definitions.values()) await syncQueue(definition)
         if (options.work) {
           for (const definition of definitions.values()) {
+            if (definition.schedule) {
+              const scheduled = definition.payload.safeParse(definition.schedule.payload)
+              if (!scheduled.success)
+                throw new JobPayloadError(
+                  `job ${definition.name}: invalid scheduled payload: ${issuesOf(scheduled.error)}`,
+                )
+              await boss.schedule(
+                definition.name,
+                definition.schedule.cron,
+                scheduled.data as object,
+              )
+            }
             await boss.work(
               definition.name,
               {

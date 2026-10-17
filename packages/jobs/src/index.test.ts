@@ -102,6 +102,31 @@ describe.skipIf(!serverUrl)('createJobs', () => {
     }
   })
 
+  it('installs a validated recurring schedule only on workers', async () => {
+    const name = queueName('recurring')
+    const definition = defineJob({
+      name,
+      payload: z.strictObject({ marker: z.literal('ok') }),
+      schedule: { cron: '* * * * *', payload: { marker: 'ok' as const } },
+      handler: async () => {},
+    })
+    const web = await start([definition], { work: false })
+    expect(
+      (await testDb.pool.query('SELECT 1 FROM pgboss.schedule WHERE name=$1', [name])).rowCount,
+    ).toBe(0)
+    await web.stop()
+    const worker = await start([definition])
+    const rows = await testDb.pool.query('SELECT cron,data FROM pgboss.schedule WHERE name=$1', [
+      name,
+    ])
+    expect(rows.rows).toEqual([{ cron: '* * * * *', data: { marker: 'ok' } }])
+    await worker.stop()
+    await start([definition])
+    expect(
+      (await testDb.pool.query('SELECT 1 FROM pgboss.schedule WHERE name=$1', [name])).rowCount,
+    ).toBe(1)
+  })
+
   it('runs a job with its validated payload', async () => {
     const received = deferred<{ to: string; count: number }>()
     const name = queueName('echo')

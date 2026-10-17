@@ -272,7 +272,9 @@ export function createFixtures(db: Db) {
       .insertInto('calendar_connections')
       .values({
         user_id: userId,
-        provider: 'google',
+        // Static mirrored data for provider-independent engine tests. Live Google data
+        // additionally needs a fresh sync cursor/coverage, tested by calendar sync tests.
+        provider: 'caldav',
         external_account_id: `acct-${unique()}`,
         credentials: Buffer.from('ciphertext'),
       })

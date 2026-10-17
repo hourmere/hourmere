@@ -15,7 +15,7 @@ const outcomes = new Map([
   ['invalid_state', 'This connection attempt expired or was already used. Start again.'],
   [
     'permissions_missing',
-    'Google did not grant the requested access. Connect again and allow the calendar list.',
+    'Google did not grant the requested access. Connect again and allow the requested permissions.',
   ],
   ['needs_reauth', 'Google did not provide continuing access. Connect again to try again.'],
   ['provider_unavailable', 'Google Calendar could not be reached. Try connecting again shortly.'],
@@ -60,7 +60,7 @@ export function CalendarsPage() {
     if (search.has('connection')) setSearch({}, { replace: true })
   }, [search, setSearch])
 
-  async function connect() {
+  async function connect(access: 'list' | 'sync' = 'sync') {
     connectionRequest.current?.abort()
     const request = new AbortController()
     connectionRequest.current = request
@@ -70,7 +70,7 @@ export function CalendarsPage() {
     try {
       const { authorizationUrl } = await unwrap(
         api.POST('/api/v1/calendar-connections/google/authorize', {
-          body: {},
+          body: { access },
           signal: request.signal,
         }),
       )
@@ -90,6 +90,48 @@ export function CalendarsPage() {
     } catch (err) {
       if (mounted.current && !request.signal.aborted)
         setError(`Could not connect Google Calendar. ${errorMessage(err)}`)
+    } finally {
+      if (mounted.current) setPending(null)
+    }
+  }
+
+  async function calendarAction(
+    id: string,
+    action: 'toggle' | 'sync' | 'destination',
+    selected = false,
+  ) {
+    setPending(id)
+    setError(null)
+    try {
+      if (action === 'toggle')
+        await unwrap(
+          api.PATCH('/api/v1/calendars/{id}', {
+            params: { path: { id } },
+            body: { checkConflicts: selected },
+          }),
+        )
+      else if (action === 'sync')
+        await unwrap(
+          api.POST('/api/v1/calendars/{id}/sync', { params: { path: { id } }, body: {} }),
+        )
+      else
+        await unwrap(
+          api.PUT('/api/v1/calendar-destination', { body: { calendarId: selected ? null : id } }),
+        )
+      if (!mounted.current) return
+      setNotice(
+        action === 'sync'
+          ? 'Busy times synchronized.'
+          : action === 'toggle'
+            ? 'Conflict calendar selection saved.'
+            : 'Booking calendar saved. New bookings use this destination; existing meetings keep theirs.',
+      )
+      reload()
+    } catch (err) {
+      if (mounted.current) {
+        setError(errorMessage(err))
+        reload()
+      }
     } finally {
       if (mounted.current) setPending(null)
     }
@@ -134,8 +176,8 @@ export function CalendarsPage() {
     <div className="page stack">
       <h1>Calendars</h1>
       <p>
-        Connect a Google account to see its calendars. Calendar events and busy times are not synced
-        yet.
+        Choose calendars whose busy times block bookings, and an owned calendar for new booking
+        events. Existing meetings keep their original calendar when you change the destination.
       </p>
       {notice && (
         <div className="alert alert-info">
@@ -164,15 +206,16 @@ export function CalendarsPage() {
           {state.data.googleEnabled ? (
             <section className="stack" aria-label="Connect Google Calendar">
               <p>
-                Google will ask to share your account email and calendar list. Connecting is
-                separate from signing in and does not allow Hourmere to read or change your events.
+                Google will ask for your email, calendar list, event read access and permission to
+                change events on calendars you own. Busy-time synchronization stores times and event
+                IDs, without event titles or descriptions. Connecting is separate from signing in.
               </p>
               <div>
                 <button
                   type="button"
                   className="button button-primary"
                   disabled={pending !== null}
-                  onClick={connect}
+                  onClick={() => connect()}
                 >
                   {pending === 'connect' ? 'Opening Google…' : 'Connect Google Calendar'}
                 </button>
@@ -198,11 +241,98 @@ export function CalendarsPage() {
                     it.
                   </p>
                 )}
+                {!connection.syncAuthorized && (
+                  <div className="stack">
+                    <p>
+                      This connection has calendar-list access only. Enable synchronization to use
+                      busy times and write booking events.
+                    </p>
+                    <button
+                      type="button"
+                      className="button"
+                      disabled={pending !== null || !state.data.googleEnabled}
+                      onClick={() => connect('sync')}
+                    >
+                      Enable calendar synchronization
+                    </button>
+                  </div>
+                )}
                 <ul>
                   {connection.calendars.map((calendar) => (
                     <li key={calendar.id}>
                       {calendar.name}
                       {calendar.isPrimary ? ' (primary)' : ''}
+                      {(connection.syncAuthorized ||
+                        calendar.checkConflicts ||
+                        state.data.destinationCalendarId === calendar.id) && (
+                        <fieldset className="form-fieldset" disabled={pending !== null}>
+                          <label className="choice">
+                            <input
+                              type="checkbox"
+                              checked={calendar.checkConflicts}
+                              disabled={
+                                pending !== null ||
+                                (!calendar.checkConflicts &&
+                                  (calendar.accessRole === 'freeBusyReader' ||
+                                    connection.status !== 'active' ||
+                                    !state.data.googleEnabled ||
+                                    !connection.syncAuthorized))
+                              }
+                              onChange={(event) =>
+                                calendarAction(calendar.id, 'toggle', event.target.checked)
+                              }
+                            />
+                            Check conflicts in {calendar.name}
+                          </label>
+                          {calendar.checkConflicts && (
+                            <>
+                              <p>
+                                {calendar.syncError
+                                  ? 'Synchronization failed. Booking times stay unavailable until synchronization recovers.'
+                                  : calendar.lastSyncedAt
+                                    ? `Last synchronized: ${new Date(calendar.lastSyncedAt).toLocaleString()}`
+                                    : 'Waiting for the first synchronization. Booking times stay unavailable until it completes.'}
+                              </p>
+                              <button
+                                type="button"
+                                className="button button-small"
+                                disabled={
+                                  connection.status !== 'active' ||
+                                  !state.data.googleEnabled ||
+                                  !connection.syncAuthorized
+                                }
+                                onClick={() => calendarAction(calendar.id, 'sync')}
+                              >
+                                Sync {calendar.name} now
+                              </button>
+                            </>
+                          )}
+                          {(calendar.accessRole === 'owner' ||
+                            state.data.destinationCalendarId === calendar.id) && (
+                            <button
+                              type="button"
+                              className="button button-small"
+                              disabled={
+                                state.data.destinationCalendarId !== calendar.id &&
+                                (connection.status !== 'active' ||
+                                  !state.data.googleEnabled ||
+                                  !connection.syncAuthorized)
+                              }
+                              onClick={() =>
+                                calendarAction(
+                                  calendar.id,
+                                  'destination',
+                                  state.data.destinationCalendarId === calendar.id,
+                                )
+                              }
+                            >
+                              {state.data.destinationCalendarId === calendar.id
+                                ? `Stop writing bookings to ${calendar.name}`
+                                : `Write new bookings to ${calendar.name}`}
+                            </button>
+                          )}
+                        </fieldset>
+                      )}
                     </li>
                   ))}
                 </ul>
