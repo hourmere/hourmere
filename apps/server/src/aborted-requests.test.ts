@@ -37,6 +37,19 @@ const echo: RouteModule = ({ app }) => {
   })
   app.get('/api/v1/slow-bug', async (c) => {
     await new Promise((resolve) => setTimeout(resolve, 300))
+    if (c.req.query('kind') === 'reset') {
+      throw new Error('database query failed', {
+        cause: Object.assign(new Error('Connection terminated unexpectedly'), {
+          code: 'ECONNRESET',
+        }),
+      })
+    }
+    if (c.req.query('kind') === 'transport-abort') {
+      throw Object.assign(new Error('upstream operation failed'), { code: 'ECONNABORTED' })
+    }
+    if (c.req.query('kind') === 'signal-abort') {
+      throw new DOMException('request operation cancelled', 'AbortError')
+    }
     if (c.req.query('kind') === 'refused') {
       throw Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:5432'), {
         code: 'ECONNREFUSED',
@@ -182,6 +195,26 @@ describe('a client that goes away mid-request', () => {
         / ERROR GET \/api\/v1\/slow-bug: Error: connect ECONNREFUSED .*\\n {4}at /,
       ),
     ])
+  })
+
+  it.each(['reset', 'transport-abort'])(
+    'keeps an unrelated %s failure as ERROR after the client disconnects',
+    async (kind) => {
+      await getAndLeave(port, `/api/v1/slow-bug?kind=${kind}`)
+      expect(await answered('/api/v1/slow-bug', 'GET')).toMatch(/ 500 /)
+      expect(logged.warn).toEqual([])
+      expect(logged.error).toHaveLength(1)
+      expect(logged.error[0]).toContain(' ERROR GET /api/v1/slow-bug: ')
+      expect(logged.error[0]).toContain(kind === 'reset' ? 'ECONNRESET' : 'ECONNABORTED')
+    },
+  )
+
+  it('still recognizes AbortError from a request-scoped operation', async () => {
+    await getAndLeave(port, '/api/v1/slow-bug?kind=signal-abort')
+    expect(await answered('/api/v1/slow-bug', 'GET')).toMatch(/ 499 /)
+    expect(logged.error).toEqual([])
+    expect(logged.warn).toHaveLength(1)
+    expect(logged.warn[0]).toContain('AbortError: request operation cancelled')
   })
 
   it('still logs real failures of clients that stay as errors', async () => {
