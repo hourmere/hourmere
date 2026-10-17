@@ -171,7 +171,9 @@ export interface BookingNotifications {
 export interface Bookings {
   api_key_id: string | null;
   cancel_reason: string | null;
+  cancelled_api_key_id: string | null;
   cancelled_at: Timestamp | null;
+  cancelled_source: string | null;
   created_at: Generated<Timestamp>;
   end_at: Timestamp;
   event_type_id: string | null;

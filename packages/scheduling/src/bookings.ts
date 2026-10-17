@@ -551,11 +551,18 @@ async function cancelLocked(
   now: Temporal.Instant,
   reason: string | null,
   notify: BookingNotifier | undefined,
+  origin: BookingOrigin,
 ): Promise<Booking> {
   assertChangeable(row, now)
   await db
     .updateTable('bookings')
-    .set({ status: 'cancelled', cancelled_at: now.toString(), cancel_reason: reason })
+    .set({
+      status: 'cancelled',
+      cancelled_at: now.toString(),
+      cancel_reason: reason,
+      cancelled_source: origin.source,
+      cancelled_api_key_id: origin.apiKeyId,
+    })
     .where('id', '=', row.id)
     .execute()
   // In this transaction: the cancellation email exists exactly when the cancellation does.
@@ -580,8 +587,9 @@ export interface CreateBookingInput {
 }
 
 /**
- * Who made a booking, for the audit trail (`bookings.source` and `bookings.api_key_id`). The
- * booking page is `web` without a key; agents pass `api` or `mcp` with the key they used.
+ * Who initiated a booking change. Creation uses source/api_key_id; withdrawals use
+ * cancelled_source/cancelled_api_key_id without overwriting the original attribution.
+ * The booking page is web without a key; agents pass api or mcp with the key they used.
  */
 export interface BookingOrigin {
   source: BookingSource
@@ -718,6 +726,7 @@ export async function cancelManagedBooking(
   ctx: PublicContext,
   token: string | undefined,
   { reason }: { reason?: string | undefined } = {},
+  origin: BookingOrigin = BOOKING_PAGE,
 ): Promise<Booking> {
   const hash = manageTokenHash(token)
   if (!hash) throw bookingNotFound()
@@ -725,7 +734,7 @@ export async function cancelManagedBooking(
   return ctx.db.transaction().execute(async (trx) => {
     const row = await lockManagedBooking(trx, hash)
     if (!row) throw bookingNotFound()
-    return cancelLocked(trx, row, ctx.now(), cancelReason, ctx.notify)
+    return cancelLocked(trx, row, ctx.now(), cancelReason, ctx.notify, origin)
   })
 }
 
@@ -807,7 +816,12 @@ export async function rescheduleManagedBooking(
     // Cancel first: the trigger frees the old host rows, so the new time may overlap them.
     await trx
       .updateTable('bookings')
-      .set({ status: 'cancelled', cancelled_at: now.toString() })
+      .set({
+        status: 'cancelled',
+        cancelled_at: now.toString(),
+        cancelled_source: origin.source,
+        cancelled_api_key_id: origin.apiKeyId,
+      })
       .where('id', '=', old.id)
       .execute()
     const { id, manageToken } = await insertBooking(trx, {
@@ -997,6 +1011,7 @@ export async function cancelHostBooking(
   ctx: ServiceContext,
   id: string,
   { reason }: { reason?: string | undefined } = {},
+  origin?: BookingOrigin,
 ): Promise<Booking> {
   if (!UUID.test(id)) throw bookingNotFound()
   const cancelReason = normalizeReason(reason)
@@ -1011,6 +1026,16 @@ export async function cancelHostBooking(
       .forUpdate('b')
       .executeTakeFirst()
     if (!row) throw bookingNotFound()
-    return cancelLocked(trx, row, ctx.now(), cancelReason, ctx.notify)
+    return cancelLocked(
+      trx,
+      row,
+      ctx.now(),
+      cancelReason,
+      ctx.notify,
+      origin ?? {
+        source: ctx.principal.kind === 'api_key' ? 'api' : 'web',
+        apiKeyId: ctx.principal.kind === 'api_key' ? ctx.principal.apiKeyId : null,
+      },
+    )
   })
 }
