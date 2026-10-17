@@ -266,6 +266,11 @@ export function createApp({
   })
   // First, so it also covers what every later middleware, route and onError answers.
   app.use('*', securityHeaders({ hsts: strictTransportSecurity(publicUrl, hstsMaxAge) }))
+  app.use('/oauth/*', async (c, next) => {
+    await next()
+    c.res.headers.set('Cache-Control', 'no-store')
+    c.res.headers.set('Referrer-Policy', 'no-referrer')
+  })
   app.use('/api/*', requestLogger)
   app.use('/api/*', clientIp(trustedProxies))
   // First on /api/v1, so it also covers what the middleware below and onError answer.
@@ -361,7 +366,7 @@ export function createApp({
     app.use('*', async (c, next) => {
       await next()
       if (c.res.headers.get('content-type')?.startsWith('text/html')) {
-        c.res.headers.set('Cache-Control', 'no-cache')
+        if (!c.res.headers.has('Cache-Control')) c.res.headers.set('Cache-Control', 'no-cache')
       }
     })
     app.use('*', serveStatic({ root }))

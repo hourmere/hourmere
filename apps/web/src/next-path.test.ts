@@ -4,6 +4,7 @@ import { safeNextPath, signInPath } from './next-path.ts'
 describe('safeNextPath', () => {
   it.each([
     ['/app', '/app'],
+    ['/oauth/authorize?client_id=test&sig=abc', '/oauth/authorize?client_id=test&sig=abc'],
     ['/app/', '/app/'],
     ['/app/api-keys', '/app/api-keys'],
     ['/app/bookings?tab=past', '/app/bookings?tab=past'],
@@ -53,6 +54,10 @@ describe('safeNextPath', () => {
     ['/app/%2e%2e/api-keys'],
     // Sign-in itself and the server's page for emailed links.
     ['/sign-in'],
+    ['/oauth/consent?sig=abc'],
+    ['/oauth/authorize/../consent'],
+    ['/oauth/authorize-more'],
+    ['/oauth/authorize?' + 'x'.repeat(20000)],
     ['/sign-in?next=/app/api-keys'],
     ['/sign-in/confirm'],
     ['/sign-in/confirm#token=x'],

@@ -87,3 +87,12 @@ export const ManageBookingPage = page(
   () => import('./public/ManageBookingPage.tsx'),
   (m) => m.ManageBookingPage,
 )
+
+export const McpAuthorizePage = page(
+  () => import('./pages/McpOAuth.tsx'),
+  (m) => m.McpAuthorizePage,
+)
+export const ConnectedAppsPage = page(
+  () => import('./pages/McpOAuth.tsx'),
+  (m) => m.ConnectedAppsPage,
+)

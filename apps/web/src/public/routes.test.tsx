@@ -14,6 +14,7 @@ describe('routing between the app and the public pages', () => {
       ...signedIn,
       ...organizations(),
       ...profile(),
+      'GET /api/v1/mcp-oauth/connections': () => json(200, { data: [] }),
       'GET /api/v1/event-types': () => json(200, { data: [] }),
       'GET /api/v1/schedules': () => json(200, { data: [] }),
       'GET /api/v1/bookings': () => json(200, { data: [], nextCursor: null }),
@@ -60,6 +61,7 @@ describe('routing between the app and the public pages', () => {
       '/api',
       '/assets',
       '/mcp',
+      '/oauth',
       '/team',
     ].map((path) => path.split('/')[1] as string)
     for (const segment of topLevel) expect(isReservedName(segment), segment).toBe(true)

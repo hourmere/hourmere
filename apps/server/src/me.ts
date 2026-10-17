@@ -16,7 +16,11 @@ export const Me = z
       })
       .openapi({ description: 'The organization the caller acts in' }),
     principal: z.object({
-      kind: z.enum(['session', 'api_key']),
+      kind: z.enum(['session', 'api_key', 'oauth']),
+      oauthConsentId: z
+        .uuid()
+        .optional()
+        .openapi({ description: 'The organization-bound consent used, for kind oauth' }),
       apiKeyId: z.uuid().nullable().openapi({ description: 'The key used, for kind api_key' }),
     }),
   })
@@ -26,6 +30,10 @@ export function describeCaller(p: Principal): z.infer<typeof Me> {
   return {
     user: p.user,
     organization: p.organization,
-    principal: { kind: p.kind, apiKeyId: p.kind === 'api_key' ? p.apiKeyId : null },
+    principal: {
+      kind: p.kind,
+      apiKeyId: p.kind === 'api_key' ? p.apiKeyId : null,
+      ...(p.kind === 'oauth' && { oauthConsentId: p.oauthConsentId }),
+    },
   }
 }

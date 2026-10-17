@@ -9,10 +9,11 @@ const SIGN_IN = PATHS.signIn
 // Any origin works for resolving: only the path, query and fragment are kept.
 const BASE = 'https://app.invalid'
 // Far beyond any page of the app; a longer value is not worth carrying through sign-in.
-const MAX_LENGTH = 2048
+const MAX_LENGTH = 20000
 
 /** Whether `pathname` (normalized) is a signed-in page: /app or below it. */
-const isAppPage = (pathname: string) => pathname === APP_BASE || pathname.startsWith(`${APP_BASE}/`)
+const isAppPage = (pathname: string) =>
+  pathname === APP_BASE || pathname.startsWith(`${APP_BASE}/`) || pathname === '/oauth/authorize'
 
 /**
  * `raw` if it is a signed-in page of this app (/app or below, normalized), else the default
@@ -25,7 +26,12 @@ const isAppPage = (pathname: string) => pathname === APP_BASE || pathname.starts
  * make sign-in fail: encoded separators (`%2F`, `%5C`) in the path. And overlong values.
  */
 export function safeNextPath(raw: string | null | undefined): string {
-  if (!raw?.startsWith('/') || raw.startsWith('//') || raw.length > MAX_LENGTH) return HOME
+  if (
+    !raw?.startsWith('/') ||
+    raw.startsWith('//') ||
+    raw.length > (raw.startsWith('/oauth/authorize?') ? MAX_LENGTH : 2048)
+  )
+    return HOME
   // biome-ignore lint/suspicious/noControlCharactersInRegex: refusing control characters is the point
   if (/[\u0000- \u007f-\u009f\\]/.test(raw)) return HOME
   let url: URL
@@ -39,7 +45,7 @@ export function safeNextPath(raw: string | null | undefined): string {
   if (url.origin !== BASE || !isAppPage(pathname) || /%2f|%5c/i.test(pathname)) return HOME
   // Normalizing percent-encodes some characters, which can make the value longer.
   const path = pathname + url.search + url.hash
-  return path.length > MAX_LENGTH ? HOME : path
+  return path.length > (pathname === '/oauth/authorize' ? MAX_LENGTH : 2048) ? HOME : path
 }
 
 /** The sign-in page, remembering `path` (pathname plus query) to come back to. */

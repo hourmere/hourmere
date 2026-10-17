@@ -1,13 +1,18 @@
 // The remote MCP server: Streamable HTTP at /mcp on the same server as the REST API,
-// stateless, authenticated with API keys. See docs/mcp.md.
+// stateless, authenticated with API keys or optional OAuth grants. See docs/mcp.md.
 import { inspect } from 'node:util'
 import type { OpenAPIHono } from '@hono/zod-openapi'
-import { type CallerResolver, escapeControlCharacters } from '@hourmere/auth'
+import {
+  type CallerResolver,
+  type createMcpOAuthResolver,
+  escapeControlCharacters,
+} from '@hourmere/auth'
 import { type AuthInfo, createMcpHandler, McpServer } from '@modelcontextprotocol/server'
 import type { Context } from 'hono'
 import { createMiddleware } from 'hono/factory'
 import { routeBodyLimit } from '../body-limit.ts'
 import { withClientIpHeader } from '../client-ip.ts'
+import { createRateLimiter } from '../rate-limit.ts'
 import { BOOKING_BODY_LIMIT } from '../routes/public.ts'
 import { clip, type McpCaller, prepareTools, registerTools, type Tool } from './tools.ts'
 
@@ -22,7 +27,7 @@ export const MCP_BODY_LIMIT = BOOKING_BODY_LIMIT
 
 const SERVER_INFO = { name: 'hourmere', title: 'Hourmere', version: '0.0.0' }
 
-const INSTRUCTIONS = `Hourmere schedules meetings. You act as the user who owns the API key, in the organization the key belongs to (whoami tells you who that is).
+const INSTRUCTIONS = `Hourmere schedules meetings. You act as the user in the organization bound to your API key or OAuth grant (whoami tells you who that is).
 To book time with someone, call find_available_slots for their event type (handle and slug come from their booking link https://<host>/<handle>/<slug>), then create_booking with the exact start of one of the returned slots.
 Times are RFC 3339: results give each time in UTC (Z) and, where you pass a timeZone, in that IANA time zone too.
 create_booking and reschedule_booking return a manageToken once: keep it, it is the only way to reschedule or cancel that booking as the invitee.`
@@ -30,7 +35,7 @@ create_booking and reschedule_booking return a manageToken once: keep it, it is 
 /** What createApp passes to the MCP module. */
 export type McpModule = (shared: {
   app: OpenAPIHono
-  /** The REST API's caller resolution; /mcp lets only API keys through it. */
+  /** The REST resolver handles API keys; optional OAuth is verified separately. */
   resolveCaller: CallerResolver
   /** PUBLIC_URL: the only origin browsers may send requests from. */
   publicUrl: string
@@ -66,13 +71,19 @@ function logLine(level: 'ERROR' | 'WARN', what: string, detail: unknown): void {
  * SDK only needs `token` for OAuth helpers that are not used here.
  */
 function toAuthInfo(caller: McpCaller): AuthInfo {
-  return { token: '', clientId: caller.apiKeyId, scopes: [], extra: { caller } }
+  return {
+    token: '',
+    clientId: caller.kind === 'api_key' ? caller.apiKeyId : caller.clientId,
+    scopes: caller.kind === 'oauth' ? [...caller.scopes] : [],
+    extra: { caller },
+  }
 }
 
 function callerOf(authInfo: AuthInfo | undefined): McpCaller {
   const caller = authInfo?.extra?.caller as McpCaller | undefined
   // Only reachable if a request got past the endpoint without authentication.
-  if (caller?.kind !== 'api_key') throw new Error('MCP request without an authenticated caller')
+  if (caller?.kind !== 'api_key' && caller?.kind !== 'oauth')
+    throw new Error('MCP request without an authenticated caller')
   return caller
 }
 
@@ -94,7 +105,13 @@ const BEARER = /^Bearer[ \t]+\S/i
  * pages on any site could post to (CSRF). Per-key rate limits apply as for REST: resolving
  * the key counts the request.
  */
-function requireApiKey(resolveCaller: CallerResolver) {
+const oauthLimits = createRateLimiter({ limit: 120, windowSeconds: 60 })
+
+function requireApiKey(
+  resolveCaller: CallerResolver,
+  oauth?: McpEndpointOptions['oauth'],
+  publicUrl?: string,
+) {
   return createMiddleware<McpEnv>(async (c, next) => {
     if (c.req.header('authorization') === undefined) {
       return unauthorized(
@@ -103,6 +120,23 @@ function requireApiKey(resolveCaller: CallerResolver) {
           ? 'Send an API key as Authorization: Bearer hm_…'
           : 'The MCP endpoint does not accept session cookies; send an API key as Authorization: Bearer hm_…',
       )
+    }
+    if (oauth && !/^Bearer[ \t]+hm_/i.test(c.req.header('authorization') ?? '')) {
+      const result = await oauth.resolve(c.req.raw)
+      if (!result.ok) {
+        c.header(
+          'WWW-Authenticate',
+          `Bearer resource_metadata="${new URL('/.well-known/oauth-protected-resource/mcp', publicUrl).href}", error="${result.error}"${result.error === 'insufficient_scope' ? ', scope="mcp:tools"' : ''}`,
+        )
+        return c.json({ error: result.error }, result.error === 'insufficient_scope' ? 403 : 401)
+      }
+      const retry = oauthLimits.hit(result.principal.oauthConsentId)
+      if (retry !== undefined) {
+        c.header('Retry-After', String(retry))
+        return c.json({ error: 'rate_limited' }, 429)
+      }
+      c.set('mcpCaller', result.principal)
+      return next()
     }
     const headers = withClientIpHeader(c.req.raw.headers, c.var.clientIp)
     headers.delete('cookie')
@@ -177,18 +211,20 @@ function postOnly() {
 export interface McpEndpointOptions {
   /** Served to every caller, in this order (clients may cache the list). */
   tools: readonly Tool[]
+  oauth?: {
+    resolve: ReturnType<typeof createMcpOAuthResolver>
+    handler: (request: Request) => Promise<Response>
+  }
 }
 
 /**
  * The MCP endpoint at /mcp. The composition root (server.ts) creates it with the tools,
  * which hold their services; createApp mounts it.
  *
- * OAuth 2.1 (for claude.ai and ChatGPT connectors) is meant to slot in here without
- * breaking API key clients: serve the protected-resource metadata where the 404 below is,
- * name it in the 401's WWW-Authenticate, and let requireApiKey also accept access tokens
- * that resolve to the same McpCaller.
+ * Optional OAuth and metadata are supplied by the composition root. API keys keep their
+ * existing resolver and rate limits; cookies never authenticate a JSON-RPC request.
  */
-export function mcpEndpoint({ tools }: McpEndpointOptions): McpModule {
+export function mcpEndpoint({ tools, oauth }: McpEndpointOptions): McpModule {
   const prepared = prepareTools(tools)
   const handler = createMcpHandler(
     ({ authInfo }) => {
@@ -210,6 +246,21 @@ export function mcpEndpoint({ tools }: McpEndpointOptions): McpModule {
   )
 
   return ({ app, resolveCaller, publicUrl }) => {
+    if (oauth) {
+      for (const path of [
+        '/.well-known/oauth-protected-resource',
+        '/.well-known/oauth-protected-resource/mcp',
+        '/.well-known/oauth-authorization-server',
+        '/.well-known/oauth-authorization-server/api/auth',
+        '/.well-known/openid-configuration/api/auth',
+      ]) {
+        app.get(path, async () => {
+          const response = await oauth.handler(new Request(new URL(path, publicUrl)))
+          response.headers.set('Cache-Control', 'no-store')
+          return response
+        })
+      }
+    }
     // `/mcp/` is the same endpoint: clients and proxies add the slash.
     for (const path of [MCP_PATH, `${MCP_PATH}/`]) {
       app.all(
@@ -219,14 +270,24 @@ export function mcpEndpoint({ tools }: McpEndpointOptions): McpModule {
         noStore,
         checkOrigin(new URL(publicUrl).origin),
         postOnly(),
-        requireApiKey(resolveCaller),
+        createMiddleware(async (c, next) => {
+          await next()
+          if (
+            oauth &&
+            c.res.status === 401 &&
+            !c.res.headers.get('WWW-Authenticate')?.includes('resource_metadata')
+          )
+            c.res.headers.set(
+              'WWW-Authenticate',
+              `${c.res.headers.get('WWW-Authenticate') ?? 'Bearer'}, resource_metadata="${new URL('/.well-known/oauth-protected-resource/mcp', publicUrl).href}"`,
+            )
+        }),
+        requireApiKey(resolveCaller, oauth, publicUrl),
         (c) => handler.fetch(c.req.raw, { authInfo: toAuthInfo(c.var.mcpCaller) }),
       )
     }
 
-    // No OAuth yet. Answer the discovery documents (RFC 9728, RFC 8414, OpenID, at the root
-    // and under /mcp) with 404, not the web app's HTML, so clients that look for them after
-    // a 401 learn that early. Nothing else lives under /mcp/ either.
+    // Unknown or disabled discovery paths get JSON 404 rather than the SPA's HTML.
     for (const path of [
       '/.well-known/oauth-protected-resource',
       '/.well-known/oauth-protected-resource/*',
