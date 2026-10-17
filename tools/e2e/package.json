@@ -1,0 +1,13 @@
+{
+  "name": "@hourmere/e2e",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "typecheck": "tsc -p tsconfig.json",
+    "test:privacy": "node check-artifacts.ts"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1"
+  }
+}

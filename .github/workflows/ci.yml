@@ -64,3 +64,33 @@ jobs:
       - name: Logs
         if: failure()
         run: docker compose logs
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: hourmere
+          POSTGRES_PASSWORD: hourmere
+          POSTGRES_DB: hourmere
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U hourmere -d hourmere"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      HOURMERE_E2E_BOOTSTRAP_URL: postgres://hourmere:hourmere@localhost:5432/hourmere
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - name: Verify the existing Chrome installation
+        run: google-chrome --version
+      - run: npm ci --ignore-scripts --audit=false --fund=false
+      - run: npm run build --workspace @hourmere/web
+      - run: npm run test:e2e
+      - run: npm run test:e2e:privacy
