@@ -51,7 +51,7 @@ connect.
 every MCP request; beyond it, **429** with `Retry-After`. Tools that act on public booking
 pages are also limited per user, all of their keys together, with the numbers the public
 endpoints apply per address: `find_available_slots` 120 a minute, `create_booking` 10,
-`reschedule_booking` and `cancel_booking` by manage token 30 together. Beyond those, the tool
+`reschedule_booking` (by host ID or manage token) and `cancel_booking` by manage token 30 together. Beyond those, the tool
 answers `rate_limited` (see [Errors](#errors)).
 
 ## Connecting a client
@@ -117,7 +117,7 @@ parts of its link, `https://<host>/<handle>/<slug>`.
 | `whoami` | The key's user, the organization it acts in and the key id (same data as `GET /api/v1/me`) | read-only |
 | `find_available_slots` | The event type (title, duration, questions, host's time zone) and its free slots between two dates | read-only |
 | `create_booking` | Books a slot for an invitee; returns the booking and its `manageToken` | open world |
-| `reschedule_booking` | Moves a booking to another slot with its `manageToken`; returns the new booking and a new token | destructive, open world |
+| `reschedule_booking` | Moves a booking you host (`bookingId`) or one you made (`manageToken`); returns the new booking and a new token | destructive, open world |
 | `cancel_booking` | Cancels a booking you host (`bookingId`) or one you made (`manageToken`) | destructive, idempotent, open world |
 | `list_bookings` | Bookings you host in the key's organization, by start time, a page at a time | read-only |
 
@@ -147,6 +147,12 @@ fields are those of the REST API (`/api/v1/openapi.json`). Results come as
   has its own. A token a tool returned stays with its booking (after a reschedule it belongs
   to the cancelled one), while an email's token follows the meeting to the booking that
   replaced it ([api-conventions.md](api-conventions.md#public-endpoints)).
+- **Host moves:** pass `bookingId` from `list_bookings` and a new `start` to
+  `reschedule_booking`. You must host the booking in the key's current organization.
+  Give exactly one of `bookingId` or `manageToken`. All hosts' current availability is
+  checked with the old booking ignored, so the new time may overlap it. A move creates a
+  successor; retrying the old ID fails with `booking_cancelled`. After a lost response,
+  inspect `list_bookings` and `rescheduledFromId` before deciding what to do next.
 - **Emails:** bookings made, moved or cancelled through MCP send the same emails as the
   booking page (hosts, invitee, guests; [notifications.md](notifications.md)).
 - **Retries:** give `create_booking` an `idempotencyKey` (a new random value per booking,
@@ -189,7 +195,6 @@ is `-32700` (HTTP 400), an unknown tool `-32602`. Refusals before the protocol l
   caller as keys. The seam is `apps/server/src/mcp/endpoint.ts`.
 - Tools for the owner side (profile, schedules, event types), on the services the REST API
   now uses for them.
-- Rescheduling as the host (the service layer only reschedules through manage tokens so far).
 
 ## Adding a tool
 

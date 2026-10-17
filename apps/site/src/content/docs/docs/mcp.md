@@ -70,3 +70,14 @@ and return the same stable error codes as REST, such as `slot_unavailable`, `slo
 required fields and limits. The [REST guide](/docs/rest) covers token handling and booking
 semantics shared by both interfaces. Hosting/catalog tools and host-side rescheduling are
 not implemented yet.
+
+## Reschedule as the host
+
+Use `list_bookings` to find a booking you host, then call `reschedule_booking` with
+`bookingId` and the new `start`. The key must act in that booking's organization. Give
+exactly one of `bookingId` or `manageToken`; both forms share the same availability,
+notification and per-user management limits.
+
+A move creates a new booking with `rescheduledFromId` pointing to the old one. Retrying the
+old ID fails with `booking_cancelled`. If an answer is lost, inspect `list_bookings` before
+trying another move. The returned new manage token is shown once, as with an invitee move.
