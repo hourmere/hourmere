@@ -156,7 +156,7 @@ const fields = {
   }),
 }
 
-const EventType = z
+export const EventType = z
   .object({
     id: z.uuid(),
     organizationId: z.uuid(),

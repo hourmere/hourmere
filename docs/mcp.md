@@ -115,11 +115,31 @@ parts of its link, `https://<host>/<handle>/<slug>`.
 | Tool | What it does | Hints |
 |---|---|---|
 | `whoami` | The key's user, the organization it acts in and the key id (same data as `GET /api/v1/me`) | read-only |
+| `get_profile` | Your booking-page handle, time zone and language | read-only |
+| `list_event_types` | Compact, paginated summaries of visible event types in the key's organization | read-only |
+| `get_event_type` | One visible event type's full configuration | read-only |
+| `list_schedules` | Compact, paginated summaries of your working-hours schedules | read-only |
+| `get_schedule` | One of your schedules, including weekly hours in its time zone | read-only |
 | `find_available_slots` | The event type (title, duration, questions, host's time zone) and its free slots between two dates | read-only |
 | `create_booking` | Books a slot for an invitee; returns the booking and its `manageToken` | open world |
 | `reschedule_booking` | Moves a booking you host (`bookingId`) or one you made (`manageToken`); returns the new booking and a new token | destructive, open world |
 | `cancel_booking` | Cancels a booking you host (`bookingId`) or one you made (`manageToken`) | destructive, idempotent, open world |
 | `list_bookings` | Bookings you host in the key's organization, by start time, a page at a time | read-only |
+
+Configuration discovery starts with `whoami` and `get_profile`. `list_event_types` includes
+team event types and your personal types in the key's organization, including inactive
+configurations; deleted types and another member's personal types are excluded. Discovery
+is not proof of public availability: use `find_available_slots` before booking.
+`list_schedules` includes only your schedules, which follow your user across organizations.
+Use the corresponding `get_` tool for full details; `get_schedule` returns weekly hours,
+not date overrides. Configuration changes and date overrides use the REST API or web app.
+
+Both catalog lists accept `limit` (default 20, maximum 100) and `after`. Results are
+`{ data, nextAfter }`, sorted by ID. Set `after` to the previous `nextAfter`, keep the same key
+and acting organization, and stop at `nextAfter: null`. The cursor is exclusive and remains
+usable if that row is deleted. Pages are recalculated; concurrent configuration changes can
+affect later pages. Lists contain bounded metadata, not descriptions, questions, location or
+weekly hours; each database query fetches at most `limit + 1` summaries.
 
 `list_bookings` defaults to ascending start time (then ID). Set `order: "desc"` for newest
 first; keep the same order and filters when following `nextCursor`. The host's Past page
@@ -193,8 +213,8 @@ is `-32700` (HTTP 400), an unknown tool `-32602`. Refusals before the protocol l
   resource metadata at `/.well-known/oauth-protected-resource/mcp` (now a 404) and name it in
   the 401's `WWW-Authenticate` header, and access tokens will resolve to the same kind of
   caller as keys. The seam is `apps/server/src/mcp/endpoint.ts`.
-- Tools for the owner side (profile, schedules, event types), on the services the REST API
-  now uses for them.
+- Configuration write tools (profile, schedules, event types), on the services the REST API
+  now uses for them. Read-only discovery is available today.
 
 ## Adding a tool
 

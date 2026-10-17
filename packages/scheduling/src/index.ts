@@ -44,6 +44,12 @@ export {
   rescheduleHostBooking,
   rescheduleManagedBooking,
 } from './bookings.ts'
+export {
+  type CatalogPage,
+  type CatalogPageInput,
+  DEFAULT_CATALOG_PAGE_SIZE,
+  MAX_CATALOG_PAGE_SIZE,
+} from './catalog-page.ts'
 export type {
   BookingEvent,
   BookingNotifier,
@@ -58,8 +64,10 @@ export {
   type EventType,
   type EventTypeInput,
   type EventTypeLocation,
+  type EventTypeSummary,
   type EventTypeUpdate,
   getEventType,
+  listEventTypeCatalog,
   listEventTypes,
   PHONE_NUMBER_PATTERN,
   type QuestionInput,
@@ -103,6 +111,7 @@ export {
   deleteSchedule,
   deleteScheduleOverride,
   getSchedule,
+  listScheduleCatalog,
   listScheduleOverrides,
   listSchedules,
   putScheduleOverride,
@@ -110,6 +119,7 @@ export {
   type Schedule,
   type ScheduleInput,
   type ScheduleOverride,
+  type ScheduleSummary,
   type ScheduleUpdate,
   updateSchedule,
 } from './schedules.ts'

@@ -26,6 +26,7 @@ import { createApp } from './app.ts'
 import { type Config, loadConfig } from './config.ts'
 import { httpServerOptions } from './http-timeouts.ts'
 import { bookingTools } from './mcp/bookings.ts'
+import { catalogTools } from './mcp/catalog.ts'
 import { mcpEndpoint } from './mcp/endpoint.ts'
 import { whoamiTool } from './mcp/whoami.ts'
 import { installOneLineConsole } from './one-line-console.ts'
@@ -238,7 +239,9 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
         enqueueCalendarSync: (id, trx) =>
           jobs.enqueue('calendar-sync', { calendarId: id }, { singletonKey: id, transaction: trx }),
       }),
-      mcp: mcpEndpoint({ tools: [whoamiTool, ...bookingTools({ db, notify })] }),
+      mcp: mcpEndpoint({
+        tools: [whoamiTool, ...bookingTools({ db, notify }), ...catalogTools({ db })],
+      }),
     }).fetch
   }
 
