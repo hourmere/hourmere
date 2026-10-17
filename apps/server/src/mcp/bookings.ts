@@ -49,6 +49,9 @@ const localTime = (iso: string, timeZone: string) =>
     .toZonedDateTimeISO(timeZone)
     .toString({ timeZoneName: 'never', fractionalSecondDigits: 0 })
 
+const DEFAULT_MCP_SLOTS = 100
+const MAX_MCP_SLOTS = 500
+
 const FindSlotsInput = z.strictObject({
   handle,
   slug,
@@ -56,6 +59,14 @@ const FindSlotsInput = z.strictObject({
     description:
       'IANA time zone name, e.g. Europe/Berlin or America/New_York (numeric offsets such as +01:00 are refused: they ignore daylight saving time). startDate and endDate are days in this zone, and each slot is also given in it. Use the time zone of the person you are booking for.',
     example: 'Europe/Berlin',
+  }),
+  maxSlots: z.number().int().min(1).max(MAX_MCP_SLOTS).optional().openapi({
+    description: 'Maximum slots in this page; use after=nextAfter to continue with the same query',
+    default: DEFAULT_MCP_SLOTS,
+  }),
+  after: Instant.optional().openapi({
+    description:
+      'Exclusive start instant from the previous page nextAfter; keep the same handle, slug, dates and timeZone',
   }),
   startDate: z.iso.date().openapi({ description: 'First day to search, YYYY-MM-DD in timeZone' }),
   endDate: z.iso.date().openapi({
@@ -78,9 +89,13 @@ const FindSlotsOutput = z.object({
     description:
       'The requested time zone, with its letter case normalized (europe/berlin → Europe/Berlin)',
   }),
-  slots: z.array(LocalSlot).openapi({
+  slots: z.array(LocalSlot).max(MAX_MCP_SLOTS).openapi({
     description:
       "Bookable slots, sorted by start. Pass a slot's `start` unchanged to create_booking.",
+  }),
+  nextAfter: Instant.nullable().openapi({
+    description:
+      'Pass as after with the same query to get the next page; null when this page finishes the results. Availability is recalculated on every request.',
   }),
 })
 
@@ -168,7 +183,7 @@ export function bookingTools({
   const findAvailableSlots = defineTool({
     name: 'find_available_slots',
     title: 'Find available slots',
-    description: `Lists the times someone's event type can be booked between two dates, and the event type itself (title, duration, location kind, the questions its booking form asks, and the host's time zone). Use it before create_booking or reschedule_booking. The event type is identified by its booking link https://<host>/<handle>/<slug>. Each slot is given in UTC (start, end) and in the requested timeZone (localStart, localEnd); pass start unchanged to create_booking. Search a few days at a time (at most ${MAX_SLOT_RANGE_DAYS} days): long searches return long lists.`,
+    description: `Lists the times someone's event type can be booked between two dates, and the event type itself (title, duration, location kind, the questions its booking form asks, and the host's time zone). Use it before create_booking or reschedule_booking. The event type is identified by its booking link https://<host>/<handle>/<slug>. Each slot is given in UTC (start, end) and in the requested timeZone (localStart, localEnd); pass start unchanged to create_booking. Returns at most maxSlots slots (default 100, maximum 500) from a search of at most ${MAX_SLOT_RANGE_DAYS} days. If nextAfter is not null, pass it as after with the same query to continue. Availability can change between pages; recheck before booking.`,
     input: FindSlotsInput,
     output: FindSlotsOutput,
     annotations: {
@@ -200,10 +215,18 @@ export function bookingTools({
       const end = Temporal.Instant.compare(nextDay, longest) > 0 ? longest : nextDay
       const eventType = await getPublicEventType(pub, args)
       const slots = await listPublicSlots(pub, { handle: args.handle, slug: args.slug, start, end })
+      const after = args.after === undefined ? null : Temporal.Instant.from(args.after)
+      const remaining =
+        after === null
+          ? slots
+          : slots.filter((slot) => Temporal.Instant.compare(slot.start, after) > 0)
+      const limit = args.maxSlots ?? DEFAULT_MCP_SLOTS
+      const page = remaining.slice(0, limit)
       return {
         eventType,
         timeZone,
-        slots: slots.map((s) => ({
+        nextAfter: remaining.length > limit ? (page.at(-1)?.start ?? null) : null,
+        slots: page.map((s) => ({
           ...s,
           localStart: localTime(s.start, timeZone),
           localEnd: localTime(s.end, timeZone),
