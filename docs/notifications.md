@@ -319,3 +319,11 @@ composition root, with the log mailer and a running worker).
 Hosts can edit their display name in Settings. Notifications read the current name when
 sent; an empty legacy name falls back to the profile handle, then the verified email
 address. The same label is used in email subjects and calendar organizer names.
+
+## Sign-in links
+
+Login delivery uses separate `sign-in-email` jobs. Every request takes the same enqueue
+path; a worker decides account/registration eligibility. Job JSON carries only an outbox
+ID, and the expiring outbox encrypts the recipient and scanner-safe fragment URL. See
+[data-model.md](data-model.md#sign-in-email-outbox) for storage and cleanup. Web-only
+processes need a worker for sign-in mail, just as they do for booking notifications.

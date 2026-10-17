@@ -303,6 +303,13 @@ export interface Schedules {
   weekly_hours: Json;
 }
 
+export interface SignInEmails {
+  created_at: Generated<Timestamp>;
+  encrypted_payload: Buffer;
+  expires_at: Timestamp;
+  id: string;
+}
+
 export interface DB {
   "auth.account": AuthAccount;
   "auth.apikey": AuthApikey;
@@ -328,4 +335,5 @@ export interface DB {
   profiles: Profiles;
   schedule_overrides: ScheduleOverrides;
   schedules: Schedules;
+  sign_in_emails: SignInEmails;
 }
