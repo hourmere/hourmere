@@ -327,7 +327,7 @@ export function bookingTools({
     name: 'list_bookings',
     title: 'List my bookings',
     description:
-      "Lists bookings you host (you: the API key's user, see whoami) in the organization the key acts in, ordered by start time, a page at a time. Filter by start time (from inclusive, to exclusive, RFC 3339) and status. When nextCursor is not null, call again with it as cursor and the same filters for the next page. Times are UTC; each attendee has their own timeZone.",
+      "Lists bookings you host (you: the API key's user, see whoami) in the organization the key acts in, ordered by start time and id, ascending by default, a page at a time. Use order=desc for newest first. Filter by start time (from inclusive, to exclusive, RFC 3339) and status. When nextCursor is not null, call again with it as cursor and the same filters and order for the next page. Times are UTC; each attendee has their own timeZone.",
     input: ListBookingsInput,
     output: BookingPage,
     annotations: {
@@ -338,6 +338,7 @@ export function bookingTools({
     },
     async run(args, call) {
       return listHostBookings(context(call.caller), {
+        order: args.order,
         from: args.from === undefined ? undefined : Temporal.Instant.from(args.from),
         to: args.to === undefined ? undefined : Temporal.Instant.from(args.to),
         status: args.status,

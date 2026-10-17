@@ -121,6 +121,10 @@ parts of its link, `https://<host>/<handle>/<slug>`.
 | `cancel_booking` | Cancels a booking you host (`bookingId`) or one you made (`manageToken`) | destructive, idempotent, open world |
 | `list_bookings` | Bookings you host in the key's organization, by start time, a page at a time | read-only |
 
+`list_bookings` defaults to ascending start time (then ID). Set `order: "desc"` for newest
+first; keep the same order and filters when following `nextCursor`. The host's Past page
+uses descending order for the complete paginated history.
+
 Each tool's description and JSON Schemas (`tools/list`) say what it needs and returns; the
 fields are those of the REST API (`/api/v1/openapi.json`). Results come as
 `structuredContent` and, for older clients, as the same JSON in a text block.

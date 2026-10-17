@@ -40,7 +40,7 @@ standing GET event stream. Authentication failures return HTTP 401; rate limits 
 | `create_booking` | `handle`, `slug`, a returned slot's `start`, `invitee`, and an optional `idempotencyKey`; returns the booking and manage token. |
 | `reschedule_booking` | `manageToken` and new `start`; returns a replacement booking and token. |
 | `cancel_booking` | Either a hosted `bookingId` or an invitee `manageToken`; cancels the booking. |
-| `list_bookings` | Lists bookings hosted by the key owner in its organization, with pagination. |
+| `list_bookings` | Lists bookings hosted by the key owner in its organization, with pagination. `order` defaults to `asc`; use `desc` for newest first and keep it unchanged between pages. |
 
 For example, after confirming the booking page, test recipient and time zone with your agent:
 

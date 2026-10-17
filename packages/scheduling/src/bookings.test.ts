@@ -1625,5 +1625,73 @@ describe.skipIf(!serverUrl)('bookings', () => {
         cancelHostBooking(as(alice, alice.organizationId), id, { reason: 'x'.repeat(1001) }),
       ).rejects.toMatchObject({ code: 'invalid_reason' })
     })
+
+    it('pages backwards through equal starts and microseconds without omissions or repeats', async () => {
+      const host = await setup()
+      const rows: { id: string; start: string }[] = []
+      for (const us of [0, 1, 1, 1, 2, 3]) {
+        const start = `2026-11-09T09:00:00.${String(us).padStart(6, '0')}Z`
+        rows.push({
+          id: await f.booking(host.organizationId, [host.userId], start, '2026-11-09T09:30:00Z', {
+            status: 'cancelled',
+          }),
+          start,
+        })
+      }
+      const expected = rows
+        .sort((a, b) => Temporal.Instant.compare(a.start, b.start) || (a.id < b.id ? -1 : 1))
+        .map((r) => r.id)
+      const c = as(host, host.organizationId)
+      expect((await listHostBookings(c)).data.map((b) => b.id)).toEqual(expected)
+      expect((await listHostBookings(c, { order: 'asc' })).data.map((b) => b.id)).toEqual(expected)
+      for (const limit of [1, 2, 3, 5, 6]) {
+        const ids: string[] = []
+        let cursor: string | undefined
+        for (let page = 0; page < 10; page++) {
+          const result = await listHostBookings(c, {
+            order: 'desc',
+            status: 'cancelled',
+            limit,
+            cursor,
+          })
+          ids.push(...result.data.map((b) => b.id))
+          if (!result.nextCursor) break
+          cursor = result.nextCursor
+        }
+        expect(ids).toEqual(expected.toReversed())
+      }
+      const filtered = await listHostBookings(c, {
+        order: 'desc',
+        from: instant('2026-11-09T09:00:00.000001Z'),
+        to: instant('2026-11-09T09:00:00.000003Z'),
+      })
+      expect(filtered.data.map((b) => b.id)).toEqual(expected.slice(1, 5).toReversed())
+      expect(
+        await listHostBookings(c, { order: 'desc', from: instant('2030-01-01T00:00Z') }),
+      ).toEqual({ data: [], nextCursor: null })
+      await expect(listHostBookings(c, { order: 'newest' as 'desc' })).rejects.toMatchObject({
+        code: 'invalid_order',
+      })
+    })
+
+    it('continues descending pages without repeating newly inserted newer bookings', async () => {
+      const host = await setup()
+      const ids = []
+      for (const hour of ['09', '10', '11'])
+        ids.push(
+          await f.booking(
+            host.organizationId,
+            [host.userId],
+            `2026-11-09T${hour}:00Z`,
+            `2026-11-09T${hour}:30Z`,
+          ),
+        )
+      const c = as(host, host.organizationId)
+      const first = await listHostBookings(c, { order: 'desc', limit: 1 })
+      await f.booking(host.organizationId, [host.userId], '2026-11-09T12:00Z', '2026-11-09T12:30Z')
+      const rest = await listHostBookings(c, { order: 'desc', cursor: first.nextCursor as string })
+      expect([...first.data, ...rest.data].map((b) => b.id)).toEqual(ids.toReversed())
+      expect(rest.nextCursor).toBeNull()
+    })
   })
 })
