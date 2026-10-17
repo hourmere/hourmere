@@ -172,7 +172,11 @@ export async function writeBookingCalendar(
       const result = found
         ? await client.updateEvent(token, calendar.external_id, found.id, found.etag, value, signal)
         : await client.importEvent(token, calendar.external_id, value, signal)
-      if (result.iCalUID !== uid || (found && found.id !== result.id))
+      if (
+        (!found && result.iCalUID !== uid) ||
+        (found &&
+          (found.id !== result.id || (result.iCalUID !== undefined && result.iCalUID !== uid)))
+      )
         throw new GoogleCalendarError('provider_unavailable')
       await trx
         .insertInto('booking_calendar_events')

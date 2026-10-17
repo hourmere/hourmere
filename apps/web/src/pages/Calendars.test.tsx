@@ -204,6 +204,47 @@ describe('the calendars page', () => {
     )
   })
 
+  it.each(['needs_reauth', 'revoked'] as const)(
+    'allows local conflict deselection after access becomes %s',
+    async (status) => {
+      const user = userEvent.setup()
+      let selected = true
+      const calendar = connection.calendars[0] as NonNullable<(typeof connection.calendars)[0]>
+      fakeApi({
+        ...signedIn,
+        'GET /api/v1/calendar-connections': () =>
+          json(200, {
+            googleEnabled: false,
+            destinationCalendarId: null,
+            data: [
+              {
+                ...connection,
+                status,
+                syncAuthorized: false,
+                calendars: [{ ...calendar, checkConflicts: selected }],
+              },
+            ],
+          }),
+        [`PATCH /api/v1/calendars/${calendar.id}`]: () => {
+          selected = false
+          return new Response(null, { status: 204 })
+        },
+      })
+      renderApp('/app/calendars')
+      const checkbox = (await screen.findByRole('checkbox', {
+        name: 'Check conflicts in Work calendar',
+      })) as HTMLInputElement
+      expect(checkbox.matches(':disabled')).toBe(false)
+      await user.click(checkbox)
+      await vi.waitFor(() =>
+        expect(
+          screen.queryByRole('checkbox', { name: 'Check conflicts in Work calendar' }),
+        ).toBeNull(),
+      )
+      expect(selected).toBe(false)
+    },
+  )
+
   it('does not follow a late authorization response after the person leaves', async () => {
     const user = userEvent.setup()
     let finish: (response: Response) => void = () => {}

@@ -2,7 +2,7 @@
 ALTER TABLE calendar_oauth_states ADD COLUMN access text NOT NULL DEFAULT 'list'
   CHECK (access IN ('list', 'sync'));
 ALTER TABLE calendars ADD COLUMN access_role text NOT NULL DEFAULT 'reader'
-  CHECK (access_role IN ('freeBusyReader', 'reader', 'writer', 'owner'));
+  CHECK (access_role IN ('freeBusyReader', 'reader', 'writer', 'writerWithoutPrivateAccess', 'owner'));
 ALTER TABLE calendars ADD COLUMN time_zone text;
 
 -- A failed refresh must not make stale busy data look current.

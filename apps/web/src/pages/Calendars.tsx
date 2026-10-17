@@ -262,21 +262,21 @@ export function CalendarsPage() {
                     <li key={calendar.id}>
                       {calendar.name}
                       {calendar.isPrimary ? ' (primary)' : ''}
-                      {connection.syncAuthorized && (
-                        <fieldset
-                          className="form-fieldset"
-                          disabled={
-                            pending !== null ||
-                            connection.status !== 'active' ||
-                            !state.data.googleEnabled
-                          }
-                        >
+                      {(connection.syncAuthorized ||
+                        calendar.checkConflicts ||
+                        state.data.destinationCalendarId === calendar.id) && (
+                        <fieldset className="form-fieldset" disabled={pending !== null}>
                           <label className="choice">
                             <input
                               type="checkbox"
                               checked={calendar.checkConflicts}
                               disabled={
-                                calendar.accessRole === 'freeBusyReader' || pending !== null
+                                pending !== null ||
+                                (!calendar.checkConflicts &&
+                                  (calendar.accessRole === 'freeBusyReader' ||
+                                    connection.status !== 'active' ||
+                                    !state.data.googleEnabled ||
+                                    !connection.syncAuthorized))
                               }
                               onChange={(event) =>
                                 calendarAction(calendar.id, 'toggle', event.target.checked)
@@ -296,16 +296,28 @@ export function CalendarsPage() {
                               <button
                                 type="button"
                                 className="button button-small"
+                                disabled={
+                                  connection.status !== 'active' ||
+                                  !state.data.googleEnabled ||
+                                  !connection.syncAuthorized
+                                }
                                 onClick={() => calendarAction(calendar.id, 'sync')}
                               >
                                 Sync {calendar.name} now
                               </button>
                             </>
                           )}
-                          {calendar.accessRole === 'owner' && (
+                          {(calendar.accessRole === 'owner' ||
+                            state.data.destinationCalendarId === calendar.id) && (
                             <button
                               type="button"
                               className="button button-small"
+                              disabled={
+                                state.data.destinationCalendarId !== calendar.id &&
+                                (connection.status !== 'active' ||
+                                  !state.data.googleEnabled ||
+                                  !connection.syncAuthorized)
+                              }
                               onClick={() =>
                                 calendarAction(
                                   calendar.id,

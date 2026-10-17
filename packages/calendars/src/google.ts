@@ -50,7 +50,9 @@ const calendarPage = z.object({
         id: text,
         summary: text.optional(),
         primary: z.boolean().optional(),
-        accessRole: z.enum(['freeBusyReader', 'reader', 'writer', 'owner']).optional(),
+        accessRole: z
+          .enum(['freeBusyReader', 'reader', 'writer', 'writerWithoutPrivateAccess', 'owner'])
+          .optional(),
         timeZone: text.optional(),
       }),
     )
@@ -67,7 +69,7 @@ export interface GoogleCalendar {
   id: string
   name: string
   isPrimary: boolean
-  accessRole: 'freeBusyReader' | 'reader' | 'writer' | 'owner'
+  accessRole: 'freeBusyReader' | 'reader' | 'writer' | 'writerWithoutPrivateAccess' | 'owner'
   timeZone: string | null
 }
 export interface GoogleCalendarConfig {

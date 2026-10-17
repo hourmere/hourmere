@@ -25,6 +25,7 @@ const event = z.object({
 })
 export type GoogleEvent = z.infer<typeof event>
 const pageSchema = z.object({
+  timeZone: text.optional(),
   items: z.array(event).max(2500).optional(),
   nextPageToken: text.optional(),
   nextSyncToken: text.optional(),
@@ -66,6 +67,7 @@ export function googleEventMethods(
       const items: GoogleEvent[] = []
       const seenPages = new Set<string>()
       const seenEvents = new Set<string>()
+      let timeZone: string | null = null
       let pageToken: string | undefined
       for (let page = 0; page < 100; page++) {
         const url = new URL(base(calendar))
@@ -74,7 +76,7 @@ export function googleEventMethods(
           showDeleted: 'true',
           maxResults: '250',
           fields:
-            'items(id,status,start,end,transparency,attendees(self,responseStatus)),nextPageToken,nextSyncToken',
+            'timeZone,items(id,status,start,end,transparency,attendees(self,responseStatus)),nextPageToken,nextSyncToken',
           ...(window.token
             ? { syncToken: window.token }
             : { timeMin: window.start, timeMax: window.end }),
@@ -90,6 +92,16 @@ export function googleEventMethods(
         }
         const result = pageSchema.safeParse(value)
         if (!result.success) throw new GoogleCalendarError('provider_unavailable')
+        if (result.data.timeZone) {
+          try {
+            Temporal.Instant.fromEpochMilliseconds(0).toZonedDateTimeISO(result.data.timeZone)
+          } catch {
+            throw new GoogleCalendarError('provider_unavailable')
+          }
+          if (timeZone !== null && timeZone !== result.data.timeZone)
+            throw new GoogleCalendarError('provider_unavailable')
+          timeZone = result.data.timeZone
+        }
         for (const item of result.data.items ?? []) {
           if (seenEvents.has(item.id)) throw new GoogleCalendarError('provider_unavailable')
           seenEvents.add(item.id)
@@ -99,7 +111,7 @@ export function googleEventMethods(
         pageToken = result.data.nextPageToken
         if (!pageToken) {
           if (!result.data.nextSyncToken) throw new GoogleCalendarError('provider_unavailable')
-          return { items, token: result.data.nextSyncToken }
+          return { items, token: result.data.nextSyncToken, timeZone }
         }
         if (seenPages.has(pageToken)) throw new GoogleCalendarError('provider_unavailable')
         seenPages.add(pageToken)

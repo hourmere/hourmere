@@ -20,6 +20,7 @@ const cursor = z.object({
   start: z.string(),
   end: z.string(),
   token: z.string().min(1).max(4096),
+  timeZone: z.string().nullable(),
 })
 export type CalendarSyncState = z.infer<typeof cursor>
 const failure = () => new GoogleCalendarError('provider_unavailable')
@@ -174,7 +175,11 @@ export async function syncGoogleCalendar(
       const start = day.subtract({ hours: 72 }).toString()
       const end = day.add({ hours: 403 * 24 }).toString()
       const saved = cursor.safeParse(calendar.sync_state)
-      let incremental = saved.success && saved.data.start === start && saved.data.end === end
+      let incremental =
+        saved.success &&
+        saved.data.start === start &&
+        saved.data.end === end &&
+        saved.data.timeZone === calendar.time_zone
       let page: Awaited<ReturnType<typeof client.events>>
       try {
         page = await client.events(
@@ -188,10 +193,18 @@ export async function syncGoogleCalendar(
         incremental = false
         page = await client.events(accessToken, calendar.external_id, { start, end }, signal)
       }
+      // The collection timezone is current even when the list metadata is stale. An
+      // empty delta cannot re-interpret stored all-day dates, so rebuild the snapshot.
+      let timeZone = page.timeZone ?? calendar.time_zone
+      if (incremental && page.timeZone !== null && page.timeZone !== calendar.time_zone) {
+        incremental = false
+        page = await client.events(accessToken, calendar.external_id, { start, end }, signal)
+        timeZone = page.timeZone ?? timeZone
+      }
       // Validate every interval before changing the snapshot; partial pages never become live.
       const events = page.items.map((event) => ({
         id: event.id,
-        period: eventPeriod(event, calendar.time_zone),
+        period: eventPeriod(event, timeZone),
       }))
       if (!incremental)
         await trx.deleteFrom('calendar_busy').where('calendar_id', '=', calendarId).execute()
@@ -231,7 +244,8 @@ export async function syncGoogleCalendar(
       await trx
         .updateTable('calendars')
         .set({
-          sync_state: JSON.stringify({ version: 1, start, end, token: page.token }),
+          sync_state: JSON.stringify({ version: 1, start, end, token: page.token, timeZone }),
+          time_zone: timeZone,
           last_synced_at: new Date(now.epochMilliseconds),
           sync_error: null,
         })

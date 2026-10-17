@@ -285,6 +285,80 @@ describe.skipIf(!url)('Google busy and booking synchronization (real Postgres)',
       ).sync_state,
     ).toMatchObject({ token: 'old' })
   })
+  it.each([false, true])(
+    'rebuilds all-day intervals when the collection or list timezone changes (metadata=%s)',
+    async (refreshMetadata) => {
+      await select()
+      await db
+        .updateTable('calendars')
+        .set({ time_zone: 'UTC' })
+        .where('id', '=', calendarId)
+        .execute()
+      const day = { id: 'all-day', start: { date: '2026-11-02' }, end: { date: '2026-11-03' } }
+      provider.controls.eventPages = [{ timeZone: 'UTC', items: [day], nextSyncToken: 'utc' }]
+      await syncGoogleCalendar(deps, calendarId)
+      if (refreshMetadata)
+        await db
+          .updateTable('calendars')
+          .set({ time_zone: 'America/Los_Angeles' })
+          .where('id', '=', calendarId)
+          .execute()
+      provider.controls.eventHook = async (url) =>
+        Response.json({
+          timeZone: 'America/Los_Angeles',
+          items: url.searchParams.has('syncToken') ? [] : [day],
+          nextSyncToken: 'la',
+        })
+      await syncGoogleCalendar(deps, calendarId)
+      const row = (await busy())[0]
+      expect(row?.period).toContain('2026-11-03 08:00:00')
+      expect(
+        (
+          await db
+            .selectFrom('calendars')
+            .select('sync_state')
+            .where('id', '=', calendarId)
+            .executeTakeFirstOrThrow()
+        ).sync_state,
+      ).toMatchObject({ timeZone: 'America/Los_Angeles' })
+    },
+  )
+  it('accepts a shared writerWithoutPrivateAccess role without allowing it as the write destination', async () => {
+    provider.controls.pages = [
+      {
+        items: [
+          {
+            id: 'primary-calendar',
+            summary: 'My calendar',
+            primary: true,
+            timeZone: 'UTC',
+            accessRole: 'writerWithoutPrivateAccess',
+          },
+        ],
+      },
+    ]
+    const url = new URL((await beginGoogleConnection(deps, owner, 'sync')).authorizationUrl)
+    expect(
+      await finishGoogleConnection(
+        deps,
+        owner,
+        new URLSearchParams({ state: url.searchParams.get('state') as string, code: 'fake' }),
+      ),
+    ).toBe('connected')
+    expect(
+      (
+        await db
+          .selectFrom('calendars')
+          .select('access_role')
+          .where('id', '=', calendarId)
+          .executeTakeFirstOrThrow()
+      ).access_role,
+    ).toBe('writerWithoutPrivateAccess')
+    await expect(setCalendarDestination(deps, owner, calendarId)).rejects.toMatchObject({
+      code: 'calendar_not_writable',
+    })
+  })
+
   it('refuses repeated pages and missing final cursors', async () => {
     await select()
     provider.controls.eventPages = [
@@ -563,6 +637,79 @@ describe.skipIf(!url)('Google busy and booking synchronization (real Postgres)',
       excludeBookingId: next,
     })
     expect(input?.busy).toEqual([])
+  })
+
+  it('excludes a booking mirrored through another connected account of the same user', async () => {
+    await select()
+    await syncGoogleCalendar(deps, calendarId)
+    await setCalendarDestination(deps, owner, calendarId)
+    await f.schedule(owner.user.id, { timeZone: 'UTC' })
+    const eventType = await f.eventType(owner.organization.id, owner.user.id, {})
+    const id = await booking()
+    await writeBookingCalendar(deps, id)
+    const source = await db
+      .selectFrom('calendars')
+      .selectAll()
+      .where('id', '=', calendarId)
+      .executeTakeFirstOrThrow()
+    const otherConnection = await db
+      .insertInto('calendar_connections')
+      .values({
+        user_id: owner.user.id,
+        provider: 'google',
+        external_account_id: 'second-google-account',
+        credentials: Buffer.from('unused-fixture'),
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    const mirror = await db
+      .insertInto('calendars')
+      .values({
+        connection_id: otherConnection.id,
+        external_id: source.external_id,
+        name: 'Shared mirror',
+        check_conflicts: true,
+        last_synced_at: source.last_synced_at,
+        sync_state: JSON.stringify(source.sync_state),
+        time_zone: source.time_zone,
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    const own = (await busy())[0]
+    if (!own) throw Error('Missing own event')
+    await db
+      .insertInto('calendar_busy')
+      .values({
+        calendar_id: mirror.id,
+        external_event_id: own.external_event_id,
+        period: own.period,
+      })
+      .execute()
+    const input = await buildAvailabilityInput(db, {
+      eventTypeId: eventType,
+      hostUserId: owner.user.id,
+      rangeStart: instant('2026-11-02T10:15:00Z'),
+      rangeEnd: instant('2026-11-02T10:45:00Z'),
+      now: instant('2026-11-01T12:00:00Z'),
+      excludeBookingId: id,
+    })
+    expect(input?.busy).toEqual([])
+  })
+  it('accepts a cancellation response containing only the provider event ID', async () => {
+    await setCalendarDestination(deps, owner, calendarId)
+    const id = await booking()
+    await writeBookingCalendar(deps, id)
+    await db
+      .updateTable('bookings')
+      .set({ status: 'cancelled', cancelled_at: new Date(now) })
+      .where('id', '=', id)
+      .execute()
+    const original = provider.client.updateEvent
+    vi.spyOn(provider.client, 'updateEvent').mockImplementationOnce(async (...args) => ({
+      id: (await original(...args)).id,
+    }))
+    await writeBookingCalendar(deps, id)
+    expect(await busy()).toEqual([])
   })
 
   it('queues a real booking destination without waiting for a busy-sync network call', async () => {

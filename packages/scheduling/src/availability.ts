@@ -428,7 +428,7 @@ export async function buildAvailabilityInput(
   const googleCalendars = await db
     .selectFrom('calendars as c')
     .innerJoin('calendar_connections as cc', 'cc.id', 'c.connection_id')
-    .select(['cc.status', 'c.last_synced_at', 'c.sync_state', 'c.sync_error'])
+    .select(['cc.status', 'c.last_synced_at', 'c.sync_state', 'c.sync_error', 'c.time_zone'])
     .where('cc.user_id', '=', hostUserId)
     .where('cc.provider', '=', 'google')
     .where('c.check_conflicts', '=', true)
@@ -454,6 +454,7 @@ export async function buildAvailabilityInput(
       typeof state !== 'object' ||
       Array.isArray(state) ||
       state.version !== 1 ||
+      state.timeZone !== calendar.time_zone ||
       typeof state.start !== 'string' ||
       typeof state.end !== 'string'
     )
@@ -517,6 +518,16 @@ export async function buildAvailabilityInput(
           not(
             exists(
               selectFrom('booking_calendar_events as bce')
+                .innerJoin(
+                  'calendars as written_calendar',
+                  'written_calendar.id',
+                  'bce.calendar_id',
+                )
+                .innerJoin(
+                  'calendar_connections as written_connection',
+                  'written_connection.id',
+                  'written_calendar.connection_id',
+                )
                 .select('bce.booking_id')
                 .where(sql<boolean>`bce.booking_id IN (
                   WITH RECURSIVE ancestors(id,rescheduled_from_id) AS (
@@ -524,7 +535,17 @@ export async function buildAvailabilityInput(
                     UNION ALL SELECT b.id,b.rescheduled_from_id FROM bookings b JOIN ancestors a ON b.id=a.rescheduled_from_id
                   ) CYCLE id SET is_cycle USING path SELECT id FROM ancestors WHERE NOT is_cycle
                 )`)
-                .whereRef('bce.calendar_id', '=', 'cb.calendar_id')
+                .where(({ or, and, eb }) =>
+                  or([
+                    eb('bce.calendar_id', '=', eb.ref('cb.calendar_id')),
+                    and([
+                      eb('cc.provider', '=', 'google'),
+                      eb('written_connection.provider', '=', 'google'),
+                      eb('written_connection.user_id', '=', hostUserId),
+                      eb('written_calendar.external_id', '=', eb.ref('c.external_id')),
+                    ]),
+                  ]),
+                )
                 .whereRef('bce.external_event_id', '=', 'cb.external_event_id'),
             ),
           ),
