@@ -13,7 +13,7 @@ import { API_KEY_PREFIX } from './caller.ts'
 import { beforeHook } from './hooks.ts'
 import { betterAuthLog, logMailFailure } from './log.ts'
 import { confirmLink } from './magic-link.ts'
-import { ensurePersonalOrganization, personalOrganizationGuards } from './organizations.ts'
+import { ensurePersonalOrganization, organizationGuards } from './organizations.ts'
 import { hasAccount, maySignUp, type SignupPolicy, signupConnectionOptions } from './signup.ts'
 
 export { API_KEY_RATE_LIMIT } from './api-keys.ts'
@@ -223,7 +223,7 @@ export function createAuth({
       organization({
         // An invitation is accepted only by someone who proved they own the invited address.
         requireEmailVerificationOnInvitation: true,
-        organizationHooks: personalOrganizationGuards(db),
+        organizationHooks: organizationGuards(db),
       }),
       apiKey({
         defaultPrefix: API_KEY_PREFIX,
