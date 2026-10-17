@@ -1,5 +1,5 @@
 // The parts of Better Auth's own HTTP protocol (/api/auth/*) the web app uses: sign-in,
-// sign-out and API keys. It is not in our OpenAPI document (docs/api-conventions.md), so
+// sign-out, profile updates and API keys. It is not in our OpenAPI document (docs/api-conventions.md), so
 // the shapes used here are written out by hand. Errors are `{ "message", "code" }`.
 import { notifyUnauthorized } from './client.ts'
 import { errorFromResponse } from './errors.ts'
@@ -52,6 +52,10 @@ export async function startSocialSignIn(
 
 export function signOut(): Promise<unknown> {
   return authRequest('/sign-out', { body: {} })
+}
+
+export function updateDisplayName(name: string): Promise<unknown> {
+  return authRequest('/update-user', { body: { name } })
 }
 
 /** An API key as Better Auth lists it; the secret itself is never stored or listed. */

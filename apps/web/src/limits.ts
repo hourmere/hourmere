@@ -50,3 +50,6 @@ export const PROFILE = {
 export const BOOKING = {
   cancelReasonMaxLength: 1000,
 } as const
+
+/** Better Auth protocol limit, checked against @hourmere/auth in web-limits.test.ts. */
+export const ACCOUNT = { nameMaxLength: 200 } as const
