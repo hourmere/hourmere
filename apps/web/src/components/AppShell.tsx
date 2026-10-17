@@ -39,10 +39,17 @@ function Shell() {
   // as a full page load would. Not on the first page: focus starts at the top then.
   useEffect(() => {
     // On narrow screens the navigation scrolls sideways; keep the current page's link in view.
-    nav.current?.querySelector('[aria-current="page"]')?.scrollIntoView?.({
-      block: 'nearest',
-      inline: 'nearest',
-    })
+    // scrollIntoView also changes the browser's sequential focus starting point, which
+    // skips the skip link on the first Tab. Scroll only the navigation list horizontally.
+    const list = nav.current?.querySelector('ul')
+    const selected = list?.querySelector('[aria-current="page"]')
+    if (list && selected) {
+      const left = list.getBoundingClientRect().left + list.clientLeft
+      const right = left + list.clientWidth
+      const item = selected.getBoundingClientRect()
+      if (item.left < left) list.scrollLeft += item.left - left
+      else if (item.right > right) list.scrollLeft += item.right - right
+    }
     if (shownPath.current === pathname) return
     shownPath.current = pathname
     main.current?.focus()
