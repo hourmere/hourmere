@@ -1,6 +1,6 @@
 // Sign-up control (SIGNUP, SIGNUP_ALLOWED_DOMAINS) end to end: the real app, Better Auth and
 // migrations, against a throwaway database that has no users at the start of each test.
-import { randomBytes } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import {
   assertSignupEnforced,
   createAuth,
@@ -40,6 +40,7 @@ describe.skipIf(!serverUrl)('sign-up control', () => {
   })
 
   beforeEach(async () => {
+    await testDb.pool.query('DELETE FROM auth.organization')
     await testDb.pool.query('DELETE FROM auth."user"')
     outbox.length = 0
   })
@@ -281,6 +282,292 @@ describe.skipIf(!serverUrl)('sign-up control', () => {
       expectSignupDisabled(await useLink(instance(CLOSED), link))
       expect(await rows()).toEqual(NO_ROWS)
     })
+  })
+
+  describe('invited addresses', () => {
+    const restricted: SignupPolicy[] = [
+      { mode: 'closed', allowedDomains: [] },
+      { mode: 'first-user', allowedDomains: [] },
+    ]
+
+    async function invite({
+      email = 'invitee@outside.example',
+      status = 'pending',
+      expiresAt = new Date(Date.now() + 86_400_000),
+      personal = false,
+    } = {}) {
+      const owner = await db
+        .insertInto('auth.user')
+        .values({ email: 'inviter@team.example', name: 'Owner', emailVerified: true })
+        .onConflict((oc) => oc.column('email').doUpdateSet({ name: 'Owner' }))
+        .returning('id')
+        .executeTakeFirstOrThrow()
+      const org = await db
+        .insertInto('auth.organization')
+        .values({ name: 'Inviting team', slug: randomUUID(), createdAt: new Date() })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+      await db
+        .insertInto('auth.member')
+        .values({ organizationId: org.id, userId: owner.id, role: 'owner', createdAt: new Date() })
+        .execute()
+      if (personal) {
+        await db
+          .insertInto('personal_organizations')
+          .values({ user_id: owner.id, organization_id: org.id })
+          .execute()
+      }
+      return db
+        .insertInto('auth.invitation')
+        .values({
+          organizationId: org.id,
+          inviterId: owner.id,
+          email,
+          role: 'member',
+          status,
+          expiresAt,
+        })
+        .returningAll()
+        .executeTakeFirstOrThrow()
+    }
+
+    it.each(restricted)(
+      'allows a live exact-address invitation in $mode, joining only on acceptance',
+      async (policy) => {
+        const invitation = await invite({ email: 'Invitee@Outside.Example' })
+        const app = instance(policy)
+        const link = await askForLink(app, 'INVITEE@outside.example')
+        expect(link).toBeDefined()
+        const signedIn = await useLink(app, link)
+        expect(signedIn.status).toBe(302)
+        expect(hasSession(signedIn)).toBe(true)
+        expect(await users()).toEqual(['invitee@outside.example', 'inviter@team.example'])
+        expect(
+          await db
+            .selectFrom('auth.invitation')
+            .select('status')
+            .where('id', '=', invitation.id)
+            .executeTakeFirst(),
+        ).toEqual({ status: 'pending' })
+        const membership = () =>
+          db
+            .selectFrom('auth.member')
+            .select('id')
+            .where('organizationId', '=', invitation.organizationId)
+            .execute()
+        expect(await membership()).toHaveLength(1)
+        const accepted = await app.request('/api/auth/organization/accept-invitation', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            origin,
+            cookie: signedIn.headers
+              .getSetCookie()
+              .map((c) => c.split(';')[0])
+              .join('; '),
+          },
+          body: JSON.stringify({ invitationId: invitation.id }),
+        })
+        expect(accepted.status).toBe(200)
+        expect(await membership()).toHaveLength(2)
+      },
+    )
+
+    it.each(restricted)(
+      'allows verified Google sign-up in $mode without granting membership',
+      async (policy) => {
+        const invitation = await invite()
+        const res = await googleSignIn(instance(policy, { google: invitation.email }))
+        expect(res.status).toBe(200)
+        expect(hasSession(res)).toBe(true)
+        expect(
+          await db
+            .selectFrom('auth.member')
+            .select('id')
+            .where('organizationId', '=', invitation.organizationId)
+            .execute(),
+        ).toHaveLength(1)
+      },
+    )
+
+    it.each([
+      { status: 'canceled' },
+      { status: 'rejected' },
+      { status: 'accepted' },
+      { status: 'unknown' },
+      { expiresAt: new Date(0) },
+      { email: 'other@outside.example' },
+      { email: 'prefix-invitee@outside.example' },
+      { email: 'invitee@outside.example.evil' },
+      { personal: true },
+    ])('does not allow an invalid invitation: %j', async (options) => {
+      await invite(options)
+      for (const policy of restricted) {
+        await noLink(instance(policy), 'invitee@outside.example')
+        const res = await googleSignIn(instance(policy, { google: 'invitee@outside.example' }))
+        expect(res.status).toBe(403)
+        expect(await res.json()).toMatchObject({ code: 'SIGNUP_DISABLED' })
+        const pool = authPool(policy)
+        await expect(
+          pool.query(
+            `INSERT INTO auth."user" (name, email, "emailVerified") VALUES ('', 'invitee@outside.example', true)`,
+          ),
+        ).rejects.toMatchObject({ code: '42501' })
+      }
+      expect(await users()).toEqual(['inviter@team.example'])
+    })
+
+    it('rechecks invitation validity when an already emailed link is used', async () => {
+      const invitation = await invite()
+      const app = instance(restricted[0] as SignupPolicy)
+      const link = await askForLink(app, invitation.email)
+      expect(link).toBeDefined()
+      await db
+        .updateTable('auth.invitation')
+        .set({ status: 'canceled' })
+        .where('id', '=', invitation.id)
+        .execute()
+      expectSignupDisabled(await useLink(app, link))
+      expect(await users()).toEqual(['inviter@team.example'])
+      // A different live invitation for the same address is sufficient.
+      await invite()
+      await signIn(app, invitation.email)
+    })
+
+    it('still requires a proven email even with a live invitation', async () => {
+      const invitation = await invite()
+      const policy = restricted[0] as SignupPolicy
+      const auth = createAuth({
+        pool: authPool(policy),
+        db,
+        baseURL: origin,
+        secret: randomBytes(32).toString('base64'),
+        mailer: { send: async () => {} },
+        signup: policy,
+        socialProviders: { google: client },
+        socialProviderOptions: {
+          google: {
+            ...vouching(invitation.email),
+            getUserInfo: async () => ({
+              user: { email: invitation.email, emailVerified: false, name: 'Unverified' },
+              data: { sub: 'unverified' } as never,
+            }),
+          },
+        },
+      })
+      const res = await auth.handler(
+        new Request(`${origin}/api/auth/sign-in/social`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            provider: 'google',
+            idToken: { token: 'header.payload.signature' },
+          }),
+        }),
+      )
+      expect(res.status).toBe(403)
+      expect(await res.json()).toMatchObject({ code: 'EMAIL_NOT_VERIFIED' })
+      expect(await users()).toEqual(['inviter@team.example'])
+    })
+
+    it('serializes insertion and invitation revocation at the database backstop', async () => {
+      const invitation = await invite()
+      const signingUp = await authPool(restricted[0] as SignupPolicy).connect()
+      const revoking = await testDb.pool.connect()
+      let revoked: Promise<unknown> | undefined
+      try {
+        await signingUp.query('BEGIN')
+        await signingUp.query(
+          `INSERT INTO auth."user" (name, email, "emailVerified") VALUES ('', $1, true)`,
+          [invitation.email],
+        )
+        const backend = await revoking.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')
+        const pid = backend.rows[0]?.pid
+        expect(pid).toBeTypeOf('number')
+        revoked = revoking.query(`UPDATE auth.invitation SET status = 'canceled' WHERE id = $1`, [
+          invitation.id,
+        ])
+        await vi.waitFor(async () => {
+          const { rows } = await testDb.pool.query(
+            'SELECT wait_event_type FROM pg_stat_activity WHERE pid = $1',
+            [pid],
+          )
+          expect(rows[0]?.wait_event_type).toBe('Lock')
+        })
+        await signingUp.query('COMMIT')
+        await revoked
+        expect(await users()).toContain(invitation.email)
+      } finally {
+        await signingUp.query('ROLLBACK')
+        await revoked
+        signingUp.release()
+        revoking.release()
+      }
+    })
+
+    it.each(['canceled', 'expired'])(
+      'refuses at insertion if the invitation becomes %s after the application check',
+      async (change) => {
+        const invitation = await invite()
+        const pool = authPool(restricted[0] as SignupPolicy)
+        let resume = () => {}
+        let reached = () => {}
+        const released = new Promise<void>((resolve) => {
+          resume = resolve
+        })
+        const inserting = new Promise<void>((resolve) => {
+          reached = resolve
+        })
+        const timeout = setTimeout(resume, 5_000)
+        const forward = (target: object, prop: string | symbol) => {
+          const value = Reflect.get(target, prop)
+          return typeof value === 'function' ? value.bind(target) : value
+        }
+        const held = new Proxy(pool, {
+          get(target, prop) {
+            if (prop !== 'connect') return forward(target, prop)
+            return async () =>
+              new Proxy(await target.connect(), {
+                get(connection, key) {
+                  if (key !== 'query') return forward(connection, key)
+                  return async (...args: unknown[]) => {
+                    if (typeof args[0] === 'string' && /^insert into "user"/i.test(args[0])) {
+                      reached()
+                      await released
+                    }
+                    return (connection.query as (...a: unknown[]) => Promise<unknown>)(...args)
+                  }
+                },
+              })
+          },
+        })
+        const request = googleSignIn(
+          instance(restricted[0] as SignupPolicy, { pool: held, google: invitation.email }),
+        )
+        try {
+          await Promise.race([
+            inserting,
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error('insert not reached')), 3_000).unref(),
+            ),
+          ])
+          await db
+            .updateTable('auth.invitation')
+            .set(change === 'canceled' ? { status: 'canceled' } : { expiresAt: new Date(0) })
+            .where('id', '=', invitation.id)
+            .execute()
+          resume()
+          const res = await request
+          expect(res.status).toBe(401)
+          expect(hasSession(res)).toBe(false)
+          expect(await users()).toEqual(['inviter@team.example'])
+        } finally {
+          clearTimeout(timeout)
+          resume()
+          await request
+        }
+      },
+    )
   })
 
   describe('sign-in providers', () => {

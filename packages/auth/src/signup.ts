@@ -1,4 +1,5 @@
 import type { Db } from '@hourmere/db'
+import { sql } from 'kysely'
 import type pg from 'pg'
 
 /** Who may create an account (SIGNUP). Existing users can always sign in. */
@@ -8,7 +9,7 @@ export type SignupMode = (typeof SIGNUP_MODES)[number]
 export interface SignupPolicy {
   /**
    * `open`: anyone. `first-user`: the first account, then only `allowedDomains`. `closed`:
-   * only `allowedDomains`.
+   * only `allowedDomains`. A pending, unexpired team invitation also allows its address.
    */
   mode: SignupMode
   /** Lowercase email domains whose addresses may always sign up; exact match, no subdomains. */
@@ -25,10 +26,22 @@ const domainOf = (email: string) => email.slice(email.lastIndexOf('@') + 1).toLo
 
 /**
  * Whether a new account may be created for `email` now. Looks at the database only when the
- * answer depends on it: in first-user mode, for an address outside the allowed domains.
+ * answer depends on it: a restricted address needs a live team invitation or the first slot.
  */
 export async function maySignUp(db: Db, policy: SignupPolicy, email: string): Promise<boolean> {
   if (policy.mode === 'open' || policy.allowedDomains.includes(domainOf(email))) return true
+  const invitation = await db
+    .selectFrom('auth.invitation')
+    .select('id')
+    .where(sql<string>`lower(email)`, '=', email.toLowerCase())
+    .where('status', '=', 'pending')
+    .where('expiresAt', '>', sql<Date>`clock_timestamp()`)
+    .where('organizationId', 'not in', (eb) =>
+      eb.selectFrom('personal_organizations').select('organization_id'),
+    )
+    .limit(1)
+    .executeTakeFirst()
+  if (invitation) return true
   if (policy.mode === 'closed') return false
   const anyUser = await db.selectFrom('auth.user').select('id').limit(1).executeTakeFirst()
   return anyUser === undefined
@@ -46,7 +59,7 @@ export async function hasAccount(db: Db, email: string): Promise<boolean> {
 
 /**
  * Connection settings that hand the policy to the database, which enforces it again in the
- * transaction that inserts the user (migration 0006). For Better Auth's pool.
+ * transaction that inserts the user (migrations 0006 and 0012). For Better Auth's pool.
  */
 export function signupConnectionOptions({ mode, allowedDomains }: SignupPolicy): string {
   // Also keeps anything but a plain domain out of the connection options.
