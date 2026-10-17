@@ -176,13 +176,11 @@ export function publicRoutes({
           request: {
             params: target.team
               ? PageParams.extend({
-                  handle: z
-                    .string()
-                    .openapi({
-                      description:
-                        'Exact-case organization slug (1–64 ASCII letters/digits/inner hyphens)',
-                      example: 'cobaltmere',
-                    }),
+                  handle: z.string().openapi({
+                    description:
+                      'Exact-case organization slug (1–64 ASCII letters/digits/inner hyphens)',
+                    example: 'cobaltmere',
+                  }),
                 })
               : PageParams,
           },
@@ -205,12 +203,10 @@ export function publicRoutes({
           request: {
             params: target.team
               ? PageParams.extend({
-                  handle: z
-                    .string()
-                    .openapi({
-                      description: 'Exact-case organization slug',
-                      example: 'cobaltmere',
-                    }),
+                  handle: z.string().openapi({
+                    description: 'Exact-case organization slug',
+                    example: 'cobaltmere',
+                  }),
                 })
               : PageParams,
             query: z.object({ start: Instant, end: Instant }),
@@ -249,12 +245,10 @@ export function publicRoutes({
           request: {
             params: target.team
               ? PageParams.extend({
-                  handle: z
-                    .string()
-                    .openapi({
-                      description: 'Exact-case organization slug',
-                      example: 'cobaltmere',
-                    }),
+                  handle: z.string().openapi({
+                    description: 'Exact-case organization slug',
+                    example: 'cobaltmere',
+                  }),
                 })
               : PageParams,
             headers: z.object({
