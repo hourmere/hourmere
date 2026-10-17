@@ -238,9 +238,9 @@ describe('display name settings', () => {
     const api = fakeApi({
       ...profile(PROFILE),
       'GET /api/v1/me': () => json(200, { ...ME, user: { ...ME.user, name } }),
-      'POST /api/auth/update-user': ({ body }) => {
+      'PATCH /api/v1/profile/name': ({ body }) => {
         name = (body as { name: string }).name
-        return json(200, { status: true })
+        return json(200, { name })
       },
       'PUT /api/v1/profile': defaultPut,
     })
@@ -253,7 +253,7 @@ describe('display name settings', () => {
     await user.click(screen.getByRole('button', { name: 'Save display name' }))
     expect(await screen.findByText('Display name saved.')).toBeDefined()
     expect(input('Display name').value).toBe('Ada Lovelace')
-    expect(api.to('POST /api/auth/update-user').map((call) => call.body)).toEqual([
+    expect(api.to('PATCH /api/v1/profile/name').map((call) => call.body)).toEqual([
       { name: 'Ada Lovelace' },
     ])
     expect(api.to('GET /api/v1/me')).toHaveLength(2)
@@ -276,7 +276,7 @@ describe('display name settings', () => {
         'Display name: Enter a name on one line, up to 200 characters.',
       )
       expect(control.getAttribute('aria-invalid')).toBe('true')
-      expect(api.to('POST /api/auth/update-user')).toHaveLength(0)
+      expect(api.to('PATCH /api/v1/profile/name')).toHaveLength(0)
     },
   )
 
@@ -286,8 +286,8 @@ describe('display name settings', () => {
     const api = fakeApi({
       ...signedIn,
       ...profile(PROFILE),
-      'POST /api/auth/update-user': () =>
-        fail ? json(400, { code: 'INVALID_DISPLAY_NAME' }) : json(200, { status: true }),
+      'PATCH /api/v1/profile/name': () =>
+        fail ? json(400, { error: 'invalid_display_name' }) : json(200, { name: 'New name' }),
     })
     renderApp('/app/settings')
     await user.clear(await screen.findByLabelText('Display name'))
@@ -300,7 +300,7 @@ describe('display name settings', () => {
     fail = false
     await user.click(screen.getByRole('button', { name: 'Save display name' }))
     await screen.findByText('Display name saved.')
-    expect(api.to('POST /api/auth/update-user')).toHaveLength(2)
+    expect(api.to('PATCH /api/v1/profile/name')).toHaveLength(2)
     expect(leaving()).toBe(false)
   })
 
@@ -309,7 +309,7 @@ describe('display name settings', () => {
     fakeApi({
       ...signedIn,
       ...profile(PROFILE),
-      'POST /api/auth/update-user': () => json(500, { error: 'internal_error' }),
+      'PATCH /api/v1/profile/name': () => json(500, { error: 'internal_error' }),
     })
     renderApp('/app/settings')
     await user.type(await screen.findByLabelText('Display name'), ' new')
@@ -329,7 +329,7 @@ describe('display name settings', () => {
     fakeApi({
       ...profile(PROFILE),
       'GET /api/v1/me': () => (++reads === 1 ? json(200, ME) : refresh.response),
-      'POST /api/auth/update-user': () => save.response,
+      'PATCH /api/v1/profile/name': () => save.response,
     })
     renderApp('/app/settings')
     await user.type(await screen.findByLabelText('Display name'), ' new')
@@ -339,7 +339,7 @@ describe('display name settings', () => {
     expect(leaving()).toBe(true)
     await user.type(input('Display name'), 'x')
     expect(input('Display name').value).toBe('Ada new')
-    await save.answer(json(200, { status: true }))
+    await save.answer(json(200, { name: 'Ada new' }))
     expect(input('Display name').matches(':disabled')).toBe(true)
     await refresh.answer(json(200, { ...ME, user: { ...ME.user, name: 'Ada new' } }))
     expect(screen.getByText('Display name saved.')).toBeDefined()
