@@ -6,6 +6,12 @@
 import { validateEventTypeRules } from '@hourmere/core'
 import type { Db, Json } from '@hourmere/db'
 import { LOCATION_KINDS } from './availability.ts'
+import {
+  type CatalogPage,
+  type CatalogPageInput,
+  catalogPage,
+  checkedCatalogPage,
+} from './catalog-page.ts'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import {
@@ -180,6 +186,65 @@ export async function listEventTypes(ctx: ServiceContext): Promise<EventType[]> 
 export async function getEventType(ctx: ServiceContext, id: string): Promise<EventType> {
   const row = await visibleRow(ctx.db, ctx, id)
   return toEventType(await loadEventType(ctx.db, row.id))
+}
+
+/** Compact metadata for discovery; details are read explicitly with getEventType. */
+export type EventTypeSummary = Pick<
+  EventType,
+  | 'id'
+  | 'organizationId'
+  | 'ownerUserId'
+  | 'slug'
+  | 'title'
+  | 'durationMinutes'
+  | 'schedulingType'
+  | 'isActive'
+  | 'position'
+>
+
+/** Visible configurations by id, with no description, location or question blobs in the list. */
+export async function listEventTypeCatalog(
+  ctx: ServiceContext,
+  input: CatalogPageInput = {},
+): Promise<CatalogPage<EventTypeSummary>> {
+  const { limit, after } = checkedCatalogPage(input)
+  let query = ctx.db
+    .selectFrom('event_types')
+    .select([
+      'id',
+      'organization_id',
+      'owner_user_id',
+      'slug',
+      'title',
+      'duration_minutes',
+      'scheduling_type',
+      'is_active',
+      'position',
+    ])
+    .where('organization_id', '=', ctx.principal.organization.id)
+    .where('deleted_at', 'is', null)
+    .where((eb) =>
+      eb.or([eb('owner_user_id', 'is', null), eb('owner_user_id', '=', ctx.principal.user.id)]),
+    )
+  if (after !== undefined) query = query.where('id', '>', after)
+  const rows = await query
+    .orderBy('id')
+    .limit(limit + 1)
+    .execute()
+  return catalogPage(
+    rows.map((r) => ({
+      id: r.id,
+      organizationId: r.organization_id,
+      ownerUserId: r.owner_user_id,
+      slug: r.slug,
+      title: r.title,
+      durationMinutes: r.duration_minutes,
+      schedulingType: r.scheduling_type as SchedulingType,
+      isActive: r.is_active,
+      position: r.position,
+    })),
+    limit,
+  )
 }
 
 /**
