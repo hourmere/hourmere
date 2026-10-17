@@ -17,7 +17,7 @@ Open-source scheduling for people and AI agents. Self-host or use the cloud.
 | `packages/calendars` | Separate Google Calendar OAuth, encrypted credentials, incremental busy-time sync and booking writeback. See [docs/google-calendar.md](docs/google-calendar.md). |
 | `packages/mail` | Outgoing email: SMTP, or the server log when SMTP is not configured; booking email templates and calendar invitations. |
 | `packages/jobs` | Background jobs on Postgres (pg-boss): typed job definitions, enqueueing inside a transaction, workers. |
-| `packages/notifications` | The booking notification job: who gets which email, sent once. See [docs/notifications.md](docs/notifications.md). |
+| `packages/notifications` | Durable booking and sign-in email delivery, retries and the encrypted credential outbox. See [docs/notifications.md](docs/notifications.md). |
 | `tools/api-types` | Generates the web app's API types from the server's OpenAPI document (`npm run api:types`). |
 
 ## Development
@@ -96,9 +96,11 @@ mode. Sign-up still requires proving that email address; joining the team requir
 the invitation separately. Expired, canceled or already accepted invitations do not allow
 new accounts. A new
 address that may not sign up gets no sign-in email, and the request is answered the same way
-as for any other address. The request does not wait for the email either: if sending fails
-(e.g. wrong SMTP settings), the person sees the usual answer and the failure appears in the
-log.
+as for any other address. Every request queues an encrypted, short-lived email job before eligibility is checked by
+a worker; the request does not wait for SMTP or check whether the address has an account.
+Workers retry temporary failures until the link expires. In web-only mode, a separate worker
+is required for sign-in emails as well as booking notifications. Failures appear in the log
+without the recipient or link.
 
 The database enforces the sign-up rules too, using settings the app passes in the `options`
 startup parameter when it connects (`search_path` and `hourmere.*`), and it needs read
