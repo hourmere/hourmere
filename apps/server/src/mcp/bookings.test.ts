@@ -662,6 +662,39 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
       })
     })
 
+    it('lists host bookings newest first with descending continuation', async () => {
+      const ids = []
+      for (const hour of ['09', '10', '11'])
+        ids.push(
+          await f.booking(
+            ada.organizationId,
+            [ada.userId],
+            `2026-11-11T${hour}:00Z`,
+            `2026-11-11T${hour}:30Z`,
+            { status: 'cancelled' },
+          ),
+        )
+      const args = {
+        order: 'desc',
+        status: 'cancelled',
+        from: '2026-11-11T00:00:00Z',
+        to: '2026-11-12T00:00:00Z',
+        limit: 2,
+      }
+      const first = ok<{ data: { id: string }[]; nextCursor: string }>(
+        await call('list_bookings', args, adaKey.key),
+      )
+      const last = ok<{ data: { id: string }[]; nextCursor: null }>(
+        await call('list_bookings', { ...args, cursor: first.nextCursor }, adaKey.key),
+      )
+      expect([...first.data, ...last.data].map((b) => b.id)).toEqual(ids.toReversed())
+      expect(last.nextCursor).toBeNull()
+      expect(ok<{ data: unknown[] }>(await call('list_bookings', args)).data).toEqual([])
+      expect(errorOf(await call('list_bookings', { order: 'newest' }, adaKey.key)).error).toBe(
+        'invalid_request',
+      )
+    })
+
     it('needs exactly one of bookingId and manageToken to cancel', async () => {
       for (const args of [{}, { bookingId: randomUUID(), manageToken: 'x'.repeat(43) }]) {
         expect(errorOf(await call('cancel_booking', args))).toMatchObject({

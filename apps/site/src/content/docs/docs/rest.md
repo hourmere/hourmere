@@ -93,5 +93,7 @@ in a fragment (`/booking#token=…`); API calls use headers, never query paramet
 current returned token before running either management example.
 
 List the key owner's hosted bookings with `GET /api/v1/bookings`. A key does not grant access
-to arbitrary hosts' private bookings. Rate limits return `429` and `Retry-After`; slot races
+to arbitrary hosts' private bookings. Results default to ascending start time and ID; request
+`order=desc` for newest first. Pass `nextCursor` as `cursor` and keep the time filters and
+order unchanged for every page. Rate limits return `429` and `Retry-After`; slot races
 return `slot_taken` or `slot_unavailable`. Recheck availability before retrying with a new key.

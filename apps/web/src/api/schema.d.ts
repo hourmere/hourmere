@@ -58,7 +58,7 @@ export interface paths {
         };
         /**
          * Bookings the caller hosts
-         * @description Bookings in the organization the caller acts in where the caller is a host, ordered by start time. Paginated with a cursor: pass `nextCursor` from one page as `cursor` for the next (keep the other parameters the same).
+         * @description Bookings in the organization the caller acts in where the caller is a host, ordered by start time and id, ascending by default. Use order=desc for newest first. Paginated with a cursor: pass `nextCursor` from one page as `cursor` for the next (keep the other parameters, including order, the same).
          */
         get: {
             parameters: {
@@ -68,6 +68,8 @@ export interface paths {
                     from?: string;
                     /** @description Page size, 1–100 (default 50) */
                     limit?: number;
+                    /** @description Order by start time and id: asc (default) or desc. Keep unchanged between pages. */
+                    order?: "asc" | "desc";
                     status?: "confirmed" | "cancelled";
                     /** @description Only bookings starting before */
                     to?: string;
