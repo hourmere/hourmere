@@ -27,6 +27,9 @@ types in `packages/db/src/tables.ts` are generated from the migrated database.
   exclusion constraint, not by application code racing against itself.
 - **IDs** are UUIDv7 (`uuidv7()`, time-ordered, good index locality) for application
   tables; Better Auth tables use database-generated UUIDs.
+- **Public namespaces.** Organization creation and explicit slug updates reject the same
+  case-insensitive reserved names as profile handles. Existing rows are not rewritten;
+  metadata-only updates remain available for legacy slugs.
 - **Time** is always `timestamptz` (an instant). Wall-clock rules (working hours) are
   stored with their IANA time zone and expanded by the availability engine
   (`@hourmere/core`), which handles DST.

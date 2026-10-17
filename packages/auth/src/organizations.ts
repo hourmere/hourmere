@@ -140,14 +140,20 @@ const refuse = (message: string) =>
   new APIError('FORBIDDEN', { code: 'PERSONAL_ORGANIZATION', message })
 
 /**
- * Better Auth organization hooks that keep a personal organization its user's alone. Without
- * them a user could invite someone as owner who then removes them, leaving the user's
+ * Better Auth organization hooks that protect the public URL namespace and keep each personal
+ * organization under its user's control. Without them a user could invite someone as owner
+ * who then removes them, leaving the user's
  * session and API keys without an organization. Team work belongs in a team organization.
  * (Leaving is not hooked: Better Auth refuses to let the only owner leave.)
  */
-export function personalOrganizationGuards(
-  db: Db,
-): NonNullable<OrganizationOptions['organizationHooks']> {
+export function organizationGuards(db: Db): NonNullable<OrganizationOptions['organizationHooks']> {
+  const checkSlug = (slug: string | undefined) => {
+    if (slug !== undefined && isReservedName(slug))
+      throw new APIError('BAD_REQUEST', {
+        code: 'ORGANIZATION_SLUG_RESERVED',
+        message: 'This organization slug is reserved. Choose another one.',
+      })
+  }
   const isPersonal = async (organizationId: string) =>
     (await personalOwner(db, organizationId)) !== undefined
   const noOneElse = async ({ organization }: { organization: { id: string } }) => {
@@ -156,6 +162,9 @@ export function personalOrganizationGuards(
     }
   }
   return {
+    beforeCreateOrganization: async ({ organization }) => checkSlug(organization.slug),
+    // A display-name-only edit must still work for an existing legacy reserved slug.
+    beforeUpdateOrganization: async ({ organization }) => checkSlug(organization.slug),
     // It lives as long as its user: deleting the user deletes it.
     beforeDeleteOrganization: async ({ organization }) => {
       if (await isPersonal(organization.id)) {
