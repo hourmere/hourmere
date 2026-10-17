@@ -70,6 +70,7 @@ export interface EventTypeDraft {
   position: string
   isActive: boolean
   isHidden: boolean
+  allowGuests: boolean
 }
 
 let nextKey = 0
@@ -108,6 +109,7 @@ export function emptyDraft(): EventTypeDraft {
     position: '0',
     isActive: true,
     isHidden: false,
+    allowGuests: false,
   }
 }
 
@@ -142,6 +144,7 @@ export function draftFromEventType(e: EventType): EventTypeDraft {
     position: String(e.position),
     isActive: e.isActive,
     isHidden: e.isHidden,
+    allowGuests: e.allowGuests,
   }
 }
 
@@ -326,6 +329,7 @@ export function toInput(draft: EventTypeDraft): EventTypeBody {
     position: whole(draft.position) as number,
     isActive: draft.isActive,
     isHidden: draft.isHidden,
+    allowGuests: draft.allowGuests,
   }
 }
 

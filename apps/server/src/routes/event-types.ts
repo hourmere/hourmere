@@ -145,6 +145,10 @@ const fields = {
     "Bookings per host's day; null = no limit",
   ).nullable(),
   location: Location,
+  allowGuests: z.boolean().openapi({
+    description:
+      'Whether new bookings may add up to ten guest email recipients; existing booking attendees are preserved',
+  }),
   isActive: z.boolean().openapi({ description: 'Whether invitees can book it' }),
   isHidden: z.boolean().openapi({
     description:
@@ -195,6 +199,7 @@ const EventTypeInput = z
     questions: questions.optional(),
     isActive: fields.isActive.optional().openapi({ default: true }),
     isHidden: fields.isHidden.optional().openapi({ default: false }),
+    allowGuests: fields.allowGuests.optional().openapi({ default: false }),
     position: fields.position.optional().openapi({ default: 0 }),
     scheduleId: fields.scheduleId.optional(),
   })
@@ -216,6 +221,7 @@ const EventTypeUpdate = z
     questions: questions.optional(),
     isActive: fields.isActive.optional(),
     isHidden: fields.isHidden.optional(),
+    allowGuests: fields.allowGuests.optional(),
     position: fields.position.optional(),
     scheduleId: fields.scheduleId.optional(),
   })

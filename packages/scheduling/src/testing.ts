@@ -120,6 +120,7 @@ export interface EventTypeFixture {
   location?: Record<string, unknown> | null
   questions?: unknown[]
   isActive?: boolean
+  allowGuests?: boolean
   deletedAt?: string | null
   /** Hosts with their per-event-type schedule (null = default). Defaults to the owner. */
   hosts?: { userId: string; scheduleId?: string | null }[]
@@ -245,6 +246,7 @@ export function createFixtures(db: Db) {
         location: o.location ? JSON.stringify(o.location) : null,
         questions: JSON.stringify(o.questions ?? []),
         is_active: o.isActive ?? true,
+        allow_guests: o.allowGuests ?? false,
         deleted_at: o.deletedAt ?? null,
       })
       .returning('id')

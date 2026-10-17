@@ -64,6 +64,8 @@ export interface EventType {
   isActive: boolean
   /** Hidden from public listings; the direct link remains bookable. */
   isHidden: boolean
+  /** Whether new bookings may add guest recipients; existing attendees are preserved. */
+  allowGuests: boolean
   position: number
   /** The host's schedule; null = the host's default schedule. */
   scheduleId: string | null
@@ -86,6 +88,7 @@ export interface EventTypeInput {
   questions?: QuestionInput[] | undefined
   isActive?: boolean | undefined
   isHidden?: boolean | undefined
+  allowGuests?: boolean | undefined
   position?: number | undefined
   /** One of the host's schedules; null or omitted = the host's default schedule. */
   scheduleId?: string | null | undefined
@@ -131,6 +134,8 @@ interface Fields {
   isActive: boolean
   /** Hidden from public listings; the direct link remains bookable. */
   isHidden: boolean
+  /** Whether new bookings may add guest recipients; existing attendees are preserved. */
+  allowGuests: boolean
   position: number
 }
 
@@ -149,6 +154,7 @@ const FIELD_NAMES = [
   'questions',
   'isActive',
   'isHidden',
+  'allowGuests',
   'position',
 ] as const satisfies readonly (keyof Fields)[]
 
@@ -164,6 +170,7 @@ const DEFAULTS = {
   questions: [],
   isActive: true,
   isHidden: false,
+  allowGuests: false,
   position: 0,
 } as const satisfies Partial<Fields>
 
@@ -207,6 +214,7 @@ export type EventTypeSummary = Pick<
   | 'schedulingType'
   | 'isActive'
   | 'isHidden'
+  | 'allowGuests'
   | 'position'
 >
 
@@ -228,6 +236,7 @@ export async function listEventTypeCatalog(
       'scheduling_type',
       'is_active',
       'is_hidden',
+      'allow_guests',
       'position',
     ])
     .where('organization_id', '=', ctx.principal.organization.id)
@@ -251,6 +260,7 @@ export async function listEventTypeCatalog(
       schedulingType: r.scheduling_type as SchedulingType,
       isActive: r.is_active,
       isHidden: r.is_hidden,
+      allowGuests: r.allow_guests,
       position: r.position,
     })),
     limit,
@@ -463,6 +473,7 @@ function validFields(candidate: Partial<Record<keyof Fields, unknown>>): Fields 
   )
   if (typeof c.isActive !== 'boolean') throw invalid('isActive must be true or false')
   if (typeof c.isHidden !== 'boolean') throw invalid('isHidden must be true or false')
+  if (typeof c.allowGuests !== 'boolean') throw invalid('allowGuests must be true or false')
   const { positionMin, positionMax } = EVENT_TYPE_LIMITS
   if (
     !Number.isSafeInteger(c.position) ||
@@ -486,6 +497,7 @@ function validFields(candidate: Partial<Record<keyof Fields, unknown>>): Fields 
     questions: validateQuestions(c.questions),
     isActive: c.isActive,
     isHidden: c.isHidden,
+    allowGuests: c.allowGuests,
     position: c.position as number,
   }
 }
@@ -622,6 +634,7 @@ function fieldsOf(row: {
   questions: Json
   is_active: boolean
   is_hidden: boolean
+  allow_guests: boolean
   position: number
 }): Fields {
   return {
@@ -639,6 +652,7 @@ function fieldsOf(row: {
     questions: parseQuestions(row.questions),
     isActive: row.is_active,
     isHidden: row.is_hidden,
+    allowGuests: row.allow_guests,
     position: row.position,
   }
 }
@@ -659,6 +673,7 @@ function columns(fields: Fields) {
     questions: jsonb(fields.questions),
     is_active: fields.isActive,
     is_hidden: fields.isHidden,
+    allow_guests: fields.allowGuests,
     position: fields.position,
   }
 }

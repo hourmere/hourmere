@@ -28,6 +28,7 @@ export const PublicEventType = z
     location: z.object({ kind: LocationKind }).nullable().openapi({
       description: 'Only the kind; details such as a phone number come with the booking',
     }),
+    allowGuests: z.boolean().openapi({ description: 'Whether invitees may add guest recipients' }),
     questions: z
       .array(Question)
       .openapi({ description: 'Booking-form fields beyond name and email' }),
@@ -77,7 +78,10 @@ export const CreateBooking = z
       timeZone: z.string().min(1).max(64).openapi({ description: 'IANA time zone' }),
       locale: z.string().max(35).optional(),
     }),
-    guests: z.array(z.strictObject({ name, email })).max(MAX_GUESTS).optional(),
+    guests: z.array(z.strictObject({ name, email })).max(MAX_GUESTS).optional().openapi({
+      description:
+        'Up to ten additional email recipients, only when the event type has allowGuests enabled; otherwise guests_not_allowed',
+    }),
     responses: Responses.optional(),
   })
   .openapi('CreateBooking')
@@ -265,7 +269,7 @@ export function publicRoutes({
               content: json(BookingWithToken),
             },
             400: error(
-              'Invalid request (`invalid_request`, `invalid_responses`, `invalid_invitee`, `invalid_guests`, `invalid_time_zone`, `too_many_guests`, `invalid_idempotency_key`)',
+              'Invalid request (`invalid_request`, `invalid_responses`, `invalid_invitee`, `invalid_guests`, `invalid_time_zone`, `too_many_guests`, `guests_not_allowed`, `invalid_idempotency_key`)',
             ),
             404: eventTypeNotFound,
             409: error(

@@ -56,6 +56,8 @@ describe.skipIf(!serverUrl)('public routes', () => {
     await f.schedule(host.userId)
     await f.eventType(host.organizationId, host.userId, {
       slug: 'intro',
+      // These scenarios exercise a host that explicitly enabled guests.
+      allowGuests: true,
       title: 'Intro call',
       durationMinutes: 30,
       location: { kind: 'phone', number: '+49 30 1234567' },
@@ -89,6 +91,7 @@ describe.skipIf(!serverUrl)('public routes', () => {
     expect(await res.json()).toEqual({
       handle: 'ada',
       slug: 'intro',
+      allowGuests: true,
       title: 'Intro call',
       description: null,
       durationMinutes: 30,
@@ -693,7 +696,11 @@ describe.skipIf(!serverUrl)('public routes', () => {
       required: true,
       options: Array.from({ length: 50 }, (_, i) => option(i)),
     }))
-    await f.eventType(ada.organizationId, ada.userId, { slug: 'everything', questions })
+    await f.eventType(ada.organizationId, ada.userId, {
+      slug: 'everything',
+      questions,
+      allowGuests: true,
+    })
     const email = `${'a'.repeat(64)}@${'b'.repeat(63)}.${'c'.repeat(63)}.${'d'.repeat(57)}.com`
     expect(email).toHaveLength(254)
     const request = {

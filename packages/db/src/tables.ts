@@ -247,6 +247,7 @@ export interface EventTypeHosts {
 }
 
 export interface EventTypes {
+  allow_guests: Generated<boolean>;
   booking_window_days: number | null;
   buffer_after_minutes: Generated<number>;
   buffer_before_minutes: Generated<number>;

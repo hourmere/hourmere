@@ -17,6 +17,7 @@ export interface BookingFormValues {
 }
 
 interface BookingFormProps {
+  allowGuests: boolean
   questions: readonly Question[]
   values: BookingFormValues
   onChange: (values: BookingFormValues) => void
@@ -67,6 +68,7 @@ function fieldOrder(questions: readonly Question[], values: BookingFormValues): 
  * guests. Problems show next to their fields; on submit, focus goes to the first one.
  */
 export function BookingForm({
+  allowGuests,
   questions,
   values,
   onChange,
@@ -172,64 +174,68 @@ export function BookingForm({
         />
       ))}
 
-      <fieldset
-        className="guests"
-        data-field="guests"
-        tabIndex={-1}
-        aria-describedby={describedBy('guests')}
-      >
-        <legend>
-          Guests <span className="optional">(optional, up to {LIMITS.guests})</span>
-        </legend>
-        {errorText('guests')}
-        {values.guests.map((guest, i) => (
-          // biome-ignore lint/suspicious/noArrayIndexKey: guests are edited in place by position
-          <div className="guest" key={i}>
-            {textInput(
-              `guest-${i}-name`,
-              `Guest ${i + 1} name`,
-              guest.name,
-              (name) =>
-                update({ guests: values.guests.map((g, j) => (j === i ? { ...g, name } : g)) }),
-              { autoComplete: 'off' },
-            )}
-            {textInput(
-              `guest-${i}-email`,
-              `Guest ${i + 1} email`,
-              guest.email,
-              (email) =>
-                update({ guests: values.guests.map((g, j) => (j === i ? { ...g, email } : g)) }),
-              { type: 'email', autoComplete: 'off' },
-            )}
+      {(allowGuests || values.guests.length > 0) && (
+        <fieldset
+          className="guests"
+          data-field="guests"
+          tabIndex={-1}
+          aria-describedby={describedBy('guests')}
+        >
+          <legend>
+            Guests <span className="optional">(optional, up to {LIMITS.guests})</span>
+          </legend>
+          {errorText('guests')}
+          {values.guests.map((guest, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: guests are edited in place by position
+            <div className="guest" key={i}>
+              {textInput(
+                `guest-${i}-name`,
+                `Guest ${i + 1} name`,
+                guest.name,
+                (name) =>
+                  update({ guests: values.guests.map((g, j) => (j === i ? { ...g, name } : g)) }),
+                { autoComplete: 'off' },
+              )}
+              {textInput(
+                `guest-${i}-email`,
+                `Guest ${i + 1} email`,
+                guest.email,
+                (email) =>
+                  update({ guests: values.guests.map((g, j) => (j === i ? { ...g, email } : g)) }),
+                { type: 'email', autoComplete: 'off' },
+              )}
+              <button
+                type="button"
+                className="button button-small guest-remove"
+                onClick={() => update({ guests: values.guests.filter((_, j) => j !== i) })}
+              >
+                Remove guest {i + 1}
+              </button>
+            </div>
+          ))}
+          {allowGuests && values.guests.length < LIMITS.guests ? (
             <button
               type="button"
-              className="button button-small guest-remove"
-              onClick={() => update({ guests: values.guests.filter((_, j) => j !== i) })}
+              className="button button-small"
+              onClick={() => {
+                update({ guests: [...values.guests, { name: '', email: '' }] })
+                // Focus the new guest's name once it is there.
+                requestAnimationFrame(() =>
+                  form.current
+                    ?.querySelector<HTMLElement>(
+                      `[data-field="guest-${values.guests.length}-name"]`,
+                    )
+                    ?.focus(),
+                )
+              }}
             >
-              Remove guest {i + 1}
+              Add a guest
             </button>
-          </div>
-        ))}
-        {values.guests.length < LIMITS.guests ? (
-          <button
-            type="button"
-            className="button button-small"
-            onClick={() => {
-              update({ guests: [...values.guests, { name: '', email: '' }] })
-              // Focus the new guest's name once it is there.
-              requestAnimationFrame(() =>
-                form.current
-                  ?.querySelector<HTMLElement>(`[data-field="guest-${values.guests.length}-name"]`)
-                  ?.focus(),
-              )
-            }}
-          >
-            Add a guest
-          </button>
-        ) : (
-          <p className="hint">You can add up to {LIMITS.guests} guests.</p>
-        )}
-      </fieldset>
+          ) : (
+            <p className="hint">You can add up to {LIMITS.guests} guests.</p>
+          )}
+        </fieldset>
+      )}
 
       {formError && (
         <div className="alert alert-error">

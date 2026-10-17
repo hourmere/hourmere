@@ -152,6 +152,8 @@ describe.skipIf(!serverUrl)('booking notifications over REST and MCP', () => {
     await f.schedule(host.userId)
     await f.eventType(host.organizationId, host.userId, {
       slug: 'intro',
+      // These scenarios exercise a host that explicitly enabled guests.
+      allowGuests: true,
       title: 'Intro call',
       location: { kind: 'link', url: 'https://meet.example.com/abc' },
       questions: [{ id: 'topic', label: 'Topic', type: 'short_text', required: false }],
@@ -283,6 +285,48 @@ describe.skipIf(!serverUrl)('booking notifications over REST and MCP', () => {
   }
 
   const to = (address: string) => (m: MailMessage) => m.to === address
+
+  it('refuses disabled guest recipients over REST and MCP before queuing any email', async () => {
+    const before = (await testDb.pool.query('SELECT id FROM pgboss.job ORDER BY id')).rows
+    const beforeBookings = (await testDb.pool.query('SELECT id FROM bookings ORDER BY id')).rows
+    const beforeAttempts = attempted.length
+    await db
+      .updateTable('event_types')
+      .set({ allow_guests: false })
+      .where('slug', '=', 'intro')
+      .execute()
+    try {
+      const guests = [{ name: 'Guest', email: 'guest@example.com' }]
+      expect(await book('2026-11-05T08:00:00Z', { guests })).toMatchObject({
+        status: 400,
+        body: { error: 'guests_not_allowed' },
+      })
+      expect(
+        toolError(
+          await mcp('create_booking', {
+            handle,
+            slug: 'intro',
+            start: '2026-11-05T08:00:00Z',
+            invitee: invitee('ada@example.com'),
+            guests,
+          }),
+        ),
+      ).toMatchObject({ error: 'guests_not_allowed' })
+      expect((await testDb.pool.query('SELECT id FROM bookings ORDER BY id')).rows).toEqual(
+        beforeBookings,
+      )
+      expect((await testDb.pool.query('SELECT id FROM pgboss.job ORDER BY id')).rows).toEqual(
+        before,
+      )
+      expect(attempted.length).toBe(beforeAttempts)
+    } finally {
+      await db
+        .updateTable('event_types')
+        .set({ allow_guests: true })
+        .where('slug', '=', 'intro')
+        .execute()
+    }
+  })
 
   it('emails the host, the invitee and guests of a REST booking, once', async () => {
     const key = crypto.randomUUID()

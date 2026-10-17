@@ -156,6 +156,8 @@ describe('creating an event type', () => {
     await user.clear(field('Position'))
     await user.type(field('Position'), '2')
     await user.click(screen.getByRole('checkbox', { name: 'Active: invitees can book it' }))
+    expect(field('Allow invitees to add guests').checked).toBe(false)
+    await user.click(field('Allow invitees to add guests'))
     expect(field('Hide from your booking page').checked).toBe(false)
     await user.click(field('Hide from your booking page'))
     await user.selectOptions(screen.getByLabelText('Where the meeting happens'), 'phone')
@@ -192,6 +194,7 @@ describe('creating an event type', () => {
         position: 2,
         isActive: false,
         isHidden: true,
+        allowGuests: true,
       },
     ])
   })
@@ -563,7 +566,39 @@ describe('editing an event type', () => {
         position: 0,
         isActive: true,
         isHidden: false,
+        allowGuests: false,
       },
+    ])
+  })
+
+  it('loads guest opt-in, preserves unsaved opt-out across failure, and saves a retry', async () => {
+    const user = userEvent.setup()
+    let first = true
+    const api = eventTypeServer([eventType({ allowGuests: true })], {
+      [`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`]: ({ body }) => {
+        if (first) {
+          first = false
+          return json(503, { error: 'unavailable' })
+        }
+        return json(200, eventType(body as Partial<EventType>))
+      },
+    })
+    await openExisting()
+    expect(field('Allow invitees to add guests').checked).toBe(true)
+    expect(
+      screen.getByText(/changing this does not remove guests from existing bookings/),
+    ).toBeDefined()
+    await user.click(field('Allow invitees to add guests'))
+    expect(screen.getByText('Unsaved changes')).toBeDefined()
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    await screen.findByRole('alert')
+    expect(field('Allow invitees to add guests').checked).toBe(false)
+    expect(screen.getByText('Unsaved changes')).toBeDefined()
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    await screen.findByText('Saved.')
+    expect(api.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`).map((c) => c.body)).toEqual([
+      expect.objectContaining({ allowGuests: false }),
+      expect.objectContaining({ allowGuests: false }),
     ])
   })
 

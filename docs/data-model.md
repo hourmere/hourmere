@@ -196,3 +196,13 @@ out, and nothing of ours references its tables.
    the latest migration. It writes only the difference to
    `packages/auth/auth-schema.generated.sql`; prefix it with
    `SET LOCAL search_path TO auth, public;` and save it as the next migration.
+
+### Guest recipients
+
+`event_types.allow_guests` is a non-null boolean, default `false` for both new and existing
+event types (migration 0015). Hosts explicitly enable it to let new bookings add up to ten
+guest email recipients. Public personal/team pages and REST/MCP booking creation enforce
+the current setting in the booking transaction, holding an event-type share lock until
+commit. Settings changes wait for an already approved booking; a booking waiting behind a
+settings change reads its committed value. Existing `booking_attendees` are preserved for
+reminders, rescheduling and cancellation, and successful idempotent replays still work.

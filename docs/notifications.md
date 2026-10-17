@@ -319,3 +319,18 @@ composition root, with the log mailer and a running worker).
 Hosts can edit their display name in Settings. Notifications read the current name when
 sent; an empty legacy name falls back to the profile handle, then the verified email
 address. The same label is used in email subjects and calendar organizer names.
+
+## Guest email controls
+
+Guests are additional recipients supplied by an invitee. New bookings can add them only
+when the host enables **Allow invitees to add guests** on that event type; the default is
+off, including for event types created before migration 0015. REST and MCP expose the
+`allowGuests` flag on event-type detail and authenticated discovery. Nonempty guests on
+a disabled event type return `400 guests_not_allowed` before any booking, attendee or
+notification is stored. Enabled types retain the ten-guest cap and existing rate limits.
+
+Turning the setting off affects new bookings. Existing guests still receive reminders and
+calendar updates/cancellations so their invitations do not become stale; retries of a
+successfully committed booking preserve the original result. This opt-in limits anonymous
+guest email amplification; it does not verify the main invitee's email address or eliminate
+all email abuse.
