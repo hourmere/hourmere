@@ -838,6 +838,109 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
     })
   })
 
+  describe('organization slugs', () => {
+    let cookie: string
+    let teamId: string
+    let ownerId: string
+    beforeAll(async () => {
+      cookie = await signIn('slug-owner@example.com')
+      ownerId = await userId('slug-owner@example.com')
+      teamId = await createTeam(cookie, 'slug-check-team')
+    })
+
+    it.each(['admin', 'API', 'sign-in', 'mcp', 'Support', '.well-known'])(
+      'refuses reserved slug %s on both create and update',
+      async (slug) => {
+        const rejected = {
+          code: 'ORGANIZATION_SLUG_RESERVED',
+          message: 'This organization slug is reserved. Choose another one.',
+        }
+        const created = await post('/api/auth/organization/create', cookie, {
+          name: 'Reserved team',
+          slug,
+        })
+        expect(created.status).toBe(400)
+        expect(await created.json()).toEqual(rejected)
+        const updated = await post('/api/auth/organization/update', cookie, {
+          organizationId: teamId,
+          data: { slug, name: 'Must not be saved' },
+        })
+        expect(updated.status).toBe(400)
+        expect(await updated.json()).toEqual(rejected)
+        expect(
+          await db
+            .selectFrom('auth.organization')
+            .select(['name', 'slug'])
+            .where('id', '=', teamId)
+            .executeTakeFirstOrThrow(),
+        ).toEqual({ name: 'slug-check-team', slug: 'slug-check-team' })
+        expect(
+          await count('SELECT count(*)::int AS n FROM auth.organization WHERE slug = $1', [slug]),
+        ).toBe(0)
+      },
+    )
+
+    it('also guards trusted server-side creation and personal slug changes', async () => {
+      await expect(
+        main.auth.api.createOrganization({
+          body: { userId: ownerId, name: 'Server-created team', slug: 'OAUTH' },
+        }),
+      ).rejects.toMatchObject({
+        status: 'BAD_REQUEST',
+        body: { code: 'ORGANIZATION_SLUG_RESERVED' },
+      })
+      const personal = (
+        await testDb.pool.query<{ organization_id: string }>(
+          'SELECT organization_id FROM personal_organizations WHERE user_id = $1',
+          [ownerId],
+        )
+      ).rows[0]?.organization_id
+      const response = await post('/api/auth/organization/update', cookie, {
+        organizationId: personal,
+        data: { slug: 'CALENDARS' },
+      })
+      expect(response.status).toBe(400)
+      expect(await response.json()).toMatchObject({ code: 'ORGANIZATION_SLUG_RESERVED' })
+    })
+
+    it('allows unreserved slugs and ordinary metadata edits', async () => {
+      const id = await createTeam(cookie, 'admins')
+      const response = await post('/api/auth/organization/update', cookie, {
+        organizationId: id,
+        data: { slug: 'admin-team', name: 'Updated display name' },
+      })
+      expect(response.status).toBe(200)
+      expect(
+        await db
+          .selectFrom('auth.organization')
+          .select(['name', 'slug'])
+          .where('id', '=', id)
+          .executeTakeFirstOrThrow(),
+      ).toEqual({ name: 'Updated display name', slug: 'admin-team' })
+    })
+
+    it('does not rename historical data or prevent display-name-only edits to a legacy slug', async () => {
+      const id = await createTeam(cookie, 'legacy-slug-team')
+      await db
+        .updateTable('auth.organization')
+        .set({ slug: 'privacy' })
+        .where('id', '=', id)
+        .execute()
+      const response = await post('/api/auth/organization/update', cookie, {
+        organizationId: id,
+        data: { name: 'Legacy display name' },
+      })
+      expect(response.status).toBe(200)
+      expect(
+        await db
+          .selectFrom('auth.organization')
+          .select(['name', 'slug'])
+          .where('id', '=', id)
+          .executeTakeFirstOrThrow(),
+      ).toEqual({ name: 'Legacy display name', slug: 'privacy' })
+    })
+  })
+
   describe('display name updates', () => {
     let cookie: string
     let id: string
