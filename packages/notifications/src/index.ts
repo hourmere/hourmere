@@ -730,9 +730,13 @@ function logConferenceNotificationExhausted(
 }
 
 /** Claim only the outbox row; commit before any recipient transaction or network I/O. */
-async function claimConferenceNotification(deps: NotificationDeps, now: Date) {
+async function claimConferenceNotification(
+  deps: NotificationDeps,
+  now: Date,
+  attempted: { booking_id: string; kind: string }[],
+) {
   return deps.db.transaction().execute(async (trx) => {
-    const row = await trx
+    let query = trx
       .selectFrom('booking_conference_notifications as n')
       .innerJoin('bookings as b', 'b.id', 'n.booking_id')
       .innerJoin('booking_conferences as c', 'c.booking_id', 'b.id')
@@ -756,7 +760,17 @@ async function claimConferenceNotification(deps: NotificationDeps, now: Date) {
       .limit(1)
       .forUpdate('n')
       .skipLocked()
-      .executeTakeFirst()
+    if (attempted.length)
+      query = query.where((eb) =>
+        eb.not(
+          eb.or(
+            attempted.map((row) =>
+              eb.and([eb('n.booking_id', '=', row.booking_id), eb('n.kind', '=', row.kind)]),
+            ),
+          ),
+        ),
+      )
+    const row = await query.executeTakeFirst()
     if (!row) return
     const attempt = row.attempts + 1
     const leaseId = randomUUID()
@@ -797,10 +811,12 @@ export async function dispatchConferenceNotifications(
       FROM expired WHERE n.booking_id=expired.booking_id AND n.kind=expired.kind
     RETURNING n.booking_id,n.kind`.execute(deps.db)
   for (const row of expired.rows) logConferenceNotificationExhausted(deps, row)
+  const attempted: { booking_id: string; kind: string }[] = []
   for (let batch = 0; batch < 100; batch++) {
     signal?.throwIfAborted()
-    const row = await claimConferenceNotification(deps, clock())
+    const row = await claimConferenceNotification(deps, clock(), attempted)
     if (!row) return
+    attempted.push(row)
     const kind = row.kind as NotificationKind
     const finish = () =>
       deps.db
@@ -809,6 +825,7 @@ export async function dispatchConferenceNotifications(
         .where('kind', '=', row.kind)
         .where('lease_id', '=', row.leaseId)
         .where('attempts', '=', row.attempt)
+        .where('lease_until', '>', clock())
         .where('exhausted_at', 'is', null)
         .where('delivered', '=', false)
     let errorCode: 'recipient_retry' | 'delivery_failed' | 'interrupted' | undefined

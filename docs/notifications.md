@@ -370,7 +370,8 @@ attempt deadline and the worker's shutdown signal. Lease ownership is checked ag
 each new recipient, and completion uses the lease ID and attempt number. A stale worker
 cannot consume the replacement worker's claim. A crashed final attempt becomes exhausted
 after its lease expires; no fourteenth attempt is authorized. Each dispatch handles at most
-100 expired final claims and 100 delivery attempts. SMTP acceptance followed by a failed
+100 expired final claims and 100 distinct outbox delivery attempts; the same row is not
+immediately retried again within that dispatch. SMTP acceptance followed by a failed
 receipt commit still has the previously documented duplicate window; leases do not make
 external SMTP delivery exactly once.
 

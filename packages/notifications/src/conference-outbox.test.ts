@@ -275,6 +275,48 @@ describe.skipIf(!serverUrl)('bounded conference notification outbox (real Postgr
     expect((await row(id)).delivered).toBe(true)
   })
 
+  it('does not fabricate delivery when its lease expires during a real user lock wait', async () => {
+    const { id, host } = await fixture()
+    const blocker = await owned.pool.connect()
+    await blocker.query('BEGIN')
+    await blocker.query('SELECT id FROM auth."user" WHERE id=$1 FOR UPDATE', [host.userId])
+    const blockerPid = (await blocker.query<{ pid: number }>('SELECT pg_backend_pid() AS pid'))
+      .rows[0]?.pid
+    expect(blockerPid).toBeTypeOf('number')
+    let calls = 0
+    const config = deps({
+      send: async () => {
+        calls++
+      },
+    })
+    const sending = dispatchConferenceNotifications(config)
+    let held = true
+    try {
+      await until(async () => {
+        const result = await owned.pool.query<{ blocked: boolean }>(
+          'SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND $1=ANY(pg_blocking_pids(pid))) AS blocked',
+          [blockerPid],
+        )
+        return (await row(id)).attempts === 1 && result.rows[0]?.blocked === true
+      })
+      now = now.add({ minutes: 11 })
+      await blocker.query('ROLLBACK')
+      held = false
+      await sending
+      expect(calls).toBe(0)
+      expect((await row(id)).delivered).toBe(false)
+      expect((await row(id)).attempts).toBe(1)
+      await dispatchConferenceNotifications(config)
+      expect(calls).toBe(2)
+      expect((await row(id)).attempts).toBe(2)
+      expect((await row(id)).delivered).toBe(true)
+    } finally {
+      if (held) await blocker.query('ROLLBACK')
+      blocker.release()
+      await sending
+    }
+  })
+
   it('turns an expired final claim into an inspectable failure without a fourteenth send', async () => {
     const { id } = await fixture()
     await db
