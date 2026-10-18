@@ -465,6 +465,34 @@ export interface SignInEmails {
   id: string;
 }
 
+export interface WebhookDeliveries {
+  attempts: Generated<number>;
+  booking_id: string;
+  created_at: Generated<Timestamp>;
+  delivered_at: Timestamp | null;
+  event_id: string;
+  event_type: string;
+  http_status: number | null;
+  id: Generated<string>;
+  last_attempt_at: Timestamp | null;
+  last_error: string | null;
+  organization_id: string;
+  payload: string;
+  status: Generated<string>;
+  webhook_id: string;
+}
+
+export interface Webhooks {
+  created_at: Generated<Timestamp>;
+  events: string[];
+  id: Generated<string>;
+  is_active: Generated<boolean>;
+  organization_id: string;
+  secret_ciphertext: Buffer;
+  updated_at: Generated<Timestamp>;
+  url: string;
+}
+
 export interface DB {
   "auth.account": AuthAccount;
   "auth.apikey": AuthApikey;
@@ -501,4 +529,6 @@ export interface DB {
   schedule_overrides: ScheduleOverrides;
   schedules: Schedules;
   sign_in_emails: SignInEmails;
+  webhook_deliveries: WebhookDeliveries;
+  webhooks: Webhooks;
 }

@@ -174,14 +174,14 @@ Validated by the application (zod), not by the database:
 | When | Change |
 |---|---|
 | Cloud billing | `subscriptions` (organization ↔ Stripe customer/subscription, plan, seats) |
-| Weeks 5–8 | `webhooks`, `webhook_deliveries`; Better Auth teams (sub-groups for round-robin pools) |
+| Weeks 5–8 | Better Auth teams (sub-groups for round-robin pools) |
 | With Google/Microsoft sign-in | Already configured: Better Auth encrypts sign-in OAuth tokens (`encryptOAuthTokens`) |
-| After launch | Better Auth `two-factor`; OAuth 2.1 provider tables for claude.ai / ChatGPT connectors |
+| After launch | Better Auth `two-factor` |
 | Group events (seats) | Move `manage_token_hash` and `responses` from bookings to attendees |
 | Year 2 (enterprise) | Better Auth `sso`; `audit_events` |
 
-Background jobs (notification emails and reminders now; calendar sync and webhook retries
-later) use pg-boss (`@hourmere/jobs`), which keeps its queue in its own `pgboss` schema and
+Background jobs (notification emails, reminders, calendar synchronization and webhook
+delivery/retries) use pg-boss (`@hourmere/jobs`), which keeps its queue in its own `pgboss` schema and
 installs and upgrades it itself (on start, or with `npm run db:migrate` when
 `AUTO_MIGRATE=false`). Our migration runner never touches that schema, `db:types` leaves it
 out, and nothing of ours references its tables.
@@ -250,3 +250,13 @@ before that migration cannot be recovered; these legacy bookings retain only the
 identities. A historical booking with no snapshot and no hosts cannot be rescheduled.
 
 See [collective scheduling](collective-scheduling.md) for assignment, availability and locking.
+
+## Booking webhooks
+
+Migration 0017 adds organization-owned `webhooks` (bounded subscriptions, active flag and
+authenticated encrypted signing secret) and `webhook_deliveries` (immutable minimal event
+snapshot plus bounded attempt metadata). The booking transaction captures subscribed
+endpoints and queues only delivery IDs. Composite foreign keys keep deliveries in their
+endpoint organization; endpoint/booking/organization deletion cascades snapshots. Runtime
+locks use endpoint then delivery so deletion, pause and rotation cannot deadlock delivery
+through inverse lock order. Details and retention are in [webhooks.md](webhooks.md).
