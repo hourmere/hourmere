@@ -2,7 +2,7 @@ import { inspect } from 'node:util'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
-import { GOOGLE_CALENDAR_SYNC_SCOPES } from './google.ts'
+import { GOOGLE_CALENDAR_SYNC_SCOPES, GoogleCalendarError } from './google.ts'
 import {
   beginGoogleConnection,
   beginMicrosoftConnection,
@@ -167,5 +167,32 @@ describe.skipIf(!url)('OAuth token error recovery (real Postgres)', () => {
     expect(
       await useGoogleConnection(deps, id, AbortSignal.timeout(1000), async () => 'synced'),
     ).toBe('synced')
+  })
+
+  it('Google list refresh clears a transient error but keeps a writeback permissions failure', async () => {
+    const { id } = await connect('google')
+    const connection = () =>
+      db
+        .selectFrom('calendar_connections')
+        .select(['status', 'last_error'])
+        .where('id', '=', id)
+        .executeTakeFirstOrThrow()
+    const record = (code: 'provider_unavailable' | 'permissions_missing') =>
+      expect(
+        useGoogleConnection(deps, id, AbortSignal.timeout(1000), async () => {
+          throw new GoogleCalendarError(code)
+        }),
+      ).rejects.toMatchObject({ code })
+    await record('provider_unavailable')
+    expect(await connection()).toEqual({ status: 'active', last_error: 'provider_unavailable' })
+    await refreshCalendarList(deps, owner, id)
+    expect(await connection()).toEqual({ status: 'active', last_error: null })
+    await record('permissions_missing')
+    await refreshCalendarList(deps, owner, id)
+    expect(await connection()).toEqual({ status: 'active', last_error: 'permissions_missing' })
+    expect(
+      await useGoogleConnection(deps, id, AbortSignal.timeout(1000), async () => 'synced'),
+    ).toBe('synced')
+    expect(await connection()).toEqual({ status: 'active', last_error: 'permissions_missing' })
   })
 })

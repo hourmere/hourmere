@@ -3,6 +3,7 @@ import type { Principal } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { isSingleLineText } from '@hourmere/scheduling/text'
+import { sql } from 'kysely'
 import { z } from 'zod'
 import { calendarEncryptionKey, decryptCredential, encryptCredential } from './credentials.ts'
 import {
@@ -598,9 +599,15 @@ async function refreshCalendarProvider(
           expiresAt: tokens.expiresAt,
         } satisfies StoredTokens),
       )
+      // Listing calendars proves nothing about event writes: a permissions failure recorded
+      // by a booking write stays visible until the host reconnects, which queues recovery.
       await trx
         .updateTable('calendar_connections')
-        .set({ credentials, scopes, last_error: null })
+        .set({
+          credentials,
+          scopes,
+          last_error: sql<string | null>`nullif(last_error, 'provider_unavailable')`,
+        })
         .where('id', '=', id)
         .execute()
       // A refresh may rotate the refresh token. Keep it even when the following list

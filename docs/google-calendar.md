@@ -173,7 +173,10 @@ Temporary failures are collected after every destination has been attempted and 
 Google event API 403 responses with `rateLimitExceeded`, `userRateLimitExceeded` or
 `quotaExceeded` use this retry path. Other 403 responses record `permissions_missing` in the
 owner's `lastError` metadata, and the Calendars page prompts the host to reconnect even while
-the connection is active. Successful synchronization or writeback clears the previous error.
+the connection is active. A temporary provider error clears after the next successful
+synchronization or writeback. A permissions error stays until the host reconnects, even when
+other syncs, writebacks or calendar-list refreshes on that connection succeed; reconnecting
+clears it and writes the missed events through the recovery pass described below.
 Availability continues to fail closed immediately for selected calendars with sync failures.
 
 Reauthorizing an existing Google connection queues a finite `booking-calendar-recover`

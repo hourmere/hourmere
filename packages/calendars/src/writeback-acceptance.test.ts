@@ -11,8 +11,14 @@ import {
 } from './booking-events.ts'
 import { calendarEncryptionKey, encryptCredential } from './credentials.ts'
 import { GOOGLE_CALENDAR_SYNC_SCOPES, GoogleCalendarError } from './google.ts'
-import { type CalendarDeps, listCalendarConnections } from './index.ts'
+import {
+  beginGoogleConnection,
+  type CalendarDeps,
+  finishGoogleConnection,
+  listCalendarConnections,
+} from './index.ts'
 import { bookingCalendarJob, bookingCalendarRecoveryJob, calendarDispatchJob } from './jobs.ts'
+import { syncGoogleCalendar } from './sync.ts'
 import { calendarTestSession, fakeGoogle, TEST_CALENDAR_KEY } from './testing.ts'
 
 const url = process.env.DATABASE_URL
@@ -156,7 +162,9 @@ describe.skipIf(!url)('Calendar writeback acceptance (real Postgres)', () => {
     async (reason) => {
       // A prior parameter may have left a deliberately delayed retry in this file's DB.
       await database.pool
-        .query("DELETE FROM pgboss.job WHERE name='booking-calendar'")
+        .query(
+          "DELETE FROM pgboss.job WHERE name IN ('booking-calendar','booking-calendar-recover')",
+        )
         .catch((error: { code?: string }) => {
           if (error.code !== '42P01') throw error
         })
@@ -166,13 +174,36 @@ describe.skipIf(!url)('Calendar writeback acceptance (real Postgres)', () => {
         Response.json({ error: { errors: [{ reason }] } }, { status: 403 })
       const jobs = createJobs({
         connectionString: database.url,
-        definitions: [bookingCalendarJob(deps)],
+        definitions: [
+          bookingCalendarJob(deps),
+          bookingCalendarRecoveryJob(
+            deps,
+            (bookingId, trx): Promise<unknown> =>
+              jobs.enqueue(
+                'booking-calendar',
+                { bookingId },
+                { singletonKey: bookingId, transaction: trx },
+              ),
+            (connectionId, after): Promise<unknown> =>
+              jobs.enqueue(
+                'booking-calendar-recover',
+                { connectionId, after },
+                { singletonKey: connectionId },
+              ),
+          ),
+        ],
         work: true,
         migrate: true,
         maxConnections: 2,
         pollingIntervalSeconds: 0.5,
         log: () => {},
       })
+      deps.enqueueWritebackRecovery = (connectionId, trx) =>
+        jobs.enqueue(
+          'booking-calendar-recover',
+          { connectionId },
+          { singletonKey: connectionId, transaction: trx },
+        )
       try {
         await jobs.start()
         const jobId = await jobs.enqueue(
@@ -218,11 +249,88 @@ describe.skipIf(!url)('Calendar writeback acceptance (real Postgres)', () => {
           )
           expect(await mappings()).toEqual([{ booking_id: id, calendar_id: calA }])
           expect((await listCalendarConnections(deps, a)).data[0]?.lastError).toBeNull()
+        } else {
+          // Unrelated successful work on the same connection (the per-minute busy sync of the
+          // destination calendar, another booking's write) must not hide the refused copy.
+          provider.controls.eventHook = undefined
+          await db
+            .updateTable('calendars')
+            .set({ check_conflicts: true })
+            .where('id', '=', calA)
+            .execute()
+          await syncGoogleCalendar(deps, calA)
+          expect((await listCalendarConnections(deps, a)).data[0]?.lastError).toBe(
+            'permissions_missing',
+          )
+          const second = await f.booking(
+            a.organization.id,
+            [a.user.id],
+            '2026-11-02T11:00:00Z',
+            '2026-11-02T11:30:00Z',
+            { eventTypeId: null },
+          )
+          await notify(second)
+          await writeBookingCalendar(deps, second)
+          expect(await mappings()).toEqual([{ booking_id: second, calendar_id: calA }])
+          expect((await listCalendarConnections(deps, a)).data[0]?.lastError).toBe(
+            'permissions_missing',
+          )
+          // Reconnecting the same account clears the error and queues the recovery pass,
+          // which writes the copy that was refused.
+          provider.controls.token.scope = GOOGLE_CALENDAR_SYNC_SCOPES.join(' ')
+          provider.controls.identity = {
+            sub: 'account-a',
+            email: 'account-a@example.com',
+            email_verified: true,
+          }
+          provider.controls.pages = [
+            { items: [{ id: 'account-a', summary: 'account-a', accessRole: 'owner' }] },
+          ]
+          // The host signs in to reconnect: the fixture session must still be valid at NOW.
+          await db
+            .updateTable('auth.session')
+            .set({ expiresAt: new Date(NOW + 86_400_000) })
+            .where('id', '=', a.sessionId)
+            .execute()
+          const started = await beginGoogleConnection(deps, a, 'sync')
+          const state = new URL(started.authorizationUrl).searchParams.get('state') as string
+          expect(
+            await finishGoogleConnection(
+              deps,
+              a,
+              new URLSearchParams({ state, code: 'fake-authorization-code' }),
+            ),
+          ).toBe('connected')
+          expect((await listCalendarConnections(deps, a)).data[0]).toMatchObject({
+            id: connectionA,
+            status: 'active',
+            lastError: null,
+          })
+          const recovery = await database.pool.query(
+            "SELECT data FROM pgboss.job WHERE name='booking-calendar-recover' AND singleton_key=$1",
+            [connectionA],
+          )
+          expect(recovery.rows).toEqual([{ data: { connectionId: connectionA } }])
+          await vi.waitFor(
+            async () => {
+              expect(
+                (await mappings()).sort((x, y) => x.booking_id.localeCompare(y.booking_id)),
+              ).toEqual(
+                [
+                  { booking_id: id, calendar_id: calA },
+                  { booking_id: second, calendar_id: calA },
+                ].sort((x, y) => x.booking_id.localeCompare(y.booking_id)),
+              )
+            },
+            { timeout: 10_000, interval: 50 },
+          )
+          expect((await listCalendarConnections(deps, a)).data[0]?.lastError).toBeNull()
         }
       } finally {
         await jobs.stop()
       }
     },
+    30_000,
   )
   it('bounds a stalled host attempt so a healthy later host still receives its copy', async () => {
     const id = await booking([a.user.id, b.user.id])

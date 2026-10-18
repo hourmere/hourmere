@@ -93,10 +93,14 @@ export async function useGoogleConnection<T>(
         accessToken = next.accessToken
       }
       const value = await work(trx, accessToken, owner.user_id)
+      // Only a transient failure clears itself. A permissions failure recorded by one booking
+      // write stays visible while unrelated busy syncs and writes on the same connection
+      // succeed; reconnecting clears it and queues recovery of the copies that were refused.
       await trx
         .updateTable('calendar_connections')
         .set({ last_error: null })
         .where('id', '=', id)
+        .where('last_error', '=', 'provider_unavailable')
         .execute()
       return { ok: true as const, value }
     } catch (error) {
