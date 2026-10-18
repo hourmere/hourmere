@@ -1,4 +1,5 @@
 import { createRoute, z } from '@hono/zod-openapi'
+import { retryBookingConference } from '@hourmere/calendars'
 import type { Db } from '@hourmere/db'
 import {
   type BookingNotifier,
@@ -76,6 +77,13 @@ export const Booking = z
     end: Instant,
     title: z.string(),
     location: BookingLocation.nullable(),
+    conference: z
+      .object({
+        provider: z.literal('google_meet'),
+        status: z.enum(['pending', 'ready', 'failed']),
+        errorCode: z.string().max(64).nullable(),
+      })
+      .optional(),
     responses: Responses,
     attendees: z.array(Attendee).openapi({ description: 'The invitee first, then guests' }),
     rescheduledFromId: z.uuid().nullable().openapi({
@@ -167,6 +175,7 @@ const invalidCancel = error(
 
 export interface BookingRoutesDeps {
   db: Db
+  automaticMeet?: boolean | undefined
   now?: () => Temporal.Instant
   /** Queues the booking emails in the transaction of each change; none are sent without it. */
   notify?: BookingNotifier | undefined
@@ -183,9 +192,10 @@ export function bookingRoutes({
   db,
   now = () => Temporal.Now.instant(),
   notify,
+  automaticMeet,
   rateLimits = {},
 }: BookingRoutesDeps): RouteModule {
-  const publicContext: PublicContext = { db, now, notify }
+  const publicContext: PublicContext = { db, now, notify, automaticMeet }
   const manageLimit = rateLimit(createRateLimiter(rateLimits.manage ?? PUBLIC_RATE_LIMITS.manage))
   // Picking a new time pages through months of slots, so it counts like public slots.
   const manageSlotsLimit = rateLimit(
@@ -198,8 +208,32 @@ export function bookingRoutes({
       principal,
       now,
       notify,
+      automaticMeet,
     })
 
+    app.openapi(
+      createRoute({
+        method: 'post',
+        path: '/api/v1/bookings/{id}/conference/retry',
+        security: authenticated,
+        middleware: caller,
+        tags: ['Bookings'],
+        summary: 'Retry safe conference reconciliation for an assigned host',
+        request: { params: z.object({ id: z.uuid() }), body:{required:true,content:json(z.strictObject({}))} },
+        responses: {
+          204: { description: 'Durable reconciliation requested' },
+          400: invalidId,
+          401: unauthorized,
+          403: crossOrigin,
+          404: { description: 'No such booking or conference', content: json(ErrorBody) },
+          409: { description: 'conference_not_retryable', content: json(ErrorBody) },
+        },
+      }),
+      async (c) => {
+        await retryBookingConference(context(c.var.principal), c.req.valid('param').id)
+        return c.body(null, 204)
+      },
+    )
     // Registered before /api/v1/bookings/{id}…: Hono runs matching routes in registration
     // order, and "manage" would otherwise be taken for an id (and need a caller).
     app.openapi(

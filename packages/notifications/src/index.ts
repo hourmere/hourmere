@@ -24,6 +24,7 @@ export const NOTIFICATION_KINDS = [
   'rescheduled',
   'cancelled',
   'reminder',
+  'conference_failed',
 ] as const satisfies readonly BookingEmailKind[]
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number]
 
@@ -248,6 +249,7 @@ interface NotificationData {
   previous: { start: Temporal.Instant; end: Temporal.Instant; status: string } | undefined
   /** A booking that replaced this one (it was cancelled by a reschedule). */
   replaced: boolean
+  automaticConference: boolean
 }
 
 /**
@@ -359,6 +361,7 @@ function loadNotificationData(db: Db, bookingId: string): Promise<NotificationDa
         status: previous.status,
       },
       replaced: successor !== undefined,
+      automaticConference: isRecord(b.location) && b.location.autoCreate === true,
     }
   })
 }
@@ -370,6 +373,7 @@ function stillTrue(
   now: Temporal.Instant,
 ): boolean {
   if (kind === 'cancelled') return booking.status === 'cancelled'
+  if (kind === 'conference_failed') return booking.status === 'confirmed'
   return booking.status === 'confirmed' && Temporal.Instant.compare(booking.start, now) > 0
 }
 
@@ -428,7 +432,12 @@ async function sendOnce(
         .executeTakeFirst()
       if (
         !current ||
-        !stillTrue(key.kind, { status: current.status, start: instant(current.start_at) }, clock())
+        !stillTrue(
+          key.kind,
+          { status: current.status, start: instant(current.start_at) },
+          clock(),
+        ) ||
+        !(await conferenceNotificationAllowed(trx, key.bookingId, key.kind))
       ) {
         throw new Overtaken()
       }
@@ -462,6 +471,7 @@ export async function sendBookingNotification(
 ): Promise<void> {
   const clock = deps.now ?? (() => Temporal.Now.instant())
   const now = clock()
+  if (!(await conferenceNotificationAllowed(deps.db, bookingId, kind))) return
   const data = await loadNotificationData(deps.db, bookingId)
   if (!data || !stillApplies(kind, data, now)) return
   const { booking, hosts, attendees } = data
@@ -478,7 +488,11 @@ export async function sendBookingNotification(
   }
   // Nobody it is for.
   if (!invitee) return
-  const guests = attendees.filter((a) => a !== invitee)
+  const guests = kind === 'conference_failed' ? [] : attendees.filter((a) => a !== invitee)
+  const email: typeof bookingEmail = (...args) => ({
+    ...bookingEmail(...args),
+    sensitive: data.automaticConference,
+  })
 
   const meeting: BookingEmailMeeting = {
     eventName: booking.eventName,
@@ -493,7 +507,7 @@ export async function sendBookingNotification(
     cancelReason: booking.cancelReason,
   }
   const invitation = (summary: string) =>
-    kind === 'reminder'
+    kind === 'reminder' || kind === 'conference_failed'
       ? undefined
       : icsAttachment({
           method: kind === 'cancelled' ? 'CANCEL' : 'REQUEST',
@@ -516,7 +530,7 @@ export async function sendBookingNotification(
     key: `attendee:${attendee.id}`,
     withLinks: attendee === invitee && kind !== 'cancelled',
     message: (token: string | undefined) =>
-      bookingEmail(
+      email(
         kind,
         meeting,
         {
@@ -535,7 +549,7 @@ export async function sendBookingNotification(
       key: `host:${host.id}`,
       withLinks: false,
       message: () =>
-        bookingEmail(
+        email(
           kind,
           meeting,
           { role: 'host', email: host.email, timeZone: host.timeZone, answers: booking.answers },
@@ -607,3 +621,87 @@ export {
   SignInEmailPayload,
   signInEmailJobs,
 } from './sign-in.ts'
+
+/** Legacy queued jobs and outbox jobs share this gate; no final invitation while unready. */
+export async function conferenceNotificationAllowed(
+  db: Db,
+  bookingId: string,
+  kind: NotificationKind,
+) {
+  if (kind === 'cancelled') return true
+  const row = await db
+    .selectFrom('bookings as b')
+    .leftJoin('booking_conferences as c', 'c.booking_id', 'b.id')
+    .select(['b.location', 'c.state', 'c.revision', 'c.applied_revision'])
+    .where('b.id', '=', bookingId)
+    .executeTakeFirst()
+  if (!row) return false
+  const automatic = isRecord(row.location) && row.location.autoCreate === true
+  if (!automatic) return kind !== 'conference_failed'
+  if (kind === 'conference_failed') return row.state === 'failed'
+  return (
+    row.state === 'ready' &&
+    row.applied_revision === row.revision &&
+    isRecord(row.location) &&
+    typeof row.location.url === 'string'
+  )
+}
+
+/** A durable outbox is retried independently of legacy exclusive notification keys. */
+export async function dispatchConferenceNotifications(
+  deps: NotificationDeps,
+  signal?: AbortSignal,
+) {
+  const now = new Date((deps.now?.() ?? Temporal.Now.instant()).epochMilliseconds)
+  const rows = await deps.db
+    .selectFrom('booking_conference_notifications as n')
+    .innerJoin('bookings as b', 'b.id', 'n.booking_id')
+    .innerJoin('booking_conferences as c', 'c.booking_id', 'b.id')
+    .select(['n.booking_id', 'n.kind'])
+    .where('n.delivered', '=', false)
+    .where('n.due_at', '<=', now)
+    .where('b.status', '=', 'confirmed')
+    .where(eb=>eb.or([eb('n.kind','=','conference_failed'),eb('b.start_at','>',now)]))
+    .where((eb) =>
+      eb.or([
+        eb.and([eb('n.kind', '=', 'conference_failed'), eb('c.state', '=', 'failed')]),
+        eb.and([eb('n.kind', '!=', 'conference_failed'), eb('c.state', '=', 'ready')]),
+      ]),
+    )
+    .orderBy('n.due_at')
+    .limit(100)
+    .execute()
+  for (const row of rows) {
+    signal?.throwIfAborted()
+    const kind = row.kind as NotificationKind
+    // Waiting rows remain durable. Stale rows can be marked done: the actual send gate
+    // suppresses a cancelled/superseded booking and a newer transition owns its own row.
+    if (!(await conferenceNotificationAllowed(deps.db, row.booking_id, kind))) continue
+    try {
+      await sendBookingNotification(deps, row.booking_id, kind, { signal })
+    } catch(error) {
+      if (!(error instanceof NotificationRetryError)) throw error
+      // One temporarily refused recipient must not starve other bookings in this batch.
+      await deps.db.updateTable('booking_conference_notifications').set({due_at:new Date(now.getTime()+60_000)}).where('booking_id','=',row.booking_id).where('kind','=',row.kind).execute()
+      continue
+    }
+    await deps.db
+      .updateTable('booking_conference_notifications')
+      .set({ delivered: true })
+      .where('booking_id', '=', row.booking_id)
+      .where('kind', '=', row.kind)
+      .execute()
+  }
+}
+export function conferenceNotificationDispatchJob(deps: NotificationDeps) {
+  return defineJob({
+    name: 'conference-notification-dispatch',
+    payload: z.strictObject({}),
+    policy: 'exclusive',
+    concurrency: 1,
+    schedule: { cron: '* * * * *', payload: {} },
+    expireInSeconds: 300,
+    retry: { limit: 12, delaySeconds: 30, backoff: true, maxDelaySeconds: 3600 },
+    handler: (_payload, { signal }) => dispatchConferenceNotifications(deps, signal),
+  })
+}

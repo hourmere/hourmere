@@ -161,6 +161,7 @@ async function saveCalendars(db: Db, connectionId: string, calendars: ProviderCa
           is_primary: calendar.isPrimary,
           access_role: calendar.accessRole,
           time_zone: calendar.timeZone,
+          supports_google_meet: calendar.supportsGoogleMeet ?? false,
           // Connection/listing is not busy-time sync. Do not claim conflicts are checked yet.
           check_conflicts: false,
         })),
@@ -171,6 +172,7 @@ async function saveCalendars(db: Db, connectionId: string, calendars: ProviderCa
           is_primary: eb.ref('excluded.is_primary'),
           access_role: eb.ref('excluded.access_role'),
           time_zone: eb.ref('excluded.time_zone'),
+          supports_google_meet: eb.ref('excluded.supports_google_meet'),
         })),
       )
       .execute()
@@ -585,3 +587,11 @@ async function refreshCalendarProvider(
         : `Reconnect ${provider === 'google' ? 'Google' : 'Microsoft'} Calendar to restore access.`,
     )
 }
+
+export {
+  bookingConferenceJob,
+  conferenceBookingNotifier,
+  conferenceDispatchJob,
+  retryBookingConference,
+  writeBookingConference,
+} from './conferences.ts'

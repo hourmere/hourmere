@@ -54,6 +54,7 @@ const schema = z
         })
         .transform((list) => [...new Set(list.map((v) => embedOrigin(v) as string))]),
     ).transform((v) => v ?? []),
+    GOOGLE_MEET_ENABLED: optional(z.enum(['true', 'false'])).transform((v) => v === 'true'),
     WEBHOOKS_ENABLED: optional(z.enum(['true', 'false'])).transform((v) => v === 'true'),
     WEBHOOK_ENCRYPTION_KEY: optional(
       z.string().refine(
@@ -195,6 +196,17 @@ const schema = z
         code: 'custom',
         path: ['PUBLIC_URL'],
         message: 'Embedding requires an HTTPS PUBLIC_URL except on loopback development hosts',
+      })
+    if (
+      c.GOOGLE_MEET_ENABLED &&
+      (!c.GOOGLE_CALENDAR_CLIENT_ID ||
+        !c.GOOGLE_CALENDAR_CLIENT_SECRET ||
+        !c.CALENDAR_ENCRYPTION_KEY)
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['GOOGLE_MEET_ENABLED'],
+        message: 'Automatic Google Meet requires Google Calendar write configuration',
       })
     if (c.WEBHOOKS_ENABLED && !c.WEBHOOK_ENCRYPTION_KEY)
       ctx.addIssue({

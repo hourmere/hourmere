@@ -91,6 +91,15 @@ export async function writeBookingCalendar(
   const client = deps.google.client
   const root = await rootOf(deps.db, bookingId)
   if (!root) return
+  // Automatic roots have exactly one provider-create authority, including unknown imports.
+  if (
+    await deps.db
+      .selectFrom('booking_conferences')
+      .select('root_booking_id')
+      .where('root_booking_id', '=', root)
+      .executeTakeFirst()
+  )
+    return
   const chain = await sql<{ id: string; depth: number }>`WITH RECURSIVE chain(id,depth) AS (
     SELECT id,0 FROM bookings WHERE id=${root}::uuid
     UNION ALL SELECT b.id,c.depth+1 FROM bookings b JOIN chain c ON b.rescheduled_from_id=c.id
@@ -126,6 +135,14 @@ export async function writeBookingCalendar(
   for (const target of [...targets.values()].sort((a, b) => a.id.localeCompare(b.id))) {
     signal.throwIfAborted()
     await useGoogleConnection(deps, target.connection_id, signal, async (trx, token, userId) => {
+      if (
+        await trx
+          .selectFrom('booking_conferences')
+          .select('root_booking_id')
+          .where('root_booking_id', '=', root)
+          .executeTakeFirst()
+      )
+        return
       const calendar = await trx
         .selectFrom('calendars')
         .selectAll()

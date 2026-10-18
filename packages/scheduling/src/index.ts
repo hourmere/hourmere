@@ -60,6 +60,7 @@ export {
   DEFAULT_CATALOG_PAGE_SIZE,
   MAX_CATALOG_PAGE_SIZE,
 } from './catalog-page.ts'
+export { automaticMeet, type ConferenceStatus, conferenceRoot } from './conferences.ts'
 export type {
   BookingEvent,
   BookingNotifier,

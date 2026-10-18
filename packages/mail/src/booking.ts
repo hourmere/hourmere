@@ -4,7 +4,12 @@
 import type { MailAttachment, MailMessage } from './index.ts'
 import { escapeHtml, linkableUrl, multiLine, singleLine, subjectLine } from './text.ts'
 
-export type BookingEmailKind = 'confirmed' | 'rescheduled' | 'cancelled' | 'reminder'
+export type BookingEmailKind =
+  | 'confirmed'
+  | 'rescheduled'
+  | 'cancelled'
+  | 'reminder'
+  | 'conference_failed'
 
 /** Where the meeting happens, as the emails show it. */
 export type MeetingLocation =
@@ -245,6 +250,7 @@ export function bookingEmail(
   const when = formatShortTime(meeting.start, recipient.timeZone)
 
   const subject = {
+    conference_failed: `Meeting link needs attention: ${event} on ${when}`,
     confirmed: isHost
       ? `New booking: ${event} with ${invitee} on ${when}`
       : `Confirmed: ${event} with ${host} on ${when}`,
@@ -253,6 +259,9 @@ export function bookingEmail(
     reminder: `Reminder: ${event} with ${other} on ${when}`,
   }[kind]
   const intro = {
+    conference_failed: isHost
+      ? 'The time is reserved, but Google Meet could not be prepared. Open this booking in Hourmere to review the problem, retry safe reconciliation or cancel. No final calendar invitation has been sent.'
+      : 'Your time is reserved, but the host needs to fix the Google Meet link. No final calendar invitation has been sent. You can use the links below to manage or cancel the booking.',
     confirmed: isHost
       ? `${invitee} booked a meeting with you.`
       : `Your meeting with ${host} is booked.`,

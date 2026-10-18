@@ -277,6 +277,35 @@ export interface BookingCalendarTargets {
   user_id: string;
 }
 
+export interface BookingConferenceNotifications {
+  booking_id: string;
+  delivered: Generated<boolean>;
+  due_at: Generated<Timestamp>;
+  kind: string;
+}
+
+export interface BookingConferences {
+  applied_revision: number | null;
+  attempts: Generated<number>;
+  booking_id: string;
+  calendar_id: string | null;
+  connection_id: string | null;
+  create_started: Generated<boolean>;
+  error_code: string | null;
+  external_event_id: string | null;
+  lease_id: string | null;
+  lease_until: Timestamp | null;
+  next_attempt_at: Generated<Timestamp>;
+  organization_id: string;
+  organizer_user_id: string;
+  request_id: Generated<string>;
+  retry_conference: Generated<boolean>;
+  revision: Generated<number>;
+  root_booking_id: string;
+  state: Generated<string>;
+  updated_at: Generated<Timestamp>;
+}
+
 export interface BookingHosts {
   /**
    * Derived from the booking status by booking_host_slot(); any value written is replaced.
@@ -367,6 +396,7 @@ export interface Calendars {
   is_primary: Generated<boolean>;
   last_synced_at: Timestamp | null;
   name: string;
+  supports_google_meet: Generated<boolean>;
   sync_error: string | null;
   sync_state: Json | null;
   time_zone: string | null;
@@ -513,6 +543,8 @@ export interface DB {
   booking_attendees: BookingAttendees;
   booking_calendar_events: BookingCalendarEvents;
   booking_calendar_targets: BookingCalendarTargets;
+  booking_conference_notifications: BookingConferenceNotifications;
+  booking_conferences: BookingConferences;
   booking_hosts: BookingHosts;
   booking_notifications: BookingNotifications;
   bookings: Bookings;

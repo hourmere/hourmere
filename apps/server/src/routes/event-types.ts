@@ -38,7 +38,7 @@ import {
 const L = EVENT_TYPE_LIMITS
 
 const locationKinds = {
-  googleMeet: { kind: z.literal('google_meet') },
+  googleMeet: { kind: z.literal('google_meet'), autoCreate: z.literal(true).optional() },
   zoom: { kind: z.literal('zoom') },
   phone: {
     kind: z.literal('phone'),
