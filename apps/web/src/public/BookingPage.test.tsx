@@ -56,6 +56,63 @@ async function chooseSlot(user: ReturnType<typeof userEvent.setup>, dayName: Reg
 }
 
 describe('the booking page', () => {
+  it('keeps unobtrusive attribution on ordinary booking pages, pointing to the hosted service', async () => {
+    fakeApi(eventRoutes(EVENT, DST_SLOTS))
+    renderApp('/ada/intro')
+    await screen.findByRole('heading', { name: 'Intro call' })
+    const mark = screen.getByRole('link', { name: /Powered by Hourmere/ })
+    expect(mark.getAttribute('href')).toBe('https://hourmere.com')
+    expect(mark.closest('footer')).not.toBeNull()
+    expect(mark.getAttribute('target')).toBe('_blank')
+    expect(mark.getAttribute('rel')).toContain('noreferrer')
+    expect(screen.queryByRole('link', { name: 'Create your own booking link' })).toBeNull()
+  })
+
+  it('uses the configured hosted destination for attribution and the confirmation CTA without sharing booking data', async () => {
+    const user = userEvent.setup()
+    fakeApi({
+      ...eventRoutes(EVENT, DST_SLOTS),
+      'GET /api/v1/instance': () =>
+        json(200, {
+          hostedSignupUrl: 'https://hosted.example/sign-up',
+          signIn: { email: true, google: false, microsoft: false },
+        }),
+      'POST /api/v1/public/ada/intro/bookings': () =>
+        json(201, { booking: booking(), manageToken: TOKEN }),
+    })
+    renderApp('/ada/intro')
+    await chooseSlot(user, /November 2, available/, '9:00 AM')
+    await user.type(screen.getByLabelText('Your name'), 'Grace Hopper')
+    await user.type(screen.getByLabelText('Email'), 'grace@example.com')
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+    await screen.findByRole('heading', { name: 'You’re booked' })
+    for (const name of [/Powered by Hourmere/, 'Create your own booking link']) {
+      const link = screen.getByRole('link', { name })
+      await waitFor(() => expect(link.getAttribute('href')).toBe('https://hosted.example/sign-up'))
+      expect(link.getAttribute('rel')).toContain('noreferrer')
+      expect(link.getAttribute('target')).toBe('_blank')
+      expect(link.classList.contains('button')).toBe(false)
+      expect(link.tabIndex).toBe(0)
+    }
+    expect(
+      screen
+        .getByLabelText<HTMLInputElement>(/Your link to change or cancel/)
+        .value.endsWith(TOKEN),
+    ).toBe(true)
+  })
+
+  it('keeps the official attribution destination when instance discovery fails', async () => {
+    fakeApi({
+      ...eventRoutes(EVENT, DST_SLOTS),
+      'GET /api/v1/instance': () => json(503, { error: 'internal_error' }),
+    })
+    renderApp('/ada/intro')
+    await screen.findByRole('heading', { name: 'Intro call' })
+    expect(screen.getByRole('link', { name: /Powered by Hourmere/ }).getAttribute('href')).toBe(
+      'https://hourmere.com',
+    )
+  })
+
   it('withholds every calendar export until the protected Meet status becomes ready', async () => {
     const user = userEvent.setup(),
       JOIN = 'https://meet.google.com/abc-defg-hij'
@@ -152,6 +209,9 @@ describe('the booking page', () => {
       expect(postMessage.mock.calls.filter(([data]) => data.type === 'hourmere:close')).toEqual([
         [{ type: 'hourmere:close', id: 'abcdefghijklmnop1234' }, 'https://parent.example'],
       ])
+      expect(
+        screen.getByRole('link', { name: 'Create your own booking link' }).getAttribute('href'),
+      ).toBe('https://hourmere.com')
       expect(api.to('GET /api/v1/me')).toHaveLength(0)
     },
   )
@@ -715,49 +775,58 @@ describe('the booking page', () => {
     expect(await screen.findByText(/Try again in 30 seconds/)).toBeDefined()
   })
 
-  it('sends people back to pick another time when theirs was just taken', async () => {
-    const user = userEvent.setup()
-    let taken = false
-    const api = fakeApi({
-      ...eventRoutes(EVENT, DST_SLOTS),
-      'GET /api/v1/public/ada/intro/slots': (call) =>
-        slotsAnswer(taken ? DST_SLOTS.filter((s) => s !== '2026-11-02T14:00:00Z') : DST_SLOTS)(
-          call,
-        ),
-      'POST /api/v1/public/ada/intro/bookings': ({ body }) => {
-        if ((body as { start: string }).start === '2026-11-02T14:00:00.000Z') {
-          taken = true
-          return json(409, { error: 'slot_taken', message: 'Someone else just booked this time' })
-        }
-        return json(201, {
-          booking: booking({ start: '2026-11-02T10:30:00.000Z' }),
-          manageToken: TOKEN,
-        })
-      },
-    })
-    renderApp('/ada/intro')
-    await chooseSlot(user, /November 2, available/, '9:00 AM')
-    await user.type(screen.getByLabelText('Your name'), 'Grace Hopper')
-    await user.type(screen.getByLabelText('Email'), 'grace@example.com')
-    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+  it.each(['slot_taken', 'booking_changed'])(
+    'refreshes availability and keeps entered details after %s',
+    async (error) => {
+      const user = userEvent.setup()
+      let taken = false
+      const api = fakeApi({
+        ...eventRoutes(EVENT, DST_SLOTS),
+        'GET /api/v1/public/ada/intro/slots': (call) =>
+          slotsAnswer(taken ? DST_SLOTS.filter((s) => s !== '2026-11-02T14:00:00Z') : DST_SLOTS)(
+            call,
+          ),
+        'POST /api/v1/public/ada/intro/bookings': ({ body }) => {
+          if ((body as { start: string }).start === '2026-11-02T14:00:00.000Z') {
+            taken = true
+            return json(409, { error })
+          }
+          return json(201, {
+            booking: booking({ start: '2026-11-02T10:30:00.000Z' }),
+            manageToken: TOKEN,
+          })
+        },
+      })
+      renderApp('/ada/intro')
+      await chooseSlot(user, /November 2, available/, '9:00 AM')
+      await user.type(screen.getByLabelText('Your name'), 'Grace Hopper')
+      await user.type(screen.getByLabelText('Email'), 'grace@example.com')
+      await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
 
-    expect(await screen.findByText(/Someone else just booked that time/)).toBeDefined()
-    await waitFor(() =>
-      expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Pick a time' })),
-    )
-    await waitFor(() => expect(api.to('GET /api/v1/public/ada/intro/slots')).toHaveLength(2))
-    await user.click(await day(/November 2, available/))
-    expect(slotButtons()).toEqual(['5:30 AM', '10:30 PM'])
-    await user.click(screen.getByRole('button', { name: '5:30 AM' }))
-    // What they typed is still there.
-    expect(screen.getByLabelText<HTMLInputElement>('Your name').value).toBe('Grace Hopper')
-    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
-    expect(await screen.findByRole('heading', { name: 'You’re booked' })).toBeDefined()
-    const posts = api.to('POST /api/v1/public/ada/intro/bookings')
-    expect(posts[1]?.headers.get('idempotency-key')).not.toBe(
-      posts[0]?.headers.get('idempotency-key'),
-    )
-  })
+      expect(
+        await screen.findByText(
+          error === 'slot_taken'
+            ? /Someone else just booked that time/
+            : /That time is no longer available/,
+        ),
+      ).toBeDefined()
+      await waitFor(() =>
+        expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Pick a time' })),
+      )
+      await waitFor(() => expect(api.to('GET /api/v1/public/ada/intro/slots')).toHaveLength(2))
+      await user.click(await day(/November 2, available/))
+      expect(slotButtons()).toEqual(['5:30 AM', '10:30 PM'])
+      await user.click(screen.getByRole('button', { name: '5:30 AM' }))
+      // What they typed is still there.
+      expect(screen.getByLabelText<HTMLInputElement>('Your name').value).toBe('Grace Hopper')
+      await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+      expect(await screen.findByRole('heading', { name: 'You’re booked' })).toBeDefined()
+      const posts = api.to('POST /api/v1/public/ada/intro/bookings')
+      expect(posts[1]?.headers.get('idempotency-key')).not.toBe(
+        posts[0]?.headers.get('idempotency-key'),
+      )
+    },
+  )
 
   it('shows a not-found page for an unknown event, and asks nothing for impossible addresses', async () => {
     fakeApi({

@@ -226,7 +226,7 @@ export function bookingTools({
   const findAvailableSlots = defineTool({
     name: 'find_available_slots',
     title: 'Find available slots',
-    description: `Lists the times someone's event type can be booked between two dates, and the event type itself (title, duration, location kind, the questions its booking form asks, and the host's time zone). Use it before create_booking or reschedule_booking. The event type is identified by its booking link https://<host>/<handle>/<slug>. Each slot is given in UTC (start, end) and in the requested timeZone (localStart, localEnd); pass start unchanged to create_booking. Returns at most maxSlots slots (default 100, maximum 500) from a search of at most ${MAX_SLOT_RANGE_DAYS} days. If nextAfter is not null, pass it as after with the same query to continue. Availability can change between pages; recheck before booking.`,
+    description: `Lists the times someone's event type can be booked between two dates, and the event type itself (title, duration, location kind, the questions its booking form asks, and the host's time zone when applicable; round-robin metadata omits it). Use it before create_booking or reschedule_booking. The event type is identified by its booking link https://<host>/<handle>/<slug>. Each slot is given in UTC (start, end) and in the requested timeZone (localStart, localEnd); pass start unchanged to create_booking. Returns at most maxSlots slots (default 100, maximum 500) from a search of at most ${MAX_SLOT_RANGE_DAYS} days. If nextAfter is not null, pass it as after with the same query to continue. Availability can change between pages; recheck before booking.`,
     input: FindSlotsInput,
     output: FindSlotsOutput,
     annotations: {
@@ -400,6 +400,8 @@ export function bookingTools({
         order: args.order,
         from: args.from === undefined ? undefined : Temporal.Instant.from(args.from),
         to: args.to === undefined ? undefined : Temporal.Instant.from(args.to),
+        endAfter: args.endAfter === undefined ? undefined : Temporal.Instant.from(args.endAfter),
+        endTo: args.endTo === undefined ? undefined : Temporal.Instant.from(args.endTo),
         status: args.status,
         limit: args.limit,
         cursor: args.cursor,

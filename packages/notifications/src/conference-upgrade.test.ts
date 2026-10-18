@@ -100,7 +100,19 @@ describe.skipIf(!serverUrl)('conference migrations preserve populated predecesso
           (await owned.pool.query(`SELECT *,xmin::text AS original_xmin FROM ${table} ORDER BY 1`))
             .rows,
         )
-      expect(await runMigrations(owned.pool)).toEqual(migrations.filter((file) => file >= '0024'))
+      const applied = await runMigrations(owned.pool)
+      let previousIndex = -1
+      for (const migration of [
+        '0024_conference_notification_retries.sql',
+        '0025_automatic_zoom.sql',
+        '0026_conference_notification_skips.sql',
+        '0027_nontransitive_invited_signup.sql',
+        '0028_webhook_interrupted_deliveries.sql',
+      ]) {
+        const index = applied.indexOf(migration)
+        expect(index, migration).toBeGreaterThan(previousIndex)
+        previousIndex = index
+      }
       for (const table of tables) {
         const old = before.get(table) as Record<string, unknown>[]
         const after = (

@@ -20,6 +20,7 @@ services:
       DATABASE_URL: postgres://hourmere@db:5432/hourmere
       PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:3000}
+      HOSTED_SIGNUP_URL: ${HOSTED_SIGNUP_URL:-https://hourmere.com}
       EMBED_ALLOWED_ORIGINS: ${EMBED_ALLOWED_ORIGINS:-}
       WEBHOOKS_ENABLED: ${WEBHOOKS_ENABLED:-false}
       WEBHOOK_ENCRYPTION_KEY: ${WEBHOOK_ENCRYPTION_KEY:-}

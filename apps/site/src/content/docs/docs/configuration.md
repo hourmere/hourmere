@@ -17,6 +17,7 @@ Restart/recreate affected processes after changing configuration.
 | `PGPASSWORD` | Unset | PostgreSQL client password when absent from the URL. Compose sets it from `POSTGRES_PASSWORD`; do not percent-encode this separate value. |
 | `PORT` | `3000` | Direct-server TCP port (`0`–`65535`). `0` lets the OS choose a port and requires an explicit `PUBLIC_URL`; links always use that configured external origin. In Compose, `.env` `PORT` changes the host port; the container still listens on `3000`. |
 | `PUBLIC_URL` | `http://localhost:<PORT>` | External HTTP(S) origin, with no path/query. Use HTTPS publicly. Compose defaults to `http://localhost:3000` independently of its host port setting. |
+| `HOSTED_SIGNUP_URL` | `https://hourmere.com` | Hosted service destination for public attribution and confirmation links. Set the hosted sign-up page URL when available; HTTP(S), no credentials, query or fragment. Independent of this instance’s `PUBLIC_URL`; attribution cannot be disabled. |
 | `BETTER_AUTH_SECRET` | Required | At least 32 non-whitespace random characters. Signs sessions and protects sign-in tokens. Changing it signs people out. |
 | `AUTO_MIGRATE` | `true` | Apply SQL/job migrations on startup. `false` requires manual migrations first; startup still needs database access. Not forwarded by the default Compose file. |
 | `WEB_DIST` | Unset | Built SPA directory. Not forwarded by the default Compose file: Docker sets `/app/apps/web/dist`; development uses Vite instead. |
@@ -42,10 +43,17 @@ not a separate Hourmere mode switch.
 
 With `first-user`, the first person who signs in can register; after that the domain allowlist
 applies. In either restricted mode, a pending, unexpired team invitation also permits its
-exact email address to register. With `closed` and no domains, only these invitees can
-register. They must still prove ownership of the email address and accept the invitation
-separately to join the team. Canceled, expired and accepted invitations grant no registration
-exception. New addresses that are not allowed get the same sign-in response, but no email.
+exact email address to register only when the inviter's current email domain is in
+`SIGNUP_ALLOWED_DOMAINS` or the inviter is the first user: the earliest remaining auth user
+by creation time, with user id breaking ties. This check uses the current allowlist, including
+for existing invitations. An invitee outside those domains cannot admit another address by
+creating a team and inviting it; neither team creation nor invitation acceptance delegates
+registration authority. With `closed` and no domains, only invitations from the first user
+admit new accounts, so an empty instance must first be bootstrapped in `first-user` mode or
+by an administrator. Invitees must still prove ownership of the email address and accept the
+invitation separately to join the team. Canceled, expired and accepted invitations grant no
+registration exception. New addresses that are not allowed get the same sign-in response,
+but no email.
 
 ## Proxy, security headers and timeouts
 

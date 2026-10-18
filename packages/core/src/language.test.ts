@@ -27,11 +27,15 @@ describe('bounded interface language preferences', () => {
     ['zh-Hans', 'zh-CN'],
     ['zh-SG', 'zh-CN'],
     ['zh-Hans-CN', 'zh-CN'],
+    ['zh-Hans-TW', 'zh-CN'],
+    ['zh-Hans-HK', 'zh-CN'],
+    ['zh-Hans-MO', 'zh-CN'],
   ])('recognizes a supported BCP47 default %s', (value, language) => {
     expect(interfaceLanguage(value)).toBe(language)
   })
   it.each([
     'zh-Hant',
+    'zh-Hant-CN',
     'zh-TW',
     'zh-HK',
     'zh-MO',

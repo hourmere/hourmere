@@ -137,8 +137,11 @@ wrote the change or otherwise have the right to submit it under the project's li
   work, so there is no outside contribution to certify. The list is kept in
   [`scripts/check-dco.ts`](scripts/check-dco.ts). In a pull request from a fork the exemptions
   do not apply, because anyone can put any email address on a commit.
-- **Merge commits** need no sign-off. The commits a merge brings in are checked on their own,
-  and neither `git merge` nor GitHub's "Update branch" button adds a sign-off.
+- **Clean merge commits** need no sign-off: their tree must exactly match the conflict-free
+  automatic merge of their two parents (`git merge-tree --write-tree`). The commits they
+  bring in are checked on their own. A merge with extra content, conflict resolutions or
+  more than two parents needs its author's sign-off, subject to the same author exemptions
+  above. Neither `git merge` nor GitHub's "Update branch" button adds a sign-off by default.
 
 CI checks this on every pull request ([`.github/workflows/dco.yml`](.github/workflows/dco.yml))
 and lists each commit that is missing a sign-off.

@@ -126,6 +126,10 @@ types in `packages/db/src/tables.ts` are generated from the migrated database.
   policy as settings (`hourmere.signup`, `hourmere.signup_allowed_domains`); other
   connections (migrations, psql) are not limited. The server reads the settings back at
   startup and refuses to start if they are missing (e.g. dropped by a connection pooler).
+- **Invitation authority is non-transitive.** Migration 0027 admits an invitation's exact
+  address only when its inviter has a currently allowed email domain or is the earliest
+  remaining auth user (creation time, then ID). Creating a team or accepting an invitation
+  grants no registration authority. Existing invitations follow the current policy.
 - **A personal organization is its user's alone**: no invitations or other members, the
   owner cannot be removed or demoted, and it cannot be deleted on its own.
 - **Ownership is enforced where it is cheap to do so.** Composite foreign keys keep a
@@ -260,8 +264,10 @@ snapshot plus bounded attempt metadata). The booking transaction captures subscr
 endpoints and queues only delivery IDs. Composite foreign keys keep deliveries in their
 endpoint organization; endpoint/booking/organization deletion cascades snapshots. Runtime
 locks use endpoint then delivery so deletion, pause and rotation cannot deadlock delivery
-through inverse lock order. Migration 0028 adds safe `interrupted`/`job_missing` error
-classifications for finite retry accounting and orphan reconciliation. Details and retention are in [webhooks.md](webhooks.md).
+through inverse lock order. Details and retention are in [webhooks.md](webhooks.md).
+
+Migration 0028 adds safe `interrupted`/`job_missing` error classifications for finite retry
+accounting and orphan reconciliation, preserving existing webhook delivery data.
 
 ## Independent conference identities
 
@@ -303,14 +309,14 @@ one such optional copy. The join URL is stored only in the current ready protect
 location. See [automatic-google-meet.md](automatic-google-meet.md) and
 [automatic-zoom.md](automatic-zoom.md).
 
-Migration0024 adds a persisted attempt count, random bounded lease, safe error class and
+Migration 0024 adds a persisted attempt count, random bounded lease, safe error class and
 exhausted timestamp to each conference notification. Existing due times and delivery flags
 are preserved. Attempt claims commit before SMTP; lease/attempt comparison protects completion
 and the row has a finite initial-attempt-plus-twelve-retry budget across cron executions.
 See [notifications.md](notifications.md#conference-outbox-delivery-budget) for diagnostics,
 legacy-row backfill and the remaining SMTP acceptance/failed-commit duplicate window.
 
-Migration0026 adds `skipped_at` as a distinct terminal outcome for obsolete conference
+Migration 0026 adds `skipped_at` as a distinct terminal outcome for obsolete conference
 notices. Cancellation, replacement or a closed delivery gate records a skip with
 `delivered=false`; pending conference reconciliation remains eligible for a later attempt.
 The migration preserves existing delivery history and does not update old rows.

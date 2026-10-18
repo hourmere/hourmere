@@ -32,6 +32,15 @@ export const json = (status: number, body: unknown) =>
  * not listed fails like a network error and then fails the test, so every call is deliberate.
  */
 export function fakeApi(routes: Routes) {
+  // Public layouts discover the hosted service destination independently of sessions.
+  const scripted: Routes = {
+    'GET /api/v1/instance': () =>
+      json(200, {
+        hostedSignupUrl: 'https://hourmere.com',
+        signIn: { email: true, google: false, microsoft: false },
+      }),
+    ...routes,
+  }
   const calls: Call[] = []
   const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const request =
@@ -46,7 +55,7 @@ export function fakeApi(routes: Routes) {
     }
     calls.push(call)
     const route = `${request.method} ${url.pathname}`
-    const handler = Object.hasOwn(routes, route) ? routes[route] : undefined
+    const handler = Object.hasOwn(scripted, route) ? scripted[route] : undefined
     if (!handler) {
       recordUnexpectedRequest(`${request.method} ${call.path}`)
       throw new TypeError('Failed to fetch')

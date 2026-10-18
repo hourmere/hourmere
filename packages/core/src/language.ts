@@ -9,12 +9,11 @@ export function interfaceLanguage(value: unknown): InterfaceLanguage | undefined
   try {
     const locale = new Intl.Locale(value)
     if (locale.language === 'en') return 'en'
-    if (
-      locale.language === 'zh' &&
-      locale.script !== 'Hant' &&
-      !['TW', 'HK', 'MO'].includes(locale.region ?? '')
-    )
-      return 'zh-CN'
+    if (locale.language === 'zh') {
+      if (locale.script === 'Hans') return 'zh-CN'
+      if (locale.script === 'Hant') return undefined
+      if (!['TW', 'HK', 'MO'].includes(locale.region ?? '')) return 'zh-CN'
+    }
   } catch {
     /* Invalid or unsupported preferences fall through to the next source. */
   }

@@ -29,7 +29,7 @@ it.skipIf(!serverUrl)(
       for (const file of predecessors) await copyFile(new URL(file, source), join(dir, file))
       const predecessor = await runMigrations(pool, dir)
       expect(predecessor).toEqual(predecessors)
-      expect(predecessor).toContain('0026_conference_notification_skips.sql')
+      expect(predecessor.at(-1)).toBe('0027_nontransitive_invited_signup.sql')
       const db = createDb(pool)
       const user = await createTestUser(db)
       const key = Buffer.alloc(32, 9).toString('base64')
