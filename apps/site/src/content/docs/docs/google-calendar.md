@@ -68,3 +68,11 @@ You can turn off local conflict checking even when authorization has expired.
 It leaves existing Google event copies and the Google-wide grant in place. To revoke that
 grant, remove Hourmere yourself in [Google Account connections](https://myaccount.google.com/connections).
 After disconnecting, Hourmere no longer updates those event copies.
+
+
+Automatic Meet is a separate explicit opt-in. Collective meetings select an eligible organizer;
+round robin uses its actual winner. Only the organizer needs a Meet-capable Google destination.
+Up to N−1 configured collective destinations receive ordinary private copies of the same ready
+link, without creating more conferences or provider attendee invitations. Other hosts retain
+normal email/ICS invitations. Existing roots never switch calendars or gain new copies when
+settings change. The host booking page shows only the caller's copy state and safe retry.

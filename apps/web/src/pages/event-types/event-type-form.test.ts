@@ -96,6 +96,35 @@ describe('validateDraft', () => {
       'Choose the meeting organizer from the required hosts.',
     )
   })
+  it('preserves an explicit non-first collective organizer and rejects missing or removed choices', () => {
+    const ids = ['00000000-0000-7000-8000-000000000001', '00000000-0000-7000-8000-000000000002']
+    const value = {
+      ...emptyDraft(),
+      title: 'Panel',
+      slug: 'panel',
+      schedulingType: 'collective' as const,
+      hostUserIds: ids,
+      locationKind: 'google_meet' as const,
+      autoCreateMeet: true,
+      conferenceOrganizerUserId: ids[1] as string,
+    }
+    expect(renderedDraftErrors(value)).toEqual({})
+    expect(toInput(value).conferenceOrganizer).toEqual({ userId: ids[1] })
+    const restored = draftFromEventType(
+      eventType({ ...toInput(value), conferenceOrganizer: { userId: ids[1] as string } }),
+    )
+    expect(restored.conferenceOrganizerUserId).toBe(ids[1])
+    expect(renderedDraftErrors({ ...value, conferenceOrganizerUserId: '' })).toHaveProperty(
+      'conferenceOrganizer',
+    )
+    expect(
+      renderedDraftErrors({
+        ...value,
+        hostUserIds: [ids[0] as string, '00000000-0000-7000-8000-000000000003'],
+      }),
+    ).toHaveProperty('conferenceOrganizer')
+    expect(toInput({ ...value, schedulingType: 'round_robin' }).conferenceOrganizer).toBeNull()
+  })
   it('accepts the defaults with a title and slug', () => {
     expect(renderedDraftErrors({ ...emptyDraft(), title: 'Intro', slug: 'intro' })).toEqual({})
   })

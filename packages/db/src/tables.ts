@@ -279,6 +279,25 @@ export interface BookingCalendarTargets {
   user_id: string;
 }
 
+export interface BookingConferenceMirrors {
+  applied_revision: number | null;
+  attempts: Generated<number>;
+  calendar_id: string | null;
+  connection_id: string | null;
+  create_started: Generated<boolean>;
+  error_code: string | null;
+  external_event_id: string | null;
+  lease_id: string | null;
+  lease_until: Timestamp | null;
+  next_attempt_at: Generated<Timestamp>;
+  operation_id: Generated<string>;
+  revision: Generated<number>;
+  root_booking_id: string;
+  state: Generated<string>;
+  updated_at: Generated<Timestamp>;
+  user_id: string;
+}
+
 export interface BookingConferenceNotifications {
   booking_id: string;
   delivered: Generated<boolean>;
@@ -286,28 +305,7 @@ export interface BookingConferenceNotifications {
   kind: string;
 }
 
-export interface BookingConferenceMirrors {
-  root_booking_id: string;
-  user_id: string;
-  calendar_id: string | null;
-  connection_id: string | null;
-  operation_id: Generated<string>;
-  revision: Generated<number>;
-  applied_revision: number | null;
-  state: Generated<string>;
-  error_code: string | null;
-  create_started: Generated<boolean>;
-  external_event_id: string | null;
-  attempts: Generated<number>;
-  next_attempt_at: Generated<Timestamp>;
-  lease_id: string | null;
-  lease_until: Timestamp | null;
-  updated_at: Generated<Timestamp>;
-}
-
 export interface BookingConferences {
-  invitation_organizer_name: string | null;
-  invitation_organizer_email: string | null;
   applied_revision: number | null;
   attempts: Generated<number>;
   booking_id: string;
@@ -316,6 +314,8 @@ export interface BookingConferences {
   create_started: Generated<boolean>;
   error_code: string | null;
   external_event_id: string | null;
+  invitation_organizer_email: string | null;
+  invitation_organizer_name: string | null;
   lease_id: string | null;
   lease_until: Timestamp | null;
   next_attempt_at: Generated<Timestamp>;
@@ -463,11 +463,11 @@ export interface EventTypeHosts {
 }
 
 export interface EventTypes {
-  conference_organizer_user_id: string | null;
   allow_guests: Generated<boolean>;
   booking_window_days: number | null;
   buffer_after_minutes: Generated<number>;
   buffer_before_minutes: Generated<number>;
+  conference_organizer_user_id: string | null;
   created_at: Generated<Timestamp>;
   deleted_at: Timestamp | null;
   description: string | null;
@@ -602,9 +602,9 @@ export interface DB {
   booking_attendees: BookingAttendees;
   booking_calendar_events: BookingCalendarEvents;
   booking_calendar_targets: BookingCalendarTargets;
+  booking_conference_mirrors: BookingConferenceMirrors;
   booking_conference_notifications: BookingConferenceNotifications;
   booking_conferences: BookingConferences;
-  booking_conference_mirrors: BookingConferenceMirrors;
   booking_hosts: BookingHosts;
   booking_notifications: BookingNotifications;
   bookings: Bookings;

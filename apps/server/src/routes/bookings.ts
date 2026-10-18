@@ -84,12 +84,9 @@ export const Booking = z
         errorCode: z.string().max(64).nullable(),
       })
       .optional(),
-    conferenceCanRetry: z
-      .boolean()
-      .optional()
-      .openapi({
-        description: 'Authenticated host reads only: whether this caller is the pinned organizer.',
-      }),
+    conferenceCanRetry: z.boolean().optional().openapi({
+      description: 'Authenticated host reads only: whether this caller is the pinned organizer.',
+    }),
     calendarCopy: z
       .object({
         status: z.enum(['pending', 'ready', 'failed', 'not_configured']),

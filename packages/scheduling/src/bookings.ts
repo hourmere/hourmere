@@ -1285,17 +1285,31 @@ async function withOwnCalendarCopies(ctx: ServiceContext, bookings: Booking[]) {
         )
         .execute()
     : []
-  return bookings.map((b) => ({
-    ...b,
-    ...(states.has(b.id) ? { calendarCopy: states.get(b.id) } : {}),
-    ...(b.conference
-      ? {
-          conferenceCanRetry:
-            b.conference.errorCode !== 'organizer_unavailable' &&
-            conferences.some(
-              (c) => c.booking_id === b.id && c.organizer_user_id === ctx.principal.user.id,
-            ),
-        }
-      : {}),
-  }))
+  const now = ctx.now()
+  return bookings.map((b) => {
+    const copy = states.get(b.id)
+    return {
+      ...b,
+      ...(copy
+        ? {
+            calendarCopy: {
+              ...copy,
+              canRetry:
+                copy.canRetry &&
+                (b.status === 'cancelled' ||
+                  Temporal.Instant.compare(Temporal.Instant.from(b.start), now) > 0),
+            },
+          }
+        : {}),
+      ...(b.conference
+        ? {
+            conferenceCanRetry:
+              b.conference.errorCode !== 'organizer_unavailable' &&
+              conferences.some(
+                (c) => c.booking_id === b.id && c.organizer_user_id === ctx.principal.user.id,
+              ),
+          }
+        : {}),
+    }
+  })
 }

@@ -47,7 +47,7 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
   let agent: { userId: string; key: string; keyId: string }
   let adaKey: { key: string; keyId: string }
 
-  function appWith(rateLimits: BookingToolsDeps['rateLimits'] = {}) {
+  function appWith(rateLimits: BookingToolsDeps['rateLimits'] = {}, automaticMeet = false) {
     const limits = { page: plenty, slots: plenty, book: plenty, manage: plenty, ...rateLimits }
     return createApp({
       checkDb: async () => {},
@@ -55,11 +55,14 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
       resolveCaller: createCallerResolver({ auth, db }),
       publicUrl: PUBLIC_URL,
       routes: [
-        publicRoutes({ db, now: () => NOW, rateLimits: limits }),
-        bookingRoutes({ db, now: () => NOW, rateLimits: limits }),
+        publicRoutes({ db, now: () => NOW, rateLimits: limits, automaticMeet }),
+        bookingRoutes({ db, now: () => NOW, rateLimits: limits, automaticMeet }),
       ],
       mcp: mcpEndpoint({
-        tools: [whoamiTool, ...bookingTools({ db, now: () => NOW, rateLimits: limits })],
+        tools: [
+          whoamiTool,
+          ...bookingTools({ db, now: () => NOW, rateLimits: limits, automaticMeet }),
+        ],
       }),
     })
   }
@@ -221,6 +224,159 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
         },
       }),
     })
+
+  it('MCP books an explicit collective Meet and exposes/retries only the caller’s original copy', async () => {
+    const org = await f.organization(`Meet-${randomUUID().slice(0, 8)}`)
+    const second = await f.host({
+      name: 'Explicit MCP Organizer',
+      handle: `mh-${randomUUID().slice(0, 8)}`,
+      timeZone: 'UTC',
+    })
+    const third = await f.host({ name: 'No-calendar MCP host', handle: null, timeZone: 'UTC' })
+    await f.schedule(second.userId, { timeZone: 'UTC' })
+    await f.schedule(third.userId, { timeZone: 'UTC' })
+    for (const id of [ada.userId, second.userId, third.userId])
+      await f.member(id, org, id === ada.userId ? 'owner' : 'member')
+    for (const id of [ada.userId, second.userId]) {
+      const cc = await db
+        .insertInto('calendar_connections')
+        .values({
+          user_id: id,
+          provider: 'google',
+          external_account_id: `synthetic-${id}`,
+          credentials: Buffer.from('unused-synthetic-no-provider-work'),
+          scopes: [
+            'https://www.googleapis.com/auth/calendar.events.owned',
+            'https://www.googleapis.com/auth/calendar.events.readonly',
+          ],
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+      const cal = await db
+        .insertInto('calendars')
+        .values({
+          connection_id: cc.id,
+          external_id: `synthetic-${id}`,
+          name: 'Synthetic',
+          access_role: 'owner',
+          supports_google_meet: true,
+          check_conflicts: false,
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+      await db
+        .updateTable('profiles')
+        .set({ destination_calendar_id: cal.id })
+        .where('user_id', '=', id)
+        .execute()
+    }
+    const eventId = await f.eventType(org, null, {
+      slug: 'meet',
+      location: { kind: 'google_meet', autoCreate: true },
+      hosts: [{ userId: ada.userId }, { userId: second.userId }, { userId: third.userId }],
+    })
+    await db
+      .updateTable('event_types')
+      .set({ scheduling_type: 'collective', conference_organizer_user_id: second.userId })
+      .where('id', '=', eventId)
+      .execute()
+    const teamSlug = (
+      await db
+        .selectFrom('auth.organization')
+        .select('slug')
+        .where('id', '=', org)
+        .executeTakeFirstOrThrow()
+    ).slug
+    const enabled = appWith({}, true),
+      ownerKey = await createKey(ada.userId, 'meet-owner', org),
+      organizerKey = await createKey(second.userId, 'meet-organizer', org),
+      thirdKey = await createKey(third.userId, 'meet-no-calendar', org)
+    const found = ok<{ slots: unknown[] }>(
+      await call(
+        'find_available_slots',
+        { teamSlug, slug: 'meet', timeZone: 'UTC', startDate: '2030-11-04', endDate: '2030-11-04' },
+        agent.key,
+        enabled,
+      ),
+    )
+    expect(found.slots.length).toBeGreaterThan(0)
+    const request = {
+      teamSlug,
+      slug: 'meet',
+      start: '2030-11-04T09:00:00Z',
+      invitee: { name: 'Synthetic invitee', email: 'meet-invitee@example.com', timeZone: 'UTC' },
+      idempotencyKey: randomUUID(),
+    }
+    const created = ok<Booked>(await call('create_booking', request, agent.key, enabled))
+    expect(JSON.stringify(created)).not.toContain('invitation_organizer')
+    expect(JSON.stringify(created)).not.toContain(second.userId)
+    expect(created.booking).not.toHaveProperty('calendarCopy')
+    expect(ok<Booked>(await call('create_booking', request, agent.key, enabled)).replayed).toBe(
+      true,
+    )
+    const intent = await db
+      .selectFrom('booking_conferences')
+      .selectAll()
+      .where('root_booking_id', '=', created.booking.id)
+      .executeTakeFirstOrThrow()
+    expect(intent.organizer_user_id).toBe(second.userId)
+    expect(intent.invitation_organizer_email).toBeTruthy()
+    const mine = ok<{ data: { id: string; calendarCopy?: unknown }[] }>(
+      await call('list_bookings', {}, ownerKey.key, enabled),
+    ).data.find((b) => b.id === created.booking.id)
+    expect(mine?.calendarCopy).toEqual({ status: 'pending', errorCode: null, canRetry: false })
+    expect(
+      ok<{ data: { calendarCopy?: unknown }[] }>(
+        await call('list_bookings', {}, thirdKey.key, enabled),
+      ).data[0]?.calendarCopy,
+    ).toEqual({ status: 'not_configured', errorCode: 'not_configured', canRetry: false })
+    await db
+      .updateTable('booking_conference_mirrors')
+      .set({ state: 'failed', error_code: 'ambiguous_create', create_started: true })
+      .where('root_booking_id', '=', created.booking.id)
+      .where('user_id', '=', ada.userId)
+      .execute()
+    expect(
+      errorOf(
+        await call('retry_calendar_copy', { bookingId: created.booking.id }, thirdKey.key, enabled),
+      ).error,
+    ).toBe('calendar_copy_not_retryable')
+    expect(
+      ok(
+        await call('retry_calendar_copy', { bookingId: created.booking.id }, ownerKey.key, enabled),
+      ),
+    ).toEqual({ accepted: true })
+    expect(
+      errorOf(
+        await call(
+          'retry_calendar_copy',
+          { bookingId: created.booking.id, forceCreate: true },
+          ownerKey.key,
+          enabled,
+        ),
+      ).error,
+    ).toBe('invalid_request')
+    await db
+      .updateTable('booking_conferences')
+      .set({ state: 'failed', error_code: 'provider_unavailable' })
+      .where('root_booking_id', '=', created.booking.id)
+      .execute()
+    expect(
+      errorOf(
+        await call('retry_conference', { bookingId: created.booking.id }, ownerKey.key, enabled),
+      ).error,
+    ).toBe('conference_not_found')
+    expect(
+      ok(
+        await call(
+          'retry_conference',
+          { bookingId: created.booking.id },
+          organizerKey.key,
+          enabled,
+        ),
+      ),
+    ).toEqual({ accepted: true })
+  })
 
   const bookingArgs = (start: string, more: Record<string, unknown> = {}) => ({
     handle: 'ada',

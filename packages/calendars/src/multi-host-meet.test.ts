@@ -256,12 +256,18 @@ describe.skipIf(!serverUrl)('multi-host Meet identity and pinned mirrors (real P
     ).rejects.toMatchObject({ code: 'automatic_meet_unavailable' })
   })
   it('creates one conference and up to N-1 ordinary mirrors; no-connected host still receives ICS', async () => {
-    const { selected } = await event(),
-      b = await book(),
+    const { selected } = await event()
+    const pending = book()
+    await expect(pending).resolves.toMatchObject({ booking: { status: 'confirmed' } })
+    const b = await pending,
       id = b.booking.id
     expect((await intent(id)).organizer_user_id).toBe(selected.id)
     expect((await intent(id)).invitation_organizer_email).toBe(selected.email)
     expect((await mirrors(id)).map((r) => r.state).sort()).toEqual(['not_configured', 'pending'])
+    expect((await mirrors(id)).find((m) => m.state === 'not_configured')).toMatchObject({
+      calendar_id: null,
+      connection_id: null,
+    })
     await writeBookingCalendar(deps, id)
     expect(calls).toHaveLength(0)
     await writeBookingConference(deps, id)
@@ -298,7 +304,22 @@ describe.skipIf(!serverUrl)('multi-host Meet identity and pinned mirrors (real P
     })
   })
   it('round robin filters Meet eligibility before choosing actual fair winner and creates no mirrors', async () => {
-    await event('round_robin')
+    const { e } = await event('round_robin')
+    await db
+      .updateTable('round_robin_state')
+      .set({ next_sequence: '6' })
+      .where('event_type_id', '=', e.id)
+      .execute()
+    await db
+      .updateTable('event_type_hosts')
+      .set({ last_assigned_sequence: '5' })
+      .where('event_type_id', '=', e.id)
+      .where(
+        'user_id',
+        'in',
+        users.slice(0, 2).map((u) => u.id),
+      )
+      .execute()
     const slots = await listPublicTeamSlots(ctx, {
       handle: slug,
       slug: 'meet',
@@ -306,7 +327,9 @@ describe.skipIf(!serverUrl)('multi-host Meet identity and pinned mirrors (real P
       end: START.add({ hours: 1 }),
     })
     expect(slots.length).toBeGreaterThan(0)
-    const first = await book()
+    const firstResult = book()
+    await expect(firstResult).resolves.toMatchObject({ booking: { status: 'confirmed' } })
+    const first = await firstResult
     const c = await intent(first.booking.id)
     expect(users.slice(0, 2).map((u) => u.id)).toContain(c.organizer_user_id)
     expect(await mirrors(first.booking.id)).toHaveLength(0)
@@ -512,7 +535,7 @@ describe.skipIf(!serverUrl)('multi-host Meet identity and pinned mirrors (real P
     await entered.promise
     await cancelManagedBooking(ctx, b.manageToken as string, {})
     release.release()
-    await work
+    await expect(work).resolves.toBeUndefined()
     await due(b.booking.id)
     await writeBookingCalendar(deps, b.booking.id)
     expect(calls.filter((c) => c.method === 'POST')).toHaveLength(2)
@@ -796,4 +819,160 @@ describe.skipIf(!serverUrl)('multi-host Meet identity and pinned mirrors (real P
       expect(sent[0]?.attachments?.length ?? 0).toBe(0)
     },
   )
+  it.each(['root', 'mirror'] as const)(
+    'a %s ID arriving after an already-terminal newer lease reopens safe cleanup',
+    async (kind) => {
+      await event()
+      const b = await book()
+      if (kind === 'mirror') await writeBookingConference(deps, b.booking.id)
+      const applyEntered = barrier(),
+        allowApply = barrier()
+      let transactions = 0
+      const delayed = new Proxy(db, {
+        get(target, key) {
+          if (key === 'transaction')
+            return () => {
+              const builder = target.transaction()
+              return new Proxy(builder, {
+                get(t, k) {
+                  if (k === 'execute')
+                    return async (callback: Parameters<typeof builder.execute>[0]) => {
+                      transactions++
+                      if (transactions === 3) {
+                        applyEntered.release()
+                        await allowApply.promise
+                      }
+                      return t.execute(callback)
+                    }
+                  const v = Reflect.get(t, k)
+                  return typeof v === 'function' ? v.bind(t) : v
+                },
+              })
+            }
+          const v = Reflect.get(target, key)
+          return typeof v === 'function' ? v.bind(target) : v
+        },
+      })
+      const first =
+        kind === 'root'
+          ? writeBookingConference({ ...deps, db: delayed }, b.booking.id)
+          : writeBookingCalendar({ ...deps, db: delayed }, b.booking.id)
+      await applyEntered.promise
+      await cancelManagedBooking(ctx, b.manageToken as string, {})
+      const table = kind === 'root' ? 'booking_conferences' : 'booking_conference_mirrors'
+      await db
+        .updateTable(table)
+        .set({
+          lease_until: new Date(NOW.epochMilliseconds - 1),
+          next_attempt_at: new Date(NOW.epochMilliseconds - 1),
+        })
+        .where('root_booking_id', '=', b.booking.id)
+        .execute()
+      const original = provider.controls.eventHook
+      if (!original) throw Error('Synthetic hook missing')
+      provider.controls.eventHook = async (url, init) =>
+        url.searchParams.has('iCalUID') ? Response.json({ items: [] }) : original(url, init)
+      const work = () =>
+        kind === 'root'
+          ? writeBookingConference(deps, b.booking.id)
+          : writeBookingCalendar(deps, b.booking.id)
+      await work()
+      expect(
+        (kind === 'root'
+          ? await intent(b.booking.id)
+          : (await mirrors(b.booking.id)).find((m) => m.calendar_id)
+        )?.state,
+      ).toBe('failed')
+      allowApply.release()
+      await first
+      expect(
+        kind === 'root'
+          ? await intent(b.booking.id)
+          : (await mirrors(b.booking.id)).find((m) => m.calendar_id),
+      ).toMatchObject({ state: 'pending', external_event_id: expect.any(String) })
+      await due(b.booking.id)
+      await work()
+      expect(
+        (kind === 'root'
+          ? await intent(b.booking.id)
+          : (await mirrors(b.booking.id)).find((m) => m.calendar_id)
+        )?.state,
+      ).toBe('ready')
+      expect(calls.filter((c) => c.method === 'POST')).toHaveLength(kind === 'root' ? 1 : 2)
+    },
+  )
+  it('a mirror response with the wrong shared URL is retained as failed, never declared ready', async () => {
+    await event()
+    const b = await book()
+    await writeBookingConference(deps, b.booking.id)
+    const original = provider.controls.eventHook
+    if (!original) throw Error('Synthetic hook missing')
+    provider.controls.eventHook = async (url, init) => {
+      const response = await original(url, init)
+      if (init.method === 'POST') {
+        const value = (await response.json()) as Record<string, unknown>
+        return Response.json({ ...value, location: 'https://attacker.example/room' })
+      }
+      return response
+    }
+    await writeBookingCalendar(deps, b.booking.id)
+    expect((await mirrors(b.booking.id)).find((m) => m.calendar_id)).toMatchObject({
+      state: 'failed',
+      error_code: 'invalid_response',
+      external_event_id: expect.any(String),
+    })
+    expect((await intent(b.booking.id)).state).toBe('ready')
+  })
+  it.each([false, true])(
+    'removed instance Google configuration leaves an inspectable pinned mirror outcome (created=%s)',
+    async (created) => {
+      await event()
+      const b = await book()
+      await writeBookingConference(deps, b.booking.id)
+      if (created) await writeBookingCalendar(deps, b.booking.id)
+      const withoutGoogle = { db, now: () => NOW.epochMilliseconds }
+      if (created) await cancelManagedBooking(ctx, b.manageToken as string, {})
+      await due(b.booking.id)
+      await writeBookingCalendar(withoutGoogle, b.booking.id)
+      const m = (await mirrors(b.booking.id)).find((m) => m.calendar_id)
+      expect(m).toMatchObject({
+        state: 'failed',
+        error_code: 'calendar_unavailable',
+        create_started: created,
+      })
+      expect(calls.filter((c) => c.method === 'POST')).toHaveLength(created ? 2 : 1)
+      if (!created) {
+        await cancelManagedBooking(ctx, b.manageToken as string, {})
+        await writeBookingCalendar(withoutGoogle, b.booking.id)
+        expect((await mirrors(b.booking.id)).find((m) => m.calendar_id)?.state).toBe('ready')
+      }
+    },
+  )
+  it('private retry hints reject started confirmed meetings while retaining late cancellation cleanup', async () => {
+    await event()
+    const b = await book(),
+      m = (await mirrors(b.booking.id)).find((m) => m.calendar_id)
+    if (!m) throw Error('Synthetic pinned copy missing')
+    await db
+      .updateTable('booking_conference_mirrors')
+      .set({ state: 'failed', error_code: 'calendar_unavailable' })
+      .where('root_booking_id', '=', b.booking.id)
+      .where('user_id', '=', m.user_id)
+      .execute()
+    const host = users.find((u) => u.id === m.user_id) as TestUser,
+      late = { ...ctx, now: () => START.add({ hours: 1 }), principal: team.as(host) }
+    expect((await getHostBooking(late, b.booking.id)).calendarCopy?.canRetry).toBe(false)
+    await expect(retryConferenceMirror(late, b.booking.id)).rejects.toMatchObject({
+      code: 'calendar_copy_not_retryable',
+    })
+    await cancelManagedBooking(ctx, b.manageToken as string, {})
+    await db
+      .updateTable('booking_conference_mirrors')
+      .set({ state: 'failed', error_code: 'calendar_unavailable' })
+      .where('root_booking_id', '=', b.booking.id)
+      .where('user_id', '=', m.user_id)
+      .execute()
+    expect((await getHostBooking(late, b.booking.id)).calendarCopy?.canRetry).toBe(true)
+    await expect(retryConferenceMirror(late, b.booking.id)).resolves.toBeUndefined()
+  })
 })
