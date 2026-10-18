@@ -126,6 +126,10 @@ describe.skipIf(!serverUrl)('host booking routes', () => {
   })
 
   it.each([
+    ['?endAfter=invalid', 'invalid_request'],
+    ['?endTo=2026-11-04T10:00:00.1234567890Z', 'invalid_request'],
+    ['?endAfter=2026-11-05T00:00:00Z&endTo=2026-11-04T00:00:00Z', 'invalid_range'],
+    ['?endAfter=2026-11-04T00:00:00Z&endTo=2026-11-04T00:00:00Z', 'invalid_range'],
     ['?order=newest', 'invalid_request'],
     ['?limit=0', 'invalid_request'],
     ['?limit=101', 'invalid_request'],
@@ -174,6 +178,21 @@ describe.skipIf(!serverUrl)('host booking routes', () => {
     // Alice's bookings start at 09:00, 10:00 and 11:00 on 2026-11-04.
     expect(await ids('?from=2026-11-04T10:00:00.000001Z')).toEqual([aliceBookings[2]])
     expect(await ids('?to=2026-11-04T10:00:00.000001Z')).toEqual(aliceBookings.slice(0, 2))
+  })
+
+  it('splits bookings by their end, keeping in-progress meetings and precision at the boundary', async () => {
+    const ids = async (query: string) => {
+      const response = await get(`/api/v1/bookings?${query}`, 'alice')
+      expect(response.status).toBe(200)
+      return ((await response.json()) as Page).data.map((b) => b.id)
+    }
+    expect(await ids('endAfter=2026-11-04T09:15:00Z')).toEqual(aliceBookings)
+    expect(await ids('endAfter=2026-11-04T10:30:00Z')).toEqual(aliceBookings.slice(2))
+    expect(await ids('endTo=2026-11-04T10:30:00Z')).toEqual(aliceBookings.slice(0, 2))
+    expect(await ids('endTo=2026-11-04T10:29:59.999999Z')).toEqual(aliceBookings.slice(0, 1))
+    expect(
+      await ids('endAfter=2026-11-04T09:30:00Z&endTo=2026-11-04T11:30:00Z&limit=1&order=desc'),
+    ).toEqual(aliceBookings.slice(2))
   })
 
   it('never lets a cache keep a response, errors included', async () => {

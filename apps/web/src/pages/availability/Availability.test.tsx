@@ -2,6 +2,7 @@ import { fireEvent, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { Schedule } from '../../api/resources.ts'
+import { browserLocale } from '../../test/browser-locale.ts'
 import {
   fakeApi,
   json,
@@ -396,6 +397,34 @@ describe('deleting a schedule', () => {
 })
 
 describe('date overrides', () => {
+  it.each(['fa-IR', 'th-TH'])(
+    'uses Gregorian override labels and notices for browser locale %s',
+    async (locale) => {
+      browserLocale(locale)
+      const user = userEvent.setup()
+      scheduleServer([schedule()], {
+        overrides: [{ date: '2030-12-24', intervals: [] }],
+        extra: {
+          [`DELETE /api/v1/schedules/${SCHEDULE_ID}/overrides/2030-12-24`]: () =>
+            new Response(null, { status: 204 }),
+        },
+      })
+      renderApp(`/app/availability/${SCHEDULE_ID}`)
+      const date = new Intl.DateTimeFormat(locale, {
+        calendar: 'gregory',
+        timeZone: 'UTC',
+        weekday: 'short',
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+      }).format(new Date('2030-12-24T00:00:00Z'))
+      const section = await screen.findByRole('region', { name: 'Date overrides' })
+      await within(section).findByText(date)
+      await user.click(within(section).getByRole('button', { name: `Remove override: ${date}` }))
+      expect(await within(section).findByText(`Removed the override for ${date}.`)).toBeDefined()
+    },
+  )
+
   const overridesSection = () => screen.findByRole('region', { name: 'Date overrides' })
 
   it.each([

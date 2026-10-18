@@ -1,9 +1,25 @@
-import { type ReactNode, useEffect, useRef } from 'react'
+import { createContext, type ReactNode, useContext, useEffect, useRef, useState } from 'react'
+import { api } from '../api/client.ts'
 import { Logo } from '../components/Logo.tsx'
 import { usePageTitle } from '../hooks.ts'
 import { LanguageSwitcher, useI18n } from '../i18n/runtime.tsx'
 import { useEmbedded } from './embed-context.ts'
 import './public.css'
+
+const HostedSignupUrl = createContext('https://hourmere.com')
+
+/** A quiet, ordinary link: no booking details or management capability leave the page. */
+export function CreateBookingLink() {
+  const { t } = useI18n()
+  const href = useContext(HostedSignupUrl)
+  return (
+    <p className="public-signup">
+      <a href={href} target="_blank" rel="noopener noreferrer">
+        {t('Create your own booking link')}
+      </a>
+    </p>
+  )
+}
 
 /**
  * The frame of the public pages (booking pages and invitee links): no app navigation, the
@@ -11,26 +27,36 @@ import './public.css'
  */
 export function PublicLayout({ children, wide = false }: { children: ReactNode; wide?: boolean }) {
   const { t } = useI18n()
+  const [hostedSignupUrl, setHostedSignupUrl] = useState('https://hourmere.com')
+  useEffect(() => {
+    const controller = new AbortController()
+    api.GET('/api/v1/instance', { signal: controller.signal }).then(
+      ({ data }) => {
+        if (!controller.signal.aborted && data?.hostedSignupUrl)
+          setHostedSignupUrl(data.hostedSignupUrl)
+      },
+      () => {}, // Attribution remains usable when instance discovery is unavailable.
+    )
+    return () => controller.abort()
+  }, [])
 
   const embedded = useEmbedded()
   return (
-    <div className={`public${embedded ? ' public-embedded' : ''}`}>
-      <div className="public-language">
-        <LanguageSwitcher />
-      </div>
-      <main id="main" className={`public-main${wide ? ' public-main-wide' : ''}`}>
-        {children}
-      </main>
-      <footer className="public-footer">
-        {embedded ? (
-          <a href="https://hourmere.com" target="_blank" rel="noopener noreferrer">
+    <HostedSignupUrl value={hostedSignupUrl}>
+      <div className={`public${embedded ? ' public-embedded' : ''}`}>
+        <div className="public-language">
+          <LanguageSwitcher />
+        </div>
+        <main id="main" className={`public-main${wide ? ' public-main-wide' : ''}`}>
+          {children}
+        </main>
+        <footer className="public-footer">
+          <a href={hostedSignupUrl} target="_blank" rel="noopener noreferrer">
             {t('Powered by')} <Logo size={18} />
           </a>
-        ) : (
-          <Logo size={18} />
-        )}
-      </footer>
-    </div>
+        </footer>
+      </div>
+    </HostedSignupUrl>
   )
 }
 

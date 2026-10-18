@@ -7,6 +7,26 @@ const base = {
 }
 
 describe('loadConfig', () => {
+  it('keeps public attribution on the hosted service independently of the instance origin', () => {
+    expect(loadConfig({ ...base, PUBLIC_URL: 'https://self.example' }).HOSTED_SIGNUP_URL).toBe(
+      'https://hourmere.com',
+    )
+    expect(loadConfig({ ...base, HOSTED_SIGNUP_URL: '' }).HOSTED_SIGNUP_URL).toBe(
+      'https://hourmere.com',
+    )
+    expect(
+      loadConfig({ ...base, HOSTED_SIGNUP_URL: 'https://hosted.example/sign-up' })
+        .HOSTED_SIGNUP_URL,
+    ).toBe('https://hosted.example/sign-up')
+    for (const HOSTED_SIGNUP_URL of [
+      'javascript:alert(1)',
+      'https://user:secret@example.com',
+      'https://example.com/?tracking=1',
+      'https://example.com/#token',
+    ])
+      expect(() => loadConfig({ ...base, HOSTED_SIGNUP_URL })).toThrow(/HOSTED_SIGNUP_URL/)
+  })
+
   it('requires an explicit public origin for an OS-assigned port and rejects invalid TCP ports', () => {
     expect(
       loadConfig({ ...base, PORT: '0', PUBLIC_URL: 'https://hourmere.example' }),

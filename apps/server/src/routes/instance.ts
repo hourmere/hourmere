@@ -3,6 +3,9 @@ import { json, type RouteModule } from '../openapi.ts'
 
 const Instance = z
   .object({
+    hostedSignupUrl: z.url().openapi({
+      description: 'Hosted service destination for public attribution and sign-up links',
+    }),
     automaticGoogleMeet: z.boolean().optional(),
     automaticZoom: z.boolean().optional(),
     signIn: z
@@ -18,19 +21,22 @@ const Instance = z
 /**
  * What this instance offers, for clients deciding what to show before anyone signs in (the
  * web app's sign-in buttons). Public and the same for every caller; it never carries
- * configuration values, only whether a feature is on.
+ * secrets; the public hosted sign-up destination is safe to share.
  */
 export function instanceRoutes({
   socialProviders,
   automaticMeet = false,
   automaticZoom = false,
+  hostedSignupUrl = 'https://hourmere.com',
 }: {
   /** The configured sign-in providers (config.socialProviders); only their presence counts. */
   socialProviders: { google?: unknown; microsoft?: unknown }
   automaticMeet?: boolean
   automaticZoom?: boolean
+  hostedSignupUrl?: string
 }): RouteModule {
   const body: z.infer<typeof Instance> = {
+    hostedSignupUrl,
     automaticGoogleMeet: automaticMeet,
     automaticZoom,
     signIn: {

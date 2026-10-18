@@ -2,14 +2,17 @@ import { describe, expect, it } from 'vitest'
 import { createApp } from '../app.ts'
 import { instanceRoutes } from './instance.ts'
 
-const appWith = (socialProviders: Parameters<typeof instanceRoutes>[0]['socialProviders']) =>
+const appWith = (
+  socialProviders: Parameters<typeof instanceRoutes>[0]['socialProviders'],
+  hostedSignupUrl?: string,
+) =>
   createApp({
     checkDb: async () => {},
     publicUrl: 'http://localhost:3000',
     authHandler: async () => new Response(null, { status: 404 }),
     // Nobody is signed in: the route must not need anyone to be.
     resolveCaller: async () => ({ ok: false, error: 'unauthorized', setCookie: [] }),
-    routes: [instanceRoutes({ socialProviders })],
+    routes: [instanceRoutes({ socialProviders, hostedSignupUrl })],
   })
 
 const oauth = (name: string) => ({
@@ -22,6 +25,7 @@ describe('GET /api/v1/instance', () => {
     const res = await appWith({}).request('/api/v1/instance')
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({
+      hostedSignupUrl: 'https://hourmere.com',
       automaticGoogleMeet: false,
       automaticZoom: false,
       signIn: { email: true, google: false, microsoft: false },
@@ -34,6 +38,7 @@ describe('GET /api/v1/instance', () => {
     expect(res.status).toBe(200)
     const text = await res.text()
     expect(JSON.parse(text)).toEqual({
+      hostedSignupUrl: 'https://hourmere.com',
       automaticGoogleMeet: false,
       automaticZoom: false,
       signIn: { email: true, google: true, microsoft: true },
@@ -42,6 +47,7 @@ describe('GET /api/v1/instance', () => {
 
     const googleOnly = await appWith({ google: oauth('google') }).request('/api/v1/instance')
     expect(await googleOnly.json()).toEqual({
+      hostedSignupUrl: 'https://hourmere.com',
       automaticGoogleMeet: false,
       automaticZoom: false,
       signIn: { email: true, google: true, microsoft: false },
@@ -54,10 +60,17 @@ describe('GET /api/v1/instance', () => {
     })
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({
+      hostedSignupUrl: 'https://hourmere.com',
       automaticGoogleMeet: false,
       automaticZoom: false,
       signIn: { email: true, google: false, microsoft: false },
     })
+  })
+
+  it('publishes the configured hosted sign-up destination without requiring a session', async () => {
+    const res = await appWith({}, 'https://hosted.example/sign-up').request('/api/v1/instance')
+    expect(res.status).toBe(200)
+    expect(await res.json()).toHaveProperty('hostedSignupUrl', 'https://hosted.example/sign-up')
   })
 
   it('is documented as a public route', async () => {

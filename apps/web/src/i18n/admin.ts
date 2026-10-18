@@ -1,5 +1,11 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  '.': '。',
+  'Anyone who knows or guesses the direct link can still book it. Unlisted is not access control.':
+    '任何知道或猜到直接链接的人仍可预约。未公开列出不代表访问控制。',
+  'You can add a random suffix to make the link harder to guess. This is optional.':
+    '你可以添加随机后缀，让链接更难被猜到。此操作为可选项。',
+  'Use suggested link': '使用建议的链接',
   'Connect your own Zoom account separately from sign-in and calendars. Identity access and automatic meeting permissions are separate choices.':
     '单独连接你自己的 Zoom 账号，与登录和日历互相独立。身份访问与自动创建会议权限需要分别选择。',
   'Connect Zoom requests only basic account identity. Authorize Zoom meetings also requests create, read, update and delete meeting access. You choose your own connection when configuring automatic meetings.':

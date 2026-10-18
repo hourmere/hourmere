@@ -143,6 +143,10 @@ export interface paths {
             parameters: {
                 query?: {
                     cursor?: string;
+                    /** @description Only bookings ending after (exclusive) */
+                    endAfter?: string;
+                    /** @description Only bookings ending at or before (inclusive) */
+                    endTo?: string;
                     /** @description Only bookings starting at or after */
                     from?: string;
                     /** @description Page size, 1–100 (default 50) */
@@ -5147,6 +5151,11 @@ export interface components {
         Instance: {
             automaticGoogleMeet?: boolean;
             automaticZoom?: boolean;
+            /**
+             * Format: uri
+             * @description Hosted service destination for public attribution and sign-up links
+             */
+            hostedSignupUrl: string;
             /** @description The sign-in methods people can use on this instance */
             signIn: {
                 /** @description Sign-in links sent by email */
@@ -5234,8 +5243,8 @@ export interface components {
             handle: string;
             host: {
                 name: string;
-                /** @description The host's IANA time zone */
-                timeZone: string;
+                /** @description The host's IANA time zone; omitted for round-robin pools */
+                timeZone?: string;
             };
             hosts?: {
                 name: string;

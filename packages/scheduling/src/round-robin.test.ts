@@ -157,6 +157,15 @@ describe.skipIf(!serverUrl)('round-robin scheduling', () => {
     })
     expect((await getEventType(s.ctx, s.event.id)).roundRobinActive).toBe(false)
     expect((await state(s))?.next_sequence).toBe('1')
+    await expect(getPublicTeamEventType(s.pub, s.page)).rejects.toMatchObject({
+      code: 'event_type_not_found',
+    })
+    await expect(listPublicTeamSlots(s.pub, { ...s.page, ...range })).rejects.toMatchObject({
+      code: 'event_type_not_found',
+    })
+    await expect(book(s, '2026-11-02T10:00Z')).rejects.toMatchObject({
+      code: 'event_type_not_found',
+    })
     await activateRoundRobin(s.ctx, s.event.id)
     expect((await state(s))?.next_sequence).toBe('1')
     const b = await book(s, '2026-11-02T10:00Z')
@@ -235,6 +244,7 @@ describe.skipIf(!serverUrl)('round-robin scheduling', () => {
     const publicEvent = await getPublicTeamEventType(s.pub, s.page)
     expect(publicEvent.schedulingType).toBe('round_robin')
     expect(publicEvent.hosts).toBeUndefined()
+    expect(publicEvent.host).toEqual({ name: s.ctx.principal.organization.name })
     for (const user of s.users) {
       expect(JSON.stringify(publicEvent)).not.toContain(user.id)
       expect(JSON.stringify(publicEvent)).not.toContain(user.email)
@@ -390,6 +400,9 @@ describe.skipIf(!serverUrl)('round-robin scheduling', () => {
           .execute()
       if (change === 'delete')
         await db.deleteFrom('auth.user').where('id', '=', withdrawn).execute()
+      expect((await getPublicTeamEventType(s.pub, s.page)).host).toEqual({
+        name: s.ctx.principal.organization.name,
+      })
       const created = await book(s)
       expect(await host(created.booking.id)).toBe(ids[1])
       expect((await state(s))?.next_sequence).toBe('1')
@@ -532,7 +545,7 @@ describe.skipIf(!serverUrl)('round-robin scheduling', () => {
         await blocker.query('COMMIT')
         const result = await pending
         if (change === 'pool') {
-          expect(result).toMatchObject({ error: { code: 'event_type_not_found' } })
+          expect(result).toMatchObject({ error: { kind: 'conflict', code: 'booking_changed' } })
           expect((await state(s))?.next_sequence).toBe('0')
         } else {
           expect(result).toHaveProperty('value')
