@@ -88,14 +88,26 @@ describe('comparison review information', () => {
     )
   })
 
-  it('describes MCP OAuth 2.1 as operator-enabled in the home-page FAQ', () => {
-    const home = read('./pages/index.astro')
-    const start = home.indexOf('id="faq"')
-    const faq = plainText(home.slice(start, home.indexOf('</section>', start)))
-    expect(faq).toMatch(
+  it('describes MCP OAuth 2.1 as operator-enabled, not planned, on the home and terms pages', () => {
+    const home = plainText(read('./pages/index.astro'))
+    expect(home).toMatch(
       /through the API or the remote MCP server\. MCP clients can also connect with OAuth 2\.1 when the instance operator enables it\./,
     )
-    expect(faq).not.toMatch(/OAuth for AI connectors is planned/)
+    expect(home).toMatch(
+      /Agents can access your account only with an API key that you create or, for MCP clients when the instance operator enables it, an OAuth 2\.1 connection that you approve\./,
+    )
+    expect(home).toMatch(
+      /AI assistants get access to your account only when you give them an API key or approve an OAuth connection\./,
+    )
+    const terms = plainText(read('./pages/terms.astro'))
+    expect(terms).toMatch(
+      /with an API key that you create or, for MCP clients when the instance operator enables it, an OAuth 2\.1 connection that you approve\./,
+    )
+    for (const page of [home, terms]) {
+      expect(page).not.toMatch(
+        /OAuth (?:authorization )?for AI connectors is planned|only with an API key that you create\.|only when you give them an API key\./,
+      )
+    }
   })
 
   it('displays the date from page metadata through the registered Starlight component', () => {
