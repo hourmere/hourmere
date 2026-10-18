@@ -444,3 +444,77 @@ for (const selected of ['en', 'zh-CN'] as const) {
     await expect(page.locator('dl.details dd').first()).toHaveText('0')
   })
 }
+
+test('zh-CN collective host drafts, validation and public booking preserve every required host', async ({
+  page,
+  app,
+}) => {
+  await initialLanguage(page, 'zh-CN')
+  await app.authorizeHost('owner')
+  await page.goto(`${app.url}/app/event-types/new`)
+  const title = page.getByLabel('标题', { exact: true })
+  await title.fill('Chinese panel interview')
+  await page.getByLabel('排期方式', { exact: true }).selectOption('collective')
+  await page.getByRole('button', { name: '创建活动类型', exact: true }).click()
+  await expect(page.getByText('请选择两至八位必选主持人。').first()).toBeVisible()
+  await language(page, 'en')
+  await expect(page.getByText('Choose two to eight required hosts.').first()).toBeVisible()
+  await expect(page.getByLabel('Title', { exact: true })).toHaveValue('Chinese panel interview')
+  await page.getByLabel('Second Required Host', { exact: true }).check()
+  await language(page, 'zh-CN')
+  await expect(page.getByLabel('Second Required Host', { exact: true })).toBeChecked()
+  await page.getByRole('button', { name: '创建活动类型', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '活动类型', exact: true })).toBeVisible()
+  await page.goto(`${app.url}/team/FixtureTeam/chinese-panel-interview`)
+  await expect(
+    page.getByRole('heading', { name: 'Chinese panel interview', exact: true }),
+  ).toBeVisible()
+  await expect(page.getByText(/必选主持人：/)).toContainText('Second Required Host')
+  await pickSlot(page, page)
+  await fillInvitee(page)
+  await page.getByRole('button', { name: '确认预约', exact: true }).click()
+  await expect(page.getByRole('heading', { name: '预约成功', exact: true })).toBeVisible()
+  expect(await app.hostCounts()).toEqual([2])
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+    ),
+  ).toBe(true)
+})
+
+test('zh-CN collective popup keeps language and capability-free completion for both hosts', async ({
+  page,
+  app,
+}) => {
+  await page.goto(`${app.parentUrl}/collective?language=zh-CN`)
+  await page.getByRole('button', { name: 'Book a meeting', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '预约会议', exact: true })
+  const frame = dialog.locator('iframe').contentFrame()
+  await expect(
+    frame.getByRole('heading', { name: 'Collective fixture call', exact: true }),
+  ).toBeVisible()
+  await expect(frame.getByLabel('界面语言')).toHaveValue('zh-CN')
+  await expect(frame.getByText(/必选主持人：/)).toContainText('Second Required Host')
+  await pickSlot(frame.locator('body'), page)
+  await fillInvitee(frame.locator('body'))
+  await frame.getByRole('button', { name: '确认预约', exact: true }).click()
+  await expect(frame.getByRole('heading', { name: '预约成功', exact: true })).toBeVisible()
+  expect(await app.rows()).toEqual([{ source: 'embed', status: 'confirmed' }])
+  expect(await app.hostCounts()).toEqual([2])
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const messages = (window as unknown as { fixtureMessages: unknown[] }).fixtureMessages
+        return messages.some((value) => {
+          if (!value || typeof value !== 'object') return false
+          const message = value as Record<string, unknown>
+          return (
+            message.type === 'hourmere:booked' &&
+            Object.keys(message).sort().join(',') === 'id,type' &&
+            typeof message.id === 'string'
+          )
+        })
+      }),
+    )
+    .toBe(true)
+})
