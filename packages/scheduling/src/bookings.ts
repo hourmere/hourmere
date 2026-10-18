@@ -17,7 +17,7 @@ import {
 import {
   automaticMeet,
   automaticZoom,
-  bookingConferenceStates,
+  bookingConferenceViews,
   type CalendarCopyStatus,
   type ConferenceStatus,
   cancelBookingConference,
@@ -422,7 +422,7 @@ async function toBookings(db: Db, rows: readonly BookingRow[]): Promise<Booking[
     })
     byBooking.set(a.booking_id, list)
   }
-  const conferences = await bookingConferenceStates(
+  const conferences = await bookingConferenceViews(
     db,
     rows.map((r) => r.id),
   )
@@ -452,30 +452,36 @@ async function toBookings(db: Db, rows: readonly BookingRow[]): Promise<Booking[
         timeZone: host.time_zone,
       })
   }
-  return rows.map((r) => ({
-    id: r.id,
-    eventTypeId: r.event_type_id,
-    status: r.status as BookingStatus,
-    start: toIso(toInstant(r.start_at)),
-    end: toIso(toInstant(r.end_at)),
-    title: r.title,
-    location: parseLocation(
-      automaticZoom(r.location) &&
-        (r.status !== 'confirmed' || conferences.get(r.id)?.status !== 'ready')
-        ? unresolvedLocation(r.location)
-        : r.location,
-    ),
-    ...(conferences.has(r.id) ? { conference: conferences.get(r.id) } : {}),
-    responses: (isRecord(r.responses) ? r.responses : {}) as Responses,
-    attendees: byBooking.get(r.id) ?? [],
-    rescheduledFromId: r.rescheduled_from_id,
-    cancelledAt: r.cancelled_at && toIso(toInstant(r.cancelled_at)),
-    cancelReason: r.cancel_reason,
-    source: r.source as BookingSource,
-    createdAt: toIso(toInstant(r.created_at)),
-    ...(r.hosts_use_default_schedule &&
-      r.required_host_user_ids.length === 1 && { assignedHost: assigned.get(r.id) ?? null }),
-  }))
+  return rows.map((r) => {
+    const view = conferences.get(r.id)
+    const location = view ? view.location : r.location
+    return {
+      id: r.id,
+      eventTypeId: r.event_type_id,
+      status: r.status as BookingStatus,
+      start: toIso(toInstant(r.start_at)),
+      end: toIso(toInstant(r.end_at)),
+      title: r.title,
+      location: parseLocation(
+        automaticZoom(location) &&
+          (r.status !== 'confirmed' ||
+            view?.bookingStatus !== 'confirmed' ||
+            view?.conference.status !== 'ready')
+          ? unresolvedLocation(location)
+          : location,
+      ),
+      ...(view ? { conference: view.conference } : {}),
+      responses: (isRecord(r.responses) ? r.responses : {}) as Responses,
+      attendees: byBooking.get(r.id) ?? [],
+      rescheduledFromId: r.rescheduled_from_id,
+      cancelledAt: r.cancelled_at && toIso(toInstant(r.cancelled_at)),
+      cancelReason: r.cancel_reason,
+      source: r.source as BookingSource,
+      createdAt: toIso(toInstant(r.created_at)),
+      ...(r.hosts_use_default_schedule &&
+        r.required_host_user_ids.length === 1 && { assignedHost: assigned.get(r.id) ?? null }),
+    }
+  })
 }
 
 async function loadBooking(db: Db, id: string): Promise<Booking> {

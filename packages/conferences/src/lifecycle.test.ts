@@ -7,7 +7,9 @@ import {
   createEventType,
   createPublicBooking,
   createPublicTeamBooking,
+  getHostBooking,
   getManagedBooking,
+  listHostBookings,
   type PublicContext,
   rescheduleManagedBooking,
   updateEventType,
@@ -174,6 +176,75 @@ describe.skipIf(!serverUrl)('automatic Zoom durable booking lifecycle (real Post
     expect(JSON.stringify(managed)).not.toMatch(
       /zoom_connection_id|zoom_user_id|synthetic-private-start|synthetic-raw-passcode/,
     )
+  })
+  it.each(['public manage', 'host detail', 'host list'] as const)(
+    '%s reads readiness and its link together when the worker commits during hydration',
+    async (reader) => {
+      const b = await book()
+      let advanced = false
+      const observed = db.withPlugin({
+        transformQuery: ({ node }) => node,
+        async transformResult({ result }) {
+          if (
+            !advanced &&
+            result.rows.some(
+              (row) =>
+                row.id === b.booking.id &&
+                Object.hasOwn(row, 'location') &&
+                Object.hasOwn(row, 'responses'),
+            )
+          ) {
+            advanced = true
+            // The first SELECT has sampled the pending booking without a link. Commit
+            // the real worker before the later conference SELECT can see readiness.
+            await writeBookingConference(deps, b.booking.id)
+          }
+          return result
+        },
+      })
+      const service = { ...ctx, db: observed, principal: owner }
+      const current =
+        reader === 'public manage'
+          ? await getManagedBooking(service, b.manageToken as string)
+          : reader === 'host detail'
+            ? await getHostBooking(service, b.booking.id)
+            : (await listHostBookings(service, {})).data[0]
+      expect(advanced).toBe(true)
+      expect(current?.conference?.status).toBe('ready')
+      expect(current?.location?.url).toBe(
+        'https://us02web.zoom.us/j/81234567890?pwd=synthetic-only.1',
+      )
+      expect(posts()).toHaveLength(1)
+    },
+  )
+  it('withholds a Zoom link when cancellation and cleanup commit during hydration', async () => {
+    const b = await book()
+    await writeBookingConference(deps, b.booking.id)
+    let cancelled = false
+    const observed = db.withPlugin({
+      transformQuery: ({ node }) => node,
+      async transformResult({ result }) {
+        if (
+          !cancelled &&
+          result.rows.some(
+            (row) =>
+              row.id === b.booking.id &&
+              Object.hasOwn(row, 'location') &&
+              Object.hasOwn(row, 'responses'),
+          )
+        ) {
+          cancelled = true
+          await cancelManagedBooking(ctx, b.manageToken as string)
+          await writeBookingConference(deps, b.booking.id)
+        }
+        return result
+      },
+    })
+    const current = await getManagedBooking({ ...ctx, db: observed }, b.manageToken as string)
+    expect(cancelled).toBe(true)
+    expect(current.conference?.status).toBe('ready')
+    expect(current.location?.url).toBeUndefined()
+    expect(provider.controls.storedMeetings.size).toBe(0)
   })
   it('holds final mail/ICS until ready, deduplicates release and redacts the development mail log', async () => {
     const b = await book()
