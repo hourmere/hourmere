@@ -166,6 +166,13 @@ remains enforced so that endpoint cannot bypass the text rules.
 
 ## Lists
 
+`GET /api/v1/analytics/bookings` returns bounded daily activity counts (at most 90 inclusive
+calendar dates), with explicit `startDate`, `endDate` and IANA `timeZone`. Personal owners
+and team owners/admins may read the acting organization's totals; ordinary members receive
+`403 insufficient_role`. It reports stored operation dates, excludes reschedule withdrawals
+from cancellations, and includes no booking or attendee details. See [analytics.md](analytics.md)
+for the retained-record and deletion semantics.
+
 A list response is `{ "data": [ … ] }`. Lists that can grow without bound use cursor
 pagination and add `nextCursor`: pass it as `cursor` (with the same filters) for the next page;
 it is null on the last page. Cursors are opaque; `limit` sets the page size (1–100, default
@@ -288,3 +295,12 @@ report the flag. Sending nonempty `guests` while it is off returns `400 guests_n
 from both REST and MCP, without creating a booking or email jobs. The maximum remains ten
 after opt-in. A settings change is serialized with booking approval; idempotent replays
 of committed bookings and existing attendees on reschedule/cancel remain intact.
+
+### Organization webhooks
+
+`/api/v1/webhooks` configuration and delivery metadata require a current verified owner/admin
+of the acting organization. Ordinary hosts cannot inspect organization-wide outbound
+events. Creation/rotation reveal a signing secret once; lists never recover it. Destinations
+are immutable HTTPS public DNS URLs and are resolved again with pinned addresses per send.
+The instance must explicitly enable new captures; no historical bookings are backfilled.
+See [webhooks.md](webhooks.md) for the payload, signed headers, retention and delivery contract.

@@ -5,12 +5,14 @@ import type { Principal } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createApp } from '../app.ts'
+import { analyticsRoutes } from './analytics.ts'
 import { bookingRoutes } from './bookings.ts'
 import { calendarRoutes } from './calendars.ts'
 import { eventTypeRoutes } from './event-types.ts'
 import { profileRoutes } from './profile.ts'
 import { publicRoutes } from './public.ts'
 import { scheduleRoutes } from './schedules.ts'
+import { webhookRoutes } from './webhooks.ts'
 
 export const PUBLIC_URL = 'http://localhost:3000'
 
@@ -52,9 +54,11 @@ export const productRoutes = (db: Db) => [
   calendarRoutes({ db }),
   profileRoutes({ db }),
   scheduleRoutes({ db }),
+  webhookRoutes({ db, enabled: false }),
   eventTypeRoutes({ db }),
   publicRoutes({ db }),
   bookingRoutes({ db }),
+  analyticsRoutes({ db }),
 ]
 
 /**

@@ -12,6 +12,7 @@ export const NAV_ITEMS = [
   { to: PATHS.eventTypes, label: 'Event types' },
   { to: PATHS.availability, label: 'Availability' },
   { to: PATHS.bookings, label: 'Bookings' },
+  { to: PATHS.analytics, label: 'Booking activity' },
   { to: PATHS.calendars, label: 'Calendars' },
   { to: PATHS.apiKeys, label: 'API keys' },
   { to: PATHS.connectedApps, label: 'Connected apps' },

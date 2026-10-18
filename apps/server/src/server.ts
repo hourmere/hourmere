@@ -27,6 +27,7 @@ import {
   signInEmailJobs,
 } from '@hourmere/notifications'
 import type { BookingNotifier } from '@hourmere/scheduling'
+import { webhookBookingNotifier, webhookCleanupJob, webhookDeliveryJob } from '@hourmere/webhooks'
 import { sql } from 'kysely'
 import { createApp } from './app.ts'
 import { type Config, loadConfig } from './config.ts'
@@ -38,6 +39,7 @@ import { mcpOAuthCleanupJob, mcpOAuthRoutes } from './mcp/oauth.ts'
 import { whoamiTool } from './mcp/whoami.ts'
 import { installOneLineConsole } from './one-line-console.ts'
 import type { RouteModule } from './openapi.ts'
+import { analyticsRoutes } from './routes/analytics.ts'
 import { bookingRoutes } from './routes/bookings.ts'
 import { calendarRoutes } from './routes/calendars.ts'
 import { eventTypeRoutes } from './routes/event-types.ts'
@@ -45,6 +47,7 @@ import { instanceRoutes } from './routes/instance.ts'
 import { profileRoutes } from './routes/profile.ts'
 import { publicRoutes } from './routes/public.ts'
 import { scheduleRoutes } from './routes/schedules.ts'
+import { webhookRoutes } from './routes/webhooks.ts'
 import { closeConnectionsWhen, closeServer } from './shutdown.ts'
 import { createWorkerHealthApp } from './worker-health.ts'
 
@@ -61,8 +64,10 @@ export function productRoutes({
   enqueueCalendarSync,
   mcpAuth,
   publicUrl = 'http://localhost',
+  webhooks = { enabled: false },
 }: {
   db: Db
+  webhooks?: import('@hourmere/webhooks').WebhookSettings
   mcpAuth?: Pick<ReturnType<typeof createAuth>, 'handler'> | undefined
   publicUrl?: string
   socialProviders: Config['socialProviders']
@@ -77,9 +82,11 @@ export function productRoutes({
     calendarRoutes({ db, google: googleCalendar, enqueueSync: enqueueCalendarSync }),
     profileRoutes({ db }),
     scheduleRoutes({ db }),
+    webhookRoutes({ db, ...webhooks }),
     eventTypeRoutes({ db }),
     publicRoutes({ db, notify }),
     bookingRoutes({ db, notify }),
+    analyticsRoutes({ db }),
   ]
 }
 
@@ -186,6 +193,10 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
           encryptionKey: config.CALENDAR_ENCRYPTION_KEY,
         }
       : undefined
+  const webhookSettings = {
+    enabled: config.WEBHOOKS_ENABLED,
+    encryptionKey: config.WEBHOOK_ENCRYPTION_KEY,
+  }
   const calendarDeps: CalendarDeps = { db, google: googleCalendar, microsoft: microsoftCalendar }
   let enqueueCalendar: (calendarId: string) => Promise<unknown> = async () => {}
   // Background jobs: every role queues them, `all` and `worker` run them.
@@ -201,6 +212,8 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
         signup: config.signup,
       }),
       bookingNotificationJob({ db, mailer, publicUrl: config.PUBLIC_URL }),
+      webhookDeliveryJob({ db, ...webhookSettings }),
+      webhookCleanupJob(db),
       calendarSyncJob(calendarDeps),
       bookingCalendarJob(calendarDeps),
       calendarDispatchJob(calendarDeps, (id) => enqueueCalendar(id)),
@@ -229,9 +242,11 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
     // Booking changes over REST and MCP queue their emails in their own transactions.
     const emailNotifier = bookingNotifier(jobs)
     const calendarNotifier = calendarBookingNotifier(jobs)
+    const webhookNotifier = webhookBookingNotifier(jobs, webhookSettings)
     const notify: BookingNotifier = async (trx, event, now) => {
       await emailNotifier(trx, event, now)
       if (googleCalendar) await calendarNotifier(trx, event)
+      await webhookNotifier(trx, event, now)
     }
     const auth = createAuth({
       pool: authPool,
@@ -263,6 +278,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
         publicUrl: config.PUBLIC_URL,
         db,
         socialProviders: config.socialProviders,
+        webhooks: webhookSettings,
         notify,
         googleCalendar,
         enqueueCalendarSync: (id, trx) =>
