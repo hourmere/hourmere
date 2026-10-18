@@ -101,7 +101,14 @@ describe('comparison review information', () => {
     )
     const terms = plainText(read('./pages/terms.astro'))
     expect(terms).toMatch(
-      /with an API key that you create or, for MCP clients when the instance operator enables it, an OAuth 2\.1 connection that you approve\./,
+      /with an API key that you create or, for MCP clients when we enable it, an OAuth 2\.1 connection that you approve\./,
+    )
+    expect(terms).toMatch(
+      /Actions that applications take with your API key or an OAuth connection you approve, such as booking/,
+    )
+    expect(terms).toMatch(/revoke a connected application's OAuth access at any time in Connected apps/)
+    expect(terms).toMatch(
+      /do not give API keys to, or approve OAuth connections for, applications you do not trust/,
     )
     for (const page of [home, terms]) {
       expect(page).not.toMatch(
@@ -128,6 +135,12 @@ describe('MCP quickstart authentication', () => {
       /accepts API keys and, when the instance operator enables it, organization-bound \[OAuth 2\.1 connections\]\(#connect-with-oauth\)/,
     )
     expect(source).not.toMatch(/no OAuth 2\.1 connector flow|OAuth-only client cannot connect/)
+    expect(source).toContain(
+      '| `list_calendar_connections` | No arguments; your connected account emails, calendar names and IDs, safe connection status, conflict settings and write destination. |',
+    )
+    expect(source).toContain(
+      '| `list_conference_connections` | No arguments; your Zoom connection IDs, account email and display name, identity/meetings mode and safe status. |',
+    )
   })
 })
 
@@ -154,6 +167,12 @@ describe('privacy data-flow disclosures', () => {
       /does not send email addresses, guest names, attendee lists, booking answers or private management links/,
     )
     expect(google).toMatch(/tokens are stored encrypted/)
+    expect(google).toMatch(
+      /showing you, and applications you authorize, the status of your calendar connection/,
+    )
+    expect(google).toMatch(
+      /such as your availability or your connected Google account's email address and calendar names \(see section 6 ?\)/,
+    )
   })
 
   it('explains Google local disconnect separately from provider revocation and retained bookings', () => {
@@ -189,6 +208,14 @@ describe('privacy data-flow disclosures', () => {
     expect(agents).toMatch(/revoke.*API key.*MCP OAuth grant in Connected apps/)
     expect(agents).toMatch(/does not retrieve information the application has already received/)
     expect(agents).not.toMatch(/OAuth.*planned/)
+    expect(agents).toMatch(
+      /API keys can use permitted REST and MCP operations, including changing your calendar conflict and destination settings and refreshing or syncing your calendars/,
+    )
+    expect(agents).toMatch(
+      /hosted bookings with attendee details and your calendar and Zoom connection details \(connected account email addresses, calendar names and settings, Zoom display name and connection status, without credentials\)/,
+    )
+    expect(agents).toMatch(/Availability, booking and connection data that Hourmere returns/)
+    expect(agents).not.toMatch(/Availability and booking data/)
   })
 
   it('discloses automatic conference payloads and join-link storage and recipients', () => {

@@ -44,8 +44,8 @@ app or through REST.
 | `get_event_type` | An `id` from the list; full configuration, including questions, location and rules. |
 | `list_schedules` | Optional `limit` and `after`; summaries of your schedules. Schedules belong to your user across organizations. |
 | `get_schedule` | An `id` from the list; weekly working hours in the schedule's IANA time zone. Date overrides are separate. |
-| `list_calendar_connections` | No arguments; your calendar IDs, safe connection status, conflict settings and write destination. |
-| `list_conference_connections` | No arguments; your Zoom connection IDs, identity/meetings mode and safe status. |
+| `list_calendar_connections` | No arguments; your connected account emails, calendar names and IDs, safe connection status, conflict settings and write destination. |
+| `list_conference_connections` | No arguments; your Zoom connection IDs, account email and display name, identity/meetings mode and safe status. |
 
 Catalog lists return `{ data, nextAfter }`, sorted by ID, with 20 summaries by default and at
 most 100 (`limit: 1`–`100`). Pass `after: nextAfter` with the same key and organization until

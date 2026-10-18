@@ -272,8 +272,8 @@ const privacyMail = `mailto:${contact.privacy}`
     create your account, sign you in and show your account profile, as described above. We use
     calendar data only for scheduling: showing your available times on your booking pages and to
     applications you authorize, preventing double-booking, adding booked meetings to your calendar,
-    updating or removing those events when bookings change, and showing you the status of your
-    calendar connection.
+    updating or removing those events when bookings change, and showing you, and applications you
+    authorize, the status of your calendar connection.
   </p>
   <p>We do not:</p>
   <ul>
@@ -297,7 +297,8 @@ const privacyMail = `mailto:${contact.privacy}`
       as needed to provide the features you use. For example, people who visit your booking page
       see the times you are available, but not the details of your calendar events, and an AI
       assistant or other application you authorize receives, at your direction, the results of the
-      requests it makes for you (see <a href="#ai-assistants">section 6</a>);
+      requests it makes for you, such as your availability or your connected Google account's email
+      address and calendar names (see <a href="#ai-assistants">section 6</a>);
     </li>
     <li>
       with service providers that host and run the Service for us, such as our cloud hosting and
@@ -413,15 +414,18 @@ const privacyMail = `mailto:${contact.privacy}`
     You can authorize them with an API key you create or, when enabled by the instance operator,
     an MCP OAuth connection you approve while signed in. Both act as you in the selected
     organization, subject to your current permissions. API keys can use permitted REST and MCP
-    operations. MCP OAuth permission covers the available MCP tools, including reading your
-    profile, event-type configurations, working-hours schedules and hosted bookings with attendee
-    details, checking availability, and creating, rescheduling or cancelling bookings. MCP OAuth
-    does not grant REST API access or account or API-key administration. If you approve offline
+    operations, including changing your calendar conflict and destination settings and refreshing
+    or syncing your calendars. MCP OAuth permission covers the available MCP tools, including
+    reading your profile, event-type configurations, working-hours schedules, hosted bookings with
+    attendee details and your calendar and Zoom connection details (connected account email
+    addresses, calendar names and settings, Zoom display name and connection status, without
+    credentials), checking availability, and creating, rescheduling or cancelling bookings. MCP
+    OAuth does not grant REST API access or account or API-key administration. If you approve offline
     access, the connector can refresh its access without asking you to sign in for each request.
   </p>
   <p>
-    Availability and booking data that Hourmere returns to an AI agent or application you authorized
-    is sent at your direction, to provide the feature you requested. The availability is calculated
+    Availability, booking and connection data that Hourmere returns to an AI agent or application
+    you authorized is sent at your direction, to provide the feature you requested. The availability is calculated
     from your connected calendars. Our commitments about Google user data in
     <a href="#google-user-data">section 4</a> (no advertising, no sale, and no use by us to train AI
     or machine learning models) apply to Hourmere. Once the data is delivered to the application,
