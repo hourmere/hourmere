@@ -52,7 +52,10 @@ describe.skipIf(!serverUrl)('MCP OAuth activity migration', () => {
           )
         )?.rows
       const before = await snapshot()
-      expect(await runMigrations(pool)).toEqual([migration])
+      // Only this migration joins the predecessor set, so later migrations cannot change
+      // what this test applies or observes.
+      await copyFile(join(migrationsDir, migration), join(prior, migration))
+      expect(await runMigrations(pool, prior)).toEqual([migration])
       const activity = await pool.query(
         `SELECT client_id, consented_at::text, last_used_at::text FROM mcp_oauth_client_activity ORDER BY client_id`,
       )
@@ -69,7 +72,7 @@ describe.skipIf(!serverUrl)('MCP OAuth activity migration', () => {
         },
       ])
       expect(await snapshot()).toEqual(before)
-      expect(await runMigrations(pool)).toEqual([])
+      expect(await runMigrations(pool, prior)).toEqual([])
       expect(await snapshot()).toEqual(before)
       await expect(
         pool.query(`DELETE FROM auth."oauthClient" WHERE "clientId"='approved'`),
