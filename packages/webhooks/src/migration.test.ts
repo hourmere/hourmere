@@ -9,7 +9,7 @@ import { expect, it } from 'vitest'
 import { createWebhook } from './service.ts'
 
 const serverUrl = process.env.DATABASE_URL
-const migration = '0026_webhook_interrupted_deliveries.sql'
+const migration = '0028_webhook_interrupted_deliveries.sql'
 
 it.skipIf(!serverUrl)(
   'preserves predecessor webhook data, supports fresh installs and reruns safely',
@@ -23,12 +23,13 @@ it.skipIf(!serverUrl)(
     try {
       await admin.query(`CREATE DATABASE ${name}`)
       const source = new URL('../../db/migrations/', import.meta.url)
-      for (const file of (await readdir(source)).filter(
-        (file) => file.endsWith('.sql') && file < migration,
-      ))
-        await copyFile(new URL(file, source), join(dir, file))
+      const predecessors = (await readdir(source))
+        .filter((file) => file.endsWith('.sql') && file < migration)
+        .sort()
+      for (const file of predecessors) await copyFile(new URL(file, source), join(dir, file))
       const predecessor = await runMigrations(pool, dir)
-      expect(predecessor.at(-1)).toBe('0025_automatic_zoom.sql')
+      expect(predecessor).toEqual(predecessors)
+      expect(predecessor).toContain('0026_conference_notification_skips.sql')
       const db = createDb(pool)
       const user = await createTestUser(db)
       const key = Buffer.alloc(32, 9).toString('base64')
@@ -97,7 +98,7 @@ it.skipIf(!serverUrl)(
       await pool.query('DROP SCHEMA public CASCADE')
       await pool.query('DROP SCHEMA auth CASCADE')
       await pool.query('CREATE SCHEMA public')
-      expect((await runMigrations(pool)).at(-1)).toBe(migration)
+      expect(await runMigrations(pool)).toEqual([...predecessors, migration])
       expect(await runMigrations(pool)).toEqual([])
       expect(
         (await pool.query('SELECT count(*)::int AS n FROM webhook_deliveries')).rows[0].n,

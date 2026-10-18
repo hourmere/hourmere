@@ -10,9 +10,10 @@ import { migrationsDir, runMigrations } from '../../db/src/migrate.ts'
 const serverUrl = process.env.DATABASE_URL
 
 describe.skipIf(!serverUrl)('conference migrations preserve populated predecessor data', () => {
-  it('upgrades0023 through0026 without rewriting historical rows, then does nothing', async () => {
+  it('upgrades0023 to current migrations without rewriting historical rows, then does nothing', async () => {
     const predecessor = await mkdtemp(join(tmpdir(), 'hourmere-conference-predecessor-'))
-    for (const file of await readdir(migrationsDir)) {
+    const migrations = (await readdir(migrationsDir)).filter((file) => file.endsWith('.sql')).sort()
+    for (const file of migrations) {
       if (file.endsWith('.sql') && file < '0024')
         await cp(join(migrationsDir, file), join(predecessor, file))
     }
@@ -99,11 +100,7 @@ describe.skipIf(!serverUrl)('conference migrations preserve populated predecesso
           (await owned.pool.query(`SELECT *,xmin::text AS original_xmin FROM ${table} ORDER BY 1`))
             .rows,
         )
-      expect(await runMigrations(owned.pool)).toEqual([
-        '0024_conference_notification_retries.sql',
-        '0025_automatic_zoom.sql',
-        '0026_conference_notification_skips.sql',
-      ])
+      expect(await runMigrations(owned.pool)).toEqual(migrations.filter((file) => file >= '0024'))
       for (const table of tables) {
         const old = before.get(table) as Record<string, unknown>[]
         const after = (

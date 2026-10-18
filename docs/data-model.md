@@ -260,7 +260,7 @@ snapshot plus bounded attempt metadata). The booking transaction captures subscr
 endpoints and queues only delivery IDs. Composite foreign keys keep deliveries in their
 endpoint organization; endpoint/booking/organization deletion cascades snapshots. Runtime
 locks use endpoint then delivery so deletion, pause and rotation cannot deadlock delivery
-through inverse lock order. Migration 0026 adds safe `interrupted`/`job_missing` error
+through inverse lock order. Migration 0028 adds safe `interrupted`/`job_missing` error
 classifications for finite retry accounting and orphan reconciliation. Details and retention are in [webhooks.md](webhooks.md).
 
 ## Independent conference identities
