@@ -170,6 +170,15 @@ describe('the booking page', () => {
         [`POST ${prefix}/bookings`]: () => json(201, { booking: booking(), manageToken: TOKEN }),
       })
       renderApp(`/embed${team ? '/team/Alpha' : '/ada'}/intro${q}`)
+      await screen.findByRole('heading', { name: 'Intro call', level: 1 })
+      const resizeMessages = postMessage.mock.calls.filter(
+        ([data]) => data.type === 'hourmere:resize',
+      )
+      expect(resizeMessages.length).toBeGreaterThan(0)
+      for (const [data, targetOrigin] of resizeMessages) {
+        expect(data).toEqual({ type: 'hourmere:resize', id: 'abcdefghijklmnop1234', height: 240 })
+        expect(targetOrigin).toBe('https://parent.example')
+      }
       await chooseSlot(user, /November 2, available/, '9:00 AM')
       await user.type(screen.getByLabelText('Your name'), 'Invitee')
       await user.type(screen.getByLabelText('Email'), 'invitee@example.com')

@@ -85,7 +85,42 @@ const input = () => ({
   headers: { 'webhook-id': 'test' },
   signal: new AbortController().signal,
 })
+function respondWith(statusCode: number) {
+  network.request.mockImplementation((_url, _options, response) => {
+    const req = new EventEmitter() as EventEmitter & { end: () => void }
+    req.end = () => response({ statusCode, destroy: () => {} })
+    return req
+  })
+}
 describe('pinned webhook HTTPS transport', () => {
+  it.each([
+    'http://hooks.example.com/receive',
+    'https://hooks.example.com:8443/receive',
+    'https://user:password@hooks.example.com/receive',
+    'https://127.0.0.1/receive',
+  ])('revalidates stored destination %s before DNS or HTTPS', async (url) => {
+    network.lookup.mockResolvedValue([{ address: '8.8.8.8', family: 4 }])
+    respondWith(204)
+    await expect(sendWebhook({ ...input(), url })).rejects.toThrow('refused')
+    expect(network.lookup).not.toHaveBeenCalled()
+    expect(network.request).not.toHaveBeenCalled()
+  })
+  it('refuses more than 32 DNS answers before opening a socket', async () => {
+    network.lookup.mockResolvedValue(
+      Array.from({ length: 33 }, (_, i) => ({ address: `8.8.8.${i + 1}`, family: 4 })),
+    )
+    respondWith(204)
+    await expect(sendWebhook(input())).rejects.toThrow('refused')
+    expect(network.request).not.toHaveBeenCalled()
+  })
+  it('accepts exactly 32 public DNS answers', async () => {
+    network.lookup.mockResolvedValue(
+      Array.from({ length: 32 }, (_, i) => ({ address: `8.8.8.${i + 1}`, family: 4 })),
+    )
+    respondWith(204)
+    expect(await sendWebhook(input())).toBe(204)
+    expect(network.request).toHaveBeenCalledOnce()
+  })
   it('refuses the entire DNS answer when even one candidate is private', async () => {
     network.lookup.mockResolvedValue([
       { address: '8.8.8.8', family: 4 },
@@ -94,27 +129,34 @@ describe('pinned webhook HTTPS transport', () => {
     await expect(sendWebhook(input())).rejects.toThrow('refused')
     expect(network.request).not.toHaveBeenCalled()
   })
-  it('pins the validated IP while retaining Host/SNI, TLS verification and bounded headers', async () => {
-    network.lookup.mockResolvedValue([{ address: '8.8.8.8', family: 4 }])
-    const discarded = vi.fn()
-    network.request.mockImplementation((_url, options, response) => {
-      const req = new EventEmitter() as EventEmitter & { end: () => void }
-      req.end = () => response({ statusCode: 204, destroy: discarded })
-      expect(options.agent).toBe(false)
-      expect(options.servername).toBe('hooks.example.com')
-      expect(options.rejectUnauthorized).toBe(true)
-      expect(options.maxHeaderSize).toBe(16384)
-      options.lookup('hooks.example.com', {}, (err: unknown, ip: string, family: number) => {
-        expect(err).toBeNull()
-        expect(ip).toBe('8.8.8.8')
-        expect(family).toBe(4)
+  it.each([
+    { address: '8.8.8.8', family: 4 },
+    { address: '2606:4700:4700::1111', family: 6 },
+  ])(
+    'pins $address while retaining Host/SNI, TLS verification and bounded headers',
+    async (selected) => {
+      network.lookup.mockResolvedValue([selected])
+      const discarded = vi.fn()
+      network.request.mockImplementation((_url, options, response) => {
+        const req = new EventEmitter() as EventEmitter & { end: () => void }
+        req.end = () => response({ statusCode: 204, destroy: discarded })
+        expect(options.agent).toBe(false)
+        expect(options.family).toBe(selected.family)
+        expect(options.servername).toBe('hooks.example.com')
+        expect(options.rejectUnauthorized).toBe(true)
+        expect(options.maxHeaderSize).toBe(16384)
+        options.lookup('hooks.example.com', {}, (err: unknown, ip: string, family: number) => {
+          expect(err).toBeNull()
+          expect(ip).toBe(selected.address)
+          expect(family).toBe(selected.family)
+        })
+        return req
       })
-      return req
-    })
-    expect(await sendWebhook(input())).toBe(204)
-    expect(discarded).toHaveBeenCalledOnce()
-    expect(network.lookup).toHaveBeenCalledOnce()
-  })
+      expect(await sendWebhook(input())).toBe(204)
+      expect(discarded).toHaveBeenCalledOnce()
+      expect(network.lookup).toHaveBeenCalledOnce()
+    },
+  )
   it('does not follow redirect status or read any response body', async () => {
     network.lookup.mockResolvedValue([{ address: '8.8.8.8', family: 4 }])
     network.request.mockImplementation((_url, _options, response) => {

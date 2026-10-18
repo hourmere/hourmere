@@ -94,9 +94,10 @@ describe.skipIf(!serverUrl)('non-transitive invitation migration', () => {
       )
     }
     const before = await snapshot()
-    expect(await runMigrations(pool)).toEqual([migration])
+    await copyFile(join(migrationsDir, migration), join(predecessor, migration))
+    expect(await runMigrations(pool, predecessor)).toEqual([migration])
     expect(await snapshot()).toEqual(before)
-    expect(await runMigrations(pool)).toEqual([])
+    expect(await runMigrations(pool, predecessor)).toEqual([])
     expect(await snapshot()).toEqual(before)
 
     const client = await pool.connect()

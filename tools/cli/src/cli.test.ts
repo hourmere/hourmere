@@ -240,6 +240,27 @@ describe('CLI transport and arguments', () => {
     expect(JSON.parse(result.stdout).manageToken).toBe('[redacted]')
   })
 
+  it('redacts a newly returned booking capability at the top level and inside nested text', async () => {
+    const returnedToken = 'returned_management_capability_only_here_x'
+    const result = await run(
+      ['book', '--input', '-'],
+      { idempotencyKey: 'random-test-key' },
+      {
+        fetch: async () =>
+          response({
+            manageToken: returnedToken,
+            booking: { note: `nested ${returnedToken}` },
+          }),
+      },
+    )
+    expect(result.code).toBe(0)
+    expect(result.stdout.includes(returnedToken)).toBe(false)
+    expect(JSON.parse(result.stdout)).toEqual({
+      manageToken: '[redacted]',
+      booking: { note: 'nested [redacted]' },
+    })
+  })
+
   it('creates a private, exclusive capability file and gives stdout only a receipt', async () => {
     const path = join(await dir(), 'booking.json')
     const result = await run(
@@ -295,6 +316,34 @@ describe('CLI transport and arguments', () => {
     })
     expect(result.code).toBe(1)
     expect(JSON.parse(result.stderr).error).toBe('[redacted]')
+  })
+
+  it.each([
+    { name: 'empty', value: '' },
+    { name: 'uppercase', value: 'Unsafe_code' },
+    { name: 'digit-prefixed', value: '1unsafe_code' },
+    { name: 'punctuated', value: 'unsafe-code' },
+    { name: 'control-bearing', value: 'unsafe\u001b[31mcode' },
+    { name: 'overlong', value: 'x'.repeat(81) },
+    { name: 'non-string', value: 42 },
+  ])('replaces $name server error codes with a safe fallback', async ({ value }) => {
+    for (const kind of ['http', 'tool'] as const) {
+      const result = await run(['whoami'], undefined, {
+        fetch: async () =>
+          kind === 'http'
+            ? Response.json({ error: value }, { status: 400 })
+            : Response.json({
+                jsonrpc: '2.0',
+                id: 1,
+                result: {
+                  isError: true,
+                  content: [{ type: 'text', text: JSON.stringify({ error: value }) }],
+                },
+              }),
+      })
+      expect(result.code).toBe(kind === 'http' ? 3 : 1)
+      expect(JSON.parse(result.stderr).error).toBe(`${kind}_error`)
+    }
   })
 
   it('keeps rate-limit guidance machine-readable', async () => {

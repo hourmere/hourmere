@@ -83,10 +83,22 @@ Repeated initialization of a declarative inline placeholder creates one iframe. 
 `initInline` on an existing container replaces its previous frame. Disposal removes the
 frame and message listener; it leaves other container content alone.
 
-A container receives `hourmere:booking-completed` when its iframe shows confirmation,
-including a successful idempotent retry. The event has no details. Use it for a local UI
-response; it is not a trusted billing or analytics record. Do not infer that every event
-represents a new booking.
+An inline container receives `hourmere:booking-completed` when its iframe shows confirmation,
+including a successful idempotent retry. A popup dispatches the same event on the focused
+element that opened it, or on `document` if that element has been removed. The event bubbles,
+so a document listener works for both modes:
+
+```js
+document.addEventListener('hourmere:booking-completed', () => {
+  // Show a local thank-you message; no booking data is exposed.
+});
+```
+
+The widget validates the iframe's `hourmere:booked` postMessage against its exact origin,
+Window and correlation identifier before dispatching this event. The event has no details.
+Use it for a local UI response; it is not a trusted billing or analytics record. Do not infer
+that every event represents a new booking. Completion leaves the popup open so the visitor
+can copy their private manage link.
 
 ## Security and privacy
 

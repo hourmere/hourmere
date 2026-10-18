@@ -100,7 +100,12 @@ describe('standalone booking widget', () => {
       b = mount(),
       src = new URL(a.iframe.src),
       id = src.searchParams.get('embedId'),
-      booked = vi.fn()
+      booked = vi.fn(),
+      parentBooked = vi.fn(),
+      parent = document.createElement('section')
+    document.body.append(parent)
+    parent.append(a.element)
+    parent.addEventListener('hourmere:booking-completed', parentBooked)
     a.element.addEventListener('hourmere:booking-completed', booked)
     const send = (data: unknown, origin = src.origin, source = a.iframe.contentWindow) =>
       window.dispatchEvent(new MessageEvent('message', { data, origin, source }))
@@ -125,6 +130,7 @@ describe('standalone booking widget', () => {
     expect(a.iframe.style.height).toBe('500px')
     send({ type: 'hourmere:booked', id, token: 'must-not-forward', attendees: ['private'] })
     expect(booked).toHaveBeenCalledOnce()
+    expect(parentBooked).toHaveBeenCalledOnce()
     expect((booked.mock.calls[0]?.[0] as CustomEvent | undefined)?.detail).toBeNull()
     a.destroy()
     send({ type: 'hourmere:booked', id })
@@ -140,6 +146,82 @@ describe('standalone booking widget', () => {
     expect(b.iframe.isConnected).toBe(true)
     destroyInline(a.element)
     expect(b.iframe.isConnected).toBe(false)
+  })
+  it('bubbles popup completion from its opener without forwarding private message data', () => {
+    Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
+      configurable: true,
+      value: function (this: HTMLDialogElement) {
+        this.setAttribute('open', '')
+      },
+    })
+    Object.defineProperty(HTMLDialogElement.prototype, 'close', {
+      configurable: true,
+      value: function (this: HTMLDialogElement) {
+        this.removeAttribute('open')
+      },
+    })
+    const opener = document.createElement('button'),
+      completed = vi.fn(),
+      documentCompleted = vi.fn()
+    opener.dataset.hourmerePopup = ''
+    opener.dataset.hourmereUrl = url
+    document.body.append(opener)
+    opener.addEventListener('hourmere:booking-completed', completed)
+    document.addEventListener('hourmere:booking-completed', documentCompleted)
+    try {
+      init()
+      opener.click()
+      const frame = document.querySelector('dialog iframe') as HTMLIFrameElement,
+        src = new URL(frame.src),
+        id = src.searchParams.get('embedId'),
+        other = mount(),
+        send = (origin: string, source: Window | null, frameId = id) =>
+          window.dispatchEvent(
+            new MessageEvent('message', {
+              origin,
+              source,
+              data: {
+                type: 'hourmere:booked',
+                id: frameId,
+                manageToken: 'private-capability',
+                attendees: ['private@example.test'],
+              },
+            }),
+          )
+      send('https://other.test', frame.contentWindow)
+      send(src.origin, other.iframe.contentWindow)
+      send(src.origin, frame.contentWindow, 'different-instance')
+      expect(completed).not.toHaveBeenCalled()
+      expect(documentCompleted).not.toHaveBeenCalled()
+      send(src.origin, frame.contentWindow)
+      expect(completed).toHaveBeenCalledOnce()
+      expect(documentCompleted).toHaveBeenCalledOnce()
+      const event = completed.mock.calls[0]?.[0] as CustomEvent
+      expect(event.target).toBe(opener)
+      expect(event.bubbles).toBe(true)
+      expect(event.detail).toBeNull()
+      closePopup()
+      send(src.origin, frame.contentWindow)
+      expect(completed).toHaveBeenCalledOnce()
+      opener.focus()
+      openPopup({ url })
+      const replacement = document.querySelector('dialog iframe') as HTMLIFrameElement,
+        replacementUrl = new URL(replacement.src)
+      opener.remove()
+      window.dispatchEvent(
+        new MessageEvent('message', {
+          origin: replacementUrl.origin,
+          source: replacement.contentWindow,
+          data: { type: 'hourmere:booked', id: replacementUrl.searchParams.get('embedId') },
+        }),
+      )
+      expect(completed).toHaveBeenCalledOnce()
+      expect(documentCompleted).toHaveBeenCalledTimes(2)
+      expect(documentCompleted.mock.calls[1]?.[0].target).toBe(document)
+      expect(documentCompleted.mock.calls[1]?.[0].detail).toBeNull()
+    } finally {
+      document.removeEventListener('hourmere:booking-completed', documentCompleted)
+    }
   })
   it('uses a modal dialog, restores focus and cleans up on Escape or closing', () => {
     const open = document.createElement('button')

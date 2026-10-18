@@ -99,7 +99,15 @@ crashes before recording success, the next attempt can repeat the same delivery 
 response header acknowledges delivery; the response body is immediately discarded. Every
 other HTTP status, DNS/TLS error or unavailable signing secret is retried up to twelve
 times after the first attempt, starting at one minute, doubling with jitter to an hour.
-After thirteen total attempts, the delivery is failed. There is no manual replay endpoint.
+The budget includes interrupted attempts (shutdown, a killed worker or an expired job),
+including attempts whose send outcome is unknown. After thirteen total attempts, the
+delivery is failed. A surviving retry uses pg-boss's attempt number to include runs lost
+before the delivery transaction committed. Graceful shutdown records `interrupted` and
+consumes an attempt before retrying. Every fifteen minutes, cleanup also marks up to 1000
+pending deliveries without a created, retrying or active pg-boss job as failed with
+`job_missing`; retained job metadata supplies any missing attempt count. If the job was
+already deleted, only known attempts can be reported. Active jobs remain pending until
+pg-boss expires/retries or terminates them. There is no manual replay endpoint.
 
 Two delivery jobs run concurrently per worker. Each attempt has one ten-second deadline
 covering DNS, TCP/TLS and response headers, and a 16 KiB response-header limit. The transport
@@ -123,9 +131,18 @@ Pause, subscription changes, rotation and deletion wait for that attempt to fini
 they return. Subsequent queued attempts use the current subscription/state and current
 signing secret. Paused, unsubscribed or globally disabled deliveries are permanently
 skipped; enabling again does not revive them. Deletion removes all delivery rows, and old
-ID-only jobs safely skip. Receivers should install a new secret before rotation when
-coordinating the brief switch; an attempt that began earlier may already have arrived
-under the old secret. Keep the old verification key during that transition if needed.
+ID-only jobs safely skip.
+
+Secret rotation is a **hard switch**, with one signature per attempt and no grace period
+or dual signing. The new secret exists only in the rotation response, so it cannot be
+installed beforehand. Prepare the receiver to accept both old and new secrets during a
+transition, call rotate, then immediately install the returned new secret alongside the
+old one. All attempts starting after rotation use only the new secret, including retries
+of older snapshots. Attempts rejected while the receiver is being updated consume the
+same retry budget and retry with backoff (about seven hours total for the full budget).
+Previously started requests may already have reached the receiver signed with the old
+secret; retain old verification temporarily for those in-flight requests, then remove it.
+There is no zero-interruption guarantee. Grace-period dual signing is a follow-up.
 
 `GET /webhooks/{id}/deliveries` reports IDs, event type, booking ID, status, attempts, HTTP
 status, safe error code and timestamps. It exposes no payloads, signatures or secrets and
