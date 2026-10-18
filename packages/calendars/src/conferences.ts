@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { Db } from '@hourmere/db'
 import { defineJob, type EnqueueOptions } from '@hourmere/jobs'
 import type { ServiceContext } from '@hourmere/scheduling'
-import { conferenceRoot } from '@hourmere/scheduling/conferences'
+import { conferenceOrganizerAvailable, conferenceRoot } from '@hourmere/scheduling/conferences'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { sql } from 'kysely'
 import { z } from 'zod'
@@ -182,6 +182,8 @@ function interpretation(event: GoogleEvent, c: Claim): Outcome {
   return { event, error: 'invalid_response' }
 }
 async function providerWork(deps: CalendarDeps, c: Claim, signal: AbortSignal): Promise<Outcome> {
+  if (c.booking.status === 'confirmed' && !(await conferenceOrganizerAvailable(deps.db, c)))
+    return { error: 'organizer_unavailable', knownNoCreate: c.create }
   if (c.booking.status === 'cancelled' && !c.create_started && !c.external_event_id)
     return { cancelled: true }
   if (!deps.google || !c.connection_id || !c.calendar_id)
@@ -335,7 +337,14 @@ export async function writeBookingConference(
     )
       await trx
         .updateTable('booking_conferences')
-        .set({ external_event_id: outcome.event.id })
+        .set({
+          external_event_id: outcome.event.id,
+          ...(!current.external_event_id &&
+          current.state === 'failed' &&
+          current.error_code === 'ambiguous_create'
+            ? { state: 'pending', error_code: null, next_attempt_at: clock(deps) }
+            : {}),
+        })
         .where('root_booking_id', '=', root)
         .execute()
     if (current.lease_id !== c.lease) return
@@ -351,12 +360,36 @@ export async function writeBookingConference(
         .execute()
       return
     }
+    if (outcome.error === 'ambiguous_create' && !c.external_event_id && current.external_event_id) {
+      await trx
+        .updateTable('booking_conferences')
+        .set({
+          state: 'pending',
+          error_code: null,
+          lease_id: null,
+          lease_until: null,
+          next_attempt_at: clock(deps),
+        })
+        .where('root_booking_id', '=', root)
+        .execute()
+      return
+    }
     const now = clock(deps)
     const expired = booking.status === 'confirmed' && booking.start_at <= now
-    const error = expired ? 'meeting_started' : outcome.error
+    const organizerAvailable =
+      booking.status === 'cancelled' || (await conferenceOrganizerAvailable(trx, current))
+    const error = !organizerAvailable
+      ? 'organizer_unavailable'
+      : expired
+        ? 'meeting_started'
+        : outcome.error
     const retryable =
-      !expired && (outcome.pending || error === 'provider_unavailable') && c.attempts < POLL_LIMIT
-    const ready = !expired && (Boolean(outcome.url) || outcome.cancelled === true)
+      organizerAvailable &&
+      !expired &&
+      (outcome.pending || error === 'provider_unavailable') &&
+      c.attempts < POLL_LIMIT
+    const ready =
+      organizerAvailable && !expired && (Boolean(outcome.url) || outcome.cancelled === true)
     const state = ready ? 'ready' : retryable ? 'pending' : 'failed'
     await trx
       .updateTable('booking_conferences')

@@ -15,6 +15,12 @@ import {
 } from '@hourmere/core'
 import type { Db, Json } from '@hourmere/db'
 import { type Expression, type ExpressionBuilder, sql } from 'kysely'
+import {
+  automaticMeet,
+  eligibleMeetHosts,
+  meetOrganizer,
+  requireMeetDestination,
+} from './conferences.ts'
 import type { PublicContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { assertHosts } from './hosts.ts'
@@ -86,6 +92,7 @@ export interface PublicEventTypeRecord {
   hostUserId: string
   hostUserIds: string[]
   eligibleHostUserIds: string[]
+  conferenceOrganizerUserId: string | null
   schedulingType: 'individual' | 'collective' | 'round_robin'
   hosts: { name: string; timeZone: string }[]
   handle: string
@@ -168,6 +175,7 @@ export async function findPublicEventType(
     hostUserId: row.user_id,
     hostUserIds: [row.user_id],
     eligibleHostUserIds: [row.user_id],
+    conferenceOrganizerUserId: null,
     schedulingType: 'individual',
     hosts: [{ name: row.name.trim() || row.handle, timeZone: row.time_zone }],
     handle: row.handle,
@@ -294,6 +302,7 @@ export async function findPublicTeamEventType(
     hostUserId: hostUserIds[0] as string,
     hostUserIds,
     eligibleHostUserIds,
+    conferenceOrganizerUserId: row.conference_organizer_user_id,
     schedulingType: row.scheduling_type as PublicEventTypeRecord['schedulingType'],
     hosts: views,
     handle: row.team_slug,
@@ -521,6 +530,22 @@ async function publicSlots(
   const et = await resolve(ctx.db, input.handle, input.slug)
   if (!et) throw eventTypeNotFound()
   const now = ctx.now()
+  if (automaticMeet(et.location)) {
+    if (et.schedulingType === 'round_robin')
+      et.eligibleHostUserIds = await eligibleMeetHosts(
+        ctx.db,
+        et.eligibleHostUserIds,
+        et.id,
+        ctx.automaticMeet,
+      )
+    else
+      await requireMeetDestination(
+        ctx.db,
+        meetOrganizer(et.schedulingType, et.hostUserIds, et.conferenceOrganizerUserId) as string,
+        et.id,
+        ctx.automaticMeet,
+      )
+  }
   if (!hasBookablePart(et, input.start, input.end, now, et.hostUserIds.length)) return []
   if (et.schedulingType === 'round_robin')
     return unionRoundRobinSlots(ctx.db, et.id, et.eligibleHostUserIds, input.start, input.end, now)

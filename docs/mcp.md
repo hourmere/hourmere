@@ -267,3 +267,13 @@ schema, all four annotations, and a handler that builds a `ServiceContext` from 
 calls the service layer. The framework validates arguments and results, maps `DomainError`
 to error results and logs anything else on one escaped line. Register the tool in `server.ts`
 and cover it in `apps/server/src/mcp/*.test.ts`.
+
+## Automatic Meet reconciliation
+
+Collective automatic Meet uses the owner-selected organizer; round robin uses its actual eligible
+winner. Public `find_available_slots`/`create_booking` never accept a host selection. Final
+invitations wait for readiness. `list_bookings` exposes only the caller's optional ordinary
+`calendarCopy` state. `retry_conference({bookingId})` is restricted to the current verified pinned
+organizer; `retry_calendar_copy({bookingId})` reconciles the caller's original failed configured
+copy. Both reject unknown/force-create fields and never choose a replacement account/calendar.
+See [automatic-google-meet.md](automatic-google-meet.md) for optional copies and identity policy.

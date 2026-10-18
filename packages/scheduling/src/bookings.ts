@@ -15,9 +15,13 @@ import {
   toIso,
 } from './availability.ts'
 import {
+  automaticMeet,
   bookingConferenceStates,
+  type CalendarCopyStatus,
   type ConferenceStatus,
   cancelBookingConference,
+  eligibleMeetHosts,
+  ownCalendarCopyStates,
   prepareBookingConference,
   unresolvedLocation,
 } from './conferences.ts'
@@ -50,6 +54,9 @@ export interface Booking {
   /** Where the meeting happens, with its details (number, address, link). */
   location: Location | null
   conference?: ConferenceStatus
+  /** Present only in authenticated host reads, for that host alone. */
+  calendarCopy?: CalendarCopyStatus
+  conferenceCanRetry?: boolean
   responses: Responses
   /** The invitee first, then guests. */
   attendees: Attendee[]
@@ -778,7 +785,10 @@ async function publicBooking(
         await lockRoundRobinState(trx, current.id)
         const available: string[] = []
         let stale = false
-        for (const hostUserId of current.eligibleHostUserIds) {
+        const candidates = automaticMeet(current.location)
+          ? await eligibleMeetHosts(trx, current.eligibleHostUserIds, current.id, ctx.automaticMeet)
+          : current.eligibleHostUserIds
+        for (const hostUserId of candidates) {
           try {
             const slots = await findSlots(trx, {
               eventTypeId: current.id,
@@ -1159,7 +1169,7 @@ export async function listHostBookings(
   const page = rows.slice(0, limit)
   const last = page.at(-1)
   return {
-    data: await toBookings(ctx.db, page),
+    data: await withOwnCalendarCopies(ctx, await toBookings(ctx.db, page)),
     nextCursor: rows.length > limit && last ? encodeCursor(last) : null,
   }
 }
@@ -1177,7 +1187,7 @@ export async function getHostBooking(ctx: ServiceContext, id: string): Promise<B
     .executeTakeFirst()
   if (!row) throw bookingNotFound()
   const [booking] = await toBookings(ctx.db, [row])
-  return booking as Booking
+  return (await withOwnCalendarCopies(ctx, [booking as Booking]))[0] as Booking
 }
 
 /** Moves a booking in the caller's organization that the caller hosts; never follows an old id. */
@@ -1255,5 +1265,51 @@ export async function cancelHostBooking(
         oauthConsentId: ctx.principal.kind === 'oauth' ? ctx.principal.oauthConsentId : null,
       },
     )
+  })
+}
+
+async function withOwnCalendarCopies(ctx: ServiceContext, bookings: Booking[]) {
+  const states = await ownCalendarCopyStates(
+    ctx.db,
+    bookings.map((b) => b.id),
+    ctx.principal.user.id,
+  )
+  const conferences = bookings.length
+    ? await ctx.db
+        .selectFrom('booking_conferences')
+        .select(['booking_id', 'organizer_user_id'])
+        .where(
+          'booking_id',
+          'in',
+          bookings.map((b) => b.id),
+        )
+        .execute()
+    : []
+  const now = ctx.now()
+  return bookings.map((b) => {
+    const copy = states.get(b.id)
+    return {
+      ...b,
+      ...(copy
+        ? {
+            calendarCopy: {
+              ...copy,
+              canRetry:
+                copy.canRetry &&
+                (b.status === 'cancelled' ||
+                  Temporal.Instant.compare(Temporal.Instant.from(b.start), now) > 0),
+            },
+          }
+        : {}),
+      ...(b.conference
+        ? {
+            conferenceCanRetry:
+              b.conference.errorCode !== 'organizer_unavailable' &&
+              conferences.some(
+                (c) => c.booking_id === b.id && c.organizer_user_id === ctx.principal.user.id,
+              ),
+          }
+        : {}),
+    }
   })
 }
