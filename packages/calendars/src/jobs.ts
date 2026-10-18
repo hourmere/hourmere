@@ -1,6 +1,11 @@
+import type { Db } from '@hourmere/db'
 import { defineJob } from '@hourmere/jobs'
 import { z } from 'zod'
-import { BOOKING_CALENDAR_JOB, writeBookingCalendar } from './booking-events.ts'
+import {
+  BOOKING_CALENDAR_JOB,
+  recoverBookingCalendarPage,
+  writeBookingCalendar,
+} from './booking-events.ts'
 import type { CalendarDeps } from './index.ts'
 import { syncGoogleCalendar } from './sync.ts'
 
@@ -65,6 +70,27 @@ export function calendarDispatchJob(
         if (calendars.length < 100) return
         after = calendars.at(-1)?.id
       }
+    },
+  })
+}
+
+/** Explicit finite pass after reauthorization or an operator-requested recovery. */
+export function bookingCalendarRecoveryJob(
+  deps: CalendarDeps,
+  enqueueBooking: (bookingId: string, transaction: Db) => Promise<unknown>,
+  enqueueRecovery: (connectionId: string, after: string) => Promise<unknown>,
+) {
+  return defineJob({
+    name: 'booking-calendar-recover',
+    payload: z.strictObject({ connectionId: z.uuid(), after: z.uuid().optional() }),
+    policy: 'stately',
+    concurrency: 1,
+    retry: { limit: 5, delaySeconds: 60, backoff: true, maxDelaySeconds: 3600 },
+    expireInSeconds: 300,
+    handler: async ({ connectionId, after }, { signal }) => {
+      signal.throwIfAborted()
+      const next = await recoverBookingCalendarPage(deps, connectionId, after, enqueueBooking)
+      if (next) await enqueueRecovery(connectionId, next)
     },
   })
 }

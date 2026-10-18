@@ -330,6 +330,17 @@ const schema = z
       }
     }
     if (
+      c.CALENDAR_ENCRYPTION_KEY &&
+      ([c.WEBHOOK_ENCRYPTION_KEY, c.BETTER_AUTH_SECRET].includes(c.CALENDAR_ENCRYPTION_KEY) ||
+        Buffer.from(c.CALENDAR_ENCRYPTION_KEY, 'base64').equals(Buffer.from(c.BETTER_AUTH_SECRET)))
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['CALENDAR_ENCRYPTION_KEY'],
+        message:
+          'Use an independent CALENDAR_ENCRYPTION_KEY, separate from authentication and webhook keys',
+      })
+    if (
       c.CONFERENCE_ENCRYPTION_KEY &&
       ([c.CALENDAR_ENCRYPTION_KEY, c.WEBHOOK_ENCRYPTION_KEY, c.BETTER_AUTH_SECRET].includes(
         c.CONFERENCE_ENCRYPTION_KEY,

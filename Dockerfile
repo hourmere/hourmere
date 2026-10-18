@@ -25,6 +25,7 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/packages ./packages
 COPY --from=build /app/apps/server ./apps/server
 COPY --from=build /app/apps/web/dist ./apps/web/dist
+COPY --from=build /app/scripts/redispatch-calendar-writeback.ts ./scripts/redispatch-calendar-writeback.ts
 USER node
 EXPOSE 3000
 # HOURMERE_ROLE (all, web or worker; default all) picks what a container runs. Every role
