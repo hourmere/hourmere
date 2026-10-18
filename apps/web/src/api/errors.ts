@@ -1,12 +1,15 @@
+import { literal, type MessageKey, msg, type UiText } from '../i18n/translate.ts'
 /** A request the server answered with an error status. `message` is safe to show. */
 export class RequestError extends Error {
+  readonly displayMessage: UiText | undefined
   readonly status: number
   /** The machine-readable code: `error` for /api/v1, `code` for Better Auth's /api/auth. */
   readonly code: string | undefined
 
-  constructor(status: number, code: string | undefined, message: string) {
+  constructor(status: number, code: string | undefined, message: string, displayMessage?: UiText) {
     super(message)
     this.name = 'RequestError'
+    this.displayMessage = displayMessage
     this.status = status
     this.code = code
   }
@@ -14,7 +17,7 @@ export class RequestError extends Error {
 
 export const UNREACHABLE = "Can't reach Hourmere. Check your connection and try again."
 
-function messageForStatus(status: number): string {
+function messageForStatus(status: number): MessageKey {
   if (status === 401) return 'Your session has ended. Sign in again.'
   if (status === 403) return "You don't have permission to do that."
   if (status === 429) return 'Too many requests. Wait a minute and try again.'
@@ -61,6 +64,43 @@ export async function errorFromResponse(response: Response): Promise<RequestErro
 }
 
 /** What to tell people about a failed request (or any other error). */
-export function errorMessage(err: unknown): string {
-  return err instanceof RequestError ? err.message : UNREACHABLE
+export function errorMessage(err: unknown): UiText {
+  if (!(err instanceof RequestError)) return msg(UNREACHABLE)
+  if (err.displayMessage) return err.displayMessage
+  const known: Readonly<Record<string, MessageKey>> = {
+    mcp_oauth_disabled: 'MCP OAuth is disabled on this Hourmere instance.',
+    oauth_request_expired:
+      'This connection attempt expired or was already used. Restart it from your AI app.',
+    invalid_oauth_request:
+      'This connection request is invalid or expired. Restart it from your AI app.',
+    oauth_organization_forbidden: 'You no longer have access to the selected organization.',
+    booking_cancelled: 'This booking was already cancelled.',
+    booking_in_past: 'This meeting has already started, so it can’t be changed.',
+    slot_taken: 'Someone else just booked that time. Please pick another one.',
+    slot_unavailable: 'That time is no longer available. Please pick another one.',
+    EMAIL_NOT_VERIFIED:
+      'Confirm your email address by signing in with an email link before using API keys',
+    calendar_reauth_required: 'Reconnect Google Calendar',
+    calendar_connection_needs_reauth: 'Reconnect Google Calendar',
+    google_calendar_needs_reauth: 'Reconnect Google Calendar',
+    google_calendar_permissions_missing: 'Reconnect before enabling busy times.',
+    schedule_is_default: 'Make another schedule the default before deleting this one',
+    default_schedule: 'Make another schedule the default before deleting this one',
+    default_schedule_required: 'Make another schedule the default before deleting this one',
+    invalid_hosts: 'Check the form and try again.',
+    booking_hosts_unavailable:
+      'This booking can no longer be moved to another time. You can still cancel it, or contact your host.',
+  }
+  const key = err.code && Object.hasOwn(known, err.code) ? known[err.code] : undefined
+  if (key) return msg(key)
+  if (
+    err.status === 401 ||
+    err.status === 403 ||
+    err.status === 429 ||
+    err.status >= 500 ||
+    !err.message
+  )
+    return msg(messageForStatus(err.status))
+  // Unknown server prose stays verbatim. It is never treated as a translation key.
+  return literal(err.message)
 }

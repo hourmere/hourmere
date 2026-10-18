@@ -1,4 +1,5 @@
 import { type KeyboardEvent, useEffect, useId, useMemo, useRef } from 'react'
+import { useI18n } from '../i18n/runtime.tsx'
 import {
   addDays,
   addMonths,
@@ -58,6 +59,8 @@ export function MonthCalendar({
   firstDayOfWeek,
   busy,
 }: MonthCalendarProps) {
+  const { t } = useI18n()
+
   const headingId = useId()
   const grid = useRef<HTMLTableElement>(null)
   const weeks = useMemo(() => monthGrid(month, firstDayOfWeek), [month, firstDayOfWeek])
@@ -121,7 +124,7 @@ export function MonthCalendar({
             className="icon-button"
             onClick={() => onMonthChange(addMonths(month, -1))}
             disabled={!canGoBack}
-            aria-label="Previous month"
+            aria-label={t('Previous month')}
           >
             <span aria-hidden="true">‹</span>
           </button>
@@ -130,7 +133,7 @@ export function MonthCalendar({
             className="icon-button"
             onClick={() => onMonthChange(addMonths(month, 1))}
             disabled={!canGoForward}
-            aria-label="Next month"
+            aria-label={t('Next month')}
           >
             <span aria-hidden="true">›</span>
           </button>
@@ -166,9 +169,14 @@ export function MonthCalendar({
                 }
                 const isAvailable = available.has(day)
                 const isSelected = day === selected
-                const label = `${formatDateKey(day, locale)}, ${
-                  busy ? 'loading' : isAvailable ? 'available' : 'no times available'
-                }`
+                const label = t(
+                  busy
+                    ? '{date}, loading'
+                    : isAvailable
+                      ? '{date}, available'
+                      : '{date}, no times available',
+                  { date: formatDateKey(day, locale) },
+                )
                 return (
                   // biome-ignore lint/a11y/useAriaPropsSupportedByRole: a td in a grid is a gridcell
                   <td key={day} aria-selected={isSelected}>

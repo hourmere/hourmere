@@ -6,7 +6,10 @@ import { errorMessage } from '../api/errors.ts'
 import { goTo } from '../browser.ts'
 import { Logo } from '../components/Logo.tsx'
 import { useLoad, usePageTitle } from '../hooks.ts'
+import { LanguageSwitcher, useI18n } from '../i18n/runtime.tsx'
+import { msg, type UiText } from '../i18n/translate.ts'
 import { safeNextPath, signInPath } from '../next-path.ts'
+import { emailError } from '../public/validation.ts'
 import { PageStatus, useSession } from '../session.tsx'
 
 const PROVIDERS: { id: SocialProvider; label: string }[] = [
@@ -26,13 +29,17 @@ const NO_NEW_ACCOUNT = 'This Hourmere instance does not accept new accounts for 
 // shown: anyone can put text in a link to this page). Codes are matched case-insensitively,
 // in a Map: the code comes from the URL, and a plain object would answer `constructor` or
 // `__proto__` with what it inherits.
-const SIGN_IN_ERRORS = new Map<string, string>(
+const SIGN_IN_ERRORS = new Map<string, UiText>(
   Object.entries({
     invalid_token:
       'That sign-in link is invalid, has expired or was already used. Request a new one below.',
     expired_token: 'That sign-in link has expired. Request a new one below.',
-    email_not_verified: `Your sign-in provider did not confirm your email address. ${USE_EMAIL_LINK}`,
-    email_not_found: `Your sign-in provider did not share your email address. ${USE_EMAIL_LINK}`,
+    email_not_verified: msg('Your sign-in provider did not confirm your email address. {0}', {
+      '0': msg(USE_EMAIL_LINK),
+    }),
+    email_not_found: msg('Your sign-in provider did not share your email address. {0}', {
+      '0': msg(USE_EMAIL_LINK),
+    }),
     access_denied: 'Sign-in was cancelled.',
     state_mismatch: INTERRUPTED,
     state_not_found: INTERRUPTED,
@@ -40,10 +47,19 @@ const SIGN_IN_ERRORS = new Map<string, string>(
     invalid_callback_request: INTERRUPTED,
     invalid_code: INTERRUPTED,
     no_code: INTERRUPTED,
-    account_not_linked: `This email address already has an account. ${USE_EMAIL_LINK}`,
-    unable_to_link_account: `This sign-in could not be connected to your account. ${USE_EMAIL_LINK}`,
-    email_does_not_match: `That account's email address does not match yours. ${USE_EMAIL_LINK}`,
-    account_already_linked_to_different_user: `That sign-in account is already connected to another Hourmere account. ${USE_EMAIL_LINK}`,
+    account_not_linked: msg('This email address already has an account. {0}', {
+      '0': msg(USE_EMAIL_LINK),
+    }),
+    unable_to_link_account: msg('This sign-in could not be connected to your account. {0}', {
+      '0': msg(USE_EMAIL_LINK),
+    }),
+    email_does_not_match: msg("That account's email address does not match yours. {0}", {
+      '0': msg(USE_EMAIL_LINK),
+    }),
+    account_already_linked_to_different_user: msg(
+      'That sign-in account is already connected to another Hourmere account. {0}',
+      { '0': msg(USE_EMAIL_LINK) },
+    ),
     unable_to_get_user_info:
       'Your sign-in provider did not send your account details. Please try again.',
     // The magic link says failed_to_…, the provider callback unable_to_….
@@ -59,26 +75,28 @@ const SIGN_IN_ERRORS = new Map<string, string>(
 )
 
 /** What to tell someone sent back to sign-in with `?error=code`; null without an error. */
-export function describeSignInError(code: string | null): string | null {
+export function describeSignInError(code: string | null): UiText | null {
   if (code === null) return null
   const known = SIGN_IN_ERRORS.get(code.toLowerCase())
   if (known) return known
   // Unknown codes are named so people can report them, but only if they look like codes.
   const shown = /^[A-Za-z0-9_.-]{1,64}$/.test(code) ? ` (${code})` : ''
-  return `Sign-in did not work${shown}. Please try again.`
+  return msg('Sign-in did not work{0}. Please try again.', { '0': shown })
 }
 
 type Phase =
-  | { kind: 'form'; error: string | null }
+  | { kind: 'form'; error: UiText | null }
   | { kind: 'sending' }
   | { kind: 'sent'; email: string }
 
 export function SignInPage() {
+  const { t } = useI18n()
+
   usePageTitle('Sign in')
   const { state } = useSession()
   const [params] = useSearchParams()
   const next = safeNextPath(params.get('next'))
-  if (state.status === 'loading') return <PageStatus>Loading…</PageStatus>
+  if (state.status === 'loading') return <PageStatus>{t('Loading…')}</PageStatus>
   if (state.status === 'signed-in') return <Navigate to={next} replace />
   const expired = state.status === 'signed-out' && state.reason === 'expired'
   return <SignInForm next={next} expired={expired} />
@@ -89,6 +107,8 @@ export function SignInPage() {
  * `expired`: the session ended while the app was open (not on a first visit).
  */
 function SignInForm({ next, expired }: { next: string; expired: boolean }) {
+  const { t, ui } = useI18n()
+
   const [params, setParams] = useSearchParams()
   const [phase, setPhase] = useState<Phase>(() => ({
     kind: 'form',
@@ -121,12 +141,20 @@ function SignInForm({ next, expired }: { next: string; expired: boolean }) {
   async function requestLink(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     const address = email.trim()
+    const problem = emailError(address)
+    if (problem) {
+      setPhase({ kind: 'form', error: problem })
+      return
+    }
     setPhase({ kind: 'sending' })
     try {
       await sendSignInLink(address, redirects)
       setPhase({ kind: 'sent', email: address })
     } catch (err) {
-      setPhase({ kind: 'form', error: `Could not send the link. ${errorMessage(err)}` })
+      setPhase({
+        kind: 'form',
+        error: msg('Could not send the link. {0}', { '0': errorMessage(err) }),
+      })
     }
   }
 
@@ -137,7 +165,10 @@ function SignInForm({ next, expired }: { next: string; expired: boolean }) {
       goTo(await startSocialSignIn(provider, redirects))
     } catch (err) {
       setRedirecting(null)
-      setPhase({ kind: 'form', error: `Could not start sign-in. ${errorMessage(err)}` })
+      setPhase({
+        kind: 'form',
+        error: msg('Could not start sign-in. {0}', { '0': errorMessage(err) }),
+      })
     }
   }
 
@@ -146,20 +177,21 @@ function SignInForm({ next, expired }: { next: string; expired: boolean }) {
       <main className="centered">
         <div className="card">
           <Logo size={32} />
+          <LanguageSwitcher />
           <h1 ref={sentHeading} tabIndex={-1}>
-            Check your email
+            {t('Check your email')}
           </h1>
           <p>
-            We sent a sign-in link to <strong>{phase.email}</strong>. Open it to sign in; it works
-            once and expires in a few minutes.
+            {t('We sent a sign-in link to')} <strong>{phase.email}</strong>
+            {t('. Open it to sign in; it works once and expires in a few minutes.')}
           </p>
-          <p className="muted">Nothing there? Check your spam folder, or try again.</p>
+          <p className="muted">{t('Nothing there? Check your spam folder, or try again.')}</p>
           <button
             type="button"
             className="button button-block"
             onClick={() => setPhase({ kind: 'form', error: null })}
           >
-            Use a different email
+            {t('Use a different email')}
           </button>
         </div>
       </main>
@@ -171,20 +203,21 @@ function SignInForm({ next, expired }: { next: string; expired: boolean }) {
     <main className="centered">
       <div className="card">
         <Logo size={32} />
-        <h1>Sign in to Hourmere</h1>
+        <LanguageSwitcher />
+        <h1>{t('Sign in to Hourmere')}</h1>
         {expired && (
           <p className="alert alert-info" role="status">
-            Your session ended. Please sign in again.
+            {t('Your session ended. Please sign in again.')}
           </p>
         )}
         {phase.kind === 'form' && phase.error && (
           <p className="alert alert-error" role="alert">
-            {phase.error}
+            {ui(phase.error)}
           </p>
         )}
-        <form className="stack" onSubmit={requestLink}>
+        <form className="stack" onSubmit={requestLink} noValidate>
           <div className="field">
-            <label htmlFor="email">Email</label>
+            <label htmlFor="email">{t('Email')}</label>
             <input
               id="email"
               name="email"
@@ -196,13 +229,13 @@ function SignInForm({ next, expired }: { next: string; expired: boolean }) {
             />
           </div>
           <button type="submit" className="button button-primary button-block" disabled={busy}>
-            {phase.kind === 'sending' ? 'Sending…' : 'Email me a sign-in link'}
+            {phase.kind === 'sending' ? t('Sending…') : t('Email me a sign-in link')}
           </button>
         </form>
         {providers.length > 0 && (
           <>
             <p className="divider">
-              <span>or</span>
+              <span>{t('or')}</span>
             </p>
             <div className="stack">
               {providers.map((p) => (
@@ -213,13 +246,17 @@ function SignInForm({ next, expired }: { next: string; expired: boolean }) {
                   disabled={busy}
                   onClick={() => continueWith(p.id)}
                 >
-                  {redirecting === p.id ? `Opening ${p.label}…` : `Continue with ${p.label}`}
+                  {redirecting === p.id
+                    ? t('Opening {0}…', { '0': p.label })
+                    : t('Continue with {0}', { '0': p.label })}
                 </button>
               ))}
             </div>
           </>
         )}
-        <p className="fine-print">No password needed. New here? Signing in creates your account.</p>
+        <p className="fine-print">
+          {t('No password needed. New here? Signing in creates your account.')}
+        </p>
       </div>
     </main>
   )

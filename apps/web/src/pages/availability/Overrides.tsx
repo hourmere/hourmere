@@ -6,6 +6,8 @@ import { errorMessage, RequestError, requestError } from '../../api/errors.ts'
 import type { Schedule } from '../../api/resources.ts'
 import { ErrorSummary, Field, FieldError, type FieldErrors } from '../../components/forms.tsx'
 import { useLoad } from '../../hooks.ts'
+import { useI18n } from '../../i18n/runtime.tsx'
+import { dateMessage, msg, type UiText } from '../../i18n/translate.ts'
 import { useUnsavedChanges } from '../../unsaved-changes.tsx'
 import { IntervalsEditor } from './IntervalsEditor.tsx'
 import {
@@ -21,23 +23,14 @@ type Override = { date: string; intervals: { start: string; end: string }[] }
 
 const PREFIX = 'override-hours'
 
-const dateFormat = new Intl.DateTimeFormat(undefined, {
-  timeZone: 'UTC',
-  weekday: 'short',
-  day: 'numeric',
-  month: 'short',
-  year: 'numeric',
-})
-
-/** "Thu, 24 Dec 2026" for "2026-12-24" (a calendar date, no zone). */
-export const formatDate = (date: string) => dateFormat.format(new Date(`${date}T00:00:00Z`))
-
 const hoursText = (o: Override) =>
   o.intervals.length === 0
     ? 'Unavailable all day'
     : o.intervals.map((i) => `${i.start}–${i.end}`).join(', ')
 
 export function Overrides({ schedule }: { schedule: Schedule }) {
+  const { t, ui } = useI18n()
+
   // Upcoming ones only: past dates no longer matter for booking.
   const today = todayIn(schedule.timeZone)
   const load = useCallback(
@@ -53,33 +46,36 @@ export function Overrides({ schedule }: { schedule: Schedule }) {
     [schedule.id, today],
   )
   const [state, reload] = useLoad(load)
-  const [status, setStatus] = useState('')
+  const [status, setStatus] = useState<UiText>('')
   const heading = useRef<HTMLHeadingElement>(null)
 
   return (
     <section className="panel" aria-labelledby="overrides-heading">
       <h2 id="overrides-heading" ref={heading} tabIndex={-1}>
-        Date overrides
+        {t('Date overrides')}
       </h2>
       <p className="hint">
-        Other hours on single dates, such as holidays, in {schedule.timeZone.replaceAll('_', ' ')}.
-        They are saved right away.
+        {t('Other hours on single dates, such as holidays, in')}{' '}
+        {schedule.timeZone.replaceAll('_', ' ')}
+        {t('. They are saved right away.')}
       </p>
       <p className="flash" role="status">
-        {status}
+        {ui(status)}
       </p>
-      {state.status === 'loading' && <p role="status">Loading overrides…</p>}
+      {state.status === 'loading' && <p role="status">{t('Loading overrides…')}</p>}
       {state.status === 'error' && (
         <div className="alert alert-error" role="alert">
-          <p>Could not load the date overrides. {state.message}</p>
+          <p>
+            {t('Could not load the date overrides.')} {ui(state.message)}
+          </p>
           <button type="button" className="button button-small" onClick={reload}>
-            Try again
+            {t('Try again')}
           </button>
         </div>
       )}
       {state.status === 'ready' &&
         (state.data.length === 0 ? (
-          <p className="muted">No upcoming date overrides.</p>
+          <p className="muted">{t('No upcoming date overrides.')}</p>
         ) : (
           <ul className="override-list">
             {state.data.map((o) => (
@@ -88,7 +84,7 @@ export function Overrides({ schedule }: { schedule: Schedule }) {
                 scheduleId={schedule.id}
                 override={o}
                 onRemoved={() => {
-                  setStatus(`Removed the override for ${formatDate(o.date)}.`)
+                  setStatus(msg('Removed the override for {0}.', { '0': dateMessage(o.date) }))
                   reload()
                   heading.current?.focus()
                 }}
@@ -102,7 +98,15 @@ export function Overrides({ schedule }: { schedule: Schedule }) {
         existing={state.status === 'ready' ? state.data : []}
         onSaved={(o, created) => {
           setStatus(
-            `${created ? 'Added' : 'Replaced'} the override for ${formatDate(o.date)}: ${hoursText(o)}.`,
+            msg(
+              created
+                ? 'Added the override for {date}: {hours}.'
+                : 'Replaced the override for {date}: {hours}.',
+              {
+                date: dateMessage(o.date),
+                hours: o.intervals.length ? hoursText(o) : msg('Unavailable all day'),
+              },
+            ),
           )
           reload()
         }}
@@ -120,9 +124,18 @@ function OverrideRow({
   override: Override
   onRemoved: () => void
 }) {
+  const { t, ui, formatLocale: displayLocale } = useI18n()
+
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const date = formatDate(override.date)
+  const [error, setError] = useState<UiText | null>(null)
+  const date = new Intl.DateTimeFormat(displayLocale, {
+    calendar: 'gregory',
+    timeZone: 'UTC',
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  }).format(new Date(`${override.date}T00:00:00Z`))
 
   async function remove() {
     setBusy(true)
@@ -137,7 +150,7 @@ function OverrideRow({
     } catch (err) {
       // Already gone (removed elsewhere): what the person wanted.
       if (err instanceof RequestError && err.code === 'schedule_override_not_found') onRemoved()
-      else setError(`Could not remove it. ${errorMessage(err)}`)
+      else setError(msg('Could not remove it. {0}', { '0': errorMessage(err) }))
     }
     setBusy(false)
   }
@@ -147,19 +160,19 @@ function OverrideRow({
       <span className="override-date">
         <time dateTime={override.date}>{date}</time>
       </span>
-      <span>{hoursText(override)}</span>
+      <span>{ui(hoursText(override))}</span>
       <button
         type="button"
         className="button button-small"
         onClick={remove}
         disabled={busy}
-        aria-label={`Remove override: ${date}`}
+        aria-label={t('Remove override: {0}', { '0': date })}
       >
-        {busy ? 'Removing…' : 'Remove'}
+        {busy ? t('Removing…') : t('Remove')}
       </button>
       {error && (
         <p className="alert alert-error" role="alert">
-          {error}
+          {ui(error)}
         </p>
       )}
     </li>
@@ -177,12 +190,14 @@ function AddOverride({
   existing: Override[]
   onSaved: (override: Override, created: boolean) => void
 }) {
+  const { t } = useI18n()
+
   const [date, setDate] = useState('')
   const [mode, setMode] = useState<'unavailable' | 'hours'>('unavailable')
   const [initialIntervals] = useState(() => [intervalDraft()])
   const [intervals, setIntervals] = useState<IntervalDraft[]>(initialIntervals)
   const [errors, setErrors] = useState<FieldErrors>({})
-  const [formError, setFormError] = useState<string | null>(null)
+  const [formError, setFormError] = useState<UiText | null>(null)
   const [attempt, setAttempt] = useState(0)
   const [saving, setSaving] = useState(false)
   const submitButton = useRef<HTMLButtonElement>(null)
@@ -234,33 +249,33 @@ function AddOverride({
         const overlap = /overlapping intervals (.+)$/.exec(err.message)?.[1]
         setErrors({
           [PREFIX]: overlap
-            ? `These hours overlap: ${overlap}.`
+            ? msg('These hours overlap: {0}.', { '0': overlap })
             : 'Check these hours: each must end after it starts.',
         })
       } else {
-        setFormError(`Could not save the override. ${errorMessage(err)}`)
+        setFormError(msg('Could not save the override. {0}', { '0': errorMessage(err) }))
       }
       setAttempt((n) => n + 1)
     }
     setSaving(false)
   }
 
-  const labels: Record<string, string> = { 'override-date': 'Date', [PREFIX]: 'Hours' }
+  const labels: Record<string, UiText> = { 'override-date': 'Date', [PREFIX]: 'Hours' }
   intervals.forEach((i, n) => {
-    labels[intervalField(PREFIX, i, 'start')] = `Hours ${n + 1}, from`
-    labels[intervalField(PREFIX, i, 'end')] = `Hours ${n + 1}, until`
+    labels[intervalField(PREFIX, i, 'start')] = msg('Hours {0}, from', { '0': n + 1 })
+    labels[intervalField(PREFIX, i, 'end')] = msg('Hours {0}, until', { '0': n + 1 })
   })
 
   return (
     <form className="override-form" onSubmit={submit} noValidate aria-labelledby="add-override">
-      <h3 id="add-override">Add a date override</h3>
+      <h3 id="add-override">{t('Add a date override')}</h3>
       <ErrorSummary errors={errors} labels={labels} message={formError} attempt={attempt} />
       <fieldset className="form-fieldset override-fields" disabled={saving} role="presentation">
         <Field
           id="override-date"
-          label="Date"
+          label={t('Date')}
           error={errors['override-date']}
-          hint={replaces ? 'This date has an override already; saving replaces it.' : undefined}
+          hint={replaces ? t('This date has an override already; saving replaces it.') : undefined}
           className="date-field"
         >
           {(props) => (
@@ -274,7 +289,7 @@ function AddOverride({
           )}
         </Field>
         <fieldset className="choice">
-          <legend>Hours on that date</legend>
+          <legend>{t('Hours on that date')}</legend>
           <label className="checkbox">
             <input
               type="radio"
@@ -283,7 +298,7 @@ function AddOverride({
               checked={mode === 'unavailable'}
               onChange={() => setMode('unavailable')}
             />
-            Unavailable all day
+            {t('Unavailable all day')}
           </label>
           <label className="checkbox">
             <input
@@ -293,14 +308,14 @@ function AddOverride({
               checked={mode === 'hours'}
               onChange={() => setMode('hours')}
             />
-            Other hours
+            {t('Other hours')}
           </label>
         </fieldset>
         {mode === 'hours' && (
           <div id={PREFIX} tabIndex={-1}>
             <IntervalsEditor
               prefix={PREFIX}
-              label="That date"
+              label={t('That date')}
               intervals={intervals}
               onChange={setIntervals}
               errors={errors}
@@ -318,7 +333,7 @@ function AddOverride({
           className="button button-primary"
           aria-disabled={saving}
         >
-          {saving ? 'Saving…' : 'Save override'}
+          {saving ? t('Saving…') : t('Save override')}
         </button>
       </div>
     </form>

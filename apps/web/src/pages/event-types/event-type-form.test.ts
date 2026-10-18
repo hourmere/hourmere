@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { RequestError } from '../../api/errors.ts'
+import { translateMessage } from '../../i18n/translate.ts'
 import { eventType } from '../../test/fixtures.ts'
 import {
   comparable,
@@ -15,6 +16,13 @@ import {
   validateDraft,
 } from './event-type-form.ts'
 
+const renderedDraftErrors = (...args: Parameters<typeof validateDraft>) =>
+  Object.fromEntries(
+    Object.entries(validateDraft(...args)).map(([key, value]) => [
+      key,
+      translateMessage('en', value),
+    ]),
+  )
 describe('slugify', () => {
   it.each([
     ['Intro call', 'intro-call'],
@@ -71,11 +79,11 @@ describe('question identity', () => {
 
 describe('validateDraft', () => {
   it('accepts the defaults with a title and slug', () => {
-    expect(validateDraft({ ...emptyDraft(), title: 'Intro', slug: 'intro' })).toEqual({})
+    expect(renderedDraftErrors({ ...emptyDraft(), title: 'Intro', slug: 'intro' })).toEqual({})
   })
 
   it('refuses control characters and overlong text the way the server does', () => {
-    const errors = validateDraft({
+    const errors = renderedDraftErrors({
       ...emptyDraft(),
       title: 'Intro\u0007',
       slug: 'a'.repeat(65),
@@ -93,8 +101,8 @@ describe('validateDraft', () => {
 
   it('allows line breaks in the description but not other controls', () => {
     const base = { ...emptyDraft(), title: 'Intro', slug: 'intro' }
-    expect(validateDraft({ ...base, description: 'a\n\tb' })).toEqual({})
-    expect(validateDraft({ ...base, description: 'a b' })).toHaveProperty('description')
+    expect(renderedDraftErrors({ ...base, description: 'a\n\tb' })).toEqual({})
+    expect(renderedDraftErrors({ ...base, description: 'a b' })).toHaveProperty('description')
   })
 
   it('needs options for choice questions, at most 50', () => {
@@ -104,9 +112,11 @@ describe('validateDraft', () => {
       type: 'select' as const,
       options: Array.from({ length: 51 }, (_, i) => newOption(`o${i}`)),
     }
-    expect(validateDraft({ ...emptyDraft(), title: 'T', slug: 't', questions: [q] })).toEqual({
-      [questionField(q, 'options')]: 'Offer at most 50 options.',
-    })
+    expect(renderedDraftErrors({ ...emptyDraft(), title: 'T', slug: 't', questions: [q] })).toEqual(
+      {
+        [questionField(q, 'options')]: 'Offer at most 50 options.',
+      },
+    )
   })
 })
 
@@ -128,10 +138,30 @@ describe('serverErrors', () => {
     ])
   })
 
+  it.each(['constructor', 'toString', 'hasOwnProperty'])(
+    'keeps an unknown server field named %s as literal form text',
+    (name) => {
+      const detail = `${name} must be checked by the server.`
+      const mapped = serverErrors(refused('invalid_event_type', detail), draft)
+      expect(mapped).toEqual({ fields: {}, message: { literal: detail } })
+      expect(translateMessage('zh-CN', mapped.message)).toBe(detail)
+    },
+  )
+
+  it('puts a known host refusal on its field without translating arbitrary server detail', () => {
+    expect(serverErrors(refused('invalid_hosts', 'Server policy detail'), draft)).toEqual({
+      fields: {
+        hosts:
+          'Choose current verified team members: one individual host or two to eight collective hosts.',
+      },
+      message: null,
+    })
+  })
+
   it('keeps unknown codes for the whole form', () => {
     expect(serverErrors(refused('something_new', 'Something new.'), draft)).toEqual({
       fields: {},
-      message: 'Something new.',
+      message: { literal: 'Something new.' },
     })
     expect(serverErrors(new TypeError('Failed to fetch'), draft)).toEqual({
       fields: {},

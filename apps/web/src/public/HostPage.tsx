@@ -1,6 +1,8 @@
 import { useCallback } from 'react'
 import { Link, Navigate, useParams } from 'react-router'
 import { usePageTitle } from '../hooks.ts'
+import { useI18n } from '../i18n/runtime.tsx'
+import { literal } from '../i18n/translate.ts'
 import { codeOf, failureMessage, getHost } from './api.ts'
 import { locationLabel } from './BookingDetails.tsx'
 import { PublicLayout, PublicNotFound, PublicStatus } from './PublicLayout.tsx'
@@ -18,14 +20,16 @@ export function HostPage() {
 }
 
 function HostPageContent({ handle }: { handle: string }) {
+  const { t, ui, locale: displayLocale } = useI18n()
+
   const load = useCallback((signal: AbortSignal) => getHost(handle, signal), [handle])
   const [state, reload] = useRequest(load)
-  usePageTitle(state.status === 'ready' ? state.data.host.name : 'Booking')
+  usePageTitle(state.status === 'ready' ? literal(state.data.host.name) : 'Booking')
 
   if (state.status === 'loading') {
     return (
       <PublicLayout>
-        <PublicStatus>Loading…</PublicStatus>
+        <PublicStatus>{t('Loading…')}</PublicStatus>
       </PublicLayout>
     )
   }
@@ -34,9 +38,9 @@ function HostPageContent({ handle }: { handle: string }) {
     return (
       <PublicLayout>
         <div className="card public-card">
-          <p role="alert">{failureMessage(state.error)}</p>
+          <p role="alert">{ui(failureMessage(state.error))}</p>
           <button type="button" className="button" onClick={reload}>
-            Try again
+            {t('Try again')}
           </button>
         </div>
       </PublicLayout>
@@ -47,7 +51,9 @@ function HostPageContent({ handle }: { handle: string }) {
     <PublicLayout>
       <header className="host-header">
         <h1>{host.name}</h1>
-        {eventTypes.length > 0 && <p className="muted">Pick an event to see available times.</p>}
+        {eventTypes.length > 0 && (
+          <p className="muted">{t('Pick an event to see available times.')}</p>
+        )}
       </header>
       {eventTypes.length ? (
         <ul className="event-list">
@@ -56,8 +62,8 @@ function HostPageContent({ handle }: { handle: string }) {
               <Link className="event-card" to={`/${handle}/${et.slug}`}>
                 <span className="event-card-title">{et.title}</span>
                 <span className="event-card-meta">
-                  {formatDuration(et.durationMinutes)}
-                  {et.location && ` · ${locationLabel(et.location.kind)}`}
+                  {formatDuration(et.durationMinutes, displayLocale)}
+                  {et.location && ` · ${ui(locationLabel(et.location.kind))}`}
                 </span>
                 {et.description && <span className="event-card-description">{et.description}</span>}
               </Link>
@@ -66,7 +72,9 @@ function HostPageContent({ handle }: { handle: string }) {
         </ul>
       ) : (
         <div className="empty">
-          <p>{host.name} has no events you can book right now.</p>
+          <p>
+            {host.name} {t('has no events you can book right now.')}
+          </p>
         </div>
       )}
     </PublicLayout>

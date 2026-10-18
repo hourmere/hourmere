@@ -6,6 +6,8 @@ import { type Booking, isNotFound, loadProfile } from '../../api/resources.ts'
 import { Field } from '../../components/forms.tsx'
 import { zoned } from '../../format.ts'
 import { useLoad, usePageTitle } from '../../hooks.ts'
+import { useI18n } from '../../i18n/runtime.tsx'
+import { msg, type UiText } from '../../i18n/translate.ts'
 import { BOOKING } from '../../limits.ts'
 import { bookingPath, PATHS } from '../../paths.ts'
 import { isMultiLineText } from '../../text.ts'
@@ -30,6 +32,8 @@ export function BookingDetailPage() {
 }
 
 function BookingDetail({ id }: { id: string }) {
+  const { t, ui } = useI18n()
+
   const load = useCallback(
     async (signal: AbortSignal): Promise<Loaded | 'missing'> => {
       const [booking, profile] = await Promise.all([
@@ -70,15 +74,17 @@ function BookingDetail({ id }: { id: string }) {
   const [state, reload] = useLoad(load)
   usePageTitle('Booking')
 
-  if (state.status === 'loading') return <p role="status">Loading the booking…</p>
+  if (state.status === 'loading') return <p role="status">{t('Loading the booking…')}</p>
   if (state.status === 'error') {
     return (
       <>
-        <h1>Booking</h1>
+        <h1>{t('Booking')}</h1>
         <div className="alert alert-error" role="alert">
-          <p>Could not load the booking. {state.message}</p>
+          <p>
+            {t('Could not load the booking.')} {ui(state.message)}
+          </p>
           <button type="button" className="button button-small" onClick={reload}>
-            Try again
+            {t('Try again')}
           </button>
         </div>
       </>
@@ -87,7 +93,7 @@ function BookingDetail({ id }: { id: string }) {
   if (state.data === 'missing') {
     return (
       <MissingRecord
-        title="Booking not found"
+        title={t('Booking not found')}
         message="This booking does not exist, or it is not one of yours."
         back={{ to: PATHS.bookings, label: 'Back to bookings' }}
       />
@@ -97,10 +103,12 @@ function BookingDetail({ id }: { id: string }) {
 }
 
 function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loaded) {
+  const { t, ui, formatLocale: displayLocale } = useI18n()
+
   const [booking, setBooking] = useState(initial)
-  const [status, setStatus] = useState('')
+  const [status, setStatus] = useState<UiText>('')
   const statusRef = useRef<HTMLParagraphElement>(null)
-  const format = zoned(timeZone)
+  const format = zoned(timeZone, displayLocale)
   const zoneName = format.timeZone.replaceAll('_', ' ')
   const [invitee, ...guests] = [...booking.attendees].sort(
     (a, b) => Number(b.isBooker) - Number(a.isBooker),
@@ -119,18 +127,18 @@ function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loa
   return (
     <>
       <p className="breadcrumb">
-        <Link to={PATHS.bookings}>Bookings</Link>
+        <Link to={PATHS.bookings}>{t('Bookings')}</Link>
       </p>
       <h1>
         {booking.title}
-        {cancelled && <span className="badge badge-danger heading-badge">Cancelled</span>}
+        {cancelled && <span className="badge badge-danger heading-badge">{t('Cancelled')}</span>}
       </h1>
       <p className="flash" role="status" tabIndex={-1} ref={statusRef}>
-        {status}
+        {ui(status)}
       </p>
 
       <section className="panel" aria-labelledby="when-heading">
-        <h2 id="when-heading">When</h2>
+        <h2 id="when-heading">{t('When')}</h2>
         <p className="when">
           <time dateTime={booking.start}>{format.longDate(booking.start)}</time>
           <br />
@@ -138,15 +146,16 @@ function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loa
         </p>
         {!fromProfile && (
           <p className="hint">
-            Shown in this browser’s time zone. <Link to={PATHS.settings}>Set your time zone</Link>.
+            {t('Shown in this browser’s time zone.')}{' '}
+            <Link to={PATHS.settings}>{t('Set your time zone')}</Link>.
           </p>
         )}
         <dl className="details">
-          <dt>Location</dt>
+          <dt>{t('Location')}</dt>
           <dd>
             {location ? (
               <>
-                {location.label}
+                {ui(location.label)}
                 {location.detail && (
                   <>
                     :{' '}
@@ -161,30 +170,34 @@ function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loa
                 )}
               </>
             ) : (
-              <span className="muted">Not set</span>
+              <span className="muted">{t('Not set')}</span>
             )}
           </dd>
-          <dt>Booked</dt>
+          <dt>{t('Booked')}</dt>
           <dd>
-            {format.dateTime(booking.createdAt)}, through {SOURCE_LABELS[booking.source]}
+            {format.dateTime(booking.createdAt)}
+            {t(', through')} {ui(SOURCE_LABELS[booking.source])}
           </dd>
           {booking.rescheduledFromId && (
             <>
-              <dt>Rescheduled</dt>
+              <dt>{t('Rescheduled')}</dt>
               <dd>
-                From <Link to={bookingPath(booking.rescheduledFromId)}>an earlier booking</Link>
+                {t('From')}{' '}
+                <Link to={bookingPath(booking.rescheduledFromId)}>{t('an earlier booking')}</Link>
               </dd>
             </>
           )}
           {cancelled && (
             <>
-              <dt>Cancelled</dt>
+              <dt>{t('Cancelled')}</dt>
               <dd>
-                {booking.cancelledAt ? format.dateTime(booking.cancelledAt) : 'Yes'}
+                {booking.cancelledAt ? format.dateTime(booking.cancelledAt) : t('Yes')}
                 {booking.cancelReason && (
                   <>
                     <br />
-                    <span className="multiline">Reason: {booking.cancelReason}</span>
+                    <span className="multiline">
+                      {t('Reason:')} {booking.cancelReason}
+                    </span>
                   </>
                 )}
               </dd>
@@ -194,9 +207,9 @@ function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loa
       </section>
 
       <section className="panel" aria-labelledby="people-heading">
-        <h2 id="people-heading">People</h2>
+        <h2 id="people-heading">{t('People')}</h2>
         <dl className="details">
-          <dt>Invitee</dt>
+          <dt>{t('Invitee')}</dt>
           <dd>
             {invitee ? (
               <>
@@ -205,23 +218,28 @@ function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loa
                 <a href={`mailto:${invitee.email}`}>{invitee.email}</a>
                 <br />
                 <span className="muted">
-                  Time zone: {invitee.timeZone.replaceAll('_', ' ')}
+                  {t('Time zone:')} {invitee.timeZone.replaceAll('_', ' ')}
                   {invitee.timeZone !== format.timeZone && (
                     <>
                       {' '}
-                      ({zoned(invitee.timeZone).dateTimeRange(booking.start, booking.end)} there)
+                      (
+                      {zoned(invitee.timeZone, displayLocale).dateTimeRange(
+                        booking.start,
+                        booking.end,
+                      )}{' '}
+                      {t('there)')}
                     </>
                   )}
                 </span>
               </>
             ) : (
-              <span className="muted">Unknown</span>
+              <span className="muted">{t('Unknown')}</span>
             )}
           </dd>
-          <dt>Guests</dt>
+          <dt>{t('Guests')}</dt>
           <dd>
             {guests.length === 0 ? (
-              <span className="muted">None</span>
+              <span className="muted">{t('None')}</span>
             ) : (
               <ul className="plain-list">
                 {guests.map((g) => (
@@ -236,16 +254,20 @@ function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loa
       </section>
 
       <section className="panel" aria-labelledby="answers-heading">
-        <h2 id="answers-heading">Answers</h2>
+        <h2 id="answers-heading">{t('Answers')}</h2>
         {answerIds.length === 0 ? (
-          <p className="muted">No answers to extra questions.</p>
+          <p className="muted">{t('No answers to extra questions.')}</p>
         ) : (
           <dl className="details details-stacked">
             {answerIds.map((qid) => (
               <div key={qid} className="detail-pair">
                 <dt>{labels.get(qid) ?? qid}</dt>
                 <dd className="multiline">
-                  {answerText(booking.responses[qid]) ?? <span className="muted">No answer</span>}
+                  {(typeof booking.responses[qid] === 'boolean'
+                    ? t(booking.responses[qid] ? 'Yes' : 'No')
+                    : answerText(booking.responses[qid])) ?? (
+                    <span className="muted">{t('No answer')}</span>
+                  )}
                 </dd>
               </div>
             ))}
@@ -281,10 +303,12 @@ function CancelBooking({
   onCancelled: (booking: Booking) => void
   onAlreadyCancelled: (message: string) => void
 }) {
+  const { t, ui } = useI18n()
+
   const [open, setOpen] = useState(false)
   const [reason, setReason] = useState('')
-  const [reasonError, setReasonError] = useState<string | undefined>()
-  const [error, setError] = useState<string | null>(null)
+  const [reasonError, setReasonError] = useState<UiText | undefined>()
+  const [error, setError] = useState<UiText | null>(null)
   const [busy, setBusy] = useState(false)
   const openButton = useRef<HTMLButtonElement>(null)
   const formId = useId()
@@ -305,7 +329,10 @@ function CancelBooking({
     const text = reason.trim()
     if (text.length > BOOKING.cancelReasonMaxLength) {
       setReasonError(
-        `Use at most ${BOOKING.cancelReasonMaxLength} characters (now ${text.length}).`,
+        msg('Use at most {0} characters (now {1}).', {
+          '0': BOOKING.cancelReasonMaxLength,
+          '1': text.length,
+        }),
       )
       document.getElementById('cancel-reason')?.focus()
       return
@@ -339,7 +366,7 @@ function CancelBooking({
       } else if (err instanceof RequestError && err.code === 'booking_in_past') {
         setError('This booking has already started, so it can no longer be cancelled.')
       } else {
-        setError(`Could not cancel the booking. ${errorMessage(err)}`)
+        setError(msg('Could not cancel the booking. {0}', { '0': errorMessage(err) }))
       }
     }
     setBusy(false)
@@ -347,12 +374,13 @@ function CancelBooking({
 
   return (
     <section className="panel panel-danger" aria-labelledby="cancel-heading">
-      <h2 id="cancel-heading">Cancel this booking</h2>
+      <h2 id="cancel-heading">{t('Cancel this booking')}</h2>
       {!open ? (
         <>
           <p>
-            The time becomes free again. The invitee can see that it is cancelled, and why if you
-            give a reason, with their booking.
+            {t(
+              'The time becomes free again. The invitee can see that it is cancelled, and why if you give a reason, with their booking.',
+            )}
           </p>
           <button
             ref={openButton}
@@ -365,17 +393,19 @@ function CancelBooking({
             aria-controls={formId}
             aria-expanded={false}
           >
-            Cancel booking…
+            {t('Cancel booking…')}
           </button>
         </>
       ) : (
         <form id={formId} onSubmit={submit} noValidate className="stack">
           <Field
             id="cancel-reason"
-            label="Reason"
+            label={t('Reason')}
             optional
             error={reasonError}
-            hint={`The invitee can see it. Up to ${BOOKING.cancelReasonMaxLength} characters.`}
+            hint={t('The invitee can see it. Up to {0} characters.', {
+              '0': BOOKING.cancelReasonMaxLength,
+            })}
           >
             {(props) => (
               <textarea
@@ -388,15 +418,15 @@ function CancelBooking({
           </Field>
           {error && (
             <p className="alert alert-error" role="alert">
-              {error}
+              {ui(error)}
             </p>
           )}
           <div className="form-actions">
             <button type="submit" className="button button-danger" disabled={busy}>
-              {busy ? 'Cancelling…' : 'Cancel booking'}
+              {busy ? t('Cancelling…') : t('Cancel booking')}
             </button>
             <button type="button" className="button" onClick={close} disabled={busy}>
-              Keep booking
+              {t('Keep booking')}
             </button>
           </div>
         </form>

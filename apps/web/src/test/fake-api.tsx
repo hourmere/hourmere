@@ -74,6 +74,7 @@ export const ME: Schemas['Me'] = {
 
 export const signedInAs = (me: Schemas['Me']): Routes => ({
   'GET /api/v1/me': () => json(200, me),
+  'GET /api/v1/profile': () => json(404, { error: 'profile_not_found' }),
 })
 export const signedIn = signedInAs(ME)
 /** Better Auth's list of the signed-in user's organizations. */

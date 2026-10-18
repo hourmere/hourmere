@@ -1,5 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { errorMessage } from '../api/errors.ts'
+import { useI18n } from '../i18n/runtime.tsx'
+import type { UiText } from '../i18n/translate.ts'
 
 /**
  * A destructive action that asks for confirmation in place: the button turns into the
@@ -29,9 +31,11 @@ export function ConfirmAction({
   onConfirm: () => Promise<void>
   className?: string
 }) {
+  const { t, ui } = useI18n()
+
   const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<UiText | null>(null)
   const cancel = useRef<HTMLButtonElement>(null)
   const start = useRef<HTMLButtonElement>(null)
   const wasConfirming = useRef(false)
@@ -58,7 +62,7 @@ export function ConfirmAction({
       await onConfirm()
     } catch (err) {
       if (!mounted.current) return
-      setError(`${failure} ${errorMessage(err)}`)
+      setError(errorMessage(err))
     }
     if (mounted.current) setBusy(false)
   }
@@ -70,9 +74,9 @@ export function ConfirmAction({
         type="button"
         className={`button button-small ${className}`.trim()}
         onClick={() => setConfirming(true)}
-        {...(accessibleLabel && { 'aria-label': accessibleLabel })}
+        {...(accessibleLabel && { 'aria-label': ui(accessibleLabel) })}
       >
-        {label}
+        {ui(label)}
       </button>
     )
   }
@@ -89,7 +93,7 @@ export function ConfirmAction({
         }
       }}
     >
-      <p id={promptId}>{prompt}</p>
+      <p id={promptId}>{ui(prompt)}</p>
       <div className="confirm-buttons">
         <button
           type="button"
@@ -97,7 +101,7 @@ export function ConfirmAction({
           onClick={confirm}
           disabled={busy}
         >
-          {busy ? busyLabel : confirmLabel}
+          {ui(busy ? busyLabel : confirmLabel)}
         </button>
         <button
           ref={cancel}
@@ -106,12 +110,12 @@ export function ConfirmAction({
           onClick={() => setConfirming(false)}
           disabled={busy}
         >
-          Cancel
+          {t('Cancel')}
         </button>
       </div>
       {error && (
         <p className="alert alert-error" role="alert">
-          {error}
+          {ui(failure)} {ui(error)}
         </p>
       )}
     </div>

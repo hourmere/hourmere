@@ -5,7 +5,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./reserved": "./src/reserved.ts",
-    "./embed": "./src/embed.ts"
+    "./embed": "./src/embed.ts",
+    "./language": "./src/language.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json"

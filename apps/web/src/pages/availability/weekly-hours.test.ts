@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { translateMessage } from '../../i18n/translate.ts'
 import {
   intervalDraft,
   intervalField,
@@ -8,10 +9,17 @@ import {
   validateIntervals,
 } from './weekly-hours.ts'
 
+const validateIntervalsText = (...args: Parameters<typeof validateIntervals>) =>
+  Object.fromEntries(
+    Object.entries(validateIntervals(...args)).map(([key, value]) => [
+      key,
+      translateMessage('en', value),
+    ]),
+  )
 describe('validateIntervals', () => {
   it('accepts separate and touching ranges, and an end at midnight', () => {
     expect(
-      validateIntervals('d', [
+      validateIntervalsText('d', [
         intervalDraft('09:00', '12:00'),
         intervalDraft('12:00', '13:00'),
         intervalDraft('20:00', '24:00'),
@@ -21,7 +29,7 @@ describe('validateIntervals', () => {
 
   it('names every overlap, in time order', () => {
     expect(
-      validateIntervals('d', [
+      validateIntervalsText('d', [
         intervalDraft('13:00', '15:00'),
         intervalDraft('09:00', '12:00'),
         intervalDraft('11:00', '14:00'),
@@ -30,7 +38,7 @@ describe('validateIntervals', () => {
       d: 'These hours overlap: 09:00–12:00 and 11:00–14:00; 11:00–14:00 and 13:00–15:00.',
     })
     expect(
-      validateIntervals('d', [
+      validateIntervalsText('d', [
         intervalDraft('09:00', '17:00'),
         intervalDraft('10:00', '11:00'),
         intervalDraft('12:00', '13:00'),
@@ -43,7 +51,7 @@ describe('validateIntervals', () => {
   it('refuses an end at or before the start, and missing times', () => {
     const same = intervalDraft('10:00', '10:00')
     const missing = { ...intervalDraft(), start: '' }
-    expect(validateIntervals('d', [same, missing])).toEqual({
+    expect(validateIntervalsText('d', [same, missing])).toEqual({
       [intervalField('d', same, 'end')]: 'End after the start time.',
       [intervalField('d', missing, 'start')]: 'Enter a start time.',
     })

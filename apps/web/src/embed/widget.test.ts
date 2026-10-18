@@ -257,3 +257,61 @@ describe('standalone booking widget', () => {
     destroyInline(element)
   })
 })
+
+describe('standalone widget languages', () => {
+  it('uses the explicit tiny language option in frame labels and query', () => {
+    const element = document.createElement('div')
+    document.body.append(element)
+    const handle = initInline({ element, url, language: 'zh-CN' })
+    handles.push(handle)
+    expect(handle.iframe.title).toBe('通过 Hourmere 预约会议')
+    const query = new URL(handle.iframe.src).searchParams
+    expect(query.get('language')).toBe('zh-CN')
+    expect([...query.keys()].sort()).toEqual(['embedId', 'language', 'parentOrigin'])
+  })
+  it.each(['zh', 'EN', 'zh-TW', 'en-US', '__proto__', 'constructor', 'zh-CN&token=private'])(
+    'rejects unsupported explicit language %s before replacing an existing frame',
+    (language) => {
+      const initial = mount()
+      expect(() =>
+        initInline({ element: initial.element, url, language: language as 'en' }),
+      ).toThrow('Invalid Hourmere interface language')
+      expect(initial.iframe.isConnected).toBe(true)
+      expect(initial.element.querySelectorAll('iframe')).toHaveLength(1)
+    },
+  )
+  it('localizes popup controls while keeping the original sender and cleanup guards', () => {
+    Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
+      configurable: true,
+      value: function (this: HTMLDialogElement) {
+        this.setAttribute('open', '')
+      },
+    })
+    Object.defineProperty(HTMLDialogElement.prototype, 'close', {
+      configurable: true,
+      value: function (this: HTMLDialogElement) {
+        this.removeAttribute('open')
+      },
+    })
+    openPopup({ url, language: 'zh-CN' })
+    const dialog = document.querySelector('dialog') as HTMLDialogElement
+    expect(dialog.querySelector('h2')?.textContent).toBe('预约会议')
+    expect(dialog.querySelector('button')?.getAttribute('aria-label')).toBe('关闭预约窗口')
+    const frame = dialog.querySelector('iframe') as HTMLIFrameElement
+    expect(new URL(frame.src).searchParams.get('language')).toBe('zh-CN')
+    dialog.dispatchEvent(new Event('cancel', { cancelable: true }))
+    expect(document.querySelector('dialog')).toBeNull()
+  })
+  it('supports declarative language and uses the same language for failure messages', () => {
+    const element = document.createElement('div')
+    element.dataset.hourmereInline = ''
+    element.dataset.hourmereUrl = 'javascript:invalid'
+    element.dataset.hourmereLanguage = 'zh-CN'
+    document.body.append(element)
+    init()
+    expect(element.querySelector('[role="alert"]')?.textContent).toBe(
+      '预约组件无法加载。请检查 Hourmere 地址和实例的嵌入设置。',
+    )
+    expect(element.querySelector('iframe')).toBeNull()
+  })
+})
