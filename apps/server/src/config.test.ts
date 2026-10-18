@@ -7,6 +7,26 @@ const base = {
 }
 
 describe('loadConfig', () => {
+  it('keeps webhooks off and requires an independent well-formed encryption key when enabled', () => {
+    expect(loadConfig(base).WEBHOOKS_ENABLED).toBe(false)
+    expect(() => loadConfig({ ...base, WEBHOOKS_ENABLED: 'true' })).toThrow(
+      /WEBHOOK_ENCRYPTION_KEY/,
+    )
+    expect(() => loadConfig({ ...base, WEBHOOK_ENCRYPTION_KEY: 'synthetic-invalid-key' })).toThrow(
+      /32 random bytes/,
+    )
+    expect(() =>
+      loadConfig({ ...base, WEBHOOK_ENCRYPTION_KEY: 'synthetic-invalid-key' }),
+    ).not.toThrow(/synthetic-invalid-key/)
+    expect(
+      loadConfig({
+        ...base,
+        WEBHOOKS_ENABLED: 'true',
+        WEBHOOK_ENCRYPTION_KEY: Buffer.alloc(32, 3).toString('base64'),
+      }).WEBHOOKS_ENABLED,
+    ).toBe(true)
+  })
+
   it('defaults embedding off and accepts only bounded exact secure origins', () => {
     expect(loadConfig(base).EMBED_ALLOWED_ORIGINS).toEqual([])
     expect(

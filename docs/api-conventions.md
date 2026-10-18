@@ -288,3 +288,12 @@ report the flag. Sending nonempty `guests` while it is off returns `400 guests_n
 from both REST and MCP, without creating a booking or email jobs. The maximum remains ten
 after opt-in. A settings change is serialized with booking approval; idempotent replays
 of committed bookings and existing attendees on reschedule/cancel remain intact.
+
+### Organization webhooks
+
+`/api/v1/webhooks` configuration and delivery metadata require a current verified owner/admin
+of the acting organization. Ordinary hosts cannot inspect organization-wide outbound
+events. Creation/rotation reveal a signing secret once; lists never recover it. Destinations
+are immutable HTTPS public DNS URLs and are resolved again with pinned addresses per send.
+The instance must explicitly enable new captures; no historical bookings are backfilled.
+See [webhooks.md](webhooks.md) for the payload, signed headers, retention and delivery contract.
