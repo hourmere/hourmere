@@ -79,9 +79,10 @@ it.skipIf(!serverUrl)(
         deliveries: await db.selectFrom('webhook_deliveries').selectAll().orderBy('id').execute(),
       })
       const before = await snapshot()
-      expect(await runMigrations(pool)).toEqual([migration])
+      await copyFile(new URL(migration, source), join(dir, migration))
+      expect(await runMigrations(pool, dir)).toEqual([migration])
       expect(isDeepStrictEqual(await snapshot(), before)).toBe(true)
-      expect(await runMigrations(pool)).toEqual([])
+      expect(await runMigrations(pool, dir)).toEqual([])
       for (const error of ['interrupted', 'job_missing'])
         await db
           .updateTable('webhook_deliveries')
@@ -98,8 +99,8 @@ it.skipIf(!serverUrl)(
       await pool.query('DROP SCHEMA public CASCADE')
       await pool.query('DROP SCHEMA auth CASCADE')
       await pool.query('CREATE SCHEMA public')
-      expect(await runMigrations(pool)).toEqual([...predecessors, migration])
-      expect(await runMigrations(pool)).toEqual([])
+      expect(await runMigrations(pool, dir)).toEqual([...predecessors, migration])
+      expect(await runMigrations(pool, dir)).toEqual([])
       expect(
         (await pool.query('SELECT count(*)::int AS n FROM webhook_deliveries')).rows[0].n,
       ).toBe(0)

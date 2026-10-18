@@ -8,7 +8,7 @@ import { createPool } from './index.ts'
 import { migrationsDir, runMigrations } from './migrate.ts'
 
 const serverUrl = process.env.DATABASE_URL
-const migration = '0026_host_reschedule_tokens.sql'
+const migration = '0029_host_reschedule_tokens.sql'
 
 /** The bootstrap connection only creates and drops this test's disposable database. */
 async function withDatabase(check: (pool: pg.Pool) => Promise<void>) {
@@ -60,7 +60,9 @@ describe.skipIf(!serverUrl)('host reschedule token migration', () => {
         if (file.endsWith('.sql') && file < migration)
           await copyFile(join(migrationsDir, file), join(predecessor, file))
       await withDatabase(async (pool) => {
-        await runMigrations(pool, predecessor)
+        expect((await runMigrations(pool, predecessor)).at(-1)).toBe(
+          '0028_webhook_interrupted_deliveries.sql',
+        )
         expect(await nullable(pool)).toBe('NO')
         const organizationId = randomUUID()
         const hostId = randomUUID()

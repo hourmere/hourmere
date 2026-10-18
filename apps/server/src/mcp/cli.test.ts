@@ -215,8 +215,8 @@ describe.skipIf(!bootstrap)('CLI through HTTP and PostgreSQL', () => {
         start: next.data.slots[0].start,
       })
       expect(printedMove.code).toBe(0)
-      expect(printedMove.returnedTokenCount).toBe(1)
-      expect(printedMove.data.manageToken === '[redacted]').toBe(true)
+      expect(printedMove.returnedTokenCount).toBe(0)
+      expect(printedMove.data.manageToken === null).toBe(true)
       expect((await run('cancel', { bookingId: printedMove.data.booking.id })).data.status).toBe(
         'cancelled',
       )

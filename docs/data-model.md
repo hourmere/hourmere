@@ -260,7 +260,7 @@ See [collective scheduling](collective-scheduling.md) for assignment, availabili
 
 ## Host reschedule tokens
 
-Migration 0026 makes `bookings.manage_token_hash` nullable so a host move can transfer the
+Migration 0029 makes `bookings.manage_token_hash` nullable so a host move can transfer the
 invitee's existing hash to its successor without minting or returning a new secret. The
 unique constraint remains in place. Existing bookings and email-token hashes are unchanged
 by the migration. Host moves lock the personal owner (where applicable), organization and
