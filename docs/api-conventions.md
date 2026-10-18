@@ -101,8 +101,9 @@ A request is authenticated by one of:
 anyone signs in, such as which sign-in methods are enabled (`signIn.google`, …).
 
 `GET /api/v1/me` returns the caller, the organization they act in and whether they used a
-session or an API key. The MCP server at `/mcp` ([mcp.md](mcp.md)) takes API keys only, never
-session cookies, and answers with the same error codes.
+session or an API key. The MCP server at `/mcp` ([mcp.md](mcp.md)) takes API keys and, when enabled,
+organization-bound MCP OAuth tokens. It never accepts session cookies and answers with the
+same error codes; OAuth tokens do not authenticate REST requests.
 
 ## Validation
 

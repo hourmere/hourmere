@@ -35,9 +35,14 @@ in to the web app at `/app/api-keys`. Choose the intended organization, create a
 copy it once into your secret store. The self-hosted [MCP quickstart](../apps/site/src/content/docs/docs/mcp.md)
 covers the connection values and booking flow.
 
-A missing key gets **401** with `WWW-Authenticate: Bearer`; a malformed, unknown, disabled
-or deleted one gets 401 with `WWW-Authenticate: Bearer error="invalid_token"` (RFC 6750).
-With OAuth disabled, discovery documents return 404.
+With OAuth disabled, missing credentials get **401** with `WWW-Authenticate: Bearer`; a
+malformed, unknown, disabled or deleted key gets 401 with
+`WWW-Authenticate: Bearer error="invalid_token"` (RFC 6750), and discovery documents return
+404. With OAuth enabled, missing credentials get
+`Bearer resource_metadata="<PUBLIC_URL>/.well-known/oauth-protected-resource/mcp"`; invalid
+tokens include `error="invalid_token"` and the same resource metadata. A token missing
+`mcp:tools` gets 403 with `error="insufficient_scope"`, resource metadata and
+`scope="mcp:tools"` so the connector can request approval.
 Session cookies are never accepted on `/mcp`, even alongside a
 key: a JSON-RPC endpoint that cookies could authenticate would let any web page act as a
 signed-in visitor (CSRF).
@@ -78,9 +83,12 @@ account/key administration access. Another tab changing the active organization 
 change that choice. The browser flow uses short-lived signed requests and a session-bound,
 one-time intent; restart from the connector if the attempt expires or the page is refreshed.
 
-Access tokens last five minutes. Refresh tokens last 30 days and rotate on use; a 30-second
-reuse window permits lost-response retries (the replay response is encrypted). Signing keys
-are encrypted with `BETTER_AUTH_SECRET`, refresh tokens are hashed. Keep that secret stable.
+Access tokens last five minutes. With `offline_access`, the connection survives browser
+sign-out and session expiry for at most 30 days from the original consent. Refresh tokens
+rotate on use without extending that absolute deadline; reconnect after it expires. Without
+`offline_access`, a session-bound access token stops working when its browser session ends.
+A 30-second reuse window permits lost-response retries (the replay response is encrypted).
+Signing keys are encrypted with `BETTER_AUTH_SECRET`, refresh tokens are hashed. Keep that secret stable.
 Reuse detection after that window invalidates refresh tokens for the same client/user
 pair across organizations; reconnect affected apps. Direct JWT revocation through the
 provider token-revocation endpoint reports `unsupported_token_type`; Connected apps revokes
@@ -89,15 +97,28 @@ reservations across web instances. Unbound bearer tokens are also supported.
 
 Manage your connections at `/app/connected-apps`. Revocation removes the grant and consent
 and revokes its refresh tokens; old JWTs and pending codes remain invalid after reconnection.
-Each MCP request checks the current grant, consent, client, email verification, team
-membership and any session binding. Native browser consent update/delete endpoints are
-disabled: use Connected apps so revocation also retires the grant and refresh tokens. OAuth attribution and idempotency use their own consent identifier, separate
+Every token issuance, refresh and MCP request checks the current user, grant, consent,
+client, verified email and organization membership. Current roles continue to govern each
+tool. Organization removal or revocation stops the connection immediately, including offline
+access. Browser session liveness is required only for access without `offline_access`.
+Native browser consent update/delete endpoints are disabled: use Connected apps so revocation also retires the grant and refresh tokens. OAuth attribution and idempotency use their own consent identifier, separate
 from API keys and anonymous public requests. Historical booking attribution survives revocation.
 
 OAuth requests are limited to 120 per minute per consent per web process; the existing
 per-user tool limits also apply. Browser connection endpoints allow 30 requests per minute
-per IP per process. Provider endpoints use Better Auth's own rate limits. The worker cleans
-expired intents and token/assertion records every 15 minutes. Keep workers running.
+per IP per process. Provider limits apply in every `NODE_ENV`: dynamic registration allows
+5 requests per minute per IP, authorization 30, and the token endpoint 20. The token budget
+is shared by code exchanges, refreshes and failed requests from the same IP; exceeding it
+returns 429 with Better Auth’s `X-Retry-After` seconds header (the authorization entrance
+limiter uses `Retry-After`). Broker calls forward the server's trusted client IP to avoid
+a shared provider bucket. Requests rejected before client and redirect validation render an
+Hourmere error page; they never redirect to an unvalidated client address.
+
+Every 15 minutes, the worker cleans expired intents and token/assertion records. It also
+removes DCR clients that have not completed consent within 24 hours and clients unused for
+at least 90 days (up to one extra day allows for coalesced activity writes). A durable
+completion/activity record survives revocation; successful approval, token issuance and MCP use refresh activity (writes are coalesced within a day). CIMD and
+operator-owned clients are excluded from DCR cleanup. Keep workers running.
 
 Protocol integration tests use synthetic HTTPS metadata, real temporary PostgreSQL databases
 and in-process requests. Hosted ChatGPT/claude.ai connections still require an externally

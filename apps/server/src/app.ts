@@ -2,7 +2,12 @@ import { relative } from 'node:path'
 import { inspect } from 'node:util'
 import { serveStatic } from '@hono/node-server/serve-static'
 import { createRoute, type Hook, OpenAPIHono, z } from '@hono/zod-openapi'
-import { type CallerResolver, escapeControlCharacters } from '@hourmere/auth'
+import {
+  type CallerResolver,
+  escapeControlCharacters,
+  MCP_OAUTH_SCOPE,
+  MCP_OAUTH_SCOPES,
+} from '@hourmere/auth'
 import { embedParent } from '@hourmere/core/embed'
 import { DomainError, type DomainErrorKind } from '@hourmere/scheduling'
 import type { Context, Env } from 'hono'
@@ -15,7 +20,7 @@ import { clientIp, withClientIp } from './client-ip.ts'
 import type { McpModule } from './mcp/endpoint.ts'
 import { describeCaller, Me } from './me.ts'
 import { authenticated, ErrorBody, json, type RouteModule } from './openapi.ts'
-import { routeRateLimits } from './rate-limit.ts'
+import { createRateLimiter, rateLimit, routeRateLimits } from './rate-limit.ts'
 import {
   DEFAULT_HSTS_MAX_AGE,
   securityHeaders,
@@ -156,6 +161,37 @@ function summary(err: unknown): string {
 }
 
 const JSON_CONTENT_TYPE = /^application\/([a-z0-9.+-]+\+)?json/i
+
+/** Refuse malformed authorization attempts locally, before a provider can redirect them. */
+async function validMcpAuthorization(request: Request, publicUrl: string) {
+  let query: URLSearchParams
+  if (request.method === 'POST') {
+    if (!request.headers.get('content-type')?.startsWith('application/x-www-form-urlencoded'))
+      return false
+    query = new URLSearchParams(await request.clone().text())
+  } else query = new URL(request.url).searchParams
+  for (const key of new Set(query.keys())) if (query.getAll(key).length !== 1) return false
+  const scopes = query.get('scope')?.split(' ') ?? []
+  return (
+    Boolean(query.get('client_id')) &&
+    Boolean(query.get('redirect_uri')) &&
+    query.get('response_type') === 'code' &&
+    query.get('resource') === new URL('/mcp', publicUrl).href &&
+    query.get('code_challenge_method') === 'S256' &&
+    /^[\w-]{43}$/.test(query.get('code_challenge') ?? '') &&
+    scopes.includes(MCP_OAUTH_SCOPE) &&
+    scopes.every((scope) => MCP_OAUTH_SCOPES.includes(scope)) &&
+    !query.get('prompt')?.split(' ').includes('none')
+  )
+}
+
+function mcpAuthorizationError(c: Context) {
+  return c.html(
+    '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Unable to connect to Hourmere</title><h1>Unable to connect to Hourmere</h1><p>This authorization request is invalid. Return to the connector and start again.</p></html>',
+    400,
+    { 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' },
+  )
+}
 
 /**
  * Defense in depth for every /api/v1 route, present and future: a JSON body with NUL or
@@ -314,6 +350,33 @@ export function createApp({
 
   // Better Auth's own protocol (sign-in, sign-out, sessions, organizations, API keys); it
   // follows Better Auth's versioning, not ours, so it lives outside /api/v1.
+  // Count even malformed requests that are refused before reaching Better Auth. This is
+  // the provider's 30/minute authorize limit, independent of NODE_ENV.
+  const authorizeLimit = rateLimit(createRateLimiter({ limit: 30, windowSeconds: 60 }))
+  for (const path of ['/api/auth/oauth2/authorize', '/api/auth/oauth2/authorize/']) {
+    app.use(path, authorizeLimit)
+    app.on(['GET', 'POST'], path, async (c) => {
+      if (!(await validMcpAuthorization(c.req.raw, publicUrl))) return mcpAuthorizationError(c)
+      const response = await authHandler(withClientIp(c.req.raw, c.var.clientIp))
+      let location = response.headers.get('location')
+      if (!location && response.headers.get('content-type')?.includes('application/json')) {
+        const value = (await response.clone().json()) as { url?: unknown; redirect_uri?: unknown }
+        const target = value.url ?? value.redirect_uri
+        if (typeof target === 'string') location = target
+      }
+      if (location) {
+        const redirect = new URL(location, publicUrl)
+        // A missing/invalid client or redirect URI is not an instruction to navigate.
+        // Render all authorize errors here, including the provider's local error URL.
+        if (
+          redirect.searchParams.has('error') ||
+          new URLSearchParams(redirect.hash.slice(1)).has('error')
+        )
+          return mcpAuthorizationError(c)
+      }
+      return response
+    })
+  }
   app.on(['GET', 'POST'], '/api/auth/*', (c) =>
     authHandler(withClientIp(c.req.raw, c.var.clientIp)),
   )

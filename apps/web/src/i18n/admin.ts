@@ -369,8 +369,8 @@ export const admin = {
   Invitee: '受邀人',
   'Invitees always give their name and email. Add questions for anything else you need to know, up to':
     '受邀人始终需要提供姓名和邮箱。可添加其他问题，最多',
-  'It can stay connected for up to 30 days without another sign-in. You can revoke access in Connected apps.':
-    '此应用可在无需重新登录的情况下持续连接最多 30 天。你可以在“已连接的应用”中撤销访问。',
+  'It can stay connected after you sign out, for up to 30 days from its original approval. Refreshing does not extend that time. Leaving the organization or revoking access in Connected apps stops the connection immediately.':
+    '此应用可在你退出登录后继续连接，最长为首次批准起的 30 天。刷新令牌不会延长此期限。离开组织或在“已连接的应用”中撤销访问会立即终止连接。',
   'Its booking link stops working at once. Bookings already made are kept, and you can still see them under Bookings.':
     '预约链接会立即失效。已创建的预约会保留，你仍可在预约列表中查看。',
   'Its date overrides are deleted with it.': '对应的特定日期安排也将删除。',

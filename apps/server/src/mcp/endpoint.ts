@@ -89,8 +89,7 @@ function callerOf(authInfo: AuthInfo | undefined): McpCaller {
 
 /**
  * 401 with the RFC 6750 challenge: `error="invalid_token"` when a bearer token was sent but
- * is not valid, a bare `Bearer` when there was none. Will also name the protected-resource
- * metadata (resource_metadata="…") once OAuth arrives.
+ * is not valid, a bare `Bearer` when there was none. OAuth adds resource metadata below.
  */
 const unauthorized = (c: Context, message: string, invalidToken = false) => {
   c.header('WWW-Authenticate', invalidToken ? 'Bearer error="invalid_token"' : 'Bearer')
@@ -116,9 +115,11 @@ function requireApiKey(
     if (c.req.header('authorization') === undefined) {
       return unauthorized(
         c,
-        c.req.header('cookie') === undefined
-          ? 'Send an API key as Authorization: Bearer hm_…'
-          : 'The MCP endpoint does not accept session cookies; send an API key as Authorization: Bearer hm_…',
+        oauth
+          ? 'Connect with OAuth or send an API key as Authorization: Bearer hm_…; session cookies do not authenticate MCP requests'
+          : c.req.header('cookie') === undefined
+            ? 'Send an API key as Authorization: Bearer hm_…'
+            : 'The MCP endpoint does not accept session cookies; send an API key as Authorization: Bearer hm_…',
       )
     }
     if (oauth && !/^Bearer[ \t]+hm_/i.test(c.req.header('authorization') ?? '')) {
@@ -276,11 +277,13 @@ export function mcpEndpoint({ tools, oauth }: McpEndpointOptions): McpModule {
             oauth &&
             c.res.status === 401 &&
             !c.res.headers.get('WWW-Authenticate')?.includes('resource_metadata')
-          )
+          ) {
+            const challenge = c.res.headers.get('WWW-Authenticate') ?? 'Bearer'
             c.res.headers.set(
               'WWW-Authenticate',
-              `${c.res.headers.get('WWW-Authenticate') ?? 'Bearer'}, resource_metadata="${new URL('/.well-known/oauth-protected-resource/mcp', publicUrl).href}"`,
+              `${challenge}${challenge === 'Bearer' ? ' ' : ', '}resource_metadata="${new URL('/.well-known/oauth-protected-resource/mcp', publicUrl).href}"`,
             )
+          }
         }),
         requireApiKey(resolveCaller, oauth, publicUrl),
         (c) => handler.fetch(c.req.raw, { authInfo: toAuthInfo(c.var.mcpCaller) }),

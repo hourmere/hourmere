@@ -1,6 +1,6 @@
 ---
 title: MCP quickstart
-description: Connect an AI client to Hourmere's remote MCP server using an API key.
+description: Connect an AI client to Hourmere's remote MCP server using an API key or OAuth.
 ---
 
 ## Connect a client
@@ -22,10 +22,10 @@ header on every request:
 ```
 
 This shows the connection values; client-specific configuration keys may differ. Store the
-real key privately. Hourmere currently accepts API keys, with no OAuth 2.1 connector flow.
-An OAuth-only client cannot connect directly yet. Browser session cookies do not authenticate
-MCP. A browser request from a different origin is refused; non-browser clients normally send
-no `Origin` header.
+real key privately. API keys are always supported. OAuth connectors can also connect when
+the operator sets `MCP_OAUTH_ENABLED=true`; see [Connect with OAuth](#connect-with-oauth).
+Browser session cookies do not authenticate MCP. A browser request from a different origin
+is refused; non-browser clients normally send no `Origin` header.
 
 Ask the client to list tools, then call `whoami` to verify the user and organization before
 changing bookings. The endpoint is stateless: it does not issue a session ID or maintain a
@@ -111,6 +111,16 @@ registration, and requires Authorization Code with S256 PKCE and the MCP resourc
 
 Sign in, choose an organization explicitly, and review the app's requested access. MCP
 access includes booking details and mutations with your current permissions in that
-organization. Optional offline access keeps the connection for up to 30 days. Revoke an
+organization. Optional `offline_access` keeps the connection working after browser sign-out
+or session expiry, for at most 30 days from the original approval. Refreshing does not extend
+that deadline; reconnect when it expires. Every request checks your current membership and
+permissions. Removal from the organization or revocation ends access immediately. Revoke an
 app at **Connected apps**; old tokens stop working immediately. API keys remain available
 when OAuth is disabled. Calendar connections are configured separately.
+
+OAuth limits apply regardless of `NODE_ENV`: registration allows 5 requests per minute per
+IP, authorization 30 and token requests 20. Code exchanges, refreshes and failed token
+requests share that token budget; provider 429 responses include `X-Retry-After` seconds
+(the authorization entrance limiter uses `Retry-After`). Workers remove DCR
+clients without completed consent after 24 hours and clients unused for at least 90 days
+(with up to one day of grace for daily activity writes).
