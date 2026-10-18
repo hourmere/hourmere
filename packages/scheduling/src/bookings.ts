@@ -460,7 +460,8 @@ async function toBookings(db: Db, rows: readonly BookingRow[]): Promise<Booking[
     end: toIso(toInstant(r.end_at)),
     title: r.title,
     location: parseLocation(
-      automaticZoom(r.location) && conferences.get(r.id)?.status !== 'ready'
+      automaticZoom(r.location) &&
+        (r.status !== 'confirmed' || conferences.get(r.id)?.status !== 'ready')
         ? unresolvedLocation(r.location)
         : r.location,
     ),

@@ -228,6 +228,64 @@ describe.skipIf(!serverUrl)('automatic Zoom durable booking lifecycle (real Post
     expect(provider.controls.storedMeetings.size).toBe(0)
     expect(posts()).toHaveLength(1)
   })
+  it('strips cancelled Zoom links before and after remote cleanup but preserves stored URL and actual CANCEL ICS', async () => {
+    const b = await book()
+    await writeBookingConference(deps, b.booking.id)
+    const ready = await getManagedBooking(ctx, b.manageToken as string)
+    const link = ready.location?.url as string
+    expect(typeof link === 'string').toBe(true)
+    const cancelled = await cancelManagedBooking(ctx, b.manageToken as string)
+    expect(cancelled.status).toBe('cancelled')
+    expect(cancelled.location?.url === undefined).toBe(true)
+    expect(
+      (await getManagedBooking(ctx, b.manageToken as string)).location?.url === undefined,
+    ).toBe(true)
+    expect((await book()).booking.location?.url === undefined).toBe(true)
+    await sendBookingNotification(mail(), b.booking.id, 'cancelled')
+    expect(sent).toHaveLength(2)
+    expect(
+      sent.every(
+        (message) =>
+          message.sensitive &&
+          message.attachments?.some((attachment) => {
+            const content = attachment.content.replace(/\r?\n[ \t]/g, '')
+            return (
+              content.includes('METHOD:CANCEL') &&
+              content.includes(link) &&
+              content.includes(`${b.booking.id}@hourmere`)
+            )
+          }),
+      ),
+    ).toBe(true)
+    const stored = await db
+      .selectFrom('bookings')
+      .select('location')
+      .where('id', '=', b.booking.id)
+      .executeTakeFirstOrThrow()
+    expect(
+      typeof stored.location === 'object' &&
+        stored.location !== null &&
+        'url' in stored.location &&
+        stored.location.url === link,
+    ).toBe(true)
+    await writeBookingConference(deps, b.booking.id)
+    expect((await row()).state).toBe('ready')
+    expect(provider.controls.storedMeetings.size).toBe(0)
+    expect(posts()).toHaveLength(1)
+    expect(provider.calls.filter((call) => call.init.method === 'DELETE')).toHaveLength(1)
+    expect(
+      (await getManagedBooking(ctx, b.manageToken as string)).location?.url === undefined,
+    ).toBe(true)
+    const replay = await book()
+    expect(replay.booking.status).toBe('cancelled')
+    expect(replay.booking.location?.url === undefined).toBe(true)
+    const after = await db
+      .selectFrom('bookings')
+      .select('location')
+      .where('id', '=', b.booking.id)
+      .executeTakeFirstOrThrow()
+    expect(JSON.stringify(after.location) === JSON.stringify(stored.location)).toBe(true)
+  })
   it('never POSTs again after an unknown accepted create, retry, cancellation or an empty provider store', async () => {
     const b = await book()
     provider.controls.meetingHook = async () => {

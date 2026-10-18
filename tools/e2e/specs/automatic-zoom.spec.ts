@@ -187,8 +187,11 @@ for (const locale of ['en', 'zh-CN'] as const) {
       await page.getByRole('button', { name: text.cancel, exact: true }).click()
       expect((await cancelling).status()).toBe(200)
       await expect(page.getByRole('heading', { name: text.cancelled, exact: true })).toBeVisible()
+      await expect(page.locator('a[href*="zoom.us/j/"]')).toHaveCount(0)
+      await expect(page.getByRole('link', { name: text.join, exact: true })).toHaveCount(0)
       await app.advance()
       await expect(page.getByText(text.cleanup, { exact: true })).toBeVisible()
+      await expect(page.locator('a[href*="zoom.us/j/"]')).toHaveCount(0)
       await expect(page.getByRole('link', { name: text.join, exact: true })).toHaveCount(0)
       expect(await app.state()).toMatchObject({
         posts: 1,

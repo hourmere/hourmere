@@ -103,7 +103,9 @@ A copy failure cannot create a second Zoom meeting, hide its ready link or hold 
 ## Status, notifications and retry
 
 REST and MCP booking results expose optional `conference: {provider:"zoom",status,errorCode}`.
-Pending or failed responses contain no join URL. The organizer's private booking view may
+Only confirmed, ready booking responses contain a join URL. Cancelled bookings do not return
+a participant link, including after remote cleanup becomes ready. Raw stored participant data
+is retained for the original CANCEL ICS and cleanup. Pending or failed responses contain no join URL. The organizer's private booking view may
 also include their `calendarCopy` status; public metadata never exposes connection pins.
 Final meeting invitations and ICS wait for a current ready participant link. Failures use
 bounded no-link/no-ICS notices. Cancellation and rescheduling follow the current lifecycle

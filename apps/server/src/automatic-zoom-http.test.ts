@@ -606,8 +606,59 @@ describe.skipIf(!bootstrap)('automatic Zoom real TCP/session/API-key boundaries'
       start: '2030-11-04T16:00:00Z',
     })) as typeof booking
     await writeBookingConference(worker, booking.booking.id)
-    await cli('cancel', { bookingId: moved.booking.id })
+    const assertCancelled = (value: unknown, cleaned: boolean) => {
+      const response = value as
+        | { status?: string; location?: { url?: string }; conference?: { status: string } }
+        | undefined
+      expect(response?.status).toBe('cancelled')
+      expect(response?.location?.url === undefined).toBe(true)
+      expect(response?.conference?.status).toBe(cleaned ? 'ready' : 'pending')
+    }
+    const cancelledViews = async (cleaned: boolean) => {
+      const details = await request(`/api/v1/bookings/${moved.booking.id}`, 'GET', '', undefined, {
+        authorization: `Bearer ${key}`,
+      })
+      expect(details.status).toBe(200)
+      assertCancelled(await details.json(), cleaned)
+      const manage = await request('/api/v1/bookings/manage', 'GET', '', undefined, {
+        'X-Manage-Token': moved.manageToken,
+      })
+      expect(manage.status).toBe(200)
+      assertCancelled(await manage.json(), cleaned)
+      type Item = { id: string }
+      const rest = await request('/api/v1/bookings', 'GET', '', undefined, {
+        authorization: `Bearer ${key}`,
+      })
+      expect(rest.status).toBe(200)
+      assertCancelled(
+        ((await rest.json()) as { data: Item[] }).data.find((b) => b.id === moved.booking.id),
+        cleaned,
+      )
+      const mcpList = (await mcp('list_bookings', {})) as { data: Item[] }
+      assertCancelled(
+        mcpList.data.find((b) => b.id === moved.booking.id),
+        cleaned,
+      )
+      const cliList = (await cli('list', {})) as { data: Item[] }
+      assertCancelled(
+        cliList.data.find((b) => b.id === moved.booking.id),
+        cleaned,
+      )
+      const raw = (
+        await db
+          .selectFrom('bookings')
+          .select('location')
+          .where('id', '=', moved.booking.id)
+          .executeTakeFirstOrThrow()
+      ).location
+      expect(
+        typeof raw === 'object' && raw !== null && 'url' in raw && typeof raw.url === 'string',
+      ).toBe(true)
+    }
+    assertCancelled(await cli('cancel', { bookingId: moved.booking.id }), false)
+    await cancelledViews(false)
     await writeBookingConference(worker, booking.booking.id)
+    await cancelledViews(true)
     expect(
       provider.calls.filter(
         (c) => c.init.method === 'POST' && c.url.endsWith('/users/me/meetings'),
