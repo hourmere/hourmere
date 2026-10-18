@@ -146,13 +146,16 @@ export const test = base.extend<{
             code: 'synthetic-browser-code',
           }).toString()
           return route.fulfill({
-            status: 302,
+            // WebKit cannot fulfill an intercepted navigation with a redirect status.
+            // A controlled fake-consent document still navigates through the real
+            // state/PKCE/session-bound callback without contacting the provider.
+            status: 200,
+            contentType: 'text/html',
             headers: {
-              Location: callback.href,
               'Referrer-Policy': 'no-referrer',
               'Cache-Control': 'no-store',
             },
-            body: '',
+            body: `<!doctype html><meta name="referrer" content="no-referrer"><script>location.replace(${JSON.stringify(callback.href).replaceAll('<', '\\u003c')})</script>`,
           })
         }
         externalRequests++

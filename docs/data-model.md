@@ -295,6 +295,13 @@ one such optional copy. The join URL is stored only in the current ready protect
 location. See [automatic-google-meet.md](automatic-google-meet.md) and
 [automatic-zoom.md](automatic-zoom.md).
 
+Migration0024 adds a persisted attempt count, random bounded lease, safe error class and
+exhausted timestamp to each conference notification. Existing due times and delivery flags
+are preserved. Attempt claims commit before SMTP; lease/attempt comparison protects completion
+and the row has a finite initial-attempt-plus-twelve-retry budget across cron executions.
+See [notifications.md](notifications.md#conference-outbox-delivery-budget) for diagnostics,
+legacy-row backfill and the remaining SMTP acceptance/failed-commit duplicate window.
+
 ## Round-robin assignment state
 
 Migration 0020 adds `round_robin_state` (event primary key, monotonic `bigint` sequence,
