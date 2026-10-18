@@ -5,16 +5,18 @@ import { DomainError } from '@hourmere/scheduling/errors'
 import { isSingleLineText } from '@hourmere/scheduling/text'
 import { z } from 'zod'
 import {
-  conferenceAad,
   conferenceEncryptionKey,
+  conferenceStateAad,
+  conferenceTokenAad,
   decryptConferenceCredential,
   encryptConferenceCredential,
 } from './credentials.ts'
 import {
-  minimalZoomScopes,
+  matchingZoomScopes,
   type ZoomClient,
   ZoomError,
   type ZoomIdentity,
+  type ZoomMode,
   type ZoomTokens,
 } from './zoom.ts'
 
@@ -24,7 +26,7 @@ export const MAX_ZOOM_CONNECTIONS = 5
 const STATE_LIFETIME = 10 * 60_000
 export interface ConferenceDeps {
   db: Db
-  zoom?: { client: ZoomClient; encryptionKey: string } | undefined
+  zoom?: { client: ZoomClient; encryptionKey: string; meetingsEnabled?: boolean } | undefined
   now?: () => number
   timeoutMs?: number
 }
@@ -125,10 +127,17 @@ const stored = z.strictObject({
   refreshToken: z.string().min(1).max(8192),
   expiresAt: z.number().finite().positive(),
 })
-function credentials(key: Buffer, owner: string, id: string, external: string, tokens: ZoomTokens) {
+function credentials(
+  key: Buffer,
+  owner: string,
+  id: string,
+  external: string,
+  tokens: ZoomTokens,
+  mode: ZoomMode,
+) {
   return encryptConferenceCredential(
     key,
-    conferenceAad('connection-tokens', owner, id, external),
+    conferenceTokenAad(owner, id, external, mode),
     JSON.stringify({
       accessToken: tokens.accessToken,
       refreshToken: tokens.refreshToken,
@@ -136,16 +145,19 @@ function credentials(key: Buffer, owner: string, id: string, external: string, t
     }),
   )
 }
-function readTokens(key: Buffer, owner: string, id: string, external: string, value: Buffer) {
+function readTokens(
+  key: Buffer,
+  owner: string,
+  id: string,
+  external: string,
+  value: Buffer,
+  mode: ZoomMode,
+) {
   try {
     if (value.length > 32768) throw new Error()
     return stored.parse(
       JSON.parse(
-        decryptConferenceCredential(
-          key,
-          conferenceAad('connection-tokens', owner, id, external),
-          value,
-        ),
+        decryptConferenceCredential(key, conferenceTokenAad(owner, id, external, mode), value),
       ),
     )
   } catch {
@@ -160,6 +172,7 @@ export async function listConferenceConnections(deps: ConferenceDeps, principal:
       .select([
         'id',
         'provider',
+        'mode',
         'account_email',
         'display_name',
         'status',
@@ -178,16 +191,19 @@ export async function listConferenceConnections(deps: ConferenceDeps, principal:
       .select('state_hash')
       .where('user_id', '=', session.user.id)
       .where('session_id', '=', session.sessionId)
+      .where('binding_version', '=', 2)
       .where('expires_at', '>', new Date(clock(deps)))
       .limit(5)
       .execute()
     return {
       zoomEnabled: !!deps.zoom,
+      zoomMeetingsEnabled: deps.zoom?.meetingsEnabled === true,
       pendingAttempts: attempts.length,
       maximumConnections: MAX_ZOOM_CONNECTIONS,
       data: rows.map((row) => ({
         id: row.id,
         provider: 'zoom' as const,
+        mode: row.mode as ZoomMode,
         accountEmail: row.account_email,
         displayName: row.display_name,
         status: row.status as 'active' | 'refreshing' | 'needs_reauth' | 'disconnected',
@@ -198,23 +214,48 @@ export async function listConferenceConnections(deps: ConferenceDeps, principal:
     }
   })
 }
-export async function beginZoomConnection(deps: ConferenceDeps, principal: Principal, id?: string) {
+export function beginZoomConnection(deps: ConferenceDeps, principal: Principal, id?: string) {
+  return beginConnection(deps, principal, id)
+}
+/** A distinct caller action, never an environment-driven widening of identity consent. */
+export async function authorizeZoomMeetings(
+  deps: ConferenceDeps,
+  principal: Principal,
+  id?: string,
+) {
+  requireConferenceSession(principal)
+  if (!deps.zoom?.meetingsEnabled)
+    throw new DomainError(
+      'conflict',
+      'zoom_meetings_disabled',
+      'Automatic Zoom meetings are disabled on this instance.',
+    )
+  return beginConnection(deps, principal, id, 'meetings')
+}
+async function beginConnection(
+  deps: ConferenceDeps,
+  principal: Principal,
+  id?: string,
+  requestedMode?: ZoomMode,
+) {
   const session = requireConferenceSession(principal),
     { client, key } = configured(deps)
   if (id !== undefined && !z.uuid().safeParse(id).success) throw missing()
   const state = randomBytes(32).toString('base64url'),
     verifier = randomBytes(32).toString('base64url'),
     hash = digest(state)
-  await owned(deps, session, async (db) => {
+  const mode = await owned(deps, session, async (db) => {
+    let mode: ZoomMode = requestedMode ?? 'identity'
     if (id) {
       const row = await db
         .selectFrom('conference_connections')
-        .select(['id', 'status'])
+        .select(['id', 'status', 'mode'])
         .where('id', '=', id)
         .where('user_id', '=', session.user.id)
         .forUpdate()
         .executeTakeFirst()
       if (!row) throw missing()
+      mode = requestedMode ?? (row.mode as ZoomMode)
       if (row.status === 'disconnected' && (await atConnectionLimit(db, session.user.id)))
         throw limit()
       // Explicit reconnection replaces existing access and invalidates an unfinished refresh.
@@ -259,16 +300,19 @@ export async function beginZoomConnection(deps: ConferenceDeps, principal: Princ
         user_id: session.user.id,
         session_id: session.sessionId,
         connection_id: id ?? null,
+        mode,
+        binding_version: 2,
         verifier: encryptConferenceCredential(
           key,
-          conferenceAad('oauth-state', session.user.id, hash, session.sessionId),
+          conferenceStateAad(session.user.id, hash, session.sessionId, mode, id ?? null),
           verifier,
         ),
         expires_at: new Date(clock(deps) + STATE_LIFETIME),
       })
       .execute()
+    return mode
   })
-  return { authorizationUrl: client.authorizationUrl(state, verifier) }
+  return { authorizationUrl: client.authorizationUrl(state, verifier, mode) }
 }
 export type ZoomOutcome =
   | 'connected'
@@ -281,6 +325,7 @@ export type ZoomOutcome =
   | 'identity_mismatch'
   | 'account_in_use'
   | 'connection_limit'
+  | 'mode_conflict'
 /** Durable one-use claim precedes I/O. A failed commit cannot make a code redeemable again. */
 export async function finishZoomConnection(
   deps: ConferenceDeps,
@@ -297,11 +342,12 @@ export async function finishZoomConnection(
   const attempt = await owned(deps, session, async (db) => {
     const row = await db
       .selectFrom('conference_oauth_states')
-      .select(['verifier', 'connection_id'])
+      .select(['verifier', 'connection_id', 'mode'])
       .where('state_hash', '=', hash)
       .where('user_id', '=', session.user.id)
       .where('session_id', '=', session.sessionId)
       .where('claimed', '=', false)
+      .where('binding_version', '=', 2)
       .where('expires_at', '>', new Date(clock(deps)))
       .forUpdate()
       .executeTakeFirst()
@@ -318,7 +364,7 @@ export async function finishZoomConnection(
     return await owned(deps, session, async (db) => {
       const valid = await db
         .selectFrom('conference_oauth_states')
-        .select('connection_id')
+        .select(['connection_id', 'mode', 'binding_version'])
         .where('state_hash', '=', hash)
         .where('user_id', '=', session.user.id)
         .where('session_id', '=', session.sessionId)
@@ -326,7 +372,12 @@ export async function finishZoomConnection(
         .where('expires_at', '>', new Date(clock(deps)))
         .forUpdate()
         .executeTakeFirst()
-      if (!valid) return 'invalid_state'
+      if (
+        valid?.binding_version !== 2 ||
+        valid.mode !== attempt.mode ||
+        valid.connection_id !== attempt.connection_id
+      )
+        return 'invalid_state'
       await db.deleteFrom('conference_oauth_states').where('state_hash', '=', hash).execute()
       const keys = [...query.keys()]
       if (
@@ -346,24 +397,44 @@ export async function finishZoomConnection(
       if (!code || code.length > 4096 || !isSingleLineText(code) || /\s/u.test(code))
         return 'invalid_state'
       try {
-        const signal = AbortSignal.timeout(deps.timeoutMs ?? 15000)
+        const signal = AbortSignal.timeout(deps.timeoutMs ?? 15000),
+          mode = attempt.mode as ZoomMode
         const verifier = decryptConferenceCredential(
           key,
-          conferenceAad('oauth-state', session.user.id, hash, session.sessionId),
+          conferenceStateAad(session.user.id, hash, session.sessionId, mode, attempt.connection_id),
           attempt.verifier as Buffer,
         )
-        const tokens = await client.exchange(code, verifier, signal)
-        if (!minimalZoomScopes(tokens.scopes)) throw new ZoomError('permissions_missing')
+        const tokens = await client.exchange(code, verifier, signal, mode)
+        if (!matchingZoomScopes(tokens.scopes, mode)) throw new ZoomError('permissions_missing')
         const identity = await client.identity(tokens.accessToken, signal)
         if (!(await sessionAlive(db, session, clock(deps)))) return 'invalid_state'
         const previous = await db
           .selectFrom('conference_connections')
-          .select(['id', 'user_id', 'external_user_id', 'status'])
+          .select(['id', 'user_id', 'external_user_id', 'status', 'mode'])
           .where('provider', '=', 'zoom')
           .where('external_user_id', '=', identity.id)
           .forUpdate()
           .executeTakeFirst()
         if (previous && previous.user_id !== session.user.id) return 'account_in_use'
+        if (
+          previous?.mode === 'meetings' &&
+          previous.status !== 'disconnected' &&
+          mode === 'identity'
+        ) {
+          // A wrong-mode reconsent can rotate/revoke the external grant. Keep stronger local
+          // intent but never pretend its old credentials remain safe or silently downgrade.
+          await db
+            .updateTable('conference_connections')
+            .set({
+              credentials: null,
+              operation_id: null,
+              status: 'needs_reauth',
+              last_error: 'mode_conflict',
+            })
+            .where('id', '=', previous.id)
+            .execute()
+          return 'mode_conflict'
+        }
         if (valid.connection_id && previous?.id !== valid.connection_id) return 'identity_mismatch'
         if (
           (!previous || previous.status === 'disconnected') &&
@@ -374,9 +445,10 @@ export async function finishZoomConnection(
           value = {
             account_email: identity.email,
             display_name: identity.name,
-            credentials: credentials(key, session.user.id, id, identity.id, tokens),
+            credentials: credentials(key, session.user.id, id, identity.id, tokens, mode),
             operation_id: null,
             scopes: tokens.scopes,
+            mode,
             status: 'active',
             last_error: null,
           }
@@ -446,7 +518,7 @@ export async function refreshConference(deps: ConferenceDeps, principal: Princip
   const claim = await owned(deps, session, async (db) => {
     const row = await db
       .selectFrom('conference_connections')
-      .select(['id', 'status', 'external_user_id', 'credentials', 'scopes'])
+      .select(['id', 'status', 'external_user_id', 'credentials', 'scopes', 'mode'])
       .where('id', '=', id)
       .where('user_id', '=', session.user.id)
       .forUpdate()
@@ -454,14 +526,21 @@ export async function refreshConference(deps: ConferenceDeps, principal: Princip
     if (!row) throw missing()
     if (row.status !== 'active' || !row.credentials || !row.external_user_id) return undefined
     try {
-      if (!minimalZoomScopes(row.scopes)) throw new ZoomError('permissions_missing')
-      const tokens = readTokens(key, session.user.id, id, row.external_user_id, row.credentials)
+      if (!matchingZoomScopes(row.scopes, row.mode)) throw new ZoomError('permissions_missing')
+      const tokens = readTokens(
+        key,
+        session.user.id,
+        id,
+        row.external_user_id,
+        row.credentials,
+        row.mode as ZoomMode,
+      )
       await db
         .updateTable('conference_connections')
         .set({ credentials: null, operation_id: operation, status: 'refreshing', last_error: null })
         .where('id', '=', id)
         .execute()
-      return { tokens, external: row.external_user_id }
+      return { tokens, external: row.external_user_id, mode: row.mode as ZoomMode }
     } catch (error) {
       if (!(error instanceof ZoomError)) throw error
       await db
@@ -496,8 +575,8 @@ export async function refreshConference(deps: ConferenceDeps, principal: Princip
         errorCode: string | null = null
       try {
         const signal = AbortSignal.timeout(deps.timeoutMs ?? 15000)
-        tokens = await client.refresh(claim.tokens.refreshToken, signal)
-        if (!minimalZoomScopes(tokens.scopes)) {
+        tokens = await client.refresh(claim.tokens.refreshToken, signal, claim.mode)
+        if (!matchingZoomScopes(tokens.scopes, claim.mode)) {
           tokens = undefined
           throw new ZoomError('permissions_missing')
         }
@@ -519,7 +598,7 @@ export async function refreshConference(deps: ConferenceDeps, principal: Princip
         .updateTable('conference_connections')
         .set({
           credentials: tokens
-            ? credentials(key, session.user.id, id, claim.external, tokens)
+            ? credentials(key, session.user.id, id, claim.external, tokens, claim.mode)
             : null,
           operation_id: null,
           status: tokens ? 'active' : 'needs_reauth',

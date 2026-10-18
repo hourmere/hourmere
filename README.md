@@ -15,7 +15,7 @@ Open-source scheduling for people and AI agents. Self-host or use the cloud.
 | `packages/scheduling` | Service layer shared by the REST API and the MCP server: reads and writes the database, enforces permissions, throws `DomainError`. |
 | `packages/auth` | Sign-in (Better Auth: email links, Google, Microsoft), sessions, organizations, API keys. |
 | `packages/calendars` | Separate Google Calendar OAuth, encrypted credentials, incremental busy-time sync and booking writeback. See [docs/google-calendar.md](docs/google-calendar.md). |
-| `packages/conferences` | Independent, minimum-scope Zoom identity connections; no meetings or sign-in. |
+| `packages/conferences` | Independent Zoom identity connections and explicit meeting-grant adapter; see [current checkpoint](docs/automatic-zoom.md), separate from sign-in. |
 | `packages/mail` | Outgoing email: SMTP, or the server log when SMTP is not configured; booking email templates and calendar invitations. |
 | `packages/jobs` | Background jobs on Postgres (pg-boss): typed job definitions, enqueueing inside a transaction, workers. |
 | `packages/webhooks` | Optional signed organization booking webhooks, transactional delivery and bounded retries. See [docs/webhooks.md](docs/webhooks.md). |
@@ -160,8 +160,9 @@ in a public issue. See [SECURITY.md](SECURITY.md).
 [AGPL-3.0](LICENSE)
 
 Optional [independent Zoom account connections](apps/site/src/content/docs/docs/zoom-connections.md)
-provide a separate minimum-scope identity foundation. They do not create meetings or enable
-Zoom sign-in. See the repository guide in
+provide a separate minimum-scope identity foundation. Explicit meeting authorization and
+provider transport are described in [the automatic Zoom checkpoint](docs/automatic-zoom.md);
+booking lifecycle integration is not yet complete. Zoom is not a sign-in provider. See the repository guide in
 `apps/site/src/content/docs/docs/zoom-connections.md` before configuring a real client.
 
 Optional [automatic Google Meet](docs/automatic-google-meet.md) creates one conference per explicitly opted-in single-host booking, with durable pending/failure state and final invitations held until its link is ready.

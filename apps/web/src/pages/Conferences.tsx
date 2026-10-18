@@ -20,7 +20,9 @@ const outcomes = {
     'Zoom could not be reached. Check the connection status before trying again.',
   needs_reauth: 'Reconnect this Zoom account before refreshing it.',
   permissions_missing:
-    'Zoom did not grant only the requested identity access. Check the app configuration and reconnect.',
+    'Zoom did not return exactly the requested permissions. Check the app configuration and reconnect.',
+  mode_conflict:
+    'Identity-only authorization cannot replace meeting permissions. Reconnect this Zoom account with its existing meeting permissions.',
   identity_mismatch: 'Choose the same Zoom account when reconnecting this connection.',
   account_in_use: 'This Zoom identity is already connected to another Hourmere account.',
   connection_limit: 'This account has reached its limit of five connected Zoom identities.',
@@ -77,26 +79,37 @@ export function ConferencesPage() {
       setSearch(next, { replace: true })
     }
   }, [search, setSearch])
-  async function connect(id?: string) {
+  async function connect(id?: string, meetings = false) {
     request.current?.abort()
     const controller = new AbortController()
     request.current = controller
     const startedAt = window.location.pathname + window.location.search
-    setPending(id ?? 'connect')
+    setPending(id ?? (meetings ? 'meetings' : 'connect'))
     setError(null)
     setNotice(null)
     try {
       const { authorizationUrl } = await unwrap(
-        id
-          ? api.POST('/api/v1/conference-connections/{id}/reconnect', {
-              params: { path: { id } },
-              body: {},
-              signal: controller.signal,
-            })
-          : api.POST('/api/v1/conference-connections/zoom/authorize', {
-              body: {},
-              signal: controller.signal,
-            }),
+        meetings
+          ? id
+            ? api.POST('/api/v1/conference-connections/{id}/authorize-meetings', {
+                params: { path: { id } },
+                body: {},
+                signal: controller.signal,
+              })
+            : api.POST('/api/v1/conference-connections/zoom/authorize-meetings', {
+                body: {},
+                signal: controller.signal,
+              })
+          : id
+            ? api.POST('/api/v1/conference-connections/{id}/reconnect', {
+                params: { path: { id } },
+                body: {},
+                signal: controller.signal,
+              })
+            : api.POST('/api/v1/conference-connections/zoom/authorize', {
+                body: {},
+                signal: controller.signal,
+              }),
       )
       if (
         !mounted.current ||
@@ -163,12 +176,12 @@ export function ConferencesPage() {
       </div>
       <p className="muted">
         {t(
-          'Connect your own Zoom identity separately from sign-in and calendars. This connection cannot create or read meetings.',
+          'Connect your own Zoom account separately from sign-in and calendars. Identity access and automatic meeting permissions are separate choices.',
         )}
       </p>
       <p className="muted">
         {t(
-          'Only basic Zoom account identity is requested. Calendar access and automatic meeting creation are separate features.',
+          'Connect Zoom requests only basic account identity. Authorize Zoom meetings also requests create, read, update and delete meeting access. You choose your own connection when configuring automatic meetings.',
         )}
       </p>
       {notice && (
@@ -209,6 +222,27 @@ export function ConferencesPage() {
           >
             {t(pending === 'connect' ? 'Connecting to Zoom…' : 'Connect Zoom')}
           </button>
+          {state.data.zoomMeetingsEnabled && (
+            <button
+              type="button"
+              className="button"
+              disabled={
+                !state.data.zoomEnabled ||
+                pending !== null ||
+                state.data.data.length >= state.data.maximumConnections
+              }
+              onClick={() => void connect(undefined, true)}
+            >
+              {t(pending === 'meetings' ? 'Connecting to Zoom…' : 'Authorize Zoom meetings')}
+            </button>
+          )}
+          {!state.data.zoomMeetingsEnabled && (
+            <p className="muted">
+              {t(
+                'New automatic Zoom authorization is disabled on this instance. Existing connections reconnect with their saved permissions.',
+              )}
+            </p>
+          )}
           <p className="muted">
             {t(
               'Connect up to five Zoom identities at once. Disconnecting frees a place and keeps the connection ID for a future reconnection.',
@@ -236,6 +270,7 @@ export function ConferencesPage() {
                   <p>{connection.accountEmail}</p>
                 )}
                 <p>{t(statusLabels[connection.status])}</p>
+                <p>{t(connection.mode === 'meetings' ? 'Meeting permissions' : 'Identity only')}</p>
                 <p className="muted">
                   {t('Connection updated')}:{' '}
                   <time dateTime={connection.updatedAt}>{date(connection.updatedAt)}</time>
@@ -254,6 +289,16 @@ export function ConferencesPage() {
                   </p>
                 )}
                 <div className="card-actions">
+                  {connection.mode === 'identity' && state.data.zoomMeetingsEnabled && (
+                    <button
+                      type="button"
+                      className="button button-small"
+                      disabled={!state.data.zoomEnabled || pending !== null}
+                      onClick={() => void connect(connection.id, true)}
+                    >
+                      {t('Authorize Zoom meetings')}
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="button button-small"

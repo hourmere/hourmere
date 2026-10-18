@@ -13,6 +13,14 @@ const zoom = {
 describe('independent opt-in Zoom configuration', () => {
   it('is disabled by default and does not add Zoom to sign-in providers', () => {
     expect(loadConfig(base).ZOOM_CLIENT_ID).toBeUndefined()
+    expect(loadConfig({ ...base, ...zoom }).ZOOM_MEETINGS_ENABLED).toBe(false)
+    expect(
+      loadConfig({ ...base, ...zoom, ZOOM_MEETINGS_ENABLED: 'true' }).ZOOM_MEETINGS_ENABLED,
+    ).toBe(true)
+    expect(() => loadConfig({ ...base, ZOOM_MEETINGS_ENABLED: 'true' })).toThrow(
+      /separately configured Zoom/,
+    )
+    expect(() => loadConfig({ ...base, ...zoom, ZOOM_MEETINGS_ENABLED: '1' })).toThrow()
     const config = loadConfig({ ...base, ...zoom })
     expect(config.ZOOM_CLIENT_ID).toBe('synthetic-client')
     expect(config.GOOGLE_CLIENT_ID).toBeUndefined()

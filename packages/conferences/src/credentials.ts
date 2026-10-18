@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
+import type { ZoomMode } from './zoom.ts'
 
 export function conferenceEncryptionKey(value: string): Buffer {
   const key = Buffer.from(value, 'base64')
@@ -33,4 +34,43 @@ export function decryptConferenceCredential(key: Buffer, aad: string, value: Buf
   } catch {
     throw new Error('Conference credentials could not be decrypted')
   }
+}
+
+/** Identity v1 credentials remain readable; stronger grants cannot be transplanted to it. */
+export function conferenceTokenAad(
+  owner: string,
+  record: string,
+  identity: string,
+  mode: ZoomMode,
+): string {
+  return mode === 'identity'
+    ? conferenceAad('connection-tokens', owner, record, identity)
+    : JSON.stringify([
+        'hourmere-conference-v2',
+        'zoom',
+        'connection-tokens',
+        owner,
+        record,
+        identity,
+        mode,
+      ])
+}
+/** New attempts bind all authorization decisions, including a deliberately absent ID. */
+export function conferenceStateAad(
+  owner: string,
+  record: string,
+  session: string,
+  mode: ZoomMode,
+  connection: string | null,
+): string {
+  return JSON.stringify([
+    'hourmere-conference-v2',
+    'zoom',
+    'oauth-state',
+    owner,
+    record,
+    session,
+    mode,
+    connection,
+  ])
 }

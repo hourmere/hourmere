@@ -1,5 +1,19 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  'Connect your own Zoom account separately from sign-in and calendars. Identity access and automatic meeting permissions are separate choices.':
+    '单独连接你自己的 Zoom 账号，与登录和日历互相独立。身份访问与自动创建会议权限需要分别选择。',
+  'Connect Zoom requests only basic account identity. Authorize Zoom meetings also requests create, read, update and delete meeting access. You choose your own connection when configuring automatic meetings.':
+    '“连接 Zoom”仅请求基本账号身份。“授权 Zoom 会议”还会请求创建、读取、更新和删除会议的权限。配置自动会议时，由你选择自己的连接。',
+  'Authorize Zoom meetings': '授权 Zoom 会议',
+  'Meeting permissions': '会议权限',
+  'Identity only': '仅身份访问',
+  'New automatic Zoom authorization is disabled on this instance. Existing connections reconnect with their saved permissions.':
+    '此实例已关闭新的自动 Zoom 授权。现有连接会按已保存的权限重新连接。',
+  'Identity-only authorization cannot replace meeting permissions. Reconnect this Zoom account with its existing meeting permissions.':
+    '仅身份授权不能替换会议权限。请使用此 Zoom 账号原有的会议权限重新连接。',
+  'Zoom did not return exactly the requested permissions. Check the app configuration and reconnect.':
+    'Zoom 返回的权限与所请求的权限不完全一致。请检查应用配置后重新连接。',
+  'Automatic Zoom meetings are disabled on this instance.': '此实例已关闭自动 Zoom 会议。',
   Retry: '重试',
   'Working…': '正在处理…',
   'Conference accounts': '会议账号',

@@ -9,6 +9,7 @@ vi.mock('../browser.ts', () => ({ goTo: vi.fn() }))
 const account: Schemas['ConferenceConnection'] = {
   id: 'a0000000-0000-7000-8000-000000000001',
   provider: 'zoom',
+  mode: 'identity',
   accountEmail: 'zoom@example.com',
   displayName: 'Settings',
   status: 'active',
@@ -19,6 +20,7 @@ const account: Schemas['ConferenceConnection'] = {
 const list = (data = [account], zoomEnabled = true) => ({
   data: data.filter((connection) => connection.status !== 'disconnected'),
   zoomEnabled,
+  zoomMeetingsEnabled: false,
   pendingAttempts: 0,
   maximumConnections: 5,
 })
@@ -91,6 +93,57 @@ describe('separate conference accounts page', () => {
     await user.click(await screen.findByRole('button', { name: 'Connect Zoom' }))
     expect((await screen.findByRole('alert')).textContent).toContain("Can't reach Hourmere")
     expect(goTo).not.toHaveBeenCalled()
+  })
+  it('offers meeting access as a distinct explicit choice and upgrades only the selected identity', async () => {
+    const user = userEvent.setup(),
+      requests = fakeApi({
+        ...signedIn,
+        'GET /api/v1/conference-connections': () =>
+          json(200, { ...list(), zoomMeetingsEnabled: true }),
+        'POST /api/v1/conference-connections/zoom/authorize-meetings': () =>
+          json(200, { authorizationUrl: authUrl }),
+        [`POST /api/v1/conference-connections/${account.id}/authorize-meetings`]: () =>
+          json(200, { authorizationUrl: authUrl }),
+      })
+    renderApp('/app/conferences?zoom=mode_conflict')
+    const heading = await screen.findByRole('heading', { name: 'Settings', level: 2 })
+    expect(
+      screen
+        .getByText(
+          'Identity-only authorization cannot replace meeting permissions. Reconnect this Zoom account with its existing meeting permissions.',
+        )
+        .getAttribute('role'),
+    ).toBe('status')
+    const article = heading.closest('article') as HTMLElement
+    await user.click(within(article).getByRole('button', { name: 'Authorize Zoom meetings' }))
+    expect(
+      requests.to(`POST /api/v1/conference-connections/${account.id}/authorize-meetings`)[0]?.body,
+    ).toEqual({})
+    expect(requests.to('POST /api/v1/conference-connections/zoom/authorize')).toHaveLength(0)
+    await user.click(
+      screen.getAllByRole('button', { name: 'Authorize Zoom meetings' })[0] as HTMLElement,
+    )
+    expect(
+      requests.to('POST /api/v1/conference-connections/zoom/authorize-meetings')[0]?.body,
+    ).toEqual({})
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Interface language' }), 'zh-CN')
+    expect(screen.getByRole('heading', { name: 'Settings', level: 2 })).toBe(heading)
+    expect(screen.getByText('仅身份访问')).toBeDefined()
+    expect(screen.getAllByRole('button', { name: '授权 Zoom 会议' })).toHaveLength(2)
+  })
+  it('shows saved stronger mode even when new authorization is disabled, without an automatic grant', async () => {
+    const requests = fakeApi({
+      ...signedIn,
+      'GET /api/v1/conference-connections': () =>
+        json(200, list([{ ...account, mode: 'meetings' }])),
+    })
+    renderApp('/app/conferences')
+    expect(await screen.findByText('Meeting permissions')).toBeDefined()
+    expect(screen.queryByRole('button', { name: 'Authorize Zoom meetings' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Reconnect Zoom' }).hasAttribute('disabled')).toBe(
+      false,
+    )
+    expect(requests.calls.filter((call) => call.method === 'POST')).toHaveLength(0)
   })
   it('does not navigate after leaving while authorization is pending', async () => {
     const user = userEvent.setup(),

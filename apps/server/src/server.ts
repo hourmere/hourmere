@@ -213,6 +213,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
             publicUrl: config.PUBLIC_URL,
           }),
           encryptionKey: config.CONFERENCE_ENCRYPTION_KEY,
+          meetingsEnabled: config.ZOOM_MEETINGS_ENABLED,
         }
       : undefined
   const webhookSettings = {

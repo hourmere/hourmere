@@ -1484,6 +1484,7 @@ export interface paths {
                             maximumConnections: number;
                             pendingAttempts: number;
                             zoomEnabled: boolean;
+                            zoomMeetingsEnabled: boolean;
                         };
                     };
                 };
@@ -1612,6 +1613,108 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/conference-connections/{id}/authorize-meetings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Explicitly authorize automatic single-host Zoom meetings
+         * @description Session-only opt-in. Requests exact identity plus meeting create/read/update/delete scopes, bound to one short-lived PKCE attempt. Reconnecting does not silently change its stored mode.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            responses: {
+                /** @description Explicit meeting-permission OAuth attempt */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uri */
+                            authorizationUrl: string;
+                        };
+                    };
+                };
+                /** @description invalid_request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No valid session or API key */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description conference_session_required */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description zoom_connection_not_found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description zoom_disabled, zoom_meetings_disabled or zoom_connection_limit */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The API key's rate limit is used up */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/conference-connections/{id}/reconnect": {
         parameters: {
             query?: never;
@@ -1621,7 +1724,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Reconnect the same Zoom identity, replacing existing local access */
+        /**
+         * Reconnect the same Zoom identity with its saved permissions
+         * @description Retains the stored identity or meeting authorization mode. A changed instance flag does not widen a saved identity grant.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -1722,7 +1828,7 @@ export interface paths {
         put?: never;
         /**
          * Explicitly rotate Zoom credentials and refresh identity metadata
-         * @description Old credentials are durably retired before the provider call. Unknown or failed rotation requires reconnection. No meetings are read or written.
+         * @description Old credentials are durably retired before the provider call. Unknown or failed rotation requires reconnection. Only identity metadata is fetched; each connection retains its explicitly authorized mode.
          */
         post: {
             parameters: {
@@ -1874,6 +1980,106 @@ export interface paths {
                     };
                 };
                 /** @description zoom_disabled or zoom_connection_limit */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The API key's rate limit is used up */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/conference-connections/zoom/authorize-meetings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Explicitly authorize automatic single-host Zoom meetings
+         * @description Session-only opt-in. Requests exact identity plus meeting create/read/update/delete scopes, bound to one short-lived PKCE attempt. Reconnecting does not silently change its stored mode.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            responses: {
+                /** @description Explicit meeting-permission OAuth attempt */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            /** Format: uri */
+                            authorizationUrl: string;
+                        };
+                    };
+                };
+                /** @description invalid_request */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No valid session or API key */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description conference_session_required */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description zoom_connection_not_found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description zoom_disabled, zoom_meetings_disabled or zoom_connection_limit */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -4506,6 +4712,8 @@ export interface components {
             /** Format: uuid */
             id: string;
             lastError: string | null;
+            /** @enum {string} */
+            mode: "identity" | "meetings";
             /** @enum {string} */
             provider: "zoom";
             /** @enum {string} */

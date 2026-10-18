@@ -413,6 +413,7 @@ export interface ConferenceConnections {
   external_user_id: string | null;
   id: Generated<string>;
   last_error: string | null;
+  mode: Generated<string>;
   operation_id: string | null;
   provider: string;
   scopes: Generated<string[]>;
@@ -422,10 +423,12 @@ export interface ConferenceConnections {
 }
 
 export interface ConferenceOauthStates {
+  binding_version: Generated<number>;
   claimed: Generated<boolean>;
   connection_id: string | null;
   created_at: Generated<Timestamp>;
   expires_at: Timestamp;
+  mode: Generated<string>;
   session_id: string;
   state_hash: string;
   user_id: string;
