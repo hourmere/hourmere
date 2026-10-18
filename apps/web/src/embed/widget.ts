@@ -1,9 +1,12 @@
 import { embedOrigin, publicBookingPath } from '@hourmere/core/embed'
+import { explicitLanguage, type InterfaceLanguage } from '@hourmere/core/language'
+import { widgetLanguage, widgetMessages } from './language.ts'
 
 export interface InlineOptions {
   element: HTMLElement
   url: string
   height?: number
+  language?: InterfaceLanguage
 }
 export interface EmbedHandle {
   iframe: HTMLIFrameElement
@@ -13,7 +16,12 @@ const mounted = new WeakMap<HTMLElement, EmbedHandle>()
 let popup: { dialog: HTMLDialogElement; handle: EmbedHandle; previous: Element | null } | undefined
 
 /** Validated booking URLs cannot turn this helper into a general-purpose iframe loader. */
-export function iframeUrl(raw: string, parentOrigin: string, id: string): URL {
+export function iframeUrl(
+  raw: string,
+  parentOrigin: string,
+  id: string,
+  language?: InterfaceLanguage,
+): URL {
   if (typeof raw !== 'string' || raw.length > 4096) throw new Error('Invalid Hourmere booking URL')
   let url: URL
   try {
@@ -32,10 +40,12 @@ export function iframeUrl(raw: string, parentOrigin: string, id: string): URL {
     !embedOrigin(parentOrigin)
   )
     throw new Error('Invalid Hourmere booking URL or parent origin')
-  return new URL(`/embed${path}?${new URLSearchParams({ parentOrigin, embedId: id })}`, url.origin)
+  const query = new URLSearchParams({ parentOrigin, embedId: id })
+  if (language !== undefined) query.set('language', widgetLanguage(language))
+  return new URL(`/embed${path}?${query}`, url.origin)
 }
 
-export function initInline({ element, url, height = 720 }: InlineOptions): EmbedHandle {
+export function initInline({ element, url, height = 720, language }: InlineOptions): EmbedHandle {
   if (
     !(element instanceof HTMLElement) ||
     element.ownerDocument !== document ||
@@ -44,11 +54,12 @@ export function initInline({ element, url, height = 720 }: InlineOptions): Embed
     height > 2000
   )
     throw new Error('Invalid Hourmere embed container or height')
+  const selectedLanguage = widgetLanguage(language)
   const id = crypto.randomUUID().replaceAll('-', ''),
-    target = iframeUrl(url, window.location.origin, id)
+    target = iframeUrl(url, window.location.origin, id, selectedLanguage)
   mounted.get(element)?.destroy()
   const iframe = document.createElement('iframe')
-  iframe.title = 'Book a meeting with Hourmere'
+  iframe.title = widgetMessages(selectedLanguage).iframe
   iframe.referrerPolicy = 'no-referrer'
   iframe.setAttribute('allow', 'clipboard-write')
   iframe.setAttribute(
@@ -117,7 +128,9 @@ export function closePopup() {
   if (current.previous instanceof HTMLElement && current.previous.isConnected)
     current.previous.focus()
 }
-export function openPopup({ url }: { url: string }) {
+export function openPopup({ url, language }: { url: string; language?: InterfaceLanguage }) {
+  const selectedLanguage = widgetLanguage(language),
+    text = widgetMessages(selectedLanguage)
   // Validate before closing an existing usable dialog or modifying the host document.
   iframeUrl(url, window.location.origin, crypto.randomUUID().replaceAll('-', ''))
   closePopup()
@@ -127,7 +140,7 @@ export function openPopup({ url }: { url: string }) {
     close = document.createElement('button'),
     holder = document.createElement('div')
   title.id = `hourmere-title-${crypto.randomUUID()}`
-  title.textContent = 'Book a meeting'
+  title.textContent = text.title
   dialog.setAttribute('aria-labelledby', title.id)
   Object.assign(dialog.style, {
     width: 'min(1000px, calc(100vw - 24px))',
@@ -143,8 +156,8 @@ export function openPopup({ url }: { url: string }) {
   })
   Object.assign(title.style, { font: '600 18px system-ui', margin: '0 0 12px' })
   close.type = 'button'
-  close.textContent = 'Close'
-  close.setAttribute('aria-label', 'Close booking')
+  close.textContent = text.close
+  close.setAttribute('aria-label', text.closeLabel)
   Object.assign(close.style, {
     font: 'inherit',
     marginBottom: '12px',
@@ -167,7 +180,7 @@ export function openPopup({ url }: { url: string }) {
   dialog.append(title, close, holder)
   document.body.append(dialog)
   try {
-    const handle = initInline({ element: holder, url })
+    const handle = initInline({ element: holder, url, language: selectedLanguage })
     handle.iframe.removeAttribute('loading')
     popup = { dialog, handle, previous }
     dialog.showModal()
@@ -182,20 +195,23 @@ export function openPopup({ url }: { url: string }) {
 }
 
 const buttons = new WeakSet<HTMLElement>()
-function errorMessage(element: HTMLElement) {
+function errorMessage(element: HTMLElement, language?: InterfaceLanguage) {
   const status = document.createElement('p')
   status.setAttribute('role', 'alert')
-  status.textContent =
-    'The booking widget could not load. Check its Hourmere URL and the instance embedding settings.'
+  status.textContent = widgetMessages(widgetLanguage(language)).failure
   element.append(status)
 }
 export function init() {
   for (const element of document.querySelectorAll<HTMLElement>('[data-hourmere-inline]')) {
     if (mounted.has(element)) continue
     try {
-      initInline({ element, url: element.getAttribute('data-hourmere-url') ?? '' })
+      initInline({
+        element,
+        url: element.getAttribute('data-hourmere-url') ?? '',
+        language: widgetLanguage(element.getAttribute('data-hourmere-language') ?? undefined),
+      })
     } catch {
-      errorMessage(element)
+      errorMessage(element, explicitLanguage(element.getAttribute('data-hourmere-language')))
     }
   }
   for (const element of document.querySelectorAll<HTMLElement>('[data-hourmere-popup]')) {
@@ -205,9 +221,15 @@ export function init() {
       event.preventDefault()
       element.focus()
       try {
-        openPopup({ url: element.getAttribute('data-hourmere-url') ?? '' })
+        openPopup({
+          url: element.getAttribute('data-hourmere-url') ?? '',
+          language: widgetLanguage(element.getAttribute('data-hourmere-language') ?? undefined),
+        })
       } catch {
-        errorMessage(element.parentElement ?? element)
+        errorMessage(
+          element.parentElement ?? element,
+          explicitLanguage(element.getAttribute('data-hourmere-language')),
+        )
       }
     })
   }

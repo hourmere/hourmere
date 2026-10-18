@@ -6,26 +6,32 @@ import { ErrorSummary, Field, type FieldErrors } from '../components/forms.tsx'
 import { TimeZonePicker } from '../components/TimeZonePicker.tsx'
 import { browserLocale, browserTimeZone, isKnownTimeZone } from '../format.ts'
 import { useLoad, useMounted, usePageTitle } from '../hooks.ts'
+import { useI18n } from '../i18n/runtime.tsx'
+import { msg, type UiText } from '../i18n/translate.ts'
 import { ACCOUNT, PROFILE } from '../limits.ts'
 import { type Me, useMe, useSession } from '../session.tsx'
 import { useUnsavedChanges } from '../unsaved-changes.tsx'
 
 export function SettingsPage() {
+  const { t, ui } = useI18n()
+
   usePageTitle('Settings')
   const me = useMe()
   const [profile, reload] = useLoad(loadProfile)
 
   return (
     <>
-      <h1>Settings</h1>
+      <h1>{t('Settings')}</h1>
       <section className="panel" aria-labelledby="profile-heading">
-        <h2 id="profile-heading">Profile</h2>
-        {profile.status === 'loading' && <p role="status">Loading your profile…</p>}
+        <h2 id="profile-heading">{t('Profile')}</h2>
+        {profile.status === 'loading' && <p role="status">{t('Loading your profile…')}</p>}
         {profile.status === 'error' && (
           <div className="alert alert-error" role="alert">
-            <p>Could not load your profile. {profile.message}</p>
+            <p>
+              {t('Could not load your profile.')} {ui(profile.message)}
+            </p>
             <button type="button" className="button button-small" onClick={reload}>
-              Try again
+              {t('Try again')}
             </button>
           </div>
         )}
@@ -33,32 +39,34 @@ export function SettingsPage() {
       </section>
 
       <section className="panel" aria-labelledby="account-heading">
-        <h2 id="account-heading">Account</h2>
+        <h2 id="account-heading">{t('Account')}</h2>
         <DisplayNameForm name={me.user.name} />
         <dl className="details">
-          <dt>Email</dt>
+          <dt>{t('Email')}</dt>
           <dd>{me.user.email}</dd>
-          <dt>Organization</dt>
+          <dt>{t('Organization')}</dt>
           <dd>
             {me.organization.name}
-            {me.organization.personal && <span className="muted"> (personal)</span>}
+            {me.organization.personal && <span className="muted"> {t('(personal)')}</span>}
           </dd>
         </dl>
-        <p className="hint">Your email comes from how you sign in.</p>
+        <p className="hint">{t('Your email comes from how you sign in.')}</p>
       </section>
     </>
   )
 }
 
 function DisplayNameForm({ name }: { name: string }) {
+  const { t, ui } = useI18n()
+
   const { refresh } = useSession()
   const [baseline, setBaseline] = useState(name)
   const [draft, setDraft] = useState(name)
   const [errors, setErrors] = useState<FieldErrors>({})
-  const [message, setMessage] = useState<string | null>(null)
+  const [message, setMessage] = useState<UiText | null>(null)
   const [attempt, setAttempt] = useState(0)
   const [saving, setSaving] = useState(false)
-  const [status, setStatus] = useState('')
+  const [status, setStatus] = useState<UiText>('')
   const statusRef = useRef<HTMLParagraphElement>(null)
   const mounted = useMounted()
   const dirty = draft !== baseline
@@ -75,7 +83,9 @@ function DisplayNameForm({ name }: { name: string }) {
       next.length > ACCOUNT.nameMaxLength ||
       !next.isWellFormed() ||
       /[\p{Cc}\p{Zl}\p{Zp}]/u.test(next)
-    const nameError = `Enter a name on one line, up to ${ACCOUNT.nameMaxLength} characters.`
+    const nameError = msg('Enter a name on one line, up to {0} characters.', {
+      '0': ACCOUNT.nameMaxLength,
+    })
     setErrors(invalid ? { displayName: nameError } : {})
     if (invalid) return
     setSaving(true)
@@ -95,14 +105,14 @@ function DisplayNameForm({ name }: { name: string }) {
       setStatus('')
       if (err instanceof RequestError && err.code === 'invalid_display_name') {
         setErrors({ displayName: nameError })
-      } else setMessage(`Could not save your display name. ${errorMessage(err)}`)
+      } else setMessage(msg('Could not save your display name. {0}', { '0': errorMessage(err) }))
       setAttempt((n) => n + 1)
     }
     setSaving(false)
   }
 
   return (
-    <form className="stack" onSubmit={submit} noValidate aria-label="Edit display name">
+    <form className="stack" onSubmit={submit} noValidate aria-label={t('Edit display name')}>
       <ErrorSummary
         errors={errors}
         labels={{ displayName: 'Display name' }}
@@ -112,9 +122,9 @@ function DisplayNameForm({ name }: { name: string }) {
       <fieldset className="form-fieldset" disabled={saving} role="presentation">
         <Field
           id="displayName"
-          label="Display name"
+          label={t('Display name')}
           error={errors.displayName}
-          hint="Shown on booking pages, in emails and in calendar invitations."
+          hint={t('Shown on booking pages, in emails and in calendar invitations.')}
         >
           {(props) => (
             <input
@@ -132,10 +142,10 @@ function DisplayNameForm({ name }: { name: string }) {
       </fieldset>
       <div className="form-actions">
         <button type="submit" className="button button-primary" disabled={saving}>
-          {saving ? 'Saving…' : 'Save display name'}
+          {saving ? t('Saving…') : t('Save display name')}
         </button>
         <p className="form-status" role="status" tabIndex={-1} ref={statusRef}>
-          {status || (dirty ? 'Unsaved changes' : '')}
+          {ui(status || (dirty ? 'Unsaved changes' : ''))}
         </p>
       </div>
     </form>
@@ -168,11 +178,11 @@ function canonicalLocale(value: string): string | null {
 }
 
 /** "English (United Kingdom)" for "en-GB", in the browser's language. */
-function localeName(locale: string): string | null {
+function localeName(locale: string, displayLocale?: string): string | null {
   const canonical = canonicalLocale(locale)
   if (!canonical) return null
   try {
-    return new Intl.DisplayNames(undefined, { type: 'language' }).of(canonical) ?? null
+    return new Intl.DisplayNames(displayLocale, { type: 'language' }).of(canonical) ?? null
   } catch {
     return null
   }
@@ -183,7 +193,7 @@ function validateProfile(draft: ProfileDraft): FieldErrors {
   const handle = draft.handle.trim()
   if (!handle) errors.handle = 'Enter a handle.'
   else if (handle.length > PROFILE.handleMaxLength) {
-    errors.handle = `Use at most ${PROFILE.handleMaxLength} characters.`
+    errors.handle = msg('Use at most {0} characters.', { '0': PROFILE.handleMaxLength })
   } else if (!PROFILE.handlePattern.test(handle)) {
     errors.handle =
       'Use lowercase letters, digits and hyphens, starting and ending with a letter or digit.'
@@ -223,6 +233,8 @@ function profileServerErrors(err: unknown): FieldErrors | null {
 const LABELS = { handle: 'Handle', timeZone: 'Time zone', locale: 'Language' }
 
 function ProfileForm({ profile, me }: { profile: Profile | null; me: Me }) {
+  const { t, ui, locale: displayLocale } = useI18n()
+
   const [saved, setSaved] = useState(profile)
   const [baseline, setBaseline] = useState<ProfileDraft>(() =>
     profile
@@ -235,10 +247,10 @@ function ProfileForm({ profile, me }: { profile: Profile | null; me: Me }) {
   )
   const [draft, setDraft] = useState(baseline)
   const [errors, setErrors] = useState<FieldErrors>({})
-  const [formError, setFormError] = useState<string | null>(null)
+  const [formError, setFormError] = useState<UiText | null>(null)
   const [attempt, setAttempt] = useState(0)
   const [saving, setSaving] = useState(false)
-  const [status, setStatus] = useState('')
+  const [status, setStatus] = useState<UiText>('')
   const statusRef = useRef<HTMLParagraphElement>(null)
   const mounted = useMounted()
 
@@ -288,7 +300,9 @@ function ProfileForm({ profile, me }: { profile: Profile | null; me: Me }) {
       setStatus('')
       const fields = profileServerErrors(err)
       setErrors(fields ?? {})
-      setFormError(fields ? null : `Could not save your profile. ${errorMessage(err)}`)
+      setFormError(
+        fields ? null : msg('Could not save your profile. {0}', { '0': errorMessage(err) }),
+      )
       setAttempt((n) => n + 1)
     }
     setSaving(false)
@@ -297,32 +311,32 @@ function ProfileForm({ profile, me }: { profile: Profile | null; me: Me }) {
   const origin = window.location.origin
   const handle = draft.handle.trim()
   const changingHandle = saved !== null && handle !== saved.handle
-  const language = localeName(draft.locale)
+  const language = localeName(draft.locale, displayLocale)
 
   return (
     <form className="stack" onSubmit={submit} noValidate>
       {!saved && (
         <p className="alert alert-info">
-          Choose a handle to get booking links. Check the suggestions below and save.
+          {t('Choose a handle to get booking links. Check the suggestions below and save.')}
         </p>
       )}
       <ErrorSummary errors={errors} labels={LABELS} message={formError} attempt={attempt} />
       <fieldset className="form-fieldset stack" disabled={saving} role="presentation">
         <Field
           id="handle"
-          label="Handle"
+          label={t('Handle')}
           error={errors.handle}
           hint={
             <>
-              Your booking links start with{' '}
+              {t('Your booking links start with')}{' '}
               <span className="mono preview">
-                {origin}/{handle || 'your-handle'}/
+                {origin}/{handle || t('your-handle')}/
               </span>
-              . Lowercase letters, digits and hyphens, up to {PROFILE.handleMaxLength}.
+              {t('. Lowercase letters, digits and hyphens, up to')} {PROFILE.handleMaxLength}.
               {changingHandle && (
                 <strong className="warning">
                   {' '}
-                  Links you have already shared will stop working.
+                  {t('Links you have already shared will stop working.')}
                 </strong>
               )}
             </>
@@ -342,9 +356,9 @@ function ProfileForm({ profile, me }: { profile: Profile | null; me: Me }) {
         </Field>
         <Field
           id="timeZone"
-          label="Time zone"
+          label={t('Time zone')}
           error={errors.timeZone}
-          hint="Bookings are shown in this zone. Type to search, e.g. “Berlin”."
+          hint={t('Bookings are shown in this zone. Type to search, e.g. “Berlin”.')}
         >
           {(props) => (
             <TimeZonePicker
@@ -356,11 +370,11 @@ function ProfileForm({ profile, me }: { profile: Profile | null; me: Me }) {
         </Field>
         <Field
           id="locale"
-          label="Language"
+          label={t('Language')}
           error={errors.locale}
           hint={
             <>
-              A language tag such as en, en-GB or pt-BR
+              {t('A language tag such as en, en-GB or pt-BR')}
               {language && !errors.locale ? <>: {language}</> : ''}.
             </>
           }
@@ -379,10 +393,10 @@ function ProfileForm({ profile, me }: { profile: Profile | null; me: Me }) {
       </fieldset>
       <div className="form-actions">
         <button type="submit" className="button button-primary" disabled={saving}>
-          {saving ? 'Saving…' : saved ? 'Save profile' : 'Create profile'}
+          {saving ? t('Saving…') : saved ? t('Save profile') : t('Create profile')}
         </button>
         <p className="form-status" role="status" tabIndex={-1} ref={statusRef}>
-          {status || (dirty ? 'Unsaved changes' : '')}
+          {ui(status || (dirty ? 'Unsaved changes' : ''))}
         </p>
       </div>
     </form>

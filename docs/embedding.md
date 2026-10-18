@@ -127,3 +127,13 @@ The ignored `apps/web/public/hourmere-embed.js` is generated automatically by pr
 builds. Rerun the first command after changing widget sources during development. Use a
 separate loopback origin for the parent test page and include its exact origin in
 `EMBED_ALLOWED_ORIGINS`.
+
+## Interface language
+
+Set `data-hourmere-language="zh-CN"` on a declarative inline or popup element, or pass
+`language: 'zh-CN'` to `initInline` / `openPopup`, to initialize its Simplified Chinese
+interface. Use `en` for English. These are the only accepted explicit values; an invalid
+value fails before replacing a working widget. Without the option, the helper uses a
+supported browser language or English. Visitors can change the iframe language without
+losing a selected time, form answers or a completed booking. See
+[interface languages](interface-languages.md) for preference and formatting behavior.

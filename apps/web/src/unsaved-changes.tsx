@@ -20,6 +20,7 @@ import {
   useMemo,
   useRef,
 } from 'react'
+import { useI18n } from './i18n/runtime.tsx'
 
 export const LEAVE_WITH_UNSAVED_CHANGES =
   'You have unsaved changes. Leave this page and discard them?'
@@ -35,6 +36,7 @@ const UnsavedChangesContext = createContext<UnsavedChanges | null>(null)
 
 /** Tracks which parts of the current page have unsaved changes. */
 export function UnsavedChangesProvider({ children }: { children: ReactNode }) {
+  const { t } = useI18n()
   const dirty = useRef(new Set<symbol>())
 
   const set = useCallback((key: symbol, isDirty: boolean) => {
@@ -46,8 +48,8 @@ export function UnsavedChangesProvider({ children }: { children: ReactNode }) {
     if (dirty.current.size === 0) return true
     // Registrations stay until their page unmounts: leaving can still fail (a sign-out the
     // server refuses), and the page, still there, must keep asking.
-    return window.confirm(LEAVE_WITH_UNSAVED_CHANGES)
-  }, [])
+    return window.confirm(t(LEAVE_WITH_UNSAVED_CHANGES))
+  }, [t])
 
   const value = useMemo(() => ({ set, confirmLeave }), [set, confirmLeave])
   return <UnsavedChangesContext value={value}>{children}</UnsavedChangesContext>

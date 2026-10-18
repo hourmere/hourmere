@@ -273,6 +273,7 @@ describe('the API keys page', () => {
     const user = userEvent.setup()
     let me: Me = IN_TEAM
     const api = fakeApi({
+      'GET /api/v1/profile': () => json(404, { error: 'profile_not_found' }),
       'GET /api/v1/me': () => json(200, me),
       ...organizations([ME.organization]),
       'GET /api/auth/api-key/list': () => json(200, { apiKeys: [], total: 0 }),

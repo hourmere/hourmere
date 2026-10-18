@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { errorMessage } from './api/errors.ts'
+import { useI18n } from './i18n/runtime.tsx'
+import type { UiText } from './i18n/translate.ts'
 
 export type Loaded<T> =
   | { status: 'loading' }
   | { status: 'ready'; data: T }
-  | { status: 'error'; message: string }
+  | { status: 'error'; message: UiText }
 
 /**
  * Loads data for a page: `load` runs on mount and again on `reload()`, and is aborted when
@@ -35,10 +37,12 @@ export function useLoad<T>(load: (signal: AbortSignal) => Promise<T>) {
 }
 
 /** Sets the browser tab's title for the current page. */
-export function usePageTitle(title: string) {
+export function usePageTitle(title: UiText) {
+  const { ui } = useI18n()
+  const translated = ui(title)
   useEffect(() => {
-    document.title = `${title} · Hourmere`
-  }, [title])
+    document.title = `${translated} · Hourmere`
+  }, [translated])
 }
 
 /**

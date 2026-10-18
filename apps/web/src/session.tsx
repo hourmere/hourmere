@@ -13,7 +13,13 @@ import { Navigate, Outlet, useLocation } from 'react-router'
 import { signOut as endSession } from './api/auth.ts'
 import { api, onUnauthorized, type Schemas } from './api/client.ts'
 import { errorMessage, requestError } from './api/errors.ts'
+import { admin } from './i18n/admin.ts'
+import { AccountLanguage, useI18n } from './i18n/runtime.tsx'
+import type { UiText } from './i18n/translate.ts'
+import { registerCatalog } from './i18n/translate.ts'
 import { signInPath } from './next-path.ts'
+
+registerCatalog(admin)
 
 export type Me = Schemas['Me']
 
@@ -21,7 +27,7 @@ export type SessionState =
   | { status: 'loading' }
   | { status: 'signed-in'; me: Me }
   | { status: 'signed-out'; reason: SignedOutReason }
-  | { status: 'error'; message: string }
+  | { status: 'error'; message: UiText }
 
 /**
  * Why nobody is signed in: `visit` when nobody was (the first page load), `signed-out` when
@@ -50,7 +56,7 @@ interface Session {
 }
 
 export interface Notice {
-  message: string
+  message: UiText
   /**
    * The page it is about (a pathname). It is shown only there and dropped once the person is
    * elsewhere, including when it arrives after they left (a slow request).
@@ -66,7 +72,7 @@ const lapsed = (s: SessionState): SessionState =>
     ? s
     : { status: 'signed-out', reason: s.status === 'signed-in' ? 'expired' : 'visit' }
 
-type MeResult = { ok: true; me: Me } | { ok: false; status: number; message: string }
+type MeResult = { ok: true; me: Me } | { ok: false; status: number; message: UiText }
 
 async function fetchMe(signal: AbortSignal): Promise<MeResult> {
   const { data, error, response } = await api.GET('/api/v1/me', { signal })
@@ -74,7 +80,7 @@ async function fetchMe(signal: AbortSignal): Promise<MeResult> {
   return {
     ok: false,
     status: response.status,
-    message: requestError(response.status, error).message,
+    message: errorMessage(requestError(response.status, error)),
   }
 }
 
@@ -82,6 +88,28 @@ async function fetchMe(signal: AbortSignal): Promise<MeResult> {
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<SessionState>({ status: 'loading' })
   const [notice, setNotice] = useState<Notice | null>(null)
+  const [accountLocale, setAccountLocale] = useState<{
+    userId: string
+    locale: string | undefined
+  } | null>(null)
+  const signedInUserId = state.status === 'signed-in' ? state.me.user.id : null
+  useEffect(() => {
+    if (!signedInUserId) {
+      setAccountLocale(null)
+      return
+    }
+    const controller = new AbortController()
+    api.GET('/api/v1/profile', { signal: controller.signal }).then(
+      ({ data }) => {
+        if (!controller.signal.aborted)
+          setAccountLocale({ userId: signedInUserId, locale: data?.locale ?? undefined })
+      },
+      () => {
+        /* Account defaults are optional; UI remains usable offline. */
+      },
+    )
+    return () => controller.abort()
+  }, [signedInUserId])
   // Counts the moments the session ended (sign-out, or a 401). An answer to a request that
   // started before the latest one is stale: applying it would sign a signed-out person back
   // in, e.g. a background check that the server answered just before the sign-out.
@@ -187,7 +215,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     () => ({ state, reload, refresh, signOut, notice, setNotice }),
     [state, reload, refresh, signOut, notice],
   )
-  return <SessionContext value={session}>{children}</SessionContext>
+  return (
+    <SessionContext value={session}>
+      <AccountLanguage
+        locale={accountLocale?.userId === signedInUserId ? accountLocale?.locale : undefined}
+      >
+        {children}
+      </AccountLanguage>
+    </SessionContext>
+  )
 }
 
 export function useSession(): Session {
@@ -217,15 +253,17 @@ export function PageStatus({ children }: { children: ReactNode }) {
  * sends the visitor to sign in, remembering where they were going.
  */
 export function RequireSession() {
+  const { t, ui } = useI18n()
+
   const { state, reload } = useSession()
   const location = useLocation()
-  if (state.status === 'loading') return <PageStatus>Loading…</PageStatus>
+  if (state.status === 'loading') return <PageStatus>{t('Loading…')}</PageStatus>
   if (state.status === 'error') {
     return (
       <div className="page-status">
-        <p role="alert">{state.message}</p>
+        <p role="alert">{ui(state.message)}</p>
         <button type="button" className="button" onClick={reload}>
-          Try again
+          {t('Try again')}
         </button>
       </div>
     )

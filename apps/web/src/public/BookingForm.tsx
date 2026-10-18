@@ -1,4 +1,6 @@
 import { type FormEvent, useEffect, useId, useRef, useState } from 'react'
+import { useI18n } from '../i18n/runtime.tsx'
+import { msg, type UiText } from '../i18n/translate.ts'
 import {
   type Answer,
   answerError,
@@ -23,7 +25,7 @@ interface BookingFormProps {
   onChange: (values: BookingFormValues) => void
   /** Errors from the server, by field id (see validation.ts). */
   serverErrors: FieldErrors
-  formError: string | null
+  formError: UiText | null
   submitting: boolean
   onSubmit: () => void
 }
@@ -44,7 +46,8 @@ export function validateBookingForm(
     const guestEmail = emailError(guest.email)
     if (guestEmail) errors[`guest-${i}-email`] = guestEmail
   })
-  if (values.guests.length > LIMITS.guests) errors.guests = `Add at most ${LIMITS.guests} guests.`
+  if (values.guests.length > LIMITS.guests)
+    errors.guests = msg('Add at most {0} guests.', { '0': LIMITS.guests })
   for (const q of questions) {
     const error = answerError(q, values.answers[q.id])
     if (error) errors[`q-${q.id}`] = error
@@ -77,6 +80,8 @@ export function BookingForm({
   submitting,
   onSubmit,
 }: BookingFormProps) {
+  const { t, ui } = useI18n()
+
   const prefix = useId()
   const form = useRef<HTMLFormElement>(null)
   const [clientErrors, setClientErrors] = useState<FieldErrors>({})
@@ -121,7 +126,7 @@ export function BookingForm({
   const errorText = (field: string) =>
     errors[field] ? (
       <p className="field-error" id={`${fieldId(field)}-error`}>
-        {errors[field]}
+        {ui(errors[field])}
       </p>
     ) : null
 
@@ -134,8 +139,8 @@ export function BookingForm({
   ) => (
     <div className="field">
       <label htmlFor={fieldId(field)}>
-        {label}
-        {options.required === false && <span className="optional"> (optional)</span>}
+        {ui(label)}
+        {options.required === false && <span className="optional"> {t('(optional)')}</span>}
       </label>
       <input
         id={fieldId(field)}
@@ -182,7 +187,10 @@ export function BookingForm({
           aria-describedby={describedBy('guests')}
         >
           <legend>
-            Guests <span className="optional">(optional, up to {LIMITS.guests})</span>
+            {t('Guests')}{' '}
+            <span className="optional">
+              {t('(optional, up to')} {LIMITS.guests})
+            </span>
           </legend>
           {errorText('guests')}
           {values.guests.map((guest, i) => (
@@ -190,7 +198,7 @@ export function BookingForm({
             <div className="guest" key={i}>
               {textInput(
                 `guest-${i}-name`,
-                `Guest ${i + 1} name`,
+                t('Guest {0} name', { '0': i + 1 }),
                 guest.name,
                 (name) =>
                   update({ guests: values.guests.map((g, j) => (j === i ? { ...g, name } : g)) }),
@@ -198,7 +206,7 @@ export function BookingForm({
               )}
               {textInput(
                 `guest-${i}-email`,
-                `Guest ${i + 1} email`,
+                t('Guest {0} email', { '0': i + 1 }),
                 guest.email,
                 (email) =>
                   update({ guests: values.guests.map((g, j) => (j === i ? { ...g, email } : g)) }),
@@ -209,7 +217,7 @@ export function BookingForm({
                 className="button button-small guest-remove"
                 onClick={() => update({ guests: values.guests.filter((_, j) => j !== i) })}
               >
-                Remove guest {i + 1}
+                {t('Remove guest')} {i + 1}
               </button>
             </div>
           ))}
@@ -229,21 +237,23 @@ export function BookingForm({
                 )
               }}
             >
-              Add a guest
+              {t('Add a guest')}
             </button>
           ) : (
-            <p className="hint">You can add up to {LIMITS.guests} guests.</p>
+            <p className="hint">
+              {t('You can add up to')} {LIMITS.guests} {t('guests.')}
+            </p>
           )}
         </fieldset>
       )}
 
       {formError && (
         <div className="alert alert-error">
-          <p role="alert">{formError}</p>
+          <p role="alert">{ui(formError)}</p>
         </div>
       )}
       <button type="submit" className="button button-primary button-block" disabled={submitting}>
-        {submitting ? 'Booking…' : 'Confirm booking'}
+        {submitting ? t('Booking…') : t('Confirm booking')}
       </button>
     </form>
   )
@@ -252,13 +262,15 @@ export function BookingForm({
 interface QuestionFieldProps {
   question: Question
   id: string
-  field: string
+  field: UiText
   value: Answer | undefined
   onChange: (value: Answer | undefined) => void
-  error: string | undefined
+  error: UiText | undefined
 }
 
 function QuestionField({ question: q, id, field, value, onChange, error }: QuestionFieldProps) {
+  const { t, ui } = useI18n()
+
   const errorId = `${id}-error`
   const common = {
     'aria-invalid': error ? true : undefined,
@@ -266,13 +278,13 @@ function QuestionField({ question: q, id, field, value, onChange, error }: Quest
   } as const
   const errorText = error ? (
     <p className="field-error" id={errorId}>
-      {error}
+      {ui(error)}
     </p>
   ) : null
   const label = (
     <>
       {q.label}
-      {!q.required && <span className="optional"> (optional)</span>}
+      {!q.required && <span className="optional"> {t('(optional)')}</span>}
     </>
   )
 
@@ -323,7 +335,7 @@ function QuestionField({ question: q, id, field, value, onChange, error }: Quest
             onChange={(e) => onChange(e.target.value)}
             {...common}
           >
-            <option value="">{q.required ? 'Choose…' : 'No answer'}</option>
+            <option value="">{q.required ? t('Choose…') : t('No answer')}</option>
             {(q.options ?? []).map((option) => (
               <option key={option} value={option}>
                 {option}

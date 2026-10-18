@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { TimeZonePicker } from '../components/TimeZonePicker.tsx'
+import { useI18n } from '../i18n/runtime.tsx'
+import type { UiText } from '../i18n/translate.ts'
 import { failureMessage, loadSlotsInRange, type Slot, type SlotLoader } from './api.ts'
 import {
   addMonths,
@@ -44,7 +46,7 @@ export function monthRequestRange(
 type Loaded =
   | { status: 'loading' }
   | { status: 'ready'; slots: Slot[] }
-  | { status: 'error'; message: string }
+  | { status: 'error'; message: UiText }
 
 interface SlotPickerProps {
   load: SlotLoader
@@ -52,7 +54,7 @@ interface SlotPickerProps {
   durationMinutes: number
   timeZone: string
   onTimeZoneChange: (timeZone: string) => void
-  timeZoneError?: string | undefined
+  timeZoneError?: UiText | undefined
   locale: string
   /** The current time; slots before it are not asked for. */
   now: number
@@ -66,7 +68,7 @@ interface SlotPickerProps {
   /** Focus the picker's heading when it appears (coming back to it from another step). */
   focusTitle?: boolean
   /** A message about the last attempt, shown above the calendar (e.g. the time was taken). */
-  notice?: string | null | undefined
+  notice?: UiText | null | undefined
 }
 
 const monthKey = ({ year, month }: YearMonth) => `${year}-${month}`
@@ -93,6 +95,8 @@ export function SlotPicker({
   focusTitle = false,
   notice,
 }: SlotPickerProps) {
+  const { t, ui } = useI18n()
+
   const headingId = useId()
   const heading = useRef<HTMLHeadingElement>(null)
   // biome-ignore lint/correctness/useExhaustiveDependencies: only when the picker appears
@@ -197,25 +201,34 @@ export function SlotPicker({
   const labels = daySlots.map((s) => formatTime(Date.parse(s.start), timeZone, locale))
   // Where clocks go back, one wall time happens twice: add the zone's abbreviation then.
   const repeated = new Set(labels.filter((l, i) => labels.indexOf(l) !== i))
-  const count = (n: number, one: string, many: string) => (n === 1 ? `1 ${one}` : `${n} ${many}`)
 
   let status = ''
-  if (state.status === 'loading') status = 'Loading available times…'
-  else if (ready && !available.size) status = 'No available times this month.'
+  if (state.status === 'loading') status = t('Loading available times…')
+  else if (ready && !available.size) status = t('No available times this month.')
   else if (ready && day) {
-    status = `${count(daySlots.length, 'time', 'times')} available on ${formatDateKey(day, locale)}.`
+    status = t(
+      daySlots.length === 1
+        ? '{count} time available on {day}.'
+        : '{count} times available on {day}.',
+      { count: daySlots.length, day: formatDateKey(day, locale) },
+    )
   } else if (ready) {
-    status = `${count(available.size, 'day has', 'days have')} available times this month.`
+    status = t(
+      available.size === 1
+        ? '{count} day has available times this month.'
+        : '{count} days have available times this month.',
+      { count: available.size },
+    )
   }
 
   return (
     <section className="picker" aria-labelledby={headingId}>
       <h2 id={headingId} className="picker-title" ref={heading} tabIndex={-1}>
-        {title}
+        {ui(title)}
       </h2>
       {notice && (
         <div className="alert alert-info">
-          <p role="alert">{notice}</p>
+          <p role="alert">{ui(notice)}</p>
         </div>
       )}
       <div className="picker-body">
@@ -238,17 +251,17 @@ export function SlotPicker({
             busy={state.status === 'loading'}
           />
           <p className="picker-status" role="status">
-            {status}
+            {ui(status)}
           </p>
           {state.status === 'error' && (
             <div className="alert alert-error picker-error">
-              <p role="alert">{state.message}</p>
+              <p role="alert">{ui(state.message)}</p>
               <button
                 type="button"
                 className="button button-small"
                 onClick={() => setRetry((r) => r + 1)}
               >
-                Try again
+                {t('Try again')}
               </button>
             </div>
           )}
@@ -259,7 +272,7 @@ export function SlotPicker({
                 className="button button-small"
                 onClick={() => changeMonth(addMonths(month, 1))}
               >
-                Show next month
+                {t('Show next month')}
               </button>
             </p>
           )}
@@ -274,7 +287,10 @@ export function SlotPicker({
           {day ? (
             <>
               <h3 className="slots-day">{formatDateKey(day, locale)}</h3>
-              <ul className="slots" aria-label={`Times on ${formatDateKey(day, locale)}`}>
+              <ul
+                className="slots"
+                aria-label={t('Times on {0}', { '0': formatDateKey(day, locale) })}
+              >
                 {daySlots.map((slot, i) => {
                   const start = Date.parse(slot.start)
                   const label = repeated.has(labels[i] as string)
@@ -298,7 +314,7 @@ export function SlotPicker({
             </>
           ) : (
             <p className="slots-placeholder muted">
-              {ready && available.size ? 'Pick a day to see its times.' : ' '}
+              {ready && available.size ? t('Pick a day to see its times.') : ' '}
             </p>
           )}
         </div>

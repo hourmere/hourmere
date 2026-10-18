@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useI18n } from '../i18n/runtime.tsx'
 
 type CopyState = 'idle' | 'copied' | 'failed'
 
@@ -16,6 +17,8 @@ export function CopyButton({
   /** A fuller name for screen readers, e.g. when a list has several copy buttons. */
   accessibleLabel?: string
 }) {
+  const { t, ui } = useI18n()
+
   const [state, setState] = useState<CopyState>('idle')
 
   useEffect(() => {
@@ -39,13 +42,13 @@ export function CopyButton({
         type="button"
         className="button button-small"
         onClick={copy}
-        {...(accessibleLabel && { 'aria-label': accessibleLabel })}
+        {...(accessibleLabel && { 'aria-label': ui(accessibleLabel) })}
       >
-        {label}
+        {ui(label)}
       </button>
       <span className="copy-status" role="status">
-        {state === 'copied' && 'Copied'}
-        {state === 'failed' && 'Could not copy; select the text and copy it yourself'}
+        {state === 'copied' && t('Copied')}
+        {state === 'failed' && t('Could not copy; select the text and copy it yourself')}
       </span>
     </span>
   )

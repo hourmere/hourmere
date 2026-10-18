@@ -5,18 +5,23 @@ import { errorMessage, RequestError } from '../api/errors.ts'
 import { goTo } from '../browser.ts'
 import { Logo } from '../components/Logo.tsx'
 import { useLoad, useMounted, usePageTitle } from '../hooks.ts'
+import { LanguageSwitcher, useI18n } from '../i18n/runtime.tsx'
+import type { UiText } from '../i18n/translate.ts'
+import { msg } from '../i18n/translate.ts'
 import { signInPath } from '../next-path.ts'
 import { PageStatus, useSession } from '../session.tsx'
 
 export function McpAuthorizePage() {
+  const { t } = useI18n()
+
   usePageTitle('Connect an AI app')
   const { state } = useSession()
   const location = useLocation()
-  if (state.status === 'loading') return <PageStatus>Loading…</PageStatus>
+  if (state.status === 'loading') return <PageStatus>{t('Loading…')}</PageStatus>
   if (state.status === 'signed-out')
     return <Navigate to={signInPath(location.pathname + location.search)} replace />
   if (state.status !== 'signed-in')
-    return <PageStatus>Could not check your session. Please reload.</PageStatus>
+    return <PageStatus>{t('Could not check your session. Please reload.')}</PageStatus>
   return (
     <Authorization
       key={location.pathname + location.search + state.me.user.id}
@@ -26,6 +31,8 @@ export function McpAuthorizePage() {
 }
 
 function Authorization({ email }: { email: string }) {
+  const { t, ui } = useI18n()
+
   const location = useLocation(),
     navigate = useNavigate()
   const consent = location.pathname === '/oauth/consent'
@@ -42,6 +49,7 @@ function Authorization({ email }: { email: string }) {
           409,
           'oauth_request_expired',
           'This connection attempt was interrupted. Restart it from your AI app.',
+          msg('This connection attempt was interrupted. Restart it from your AI app.'),
         )
       return unwrap(
         api.POST('/api/v1/mcp-oauth/request', {
@@ -56,7 +64,7 @@ function Authorization({ email }: { email: string }) {
   const mounted = useMounted()
   const [organizationId, setOrganizationId] = useState('')
   const [busy, setBusy] = useState(false),
-    [error, setError] = useState('')
+    [error, setError] = useState<UiText>('')
   async function submit(accept: boolean) {
     setBusy(true)
     setError('')
@@ -79,32 +87,37 @@ function Authorization({ email }: { email: string }) {
     <main className="centered">
       <section className="card stack">
         <Logo size={32} />
-        <h1>{consent ? 'Approve connection' : 'Connect an AI app'}</h1>
+        <LanguageSwitcher />
+        <h1>{consent ? t('Approve connection') : t('Connect an AI app')}</h1>
         <p>
-          Signed in as <strong>{email}</strong>.
+          {t('Signed in as')} <strong>{email}</strong>.
         </p>
-        {info.status === 'loading' && <p role="status">Checking the connection request…</p>}
-        {info.status === 'error' && <p role="alert">{info.message}</p>}
+        {info.status === 'loading' && <p role="status">{t('Checking the connection request…')}</p>}
+        {info.status === 'error' && <p role="alert">{ui(info.message)}</p>}
         {info.status === 'ready' && (
           <>
             <p>
-              <strong>{info.data.clientName}</strong> wants to connect to Hourmere.
+              <strong>{info.data.clientName}</strong> {t('wants to connect to Hourmere.')}
             </p>
-            <p className="muted">Client: {info.data.clientId}</p>
-            <p className="muted">Return address: {info.data.redirectUri}</p>
+            <p className="muted">
+              {t('Client:')} {info.data.clientId}
+            </p>
+            <p className="muted">
+              {t('Return address:')} {info.data.redirectUri}
+            </p>
             {consent ? (
               <p>
-                Organization: <strong>{info.data.selectedOrganization?.name}</strong>
+                {t('Organization:')} <strong>{info.data.selectedOrganization?.name}</strong>
               </p>
             ) : (
               <div className="field">
-                <label htmlFor="oauth-organization">Organization to connect</label>
+                <label htmlFor="oauth-organization">{t('Organization to connect')}</label>
                 <select
                   id="oauth-organization"
                   value={organizationId}
                   onChange={(e) => setOrganizationId(e.target.value)}
                 >
-                  <option value="">Choose an organization</option>
+                  <option value="">{t('Choose an organization')}</option>
                   {info.data.organizations.map((o) => (
                     <option key={o.id} value={o.id}>
                       {o.name} ({o.slug})
@@ -114,21 +127,23 @@ function Authorization({ email }: { email: string }) {
               </div>
             )}
             <p>
-              This app can use MCP tools with your permissions in this organization: view event
-              types and availability, and create, view, reschedule or cancel bookings. It receives
-              booking details, including attendee information and answers. It cannot manage your
-              account or API keys.
+              {t(
+                'This app can use MCP tools with your permissions in this organization: view event types and availability, and create, view, reschedule or cancel bookings. It receives booking details, including attendee information and answers. It cannot manage your account or API keys.',
+              )}
             </p>
             {info.data.scopes.includes('offline_access') && (
               <p>
-                It can stay connected for up to 30 days without another sign-in. You can revoke
-                access in Connected apps.
+                {t(
+                  'It can stay connected for up to 30 days without another sign-in. You can revoke access in Connected apps.',
+                )}
               </p>
             )}
             <p>
-              Only approve apps you trust. The app name and return address are supplied by the app.
+              {t(
+                'Only approve apps you trust. The app name and return address are supplied by the app.',
+              )}
             </p>
-            {error && <p role="alert">{error}</p>}
+            {error && <p role="alert">{ui(error)}</p>}
             <button
               type="button"
               className="button button-primary"
@@ -139,7 +154,7 @@ function Authorization({ email }: { email: string }) {
               }
               onClick={() => submit(true)}
             >
-              {busy ? 'Continuing…' : consent ? 'Allow access' : 'Continue'}
+              {busy ? t('Continuing…') : consent ? t('Allow access') : t('Continue')}
             </button>
             {consent && (
               <button
@@ -148,7 +163,7 @@ function Authorization({ email }: { email: string }) {
                 disabled={busy}
                 onClick={() => submit(false)}
               >
-                Deny
+                {t('Deny')}
               </button>
             )}
           </>
@@ -161,10 +176,12 @@ function Authorization({ email }: { email: string }) {
 const loadConnections = (signal: AbortSignal) =>
   unwrap(api.GET('/api/v1/mcp-oauth/connections', { signal }))
 export function ConnectedAppsPage() {
+  const { t, ui } = useI18n()
+
   usePageTitle('Connected apps')
   const [connections, reload] = useLoad(loadConnections)
   const [busy, setBusy] = useState<string | null>(null),
-    [error, setError] = useState('')
+    [error, setError] = useState<UiText>('')
   async function revoke(id: string) {
     setBusy(id)
     setError('')
@@ -179,14 +196,15 @@ export function ConnectedAppsPage() {
   }
   return (
     <>
-      <h1>Connected apps</h1>
+      <h1>{t('Connected apps')}</h1>
       <p>
-        AI apps connected through MCP OAuth. Revoking access stops new requests immediately;
-        completed bookings remain.
+        {t(
+          'AI apps connected through MCP OAuth. Revoking access stops new requests immediately; completed bookings remain.',
+        )}
       </p>
-      {error && <p role="alert">{error}</p>}
-      {connections.status === 'loading' && <p role="status">Loading…</p>}
-      {connections.status === 'error' && <p role="alert">{connections.message}</p>}
+      {error && <p role="alert">{ui(error)}</p>}
+      {connections.status === 'loading' && <p role="status">{t('Loading…')}</p>}
+      {connections.status === 'error' && <p role="alert">{ui(connections.message)}</p>}
       {connections.status === 'ready' &&
         (connections.data.data.length ? (
           <ul className="stack">
@@ -201,13 +219,13 @@ export function ConnectedAppsPage() {
                   disabled={busy !== null}
                   onClick={() => revoke(c.id)}
                 >
-                  {busy === c.id ? 'Revoking…' : 'Revoke access'}
+                  {busy === c.id ? t('Revoking…') : t('Revoke access')}
                 </button>
               </li>
             ))}
           </ul>
         ) : (
-          <p>No connected apps.</p>
+          <p>{t('No connected apps.')}</p>
         ))}
     </>
   )
