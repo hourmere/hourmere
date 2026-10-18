@@ -17,11 +17,29 @@ const query = () =>
 const noCaller = async () => ({ ok: false as const, error: 'unauthorized' as const, setCookie: [] })
 
 describe('MCP authorize request boundary', () => {
+  it('leaves authorize dispatch unchanged when MCP OAuth is disabled', async () => {
+    let called = 0
+    const app = createApp({
+      checkDb: async () => {},
+      publicUrl: BASE,
+      resolveCaller: noCaller,
+      authHandler: async () => {
+        called++
+        return new Response(null, { status: 404 })
+      },
+    })
+    for (const path of ['/api/auth/oauth2/authorize', '/api/auth/oauth2/authorize/'])
+      for (const method of ['GET', 'POST'])
+        for (let count = 0; count < 31; count++)
+          expect((await app.request(`${BASE}${path}`, { method })).status).toBe(404)
+    expect(called).toBe(124)
+  })
   it('refuses malformed authorization parameters before invoking the provider for GET and POST', async () => {
     let called = 0
     const app = createApp({
       checkDb: async () => {},
       publicUrl: BASE,
+      mcpOAuthEnabled: true,
       resolveCaller: noCaller,
       authHandler: async () => {
         called++
@@ -70,6 +88,7 @@ describe('MCP authorize request boundary', () => {
       const app = createApp({
         checkDb: async () => {},
         publicUrl: BASE,
+        mcpOAuthEnabled: true,
         resolveCaller: noCaller,
         authHandler: async () => Response.redirect(location, 302),
       })
@@ -80,6 +99,7 @@ describe('MCP authorize request boundary', () => {
     const app = createApp({
       checkDb: async () => {},
       publicUrl: BASE,
+      mcpOAuthEnabled: true,
       resolveCaller: noCaller,
       authHandler: async () => Response.redirect(`${BASE}/oauth/authorize?signed=true`, 302),
     })
@@ -91,6 +111,7 @@ describe('MCP authorize request boundary', () => {
     const app = createApp({
       checkDb: async () => {},
       publicUrl: BASE,
+      mcpOAuthEnabled: true,
       resolveCaller: noCaller,
       authHandler: async () => new Response(null, { status: 404 }),
     })
@@ -105,6 +126,7 @@ describe('MCP authorize request boundary', () => {
       const app = createApp({
         checkDb: async () => {},
         publicUrl: BASE,
+        mcpOAuthEnabled: true,
         resolveCaller: noCaller,
         authHandler: async () =>
           Response.json({ redirect: true, [field]: `${BASE}/sign-in?error=invalid_client` }),

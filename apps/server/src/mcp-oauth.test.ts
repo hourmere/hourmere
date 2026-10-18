@@ -18,7 +18,7 @@ import {
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createTestTeam, createTestUser } from '@hourmere/scheduling/testing'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.ts'
 import { mcpEndpoint } from './mcp/endpoint.ts'
 import { mcpOAuthCleanupJob, mcpOAuthRoutes } from './mcp/oauth.ts'
@@ -289,12 +289,14 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
     )
     expect(nextClaims['https://hourmere.com/organization']).toBe(team.id)
   })
-  function app() {
+  function app(trustedProxies: readonly string[] = []) {
     return createApp({
       checkDb: async () => {},
       authHandler: auth.handler,
       resolveCaller: createCallerResolver({ auth, db }),
       publicUrl: BASE,
+      mcpOAuthEnabled: true,
+      trustedProxies,
       routes: [mcpOAuthRoutes({ auth, db, publicUrl: BASE })],
       mcp: mcpEndpoint({
         tools: [whoamiTool],
@@ -425,7 +427,9 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
       '/.well-known/oauth-protected-resource/mcp',
       '/.well-known/oauth-authorization-server/api/auth',
     ]) {
-      const response = await app().request(`${BASE}${path}`)
+      const response = await app().request(`${BASE}${path}`, undefined, {
+        incoming: { socket: { remoteAddress: testIp() } },
+      })
       expect(response.status).toBe(200)
       expect(response.headers.get('cache-control')).toBe('no-store')
     }
@@ -436,6 +440,83 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
     )
     expect(await denied.json()).toMatchObject({ message: expect.stringContaining('OAuth') })
     expect((await app().request(mcpRequest('bad-token'))).status).toBe(401)
+  })
+  it('isolates discovery rate limits by transport address without missing-IP warnings', async () => {
+    const warnings = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const server = app()
+      const paths = [
+        '/.well-known/oauth-protected-resource',
+        '/.well-known/oauth-protected-resource/mcp',
+        '/.well-known/oauth-authorization-server',
+        '/.well-known/oauth-authorization-server/api/auth',
+        '/.well-known/openid-configuration/api/auth',
+      ]
+      const discovery = (path: string, peer: string, headers?: Record<string, string>) =>
+        server.request(
+          `${BASE}${path}`,
+          { headers },
+          {
+            incoming: { socket: { remoteAddress: peer } },
+          },
+        )
+      for (const path of paths) {
+        // Keep the provider's existing 404s for the issuer root and disabled OIDC metadata.
+        const status =
+          path === '/.well-known/oauth-authorization-server' ||
+          path === '/.well-known/openid-configuration/api/auth'
+            ? 404
+            : 200
+        // Forged IP headers cannot collapse unrelated peers into one bucket.
+        for (let count = 0; count < 130; count++)
+          expect(
+            (
+              await discovery(path, testIp(), {
+                [CLIENT_IP_HEADER]: '203.0.113.1',
+                'x-forwarded-for': '203.0.113.1',
+              })
+            ).status,
+          ).toBe(status)
+        const noisyPeer = testIp()
+        // Nor may a noisy peer evade its own bucket with forged addresses.
+        for (let count = 0; count < 100; count++)
+          expect(
+            (
+              await discovery(path, noisyPeer, {
+                [CLIENT_IP_HEADER]: testIp(),
+                'x-forwarded-for': testIp(),
+              })
+            ).status,
+          ).toBe(status)
+        expect((await discovery(path, noisyPeer)).status).toBe(429)
+        expect((await discovery(path, testIp())).status).toBe(status)
+        expect((await discovery(path, noisyPeer)).status).toBe(429)
+      }
+      expect(
+        warnings.mock.calls.some((call) =>
+          call.some((value) => String(value).includes('could not determine a client IP')),
+        ),
+      ).toBe(false)
+    } finally {
+      warnings.mockRestore()
+    }
+  })
+  it('uses a trusted proxy client address for discovery rate limits', async () => {
+    const server = app(['10.0.0.7'])
+    const path = '/.well-known/oauth-authorization-server/api/auth'
+    const discovery = (ip: string) =>
+      server.request(
+        `${BASE}${path}`,
+        {
+          headers: { 'x-forwarded-for': ip },
+        },
+        { incoming: { socket: { remoteAddress: '10.0.0.7' } } },
+      )
+    for (let count = 0; count < 130; count++) expect((await discovery(testIp())).status).toBe(200)
+    const noisyPeer = testIp()
+    for (let count = 0; count < 100; count++) expect((await discovery(noisyPeer)).status).toBe(200)
+    expect((await discovery(noisyPeer)).status).toBe(429)
+    expect((await discovery(testIp())).status).toBe(200)
   })
   it('limits OAuth MCP calls to 120 per consent and advertises when to retry', async () => {
     const s = await session(),
@@ -851,39 +932,70 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
       .execute()
     expect((await app().request(mcpRequest(tokens.access_token))).status).toBe(401)
   })
-  it('rechecks membership and retained offline consent before replaying a lost refresh response', async () => {
-    for (const change of ['membership', 'offline-consent']) {
-      const s = await session(),
-        team = await createTestTeam(db, [{ user: s.user, role: 'owner' }]),
-        tokens = await connected(s, team.id)
-      const refresh = () =>
-        request('/api/auth/oauth2/token', {
-          method: 'POST',
-          headers: { 'content-type': 'application/x-www-form-urlencoded' },
-          body: new URLSearchParams({
-            grant_type: 'refresh_token',
-            client_id: CLIENT,
-            refresh_token: tokens.refresh_token,
-            resource: `${BASE}/mcp`,
-          }),
-        })
-      expect((await refresh()).status).toBe(200)
-      if (change === 'membership')
-        await db
-          .deleteFrom('auth.member')
-          .where('organizationId', '=', team.id)
-          .where('userId', '=', s.user.id)
-          .execute()
-      else
-        await db
-          .updateTable('auth.oauthConsent')
-          .set({ scopes: JSON.stringify([MCP_OAUTH_SCOPE]) })
-          .where('userId', '=', s.user.id)
-          .execute()
-      const denied = await refresh()
-      expect(denied.status).toBeGreaterThanOrEqual(400)
-      expect(denied.status).toBeLessThan(500)
+  it.each(
+    ['membership', 'email', 'offline-consent'].flatMap((change) =>
+      ['initial', 'replay', 'rotated'].map((mode) => [change, mode] as const),
+    ),
+  )('returns invalid_grant for %s during %s refresh', async (change, mode) => {
+    const s = await session(),
+      team = await createTestTeam(db, [{ user: s.user, role: 'owner' }]),
+      tokens = await connected(s, team.id)
+    let refreshToken = tokens.refresh_token
+    const refresh = () =>
+      request('/api/auth/oauth2/token', {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'refresh_token',
+          client_id: CLIENT,
+          refresh_token: refreshToken,
+          resource: `${BASE}/mcp`,
+        }),
+      })
+    if (mode !== 'initial') {
+      const first = await refresh()
+      expect(first.status).toBe(200)
+      const rotated = (await first.json()) as { refresh_token: string }
+      if (mode === 'rotated') refreshToken = rotated.refresh_token
     }
+    if (change === 'membership')
+      await db
+        .deleteFrom('auth.member')
+        .where('organizationId', '=', team.id)
+        .where('userId', '=', s.user.id)
+        .execute()
+    else if (change === 'email')
+      await db
+        .updateTable('auth.user')
+        .set({ emailVerified: false })
+        .where('id', '=', s.user.id)
+        .execute()
+    else
+      await db
+        .updateTable('auth.oauthConsent')
+        .set({ scopes: JSON.stringify([MCP_OAUTH_SCOPE]) })
+        .where('userId', '=', s.user.id)
+        .execute()
+    const refreshState = async () =>
+      JSON.stringify(
+        await db
+          .selectFrom('auth.oauthRefreshToken')
+          .selectAll()
+          .where('userId', '=', s.user.id)
+          .orderBy('id')
+          .execute(),
+      )
+    const before = await refreshState()
+    const denied = await refresh()
+    expect(denied.status).toBe(400)
+    const error = (await denied.json()) as {
+      error: string
+      access_token?: string
+      refresh_token?: string
+    }
+    expect(error.error).toBe('invalid_grant')
+    expect(error.access_token === undefined && error.refresh_token === undefined).toBe(true)
+    expect((await refreshState()) === before).toBe(true)
   })
   it('immediately rejects removed members and disabled OAuth clients', async () => {
     const s = await session(),

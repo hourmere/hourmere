@@ -12,7 +12,7 @@ import { createDb, createPool, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createLogMailer, type Mailer, type MailMessage } from '@hourmere/mail'
 import type pg from 'pg'
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.ts'
 import { pressConfirmButton } from './sign-in-confirm-testing.ts'
 
@@ -34,8 +34,14 @@ describe.skipIf(!serverUrl)('sign-up control', () => {
     db = createDb(testDb.pool)
   })
 
+  const closeAuthPools = async () => {
+    await Promise.all(pools.splice(0).map((p) => p.end()))
+  }
+
+  afterEach(closeAuthPools)
+
   afterAll(async () => {
-    await Promise.all(pools.map((p) => p.end()))
+    await closeAuthPools()
     await testDb?.drop()
   })
 
@@ -52,7 +58,7 @@ describe.skipIf(!serverUrl)('sign-up control', () => {
     return url.toString()
   }
 
-  /** Better Auth's pool for `signup`, closed after the tests. */
+  /** Better Auth's pool for `signup`, closed after its test. */
   function authPool(signup: SignupPolicy, url = testDb.url) {
     const pool = createAuthPool(url, signup)
     pools.push(pool)

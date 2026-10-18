@@ -8,7 +8,7 @@ import { migrationsDir, runMigrations } from './migrate.ts'
 import { createTestDatabase } from './testing.ts'
 
 const serverUrl = process.env.DATABASE_URL
-const migration = '0026_mcp_oauth_client_activity.sql'
+const migration = '0027_mcp_oauth_client_activity.sql'
 
 describe.skipIf(!serverUrl)('MCP OAuth activity migration', () => {
   it('preserves predecessor credentials and backfills consent and token activity, then reruns without changes', async () => {

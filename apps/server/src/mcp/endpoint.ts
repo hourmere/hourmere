@@ -255,8 +255,12 @@ export function mcpEndpoint({ tools, oauth }: McpEndpointOptions): McpModule {
         '/.well-known/oauth-authorization-server/api/auth',
         '/.well-known/openid-configuration/api/auth',
       ]) {
-        app.get(path, async () => {
-          const response = await oauth.handler(new Request(new URL(path, publicUrl)))
+        app.get(path, async (c) => {
+          const response = await oauth.handler(
+            new Request(new URL(path, publicUrl), {
+              headers: withClientIpHeader(new Headers(), c.var.clientIp),
+            }),
+          )
           response.headers.set('Cache-Control', 'no-store')
           return response
         })

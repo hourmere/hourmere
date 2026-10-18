@@ -52,6 +52,8 @@ export interface AppDeps {
   routes?: readonly RouteModule[]
   /** The remote MCP server, served at /mcp (see apps/server/src/mcp). */
   mcp?: McpModule | undefined
+  /** Enables the MCP OAuth authorization request boundary. */
+  mcpOAuthEnabled?: boolean | undefined
 }
 
 const Health = z
@@ -261,6 +263,7 @@ export function createApp({
   webDist,
   routes = [],
   mcp,
+  mcpOAuthEnabled = false,
 }: AppDeps) {
   const app = new OpenAPIHono({ defaultHook: validationHook })
   // Logs one line with control characters escaped: error text can carry request input
@@ -338,6 +341,7 @@ export function createApp({
   // The MCP endpoint (and anything under it) is logged, body-limited and never cached like
   // /api/v1, 413s included; it applies its own checks.
   app.use('/mcp/*', noStoreByDefault, requestLogger, clientIp(trustedProxies), apiBodyLimit())
+  app.use('/.well-known/*', clientIp(trustedProxies))
 
   app.openapi(healthRoute, async (c) => {
     try {
@@ -352,30 +356,32 @@ export function createApp({
   // follows Better Auth's versioning, not ours, so it lives outside /api/v1.
   // Count even malformed requests that are refused before reaching Better Auth. This is
   // the provider's 30/minute authorize limit, independent of NODE_ENV.
-  const authorizeLimit = rateLimit(createRateLimiter({ limit: 30, windowSeconds: 60 }))
-  for (const path of ['/api/auth/oauth2/authorize', '/api/auth/oauth2/authorize/']) {
-    app.use(path, authorizeLimit)
-    app.on(['GET', 'POST'], path, async (c) => {
-      if (!(await validMcpAuthorization(c.req.raw, publicUrl))) return mcpAuthorizationError(c)
-      const response = await authHandler(withClientIp(c.req.raw, c.var.clientIp))
-      let location = response.headers.get('location')
-      if (!location && response.headers.get('content-type')?.includes('application/json')) {
-        const value = (await response.clone().json()) as { url?: unknown; redirect_uri?: unknown }
-        const target = value.url ?? value.redirect_uri
-        if (typeof target === 'string') location = target
-      }
-      if (location) {
-        const redirect = new URL(location, publicUrl)
-        // A missing/invalid client or redirect URI is not an instruction to navigate.
-        // Render all authorize errors here, including the provider's local error URL.
-        if (
-          redirect.searchParams.has('error') ||
-          new URLSearchParams(redirect.hash.slice(1)).has('error')
-        )
-          return mcpAuthorizationError(c)
-      }
-      return response
-    })
+  if (mcpOAuthEnabled) {
+    const authorizeLimit = rateLimit(createRateLimiter({ limit: 30, windowSeconds: 60 }))
+    for (const path of ['/api/auth/oauth2/authorize', '/api/auth/oauth2/authorize/']) {
+      app.use(path, authorizeLimit)
+      app.on(['GET', 'POST'], path, async (c) => {
+        if (!(await validMcpAuthorization(c.req.raw, publicUrl))) return mcpAuthorizationError(c)
+        const response = await authHandler(withClientIp(c.req.raw, c.var.clientIp))
+        let location = response.headers.get('location')
+        if (!location && response.headers.get('content-type')?.includes('application/json')) {
+          const value = (await response.clone().json()) as { url?: unknown; redirect_uri?: unknown }
+          const target = value.url ?? value.redirect_uri
+          if (typeof target === 'string') location = target
+        }
+        if (location) {
+          const redirect = new URL(location, publicUrl)
+          // A missing/invalid client or redirect URI is not an instruction to navigate.
+          // Render all authorize errors here, including the provider's local error URL.
+          if (
+            redirect.searchParams.has('error') ||
+            new URLSearchParams(redirect.hash.slice(1)).has('error')
+          )
+            return mcpAuthorizationError(c)
+        }
+        return response
+      })
+    }
   }
   app.on(['GET', 'POST'], '/api/auth/*', (c) =>
     authHandler(withClientIp(c.req.raw, c.var.clientIp)),

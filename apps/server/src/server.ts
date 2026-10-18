@@ -323,6 +323,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
       embedOrigins: config.EMBED_ALLOWED_ORIGINS,
       hstsMaxAge: config.HSTS_MAX_AGE,
       trustedProxies: config.trustedProxies,
+      mcpOAuthEnabled: config.MCP_OAUTH_ENABLED,
       webDist: config.WEB_DIST,
       // db is closed below.
       routes: productRoutes({

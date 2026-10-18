@@ -61,8 +61,13 @@ const refused = () =>
     message: 'Select an organization in the MCP connection flow',
   })
 
-async function requireMembership(db: Db, userId: string, organizationId: string) {
-  if (!isUuid(userId) || !isUuid(organizationId)) throw refused()
+async function requireMembership(
+  db: Db,
+  userId: string,
+  organizationId: string,
+  refusal = refused,
+) {
+  if (!isUuid(userId) || !isUuid(organizationId)) throw refusal()
   const row = await db
     .selectFrom('auth.member as m')
     .innerJoin('auth.user as u', 'u.id', 'm.userId')
@@ -71,7 +76,7 @@ async function requireMembership(db: Db, userId: string, organizationId: string)
     .where('m.organizationId', '=', organizationId)
     .where('u.emailVerified', '=', true)
     .executeTakeFirst()
-  if (!row) throw refused()
+  if (!row) throw refusal()
 }
 
 /** Activity survives revocation so cleanup can distinguish an abandoned registration. */
@@ -140,7 +145,7 @@ function offlineAccessLifecycle(db: Db, resource: string): BetterAuthPlugin {
             )
               throw invalidGrant()
             // Check even lost-response replay, which bypasses customAccessTokenClaims.
-            await requireMembership(db, refresh.userId, consent.organization_id)
+            await requireMembership(db, refresh.userId, consent.organization_id, invalidGrant)
           }),
         },
       ],
