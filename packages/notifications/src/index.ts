@@ -252,6 +252,7 @@ interface NotificationData {
   /** A booking that replaced this one (it was cancelled by a reschedule). */
   replaced: boolean
   automaticConference: boolean
+  conferenceRevision: number | undefined
   conferenceIdentity:
     | { organizerId: string; name: string | null; email: string | null; available: boolean }
     | undefined
@@ -352,6 +353,7 @@ function loadNotificationData(db: Db, bookingId: string): Promise<NotificationDa
 
     return {
       conferenceIdentity,
+      conferenceRevision: conference?.revision,
       booking: {
         id: b.id,
         status: b.status,
@@ -436,6 +438,7 @@ async function sendOnce(
     kind: NotificationKind
     recipient: string
     verifiedHost?: { id: string; email: string } | undefined
+    conferenceRevision: number | undefined
   },
   withManageLink: boolean,
   message: (manageToken: string | undefined) => MailMessage,
@@ -481,26 +484,30 @@ async function sendOnce(
         .returning('recipient')
         .executeTakeFirst()
       if (!claimed) return 'sent before'
+      // Identity/member locks can wait behind an account edit after the host send. Read
+      // the lifecycle only after those waits, without holding a booking lock over SMTP.
+      await requireConferenceInvitationIdentity(trx, key.bookingId, key.kind, true)
       // Read the booking and the clock again: it may have been cancelled, or have started,
       // while an earlier recipient's email went out. Without a lock, which would hold up
       // that cancel.
       const current = await trx
-        .selectFrom('bookings')
-        .select(['status', 'start_at'])
-        .where('id', '=', key.bookingId)
+        .selectFrom('bookings as b')
+        .leftJoin('booking_conferences as c', 'c.booking_id', 'b.id')
+        .select(['b.status', 'b.start_at', 'c.revision as conference_revision'])
+        .where('b.id', '=', key.bookingId)
         .executeTakeFirst()
       if (
         !current ||
-        !stillTrue(
-          key.kind,
-          { status: current.status, start: instant(current.start_at) },
-          clock(),
-        ) ||
-        !(await conferenceNotificationAllowed(trx, key.bookingId, key.kind))
+        !stillTrue(key.kind, { status: current.status, start: instant(current.start_at) }, clock())
       ) {
         throw new Overtaken()
       }
-      await requireConferenceInvitationIdentity(trx, key.bookingId, key.kind, true)
+      if ((current.conference_revision ?? undefined) !== key.conferenceRevision)
+        throw new NotificationRetryError(
+          'The meeting changed before delivery; retry with its current details',
+        )
+      if (!(await conferenceNotificationAllowed(trx, key.bookingId, key.kind)))
+        throw new Overtaken()
       if (
         conferenceClaim &&
         !(await trx
@@ -681,7 +688,13 @@ export async function sendBookingNotification(
     try {
       const outcome = await sendOnce(
         deps,
-        { bookingId, kind, recipient: r.key, verifiedHost: r.verifiedHost },
+        {
+          bookingId,
+          kind,
+          recipient: r.key,
+          verifiedHost: r.verifiedHost,
+          conferenceRevision: data.conferenceRevision,
+        },
         r.withLinks,
         r.message,
         clock,
