@@ -9,7 +9,7 @@ import { migrationsDir, runMigrations } from './migrate.ts'
 import { createTestDatabase } from './testing.ts'
 
 const serverUrl = process.env.DATABASE_URL
-const migration = '0026_nontransitive_invited_signup.sql'
+const migration = '0027_nontransitive_invited_signup.sql'
 
 describe.skipIf(!serverUrl)('non-transitive invitation migration', () => {
   const name = `hourmere_test_${process.pid}_${randomBytes(4).toString('hex')}`

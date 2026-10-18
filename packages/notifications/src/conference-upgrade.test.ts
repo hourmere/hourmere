@@ -10,7 +10,7 @@ import { migrationsDir, runMigrations } from '../../db/src/migrate.ts'
 const serverUrl = process.env.DATABASE_URL
 
 describe.skipIf(!serverUrl)('conference migrations preserve populated predecessor data', () => {
-  it('upgrades0023 through0026 without rewriting historical rows, then does nothing', async () => {
+  it('upgrades0023 through0027 without rewriting historical rows, then does nothing', async () => {
     const predecessor = await mkdtemp(join(tmpdir(), 'hourmere-conference-predecessor-'))
     for (const file of await readdir(migrationsDir)) {
       if (file.endsWith('.sql') && file < '0024')
@@ -103,6 +103,7 @@ describe.skipIf(!serverUrl)('conference migrations preserve populated predecesso
         '0024_conference_notification_retries.sql',
         '0025_automatic_zoom.sql',
         '0026_conference_notification_skips.sql',
+        '0027_nontransitive_invited_signup.sql',
       ])
       for (const table of tables) {
         const old = before.get(table) as Record<string, unknown>[]

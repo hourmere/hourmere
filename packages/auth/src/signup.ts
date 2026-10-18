@@ -71,7 +71,7 @@ export async function hasAccount(db: Db, email: string): Promise<boolean> {
 
 /**
  * Connection settings that hand the policy to the database, which enforces it again in the
- * transaction that inserts the user (migrations 0006, 0012 and 0026). For Better Auth's pool.
+ * transaction that inserts the user (migrations 0006, 0012 and 0027). For Better Auth's pool.
  */
 export function signupConnectionOptions({ mode, allowedDomains }: SignupPolicy): string {
   // Also keeps anything but a plain domain out of the connection options.
