@@ -2,7 +2,11 @@ import { randomUUID } from 'node:crypto'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { type Mailer, type MailMessage, MailRejectedError } from '@hourmere/mail'
-import { createPublicBooking } from '@hourmere/scheduling'
+import {
+  cancelManagedBooking,
+  createPublicBooking,
+  rescheduleManagedBooking,
+} from '@hourmere/scheduling'
 import { createFixtures } from '@hourmere/scheduling/testing'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { dispatchConferenceNotifications } from './index.ts'
@@ -55,11 +59,11 @@ describe.skipIf(!serverUrl)('bounded conference notification outbox (real Postgr
       .selectAll()
       .where('booking_id', '=', id)
       .executeTakeFirstOrThrow()
-  async function fixture() {
+  async function fixture(guests = false) {
     const f = createFixtures(db)
     const host = await f.host()
     await f.schedule(host.userId)
-    await f.eventType(host.organizationId, host.userId, { slug: 'notice' })
+    await f.eventType(host.organizationId, host.userId, { slug: 'notice', allowGuests: guests })
     const result = await createPublicBooking(
       { db, now: () => NOW },
       {
@@ -67,6 +71,7 @@ describe.skipIf(!serverUrl)('bounded conference notification outbox (real Postgr
         slug: 'notice',
         start: Temporal.Instant.from('2030-11-04T09:00:00Z'),
         invitee: { name: 'Synthetic Booker', email: 'booker@example.test', timeZone: 'UTC' },
+        guests: guests ? [{ name: 'Synthetic Guest', email: 'guest@example.test' }] : [],
       },
     )
     const id = result.booking.id
@@ -94,8 +99,271 @@ describe.skipIf(!serverUrl)('bounded conference notification outbox (real Postgr
         due_at: new Date(now.epochMilliseconds),
       })
       .execute()
-    return { id, host }
+    if (!result.manageToken) throw new Error('Synthetic booking needs a management token')
+    return { id, host, token: result.manageToken }
   }
+
+  it('excludes guests from the failure notice and its durable recipient receipts', async () => {
+    const { id } = await fixture(true)
+    const messages: MailMessage[] = []
+    await dispatchConferenceNotifications(
+      deps({
+        send: async (message) => {
+          messages.push(message)
+        },
+      }),
+    )
+    expect(messages).toHaveLength(2)
+    expect(messages.map((message) => message.to)).not.toContain('guest@example.test')
+    expect(messages.every((message) => !message.attachments?.length)).toBe(true)
+    const receipts = await db
+      .selectFrom('booking_notifications')
+      .selectAll()
+      .where('booking_id', '=', id)
+      .execute()
+    expect(receipts).toHaveLength(2)
+    expect((await row(id)).delivered).toBe(true)
+  })
+
+  for (const change of ['cancel', 'reschedule', 'started'] as const) {
+    it(`marks a ${change} notice skipped without a delivery attempt or recipient receipt`, async () => {
+      const { id, token } = await fixture()
+      if (change === 'cancel') await cancelManagedBooking({ db, now: () => now }, token)
+      else if (change === 'reschedule')
+        await rescheduleManagedBooking({ db, now: () => now }, token, {
+          start: Temporal.Instant.from('2030-11-04T11:00Z'),
+        })
+      else {
+        await db
+          .updateTable('booking_conference_notifications')
+          .set({ kind: 'confirmed' })
+          .where('booking_id', '=', id)
+          .execute()
+        now = Temporal.Instant.from('2030-11-04T09:00Z')
+      }
+      let calls = 0
+      const config = deps({
+        send: async () => {
+          calls++
+        },
+      })
+      await dispatchConferenceNotifications(config)
+      await dispatchConferenceNotifications(config)
+      expect(calls).toBe(0)
+      expect(await row(id)).toMatchObject({
+        delivered: false,
+        attempts: 0,
+        exhausted_at: null,
+        lease_id: null,
+        last_error: null,
+        skipped_at: new Date(now.epochMilliseconds),
+      })
+      expect(
+        await db
+          .selectFrom('booking_notifications')
+          .selectAll()
+          .where('booking_id', '=', id)
+          .execute(),
+      ).toHaveLength(0)
+    })
+  }
+
+  for (const kind of ['confirmed', 'conference_failed'] as const) {
+    it(`does not claim ${kind} while the conference state gate is closed`, async () => {
+      const { id } = await fixture()
+      await db
+        .updateTable('booking_conference_notifications')
+        .set({ kind })
+        .where('booking_id', '=', id)
+        .execute()
+      await db
+        .updateTable('booking_conferences')
+        .set({ state: 'pending' })
+        .where('booking_id', '=', id)
+        .execute()
+      let calls = 0
+      await dispatchConferenceNotifications(
+        deps({
+          send: async () => {
+            calls++
+          },
+        }),
+      )
+      expect(calls).toBe(0)
+      expect(await row(id)).toMatchObject({
+        delivered: false,
+        attempts: 0,
+        skipped_at: null,
+        lease_id: null,
+      })
+    })
+  }
+
+  it('skips an obsolete failure notice after recovery and still sends the recovered invitation', async () => {
+    const { id } = await fixture()
+    await db
+      .updateTable('bookings')
+      .set({
+        location: {
+          kind: 'google_meet',
+          autoCreate: true,
+          url: 'https://meet.google.com/abc-defg-hij',
+        },
+      })
+      .where('id', '=', id)
+      .execute()
+    await db
+      .updateTable('booking_conferences')
+      .set({ state: 'ready', applied_revision: 0, error_code: null })
+      .where('booking_id', '=', id)
+      .execute()
+    await db
+      .insertInto('booking_conference_notifications')
+      .values({ booking_id: id, kind: 'confirmed', due_at: new Date(now.epochMilliseconds) })
+      .execute()
+    const messages: MailMessage[] = []
+    await dispatchConferenceNotifications(
+      deps({
+        send: async (message) => {
+          messages.push(message)
+        },
+      }),
+    )
+    expect(messages).toHaveLength(2)
+    expect(
+      messages.every((message) => message.attachments?.[0]?.content.includes('METHOD:REQUEST')),
+    ).toBe(true)
+    const notices = await db
+      .selectFrom('booking_conference_notifications')
+      .selectAll()
+      .where('booking_id', '=', id)
+      .execute()
+    expect(notices.find((notice) => notice.kind === 'conference_failed')).toMatchObject({
+      delivered: false,
+      skipped_at: new Date(now.epochMilliseconds),
+      attempts: 0,
+    })
+    expect(notices.find((notice) => notice.kind === 'confirmed')).toMatchObject({
+      delivered: true,
+      skipped_at: null,
+      attempts: 1,
+    })
+  })
+
+  it('records a closed gate during delivery as skipped after only the committed host receipt', async () => {
+    const { id } = await fixture()
+    const messages: MailMessage[] = []
+    await dispatchConferenceNotifications(
+      deps({
+        send: async (message) => {
+          messages.push(message)
+          await db
+            .updateTable('booking_conferences')
+            .set({ state: 'pending' })
+            .where('booking_id', '=', id)
+            .execute()
+        },
+      }),
+    )
+    expect(messages).toHaveLength(1)
+    expect(await row(id)).toMatchObject({
+      delivered: false,
+      attempts: 1,
+      skipped_at: new Date(now.epochMilliseconds),
+      lease_id: null,
+      exhausted_at: null,
+    })
+    expect(
+      await db
+        .selectFrom('booking_notifications')
+        .selectAll()
+        .where('booking_id', '=', id)
+        .execute(),
+    ).toHaveLength(1)
+    await db
+      .updateTable('booking_conferences')
+      .set({ state: 'failed' })
+      .where('booking_id', '=', id)
+      .execute()
+    now = now.add({ hours: 1 })
+    await dispatchConferenceNotifications(
+      deps({
+        send: async (message) => {
+          messages.push(message)
+        },
+      }),
+    )
+    expect(messages).toHaveLength(1)
+  })
+
+  it('records a closed invitation URL gate at delivery entry as skipped without fabricating receipts', async () => {
+    const { id } = await fixture()
+    await db
+      .updateTable('booking_conferences')
+      .set({ state: 'ready', applied_revision: 0, error_code: null })
+      .where('booking_id', '=', id)
+      .execute()
+    await db
+      .updateTable('booking_conference_notifications')
+      .set({ kind: 'confirmed' })
+      .where('booking_id', '=', id)
+      .execute()
+    let calls = 0
+    await dispatchConferenceNotifications(
+      deps({
+        send: async () => {
+          calls++
+        },
+      }),
+    )
+    expect(calls).toBe(0)
+    expect(await row(id)).toMatchObject({
+      delivered: false,
+      attempts: 1,
+      skipped_at: new Date(now.epochMilliseconds),
+    })
+    expect(
+      await db
+        .selectFrom('booking_notifications')
+        .selectAll()
+        .where('booking_id', '=', id)
+        .execute(),
+    ).toHaveLength(0)
+  })
+
+  it('does not steal a live ten-minute lease after the first one-minute retry delay', async () => {
+    const { id } = await fixture()
+    const entered = gate(),
+      hold = gate()
+    let calls = 0
+    const config = deps({
+      send: async () => {
+        calls++
+        entered.release()
+        await hold.promise
+      },
+    })
+    const first = dispatchConferenceNotifications(config)
+    let second: Promise<void> | undefined
+    try {
+      await entered.promise
+      const originalLease = (await row(id)).lease_id
+      now = NOW.add({ minutes: 2 })
+      let secondFinished = false
+      second = dispatchConferenceNotifications(config).then(() => {
+        secondFinished = true
+      })
+      await until(async () => secondFinished || (await row(id)).attempts > 1)
+      expect((await row(id)).attempts).toBe(1)
+      expect((await row(id)).lease_id).toBe(originalLease)
+      expect(calls).toBe(1)
+    } finally {
+      hold.release()
+      await Promise.all([first, second])
+    }
+    expect(calls).toBe(2)
+    expect((await row(id)).delivered).toBe(true)
+  })
 
   for (const code of [450, 550]) {
     it(`bounds persistent ${code} refusal across cron runs, with exponential delay and post-start cap`, async () => {

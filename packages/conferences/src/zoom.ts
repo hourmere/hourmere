@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { setTimeout } from 'node:timers/promises'
 import { isSingleLineText } from '@hourmere/scheduling/text'
 import { z } from 'zod'
 import { boundedZoomJson, ZoomError } from './transport.ts'
@@ -69,6 +70,26 @@ export function minimalZoomScopes(scopes: readonly string[]): boolean {
   return matchingZoomScopes(scopes, 'identity')
 }
 
+/** Only refresh transport failures retry; meeting creation never uses this helper. */
+export async function refreshZoomTokens(
+  refresh: () => Promise<ZoomTokens>,
+  signal: AbortSignal,
+): Promise<ZoomTokens> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await refresh()
+    } catch (error) {
+      if (!(error instanceof ZoomError) || !error.retryable || attempt >= 2 || signal.aborted)
+        throw error
+      try {
+        await setTimeout(100 * 2 ** attempt, undefined, { signal })
+      } catch {
+        throw new ZoomError('provider_unavailable', { retryable: true })
+      }
+    }
+  }
+}
+
 /** Fixed official hosts and fixed callback; provider api_url fields are intentionally ignored. */
 export function createZoomClient(
   config: ZoomConfig,
@@ -76,8 +97,13 @@ export function createZoomClient(
   now: () => number = Date.now,
 ) {
   const callback = new URL(ZOOM_CALLBACK, config.publicUrl).href
-  const json = (url: string, init: RequestInit, signal: AbortSignal, maximum?: number) =>
-    boundedZoomJson(request, url, init, signal, { maximum, badRequestReauth: true })
+  const json = (
+    url: string,
+    init: RequestInit,
+    signal: AbortSignal,
+    maximum?: number,
+    oauthTokens = false,
+  ) => boundedZoomJson(request, url, init, signal, { maximum, oauthTokens })
   async function tokens(
     body: Record<string, string>,
     signal: AbortSignal,
@@ -92,14 +118,11 @@ export function createZoomClient(
             'content-type': 'application/x-www-form-urlencoded',
             authorization: `Basic ${Buffer.from(`${config.clientId}:${config.clientSecret}`).toString('base64')}`,
           },
-          body: new URLSearchParams({
-            ...body,
-            client_id: config.clientId,
-            client_secret: config.clientSecret,
-          }),
+          body: new URLSearchParams(body),
         },
         signal,
         32768,
+        true,
       ),
     )
     if (!parsed.success) throw new ZoomError('provider_unavailable')

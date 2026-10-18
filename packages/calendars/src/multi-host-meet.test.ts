@@ -25,7 +25,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { NotificationRetryError, sendBookingNotification } from '../../notifications/src/index.ts'
 import { writeBookingCalendar } from './booking-events.ts'
 import { retryConferenceMirror } from './conference-mirrors.ts'
-import { writeBookingConference } from './conferences.ts'
+import { retryBookingConference, writeBookingConference } from './conferences.ts'
 import { encryptCredential } from './credentials.ts'
 import { GOOGLE_CALENDAR_SYNC_SCOPES } from './google.ts'
 import { type CalendarDeps, tokenAad } from './index.ts'
@@ -338,6 +338,166 @@ describe.skipIf(!serverUrl)('multi-host Meet identity and pinned mirrors (real P
     expect((await intent(first.booking.id)).organizer_user_id).toBe(c.organizer_user_id)
     const second = await book('other')
     expect((await intent(second.booking.id)).organizer_user_id).not.toBe(c.organizer_user_id)
+  })
+  it('round robin public slots exclude times offered only by Meet-ineligible hosts', async () => {
+    await event('round_robin')
+    await db
+      .updateTable('schedules')
+      .set({ weekly_hours: JSON.stringify({}) })
+      .where(
+        'user_id',
+        'in',
+        users.slice(0, 2).map((u) => u.id),
+      )
+      .execute()
+    expect(
+      await listPublicTeamSlots(ctx, {
+        handle: slug,
+        slug: 'meet',
+        start: START,
+        end: START.add({ hours: 1 }),
+      }),
+    ).toEqual([])
+  })
+  it('collective public slots recheck the selected organizer destination', async () => {
+    const { selected } = await event()
+    await db
+      .updateTable('calendars')
+      .set({ supports_google_meet: false })
+      .where('external_id', '=', `cal-${selected.id}`)
+      .execute()
+    await expect(
+      listPublicTeamSlots(ctx, {
+        handle: slug,
+        slug: 'meet',
+        start: START,
+        end: START.add({ hours: 1 }),
+      }),
+    ).rejects.toMatchObject({ code: 'automatic_meet_unavailable' })
+  })
+  it('round robin rejects a fixed conference organizer even when that host is eligible', async () => {
+    await expect(
+      createEventType(admin, {
+        slug: 'meet',
+        title: 'Invalid fixed choice',
+        durationMinutes: 30,
+        schedulingType: 'round_robin',
+        hosts: users.map((u) => ({ userId: u.id })),
+        location: { kind: 'google_meet', autoCreate: true },
+        conferenceOrganizer: { userId: (users[0] as TestUser).id },
+      }),
+    ).rejects.toMatchObject({ code: 'invalid_conference_organizer' })
+  })
+  it('only the pinned collective organizer can retry a failed root', async () => {
+    const { selected } = await event(),
+      b = await book()
+    await db
+      .updateTable('booking_conferences')
+      .set({ state: 'failed', error_code: 'provider_unavailable' })
+      .where('root_booking_id', '=', b.booking.id)
+      .execute()
+    const other = users.find((u) => u.id !== selected.id) as TestUser
+    await expect(
+      retryBookingConference({ ...ctx, principal: team.as(other) }, b.booking.id),
+    ).rejects.toMatchObject({ code: 'conference_not_found' })
+    expect((await intent(b.booking.id)).state).toBe('failed')
+    await retryBookingConference({ ...ctx, principal: team.as(selected) }, b.booking.id)
+    expect((await intent(b.booking.id)).state).toBe('pending')
+  })
+  it.each([
+    { status: 400, error: 'invalid_response' },
+    { status: 401, error: 'needs_reauth' },
+    { status: 403, error: 'permissions_missing' },
+    { status: 429, error: null },
+    { status: 403, reason: 'rateLimitExceeded', error: null },
+    { status: 403, reason: 'userRateLimitExceeded', error: null },
+  ])(
+    'known rejected mirror import $status ($reason) permits a later create',
+    async ({ status, reason, error }) => {
+      await event()
+      const b = await book()
+      await writeBookingConference(deps, b.booking.id)
+      const original = provider.controls.eventHook
+      if (!original) throw Error('Synthetic provider hook missing')
+      provider.controls.eventHook = async (url, init) =>
+        init.method === 'POST'
+          ? Response.json({ error: { errors: [{ reason: reason ?? 'forbidden' }] } }, { status })
+          : original(url, init)
+      await writeBookingCalendar(deps, b.booking.id)
+      const m = (await mirrors(b.booking.id)).find((m) => m.calendar_id)
+      expect(m).toMatchObject({
+        state: error ? 'failed' : 'pending',
+        error_code: error,
+        create_started: false,
+      })
+      expect((await intent(b.booking.id)).state).toBe('ready')
+      if (error)
+        await retryConferenceMirror(
+          { ...ctx, principal: team.as(users.find((u) => u.id === m?.user_id) as TestUser) },
+          b.booking.id,
+        )
+      await db.updateTable('calendar_connections').set({ status: 'active' }).execute()
+      provider.controls.eventHook = original
+      await due(b.booking.id)
+      await writeBookingCalendar(deps, b.booking.id)
+      expect((await mirrors(b.booking.id)).find((m) => m.calendar_id)).toMatchObject({
+        state: 'ready',
+        error_code: null,
+      })
+      expect(calls.filter((c) => c.method === 'POST')).toHaveLength(2)
+    },
+  )
+  it('rejects an ordinary mirror response that contains conferenceData', async () => {
+    await event()
+    const b = await book()
+    await writeBookingConference(deps, b.booking.id)
+    const original = provider.controls.eventHook
+    if (!original) throw Error('Synthetic provider hook missing')
+    provider.controls.eventHook = async (url, init) => {
+      const result = await original(url, init)
+      return init.method === 'POST'
+        ? Response.json({
+            ...((await result.json()) as Record<string, unknown>),
+            conferenceData: {},
+          })
+        : result
+    }
+    await writeBookingCalendar(deps, b.booking.id)
+    expect((await mirrors(b.booking.id)).find((m) => m.calendar_id)).toMatchObject({
+      state: 'failed',
+      error_code: 'invalid_response',
+      external_event_id: null,
+    })
+  })
+  it('a mirror 503 import response remains ambiguous and never permits another POST', async () => {
+    await event()
+    const b = await book()
+    await writeBookingConference(deps, b.booking.id)
+    let posts = 0
+    provider.controls.eventHook = async (_url, init) => {
+      if (init.method === 'POST') {
+        posts++
+        return Response.json({}, { status: 503 })
+      }
+      return Response.json({ items: [] })
+    }
+    await writeBookingCalendar(deps, b.booking.id)
+    const m = (await mirrors(b.booking.id)).find((m) => m.calendar_id)
+    expect(m).toMatchObject({
+      state: 'failed',
+      error_code: 'ambiguous_create',
+      create_started: true,
+    })
+    await retryConferenceMirror(
+      { ...ctx, principal: team.as(users.find((u) => u.id === m?.user_id) as TestUser) },
+      b.booking.id,
+    )
+    await due(b.booking.id)
+    await writeBookingCalendar(deps, b.booking.id)
+    expect(posts).toBe(1)
+    expect((await mirrors(b.booking.id)).find((m) => m.calendar_id)?.error_code).toBe(
+      'ambiguous_create',
+    )
   })
   it('notifier failure rolls back the fairness sequence, winner, snapshot, mirrors and booking atomically', async () => {
     const { e } = await event('round_robin')

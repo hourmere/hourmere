@@ -276,11 +276,13 @@ export function mcpEndpoint({ tools, oauth }: McpEndpointOptions): McpModule {
             oauth &&
             c.res.status === 401 &&
             !c.res.headers.get('WWW-Authenticate')?.includes('resource_metadata')
-          )
+          ) {
+            const challenge = c.res.headers.get('WWW-Authenticate') ?? 'Bearer'
             c.res.headers.set(
               'WWW-Authenticate',
-              `${c.res.headers.get('WWW-Authenticate') ?? 'Bearer'}, resource_metadata="${new URL('/.well-known/oauth-protected-resource/mcp', publicUrl).href}"`,
+              `${challenge}${challenge === 'Bearer' ? ' ' : ', '}resource_metadata="${new URL('/.well-known/oauth-protected-resource/mcp', publicUrl).href}"`,
             )
+          }
         }),
         requireApiKey(resolveCaller, oauth, publicUrl),
         (c) => handler.fetch(c.req.raw, { authInfo: toAuthInfo(c.var.mcpCaller) }),
