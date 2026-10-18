@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8')
@@ -8,6 +8,15 @@ const plainText = (source: string) =>
     .replace(/\s+/g, ' ')
     .trim()
 const privacy = read('./pages/privacy.astro')
+const blocks = (tag: 'p' | 'li') =>
+  [...privacy.matchAll(new RegExp(`<${tag}(?:\\s[^>]*)?>([\\s\\S]*?)</${tag}>`, 'g'))].map(
+    (match) => plainText(match[1] ?? ''),
+  )
+const block = (tag: 'p' | 'li', text: string) => {
+  const found = blocks(tag).find((value) => value.includes(text))
+  expect(found, `Missing privacy disclosure: ${text}`).toBeDefined()
+  return found ?? ''
+}
 const section = (id: string) => {
   const start = privacy.indexOf(`<h2 id="${id}">`)
   expect(start, `Missing privacy section: ${id}`).toBeGreaterThan(-1)
@@ -49,6 +58,25 @@ describe('comparison review information', () => {
       expect(source).toContain('https://cal.com/shop')
       expect(source).toMatch(/not affiliated with or endorsed by/i)
     })
+
+    it(`${page} uses public site documentation for Hourmere claims`, () => {
+      const source = read(`./content/docs/docs/${page}`)
+      expect(source).not.toMatch(/https?:\/\/github\.com\/cobaltmere\/hourmere(?:\/|\b)/)
+      const links = [...source.matchAll(/\]\((\/docs\/[^)#]+)(?:#[^)]*)?\)/g)]
+      expect(links.length).toBeGreaterThan(0)
+      for (const [, path] of links) {
+        expect(existsSync(new URL(`./content/docs${path}.md`, import.meta.url)), path).toBe(true)
+      }
+    })
+
+    it(`${page} states development, image and Cloud launch limits in its sourced introduction`, () => {
+      const source = read(`./content/docs/docs/${page}`)
+      const intro = source.split(/^## /m)[0] ?? ''
+      expect(intro).toMatch(/README.*early development and not yet ready to use/)
+      expect(intro).toMatch(/no prebuilt public image is published/)
+      expect(intro).toContain('](/docs/self-hosting)')
+      expect(intro).toMatch(/Hourmere Cloud has not launched\]\(\/privacy\)/)
+    })
   }
 
   it('displays the date from page metadata through the registered Starlight component', () => {
@@ -69,15 +97,18 @@ describe('privacy data-flow disclosures', () => {
     expect(read('./site.ts')).toContain('Cobaltmere, LLC')
     expect(section('scope')).toMatch(/Hourmere Cloud.*(?:company\.(?:name|shortName)|Cobaltmere)/)
     expect(section('self-hosted')).toMatch(/operator.*(?:responsible|policy)/)
+    expect(section('scope')).toContain('For Hourmere Cloud, the instance operator is Cobaltmere.')
   })
 
   it('discloses Google busy data, limited booking writes and encrypted credentials', () => {
     const google = section('google-user-data')
     expect(google).toMatch(/event identifiers, start and end times/)
     expect(google).toMatch(/Busy-time synchronization does not request or store event titles/)
-    expect(google).toMatch(/ordinary booking copy contains.*title.*start and end times/)
-    expect(google).toMatch(
-      /does not send an attendee list, booking answers or private management links/,
+    const copy = block('li', 'ordinary booking copy contains')
+    expect(copy).toMatch(/booking title, which includes the invitee's name/)
+    expect(copy).toMatch(/start and end times/)
+    expect(copy).toMatch(
+      /does not send email addresses, guest names, attendee lists, booking answers or private management links/,
     )
     expect(google).toMatch(/tokens are stored encrypted/)
   })
@@ -119,10 +150,18 @@ describe('privacy data-flow disclosures', () => {
 
   it('discloses automatic conference payloads and join-link storage and recipients', () => {
     const sharing = section('sharing')
-    expect(sharing).toMatch(/Google Meet.*sends Google the booking title, start and end times/)
-    expect(sharing).toMatch(
-      /sends Zoom the booking title as the meeting topic, start time, duration and time zone/,
-    )
+    const meet = block('p', 'For Google Meet,')
+    expect(meet).toMatch(/sends Google the booking title, which includes the invitee's name/)
+    expect(meet).toMatch(/start and end times/)
+    const zoom = block('p', 'Zoom authorization is separate')
+    expect(zoom).toMatch(/sends Zoom the booking title, which includes the invitee's name/)
+    expect(zoom).toMatch(/meeting topic, start time, duration and.*UTC/)
+    for (const request of [meet, zoom]) {
+      expect(request).toMatch(
+        /do(?:es)? not send email addresses, guest names, attendee lists, booking answers or (?:private )?management links/,
+      )
+      expect(request).not.toMatch(/not send attendee names/)
+    }
     expect(sharing).toMatch(/stores the validated participant join link with the protected booking/)
     expect(sharing).toMatch(/emails and ICS attachments can reveal the join link/)
     expect(sharing).toMatch(/Public event-type catalogs and webhook payloads do not include it/)
@@ -155,6 +194,67 @@ describe('privacy data-flow disclosures', () => {
     )
   })
 
+  it('discloses encrypted sign-in OAuth tokens in collection and security sections', () => {
+    expect(section('information-we-collect')).toMatch(
+      /Google or Microsoft:.*sign-in OAuth tokens.*stored encrypted/,
+    )
+    expect(section('security')).toMatch(
+      /encrypted storage of Google and Microsoft sign-in OAuth tokens/,
+    )
+  })
+
+  it('discloses the organizer identity retained with conference records', () => {
+    expect(block('li', 'Conference information:')).toMatch(
+      /organizer(?:'s)? name and email(?: address)? used for invitations/,
+    )
+  })
+
+  it('describes encrypted sign-in email storage and five-minute expiry cleanup', () => {
+    const signIn = block('li', 'Email sign-in:')
+    expect(signIn).toMatch(/expires after 5 minutes/)
+    expect(signIn).toMatch(/Queued sign-in emails store the recipient and link encrypted/)
+    expect(signIn).toMatch(/deleted after delivery, or when expiry is detected/)
+    expect(signIn).toMatch(/delivery worker or periodic cleanup/)
+  })
+
+  it('distinguishes MCP OAuth token lifetimes from record retention', () => {
+    const agents = block('li', 'API and agent access:')
+    expect(agents).toMatch(/MCP OAuth access tokens.*5 minutes/)
+    expect(agents).toMatch(/refresh tokens.*30 days/)
+    expect(agents).not.toMatch(/records.*deleted.*30 days/)
+  })
+
+  it('discloses webhook payload deletion by creation age and earlier endpoint deletion', () => {
+    const sharing = section('sharing')
+    expect(sharing).toMatch(
+      /cleanup deletes webhook delivery records, including their payloads, after 30 days from creation/,
+    )
+    expect(sharing).toMatch(/(?:Deleting|deleting) the endpoint deletes.*sooner/)
+  })
+
+  it('discloses minimal job payloads and default seven-day completion cleanup', () => {
+    const jobs = block('li', 'Background jobs:')
+    expect(jobs).toMatch(/(?:identifiers|IDs).*job-control fields/)
+    expect(jobs).toMatch(/Completed job records are deleted after 7 days by default/)
+    expect(jobs).toMatch(/sign-in.*(?:sooner|earlier)/i)
+  })
+
+  it.each([
+    ['information-we-collect', /TODO for owner before publication:.*Stripe.*Link/],
+    ['sharing', /TODO for owner before publication:.*Stripe.*Link/],
+    ['how-we-use-information', /TODO for owner before publication:.*legal bases/],
+    [
+      'international-transfers',
+      /TODO for owner before publication:.*hosting.*Standard Contractual Clauses/,
+    ],
+  ] as const)('marks unconfirmed policy choices visibly in %s', (id, disclosure) => {
+    const start = privacy.indexOf(`<h2 id="${id}">`)
+    const end = privacy.indexOf('<h2 id=', start + 1)
+    const source = privacy.slice(start, end === -1 ? undefined : end)
+    const callouts = [...source.matchAll(/<p class="callout">([\s\S]*?)<\/p>/g)]
+    expect(callouts.some((match) => disclosure.test(plainText(match[1] ?? '')))).toBe(true)
+  })
+
   it('discloses widget submission and excludes booking details from parent messages', () => {
     const website = section('this-website')
     expect(website).toMatch(/Booking details you enter are sent directly to that Hourmere instance/)
@@ -170,7 +270,7 @@ describe('privacy data-flow disclosures', () => {
       /TODO for owner before publication:.*retention periods.*backup copies/,
     )
     expect(retention).toMatch(
-      /does not establish those periods or promise a backup-deletion deadline/,
+      /does not establish those undecided periods or promise a backup-deletion deadline/,
     )
     expect(retention).not.toMatch(/(?:\d+|thirty) days|\d+ years/)
   })

@@ -79,7 +79,8 @@ const privacyMail = `mailto:${contact.privacy}`
   <p>
     Hourmere is open-source scheduling software developed by {company.name}, a Delaware limited
     liability company. {company.name} operates Hourmere Cloud; self-hosted instances are operated by
-    whoever runs them. For Hourmere Cloud and this website, this policy
+    whoever runs them. For Hourmere Cloud, the instance operator is Cobaltmere.
+    For Hourmere Cloud and this website, this policy
     replaces the general privacy policy at <a href={company.privacyPolicy}>cobaltmere.com/privacy</a>.
   </p>
   <p>
@@ -103,14 +104,17 @@ const privacyMail = `mailto:${contact.privacy}`
     </li>
     <li>
       <strong>Email sign-in:</strong> when you sign in with an email link, we process your email
-      address and a one-time sign-in token that expires after a short time.
+      address and a one-time sign-in token that expires after 5 minutes. Queued sign-in emails
+      store the recipient and link encrypted. The queued copy is deleted after delivery, or when
+      expiry is detected by the delivery worker or periodic cleanup.
     </li>
     <li>
       <strong>Sign-in with Google or Microsoft:</strong> we receive your name, email address and
       your Google account ID or Microsoft account identifier; Google may also provide a profile
       picture. We use them to create your account and sign you in, and as your account profile:
       your name (and picture, if shown) appears in Hourmere, on your booking pages and in booking
-      emails, and we send account and booking emails to your email address.
+      emails, and we send account and booking emails to your email address. Google and Microsoft
+      sign-in OAuth tokens are stored encrypted.
     </li>
     <li>
       <strong>Calendar connection information:</strong> when you connect a Google or Microsoft
@@ -136,18 +140,25 @@ const privacyMail = `mailto:${contact.privacy}`
     <li>
       <strong>API and agent access:</strong> hashed API keys, MCP OAuth client and consent records,
       the organization you authorize, tokens needed for OAuth connections, and booking records
-      identifying the credential used to create, reschedule or cancel a booking.
+      identifying the credential used to create, reschedule or cancel a booking. MCP OAuth access
+      tokens expire after 5 minutes; refresh tokens expire after 30 days and rotate when used.
     </li>
     <li>
       <strong>Conference information:</strong> for automatic Google Meet or Zoom, the provider and
-      organizer identifiers, meeting or event identifiers, provisioning status and participant join
-      link. Zoom connections also store account display information and encrypted access and refresh
-      tokens. See <a href="#automatic-conferences">section 7</a>.
+      organizer identifiers, the organizer name and email address used for invitations, meeting or
+      event identifiers, provisioning status and participant join link. Zoom connections also store
+      account display information and encrypted access and refresh tokens. See
+      <a href="#automatic-conferences">section 7</a>.
     </li>
     <li>
       <strong>Webhook information:</strong> organization-configured destination URLs, encrypted
       signing secrets, minimal booking-event snapshots and delivery status. See
       <a href="#booking-webhooks">section 7</a>.
+    </li>
+    <li>
+      <strong>Background jobs:</strong> job payloads contain record IDs and job-control fields,
+      rather than message contents, booking answers, management links or credentials. Completed
+      job records are deleted after 7 days by default; sign-in-email job records are deleted sooner.
     </li>
     <li>
       <strong>Billing information</strong> (paid plans only): your plan, number of seats, billing
@@ -165,6 +176,10 @@ const privacyMail = `mailto:${contact.privacy}`
       or to ask for launch updates.
     </li>
   </ul>
+  <p class="callout">
+    <strong>TODO for owner before publication:</strong> confirm the proposed Stripe and Link
+    billing arrangements and the billing information described above before paid plans launch.
+  </p>
 
   <h2 id="how-we-use-information">3. How we use information</h2>
   <ul>
@@ -194,6 +209,10 @@ const privacyMail = `mailto:${contact.privacy}`
     for processing are: performance of our contract with you; our legitimate interests in
     operating, securing and improving the Service; compliance with legal obligations; and your
     consent where we ask for it.
+  </p>
+  <p class="callout">
+    <strong>TODO for owner before publication:</strong> confirm the legal bases above and which
+    processing activities rely on each basis.
   </p>
 
   <h2 id="google-user-data">4. Google user data</h2>
@@ -234,9 +253,10 @@ const privacyMail = `mailto:${contact.privacy}`
     <li>
       identifiers and status of the booking events Hourmere writes to your selected destination
       calendar, so it can reconcile updates and cancellations. The ordinary booking copy contains
-      the booking title, start and end times, calendar UID, revision and status. It does not send an
-      attendee list, booking answers or private management links to Google. Automatic Google Meet
-      and optional calendar copies with join links are described in
+      the booking title, which includes the invitee's name, start and end times, calendar UID,
+      revision and status. It does not send email addresses, guest names, attendee lists, booking
+      answers or private management links to Google. Automatic Google Meet and optional calendar
+      copies with join links are described in
       <a href="#automatic-conferences">section 7</a>.
     </li>
   </ul>
@@ -452,26 +472,31 @@ const privacyMail = `mailto:${contact.privacy}`
       obtain your explicit consent.
     </li>
   </ul>
+  <p class="callout">
+    <strong>TODO for owner before publication:</strong> confirm Stripe and Link as payment
+    providers, their controller roles and the proposed payment and tax processing described above.
+  </p>
 
   <h3 id="automatic-conferences">Automatic Google Meet and Zoom</h3>
   <p>
     Automatic meeting creation requires an explicit event-type opt-in and the organizer's
     authorized provider connection. For Google Meet, Hourmere sends Google the booking title,
-    start and end times, calendar UID, revision and status, and a conference-creation request
-    identifier on the selected organizer's calendar. It does not send attendee names, email
-    addresses, booking answers or management links in these requests. Rescheduling updates the
-    pinned event; cancellation asks Google to cancel that event. Cancelling an event does not
-    guarantee that access to an existing Meet link is revoked.
+    which includes the invitee's name, start and end times, calendar UID, revision and status, and
+    a conference-creation request identifier on the selected organizer's calendar. It does not send
+    email addresses, guest names, attendee lists, booking answers or management links in these
+    requests. Rescheduling updates the pinned event; cancellation asks Google to cancel that event.
+    Cancelling an event does not guarantee that access to an existing Meet link is revoked.
   </p>
   <p>
     Zoom authorization is separate from sign-in and calendar connections. Connecting an identity
     reads the Zoom account identifier and, when available, email and display name. Meeting creation
     requires a separate authorization to create, read, update and delete meetings. Hourmere sends
-    Zoom the booking title as the meeting topic, start time, duration and time zone, with settings
-    to use a scheduled meeting rather than a personal meeting ID and request a generated passcode.
-    These requests do not send attendee names, email addresses, booking answers or management
-    links. Hourmere stores Zoom connection tokens encrypted and retains the provider identifiers
-    needed to update the same meeting on reschedule or request deletion on cancellation.
+    Zoom the booking title, which includes the invitee's name, as the meeting topic, start time,
+    duration and the UTC time zone, with settings to use a scheduled meeting rather than a personal
+    meeting ID and request a generated passcode. These requests do not send email addresses, guest
+    names, attendee lists, booking answers or management links. Hourmere stores Zoom connection
+    tokens encrypted and retains the provider identifiers needed to update the same meeting on
+    reschedule or request deletion on cancellation.
   </p>
   <p>
     Hourmere stores the validated participant join link with the protected booking when the meeting
@@ -502,6 +527,8 @@ const privacyMail = `mailto:${contact.privacy}`
     locations or join links, private management links, API keys or OAuth credentials. The
     organization chooses the receiving services and is responsible for how they use those
     notifications. Hourmere stores the minimal payload and delivery status to deliver and retry it.
+    A background cleanup deletes webhook delivery records, including their payloads, after 30 days
+    from creation. Deleting the endpoint deletes its delivery records sooner.
   </p>
 
   <h3>Email notifications and calendar attachments</h3>
@@ -560,17 +587,19 @@ const privacyMail = `mailto:${contact.privacy}`
   <p class="callout">
     <strong>TODO for owner before publication:</strong> confirm the account and booking deletion
     procedure and retention periods for account data, conference identity and meeting records,
-    OAuth records, webhook and email delivery records, server and API logs, support correspondence
-    and backup copies. Confirm any legal, tax or accounting exceptions and the treatment of data
-    already sent to providers, webhook recipients, agents or email recipients. This draft does not
-    establish those periods or promise a backup-deletion deadline.
+    remaining OAuth and notification metadata, server and API logs, support correspondence and
+    backup copies, beyond the implemented cleanup described in sections 2 and 7. Confirm any legal,
+    tax or accounting exceptions and the treatment of data already sent to providers, webhook
+    recipients, agents or email recipients. This draft does not establish those undecided periods
+    or promise a backup-deletion deadline.
   </p>
 
   <h2 id="security">11. Security</h2>
   <p>
     We protect personal data with measures appropriate to the risk, including encryption in transit,
-    encrypted storage of calendar and Zoom connection tokens and webhook signing secrets, hashed
-    API keys, access controls and the principle of least
+    encrypted storage of Google and Microsoft sign-in OAuth tokens, calendar and Zoom connection
+    tokens, queued sign-in emails and webhook signing secrets, hashed API keys, access controls and
+    the principle of least
     privilege. No system is completely secure. If a data breach affects your personal data, we will
     notify you as required by law. To report a security issue, email <a
       href={`mailto:${contact.security}`}>{contact.security}</a
@@ -584,6 +613,11 @@ const privacyMail = `mailto:${contact.privacy}`
     delivery, may process data in other countries. Where the law requires it, we protect
     international transfers of personal data with appropriate safeguards, such as the European
     Commission's Standard Contractual Clauses.
+  </p>
+  <p class="callout">
+    <strong>TODO for owner before publication:</strong> confirm the hosting region, the countries
+    where service providers process data and the transfer safeguards actually in place, including
+    whether Standard Contractual Clauses apply.
   </p>
 
   <h2 id="your-rights">13. Your rights and choices</h2>
