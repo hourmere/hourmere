@@ -138,6 +138,16 @@ describe('serverErrors', () => {
     ])
   })
 
+  it.each(['constructor', 'toString', 'hasOwnProperty'])(
+    'keeps an unknown server field named %s as literal form text',
+    (name) => {
+      const detail = `${name} must be checked by the server.`
+      const mapped = serverErrors(refused('invalid_event_type', detail), draft)
+      expect(mapped).toEqual({ fields: {}, message: { literal: detail } })
+      expect(translateMessage('zh-CN', mapped.message)).toBe(detail)
+    },
+  )
+
   it('keeps unknown codes for the whole form', () => {
     expect(serverErrors(refused('something_new', 'Something new.'), draft)).toEqual({
       fields: {},

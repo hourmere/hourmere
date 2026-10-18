@@ -583,4 +583,34 @@ export const admin = {
   'You have unsaved changes. Leave this page and discard them?':
     '你有未保存的更改。离开此页面并放弃更改？',
   '{first} and {second}': '{first} 与 {second}',
+  'Booking activity': '预约统计',
+  'Booking actions by the day they were recorded, rather than the meeting date. These counts describe currently retained bookings; deleting data can change history.':
+    '按预约操作的记录日期统计，而非会议日期。统计仅反映当前保留的预约；删除数据可能改变历史统计。',
+  'Loading reporting preferences…': '正在加载统计偏好…',
+  'Could not load reporting preferences.': '无法加载统计偏好。',
+  'Enter a valid start date.': '请输入有效的开始日期。',
+  'Enter a valid end date.': '请输入有效的结束日期。',
+  'Choose at most 90 calendar days, with the end on or after the start.':
+    '请选择最多 90 个日历日，且结束日期不得早于开始日期。',
+  'Choose an IANA time zone.': '请选择 IANA 时区。',
+  'Start date': '开始日期',
+  'End date': '结束日期',
+  'Reporting time zone': '统计时区',
+  'Both dates are included, up to 90 local days.': '包含起止日期，最多 90 个当地日历日。',
+  'Update report': '更新统计',
+  'Loading booking activity…': '正在加载预约统计…',
+  'Could not load booking activity.': '无法加载预约统计。',
+  'Booking activity is available to personal account owners and team owners or admins. Your current team role does not permit this report.':
+    '个人账号所有者，以及团队所有者或管理员可查看预约统计。你当前的团队角色无权查看此统计。',
+  to: '至',
+  'Reporting time zone:': '统计时区：',
+  '. Days can have 23 or 25 hours when the clocks change.':
+    '。夏令时切换时，一天可能有 23 或 25 小时。',
+  'Bookings created': '新建预约',
+  Reschedules: '改期',
+  Cancellations: '取消',
+  'Creations count the initial booking once. Reschedules count each move. Cancellations exclude the old booking withdrawn during a move. These are activity counts, without visitor or conversion tracking.':
+    '新建预约仅计入首次预约；每次改期均计入改期次数；取消次数不包含改期时撤销的旧预约。这里只统计预约操作，不追踪访客或转化。',
+  'No booking activity was recorded in this range.': '此范围内没有预约操作记录。',
+  'Daily booking activity': '每日预约统计',
 } as const
