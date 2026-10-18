@@ -277,6 +277,12 @@ optional bounded display metadata, minimal scopes, a safe status/error and purpo
 AES-256-GCM ciphertext. A durable `refreshing` operation holds no reusable credentials.
 All operations lock the owner, then the live session, then the connection/state. Provider
 I/O stays bounded under that owner lock; state claims and token retirement commit first.
+Transient refresh transport failures retry at most three times with backoff; if they remain
+transient, the operation restores the original encrypted grant as active for later recovery.
+Other token rejections or malformed successful responses also preserve the prior grant;
+only an explicit invalid grant retires it. Identity/scope mismatches remain fail closed.
+Public booking eligibility accepts a pinned meeting-mode connection during `refreshing`,
+while selecting a new automatic configuration still requires `active`.
 
 `conference_oauth_states` stores only a state digest plus owner/session, optional expected
 connection, encrypted PKCE verifier, single-use claim and ten-minute expiry. A durable claim
@@ -309,6 +315,11 @@ are preserved. Attempt claims commit before SMTP; lease/attempt comparison prote
 and the row has a finite initial-attempt-plus-twelve-retry budget across cron executions.
 See [notifications.md](notifications.md#conference-outbox-delivery-budget) for diagnostics,
 legacy-row backfill and the remaining SMTP acceptance/failed-commit duplicate window.
+
+Migration0026 adds `skipped_at` as a distinct terminal outcome for obsolete conference
+notices. Cancellation, replacement or a closed delivery gate records a skip with
+`delivered=false`; pending conference reconciliation remains eligible for a later attempt.
+The migration preserves existing delivery history and does not update old rows.
 
 ## Round-robin assignment state
 

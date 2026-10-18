@@ -64,7 +64,7 @@ export const admin = {
     '此账号已达到同时连接五个 Zoom 身份的上限。',
   'Sign in again to manage conference accounts.': '请重新登录以管理会议账号。',
   Connected: '已连接',
-  'Refresh incomplete — reconnect': '刷新未完成，请重新连接',
+  'Refreshing connection': '正在刷新连接',
   'Reconnection required': '需要重新连接',
   Disconnected: '已断开',
   'Zoom account refreshed.': 'Zoom 账号已刷新。',
