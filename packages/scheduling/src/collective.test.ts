@@ -550,6 +550,51 @@ describe.skipIf(!serverUrl)('collective scheduling', () => {
     }
   })
 
+  it('locks the team organization before event rows when deletion races with a public booking', async () => {
+    const s = await setup()
+    const deleter = await owned.pool.connect()
+    await deleter.query('BEGIN')
+    await deleter.query('SELECT id FROM auth.organization WHERE id=$1 FOR UPDATE', [s.team.id])
+    const pid = required(
+      (await deleter.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0],
+    ).pid
+    const pending = booking(s).then(
+      (value) => ({ value }),
+      (error: unknown) => ({ error }),
+    )
+    try {
+      let blocked = false
+      for (let attempt = 0; attempt < 200; attempt++) {
+        const result = await owned.pool.query<{ blocked: boolean }>(
+          'SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE $1=ANY(pg_blocking_pids(pid))) AS blocked',
+          [pid],
+        )
+        if (result.rows[0]?.blocked) {
+          blocked = true
+          break
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+      expect(blocked).toBe(true)
+      // A booking holding the child event lock while waiting on the parent's FK would
+      // deadlock with this cascade. The parent-first lock lets deletion finish instead.
+      const deletion = await deleter
+        .query('DELETE FROM auth.organization WHERE id=$1', [s.team.id])
+        .then(
+          () => ({ deleted: true }),
+          (error: unknown) => ({ error }),
+        )
+      await deleter.query('error' in deletion ? 'ROLLBACK' : 'COMMIT')
+      const result = await pending
+      expect(deletion).toEqual({ deleted: true })
+      expect(result).toMatchObject({ error: { code: 'event_type_not_found' } })
+    } finally {
+      await deleter.query('ROLLBACK').catch(() => {})
+      deleter.release()
+      await pending
+    }
+  })
+
   it('preserves legacy round-robin metadata without rewriting its assignments', async () => {
     const s = await setup()
     await db

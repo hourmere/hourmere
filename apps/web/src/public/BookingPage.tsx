@@ -28,7 +28,13 @@ import {
 import { BookingForm, type BookingFormValues } from './BookingForm.tsx'
 import { notifyEmbedBooked, useEmbedded } from './embed-context.ts'
 import { now as currentTime, detectTimeZone, preferredLocale } from './env.ts'
-import { FocusHeading, PublicLayout, PublicNotFound, PublicStatus } from './PublicLayout.tsx'
+import {
+  CreateBookingLink,
+  FocusHeading,
+  PublicLayout,
+  PublicNotFound,
+  PublicStatus,
+} from './PublicLayout.tsx'
 import { normalizedHandle, normalizedSlug, teamSlug, useRequest } from './paths.ts'
 import { SlotPicker } from './SlotPicker.tsx'
 import { formatDate, formatDuration, formatTimeRange, offsetLabel, zoneName } from './time.ts'
@@ -197,7 +203,11 @@ function BookingFlow({
       if (!(err instanceof PublicRequestError)) {
         // Offline, or the answer was lost: the same request will reuse the same key.
         setFormError(msg('{0} Your booking is not confirmed yet.', { '0': failureMessage(err) }))
-      } else if (code === 'slot_taken' || code === 'slot_unavailable') {
+      } else if (
+        code === 'slot_taken' ||
+        code === 'slot_unavailable' ||
+        code === 'booking_changed'
+      ) {
         attempt.current = null
         setSlot(null)
         setBackToPicker(true)
@@ -426,6 +436,7 @@ function Confirmation({
             </p>
           </div>
         ) : null}
+        <CreateBookingLink />
       </div>
     </PublicLayout>
   )

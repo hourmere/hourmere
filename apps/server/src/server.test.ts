@@ -47,11 +47,17 @@ describe.skipIf(!serverUrl)('startServer', () => {
         DATABASE_URL: testDb.url,
         PORT: '0',
         PUBLIC_URL: 'http://localhost',
+        HOSTED_SIGNUP_URL: 'https://hosted.example/sign-up',
         BETTER_AUTH_SECRET: randomBytes(32).toString('base64'),
       })
       try {
         const health = await fetch(`http://127.0.0.1:${server.port}/api/health`)
         expect(await health.json()).toEqual({ status: 'ok', database: 'ok' })
+        const instance = await fetch(`http://127.0.0.1:${server.port}/api/v1/instance`)
+        expect(await instance.json()).toHaveProperty(
+          'hostedSignupUrl',
+          'https://hosted.example/sign-up',
+        )
         // The composition root registers the product routes.
         const doc = (await (
           await fetch(`http://127.0.0.1:${server.port}/api/v1/openapi.json`)

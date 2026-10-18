@@ -61,6 +61,17 @@ event type. Its public booking page is `/{handle}/{slug}`. Configure calendars e
 through [Google Calendar](/docs/google-calendar), then use the [REST](/docs/rest) or
 [MCP](/docs/mcp) guides for agent access.
 
+## Public attribution
+
+The official image keeps a small “Powered by Hourmere” link on public booking pages and a
+“Create your own booking link” link on booking confirmations, including embedded pages.
+Self-hosted and hosted instances both retain these links; there is no setting to hide them.
+`HOSTED_SIGNUP_URL` configures their hosted service destination and defaults to
+`https://hourmere.com`, independently of your instance’s `PUBLIC_URL`. Set the hosted
+sign-up page URL when available. The links send no booking details or tracking parameters,
+and suppress the referrer. Removing attribution may become an enterprise-license
+entitlement later; it is outside the current configuration.
+
 ## Put a TLS proxy in front
 
 Compose publishes the app only on `127.0.0.1:3000`; PostgreSQL is not published. Forward your

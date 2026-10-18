@@ -69,6 +69,32 @@ export interface GoogleCalendarConfig {
   publicUrl: string
 }
 
+async function responseJson(response: Response): Promise<unknown> {
+  if (!response.body) throw new GoogleCalendarError('provider_unavailable')
+  const reader = response.body.getReader()
+  const chunks: Uint8Array[] = []
+  let length = 0
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      length += value.byteLength
+      if (length > 262_144) throw new GoogleCalendarError('provider_unavailable')
+      chunks.push(value)
+    }
+  } finally {
+    await reader.cancel().catch(() => {})
+  }
+  return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown
+}
+
+const errorResponse = z.object({
+  error: z.union([
+    z.literal('invalid_grant'),
+    z.object({ errors: z.array(z.object({ reason: z.string() })).optional() }),
+  ]),
+})
+
 /** Fixed official endpoints; neither the user nor a provider response chooses a host. */
 export function createGoogleCalendarClient(
   config: GoogleCalendarConfig,
@@ -80,34 +106,27 @@ export function createGoogleCalendarClient(
     try {
       const response = await request(url, { ...init, signal, redirect: 'error' })
       if (!response.ok) {
-        // Do not read or log upstream error bodies: they can echo codes and tokens.
-        await response.body?.cancel()
+        // Read only bounded JSON to classify documented rejection reasons. Retain only
+        // our allowlisted code, never the upstream body (which may echo credentials).
+        const parsed = errorResponse.safeParse(await responseJson(response).catch(() => undefined))
+        const detail = parsed.success ? parsed.data.error : undefined
+        const rateLimited =
+          typeof detail === 'object' &&
+          detail.errors?.some((e) =>
+            ['rateLimitExceeded', 'userRateLimitExceeded'].includes(e.reason),
+          )
+        const tokenEndpoint = url === 'https://oauth2.googleapis.com/token'
         throw new GoogleCalendarError(
-          response.status === 401 ||
-            (response.status === 400 && url === 'https://oauth2.googleapis.com/token')
+          (tokenEndpoint && response.status === 400 && detail === 'invalid_grant') ||
+            (!tokenEndpoint && response.status === 401)
             ? 'needs_reauth'
-            : response.status === 403
+            : !tokenEndpoint && response.status === 403 && !rateLimited
               ? 'permissions_missing'
               : 'provider_unavailable',
           response.status,
         )
       }
-      if (!response.body) throw new GoogleCalendarError('provider_unavailable')
-      const reader = response.body.getReader()
-      const chunks: Uint8Array[] = []
-      let length = 0
-      try {
-        for (;;) {
-          const { done, value } = await reader.read()
-          if (done) break
-          length += value.byteLength
-          if (length > 262_144) throw new GoogleCalendarError('provider_unavailable')
-          chunks.push(value)
-        }
-      } finally {
-        await reader.cancel().catch(() => {})
-      }
-      return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown
+      return await responseJson(response)
     } catch (error) {
       if (error instanceof GoogleCalendarError) throw error
       throw new GoogleCalendarError('provider_unavailable')

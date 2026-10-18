@@ -81,6 +81,18 @@ const schema = z
           error: 'PUBLIC_URL must not have a path: Hourmere is served at the root of its domain',
         }),
     ),
+    // Public attribution points to the hosted service, independently of this instance.
+    HOSTED_SIGNUP_URL: optional(
+      z.url({ protocol: /^https?$/ }).refine(
+        (value) => {
+          const url = new URL(value)
+          return !url.username && !url.password && !url.search && !url.hash
+        },
+        {
+          error: 'HOSTED_SIGNUP_URL must be an HTTP(S) URL without credentials, query or fragment',
+        },
+      ),
+    ).transform((value) => value ?? 'https://hourmere.com'),
     BETTER_AUTH_SECRET: z
       .string({
         error:
