@@ -68,7 +68,10 @@ const schema = z
       ),
     ),
     MCP_OAUTH_ENABLED: optional(z.enum(['true', 'false'])).transform((v) => v === 'true'),
-    PORT: z.coerce.number().int().positive().default(3000),
+    PORT: z.preprocess(
+      (value) => (typeof value === 'string' && value.trim() === '' ? Number.NaN : value),
+      z.coerce.number().int().min(0).max(65535).default(3000),
+    ),
     // Where people reach Hourmere: sign-in links, OAuth redirects and cookies are built from it.
     PUBLIC_URL: optional(
       z
@@ -221,6 +224,12 @@ const schema = z
     ).transform((v) => v ?? 'all'),
   })
   .superRefine((c, ctx) => {
+    if (c.PORT === 0 && !c.PUBLIC_URL)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['PUBLIC_URL'],
+        message: 'PUBLIC_URL is required when PORT=0 selects an OS-assigned listening port',
+      })
     if (c.EMBED_ALLOWED_ORIGINS.length && c.PUBLIC_URL && !embedOrigin(c.PUBLIC_URL))
       ctx.addIssue({
         code: 'custom',
