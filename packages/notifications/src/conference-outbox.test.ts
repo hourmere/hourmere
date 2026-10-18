@@ -143,15 +143,17 @@ describe.skipIf(!serverUrl)('bounded conference notification outbox (real Postgr
       .where('id', '=', first.host.userId)
       .executeTakeFirstOrThrow()
     const sent: MailMessage[] = []
-    await dispatchConferenceNotifications(
-      deps({
-        send: async (message) => {
-          if (message.to === badHost.email)
-            throw new Error('synthetic-private-recipient@example.test synthetic-private-link')
-          sent.push(message)
-        },
-      }),
-    )
+    await expect(
+      dispatchConferenceNotifications(
+        deps({
+          send: async (message) => {
+            if (message.to === badHost.email)
+              throw new Error('synthetic-private-recipient@example.test synthetic-private-link')
+            sent.push(message)
+          },
+        }),
+      ),
+    ).resolves.toBeUndefined()
     expect((await row(first.id)).last_error).toBe('delivery_failed')
     expect((await row(first.id)).delivered).toBe(false)
     expect((await row(second.id)).delivered).toBe(true)
@@ -227,8 +229,8 @@ describe.skipIf(!serverUrl)('bounded conference notification outbox (real Postgr
     const { id } = await fixture()
     const firstEntered = gate()
     const firstHold = gate()
-    const secondEntered = gate()
     const secondHold = gate()
+    let secondRecipientStarted = false
     const sent: string[] = []
     const first = dispatchConferenceNotifications(
       deps({
@@ -247,7 +249,7 @@ describe.skipIf(!serverUrl)('bounded conference notification outbox (real Postgr
       second = dispatchConferenceNotifications(
         deps({
           send: async (m) => {
-            secondEntered.release()
+            secondRecipientStarted = true
             await secondHold.promise
             sent.push(m.to)
           },
@@ -258,7 +260,8 @@ describe.skipIf(!serverUrl)('bounded conference notification outbox (real Postgr
       expect(replacementLease).not.toBe(originalLease)
       firstHold.release()
       await first
-      await secondEntered.promise
+      await until(async () => secondRecipientStarted || (await row(id)).delivered)
+      expect(secondRecipientStarted).toBe(true)
       const current = await row(id)
       expect(current.delivered).toBe(false)
       expect(current.lease_id).toBe(replacementLease)
