@@ -27,6 +27,7 @@ export function CreateBookingLink() {
  */
 export function PublicLayout({ children, wide = false }: { children: ReactNode; wide?: boolean }) {
   const { t } = useI18n()
+  const [beforeBrand, afterBrand] = t('Powered by {0}').split('{0}')
   const [hostedSignupUrl, setHostedSignupUrl] = useState('https://hourmere.com')
   useEffect(() => {
     const controller = new AbortController()
@@ -52,7 +53,9 @@ export function PublicLayout({ children, wide = false }: { children: ReactNode; 
         </main>
         <footer className="public-footer">
           <a href={hostedSignupUrl} target="_blank" rel="noopener noreferrer">
-            {t('Powered by')} <Logo size={18} />
+            {beforeBrand}
+            <Logo size={18} />
+            {afterBrand}
           </a>
         </footer>
       </div>

@@ -25,6 +25,33 @@ afterEach(() => {
   }
 })
 describe('standalone booking widget', () => {
+  it('creates independent inline frame IDs without randomUUID on plain HTTP', () => {
+    vi.stubGlobal('crypto', { getRandomValues: crypto.getRandomValues.bind(crypto) })
+    expect(() => mount()).not.toThrow()
+    const first = mount(),
+      second = mount(),
+      firstId = new URL(first.iframe.src).searchParams.get('embedId'),
+      secondId = new URL(second.iframe.src).searchParams.get('embedId')
+    expect(firstId).toMatch(/^[a-f0-9]{32}$/)
+    expect(secondId).toMatch(/^[a-f0-9]{32}$/)
+    expect(secondId).not.toBe(firstId)
+  })
+  it('opens a labelled popup without randomUUID on plain HTTP', () => {
+    vi.stubGlobal('crypto', { getRandomValues: crypto.getRandomValues.bind(crypto) })
+    for (const method of ['showModal', 'close'] as const)
+      Object.defineProperty(HTMLDialogElement.prototype, method, {
+        configurable: true,
+        value: vi.fn(),
+      })
+    expect(() => openPopup({ url })).not.toThrow()
+    const dialog = document.querySelector('dialog') as HTMLDialogElement,
+      title = dialog.querySelector('h2') as HTMLHeadingElement,
+      frame = dialog.querySelector('iframe') as HTMLIFrameElement
+    expect(title.id).toMatch(/^hourmere-title-[a-f0-9]{32}$/)
+    expect(dialog.getAttribute('aria-labelledby')).toBe(title.id)
+    expect(new URL(frame.src).searchParams.get('embedId')).toMatch(/^[a-f0-9]{32}$/)
+    expect(dialog.showModal).toHaveBeenCalledOnce()
+  })
   it('constructs an isolated frame for only public personal/team URLs', () => {
     const a = mount(),
       src = new URL(a.iframe.src)
