@@ -140,6 +140,10 @@ describe('the calendars page', () => {
     fakeApi({ ...signedIn, ...list([]) })
     renderApp('/app/calendars?connection=private-untrusted-provider-error')
     await screen.findByText('No calendar accounts connected yet.')
+    expect(screen.getByRole('main').textContent).not.toContain('private-untrusted-provider-error')
+    await vi.waitFor(() =>
+      expect(screen.getByTestId('location').textContent).toBe('/app/calendars'),
+    )
     expect(document.body.textContent).not.toContain('private-untrusted-provider-error')
   })
 

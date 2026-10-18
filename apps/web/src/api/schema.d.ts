@@ -49,6 +49,85 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/analytics/bookings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Daily booking activity of the acting organization
+         * @description Counts initial creations, reschedule operations and actual cancellations by their stored operation dates in an IANA time zone. Both dates inclusive, at most 90 local dates. Reschedule withdrawals are excluded from cancellations. Based on currently retained rows; deletion can alter history. No traffic or conversion metrics.
+         */
+        get: {
+            parameters: {
+                query: {
+                    endDate: string;
+                    startDate: string;
+                    timeZone: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Totals and zero-filled daily counts, ordered by date */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingActivity"];
+                    };
+                };
+                /** @description invalid_request, invalid_time_zone or invalid_analytics_range */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No valid session or API key */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description insufficient_role: requires the personal owner or a team owner/admin */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The API key's rate limit is used up */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/bookings": {
         parameters: {
             query?: never;
@@ -3642,6 +3721,25 @@ export interface components {
             /** @enum {string} */
             status: "confirmed" | "cancelled";
             title: string;
+        };
+        BookingActivity: {
+            data: {
+                cancelled: number;
+                created: number;
+                /** Format: date */
+                date: string;
+                rescheduled: number;
+            }[];
+            /** Format: date */
+            endDate: string;
+            /** Format: date */
+            startDate: string;
+            timeZone: string;
+            totals: {
+                cancelled: number;
+                created: number;
+                rescheduled: number;
+            };
         };
         /** @description Where the meeting happens. Details depend on the kind: `number` (phone), `address` (in_person), `url` (link) */
         BookingLocation: ({

@@ -135,6 +135,10 @@ The same keys connect MCP clients such as Claude Code to the remote MCP server a
 For terminal scripts, the dependency-free [CLI](docs/cli.md) supports configuration discovery,
 slots, booking, host history, rescheduling and cancellation with the same API key.
 
+Organization owners can view first-party [booking activity](docs/analytics.md) at
+`/app/analytics`: daily creations, reschedules and actual cancellations, without visitor
+tracking or attendee details.
+
 ## Contributing
 
 Bug reports, ideas and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers

@@ -1,6 +1,7 @@
 import { Suspense } from 'react'
 import { Navigate, Route, Routes } from 'react-router'
 import {
+  AnalyticsPage,
   ApiKeysPage,
   AppShell,
   AvailabilityPage,
@@ -60,6 +61,7 @@ export function App() {
               <Route path="availability/new" element={<ScheduleEditorPage />} />
               <Route path="availability/:id" element={<ScheduleEditorPage />} />
               <Route path="bookings" element={<BookingsPage />} />
+              <Route path="analytics" element={<AnalyticsPage />} />
               <Route path="bookings/:id" element={<BookingDetailPage />} />
               <Route path="calendars" element={<CalendarsPage />} />
               <Route path="connected-apps" element={<ConnectedAppsPage />} />
