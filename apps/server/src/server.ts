@@ -38,6 +38,7 @@ import { mcpOAuthCleanupJob, mcpOAuthRoutes } from './mcp/oauth.ts'
 import { whoamiTool } from './mcp/whoami.ts'
 import { installOneLineConsole } from './one-line-console.ts'
 import type { RouteModule } from './openapi.ts'
+import { analyticsRoutes } from './routes/analytics.ts'
 import { bookingRoutes } from './routes/bookings.ts'
 import { calendarRoutes } from './routes/calendars.ts'
 import { eventTypeRoutes } from './routes/event-types.ts'
@@ -80,6 +81,7 @@ export function productRoutes({
     eventTypeRoutes({ db }),
     publicRoutes({ db, notify }),
     bookingRoutes({ db, notify }),
+    analyticsRoutes({ db }),
   ]
 }
 

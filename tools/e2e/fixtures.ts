@@ -4,6 +4,7 @@ import { createServer as createProbe, type Server as SocketServer } from 'node:n
 import { fileURLToPath } from 'node:url'
 import { test as base, expect, type Locator, type Page } from '@playwright/test'
 import { type RunningServer, startServer } from '../../apps/server/src/server.ts'
+import { createAuth, createAuthPool } from '../../packages/auth/src/index.ts'
 import { createDb } from '../../packages/db/src/index.ts'
 import { createTestDatabase } from '../../packages/db/src/testing.ts'
 import { createFixtures } from '../../packages/scheduling/src/testing.ts'
@@ -32,6 +33,7 @@ interface FixtureApp {
   personalPath: string
   teamPath: string
   rows: () => Promise<{ source: string; status: string }[]>
+  authorizeHost: (teamRole?: 'owner' | 'member') => Promise<void>
 }
 export const test = base.extend<{ app: FixtureApp; suppressFailureDom: undefined }>({
   suppressFailureDom: [
@@ -56,6 +58,7 @@ export const test = base.extend<{ app: FixtureApp; suppressFailureDom: undefined
       )
     const owned = await createTestDatabase(bootstrap)
     let app: RunningServer | undefined, parent: Server | undefined
+    let authPool: ReturnType<typeof createAuthPool> | undefined
     try {
       const probe = createProbe()
       const port = await listenLoopback(probe)
@@ -97,20 +100,30 @@ export const test = base.extend<{ app: FixtureApp; suppressFailureDom: undefined
         )
       })
       const parentUrl = `http://127.0.0.1:${await listenLoopback(parent)}`
+      const authSecret = randomBytes(32).toString('base64')
       app = await startServer({
         DATABASE_URL: owned.url,
         PORT: String(port),
         PUBLIC_URL: url,
-        BETTER_AUTH_SECRET: randomBytes(32).toString('base64'),
+        BETTER_AUTH_SECRET: authSecret,
         SIGNUP: 'closed',
         HOURMERE_ROLE: 'web',
         EMBED_ALLOWED_ORIGINS: parentUrl,
         WEB_DIST: fileURLToPath(new URL('../../apps/web/dist', import.meta.url)),
       })
       let externalRequests = 0
+      let authorization: string | undefined
       await context.route('**/*', async (route) => {
-        const origin = new URL(route.request().url()).origin
-        if (origin === url || origin === parentUrl) await route.continue()
+        const requestUrl = new URL(route.request().url())
+        const origin = requestUrl.origin
+        if (origin === url || origin === parentUrl)
+          await route.continue({
+            ...(authorization &&
+              origin === url &&
+              requestUrl.pathname.startsWith('/api/v1/') && {
+                headers: { ...route.request().headers(), authorization },
+              }),
+          })
         else {
           externalRequests++
           await route.abort('blockedbyclient')
@@ -121,6 +134,38 @@ export const test = base.extend<{ app: FixtureApp; suppressFailureDom: undefined
         parentUrl,
         personalPath: '/fixture-host/call',
         teamPath: '/team/FixtureTeam/call',
+        authorizeHost: async (teamRole) => {
+          const signup = { mode: 'closed', allowedDomains: [] } as const
+          authPool ??= createAuthPool(owned.url, signup)
+          if (teamRole)
+            await db
+              .updateTable('auth.member')
+              .set({ role: teamRole })
+              .where('organizationId', '=', team)
+              .where('userId', '=', host.userId)
+              .execute()
+          const auth = createAuth({
+            pool: authPool,
+            db,
+            baseURL: url,
+            secret: authSecret,
+            signup,
+            mailer: {
+              send: async () => {
+                throw new Error('No mail delivery in browser fixtures')
+              },
+            },
+          })
+          const key = await auth.api.createApiKey({
+            body: {
+              userId: host.userId,
+              name: 'synthetic-browser-analytics',
+              ...(teamRole && { metadata: { organizationId: team } }),
+            },
+          })
+          // Keep the synthetic credential in this process; only owned product API calls receive it.
+          authorization = `Bearer ${key.key}`
+        },
         rows: () =>
           db.selectFrom('bookings').select(['source', 'status']).orderBy('created_at').execute(),
       })
@@ -138,7 +183,11 @@ export const test = base.extend<{ app: FixtureApp; suppressFailureDom: undefined
           await app?.close()
         }
       } finally {
-        await owned.drop()
+        try {
+          await authPool?.end()
+        } finally {
+          await owned.drop()
+        }
       }
     }
   },

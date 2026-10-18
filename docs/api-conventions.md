@@ -166,6 +166,13 @@ remains enforced so that endpoint cannot bypass the text rules.
 
 ## Lists
 
+`GET /api/v1/analytics/bookings` returns bounded daily activity counts (at most 90 inclusive
+calendar dates), with explicit `startDate`, `endDate` and IANA `timeZone`. Personal owners
+and team owners/admins may read the acting organization's totals; ordinary members receive
+`403 insufficient_role`. It reports stored operation dates, excludes reschedule withdrawals
+from cancellations, and includes no booking or attendee details. See [analytics.md](analytics.md)
+for the retained-record and deletion semantics.
+
 A list response is `{ "data": [ … ] }`. Lists that can grow without bound use cursor
 pagination and add `nextCursor`: pass it as `cursor` (with the same filters) for the next page;
 it is null on the last page. Cursors are opaque; `limit` sets the page size (1–100, default

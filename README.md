@@ -130,6 +130,10 @@ app's API keys page (`/app/api-keys`), or with Better Auth's endpoints while sig
 The same keys connect MCP clients such as Claude Code to the remote MCP server at `/mcp`; see
 [docs/mcp.md](docs/mcp.md).
 
+Organization owners can view first-party [booking activity](docs/analytics.md) at
+`/app/analytics`: daily creations, reschedules and actual cancellations, without visitor
+tracking or attendee details.
+
 ## Contributing
 
 Bug reports, ideas and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers

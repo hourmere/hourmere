@@ -3,6 +3,13 @@
 // writes through Kysely, and throws DomainError for failures the caller can act on.
 
 export {
+  type ActivityCounts,
+  activityRange,
+  type BookingActivity,
+  getBookingActivity,
+  MAX_ANALYTICS_DAYS,
+} from './analytics.ts'
+export {
   type AvailabilityQuery,
   buildAvailabilityInput,
   findSlots,
