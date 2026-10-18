@@ -335,11 +335,13 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
   }
 
   let closing = false
-  const server = await new Promise<Server>((resolve) => {
+  const server = await new Promise<Server>((resolve, reject) => {
     const serverOptions = httpServerOptions(config.httpTimeouts)
     const answer = closeConnectionsWhen(() => closing, fetch)
     // An http.Server: serve() makes one unless given a createServer.
+    const onError = (error: Error) => reject(error)
     const s = serve({ fetch: answer, port: config.PORT, serverOptions }, (info: AddressInfo) => {
+      s.removeListener('error', onError)
       if (role === 'worker') {
         console.log(`Hourmere worker running jobs; health check on :${info.port}/api/health`)
       } else {
@@ -352,6 +354,13 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
       }
       resolve(s as Server)
     })
+    s.once('error', onError)
+  }).catch(async (error: unknown) => {
+    // Jobs already started before listen. A bind failure must not leave an invisible
+    // consumer or database pool running when startServer rejects inside another process.
+    await Promise.allSettled([jobs.stop()])
+    await Promise.allSettled([db.destroy(), authPool?.end()])
+    throw error
   })
 
   return {

@@ -7,6 +7,19 @@ const base = {
 }
 
 describe('loadConfig', () => {
+  it('requires an explicit public origin for an OS-assigned port and rejects invalid TCP ports', () => {
+    expect(
+      loadConfig({ ...base, PORT: '0', PUBLIC_URL: 'https://hourmere.example' }),
+    ).toMatchObject({
+      PORT: 0,
+      PUBLIC_URL: 'https://hourmere.example',
+    })
+    expect(() => loadConfig({ ...base, PORT: '0' })).toThrow(/PUBLIC_URL/)
+    for (const PORT of ['-1', '65536', '0.5', '', ' '])
+      expect(() => loadConfig({ ...base, PORT, PUBLIC_URL: 'https://hourmere.example' })).toThrow(
+        /PORT/,
+      )
+  })
   it('keeps automatic Meet opt-in and requires Google Calendar write configuration', () => {
     expect(loadConfig(base).GOOGLE_MEET_ENABLED).toBe(false)
     expect(loadConfig({ ...base, GOOGLE_MEET_ENABLED: '' }).GOOGLE_MEET_ENABLED).toBe(false)

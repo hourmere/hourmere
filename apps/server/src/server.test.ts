@@ -18,16 +18,6 @@ import { trickle } from './slow-client-testing.ts'
 const serverUrl = process.env.DATABASE_URL
 const METHODS = ['log', 'info', 'warn', 'error', 'debug', 'dir', 'dirxml'] as const
 
-const freePort = () =>
-  new Promise<number>((resolve, reject) => {
-    const probe = createServer()
-    probe.once('error', reject)
-    probe.listen(0, '127.0.0.1', () => {
-      const { port } = probe.address() as { port: number }
-      probe.close(() => resolve(port))
-    })
-  })
-
 describe.skipIf(!serverUrl)('startServer', () => {
   let testDb: TestDatabase
 
@@ -53,10 +43,10 @@ describe.skipIf(!serverUrl)('startServer', () => {
     const streamed = METHODS.map((m) => [m, out[m].bind(out)] as const)
     for (const [m, fn] of streamed) console[m] = fn as never
     try {
-      const port = await freePort()
       const server = await startServer({
         DATABASE_URL: testDb.url,
-        PORT: String(port),
+        PORT: '0',
+        PUBLIC_URL: 'http://localhost',
         BETTER_AUTH_SECRET: randomBytes(32).toString('base64'),
       })
       try {
@@ -121,11 +111,10 @@ describe.skipIf(!serverUrl)('startServer', () => {
     })
     await new Promise<void>((resolve) => smtp.listen(0, '127.0.0.1', resolve))
     const printed = await quietly(async () => {
-      const port = await freePort()
-      const publicUrl = `http://localhost:${port}`
+      const publicUrl = 'http://localhost'
       const server = await startServer({
         DATABASE_URL: testDb.url,
-        PORT: String(port),
+        PORT: '0',
         PUBLIC_URL: publicUrl,
         BETTER_AUTH_SECRET: randomBytes(32).toString('base64'),
         SMTP_URL: `smtp://127.0.0.1:${(smtp.address() as { port: number }).port}`,
@@ -133,7 +122,7 @@ describe.skipIf(!serverUrl)('startServer', () => {
         SIGNUP: 'open',
       })
       try {
-        const res = await fetch(`http://127.0.0.1:${port}/api/auth/sign-in/magic-link`, {
+        const res = await fetch(`http://127.0.0.1:${server.port}/api/auth/sign-in/magic-link`, {
           method: 'POST',
           headers: { 'content-type': 'application/json', origin: publicUrl },
           body: JSON.stringify({ email: 'ada@example.com', callbackURL: '/' }),
@@ -181,11 +170,10 @@ describe.skipIf(!serverUrl)('startServer', () => {
       let web: RunningServer | undefined
       let worker: RunningServer | undefined
       let ids: string[] = []
-      const port = await freePort()
-      const publicUrl = `http://localhost:${port}`
+      const publicUrl = 'http://localhost'
       const config = {
         DATABASE_URL: testDb.url,
-        PORT: String(port),
+        PORT: '0',
         PUBLIC_URL: publicUrl,
         BETTER_AUTH_SECRET: randomBytes(32).toString('base64'),
         SIGNUP: 'closed',
@@ -216,7 +204,8 @@ describe.skipIf(!serverUrl)('startServer', () => {
         ).toBe(false)
         worker = await startServer({
           ...config,
-          PORT: String(await freePort()),
+          PORT: '0',
+          PUBLIC_URL: 'http://localhost',
           HOURMERE_ROLE: 'worker',
         })
         await vi.waitFor(
@@ -254,7 +243,8 @@ describe.skipIf(!serverUrl)('startServer', () => {
     await quietly(async () => {
       const server = await startServer({
         DATABASE_URL: testDb.url,
-        PORT: String(await freePort()),
+        PORT: '0',
+        PUBLIC_URL: 'http://localhost',
         BETTER_AUTH_SECRET: randomBytes(32).toString('base64'),
         HTTP_HEADERS_TIMEOUT: '1',
         HTTP_REQUEST_TIMEOUT: '2',
@@ -325,7 +315,8 @@ describe.skipIf(!serverUrl)('startServer', () => {
       for (const role of ['all', 'worker'] as const) {
         const server = await startServer({
           ...env,
-          PORT: String(await freePort()),
+          PORT: '0',
+          PUBLIC_URL: 'http://localhost',
           HOURMERE_ROLE: role,
         })
         const { first, second, closedAfterAnswerMs } = await closeDuringRequest(
@@ -344,7 +335,7 @@ describe.skipIf(!serverUrl)('startServer', () => {
     await quietly(async () => {
       const server = await startServer({
         DATABASE_URL: testDb.url,
-        PORT: String(await freePort()),
+        PORT: '0',
         PUBLIC_URL: 'https://hourmere.example',
         BETTER_AUTH_SECRET: randomBytes(32).toString('base64'),
         HSTS_MAX_AGE: '60',
@@ -374,7 +365,8 @@ describe.skipIf(!serverUrl)('startServer', () => {
       await quietly(async () => {
         const server = await start({
           DATABASE_URL: testDb.url,
-          PORT: String(await freePort()),
+          PORT: '0',
+          PUBLIC_URL: 'http://localhost',
           BETTER_AUTH_SECRET: randomBytes(32).toString('base64'),
         })
         await server.close()
@@ -400,7 +392,8 @@ describe.skipIf(!serverUrl)('startServer', () => {
         await expect(
           start({
             DATABASE_URL: testDb.url,
-            PORT: String(await freePort()),
+            PORT: '0',
+            PUBLIC_URL: 'http://localhost',
             BETTER_AUTH_SECRET: randomBytes(32).toString('base64'),
           }),
         ).rejects.toThrow(
@@ -457,15 +450,14 @@ describe.skipIf(!serverUrl)('startServer', () => {
       return mails()
     }
     try {
-      const port = await freePort()
-      const base = `http://127.0.0.1:${port}`
       const server = await startServer({
         DATABASE_URL: testDb.url,
-        PORT: String(port),
-        PUBLIC_URL: `http://localhost:${port}`,
+        PORT: '0',
+        PUBLIC_URL: 'http://localhost',
         BETTER_AUTH_SECRET: secret,
       })
       try {
+        const base = `http://127.0.0.1:${server.port}`
         const page = `${base}/api/v1/public/${host.handle}/intro`
         const now = Temporal.Now.instant()
         const slots = (await (
@@ -494,7 +486,7 @@ describe.skipIf(!serverUrl)('startServer', () => {
         ])
         const link = confirmations[1]?.links.find((l) => l.includes('action=cancel')) ?? ''
         const token = /#token=([A-Za-z0-9_-]{43})&/.exec(link)?.[1] as string
-        expect(link.startsWith(`http://localhost:${port}/booking#token=`)).toBe(true)
+        expect(link.startsWith('http://localhost/booking#token=')).toBe(true)
 
         const client = new Client({ name: 'test-agent', version: '1.0.0' })
         await client.connect(
@@ -549,7 +541,8 @@ describe.skipIf(!serverUrl)('startServer', () => {
     await quietly(async () => {
       const web = await startServer({
         ...env,
-        PORT: String(await freePort()),
+        PORT: '0',
+        PUBLIC_URL: 'http://localhost',
         HOURMERE_ROLE: 'web',
       })
       const producer = createJobs({
@@ -573,7 +566,8 @@ describe.skipIf(!serverUrl)('startServer', () => {
 
         const worker = await startServer({
           ...env,
-          PORT: String(await freePort()),
+          PORT: '0',
+          PUBLIC_URL: 'http://localhost',
           HOURMERE_ROLE: 'worker',
         })
         const base = `http://127.0.0.1:${worker.port}`
