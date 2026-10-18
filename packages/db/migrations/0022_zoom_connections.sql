@@ -43,6 +43,9 @@ CREATE INDEX conference_oauth_states_owner ON conference_oauth_states(user_id,cr
 CREATE FUNCTION clear_deleted_conference_owner() RETURNS trigger
 LANGUAGE plpgsql SET search_path = public, pg_temp AS $$
 BEGIN
+  -- Logout deletes a session before cascading its states. Take every session lock before
+  -- touching any connection/state so concurrent logout and owner deletion cannot invert it.
+  PERFORM id FROM auth.session WHERE "userId" = OLD.id ORDER BY id FOR UPDATE;
   UPDATE conference_connections SET user_id = NULL, external_user_id = NULL,
     account_email = NULL, display_name = NULL, credentials = NULL, operation_id = NULL, scopes = '{}',
     status = 'disconnected', last_error = NULL WHERE user_id = OLD.id;
