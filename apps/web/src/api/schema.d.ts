@@ -4951,7 +4951,7 @@ export interface components {
             /** Format: date-time */
             updatedAt: string;
             /** Format: uuid */
-            zoomConnectionId?: string;
+            zoomConnectionId?: string | null;
         };
         EventTypeInput: {
             /**

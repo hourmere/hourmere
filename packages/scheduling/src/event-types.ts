@@ -73,7 +73,7 @@ export interface EventType {
   roundRobinActive: boolean
   /** Current configured hosts; at most eight. */
   hosts: { userId: string }[]
-  zoomConnectionId?: string | undefined
+  zoomConnectionId?: string | null | undefined
   conferenceOrganizer: { userId: string } | null
   location: EventTypeLocation | null
   questions: Question[]
@@ -1014,6 +1014,20 @@ async function validateConference(
           'forbidden',
           'zoom_host_session_required',
           'Only the host can choose their Zoom connection in a signed-in browser.',
+        )
+      const session = await db
+        .selectFrom('auth.session')
+        .select('id')
+        .where('id', '=', ctx.principal.sessionId)
+        .where('userId', '=', ctx.principal.user.id)
+        .where('expiresAt', '>', new Date(ctx.now().epochMilliseconds))
+        .forShare()
+        .executeTakeFirst()
+      if (!session)
+        throw new DomainError(
+          'forbidden',
+          'zoom_host_session_required',
+          'Sign in again before choosing a private Zoom connection.',
         )
       await requireZoomConnection(db, hosts[0] as string, zoomConnectionId, ctx.automaticZoom)
     }

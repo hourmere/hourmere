@@ -180,7 +180,7 @@ export const EventType = z
       .openapi({ description: 'Explicit round-robin activation; metadata saves never enable it' }),
     hosts: z.array(z.object({ userId: z.uuid() })).max(8),
     conferenceOrganizer: z.object({ userId: z.uuid() }).nullable(),
-    zoomConnectionId: z.uuid().optional(),
+    zoomConnectionId: z.uuid().nullable().optional(),
     questions: z.array(Question),
     createdAt: z.iso.datetime(),
     updatedAt: z.iso.datetime(),

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createLogMailer, type MailMessage } from '@hourmere/mail'
@@ -12,7 +13,8 @@ import {
   updateEventType,
 } from '@hourmere/scheduling'
 import { createFixtures } from '@hourmere/scheduling/testing'
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { sql } from 'kysely'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { writeBookingCalendar } from '../../calendars/src/booking-events.ts'
 import { retryBookingConference, writeBookingConference } from '../../calendars/src/conferences.ts'
 import { GOOGLE_CALENDAR_SYNC_SCOPES } from '../../calendars/src/google.ts'
@@ -673,6 +675,70 @@ describe.skipIf(!serverUrl)('automatic Zoom durable booking lifecycle (real Post
     })
     await writeBookingConference(deps, b.booking.id)
     expect((await row()).state).toBe('ready')
+    expect(posts()).toHaveLength(1)
+  })
+  it('rejects a cached principal after logout before allowing private connection reactivation', async () => {
+    const id = randomUUID()
+    await db
+      .insertInto('auth.session')
+      .values({
+        id,
+        userId: owner.user.id,
+        token: randomUUID(),
+        updatedAt: new Date(),
+        expiresAt: new Date('2035-01-01Z'),
+      })
+      .execute()
+    const stale = { ...owner, sessionId: id }
+    await db.deleteFrom('auth.session').where('id', '=', id).execute()
+    await updateEventType({ db, principal: owner, now: () => NOW }, eventId, {
+      location: { kind: 'zoom' },
+    })
+    await expect(
+      updateEventType({ db, principal: stale, now: () => NOW, automaticZoom: true }, eventId, {
+        location: { kind: 'zoom', autoCreate: true },
+        zoomConnectionId: connectionId,
+      }),
+    ).rejects.toMatchObject({ code: 'zoom_host_session_required' })
+  })
+  it('serializes disconnect after an in-flight provider transaction without losing its validated meeting identity', async () => {
+    const b = await book(),
+      entered = barrier(),
+      release = barrier<Response>()
+    provider.controls.meetingHook = async () => {
+      entered.resolve()
+      return release.promise
+    }
+    const running = writeBookingConference(deps, b.booking.id)
+    await entered.promise
+    const disconnect = disconnectConference(conference, owner, connectionId)
+    await vi.waitFor(async () => {
+      const result = await sql<{
+        blocked: boolean
+      }>`SELECT exists(SELECT 1 FROM pg_stat_activity a WHERE a.datname=current_database() AND cardinality(pg_blocking_pids(a.pid))>0) AS blocked`.execute(
+        db,
+      )
+      expect(result.rows[0]?.blocked).toBe(true)
+    })
+    release.resolve(
+      Response.json({
+        id: 81234567890,
+        host_id: 'synthetic-zoom-identity',
+        type: 2,
+        join_url: 'https://zoom.us/j/81234567890',
+        start_time: START,
+        duration: 30,
+      }),
+    )
+    await Promise.all([running, disconnect])
+    expect((await row()).zoom_meeting_id).toBe('81234567890')
+    expect(
+      await db
+        .selectFrom('conference_connections')
+        .select(['status', 'credentials'])
+        .where('id', '=', connectionId)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ status: 'disconnected', credentials: null })
     expect(posts()).toHaveLength(1)
   })
   it('supports a single-host team with its own host-authorized connection and no Google', async () => {

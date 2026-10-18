@@ -23,6 +23,7 @@ describe('GET /api/v1/instance', () => {
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({
       automaticGoogleMeet: false,
+      automaticZoom: false,
       signIn: { email: true, google: false, microsoft: false },
     })
   })
@@ -34,6 +35,7 @@ describe('GET /api/v1/instance', () => {
     const text = await res.text()
     expect(JSON.parse(text)).toEqual({
       automaticGoogleMeet: false,
+      automaticZoom: false,
       signIn: { email: true, google: true, microsoft: true },
     })
     expect(text).not.toMatch(/client/i)
@@ -41,6 +43,7 @@ describe('GET /api/v1/instance', () => {
     const googleOnly = await appWith({ google: oauth('google') }).request('/api/v1/instance')
     expect(await googleOnly.json()).toEqual({
       automaticGoogleMeet: false,
+      automaticZoom: false,
       signIn: { email: true, google: true, microsoft: false },
     })
   })
@@ -52,6 +55,7 @@ describe('GET /api/v1/instance', () => {
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({
       automaticGoogleMeet: false,
+      automaticZoom: false,
       signIn: { email: true, google: false, microsoft: false },
     })
   })
