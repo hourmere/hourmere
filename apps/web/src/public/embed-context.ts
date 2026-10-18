@@ -1,4 +1,5 @@
 import { EMBED_ID, embedOrigin } from '@hourmere/core/embed'
+import { explicitLanguage } from '@hourmere/core/language'
 import { createContext, useContext } from 'react'
 
 export const EmbeddedContext = createContext(false)
@@ -13,6 +14,8 @@ export function embedMessageContext() {
     !EMBED_ID.test(id) ||
     q.getAll('parentOrigin').length !== 1 ||
     q.getAll('embedId').length !== 1 ||
+    q.getAll('language').length > 1 ||
+    (q.has('language') && !explicitLanguage(q.get('language'))) ||
     window.parent === window
   )
     return undefined

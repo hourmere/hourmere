@@ -1,8 +1,16 @@
-import { type ReactNode, useEffect, useRef } from 'react'
+import { explicitLanguage } from '@hourmere/core/language'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
+import { EmbedLanguage } from '../i18n/runtime.tsx'
 import { BookingPage } from './BookingPage.tsx'
 import { EmbeddedContext, embedMessageContext } from './embed-context.ts'
 
 function EmbedFrame({ children }: { children: ReactNode }) {
+  const [language] = useState(() => {
+    const query = new URLSearchParams(window.location.search)
+    return query.getAll('language').length === 1
+      ? explicitLanguage(query.get('language'))
+      : undefined
+  })
   const root = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const target = embedMessageContext(),
@@ -36,9 +44,11 @@ function EmbedFrame({ children }: { children: ReactNode }) {
   }, [])
   return (
     <EmbeddedContext.Provider value={true}>
-      <div ref={root} className="embed-content">
-        {children}
-      </div>
+      <EmbedLanguage language={language}>
+        <div ref={root} className="embed-content">
+          {children}
+        </div>
+      </EmbedLanguage>
     </EmbeddedContext.Provider>
   )
 }

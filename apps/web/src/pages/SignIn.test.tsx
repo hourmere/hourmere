@@ -2,6 +2,7 @@ import { act, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { goTo } from '../browser.ts'
+import { translateMessage } from '../i18n/translate.ts'
 import {
   emptyAccount,
   fakeApi,
@@ -24,6 +25,10 @@ const linkSent = () => json(200, { status: true })
 /** Lets answered requests reach the page (for checking that something did not appear). */
 const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 20)))
 
+const describeSignInErrorText = (...args: Parameters<typeof describeSignInError>) => {
+  const result = describeSignInError(...args)
+  return result === null ? null : translateMessage('en', result)
+}
 describe('the sign-in page', () => {
   it('emails a sign-in link and says where it went', async () => {
     const api = fakeApi({
@@ -203,12 +208,12 @@ describe('the sign-in page', () => {
 
 describe('describeSignInError', () => {
   it('names unknown codes only when they look like codes', () => {
-    expect(describeSignInError(null)).toBeNull()
-    expect(describeSignInError('EMAIL_NOT_VERIFIED')).toMatch(/did not confirm your email/)
-    expect(describeSignInError('something_new')).toBe(
+    expect(describeSignInErrorText(null)).toBeNull()
+    expect(describeSignInErrorText('EMAIL_NOT_VERIFIED')).toMatch(/did not confirm your email/)
+    expect(describeSignInErrorText('something_new')).toBe(
       'Sign-in did not work (something_new). Please try again.',
     )
-    expect(describeSignInError('Visit evil.example to fix your account now')).toBe(
+    expect(describeSignInErrorText('Visit evil.example to fix your account now')).toBe(
       'Sign-in did not work. Please try again.',
     )
   })
@@ -226,11 +231,11 @@ describe('describeSignInError', () => {
       'This Hourmere instance does not accept new accounts for that email address.',
     ],
   ])('explains %s', (code, message) => {
-    if (typeof message === 'string') expect(describeSignInError(code)).toBe(message)
-    else expect(describeSignInError(code)).toMatch(message)
+    if (typeof message === 'string') expect(describeSignInErrorText(code)).toBe(message)
+    else expect(describeSignInErrorText(code)).toMatch(message)
   })
 
   it.each(PROTOTYPE_KEYS)('treats %s as an unknown code, not an inherited property', (code) => {
-    expect(describeSignInError(code)).toBe(`Sign-in did not work (${code}). Please try again.`)
+    expect(describeSignInErrorText(code)).toBe(`Sign-in did not work (${code}). Please try again.`)
   })
 })

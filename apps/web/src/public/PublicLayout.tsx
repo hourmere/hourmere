@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useRef } from 'react'
 import { Logo } from '../components/Logo.tsx'
 import { usePageTitle } from '../hooks.ts'
+import { LanguageSwitcher, useI18n } from '../i18n/runtime.tsx'
 import { useEmbedded } from './embed-context.ts'
 import './public.css'
 
@@ -9,16 +10,21 @@ import './public.css'
  * page itself and a small footer. These pages load nothing of the signed-in app.
  */
 export function PublicLayout({ children, wide = false }: { children: ReactNode; wide?: boolean }) {
+  const { t } = useI18n()
+
   const embedded = useEmbedded()
   return (
     <div className={`public${embedded ? ' public-embedded' : ''}`}>
+      <div className="public-language">
+        <LanguageSwitcher />
+      </div>
       <main id="main" className={`public-main${wide ? ' public-main-wide' : ''}`}>
         {children}
       </main>
       <footer className="public-footer">
         {embedded ? (
           <a href="https://hourmere.com" target="_blank" rel="noopener noreferrer">
-            Powered by <Logo size={18} />
+            {t('Powered by')} <Logo size={18} />
           </a>
         ) : (
           <Logo size={18} />
@@ -62,15 +68,17 @@ export function PublicStatus({ children }: { children: ReactNode }) {
 
 /** Unknown host or event type: say so plainly, without links into the signed-in app. */
 export function PublicNotFound({ what = 'page' }: { what?: 'page' | 'event' }) {
+  const { t } = useI18n()
+
   usePageTitle('Page not found')
   return (
     <PublicLayout>
       <div className="card public-card">
-        <h1>{what === 'event' ? 'This booking page doesn’t exist' : 'Page not found'}</h1>
+        <h1>{what === 'event' ? t('This booking page doesn’t exist') : t('Page not found')}</h1>
         <p>
           {what === 'event'
-            ? 'The link may be mistyped, or the host may have removed or renamed this event.'
-            : 'There is nothing at this address. Check the link you were given.'}
+            ? t('The link may be mistyped, or the host may have removed or renamed this event.')
+            : t('There is nothing at this address. Check the link you were given.')}
         </p>
       </div>
     </PublicLayout>

@@ -1,3 +1,4 @@
+import { explicitLanguage } from './language.ts'
 import { isPublicTeamSlug, isReservedName } from './reserved.ts'
 
 /** A canonical exact HTTPS origin; loopback HTTP is allowed only for local development. */
@@ -59,7 +60,9 @@ export function embedParent(url: URL, allowedOrigins: readonly string[]): string
   if (
     url.searchParams.getAll('parentOrigin').length !== 1 ||
     url.searchParams.getAll('embedId').length !== 1 ||
-    !EMBED_ID.test(url.searchParams.get('embedId') ?? '')
+    !EMBED_ID.test(url.searchParams.get('embedId') ?? '') ||
+    url.searchParams.getAll('language').length > 1 ||
+    (url.searchParams.has('language') && !explicitLanguage(url.searchParams.get('language')))
   )
     return undefined
   const origin = embedOrigin(url.searchParams.get('parentOrigin') ?? '')

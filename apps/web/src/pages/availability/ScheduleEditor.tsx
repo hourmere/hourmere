@@ -9,6 +9,8 @@ import { TimeZonePicker } from '../../components/TimeZonePicker.tsx'
 import { flash, useFlash } from '../../flash.ts'
 import { browserTimeZone } from '../../format.ts'
 import { useLoad, useMounted, usePageTitle } from '../../hooks.ts'
+import { useI18n } from '../../i18n/runtime.tsx'
+import { msg, type UiText } from '../../i18n/translate.ts'
 import { PATHS, schedulePath } from '../../paths.ts'
 import { useUnsavedChanges } from '../../unsaved-changes.tsx'
 import { MissingRecord } from '../NotFound.tsx'
@@ -45,6 +47,8 @@ export function ScheduleEditorPage() {
 }
 
 function ScheduleEditor({ id }: { id: string | undefined }) {
+  const { t, ui } = useI18n()
+
   const load = useCallback(
     async (signal: AbortSignal): Promise<Loaded | 'missing'> => {
       const [schedules, profile] = await Promise.all([
@@ -73,15 +77,17 @@ function ScheduleEditor({ id }: { id: string | undefined }) {
   const [state, reload] = useLoad(load)
   usePageTitle(id === undefined ? 'New schedule' : 'Edit schedule')
 
-  if (state.status === 'loading') return <p role="status">Loading…</p>
+  if (state.status === 'loading') return <p role="status">{t('Loading…')}</p>
   if (state.status === 'error') {
     return (
       <>
-        <h1>{id === undefined ? 'New schedule' : 'Edit schedule'}</h1>
+        <h1>{id === undefined ? t('New schedule') : t('Edit schedule')}</h1>
         <div className="alert alert-error" role="alert">
-          <p>Could not load the schedule. {state.message}</p>
+          <p>
+            {t('Could not load the schedule.')} {ui(state.message)}
+          </p>
           <button type="button" className="button button-small" onClick={reload}>
-            Try again
+            {t('Try again')}
           </button>
         </div>
       </>
@@ -90,7 +96,7 @@ function ScheduleEditor({ id }: { id: string | undefined }) {
   if (state.data === 'missing') {
     return (
       <MissingRecord
-        title="Schedule not found"
+        title={t('Schedule not found')}
         message="This schedule does not exist, or it was deleted."
         back={{ to: PATHS.availability, label: 'Back to availability' }}
       />
@@ -100,6 +106,8 @@ function ScheduleEditor({ id }: { id: string | undefined }) {
 }
 
 function ScheduleForm({ schedule, schedules, defaultTimeZone }: Loaded) {
+  const { t, ui } = useI18n()
+
   const navigate = useNavigate()
   const message = useFlash()
   const [saved, setSaved] = useState<Schedule | null>(schedule)
@@ -110,7 +118,7 @@ function ScheduleForm({ schedule, schedules, defaultTimeZone }: Loaded) {
   const isFirst = schedules.length === 0
   const [makeDefault, setMakeDefault] = useState(false)
   const [errors, setErrors] = useState<FieldErrors>({})
-  const [formError, setFormError] = useState<string | null>(null)
+  const [formError, setFormError] = useState<UiText | null>(null)
   const [attempt, setAttempt] = useState(0)
   const [saving, setSaving] = useState(false)
   const [status, setStatus] = useState(message ?? '')
@@ -170,7 +178,7 @@ function ScheduleForm({ schedule, schedules, defaultTimeZone }: Loaded) {
         // On to the new schedule's page, where date overrides can be added.
         navigate(schedulePath(created.id), {
           replace: true,
-          state: flash(`Created “${created.name}”.`),
+          state: flash(msg('Created “{0}”.', { '0': created.name })),
         })
         return
       }
@@ -182,7 +190,7 @@ function ScheduleForm({ schedule, schedules, defaultTimeZone }: Loaded) {
       setFormError(
         Object.keys(mapped.fields).length > 0
           ? null
-          : `Could not save the schedule. ${mapped.message ?? errorMessage(err)}`,
+          : msg('Could not save the schedule. {0}', { '0': mapped.message ?? errorMessage(err) }),
       )
       setAttempt((n) => n + 1)
     }
@@ -194,21 +202,21 @@ function ScheduleForm({ schedule, schedules, defaultTimeZone }: Loaded) {
     await unwrap(api.DELETE('/api/v1/schedules/{id}', { params: { path: { id: saved.id } } }))
     if (!mounted.current) return
     setBaseline(draft)
-    navigate(PATHS.availability, { state: flash(`Deleted “${saved.name}”.`) })
+    navigate(PATHS.availability, { state: flash(msg('Deleted “{0}”.', { '0': saved.name })) })
   }
 
   return (
     <>
       <p className="breadcrumb">
-        <Link to={PATHS.availability}>Availability</Link>
+        <Link to={PATHS.availability}>{t('Availability')}</Link>
       </p>
-      <h1>{saved ? `Edit “${saved.name}”` : 'New schedule'}</h1>
+      <h1>{saved ? t('Edit “{0}”', { '0': saved.name }) : t('New schedule')}</h1>
       {saved && (
         <DefaultStatus
           schedule={saved}
           onChanged={(updated) => {
             setSaved(updated)
-            setStatus(`“${updated.name}” is now your default schedule.`)
+            setStatus(msg('“{name}” is now your default schedule.', { name: updated.name }))
           }}
         />
       )}
@@ -222,13 +230,13 @@ function ScheduleForm({ schedule, schedules, defaultTimeZone }: Loaded) {
         />
         <fieldset className="form-fieldset" disabled={saving} role="presentation">
           <section className="panel" aria-labelledby="schedule-heading">
-            <h2 id="schedule-heading">Name and time zone</h2>
+            <h2 id="schedule-heading">{t('Name and time zone')}</h2>
             <div className="field-grid">
               <Field
                 id="name"
-                label="Name"
+                label={t('Name')}
                 error={errors.name}
-                hint="For you only, e.g. “Working hours”."
+                hint={t('For you only, e.g. “Working hours”.')}
               >
                 {(props) => (
                   <input
@@ -241,9 +249,9 @@ function ScheduleForm({ schedule, schedules, defaultTimeZone }: Loaded) {
               </Field>
               <Field
                 id="timeZone"
-                label="Time zone"
+                label={t('Time zone')}
                 error={errors.timeZone}
-                hint="The hours below are in this zone. Type to search, e.g. “Berlin”."
+                hint={t('The hours below are in this zone. Type to search, e.g. “Berlin”.')}
               >
                 {(props) => (
                   <TimeZonePicker
@@ -261,18 +269,18 @@ function ScheduleForm({ schedule, schedules, defaultTimeZone }: Loaded) {
                   checked={makeDefault}
                   onChange={(e) => setMakeDefault(e.target.checked)}
                 />
-                Make this my default schedule
+                {t('Make this my default schedule')}
               </label>
             )}
             {!saved && isFirst && (
-              <p className="hint">Your first schedule is your default schedule.</p>
+              <p className="hint">{t('Your first schedule is your default schedule.')}</p>
             )}
           </section>
 
           <section className="panel" aria-labelledby="hours-heading">
-            <h2 id="hours-heading">Weekly hours</h2>
+            <h2 id="hours-heading">{t('Weekly hours')}</h2>
             <p className="hint">
-              An end time of 00:00 (12:00 AM) means midnight at the end of the day.
+              {t('An end time of 00:00 (12:00 AM) means midnight at the end of the day.')}
             </p>
             <ul className="week">
               {WEEKDAYS.map(({ day, label }) => {
@@ -295,18 +303,18 @@ function ScheduleForm({ schedule, schedules, defaultTimeZone }: Loaded) {
                           })
                         }}
                       />
-                      {label}
+                      {ui(label)}
                     </label>
                     {d.available ? (
                       <IntervalsEditor
                         prefix={dayField(day)}
-                        label={label}
+                        label={ui(label)}
                         intervals={d.intervals}
                         onChange={(intervals) => setDay(day, { intervals })}
                         errors={errors}
                       />
                     ) : (
-                      <p className="muted weekday-off">Unavailable</p>
+                      <p className="muted weekday-off">{t('Unavailable')}</p>
                     )}
                   </li>
                 )
@@ -317,13 +325,13 @@ function ScheduleForm({ schedule, schedules, defaultTimeZone }: Loaded) {
 
         <div className="form-actions">
           <button type="submit" className="button button-primary" disabled={saving}>
-            {saving ? 'Saving…' : saved ? 'Save changes' : 'Create schedule'}
+            {saving ? t('Saving…') : saved ? t('Save changes') : t('Create schedule')}
           </button>
           <Link to={PATHS.availability} className="button">
-            {saved ? 'Back to availability' : 'Cancel'}
+            {saved ? t('Back to availability') : t('Cancel')}
           </Link>
           <p className="form-status" role="status" tabIndex={-1} ref={statusRef}>
-            {status || (dirty && saved ? 'Unsaved changes' : '')}
+            {ui(status || (dirty && saved ? 'Unsaved changes' : ''))}
           </p>
         </div>
       </form>
@@ -332,10 +340,11 @@ function ScheduleForm({ schedule, schedules, defaultTimeZone }: Loaded) {
         <Overrides schedule={saved} />
       ) : (
         <section className="panel" aria-labelledby="overrides-heading">
-          <h2 id="overrides-heading">Date overrides</h2>
+          <h2 id="overrides-heading">{t('Date overrides')}</h2>
           <p className="muted">
-            Create the schedule first; then you can change the hours of single dates, such as
-            holidays.
+            {t(
+              'Create the schedule first; then you can change the hours of single dates, such as holidays.',
+            )}
           </p>
         </section>
       )}
@@ -353,8 +362,10 @@ function DefaultStatus({
   schedule: Schedule
   onChanged: (schedule: Schedule) => void
 }) {
+  const { t, ui } = useI18n()
+
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<UiText | null>(null)
 
   async function makeDefault() {
     setBusy(true)
@@ -369,7 +380,7 @@ function DefaultStatus({
         ),
       )
     } catch (err) {
-      setError(`Could not make it the default. ${errorMessage(err)}`)
+      setError(msg('Could not make it the default. {0}', { '0': errorMessage(err) }))
     }
     setBusy(false)
   }
@@ -377,20 +388,20 @@ function DefaultStatus({
   if (schedule.isDefault) {
     return (
       <p className="default-status">
-        <span className="badge badge-success">Default</span> Event types use this schedule unless
-        you choose another one for them.
+        <span className="badge badge-success">{t('Default')}</span>{' '}
+        {t('Event types use this schedule unless you choose another one for them.')}
       </p>
     )
   }
   return (
     <div className="default-status">
-      <p>Event types use this schedule only where you choose it.</p>
+      <p>{t('Event types use this schedule only where you choose it.')}</p>
       <button type="button" className="button button-small" onClick={makeDefault} disabled={busy}>
-        {busy ? 'Saving…' : 'Make default'}
+        {busy ? t('Saving…') : t('Make default')}
       </button>
       {error && (
         <p className="alert alert-error" role="alert">
-          {error}
+          {ui(error)}
         </p>
       )}
     </div>
@@ -410,29 +421,33 @@ function DeleteSchedule({
   others: Schedule[]
   onDelete: () => Promise<void>
 }) {
+  const { t } = useI18n()
+
   const blocked = schedule.isDefault && others.length > 0
   return (
     <section className="panel panel-danger" aria-labelledby="delete-heading">
-      <h2 id="delete-heading">Delete this schedule</h2>
+      <h2 id="delete-heading">{t('Delete this schedule')}</h2>
       {blocked ? (
         <p>
-          This is your default schedule. To delete it, first make another schedule the default on
-          the <Link to={PATHS.availability}>availability page</Link>.
+          {t(
+            'This is your default schedule. To delete it, first make another schedule the default on the',
+          )}{' '}
+          <Link to={PATHS.availability}>{t('availability page')}</Link>.
         </p>
       ) : (
         <>
           <p>
             {schedule.isDefault
-              ? 'This is your only schedule: without it, your event types offer no times.'
-              : 'Event types that use it switch to your default schedule.'}{' '}
-            Its date overrides are deleted with it.
+              ? t('This is your only schedule: without it, your event types offer no times.')
+              : t('Event types that use it switch to your default schedule.')}{' '}
+            {t('Its date overrides are deleted with it.')}
           </p>
           <ConfirmAction
-            label="Delete schedule"
-            prompt={`Delete “${schedule.name}”? This cannot be undone.`}
-            confirmLabel="Delete schedule"
-            busyLabel="Deleting…"
-            failure="Could not delete the schedule."
+            label={t('Delete schedule')}
+            prompt={t('Delete “{0}”? This cannot be undone.', { '0': schedule.name })}
+            confirmLabel={t('Delete schedule')}
+            busyLabel={t('Deleting…')}
+            failure={t('Could not delete the schedule.')}
             onConfirm={onDelete}
           />
         </>

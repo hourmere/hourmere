@@ -3,20 +3,20 @@
 // state, and is taken out once read, so going back or reloading does not show it again.
 import { useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router'
+import type { UiText } from './i18n/translate.ts'
+import { isUiText } from './i18n/translate.ts'
 
 export interface FlashState {
-  flash: string
+  flash: UiText
 }
 
-export const flash = (message: string): FlashState => ({ flash: message })
+export const flash = (message: UiText): FlashState => ({ flash: message })
 
 const isFlash = (state: unknown): state is FlashState =>
-  typeof state === 'object' &&
-  state !== null &&
-  typeof (state as { flash?: unknown }).flash === 'string'
+  typeof state === 'object' && state !== null && isUiText((state as { flash?: unknown }).flash)
 
 /** The message the navigation to this page brought, if any. */
-export function useFlash(): string | null {
+export function useFlash(): UiText | null {
   const location = useLocation()
   const navigate = useNavigate()
   const [message] = useState(() => (isFlash(location.state) ? location.state.flash : null))

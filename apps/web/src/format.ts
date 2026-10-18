@@ -1,7 +1,18 @@
 // Formatting for people: durations, and instants shown in a named time zone.
 
 /** "30 min", "1 h", "1 h 30 min", "2 days", "1 day 4 h". */
-export function formatMinutes(total: number): string {
+export function formatMinutes(total: number, locale = 'en'): string {
+  if (locale.startsWith('zh')) {
+    if (total === 0) return '0 分钟'
+    const parts = []
+    const days = Math.floor(total / 1440),
+      hours = Math.floor((total % 1440) / 60),
+      minutes = total % 60
+    if (days) parts.push(`${days} 天`)
+    if (hours) parts.push(`${hours} 小时`)
+    if (minutes) parts.push(`${minutes} 分钟`)
+    return parts.join(' ')
+  }
   if (total === 0) return '0 min'
   const days = Math.floor(total / 1440)
   const hours = Math.floor((total % 1440) / 60)
@@ -43,28 +54,36 @@ export function isKnownTimeZone(timeZone: string): boolean {
 }
 
 /** Formats instants in one time zone, e.g. the host's. */
-export function zoned(timeZone: string) {
+export function zoned(timeZone: string, locale?: string) {
   const zone = isKnownTimeZone(timeZone) ? timeZone : 'UTC'
-  const date = new Intl.DateTimeFormat(undefined, {
+  const date = new Intl.DateTimeFormat(locale, {
     timeZone: zone,
+    calendar: 'gregory',
     weekday: 'short',
     day: 'numeric',
     month: 'short',
     year: 'numeric',
   })
-  const longDate = new Intl.DateTimeFormat(undefined, { timeZone: zone, dateStyle: 'full' })
-  const time = new Intl.DateTimeFormat(undefined, {
+  const longDate = new Intl.DateTimeFormat(locale, {
     timeZone: zone,
+    calendar: 'gregory',
+    dateStyle: 'full',
+  })
+  const time = new Intl.DateTimeFormat(locale, {
+    timeZone: zone,
+    calendar: 'gregory',
     hour: 'numeric',
     minute: '2-digit',
   })
-  const dateTime = new Intl.DateTimeFormat(undefined, {
+  const dateTime = new Intl.DateTimeFormat(locale, {
     timeZone: zone,
+    calendar: 'gregory',
     dateStyle: 'medium',
     timeStyle: 'short',
   })
   return {
     timeZone: zone,
+    calendar: 'gregory',
     /** "Mon, 2 Nov 2026" */
     date: (iso: string) => date.format(new Date(iso)),
     /** "Monday, 2 November 2026" */

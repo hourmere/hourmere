@@ -5,6 +5,8 @@ import { errorMessage } from '../api/errors.ts'
 import { goTo } from '../browser.ts'
 import { ConfirmAction } from '../components/ConfirmAction.tsx'
 import { useLoad, useMounted, usePageTitle } from '../hooks.ts'
+import { useI18n } from '../i18n/runtime.tsx'
+import { msg, type UiText } from '../i18n/translate.ts'
 import { leavesPage } from '../unsaved-changes.tsx'
 
 type Connection = Schemas['CalendarConnection']
@@ -29,11 +31,13 @@ const noticeFor = (search: URLSearchParams) =>
     ?.replaceAll('Google', search.get('provider') === 'microsoft' ? 'Microsoft' : 'Google') ?? null
 
 export function CalendarsPage() {
+  const { t, ui, formatLocale: displayLocale } = useI18n()
+
   usePageTitle('Calendars')
   const [state, reload] = useLoad(load)
   const [search, setSearch] = useSearchParams()
   const [notice, setNotice] = useState(() => noticeFor(search))
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState<UiText | null>(null)
   const [pending, setPending] = useState<string | null>(null)
   const mounted = useMounted()
   const accountsHeading = useRef<HTMLHeadingElement>(null)
@@ -107,7 +111,10 @@ export function CalendarsPage() {
     } catch (err) {
       if (mounted.current && !request.signal.aborted)
         setError(
-          `Could not connect ${provider === 'google' ? 'Google' : 'Microsoft'} Calendar. ${errorMessage(err)}`,
+          msg('Could not connect {0} Calendar. {1}', {
+            '0': provider === 'google' ? 'Google' : 'Microsoft',
+            '1': errorMessage(err),
+          }),
         )
     } finally {
       if (mounted.current) setPending(null)
@@ -193,41 +200,42 @@ export function CalendarsPage() {
 
   return (
     <div className="page stack">
-      <h1>Calendars</h1>
+      <h1>{t('Calendars')}</h1>
       <p>
-        Choose calendars whose busy times block bookings, and an owned calendar for new booking
-        events. Existing meetings keep their original calendar when you change the destination.
+        {t(
+          'Choose calendars whose busy times block bookings, and an owned calendar for new booking events. Existing meetings keep their original calendar when you change the destination.',
+        )}
       </p>
       {notice && (
         <div className="alert alert-info">
-          <p role="status">{notice}</p>
+          <p role="status">{ui(notice)}</p>
           <button type="button" className="button button-small" onClick={() => setNotice(null)}>
-            Dismiss
+            {t('Dismiss')}
           </button>
         </div>
       )}
       {error && (
         <p className="alert alert-error" role="alert">
-          {error}
+          {ui(error)}
         </p>
       )}
-      {state.status === 'loading' && <p role="status">Loading calendars…</p>}
+      {state.status === 'loading' && <p role="status">{t('Loading calendars…')}</p>}
       {state.status === 'error' && (
         <div className="alert alert-error">
-          <p role="alert">{state.message}</p>
+          <p role="alert">{ui(state.message)}</p>
           <button type="button" className="button" onClick={reload}>
-            Try again
+            {t('Try again')}
           </button>
         </div>
       )}
       {state.status === 'ready' && (
         <>
           {state.data.googleEnabled ? (
-            <section className="stack" aria-label="Connect Google Calendar">
+            <section className="stack" aria-label={t('Connect Google Calendar')}>
               <p>
-                Google will ask for your email, calendar list, event read access and permission to
-                change events on calendars you own. Busy-time synchronization stores times and event
-                IDs, without event titles or descriptions. Connecting is separate from signing in.
+                {t(
+                  'Google will ask for your email, calendar list, event read access and permission to change events on calendars you own. Busy-time synchronization stores times and event IDs, without event titles or descriptions. Connecting is separate from signing in.',
+                )}
               </p>
               <div>
                 <button
@@ -236,23 +244,23 @@ export function CalendarsPage() {
                   disabled={pending !== null}
                   onClick={() => connect()}
                 >
-                  {pending === 'connect' ? 'Opening Google…' : 'Connect Google Calendar'}
+                  {pending === 'connect' ? t('Opening Google…') : t('Connect Google Calendar')}
                 </button>
               </div>
             </section>
           ) : (
             <p className="alert alert-info">
-              Google Calendar is not configured on this Hourmere instance. Contact its administrator
-              to enable it.
+              {t(
+                'Google Calendar is not configured on this Hourmere instance. Contact its administrator to enable it.',
+              )}
             </p>
           )}
           {state.data.microsoftEnabled ? (
-            <section className="stack" aria-label="Connect Microsoft Calendar">
+            <section className="stack" aria-label={t('Connect Microsoft Calendar')}>
               <p>
-                Microsoft will ask for your account identity, continuing access and permission to
-                read basic calendar details. This connection lists your calendars; busy-time
-                synchronization and booking event writes are not yet available. Connecting is
-                separate from signing in.
+                {t(
+                  'Microsoft will ask for your account identity, continuing access and permission to read basic calendar details. This connection lists your calendars; busy-time synchronization and booking event writes are not yet available. Connecting is separate from signing in.',
+                )}
               </p>
               <div>
                 <button
@@ -262,43 +270,50 @@ export function CalendarsPage() {
                   onClick={() => connect('list', 'microsoft')}
                 >
                   {pending === 'connect-microsoft'
-                    ? 'Opening Microsoft…'
-                    : 'Connect Microsoft Calendar'}
+                    ? t('Opening Microsoft…')
+                    : t('Connect Microsoft Calendar')}
                 </button>
               </div>
             </section>
           ) : (
             <p className="alert alert-info">
-              Microsoft Calendar is not configured on this Hourmere instance. Contact its
-              administrator to enable it.
+              {t(
+                'Microsoft Calendar is not configured on this Hourmere instance. Contact its administrator to enable it.',
+              )}
             </p>
           )}
-          <section className="stack" aria-label="Connected accounts">
+          <section className="stack" aria-label={t('Connected accounts')}>
             <h2 ref={accountsHeading} tabIndex={-1}>
-              Connected accounts
+              {t('Connected accounts')}
             </h2>
-            {state.data.data.length === 0 && <p>No calendar accounts connected yet.</p>}
+            {state.data.data.length === 0 && <p>{t('No calendar accounts connected yet.')}</p>}
             {state.data.data.map((connection) => (
               <article className="panel stack" key={connection.id}>
-                <h3>{connection.accountEmail ?? `${providerName(connection)} account`}</h3>
-                <p>{providerName(connection)} Calendar</p>
+                <h3>
+                  {connection.accountEmail ?? t('{0} account', { '0': providerName(connection) })}
+                </h3>
+                <p>
+                  {providerName(connection)} {t('Calendar')}
+                </p>
                 {connection.status !== 'active' && (
                   <p className="alert alert-error">
-                    Access has expired or been removed. Connect this {providerName(connection)}{' '}
-                    account again to restore it.
+                    {t('Access has expired or been removed. Connect this')}{' '}
+                    {providerName(connection)} {t('account again to restore it.')}
                   </p>
                 )}
                 {connection.provider === 'microsoft' && (
                   <p>
-                    This connection lists calendars only. Busy-time synchronization and booking
-                    writes are not yet available.
+                    {t(
+                      'This connection lists calendars only. Busy-time synchronization and booking writes are not yet available.',
+                    )}
                   </p>
                 )}
                 {connection.provider === 'google' && !connection.syncAuthorized && (
                   <div className="stack">
                     <p>
-                      This connection has calendar-list access only. Enable synchronization to use
-                      busy times and write booking events.
+                      {t(
+                        'This connection has calendar-list access only. Enable synchronization to use busy times and write booking events.',
+                      )}
                     </p>
                     <button
                       type="button"
@@ -306,7 +321,7 @@ export function CalendarsPage() {
                       disabled={pending !== null || !state.data.googleEnabled}
                       onClick={() => connect('sync')}
                     >
-                      Enable calendar synchronization
+                      {t('Enable calendar synchronization')}
                     </button>
                   </div>
                 )}
@@ -314,7 +329,7 @@ export function CalendarsPage() {
                   {connection.calendars.map((calendar) => (
                     <li key={calendar.id}>
                       {calendar.name}
-                      {calendar.isPrimary ? ' (primary)' : ''}
+                      {calendar.isPrimary ? t(' (primary)') : ''}
                       {(connection.syncAuthorized ||
                         calendar.checkConflicts ||
                         state.data.destinationCalendarId === calendar.id) && (
@@ -335,16 +350,25 @@ export function CalendarsPage() {
                                 calendarAction(calendar.id, 'toggle', event.target.checked)
                               }
                             />
-                            Check conflicts in {calendar.name}
+                            {t('Check conflicts in')} {calendar.name}
                           </label>
                           {calendar.checkConflicts && (
                             <>
                               <p>
                                 {calendar.syncError
-                                  ? 'Synchronization failed. Booking times stay unavailable until synchronization recovers.'
+                                  ? t(
+                                      'Synchronization failed. Booking times stay unavailable until synchronization recovers.',
+                                    )
                                   : calendar.lastSyncedAt
-                                    ? `Last synchronized: ${new Date(calendar.lastSyncedAt).toLocaleString()}`
-                                    : 'Waiting for the first synchronization. Booking times stay unavailable until it completes.'}
+                                    ? t('Last synchronized: {0}', {
+                                        '0': new Date(calendar.lastSyncedAt).toLocaleString(
+                                          displayLocale,
+                                          { calendar: 'gregory' },
+                                        ),
+                                      })
+                                    : t(
+                                        'Waiting for the first synchronization. Booking times stay unavailable until it completes.',
+                                      )}
                               </p>
                               <button
                                 type="button"
@@ -356,7 +380,7 @@ export function CalendarsPage() {
                                 }
                                 onClick={() => calendarAction(calendar.id, 'sync')}
                               >
-                                Sync {calendar.name} now
+                                {t('Sync')} {calendar.name} {t('now')}
                               </button>
                             </>
                           )}
@@ -380,8 +404,8 @@ export function CalendarsPage() {
                               }
                             >
                               {state.data.destinationCalendarId === calendar.id
-                                ? `Stop writing bookings to ${calendar.name}`
-                                : `Write new bookings to ${calendar.name}`}
+                                ? t('Stop writing bookings to {0}', { '0': calendar.name })
+                                : t('Write new bookings to {0}', { '0': calendar.name })}
                             </button>
                           )}
                         </fieldset>
@@ -389,7 +413,7 @@ export function CalendarsPage() {
                     </li>
                   ))}
                 </ul>
-                {!connection.calendars.length && <p>No calendars found in this account.</p>}
+                {!connection.calendars.length && <p>{t('No calendars found in this account.')}</p>}
                 <fieldset className="form-fieldset" disabled={pending !== null}>
                   <div className="form-actions">
                     {(connection.provider === 'google'
@@ -401,16 +425,27 @@ export function CalendarsPage() {
                         disabled={pending !== null || connection.status !== 'active'}
                         onClick={() => update(connection, false)}
                       >
-                        Refresh calendar list
+                        {t('Refresh calendar list')}
                       </button>
                     )}
                     <ConfirmAction
-                      label="Disconnect"
-                      accessibleLabel={`Disconnect ${connection.accountEmail ?? `${providerName(connection)} account`}`}
-                      prompt={`Disconnect ${connection.accountEmail ?? `this ${providerName(connection)} account`}? This deletes stored credentials and local calendar data. You can also remove Hourmere’s access in ${providerName(connection)} account settings.`}
-                      confirmLabel="Disconnect account"
-                      busyLabel="Disconnecting…"
-                      failure={`Could not disconnect ${providerName(connection)} Calendar.`}
+                      label={t('Disconnect')}
+                      accessibleLabel={t('Disconnect {0}', {
+                        '0': connection.accountEmail ?? `${providerName(connection)} account`,
+                      })}
+                      prompt={t(
+                        'Disconnect {0}? This deletes stored credentials and local calendar data. You can also remove Hourmere’s access in {1} account settings.',
+                        {
+                          '0':
+                            connection.accountEmail ?? `this ${providerName(connection)} account`,
+                          '1': providerName(connection),
+                        },
+                      )}
+                      confirmLabel={t('Disconnect account')}
+                      busyLabel={t('Disconnecting…')}
+                      failure={t('Could not disconnect {0} Calendar.', {
+                        '0': providerName(connection),
+                      })}
                       onConfirm={() => update(connection, true)}
                     />
                   </div>

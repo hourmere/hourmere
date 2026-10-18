@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, useLocation, useParams } from 'react-router'
 import { usePageTitle } from '../hooks.ts'
+import { useI18n } from '../i18n/runtime.tsx'
+import { literal, msg, type UiText } from '../i18n/translate.ts'
 import { AddToCalendar, ManageLink } from './AddToCalendar.tsx'
 import {
   type BookingWithToken,
@@ -66,19 +68,21 @@ function BookingPageContent({
   slug: string
   team: boolean
 }) {
+  const { t, ui } = useI18n()
+
   const load = useCallback(
     (signal: AbortSignal) => getEventType(handle, slug, signal, team),
     [handle, slug, team],
   )
   const [state, reload] = useRequest(load)
   usePageTitle(
-    state.status === 'ready' ? `${state.data.title} · ${state.data.host.name}` : 'Booking',
+    state.status === 'ready' ? literal(`${state.data.title} · ${state.data.host.name}`) : 'Booking',
   )
 
   if (state.status === 'loading') {
     return (
       <PublicLayout wide>
-        <PublicStatus>Loading…</PublicStatus>
+        <PublicStatus>{t('Loading…')}</PublicStatus>
       </PublicLayout>
     )
   }
@@ -87,9 +91,9 @@ function BookingPageContent({
     return (
       <PublicLayout>
         <div className="card public-card">
-          <p role="alert">{failureMessage(state.error)}</p>
+          <p role="alert">{ui(failureMessage(state.error))}</p>
           <button type="button" className="button" onClick={reload}>
-            Try again
+            {t('Try again')}
           </button>
         </div>
       </PublicLayout>
@@ -117,17 +121,21 @@ function BookingFlow({
   slug: string
   team: boolean
 }) {
+  const { t, ui, locale: displayLocale, explicit } = useI18n()
+
   const embedded = useEmbedded()
-  const locale = useMemo(preferredLocale, [])
+  const browserFormatLocale = useMemo(preferredLocale, [])
+  const locale = explicit ?? browserFormatLocale
+  const [requestLocale] = useState(() => bookingLocale(explicit ?? preferredLocale()))
   const [timeZone, setTimeZone] = useState(detectTimeZone)
   const [now, setNow] = useState(currentTime)
   const [slot, setSlot] = useState<Slot | null>(null)
   const [version, setVersion] = useState(0)
-  const [notice, setNotice] = useState<string | null>(null)
+  const [notice, setNotice] = useState<UiText | null>(null)
   const [backToPicker, setBackToPicker] = useState(false)
   const [values, setValues] = useState<BookingFormValues>(EMPTY_FORM)
   const [serverErrors, setServerErrors] = useState<FieldErrors>({})
-  const [formError, setFormError] = useState<string | null>(null)
+  const [formError, setFormError] = useState<UiText | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [confirmed, setConfirmed] = useState<Confirmed | null>(null)
   const [gone, setGone] = useState(false)
@@ -153,7 +161,7 @@ function BookingFlow({
 
   async function submit() {
     if (!slot) return
-    const inviteeLocale = bookingLocale(locale)
+    const inviteeLocale = requestLocale
     const guests = values.guests.map((g) => ({ name: g.name.trim(), email: g.email.trim() }))
     const body: CreateBooking = {
       ...(embedded && { source: 'embed' as const }),
@@ -187,7 +195,7 @@ function BookingFlow({
       const code = codeOf(err)
       if (!(err instanceof PublicRequestError)) {
         // Offline, or the answer was lost: the same request will reuse the same key.
-        setFormError(`${failureMessage(err)} Your booking is not confirmed yet.`)
+        setFormError(msg('{0} Your booking is not confirmed yet.', { '0': failureMessage(err) }))
       } else if (code === 'slot_taken' || code === 'slot_unavailable') {
         attempt.current = null
         setSlot(null)
@@ -212,7 +220,10 @@ function BookingFlow({
         setServerErrors(fields)
         setFormError(
           zoneError
-            ? `Your time zone (${zoneName(timeZone)}) was not accepted. Change the time, pick another time zone and try again.`
+            ? msg(
+                'Your time zone ({0}) was not accepted. Change the time, pick another time zone and try again.',
+                { '0': zoneName(timeZone) },
+              )
             : (mapped.form ??
                 (Object.keys(fields).length ? 'Check the highlighted fields.' : null)),
         )
@@ -225,18 +236,18 @@ function BookingFlow({
   return (
     <PublicLayout wide>
       <div className="booking-layout">
-        <aside className="event-info" aria-label="About this event">
+        <aside className="event-info" aria-label={t('About this event')}>
           <p className="event-host">{event.team?.name ?? event.host.name}</p>
           <h1 className="event-title">{event.title}</h1>
           {event.hosts && (
             <p className="event-description">
-              Required hosts:{' '}
+              {t('Required hosts:')}{' '}
               {event.hosts.map((host) => `${host.name} (${host.timeZone})`).join(', ')}
             </p>
           )}
           <ul className="event-facts">
-            <li>{formatDuration(event.durationMinutes)}</li>
-            {event.location && <li>{locationLabel(event.location.kind)}</li>}
+            <li>{formatDuration(event.durationMinutes, displayLocale)}</li>
+            {event.location && <li>{ui(locationLabel(event.location.kind))}</li>}
           </ul>
           {event.description && <p className="event-description">{event.description}</p>}
           {slot && (
@@ -251,7 +262,7 @@ function BookingFlow({
                 </span>
               </p>
               <button type="button" className="button button-small" onClick={changeTime}>
-                Change time
+                {t('Change time')}
               </button>
             </div>
           )}
@@ -260,7 +271,7 @@ function BookingFlow({
           {slot ? (
             <section className="details-step" aria-labelledby="details-heading">
               <FocusHeading level={2} id="details-heading" className="step-title">
-                Your details
+                {t('Your details')}
               </FocusHeading>
               <BookingForm
                 allowGuests={event.allowGuests}
@@ -306,6 +317,8 @@ function Confirmation({
   confirmed: Confirmed
   locale: string
 }) {
+  const { t, ui } = useI18n()
+
   usePageTitle('Booking confirmed')
   const embedded = useEmbedded()
   const notified = useRef(false)
@@ -318,13 +331,16 @@ function Confirmation({
   const { booking, manageToken, replayed, timeZone } = confirmed
   const invitee = booking.attendees.find((a) => a.isBooker)
   const guests = booking.attendees.filter((a) => !a.isBooker)
-  const title = `${event.title} with ${event.host.name}`
+  const title = t('{event} with {host}', { event: event.title, host: event.host.name })
   return (
     <PublicLayout>
       <div className="card public-card confirmation">
-        <FocusHeading>You’re booked</FocusHeading>
+        <FocusHeading>{t('You’re booked')}</FocusHeading>
         <p className="lede">
-          Your {event.title} with {event.host.name} is confirmed.
+          {t('Your {event} with {host} is confirmed.', {
+            event: event.title,
+            host: event.host.name,
+          })}
         </p>
         <DetailList
           items={[
@@ -356,16 +372,17 @@ function Confirmation({
             start: Date.parse(booking.start),
             end: Date.parse(booking.end),
             description: event.description ?? undefined,
-            location: locationText(booking.location),
+            location: locationText(booking.location, ui),
           }}
         />
         {manageToken ? (
-          <ManageLink token={manageToken} intro="Use this link to reschedule or cancel." />
+          <ManageLink token={manageToken} intro={t('Use this link to reschedule or cancel.')} />
         ) : replayed ? (
           <div className="alert alert-info">
             <p>
-              This booking was already made by an earlier attempt, so its link to change or cancel
-              can’t be shown again. Use the link in your confirmation email instead.
+              {t(
+                'This booking was already made by an earlier attempt, so its link to change or cancel can’t be shown again. Use the link in your confirmation email instead.',
+              )}
             </p>
           </div>
         ) : null}

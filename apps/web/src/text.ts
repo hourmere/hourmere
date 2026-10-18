@@ -1,3 +1,5 @@
+import { type MessageKey, msg, type UiText } from './i18n/translate.ts'
+
 // The API's rules for free text (docs/api-conventions.md, Validation): well-formed Unicode
 // without control characters; only multi-line fields may hold tabs and line breaks. The same
 // checks as packages/scheduling/src/text.ts, so the forms can say what is wrong before the
@@ -29,10 +31,16 @@ export function isMultiLineText(value: string): boolean {
  * What is wrong with a required one-line text field (trimmed, as the server trims it), or
  * null when it is fine.
  */
-export function singleLineProblem(value: string, name: string, max: number): string | null {
+export function singleLineProblem(value: string, name: string, max: number): UiText | null {
   const text = value.trim()
-  if (text === '') return `Enter ${name}.`
-  if (text.length > max) return `Use at most ${max} characters (now ${text.length}).`
+  if (text === '')
+    return msg('Enter {0}.', {
+      '0': ['a title', 'an address', 'an option', 'a question', 'a name'].includes(name)
+        ? msg(name as MessageKey)
+        : name,
+    })
+  if (text.length > max)
+    return msg('Use at most {0} characters (now {1}).', { '0': max, '1': text.length })
   if (!isSingleLineText(text)) return 'Use one line of text without special control characters.'
   return null
 }

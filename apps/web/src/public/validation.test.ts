@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { RequestError } from '../api/errors.ts'
+import { translateMessage } from '../i18n/translate.ts'
 import {
   answerError,
   bookingErrors,
@@ -20,14 +21,28 @@ const q = (type: Question['type'], more: Partial<Question> = {}): Question => ({
   ...more,
 })
 
+const nameErrorText = (...args: Parameters<typeof nameError>) => {
+  const result = nameError(...args)
+  return result === null ? null : translateMessage('en', result)
+}
+
+const answerErrorText = (...args: Parameters<typeof answerError>) => {
+  const result = answerError(...args)
+  return result === null ? null : translateMessage('en', result)
+}
+
+const reasonErrorText = (...args: Parameters<typeof reasonError>) => {
+  const result = reasonError(...args)
+  return result === null ? null : translateMessage('en', result)
+}
 describe('the booking form’s rules mirror the API’s', () => {
   it('checks names and emails', () => {
-    expect(nameError('  ')).toBe('Enter your name.')
-    expect(nameError('a'.repeat(200))).toBeNull()
-    expect(nameError('a'.repeat(201))).toMatch(/at most 200/)
-    expect(nameError(` ${'a'.repeat(200)} `)).toBeNull() // trimmed, as the service does
-    expect(nameError('Ada\u0007')).toMatch(/one line/)
-    expect(nameError('Ada\nLovelace')).toMatch(/one line/)
+    expect(nameErrorText('  ')).toBe('Enter your name.')
+    expect(nameErrorText('a'.repeat(200))).toBeNull()
+    expect(nameErrorText('a'.repeat(201))).toMatch(/at most 200/)
+    expect(nameErrorText(` ${'a'.repeat(200)} `)).toBeNull() // trimmed, as the service does
+    expect(nameErrorText('Ada\u0007')).toMatch(/one line/)
+    expect(nameErrorText('Ada\nLovelace')).toMatch(/one line/)
     expect(emailError('ada@example.com')).toBeNull()
     expect(emailError(' ada@example.com ')).toBeNull()
     for (const bad of [
@@ -43,21 +58,21 @@ describe('the booking form’s rules mirror the API’s', () => {
   })
 
   it('checks each kind of answer', () => {
-    expect(answerError(q('short_text'), '')).toBe('This answer is required.')
-    expect(answerError(q('short_text', { required: false }), '')).toBeNull()
-    expect(answerError(q('short_text'), 'x'.repeat(501))).toMatch(/at most 500/)
-    expect(answerError(q('long_text'), 'line one\nline two')).toBeNull()
-    expect(answerError(q('long_text'), 'x'.repeat(5001))).toMatch(/at most 5000/)
-    expect(answerError(q('short_text'), 'line one\nline two')).toMatch(/one line/)
-    expect(answerError(q('phone'), '+49 (30) 123-45.67')).toBeNull()
-    expect(answerError(q('phone'), 'call me')).toMatch(/phone number/)
-    expect(answerError(q('phone'), `+${'1'.repeat(32)}`)).toMatch(/at most 32/)
-    expect(answerError(q('select'), '')).toBe('Choose an option.')
-    expect(answerError(q('select'), 'A')).toBeNull()
-    expect(answerError(q('multi_select'), [])).toBe('Choose at least one option.')
-    expect(answerError(q('multi_select', { required: false }), [])).toBeNull()
-    expect(answerError(q('checkbox'), false)).toBe('Check this box to continue.')
-    expect(answerError(q('checkbox', { required: false }), false)).toBeNull()
+    expect(answerErrorText(q('short_text'), '')).toBe('This answer is required.')
+    expect(answerErrorText(q('short_text', { required: false }), '')).toBeNull()
+    expect(answerErrorText(q('short_text'), 'x'.repeat(501))).toMatch(/at most 500/)
+    expect(answerErrorText(q('long_text'), 'line one\nline two')).toBeNull()
+    expect(answerErrorText(q('long_text'), 'x'.repeat(5001))).toMatch(/at most 5000/)
+    expect(answerErrorText(q('short_text'), 'line one\nline two')).toMatch(/one line/)
+    expect(answerErrorText(q('phone'), '+49 (30) 123-45.67')).toBeNull()
+    expect(answerErrorText(q('phone'), 'call me')).toMatch(/phone number/)
+    expect(answerErrorText(q('phone'), `+${'1'.repeat(32)}`)).toMatch(/at most 32/)
+    expect(answerErrorText(q('select'), '')).toBe('Choose an option.')
+    expect(answerErrorText(q('select'), 'A')).toBeNull()
+    expect(answerErrorText(q('multi_select'), [])).toBe('Choose at least one option.')
+    expect(answerErrorText(q('multi_select', { required: false }), [])).toBeNull()
+    expect(answerErrorText(q('checkbox'), false)).toBe('Check this box to continue.')
+    expect(answerErrorText(q('checkbox', { required: false }), false)).toBeNull()
   })
 
   it('sends answers as the API takes them', () => {
@@ -73,9 +88,9 @@ describe('the booking form’s rules mirror the API’s', () => {
   })
 
   it('checks reasons and locales', () => {
-    expect(reasonError('x'.repeat(1000))).toBeNull()
-    expect(reasonError('x'.repeat(1001))).toMatch(/at most 1000/)
-    expect(reasonError('Sorry,\nsomething came up')).toBeNull()
+    expect(reasonErrorText('x'.repeat(1000))).toBeNull()
+    expect(reasonErrorText('x'.repeat(1001))).toMatch(/at most 1000/)
+    expect(reasonErrorText('Sorry,\nsomething came up')).toBeNull()
     expect(bookingLocale('en-US')).toBe('en-US')
     expect(bookingLocale('x-'.repeat(20))).toBeUndefined()
   })
@@ -103,10 +118,18 @@ describe('server errors on the form', () => {
     )
   })
 
-  it('names the question an invalid_responses is about by its label', () => {
+  it('places a localized known response error on the identified question', () => {
     expect(
       bookingErrors(error('invalid_responses', 'Question "topic" is required'), questions),
-    ).toEqual({ fields: { 'q-topic': '“Topic” is required' }, form: null })
+    ).toEqual({ fields: { 'q-topic': 'Check this answer.' }, form: null })
+    expect(
+      translateMessage(
+        'zh-CN',
+        bookingErrors(error('invalid_responses', 'Question "topic" is required'), questions).fields[
+          'q-topic'
+        ],
+      ),
+    ).toBe('请检查此回答。')
     expect(
       bookingErrors(
         error('invalid_responses', 'responses answers a question this event type does not ask'),
@@ -127,7 +150,7 @@ describe('server errors on the form', () => {
       ).fields,
     ).toHaveProperty('name')
     expect(bookingErrors(error('too_many_guests', 'At most 10 guests'), questions).fields).toEqual({
-      guests: 'Add at most 10 guests.',
+      guests: { key: 'Add at most {0} guests.', values: { '0': 10 } },
     })
     expect(bookingErrors(error('invalid_time_zone', 'x'), questions).fields).toHaveProperty(
       'timeZone',

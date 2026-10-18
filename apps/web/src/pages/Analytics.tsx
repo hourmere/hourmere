@@ -6,6 +6,7 @@ import { ErrorSummary, Field, type FieldErrors } from '../components/forms.tsx'
 import { TimeZonePicker } from '../components/TimeZonePicker.tsx'
 import { isKnownTimeZone } from '../format.ts'
 import { useLoad, usePageTitle } from '../hooks.ts'
+import { useI18n } from '../i18n/runtime.tsx'
 
 interface Filters {
   startDate: string
@@ -36,21 +37,26 @@ function validDate(value: string): boolean {
 }
 
 export function AnalyticsPage() {
+  const { t, ui } = useI18n()
+
   usePageTitle('Booking activity')
   const [profile, reload] = useLoad(loadProfile)
   return (
     <>
-      <h1>Booking activity</h1>
+      <h1>{t('Booking activity')}</h1>
       <p>
-        Booking actions by the day they were recorded, rather than the meeting date. These counts
-        describe currently retained bookings; deleting data can change history.
+        {t(
+          'Booking actions by the day they were recorded, rather than the meeting date. These counts describe currently retained bookings; deleting data can change history.',
+        )}
       </p>
-      {profile.status === 'loading' && <p role="status">Loading reporting preferences…</p>}
+      {profile.status === 'loading' && <p role="status">{t('Loading reporting preferences…')}</p>}
       {profile.status === 'error' && (
         <div className="alert alert-error" role="alert">
-          <p>Could not load reporting preferences. {profile.message}</p>
+          <p>
+            {t('Could not load reporting preferences.')} {ui(profile.message)}
+          </p>
           <button type="button" className="button" onClick={reload}>
-            Try again
+            {t('Try again')}
           </button>
         </div>
       )}
@@ -60,6 +66,8 @@ export function AnalyticsPage() {
 }
 
 function ActivityForm({ timeZone }: { timeZone: string }) {
+  const { t } = useI18n()
+
   const [filters, setFilters] = useState(() => initialActivityFilters(timeZone))
   const [draft, setDraft] = useState(filters)
   const [errors, setErrors] = useState<FieldErrors>({})
@@ -91,7 +99,7 @@ function ActivityForm({ timeZone }: { timeZone: string }) {
           attempt={attempt}
           labels={{ startDate: 'Start date', endDate: 'End date', timeZone: 'Reporting time zone' }}
         />
-        <Field id="startDate" label="Start date" error={errors.startDate}>
+        <Field id="startDate" label={t('Start date')} error={errors.startDate}>
           {(control) => (
             <input
               {...control}
@@ -103,8 +111,8 @@ function ActivityForm({ timeZone }: { timeZone: string }) {
         </Field>
         <Field
           id="endDate"
-          label="End date"
-          hint="Both dates are included, up to 90 local days."
+          label={t('End date')}
+          hint={t('Both dates are included, up to 90 local days.')}
           error={errors.endDate}
         >
           {(control) => (
@@ -116,7 +124,7 @@ function ActivityForm({ timeZone }: { timeZone: string }) {
             />
           )}
         </Field>
-        <Field id="timeZone" label="Reporting time zone" error={errors.timeZone}>
+        <Field id="timeZone" label={t('Reporting time zone')} error={errors.timeZone}>
           {(control) => (
             <TimeZonePicker
               control={control}
@@ -126,7 +134,7 @@ function ActivityForm({ timeZone }: { timeZone: string }) {
           )}
         </Field>
         <button type="submit" className="button button-primary">
-          Update report
+          {t('Update report')}
         </button>
       </form>
       <ActivityReport key={JSON.stringify(filters)} filters={filters} />
@@ -135,6 +143,8 @@ function ActivityForm({ timeZone }: { timeZone: string }) {
 }
 
 function ActivityReport({ filters }: { filters: Filters }) {
+  const { t, ui, locale: displayLocale } = useI18n()
+
   const load = useCallback(
     async (signal: AbortSignal): Promise<Schemas['BookingActivity'] | null> => {
       try {
@@ -149,68 +159,78 @@ function ActivityReport({ filters }: { filters: Filters }) {
     [filters],
   )
   const [report, reload] = useLoad(load)
-  if (report.status === 'loading') return <p role="status">Loading booking activity…</p>
+  if (report.status === 'loading') return <p role="status">{t('Loading booking activity…')}</p>
   if (report.status === 'error')
     return (
       <div className="alert alert-error" role="alert">
-        <p>Could not load booking activity. {report.message}</p>
+        <p>
+          {t('Could not load booking activity.')} {ui(report.message)}
+        </p>
         <button type="button" className="button" onClick={reload}>
-          Try again
+          {t('Try again')}
         </button>
       </div>
     )
   if (report.data === null)
     return (
       <p className="alert alert-info">
-        Booking activity is available to personal account owners and team owners or admins. Your
-        current team role does not permit this report.
+        {t(
+          'Booking activity is available to personal account owners and team owners or admins. Your current team role does not permit this report.',
+        )}
       </p>
     )
   const data = report.data
   return (
     <section className="panel" aria-labelledby="activity-summary">
       <h2 id="activity-summary">
-        {data.startDate} to {data.endDate}
+        {data.startDate} {t('to')} {data.endDate}
       </h2>
       <p>
-        Reporting time zone: {data.timeZone}. Days can have 23 or 25 hours when the clocks change.
+        {t('Reporting time zone:')} {data.timeZone}
+        {t('. Days can have 23 or 25 hours when the clocks change.')}
       </p>
       <dl className="details">
-        <dt>Bookings created</dt>
-        <dd>{data.totals.created}</dd>
-        <dt>Reschedules</dt>
-        <dd>{data.totals.rescheduled}</dd>
-        <dt>Cancellations</dt>
-        <dd>{data.totals.cancelled}</dd>
+        <dt>{t('Bookings created')}</dt>
+        <dd>{new Intl.NumberFormat(displayLocale).format(data.totals.created)}</dd>
+        <dt>{t('Reschedules')}</dt>
+        <dd>{new Intl.NumberFormat(displayLocale).format(data.totals.rescheduled)}</dd>
+        <dt>{t('Cancellations')}</dt>
+        <dd>{new Intl.NumberFormat(displayLocale).format(data.totals.cancelled)}</dd>
       </dl>
       <p className="hint">
-        Creations count the initial booking once. Reschedules count each move. Cancellations exclude
-        the old booking withdrawn during a move. These are activity counts, without visitor or
-        conversion tracking.
+        {t(
+          'Creations count the initial booking once. Reschedules count each move. Cancellations exclude the old booking withdrawn during a move. These are activity counts, without visitor or conversion tracking.',
+        )}
       </p>
       {data.totals.created + data.totals.rescheduled + data.totals.cancelled === 0 && (
-        <p>No booking activity was recorded in this range.</p>
+        <p>{t('No booking activity was recorded in this range.')}</p>
       )}
       <div>
         <table className="table">
-          <caption>Daily booking activity</caption>
+          <caption>{t('Daily booking activity')}</caption>
           <thead>
             <tr>
-              <th scope="col">Date</th>
-              <th scope="col">Bookings created</th>
-              <th scope="col">Reschedules</th>
-              <th scope="col">Cancellations</th>
+              <th scope="col">{t('Date')}</th>
+              <th scope="col">{t('Bookings created')}</th>
+              <th scope="col">{t('Reschedules')}</th>
+              <th scope="col">{t('Cancellations')}</th>
             </tr>
           </thead>
           <tbody>
             {data.data.map((day) => (
               <tr key={day.date}>
-                <th scope="row" data-label="Date">
+                <th scope="row" data-label={t('Date')}>
                   {day.date}
                 </th>
-                <td data-label="Bookings created">{day.created}</td>
-                <td data-label="Reschedules">{day.rescheduled}</td>
-                <td data-label="Cancellations">{day.cancelled}</td>
+                <td data-label={t('Bookings created')}>
+                  {new Intl.NumberFormat(displayLocale).format(day.created)}
+                </td>
+                <td data-label={t('Reschedules')}>
+                  {new Intl.NumberFormat(displayLocale).format(day.rescheduled)}
+                </td>
+                <td data-label={t('Cancellations')}>
+                  {new Intl.NumberFormat(displayLocale).format(day.cancelled)}
+                </td>
               </tr>
             ))}
           </tbody>

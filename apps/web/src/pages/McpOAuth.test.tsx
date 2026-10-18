@@ -56,7 +56,7 @@ describe('MCP connection approval', () => {
         })
       renderApp(`/oauth/consent?${query}#intent=00000000-0000-7000-8000-000000000004`)
       await screen.findByText('Team Alpha')
-      expect(screen.queryByRole('combobox')).toBeNull()
+      expect(screen.queryByRole('combobox', { name: 'Organization to connect' })).toBeNull()
       expect(api.to('POST /api/v1/mcp-oauth/request')[0]?.body).toEqual({
         oauthQuery: query,
         intentId: '00000000-0000-7000-8000-000000000004',
@@ -70,6 +70,66 @@ describe('MCP connection approval', () => {
       expect(goTo).toHaveBeenCalledWith('https://connector.test/callback?code=synthetic')
     },
   )
+  it('keeps explicit organization approval and grant wording intact across language changes', async () => {
+    const user = userEvent.setup()
+    const api = fakeApi({
+      ...signedIn,
+      'POST /api/v1/mcp-oauth/request': () => json(200, info),
+      'POST /api/v1/mcp-oauth/select': () =>
+        json(200, { redirectUrl: 'http://localhost/oauth/consent?sig=continued#intent=chosen' }),
+    })
+    renderApp(`/oauth/authorize?${query}`)
+    await screen.findByText('Synthetic AI app')
+    const organization = screen.getByLabelText<HTMLSelectElement>('Organization to connect')
+    await user.selectOptions(organization, info.organizations[1]?.id as string)
+    await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+    expect(screen.getByLabelText('要连接的组织')).toBe(organization)
+    expect(organization.value).toBe(info.organizations[1]?.id)
+    expect(screen.getByText(/包括参会人信息和回答。它无法管理你的账号或 API 密钥/)).toBeDefined()
+    expect(screen.getByText(/持续连接最多 30 天/)).toBeDefined()
+    expect(screen.getByText(/应用名称和返回地址均由该应用提供/)).toBeDefined()
+    expect(screen.getByText(`客户端： ${info.clientId}`)).toBeDefined()
+    expect(screen.getByText(`返回地址： ${info.redirectUri}`)).toBeDefined()
+    expect(api.to('POST /api/v1/mcp-oauth/request')).toHaveLength(1)
+    expect(api.to('POST /api/v1/mcp-oauth/select')).toHaveLength(0)
+    await user.click(screen.getByRole('button', { name: '继续' }))
+    expect(api.to('POST /api/v1/mcp-oauth/select')[0]?.body).toEqual({
+      oauthQuery: query,
+      organizationId: info.organizations[1]?.id,
+    })
+    expect(goTo).toHaveBeenCalledWith('http://localhost/oauth/consent?sig=continued#intent=chosen')
+  })
+
+  it('changes already visible consent errors without dropping its captured intent or approving again', async () => {
+    const user = userEvent.setup()
+    const api = fakeApi({
+      ...signedIn,
+      'POST /api/v1/mcp-oauth/request': () =>
+        json(200, { ...info, selectedOrganization: info.organizations[1] }),
+      'POST /api/v1/mcp-oauth/consent': () =>
+        json(403, { error: 'forbidden', message: 'Untranslated service prose' }),
+    })
+    renderApp(`/oauth/consent?${query}#intent=00000000-0000-7000-8000-000000000004`)
+    await screen.findByText('Team Alpha')
+    await user.click(screen.getByRole('button', { name: 'Allow access' }))
+    expect(await screen.findByRole('alert')).toHaveProperty(
+      'textContent',
+      "You don't have permission to do that.",
+    )
+    await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+    expect(screen.getByRole('alert').textContent).toBe('你没有执行此操作的权限。')
+    expect(screen.getByRole('button', { name: '允许访问' })).toBeDefined()
+    expect(screen.getByRole('button', { name: '拒绝' })).toBeDefined()
+    expect(api.to('POST /api/v1/mcp-oauth/request')).toHaveLength(1)
+    expect(api.to('POST /api/v1/mcp-oauth/consent')).toHaveLength(1)
+    expect(api.to('POST /api/v1/mcp-oauth/consent')[0]?.body).toEqual({
+      oauthQuery: query,
+      intentId: '00000000-0000-7000-8000-000000000004',
+      accept: true,
+    })
+    expect(goTo).not.toHaveBeenCalled()
+  })
+
   it('requires restarting a consent page without its session-bound intent', async () => {
     const api = fakeApi(signedIn)
     renderApp(`/oauth/consent?${query}`)

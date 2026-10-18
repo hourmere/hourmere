@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { useI18n } from '../i18n/runtime.tsx'
 import type { Booking } from './api.ts'
 import { formatDate, formatTimeRange, offsetLabel, zoneName } from './time.ts'
 
@@ -25,13 +26,15 @@ function safeUrl(value: unknown): string | undefined {
 
 /** Where a booked meeting happens, with the details the booking reveals (number, address, link). */
 export function LocationDetails({ location }: { location: Booking['location'] }) {
-  if (!location) return <>To be confirmed by the host</>
+  const { t, ui } = useI18n()
+
+  if (!location) return <>{t('To be confirmed by the host')}</>
   const url = safeUrl(location.url)
   const number = typeof location.number === 'string' ? location.number : undefined
   const address = typeof location.address === 'string' ? location.address : undefined
   return (
     <>
-      {locationLabel(location.kind)}
+      {ui(locationLabel(location.kind))}
       {number && (
         <>
           {': '}
@@ -52,12 +55,17 @@ export function LocationDetails({ location }: { location: Booking['location'] })
 }
 
 /** The plain-text location for a calendar entry. */
-export function locationText(location: Booking['location']): string | undefined {
+export function locationText(
+  location: Booking['location'],
+  labelText: (label: string) => string = (label) => label,
+): string | undefined {
   if (!location) return undefined
   const detail = [location.number, location.address, location.url].find(
     (v): v is string => typeof v === 'string' && v !== '',
   )
-  return detail ? `${locationLabel(location.kind)}: ${detail}` : locationLabel(location.kind)
+  return detail
+    ? `${labelText(locationLabel(location.kind))}: ${detail}`
+    : labelText(locationLabel(location.kind))
 }
 
 /** `Tuesday, November 3, 2026, 9:00 – 9:30 AM (Europe/Berlin, GMT+01:00)` in parts. */
@@ -87,11 +95,13 @@ export function When({
 }
 
 export function DetailList({ items }: { items: [string, ReactNode][] }) {
+  const { ui } = useI18n()
+
   return (
     <dl className="booking-details">
       {items.map(([term, value]) => (
         <div key={term} className="details-row">
-          <dt>{term}</dt>
+          <dt>{ui(term)}</dt>
           <dd>{value}</dd>
         </div>
       ))}
