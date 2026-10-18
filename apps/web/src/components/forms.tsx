@@ -65,7 +65,7 @@ export function Field({
   className?: string
   children: (props: ControlProps) => ReactNode
 }) {
-  const { t, ui } = useI18n()
+  const { t } = useI18n()
 
   return (
     <div className={`field${error ? ' field-invalid' : ''} ${className}`.trim()}>
@@ -78,7 +78,7 @@ export function Field({
           {hint}
         </p>
       )}
-      {error && <FieldError id={`${id}-error`}>{ui(error)}</FieldError>}
+      {error && <FieldError id={`${id}-error`}>{error}</FieldError>}
       {children(controlProps(id, Boolean(hint), error))}
     </div>
   )

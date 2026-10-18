@@ -79,7 +79,7 @@ function BookingList({
   timeZone: string
   fromProfile: boolean
 }) {
-  const { t, ui, locale: displayLocale } = useI18n()
+  const { t, ui, formatLocale: displayLocale } = useI18n()
 
   // Every page of a list uses the same moment, as the API's cursors require the same filters.
   const [now] = useState(() => new Date().toISOString())
@@ -169,7 +169,7 @@ function BookingList({
         {tab === 'past' ? t('Newest first. ') : ''}
         {t('Times are in')} {format.timeZone.replaceAll('_', ' ')}
         {fromProfile ? (
-          ', your time zone.'
+          t(', your time zone.')
         ) : (
           <>
             {t(', this browser’s time zone.')}{' '}

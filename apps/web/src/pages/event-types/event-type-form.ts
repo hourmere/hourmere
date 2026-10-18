@@ -414,6 +414,8 @@ export function serverErrors(
   const field = (id: string, message: UiText) => ({ fields: { [id]: message }, message: null })
   const detail = err.message
   switch (err.code) {
+    case 'invalid_hosts':
+      return field('hosts', 'Check the selected hosts and try again.')
     case 'invalid_slug':
       return field(
         'slug',

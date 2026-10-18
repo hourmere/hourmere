@@ -124,7 +124,7 @@ function OverrideRow({
   override: Override
   onRemoved: () => void
 }) {
-  const { t, ui, locale: displayLocale } = useI18n()
+  const { t, ui, formatLocale: displayLocale } = useI18n()
 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<UiText | null>(null)
@@ -190,7 +190,7 @@ function AddOverride({
   existing: Override[]
   onSaved: (override: Override, created: boolean) => void
 }) {
-  const { t, ui } = useI18n()
+  const { t } = useI18n()
 
   const [date, setDate] = useState('')
   const [mode, setMode] = useState<'unavailable' | 'hours'>('unavailable')
@@ -269,12 +269,12 @@ function AddOverride({
   return (
     <form className="override-form" onSubmit={submit} noValidate aria-labelledby="add-override">
       <h3 id="add-override">{t('Add a date override')}</h3>
-      <ErrorSummary errors={errors} labels={labels} message={ui(formError)} attempt={attempt} />
+      <ErrorSummary errors={errors} labels={labels} message={formError} attempt={attempt} />
       <fieldset className="form-fieldset override-fields" disabled={saving} role="presentation">
         <Field
           id="override-date"
           label={t('Date')}
-          error={ui(errors['override-date'])}
+          error={errors['override-date']}
           hint={replaces ? t('This date has an override already; saving replaces it.') : undefined}
           className="date-field"
         >
@@ -323,7 +323,7 @@ function AddOverride({
           </div>
         )}
         {mode === 'unavailable' && errors[PREFIX] && (
-          <FieldError id={`${PREFIX}-error`}>{ui(errors[PREFIX])}</FieldError>
+          <FieldError id={`${PREFIX}-error`}>{errors[PREFIX]}</FieldError>
         )}
       </fieldset>
       <div className="form-actions">

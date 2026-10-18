@@ -1,5 +1,6 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  'Check the selected hosts and try again.': '请检查所选主持人后重试。',
   ', from': '，从',
   ', so there are times to book.': '，这样才会有可预约时间。',
   ', this browser’s time zone.': '（此浏览器的时区）。',
@@ -341,7 +342,7 @@ export const admin = {
   Profile: '个人资料',
   'Profile created. Your booking links are ready.': '个人资料已创建。你的预约链接已就绪。',
   'Public booking links for this scheduling mode are not available yet.':
-    '此排期模式暂不提供公开预约链接。',
+    '此排期方式暂不支持公开预约链接。',
   'Question {0}': '问题 {0}',
   Questions: '问题',
   'Reason:': '原因：',
@@ -613,4 +614,28 @@ export const admin = {
     '新建预约仅计入首次预约；每次改期均计入改期次数；取消次数不包含改期时撤销的旧预约。这里只统计预约操作，不追踪访客或转化。',
   'No booking activity was recorded in this range.': '此范围内没有预约操作记录。',
   'Daily booking activity': '每日预约统计',
+  Hosts: '主持人',
+  'This legacy scheduling mode can keep its existing configuration while you edit other details.':
+    '编辑其他内容时，此旧版排期方式会保留现有配置。',
+  Scheduling: '排期方式',
+  'Individual: one host': '单人会议：一位主持人',
+  'Collective: every selected host is required': '集体会议：所有选中的主持人都必须参加',
+  'Choose one current verified team member, or two to eight for a collective meeting. Changing hosts affects new bookings; existing meetings retain their original hosts.':
+    '选择一位当前已验证的团队成员；集体会议需选择两至八位。更改主持人会影响新预约；现有会议会保留原主持人。',
+  'Loading team members…': '正在加载团队成员…',
+  'Could not load team members. Only team owners and admins can assign hosts.':
+    '无法加载团队成员。只有团队所有者和管理员可以分配主持人。',
+  'Required hosts': '必选主持人',
+  'Unnamed team member': '未命名的团队成员',
+  'Some selected hosts are not on the loaded member pages. Load the next page to find them; a host who has left the team must be replaced before saving a host change.':
+    '部分选中的主持人不在已加载的成员页面中。请加载下一页查找；保存主持人变更前，必须替换已离开团队的主持人。',
+  'Load more members': '加载更多成员',
+  'Choose exactly one required host.': '请选择一位必选主持人。',
+  'Choose two to eight required hosts.': '请选择两至八位必选主持人。',
+  'Choose each host once.': '每位主持人只能选择一次。',
+  'Each required host uses their current default schedule. Times are offered only when every host offers the same start and end.':
+    '每位必选主持人使用各自当前的默认时间安排。只有所有主持人都可在同一时间开始和结束时，才会提供该时段。',
+  'Choose two to eight required hosts to get a collective booking link.':
+    '选择两至八位必选主持人后即可获取集体会议预约链接。',
+  'every {0} (the duration)': '每 {0}（会议时长）',
 } as const

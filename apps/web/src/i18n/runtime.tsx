@@ -67,14 +67,16 @@ export function useI18n() {
     [scopedSetLanguage],
   )
   const t = useCallback(
-    (key: MessageKey, values?: UiMessage['values']) => translate(locale, key, values),
-    [locale],
+    (key: MessageKey, values?: UiMessage['values']) =>
+      translate(locale, key, values, { dateLocale: selected }),
+    [locale, selected],
   )
   const ui = useCallback(
-    (message: UiText | null | undefined) => translateMessage(locale, message),
-    [locale],
+    (message: UiText | null | undefined) =>
+      translateMessage(locale, message, { dateLocale: selected }),
+    [locale, selected],
   )
-  return { locale, explicit: selected, setLanguage, t, ui }
+  return { locale, explicit: selected, formatLocale: selected, setLanguage, t, ui }
 }
 /** Changing this control updates text in place; router keys and form state do not change. */
 export function LanguageSwitcher() {

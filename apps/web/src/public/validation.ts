@@ -198,7 +198,7 @@ export function bookingErrors(err: RequestError, questions: readonly Question[])
       const id = /^Question "([^"]+)"/.exec(message)?.[1]
       const name = id === undefined ? undefined : label(id)
       if (id !== undefined && name !== undefined) {
-        fields[questionField(id)] = literal(message.replace(/^Question "[^"]+"/, `“${name}”`))
+        fields[questionField(id)] = 'Check this answer.'
         return { fields, form: null }
       }
       return {

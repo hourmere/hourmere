@@ -116,7 +116,7 @@ function DisplayNameForm({ name }: { name: string }) {
       <ErrorSummary
         errors={errors}
         labels={{ displayName: 'Display name' }}
-        message={ui(message)}
+        message={message}
         attempt={attempt}
       />
       <fieldset className="form-fieldset" disabled={saving} role="presentation">
@@ -320,7 +320,7 @@ function ProfileForm({ profile, me }: { profile: Profile | null; me: Me }) {
           {t('Choose a handle to get booking links. Check the suggestions below and save.')}
         </p>
       )}
-      <ErrorSummary errors={errors} labels={LABELS} message={ui(formError)} attempt={attempt} />
+      <ErrorSummary errors={errors} labels={LABELS} message={formError} attempt={attempt} />
       <fieldset className="form-fieldset stack" disabled={saving} role="presentation">
         <Field
           id="handle"

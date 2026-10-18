@@ -13,7 +13,7 @@ changing the interface never saves the profile. A supported profile default is l
 the authenticated account becomes available. Unsupported profile locale values remain
 valid profile settings.
 
-Without an explicit interface choice, public date and time formatting retains the browser's
+Without an explicit interface choice, date and time formatting retains the browser's
 full BCP 47 locale, including locales whose interface text falls back to English. Choosing
 English or Simplified Chinese explicitly also chooses that display format. Dates retain the
 Gregorian calendar and the selected IANA time zone. A booking flow freezes its request

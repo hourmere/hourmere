@@ -103,7 +103,7 @@ function BookingDetail({ id }: { id: string }) {
 }
 
 function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loaded) {
-  const { t, ui, locale: displayLocale } = useI18n()
+  const { t, ui, formatLocale: displayLocale } = useI18n()
 
   const [booking, setBooking] = useState(initial)
   const [status, setStatus] = useState<UiText>('')
@@ -402,7 +402,7 @@ function CancelBooking({
             id="cancel-reason"
             label={t('Reason')}
             optional
-            error={ui(reasonError)}
+            error={reasonError}
             hint={t('The invitee can see it. Up to {0} characters.', {
               '0': BOOKING.cancelReasonMaxLength,
             })}

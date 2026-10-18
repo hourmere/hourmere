@@ -196,7 +196,7 @@ function QuestionCard({
         <Field
           id={questionField(q, 'label')}
           label={t('Question')}
-          error={ui(errors[questionField(q, 'label')])}
+          error={errors[questionField(q, 'label')]}
         >
           {(props) => (
             <input
@@ -210,7 +210,7 @@ function QuestionCard({
         <Field
           id={questionField(q, 'type')}
           label={t('Answer type')}
-          error={ui(errors[questionField(q, 'type')])}
+          error={errors[questionField(q, 'type')]}
         >
           {(props) => (
             <select
@@ -259,7 +259,7 @@ function QuestionCard({
                   <label htmlFor={id} className="visually-hidden">
                     {t('Option')} {optionIndex + 1} {t('of question')} {number}
                   </label>
-                  {error && <FieldError id={`${id}-error`}>{ui(error)}</FieldError>}
+                  {error && <FieldError id={`${id}-error`}>{error}</FieldError>}
                   <div className="option-row">
                     <input
                       id={id}

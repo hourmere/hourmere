@@ -230,7 +230,7 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
         <ErrorSummary
           errors={errors}
           labels={fieldLabels(draft)}
-          message={ui(formError)}
+          message={formError}
           attempt={attempt}
         />
 
@@ -268,7 +268,7 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
                 hint={
                   <>
                     {t('Lowercase letters, digits and hyphens.')}{' '}
-                    <span className="mono preview">{slugPreview}</span>
+                    <span className="mono preview">{ui(slugPreview)}</span>
                   </>
                 }
               >
@@ -446,7 +446,9 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
                   rule={RULES.slotStepMinutes}
                   empty={
                     duration
-                      ? `every ${formatMinutes(duration, displayLocale)} (the duration)`
+                      ? t('every {0} (the duration)', {
+                          '0': formatMinutes(duration, displayLocale),
+                        })
                       : t('the duration')
                   }
                 />
@@ -619,7 +621,7 @@ function MinutesField({
       id={id}
       label={t('{0} (minutes)', { '0': label })}
       optional={optional}
-      error={ui(error)}
+      error={error}
       hint={`${extra ? `${extra} ` : ''}${rule.min}–${rule.max.toLocaleString('en')}. ${ui(amount)}`.trim()}
     >
       {(props) => (
@@ -650,7 +652,7 @@ function LocationFields({
       <Field
         id="location-kind"
         label={t('Where the meeting happens')}
-        error={ui(errors['location-kind'])}
+        error={errors['location-kind']}
       >
         {(props) => (
           <select
@@ -670,7 +672,7 @@ function LocationFields({
         <Field
           id="location-phone"
           label={t('Your phone number')}
-          error={ui(errors['location-phone'])}
+          error={errors['location-phone']}
           hint={t('In international format, e.g. +14155550123. Invitees see it after booking.')}
         >
           {(props) => (
@@ -688,7 +690,7 @@ function LocationFields({
         <Field
           id="location-address"
           label={t('Address')}
-          error={ui(errors['location-address'])}
+          error={errors['location-address']}
           hint={t('Up to {0} characters on one line.', { '0': EVENT_TYPE.addressMaxLength })}
         >
           {(props) => (
@@ -705,7 +707,7 @@ function LocationFields({
         <Field
           id="location-url"
           label={t('Meeting link')}
-          error={ui(errors['location-url'])}
+          error={errors['location-url']}
           hint={t('An https:// or http:// link, e.g. to your video room.')}
         >
           {(props) => (

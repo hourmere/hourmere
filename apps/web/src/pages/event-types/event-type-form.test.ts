@@ -148,6 +148,13 @@ describe('serverErrors', () => {
     },
   )
 
+  it('puts a known host refusal on its field without translating arbitrary server detail', () => {
+    expect(serverErrors(refused('invalid_hosts', 'Server policy detail'), draft)).toEqual({
+      fields: { hosts: 'Check the selected hosts and try again.' },
+      message: null,
+    })
+  })
+
   it('keeps unknown codes for the whole form', () => {
     expect(serverErrors(refused('something_new', 'Something new.'), draft)).toEqual({
       fields: {},

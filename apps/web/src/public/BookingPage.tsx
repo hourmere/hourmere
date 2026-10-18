@@ -241,7 +241,7 @@ function BookingFlow({
           <h1 className="event-title">{event.title}</h1>
           {event.hosts && (
             <p className="event-description">
-              Required hosts:{' '}
+              {t('Required hosts:')}{' '}
               {event.hosts.map((host) => `${host.name} (${host.timeZone})`).join(', ')}
             </p>
           )}
@@ -282,7 +282,7 @@ function BookingFlow({
                   setServerErrors({})
                 }}
                 serverErrors={serverErrors}
-                formError={ui(formError)}
+                formError={formError}
                 submitting={submitting}
                 onSubmit={submit}
               />
@@ -299,7 +299,7 @@ function BookingFlow({
               onSelect={pick}
               version={version}
               focusTitle={backToPicker}
-              notice={ui(notice)}
+              notice={notice}
             />
           )}
         </div>

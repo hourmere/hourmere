@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { errorMessage, RequestError } from '../api/errors.ts'
+import { ErrorSummary, Field } from '../components/forms.tsx'
 import { admin } from './admin.ts'
 import { common } from './common.ts'
 import { AccountLanguage, LanguageSwitcher, useI18n } from './runtime.tsx'
@@ -139,6 +140,70 @@ describe('typed interface messages and language state', () => {
     })
     expect(translateMessage('zh-CN', problem)).toBe('以下时间段重叠：09:00–12:00 与 11:00–14:00。')
   })
+  it('keeps default date formatting independent of the account interface until explicitly chosen', async () => {
+    const user = userEvent.setup()
+    const date = dateMessage('2026-11-02')
+    function DateNotice() {
+      const { ui, formatLocale } = useI18n()
+      return (
+        <>
+          <LanguageSwitcher />
+          <p data-testid="date-format-locale">{formatLocale ?? 'browser-default'}</p>
+          <p data-testid="notice-date">{ui(msg('Removed the override for {0}.', { '0': date }))}</p>
+        </>
+      )
+    }
+    render(
+      <AccountLanguage locale="zh-Hans-CN">
+        <DateNotice />
+      </AccountLanguage>,
+    )
+    const expectedBrowserDate = new Intl.DateTimeFormat(undefined, {
+      calendar: 'gregory',
+      timeZone: 'UTC',
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    }).format(new Date('2026-11-02T00:00:00Z'))
+    expect(screen.getByTestId('date-format-locale').textContent).toBe('browser-default')
+    expect(screen.getByTestId('notice-date').textContent).toContain(expectedBrowserDate)
+    await user.selectOptions(screen.getByLabelText('界面语言'), 'zh-CN')
+    expect(screen.getByTestId('date-format-locale').textContent).toBe('zh-CN')
+    expect(screen.getByTestId('notice-date').textContent).toContain('11月')
+    expect(translateMessage('zh-CN', date, { dateLocale: 'en-GB' })).toContain('Nov')
+  })
+
+  it.each(['Email', 'Settings', 'Unknown service detail', '邮箱'])(
+    'preserves literal %s through field and error summary components after language changes',
+    async (detail) => {
+      const user = userEvent.setup()
+      render(
+        <>
+          <LanguageSwitcher />
+          <Field id="server-field" label="Custom server field" error={literal(detail)}>
+            {(control) => <input {...control} />}
+          </Field>
+          <ErrorSummary
+            errors={{ 'server-field': literal(detail) }}
+            labels={{ 'server-field': literal('Email') }}
+            message={literal(detail)}
+            attempt={1}
+          />
+        </>,
+      )
+      const fieldError = document.getElementById('server-field-error')
+      expect(fieldError?.textContent?.endsWith(detail)).toBe(true)
+      await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+      expect(fieldError?.textContent?.endsWith(detail)).toBe(true)
+      expect(screen.getByRole('alert').querySelector('p')?.textContent).toBe(detail)
+      expect(screen.getByRole('alert').querySelector('a')?.textContent).toBe(`Email: ${detail}`)
+      await user.selectOptions(screen.getByLabelText('界面语言'), 'en')
+      expect(fieldError?.textContent?.endsWith(detail)).toBe(true)
+      expect(screen.getByRole('alert').querySelector('p')?.textContent).toBe(detail)
+    },
+  )
+
   it('rejects inherited keys and malformed or unbounded history records', () => {
     for (const key of ['__proto__', 'constructor', 'toString'])
       expect(translate('zh-CN', key as MessageKey)).toBe(key)

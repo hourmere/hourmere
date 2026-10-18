@@ -261,4 +261,58 @@ describe('changing interface language through booking and account flows', () => 
     expect(email.value).toBe('invalid')
     expect(api.to('POST /api/auth/sign-in/magic-link')).toHaveLength(0)
   })
+  it.each(['Email', 'Settings', 'Unknown service detail', '邮箱'])(
+    'keeps unknown public server prose %s literal through the booking form boundary',
+    async (detail) => {
+      const user = userEvent.setup()
+      const api = fakeApi({
+        ...eventRoutes({ ...EVENT, allowGuests: false, questions: [] }, ['2026-11-02T14:00:00Z']),
+        'POST /api/v1/public/ada/intro/bookings': () =>
+          json(400, { error: 'unknown_future_code', message: detail }),
+      })
+      renderApp('/ada/intro')
+      await pick(user)
+      await user.type(screen.getByLabelText('Your name'), 'Synthetic invitee')
+      await user.type(screen.getByLabelText('Email'), 'invitee@example.invalid')
+      await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+      const problem = await screen.findByRole('alert')
+      expect(problem.textContent).toBe(detail)
+      await setLanguage(user, 'zh-CN')
+      expect(screen.getByRole('alert')).toBe(problem)
+      expect(problem.textContent).toBe(detail)
+      expect(screen.getByLabelText<HTMLInputElement>('你的姓名').value).toBe('Synthetic invitee')
+      await setLanguage(user, 'en')
+      expect(problem.textContent).toBe(detail)
+      expect(api.to('POST /api/v1/public/ada/intro/bookings')).toHaveLength(1)
+    },
+  )
+
+  it('localizes a known server question error while keeping the custom question label and answer', async () => {
+    const user = userEvent.setup()
+    fakeApi({
+      ...eventRoutes(
+        {
+          ...EVENT,
+          allowGuests: false,
+          questions: [{ id: 'question', label: 'Settings', type: 'short_text', required: true }],
+        },
+        ['2026-11-02T14:00:00Z'],
+      ),
+      'POST /api/v1/public/ada/intro/bookings': () =>
+        json(400, { error: 'invalid_responses', message: 'Question "question" is required' }),
+    })
+    renderApp('/ada/intro')
+    await pick(user)
+    await user.type(screen.getByLabelText('Your name'), 'Synthetic invitee')
+    await user.type(screen.getByLabelText('Email'), 'invitee@example.invalid')
+    await user.type(screen.getByLabelText('Settings'), 'Email')
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+    await screen.findByText('Check this answer.')
+    await setLanguage(user, 'zh-CN')
+    expect(screen.getByText('请检查此回答。')).toBeDefined()
+    expect(screen.getByLabelText<HTMLInputElement>('Settings').value).toBe('Email')
+    expect(screen.queryByText(/is required/)).toBeNull()
+    await setLanguage(user, 'en')
+    expect(screen.getByText('Check this answer.')).toBeDefined()
+  })
 })

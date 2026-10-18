@@ -118,10 +118,18 @@ describe('server errors on the form', () => {
     )
   })
 
-  it('names the question an invalid_responses is about by its label', () => {
+  it('places a localized known response error on the identified question', () => {
     expect(
       bookingErrors(error('invalid_responses', 'Question "topic" is required'), questions),
-    ).toEqual({ fields: { 'q-topic': { literal: '“Topic” is required' } }, form: null })
+    ).toEqual({ fields: { 'q-topic': 'Check this answer.' }, form: null })
+    expect(
+      translateMessage(
+        'zh-CN',
+        bookingErrors(error('invalid_responses', 'Question "topic" is required'), questions).fields[
+          'q-topic'
+        ],
+      ),
+    ).toBe('请检查此回答。')
     expect(
       bookingErrors(
         error('invalid_responses', 'responses answers a question this event type does not ask'),

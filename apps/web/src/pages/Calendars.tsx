@@ -31,7 +31,7 @@ const noticeFor = (search: URLSearchParams) =>
     ?.replaceAll('Google', search.get('provider') === 'microsoft' ? 'Microsoft' : 'Google') ?? null
 
 export function CalendarsPage() {
-  const { t, ui, locale: displayLocale } = useI18n()
+  const { t, ui, formatLocale: displayLocale } = useI18n()
 
   usePageTitle('Calendars')
   const [state, reload] = useLoad(load)

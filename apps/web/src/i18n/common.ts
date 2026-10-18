@@ -1,4 +1,4 @@
-// English semantic keys keep local UI messages language-independent in state.
+// Public/shared UI messages. Admin messages live in a lazy catalog.
 export const common = {
   Calendar: '日历',
   'Go to Hourmere': '前往 Hourmere',
@@ -224,4 +224,5 @@ export const common = {
   'Your {event} with {host} is confirmed.': '你与 {host} 的“{event}”预约已确认。',
   'an AI agent (MCP)': 'AI 代理（MCP）',
   '{event} with {host}': '与 {host} 的{event}',
+  'Required hosts:': '必选主持人：',
 } as const

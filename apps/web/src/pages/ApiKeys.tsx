@@ -26,7 +26,7 @@ const EXPIRY_OPTIONS = [
   { value: String(365 * DAY), label: 'In 1 year' },
 ] as const
 
-function formatDate(iso: string, locale: string, withTime = false) {
+function formatDate(iso: string, locale: string | undefined, withTime = false) {
   const date = new Date(iso)
   const full = new Intl.DateTimeFormat(locale, {
     calendar: 'gregory',
@@ -328,7 +328,7 @@ function KeyTable({
   organizations: ReadonlyMap<string, string>
   onRevoked: (key: ApiKey) => void
 }) {
-  const { t, locale: displayLocale } = useI18n()
+  const { t, formatLocale: displayLocale } = useI18n()
 
   const now = Date.now()
   return (

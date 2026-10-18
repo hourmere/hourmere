@@ -225,7 +225,7 @@ function ScheduleForm({ schedule, schedules, defaultTimeZone }: Loaded) {
         <ErrorSummary
           errors={errors}
           labels={scheduleLabels(draft)}
-          message={ui(formError)}
+          message={formError}
           attempt={attempt}
         />
         <fieldset className="form-fieldset" disabled={saving} role="presentation">

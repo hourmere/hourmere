@@ -40,10 +40,15 @@ const catalogs: Catalog[] = [common]
 export function registerCatalog(catalog: Catalog) {
   if (!catalogs.includes(catalog)) catalogs.push(catalog)
 }
+export interface TranslationFormat {
+  /** Undefined deliberately retains the browser’s full default BCP 47 date format. */
+  readonly dateLocale: string | undefined
+}
 export function translate(
   locale: InterfaceLanguage,
   key: MessageKey,
   values: UiMessage['values'] = {},
+  formatting?: TranslationFormat,
 ): string {
   let template: string = key
   if (locale === 'zh-CN')
@@ -56,7 +61,7 @@ export function translate(
     if (!Object.hasOwn(values, name)) return placeholder
     const value = values[name]
     return typeof value === 'object' && value !== null
-      ? translateMessage(locale, value)
+      ? translateMessage(locale, value, formatting)
       : typeof value === 'number'
         ? new Intl.NumberFormat(locale, { useGrouping: false }).format(value)
         : String(value)
@@ -66,14 +71,17 @@ export function translate(
 export function translateMessage(
   locale: InterfaceLanguage,
   message: UiText | null | undefined,
+  formatting?: TranslationFormat,
 ): string {
   if (!message) return ''
   if (typeof message !== 'string') {
     if ('literal' in message) return message.literal
     if ('items' in message)
-      return message.items.map((item) => translateMessage(locale, item)).join(message.separator)
+      return message.items
+        .map((item) => translateMessage(locale, item, formatting))
+        .join(message.separator)
     if ('date' in message)
-      return new Intl.DateTimeFormat(locale, {
+      return new Intl.DateTimeFormat(formatting ? formatting.dateLocale : locale, {
         calendar: 'gregory',
         timeZone: 'UTC',
         weekday: 'short',
@@ -81,7 +89,7 @@ export function translateMessage(
         month: 'short',
         year: 'numeric',
       }).format(new Date(`${message.date}T00:00:00Z`))
-    return translate(locale, message.key, message.values)
+    return translate(locale, message.key, message.values, formatting)
   }
   if (locale === 'en') return message
   for (const catalog of catalogs)
