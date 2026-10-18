@@ -1090,6 +1090,54 @@ describe('collective host assignment', () => {
     })
     expect(calls.to('GET /api/v1/event-type-hosts')).toHaveLength(2)
   })
+  it('requires an explicit organizer from paged selected hosts and keeps it out of metadata-only PATCH', async () => {
+    const user = userEvent.setup()
+    const calls = eventTypeServer(
+      [
+        eventType({
+          ownerUserId: null,
+          schedulingType: 'collective',
+          hosts: [{ userId: ME.user.id }, { userId: secondId }],
+          location: { kind: 'google_meet', autoCreate: true },
+          conferenceOrganizer: { userId: secondId },
+        }),
+      ],
+      {
+        ...signedInAs(me),
+        'GET /api/v1/instance': () =>
+          json(200, { signup: { mode: 'closed' }, automaticGoogleMeet: true }),
+        'GET /api/v1/event-type-hosts': ({ path }) =>
+          path.includes('after=')
+            ? json(200, { data: [{ id: secondId, name: 'Grace' }], nextAfter: null })
+            : json(200, { data: [{ id: ME.user.id, name: 'Ada' }], nextAfter: ME.user.id }),
+      },
+    )
+    renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
+    await screen.findByRole('heading', { name: 'Edit “Intro call”' })
+    expect((screen.getByLabelText('Meeting organizer') as HTMLSelectElement).value).toBe(secondId)
+    await user.clear(field('Title'))
+    await user.type(field('Title'), 'Metadata panel')
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    await screen.findByText('Saved.')
+    expect(calls.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`)[0]?.body).not.toHaveProperty(
+      'conferenceOrganizer',
+    )
+    await user.click(screen.getByRole('button', { name: 'Load more members' }))
+    await screen.findByLabelText('Grace')
+    await user.selectOptions(screen.getByLabelText('Meeting organizer'), '')
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    expect(
+      screen.getAllByText('Choose the meeting organizer from the required hosts.').length,
+    ).toBeGreaterThan(0)
+    expect(calls.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`)).toHaveLength(1)
+    await user.selectOptions(screen.getByLabelText('Meeting organizer'), ME.user.id)
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    await screen.findByText('Saved.')
+    expect(calls.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`)[1]?.body).toHaveProperty(
+      'conferenceOrganizer',
+      { userId: ME.user.id },
+    )
+  })
   it('shows member directory failures and retries without losing existing configuration', async () => {
     const user = userEvent.setup()
     let attempt = 0

@@ -26,6 +26,7 @@ export function eventType(over: Partial<EventType> = {}): EventType {
     maxBookingsPerDay: null,
     schedulingType: 'individual',
     roundRobinActive: false,
+    conferenceOrganizer: null,
     hosts: [{ userId: ME.user.id }],
     location: null,
     questions: [],

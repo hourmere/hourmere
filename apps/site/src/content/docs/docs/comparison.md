@@ -77,7 +77,7 @@ Before evaluating it for real scheduling, account for the unfinished work:
   not establish Safari or Firefox compatibility.
 - Real Gmail, Outlook and Apple calendar invitation lifecycle and inbox-delivery acceptance
   are pending; local mail/ICS tests do not establish deliverability.
-- Automatic conference creation, billing and a managed Hourmere service are not available.
+- Optional automatic Google Meet supports individual, collective and round-robin scheduling with pinned organizer identity and pending/failure states. Automatic Zoom creation, billing and a managed Hourmere service are not available.
 - Team round-robin pools support one to eight hosts with explicit activation. Newly saved
   and legacy pools remain unbookable until activated; ordinary metadata saves never activate
   them. Assignment uses current availability and equal rotation.

@@ -279,6 +279,25 @@ export interface BookingCalendarTargets {
   user_id: string;
 }
 
+export interface BookingConferenceMirrors {
+  applied_revision: number | null;
+  attempts: Generated<number>;
+  calendar_id: string | null;
+  connection_id: string | null;
+  create_started: Generated<boolean>;
+  error_code: string | null;
+  external_event_id: string | null;
+  lease_id: string | null;
+  lease_until: Timestamp | null;
+  next_attempt_at: Generated<Timestamp>;
+  operation_id: Generated<string>;
+  revision: Generated<number>;
+  root_booking_id: string;
+  state: Generated<string>;
+  updated_at: Generated<Timestamp>;
+  user_id: string;
+}
+
 export interface BookingConferenceNotifications {
   booking_id: string;
   delivered: Generated<boolean>;
@@ -295,6 +314,8 @@ export interface BookingConferences {
   create_started: Generated<boolean>;
   error_code: string | null;
   external_event_id: string | null;
+  invitation_organizer_email: string | null;
+  invitation_organizer_name: string | null;
   lease_id: string | null;
   lease_until: Timestamp | null;
   next_attempt_at: Generated<Timestamp>;
@@ -449,6 +470,7 @@ export interface EventTypes {
   booking_window_days: number | null;
   buffer_after_minutes: Generated<number>;
   buffer_before_minutes: Generated<number>;
+  conference_organizer_user_id: string | null;
   created_at: Generated<Timestamp>;
   deleted_at: Timestamp | null;
   description: string | null;
@@ -583,6 +605,7 @@ export interface DB {
   booking_attendees: BookingAttendees;
   booking_calendar_events: BookingCalendarEvents;
   booking_calendar_targets: BookingCalendarTargets;
+  booking_conference_mirrors: BookingConferenceMirrors;
   booking_conference_notifications: BookingConferenceNotifications;
   booking_conferences: BookingConferences;
   booking_hosts: BookingHosts;

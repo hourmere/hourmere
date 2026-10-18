@@ -17,6 +17,7 @@ import {
   calendarSyncJob,
   conferenceBookingNotifier,
   conferenceDispatchJob,
+  conferenceMirrorDispatchJob,
   createGoogleCalendarClient,
   createMicrosoftCalendarClient,
 } from '@hourmere/calendars'
@@ -223,6 +224,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
   const calendarDeps: CalendarDeps = { db, google: googleCalendar, microsoft: microsoftCalendar }
   let enqueueConference: (id: string) => Promise<unknown> = async () => {}
   let enqueueCalendar: (calendarId: string) => Promise<unknown> = async () => {}
+  let enqueueBookingCalendar: (id: string) => Promise<unknown> = async () => {}
   // Background jobs: every role queues them, `all` and `worker` run them.
   const jobs = createJobs({
     connectionString: config.DATABASE_URL,
@@ -239,6 +241,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
       conferenceNotificationDispatchJob({ db, mailer, publicUrl: config.PUBLIC_URL }),
       bookingConferenceJob(calendarDeps),
       conferenceDispatchJob(calendarDeps, (id) => enqueueConference(id)),
+      conferenceMirrorDispatchJob(calendarDeps, (id) => enqueueBookingCalendar(id)),
       webhookDeliveryJob({ db, ...webhookSettings }),
       webhookCleanupJob(db),
       calendarSyncJob(calendarDeps),
@@ -251,6 +254,8 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
     migrate: config.AUTO_MIGRATE,
     instanceName: role,
   })
+  enqueueBookingCalendar = (id) =>
+    jobs.enqueue('booking-calendar', { bookingId: id }, { singletonKey: id })
   enqueueCalendar = (id) => jobs.enqueue('calendar-sync', { calendarId: id }, { singletonKey: id })
   try {
     await jobs.start()

@@ -165,4 +165,4 @@ provider transport are described in [the automatic Zoom checkpoint](docs/automat
 booking lifecycle integration is not yet complete. Zoom is not a sign-in provider. See the repository guide in
 `apps/site/src/content/docs/docs/zoom-connections.md` before configuring a real client.
 
-Optional [automatic Google Meet](docs/automatic-google-meet.md) creates one conference per explicitly opted-in single-host booking, with durable pending/failure state and final invitations held until its link is ready.
+Optional [automatic Google Meet](docs/automatic-google-meet.md) creates one conference per explicitly opted-in individual, collective or round-robin booking, with durable pending/failure state and final invitations held until its link is ready.
