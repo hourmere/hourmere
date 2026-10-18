@@ -54,6 +54,16 @@ const schema = z
         })
         .transform((list) => [...new Set(list.map((v) => embedOrigin(v) as string))]),
     ).transform((v) => v ?? []),
+    WEBHOOKS_ENABLED: optional(z.enum(['true', 'false'])).transform((v) => v === 'true'),
+    WEBHOOK_ENCRYPTION_KEY: optional(
+      z.string().refine(
+        (value) => {
+          const bytes = Buffer.from(value, 'base64')
+          return bytes.length === 32 && bytes.toString('base64') === value
+        },
+        { error: 'WEBHOOK_ENCRYPTION_KEY must be 32 random bytes encoded as base64' },
+      ),
+    ),
     MCP_OAUTH_ENABLED: optional(z.enum(['true', 'false'])).transform((v) => v === 'true'),
     PORT: z.coerce.number().int().positive().default(3000),
     // Where people reach Hourmere: sign-in links, OAuth redirects and cookies are built from it.
@@ -185,6 +195,12 @@ const schema = z
         code: 'custom',
         path: ['PUBLIC_URL'],
         message: 'Embedding requires an HTTPS PUBLIC_URL except on loopback development hosts',
+      })
+    if (c.WEBHOOKS_ENABLED && !c.WEBHOOK_ENCRYPTION_KEY)
+      ctx.addIssue({
+        code: 'custom',
+        path: ['WEBHOOK_ENCRYPTION_KEY'],
+        message: 'Webhooks require WEBHOOK_ENCRYPTION_KEY',
       })
     if (c.MCP_OAUTH_ENABLED && c.PUBLIC_URL) {
       const url = new URL(c.PUBLIC_URL)
