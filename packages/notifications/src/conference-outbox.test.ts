@@ -346,6 +346,65 @@ describe.skipIf(!serverUrl)('bounded conference notification outbox (real Postgr
     expect(logs.filter((line) => line.includes('exhausted'))).toHaveLength(1)
   })
 
+  it('caps expired final-claim cleanup at one hundred rows without sending or faking receipts', async () => {
+    const { host } = await fixture()
+    const f = createFixtures(db)
+    for (let index = 0; index < 100; index++) {
+      const start = Temporal.Instant.from('2030-11-04T09:00Z').add({ hours: index + 1 })
+      const id = await f.booking(
+        host.organizationId,
+        [host.userId],
+        start.toString(),
+        start.add({ minutes: 30 }).toString(),
+      )
+      await db
+        .insertInto('booking_conferences')
+        .values({
+          root_booking_id: id,
+          booking_id: id,
+          organization_id: host.organizationId,
+          organizer_user_id: host.userId,
+          state: 'failed',
+          error_code: 'provider_unavailable',
+        })
+        .execute()
+      await db
+        .insertInto('booking_conference_notifications')
+        .values({
+          booking_id: id,
+          kind: 'conference_failed',
+          due_at: new Date(now.epochMilliseconds),
+        })
+        .execute()
+    }
+    await db
+      .updateTable('booking_conference_notifications')
+      .set({
+        attempts: 13,
+        lease_id: randomUUID(),
+        lease_until: new Date(now.epochMilliseconds - 1),
+      })
+      .execute()
+    let calls = 0
+    const config = deps({
+      send: async () => {
+        calls++
+      },
+    })
+    await dispatchConferenceNotifications(config)
+    const first = await db.selectFrom('booking_conference_notifications').selectAll().execute()
+    expect(first).toHaveLength(101)
+    expect(first.filter((notice) => notice.exhausted_at !== null)).toHaveLength(100)
+    expect(first.every((notice) => !notice.delivered && notice.attempts === 13)).toBe(true)
+    expect(logs.filter((line) => line.includes('exhausted'))).toHaveLength(100)
+    await dispatchConferenceNotifications(config)
+    const second = await db.selectFrom('booking_conference_notifications').selectAll().execute()
+    expect(second.every((notice) => notice.exhausted_at !== null && !notice.delivered)).toBe(true)
+    expect(logs.filter((line) => line.includes('exhausted'))).toHaveLength(101)
+    expect(calls).toBe(0)
+    expect(await db.selectFrom('booking_notifications').selectAll().execute()).toHaveLength(0)
+  })
+
   it('keeps REQUEST pending while its pinned organizer is unverified instead of fabricating delivery', async () => {
     const { id, host } = await fixture()
     await db
