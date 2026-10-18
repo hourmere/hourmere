@@ -150,7 +150,10 @@ describe('serverErrors', () => {
 
   it('puts a known host refusal on its field without translating arbitrary server detail', () => {
     expect(serverErrors(refused('invalid_hosts', 'Server policy detail'), draft)).toEqual({
-      fields: { hosts: 'Check the selected hosts and try again.' },
+      fields: {
+        hosts:
+          'Choose current verified team members: one individual host or two to eight collective hosts.',
+      },
       message: null,
     })
   })

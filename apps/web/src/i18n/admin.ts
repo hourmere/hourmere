@@ -1,6 +1,7 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
-  'Check the selected hosts and try again.': '请检查所选主持人后重试。',
+  'Choose current verified team members: one individual host or two to eight collective hosts.':
+    '请选择当前已验证的团队成员：单人会议选择一位，集体会议选择两至八位。',
   ', from': '，从',
   ', so there are times to book.': '，这样才会有可预约时间。',
   ', this browser’s time zone.': '（此浏览器的时区）。',
