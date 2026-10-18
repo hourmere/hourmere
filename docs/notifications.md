@@ -351,3 +351,48 @@ delivery and management capabilities. Global configuration defaults off; see
 [webhooks.md](webhooks.md) for signatures, retry limits, permissions and network policy.
 
 For explicitly automatic Google Meet bookings, confirmed/rescheduled invitations and reminders wait for current-revision readiness through a durable outbox. Old generic jobs gate again before each send. Terminal failures generate a separately labelled `conference_failed` notice to host/booker without REQUEST ICS; cancellation messages remain independent. Sensitive meeting messages are omitted from the development log mailer. See [automatic-google-meet.md](automatic-google-meet.md).
+
+### Conference outbox delivery budget
+
+Migration0024 gives each conference outbox row one initial attempt and at most twelve
+retries. Its persisted delay starts at one minute, doubles and caps at one hour. A new cron
+job never resets that budget. Temporary recipient refusal, all-recipient permanent refusal,
+transport errors and interrupted attempts consume the same row budget; a broken booking
+does not prevent another booking from being attempted. Already committed recipient receipts
+remain deduplicated. Missing original booker or a temporarily unverified organizer does not
+fabricate a delivered invitation; a restored eligible identity can release the pending
+notice when it is next due. REQUEST/reminder notices still stop when the meeting starts.
+A terminal conference failure may have a finite logistical retry after start.
+
+Each attempt commits a random ten-minute lease and increments its counter before SMTP,
+without holding a booking/outbox row lock during network I/O. Sends receive a four-minute
+attempt deadline and the worker's shutdown signal. Lease ownership is checked again before
+each new recipient, and completion uses the lease ID and attempt number. A stale worker
+cannot consume the replacement worker's claim. A crashed final attempt becomes exhausted
+after its lease expires; no fourteenth attempt is authorized. Each dispatch handles at most
+100 expired final claims and 100 distinct outbox delivery attempts; the same row is not
+immediately retried again within that dispatch. SMTP acceptance followed by a failed
+receipt commit still has the previously documented duplicate window; leases do not make
+external SMTP delivery exactly once.
+
+`exhausted_at` is an inspectable terminal failure, with `delivered=false` and a bounded
+`last_error` classification. Diagnostics contain booking ID/kind, never SMTP response text,
+recipient addresses, answers, meeting URLs or tokens:
+
+```sql
+SELECT booking_id,kind,attempts,due_at,last_error,exhausted_at
+  FROM booking_conference_notifications
+ WHERE NOT delivered
+ ORDER BY due_at;
+```
+
+Repair mail configuration or identity first. An operator may deliberately grant one
+identified exhausted row a new budget during maintenance after workers have stopped and
+the previous lease has ended; do not automatically reset every failed row. Existing
+recipient receipts and current booking/revision/verification guards must remain intact.
+Cancellation, replacement and elapsed meeting time can make a pending row obsolete rather
+than deliverable. This is not a force-send endpoint or a promise of real inbox acceptance.
+
+Old rows retain their exact `due_at` and `delivered` values on upgrade. Because earlier
+attempt history was not recorded, their new counter starts at zero: one finite post-upgrade
+budget, without inventing historical sends or erasing existing recipient receipts.
