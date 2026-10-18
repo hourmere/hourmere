@@ -185,6 +185,8 @@ function EventTypeForm({ eventType, schedules, profile, automaticGoogleMeet }: L
     ) {
       delete body.schedulingType
       delete body.hosts
+      if (draft.conferenceOrganizerUserId === baseline.conferenceOrganizerUserId)
+        delete body.conferenceOrganizer
     }
     // The instance flag gates new opt-ins and configuration changes. Preserve an
     // unchanged automatic location during an ordinary metadata save after it is off.
@@ -432,7 +434,12 @@ function EventTypeForm({ eventType, schedules, profile, automaticGoogleMeet }: L
           </section>
 
           {!me.organization.personal && (
-            <HostAssignment draft={draft} error={errors.hosts} set={set} />
+            <HostAssignment
+              draft={draft}
+              error={errors.hosts}
+              organizerError={errors.conferenceOrganizer}
+              set={set}
+            />
           )}
 
           {!me.organization.personal && draft.schedulingType === 'round_robin' && (
@@ -487,18 +494,15 @@ function EventTypeForm({ eventType, schedules, profile, automaticGoogleMeet }: L
                   <input
                     type="checkbox"
                     checked={draft.autoCreateMeet}
-                    disabled={
-                      (!automaticGoogleMeet || draft.schedulingType !== 'individual') &&
-                      !draft.autoCreateMeet
-                    }
+                    disabled={!automaticGoogleMeet && !draft.autoCreateMeet}
                     onChange={(e) => set('autoCreateMeet', e.target.checked)}
                   />
                   {t('Create a unique Google Meet link for each booking')}
                 </label>
                 <p className="hint">
                   {t(
-                    automaticGoogleMeet && draft.schedulingType === 'individual'
-                      ? 'The assigned individual host must connect an owned, Meet-capable Google calendar. Final invitations wait for the link.'
+                    automaticGoogleMeet
+                      ? 'The organizer needs an owned, Meet-capable Google calendar. Other hosts can receive invitations without connecting a calendar. Configured Google calendars get ordinary copies after the link is ready.'
                       : 'Automatic creation is unavailable on this instance or meeting mode. You can keep the provider label or use your own meeting link.',
                   )}
                 </p>

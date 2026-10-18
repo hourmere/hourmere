@@ -15,6 +15,7 @@ import { isMultiLineText } from '../../text.ts'
 import { useUnsavedChanges } from '../../unsaved-changes.tsx'
 import { MissingRecord } from '../NotFound.tsx'
 import { answerText, describeLocation, hostZone, SOURCE_LABELS } from './booking-format.ts'
+import { CalendarCopyNotice } from './CalendarCopyNotice.tsx'
 
 type Question = Schemas['Question']
 
@@ -139,6 +140,7 @@ function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loa
       </p>
 
       <ConferenceNotice key={booking.id} booking={booking} host onChange={setBooking} />
+      <CalendarCopyNotice key={`copy:${booking.id}`} booking={booking} onChange={setBooking} />
       <section className="panel" aria-labelledby="when-heading">
         <h2 id="when-heading">{t('When')}</h2>
         <p className="when">

@@ -14,12 +14,14 @@ const COMMANDS = {
   list: 'list_bookings',
   reschedule: 'reschedule_booking',
   cancel: 'cancel_booking',
+  'retry-meeting': 'retry_conference',
+  'retry-calendar-copy': 'retry_calendar_copy',
 } as const
 
 export const HELP = `Usage: npm run --silent cli -- COMMAND [--input FILE|-] [--output FILE] [--url ORIGIN]
 
 Commands: whoami, profile, catalog, event, schedules, schedule, slots,
-          book, list, reschedule, cancel
+          book, list, reschedule, cancel, retry-meeting, retry-calendar-copy
 Arguments: JSON object in --input (MCP tool arguments; default {}). Use - for stdin.
 Configuration: HOURMERE_URL (HTTPS origin or loopback HTTP), HOURMERE_API_KEY.
 Secrets are never accepted as command-line flags. No .env or credential store is read.

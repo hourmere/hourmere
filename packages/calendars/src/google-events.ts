@@ -33,6 +33,7 @@ const conferenceData = z.object({
 const event = z.object({
   id: text,
   conferenceData: conferenceData.optional(),
+  location: z.string().max(2000).optional(),
   etag: text.optional(),
   iCalUID: text.optional(),
   status: z.enum(['confirmed', 'tentative', 'cancelled']).optional(),
@@ -61,6 +62,8 @@ export interface GoogleEventWrite {
   sequence: number
   status: 'confirmed' | 'cancelled'
   transparency: 'opaque'
+  location?: string
+  description?: string
   conferenceData?: {
     createRequest: { requestId: string; conferenceSolutionKey: { type: 'hangoutsMeet' } }
   }
@@ -165,7 +168,7 @@ export function googleEventMethods(
       const url = new URL(`${base(calendar)}/${encodeURIComponent(id)}`)
       url.searchParams.set(
         'fields',
-        'id,etag,iCalUID,status,start,end,conferenceData(createRequest/status,conferenceSolution/key,entryPoints(entryPointType,uri))',
+        'id,etag,iCalUID,status,start,end,location,conferenceData(createRequest/status,conferenceSolution/key,entryPoints(entryPointType,uri))',
       )
       return parsed(url.href, { headers: headers(token) }, signal)
     },
@@ -176,7 +179,7 @@ export function googleEventMethods(
         maxResults: '2',
         showDeleted: 'true',
         fields:
-          'items(id,etag,iCalUID,status,start,end,recurringEventId,recurrence,conferenceData(createRequest/status,conferenceSolution/key,entryPoints(entryPointType,uri))),nextPageToken',
+          'items(id,etag,iCalUID,status,start,end,location,recurringEventId,recurrence,conferenceData(createRequest/status,conferenceSolution/key,entryPoints(entryPointType,uri))),nextPageToken',
       }).toString()
       const result = pageSchema.safeParse(await json(url.href, { headers: headers(token) }, signal))
       if (!result.success || result.data.nextPageToken || (result.data.items?.length ?? 0) > 1)

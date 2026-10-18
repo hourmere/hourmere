@@ -1,5 +1,30 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  'Choose the meeting organizer from the required hosts.': '请从必需主持人中选择会议组织者。',
+  'Meeting organizer': '会议组织者',
+  'Choose an organizer': '选择组织者',
+  'Selected organizer: load the member pages to check': '已选组织者：请加载成员页面核对',
+  'Choose one required host to create the Meet link. Existing bookings keep their organizer, invitation identity and original calendars.':
+    '请选择一位必需主持人创建 Meet 链接。已有预约将保留原组织者、邀请身份和原日历。',
+  'The assigned available host creates the Meet link. Only pool members with an eligible Google calendar can receive new bookings.':
+    '实际分配的可用主持人创建 Meet 链接。只有具备符合条件的 Google 日历的池成员才能接收新预约。',
+  'The organizer needs an owned, Meet-capable Google calendar. Other hosts can receive invitations without connecting a calendar. Configured Google calendars get ordinary copies after the link is ready.':
+    '组织者需要拥有支持 Meet 的 Google 日历。其他主持人无需连接日历也可接收邀请；已配置的 Google 日历将在链接就绪后获得普通副本。',
+  'My calendar copy': '我的日历副本',
+  'No calendar copy was configured when this booking was created. Your invitation still arrives by email. Connecting a calendar later does not add a copy to this meeting.':
+    '创建此预约时未配置日历副本。您仍会通过邮件收到邀请。之后连接日历不会为此会议新增副本。',
+  'Your original calendar copy is up to date.': '您的原日历副本已更新。',
+  'Your calendar copy is waiting for the ready meeting link or a calendar update.':
+    '您的日历副本正在等待会议链接就绪或日历更新。',
+  'Your calendar copy needs attention. The shared meeting link is unaffected; this meeting will not switch calendars.':
+    '您的日历副本需要处理。共享会议链接不受影响；此会议不会改用其他日历。',
+  'Google may have accepted this copy. Rechecking only looks for the existing copy and never imports another after an unknown result.':
+    'Google 可能已接受此副本。重新检查只查找已有副本；结果未知时不会再次导入。',
+  'Could not check or retry your calendar copy. Your booking has not been changed.':
+    '无法检查或重试您的日历副本。您的预约未更改。',
+  'Recheck my calendar copy': '重新检查我的日历副本',
+  'Check my calendar copy status': '检查我的日历副本状态',
+
   Retry: '重试',
   'Working…': '正在处理…',
   'Conference accounts': '会议账号',

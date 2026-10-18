@@ -172,6 +172,13 @@ export function ConferenceNotice({
               )}
             </p>
           )}
+          {current.conference.errorCode === 'organizer_unavailable' && (
+            <p>
+              {t(
+                'The original organizer’s verified invitation identity is unavailable. This booking will not switch organizers. Contact the host or cancel the booking.',
+              )}
+            </p>
+          )}
           {current.conference.errorCode === 'calendar_unavailable' && (
             <p>
               {t(
@@ -199,19 +206,22 @@ export function ConferenceNotice({
           {t('Could not request a safe retry. Check the booking status before trying again.')}
         </p>
       )}
-      {host && status === 'failed' && (cancelled || Date.parse(current.start) > Date.now()) && (
-        <button type="button" className="button button-small" onClick={retry} disabled={retrying}>
-          {t(
-            retrying
-              ? 'Requesting…'
-              : cancelled
-                ? 'Retry Google calendar cleanup'
-                : ambiguous
-                  ? 'Recheck existing meeting'
-                  : 'Retry meeting link',
-          )}
-        </button>
-      )}
+      {host &&
+        current.conferenceCanRetry !== false &&
+        status === 'failed' &&
+        (cancelled || Date.parse(current.start) > Date.now()) && (
+          <button type="button" className="button button-small" onClick={retry} disabled={retrying}>
+            {t(
+              retrying
+                ? 'Requesting…'
+                : cancelled
+                  ? 'Retry Google calendar cleanup'
+                  : ambiguous
+                    ? 'Recheck existing meeting'
+                    : 'Retry meeting link',
+            )}
+          </button>
+        )}
       {canRead && (paused || status === 'failed') && (
         <button
           type="button"

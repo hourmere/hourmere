@@ -179,6 +179,7 @@ export const EventType = z
       .boolean()
       .openapi({ description: 'Explicit round-robin activation; metadata saves never enable it' }),
     hosts: z.array(z.object({ userId: z.uuid() })).max(8),
+    conferenceOrganizer: z.object({ userId: z.uuid() }).nullable(),
     questions: z.array(Question),
     createdAt: z.iso.datetime(),
     updatedAt: z.iso.datetime(),
@@ -202,6 +203,7 @@ const EventTypeInput = z
     bookingWindowDays: fields.bookingWindowDays.optional(),
     maxBookingsPerDay: fields.maxBookingsPerDay.optional(),
     location: LocationInput.optional(),
+    conferenceOrganizer: z.strictObject({ userId: z.string() }).nullable().optional(),
     questions: questions.optional(),
     isActive: fields.isActive.optional().openapi({ default: true }),
     isHidden: fields.isHidden.optional().openapi({ default: false }),
@@ -229,6 +231,7 @@ const EventTypeUpdate = z
     bookingWindowDays: fields.bookingWindowDays.optional(),
     maxBookingsPerDay: fields.maxBookingsPerDay.optional(),
     location: LocationInput.optional(),
+    conferenceOrganizer: z.strictObject({ userId: z.string() }).nullable().optional(),
     questions: questions.optional(),
     isActive: fields.isActive.optional(),
     isHidden: fields.isHidden.optional(),
