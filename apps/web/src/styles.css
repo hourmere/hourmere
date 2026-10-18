@@ -1376,3 +1376,8 @@ input[aria-invalid="true"] {
     gap: 0.25rem;
   }
 }
+
+.conference-account {
+  max-width: none;
+  overflow-wrap: anywhere;
+}

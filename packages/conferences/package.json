@@ -1,0 +1,20 @@
+{
+  "name": "@hourmere/conferences",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./zoom": "./src/zoom.ts",
+    "./credentials": "./src/credentials.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@hourmere/auth": "*",
+    "@hourmere/db": "*",
+    "@hourmere/scheduling": "*",
+    "kysely": "0.29.6",
+    "zod": "4.6.7"
+  }
+}

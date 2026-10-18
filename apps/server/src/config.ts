@@ -1,6 +1,8 @@
 import { EMAIL_DOMAIN, SIGNUP_MODES, type SignupPolicy } from '@hourmere/auth'
 import { calendarEncryptionKey } from '@hourmere/calendars'
+import { conferenceEncryptionKey } from '@hourmere/conferences'
 import { embedOrigin } from '@hourmere/core/embed'
+import { isSingleLineText } from '@hourmere/scheduling/text'
 import { z } from 'zod'
 import { isTrustedProxyEntry } from './client-ip.ts'
 import { DEFAULT_HTTP_TIMEOUTS, type HttpTimeouts } from './http-timeouts.ts'
@@ -110,6 +112,34 @@ const schema = z
           }
         },
         { error: 'CALENDAR_ENCRYPTION_KEY must be 32 random bytes encoded as base64' },
+      ),
+    ),
+    ZOOM_CLIENT_ID: optional(
+      z
+        .string()
+        .trim()
+        .regex(/^[A-Za-z0-9_-]{1,256}$/),
+    ),
+    ZOOM_CLIENT_SECRET: optional(
+      z
+        .string()
+        .min(1)
+        .max(1024)
+        .refine((value) => isSingleLineText(value) && !/\s/u.test(value), {
+          error: 'ZOOM_CLIENT_SECRET must be a nonempty single-line value',
+        }),
+    ),
+    CONFERENCE_ENCRYPTION_KEY: optional(
+      z.string().refine(
+        (value) => {
+          try {
+            conferenceEncryptionKey(value)
+            return true
+          } catch {
+            return false
+          }
+        },
+        { error: 'CONFERENCE_ENCRYPTION_KEY must be 32 random bytes encoded as base64' },
       ),
     ),
     MICROSOFT_CLIENT_ID: optional(z.string()),
@@ -262,6 +292,48 @@ const schema = z
             code: 'custom',
             path: ['PUBLIC_URL'],
             message: 'Google Calendar requires HTTPS except on loopback development hosts',
+          })
+      }
+    }
+    if (
+      c.CONFERENCE_ENCRYPTION_KEY &&
+      ([c.CALENDAR_ENCRYPTION_KEY, c.WEBHOOK_ENCRYPTION_KEY, c.BETTER_AUTH_SECRET].includes(
+        c.CONFERENCE_ENCRYPTION_KEY,
+      ) ||
+        Buffer.from(c.CONFERENCE_ENCRYPTION_KEY, 'base64').equals(
+          Buffer.from(c.BETTER_AUTH_SECRET),
+        ))
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['CONFERENCE_ENCRYPTION_KEY'],
+        message:
+          'Use an independent CONFERENCE_ENCRYPTION_KEY, separate from authentication, calendar and webhook keys',
+      })
+    if (c.ZOOM_CLIENT_ID || c.ZOOM_CLIENT_SECRET) {
+      for (const key of [
+        'ZOOM_CLIENT_ID',
+        'ZOOM_CLIENT_SECRET',
+        'CONFERENCE_ENCRYPTION_KEY',
+      ] as const)
+        if (!c[key])
+          ctx.addIssue({
+            code: 'custom',
+            path: [key],
+            message:
+              'Zoom connections require ZOOM_CLIENT_ID, ZOOM_CLIENT_SECRET and CONFERENCE_ENCRYPTION_KEY together',
+          })
+      if (c.PUBLIC_URL) {
+        const url = new URL(c.PUBLIC_URL)
+        if (
+          url.protocol !== 'https:' &&
+          !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)
+        )
+          ctx.addIssue({
+            code: 'custom',
+            path: ['PUBLIC_URL'],
+            message:
+              'Zoom connections require HTTPS except on loopback development hosts; actual client redirect acceptance must be verified separately',
           })
       }
     }

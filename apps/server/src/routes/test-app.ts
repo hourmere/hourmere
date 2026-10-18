@@ -8,6 +8,7 @@ import { createApp } from '../app.ts'
 import { analyticsRoutes } from './analytics.ts'
 import { bookingRoutes } from './bookings.ts'
 import { calendarRoutes } from './calendars.ts'
+import { conferenceRoutes } from './conferences.ts'
 import { eventTypeRoutes } from './event-types.ts'
 import { profileRoutes } from './profile.ts'
 import { publicRoutes } from './public.ts'
@@ -52,6 +53,7 @@ export function escapedJson(value: unknown): string {
 /** The product route modules, in server.ts's order. */
 export const productRoutes = (db: Db) => [
   calendarRoutes({ db }),
+  conferenceRoutes({ db }),
   profileRoutes({ db }),
   scheduleRoutes({ db }),
   webhookRoutes({ db, enabled: false }),

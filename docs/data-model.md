@@ -260,3 +260,23 @@ endpoints and queues only delivery IDs. Composite foreign keys keep deliveries i
 endpoint organization; endpoint/booking/organization deletion cascades snapshots. Runtime
 locks use endpoint then delivery so deletion, pause and rotation cannot deadlock delivery
 through inverse lock order. Details and retention are in [webhooks.md](webhooks.md).
+
+### Independent conference identities
+
+`conference_connections` stores Zoom identities separately from `auth.account` and
+`calendar_connections`. It has a stable UUID, owner FK, provider/external-identity uniqueness,
+optional bounded display metadata, minimal scopes, a safe status/error and purpose-bound
+AES-256-GCM ciphertext. A durable `refreshing` operation holds no reusable credentials.
+All operations lock the owner, then the live session, then the connection/state. Provider
+I/O stays bounded under that owner lock; state claims and token retirement commit first.
+
+`conference_oauth_states` stores only a state digest plus owner/session, optional expected
+connection, encrypted PKCE verifier, single-use claim and ten-minute expiry. A durable claim
+clears the verifier. Disconnect invalidates all pending owner attempts and clears credentials;
+it retains identity metadata and the stable connection ID. At most five identities can be connected at once (including reauthorization and incomplete
+refresh states). Disconnected tombstones release capacity and are excluded from the default
+metadata list; reauthorizing the same identity reuses its stable ID. A BEFORE DELETE owner trigger clears credentials,
+OAuth attempts, scopes, operation, external ID, email and display name before retaining an
+unowned secret-free tombstone. Equal email addresses never establish ownership. No meeting
+intent or calendar rows are created by this foundation. See the Zoom setup guide for the
+explicit local-disconnect versus provider-wide revocation distinction.
