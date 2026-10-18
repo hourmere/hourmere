@@ -146,4 +146,4 @@ returned-scope policy, actual-client prerequisites and local-disconnect semantic
 
 ## Automatic Google Meet
 
-`GOOGLE_MEET_ENABLED` defaults to `false`. With Google Calendar write configuration it allows explicit single-host automatic Meet event types. Existing committed intents continue reconciling after disabling the flag; no old provider labels are activated. See the repository automatic Google Meet guide for pending/failure and notification semantics.
+`GOOGLE_MEET_ENABLED` defaults to `false`. With Google Calendar write configuration it allows explicit individual, collective and round-robin automatic Meet event types. Collective meetings require an explicitly selected eligible organizer; round robin uses its assigned eligible host. Other collective hosts do not need a Google account. Existing committed intents continue reconciling after disabling the flag; no old provider labels are activated. See the repository automatic Google Meet guide for pending/failure and notification semantics.

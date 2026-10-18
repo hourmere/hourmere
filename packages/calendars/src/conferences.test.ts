@@ -237,7 +237,7 @@ describe.skipIf(!serverUrl)('automatic Meet durable flow (real PostgreSQL)', () 
           location: { kind: 'google_meet', autoCreate: true },
         },
       ),
-    ).rejects.toMatchObject({ code: 'automatic_meet_mode_unsupported' })
+    ).rejects.toMatchObject({ code: 'invalid_hosts' })
     await db
       .updateTable('event_types')
       .set({ location: JSON.stringify({ kind: 'google_meet' }) })
@@ -256,7 +256,7 @@ describe.skipIf(!serverUrl)('automatic Meet durable flow (real PostgreSQL)', () 
       await calendarBookingNotifier({ enqueue: async () => null })(trx, { bookingId: b.booking.id })
     })
     expect(await db.selectFrom('booking_calendar_targets').select('calendar_id').execute()).toEqual(
-      [{ calendar_id: calendarId }],
+      [],
     )
     await writeBookingCalendar(deps, b.booking.id)
     expect(imports()).toHaveLength(0)
@@ -489,7 +489,7 @@ describe.skipIf(!serverUrl)('automatic Meet durable flow (real PostgreSQL)', () 
     expect(sent[1]?.attachments?.length ?? 0).toBe(0)
     expect(sent[1]?.subject).toContain('Cancelled')
   })
-  it('a locally cancelled pending booking still notifies its invitee without an unverified organizer or forged ICS', async () => {
+  it('a cancelled new root uses pinned logical ICS without mailing its unverified organizer', async () => {
     const b = await book()
     await db
       .updateTable('auth.user')
@@ -500,7 +500,9 @@ describe.skipIf(!serverUrl)('automatic Meet durable flow (real PostgreSQL)', () 
     await sendBookingNotification(mail(), b.booking.id, 'cancelled')
     await sendBookingNotification(mail(), b.booking.id, 'cancelled')
     expect(sent.map((message) => message.to)).toEqual(['synthetic@example.com'])
-    expect(sent[0]?.attachments?.length ?? 0).toBe(0)
+    expect(sent[0]?.attachments?.length ?? 0).toBe(1)
+    expect(String(sent[0]?.attachments?.[0]?.content)).toContain('METHOD:CANCEL')
+    expect(String(sent[0]?.attachments?.[0]?.content)).toContain(owner.user.email)
     expect(sent[0]?.subject).toContain('Cancelled')
     expect((await getManagedBooking(ctx, b.manageToken as string)).status).toBe('cancelled')
   })

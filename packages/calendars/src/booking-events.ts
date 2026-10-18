@@ -1,6 +1,7 @@
 import type { Db } from '@hourmere/db'
 import type { EnqueueOptions } from '@hourmere/jobs'
 import { sql } from 'kysely'
+import { writeConferenceMirrors } from './conference-mirrors.ts'
 import { GOOGLE_CALENDAR_SYNC_SCOPES, GoogleCalendarError } from './google.ts'
 import type { GoogleEventWrite } from './google-events.ts'
 import type { CalendarDeps } from './index.ts'
@@ -33,8 +34,13 @@ export function calendarBookingNotifier(queue: CalendarBookingQueue) {
     if (!trx.isTransaction) throw new Error('Calendar jobs require the booking transaction')
     const root = await rootOf(trx, event.bookingId)
     if (root) {
+      const automatic = await trx
+        .selectFrom('booking_conferences')
+        .select('root_booking_id')
+        .where('root_booking_id', '=', root)
+        .executeTakeFirst()
       const destinations =
-        event.type === 'cancelled'
+        automatic || event.type === 'cancelled'
           ? []
           : await trx
               .selectFrom('booking_hosts as bh')
@@ -87,19 +93,21 @@ export async function writeBookingCalendar(
   bookingId: string,
   signal = AbortSignal.timeout(60_000),
 ) {
-  if (!deps.google) return
-  const client = deps.google.client
   const root = await rootOf(deps.db, bookingId)
   if (!root) return
   // Automatic roots have exactly one provider-create authority, including unknown imports.
-  if (
-    await deps.db
-      .selectFrom('booking_conferences')
-      .select('root_booking_id')
-      .where('root_booking_id', '=', root)
-      .executeTakeFirst()
-  )
+  const automatic = await deps.db
+    .selectFrom('booking_conferences')
+    .select(['root_booking_id', 'invitation_organizer_email'])
+    .where('root_booking_id', '=', root)
+    .executeTakeFirst()
+  if (automatic) {
+    if (automatic.invitation_organizer_email !== null)
+      await writeConferenceMirrors(deps, root, signal)
     return
+  }
+  if (!deps.google) return
+  const client = deps.google.client
   const chain = await sql<{ id: string; depth: number }>`WITH RECURSIVE chain(id,depth) AS (
     SELECT id,0 FROM bookings WHERE id=${root}::uuid
     UNION ALL SELECT b.id,c.depth+1 FROM bookings b JOIN chain c ON b.rescheduled_from_id=c.id

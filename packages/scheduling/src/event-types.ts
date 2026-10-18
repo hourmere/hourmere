@@ -13,7 +13,12 @@ import {
   catalogPage,
   checkedCatalogPage,
 } from './catalog-page.ts'
-import { automaticMeet, requireMeetDestination, requireSingleMeetHost } from './conferences.ts'
+import {
+  automaticMeet,
+  eligibleMeetHosts,
+  meetOrganizer,
+  requireMeetDestination,
+} from './conferences.ts'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { assertHosts, lockOrganization } from './hosts.ts'
@@ -66,6 +71,7 @@ export interface EventType {
   roundRobinActive: boolean
   /** Current configured hosts; at most eight. */
   hosts: { userId: string }[]
+  conferenceOrganizer: { userId: string } | null
   location: EventTypeLocation | null
   questions: Question[]
   isActive: boolean
@@ -83,6 +89,7 @@ export interface EventType {
 export interface EventTypeInput {
   schedulingType?: SchedulingType | undefined
   hosts?: { userId: string }[] | undefined
+  conferenceOrganizer?: { userId: string } | null | undefined
   slug: string
   title: string
   description?: string | null | undefined
@@ -294,8 +301,6 @@ export async function createEventType(
         throw insufficientRole()
       }
       const schedulingType = input.schedulingType ?? 'individual'
-      if (automaticMeet(fields.location) && schedulingType !== 'individual')
-        requireSingleMeetHost(schedulingType, [])
       const hostIds = validHosts(
         input.hosts ?? [{ userId: ctx.principal.user.id }],
         schedulingType,
@@ -304,10 +309,9 @@ export async function createEventType(
       const scheduleId = validScheduleId(input.scheduleId) ?? null
       if (schedulingType !== 'individual' && scheduleId !== null) throw invalidScheduleId()
       await assertHosts(trx, ctx.principal.organization.id, hostIds, true)
-      if (automaticMeet(fields.location)) {
-        requireSingleMeetHost(schedulingType, hostIds)
-        await requireMeetDestination(trx, hostIds[0] as string, undefined, ctx.automaticMeet)
-      }
+      const organizer = validOrganizer(input.conferenceOrganizer) ?? null
+      await validateConference(trx, ctx, fields.location, schedulingType, hostIds, organizer)
+
       const { id } = await trx
         .insertInto('event_types')
         .values({
@@ -315,6 +319,7 @@ export async function createEventType(
           organization_id: ctx.principal.organization.id,
           owner_user_id: personalOwnerId,
           scheduling_type: schedulingType,
+          conference_organizer_user_id: organizer,
         })
         .returning('id')
         .executeTakeFirstOrThrow()
@@ -372,19 +377,39 @@ export async function updateEventType(
         await assertHosts(trx, row.organization_id, hostIds, true)
       }
       if (schedulingType !== 'individual' && scheduleId != null) throw invalidScheduleId()
-      if (Object.keys(changes).length > 0 || scheduleId !== undefined || changingHosts) {
+      const organizer = validOrganizer(input.conferenceOrganizer)
+      if (
+        Object.keys(changes).length > 0 ||
+        scheduleId !== undefined ||
+        changingHosts ||
+        organizer !== undefined
+      ) {
         const fields = validFields({ ...fieldsOf(row), ...changes })
         if (
-          automaticMeet(fields.location) &&
-          (input.location !== undefined || changingHosts || scheduleId !== undefined)
+          input.location !== undefined ||
+          changingHosts ||
+          scheduleId !== undefined ||
+          organizer !== undefined
         ) {
           const configuredHosts = hostIds ?? existing.map((h) => h.user_id)
-          requireSingleMeetHost(schedulingType, configuredHosts)
-          await requireMeetDestination(trx, configuredHosts[0] as string, row.id, ctx.automaticMeet)
+          await assertHosts(trx, row.organization_id, configuredHosts, true)
+          await validateConference(
+            trx,
+            ctx,
+            fields.location,
+            schedulingType,
+            configuredHosts,
+            organizer === undefined ? row.conference_organizer_user_id : organizer,
+            row.id,
+          )
         }
         await trx
           .updateTable('event_types')
-          .set({ ...columns(fields), scheduling_type: schedulingType })
+          .set({
+            ...columns(fields),
+            scheduling_type: schedulingType,
+            ...(organizer !== undefined ? { conference_organizer_user_id: organizer } : {}),
+          })
           .where('id', '=', row.id)
           .execute()
       }
@@ -822,6 +847,9 @@ function toEventType(row: EventTypeRow): EventType {
     schedulingType: row.scheduling_type as SchedulingType,
     roundRobinActive: row.scheduling_type === 'round_robin' && row.round_robin_active,
     hosts: row.hosts,
+    conferenceOrganizer: row.conference_organizer_user_id
+      ? { userId: row.conference_organizer_user_id }
+      : null,
     scheduleId: row.schedule_id,
     createdAt: timestamp(row.created_at),
     updatedAt: timestamp(row.updated_at),
@@ -905,4 +933,36 @@ export async function activateRoundRobin(ctx: ServiceContext, id: string): Promi
       .execute()
     return toEventType(await loadEventType(trx, row.id))
   })
+}
+
+function validOrganizer(value: unknown): string | null | undefined {
+  if (value === null || value === undefined) return value
+  if (!isPlainObject(value) || !onlyKeys(value, ['userId']) || !isUuid(value.userId))
+    throw new DomainError('invalid', 'invalid_conference_organizer')
+  return (value.userId as string).toLowerCase()
+}
+async function validateConference(
+  db: Db,
+  ctx: ServiceContext,
+  location: unknown,
+  mode: string,
+  hosts: string[],
+  selected: string | null,
+  eventTypeId?: string,
+) {
+  if (selected !== null && (mode !== 'collective' || !hosts.includes(selected)))
+    throw new DomainError(
+      'invalid',
+      'invalid_conference_organizer',
+      'Choose an organizer from the required hosts.',
+    )
+  if (!automaticMeet(location)) return
+  if (mode === 'round_robin') await eligibleMeetHosts(db, hosts, eventTypeId, ctx.automaticMeet)
+  else
+    await requireMeetDestination(
+      db,
+      meetOrganizer(mode, hosts, selected) as string,
+      eventTypeId,
+      ctx.automaticMeet,
+    )
 }
