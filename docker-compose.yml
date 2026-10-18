@@ -51,6 +51,7 @@ services:
       HTTP_REQUEST_TIMEOUT: ${HTTP_REQUEST_TIMEOUT:-}
       HTTP_KEEP_ALIVE_TIMEOUT: ${HTTP_KEEP_ALIVE_TIMEOUT:-}
       HOURMERE_ROLE: ${HOURMERE_ROLE:-}
+      AUTO_MIGRATE: ${AUTO_MIGRATE:-true}
     ports:
       - "127.0.0.1:${PORT:-3000}:3000"
     depends_on:

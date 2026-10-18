@@ -260,7 +260,32 @@ describe.skipIf(!bootstrap)('automatic Zoom real TCP/session/API-key boundaries'
       { ...input, slug: 'key-call' },
       { authorization: `Bearer ${key}` },
     )
-    expect(api.status).toBe(403)
+    expect(api.status).toBe(201)
+    const keyEvent = (await api.json()) as { id: string; zoomConnectionId: string }
+    expect(keyEvent.zoomConnectionId).toBe(connection)
+    expect(
+      (
+        await request(
+          `/api/v1/event-types/${keyEvent.id}`,
+          'PATCH',
+          '',
+          { location: { kind: 'zoom' }, zoomConnectionId: null },
+          { authorization: `Bearer ${key}` },
+        )
+      ).status,
+    ).toBe(200)
+    const keySelected = await request(
+      `/api/v1/event-types/${keyEvent.id}`,
+      'PATCH',
+      '',
+      { location: input.location, zoomConnectionId: connection },
+      { authorization: `Bearer ${key}` },
+    )
+    expect(keySelected.status).toBe(200)
+    expect(await keySelected.json()).toMatchObject({
+      location: input.location,
+      zoomConnectionId: connection,
+    })
     const created = await request('/api/v1/event-types', 'POST', hostCookie, input)
     expect(created.status).toBe(201)
     const event = (await created.json()) as { id: string; zoomConnectionId: string }

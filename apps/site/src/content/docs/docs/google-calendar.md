@@ -40,6 +40,12 @@ Changing the destination does not move existing projected meetings. Use **Sync n
 immediate read; workers poll selected active calendars every minute. A web-only process
 without a worker does not perform scheduled synchronization.
 
+The user's own API keys can list calendar connections/status, refresh the calendar list,
+choose conflict calendars and the writeback destination, and sync now through the public
+REST API with the same ownership checks. Read-only MCP `list_calendar_connections` also
+accepts enabled MCP OAuth grants. OAuth authorization, code exchange and disconnect require
+a live browser session. Cookie-authenticated writes require the app's own origin.
+
 External event titles/descriptions are not fetched or stored; synchronization retains IDs
 and busy intervals. Cancelled, transparent and self-declined events do not block time.
 Google expands recurring instances and exceptions; all-day events use exclusive local
