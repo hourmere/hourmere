@@ -419,7 +419,7 @@ export function bookingTools({
     name: 'retry_conference',
     title: 'Reconcile the original meeting',
     description:
-      'For the current verified pinned organizer only. Safely reconciles a failed original Meet or its cancellation; never changes organizer/calendar or blindly imports after an unknown outcome. Give the current booking ID, not a management token.',
+      'For the current verified pinned organizer only. Safely reconciles a failed original Google Meet or Zoom meeting, or its cancellation. Never changes the pinned account/organizer/calendar or creates a replacement after an unknown outcome; a Zoom create with no validated ID remains ambiguous. Give the current booking ID, not a management token.',
     input: retryInput,
     output: retryOutput,
     annotations: retryAnnotations,

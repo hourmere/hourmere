@@ -11,7 +11,11 @@ import { writeBookingConference } from '../../../packages/calendars/src/conferen
 import { fakeZoom, TEST_CONFERENCE_KEY } from '../../../packages/conferences/src/testing.ts'
 import { createZoomConferenceWork } from '../../../packages/conferences/src/worker.ts'
 import { zoomScopes } from '../../../packages/conferences/src/zoom.ts'
+import { runCli } from '../../../tools/cli/src/cli.ts'
+import { callTool } from '../../../tools/cli/src/client.ts'
 import { createApp } from './app.ts'
+import { bookingTools } from './mcp/bookings.ts'
+import { mcpEndpoint } from './mcp/endpoint.ts'
 import { closeServer } from './shutdown.ts'
 
 const bootstrap = process.env.DATABASE_URL,
@@ -99,6 +103,7 @@ describe.skipIf(!bootstrap)('automatic Zoom real TCP/session/API-key boundaries'
       checkDb: async () => {},
       authHandler: auth.handler,
       resolveCaller: createCallerResolver({ auth, db }),
+      mcp: mcpEndpoint({ tools: bookingTools({ db, automaticZoom: true, now: () => NOW }) }),
       routes: [
         eventTypeRoutes({ db, automaticZoom: true, now: () => NOW }),
         publicRoutes({ db, automaticZoom: true, now: () => NOW }),
@@ -405,5 +410,171 @@ describe.skipIf(!bootstrap)('automatic Zoom real TCP/session/API-key boundaries'
         await managed.text(),
       ),
     ).toBe(false)
+  })
+  it('runs Zoom booking, same-key recovery, same-ID reschedule/cancellation and conservative retry through real MCP and CLI HTTP', async () => {
+    const authorization = await request(
+      '/api/v1/conference-connections/zoom/authorize-meetings',
+      'POST',
+      hostCookie,
+      {},
+    )
+    expect(authorization.status).toBe(200)
+    const endpoint = new URL(
+      ((await authorization.json()) as { authorizationUrl: string }).authorizationUrl,
+    )
+    expect(
+      (
+        await request(
+          `/api/conference/zoom/callback?state=${endpoint.searchParams.get('state')}&code=synthetic-code`,
+        )
+      ).status,
+    ).toBe(303)
+    const connection = (
+      await db
+        .selectFrom('conference_connections')
+        .select('id')
+        .where('user_id', '=', host.userId)
+        .executeTakeFirstOrThrow()
+    ).id
+    expect(
+      (
+        await request('/api/v1/event-types', 'POST', hostCookie, {
+          slug: 'mcp-zoom',
+          title: 'MCP Zoom',
+          durationMinutes: 30,
+          hosts: [{ userId: host.userId }],
+          location: { kind: 'zoom', autoCreate: true },
+          zoomConnectionId: connection,
+        })
+      ).status,
+    ).toBe(201)
+    const mcp = (tool: string, input: Record<string, unknown>) =>
+      callTool({ url: new URL('/mcp', url), key, tool, input })
+    const cli = async (command: string, input: Record<string, unknown>) => {
+      let stdout = '',
+        stderr = ''
+      const code = await runCli({
+        argv: [command, '--input', '-'],
+        env: { HOURMERE_URL: url, HOURMERE_API_KEY: key },
+        stdin: (async function* () {
+          yield JSON.stringify(input)
+        })(),
+        stdout: (value) => {
+          stdout += value
+        },
+        stderr: (value) => {
+          stderr += value
+        },
+      })
+      expect((stdout + stderr).includes(key)).toBe(false)
+      expect(stderr).toBe('')
+      expect(code).toBe(0)
+      return JSON.parse(stdout) as Record<string, unknown>
+    }
+    const requestBody = {
+      teamSlug: 'http-zoom-team',
+      slug: 'mcp-zoom',
+      start: '2030-11-04T15:00:00Z',
+      invitee: { name: 'MCP Synthetic', email: 'mcp-zoom@hourmere.invalid', timeZone: 'UTC' },
+      idempotencyKey: 'mcp-zoom-key',
+    }
+    const booking = (await mcp('create_booking', requestBody)) as {
+      booking: { id: string; conference: unknown }
+      manageToken: string
+      replayed: boolean
+    }
+    expect(booking.booking.conference).toEqual({
+      provider: 'zoom',
+      status: 'pending',
+      errorCode: null,
+    })
+    const worker = {
+      db,
+      now: () => NOW.epochMilliseconds,
+      zoomConferenceWork: createZoomConferenceWork(
+        {
+          db,
+          now: () => NOW.epochMilliseconds,
+          zoom: { client: provider.client, encryptionKey: TEST_CONFERENCE_KEY },
+        },
+        provider.meetings,
+      ),
+    }
+    const postsBefore = provider.calls.filter(
+      (c) => c.init.method === 'POST' && c.url.endsWith('/users/me/meetings'),
+    ).length
+    await writeBookingConference(worker, booking.booking.id)
+    const replay = (await mcp('create_booking', requestBody)) as typeof booking
+    expect(replay.booking.id).toBe(booking.booking.id)
+    expect(replay.replayed).toBe(true)
+    const own = (await mcp('list_bookings', {})) as {
+      data: {
+        id: string
+        location?: { url?: string }
+        conference?: { status: string }
+        calendarCopy?: { status: string }
+      }[]
+    }
+    const listed = own.data.find((b) => b.id === booking.booking.id)
+    expect(listed?.conference?.status).toBe('ready')
+    expect(listed?.calendarCopy?.status).toBe('not_configured')
+    expect(listed?.location?.url?.includes('/j/81234567890')).toBe(true)
+    expect(
+      /zoomConnectionId|zoom_connection_id|zoom_user_id|zoom_meeting_id|synthetic-private-start|synthetic-raw-passcode/.test(
+        JSON.stringify(own),
+      ),
+    ).toBe(false)
+    const moved = (await mcp('reschedule_booking', {
+      bookingId: booking.booking.id,
+      start: '2030-11-04T16:00:00Z',
+    })) as typeof booking
+    await writeBookingConference(worker, booking.booking.id)
+    await cli('cancel', { bookingId: moved.booking.id })
+    await writeBookingConference(worker, booking.booking.id)
+    expect(
+      provider.calls.filter(
+        (c) => c.init.method === 'POST' && c.url.endsWith('/users/me/meetings'),
+      ),
+    ).toHaveLength(postsBefore + 1)
+    expect(
+      provider.calls
+        .filter(
+          (c) =>
+            ['PATCH', 'DELETE'].includes(c.init.method ?? '') &&
+            c.url.endsWith('/meetings/81234567890'),
+        )
+        .map((c) => c.init.method),
+    ).toEqual(['PATCH', 'DELETE'])
+    expect(provider.controls.storedMeetings.size).toBe(0)
+    const unknown = (await mcp('create_booking', {
+      ...requestBody,
+      idempotencyKey: 'mcp-unknown-key',
+    })) as typeof booking
+    provider.controls.meetingHook = async () => {
+      throw new Error('synthetic unknown create')
+    }
+    await writeBookingConference(worker, unknown.booking.id)
+    expect(await cli('retry-meeting', { bookingId: unknown.booking.id })).toEqual({
+      accepted: true,
+    })
+    provider.controls.meetingHook = undefined
+    await writeBookingConference(worker, unknown.booking.id)
+    expect(
+      (
+        await db
+          .selectFrom('booking_conferences')
+          .select('error_code')
+          .where('root_booking_id', '=', unknown.booking.id)
+          .executeTakeFirstOrThrow()
+      ).error_code,
+    ).toBe('ambiguous_create')
+    expect(
+      provider.calls.filter(
+        (c) => c.init.method === 'POST' && c.url.endsWith('/users/me/meetings'),
+      ),
+    ).toHaveLength(postsBefore + 2)
+    await expect(
+      mcp('retry_conference', { bookingId: unknown.booking.id, forceCreate: true }),
+    ).rejects.toMatchObject({ code: 'invalid_request' })
   })
 })
