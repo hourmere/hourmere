@@ -33,9 +33,9 @@ interface FixtureApp {
   personalPath: string
   teamPath: string
   collectivePath: string
-  authenticate: (page: Page) => Promise<void>
   hostCounts: () => Promise<number[]>
   rows: () => Promise<{ source: string; status: string }[]>
+  authorizeHost: (teamRole?: 'owner' | 'member') => Promise<void>
 }
 export const test = base.extend<{ app: FixtureApp; suppressFailureDom: undefined }>({
   suppressFailureDom: [
@@ -105,24 +105,6 @@ export const test = base.extend<{ app: FixtureApp; suppressFailureDom: undefined
         .set({ scheduling_type: 'collective' })
         .where('id', '=', collectiveId)
         .execute()
-      const secret = randomBytes(32).toString('base64')
-      const signup = { mode: 'closed', allowedDomains: [] } as const
-      authPool = createAuthPool(owned.url, signup)
-      const auth = createAuth({
-        pool: authPool,
-        db,
-        baseURL: url,
-        secret,
-        signup,
-        mailer: {
-          send: async () => {
-            throw new Error('Synthetic E2E must not send mail')
-          },
-        },
-      })
-      const key = await auth.api.createApiKey({
-        body: { userId: host.userId, name: 'collective-e2e', metadata: { organizationId: team } },
-      })
       parent = createHttpServer((request, response) => {
         response.setHeader('Cache-Control', 'no-store')
         if (request.url === '/parent.js') {
@@ -140,20 +122,30 @@ export const test = base.extend<{ app: FixtureApp; suppressFailureDom: undefined
         )
       })
       const parentUrl = `http://127.0.0.1:${await listenLoopback(parent)}`
+      const authSecret = randomBytes(32).toString('base64')
       app = await startServer({
         DATABASE_URL: owned.url,
         PORT: String(port),
         PUBLIC_URL: url,
-        BETTER_AUTH_SECRET: secret,
+        BETTER_AUTH_SECRET: authSecret,
         SIGNUP: 'closed',
         HOURMERE_ROLE: 'web',
         EMBED_ALLOWED_ORIGINS: parentUrl,
         WEB_DIST: fileURLToPath(new URL('../../apps/web/dist', import.meta.url)),
       })
       let externalRequests = 0
+      let authorization: string | undefined
       await context.route('**/*', async (route) => {
-        const origin = new URL(route.request().url()).origin
-        if (origin === url || origin === parentUrl) await route.continue()
+        const requestUrl = new URL(route.request().url())
+        const origin = requestUrl.origin
+        if (origin === url || origin === parentUrl)
+          await route.continue({
+            ...(authorization &&
+              origin === url &&
+              requestUrl.pathname.startsWith('/api/v1/') && {
+                headers: { ...route.request().headers(), authorization },
+              }),
+          })
         else {
           externalRequests++
           await route.abort('blockedbyclient')
@@ -165,13 +157,6 @@ export const test = base.extend<{ app: FixtureApp; suppressFailureDom: undefined
         personalPath: '/fixture-host/call',
         teamPath: '/team/FixtureTeam/call',
         collectivePath: '/team/FixtureTeam/collective',
-        authenticate: async (page) => {
-          await page.route(`${url}/api/v1/**`, async (route) => {
-            await route.continue({
-              headers: { ...route.request().headers(), authorization: `Bearer ${key.key}` },
-            })
-          })
-        },
         hostCounts: async () => {
           const bookings = await db
             .selectFrom('bookings')
@@ -190,6 +175,38 @@ export const test = base.extend<{ app: FixtureApp; suppressFailureDom: undefined
                 ).length,
             ),
           )
+        },
+        authorizeHost: async (teamRole) => {
+          const signup = { mode: 'closed', allowedDomains: [] } as const
+          authPool ??= createAuthPool(owned.url, signup)
+          if (teamRole)
+            await db
+              .updateTable('auth.member')
+              .set({ role: teamRole })
+              .where('organizationId', '=', team)
+              .where('userId', '=', host.userId)
+              .execute()
+          const auth = createAuth({
+            pool: authPool,
+            db,
+            baseURL: url,
+            secret: authSecret,
+            signup,
+            mailer: {
+              send: async () => {
+                throw new Error('No mail delivery in browser fixtures')
+              },
+            },
+          })
+          const key = await auth.api.createApiKey({
+            body: {
+              userId: host.userId,
+              name: 'synthetic-browser-analytics',
+              ...(teamRole && { metadata: { organizationId: team } }),
+            },
+          })
+          // Keep the synthetic credential in this process; only owned product API calls receive it.
+          authorization = `Bearer ${key.key}`
         },
         rows: () =>
           db.selectFrom('bookings').select(['source', 'status']).orderBy('created_at').execute(),

@@ -70,7 +70,13 @@ export const CalendarsPage = page(
   (m) => m.CalendarsPage,
 )
 
+export const AnalyticsPage = page(
+  () => import('./pages/Analytics.tsx'),
+  (m) => m.AnalyticsPage,
+)
+
 // Public pages: booking pages and the invitee's manage page.
+
 export const HostPage = page(
   () => import('./public/HostPage.tsx'),
   (m) => m.HostPage,

@@ -4,7 +4,7 @@ test('a team owner creates a collective type and a public invitee books every re
   page,
   app,
 }) => {
-  await app.authenticate(page)
+  await app.authorizeHost('owner')
   await page.goto(`${app.url}/app/event-types/new`)
   await page.getByLabel('Title', { exact: true }).fill('Panel interview')
   await page.getByLabel('Scheduling', { exact: true }).selectOption('collective')

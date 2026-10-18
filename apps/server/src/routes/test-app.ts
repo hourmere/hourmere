@@ -5,6 +5,7 @@ import type { Principal } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createApp } from '../app.ts'
+import { analyticsRoutes } from './analytics.ts'
 import { bookingRoutes } from './bookings.ts'
 import { calendarRoutes } from './calendars.ts'
 import { eventTypeRoutes } from './event-types.ts'
@@ -57,6 +58,7 @@ export const productRoutes = (db: Db) => [
   eventTypeRoutes({ db }),
   publicRoutes({ db }),
   bookingRoutes({ db }),
+  analyticsRoutes({ db }),
 ]
 
 /**
