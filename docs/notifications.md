@@ -342,3 +342,10 @@ calendar updates/cancellations so their invitations do not become stale; retries
 successfully committed booking preserve the original result. This opt-in limits anonymous
 guest email amplification; it does not verify the main invitee's email address or eliminate
 all email abuse.
+
+## Outbound booking webhooks
+
+The composition root also invokes the optional webhook notifier in the same booking
+transaction. Its ID-only jobs and immutable minimal snapshots are independent of email
+delivery and management capabilities. Global configuration defaults off; see
+[webhooks.md](webhooks.md) for signatures, retry limits, permissions and network policy.

@@ -1,0 +1,18 @@
+{
+  "name": "@hourmere/webhooks",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@hourmere/db": "*",
+    "@hourmere/jobs": "*",
+    "@hourmere/scheduling": "*",
+    "kysely": "0.29.6",
+    "zod": "4.6.7"
+  }
+}
