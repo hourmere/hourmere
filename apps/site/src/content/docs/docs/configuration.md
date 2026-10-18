@@ -130,3 +130,5 @@ Changing the secret or public origin makes pending mail unreadable, so request n
 after such a change. An SMTP acceptance followed by a lost database commit can produce a
 duplicate copy of the same one-time link. Configure SMTP before inviting others: the log
 mailer still prints delivered links, and anyone reading them can sign in.
+
+`GOOGLE_MEET_ENABLED` defaults to `false`. With Google Calendar write configuration it allows explicit single-host automatic Meet event types. Existing committed intents continue reconciling after disabling the flag; no old provider labels are activated. See the repository automatic Google Meet guide for pending/failure and notification semantics.

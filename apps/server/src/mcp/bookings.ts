@@ -178,6 +178,7 @@ export interface BookingToolsDeps {
   now?: () => Temporal.Instant
   /** Queues the booking emails in the transaction of each change, as for REST. */
   notify?: BookingNotifier | undefined
+  automaticMeet?: boolean | undefined
   /**
    * Per-user limits for discovery, booking and both reschedule modes; defaults to the public
    * endpoints' per-address limits (PUBLIC_RATE_LIMITS). Replaced in tests.
@@ -196,10 +197,17 @@ export function bookingTools({
   db,
   now = () => Temporal.Now.instant(),
   notify,
+  automaticMeet,
   rateLimits = {},
 }: BookingToolsDeps): Tool[] {
-  const pub: PublicContext = { db, now, notify }
-  const context = (caller: McpCaller): ServiceContext => ({ db, principal: caller, now, notify })
+  const pub: PublicContext = { db, now, notify, automaticMeet }
+  const context = (caller: McpCaller): ServiceContext => ({
+    db,
+    principal: caller,
+    now,
+    notify,
+    automaticMeet,
+  })
   const origin = (caller: McpCaller): BookingOrigin => ({
     source: 'mcp',
     apiKeyId: caller.kind === 'api_key' ? caller.apiKeyId : null,

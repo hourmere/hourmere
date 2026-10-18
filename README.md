@@ -157,3 +157,5 @@ in a public issue. See [SECURITY.md](SECURITY.md).
 ## License
 
 [AGPL-3.0](LICENSE)
+
+Optional [automatic Google Meet](docs/automatic-google-meet.md) creates one conference per explicitly opted-in single-host booking, with durable pending/failure state and final invitations held until its link is ready.

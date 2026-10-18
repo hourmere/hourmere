@@ -51,6 +51,11 @@ const calendarPage = z.object({
           .enum(['freeBusyReader', 'reader', 'writer', 'writerWithoutPrivateAccess', 'owner'])
           .optional(),
         timeZone: text.optional(),
+        conferenceProperties: z
+          .object({
+            allowedConferenceSolutionTypes: z.array(z.string().max(100)).max(20).optional(),
+          })
+          .optional(),
       }),
     )
     .max(250)
@@ -78,7 +83,8 @@ export function createGoogleCalendarClient(
         // Do not read or log upstream error bodies: they can echo codes and tokens.
         await response.body?.cancel()
         throw new GoogleCalendarError(
-          response.status === 401 || response.status === 400
+          response.status === 401 ||
+            (response.status === 400 && url === 'https://oauth2.googleapis.com/token')
             ? 'needs_reauth'
             : response.status === 403
               ? 'permissions_missing'
@@ -188,7 +194,8 @@ export function createGoogleCalendarClient(
         url.search = new URLSearchParams({
           maxResults: '250',
           showHidden: 'true',
-          fields: 'items(id,summary,primary,accessRole,timeZone),nextPageToken',
+          fields:
+            'items(id,summary,primary,accessRole,timeZone,conferenceProperties/allowedConferenceSolutionTypes),nextPageToken',
           ...(pageToken && { pageToken }),
         }).toString()
         const result = calendarPage.safeParse(
@@ -202,6 +209,9 @@ export function createGoogleCalendarClient(
             isPrimary: item.primary ?? false,
             accessRole: item.accessRole ?? 'reader',
             timeZone: item.timeZone ?? null,
+            supportsGoogleMeet:
+              item.conferenceProperties?.allowedConferenceSolutionTypes?.includes('hangoutsMeet') ??
+              false,
           })
         if (calendars.length > 2000) throw new GoogleCalendarError('provider_unavailable')
         pageToken = result.data.nextPageToken

@@ -24,6 +24,7 @@ export const NOTIFICATION_KINDS = [
   'rescheduled',
   'cancelled',
   'reminder',
+  'conference_failed',
 ] as const satisfies readonly BookingEmailKind[]
 export type NotificationKind = (typeof NOTIFICATION_KINDS)[number]
 
@@ -248,6 +249,7 @@ interface NotificationData {
   previous: { start: Temporal.Instant; end: Temporal.Instant; status: string } | undefined
   /** A booking that replaced this one (it was cancelled by a reschedule). */
   replaced: boolean
+  automaticConference: boolean
 }
 
 /**
@@ -359,6 +361,7 @@ function loadNotificationData(db: Db, bookingId: string): Promise<NotificationDa
         status: previous.status,
       },
       replaced: successor !== undefined,
+      automaticConference: isRecord(b.location) && b.location.autoCreate === true,
     }
   })
 }
@@ -370,6 +373,7 @@ function stillTrue(
   now: Temporal.Instant,
 ): boolean {
   if (kind === 'cancelled') return booking.status === 'cancelled'
+  if (kind === 'conference_failed') return booking.status === 'confirmed'
   return booking.status === 'confirmed' && Temporal.Instant.compare(booking.start, now) > 0
 }
 
@@ -385,6 +389,8 @@ function stillApplies(kind: NotificationKind, data: NotificationData, now: Tempo
 
 /** Thrown inside a send transaction to roll it back when the booking changed meanwhile. */
 class Overtaken extends Error {}
+/** An obsolete host recipient must not suppress the original invitee's failure notice. */
+class RecipientUnavailable extends Error {}
 
 /**
  * Sends one recipient's email once, with a narrow duplicate window. The row in
@@ -396,14 +402,32 @@ class Overtaken extends Error {}
  */
 async function sendOnce(
   deps: NotificationDeps,
-  key: { bookingId: string; kind: NotificationKind; recipient: string },
+  key: {
+    bookingId: string
+    kind: NotificationKind
+    recipient: string
+    verifiedHost?: { id: string; email: string } | undefined
+  },
   withManageLink: boolean,
   message: (manageToken: string | undefined) => MailMessage,
   clock: () => Temporal.Instant,
   signal: AbortSignal | undefined,
-): Promise<'sent' | 'sent before' | 'overtaken'> {
+): Promise<'sent' | 'sent before' | 'overtaken' | 'recipient unavailable'> {
   try {
     return await deps.db.transaction().execute(async (trx) => {
+      if (key.verifiedHost) {
+        // Parent protection before the notification's booking FK, matching user-deletion
+        // order. Hold verification/address stable until this bounded SMTP attempt ends.
+        const host = await trx
+          .selectFrom('auth.user')
+          .select('id')
+          .where('id', '=', key.verifiedHost.id)
+          .where('email', '=', key.verifiedHost.email)
+          .where('emailVerified', '=', true)
+          .forShare()
+          .executeTakeFirst()
+        if (!host) throw new RecipientUnavailable()
+      }
       // The same format as the token the booking services issue (32 random bytes, base64url).
       const token = withManageLink ? randomBytes(32).toString('base64url') : undefined
       const claimed = await trx
@@ -428,7 +452,12 @@ async function sendOnce(
         .executeTakeFirst()
       if (
         !current ||
-        !stillTrue(key.kind, { status: current.status, start: instant(current.start_at) }, clock())
+        !stillTrue(
+          key.kind,
+          { status: current.status, start: instant(current.start_at) },
+          clock(),
+        ) ||
+        !(await conferenceNotificationAllowed(trx, key.bookingId, key.kind))
       ) {
         throw new Overtaken()
       }
@@ -438,6 +467,7 @@ async function sendOnce(
     })
   } catch (err) {
     if (err instanceof Overtaken) return 'overtaken'
+    if (err instanceof RecipientUnavailable) return 'recipient unavailable'
     throw err
   }
 }
@@ -462,27 +492,41 @@ export async function sendBookingNotification(
 ): Promise<void> {
   const clock = deps.now ?? (() => Temporal.Now.instant())
   const now = clock()
+  if (!(await conferenceNotificationAllowed(deps.db, bookingId, kind))) return
   const data = await loadNotificationData(deps.db, bookingId)
   if (!data || !stillApplies(kind, data, now)) return
   const { booking, hosts, attendees } = data
   const organizer = hosts[0]
-  const invitee = attendees.find((a) => a.isBooker) ?? attendees[0]
+  const invitee =
+    attendees.find((a) => a.isBooker) ?? (kind === 'conference_failed' ? undefined : attendees[0])
   const log = deps.log ?? ((line: string) => console.warn(line))
   // Nobody to send on behalf of: no host with a verified address. Worth a line, since then
   // the invitee hears nothing either.
-  if (!organizer) {
+  if (!organizer && kind !== 'conference_failed' && kind !== 'cancelled') {
     log(
       `${new Date().toISOString()} WARN ${BOOKING_NOTIFICATION_JOB}: booking ${bookingId} has no host with a verified email address; not sending its ${kind} emails`,
     )
     return
   }
   // Nobody it is for.
-  if (!invitee) return
-  const guests = attendees.filter((a) => a !== invitee)
+  if (!invitee) {
+    if (kind === 'conference_failed')
+      throw new NotificationRetryError(
+        'The original invitee is unavailable; failure notification remains pending',
+      )
+    return
+  }
+  const guests = kind === 'conference_failed' ? [] : attendees.filter((a) => a !== invitee)
+  const email: typeof bookingEmail = (...args) => ({
+    ...bookingEmail(...args),
+    sensitive: data.automaticConference,
+  })
 
   const meeting: BookingEmailMeeting = {
     eventName: booking.eventName,
-    hostName: organizer.name,
+    // A logistical failure needs no calendar organizer and must still reach the original
+    // invitee when the pinned host was deleted or is no longer verified.
+    hostName: organizer?.name ?? 'Host',
     inviteeName: invitee.name,
     inviteeEmail: invitee.email,
     guests: guests.map(({ name, email }) => ({ name, email })),
@@ -493,7 +537,7 @@ export async function sendBookingNotification(
     cancelReason: booking.cancelReason,
   }
   const invitation = (summary: string) =>
-    kind === 'reminder'
+    kind === 'reminder' || kind === 'conference_failed' || !organizer
       ? undefined
       : icsAttachment({
           method: kind === 'cancelled' ? 'CANCEL' : 'REQUEST',
@@ -514,9 +558,10 @@ export async function sendBookingNotification(
         })
   const toAttendee = (attendee: (typeof attendees)[number]) => ({
     key: `attendee:${attendee.id}`,
+    verifiedHost: undefined,
     withLinks: attendee === invitee && kind !== 'cancelled',
     message: (token: string | undefined) =>
-      bookingEmail(
+      email(
         kind,
         meeting,
         {
@@ -525,7 +570,7 @@ export async function sendBookingNotification(
           timeZone: attendee.timeZone,
           manageLinks: token === undefined ? undefined : inviteeManageLinks(deps.publicUrl, token),
         },
-        { attachment: invitation(`${booking.eventName} with ${organizer.name}`) },
+        { attachment: invitation(`${booking.eventName} with ${meeting.hostName}`) },
       ),
   })
   // Hosts first (verified addresses, and they most need to know), then the invitee, then
@@ -533,9 +578,13 @@ export async function sendBookingNotification(
   const recipients = [
     ...hosts.map((host) => ({
       key: `host:${host.id}`,
+      verifiedHost:
+        kind === 'conference_failed' || kind === 'cancelled'
+          ? { id: host.id, email: host.email }
+          : undefined,
       withLinks: false,
       message: () =>
-        bookingEmail(
+        email(
           kind,
           meeting,
           { role: 'host', email: host.email, timeZone: host.timeZone, answers: booking.answers },
@@ -559,7 +608,7 @@ export async function sendBookingNotification(
     try {
       const outcome = await sendOnce(
         deps,
-        { bookingId, kind, recipient: r.key },
+        { bookingId, kind, recipient: r.key, verifiedHost: r.verifiedHost },
         r.withLinks,
         r.message,
         clock,
@@ -607,3 +656,92 @@ export {
   SignInEmailPayload,
   signInEmailJobs,
 } from './sign-in.ts'
+
+/** Legacy queued jobs and outbox jobs share this gate; no final invitation while unready. */
+export async function conferenceNotificationAllowed(
+  db: Db,
+  bookingId: string,
+  kind: NotificationKind,
+) {
+  if (kind === 'cancelled') return true
+  const row = await db
+    .selectFrom('bookings as b')
+    .leftJoin('booking_conferences as c', 'c.booking_id', 'b.id')
+    .select(['b.location', 'c.state', 'c.revision', 'c.applied_revision'])
+    .where('b.id', '=', bookingId)
+    .executeTakeFirst()
+  if (!row) return false
+  const automatic = isRecord(row.location) && row.location.autoCreate === true
+  if (!automatic) return kind !== 'conference_failed'
+  if (kind === 'conference_failed') return row.state === 'failed'
+  return (
+    row.state === 'ready' &&
+    row.applied_revision === row.revision &&
+    isRecord(row.location) &&
+    typeof row.location.url === 'string'
+  )
+}
+
+/** A durable outbox is retried independently of legacy exclusive notification keys. */
+export async function dispatchConferenceNotifications(
+  deps: NotificationDeps,
+  signal?: AbortSignal,
+) {
+  const now = new Date((deps.now?.() ?? Temporal.Now.instant()).epochMilliseconds)
+  const rows = await deps.db
+    .selectFrom('booking_conference_notifications as n')
+    .innerJoin('bookings as b', 'b.id', 'n.booking_id')
+    .innerJoin('booking_conferences as c', 'c.booking_id', 'b.id')
+    .select(['n.booking_id', 'n.kind'])
+    .where('n.delivered', '=', false)
+    .where('n.due_at', '<=', now)
+    .where('b.status', '=', 'confirmed')
+    .where((eb) => eb.or([eb('n.kind', '=', 'conference_failed'), eb('b.start_at', '>', now)]))
+    .where((eb) =>
+      eb.or([
+        eb.and([eb('n.kind', '=', 'conference_failed'), eb('c.state', '=', 'failed')]),
+        eb.and([eb('n.kind', '!=', 'conference_failed'), eb('c.state', '=', 'ready')]),
+      ]),
+    )
+    .orderBy('n.due_at')
+    .limit(100)
+    .execute()
+  for (const row of rows) {
+    signal?.throwIfAborted()
+    const kind = row.kind as NotificationKind
+    // Waiting rows remain durable. Stale rows can be marked done: the actual send gate
+    // suppresses a cancelled/superseded booking and a newer transition owns its own row.
+    if (!(await conferenceNotificationAllowed(deps.db, row.booking_id, kind))) continue
+    try {
+      await sendBookingNotification(deps, row.booking_id, kind, { signal })
+    } catch (error) {
+      if (!(error instanceof NotificationRetryError)) throw error
+      // One temporarily refused recipient must not starve other bookings in this batch.
+      await deps.db
+        .updateTable('booking_conference_notifications')
+        .set({ due_at: new Date(now.getTime() + 60_000) })
+        .where('booking_id', '=', row.booking_id)
+        .where('kind', '=', row.kind)
+        .execute()
+      continue
+    }
+    await deps.db
+      .updateTable('booking_conference_notifications')
+      .set({ delivered: true })
+      .where('booking_id', '=', row.booking_id)
+      .where('kind', '=', row.kind)
+      .execute()
+  }
+}
+export function conferenceNotificationDispatchJob(deps: NotificationDeps) {
+  return defineJob({
+    name: 'conference-notification-dispatch',
+    payload: z.strictObject({}),
+    policy: 'exclusive',
+    concurrency: 1,
+    schedule: { cron: '* * * * *', payload: {} },
+    expireInSeconds: 300,
+    retry: { limit: 12, delaySeconds: 30, backoff: true, maxDelaySeconds: 3600 },
+    handler: (_payload, { signal }) => dispatchConferenceNotifications(deps, signal),
+  })
+}

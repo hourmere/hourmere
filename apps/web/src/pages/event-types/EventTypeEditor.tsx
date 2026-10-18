@@ -49,6 +49,7 @@ interface Loaded {
   eventType: EventType | null
   schedules: Schedule[]
   profile: Profile | null
+  automaticGoogleMeet: boolean
 }
 
 /** Creates an event type (/app/event-types/new) or edits one (/app/event-types/:id). */
@@ -63,7 +64,7 @@ function EventTypeEditor({ id }: { id: string | undefined }) {
 
   const load = useCallback(
     async (signal: AbortSignal): Promise<Loaded | 'missing'> => {
-      const [eventType, schedules, profile] = await Promise.all([
+      const [eventType, schedules, profile, instance] = await Promise.all([
         id === undefined
           ? null
           : unwrap(api.GET('/api/v1/event-types/{id}', { params: { path: { id } }, signal })).catch(
@@ -74,9 +75,15 @@ function EventTypeEditor({ id }: { id: string | undefined }) {
             ),
         loadSchedules(signal),
         loadProfile(signal),
+        unwrap(api.GET('/api/v1/instance', { signal })),
       ])
       if (eventType === 'missing') return 'missing'
-      return { eventType, schedules, profile }
+      return {
+        eventType,
+        schedules,
+        profile,
+        automaticGoogleMeet: instance.automaticGoogleMeet === true,
+      }
     },
     [id],
   )
@@ -111,7 +118,7 @@ function EventTypeEditor({ id }: { id: string | undefined }) {
   return <EventTypeForm {...state.data} />
 }
 
-function EventTypeForm({ eventType, schedules, profile }: Loaded) {
+function EventTypeForm({ eventType, schedules, profile, automaticGoogleMeet }: Loaded) {
   const { t, ui, locale: displayLocale } = useI18n()
 
   const me = useMe()
@@ -178,6 +185,17 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
     ) {
       delete body.schedulingType
       delete body.hosts
+    }
+    // The instance flag gates new opt-ins and configuration changes. Preserve an
+    // unchanged automatic location during an ordinary metadata save after it is off.
+    if (
+      saved &&
+      baseline.autoCreateMeet &&
+      draft.autoCreateMeet &&
+      draft.locationKind === 'google_meet'
+    ) {
+      delete body.location
+      if (draft.scheduleId === baseline.scheduleId) delete body.scheduleId
     }
     if (draft.schedulingType === 'round_robin' && unchangedPool) delete body.scheduleId
     try {
@@ -463,6 +481,29 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
           <section className="panel" aria-labelledby="location-heading">
             <h2 id="location-heading">{t('Location')}</h2>
             <LocationFields draft={draft} errors={errors} set={set} />
+            {draft.locationKind === 'google_meet' && (
+              <div>
+                <label className="checkbox">
+                  <input
+                    type="checkbox"
+                    checked={draft.autoCreateMeet}
+                    disabled={
+                      (!automaticGoogleMeet || draft.schedulingType !== 'individual') &&
+                      !draft.autoCreateMeet
+                    }
+                    onChange={(e) => set('autoCreateMeet', e.target.checked)}
+                  />
+                  {t('Create a unique Google Meet link for each booking')}
+                </label>
+                <p className="hint">
+                  {t(
+                    automaticGoogleMeet && draft.schedulingType === 'individual'
+                      ? 'The assigned individual host must connect an owned, Meet-capable Google calendar. Final invitations wait for the link.'
+                      : 'Automatic creation is unavailable on this instance or meeting mode. You can keep the provider label or use your own meeting link.',
+                  )}
+                </p>
+              </div>
+            )}
           </section>
 
           <section className="panel" aria-labelledby="questions-heading">

@@ -349,3 +349,5 @@ The composition root also invokes the optional webhook notifier in the same book
 transaction. Its ID-only jobs and immutable minimal snapshots are independent of email
 delivery and management capabilities. Global configuration defaults off; see
 [webhooks.md](webhooks.md) for signatures, retry limits, permissions and network policy.
+
+For explicitly automatic Google Meet bookings, confirmed/rescheduled invitations and reminders wait for current-revision readiness through a durable outbox. Old generic jobs gate again before each send. Terminal failures generate a separately labelled `conference_failed` notice to host/booker without REQUEST ICS; cancellation messages remain independent. Sensitive meeting messages are omitted from the development log mailer. See [automatic-google-meet.md](automatic-google-meet.md).

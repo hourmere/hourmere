@@ -77,6 +77,52 @@ async function openExisting() {
   return screen.findByRole('heading', { name: 'Edit “Intro call”', level: 1 })
 }
 
+describe('automatic Meet opt-in', () => {
+  it('keeps a legacy provider label inert and disabled when the instance capability is off', async () => {
+    const user = userEvent.setup()
+    eventTypeServer([eventType({ location: { kind: 'google_meet' } })])
+    await openExisting()
+    const optIn = screen.getByRole<HTMLInputElement>('checkbox', {
+      name: 'Create a unique Google Meet link for each booking',
+    })
+    expect(optIn.checked).toBe(false)
+    expect(optIn.disabled).toBe(true)
+    await user.clear(field('Title'))
+    await user.type(field('Title'), 'Metadata only')
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    await screen.findByText('Saved.')
+  })
+  it('preserves an existing opt-in during metadata edits after flag-off, and allows an explicit opt-out', async () => {
+    const user = userEvent.setup(),
+      api = eventTypeServer([eventType({ location: { kind: 'google_meet', autoCreate: true } })])
+    await openExisting()
+    const optIn = screen.getByRole<HTMLInputElement>('checkbox', {
+      name: 'Create a unique Google Meet link for each booking',
+    })
+    expect(optIn.checked).toBe(true)
+    expect(optIn.disabled).toBe(false)
+    await user.clear(field('Title'))
+    await user.type(field('Title'), 'Metadata only')
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    await screen.findByText('Saved.')
+    const metadata = api.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`)[0]?.body
+    expect(metadata).not.toHaveProperty('location')
+    expect(metadata).not.toHaveProperty('scheduleId')
+    expect(
+      screen.getByRole<HTMLInputElement>('checkbox', {
+        name: 'Create a unique Google Meet link for each booking',
+      }).checked,
+    ).toBe(true)
+    await user.click(optIn)
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    await screen.findByText('Saved.')
+    expect(api.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`)[1]?.body).toHaveProperty(
+      'location',
+      { kind: 'google_meet' },
+    )
+  })
+})
+
 describe('the event types list', () => {
   it('lists event types with duration, status and a booking link to copy', async () => {
     const user = userEvent.setup()

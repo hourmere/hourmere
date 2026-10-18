@@ -311,3 +311,7 @@ events. Creation/rotation reveal a signing secret once; lists never recover it. 
 are immutable HTTPS public DNS URLs and are resolved again with pinned addresses per send.
 The instance must explicitly enable new captures; no historical bookings are backfilled.
 See [webhooks.md](webhooks.md) for the payload, signed headers, retention and delivery contract.
+
+### Automatic Google Meet
+
+The optional event-type input `location: {kind:"google_meet",autoCreate:true}` explicitly enables per-booking provisioning when the instance and selected owned calendar support it. Label-only existing input is unchanged. New unsupported configurations return `automatic_meet_disabled`, `automatic_meet_unavailable` or `automatic_meet_mode_unsupported`. Protected booking details add optional bounded `conference` state; catalogs expose no join URL. Assigned verified hosts can POST an empty strict JSON object to `/api/v1/bookings/{id}/conference/retry` for safe reconciliation. It never overrides an ambiguous create or switches the pinned destination. See [automatic-google-meet.md](automatic-google-meet.md) for ready-gated invitations, cancellation and retry limits.
