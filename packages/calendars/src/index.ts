@@ -23,7 +23,7 @@ import {
   type ProviderCalendar,
 } from './provider.ts'
 
-export { calendarBookingNotifier } from './booking-events.ts'
+export { calendarBookingNotifier, redispatchBookingCalendar } from './booking-events.ts'
 export { calendarEncryptionKey } from './credentials.ts'
 export {
   createGoogleCalendarClient,
@@ -31,7 +31,12 @@ export {
   GOOGLE_CALENDAR_SCOPES,
   GOOGLE_CALENDAR_SYNC_SCOPES,
 } from './google.ts'
-export { bookingCalendarJob, calendarDispatchJob, calendarSyncJob } from './jobs.ts'
+export {
+  bookingCalendarJob,
+  bookingCalendarRecoveryJob,
+  calendarDispatchJob,
+  calendarSyncJob,
+} from './jobs.ts'
 export {
   createMicrosoftCalendarClient,
   MICROSOFT_CALENDAR_CALLBACK,
@@ -67,6 +72,9 @@ export interface CalendarDeps {
   microsoft?: { client: MicrosoftCalendarClient; encryptionKey: string } | undefined
   now?: () => number
   enqueueSync?: ((calendarId: string, transaction: Db) => Promise<unknown>) | undefined
+  enqueueWritebackRecovery?:
+    | ((connectionId: string, transaction: Db) => Promise<unknown>)
+    | undefined
 }
 const storedTokens = z.object({
   accessToken: z.string().min(1).max(8192),
@@ -103,12 +111,17 @@ const configured = (deps: CalendarDeps, provider: CalendarProvider = 'google') =
 }
 
 /** All connection mutations lock the owner, including the final phase of a callback. */
-export async function lockUser(db: Db, principal: SessionPrincipal, now: number) {
+export async function lockUser(
+  db: Db,
+  principal: SessionPrincipal,
+  now: number,
+  mode: 'update' | 'key_share' = 'update',
+) {
   const user = await db
     .selectFrom('auth.user')
     .select('id')
     .where('id', '=', principal.user.id)
-    .forUpdate()
+    .$call((query) => (mode === 'key_share' ? query.forKeyShare() : query.forUpdate()))
     .executeTakeFirst()
   const session = await db
     .selectFrom('auth.session')
@@ -464,10 +477,16 @@ async function finishConnection(
         .returning('id')
         .executeTakeFirstOrThrow()
       await saveCalendars(trx, connection.id, calendars)
+      if (provider === 'google' && previous)
+        await deps.enqueueWritebackRecovery?.(connection.id, trx)
     })
     return 'connected'
   } catch (error) {
-    if (error instanceof CalendarProviderError) return error.code
+    if (error instanceof CalendarProviderError) {
+      if (error.code === 'provider_unavailable' && error.oauthError)
+        console.error('Calendar OAuth token exchange failed:', provider, error.oauthError)
+      return error.code
+    }
     if (error instanceof DomainError && error.code === 'invalid_oauth_state') return 'invalid_state'
     throw error
   } finally {
@@ -492,7 +511,7 @@ export async function disconnectCalendar(deps: CalendarDeps, principal: Principa
   })
 }
 
-/** Refresh/list under the same owner lock as disconnect and reconnect; never lose a rotation. */
+/** Serialize rotations on the connection while keeping public booking owner locks compatible. */
 export async function refreshGoogleCalendars(deps: CalendarDeps, principal: Principal, id: string) {
   return refreshCalendarProvider(deps, principal, id, 'google')
 }
@@ -528,14 +547,16 @@ async function refreshCalendarProvider(
   const session = requireCalendarSession(principal)
   const { client, key } = configured(deps, provider)
   if (!z.uuid().safeParse(id).success) throw notFound()
+  let providerError: CalendarProviderError | undefined
   const outcome = await deps.db.transaction().execute(async (trx) => {
-    await lockUser(trx, session, (deps.now ?? Date.now)())
+    await lockUser(trx, session, (deps.now ?? Date.now)(), 'key_share')
     const connection = await trx
       .selectFrom('calendar_connections')
       .selectAll()
       .where('id', '=', id)
       .where('user_id', '=', session.user.id)
       .where('provider', '=', provider)
+      .forUpdate()
       .executeTakeFirst()
     if (!connection) throw notFound()
     if (connection.status !== 'active') return 'needs_reauth'
@@ -575,12 +596,15 @@ async function refreshCalendarProvider(
       return 'ok'
     } catch (error) {
       if (!(error instanceof CalendarProviderError)) throw error
-      if (error.code !== 'provider_unavailable')
-        await trx
-          .updateTable('calendar_connections')
-          .set({ status: 'needs_reauth', last_error: error.code })
-          .where('id', '=', id)
-          .execute()
+      providerError = error
+      await trx
+        .updateTable('calendar_connections')
+        .set({
+          last_error: error.code,
+          ...(error.code !== 'provider_unavailable' ? { status: 'needs_reauth' } : {}),
+        })
+        .where('id', '=', id)
+        .execute()
       return error.code
     }
   })
@@ -591,6 +615,7 @@ async function refreshCalendarProvider(
       outcome === 'provider_unavailable'
         ? `${provider === 'google' ? 'Google' : 'Microsoft'} Calendar could not be reached. Try again shortly.`
         : `Reconnect ${provider === 'google' ? 'Google' : 'Microsoft'} Calendar to restore access.`,
+      { cause: providerError },
     )
 }
 

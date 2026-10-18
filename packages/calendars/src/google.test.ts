@@ -7,6 +7,27 @@ const config = {
   publicUrl: 'http://localhost:5173',
 }
 describe('Google response boundary', () => {
+  it('requests a separate grant instead of inheriting scopes from another consent', () => {
+    const url = new URL(
+      createGoogleCalendarClient(config).authorizationUrl('fake-state', 'fake-verifier'),
+    )
+    expect(url.searchParams.get('include_granted_scopes')).toBe('false')
+  })
+
+  it('rejects oversized valid JSON before accepting an otherwise valid identity', async () => {
+    const client = createGoogleCalendarClient(config, async () =>
+      Response.json({
+        sub: 'account-1',
+        email: 'calendar@example.com',
+        email_verified: true,
+        ignored: 'x'.repeat(262_144),
+      }),
+    )
+    await expect(client.identity('fake-access', AbortSignal.timeout(1000))).rejects.toMatchObject({
+      code: 'provider_unavailable',
+    })
+  })
+
   it.each([
     () => new Response('fake-secret-echo', { status: 400 }),
     () => new Response('fake-secret-echo', { status: 503 }),
@@ -42,4 +63,44 @@ describe('Google response boundary', () => {
     expect(seen).toMatchObject({ method: 'POST', signal, redirect: 'error' })
     expect(new URLSearchParams(String(seen?.body)).get('code_verifier')).toBe('fake-verifier')
   })
+})
+
+describe('Google events response boundary', () => {
+  const signal = () => AbortSignal.timeout(1000)
+  const window = { start: '2026-10-18T00:00:00Z', end: '2026-10-19T00:00:00Z' }
+
+  it('refuses an invalid events-page time zone even when its events are empty', async () => {
+    const client = createGoogleCalendarClient(config, async () =>
+      Response.json({ items: [], timeZone: 'not/a-zone', nextSyncToken: 'next' }),
+    )
+    await expect(client.events('fake-access', 'calendar', window, signal())).rejects.toMatchObject({
+      code: 'provider_unavailable',
+    })
+  })
+
+  it('refuses multiple events sharing the booking UID', async () => {
+    const client = createGoogleCalendarClient(config, async () =>
+      Response.json({
+        items: [
+          { id: 'event-1', iCalUID: 'booking@hourmere' },
+          { id: 'event-2', iCalUID: 'booking@hourmere' },
+        ],
+      }),
+    )
+    await expect(
+      client.findEvent('fake-access', 'calendar', 'booking@hourmere', signal()),
+    ).rejects.toMatchObject({ code: 'provider_unavailable' })
+  })
+
+  it.each([{ recurringEventId: 'series-1' }, { recurrence: ['RRULE:FREQ=DAILY'] }])(
+    'refuses a recurring event sharing the booking UID: %j',
+    async (recurrence) => {
+      const client = createGoogleCalendarClient(config, async () =>
+        Response.json({ items: [{ id: 'event-1', iCalUID: 'booking@hourmere', ...recurrence }] }),
+      )
+      await expect(
+        client.findEvent('fake-access', 'calendar', 'booking@hourmere', signal()),
+      ).rejects.toMatchObject({ code: 'provider_unavailable' })
+    },
+  )
 })

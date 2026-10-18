@@ -885,6 +885,7 @@ describe.skipIf(!serverUrl)('automatic Meet durable flow (real PostgreSQL)', () 
   it('token refresh failure retains a durable intent and cancellation remains usable without provider cleanup', async () => {
     const b = await book()
     provider.controls.tokenStatus = 400
+    provider.controls.token.error = 'invalid_grant'
     await writeBookingConference(deps, b.booking.id)
     expect((await row()).error_code).toBe('needs_reauth')
     expect((await row()).create_started).toBe(false)
@@ -899,6 +900,7 @@ describe.skipIf(!serverUrl)('automatic Meet durable flow (real PostgreSQL)', () 
   it('cancel with an existing remote event and revoked credentials reports unresolved cleanup while still notifying', async () => {
     const b = await ready()
     provider.controls.tokenStatus = 400
+    provider.controls.token.error = 'invalid_grant'
     await cancelManagedBooking(ctx, b.manageToken as string)
     await sendBookingNotification(mail(), b.booking.id, 'cancelled')
     expect(sent).toHaveLength(2)
@@ -909,6 +911,7 @@ describe.skipIf(!serverUrl)('automatic Meet durable flow (real PostgreSQL)', () 
     // Reconnecting the same identity permits explicit cleanup retry, even after the
     // meeting start. It never grants authority to create another event.
     provider.controls.tokenStatus = 200
+    delete provider.controls.token.error
     await db.updateTable('calendar_connections').set({ status: 'active' }).execute()
     const late = {
       ...ctx,
@@ -992,7 +995,7 @@ describe.skipIf(!serverUrl)('automatic Meet durable flow (real PostgreSQL)', () 
     await dispatchConferenceNotifications(config)
     expect(sent).toHaveLength(4)
   })
-  it('calendar400 does not revoke credentials while token400 does, with no upstream body exposure', async () => {
+  it('calendar400 does not revoke credentials while invalid_grant does, with no upstream body exposure', async () => {
     const b = await book()
     provider.controls.eventHook = async () => new Response('private-upstream-echo', { status: 400 })
     await writeBookingConference(deps, b.booking.id)
@@ -1007,6 +1010,7 @@ describe.skipIf(!serverUrl)('automatic Meet durable flow (real PostgreSQL)', () 
       .set({ state: 'pending', next_attempt_at: future() })
       .execute()
     provider.controls.tokenStatus = 400
+    provider.controls.token.error = 'invalid_grant'
     await writeBookingConference(deps, b.booking.id)
     expect(
       (await db.selectFrom('calendar_connections').select('status').executeTakeFirstOrThrow())

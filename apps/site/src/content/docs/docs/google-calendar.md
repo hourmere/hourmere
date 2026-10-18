@@ -64,6 +64,24 @@ retry. Google's External Testing mode can expire refresh tokens; see the
 [Google web-server OAuth guide](https://developers.google.com/identity/protocols/oauth2/web-server).
 You can turn off local conflict checking even when authorization has expired.
 
+Each host's ordinary calendar copy is processed independently, so one revoked connection
+does not block the other hosts. Reconnecting queues missing copies for that host's future
+bookings and preserves saved destinations. A bounded recovery pass handles 100 bookings
+per page. After writeback retries are exhausted, operators can explicitly queue a new finite
+pass from the repository checkout:
+
+```sh
+node --env-file=.env scripts/redispatch-calendar-writeback.ts --connection-id <connection UUID>
+```
+
+Workers must be running. Only active Google accounts, owned destinations and future
+confirmed bookings are eligible; successful copies are skipped. Old bookings without a
+saved destination use that host's current owned destination on the recovered connection.
+For one exhausted update or cancellation, use the same command with
+`--booking-id <chain root UUID>` instead; this queues one ordinary bounded writeback job.
+A wrong instance client secret preserves user connections for retry after the operator
+fixes configuration; a revoked user grant still requires that user's consent.
+
 **Disconnect** deletes local credentials, calendar metadata, busy data and write bindings.
 It leaves existing Google event copies and the Google-wide grant in place. To revoke that
 grant, remove Hourmere yourself in [Google Account connections](https://myaccount.google.com/connections).

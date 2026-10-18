@@ -10,6 +10,7 @@ import {
 } from '@hourmere/auth'
 import {
   bookingCalendarJob,
+  bookingCalendarRecoveryJob,
   bookingConferenceJob,
   type CalendarDeps,
   calendarBookingNotifier,
@@ -70,8 +71,10 @@ export function productRoutes({
   socialProviders,
   notify,
   googleCalendar,
+  microsoftCalendar,
   zoomConference,
   enqueueCalendarSync,
+  enqueueCalendarWritebackRecovery,
   mcpAuth,
   publicUrl = 'http://localhost',
   webhooks = { enabled: false },
@@ -88,13 +91,21 @@ export function productRoutes({
   /** Queues booking emails in the booking's transaction (the OpenAPI document needs none). */
   notify?: BookingNotifier | undefined
   googleCalendar?: CalendarDeps['google']
+  microsoftCalendar?: CalendarDeps['microsoft']
   zoomConference?: ConferenceDeps['zoom']
   enqueueCalendarSync?: CalendarDeps['enqueueSync']
+  enqueueCalendarWritebackRecovery?: CalendarDeps['enqueueWritebackRecovery']
 }): RouteModule[] {
   return [
     mcpOAuthRoutes({ auth: mcpAuth, db, publicUrl }),
     instanceRoutes({ socialProviders, automaticMeet, automaticZoom }),
-    calendarRoutes({ db, google: googleCalendar, enqueueSync: enqueueCalendarSync }),
+    calendarRoutes({
+      db,
+      google: googleCalendar,
+      microsoft: microsoftCalendar,
+      enqueueSync: enqueueCalendarSync,
+      enqueueWritebackRecovery: enqueueCalendarWritebackRecovery,
+    }),
     conferenceRoutes({ db, zoom: zoomConference }),
     profileRoutes({ db }),
     scheduleRoutes({ db }),
@@ -241,6 +252,8 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
   let enqueueConference: (id: string) => Promise<unknown> = async () => {}
   let enqueueCalendar: (calendarId: string) => Promise<unknown> = async () => {}
   let enqueueBookingCalendar: (id: string) => Promise<unknown> = async () => {}
+  let enqueueWritebackRecovery: (connectionId: string, after?: string) => Promise<unknown> =
+    async () => {}
   // Background jobs: every role queues them, `all` and `worker` run them.
   const jobs = createJobs({
     connectionString: config.DATABASE_URL,
@@ -262,6 +275,16 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
       webhookCleanupJob(db),
       calendarSyncJob(calendarDeps),
       bookingCalendarJob(calendarDeps),
+      bookingCalendarRecoveryJob(
+        calendarDeps,
+        (id, trx): Promise<unknown> =>
+          jobs.enqueue(
+            'booking-calendar',
+            { bookingId: id },
+            { singletonKey: id, transaction: trx },
+          ),
+        (connectionId, after) => enqueueWritebackRecovery(connectionId, after),
+      ),
       calendarDispatchJob(calendarDeps, (id) => enqueueCalendar(id)),
     ],
     work: role !== 'web',
@@ -272,6 +295,12 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
   })
   enqueueBookingCalendar = (id) =>
     jobs.enqueue('booking-calendar', { bookingId: id }, { singletonKey: id })
+  enqueueWritebackRecovery = (connectionId, after) =>
+    jobs.enqueue(
+      'booking-calendar-recover',
+      { connectionId, ...(after ? { after } : {}) },
+      { singletonKey: connectionId },
+    )
   enqueueCalendar = (id) => jobs.enqueue('calendar-sync', { calendarId: id }, { singletonKey: id })
   try {
     await jobs.start()
@@ -335,9 +364,16 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
         webhooks: webhookSettings,
         notify,
         googleCalendar,
+        microsoftCalendar,
         zoomConference,
         enqueueCalendarSync: (id, trx) =>
           jobs.enqueue('calendar-sync', { calendarId: id }, { singletonKey: id, transaction: trx }),
+        enqueueCalendarWritebackRecovery: (connectionId, trx) =>
+          jobs.enqueue(
+            'booking-calendar-recover',
+            { connectionId },
+            { singletonKey: connectionId, transaction: trx },
+          ),
       }),
       mcp: mcpEndpoint({
         ...(config.MCP_OAUTH_ENABLED

@@ -91,8 +91,9 @@ their query strings. Provider calls use fixed official endpoints, a shared 15-se
 bounded response bodies/pages, and refuse HTTP redirects.
 
 Reconnection preserves the connection ID, its calendars' existing settings and a previous
-refresh token when Google omits a replacement. Owner-level row locks serialize reconnect,
-refresh and disconnect. A rotated refresh token is saved even if the subsequent calendar
+refresh token when Google omits a replacement. Reconnection/disconnect briefly lock the owner; calendar-list refresh holds only an owner
+key-share lock plus its connection row lock across provider work, so public bookings remain
+compatible. Connection row locks serialize token rotation, refresh and writes. A rotated refresh token is saved even if the subsequent calendar
 list request fails. A complete calendar-list fetch replaces local metadata atomically;
 removed calendars and their dependent local data are deleted.
 
@@ -158,3 +159,43 @@ serialize refresh, busy sync, writeback and disconnect. Disconnect deletes local
 credentials, mappings and targets; it leaves existing Google event copies in the user's
 calendar and stops future updates. Google-side edits/cancellations do not change Hourmere
 bookings. Push notifications, shared-calendar writes and conference creation are follow-ups.
+
+A host whose destination needs reauthorization or lacks sync permissions does not block
+other hosts' copies. Its original destination is retained even for bookings made while
+reauthorization is needed. Each destination has its own ten-second deadline inside a shared two-minute writeback
+deadline, so a stalled provider call for one host also leaves time for other hosts.
+Temporary failures are collected after every destination has been attempted and use the normal job backoff (12 retries, up to one hour between attempts).
+Availability continues to fail closed immediately for selected calendars with sync failures.
+
+Reauthorizing an existing Google connection queues a finite `booking-calendar-recover`
+pass for that account's host. Each page examines at most 100 future, confirmed latest
+bookings and queues the next page. It queues only missing copies on that connection,
+preserves previously saved destinations, and skips automatic-conference bookings. For
+bookings from an older outage with no saved destination, it captures the host's current
+owned destination on that connection. Successful existing copies are left alone. Recovery
+pages have five retries with backoff; there is no recurring retry-budget reset.
+
+After fixing a provider/configuration problem, an operator can explicitly re-dispatch jobs
+whose 12 writeback retries (or five recovery-page retries) have been exhausted:
+
+```sh
+node --env-file=.env scripts/redispatch-calendar-writeback.ts --connection-id <connection UUID>
+```
+
+Run this from the repository checkout with the deployment's environment and workers running.
+The command queues one finite recovery pass through the same bounded pages, for one active
+Google connection; it prints no credentials. Use the connection ID from that user's calendar
+connection metadata. Each missing copy receives the ordinary bounded writeback retry budget.
+Account recovery excludes past/cancelled meetings, removed hosts, non-owned destinations,
+inactive accounts and successful copies. To retry one exhausted projection, including a
+cancellation or an update whose mapping already exists, use
+`node --env-file=.env scripts/redispatch-calendar-writeback.ts --booking-id <chain root UUID>`.
+This queues exactly one ordinary booking-calendar job with the same 12-retry limit. Re-running the command is an explicit operator action,
+not a background loop that grants retries indefinitely.
+
+Token-endpoint failures read at most 4 KiB and recognize only a fixed OAuth `error` enum.
+`invalid_grant` means the user must reauthorize. `invalid_client` and `unauthorized_client`
+indicate instance client configuration errors: the connection remains active, jobs retain
+their retry/backoff behavior, and an operator-visible fixed error code identifies the
+configuration problem. Other request/provider failures also preserve retry eligibility.
+No token error body or provider description is logged or returned to the user.

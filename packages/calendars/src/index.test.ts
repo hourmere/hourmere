@@ -201,6 +201,7 @@ describe.skipIf(!databaseUrl)('separate Google calendar connections (real Postgr
       'permissions_missing',
     )
     provider.controls.tokenStatus = 400
+    provider.controls.token = { error: 'invalid_grant' }
     attempt = await start()
     expect(await finishGoogleConnection(deps, owner, query(attempt.state))).toBe('needs_reauth')
     expect(await finishGoogleConnection(deps, owner, query(attempt.state))).toBe('invalid_state')
@@ -341,6 +342,7 @@ describe.skipIf(!databaseUrl)('separate Google calendar connections (real Postgr
     })
     expect((await listCalendarConnections(deps, owner)).data[0]?.status).toBe('active')
     provider.controls.tokenStatus = 400
+    provider.controls.token = { error: 'invalid_grant' }
     await expect(refreshGoogleCalendars(deps, owner, connection.id)).rejects.toMatchObject({
       code: 'google_calendar_needs_reauth',
     })

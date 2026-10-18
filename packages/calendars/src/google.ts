@@ -2,7 +2,13 @@ import { createHash } from 'node:crypto'
 import { isSingleLineText } from '@hourmere/scheduling/text'
 import { z } from 'zod'
 import { googleEventMethods } from './google-events.ts'
-import { CalendarProviderError, type CalendarTokens, type ProviderCalendar } from './provider.ts'
+import {
+  CalendarProviderError,
+  type CalendarTokens,
+  type OAuthTokenError,
+  type ProviderCalendar,
+  readOAuthTokenError,
+} from './provider.ts'
 
 export const GOOGLE_CALENDAR_CALLBACK = '/api/calendar/google/callback'
 export const GOOGLE_CALENDAR_SCOPES = [
@@ -20,8 +26,9 @@ export class GoogleCalendarError extends CalendarProviderError {
   constructor(
     code: 'provider_unavailable' | 'needs_reauth' | 'permissions_missing',
     status?: number,
+    oauthError?: OAuthTokenError,
   ) {
-    super(code, status)
+    super(code, status, oauthError)
     this.name = 'GoogleCalendarError'
   }
 }
@@ -80,16 +87,23 @@ export function createGoogleCalendarClient(
     try {
       const response = await request(url, { ...init, signal, redirect: 'error' })
       if (!response.ok) {
-        // Do not read or log upstream error bodies: they can echo codes and tokens.
-        await response.body?.cancel()
+        // Token errors distinguish a revoked grant from broken instance credentials. Only
+        // the bounded, allow-listed OAuth error field survives; never retain provider text.
+        const tokenEndpoint = url === 'https://oauth2.googleapis.com/token'
+        const oauthError = tokenEndpoint ? await readOAuthTokenError(response) : undefined
+        if (!tokenEndpoint) await response.body?.cancel()
         throw new GoogleCalendarError(
-          response.status === 401 ||
-            (response.status === 400 && url === 'https://oauth2.googleapis.com/token')
-            ? 'needs_reauth'
-            : response.status === 403
-              ? 'permissions_missing'
-              : 'provider_unavailable',
+          tokenEndpoint
+            ? oauthError === 'invalid_grant' && [400, 401].includes(response.status)
+              ? 'needs_reauth'
+              : 'provider_unavailable'
+            : response.status === 401
+              ? 'needs_reauth'
+              : response.status === 403
+                ? 'permissions_missing'
+                : 'provider_unavailable',
           response.status,
+          oauthError,
         )
       }
       if (!response.body) throw new GoogleCalendarError('provider_unavailable')
