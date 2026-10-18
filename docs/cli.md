@@ -38,15 +38,15 @@ for the MCP envelope. The server enforces the tool's full schema and domain rule
 | `event` | `get_event_type` | `id` from `catalog` |
 | `schedules` | `list_schedules` | optional `limit`, `after` |
 | `schedule` | `get_schedule` | `id` from `schedules` |
-| `slots` | `find_available_slots` | `handle`, `slug`, `timeZone`, `startDate`, `endDate`; optional `maxSlots`, `after` |
-| `book` | `create_booking` | `handle`, `slug`, `start`, `invitee`, **`idempotencyKey`**; optional `responses`, `guests` |
+| `slots` | `find_available_slots` | `handle` or `teamSlug`, `slug`, `timeZone`, `startDate`, `endDate`; optional `maxSlots`, `after` |
+| `book` | `create_booking` | `handle` or `teamSlug`, `slug`, `start`, `invitee`, **`idempotencyKey`**; optional `responses`, `guests` |
 | `list` | `list_bookings` | optional `from`, `to`, `status`, `order`, `limit`, `cursor` |
 | `reschedule` | `reschedule_booking` | `start` and exactly one of `bookingId`, `manageToken` |
 | `cancel` | `cancel_booking` | exactly one of `bookingId`, `manageToken`; optional `reason` |
 
 `catalog` includes the key's visible team and personal configurations. Booking and slot
-commands currently accept personal handles; the existing MCP tools do not expose team
-booking links. `reschedule` and `cancel` by ID require hosting that booking in the key's
+commands accept exactly one of `handle` (personal link) or `teamSlug` (team link). Team
+slugs keep their stored case; collective types require every configured host. `reschedule` and `cancel` by ID require hosting that booking in the key's
 organization. A management token instead acts as the invitee. These operations can send
 the same notification emails and calendar updates as the booking page.
 
@@ -63,6 +63,11 @@ For example, put this JSON into a local request file, then run
   "maxSlots": 20
 }
 ```
+
+For a team link such as `/team/Cobaltmere/interview`, replace `"handle": "ada"`
+with `"teamSlug": "Cobaltmere"` and use `"slug": "interview"` in both the slots
+and booking JSON. Do not provide both namespace fields. The CLI forwards the same JSON
+without a separate team command.
 
 Keep all filters unchanged when continuing a page. Catalogs and slots return `nextAfter`;
 pass it as `after` until null. Booking lists return `nextCursor`; pass it as `cursor` until

@@ -72,6 +72,7 @@ describe.skipIf(!serverUrl)('event type service', () => {
         bookingWindowDays: null,
         maxBookingsPerDay: null,
         schedulingType: 'individual',
+        hosts: [{ userId: user.id }],
         location: null,
         questions: [],
         isActive: true,

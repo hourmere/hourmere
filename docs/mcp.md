@@ -172,6 +172,12 @@ is not proof of public availability: use `find_available_slots` before booking.
 Use the corresponding `get_` tool for full details; `get_schedule` returns weekly hours,
 not date overrides. Configuration changes and date overrides use the REST API or web app.
 
+`find_available_slots` and `create_booking` accept exactly one public namespace:
+`handle` for `/{handle}/{slug}`, or `teamSlug` for `/team/{teamSlug}/{slug}`. Personal
+handles are case-insensitive; team slugs use exact stored case. Old `handle` inputs remain
+valid. A collective team type offers only intervals every required host offers; see
+[collective scheduling](collective-scheduling.md) for its bounds and rescheduling rules.
+
 Both catalog lists accept `limit` (default 20, maximum 100) and `after`. Results are
 `{ data, nextAfter }`, sorted by ID. Set `after` to the previous `nextAfter`, keep the same key
 and acting organization, and stop at `nextAfter: null`. The cursor is exclusive and remains

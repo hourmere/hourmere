@@ -16,6 +16,7 @@ import {
 } from './availability.ts'
 import type { BookingNotifier, PublicContext, ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
+import { bookingHostIds, lockOrganization } from './hosts.ts'
 import { type Responses, validateResponses } from './questions.ts'
 import { cleanText } from './text.ts'
 
@@ -259,6 +260,7 @@ const RESCHEDULE_COLUMNS = [
   'title',
   'location',
   'responses',
+  'required_host_user_ids',
 ] as const
 
 /**
@@ -459,6 +461,7 @@ async function requireOfferedSlot(
     end: Temporal.Instant
     now: Temporal.Instant
     excludeBookingId?: string
+    useDefaultSchedule?: boolean
   },
 ): Promise<void> {
   const slots = await findSlots(db, {
@@ -468,6 +471,7 @@ async function requireOfferedSlot(
     rangeEnd: q.end,
     now: q.now,
     excludeBookingId: q.excludeBookingId,
+    useDefaultSchedule: q.useDefaultSchedule,
   })
   if (!slots.some((s) => s.start.equals(q.start) && s.end.equals(q.end))) {
     throw new DomainError('conflict', 'slot_unavailable', 'This time is not available')
@@ -512,6 +516,7 @@ async function insertBooking(db: Db, b: NewBooking): Promise<{ id: string; manag
       idempotency_key: b.idempotency?.key ?? null,
       idempotency_fingerprint: b.idempotency?.fingerprint ?? null,
       rescheduled_from_id: b.rescheduledFromId ?? null,
+      required_host_user_ids: [...b.hostUserIds].sort(),
     })
     .returning('id')
     .executeTakeFirstOrThrow()
@@ -688,7 +693,8 @@ async function publicBooking(
 
   try {
     return await ctx.db.transaction().execute(async (trx) => {
-      await lockHosts(trx, [et.hostUserId])
+      await lockOrganization(trx, et.organizationId)
+      await lockHosts(trx, et.hostUserIds)
       // A concurrent request with the same key may have committed while we waited.
       if (scope) {
         const replay = await findReplay(trx, scope)
@@ -697,7 +703,11 @@ async function publicBooking(
       // The event type may have changed while we waited (duration, questions, rules), and
       // waiting took time: read both again now that the host is locked.
       const current = await resolve(trx, input.handle, input.slug, { lock: true })
-      if (!current || current.id !== et.id || current.hostUserId !== et.hostUserId) {
+      if (
+        !current ||
+        current.id !== et.id ||
+        current.hostUserIds.join() !== et.hostUserIds.join()
+      ) {
         throw eventTypeNotFound()
       }
       if (guests.length > 0 && !current.allowGuests) {
@@ -710,13 +720,15 @@ async function publicBooking(
       const now = ctx.now()
       const responses = validateResponses(current.questions, input.responses ?? {})
       const end = input.start.add({ minutes: current.durationMinutes })
-      await requireOfferedSlot(trx, {
-        eventTypeId: current.id,
-        hostUserId: current.hostUserId,
-        start: input.start,
-        end,
-        now,
-      })
+      for (const hostUserId of current.hostUserIds)
+        await requireOfferedSlot(trx, {
+          eventTypeId: current.id,
+          hostUserId,
+          start: input.start,
+          end,
+          now,
+          useDefaultSchedule: current.hostUserIds.length > 1,
+        })
       const { id, manageToken } = await insertBooking(trx, {
         organizationId: current.organizationId,
         eventTypeId: current.id,
@@ -729,7 +741,7 @@ async function publicBooking(
         apiKeyId: origin.apiKeyId,
         oauthConsentId: origin.oauthConsentId ?? null,
         idempotency: scope && { key: scope.key, fingerprint: scope.fingerprint },
-        hostUserIds: [current.hostUserId],
+        hostUserIds: current.hostUserIds,
         attendees: [invitee, ...guests],
       })
       // In this transaction, and never on the replay paths: one set of emails per booking,
@@ -798,6 +810,16 @@ export async function rescheduleManagedBooking(
   const hash = manageTokenHash(token)
   if (!hash) throw bookingNotFound()
   return ctx.db.transaction().execute(async (trx) => {
+    const target = await resolveManagedTarget(trx, hash)
+    const parent =
+      target &&
+      (await trx
+        .selectFrom('bookings')
+        .select('organization_id')
+        .where('id', '=', target.id)
+        .executeTakeFirst())
+    if (!parent) throw bookingNotFound()
+    await lockOrganization(trx, parent.organization_id)
     const old = await lockManagedBooking(trx, hash)
     if (!old) throw bookingNotFound()
     return rescheduleLocked(ctx, trx, old, start, origin)
@@ -825,16 +847,11 @@ async function rescheduleLocked(
       .orderBy('id')
       .execute(),
   ])
-  const hostUserIds = hosts.map((h) => h.user_id)
-  // Without a host there is nobody whose availability could be checked.
-  if (!hostUserIds.length) {
-    throw new DomainError(
-      'conflict',
-      'booking_has_no_host',
-      'This booking has no host, so it cannot be rescheduled',
-    )
-  }
+  const hostUserIds = old.required_host_user_ids.length
+    ? [...old.required_host_user_ids].sort()
+    : hosts.map((h) => h.user_id).sort()
   await lockHosts(trx, hostUserIds)
+  await bookingHostIds(trx, old.id, old.organization_id, old.required_host_user_ids, true)
   // Read after the locks: waiting for them takes time, and the rules may have changed.
   const now = ctx.now()
   assertChangeable(old, now)
@@ -848,6 +865,7 @@ async function rescheduleLocked(
           .where('id', '=', old.event_type_id)
           .where('is_active', '=', true)
           .where('deleted_at', 'is', null)
+          .forShare()
           .executeTakeFirst()
   if (!eventType) {
     throw new DomainError(
@@ -865,6 +883,7 @@ async function rescheduleLocked(
       end,
       now,
       excludeBookingId: old.id,
+      useDefaultSchedule: hostUserIds.length > 1,
     })
   }
 
@@ -1081,6 +1100,7 @@ export async function rescheduleHostBooking(
 ): Promise<BookingWithToken> {
   if (!UUID.test(id)) throw bookingNotFound()
   return ctx.db.transaction().execute(async (trx) => {
+    await lockOrganization(trx, ctx.principal.organization.id)
     const old = await trx
       .selectFrom('bookings')
       .select(RESCHEDULE_COLUMNS)

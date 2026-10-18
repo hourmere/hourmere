@@ -239,6 +239,12 @@ function BookingFlow({
         <aside className="event-info" aria-label={t('About this event')}>
           <p className="event-host">{event.team?.name ?? event.host.name}</p>
           <h1 className="event-title">{event.title}</h1>
+          {event.hosts && (
+            <p className="event-description">
+              Required hosts:{' '}
+              {event.hosts.map((host) => `${host.name} (${host.timeZone})`).join(', ')}
+            </p>
+          )}
           <ul className="event-facts">
             <li>{formatDuration(event.durationMinutes, displayLocale)}</li>
             {event.location && <li>{ui(locationLabel(event.location.kind))}</li>}

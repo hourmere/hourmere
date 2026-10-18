@@ -149,7 +149,8 @@ function EventTypeTable({
           const url =
             e.ownerUserId === null &&
             !me.organization.personal &&
-            e.schedulingType === 'individual' &&
+            ((e.schedulingType === 'individual' && e.hosts.length === 1) ||
+              (e.schedulingType === 'collective' && e.hosts.length >= 2 && e.hosts.length <= 8)) &&
             isPublicTeamSlug(me.organization.slug)
               ? publicTeamPageUrl(me.organization.slug, e.slug)
               : profile && e.ownerUserId === me.user.id
@@ -177,7 +178,8 @@ function EventTypeTable({
                 ) : (
                   <span className="muted">
                     {e.ownerUserId === null
-                      ? e.schedulingType === 'individual' && !isPublicTeamSlug(me.organization.slug)
+                      ? e.schedulingType !== 'round_robin' &&
+                        !isPublicTeamSlug(me.organization.slug)
                         ? TEAM_LINK_SLUG_HINT
                         : t('No public booking link')
                       : `/${e.slug}`}

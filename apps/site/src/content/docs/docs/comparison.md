@@ -64,7 +64,7 @@ not establish compatible MCP support in another.
 
 ## Check the features you need
 
-The current Hourmere source includes personal booking pages, single-host team links,
+The current Hourmere source includes personal booking pages, individual and collective team links,
 unlisted event types, availability rules, booking changes and cancellations, queued email,
 and opt-in inline and popup widgets. Google Calendar connection, busy-time synchronization
 and booking event writes have been tested. These capabilities remain development software.
@@ -77,7 +77,7 @@ Before evaluating it for real scheduling, account for the unfinished work:
   not establish Safari or Firefox compatibility.
 - Real Gmail, Outlook and Apple calendar invitation lifecycle and inbox-delivery acceptance
   are pending; local mail/ICS tests do not establish deliverability.
-- Round-robin assignment, collective meetings, automatic conference creation, billing and
+- Round-robin assignment, automatic conference creation, billing and
   a managed Hourmere service are not available.
 - Public release, fresh-machine deployment acceptance and four weeks of actual self-use
   have not been completed.

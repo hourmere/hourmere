@@ -5,6 +5,7 @@ import {
   deleteEventType,
   EVENT_TYPE_LIMITS,
   getEventType,
+  listEventTypeHosts,
   listEventTypes,
   MAX_OPTION_LENGTH,
   MAX_OPTIONS,
@@ -173,6 +174,7 @@ export const EventType = z
     }),
     ...fields,
     schedulingType: z.enum(['individual', 'round_robin', 'collective']),
+    hosts: z.array(z.object({ userId: z.uuid() })).max(8),
     questions: z.array(Question),
     createdAt: z.iso.datetime(),
     updatedAt: z.iso.datetime(),
@@ -202,6 +204,11 @@ const EventTypeInput = z
     allowGuests: fields.allowGuests.optional().openapi({ default: false }),
     position: fields.position.optional().openapi({ default: 0 }),
     scheduleId: fields.scheduleId.optional(),
+    schedulingType: z.enum(['individual', 'collective']).optional(),
+    hosts: z
+      .array(z.strictObject({ userId: z.string() }))
+      .optional()
+      .openapi({ minItems: 1, maxItems: 8 }),
   })
   .openapi('EventTypeInput')
 
@@ -224,6 +231,11 @@ const EventTypeUpdate = z
     allowGuests: fields.allowGuests.optional(),
     position: fields.position.optional(),
     scheduleId: fields.scheduleId.optional(),
+    schedulingType: z.enum(['individual', 'collective']).optional(),
+    hosts: z
+      .array(z.strictObject({ userId: z.string() }))
+      .optional()
+      .openapi({ minItems: 1, maxItems: 8 }),
   })
   .openapi('EventTypeUpdate', {
     description: 'Omitted fields stay as they are; null clears a nullable field',
@@ -247,13 +259,45 @@ export const EVENT_TYPE_BODY_LIMIT = 2 * 1024 * 1024
 const notFound =
   'event_type_not_found: no such event type in the organization, or one the caller cannot see'
 const invalid =
-  'invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, or invalid_schedule_id (scheduleId is not one of the host’s schedules)'
+  'invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_hosts, or invalid_schedule_id (scheduleId is not one of the host’s schedules)'
 const forbidden = `insufficient_role: team event types need the owner or admin role; ${CROSS_ORIGIN_WRITE}`
 const slugTaken = 'slug_taken: another event type on the same page has this slug'
 
 export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
   return ({ app, caller }) => {
     const route = { security: authenticated, middleware: caller, tags }
+
+    app.openapi(
+      createRoute({
+        ...route,
+        method: 'get',
+        path: '/api/v1/event-type-hosts',
+        summary: 'Current verified members available for host assignment',
+        request: {
+          query: z.object({
+            after: z.uuid().optional(),
+            limit: z.coerce.number().int().min(1).max(100).optional(),
+          }),
+        },
+        responses: {
+          200: {
+            description: 'A bounded member page',
+            content: json(
+              z.object({
+                data: z.array(z.object({ id: z.uuid(), name: z.string() })),
+                nextAfter: z.string().nullable(),
+              }),
+            ),
+          },
+          ...errorResponses({ 403: forbidden, 400: 'invalid_limit, invalid_cursor' }),
+        },
+      }),
+      async (c) =>
+        c.json(
+          await listEventTypeHosts(serviceContext(deps, c.var.principal), c.req.valid('query')),
+          200,
+        ),
+    )
 
     app.openapi(
       createRoute({

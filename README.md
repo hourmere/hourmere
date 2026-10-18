@@ -44,7 +44,7 @@ npm run dev --workspace @hourmere/web
 ```
 
 Signed-in pages live under `/app` (`/app/event-types`, `/app/availability`, `/app/bookings`, `/app/api-keys`, `/app/settings`); `/sign-in` stays at the top level, and the rest of the root is for public booking pages (`/{handle}/{slug}` for personal types and
-`/team/{teamSlug}/{slug}` for single-host team types). After signing in, people only return to pages under `/app`.
+`/team/{teamSlug}/{slug}` for individual and collective team types). After signing in, people only return to pages under `/app`.
 
 The web app only uses the public API (`/api/v1/*` and Better Auth's `/api/auth/*`). Its types for `/api/v1` are generated from the server's OpenAPI document: after changing a route, run `npm run api:types` (no database needed) and commit `apps/web/src/api/schema.d.ts`; CI fails if it is out of date.
 
@@ -67,6 +67,9 @@ The app listens on `127.0.0.1:3000` and applies database migrations on start. It
 the background jobs (booking emails); to run them in a container of their own, set
 `HOURMERE_ROLE=web` and enable the `worker` service in `docker-compose.yml` (same image,
 `HOURMERE_ROLE=worker`). Give containers at least 35 seconds to stop, so running jobs can finish. Put a reverse proxy with TLS in front of it, and set `TRUSTED_PROXIES` to the proxy's address as the app sees it (for a proxy on the host or on the compose network that is the Docker network, e.g. `172.16.0.0/12`), so rate limits apply per visitor rather than to everyone behind the proxy.
+
+Team owners and admins can configure [collective meetings](docs/collective-scheduling.md)
+with two to eight required hosts.
 
 Website widgets support inline and popup booking; see [embedding](docs/embedding.md) for the
 explicit parent-origin allow list, integration snippets and privacy contract.

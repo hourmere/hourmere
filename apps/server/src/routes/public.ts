@@ -41,6 +41,12 @@ export const PublicEventType = z
       .optional()
       .openapi({ description: 'Present for a team booking link' }),
   })
+  .extend({
+    hosts: z
+      .array(z.object({ name: z.string(), timeZone: z.string() }))
+      .max(8)
+      .optional(),
+  })
   .openapi('PublicEventType')
 
 export const PublicHost = z
@@ -178,7 +184,7 @@ export function publicRoutes({
           path: `${target.prefix}/{handle}/{slug}`,
           summary: 'A public event type',
           description: target.team
-            ? 'The single-host team page at /team/{handle}/{slug}. handle is the exact-case organization slug; personal organizations and unsupported scheduling modes are not served.'
+            ? 'The individual or collective team page at /team/{handle}/{slug}. handle is the exact-case organization slug; personal organizations and unsupported scheduling modes are not served.'
             : 'What the booking page at /{handle}/{slug} shows.',
           middleware: pageLimit,
           request: {

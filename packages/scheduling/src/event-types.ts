@@ -5,6 +5,7 @@
 // pointing at the event type they were made with.
 import { validateEventTypeRules } from '@hourmere/core'
 import type { Db, Json } from '@hourmere/db'
+import { sql } from 'kysely'
 import { LOCATION_KINDS } from './availability.ts'
 import {
   type CatalogPage,
@@ -14,6 +15,7 @@ import {
 } from './catalog-page.ts'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
+import { assertHosts, lockOrganization } from './hosts.ts'
 import {
   engineValidation,
   isConstraintViolation,
@@ -59,6 +61,8 @@ export interface EventType {
   /** null = no limit. */
   maxBookingsPerDay: number | null
   schedulingType: SchedulingType
+  /** Current configured hosts; at most eight. */
+  hosts: { userId: string }[]
   location: EventTypeLocation | null
   questions: Question[]
   isActive: boolean
@@ -74,6 +78,8 @@ export interface EventType {
 }
 
 export interface EventTypeInput {
+  schedulingType?: 'individual' | 'collective' | undefined
+  hosts?: { userId: string }[] | undefined
   slug: string
   title: string
   description?: string | null | undefined
@@ -276,29 +282,42 @@ export async function createEventType(
   ctx: ServiceContext,
   input: EventTypeInput,
 ): Promise<EventType> {
-  const userId = ctx.principal.user.id
-  const { personalOwnerId, canManageTeam } = await access(ctx.db, ctx)
-  // A personal organization has no members but its user (see @hourmere/auth).
-  if (personalOwnerId !== null ? personalOwnerId !== userId : !canManageTeam) {
-    throw insufficientRole()
-  }
   const fields = validFields({ ...DEFAULTS, ...defined(input) })
-  const scheduleId = validScheduleId(input.scheduleId) ?? null
   return withWriteErrors(() =>
     ctx.db.transaction().execute(async (trx) => {
+      await lockOrganization(trx, ctx.principal.organization.id)
+      const { personalOwnerId, canManageTeam } = await access(trx, ctx, true)
+      if (personalOwnerId !== null ? personalOwnerId !== ctx.principal.user.id : !canManageTeam) {
+        throw insufficientRole()
+      }
+      const schedulingType = input.schedulingType ?? 'individual'
+      const hostIds = validHosts(
+        input.hosts ?? [{ userId: ctx.principal.user.id }],
+        schedulingType,
+        personalOwnerId,
+      )
+      const scheduleId = validScheduleId(input.scheduleId) ?? null
+      if (schedulingType === 'collective' && scheduleId !== null) throw invalidScheduleId()
+      await assertHosts(trx, ctx.principal.organization.id, hostIds, true)
       const { id } = await trx
         .insertInto('event_types')
         .values({
           ...columns(fields),
           organization_id: ctx.principal.organization.id,
           owner_user_id: personalOwnerId,
-          scheduling_type: 'individual',
+          scheduling_type: schedulingType,
         })
         .returning('id')
         .executeTakeFirstOrThrow()
       await trx
         .insertInto('event_type_hosts')
-        .values({ event_type_id: id, user_id: userId, schedule_id: scheduleId })
+        .values(
+          hostIds.map((user_id) => ({
+            event_type_id: id,
+            user_id,
+            schedule_id: scheduleId,
+          })),
+        )
         .execute()
       return toEventType(await loadEventType(trx, id))
     }),
@@ -314,17 +333,81 @@ export async function updateEventType(
   const changes = defined(input)
   return withWriteErrors(() =>
     ctx.db.transaction().execute(async (trx) => {
+      await lockOrganization(trx, ctx.principal.organization.id)
       // Locked, so concurrent updates of different fields cannot undo each other.
       const row = await visibleRow(trx, ctx, id, { lock: true })
-      await assertCanWrite(trx, ctx, row)
-      const scheduleId = validScheduleId(input.scheduleId)
-      if (Object.keys(changes).length > 0 || scheduleId !== undefined) {
-        // Also for a change of the host's schedule alone, so updatedAt moves with it.
-        const fields = validFields({ ...fieldsOf(row), ...changes })
-        await trx.updateTable('event_types').set(columns(fields)).where('id', '=', row.id).execute()
+      await assertCanWrite(trx, ctx, row, true)
+      if (
+        row.scheduling_type === 'round_robin' &&
+        (input.hosts !== undefined ||
+          input.schedulingType !== undefined ||
+          input.scheduleId !== undefined)
+      )
+        throw invalidHosts('Legacy round-robin configurations support metadata changes only')
+      const changingHosts = input.hosts !== undefined || input.schedulingType !== undefined
+      if (
+        input.schedulingType !== undefined &&
+        input.schedulingType !== row.scheduling_type &&
+        input.hosts === undefined
+      ) {
+        throw invalidHosts('Changing schedulingType requires the complete hosts list')
       }
-      if (scheduleId !== undefined) {
-        // The composite foreign key keeps the schedule among the host's own schedules.
+      const schedulingType = input.schedulingType ?? row.scheduling_type
+      const existing = await trx
+        .selectFrom('event_type_hosts')
+        .select(['user_id', 'schedule_id'])
+        .where('event_type_id', '=', row.id)
+        .orderBy('user_id')
+        .execute()
+      const scheduleId = validScheduleId(input.scheduleId)
+      let hostIds: string[] | undefined
+      if (changingHosts) {
+        hostIds = validHosts(
+          input.hosts ?? existing.map((h) => ({ userId: h.user_id })),
+          schedulingType,
+          row.owner_user_id,
+        )
+        await assertHosts(trx, row.organization_id, hostIds, true)
+      }
+      if (schedulingType === 'collective' && scheduleId != null) throw invalidScheduleId()
+      if (Object.keys(changes).length > 0 || scheduleId !== undefined || changingHosts) {
+        const fields = validFields({ ...fieldsOf(row), ...changes })
+        await trx
+          .updateTable('event_types')
+          .set({ ...columns(fields), scheduling_type: schedulingType })
+          .where('id', '=', row.id)
+          .execute()
+      }
+      if (hostIds) {
+        const resolvedSchedule =
+          schedulingType === 'collective'
+            ? null
+            : scheduleId !== undefined
+              ? scheduleId
+              : existing.length === 1 && existing[0]?.user_id === hostIds[0]
+                ? (existing[0]?.schedule_id ?? null)
+                : null
+        await trx
+          .deleteFrom('event_type_hosts')
+          .where('event_type_id', '=', row.id)
+          .where('user_id', 'not in', hostIds)
+          .execute()
+        await trx
+          .insertInto('event_type_hosts')
+          .values(
+            hostIds.map((user_id) => ({
+              event_type_id: row.id,
+              user_id,
+              schedule_id: resolvedSchedule,
+            })),
+          )
+          .onConflict((conflict) =>
+            conflict
+              .columns(['event_type_id', 'user_id'])
+              .doUpdateSet({ schedule_id: resolvedSchedule }),
+          )
+          .execute()
+      } else if (scheduleId !== undefined) {
         await trx
           .updateTable('event_type_hosts')
           .set({ schedule_id: scheduleId })
@@ -352,6 +435,13 @@ function selectEventTypes(db: Db) {
   return db
     .selectFrom('event_types as e')
     .selectAll('e')
+    .select(
+      sql<
+        { userId: string }[]
+      >`(SELECT coalesce(jsonb_agg(host), '[]'::jsonb) FROM (SELECT h.user_id AS "userId" FROM event_type_hosts h WHERE h.event_type_id = e.id ORDER BY h.user_id LIMIT 8) host)`.as(
+        'hosts',
+      ),
+    )
     .select((eb) =>
       eb
         .selectFrom('event_type_hosts as h')
@@ -393,20 +483,38 @@ async function visibleRow(db: Db, ctx: ServiceContext, id: string, { lock = fals
 }
 
 /** A visible personal event type is the caller's own; a team one needs owner or admin. */
-async function assertCanWrite(db: Db, ctx: ServiceContext, row: { owner_user_id: string | null }) {
+async function assertCanWrite(
+  db: Db,
+  ctx: ServiceContext,
+  row: { owner_user_id: string | null },
+  lock = false,
+) {
   if (row.owner_user_id !== null) return
-  if (!(await access(db, ctx)).canManageTeam) throw insufficientRole()
+  if (!(await access(db, ctx, lock)).canManageTeam) throw insufficientRole()
 }
 
 /** The caller's standing in the organization they act in. */
-async function access(db: Db, ctx: ServiceContext) {
-  const row = await db
+async function access(db: Db, ctx: ServiceContext, lock = false) {
+  // User before member, matching auth.user deletion's membership cascade.
+  if (lock) {
+    const actor = await db
+      .selectFrom('auth.user')
+      .select('emailVerified')
+      .where('id', '=', ctx.principal.user.id)
+      .forShare()
+      .executeTakeFirst()
+    if (!actor?.emailVerified) return { personalOwnerId: null, canManageTeam: false }
+  }
+  let query = db
     .selectFrom('auth.member as m')
+    .innerJoin('auth.user as u', 'u.id', 'm.userId')
+    .where('u.emailVerified', '=', true)
     .leftJoin('personal_organizations as p', 'p.organization_id', 'm.organizationId')
     .select(['m.role', 'p.user_id as personalOwnerId'])
     .where('m.userId', '=', ctx.principal.user.id)
     .where('m.organizationId', '=', ctx.principal.organization.id)
-    .executeTakeFirst()
+  if (lock) query = query.forShare('m')
+  const row = await query.executeTakeFirst()
   // Better Auth stores several roles comma-separated.
   const roles = row?.role.split(',').map((role) => role.trim()) ?? []
   return {
@@ -685,8 +793,58 @@ function toEventType(row: EventTypeRow): EventType {
     ownerUserId: row.owner_user_id,
     ...fieldsOf(row),
     schedulingType: row.scheduling_type as SchedulingType,
+    hosts: row.hosts,
     scheduleId: row.schedule_id,
     createdAt: timestamp(row.created_at),
     updatedAt: timestamp(row.updated_at),
   }
+}
+
+const invalidHosts = (
+  message = 'hosts must name distinct current verified members: one individual host or two to eight collective hosts',
+) => new DomainError('invalid', 'invalid_hosts', message)
+
+function validHosts(value: unknown, mode: string, personalOwnerId: string | null): string[] {
+  if (mode !== 'individual' && mode !== 'collective')
+    throw invalidHosts('This scheduling mode cannot be configured')
+  if (
+    !Array.isArray(value) ||
+    value.length < (mode === 'collective' ? 2 : 1) ||
+    value.length > (mode === 'collective' ? 8 : 1)
+  )
+    throw invalidHosts()
+  const ids: string[] = []
+  for (const host of value) {
+    if (!isPlainObject(host) || !onlyKeys(host, ['userId']) || !isUuid(host.userId))
+      throw invalidHosts()
+    ids.push((host.userId as string).toLowerCase())
+  }
+  if (new Set(ids).size !== ids.length) throw invalidHosts()
+  if (personalOwnerId !== null && (mode !== 'individual' || ids[0] !== personalOwnerId))
+    throw invalidHosts('Personal event types must be hosted by their owner')
+  return ids.sort()
+}
+
+/** Host assignment exposes names and IDs only to current owners/admins, one page at a time. */
+export async function listEventTypeHosts(
+  ctx: ServiceContext,
+  input: CatalogPageInput = {},
+): Promise<CatalogPage<{ id: string; name: string }>> {
+  const { personalOwnerId, canManageTeam } = await access(ctx.db, ctx)
+  if (personalOwnerId !== ctx.principal.user.id && !canManageTeam) throw insufficientRole()
+  const { limit, after } = checkedCatalogPage(input)
+  let query = ctx.db
+    .selectFrom('auth.member as m')
+    .innerJoin('auth.user as u', 'u.id', 'm.userId')
+    .select(['u.id', 'u.name'])
+    .where('m.organizationId', '=', ctx.principal.organization.id)
+    .where('u.emailVerified', '=', true)
+  if (after !== undefined) query = query.where('u.id', '>', after)
+  return catalogPage(
+    await query
+      .orderBy('u.id')
+      .limit(limit + 1)
+      .execute(),
+    limit,
+  )
 }

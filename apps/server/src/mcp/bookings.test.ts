@@ -139,6 +139,69 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
     }
   }
 
+  it('discovers and books a collective team with exact-case teamSlug and an unambiguous namespace', async () => {
+    const teamSlug = `Collective-${randomUUID().slice(0, 8)}`
+    const org = await f.organization(teamSlug)
+    const second = await f.host({ name: 'Second required host', handle: null })
+    await f.schedule(second.userId)
+    await f.member(ada.userId, org, 'owner')
+    await f.member(second.userId, org)
+    const eventId = await f.eventType(org, null, {
+      slug: 'interview',
+      hosts: [{ userId: ada.userId }, { userId: second.userId }],
+    })
+    await db
+      .updateTable('event_types')
+      .set({ scheduling_type: 'collective' })
+      .where('id', '=', eventId)
+      .execute()
+    const args = {
+      teamSlug,
+      slug: 'interview',
+      timeZone: 'Europe/Berlin',
+      startDate: '2026-11-03',
+      endDate: '2026-11-03',
+    }
+    const found = ok<{
+      eventType: { hosts: { name: string; timeZone: string }[] }
+      slots: { start: string }[]
+    }>(await call('find_available_slots', args))
+    expect(found.eventType.hosts).toHaveLength(2)
+    expect(found.slots.length).toBeGreaterThan(0)
+    expect(errorOf(await call('find_available_slots', { ...args, handle: 'ada' })).error).toBe(
+      'invalid_request',
+    )
+    expect(
+      errorOf(await call('find_available_slots', { ...args, teamSlug: teamSlug.toLowerCase() }))
+        .error,
+    ).toBe('event_type_not_found')
+    const key = randomUUID()
+    const request = {
+      teamSlug,
+      slug: 'interview',
+      start: found.slots[0]?.start,
+      idempotencyKey: key,
+      invitee: { name: 'Synthetic invitee', email: 'synthetic@example.com', timeZone: 'UTC' },
+    }
+    const created = ok<Booked>(await call('create_booking', request))
+    expect(created.booking.source).toBe('mcp')
+    expect(ok<Booked>(await call('create_booking', request)).replayed).toBe(true)
+    expect(
+      await db
+        .selectFrom('booking_hosts')
+        .select('user_id')
+        .where('booking_id', '=', created.booking.id)
+        .execute(),
+    ).toHaveLength(2)
+    expect(errorOf(await call('create_booking', { ...request, handle: 'ada' })).error).toBe(
+      'invalid_request',
+    )
+    const cancelled = ok<{ status: string }>(
+      await call('cancel_booking', { manageToken: created.manageToken }),
+    )
+    expect(cancelled.status).toBe('cancelled')
+  })
+
   const initialize = (key: string) =>
     app.request(`${PUBLIC_URL}/mcp`, {
       method: 'POST',
