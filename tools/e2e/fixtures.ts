@@ -1,11 +1,15 @@
 import { randomBytes } from 'node:crypto'
 import { createServer as createHttpServer, type Server } from 'node:http'
-import { createServer as createProbe, type Server as SocketServer } from 'node:net'
+import {
+  createConnection,
+  createServer as createProbe,
+  type Server as SocketServer,
+} from 'node:net'
 import { fileURLToPath } from 'node:url'
 import { test as base, expect, type Locator, type Page } from '@playwright/test'
 import { type RunningServer, startServer } from '../../apps/server/src/server.ts'
 import { createAuth, createAuthPool } from '../../packages/auth/src/index.ts'
-import { createDb } from '../../packages/db/src/index.ts'
+import { createDb, createPool } from '../../packages/db/src/index.ts'
 import { createTestDatabase } from '../../packages/db/src/testing.ts'
 import { createFixtures } from '../../packages/scheduling/src/testing.ts'
 
@@ -34,6 +38,14 @@ interface FixtureApp {
   teamPath: string
   rows: () => Promise<{ source: string; status: string }[]>
   authorizeHost: (teamRole?: 'owner' | 'member') => Promise<void>
+  bookingState: () => Promise<{
+    total: number
+    roots: number
+    successors: number
+    bookerLocales: (string | null)[]
+    fingerprints: number
+    originalFingerprintPreserved: boolean
+  }>
 }
 export const test = base.extend<{ app: FixtureApp; suppressFailureDom: undefined }>({
   suppressFailureDom: [
@@ -59,9 +71,11 @@ export const test = base.extend<{ app: FixtureApp; suppressFailureDom: undefined
     const owned = await createTestDatabase(bootstrap)
     let app: RunningServer | undefined, parent: Server | undefined
     let authPool: ReturnType<typeof createAuthPool> | undefined
+    const ownedPorts: number[] = []
     try {
       const probe = createProbe()
       const port = await listenLoopback(probe)
+      ownedPorts.push(port)
       await new Promise<void>((resolve, reject) =>
         probe.close((error) => (error ? reject(error) : resolve())),
       )
@@ -86,6 +100,11 @@ export const test = base.extend<{ app: FixtureApp; suppressFailureDom: undefined
         hosts: [{ userId: host.userId }],
       })
       parent = createHttpServer((request, response) => {
+        const language = new URL(request.url ?? '/', 'http://localhost').searchParams.get(
+          'language',
+        )
+        const languageAttribute =
+          language === 'en' || language === 'zh-CN' ? ` data-hourmere-language="${language}"` : ''
         response.setHeader('Cache-Control', 'no-store')
         if (request.url === '/parent.js') {
           response.setHeader('Content-Type', 'application/javascript')
@@ -96,10 +115,12 @@ export const test = base.extend<{ app: FixtureApp; suppressFailureDom: undefined
         }
         response.setHeader('Content-Type', 'text/html; charset=utf-8')
         response.end(
-          `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Fixture website</title><button type="button" data-hourmere-popup data-hourmere-url="${url}/fixture-host/call">Book a meeting</button><div data-hourmere-inline data-hourmere-url="${url}/fixture-host/call"></div><script src="/parent.js" defer></script><script src="${url}/hourmere-embed.js" defer></script>`,
+          `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Fixture website</title><button type="button" data-hourmere-popup${languageAttribute} data-hourmere-url="${url}/fixture-host/call">Book a meeting</button><div data-hourmere-inline${languageAttribute} data-hourmere-url="${url}/fixture-host/call"></div><script src="/parent.js" defer></script><script src="${url}/hourmere-embed.js" defer></script>`,
         )
       })
-      const parentUrl = `http://127.0.0.1:${await listenLoopback(parent)}`
+      const parentPort = await listenLoopback(parent)
+      ownedPorts.push(parentPort)
+      const parentUrl = `http://127.0.0.1:${parentPort}`
       const authSecret = randomBytes(32).toString('base64')
       app = await startServer({
         DATABASE_URL: owned.url,
@@ -109,7 +130,9 @@ export const test = base.extend<{ app: FixtureApp; suppressFailureDom: undefined
         SIGNUP: 'closed',
         HOURMERE_ROLE: 'web',
         EMBED_ALLOWED_ORIGINS: parentUrl,
-        WEB_DIST: fileURLToPath(new URL('../../apps/web/dist', import.meta.url)),
+        WEB_DIST:
+          process.env.HOURMERE_E2E_WEB_DIST ??
+          fileURLToPath(new URL('../../apps/web/dist', import.meta.url)),
       })
       let externalRequests = 0
       let authorization: string | undefined
@@ -120,7 +143,9 @@ export const test = base.extend<{ app: FixtureApp; suppressFailureDom: undefined
           await route.continue({
             ...(authorization &&
               origin === url &&
-              requestUrl.pathname.startsWith('/api/v1/') && {
+              requestUrl.pathname.startsWith('/api/v1/') &&
+              !requestUrl.pathname.startsWith('/api/v1/public/') &&
+              !requestUrl.pathname.startsWith('/api/v1/bookings/manage') && {
                 headers: { ...route.request().headers(), authorization },
               }),
           })
@@ -129,6 +154,7 @@ export const test = base.extend<{ app: FixtureApp; suppressFailureDom: undefined
           await route.abort('blockedbyclient')
         }
       })
+      const firstFingerprints = new Map<string, Buffer>()
       await use({
         url,
         parentUrl,
@@ -159,12 +185,38 @@ export const test = base.extend<{ app: FixtureApp; suppressFailureDom: undefined
           const key = await auth.api.createApiKey({
             body: {
               userId: host.userId,
-              name: 'synthetic-browser-analytics',
+              name: 'synthetic-browser-fixture',
               ...(teamRole && { metadata: { organizationId: team } }),
             },
           })
           // Keep the synthetic credential in this process; only owned product API calls receive it.
           authorization = `Bearer ${key.key}`
+        },
+        bookingState: async () => {
+          const rows = await db
+            .selectFrom('bookings')
+            .select(['id', 'rescheduled_from_id', 'idempotency_fingerprint'])
+            .execute()
+          let originalFingerprintPreserved = true
+          for (const row of rows) {
+            if (!row.idempotency_fingerprint) continue
+            const first = firstFingerprints.get(row.id)
+            if (first) originalFingerprintPreserved &&= first.equals(row.idempotency_fingerprint)
+            else firstFingerprints.set(row.id, Buffer.from(row.idempotency_fingerprint))
+          }
+          const attendees = await db
+            .selectFrom('booking_attendees')
+            .select('locale')
+            .where('is_booker', '=', true)
+            .execute()
+          return {
+            total: rows.length,
+            roots: rows.filter((row) => row.rescheduled_from_id === null).length,
+            successors: rows.filter((row) => row.rescheduled_from_id !== null).length,
+            fingerprints: rows.filter((row) => row.idempotency_fingerprint !== null).length,
+            originalFingerprintPreserved,
+            bookerLocales: attendees.map((row) => row.locale),
+          }
         },
         rows: () =>
           db.selectFrom('bookings').select(['source', 'status']).orderBy('created_at').execute(),
@@ -187,6 +239,36 @@ export const test = base.extend<{ app: FixtureApp; suppressFailureDom: undefined
           await authPool?.end()
         } finally {
           await owned.drop()
+          const verification = createPool(owned.url)
+          try {
+            let absent = false
+            try {
+              await verification.query('SELECT 1')
+            } catch (error) {
+              absent = (error as { code?: string }).code === '3D000'
+            }
+            expect(absent, 'The helper-owned database must no longer exist').toBe(true)
+          } finally {
+            await verification.end()
+          }
+          for (const port of ownedPorts) {
+            const closed = await new Promise<boolean>((resolve) => {
+              const socket = createConnection({ host: '127.0.0.1', port })
+              socket.once('connect', () => {
+                socket.destroy()
+                resolve(false)
+              })
+              socket.once('error', (error) => {
+                resolve((error as NodeJS.ErrnoException).code === 'ECONNREFUSED')
+              })
+              socket.setTimeout(1000, () => {
+                socket.destroy()
+                resolve(false)
+              })
+            })
+            expect(closed, 'The helper-owned listener must be closed').toBe(true)
+          }
+          console.log('Fixture cleanup verified: database absent and owned listeners closed')
         }
       }
     }
@@ -209,12 +291,12 @@ export async function pickSlot(scope: Page | Locator, page: Page) {
       }
     }
     const slots = page.waitForResponse((r) => r.url().includes('/slots') && r.status() === 200)
-    await scope.getByRole('button', { name: 'Next month' }).click()
+    await scope.getByRole('button', { name: /^(Next month|下个月)$/ }).click()
     await slots
   }
   throw new Error('No fixture availability within four months')
 }
 export async function fillInvitee(scope: Page | Locator) {
-  await scope.getByLabel('Your name', { exact: true }).fill('Fixture Invitee')
-  await scope.getByLabel('Email', { exact: true }).fill('fixture-invitee@hourmere.invalid')
+  await scope.getByLabel(/^(Your name|你的姓名)$/, { exact: true }).fill('Fixture Invitee')
+  await scope.getByLabel(/^(Email|邮箱)$/, { exact: true }).fill('fixture-invitee@hourmere.invalid')
 }

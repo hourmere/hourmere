@@ -1361,3 +1361,18 @@ input[aria-invalid="true"] {
   margin: 0 auto;
   padding: 16px 20px 0;
 }
+
+@media (max-width: 480px) {
+  .topbar {
+    flex-wrap: wrap;
+  }
+  .topbar .account {
+    flex-basis: 100%;
+    justify-content: space-between;
+  }
+  .topbar .language-picker {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.25rem;
+  }
+}
