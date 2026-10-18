@@ -6,7 +6,8 @@
     ".": "./src/index.ts",
     "./zoom": "./src/zoom.ts",
     "./credentials": "./src/credentials.ts",
-    "./zoom-meetings": "./src/zoom-meetings.ts"
+    "./zoom-meetings": "./src/zoom-meetings.ts",
+    "./worker": "./src/worker.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json"

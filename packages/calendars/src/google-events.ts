@@ -9,15 +9,8 @@ const time = z.object({
   timeZone: text.optional(),
 })
 export const safeGoogleEventId = (value: string) => /^[A-Za-z0-9_-]{1,1024}$/.test(value)
-export function googleMeetUrl(value: unknown): string | undefined {
-  if (
-    typeof value !== 'string' ||
-    value.length > 200 ||
-    !/^https:\/\/meet\.google\.com\/[a-z]{3}-[a-z]{4}-[a-z]{3}$/.test(value)
-  )
-    return undefined
-  return value
-}
+export { googleMeetUrl } from '@hourmere/scheduling/conference-url'
+
 const conferenceData = z.object({
   createRequest: z
     .object({

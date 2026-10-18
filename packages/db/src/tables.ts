@@ -321,12 +321,16 @@ export interface BookingConferences {
   next_attempt_at: Generated<Timestamp>;
   organization_id: string;
   organizer_user_id: string;
+  provider: Generated<string>;
   request_id: Generated<string>;
   retry_conference: Generated<boolean>;
   revision: Generated<number>;
   root_booking_id: string;
   state: Generated<string>;
   updated_at: Generated<Timestamp>;
+  zoom_connection_id: string | null;
+  zoom_meeting_id: string | null;
+  zoom_user_id: string | null;
 }
 
 export interface BookingHosts {
@@ -490,6 +494,7 @@ export interface EventTypes {
   slug: string;
   title: string;
   updated_at: Generated<Timestamp>;
+  zoom_connection_id: string | null;
 }
 
 export interface McpOauthGrants {

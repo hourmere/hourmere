@@ -31,3 +31,24 @@ ALTER TABLE conference_connections DROP CONSTRAINT conference_connections_last_e
 ALTER TABLE conference_connections ADD CONSTRAINT conference_connections_last_error_check
   CHECK (last_error IN ('provider_unavailable','needs_reauth','permissions_missing',
     'identity_mismatch','credentials_unavailable','mode_conflict'));
+
+-- Provider pins are independent of calendar credentials. Old roots retain Google defaults;
+-- no identity/email/history is fabricated and no old row is updated.
+ALTER TABLE event_types ADD COLUMN zoom_connection_id uuid;
+ALTER TABLE booking_conferences
+  ADD COLUMN provider text NOT NULL DEFAULT 'google_meet' CHECK(provider IN ('google_meet','zoom')),
+  ADD COLUMN zoom_connection_id uuid,
+  ADD COLUMN zoom_user_id text,
+  ADD COLUMN zoom_meeting_id text CHECK(zoom_meeting_id ~ '^[1-9][0-9]{0,14}$'),
+  ADD CONSTRAINT booking_conference_provider_pins CHECK (
+    (provider='google_meet' AND zoom_connection_id IS NULL AND zoom_user_id IS NULL AND zoom_meeting_id IS NULL) OR
+    (provider='zoom' AND zoom_connection_id IS NOT NULL AND zoom_user_id IS NOT NULL AND zoom_user_id ~ '^[A-Za-z0-9_-]{1,128}$'
+      AND calendar_id IS NULL AND connection_id IS NULL AND external_event_id IS NULL)
+  );
+CREATE OR REPLACE FUNCTION immutable_conference_identity() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+ IF ROW(NEW.root_booking_id,NEW.organization_id,NEW.organizer_user_id,NEW.calendar_id,NEW.connection_id,
+        NEW.invitation_organizer_name,NEW.invitation_organizer_email,NEW.provider,NEW.zoom_connection_id,NEW.zoom_user_id) IS DISTINCT FROM
+    ROW(OLD.root_booking_id,OLD.organization_id,OLD.organizer_user_id,OLD.calendar_id,OLD.connection_id,
+        OLD.invitation_organizer_name,OLD.invitation_organizer_email,OLD.provider,OLD.zoom_connection_id,OLD.zoom_user_id) THEN
+   RAISE EXCEPTION 'Conference identity is immutable' USING ERRCODE='23514';
+ END IF; RETURN NEW; END $$;

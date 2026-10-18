@@ -56,6 +56,12 @@ export function requireCalendarSession(principal: Principal): SessionPrincipal {
 }
 
 export interface CalendarDeps {
+  zoomConferenceWork?:
+    | ((
+        claim: import('@hourmere/scheduling/conferences').ConferenceWork,
+        signal: AbortSignal,
+      ) => Promise<import('@hourmere/scheduling/conferences').ConferenceResult>)
+    | undefined
   db: Db
   google?: { client: GoogleCalendarClient; encryptionKey: string } | undefined
   microsoft?: { client: MicrosoftCalendarClient; encryptionKey: string } | undefined

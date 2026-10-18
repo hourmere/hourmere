@@ -2,7 +2,12 @@ import { randomUUID } from 'node:crypto'
 import type { Db } from '@hourmere/db'
 import { defineJob, type EnqueueOptions } from '@hourmere/jobs'
 import type { ServiceContext } from '@hourmere/scheduling'
-import { conferenceOrganizerAvailable, conferenceRoot } from '@hourmere/scheduling/conferences'
+import { conferenceJoinUrl, zoomMeetingId } from '@hourmere/scheduling/conference-url'
+import {
+  type ConferenceResult,
+  conferenceOrganizerAvailable,
+  conferenceRoot,
+} from '@hourmere/scheduling/conferences'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { sql } from 'kysely'
 import { z } from 'zod'
@@ -107,7 +112,11 @@ async function claim(deps: CalendarDeps, root: string) {
       .executeTakeFirst()
     if (!booking) return
     const lease = randomUUID()
-    const create = !c.create_started && !c.external_event_id && booking.status === 'confirmed'
+    const create =
+      !c.create_started &&
+      !c.external_event_id &&
+      !c.zoom_meeting_id &&
+      booking.status === 'confirmed'
     await trx
       .updateTable('booking_conferences')
       .set({
@@ -123,14 +132,7 @@ async function claim(deps: CalendarDeps, root: string) {
   })
 }
 type Claim = NonNullable<Awaited<ReturnType<typeof claim>>>
-type Outcome = {
-  event?: GoogleEvent
-  url?: string
-  pending?: boolean
-  cancelled?: boolean
-  error?: string
-  knownNoCreate?: boolean
-}
+type Outcome = ConferenceResult & { event?: GoogleEvent }
 const valueFor = (c: Claim): GoogleEventWrite => ({
   iCalUID: `${c.root_booking_id}@hourmere`,
   summary: c.booking.title,
@@ -184,6 +186,22 @@ function interpretation(event: GoogleEvent, c: Claim): Outcome {
 async function providerWork(deps: CalendarDeps, c: Claim, signal: AbortSignal): Promise<Outcome> {
   if (c.booking.status === 'confirmed' && !(await conferenceOrganizerAvailable(deps.db, c)))
     return { error: 'organizer_unavailable', knownNoCreate: c.create }
+  if (c.provider === 'zoom')
+    return deps.zoomConferenceWork
+      ? deps.zoomConferenceWork(
+          {
+            rootBookingId: c.root_booking_id,
+            organizerUserId: c.organizer_user_id,
+            connectionId: c.zoom_connection_id,
+            externalUserId: c.zoom_user_id,
+            meetingId: c.zoom_meeting_id,
+            create: c.create,
+            createStarted: c.create_started,
+            booking: c.booking,
+          },
+          signal,
+        )
+      : { error: 'disabled', knownNoCreate: c.create }
   if (c.booking.status === 'cancelled' && !c.create_started && !c.external_event_id)
     return { cancelled: true }
   if (!deps.google || !c.connection_id || !c.calendar_id)
@@ -311,10 +329,15 @@ export async function writeBookingConference(
 ) {
   const c = await claim(deps, root)
   if (!c) return
-  const outcome: Outcome =
+  let outcome: Outcome =
     c.booking.status === 'confirmed' && c.booking.start_at <= clock(deps)
       ? { error: 'meeting_started', knownNoCreate: c.create }
       : await providerWork(deps, c, signal)
+  if (
+    outcome.url &&
+    !conferenceJoinUrl(c.provider, outcome.url, outcome.meetingId ?? c.zoom_meeting_id)
+  )
+    outcome = { ...outcome, url: undefined, error: 'invalid_response' }
   await deps.db.transaction().execute(async (trx) => {
     // Actual service order: booking before intent. Never take these locks over network.
     const booking = await trx
@@ -347,6 +370,24 @@ export async function writeBookingConference(
         })
         .where('root_booking_id', '=', root)
         .execute()
+    if (
+      outcome.meetingId &&
+      zoomMeetingId(outcome.meetingId) === outcome.meetingId &&
+      current.provider === 'zoom' &&
+      (!current.zoom_meeting_id || current.zoom_meeting_id === outcome.meetingId)
+    )
+      await trx
+        .updateTable('booking_conferences')
+        .set({
+          zoom_meeting_id: outcome.meetingId,
+          ...(!current.zoom_meeting_id &&
+          current.state === 'failed' &&
+          current.error_code === 'ambiguous_create'
+            ? { state: 'pending', error_code: null, next_attempt_at: clock(deps) }
+            : {}),
+        })
+        .where('root_booking_id', '=', root)
+        .execute()
     if (current.lease_id !== c.lease) return
     if (
       current.booking_id !== c.booking_id ||
@@ -360,7 +401,11 @@ export async function writeBookingConference(
         .execute()
       return
     }
-    if (outcome.error === 'ambiguous_create' && !c.external_event_id && current.external_event_id) {
+    if (
+      outcome.error === 'ambiguous_create' &&
+      !(c.external_event_id || c.zoom_meeting_id) &&
+      (current.external_event_id || current.zoom_meeting_id)
+    ) {
       await trx
         .updateTable('booking_conferences')
         .set({
@@ -389,7 +434,10 @@ export async function writeBookingConference(
       (outcome.pending || error === 'provider_unavailable') &&
       c.attempts < POLL_LIMIT
     const ready =
-      organizerAvailable && !expired && (Boolean(outcome.url) || outcome.cancelled === true)
+      organizerAvailable &&
+      !expired &&
+      !outcome.error &&
+      (Boolean(outcome.url) || outcome.cancelled === true)
     const state = ready ? 'ready' : retryable ? 'pending' : 'failed'
     await trx
       .updateTable('booking_conferences')
@@ -465,7 +513,11 @@ export async function writeBookingConference(
       await trx
         .updateTable('bookings')
         .set({
-          location: JSON.stringify({ kind: 'google_meet', autoCreate: true, url: outcome.url }),
+          location: JSON.stringify({
+            kind: c.provider === 'zoom' ? 'zoom' : 'google_meet',
+            autoCreate: true,
+            url: outcome.url,
+          }),
         })
         .where('id', '=', c.booking_id)
         .execute()

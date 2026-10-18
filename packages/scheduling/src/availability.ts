@@ -17,9 +17,11 @@ import type { Db, Json } from '@hourmere/db'
 import { type Expression, type ExpressionBuilder, sql } from 'kysely'
 import {
   automaticMeet,
+  automaticZoom,
   eligibleMeetHosts,
   meetOrganizer,
   requireMeetDestination,
+  requireZoomConnection,
 } from './conferences.ts'
 import type { PublicContext } from './context.ts'
 import { DomainError } from './errors.ts'
@@ -92,6 +94,7 @@ export interface PublicEventTypeRecord {
   hostUserId: string
   hostUserIds: string[]
   eligibleHostUserIds: string[]
+  zoomConnectionId?: string | null
   conferenceOrganizerUserId: string | null
   schedulingType: 'individual' | 'collective' | 'round_robin'
   hosts: { name: string; timeZone: string }[]
@@ -154,6 +157,7 @@ export async function findPublicEventType(
       'et.minimum_notice_minutes',
       'et.booking_window_days',
       'et.location',
+      'et.zoom_connection_id',
       'et.questions',
       'et.allow_guests',
       'p.user_id',
@@ -176,6 +180,7 @@ export async function findPublicEventType(
     hostUserIds: [row.user_id],
     eligibleHostUserIds: [row.user_id],
     conferenceOrganizerUserId: null,
+    zoomConnectionId: row.zoom_connection_id,
     schedulingType: 'individual',
     hosts: [{ name: row.name.trim() || row.handle, timeZone: row.time_zone }],
     handle: row.handle,
@@ -303,6 +308,7 @@ export async function findPublicTeamEventType(
     hostUserIds,
     eligibleHostUserIds,
     conferenceOrganizerUserId: row.conference_organizer_user_id,
+    zoomConnectionId: row.zoom_connection_id,
     schedulingType: row.scheduling_type as PublicEventTypeRecord['schedulingType'],
     hosts: views,
     handle: row.team_slug,
@@ -530,6 +536,11 @@ async function publicSlots(
   const et = await resolve(ctx.db, input.handle, input.slug)
   if (!et) throw eventTypeNotFound()
   const now = ctx.now()
+  if (automaticZoom(et.location)) {
+    if (et.schedulingType !== 'individual' || et.hostUserIds.length !== 1)
+      throw new DomainError('conflict', 'automatic_zoom_host_policy')
+    await requireZoomConnection(ctx.db, et.hostUserId, et.zoomConnectionId, ctx.automaticZoom)
+  }
   if (automaticMeet(et.location)) {
     if (et.schedulingType === 'round_robin')
       et.eligibleHostUserIds = await eligibleMeetHosts(

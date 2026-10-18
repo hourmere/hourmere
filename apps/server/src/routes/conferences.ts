@@ -41,16 +41,22 @@ const privateHeaders = createMiddleware(async (c, next) => {
   c.header('Referrer-Policy', 'no-referrer')
   await next()
 })
+const jsonCommand = createMiddleware(async (c, next) => {
+  if (c.req.header('content-type')?.split(';')[0]?.trim().toLowerCase() !== 'application/json')
+    return c.json({ error: 'invalid_request', message: 'Send an empty JSON object.' }, 400)
+  await next()
+})
 export function conferenceRoutes(deps: ConferenceDeps): RouteModule {
   const limit = rateLimit(createRateLimiter({ limit: 20, windowSeconds: 60 }))
   return ({ app, caller }) => {
     const session: [CallerMiddleware, MiddlewareHandler<CallerEnv>, MiddlewareHandler<CallerEnv>] =
       [privateHeaders, caller, sessionOnly]
-    const write: [...typeof session, MiddlewareHandler<CallerEnv>, MiddlewareHandler<CallerEnv>] = [
-      ...session,
-      limit,
-      routeBodyLimit(1024),
-    ]
+    const write: [
+      ...typeof session,
+      MiddlewareHandler<CallerEnv>,
+      MiddlewareHandler<CallerEnv>,
+      MiddlewareHandler<CallerEnv>,
+    ] = [...session, limit, routeBodyLimit(1024), jsonCommand]
     app.openapi(
       createRoute({
         method: 'get',

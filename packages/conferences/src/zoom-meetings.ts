@@ -1,61 +1,9 @@
+import { zoomJoinUrl, zoomMeetingId } from '@hourmere/scheduling/conference-url'
 import { isSingleLineText } from '@hourmere/scheduling/text'
 import { z } from 'zod'
 import { boundedZoomJson, ZOOM_NOT_FOUND, ZoomError } from './transport.ts'
 
-// Fixed commercial Zoom web hosts documented in Zoom support KB0078410. Vanity and
-// government domains need a separately reviewed policy; no suffix/wildcard acceptance.
-const JOIN_HOSTS = new Set([
-  'zoom.us',
-  'au01web.zoom.us',
-  'ca01web.zoom.us',
-  'eu01web.zoom.us',
-  'in01web.zoom.us',
-  'us02web.zoom.us',
-  'us04web.zoom.us',
-  'us05web.zoom.us',
-  'us06web.zoom.us',
-  'us07web.zoom.us',
-  'eu02web.zoom.us',
-  'sa01web.zoom.us',
-  'dg01web.zoom.us',
-  'sg01web.zoom.us',
-  'uk01web.zoom.us',
-])
-/** Canonical positive decimal, bounded to a safely representable 15-digit resource ID. */
-export function zoomMeetingId(value: unknown): string | null {
-  if (typeof value === 'number' && (!Number.isSafeInteger(value) || value <= 0)) return null
-  if (typeof value !== 'string' && typeof value !== 'number') return null
-  const id = String(value)
-  return /^[1-9][0-9]{0,14}$/.test(id) ? id : null
-}
-/** This URL is a participant capability. It must never be logged or put in a public catalog. */
-export function zoomJoinUrl(value: unknown, meetingId: string): string | null {
-  if (typeof value !== 'string' || value.length > 1024 || !isSingleLineText(value)) return null
-  if (zoomMeetingId(meetingId) !== meetingId) return null
-  try {
-    const url = new URL(value)
-    if (
-      url.protocol !== 'https:' ||
-      !JOIN_HOSTS.has(url.hostname) ||
-      url.username ||
-      url.password ||
-      url.port ||
-      url.hash ||
-      url.pathname !== `/j/${meetingId}` ||
-      url.href !== value
-    )
-      return null
-    const keys = [...url.searchParams.keys()]
-    if (keys.length > 1 || keys.some((key) => key !== 'pwd')) return null
-    if (keys.length && !/^[A-Za-z0-9_.~-]{1,128}$/.test(url.searchParams.get('pwd') ?? ''))
-      return null
-    // Refuse alternate encodings and dangling query delimiters as well as extra capabilities.
-    const expected = `https://${url.hostname}/j/${meetingId}${keys.length ? `?pwd=${url.searchParams.get('pwd')}` : ''}`
-    return value === expected ? expected : null
-  } catch {
-    return null
-  }
-}
+export { zoomJoinUrl, zoomMeetingId } from '@hourmere/scheduling/conference-url'
 export interface ZoomMeetingInput {
   topic: string
   start: Date

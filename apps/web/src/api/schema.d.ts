@@ -4690,7 +4690,7 @@ export interface components {
             conference?: {
                 errorCode: string | null;
                 /** @enum {string} */
-                provider: "google_meet";
+                provider: "google_meet" | "zoom";
                 /** @enum {string} */
                 status: "pending" | "ready" | "failed";
             };
@@ -4891,6 +4891,8 @@ export interface components {
                 /** @enum {string} */
                 kind: "google_meet";
             } | {
+                /** @enum {boolean} */
+                autoCreate?: true;
                 /** @enum {string} */
                 kind: "zoom";
             } | {
@@ -4948,6 +4950,8 @@ export interface components {
             title: string;
             /** Format: date-time */
             updatedAt: string;
+            /** Format: uuid */
+            zoomConnectionId?: string;
         };
         EventTypeInput: {
             /**
@@ -4993,6 +4997,8 @@ export interface components {
                 /** @enum {string} */
                 kind: "google_meet";
             } | {
+                /** @enum {boolean} */
+                autoCreate?: true;
                 /** @enum {string} */
                 kind: "zoom";
             } | {
@@ -5046,6 +5052,7 @@ export interface components {
             slug: string;
             /** @example Intro call */
             title: string;
+            zoomConnectionId?: string | null;
         };
         EventTypeList: {
             data: components["schemas"]["EventType"][];
@@ -5080,6 +5087,8 @@ export interface components {
                 /** @enum {string} */
                 kind: "google_meet";
             } | {
+                /** @enum {boolean} */
+                autoCreate?: true;
                 /** @enum {string} */
                 kind: "zoom";
             } | {
@@ -5127,6 +5136,7 @@ export interface components {
             slug?: string;
             /** @example Intro call */
             title?: string;
+            zoomConnectionId?: string | null;
         };
         Health: {
             /** @enum {string} */
@@ -5136,6 +5146,7 @@ export interface components {
         };
         Instance: {
             automaticGoogleMeet?: boolean;
+            automaticZoom?: boolean;
             /** @description The sign-in methods people can use on this instance */
             signIn: {
                 /** @description Sign-in links sent by email */

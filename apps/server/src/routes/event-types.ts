@@ -40,7 +40,7 @@ const L = EVENT_TYPE_LIMITS
 
 const locationKinds = {
   googleMeet: { kind: z.literal('google_meet'), autoCreate: z.literal(true).optional() },
-  zoom: { kind: z.literal('zoom') },
+  zoom: { kind: z.literal('zoom'), autoCreate: z.literal(true).optional() },
   phone: {
     kind: z.literal('phone'),
     number: z.string().openapi({
@@ -180,6 +180,7 @@ export const EventType = z
       .openapi({ description: 'Explicit round-robin activation; metadata saves never enable it' }),
     hosts: z.array(z.object({ userId: z.uuid() })).max(8),
     conferenceOrganizer: z.object({ userId: z.uuid() }).nullable(),
+    zoomConnectionId: z.uuid().optional(),
     questions: z.array(Question),
     createdAt: z.iso.datetime(),
     updatedAt: z.iso.datetime(),
@@ -204,6 +205,7 @@ const EventTypeInput = z
     maxBookingsPerDay: fields.maxBookingsPerDay.optional(),
     location: LocationInput.optional(),
     conferenceOrganizer: z.strictObject({ userId: z.string() }).nullable().optional(),
+    zoomConnectionId: z.string().nullable().optional(),
     questions: questions.optional(),
     isActive: fields.isActive.optional().openapi({ default: true }),
     isHidden: fields.isHidden.optional().openapi({ default: false }),
@@ -232,6 +234,7 @@ const EventTypeUpdate = z
     maxBookingsPerDay: fields.maxBookingsPerDay.optional(),
     location: LocationInput.optional(),
     conferenceOrganizer: z.strictObject({ userId: z.string() }).nullable().optional(),
+    zoomConnectionId: z.string().nullable().optional(),
     questions: questions.optional(),
     isActive: fields.isActive.optional(),
     isHidden: fields.isHidden.optional(),

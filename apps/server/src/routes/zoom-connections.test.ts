@@ -239,6 +239,50 @@ describe.skipIf(!databaseUrl)('Zoom HTTP session-only routes (real Postgres)', (
     expect(response.headers.get('cache-control')).toBe('no-store')
     expect(provider.calls).toHaveLength(0)
   })
+  it('refuses bodyless or non-JSON meeting commands before creating state, while retaining caller/origin gates', async () => {
+    app = composition(true, true)
+    const path = '/api/v1/conference-connections/zoom/authorize-meetings'
+    for (const headers of [
+      { cookie: 'owner', origin: 'http://localhost:5173' },
+      { cookie: 'owner', origin: 'http://localhost:5173', 'content-type': 'text/plain' },
+      { cookie: 'owner', origin: 'http://localhost:5173', 'content-type': 'application/json' },
+    ]) {
+      const response = await app.request(path, { method: 'POST', headers })
+      expect(response.status).toBe(400)
+      expect(response.headers.get('cache-control')).toBe('no-store')
+    }
+    expect(
+      await db.selectFrom('conference_oauth_states').select('state_hash').execute(),
+    ).toHaveLength(0)
+    expect(provider.calls).toHaveLength(0)
+    expect(
+      (await app.request(path, { method: 'POST', headers: { origin: 'http://localhost:5173' } }))
+        .status,
+    ).toBe(401)
+    expect(
+      (
+        await app.request(path, {
+          method: 'POST',
+          headers: {
+            cookie: 'owner',
+            origin: 'http://localhost:5173',
+            authorization: 'Bearer synthetic-key',
+          },
+        })
+      ).status,
+    ).toBe(403)
+    expect(
+      (
+        await app.request(path, {
+          method: 'POST',
+          headers: { cookie: 'owner', origin: 'https://untrusted.invalid' },
+        })
+      ).status,
+    ).toBe(403)
+    expect(
+      await db.selectFrom('conference_oauth_states').select('state_hash').execute(),
+    ).toHaveLength(0)
+  })
   it('uses a distinct session-only meeting action and refuses caller-supplied modes/scopes/connection IDs', async () => {
     expect(
       (await req('/api/v1/conference-connections/zoom/authorize-meetings', 'POST', '{}')).status,

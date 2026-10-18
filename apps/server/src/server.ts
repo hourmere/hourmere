@@ -22,6 +22,8 @@ import {
   createMicrosoftCalendarClient,
 } from '@hourmere/calendars'
 import { type ConferenceDeps, createZoomClient } from '@hourmere/conferences'
+import { createZoomConferenceWork } from '@hourmere/conferences/worker'
+import { createZoomMeetingsClient } from '@hourmere/conferences/zoom-meetings'
 import { createDb, createPool, type Db, runMigrations } from '@hourmere/db'
 import { createJobs } from '@hourmere/jobs'
 import { createLogMailer, createSmtpMailer, type Mailer } from '@hourmere/mail'
@@ -74,9 +76,11 @@ export function productRoutes({
   publicUrl = 'http://localhost',
   webhooks = { enabled: false },
   automaticMeet = false,
+  automaticZoom = false,
 }: {
   db: Db
   automaticMeet?: boolean
+  automaticZoom?: boolean
   webhooks?: import('@hourmere/webhooks').WebhookSettings
   mcpAuth?: Pick<ReturnType<typeof createAuth>, 'handler'> | undefined
   publicUrl?: string
@@ -89,15 +93,15 @@ export function productRoutes({
 }): RouteModule[] {
   return [
     mcpOAuthRoutes({ auth: mcpAuth, db, publicUrl }),
-    instanceRoutes({ socialProviders, automaticMeet }),
+    instanceRoutes({ socialProviders, automaticMeet, automaticZoom }),
     calendarRoutes({ db, google: googleCalendar, enqueueSync: enqueueCalendarSync }),
     conferenceRoutes({ db, zoom: zoomConference }),
     profileRoutes({ db }),
     scheduleRoutes({ db }),
     webhookRoutes({ db, ...webhooks }),
-    eventTypeRoutes({ db, automaticMeet }),
-    publicRoutes({ db, notify, automaticMeet }),
-    bookingRoutes({ db, notify, automaticMeet }),
+    eventTypeRoutes({ db, automaticMeet, automaticZoom }),
+    publicRoutes({ db, notify, automaticMeet, automaticZoom }),
+    bookingRoutes({ db, notify, automaticMeet, automaticZoom }),
     analyticsRoutes({ db }),
   ]
 }
@@ -221,7 +225,19 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
     enabled: config.WEBHOOKS_ENABLED,
     encryptionKey: config.WEBHOOK_ENCRYPTION_KEY,
   }
-  const calendarDeps: CalendarDeps = { db, google: googleCalendar, microsoft: microsoftCalendar }
+  const calendarDeps: CalendarDeps = {
+    db,
+    google: googleCalendar,
+    microsoft: microsoftCalendar,
+    ...(zoomConference
+      ? {
+          zoomConferenceWork: createZoomConferenceWork(
+            { db, zoom: zoomConference },
+            createZoomMeetingsClient(),
+          ),
+        }
+      : {}),
+  }
   let enqueueConference: (id: string) => Promise<unknown> = async () => {}
   let enqueueCalendar: (calendarId: string) => Promise<unknown> = async () => {}
   let enqueueBookingCalendar: (id: string) => Promise<unknown> = async () => {}
@@ -315,6 +331,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
         db,
         socialProviders: config.socialProviders,
         automaticMeet: config.GOOGLE_MEET_ENABLED,
+        automaticZoom: config.ZOOM_MEETINGS_ENABLED,
         webhooks: webhookSettings,
         notify,
         googleCalendar,
@@ -333,7 +350,12 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
           : {}),
         tools: [
           whoamiTool,
-          ...bookingTools({ db, notify, automaticMeet: config.GOOGLE_MEET_ENABLED }),
+          ...bookingTools({
+            db,
+            notify,
+            automaticMeet: config.GOOGLE_MEET_ENABLED,
+            automaticZoom: config.ZOOM_MEETINGS_ENABLED,
+          }),
           ...catalogTools({ db }),
         ],
       }),
