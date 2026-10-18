@@ -57,9 +57,10 @@ requires OAuth Authorization Code with PKCE and dynamic client registration; per
 access tokens are not accepted by that MCP server. This is a transport-specific difference,
 not a claim that Calendly has no API access for scripts.
 
-Cal.diy's README documents API v2 alongside its booking engine. Check the particular
-edition's API and authentication documentation for your integration; an API in one
-offering does not establish compatible MCP support in another.
+Cal.com's [transition announcement](https://cal.com/blog/cal-diy-open-source-to-closed-source)
+says Cal.diy retains API v2 alongside its booking engine. Check the particular edition's
+API and authentication documentation for your integration; an API in one offering does
+not establish compatible MCP support in another.
 
 ## Check the features you need
 
