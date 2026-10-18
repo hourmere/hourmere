@@ -129,23 +129,11 @@ with headers; the exact keys vary by client, e.g. VS Code's `.vscode/mcp.json` u
 }
 ```
 
-**Claude Desktop and claude.ai:** custom connectors there sign in with OAuth, which Hourmere
-does not offer yet (see [What's next](#whats-next)). Meanwhile Claude Desktop can reach the
-endpoint through a local bridge that adds the header, such as
-[`mcp-remote`](https://www.npmjs.com/package/mcp-remote), in `claude_desktop_config.json`.
-Pin a version (versions before 0.1.16 have a remote code execution flaw, CVE-2025-6514):
-
-```json
-{
-  "mcpServers": {
-    "hourmere": {
-      "command": "npx",
-      "args": ["mcp-remote@0.14.3", "https://hourmere.example.com/mcp", "--header", "Authorization:${HOURMERE_AUTH}"],
-      "env": { "HOURMERE_AUTH": "Bearer hm_…" }
-    }
-  }
-}
-```
+**OAuth connectors:** enable Hourmere's optional [OAuth 2.1 provider](#oauth-21-connectors)
+for clients that require browser authorization. Actual hosted ChatGPT/claude.ai acceptance
+still requires an externally reachable HTTPS deployment and a real connector account;
+local protocol tests do not establish hosted compatibility. For terminal workflows, the
+repository's [CLI](cli.md) calls the existing API-key tools without a third-party bridge.
 
 **By hand**, to check a key (a 2026-07-28 request; `tools/call` adds `Mcp-Name: <tool>`):
 

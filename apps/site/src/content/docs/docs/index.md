@@ -10,6 +10,8 @@ from your Hourmere instance.
 - [Self-host with Docker Compose](/docs/self-hosting): install, configure email and a proxy,
   split workers, back up and upgrade.
 - [Configuration reference](/docs/configuration): environment variables and Compose behavior.
+- [Compare scheduling options](/docs/comparison): deployment, agent access and the current
+  limitations of Hourmere alongside Calendly, Cal.com and Cal.diy.
 - [REST quickstart](/docs/rest): create an API key and find, book and manage a time slot.
 - [MCP quickstart](/docs/mcp): connect a client with an API key and use the booking tools.
 - [Google Calendar](/docs/google-calendar): configure separate calendar authorization and
