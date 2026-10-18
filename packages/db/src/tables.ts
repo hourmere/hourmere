@@ -9,6 +9,8 @@ export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
   ? ColumnType<S, I | undefined, U>
   : ColumnType<T, T | undefined, T>;
 
+export type Int8 = ColumnType<string, bigint | number | string, bigint | number | string>;
+
 export type Json = JsonValue;
 
 export type JsonArray = JsonValue[];
@@ -309,6 +311,7 @@ export interface Bookings {
   created_at: Generated<Timestamp>;
   end_at: Timestamp;
   event_type_id: string | null;
+  hosts_use_default_schedule: Generated<boolean>;
   id: Generated<string>;
   idempotency_fingerprint: Buffer | null;
   idempotency_key: string | null;
@@ -402,6 +405,7 @@ export interface ConferenceOauthStates {
 export interface EventTypeHosts {
   destination_calendar_id: string | null;
   event_type_id: string;
+  last_assigned_sequence: Generated<Int8>;
   schedule_id: string | null;
   user_id: string;
   weight: Generated<number>;
@@ -466,6 +470,12 @@ export interface Profiles {
   time_zone: string;
   updated_at: Generated<Timestamp>;
   user_id: string;
+}
+
+export interface RoundRobinState {
+  enabled: Generated<boolean>;
+  event_type_id: string;
+  next_sequence: Generated<Int8>;
 }
 
 export interface ScheduleOverrides {
@@ -555,6 +565,7 @@ export interface DB {
   mcp_oauth_intents: McpOauthIntents;
   personal_organizations: PersonalOrganizations;
   profiles: Profiles;
+  round_robin_state: RoundRobinState;
   schedule_overrides: ScheduleOverrides;
   schedules: Schedules;
   sign_in_emails: SignInEmails;

@@ -1004,7 +1004,7 @@ describe('unavailable team booking links', () => {
           ? /Choose a non-reserved team slug/
           : mode === 'collective'
             ? 'Choose two to eight required hosts to get a collective booking link.'
-            : 'Public booking links for this scheduling mode are not available yet.',
+            : 'Activate round robin to get a public booking link.',
       ),
     ).toBeDefined()
   })
@@ -1058,5 +1058,103 @@ describe('collective host assignment', () => {
     expect((await screen.findByRole('alert')).textContent).toContain('Could not load team members')
     await user.click(screen.getByRole('button', { name: 'Try again' }))
     expect(((await screen.findByLabelText('Ada')) as HTMLInputElement).checked).toBe(true)
+  })
+})
+
+describe('round-robin pool and explicit activation', () => {
+  const me = {
+    ...ME,
+    organization: { ...ME.organization, name: 'Team', slug: 'Cobaltmere', personal: false },
+  }
+  const base = (overrides: Partial<EventType> = {}) =>
+    eventType({
+      ownerUserId: null,
+      schedulingType: 'round_robin',
+      roundRobinActive: false,
+      ...overrides,
+    })
+  it('saves only metadata for an unchanged zero-member pool and never activates it', async () => {
+    const user = userEvent.setup()
+    const calls = eventTypeServer([base({ hosts: [], scheduleId: SCHEDULE_ID })], {
+      ...signedInAs(me),
+    })
+    renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
+    await screen.findByRole('heading', { name: 'Edit “Intro call”' })
+    await user.type(field('Title'), ' updated')
+    expect(
+      (screen.getByRole('button', { name: 'Activate round robin' }) as HTMLButtonElement).disabled,
+    ).toBe(true)
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    await screen.findByText('Saved.')
+    const body = calls.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`)[0]?.body as Record<
+      string,
+      unknown
+    >
+    expect(body.title).toBe('Intro call updated')
+    expect(body).not.toHaveProperty('hosts')
+    expect(body).not.toHaveProperty('schedulingType')
+    expect(body).not.toHaveProperty('scheduleId')
+    expect(calls.to(`POST /api/v1/event-types/${EVENT_TYPE_ID}/round-robin/activate`)).toHaveLength(
+      0,
+    )
+    expect(screen.getByText('Needs activation')).toBeDefined()
+  })
+
+  it('uses defaults explicitly, reports activation failure, then activates on a separate retry', async () => {
+    const user = userEvent.setup()
+    let attempts = 0
+    const calls = eventTypeServer([base({ scheduleId: SCHEDULE_ID })], {
+      ...signedInAs(me),
+      [`POST /api/v1/event-types/${EVENT_TYPE_ID}/round-robin/activate`]: () =>
+        ++attempts === 1
+          ? json(403, { error: 'insufficient_role' })
+          : json(200, base({ roundRobinActive: true, scheduleId: null })),
+    })
+    renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
+    await screen.findByRole('heading', { name: 'Edit “Intro call”' })
+    await user.click(screen.getByRole('button', { name: 'Use hosts’ default availability' }))
+    await screen.findByText(
+      'Default availability saved. Activate round robin separately when ready.',
+    )
+    expect(calls.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`)[0]?.body).toEqual({
+      schedulingType: 'round_robin',
+      hosts: [{ userId: ME.user.id }],
+      scheduleId: null,
+    })
+    expect(attempts).toBe(0)
+    await user.click(screen.getByRole('button', { name: 'Activate round robin' }))
+    await screen.findByText(/Could not update round robin/)
+    expect(screen.getByRole('button', { name: 'Activate round robin' })).toBeDefined()
+    await user.click(screen.getByRole('button', { name: 'Activate round robin' }))
+    await screen.findByText('Round robin activated.')
+    expect(screen.queryByRole('button', { name: 'Activate round robin' })).toBeNull()
+    expect(
+      calls.to(`POST /api/v1/event-types/${EVENT_TYPE_ID}/round-robin/activate`).map((c) => c.body),
+    ).toEqual([{}, {}])
+  })
+
+  it('removes an unavailable selected host without showing its private identity, then saves a current pool', async () => {
+    const user = userEvent.setup(),
+      stale = '00000000-0000-7000-8000-000000000099'
+    const calls = eventTypeServer([base({ hosts: [{ userId: stale }] })], { ...signedInAs(me) })
+    renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
+    await screen.findByRole('heading', { name: 'Edit “Intro call”' })
+    expect(screen.queryByText(stale)).toBeNull()
+    await user.click(await screen.findByRole('button', { name: 'Remove selected host 1' }))
+    await user.click(await screen.findByLabelText('Ada'))
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    await screen.findByText('Saved.')
+    expect(calls.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`)[0]?.body).toMatchObject({
+      schedulingType: 'round_robin',
+      hosts: [{ userId: ME.user.id }],
+      scheduleId: null,
+    })
+  })
+
+  it('advertises activated pool links and leaves dormant pools awaiting activation', async () => {
+    eventTypeServer([base({ roundRobinActive: true })], { ...signedInAs(me) })
+    renderApp('/app/event-types')
+    expect(await screen.findByRole('button', { name: 'Copy link for Intro call' })).toBeDefined()
+    expect(screen.queryByText('Needs activation')).toBeNull()
   })
 })

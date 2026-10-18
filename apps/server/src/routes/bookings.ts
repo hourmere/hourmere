@@ -87,6 +87,14 @@ export const Booking = z
       description: 'How the booking was made; api and mcp are agents',
     }),
     createdAt: Instant,
+    assignedHost: z
+      .object({ name: z.string(), timeZone: z.string() })
+      .nullable()
+      .optional()
+      .openapi({
+        description:
+          'The actual round-robin winner; no private host identity or availability mapping',
+      }),
   })
   .openapi('Booking')
 

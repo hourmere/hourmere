@@ -1,5 +1,9 @@
 // Public/shared UI messages. Admin messages live in a lazy catalog.
 export const common = {
+  'An available team member will be assigned when you book.':
+    '预约时将为你分配一位可用的团队成员。',
+  'Host no longer available': '原主持人已不可用',
+
   Calendar: '日历',
   'Go to Hourmere': '前往 Hourmere',
   'Go to your event types': '前往你的活动类型',

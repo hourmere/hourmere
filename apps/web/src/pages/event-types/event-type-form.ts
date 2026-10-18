@@ -201,6 +201,11 @@ export function validateDraft(draft: EventTypeDraft): FieldErrors {
     (draft.hostUserIds.length < 2 || draft.hostUserIds.length > 8)
   )
     errors.hosts = 'Choose two to eight required hosts.'
+  if (
+    draft.schedulingType === 'round_robin' &&
+    (draft.hostUserIds.length < 1 || draft.hostUserIds.length > 8)
+  )
+    errors.hosts = 'Choose one to eight pool members.'
   if (new Set(draft.hostUserIds).size !== draft.hostUserIds.length)
     errors.hosts = 'Choose each host once.'
   const add = (field: string, problem: UiText | null) => {
@@ -327,11 +332,10 @@ export function toInput(draft: EventTypeDraft): EventTypeBody {
     }
   })()
   return {
-    ...(draft.schedulingType !== 'round_robin' &&
-      draft.hostUserIds.length > 0 && {
-        schedulingType: draft.schedulingType,
-        hosts: draft.hostUserIds.map((userId) => ({ userId })),
-      }),
+    ...(draft.hostUserIds.length > 0 && {
+      schedulingType: draft.schedulingType,
+      hosts: draft.hostUserIds.map((userId) => ({ userId })),
+    }),
     title: draft.title.trim(),
     slug: draft.slug.trim(),
     description: draft.description.trim() || null,
@@ -350,7 +354,7 @@ export function toInput(draft: EventTypeDraft): EventTypeBody {
       required: q.required,
       ...(isChoice(q.type) && { options: q.options.map((o) => o.text.trim()) }),
     })),
-    scheduleId: draft.schedulingType === 'collective' ? null : draft.scheduleId || null,
+    scheduleId: draft.schedulingType !== 'individual' ? null : draft.scheduleId || null,
     position: whole(draft.position) as number,
     isActive: draft.isActive,
     isHidden: draft.isHidden,
@@ -424,7 +428,7 @@ export function serverErrors(
     case 'invalid_hosts':
       return field(
         'hosts',
-        'Choose current verified team members: one individual host or two to eight collective hosts.',
+        'Choose one individual host, two to eight collective hosts, or one to eight round-robin pool members. Changes affect new bookings; existing meetings retain their original hosts.',
       )
     case 'invalid_schedule_id':
       return field('scheduleId', 'This schedule no longer exists. Choose another one.')

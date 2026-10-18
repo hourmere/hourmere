@@ -261,7 +261,7 @@ endpoint organization; endpoint/booking/organization deletion cascades snapshots
 locks use endpoint then delivery so deletion, pause and rotation cannot deadlock delivery
 through inverse lock order. Details and retention are in [webhooks.md](webhooks.md).
 
-### Independent conference identities
+## Independent conference identities
 
 `conference_connections` stores Zoom identities separately from `auth.account` and
 `calendar_connections`. It has a stable UUID, owner FK, provider/external-identity uniqueness,
@@ -273,10 +273,18 @@ I/O stays bounded under that owner lock; state claims and token retirement commi
 `conference_oauth_states` stores only a state digest plus owner/session, optional expected
 connection, encrypted PKCE verifier, single-use claim and ten-minute expiry. A durable claim
 clears the verifier. Disconnect invalidates all pending owner attempts and clears credentials;
-it retains identity metadata and the stable connection ID. At most five identities can be connected at once (including reauthorization and incomplete
-refresh states). Disconnected tombstones release capacity and are excluded from the default
-metadata list; reauthorizing the same identity reuses its stable ID. A BEFORE DELETE owner trigger clears credentials,
+it retains identity metadata and the stable connection ID. At most five identities can be
+connected at once (including reauthorization and incomplete refresh states). Disconnected tombstones release capacity and are excluded from the default
+metadata list; reauthorizing the same identity reuses its stable ID. A BEFORE DELETE owner
+trigger clears credentials,
 OAuth attempts, scopes, operation, external ID, email and display name before retaining an
 unowned secret-free tombstone. Equal email addresses never establish ownership. No meeting
 intent or calendar rows are created by this foundation. See the Zoom setup guide for the
 explicit local-disconnect versus provider-wide revocation distinction.
+## Round-robin assignment state
+
+Migration 0020 adds `round_robin_state` (event primary key, monotonic `bigint` sequence,
+explicit enabled flag), retained host `last_assigned_sequence`, and immutable booking
+`hosts_use_default_schedule`. Activation and mode changes preserve sequence history;
+new successful bookings update fairness with the booking/outbox transaction. No legacy
+configuration is activated by migration. See [round-robin scheduling](round-robin-scheduling.md).

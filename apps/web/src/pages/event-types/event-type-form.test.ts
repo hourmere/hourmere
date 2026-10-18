@@ -152,7 +152,7 @@ describe('serverErrors', () => {
     expect(serverErrors(refused('invalid_hosts', 'Server policy detail'), draft)).toEqual({
       fields: {
         hosts:
-          'Choose current verified team members: one individual host or two to eight collective hosts.',
+          'Choose one individual host, two to eight collective hosts, or one to eight round-robin pool members. Changes affect new bookings; existing meetings retain their original hosts.',
       },
       message: null,
     })
