@@ -224,7 +224,7 @@ async function provider(deps: CalendarDeps, c: Claim, signal: AbortSignal): Prom
     if (error instanceof GoogleCalendarError) {
       if (error.status === 404 && c.b.status === 'cancelled' && c.external_event_id)
         return { cancelled: true }
-      const known = posted && [400, 401, 403, 404].includes(error.status ?? 0)
+      const known = posted && [400, 401, 403, 404, 429].includes(error.status ?? 0)
       return {
         error: known
           ? error.status === 400

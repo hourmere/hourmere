@@ -7,10 +7,22 @@ import {
   encryptConferenceCredential,
 } from './credentials.ts'
 import { fakeZoom, TEST_CONFERENCE_KEY } from './testing.ts'
-import { createZoomClient, ZOOM_SCOPE } from './zoom.ts'
+import { createZoomClient, refreshZoomTokens, ZOOM_SCOPE, ZoomError } from './zoom.ts'
 
 const signal = () => AbortSignal.timeout(1000)
 describe('Zoom confidential OAuth transport and separate encryption', () => {
+  it('bounds refresh retries to three attempts with 100 ms then 200 ms backoff', async () => {
+    const times: number[] = [],
+      start = performance.now()
+    const error = await refreshZoomTokens(async () => {
+      times.push(performance.now() - start)
+      throw new ZoomError('provider_unavailable', { retryable: true })
+    }, new AbortController().signal).catch((error) => error)
+    expect(error).toMatchObject({ code: 'provider_unavailable' })
+    expect(times).toHaveLength(3)
+    expect((times[1] ?? 0) - (times[0] ?? 0)).toBeGreaterThanOrEqual(90)
+    expect((times[2] ?? 0) - (times[1] ?? 0)).toBeGreaterThanOrEqual(190)
+  })
   it('uses advanced minimal scopes, S256 and the fixed callback without secret/verifier URL values', () => {
     const p = fakeZoom(),
       url = new URL(p.client.authorizationUrl('synthetic-state', 'synthetic-verifier'))
@@ -42,7 +54,8 @@ describe('Zoom confidential OAuth transport and separate encryption', () => {
     )
     const body = new URLSearchParams(String(call?.init.body))
     expect(body.get('code_verifier')).toBe('synthetic-verifier')
-    expect(body.get('client_secret')).toBe('synthetic-secret')
+    expect(body.has('client_secret')).toBe(false)
+    expect(body.has('client_id')).toBe(false)
     expect(body.get('redirect_uri')).toBe('http://localhost:5173/api/conference/zoom/callback')
     expect((await p.client.identity(tokens.accessToken, signal())).name).toBe('Settings')
     expect(p.calls[1]?.url).toBe('https://api.zoom.us/v2/users/me')
@@ -50,6 +63,7 @@ describe('Zoom confidential OAuth transport and separate encryption', () => {
     expect(new URLSearchParams(String(p.calls[2]?.init.body)).get('grant_type')).toBe(
       'refresh_token',
     )
+    expect(new URLSearchParams(String(p.calls[2]?.init.body)).has('client_secret')).toBe(false)
     expect(
       p.calls.every(
         (c) =>

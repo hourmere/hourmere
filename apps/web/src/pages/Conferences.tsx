@@ -31,7 +31,7 @@ const outcomes = {
 } as const
 const statusLabels = {
   active: 'Connected',
-  refreshing: 'Refresh incomplete — reconnect',
+  refreshing: 'Refreshing connection',
   needs_reauth: 'Reconnection required',
   disconnected: 'Disconnected',
 } as const

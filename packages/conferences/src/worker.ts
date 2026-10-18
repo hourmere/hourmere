@@ -4,7 +4,7 @@ import type { ConferenceResult, ConferenceWork } from '@hourmere/scheduling/conf
 import { conferenceEncryptionKey } from './credentials.ts'
 import type { ConferenceDeps } from './index.ts'
 import { credentials, readTokens } from './tokens.ts'
-import { matchingZoomScopes, ZoomError, type ZoomTokens } from './zoom.ts'
+import { matchingZoomScopes, refreshZoomTokens, ZoomError, type ZoomTokens } from './zoom.ts'
 import type { ZoomMeeting, ZoomMeetingsClient } from './zoom-meetings.ts'
 
 const clock = (deps: ConferenceDeps) => (deps.now ?? Date.now)()
@@ -73,7 +73,11 @@ export function createZoomConferenceWork(deps: ConferenceDeps, meetings: ZoomMee
             .execute()
           return failure('needs_reauth', c)
         }
-        const input = { topic: c.booking.title, start: c.booking.start_at, end: c.booking.end_at }
+        const input = {
+          topic: Array.from(c.booking.title).slice(0, 200).join(''),
+          start: c.booking.start_at,
+          end: c.booking.end_at,
+        }
         if (c.meetingId) {
           const existing = await meetings.get(
             token,
@@ -128,16 +132,17 @@ export function createZoomConferenceWork(deps: ConferenceDeps, meetings: ZoomMee
         return failure(
           error instanceof ZoomError ? error.code : 'provider_unavailable',
           c,
-          attempted,
+          attempted && !(error instanceof ZoomError && error.knownNoCreate),
         )
       }
     }
-    let rotation: { refresh: string } | undefined
+    let rotation: { refresh: string; original: Buffer } | undefined
     try {
       const first = await connection(
         deps,
         c,
         async (db, r): Promise<ConferenceResult | undefined> => {
+          if (r?.status === 'refreshing') return failure('provider_unavailable', c)
           if (
             r?.status !== 'active' ||
             !r.credentials ||
@@ -181,7 +186,7 @@ export function createZoomConferenceWork(deps: ConferenceDeps, meetings: ZoomMee
             })
             .where('id', '=', r.id)
             .execute()
-          rotation = { refresh: tokens.refreshToken }
+          rotation = { refresh: tokens.refreshToken, original: r.credentials }
           return undefined
         },
       )
@@ -197,15 +202,20 @@ export function createZoomConferenceWork(deps: ConferenceDeps, meetings: ZoomMee
         )
           return failure('needs_reauth', c)
         let tokens: ZoomTokens | undefined,
+          recoverable = false,
           error: string | null = null
         try {
-          tokens = await zoom.client.refresh(refresh, signal, 'meetings')
+          tokens = await refreshZoomTokens(
+            () => zoom.client.refresh(refresh, signal, 'meetings'),
+            signal,
+          )
           if (!matchingZoomScopes(tokens.scopes, 'meetings')) {
             tokens = undefined
             throw new ZoomError('permissions_missing')
           }
         } catch (e) {
           error = e instanceof ZoomError ? e.code : 'provider_unavailable'
+          recoverable = e instanceof ZoomError && e.code === 'provider_unavailable'
         }
         await db
           .updateTable('conference_connections')
@@ -219,8 +229,10 @@ export function createZoomConferenceWork(deps: ConferenceDeps, meetings: ZoomMee
                   tokens,
                   'meetings',
                 )
-              : null,
-            status: tokens ? 'active' : 'needs_reauth',
+              : recoverable
+                ? (rotation?.original ?? null)
+                : null,
+            status: tokens || recoverable ? 'active' : 'needs_reauth',
             operation_id: null,
             last_error: error,
             ...(tokens ? { scopes: tokens.scopes } : {}),
