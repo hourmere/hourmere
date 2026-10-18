@@ -1292,6 +1292,88 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/event-type-hosts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Current verified members available for host assignment */
+        get: {
+            parameters: {
+                query?: {
+                    after?: string;
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description A bounded member page */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data: {
+                                /** Format: uuid */
+                                id: string;
+                                name: string;
+                            }[];
+                            nextAfter: string | null;
+                        };
+                    };
+                };
+                /** @description invalid_limit, invalid_cursor */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No valid session or API key */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description insufficient_role: team event types need the owner or admin role; forbidden: a cookie-authenticated write from another origin */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The API key's rate limit is used up */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/event-types": {
         parameters: {
             query?: never;
@@ -1368,7 +1450,7 @@ export interface paths {
                         "application/json": components["schemas"]["EventType"];
                     };
                 };
-                /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
+                /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_hosts, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -1567,7 +1649,7 @@ export interface paths {
                         "application/json": components["schemas"]["EventType"];
                     };
                 };
-                /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
+                /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_hosts, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
                 400: {
                     headers: {
                         [name: string]: unknown;
@@ -2714,7 +2796,7 @@ export interface paths {
         };
         /**
          * A public event type
-         * @description The single-host team page at /team/{handle}/{slug}. handle is the exact-case organization slug; personal organizations and unsupported scheduling modes are not served.
+         * @description The individual or collective team page at /team/{handle}/{slug}. handle is the exact-case organization slug; personal organizations and unsupported scheduling modes are not served.
          */
         get: {
             parameters: {
@@ -3673,6 +3755,10 @@ export interface components {
             description: string | null;
             /** @description Length of a meeting */
             durationMinutes: number;
+            hosts: {
+                /** Format: uuid */
+                userId: string;
+            }[];
             /** Format: uuid */
             id: string;
             /** @description Whether invitees can book it */
@@ -3761,6 +3847,9 @@ export interface components {
             description?: string | null;
             /** @description Length of a meeting */
             durationMinutes: number;
+            hosts?: {
+                userId: string;
+            }[];
             /**
              * @description Whether invitees can book it
              * @default true
@@ -3818,6 +3907,8 @@ export interface components {
              * @description One of the host's schedules; null = the host's default schedule
              */
             scheduleId?: string | null;
+            /** @enum {string} */
+            schedulingType?: "individual" | "collective";
             /** @description Distance between start times; null = the duration */
             slotStepMinutes?: number | null;
             /**
@@ -3844,6 +3935,9 @@ export interface components {
             description?: string | null;
             /** @description Length of a meeting */
             durationMinutes?: number;
+            hosts?: {
+                userId: string;
+            }[];
             /** @description Whether invitees can book it */
             isActive?: boolean;
             /** @description Hidden from public listings; anyone with the direct link can still book it. This is not access control. */
@@ -3889,6 +3983,8 @@ export interface components {
              * @description One of the host's schedules; null = the host's default schedule
              */
             scheduleId?: string | null;
+            /** @enum {string} */
+            schedulingType?: "individual" | "collective";
             /** @description Distance between start times; null = the duration */
             slotStepMinutes?: number | null;
             /**
@@ -3996,6 +4092,10 @@ export interface components {
                 /** @description The host's IANA time zone */
                 timeZone: string;
             };
+            hosts?: {
+                name: string;
+                timeZone: string;
+            }[];
             /** @description Only the kind; details such as a phone number come with the booking */
             location: {
                 /** @enum {string} */

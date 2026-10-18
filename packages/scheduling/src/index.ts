@@ -71,6 +71,7 @@ export {
   type EventTypeUpdate,
   getEventType,
   listEventTypeCatalog,
+  listEventTypeHosts,
   listEventTypes,
   PHONE_NUMBER_PATTERN,
   type QuestionInput,

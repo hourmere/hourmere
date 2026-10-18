@@ -22,7 +22,7 @@ types in `packages/db/src/tables.ts` are generated from the migrated database.
   sign-up, so a solo user and a 50-person team use the same tables and the same queries.
 - **Team-shaped from day one.** Hosts are always rows in `event_type_hosts` /
   `booking_hosts`, even when there is only one. Round-robin and collective scheduling need
-  no schema change.
+  no new host relation.
 - **The database enforces what must never be wrong.** Double-booking is prevented by an
   exclusion constraint, not by application code racing against itself.
 - **IDs** are UUIDv7 (`uuidv7()`, time-ordered, good index locality) for application
@@ -234,3 +234,19 @@ without cascading on credential deletion. OAuth origins require `source=mcp` and
 key ID. The idempotency index includes both nullable credential columns, preserving existing
 anonymous/API-key scopes while isolating each OAuth consent. Public booking representations
 expose neither credential identifier.
+
+## Required booking hosts
+
+Migration 0019 adds `bookings.required_host_user_ids`, an immutable UUID-array snapshot.
+New bookings save the complete sorted host set, and rescheduled successors copy that set.
+`auth.user` deletion cascades the corresponding `booking_hosts` row, so the snapshot is
+needed to detect a missing required participant instead of silently moving a smaller meeting.
+The snapshot has no foreign keys, is never returned by public APIs, and does not restore
+an account or its deleted personal data. Canceling remains possible when a host leaves,
+is unverified or is deleted. Rescheduling then returns `booking_hosts_unavailable`.
+
+The backfill captures the booking host rows still present at migration time. A host deleted
+before that migration cannot be recovered; these legacy bookings retain only their remaining
+identities. A historical booking with no snapshot and no hosts cannot be rescheduled.
+
+See [collective scheduling](collective-scheduling.md) for assignment, availability and locking.

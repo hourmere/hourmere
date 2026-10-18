@@ -34,6 +34,7 @@ describe('event type routes in the OpenAPI document', () => {
         '$',
         ...[0, 1, 2, 3, 4].map((i) => `$.location|oneOf${i}`),
         '$.questions[]',
+        '$.hosts[]',
       ])
     }
   })
@@ -86,6 +87,57 @@ describe.skipIf(!serverUrl)('event type routes', () => {
   })
   const idOf = (answer: { body: unknown }) => (answer.body as { id: string }).id
 
+  it('assigns collective team hosts through REST and restricts the paged member directory', async () => {
+    const owner = await createTestUser(t.db)
+    const member = await createTestUser(t.db)
+    const team = await createTestTeam(t.db, [
+      { user: owner, role: 'owner' },
+      { user: member, role: 'member' },
+    ])
+    const ownerApi = t.as(team.as(owner))
+    const memberApi = t.as(team.as(member))
+    const created = await ownerApi.post(
+      '/api/v1/event-types',
+      body({ schedulingType: 'collective', hosts: [{ userId: owner.id }, { userId: member.id }] }),
+    )
+    expect(created.status).toBe(201)
+    expect(created.body).toMatchObject({
+      schedulingType: 'collective',
+      hosts: [expect.any(Object), expect.any(Object)],
+      scheduleId: null,
+    })
+    expect((await memberApi.get('/api/v1/event-type-hosts')).status).toBe(403)
+    const first = await ownerApi.get('/api/v1/event-type-hosts?limit=1')
+    expect(first.status).toBe(200)
+    const page = first.body as { data: { id: string; name: string }[]; nextAfter: string }
+    expect(page.data).toHaveLength(1)
+    expect(JSON.stringify(first.body)).not.toContain('@')
+    expect(
+      (await ownerApi.get(`/api/v1/event-type-hosts?limit=1&after=${page.nextAfter}`)).status,
+    ).toBe(200)
+    expect(
+      (
+        await memberApi.patch(`/api/v1/event-types/${idOf(created)}`, {
+          hosts: [{ userId: member.id }],
+        })
+      ).status,
+    ).toBe(403)
+    expect(
+      (
+        await ownerApi.patch(`/api/v1/event-types/${idOf(created)}`, {
+          hosts: [{ userId: owner.id }, { userId: owner.id.toUpperCase() }],
+        })
+      ).body,
+    ).toMatchObject({ error: 'invalid_hosts' })
+    expect(
+      (await ownerApi.patch(`/api/v1/event-types/${idOf(created)}`, { title: 'Updated interview' }))
+        .body,
+    ).toMatchObject({
+      schedulingType: 'collective',
+      hosts: (created.body as { hosts: unknown }).hosts,
+    })
+  })
+
   it('requires a caller', async () => {
     expect((await t.anonymous.get('/api/v1/event-types')).status).toBe(401)
     expect((await t.anonymous.post('/api/v1/event-types', body())).status).toBe(401)
@@ -116,6 +168,7 @@ describe.skipIf(!serverUrl)('event type routes', () => {
       bookingWindowDays: null,
       maxBookingsPerDay: null,
       schedulingType: 'individual',
+      hosts: [{ userId: user.id }],
       location: { kind: 'phone', number: '+14155550123' },
       questions: [{ id: 'company', label: 'Company', type: 'short_text', required: false }],
       isActive: true,
