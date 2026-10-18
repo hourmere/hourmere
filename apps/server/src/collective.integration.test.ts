@@ -17,6 +17,7 @@ import {
   createTestUser,
   testContext,
 } from '@hourmere/scheduling/testing'
+import { createWebhook, webhookBookingNotifier } from '@hourmere/webhooks'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { writeBookingCalendar } from '../../../packages/calendars/src/booking-events.ts'
 import {
@@ -129,6 +130,15 @@ describe.skipIf(!serverUrl)(
         schedulingType: 'collective',
         hosts: users.map((u) => ({ userId: u.id })),
       })
+      const webhookSettings = {
+        enabled: true,
+        encryptionKey: Buffer.alloc(32, 19).toString('base64'),
+      }
+      const { webhook } = await createWebhook(ctx, webhookSettings, {
+        url: 'https://hooks.example.com/collective',
+        events: ['booking.created', 'booking.rescheduled', 'booking.cancelled'],
+      })
+      const webhookNotify = webhookBookingNotifier({ enqueue: async () => null }, webhookSettings)
       const calendarNotify = calendarBookingNotifier({
         enqueue: async (_name, _payload, options) => {
           expect(Boolean(options?.transaction)).toBe(true)
@@ -147,6 +157,7 @@ describe.skipIf(!serverUrl)(
         notify: async (trx, event, at) => {
           await calendarNotify(trx, event)
           await emailNotify(trx, event, at)
+          await webhookNotify(trx, event, at)
         },
       }
       const input = {
@@ -220,6 +231,61 @@ describe.skipIf(!serverUrl)(
           .execute(),
       ).toHaveLength(2)
       expect(calendars).toHaveLength(2)
+      const deliveries = await db
+        .selectFrom('webhook_deliveries')
+        .select(['event_type', 'payload'])
+        .where('webhook_id', '=', webhook.id)
+        .orderBy('created_at')
+        .execute()
+      expect(deliveries.map((delivery) => delivery.event_type)).toEqual([
+        'booking.created',
+        'booking.rescheduled',
+        'booking.cancelled',
+      ])
+      expect(JSON.stringify(deliveries)).not.toContain('invitee@example.com')
+      for (const user of users) expect(JSON.stringify(deliveries)).not.toContain(user.email)
+      const before = await db
+        .selectFrom('bookings')
+        .select('id')
+        .where('organization_id', '=', team.id)
+        .execute()
+      await expect(
+        createPublicTeamBooking(
+          {
+            ...pub,
+            notify: async (...args) => {
+              await pub.notify?.(...args)
+              throw new Error('Synthetic transactional rollback')
+            },
+          },
+          {
+            ...input,
+            start: Temporal.Instant.from('2026-11-03T11:00Z'),
+            idempotencyKey: randomUUID(),
+          },
+        ),
+      ).rejects.toThrow('Synthetic transactional rollback')
+      expect(
+        await db
+          .selectFrom('bookings')
+          .select('id')
+          .where('organization_id', '=', team.id)
+          .execute(),
+      ).toHaveLength(before.length)
+      expect(
+        await db
+          .selectFrom('webhook_deliveries')
+          .select('id')
+          .where('webhook_id', '=', webhook.id)
+          .execute(),
+      ).toHaveLength(3)
+      expect(
+        await db
+          .selectFrom('booking_calendar_targets')
+          .select('calendar_id')
+          .where('root_booking_id', '=', created.booking.id)
+          .execute(),
+      ).toHaveLength(2)
       expect(
         provider.calls.filter(
           (call) => call.init.method === 'POST' && call.url.pathname.endsWith('/import'),

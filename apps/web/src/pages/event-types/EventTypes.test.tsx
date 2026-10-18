@@ -981,6 +981,7 @@ describe('unavailable team booking links', () => {
     { slug: 'a'.repeat(65), mode: 'individual' },
     { slug: 'api', mode: 'individual' },
     { slug: 'Team', mode: 'round_robin' },
+    { slug: 'Team', mode: 'collective' },
   ] as const)('does not advertise a dead link for $slug/$mode', async ({ slug, mode }) => {
     const user = userEvent.setup()
     const me = { ...ME, organization: { ...ME.organization, slug, personal: false } }
@@ -1001,7 +1002,9 @@ describe('unavailable team booking links', () => {
       screen.getByText(
         mode === 'individual'
           ? /Choose a non-reserved team slug/
-          : 'Public booking links for this scheduling mode are not available yet.',
+          : mode === 'collective'
+            ? 'Choose two to eight required hosts to get a collective booking link.'
+            : 'Public booking links for this scheduling mode are not available yet.',
       ),
     ).toBeDefined()
   })

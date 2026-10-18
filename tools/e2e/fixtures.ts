@@ -208,8 +208,11 @@ export const test = base.extend<{ app: FixtureApp; suppressFailureDom: undefined
           await app?.close()
         }
       } finally {
-        await authPool?.end()
-        await owned.drop()
+        try {
+          await authPool?.end()
+        } finally {
+          await owned.drop()
+        }
       }
     }
   },

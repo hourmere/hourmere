@@ -203,7 +203,13 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
     navigate(PATHS.eventTypes, { state: flash(`Deleted “${saved.title}”.`) })
   }
 
-  const slugPreview = bookingLinkPreview(me, profile, draft.slug.trim(), draft.schedulingType)
+  const slugPreview = bookingLinkPreview(
+    me,
+    profile,
+    draft.slug.trim(),
+    draft.schedulingType,
+    draft.hostUserIds.length,
+  )
   const duration = parseWhole(draft.durationMinutes)
 
   return (
@@ -532,9 +538,16 @@ function bookingLinkPreview(
   profile: Profile | null,
   slug: string,
   schedulingType: EventType['schedulingType'] = 'individual',
+  hostCount = 1,
 ): string {
   if (!me.organization.personal && schedulingType === 'round_robin')
     return 'Public booking links for this scheduling mode are not available yet.'
+  if (
+    !me.organization.personal &&
+    schedulingType === 'collective' &&
+    (hostCount < 2 || hostCount > 8)
+  )
+    return 'Choose two to eight required hosts to get a collective booking link.'
   if (!me.organization.personal && !isPublicTeamSlug(me.organization.slug))
     return TEAM_LINK_SLUG_HINT
   if (!me.organization.personal) return publicTeamPageUrl(me.organization.slug, slug || 'your-link')
