@@ -40,6 +40,8 @@ export function fakeGoogle() {
       scope: GOOGLE_CALENDAR_SCOPES.join(' '),
     } as Record<string, unknown>,
     tokenStatus: 200,
+    tokenError: 'invalid_grant',
+    tokenHook: undefined as (() => Promise<Response>) | undefined,
     identity: {
       sub: 'google-account-1',
       email: 'calendar@example.com',
@@ -69,8 +71,15 @@ export function fakeGoogle() {
   const request: typeof fetch = async (input, init = {}) => {
     const url = new URL(String(input))
     calls.push({ url, init })
-    if (url.href === 'https://oauth2.googleapis.com/token')
-      return Response.json(controls.token, { status: controls.tokenStatus })
+    if (url.href === 'https://oauth2.googleapis.com/token') {
+      if (controls.tokenHook) return controls.tokenHook()
+      return Response.json(
+        controls.tokenStatus === 200 ? controls.token : { error: controls.tokenError },
+        {
+          status: controls.tokenStatus,
+        },
+      )
+    }
     if (url.href === 'https://openidconnect.googleapis.com/v1/userinfo')
       return Response.json(controls.identity)
     if (

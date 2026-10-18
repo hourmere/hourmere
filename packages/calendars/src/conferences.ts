@@ -297,7 +297,7 @@ async function providerWork(deps: CalendarDeps, c: Claim, signal: AbortSignal): 
     if (
       error instanceof GoogleCalendarError &&
       attemptedCreate &&
-      [400, 401, 403, 404].includes(error.status ?? 0)
+      [400, 401, 403, 404, 429].includes(error.status ?? 0)
     )
       return {
         error:

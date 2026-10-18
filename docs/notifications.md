@@ -370,17 +370,30 @@ attempt deadline and the worker's shutdown signal. Lease ownership is checked ag
 each new recipient, and completion uses the lease ID and attempt number. A stale worker
 cannot consume the replacement worker's claim. A crashed final attempt becomes exhausted
 after its lease expires; no fourteenth attempt is authorized. Each dispatch handles at most
-100 expired final claims and 100 distinct outbox delivery attempts; the same row is not
+100 obsolete notices, 100 expired final claims and 100 distinct outbox delivery attempts; the same row is not
 immediately retried again within that dispatch. SMTP acceptance followed by a failed
 receipt commit still has the previously documented duplicate window; leases do not make
 external SMTP delivery exactly once.
+
+Migration0026 adds `skipped_at`, a distinct terminal outcome with `delivered=false`:
+the booking was cancelled, replaced or already started, a failure notice was overtaken by
+conference recovery, or its invitation/failure gate
+closed while an attempt was delivering. Already committed recipient receipts remain visible;
+skipped never claims that every intended recipient was emailed. A lifecycle sweep skips
+unclaimed obsolete rows without consuming an attempt and never takes a live lease. A notice
+waiting for its ready/failed conference state remains unclaimed while that gate is closed;
+it may become eligible later. A notice skipped during delivery remains terminal.
 
 `exhausted_at` is an inspectable terminal failure, with `delivered=false` and a bounded
 `last_error` classification. Diagnostics contain booking ID/kind, never SMTP response text,
 recipient addresses, answers, meeting URLs or tokens:
 
 ```sql
-SELECT booking_id,kind,attempts,due_at,last_error,exhausted_at
+SELECT booking_id,kind,attempts,due_at,last_error,exhausted_at,skipped_at,
+       CASE WHEN delivered THEN 'delivered'
+            WHEN skipped_at IS NOT NULL THEN 'skipped'
+            WHEN exhausted_at IS NOT NULL THEN 'exhausted'
+            ELSE 'pending' END AS outcome
   FROM booking_conference_notifications
  WHERE NOT delivered
  ORDER BY due_at;
@@ -390,9 +403,10 @@ Repair mail configuration or identity first. An operator may deliberately grant 
 identified exhausted row a new budget during maintenance after workers have stopped and
 the previous lease has ended; do not automatically reset every failed row. Existing
 recipient receipts and current booking/revision/verification guards must remain intact.
-Cancellation, replacement and elapsed meeting time can make a pending row obsolete rather
-than deliverable. This is not a force-send endpoint or a promise of real inbox acceptance.
+Skipped rows need no delivery repair; current cancellations and reschedules have their own
+notifications. This is not a force-send endpoint or a promise of real inbox acceptance.
 
-Old rows retain their exact `due_at` and `delivered` values on upgrade. Because earlier
+Old rows retain their exact `due_at` and `delivered` values on upgrade, and `skipped_at`
+starts null without rewriting historical delivery outcomes. Because earlier
 attempt history was not recorded, their new counter starts at zero: one finite post-upgrade
 budget, without inventing historical sends or erasing existing recipient receipts.
