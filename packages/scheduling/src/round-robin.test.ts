@@ -827,4 +827,134 @@ describe.skipIf(!serverUrl)('round-robin scheduling', () => {
       'cancelled',
     )
   })
+  it('preserves a dormant pool custom schedule until explicit default conversion, without activating it', async () => {
+    const s = await setup(2, false)
+    const custom = await s.f.schedule(s.owner.id, { timeZone: 'UTC', isDefault: false })
+    await db
+      .updateTable('event_type_hosts')
+      .set({ schedule_id: custom })
+      .where('event_type_id', '=', s.event.id)
+      .where('user_id', '=', s.owner.id)
+      .execute()
+    await updateEventType(s.ctx, s.event.id, { title: 'Metadata only' })
+    expect(
+      (
+        await db
+          .selectFrom('event_type_hosts')
+          .select('schedule_id')
+          .where('event_type_id', '=', s.event.id)
+          .where('user_id', '=', s.owner.id)
+          .executeTakeFirst()
+      )?.schedule_id,
+    ).toBe(custom)
+    expect(await code(() => activateRoundRobin(s.ctx, s.event.id))).toBe('invalid_schedule_id')
+    const repaired = await updateEventType(s.ctx, s.event.id, {
+      schedulingType: 'round_robin',
+      hosts: s.event.hosts,
+      scheduleId: null,
+    })
+    expect(repaired.roundRobinActive).toBe(false)
+    expect(await state(s)).toBeUndefined()
+    expect(
+      (
+        await db
+          .selectFrom('event_type_hosts')
+          .select('schedule_id')
+          .where('event_type_id', '=', s.event.id)
+          .execute()
+      ).every((h) => h.schedule_id === null),
+    ).toBe(true)
+    expect((await activateRoundRobin(s.ctx, s.event.id)).roundRobinActive).toBe(true)
+  })
+
+  it('allows metadata-only saves for a dormant zero-member or unverified pool without enabling it', async () => {
+    for (const mode of ['empty', 'unverified'] as const) {
+      const s = await setup(2, false)
+      if (mode === 'empty')
+        await db.deleteFrom('event_type_hosts').where('event_type_id', '=', s.event.id).execute()
+      else
+        await db
+          .updateTable('auth.user')
+          .set({ emailVerified: false })
+          .where('id', '=', required(s.users[1]).id)
+          .execute()
+      const saved = await updateEventType(s.ctx, s.event.id, { title: 'Metadata survives' })
+      expect(saved.title).toBe('Metadata survives')
+      expect(saved.roundRobinActive).toBe(false)
+      expect(await state(s)).toBeUndefined()
+      expect(await code(() => activateRoundRobin(s.ctx, s.event.id))).toBe('invalid_hosts')
+    }
+  })
+
+  it('commits an accepted booking before a waiting pool edit without losing its original host or sequence', async () => {
+    const s = await setup(),
+      ids = s.users.map((u) => u.id).sort()
+    let entered: () => void = () => {},
+      release: () => void = () => {},
+      pid = 0
+    const reached = new Promise<void>((resolve) => {
+        entered = resolve
+      }),
+      held = new Promise<void>((resolve) => {
+        release = resolve
+      })
+    const first = createPublicTeamBooking(
+      {
+        ...s.pub,
+        notify: async (trx) => {
+          pid = required(
+            await trx
+              .selectNoFrom((eb) => eb.fn<number>('pg_backend_pid', []).as('pid'))
+              .executeTakeFirst(),
+          ).pid
+          entered()
+          await held
+        },
+      },
+      request(s),
+    )
+    await reached
+    const edit = updateEventType(s.ctx, s.event.id, { hosts: [{ userId: required(ids[1]) }] })
+    try {
+      await waitForBlocker(pid)
+    } finally {
+      release()
+    }
+    const created = await first
+    await edit
+    expect(await host(created.booking.id)).toBe(ids[0])
+    expect((await state(s))?.next_sequence).toBe('1')
+    const moved = await rescheduleManagedBooking(s.pub, created.manageToken as string, {
+      start: instant('2026-11-02T10:00Z'),
+    })
+    expect(await host(moved.booking.id)).toBe(ids[0])
+    expect((await state(s))?.next_sequence).toBe('1')
+    expect(await host((await book(s, '2026-11-02T11:00Z')).booking.id)).toBe(ids[1])
+    expect((await state(s))?.next_sequence).toBe('2')
+  })
+  it('propagates an unexpected PostgreSQL availability failure instead of downgrading it to a skipped host', async () => {
+    const s = await setup()
+    // Fault injection is confined to this file's helper-owned database and restored in finally.
+    await owned.pool.query(
+      'ALTER TABLE calendar_connections RENAME TO round_robin_fault_connections',
+    )
+    try {
+      await expect(listPublicTeamSlots(s.pub, { ...s.page, ...range })).rejects.toMatchObject({
+        code: '42P01',
+      })
+      await expect(book(s)).rejects.toMatchObject({ code: '42P01' })
+    } finally {
+      await owned.pool.query(
+        'ALTER TABLE round_robin_fault_connections RENAME TO calendar_connections',
+      )
+    }
+    expect((await state(s))?.next_sequence).toBe('0')
+    expect(
+      await db
+        .selectFrom('bookings')
+        .select('id')
+        .where('event_type_id', '=', s.event.id)
+        .execute(),
+    ).toEqual([])
+  })
 })
