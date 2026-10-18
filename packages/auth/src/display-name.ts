@@ -3,6 +3,17 @@ import type { AuthMiddlewareContext } from './api-keys.ts'
 
 export const DISPLAY_NAME_MAX_LENGTH = 200
 
+/** Sign-in names are optional provider/input metadata, so clean them without rejecting sign-up. */
+export function sanitizeInitialDisplayName(value: string): string {
+  const name = value
+    .toWellFormed()
+    .replace(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, ' ')
+    .trim()
+  const clipped = name.slice(0, DISPLAY_NAME_MAX_LENGTH)
+  // A UTF-16 limit must not leave half of an astral character at the end.
+  return (clipped.isWellFormed() ? clipped : clipped.slice(0, -1)).trimEnd()
+}
+
 /** Names are used in email subjects and calendar organizer labels as well as the UI. */
 export function displayNameRules(ctx: AuthMiddlewareContext) {
   if (ctx.path !== '/update-user') return

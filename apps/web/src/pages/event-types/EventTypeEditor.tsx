@@ -17,7 +17,7 @@ import { flash } from '../../flash.ts'
 import { formatMinutes } from '../../format.ts'
 import { useLoad, useMounted, usePageTitle } from '../../hooks.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
-import { msg, type UiText } from '../../i18n/translate.ts'
+import { type MessageKey, msg, type UiText } from '../../i18n/translate.ts'
 import { EVENT_TYPE, RULES } from '../../limits.ts'
 import {
   eventTypePath,
@@ -142,6 +142,7 @@ function EventTypeForm({
   const [draft, setDraft] = useState(baseline)
   // On a new event type the slug follows the title until it is edited by hand.
   const [slugTouched, setSlugTouched] = useState(eventType !== null)
+  const [slugSuffix, setSlugSuffix] = useState<string | null>(null)
   const [errors, setErrors] = useState<FieldErrors>({})
   const [formError, setFormError] = useState<UiText | null>(null)
   const [attempt, setAttempt] = useState(0)
@@ -289,6 +290,9 @@ function EventTypeForm({
     saved?.roundRobinActive ?? false,
   )
   const duration = parseWhole(draft.durationMinutes)
+  const suggestedSlug = slugSuffix
+    ? `${(slugify(draft.slug) || 'event').slice(0, EVENT_TYPE.slugMaxLength - slugSuffix.length - 1).replace(/-+$/, '')}-${slugSuffix}`
+    : null
 
   return (
     <>
@@ -410,14 +414,42 @@ function EventTypeForm({
                 <input
                   type="checkbox"
                   checked={draft.isHidden}
-                  onChange={(e) => set('isHidden', e.target.checked)}
+                  onChange={(e) => {
+                    set('isHidden', e.target.checked)
+                    if (e.target.checked)
+                      setSlugSuffix(crypto.randomUUID().replaceAll('-', '').slice(0, 8))
+                    else setSlugSuffix(null)
+                  }}
                   aria-describedby="hidden-hint"
                 />
                 {t('Hide from your booking page')}
               </label>
               <p className="hint" id="hidden-hint">
-                {t('Anyone with the direct link can still book it. This does not restrict access.')}
+                {t(
+                  'Anyone who knows or guesses the direct link can still book it. Unlisted is not access control.',
+                )}
               </p>
+              {draft.isHidden && suggestedSlug && (
+                <div className="hint">
+                  <p>
+                    {t(
+                      'You can add a random suffix to make the link harder to guess. This is optional.',
+                    )}
+                  </p>
+                  <p className="mono">{suggestedSlug}</p>
+                  <button
+                    type="button"
+                    className="button button-small"
+                    onClick={() => {
+                      setSlugTouched(true)
+                      set('slug', suggestedSlug)
+                      setSlugSuffix(null)
+                    }}
+                  >
+                    {t('Use suggested link')}
+                  </button>
+                </div>
+              )}
             </div>
           </section>
 
@@ -765,7 +797,7 @@ function MinutesField({
   optional?: boolean
   /** What an empty field means, for optional ones. */
   empty?: string
-  extra?: string
+  extra?: MessageKey
 }) {
   const { t, ui, locale: displayLocale } = useI18n()
 
@@ -784,7 +816,7 @@ function MinutesField({
       label={t('{0} (minutes)', { '0': label })}
       optional={optional}
       error={error}
-      hint={`${extra ? `${extra} ` : ''}${rule.min}–${rule.max.toLocaleString('en')}. ${ui(amount)}`.trim()}
+      hint={`${extra ? `${ui(extra)} ` : ''}${rule.min}–${rule.max.toLocaleString('en')}. ${ui(amount)}`.trim()}
     >
       {(props) => (
         <input

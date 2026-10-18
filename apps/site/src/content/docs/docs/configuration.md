@@ -17,6 +17,7 @@ Restart/recreate affected processes after changing configuration.
 | `PGPASSWORD` | Unset | PostgreSQL client password when absent from the URL. Compose sets it from `POSTGRES_PASSWORD`; do not percent-encode this separate value. |
 | `PORT` | `3000` | Direct-server TCP port (`0`–`65535`). `0` lets the OS choose a port and requires an explicit `PUBLIC_URL`; links always use that configured external origin. In Compose, `.env` `PORT` changes the host port; the container still listens on `3000`. |
 | `PUBLIC_URL` | `http://localhost:<PORT>` | External HTTP(S) origin, with no path/query. Use HTTPS publicly. Compose defaults to `http://localhost:3000` independently of its host port setting. |
+| `HOSTED_SIGNUP_URL` | `https://hourmere.com` | Hosted service destination for public attribution and confirmation links. Set the hosted sign-up page URL when available; HTTP(S), no credentials, query or fragment. Independent of this instance’s `PUBLIC_URL`; attribution cannot be disabled. |
 | `BETTER_AUTH_SECRET` | Required | At least 32 non-whitespace random characters. Signs sessions and protects sign-in tokens. Changing it signs people out. |
 | `AUTO_MIGRATE` | `true` | Apply SQL/job migrations on startup. `false` requires manual migrations first; startup still needs database access. Not forwarded by the default Compose file. |
 | `WEB_DIST` | Unset | Built SPA directory. Not forwarded by the default Compose file: Docker sets `/app/apps/web/dist`; development uses Vite instead. |

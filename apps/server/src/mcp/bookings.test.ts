@@ -1073,6 +1073,21 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
       expect(errorOf(await call('list_bookings', { order: 'newest' }, adaKey.key)).error).toBe(
         'invalid_request',
       )
+      const ended = ok<{ data: { id: string }[] }>(
+        await call('list_bookings', { ...args, endTo: '2026-11-11T10:30:00Z' }, adaKey.key),
+      )
+      expect(ended.data.map((b) => b.id)).toEqual(ids.slice(0, 2).toReversed())
+      const inProgress = ok<{ data: { id: string }[] }>(
+        await call(
+          'list_bookings',
+          { ...args, limit: 3, endAfter: '2026-11-11T10:15:00Z' },
+          adaKey.key,
+        ),
+      )
+      expect(inProgress.data.map((b) => b.id)).toEqual(ids.slice(1).toReversed())
+      expect(errorOf(await call('list_bookings', { endAfter: 'invalid' }, adaKey.key)).error).toBe(
+        'invalid_request',
+      )
     })
 
     it('needs exactly one of bookingId and manageToken to cancel', async () => {
