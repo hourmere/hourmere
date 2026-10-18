@@ -14,10 +14,16 @@ import type { MiddlewareHandler } from 'hono'
 import { createMiddleware } from 'hono/factory'
 import { routeBodyLimit } from '../body-limit.ts'
 import type { CallerEnv } from '../caller.ts'
-import { type CallerMiddleware, errorResponses, json, type RouteModule } from '../openapi.ts'
+import {
+  authenticated,
+  type CallerMiddleware,
+  errorResponses,
+  json,
+  type RouteModule,
+} from '../openapi.ts'
 import { createRateLimiter, rateLimit } from '../rate-limit.ts'
 
-const Connection = z
+export const Connection = z
   .object({
     id: z.uuid(),
     provider: z.literal('zoom'),
@@ -30,6 +36,13 @@ const Connection = z
     updatedAt: z.iso.datetime(),
   })
   .openapi('ConferenceConnection')
+export const ConferenceConnections = z.object({
+  zoomEnabled: z.boolean(),
+  zoomMeetingsEnabled: z.boolean(),
+  pendingAttempts: z.number().int(),
+  maximumConnections: z.number().int(),
+  data: z.array(Connection),
+})
 const Id = z.object({ id: z.uuid() })
 const emptyBody = { body: { required: true, content: json(z.strictObject({})) } }
 const sessionOnly = createMiddleware<CallerEnv>(async (c, next) => {
@@ -49,6 +62,7 @@ const jsonCommand = createMiddleware(async (c, next) => {
 export function conferenceRoutes(deps: ConferenceDeps): RouteModule {
   const limit = rateLimit(createRateLimiter({ limit: 20, windowSeconds: 60 }))
   return ({ app, caller }) => {
+    const metadata: [CallerMiddleware, MiddlewareHandler<CallerEnv>] = [privateHeaders, caller]
     const session: [CallerMiddleware, MiddlewareHandler<CallerEnv>, MiddlewareHandler<CallerEnv>] =
       [privateHeaders, caller, sessionOnly]
     const write: [
@@ -63,22 +77,15 @@ export function conferenceRoutes(deps: ConferenceDeps): RouteModule {
         path: '/api/v1/conference-connections',
         tags: ['Conferences'],
         summary: 'List personal Zoom connection metadata, without credentials',
-        security: [{ session: [] }],
-        middleware: session,
+        security: authenticated,
+        middleware: metadata,
         responses: {
           200: {
-            description: 'Personal metadata only; API keys and MCP are refused',
-            content: json(
-              z.object({
-                zoomEnabled: z.boolean(),
-                zoomMeetingsEnabled: z.boolean(),
-                pendingAttempts: z.number().int(),
-                maximumConnections: z.number().int(),
-                data: z.array(Connection),
-              }),
-            ),
+            description:
+              'Owned personal metadata only; OAuth attempts are browser-session-specific',
+            content: json(ConferenceConnections),
           },
-          ...errorResponses({ 403: 'conference_session_required' }),
+          ...errorResponses({ 403: 'conference_access_denied or conference_session_required' }),
         },
       }),
       async (c) => c.json(await listConferenceConnections(deps, c.var.principal), 200),

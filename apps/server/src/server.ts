@@ -43,7 +43,9 @@ import { httpServerOptions } from './http-timeouts.ts'
 import { bookingTools } from './mcp/bookings.ts'
 import { catalogTools } from './mcp/catalog.ts'
 import { mcpEndpoint } from './mcp/endpoint.ts'
+import { integrationTools } from './mcp/integrations.ts'
 import { mcpOAuthCleanupJob, mcpOAuthRoutes } from './mcp/oauth.ts'
+import type { Tool } from './mcp/tools.ts'
 import { whoamiTool } from './mcp/whoami.ts'
 import { installOneLineConsole } from './one-line-console.ts'
 import type { RouteModule } from './openapi.ts'
@@ -77,10 +79,12 @@ export function productRoutes({
   webhooks = { enabled: false },
   automaticMeet = false,
   automaticZoom = false,
+  hostedSignupUrl,
 }: {
   db: Db
   automaticMeet?: boolean
   automaticZoom?: boolean
+  hostedSignupUrl?: string
   webhooks?: import('@hourmere/webhooks').WebhookSettings
   mcpAuth?: Pick<ReturnType<typeof createAuth>, 'handler'> | undefined
   publicUrl?: string
@@ -93,7 +97,7 @@ export function productRoutes({
 }): RouteModule[] {
   return [
     mcpOAuthRoutes({ auth: mcpAuth, db, publicUrl }),
-    instanceRoutes({ socialProviders, automaticMeet, automaticZoom }),
+    instanceRoutes({ socialProviders, automaticMeet, automaticZoom, hostedSignupUrl }),
     calendarRoutes({ db, google: googleCalendar, enqueueSync: enqueueCalendarSync }),
     conferenceRoutes({ db, zoom: zoomConference }),
     profileRoutes({ db }),
@@ -103,6 +107,33 @@ export function productRoutes({
     publicRoutes({ db, notify, automaticMeet, automaticZoom }),
     bookingRoutes({ db, notify, automaticMeet, automaticZoom }),
     analyticsRoutes({ db }),
+  ]
+}
+
+/** The same tool registry is used by the running server and capability contract tests. */
+export function productTools({
+  db,
+  notify,
+  automaticMeet,
+  automaticZoom,
+  googleCalendar,
+  zoomConference,
+}: {
+  db: Db
+  notify?: BookingNotifier | undefined
+  automaticMeet?: boolean | undefined
+  automaticZoom?: boolean | undefined
+  googleCalendar?: CalendarDeps['google']
+  zoomConference?: ConferenceDeps['zoom']
+}): Tool[] {
+  return [
+    whoamiTool,
+    ...bookingTools({ db, notify, automaticMeet, automaticZoom }),
+    ...catalogTools({ db }),
+    ...integrationTools({
+      calendar: { db, google: googleCalendar },
+      conference: { db, zoom: zoomConference },
+    }),
   ]
 }
 
@@ -333,6 +364,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
         socialProviders: config.socialProviders,
         automaticMeet: config.GOOGLE_MEET_ENABLED,
         automaticZoom: config.ZOOM_MEETINGS_ENABLED,
+        hostedSignupUrl: config.HOSTED_SIGNUP_URL,
         webhooks: webhookSettings,
         notify,
         googleCalendar,
@@ -349,16 +381,14 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
               },
             }
           : {}),
-        tools: [
-          whoamiTool,
-          ...bookingTools({
-            db,
-            notify,
-            automaticMeet: config.GOOGLE_MEET_ENABLED,
-            automaticZoom: config.ZOOM_MEETINGS_ENABLED,
-          }),
-          ...catalogTools({ db }),
-        ],
+        tools: productTools({
+          db,
+          notify,
+          automaticMeet: config.GOOGLE_MEET_ENABLED,
+          automaticZoom: config.ZOOM_MEETINGS_ENABLED,
+          googleCalendar,
+          zoomConference,
+        }),
       }),
     }).fetch
   }

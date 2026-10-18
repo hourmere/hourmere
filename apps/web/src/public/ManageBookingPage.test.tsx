@@ -193,9 +193,10 @@ describe('the invitee’s manage page', () => {
         '/api/v1/bookings/manage/slots',
         '/api/v1/bookings/manage/reschedule',
         '/api/v1/bookings/manage/cancel',
+        '/api/v1/instance',
       ]),
     )
-    for (const call of api.calls) {
+    for (const call of api.calls.filter((call) => call.path !== '/api/v1/instance')) {
       expect([TOKEN, NEW_TOKEN]).toContain(call.headers.get('x-manage-token'))
       for (const secret of [TOKEN, NEW_TOKEN]) {
         expect(call.path).not.toContain(secret)
@@ -381,12 +382,9 @@ describe('the invitee’s manage page', () => {
     expect(await screen.findByText('Intro call')).toBeDefined()
     open(`/booking#token=${TOKEN}`)
     await waitFor(() => expect(api.to('GET /api/v1/bookings/manage')).toHaveLength(4))
-    expect(api.calls.map((c) => c.headers.get('x-manage-token'))).toEqual([
-      TOKEN,
-      NEW_TOKEN,
-      TOKEN,
-      TOKEN,
-    ])
+    expect(
+      api.to('GET /api/v1/bookings/manage').map((c) => c.headers.get('x-manage-token')),
+    ).toEqual([TOKEN, NEW_TOKEN, TOKEN, TOKEN])
   })
 
   it.each(['#token=', '#action=cancel', '#other=unknown'])(
@@ -426,7 +424,7 @@ describe('the invitee’s manage page', () => {
     await pending.answer(json(200, managed()))
     expect(screen.queryByText('Intro call')).toBeNull()
     expect(screen.getByRole('heading', { name: 'Open your booking link' })).toBeDefined()
-    expect(api.calls).toHaveLength(1)
+    expect(api.to('GET /api/v1/bookings/manage')).toHaveLength(1)
   })
 
   it('excludes the original instant from new times, regardless of its ISO spelling', async () => {

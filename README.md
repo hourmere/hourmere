@@ -69,6 +69,10 @@ the background jobs (booking emails); to run them in a container of their own, s
 `HOURMERE_ROLE=web` and enable the `worker` service in `docker-compose.yml` (same image,
 `HOURMERE_ROLE=worker`). Give containers at least 35 seconds to stop, so running jobs can finish. Put a reverse proxy with TLS in front of it, and set `TRUSTED_PROXIES` to the proxy's address as the app sees it (for a proxy on the host or on the compose network that is the Docker network, e.g. `172.16.0.0/12`), so rate limits apply per visitor rather than to everyone behind the proxy.
 
+The official image retains small public attribution and booking-confirmation links to the
+hosted service. `HOSTED_SIGNUP_URL` sets their destination (default `https://hourmere.com`);
+there is no setting to hide them.
+
 Team owners and admins can configure [collective meetings](docs/collective-scheduling.md)
 with two to eight required hosts, or [round-robin pools](docs/round-robin-scheduling.md)
 with one to eight hosts and explicit activation.
@@ -100,12 +104,19 @@ anyone else, and always on a hosted or internet-facing instance.
 `first-user` (the default), the first person to sign in gets an account, and after that only
 addresses in `SIGNUP_ALLOWED_DOMAINS` (comma-separated email domains, e.g.
 `example.com,example.org`; exact match, so list subdomains separately). So sign in right
-after the first start: the first account should be yours. `closed` allows only those domains
-(only invitees, if the list is empty); `open` lets anyone who can reach the instance sign up.
+after the first start: the first account should be yours. `closed` allows those domains and
+the invitation exception below. With an empty domain list, only invitations from the first
+user admit new accounts, so bootstrap an empty instance in `first-user` mode or through an
+administrator before using `closed`. `open` lets anyone who can reach the instance sign up.
 A pending, unexpired team invitation allows its exact email address in either restricted
-mode. Sign-up still requires proving that email address; joining the team requires accepting
-the invitation separately. Expired, canceled or already accepted invitations do not allow
-new accounts. A new
+mode only if the inviter's current email domain is allowed or the inviter is the instance's
+first user (the earliest remaining auth user by creation time, with user id breaking ties).
+Invitation-based registration is non-transitive: an invitee outside the allowed domains
+cannot admit another address by creating a team and inviting it. Team creation and invitation
+acceptance grant no registration authority. These rules apply to existing invitations too,
+using the current domain allowlist. Sign-up still requires proving that email address;
+joining the team requires accepting the invitation separately. Expired, canceled or already
+accepted invitations do not allow new accounts. A new
 address that may not sign up gets no sign-in email, and the request is answered the same way
 as for any other address. Every request queues an encrypted, short-lived email job before eligibility is checked by
 a worker; the request does not wait for SMTP or check whether the address has an account.

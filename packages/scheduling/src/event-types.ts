@@ -1009,26 +1009,28 @@ async function validateConference(
         'Automatic Zoom requires one explicitly authorized host.',
       )
     if (authorizeZoom) {
-      if (ctx.principal.kind !== 'session' || hosts[0] !== ctx.principal.user.id)
+      if (hosts[0] !== ctx.principal.user.id)
         throw new DomainError(
           'forbidden',
           'zoom_host_session_required',
-          'Only the host can choose their Zoom connection in a signed-in browser.',
+          'Only the host can choose their Zoom connection.',
         )
-      const session = await db
-        .selectFrom('auth.session')
-        .select('id')
-        .where('id', '=', ctx.principal.sessionId)
-        .where('userId', '=', ctx.principal.user.id)
-        .where('expiresAt', '>', new Date(ctx.now().epochMilliseconds))
-        .forShare()
-        .executeTakeFirst()
-      if (!session)
-        throw new DomainError(
-          'forbidden',
-          'zoom_host_session_required',
-          'Sign in again before choosing a private Zoom connection.',
-        )
+      if (ctx.principal.kind === 'session') {
+        const session = await db
+          .selectFrom('auth.session')
+          .select('id')
+          .where('id', '=', ctx.principal.sessionId)
+          .where('userId', '=', ctx.principal.user.id)
+          .where('expiresAt', '>', new Date(ctx.now().epochMilliseconds))
+          .forShare()
+          .executeTakeFirst()
+        if (!session)
+          throw new DomainError(
+            'forbidden',
+            'zoom_host_session_required',
+            'Sign in again before choosing a private Zoom connection.',
+          )
+      }
       await requireZoomConnection(db, hosts[0] as string, zoomConnectionId, ctx.automaticZoom)
     }
     return

@@ -10,6 +10,7 @@ import pg from 'pg'
 import { parse } from 'pg-connection-string'
 import { API_KEY_RATE_LIMIT } from './api-keys.ts'
 import { API_KEY_PREFIX } from './caller.ts'
+import { sanitizeInitialDisplayName } from './display-name.ts'
 import { beforeHook } from './hooks.ts'
 import { betterAuthLog, logMailFailure } from './log.ts'
 import { confirmLink, SIGN_IN_PATH } from './magic-link.ts'
@@ -223,6 +224,7 @@ export function createAuth({
                   'This sign-in provider did not confirm your email address. Sign in with an email link first; you can use this provider afterwards if it confirms the address.',
               })
             }
+            return { data: { ...user, name: sanitizeInitialDisplayName(user.name) } }
           },
           // Runs after the user row is committed.
           after: async (user) => {

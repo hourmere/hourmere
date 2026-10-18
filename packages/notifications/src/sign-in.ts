@@ -206,14 +206,14 @@ export async function deliverSignInEmail(
     const token = await verification(trx, deps, request)
     if (
       !token ||
-      token.expiresAt <= clock() ||
       (!(await maySignUp(trx, deps.signup, request.email)) &&
         !(await hasAccount(trx, request.email)))
     ) {
       await remove()
       return
     }
-    // Policy queries may have waited while the one-time link was used or expired.
+    // Check token expiry once, after policy queries that may have waited while the
+    // one-time link was used or expired. Outbox retention is checked independently above.
     const current = await verification(trx, deps, request)
     if (!current || current.expiresAt <= clock()) {
       await remove()

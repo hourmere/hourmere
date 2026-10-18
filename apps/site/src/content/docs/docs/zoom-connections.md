@@ -7,8 +7,13 @@ Hourmere can connect a personal Zoom identity under **Conference accounts**, sep
 sign-in, Google/Microsoft calendar connections, and the passive Zoom location label on event
 types. The identity-only choice does **not** create or read meetings. Optional automatic meeting
 authorization is a separate explicit choice; see the repository `docs/automatic-zoom.md`
-for lifecycle, private host selection, safe retry and acceptance limits. API keys and MCP OAuth cannot manage these
-connections. A live browser session and same-origin writes are required.
+for lifecycle, private host selection, safe retry and acceptance limits. The user's own API
+keys can list Zoom connections and select their own meeting-mode connection for automatic
+Zoom through REST on event types they actually host, with the same organization checks.
+Read-only MCP `list_conference_connections` also accepts enabled MCP OAuth grants.
+OAuth authorization, code exchange and disconnect require a live browser session;
+explicit Zoom credential refresh remains session-only. Cookie-authenticated writes require
+the app's own origin. MCP OAuth grants do not authenticate REST settings mutations.
 
 ## Configure an optional confidential client
 
@@ -84,7 +89,7 @@ User operations and deletion use the same owner-first row-lock order. Durable cl
 callback replay and rotating-token reuse after failed commits. Provider calls have a bounded
 deadline and response size. The retained connection foundation intentionally does not yet
 implement Zoom Marketplace production deauthorization/compliance webhooks. Automatic personal and individual single-host team events require an explicit meeting-mode
-connection, a default-off instance flag and the actual host’s own live-session selection.
+connection, a default-off instance flag and the actual host's session or own API-key selection.
 They reconcile one pinned meeting through reschedule/cancellation, hold final mail/ICS until
 ready and can pin one optional ordinary Google copy. Collective/round-robin automatic Zoom
 is unsupported. An unknown create is never retried with another POST: inspect/remove any
