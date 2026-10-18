@@ -48,12 +48,19 @@ application and job migrations at startup. A healthy response is a liveness/data
 it does not prove SMTP delivery or external calendar access.
 
 Sign in immediately after the first start. With the default `SIGNUP=first-user`, the first
-account belongs to whoever signs in first; further new accounts are refused unless their
-email domain is in `SIGNUP_ALLOWED_DOMAINS`. Existing accounts can always sign in.
-`SIGNUP=closed` still allows the listed domains. In either restricted mode, people with a
-pending, unexpired team invitation may also register using that exact email address. They
-must still prove email ownership and accept the invitation separately to join the team.
-With `closed` and an empty domain list, only these invitees can register.
+account belongs to whoever signs in first; further new accounts need an email domain in
+`SIGNUP_ALLOWED_DOMAINS` or the invitation exception below. Existing accounts can always
+sign in. `SIGNUP=closed` still allows the listed domains. In either restricted mode, a
+pending, unexpired team invitation admits its exact email address only if the inviter's
+current email domain is in the allowlist or the inviter is the first user: the earliest
+remaining auth user by creation time, with user id breaking ties. The current allowlist
+applies to existing invitations too. Registration authority is non-transitive: an invitee
+outside those domains cannot admit another address by creating a team and inviting it;
+neither team creation nor invitation acceptance grants that authority. Invitees must still
+prove email ownership and accept the invitation separately to join the team.
+With `closed` and an empty domain list, only invitations from the first user admit new
+accounts, so bootstrap an empty instance in `first-user` mode or through an administrator
+before using `closed`.
 `SIGNUP=open` permits anyone who can reach the app and cannot be combined with a domain list.
 
 In the app, set a profile handle and time zone, create working hours, then create an active

@@ -5,7 +5,7 @@ import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createJobs, type EnqueueOptions } from '@hourmere/jobs'
 import type { MailMessage } from '@hourmere/mail'
 import type pg from 'pg'
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   deliverSignInEmail,
   queuedSignInEmail,
@@ -54,8 +54,10 @@ describe.skipIf(!serverUrl)('queued sign-in email', () => {
     db = createDb(owned.pool)
   })
   afterAll(async () => {
-    await Promise.all(pools.map((pool) => pool.end()))
     await owned?.drop()
+  })
+  afterEach(async () => {
+    await Promise.all(pools.splice(0).map((pool) => pool.end()))
   })
   beforeEach(async () => {
     await db.deleteFrom('sign_in_emails').execute()

@@ -100,8 +100,10 @@ anyone else, and always on a hosted or internet-facing instance.
 `first-user` (the default), the first person to sign in gets an account, and after that only
 addresses in `SIGNUP_ALLOWED_DOMAINS` (comma-separated email domains, e.g.
 `example.com,example.org`; exact match, so list subdomains separately). So sign in right
-after the first start: the first account should be yours. `closed` allows only those domains
-(only invitees, if the list is empty); `open` lets anyone who can reach the instance sign up.
+after the first start: the first account should be yours. `closed` allows those domains and
+the invitation exception below. With an empty domain list, only invitations from the first
+user admit new accounts, so bootstrap an empty instance in `first-user` mode or through an
+administrator before using `closed`. `open` lets anyone who can reach the instance sign up.
 A pending, unexpired team invitation allows its exact email address in either restricted
 mode only if the inviter's current email domain is allowed or the inviter is the instance's
 first user (the earliest remaining auth user by creation time, with user id breaking ties).
