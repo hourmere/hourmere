@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { errorMessage, RequestError } from '../api/errors.ts'
 import { ErrorSummary, Field } from '../components/forms.tsx'
+import { browserLocale } from '../test/browser-locale.ts'
 import { admin } from './admin.ts'
 import { common } from './common.ts'
 import { AccountLanguage, LanguageSwitcher, useI18n } from './runtime.tsx'
@@ -47,6 +48,23 @@ function Draft() {
 }
 
 describe('typed interface messages and language state', () => {
+  it.each(['fa-IR', 'th-TH'])(
+    'formats dateMessage in the Gregorian calendar for browser locale %s',
+    (locale) => {
+      browserLocale(locale)
+      const date = '2030-12-24'
+      const expected = new Intl.DateTimeFormat(locale, {
+        calendar: 'gregory',
+        timeZone: 'UTC',
+        weekday: 'short',
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+      }).format(new Date(`${date}T00:00:00Z`))
+      expect(translateMessage('en', dateMessage(date), { dateLocale: undefined })).toBe(expected)
+    },
+  )
+
   it('keeps interpolation placeholders in both complete catalogs', () => {
     const placeholders = (text: string) =>
       [...text.matchAll(/\{(\w+)\}/g)].map((match) => match[1]).sort()

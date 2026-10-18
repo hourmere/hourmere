@@ -29,6 +29,8 @@ import { pressConfirmButton } from './sign-in-confirm-testing.ts'
 const serverUrl = process.env.DATABASE_URL
 // Sign-up control has its own tests (signup.test.ts).
 const OPEN: SignupPolicy = { mode: 'open', allowedDomains: [] }
+const signUpName = `  Ada\r\nLovelace\u2028${'😀'.repeat(110)}  `
+const cleanSignUpName = `Ada Lovelace ${'😀'.repeat(93)}`
 
 interface Me {
   user: { id: string; name: string; email: string }
@@ -111,12 +113,12 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
   const afterSend = () => new Promise<void>((resolve) => setImmediate(resolve))
 
   /** Requests a magic link and returns the link in the email it sends. */
-  async function emailedLink(email: string, { app }: Instance = main): Promise<URL> {
+  async function emailedLink(email: string, { app }: Instance = main, name?: string): Promise<URL> {
     const before = outbox.length
     const res = await app.request('/api/auth/sign-in/magic-link', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ email, callbackURL: '/' }),
+      body: JSON.stringify({ email, callbackURL: '/', name }),
     })
     expect(res.status).toBe(200)
     expect(await res.json()).toEqual({ status: true })
@@ -297,6 +299,24 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
   }
 
   describe('magic link', () => {
+    it('sanitizes a sign-up name before creating the account and personal organization', async () => {
+      const email = 'clean-signup-name@example.com'
+      const link = await pressConfirmButton(main.app, await emailedLink(email, main, signUpName))
+      const response = await main.app.request(link.toString())
+      expect(response.status).toBe(302)
+      const { res, body } = await me({ cookie: cookieHeader(response) })
+      expect(res.status).toBe(200)
+      expect(body.user).toMatchObject({ email, name: cleanSignUpName })
+      expect(body.organization.name).toBe(cleanSignUpName)
+      expect(
+        await db
+          .selectFrom('auth.user')
+          .select('name')
+          .where('email', '=', email)
+          .executeTakeFirst(),
+      ).toEqual({ name: cleanSignUpName })
+    })
+
     it('signs in and reaches /api/v1/me with the session cookie', async () => {
       const link = await requestLink('ada@example.com')
       expect(`${link.origin}${link.pathname}`).toBe(`${origin}/api/auth/magic-link/verify`)
@@ -1714,10 +1734,19 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
     const client = { clientId: 'id', clientSecret: 'secret' }
 
     /** A provider whose (already verified) ID token says the user is `profile`. */
-    const vouching = (profile: { id: string; email: string; emailVerified: boolean }) => ({
+    const vouching = (profile: {
+      id: string
+      email: string
+      emailVerified: boolean
+      name?: string
+    }) => ({
       verifyIdToken: async () => true,
       getUserInfo: async () => ({
-        user: { email: profile.email, emailVerified: profile.emailVerified, name: 'From provider' },
+        user: {
+          email: profile.email,
+          emailVerified: profile.emailVerified,
+          name: profile.name ?? 'From provider',
+        },
         // Only the claims the account key is read from (Microsoft: oid, Google: sub).
         data: { oid: profile.id, sub: profile.id } as never,
       }),
@@ -1729,6 +1758,37 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ provider, idToken: { token: 'header.payload.signature' } }),
       })
+
+    it.each(['google', 'microsoft'] as const)(
+      'sanitizes the %s profile name before creating the account and personal organization',
+      async (provider) => {
+        const email = `clean-${provider}-name@example.com`
+        const social = instance(origin, {
+          socialProviders: { [provider]: client },
+          socialProviderOptions: {
+            [provider]: vouching({
+              id: `clean-${provider}-name`,
+              email,
+              emailVerified: true,
+              name: signUpName,
+            }),
+          },
+        })
+        const response = await socialSignIn(social, provider)
+        expect(response.status).toBe(200)
+        const { res, body } = await me({ cookie: cookieHeader(response) }, social.app)
+        expect(res.status).toBe(200)
+        expect(body.user).toMatchObject({ email, name: cleanSignUpName })
+        expect(body.organization.name).toBe(cleanSignUpName)
+        expect(
+          await db
+            .selectFrom('auth.user')
+            .select('name')
+            .where('email', '=', email)
+            .executeTakeFirst(),
+        ).toEqual({ name: cleanSignUpName })
+      },
+    )
 
     it('creates an account when the provider confirms the email address', async () => {
       const google = instance(origin, {

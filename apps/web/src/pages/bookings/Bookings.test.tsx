@@ -2,6 +2,7 @@ import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { Booking } from '../../api/resources.ts'
+import { browserLocale } from '../../test/browser-locale.ts'
 import { fakeApi, json, profile, type Routes, renderApp, signedIn } from '../../test/fake-api.tsx'
 import { BOOKING_ID, booking, EVENT_TYPE_ID, eventType } from '../../test/fixtures.ts'
 import { PAGE_SIZE } from './Bookings.tsx'
@@ -23,6 +24,74 @@ const numbered = (from: number, count: number): Booking[] =>
   })
 
 describe('the bookings list', () => {
+  it('keeps a meeting in progress Upcoming and moves ended meetings to Past', async () => {
+    const user = userEvent.setup()
+    const now = new Date()
+    const inProgress = booking({
+      title: 'In progress',
+      start: new Date(now.getTime() - 60_000).toISOString(),
+      end: new Date(now.getTime() + 60_000).toISOString(),
+    })
+    const ended = booking({
+      id: 'b0000000-0000-7000-8000-000000000002',
+      title: 'Ended',
+      start: new Date(now.getTime() - 120_000).toISOString(),
+      end: now.toISOString(),
+    })
+    const api = fakeApi({
+      ...signedIn,
+      ...profile(),
+      'GET /api/v1/bookings': ({ path }) => {
+        const q = query(path)
+        return json(200, {
+          data: [inProgress, ended].filter(
+            (b) =>
+              (!q.from || b.start >= q.from) &&
+              (!q.to || b.start < q.to) &&
+              (!q.endAfter || b.end > q.endAfter) &&
+              (!q.endTo || b.end <= q.endTo),
+          ),
+          nextCursor: null,
+        })
+      },
+    })
+    renderApp('/app/bookings')
+    await screen.findByRole('rowheader', { name: 'In progress' })
+    expect(screen.queryByRole('rowheader', { name: 'Ended' })).toBeNull()
+    await user.click(screen.getByRole('link', { name: 'Past' }))
+    await screen.findByRole('rowheader', { name: 'Ended' })
+    expect(screen.queryByRole('rowheader', { name: 'In progress' })).toBeNull()
+    const calls = api.to('GET /api/v1/bookings').map((c) => query(c.path))
+    expect(calls[0]).toHaveProperty('endAfter')
+    expect(calls[1]).toHaveProperty('endTo')
+    expect(calls.every((q) => !q.from && !q.to)).toBe(true)
+  })
+
+  it.each(['fa-IR', 'th-TH'])(
+    'uses Gregorian dates in the booking list for browser locale %s',
+    async (locale) => {
+      browserLocale(locale)
+      const current = booking()
+      fakeApi({
+        ...signedIn,
+        ...profile(),
+        'GET /api/v1/bookings': () => json(200, { data: [current], nextCursor: null }),
+      })
+      renderApp('/app/bookings')
+      const row = (await screen.findByRole('rowheader', { name: 'Intro call' })).closest('tr')
+      expect(row?.textContent).toContain(
+        new Intl.DateTimeFormat(locale, {
+          calendar: 'gregory',
+          timeZone: 'Europe/Berlin',
+          weekday: 'short',
+          day: 'numeric',
+          month: 'short',
+          year: 'numeric',
+        }).format(new Date(current.start)),
+      )
+    },
+  )
+
   it('shows the end date for an overnight booking in the list', async () => {
     fakeApi({
       ...signedIn,
@@ -74,8 +143,8 @@ describe('the bookings list', () => {
     const [call] = api.to('GET /api/v1/bookings')
     const q = query(call?.path ?? '')
     expect(q.limit).toBe(String(PAGE_SIZE))
-    expect(Date.parse(q.from ?? '')).toBeLessThanOrEqual(Date.now())
-    expect(q.to).toBeUndefined()
+    expect(Date.parse(q.endAfter ?? '')).toBeLessThanOrEqual(Date.now())
+    expect(q.endTo).toBeUndefined()
     expect(screen.queryByRole('button', { name: 'Show more bookings' })).toBeNull()
   })
 
@@ -112,7 +181,7 @@ describe('the bookings list', () => {
     const calls = api.to('GET /api/v1/bookings').map((c) => query(c.path))
     expect(calls.map((q) => q.cursor)).toEqual([undefined, 'cursor-1', 'cursor-2'])
     // Every page asks for the same range.
-    expect(new Set(calls.map((q) => q.from)).size).toBe(1)
+    expect(new Set(calls.map((q) => q.endAfter)).size).toBe(1)
     expect(calls.every((q) => q.limit === String(PAGE_SIZE))).toBe(true)
   })
 
@@ -122,7 +191,7 @@ describe('the bookings list', () => {
       ...signedIn,
       ...profile(),
       'GET /api/v1/bookings': ({ path }) =>
-        query(path).to
+        query(path).endTo
           ? json(200, {
               data: [
                 booking({ start: '2026-01-05T09:00:00.000Z', end: '2026-01-05T09:30:00.000Z' }),
@@ -139,8 +208,8 @@ describe('the bookings list', () => {
     expect(screen.getByRole('link', { name: 'Past' }).getAttribute('aria-current')).toBe('page')
     expect(screen.getByText(/Newest first\./)).toBeDefined()
     const past = query(api.to('GET /api/v1/bookings')[1]?.path ?? '')
-    expect(Date.parse(past.to ?? '')).toBeLessThanOrEqual(Date.now())
-    expect(past.from).toBeUndefined()
+    expect(Date.parse(past.endTo ?? '')).toBeLessThanOrEqual(Date.now())
+    expect(past.endAfter).toBeUndefined()
     expect(past.order).toBe('desc')
   })
 
@@ -168,7 +237,7 @@ describe('the bookings list', () => {
     ])
     const calls = api.to('GET /api/v1/bookings').map((call) => query(call.path))
     expect(calls.map((q) => q.order)).toEqual(['desc', 'desc'])
-    expect(calls[1]?.to).toBe(calls[0]?.to)
+    expect(calls[1]?.endTo).toBe(calls[0]?.endTo)
     expect(calls[1]?.cursor).toBe('older-page')
     expect(screen.queryByRole('button', { name: 'Show more bookings' })).toBeNull()
   })
@@ -212,7 +281,7 @@ describe('the bookings list', () => {
       ...profile(),
       'GET /api/v1/bookings': ({ path }) => {
         const q = query(path)
-        if (q.to) return json(200, { data: [booking({ title: 'Past call' })], nextCursor: null })
+        if (q.endTo) return json(200, { data: [booking({ title: 'Past call' })], nextCursor: null })
         return json(
           200,
           q.cursor
@@ -276,6 +345,33 @@ describe('a booking', () => {
       ...extra,
     })
   }
+
+  it.each(['fa-IR', 'th-TH'])(
+    'uses Gregorian dates in booking detail for browser locale %s',
+    async (locale) => {
+      browserLocale(locale)
+      const current = booking()
+      bookingServer(current)
+      renderApp(`/app/bookings/${BOOKING_ID}`)
+      const when = await screen.findByRole('region', { name: 'When' })
+      expect(when.textContent).toContain(
+        new Intl.DateTimeFormat(locale, {
+          calendar: 'gregory',
+          timeZone: 'Europe/Berlin',
+          dateStyle: 'full',
+        }).format(new Date(current.start)),
+      )
+      const people = screen.getByRole('region', { name: 'People' })
+      expect(people.textContent).toContain(
+        new Intl.DateTimeFormat(locale, {
+          calendar: 'gregory',
+          timeZone: 'America/New_York',
+          dateStyle: 'medium',
+          timeStyle: 'short',
+        }).format(new Date(current.start)),
+      )
+    },
+  )
 
   it('shows the host’s end date for an overnight booking in the detail', async () => {
     bookingServer(booking({ end: '2030-03-05T09:00:00.000Z' }))
