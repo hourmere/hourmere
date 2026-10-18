@@ -654,13 +654,13 @@ describe.skipIf(!serverUrl)('automatic Zoom durable booking lifecycle (real Post
     expect((await row()).error_code).toBe('needs_reauth')
     expect(posts()).toHaveLength(1)
   })
-  it('rejects non-host/key configuration while permitting ordinary metadata/disable changes and rejects collective/round robin', async () => {
+  it('allows own API-key configuration and ordinary metadata/disable changes while rejecting unavailable connections and round robin', async () => {
     const key = { ...owner, kind: 'api_key' as const, apiKeyId: 'synthetic-key' }
     await expect(
       updateEventType({ db, principal: key, automaticZoom: true, now: () => NOW }, eventId, {
         zoomConnectionId: null,
       }),
-    ).rejects.toMatchObject({ code: 'zoom_host_session_required' })
+    ).rejects.toMatchObject({ code: 'automatic_zoom_unavailable' })
     await expect(
       createEventType(
         { db, principal: key, automaticZoom: true, now: () => NOW },
@@ -672,7 +672,10 @@ describe.skipIf(!serverUrl)('automatic Zoom durable booking lifecycle (real Post
           zoomConnectionId: connectionId,
         },
       ),
-    ).rejects.toMatchObject({ code: 'zoom_host_session_required' })
+    ).resolves.toMatchObject({
+      zoomConnectionId: connectionId,
+      location: { kind: 'zoom', autoCreate: true },
+    })
     await expect(
       updateEventType({ db, principal: key, now: () => NOW }, eventId, {
         title: 'Changed metadata',
@@ -712,7 +715,7 @@ describe.skipIf(!serverUrl)('automatic Zoom durable booking lifecycle (real Post
     ).rejects.toMatchObject({ code: 'automatic_zoom_host_policy' })
   })
   it.each(['key', 'non-host-admin', 'expired-host'])(
-    'requires the actual host live browser session when reactivating automatic Zoom (%s)',
+    'enforces host identity and current session or API-key authority on Zoom reactivation (%s)',
     async (kind) => {
       let principal = owner
       let id = eventId
@@ -761,11 +764,17 @@ describe.skipIf(!serverUrl)('automatic Zoom durable booking lifecycle (real Post
           ? { ...owner, kind: 'api_key' as const, apiKeyId: 'synthetic-key' }
           : principal
       await updateEventType({ db, principal: actor, now: () => NOW }, id, { isActive: false })
-      await expect(
-        updateEventType({ db, principal: actor, automaticZoom: true, now: () => NOW }, id, {
+      const reactivation = updateEventType(
+        { db, principal: actor, automaticZoom: true, now: () => NOW },
+        id,
+        { isActive: true },
+      )
+      if (kind === 'key')
+        await expect(reactivation).resolves.toMatchObject({
           isActive: true,
-        }),
-      ).rejects.toMatchObject({ code: 'zoom_host_session_required' })
+          zoomConnectionId: connectionId,
+        })
+      else await expect(reactivation).rejects.toMatchObject({ code: 'zoom_host_session_required' })
       expect(
         (
           await db
@@ -774,7 +783,7 @@ describe.skipIf(!serverUrl)('automatic Zoom durable booking lifecycle (real Post
             .where('id', '=', id)
             .executeTakeFirstOrThrow()
         ).is_active,
-      ).toBe(false)
+      ).toBe(kind === 'key')
     },
   )
   it.each(['identity', 'needs_reauth', 'refreshing'])(

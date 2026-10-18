@@ -21,13 +21,14 @@ import type { CallerEnv } from '../caller.ts'
 import {
   authenticated,
   type CallerMiddleware,
+  CROSS_ORIGIN_WRITE,
   errorResponses,
   json,
   type RouteModule,
 } from '../openapi.ts'
 import { createRateLimiter, rateLimit } from '../rate-limit.ts'
 
-const CalendarConnection = z
+export const CalendarConnection = z
   .object({
     id: z.uuid(),
     provider: z.enum(['google', 'microsoft']),
@@ -53,6 +54,12 @@ const CalendarConnection = z
     ),
   })
   .openapi('CalendarConnection')
+export const CalendarConnections = z.object({
+  googleEnabled: z.boolean(),
+  microsoftEnabled: z.boolean(),
+  destinationCalendarId: z.uuid().nullable(),
+  data: z.array(CalendarConnection),
+})
 const ConnectionId = z.object({ id: z.uuid() })
 const emptyBody = { body: { required: true, content: json(z.strictObject({})) } }
 const sessionOnly = createMiddleware<CallerEnv>(async (c, next) => {
@@ -63,11 +70,12 @@ const sessionOnly = createMiddleware<CallerEnv>(async (c, next) => {
 export function calendarRoutes(deps: CalendarDeps): RouteModule {
   const limit = rateLimit(createRateLimiter({ limit: 30, windowSeconds: 60 }))
   return ({ app, caller }) => {
-    const protectedWrite: [
+    const sessionWrite: [
       CallerMiddleware,
       MiddlewareHandler<CallerEnv>,
       MiddlewareHandler<CallerEnv>,
     ] = [caller, sessionOnly, limit]
+    const protectedWrite: [CallerMiddleware, MiddlewareHandler<CallerEnv>] = [caller, limit]
     app.openapi(
       createRoute({
         method: 'get',
@@ -79,14 +87,7 @@ export function calendarRoutes(deps: CalendarDeps): RouteModule {
         responses: {
           200: {
             description: 'Connection metadata only; never OAuth credentials',
-            content: json(
-              z.object({
-                googleEnabled: z.boolean(),
-                microsoftEnabled: z.boolean(),
-                destinationCalendarId: z.uuid().nullable(),
-                data: z.array(CalendarConnection),
-              }),
-            ),
+            content: json(CalendarConnections),
           },
           ...errorResponses({}),
         },
@@ -103,7 +104,7 @@ export function calendarRoutes(deps: CalendarDeps): RouteModule {
         description:
           'Requires a browser session and same-origin request. Follow authorizationUrl; the attempt expires after ten minutes and can only finish in this session. Default access=list requests identity and calendar-list access. access=sync additionally requests event read access and event writes on owned calendars; reconnect existing accounts to upgrade.',
         security: [{ session: [] }],
-        middleware: protectedWrite,
+        middleware: sessionWrite,
         request: {
           body: {
             required: true,
@@ -135,7 +136,7 @@ export function calendarRoutes(deps: CalendarDeps): RouteModule {
         description:
           'Requires a same-origin browser session. Requests identity, continuing access and Calendars.ReadBasic to list calendars. This connection does not synchronize busy times or write events.',
         security: [{ session: [] }],
-        middleware: protectedWrite,
+        middleware: sessionWrite,
         request: emptyBody,
         responses: {
           200: {
@@ -159,7 +160,8 @@ export function calendarRoutes(deps: CalendarDeps): RouteModule {
         path: '/api/v1/calendars/{id}',
         tags: ['Calendars'],
         summary: 'Select a calendar for busy-time conflict checks',
-        security: [{ session: [] }],
+        description: 'Sessions and API keys can select only the caller’s own calendars.',
+        security: authenticated,
         middleware: protectedWrite,
         request: {
           params: ConnectionId,
@@ -169,7 +171,7 @@ export function calendarRoutes(deps: CalendarDeps): RouteModule {
           204: { description: 'Selection saved; enabled calendars synchronize in the background' },
           ...errorResponses({
             400: 'invalid_request',
-            403: 'session_required',
+            403: `${CROSS_ORIGIN_WRITE} or session_required when the browser session becomes invalid during the request`,
             404: 'calendar_not_found',
             409: 'google_calendar_permissions_missing or calendar_events_unreadable',
           }),
@@ -191,13 +193,14 @@ export function calendarRoutes(deps: CalendarDeps): RouteModule {
         path: '/api/v1/calendars/{id}/sync',
         tags: ['Calendars'],
         summary: 'Synchronize selected calendar busy intervals now',
-        security: [{ session: [] }],
+        description: 'Sessions and API keys can synchronize only the caller’s own calendars.',
+        security: authenticated,
         middleware: protectedWrite,
         request: { ...emptyBody, params: ConnectionId },
         responses: {
           204: { description: 'Busy intervals synchronized' },
           ...errorResponses({
-            403: 'session_required',
+            403: `${CROSS_ORIGIN_WRITE} or session_required when the browser session becomes invalid during the request`,
             404: 'calendar_not_found',
             409: 'calendar_sync_disabled or google_calendar_provider_unavailable',
           }),
@@ -214,7 +217,8 @@ export function calendarRoutes(deps: CalendarDeps): RouteModule {
         path: '/api/v1/calendar-destination',
         tags: ['Calendars'],
         summary: 'Choose the owned Google calendar for new booking events',
-        security: [{ session: [] }],
+        description: 'Sessions and API keys change only the caller’s own writeback destination.',
+        security: authenticated,
         middleware: protectedWrite,
         request: {
           body: {
@@ -225,7 +229,7 @@ export function calendarRoutes(deps: CalendarDeps): RouteModule {
         responses: {
           204: { description: 'Default booking calendar saved' },
           ...errorResponses({
-            403: 'session_required',
+            403: `${CROSS_ORIGIN_WRITE} or session_required when the browser session becomes invalid during the request`,
             404: 'calendar_not_found or profile_not_found',
             409: 'calendar_not_writable',
           }),
@@ -270,15 +274,15 @@ export function calendarRoutes(deps: CalendarDeps): RouteModule {
         tags: ['Calendars'],
         summary: 'Refresh the connected account’s calendar list',
         description:
-          'Refreshes an expired access token when necessary. Does not fetch events or busy intervals.',
-        security: [{ session: [] }],
+          'Requires ownership of the connection. Refreshes an expired access token internally when necessary without granting new access or exposing credentials. Does not fetch events or busy intervals.',
+        security: authenticated,
         middleware: protectedWrite,
         request: { ...emptyBody, params: ConnectionId },
         responses: {
           204: { description: 'The calendar list was refreshed' },
           ...errorResponses({
             400: 'invalid_request',
-            403: 'session_required or a cross-origin write',
+            403: `${CROSS_ORIGIN_WRITE} or session_required when the browser session becomes invalid during the request`,
             404: 'calendar_connection_not_found',
             409: 'The provider calendar integration is disabled, needs reauthorization, lacks permissions or is unavailable',
           }),

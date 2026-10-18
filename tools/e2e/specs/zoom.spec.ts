@@ -54,7 +54,32 @@ for (const language of ['en', 'zh-CN'] as const) {
       identityLiteral: true,
     })
     expect(await zoomApp.disconnectForeign()).toBe(404)
-    expect(await zoomApp.apiKeyListStatus()).toBe(403)
+    const apiKeyList = await zoomApp.apiKeyListStatus()
+    expect(apiKeyList.status).toBe(200)
+    expect(apiKeyList.body.data.map((connection) => connection.id).sort()).toEqual(
+      apiKeyList.ownConnectionIds.sort(),
+    )
+    expect(apiKeyList.browserPendingAttempts).toBe(1)
+    expect(apiKeyList.body.pendingAttempts).toBe(0)
+    expect(Object.keys(apiKeyList.body).sort()).toEqual([
+      'data',
+      'maximumConnections',
+      'pendingAttempts',
+      'zoomEnabled',
+      'zoomMeetingsEnabled',
+    ])
+    for (const connection of apiKeyList.body.data)
+      expect(Object.keys(connection).sort()).toEqual([
+        'accountEmail',
+        'createdAt',
+        'displayName',
+        'id',
+        'lastError',
+        'mode',
+        'provider',
+        'status',
+        'updatedAt',
+      ])
     await page.getByRole('button', { name: text.refresh, exact: true }).click()
     await expect(page.getByText(text.refreshed, { exact: true })).toBeVisible()
     await page.getByRole('button', { name: text.disconnect, exact: true }).click()

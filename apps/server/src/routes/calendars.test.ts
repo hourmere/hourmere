@@ -1,6 +1,7 @@
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { GOOGLE_CALENDAR_SYNC_SCOPES } from '../../../../packages/calendars/src/google.ts'
 import {
   calendarTestSession,
   fakeGoogle,
@@ -8,6 +9,7 @@ import {
   TEST_CALENDAR_KEY,
   TEST_PUBLIC_URL,
 } from '../../../../packages/calendars/src/testing.ts'
+import { createTestTeam } from '../../../../packages/scheduling/src/testing.ts'
 import { createApp } from '../app.ts'
 import { calendarRoutes } from './calendars.ts'
 
@@ -16,6 +18,9 @@ describe.skipIf(!databaseUrl)('calendar HTTP routes (real Postgres)', () => {
   let database: TestDatabase
   let db: Db
   let owner: Awaited<ReturnType<typeof calendarTestSession>>
+  let other: typeof owner
+  let ownerInTeam: typeof owner
+  let otherInTeam: typeof owner
   let provider: ReturnType<typeof fakeGoogle>
   let microsoft: ReturnType<typeof fakeMicrosoft>
   let app: ReturnType<typeof createApp>
@@ -23,6 +28,20 @@ describe.skipIf(!databaseUrl)('calendar HTTP routes (real Postgres)', () => {
     database = await createTestDatabase(databaseUrl as string)
     db = createDb(database.pool)
     owner = await calendarTestSession(db)
+    other = await calendarTestSession(db)
+    const team = await createTestTeam(db, [
+      { user: { ...owner.user, principal: owner }, role: 'owner' },
+      { user: { ...other.user, principal: other }, role: 'admin' },
+    ])
+    ownerInTeam = {
+      ...owner,
+      organization: team.as({ ...owner.user, principal: owner }).organization,
+    }
+    otherInTeam = { ...other, organization: ownerInTeam.organization }
+    await db
+      .insertInto('profiles')
+      .values({ user_id: owner.user.id, handle: 'calendar-http-owner', time_zone: 'UTC' })
+      .execute()
   })
   beforeEach(async () => {
     await db.deleteFrom('calendar_connections').execute()
@@ -35,12 +54,18 @@ describe.skipIf(!databaseUrl)('calendar HTTP routes (real Postgres)', () => {
       publicUrl: TEST_PUBLIC_URL,
       resolveCaller: async (headers) => {
         const cookie = headers.get('cookie')
+        const keyOwner =
+          headers.get('authorization') === 'Bearer hm_other'
+            ? otherInTeam
+            : headers.get('authorization') === 'Bearer hm_team'
+              ? ownerInTeam
+              : owner
         const principal = headers.has('authorization')
           ? {
               kind: 'api_key' as const,
-              apiKeyId: owner.sessionId,
-              user: owner.user,
-              organization: owner.organization,
+              apiKeyId: keyOwner.sessionId,
+              user: keyOwner.user,
+              organization: keyOwner.organization,
             }
           : cookie === 'owner'
             ? owner
@@ -77,8 +102,12 @@ describe.skipIf(!databaseUrl)('calendar HTTP routes (real Postgres)', () => {
       },
       ...(body !== undefined && { body }),
     })
-  async function start() {
-    const response = await request('/api/v1/calendar-connections/google/authorize', 'POST', '{}')
+  async function start(access: 'list' | 'sync' = 'list') {
+    const response = await request(
+      '/api/v1/calendar-connections/google/authorize',
+      'POST',
+      JSON.stringify({ access }),
+    )
     expect(response.status).toBe(200)
     const data = (await response.json()) as { authorizationUrl: string }
     return new URL(data.authorizationUrl).searchParams.get('state') as string
@@ -144,6 +173,15 @@ describe.skipIf(!databaseUrl)('calendar HTTP routes (real Postgres)', () => {
     expect((await request(`/api/v1/calendar-connections/${id}/refresh`, 'POST', '{}')).status).toBe(
       204,
     )
+    expect(
+      (
+        await request(`/api/v1/calendar-connections/${id}/refresh`, 'POST', '{}', {
+          authorization: 'Bearer hm_test',
+          cookie: '',
+          origin: '',
+        })
+      ).status,
+    ).toBe(204)
     expect((await request(`/api/v1/calendar-connections/${id}`, 'DELETE')).status).toBe(204)
     expect(await db.selectFrom('calendar_connections').selectAll().execute()).toEqual([])
     expect(await db.selectFrom('calendars').selectAll().execute()).toEqual([])
@@ -244,14 +282,158 @@ describe.skipIf(!databaseUrl)('calendar HTTP routes (real Postgres)', () => {
       [`/api/v1/calendars/${id}`, 'PATCH'],
       [`/api/v1/calendars/${id}/sync`, 'POST'],
       ['/api/v1/calendar-destination', 'PUT'],
+      [`/api/v1/calendar-connections/${id}/refresh`, 'POST'],
     ]
     const headersCases: Record<string, string>[] = [
       { origin: 'https://attacker.example' },
-      { authorization: 'Bearer hm_test' },
+      { cookie: '' },
     ]
     for (const [path, method] of paths)
       for (const headers of headersCases)
-        expect((await request(path, method, '{broken', headers)).status).toBe(403)
+        expect((await request(path, method, '{broken', headers)).status).toBe(
+          headers.cookie === '' ? 401 : 403,
+        )
+  })
+
+  it.each(['hm_test', 'hm_team'])(
+    'lets an owner API key list, refresh, select, sync and set its destination across acting organizations (%s)',
+    async (key) => {
+      provider.controls.token.scope = GOOGLE_CALENDAR_SYNC_SCOPES.join(' ')
+      const state = await start('sync')
+      await request(`/api/calendar/google/callback?state=${state}&code=fake-code`)
+      const headers = { authorization: `Bearer ${key}`, cookie: '', origin: '' }
+      const listed = await request('/api/v1/calendar-connections', 'GET', undefined, headers)
+      expect(listed.status).toBe(200)
+      const data = (await listed.json()) as { data: { id: string; calendars: { id: string }[] }[] }
+      const connection = data.data[0]
+      if (!connection) throw new Error('Expected the owner connection')
+      const id = connection.calendars[0]?.id
+      expect(id).toBeDefined()
+      expect(JSON.stringify(data)).not.toMatch(/credentials|fake-access-token|fake-refresh-token/)
+      expect(
+        (
+          await request(
+            `/api/v1/calendar-connections/${connection.id}/refresh`,
+            'POST',
+            '{}',
+            headers,
+          )
+        ).status,
+      ).toBe(204)
+      expect(
+        (await request(`/api/v1/calendars/${id}`, 'PATCH', '{"checkConflicts":true}', headers))
+          .status,
+      ).toBe(204)
+      expect((await request(`/api/v1/calendars/${id}/sync`, 'POST', '{}', headers)).status).toBe(
+        204,
+      )
+      expect(
+        (
+          await request(
+            '/api/v1/calendar-destination',
+            'PUT',
+            JSON.stringify({ calendarId: id }),
+            headers,
+          )
+        ).status,
+      ).toBe(204)
+      const updated = (await (
+        await request('/api/v1/calendar-connections', 'GET', undefined, headers)
+      ).json()) as {
+        destinationCalendarId: string
+        data: { calendars: { checkConflicts: boolean; lastSyncedAt: string | null }[] }[]
+      }
+      expect(updated.destinationCalendarId).toBe(id)
+      expect(updated.data[0]?.calendars[0]).toMatchObject({
+        checkConflicts: true,
+        lastSyncedAt: expect.any(String),
+      })
+      expect(
+        (await request('/api/v1/calendar-destination', 'PUT', '{"calendarId":null}', headers))
+          .status,
+      ).toBe(204)
+    },
+  )
+
+  it('does not let a team administrator API key discover or change another member’s private calendars', async () => {
+    provider.controls.token.scope = GOOGLE_CALENDAR_SYNC_SCOPES.join(' ')
+    const state = await start('sync')
+    await request(`/api/calendar/google/callback?state=${state}&code=fake-code`)
+    const calendar = await db
+      .selectFrom('calendars')
+      .select(['id', 'connection_id'])
+      .executeTakeFirstOrThrow()
+    const headers = { authorization: 'Bearer hm_other', cookie: '', origin: '' }
+    const listed = await request('/api/v1/calendar-connections', 'GET', undefined, headers)
+    expect(listed.status).toBe(200)
+    expect(await listed.json()).toMatchObject({ data: [], destinationCalendarId: null })
+    const calls = provider.calls.length
+    for (const [path, method, body, code] of [
+      [
+        `/api/v1/calendars/${calendar.id}`,
+        'PATCH',
+        '{"checkConflicts":true}',
+        'calendar_not_found',
+      ],
+      [`/api/v1/calendars/${calendar.id}/sync`, 'POST', '{}', 'calendar_not_found'],
+      [
+        '/api/v1/calendar-destination',
+        'PUT',
+        JSON.stringify({ calendarId: calendar.id }),
+        'calendar_not_found',
+      ],
+      [
+        `/api/v1/calendar-connections/${calendar.connection_id}/refresh`,
+        'POST',
+        '{}',
+        'calendar_connection_not_found',
+      ],
+    ] as const) {
+      const response = await request(path, method, body, headers)
+      expect(response.status).toBe(404)
+      expect(await response.json()).toMatchObject({ error: code })
+    }
+    expect(provider.calls).toHaveLength(calls)
+    expect(await db.selectFrom('calendars').select('check_conflicts').execute()).toEqual([
+      { check_conflicts: false },
+    ])
+  })
+
+  it('keeps provider consent, callbacks and disconnect session-only for an owner API key', async () => {
+    const state = await start()
+    await request(`/api/calendar/google/callback?state=${state}&code=fake-code`)
+    const connection = await db
+      .selectFrom('calendar_connections')
+      .select('id')
+      .executeTakeFirstOrThrow()
+    const headers = { authorization: 'Bearer hm_test', cookie: '', origin: '' }
+    for (const providerName of ['google', 'microsoft']) {
+      const authorize = await request(
+        `/api/v1/calendar-connections/${providerName}/authorize`,
+        'POST',
+        '{}',
+        headers,
+      )
+      expect(authorize.status).toBe(403)
+      expect(await authorize.json()).toMatchObject({ error: 'session_required' })
+      const callback = await request(
+        `/api/calendar/${providerName}/callback?state=private&code=private`,
+        'GET',
+        undefined,
+        headers,
+      )
+      expect(callback.status).toBe(303)
+      expect(callback.headers.get('location')).toBe('/app/calendars?connection=session_required')
+    }
+    const disconnect = await request(
+      `/api/v1/calendar-connections/${connection.id}`,
+      'DELETE',
+      undefined,
+      headers,
+    )
+    expect(disconnect.status).toBe(403)
+    expect(await disconnect.json()).toMatchObject({ error: 'session_required' })
+    expect(await db.selectFrom('calendar_connections').select('id').execute()).toHaveLength(1)
   })
 
   it('bounds authorization attempts before reading a large body', async () => {

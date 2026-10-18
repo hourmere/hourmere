@@ -71,6 +71,7 @@ export const RESERVED_NAMES: ReadonlySet<string> = new Set([
   'robots.txt',
   'sitemap.xml',
   'index.html',
+  'hourmere-embed.js',
   // Pages people expect from the product itself.
   'about',
   'blog',

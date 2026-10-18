@@ -22,9 +22,9 @@ header on every request:
 ```
 
 This shows the connection values; client-specific configuration keys may differ. Store the
-real key privately. Hourmere currently accepts API keys, with no OAuth 2.1 connector flow.
-An OAuth-only client cannot connect directly yet. Browser session cookies do not authenticate
-MCP. A browser request from a different origin is refused; non-browser clients normally send
+real key privately. API keys keep working with or without the optional OAuth 2.1 connector
+flow described below. Session cookies never authenticate MCP.
+A browser request from a different origin is refused; non-browser clients normally send
 no `Origin` header.
 
 Ask the client to list tools, then call `whoami` to verify the user and organization before
@@ -43,6 +43,8 @@ app or through REST.
 | `get_event_type` | An `id` from the list; full configuration, including questions, location and rules. |
 | `list_schedules` | Optional `limit` and `after`; summaries of your schedules. Schedules belong to your user across organizations. |
 | `get_schedule` | An `id` from the list; weekly working hours in the schedule's IANA time zone. Date overrides are separate. |
+| `list_calendar_connections` | No arguments; your calendar IDs, safe connection status, conflict settings and write destination. |
+| `list_conference_connections` | No arguments; your Zoom connection IDs, identity/meetings mode and safe status. |
 
 Catalog lists return `{ data, nextAfter }`, sorted by ID, with 20 summaries by default and at
 most 100 (`limit: 1`–`100`). Pass `after: nextAfter` with the same key and organization until
@@ -51,6 +53,15 @@ are recalculated, so configuration changes may affect later pages. The list omit
 detail fields; use the corresponding detail tool when needed. Configuration writes and date
 overrides remain available through REST and the web app. Always check public availability
 with `find_available_slots` before booking an event found in the catalog.
+
+Connection discovery accepts API keys and enabled MCP OAuth grants and reads only your own
+metadata, without credentials or provider calls. The user's own API keys can change calendar
+conflict selection, the writeback destination, refresh the calendar list and sync now through
+REST, and select their own meeting-mode Zoom connection on event types they actually host.
+The same organization and ownership checks apply as for browser sessions.
+OAuth authorization, code exchange and disconnect require a live browser session;
+explicit Zoom credential refresh remains session-only. Settings mutations use REST with an
+API key; MCP OAuth grants do not authenticate REST requests.
 
 ## Book and manage time
 
@@ -105,7 +116,8 @@ trying another move. The returned new manage token is shown once, as with an inv
 ## Connect with OAuth
 
 For browser-based AI connectors, the instance operator can set `MCP_OAUTH_ENABLED=true`
-with a stable HTTPS `PUBLIC_URL`. Use the same `/mcp` server URL. Hourmere serves OAuth
+with a stable HTTPS `PUBLIC_URL`. The default is `false`; API keys keep working.
+Use the same `/mcp` server URL. Hourmere serves OAuth
 resource/issuer discovery, supports HTTPS Client ID Metadata Documents and dynamic client
 registration, and requires Authorization Code with S256 PKCE and the MCP resource indicator.
 
