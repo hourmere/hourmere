@@ -143,7 +143,7 @@ mailer still prints delivered links, and anyone reading them can sign in.
 All three are required together when either Zoom client field is configured. A key alone
 does not enable Zoom. These settings do not enable sign-in, calendar access or meeting
 creation by themselves. Automatic creation also requires the flag, explicit meeting permissions
-and the actual host’s live-session account selection on each opted-in event. Existing passive
+and the actual host's session or own API-key account selection on each opted-in event. Existing passive
 Zoom labels remain inert. Collective/round-robin automatic Zoom is unsupported. Existing
 committed meeting intents reconcile after disabling the flag. See [Zoom account connections](/docs/zoom-connections/) for the conservative
 returned-scope policy, actual-client prerequisites and local-disconnect semantics.

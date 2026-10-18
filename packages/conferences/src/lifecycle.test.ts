@@ -405,13 +405,13 @@ describe.skipIf(!serverUrl)('automatic Zoom durable booking lifecycle (real Post
     expect((await row()).error_code).toBe('needs_reauth')
     expect(posts()).toHaveLength(1)
   })
-  it('rejects non-host/key configuration while permitting ordinary metadata/disable changes and rejects collective/round robin', async () => {
+  it('allows own API-key configuration and ordinary metadata/disable changes while rejecting unavailable connections and round robin', async () => {
     const key = { ...owner, kind: 'api_key' as const, apiKeyId: 'synthetic-key' }
     await expect(
       updateEventType({ db, principal: key, automaticZoom: true, now: () => NOW }, eventId, {
         zoomConnectionId: null,
       }),
-    ).rejects.toMatchObject({ code: 'zoom_host_session_required' })
+    ).rejects.toMatchObject({ code: 'automatic_zoom_unavailable' })
     await expect(
       createEventType(
         { db, principal: key, automaticZoom: true, now: () => NOW },
@@ -423,7 +423,10 @@ describe.skipIf(!serverUrl)('automatic Zoom durable booking lifecycle (real Post
           zoomConnectionId: connectionId,
         },
       ),
-    ).rejects.toMatchObject({ code: 'zoom_host_session_required' })
+    ).resolves.toMatchObject({
+      zoomConnectionId: connectionId,
+      location: { kind: 'zoom', autoCreate: true },
+    })
     await expect(
       updateEventType({ db, principal: key, now: () => NOW }, eventId, {
         title: 'Changed metadata',

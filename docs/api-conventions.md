@@ -101,8 +101,28 @@ A request is authenticated by one of:
 anyone signs in, such as which sign-in methods are enabled (`signIn.google`, …).
 
 `GET /api/v1/me` returns the caller, the organization they act in and whether they used a
-session or an API key. The MCP server at `/mcp` ([mcp.md](mcp.md)) takes API keys only, never
-session cookies, and answers with the same error codes.
+session or an API key. The MCP server at `/mcp` ([mcp.md](mcp.md)) accepts API keys and,
+when enabled, MCP OAuth grants. Session cookies never authenticate MCP. OAuth grants are
+limited to MCP tools and do not authenticate REST requests.
+
+### Integration settings
+
+The user's own API keys have the same non-credential settings access as browser sessions:
+list calendar connections/status, refresh their calendar list, choose conflict calendars,
+set/clear the writeback destination and sync a selected calendar now. They may also list
+their Zoom connections and select their own meeting-mode connection for automatic Zoom
+on personal or single-host team event types they actually host. Connections belong to the
+user across organizations; event-type writes still require the acting organization's
+permissions and the actual host's identity. Another administrator cannot select a host's
+private connection. IDs do not grant access to another user's connections.
+
+OAuth authorization, code exchange and disconnect require a live browser session.
+Explicit Zoom credential refresh also remains session-only. Calendar list refresh and sync
+may internally refresh existing access tokens without exposing them or granting new scopes.
+Cookie-authenticated writes retain the same-origin requirement; API keys use bearer
+authentication. Read-only MCP `list_calendar_connections` and `list_conference_connections`
+reuse the REST services with the same ownership checks, including for MCP OAuth grants.
+Settings mutations use REST with an API key; MCP OAuth grants remain limited to MCP tools.
 
 ## Validation
 

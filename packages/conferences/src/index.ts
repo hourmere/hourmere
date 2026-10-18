@@ -123,8 +123,36 @@ function owned<T>(
   })
 }
 export async function listConferenceConnections(deps: ConferenceDeps, principal: Principal) {
-  const session = requireConferenceSession(principal)
-  return owned(deps, session, async (db) => {
+  return deps.db.transaction().execute(async (db) => {
+    if (principal.kind === 'session') await lockSession(db, principal, clock(deps))
+    else {
+      const user = await db
+        .selectFrom('auth.user')
+        .select('id')
+        .where('id', '=', principal.user.id)
+        .where('emailVerified', '=', true)
+        .forUpdate()
+        .executeTakeFirst()
+      if (!user)
+        throw new DomainError(
+          'forbidden',
+          'conference_access_denied',
+          'This account is unavailable.',
+        )
+    }
+    const member = await db
+      .selectFrom('auth.member')
+      .select('id')
+      .where('userId', '=', principal.user.id)
+      .where('organizationId', '=', principal.organization.id)
+      .forShare()
+      .executeTakeFirst()
+    if (!member)
+      throw new DomainError(
+        'forbidden',
+        'conference_access_denied',
+        'This organization is unavailable.',
+      )
     const rows = await db
       .selectFrom('conference_connections')
       .select([
@@ -138,21 +166,24 @@ export async function listConferenceConnections(deps: ConferenceDeps, principal:
         'created_at',
         'updated_at',
       ])
-      .where('user_id', '=', session.user.id)
+      .where('user_id', '=', principal.user.id)
       .where('status', '!=', 'disconnected')
       .orderBy('created_at')
       .orderBy('id')
       .limit(MAX_ZOOM_CONNECTIONS)
       .execute()
-    const attempts = await db
-      .selectFrom('conference_oauth_states')
-      .select('state_hash')
-      .where('user_id', '=', session.user.id)
-      .where('session_id', '=', session.sessionId)
-      .where('binding_version', '=', 2)
-      .where('expires_at', '>', new Date(clock(deps)))
-      .limit(5)
-      .execute()
+    const attempts =
+      principal.kind === 'session'
+        ? await db
+            .selectFrom('conference_oauth_states')
+            .select('state_hash')
+            .where('user_id', '=', principal.user.id)
+            .where('session_id', '=', principal.sessionId)
+            .where('binding_version', '=', 2)
+            .where('expires_at', '>', new Date(clock(deps)))
+            .limit(5)
+            .execute()
+        : []
     return {
       zoomEnabled: !!deps.zoom,
       zoomMeetingsEnabled: deps.zoom?.meetingsEnabled === true,
