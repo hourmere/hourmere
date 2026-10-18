@@ -271,29 +271,87 @@ for (const selected of ['en', 'zh-CN'] as const) {
       popupBody = popupFrame.contentFrame().locator('body')
     await expect(popupFrame).toHaveAttribute('title', text[selected].iframe)
     await expect(popupBody.getByRole('heading', { name: 'Fixture call' })).toBeVisible()
-    const rejectedSenders = await page.evaluate(() => {
-      const frame = document.querySelector<HTMLIFrameElement>('dialog iframe')
-      if (!frame?.contentWindow) return false
-      const target = new URL(frame.src),
-        id = target.searchParams.get('embedId'),
-        before = frame.style.height
-      for (const [origin, source, messageId] of [
-        [target.origin, window, id],
-        [window.location.origin, frame.contentWindow, id],
-        [target.origin, frame.contentWindow, 'different_embed_id'],
-      ] as const) {
-        for (const type of ['hourmere:resize', 'hourmere:close'])
-          window.dispatchEvent(
-            new MessageEvent('message', {
-              origin,
-              source,
-              data: { type, id: messageId, height: 1999 },
-            }),
-          )
-      }
-      return frame.style.height === before && Boolean(document.querySelector('dialog[open]'))
-    })
-    expect(rejectedSenders).toBe(true)
+    const popupUrl = (await popupFrame.getAttribute('src')) ?? '',
+      popupId = new URL(popupUrl).searchParams.get('embedId') ?? ''
+    async function rejectMessages(sender: Locator, id: string) {
+      const before = await popupFrame.evaluate((frame) => frame.style.height)
+      await page.evaluate((messageId) => {
+        const state = window as unknown as { fixtureProbeMessages: number }
+        state.fixtureProbeMessages = 0
+        const received = (event: MessageEvent) => {
+          if (
+            event.isTrusted &&
+            event.data?.id === messageId &&
+            (event.data?.type === 'hourmere:close' ||
+              (event.data?.type === 'hourmere:resize' && event.data?.height === 1999))
+          ) {
+            state.fixtureProbeMessages++
+            if (state.fixtureProbeMessages === 2) window.removeEventListener('message', received)
+          }
+        }
+        window.addEventListener('message', received)
+      }, id)
+      await sender.evaluate(
+        (_, { id, target }) => {
+          for (const type of ['hourmere:resize', 'hourmere:close'])
+            window.parent.postMessage({ type, id, height: 1999 }, target)
+        },
+        { id, target: app.parentUrl },
+      )
+      await expect
+        .poll(() =>
+          page.evaluate(
+            () => (window as unknown as { fixtureProbeMessages: number }).fixtureProbeMessages,
+          ),
+        )
+        .toBe(2)
+      await expect(dialog).toBeVisible()
+      expect(await popupFrame.evaluate((frame) => frame.style.height)).toBe(before)
+    }
+    // Keep the popup WindowProxy, but retire the actual app/ResizeObserver before
+    // comparing heights. Navigation preserves sender identity across documents.
+    const appSenderUrl = `${app.url}/sender-probe`,
+      parentSenderUrl = `${app.parentUrl}/sender-probe`
+    for (const url of [appSenderUrl, parentSenderUrl])
+      await page.route(url, (route) =>
+        route.fulfill({
+          status: 200,
+          contentType: 'text/html',
+          headers: { 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' },
+          body: '<!doctype html><title>Owned sender probe</title><body>Sender probe</body>',
+        }),
+      )
+    try {
+      await popupFrame.evaluate((frame, url) => {
+        frame.setAttribute('src', url)
+      }, appSenderUrl)
+      await expect(popupBody).toHaveText('Sender probe')
+      // A valid real sender is accepted; this also follows any messages queued by
+      // the retired app. The earlier inline assertions still exercise its real observer.
+      await popupBody.evaluate(
+        (_, { id, target }) =>
+          window.parent.postMessage({ type: 'hourmere:resize', id, height: 777 }, target),
+        { id: popupId, target: app.parentUrl },
+      )
+      await expect(popupFrame).toHaveCSS('height', '777px')
+      // Expected origin and ID, but a different sender WindowProxy.
+      await rejectMessages(inlineBody, popupId)
+      // Expected origin and sender Window, but a different correlation ID.
+      await rejectMessages(popupBody, 'different_embed_id')
+      // Expected sender Window and ID, but a different origin.
+      await popupFrame.evaluate((frame, url) => {
+        frame.setAttribute('src', url)
+      }, parentSenderUrl)
+      await expect(popupBody).toHaveText('Sender probe')
+      await rejectMessages(popupBody, popupId)
+    } finally {
+      await page.unroute(appSenderUrl)
+      await page.unroute(parentSenderUrl)
+    }
+    await popupFrame.evaluate((frame, url) => {
+      frame.setAttribute('src', url)
+    }, popupUrl)
+    await expect(popupBody.getByRole('heading', { name: 'Fixture call' })).toBeVisible()
     await language(popupBody, other(selected))
     await popupBody.getByRole('button', { name: /^(Next month|下个月)$/ }).focus()
     await page.keyboard.press('Escape')
