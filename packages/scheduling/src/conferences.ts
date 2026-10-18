@@ -380,16 +380,21 @@ export async function cancelBookingConference(trx: Db, bookingId: string, now: T
       .execute()
 }
 
-export async function bookingConferenceStates(db: Db, ids: readonly string[]) {
-  if (!ids.length) return new Map<string, ConferenceStatus>()
+interface BookingConferenceView {
+  conference: ConferenceStatus
+  location: Json | null
+  bookingStatus: string
+}
+
+export async function bookingConferenceViews(db: Db, ids: readonly string[]) {
+  if (!ids.length) return new Map<string, BookingConferenceView>()
   const rows = await db
     .selectFrom('booking_conferences')
-    .selectAll()
-    .select(
-      sql<string>`(SELECT status FROM bookings WHERE id=booking_conferences.booking_id)`.as(
-        'booking_status',
-      ),
-    )
+    .innerJoin('bookings as b', 'b.id', 'booking_conferences.booking_id')
+    .selectAll('booking_conferences')
+    // Read the resolved link and readiness from one snapshot: the worker commits them
+    // together, while a booking row loaded before this query may still have no link.
+    .select(['b.status as booking_status', 'b.location as booking_location'])
     .where('booking_id', 'in', ids)
     .execute()
   const unavailable = new Set<string>()
@@ -404,9 +409,15 @@ export async function bookingConferenceStates(db: Db, ids: readonly string[]) {
     rows.map((r) => [
       r.booking_id,
       {
-        provider: r.provider as ConferenceStatus['provider'],
-        status: unavailable.has(r.booking_id) ? 'failed' : (r.state as ConferenceStatus['status']),
-        errorCode: unavailable.has(r.booking_id) ? 'organizer_unavailable' : r.error_code,
+        conference: {
+          provider: r.provider as ConferenceStatus['provider'],
+          status: unavailable.has(r.booking_id)
+            ? 'failed'
+            : (r.state as ConferenceStatus['status']),
+          errorCode: unavailable.has(r.booking_id) ? 'organizer_unavailable' : r.error_code,
+        },
+        location: r.booking_location,
+        bookingStatus: r.booking_status,
       },
     ]),
   )

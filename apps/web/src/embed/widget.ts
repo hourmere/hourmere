@@ -1,5 +1,6 @@
 import { embedOrigin, publicBookingPath } from '@hourmere/core/embed'
 import { explicitLanguage, type InterfaceLanguage } from '@hourmere/core/language'
+import { randomHex } from '../random.ts'
 import { widgetLanguage, widgetMessages } from './language.ts'
 
 export interface InlineOptions {
@@ -55,7 +56,7 @@ export function initInline({ element, url, height = 720, language }: InlineOptio
   )
     throw new Error('Invalid Hourmere embed container or height')
   const selectedLanguage = widgetLanguage(language)
-  const id = crypto.randomUUID().replaceAll('-', ''),
+  const id = randomHex(16),
     target = iframeUrl(url, window.location.origin, id, selectedLanguage)
   mounted.get(element)?.destroy()
   const iframe = document.createElement('iframe')
@@ -97,8 +98,17 @@ export function initInline({ element, url, height = 720, language }: InlineOptio
     )
       iframe.style.height = `${data.height}px`
     if (data.type === 'hourmere:close' && popup?.handle.iframe === iframe) closePopup()
-    if (data.type === 'hourmere:booked')
-      element.dispatchEvent(new CustomEvent('hourmere:booking-completed'))
+    if (data.type === 'hourmere:booked') {
+      const completionTarget =
+        popup?.handle.iframe === iframe
+          ? popup.previous instanceof HTMLElement && popup.previous.isConnected
+            ? popup.previous
+            : document
+          : element
+      completionTarget.dispatchEvent(
+        new CustomEvent('hourmere:booking-completed', { bubbles: true }),
+      )
+    }
   }
   const handle: EmbedHandle = {
     iframe,
@@ -132,14 +142,14 @@ export function openPopup({ url, language }: { url: string; language?: Interface
   const selectedLanguage = widgetLanguage(language),
     text = widgetMessages(selectedLanguage)
   // Validate before closing an existing usable dialog or modifying the host document.
-  iframeUrl(url, window.location.origin, crypto.randomUUID().replaceAll('-', ''))
+  iframeUrl(url, window.location.origin, randomHex(16))
   closePopup()
   const previous = document.activeElement,
     dialog = document.createElement('dialog'),
     title = document.createElement('h2'),
     close = document.createElement('button'),
     holder = document.createElement('div')
-  title.id = `hourmere-title-${crypto.randomUUID()}`
+  title.id = `hourmere-title-${randomHex(16)}`
   title.textContent = text.title
   dialog.setAttribute('aria-labelledby', title.id)
   Object.assign(dialog.style, {

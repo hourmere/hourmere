@@ -188,7 +188,8 @@ Background jobs (notification emails, reminders, calendar synchronization and we
 delivery/retries) use pg-boss (`@hourmere/jobs`), which keeps its queue in its own `pgboss` schema and
 installs and upgrades it itself (on start, or with `npm run db:migrate` when
 `AUTO_MIGRATE=false`). Our migration runner never touches that schema, `db:types` leaves it
-out, and nothing of ours references its tables.
+out. Webhook cleanup reads its pinned job state to reconcile orphaned deliveries; no
+application foreign keys reference its tables.
 
 ## Changing the schema
 
@@ -273,6 +274,9 @@ endpoint organization; endpoint/booking/organization deletion cascades snapshots
 locks use endpoint then delivery so deletion, pause and rotation cannot deadlock delivery
 through inverse lock order. Details and retention are in [webhooks.md](webhooks.md).
 
+Migration 0028 adds safe `interrupted`/`job_missing` error classifications for finite retry
+accounting and orphan reconciliation, preserving existing webhook delivery data.
+
 ## Independent conference identities
 
 `conference_connections` stores Zoom identities separately from `auth.account` and
@@ -313,14 +317,14 @@ one such optional copy. The join URL is stored only in the current ready protect
 location. See [automatic-google-meet.md](automatic-google-meet.md) and
 [automatic-zoom.md](automatic-zoom.md).
 
-Migration0024 adds a persisted attempt count, random bounded lease, safe error class and
+Migration 0024 adds a persisted attempt count, random bounded lease, safe error class and
 exhausted timestamp to each conference notification. Existing due times and delivery flags
 are preserved. Attempt claims commit before SMTP; lease/attempt comparison protects completion
 and the row has a finite initial-attempt-plus-twelve-retry budget across cron executions.
 See [notifications.md](notifications.md#conference-outbox-delivery-budget) for diagnostics,
 legacy-row backfill and the remaining SMTP acceptance/failed-commit duplicate window.
 
-Migration0026 adds `skipped_at` as a distinct terminal outcome for obsolete conference
+Migration 0026 adds `skipped_at` as a distinct terminal outcome for obsolete conference
 notices. Cancellation, replacement or a closed delivery gate records a skip with
 `delivered=false`; pending conference reconciliation remains eligible for a later attempt.
 The migration preserves existing delivery history and does not update old rows.

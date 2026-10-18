@@ -25,7 +25,7 @@
   display: flex;
   justify-content: center;
   padding: var(--space-4);
-  opacity: 0.8;
+  opacity: 0.9;
 }
 
 .public .public-footer .logo-word {
@@ -75,6 +75,10 @@
 }
 
 @media (prefers-color-scheme: dark) {
+  .public .public-footer {
+    opacity: 0.8;
+  }
+
   .public .field-error {
     color: #ff9b94; /* 4.5:1 or more on the dark surfaces */
   }

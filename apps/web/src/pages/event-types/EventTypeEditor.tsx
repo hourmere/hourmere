@@ -26,6 +26,7 @@ import {
   publicTeamPageUrl,
   TEAM_LINK_SLUG_HINT,
 } from '../../paths.ts'
+import { randomHex } from '../../random.ts'
 import { type Me, useMe } from '../../session.tsx'
 import { useUnsavedChanges } from '../../unsaved-changes.tsx'
 import { MissingRecord } from '../NotFound.tsx'
@@ -416,8 +417,7 @@ function EventTypeForm({
                   checked={draft.isHidden}
                   onChange={(e) => {
                     set('isHidden', e.target.checked)
-                    if (e.target.checked)
-                      setSlugSuffix(crypto.randomUUID().replaceAll('-', '').slice(0, 8))
+                    if (e.target.checked) setSlugSuffix(randomHex(4))
                     else setSlugSuffix(null)
                   }}
                   aria-describedby="hidden-hint"
@@ -808,15 +808,22 @@ function MinutesField({
         ? msg('Empty: {0}.', { '0': empty })
         : ''
       : Number.isSafeInteger(minutes) && minutes >= 60
-        ? `= ${formatMinutes(minutes, displayLocale)}.`
+        ? msg('= {0}.', { '0': formatMinutes(minutes, displayLocale) })
         : ''
+  const hint = [
+    extra ? ui(extra) : '',
+    t('{0}–{1}.', { '0': String(rule.min), '1': rule.max.toLocaleString(displayLocale) }),
+    ui(amount),
+  ]
+    .filter(Boolean)
+    .join(displayLocale === 'zh-CN' ? '' : ' ')
   return (
     <Field
       id={id}
       label={t('{0} (minutes)', { '0': label })}
       optional={optional}
       error={error}
-      hint={`${extra ? `${ui(extra)} ` : ''}${rule.min}–${rule.max.toLocaleString('en')}. ${ui(amount)}`.trim()}
+      hint={hint}
     >
       {(props) => (
         <input

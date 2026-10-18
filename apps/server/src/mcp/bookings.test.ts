@@ -142,6 +142,19 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
     }
   }
 
+  it('documents host-pool conflicts and availability refresh in create_booking', async () => {
+    const client = await connect(agent.key)
+    try {
+      const { tools } = await client.listTools()
+      const description = tools.find((tool) => tool.name === 'create_booking')?.description
+      expect(description).toContain('booking_changed')
+      expect(description).toContain('round-robin host pool changed')
+      expect(description).toContain('call find_available_slots again before retrying')
+    } finally {
+      await client.close()
+    }
+  })
+
   it('discovers and books a collective team with exact-case teamSlug and an unambiguous namespace', async () => {
     const teamSlug = `Collective-${randomUUID().slice(0, 8)}`
     const org = await f.organization(teamSlug)
