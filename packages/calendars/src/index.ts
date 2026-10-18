@@ -103,13 +103,17 @@ const configured = (deps: CalendarDeps, provider: CalendarProvider = 'google') =
 }
 
 /** All connection mutations lock the owner, including the final phase of a callback. */
-export async function lockUser(db: Db, principal: SessionPrincipal, now: number) {
+export async function lockUser(db: Db, principal: Principal, now: number) {
   const user = await db
     .selectFrom('auth.user')
     .select('id')
     .where('id', '=', principal.user.id)
     .forUpdate()
     .executeTakeFirst()
+  if (principal.kind !== 'session') {
+    if (!user) throw notFound()
+    return
+  }
   const session = await db
     .selectFrom('auth.session')
     .select('id')
@@ -506,13 +510,12 @@ export async function refreshMicrosoftCalendars(
 }
 
 export async function refreshCalendarList(deps: CalendarDeps, principal: Principal, id: string) {
-  const session = requireCalendarSession(principal)
   if (!z.uuid().safeParse(id).success) throw notFound()
   const connection = await deps.db
     .selectFrom('calendar_connections')
     .select('provider')
     .where('id', '=', id)
-    .where('user_id', '=', session.user.id)
+    .where('user_id', '=', principal.user.id)
     .where('provider', 'in', ['google', 'microsoft'])
     .executeTakeFirst()
   if (!connection) throw notFound()
@@ -525,16 +528,15 @@ async function refreshCalendarProvider(
   id: string,
   provider: CalendarProvider,
 ) {
-  const session = requireCalendarSession(principal)
   const { client, key } = configured(deps, provider)
   if (!z.uuid().safeParse(id).success) throw notFound()
   const outcome = await deps.db.transaction().execute(async (trx) => {
-    await lockUser(trx, session, (deps.now ?? Date.now)())
+    await lockUser(trx, principal, (deps.now ?? Date.now)())
     const connection = await trx
       .selectFrom('calendar_connections')
       .selectAll()
       .where('id', '=', id)
-      .where('user_id', '=', session.user.id)
+      .where('user_id', '=', principal.user.id)
       .where('provider', '=', provider)
       .executeTakeFirst()
     if (!connection) throw notFound()
@@ -542,7 +544,7 @@ async function refreshCalendarProvider(
     try {
       const previous = readTokens(
         key,
-        session.user.id,
+        principal.user.id,
         connection.external_account_id,
         connection.credentials,
         provider,
@@ -556,7 +558,7 @@ async function refreshCalendarProvider(
       requireScopes(scopes, 'list', provider)
       const credentials = encryptCredential(
         key,
-        tokenAad(session.user.id, connection.external_account_id, provider),
+        tokenAad(principal.user.id, connection.external_account_id, provider),
         JSON.stringify({
           accessToken: tokens.accessToken,
           refreshToken: tokens.refreshToken ?? previous.refreshToken,

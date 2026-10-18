@@ -143,6 +143,10 @@ export interface paths {
             parameters: {
                 query?: {
                     cursor?: string;
+                    /** @description Only bookings ending after (exclusive) */
+                    endAfter?: string;
+                    /** @description Only bookings ending at or before (inclusive) */
+                    endTo?: string;
                     /** @description Only bookings starting at or after */
                     from?: string;
                     /** @description Page size, 1–100 (default 50) */
@@ -1195,7 +1199,7 @@ export interface paths {
         put?: never;
         /**
          * Refresh the connected account’s calendar list
-         * @description Refreshes an expired access token when necessary. Does not fetch events or busy intervals.
+         * @description Requires ownership of the connection. Refreshes an expired access token internally when necessary without granting new access or exposing credentials. Does not fetch events or busy intervals.
          */
         post: {
             parameters: {
@@ -1237,7 +1241,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description session_required or a cross-origin write */
+                /** @description forbidden: a cookie-authenticated write from another origin or session_required when the browser session becomes invalid during the request */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -1474,7 +1478,10 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Choose the owned Google calendar for new booking events */
+        /**
+         * Choose the owned Google calendar for new booking events
+         * @description Sessions and API keys change only the caller’s own writeback destination.
+         */
         put: {
             parameters: {
                 query?: never;
@@ -1507,7 +1514,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description session_required */
+                /** @description forbidden: a cookie-authenticated write from another origin or session_required when the browser session becomes invalid during the request */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -1565,7 +1572,10 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        /** Select a calendar for busy-time conflict checks */
+        /**
+         * Select a calendar for busy-time conflict checks
+         * @description Sessions and API keys can select only the caller’s own calendars.
+         */
         patch: {
             parameters: {
                 query?: never;
@@ -1608,7 +1618,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description session_required */
+                /** @description forbidden: a cookie-authenticated write from another origin or session_required when the browser session becomes invalid during the request */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -1657,7 +1667,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Synchronize selected calendar busy intervals now */
+        /**
+         * Synchronize selected calendar busy intervals now
+         * @description Sessions and API keys can synchronize only the caller’s own calendars.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -1689,7 +1702,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description session_required */
+                /** @description forbidden: a cookie-authenticated write from another origin or session_required when the browser session becomes invalid during the request */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -1750,7 +1763,7 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description Personal metadata only; API keys and MCP are refused */
+                /** @description Owned personal metadata only; OAuth attempts are browser-session-specific */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -1774,7 +1787,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description conference_session_required */
+                /** @description conference_access_denied or conference_session_required */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -5339,6 +5352,11 @@ export interface components {
         Instance: {
             automaticGoogleMeet?: boolean;
             automaticZoom?: boolean;
+            /**
+             * Format: uri
+             * @description Hosted service destination for public attribution and sign-up links
+             */
+            hostedSignupUrl: string;
             /** @description The sign-in methods people can use on this instance */
             signIn: {
                 /** @description Sign-in links sent by email */
@@ -5426,8 +5444,8 @@ export interface components {
             handle: string;
             host: {
                 name: string;
-                /** @description The host's IANA time zone */
-                timeZone: string;
+                /** @description The host's IANA time zone; omitted for round-robin pools */
+                timeZone?: string;
             };
             hosts?: {
                 name: string;

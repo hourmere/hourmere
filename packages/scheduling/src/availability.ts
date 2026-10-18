@@ -343,7 +343,7 @@ export interface PublicEventType {
   location: { kind: LocationKind } | null
   questions: Question[]
   allowGuests: boolean
-  host: { name: string; timeZone: string }
+  host: { name: string; timeZone?: string }
   /** Every required host, without private identities or availability. */
   hosts?: { name: string; timeZone: string }[]
   schedulingType?: 'round_robin'
@@ -375,7 +375,10 @@ function publicEventType(et: PublicEventTypeRecord | undefined): PublicEventType
     location: et.location && { kind: et.location.kind },
     questions: et.questions,
     allowGuests: et.allowGuests,
-    host: { name: et.hostName, timeZone: et.hostTimeZone },
+    host: {
+      name: et.hostName,
+      ...(et.schedulingType !== 'round_robin' && { timeZone: et.hostTimeZone }),
+    },
     ...(et.schedulingType === 'collective' && et.hosts.length > 1 && { hosts: et.hosts }),
     ...(et.schedulingType === 'round_robin' && { schedulingType: 'round_robin' as const }),
     ...(et.team && { team: et.team }),
@@ -539,7 +542,7 @@ async function publicSlots(
   if (automaticZoom(et.location)) {
     if (et.schedulingType !== 'individual' || et.hostUserIds.length !== 1)
       throw new DomainError('conflict', 'automatic_zoom_host_policy')
-    await requireZoomConnection(ctx.db, et.hostUserId, et.zoomConnectionId, ctx.automaticZoom)
+    await requireZoomConnection(ctx.db, et.hostUserId, et.zoomConnectionId, ctx.automaticZoom, true)
   }
   if (automaticMeet(et.location)) {
     if (et.schedulingType === 'round_robin')

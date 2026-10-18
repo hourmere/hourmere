@@ -465,7 +465,7 @@ async function toBookings(db: Db, rows: readonly BookingRow[]): Promise<Booking[
     end: toIso(toInstant(r.end_at)),
     title: r.title,
     location: parseLocation(
-      automaticZoom(r.location) &&
+      (automaticZoom(r.location) || automaticMeet(r.location)) &&
         (r.status !== 'confirmed' || conferences.get(r.id)?.status !== 'ready')
         ? unresolvedLocation(r.location)
         : r.location,
@@ -779,12 +779,12 @@ async function publicBooking(
       // The event type may have changed while we waited (duration, questions, rules), and
       // waiting took time: read both again now that the host is locked.
       const current = await resolve(trx, input.handle, input.slug, { lock: true })
-      if (
-        !current ||
-        current.id !== et.id ||
-        current.hostUserIds.join() !== et.hostUserIds.join() ||
-        current.schedulingType !== et.schedulingType
-      ) {
+      if (!current || current.id !== et.id || current.schedulingType !== et.schedulingType) {
+        throw eventTypeNotFound()
+      }
+      if (current.hostUserIds.join() !== et.hostUserIds.join()) {
+        if (current.schedulingType === 'round_robin')
+          throw new DomainError('conflict', 'booking_changed', 'The host pool changed; try again')
         throw eventTypeNotFound()
       }
       if (guests.length > 0 && !current.allowGuests) {
@@ -1057,6 +1057,10 @@ export interface ListBookingsInput {
   from?: Temporal.Instant | undefined
   /** Only bookings that start before this instant. */
   to?: Temporal.Instant | undefined
+  /** Only bookings that end strictly after this instant (includes meetings in progress). */
+  endAfter?: Temporal.Instant | undefined
+  /** Only bookings that end at or before this instant. */
+  endTo?: Temporal.Instant | undefined
   status?: BookingStatus | undefined
   /** 1–MAX_PAGE_SIZE, default DEFAULT_PAGE_SIZE. */
   limit?: number | undefined
@@ -1141,9 +1145,12 @@ export async function listHostBookings(
   if (order !== 'asc' && order !== 'desc')
     throw new DomainError('invalid', 'invalid_order', 'order must be asc or desc')
   const comparison = order === 'desc' ? '<' : '>'
-  const { from, to, status } = input
+  const { from, to, endAfter, endTo, status } = input
   if (from && to && Temporal.Instant.compare(to, from) <= 0) {
     throw new DomainError('invalid', 'invalid_range', 'to must be after from')
+  }
+  if (endAfter && endTo && Temporal.Instant.compare(endTo, endAfter) <= 0) {
+    throw new DomainError('invalid', 'invalid_range', 'endTo must be after endAfter')
   }
   const after = input.cursor === undefined ? undefined : decodeCursor(input.cursor)
 
@@ -1167,6 +1174,12 @@ export async function listHostBookings(
     )
     .$if(to !== undefined, (q) =>
       q.where((eb) => eb('b.start_at', '<', timestamptz(eb, to as Temporal.Instant))),
+    )
+    .$if(endAfter !== undefined, (q) =>
+      q.where((eb) => eb('b.end_at', '>', timestamptz(eb, endAfter as Temporal.Instant))),
+    )
+    .$if(endTo !== undefined, (q) =>
+      q.where((eb) => eb('b.end_at', '<=', timestamptz(eb, endTo as Temporal.Instant))),
     )
     .$if(status !== undefined, (q) => q.where('b.status', '=', status as string))
     .$if(after !== undefined, (q) =>

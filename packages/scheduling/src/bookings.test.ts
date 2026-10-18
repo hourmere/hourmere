@@ -1957,6 +1957,35 @@ describe.skipIf(!serverUrl)('bookings', () => {
       expect((await listHostBookings(as(bob, bob.organizationId))).data).toHaveLength(1)
     })
 
+    it('filters by ending time with an exclusive Upcoming and inclusive Past boundary', async () => {
+      const caller = as(alice, alice.organizationId)
+      const starts = async (input: Parameters<typeof listHostBookings>[1]) =>
+        (await listHostBookings(caller, input)).data.map((b) => b.start)
+      expect(await starts({ endAfter: instant('2026-11-04T10:15Z') })).toEqual([
+        '2026-11-04T10:00:00.000Z',
+        '2026-11-04T11:00:00.000Z',
+        '2026-11-05T09:00:00.000Z',
+      ])
+      expect(await starts({ endAfter: instant('2026-11-04T10:30Z') })).toEqual([
+        '2026-11-04T11:00:00.000Z',
+        '2026-11-05T09:00:00.000Z',
+      ])
+      expect(await starts({ endTo: instant('2026-11-04T10:30Z') })).toEqual([
+        '2026-11-04T09:00:00.000Z',
+        '2026-11-04T10:00:00.000Z',
+      ])
+      expect(await starts({ endTo: instant('2026-11-04T10:29:59.999999Z') })).toEqual([
+        '2026-11-04T09:00:00.000Z',
+      ])
+      for (const endTo of ['2026-11-04T10:30Z', '2026-11-04T10:00Z'])
+        await expect(
+          listHostBookings(caller, {
+            endAfter: instant('2026-11-04T10:30Z'),
+            endTo: instant(endTo),
+          }),
+        ).rejects.toMatchObject({ code: 'invalid_range' })
+    })
+
     it('filters by start and status', async () => {
       const ctxA = as(alice, alice.organizationId)
       const { data } = await listHostBookings(ctxA, {

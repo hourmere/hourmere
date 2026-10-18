@@ -39,6 +39,7 @@ describe('reserved names', () => {
       'well-known',
       '.well-known',
       'favicon.ico',
+      'hourmere-embed.js',
       'robots.txt',
       'sitemap.xml',
       // The web app's top-level routes today (before the signed-in app moves under /app).

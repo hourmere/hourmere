@@ -308,6 +308,7 @@ export interface BookingConferenceNotifications {
   last_error: string | null;
   lease_id: string | null;
   lease_until: Timestamp | null;
+  skipped_at: Timestamp | null;
 }
 
 export interface BookingConferences {

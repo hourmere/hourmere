@@ -9,7 +9,8 @@ export type SignupMode = (typeof SIGNUP_MODES)[number]
 export interface SignupPolicy {
   /**
    * `open`: anyone. `first-user`: the first account, then only `allowedDomains`. `closed`:
-   * only `allowedDomains`. A pending, unexpired team invitation also allows its address.
+   * only `allowedDomains`. A live team invitation also allows its exact address when its
+   * inviter has an allowed domain or is the earliest auth user (createdAt, then id).
    */
   mode: SignupMode
   /** Lowercase email domains whose addresses may always sign up; exact match, no subdomains. */
@@ -32,12 +33,23 @@ export async function maySignUp(db: Db, policy: SignupPolicy, email: string): Pr
   if (policy.mode === 'open' || policy.allowedDomains.includes(domainOf(email))) return true
   const invitation = await db
     .selectFrom('auth.invitation')
-    .select('id')
-    .where(sql<string>`lower(email)`, '=', email.toLowerCase())
+    .innerJoin('auth.user as inviter', 'inviter.id', 'auth.invitation.inviterId')
+    .select('auth.invitation.id')
+    .where(sql<string>`lower(auth.invitation.email)`, '=', email.toLowerCase())
     .where('status', '=', 'pending')
     .where('expiresAt', '>', sql<Date>`clock_timestamp()`)
     .where('organizationId', 'not in', (eb) =>
       eb.selectFrom('personal_organizations').select('organization_id'),
+    )
+    .where((eb) =>
+      eb.or([
+        sql<boolean>`lower(substring(inviter.email FROM '@([^@]*)$')) = ANY (${policy.allowedDomains}::text[])`,
+        eb(
+          'inviter.id',
+          '=',
+          eb.selectFrom('auth.user').select('id').orderBy('createdAt').orderBy('id').limit(1),
+        ),
+      ]),
     )
     .limit(1)
     .executeTakeFirst()
@@ -59,7 +71,7 @@ export async function hasAccount(db: Db, email: string): Promise<boolean> {
 
 /**
  * Connection settings that hand the policy to the database, which enforces it again in the
- * transaction that inserts the user (migrations 0006 and 0012). For Better Auth's pool.
+ * transaction that inserts the user (migrations 0006, 0012 and 0027). For Better Auth's pool.
  */
 export function signupConnectionOptions({ mode, allowedDomains }: SignupPolicy): string {
   // Also keeps anything but a plain domain out of the connection options.

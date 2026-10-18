@@ -6,13 +6,7 @@ import { z } from 'zod'
 import { calendarEncryptionKey, encryptCredential } from './credentials.ts'
 import { GOOGLE_CALENDAR_SYNC_SCOPES, GoogleCalendarError } from './google.ts'
 import { type GoogleEvent, GoogleSyncReset } from './google-events.ts'
-import {
-  type CalendarDeps,
-  lockUser,
-  readTokens,
-  requireCalendarSession,
-  tokenAad,
-} from './index.ts'
+import { type CalendarDeps, lockUser, readTokens, tokenAad } from './index.ts'
 
 export const SYNC_MAX_AGE_MS = 10 * 60_000
 const cursor = z.object({
@@ -275,17 +269,16 @@ export async function configureCalendar(
   id: string,
   checkConflicts: boolean,
 ) {
-  const session = requireCalendarSession(principal)
   if (!z.uuid().safeParse(id).success || typeof checkConflicts !== 'boolean')
     throw new DomainError('invalid', 'invalid_calendar_settings')
   await deps.db.transaction().execute(async (trx) => {
-    await lockUser(trx, session, (deps.now ?? Date.now)())
+    await lockUser(trx, principal, (deps.now ?? Date.now)())
     const row = await trx
       .selectFrom('calendars as c')
       .innerJoin('calendar_connections as cc', 'cc.id', 'c.connection_id')
       .select(['c.id', 'cc.scopes', 'cc.status', 'c.access_role', 'c.check_conflicts'])
       .where('c.id', '=', id)
-      .where('cc.user_id', '=', session.user.id)
+      .where('cc.user_id', '=', principal.user.id)
       .where('cc.provider', '=', 'google')
       .executeTakeFirst()
     if (!row) throw new DomainError('not_found', 'calendar_not_found')
@@ -294,7 +287,7 @@ export async function configureCalendar(
         .selectFrom('calendars as c')
         .innerJoin('calendar_connections as cc', 'cc.id', 'c.connection_id')
         .select(sql<number>`count(*)::int`.as('count'))
-        .where('cc.user_id', '=', session.user.id)
+        .where('cc.user_id', '=', principal.user.id)
         .where('c.check_conflicts', '=', true)
         .executeTakeFirstOrThrow()
       if (selected.count >= 20)
@@ -329,7 +322,6 @@ export async function configureCalendar(
 }
 
 export async function syncOwnedCalendar(deps: CalendarDeps, principal: Principal, id: string) {
-  const session = requireCalendarSession(principal)
   if (!z.uuid().safeParse(id).success) throw new DomainError('not_found', 'calendar_not_found')
   if (!deps.google) throw new DomainError('conflict', 'google_calendar_disabled')
   const calendar = await deps.db
@@ -337,7 +329,7 @@ export async function syncOwnedCalendar(deps: CalendarDeps, principal: Principal
     .innerJoin('calendar_connections as cc', 'cc.id', 'c.connection_id')
     .select('c.check_conflicts')
     .where('c.id', '=', id)
-    .where('cc.user_id', '=', session.user.id)
+    .where('cc.user_id', '=', principal.user.id)
     .where('cc.provider', '=', 'google')
     .executeTakeFirst()
   if (!calendar) throw new DomainError('not_found', 'calendar_not_found')
@@ -360,18 +352,17 @@ export async function setCalendarDestination(
   principal: Principal,
   calendarId: string | null,
 ) {
-  const session = requireCalendarSession(principal)
   if (calendarId !== null && !z.uuid().safeParse(calendarId).success)
     throw new DomainError('invalid', 'invalid_calendar_settings')
   await deps.db.transaction().execute(async (trx) => {
-    await lockUser(trx, session, (deps.now ?? Date.now)())
+    await lockUser(trx, principal, (deps.now ?? Date.now)())
     if (calendarId !== null) {
       const row = await trx
         .selectFrom('calendars as c')
         .innerJoin('calendar_connections as cc', 'cc.id', 'c.connection_id')
         .select(['c.access_role', 'cc.status', 'cc.scopes'])
         .where('c.id', '=', calendarId)
-        .where('cc.user_id', '=', session.user.id)
+        .where('cc.user_id', '=', principal.user.id)
         .where('cc.provider', '=', 'google')
         .executeTakeFirst()
       if (!row) throw new DomainError('not_found', 'calendar_not_found')
@@ -389,7 +380,7 @@ export async function setCalendarDestination(
     const updated = await trx
       .updateTable('profiles')
       .set({ destination_calendar_id: calendarId })
-      .where('user_id', '=', session.user.id)
+      .where('user_id', '=', principal.user.id)
       .returning('user_id')
       .executeTakeFirst()
     if (!updated)

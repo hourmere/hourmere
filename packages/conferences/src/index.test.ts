@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import type { Principal } from '@hourmere/auth'
 import { createDb, createPool, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
@@ -132,6 +133,84 @@ describe.skipIf(!databaseUrl)('independent Zoom connections (real Postgres)', ()
         .execute(),
     ).toHaveLength(0)
   })
+  it.each(['session', 'api_key', 'oauth'] as const)(
+    'lists only owned safe metadata for a %s principal without provider I/O',
+    async (kind) => {
+      const connection = await connect()
+      provider.controls.identity.id = 'synthetic-other-identity'
+      await connect(other)
+      await start()
+      const before = provider.calls.length
+      const principal: Principal =
+        kind === 'session'
+          ? owner
+          : kind === 'api_key'
+            ? {
+                user: owner.user,
+                organization: owner.organization,
+                kind,
+                apiKeyId: owner.sessionId,
+              }
+            : {
+                user: owner.user,
+                organization: owner.organization,
+                kind,
+                clientId: 'synthetic-client',
+                oauthConsentId: 'synthetic-consent',
+                scopes: ['mcp:tools'],
+              }
+      const listing = listConferenceConnections(deps, principal)
+      await expect(listing).resolves.toMatchObject({ data: [{ id: connection.id }] })
+      const result = await listing
+      expect(result.data).toHaveLength(1)
+      expect(result.data[0]?.id).toBe(connection.id)
+      expect(result.pendingAttempts).toBe(kind === 'session' ? 1 : 0)
+      expect(Object.keys(result.data[0] ?? {}).sort()).toEqual([
+        'accountEmail',
+        'createdAt',
+        'displayName',
+        'id',
+        'lastError',
+        'mode',
+        'provider',
+        'status',
+        'updatedAt',
+      ])
+      expect(provider.calls).toHaveLength(before)
+    },
+  )
+  it('rejects a listing principal outside its current organization and a revoked browser session', async () => {
+    await connect()
+    const key: Principal = {
+      user: owner.user,
+      organization: other.organization,
+      kind: 'api_key',
+      apiKeyId: owner.sessionId,
+    }
+    await expect(listConferenceConnections(deps, key)).rejects.toMatchObject({
+      code: 'conference_access_denied',
+    })
+    const nowAfterExpiry = Date.now() + 2 * 86400000
+    await expect(
+      listConferenceConnections({ ...deps, now: () => nowAfterExpiry }, owner),
+    ).rejects.toMatchObject({ code: 'conference_session_required' })
+  })
+  it('rejects an API-key listing principal whose account is no longer verified', async () => {
+    const disposable = await conferenceTestSession(db)
+    await db
+      .updateTable('auth.user')
+      .set({ emailVerified: false })
+      .where('id', '=', disposable.user.id)
+      .execute()
+    await expect(
+      listConferenceConnections(deps, {
+        user: disposable.user,
+        organization: disposable.organization,
+        kind: 'api_key',
+        apiKeyId: disposable.sessionId,
+      }),
+    ).rejects.toMatchObject({ code: 'conference_access_denied' })
+  })
   it('rejects other users/sessions, expiry, duplicate and reused state without redeeming', async () => {
     const { state } = await start()
     expect(await finishZoomConnection(deps, other, query(state))).toBe('invalid_state')
@@ -153,6 +232,81 @@ describe.skipIf(!databaseUrl)('independent Zoom connections (real Postgres)', ()
     expect(await finishZoomConnection(deps, owner, query(state))).toBe('invalid_state')
     expect(provider.calls).toHaveLength(0)
   })
+  it('rejects an already expired cached session before creating an authorization attempt', async () => {
+    const expired = await conferenceTestSession(db)
+    await db
+      .updateTable('auth.session')
+      .set({ expiresAt: new Date(now - 1) })
+      .where('id', '=', expired.sessionId)
+      .execute()
+    await expect(beginZoomConnection(deps, expired)).rejects.toMatchObject({
+      code: 'conference_session_required',
+    })
+    expect(
+      await db
+        .selectFrom('conference_oauth_states')
+        .select('state_hash')
+        .where('user_id', '=', expired.user.id)
+        .execute(),
+    ).toHaveLength(0)
+    expect(provider.calls).toHaveLength(0)
+  })
+  it('keeps a transiently failing explicit refresh retryable across actions and bounds its attempts', async () => {
+    const first = await connect()
+    provider.controls.tokenStatus = 503
+    await expect(refreshConference(deps, owner, first.id)).rejects.toMatchObject({
+      code: 'zoom_provider_unavailable',
+    })
+    expect(await row(first.id)).toMatchObject({
+      status: 'active',
+      last_error: 'provider_unavailable',
+      operation_id: null,
+    })
+    expect((await row(first.id)).credentials !== null).toBe(true)
+    expect(
+      provider.calls.filter(
+        (c) => new URLSearchParams(String(c.init.body)).get('grant_type') === 'refresh_token',
+      ),
+    ).toHaveLength(3)
+    provider.controls.tokenStatus = 200
+    await refreshConference(deps, owner, first.id)
+    expect((await row(first.id)).status).toBe('active')
+  })
+  it('retires a refresh grant only when the token endpoint documents invalid_grant', async () => {
+    const first = await connect()
+    provider.controls.tokenStatus = 400
+    provider.controls.token = { error: 'invalid_grant', error_description: 'synthetic-private' }
+    await expect(refreshConference(deps, owner, first.id)).rejects.toMatchObject({
+      code: 'zoom_needs_reauth',
+    })
+    expect(await row(first.id)).toMatchObject({ status: 'needs_reauth', credentials: null })
+    expect(
+      provider.calls.filter(
+        (c) => new URLSearchParams(String(c.init.body)).get('grant_type') === 'refresh_token',
+      ),
+    ).toHaveLength(1)
+  })
+  it.each([400, 401, 403])(
+    'keeps token endpoint HTTP %s configuration failures recoverable without retiring the user grant',
+    async (status) => {
+      const first = await connect()
+      provider.controls.tokenStatus = status
+      provider.controls.token = { error: 'invalid_client' }
+      await expect(refreshConference(deps, owner, first.id)).rejects.toMatchObject({
+        code: 'zoom_provider_unavailable',
+      })
+      expect(await row(first.id)).toMatchObject({
+        status: 'active',
+        last_error: 'provider_unavailable',
+      })
+      expect((await row(first.id)).credentials !== null).toBe(true)
+      expect(
+        provider.calls.filter(
+          (c) => new URLSearchParams(String(c.init.body)).get('grant_type') === 'refresh_token',
+        ),
+      ).toHaveLength(1)
+    },
+  )
   it.each([
     { code: 'one', unexpected: 'value' },
     { code: 'one', error: 'access_denied' },
@@ -328,7 +482,7 @@ describe.skipIf(!databaseUrl)('independent Zoom connections (real Postgres)', ()
     expect(refreshBodies).toEqual(['synthetic-zoom-refresh', 'synthetic-rotated-refresh'])
     expect(tokens(await row(first.id)).refreshToken).toBe('synthetic-rotated-refresh')
   })
-  it.each([undefined, 'user:read:user meeting:write:meeting'])(
+  it.each(['user:read:user meeting:write:meeting'])(
     'retired rotating tokens remain unusable after invalid returned scopes: %s',
     async (scope) => {
       const first = await connect()
@@ -348,6 +502,30 @@ describe.skipIf(!databaseUrl)('independent Zoom connections (real Postgres)', ()
         code: 'zoom_needs_reauth',
       })
       expect(provider.calls).toHaveLength(count)
+    },
+  )
+  it.each(['missing-scope', 'invalid-json'])(
+    'preserves a grant after malformed successful refresh (%s) until an explicit invalid_grant',
+    async (kind) => {
+      const first = await connect()
+      if (kind === 'missing-scope') delete provider.controls.token.scope
+      else provider.controls.tokenHook = async () => new Response('{')
+      await expect(refreshConference(deps, owner, first.id)).rejects.toMatchObject({
+        code: 'zoom_provider_unavailable',
+      })
+      expect(await row(first.id)).toMatchObject({
+        status: 'active',
+        last_error: 'provider_unavailable',
+        operation_id: null,
+      })
+      expect((await row(first.id)).credentials?.equals(first.credentials as Buffer)).toBe(true)
+      provider.controls.tokenHook = undefined
+      provider.controls.token = { error: 'invalid_grant' }
+      provider.controls.tokenStatus = 400
+      await expect(refreshConference(deps, owner, first.id)).rejects.toMatchObject({
+        code: 'zoom_needs_reauth',
+      })
+      expect(await row(first.id)).toMatchObject({ status: 'needs_reauth', credentials: null })
     },
   )
   it('persists the new refresh token after a transient metadata error and uses it on the next explicit refresh', async () => {

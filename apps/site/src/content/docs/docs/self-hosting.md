@@ -48,18 +48,36 @@ application and job migrations at startup. A healthy response is a liveness/data
 it does not prove SMTP delivery or external calendar access.
 
 Sign in immediately after the first start. With the default `SIGNUP=first-user`, the first
-account belongs to whoever signs in first; further new accounts are refused unless their
-email domain is in `SIGNUP_ALLOWED_DOMAINS`. Existing accounts can always sign in.
-`SIGNUP=closed` still allows the listed domains. In either restricted mode, people with a
-pending, unexpired team invitation may also register using that exact email address. They
-must still prove email ownership and accept the invitation separately to join the team.
-With `closed` and an empty domain list, only these invitees can register.
+account belongs to whoever signs in first; further new accounts need an email domain in
+`SIGNUP_ALLOWED_DOMAINS` or the invitation exception below. Existing accounts can always
+sign in. `SIGNUP=closed` still allows the listed domains. In either restricted mode, a
+pending, unexpired team invitation admits its exact email address only if the inviter's
+current email domain is in the allowlist or the inviter is the first user: the earliest
+remaining auth user by creation time, with user id breaking ties. The current allowlist
+applies to existing invitations too. Registration authority is non-transitive: an invitee
+outside those domains cannot admit another address by creating a team and inviting it;
+neither team creation nor invitation acceptance grants that authority. Invitees must still
+prove email ownership and accept the invitation separately to join the team.
+With `closed` and an empty domain list, only invitations from the first user admit new
+accounts, so bootstrap an empty instance in `first-user` mode or through an administrator
+before using `closed`.
 `SIGNUP=open` permits anyone who can reach the app and cannot be combined with a domain list.
 
 In the app, set a profile handle and time zone, create working hours, then create an active
 event type. Its public booking page is `/{handle}/{slug}`. Configure calendars explicitly
 through [Google Calendar](/docs/google-calendar), then use the [REST](/docs/rest) or
 [MCP](/docs/mcp) guides for agent access.
+
+## Public attribution
+
+The official image keeps a small “Powered by Hourmere” link on public booking pages and a
+“Create your own booking link” link on booking confirmations, including embedded pages.
+Self-hosted and hosted instances both retain these links; there is no setting to hide them.
+`HOSTED_SIGNUP_URL` configures their hosted service destination and defaults to
+`https://hourmere.com`, independently of your instance’s `PUBLIC_URL`. Set the hosted
+sign-up page URL when available. The links send no booking details or tracking parameters,
+and suppress the referrer. Removing attribution may become an enterprise-license
+entitlement later; it is outside the current configuration.
 
 ## Put a TLS proxy in front
 

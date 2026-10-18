@@ -6,7 +6,9 @@ import {
   cancelManagedBooking,
   createEventType,
   createPublicBooking,
+  getHostBooking,
   getManagedBooking,
+  listPublicSlots,
   type PublicContext,
   rescheduleManagedBooking,
 } from '@hourmere/scheduling'
@@ -308,6 +310,7 @@ describe.skipIf(!serverUrl)('automatic Meet durable flow (real PostgreSQL)', () 
     )
     expect(moved.booking.conference?.status).toBe('pending')
     expect(moved.booking.location?.url).toBeUndefined()
+    expect((await getManagedBooking(ctx, b.manageToken as string)).location?.url).toBeUndefined()
     await writeBookingConference(deps, b.booking.id)
     const current = await row()
     expect(current.state).toBe('ready')
@@ -321,6 +324,271 @@ describe.skipIf(!serverUrl)('automatic Meet durable flow (real PostgreSQL)', () 
     expect(sent).toHaveLength(2)
     expect(sent.every((m) => m.attachments?.[0]?.content.includes('SEQUENCE:1'))).toBe(true)
   })
+  it('hides the Meet URL from cancelled protected booking reads before and after cleanup', async () => {
+    const b = await ready()
+    expect((await getManagedBooking(ctx, b.manageToken as string)).location?.url === JOIN).toBe(
+      true,
+    )
+    await cancelManagedBooking(ctx, b.manageToken as string)
+    for (const cleanup of [false, true]) {
+      if (cleanup) await writeBookingConference(deps, b.booking.id)
+      expect((await getManagedBooking(ctx, b.manageToken as string)).location?.url).toBeUndefined()
+      expect(
+        (await getHostBooking({ ...ctx, principal: owner }, b.booking.id)).location?.url,
+      ).toBeUndefined()
+    }
+  })
+  it('public individual slots recheck the current Meet destination', async () => {
+    const input = {
+      handle: 'meet-host',
+      slug: 'meet',
+      start: Temporal.Instant.from(START),
+      end: Temporal.Instant.from(START).add({ hours: 1 }),
+    }
+    expect((await listPublicSlots(ctx, input)).length).toBeGreaterThan(0)
+    await db.updateTable('calendars').set({ supports_google_meet: false }).execute()
+    await expect(listPublicSlots(ctx, input)).rejects.toMatchObject({
+      code: 'automatic_meet_unavailable',
+    })
+  })
+  it.each([
+    { status: 400, error: 'invalid_response' },
+    { status: 401, error: 'needs_reauth' },
+    { status: 403, error: 'permissions_missing' },
+    { status: 429, error: null },
+    { status: 403, reason: 'rateLimitExceeded', error: null },
+    { status: 403, reason: 'userRateLimitExceeded', error: null },
+  ])(
+    'known rejected import $status ($reason) permits a later create',
+    async ({ status, reason, error }) => {
+      const b = await book(),
+        original = provider.controls.eventHook
+      if (!original) throw Error('Synthetic provider hook missing')
+      provider.controls.eventHook = async (url, init) =>
+        init.method === 'POST'
+          ? Response.json({ error: { errors: [{ reason: reason ?? 'forbidden' }] } }, { status })
+          : original(url, init)
+      await writeBookingConference(deps, b.booking.id)
+      expect(await row()).toMatchObject({
+        state: error ? 'failed' : 'pending',
+        error_code: error,
+        create_started: false,
+      })
+      expect(imports()).toHaveLength(1)
+      expect((await row()).next_attempt_at.getTime()).toBeGreaterThan(NOW.epochMilliseconds)
+      if (error) await retryBookingConference({ ...ctx, principal: owner }, b.booking.id)
+      await db.updateTable('calendar_connections').set({ status: 'active' }).execute()
+      provider.controls.eventHook = original
+      response = 'success'
+      await due()
+      await writeBookingConference(deps, b.booking.id)
+      expect(await row()).toMatchObject({ state: 'ready', error_code: null })
+      expect(imports()).toHaveLength(2)
+    },
+  )
+  it.each([500, 503])(
+    'HTTP %s after import remains ambiguous and never re-POSTs',
+    async (status) => {
+      const b = await book()
+      provider.controls.eventHook = async () => Response.json({}, { status })
+      await writeBookingConference(deps, b.booking.id)
+      expect(await row()).toMatchObject({
+        state: 'failed',
+        error_code: 'ambiguous_create',
+        create_started: true,
+      })
+      await retryBookingConference({ ...ctx, principal: owner }, b.booking.id)
+      provider.controls.eventHook = async () => Response.json({ items: [] })
+      await writeBookingConference(deps, b.booking.id)
+      expect(imports()).toHaveLength(1)
+      expect((await row()).error_code).toBe('ambiguous_create')
+    },
+  )
+  it('a stale result lease may preserve its event ID but cannot publish readiness or a URL', async () => {
+    const b = await book(),
+      entered = barrier(),
+      release = barrier(),
+      original = provider.controls.eventHook
+    if (!original) throw Error('Synthetic provider hook missing')
+    response = 'success'
+    provider.controls.eventHook = async (url, init) => {
+      const result = await original(url, init)
+      if (init.method === 'POST') {
+        entered.release()
+        await release.promise
+      }
+      return result
+    }
+    const work = writeBookingConference(deps, b.booking.id)
+    await entered.promise
+    const replacementLease = crypto.randomUUID()
+    try {
+      await db.updateTable('booking_conferences').set({ lease_id: replacementLease }).execute()
+    } finally {
+      release.release()
+    }
+    await work
+    expect(await row()).toMatchObject({
+      state: 'pending',
+      external_event_id: 'meet-event',
+      lease_id: replacementLease,
+      applied_revision: null,
+    })
+    expect((await getManagedBooking(ctx, b.manageToken as string)).location?.url).toBeUndefined()
+    expect(
+      await db.selectFrom('booking_conference_notifications').selectAll().execute(),
+    ).toHaveLength(0)
+  })
+  it('rejects an imported root event with a different logical UID', async () => {
+    const b = await book(),
+      original = provider.controls.eventHook
+    if (!original) throw Error('Synthetic provider hook missing')
+    response = 'success'
+    provider.controls.eventHook = async (url, init) => {
+      const result = await original(url, init)
+      return init.method === 'POST'
+        ? Response.json({
+            ...((await result.json()) as Record<string, unknown>),
+            iCalUID: 'another-root@hourmere',
+          })
+        : result
+    }
+    await writeBookingConference(deps, b.booking.id)
+    expect(await row()).toMatchObject({
+      state: 'failed',
+      error_code: 'invalid_response',
+      external_event_id: null,
+    })
+    expect((await getManagedBooking(ctx, b.manageToken as string)).location?.url).toBeUndefined()
+  })
+  it('a provider URL accompanied by an error cannot mark the root ready', async () => {
+    const b = await book()
+    await db.deleteFrom('booking_conferences').where('root_booking_id', '=', b.booking.id).execute()
+    await db
+      .insertInto('booking_conferences')
+      .values({
+        root_booking_id: b.booking.id,
+        booking_id: b.booking.id,
+        organization_id: owner.organization.id,
+        organizer_user_id: owner.user.id,
+        provider: 'zoom',
+        zoom_connection_id: crypto.randomUUID(),
+        zoom_user_id: 'synthetic-zoom-user',
+      })
+      .execute()
+    await writeBookingConference(
+      {
+        ...deps,
+        zoomConferenceWork: async () => ({
+          meetingId: '81234567890',
+          url: 'https://zoom.us/j/81234567890',
+          error: 'provider_unavailable',
+        }),
+      },
+      b.booking.id,
+    )
+    expect(await row()).toMatchObject({
+      state: 'pending',
+      applied_revision: null,
+      zoom_meeting_id: '81234567890',
+    })
+    expect(
+      await db.selectFrom('booking_conference_notifications').selectAll().execute(),
+    ).toHaveLength(0)
+  })
+  it('a successful URL arriving after meeting start is never stored in booking location', async () => {
+    const b = await book(),
+      original = provider.controls.eventHook
+    if (!original) throw Error('Synthetic provider hook missing')
+    let now = NOW.epochMilliseconds
+    response = 'success'
+    provider.controls.eventHook = async (url, init) => {
+      const result = await original(url, init)
+      if (init.method === 'POST') now = Temporal.Instant.from(START).epochMilliseconds
+      return result
+    }
+    await writeBookingConference({ ...deps, now: () => now }, b.booking.id)
+    expect(await row()).toMatchObject({ state: 'failed', error_code: 'meeting_started' })
+    const raw = await db
+      .selectFrom('bookings')
+      .select('location')
+      .where('id', '=', b.booking.id)
+      .executeTakeFirstOrThrow()
+    expect(raw.location).not.toHaveProperty('url')
+    expect(
+      await db.selectFrom('booking_conference_notifications').select('kind').execute(),
+    ).toEqual([{ kind: 'conference_failed' }])
+  })
+  it('a known event deleted remotely completes cancellation cleanup on 404', async () => {
+    const b = await ready()
+    provider.controls.storedEvents.clear()
+    await cancelManagedBooking(ctx, b.manageToken as string)
+    await writeBookingConference(deps, b.booking.id)
+    expect(await row()).toMatchObject({ state: 'ready', error_code: null })
+    expect(await db.selectFrom('calendar_busy').selectAll().execute()).toHaveLength(0)
+    expect(imports()).toHaveLength(1)
+  })
+  it.each(['pending', 'ready'] as const)('refuses retry of a %s root', async (state) => {
+    const b = state === 'ready' ? await ready() : await book()
+    await expect(
+      retryBookingConference({ ...ctx, principal: owner }, b.booking.id),
+    ).rejects.toMatchObject({ code: 'conference_not_retryable' })
+    expect((await row()).state).toBe(state)
+  })
+  it('refuses retry of a failed confirmed meeting after its start', async () => {
+    const b = await book()
+    response = 'failure'
+    await writeBookingConference(deps, b.booking.id)
+    await expect(
+      retryBookingConference(
+        { ...ctx, principal: owner, now: () => Temporal.Instant.from(START) },
+        b.booking.id,
+      ),
+    ).rejects.toMatchObject({ code: 'conference_not_retryable' })
+    expect((await row()).state).toBe('failed')
+  })
+  it.each([503, 400, 'network', 'timeout'] as const)(
+    'transient token HTTP %s retains credentials and retries with bounded backoff',
+    async (status) => {
+      const b = await book()
+      if (typeof status === 'number') provider.controls.tokenStatus = status
+      else
+        provider.controls.tokenHook = async () => {
+          throw status === 'timeout'
+            ? new DOMException('Synthetic deadline', 'TimeoutError')
+            : new TypeError('Synthetic connection reset')
+        }
+      provider.controls.tokenError = 'temporarily_unavailable'
+      const connection = await db
+        .selectFrom('calendar_connections')
+        .selectAll()
+        .executeTakeFirstOrThrow()
+      await writeBookingConference(deps, b.booking.id)
+      expect(
+        await db
+          .selectFrom('calendar_connections')
+          .select(['status', 'credentials'])
+          .executeTakeFirstOrThrow(),
+      ).toMatchObject({ status: 'active', credentials: connection.credentials })
+      expect(await row()).toMatchObject({
+        state: 'pending',
+        create_started: false,
+        error_code: null,
+      })
+      expect((await row()).next_attempt_at.getTime() - NOW.epochMilliseconds).toBeGreaterThan(0)
+      expect((await row()).next_attempt_at.getTime() - NOW.epochMilliseconds).toBeLessThanOrEqual(
+        60_000,
+      )
+      expect(imports()).toHaveLength(0)
+      provider.controls.tokenStatus = 200
+      provider.controls.tokenHook = undefined
+      response = 'success'
+      await due()
+      await writeBookingConference(deps, b.booking.id)
+      expect((await row()).state).toBe('ready')
+      expect(imports()).toHaveLength(1)
+    },
+  )
   it('keeps unknown import lost responses in reconciliation and never exposes force-create', async () => {
     const b = await book()
     const hook = provider.controls.eventHook as NonNullable<typeof provider.controls.eventHook>

@@ -128,6 +128,10 @@ types in `packages/db/src/tables.ts` are generated from the migrated database.
   policy as settings (`hourmere.signup`, `hourmere.signup_allowed_domains`); other
   connections (migrations, psql) are not limited. The server reads the settings back at
   startup and refuses to start if they are missing (e.g. dropped by a connection pooler).
+- **Invitation authority is non-transitive.** Migration 0027 admits an invitation's exact
+  address only when its inviter has a currently allowed email domain or is the earliest
+  remaining auth user (creation time, then ID). Creating a team or accepting an invitation
+  grants no registration authority. Existing invitations follow the current policy.
 - **A personal organization is its user's alone**: no invitations or other members, the
   owner cannot be removed or demoted, and it cannot be deleted on its own.
 - **Ownership is enforced where it is cheap to do so.** Composite foreign keys keep a
@@ -186,7 +190,8 @@ Background jobs (notification emails, reminders, calendar synchronization and we
 delivery/retries) use pg-boss (`@hourmere/jobs`), which keeps its queue in its own `pgboss` schema and
 installs and upgrades it itself (on start, or with `npm run db:migrate` when
 `AUTO_MIGRATE=false`). Our migration runner never touches that schema, `db:types` leaves it
-out, and nothing of ours references its tables.
+out. Webhook cleanup reads its pinned job state to reconcile orphaned deliveries; no
+application foreign keys reference its tables.
 
 ## Changing the schema
 
@@ -272,6 +277,9 @@ endpoint organization; endpoint/booking/organization deletion cascades snapshots
 locks use endpoint then delivery so deletion, pause and rotation cannot deadlock delivery
 through inverse lock order. Details and retention are in [webhooks.md](webhooks.md).
 
+Migration 0028 adds safe `interrupted`/`job_missing` error classifications for finite retry
+accounting and orphan reconciliation, preserving existing webhook delivery data.
+
 ## Independent conference identities
 
 `conference_connections` stores Zoom identities separately from `auth.account` and
@@ -280,6 +288,12 @@ optional bounded display metadata, minimal scopes, a safe status/error and purpo
 AES-256-GCM ciphertext. A durable `refreshing` operation holds no reusable credentials.
 All operations lock the owner, then the live session, then the connection/state. Provider
 I/O stays bounded under that owner lock; state claims and token retirement commit first.
+Transient refresh transport failures retry at most three times with backoff; if they remain
+transient, the operation restores the original encrypted grant as active for later recovery.
+Other token rejections or malformed successful responses also preserve the prior grant;
+only an explicit invalid grant retires it. Identity/scope mismatches remain fail closed.
+Public booking eligibility accepts a pinned meeting-mode connection during `refreshing`,
+while selecting a new automatic configuration still requires `active`.
 
 `conference_oauth_states` stores only a state digest plus owner/session, optional expected
 connection, encrypted PKCE verifier, single-use claim and ten-minute expiry. A durable claim
@@ -306,12 +320,17 @@ one such optional copy. The join URL is stored only in the current ready protect
 location. See [automatic-google-meet.md](automatic-google-meet.md) and
 [automatic-zoom.md](automatic-zoom.md).
 
-Migration0024 adds a persisted attempt count, random bounded lease, safe error class and
+Migration 0024 adds a persisted attempt count, random bounded lease, safe error class and
 exhausted timestamp to each conference notification. Existing due times and delivery flags
 are preserved. Attempt claims commit before SMTP; lease/attempt comparison protects completion
 and the row has a finite initial-attempt-plus-twelve-retry budget across cron executions.
 See [notifications.md](notifications.md#conference-outbox-delivery-budget) for diagnostics,
 legacy-row backfill and the remaining SMTP acceptance/failed-commit duplicate window.
+
+Migration 0026 adds `skipped_at` as a distinct terminal outcome for obsolete conference
+notices. Cancellation, replacement or a closed delivery gate records a skip with
+`delivered=false`; pending conference reconciliation remains eligible for a later attempt.
+The migration preserves existing delivery history and does not update old rows.
 
 ## Round-robin assignment state
 

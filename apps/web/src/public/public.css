@@ -34,6 +34,28 @@
   font-size: 0.95rem;
 }
 
+.public .public-footer a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  text-decoration: none;
+}
+
+.public .public-footer a:hover {
+  text-decoration: underline;
+}
+
+.public .public-signup {
+  margin-top: var(--space-5);
+  font-size: 0.85rem;
+}
+
+.public .public-signup a {
+  color: var(--muted);
+}
+
 .public .public-card {
   max-width: none;
 }

@@ -2,8 +2,10 @@
 
 Google Calendar connections are separate from Google sign-in. Signing in never requests
 calendar permissions, and connecting a calendar never creates or links a sign-in account.
-Connections belong to a user across their organizations; only that user's browser session
-can start, refresh or disconnect them. API keys can read their owner's connection metadata.
+Connections belong to a user across their organizations. The user's own API keys can list
+connection metadata, refresh the calendar list, choose conflict calendars and the writeback
+destination, and sync now. OAuth authorization, code exchange and disconnect require a live
+browser session. Read-only MCP listing accepts API keys and enabled MCP OAuth grants.
 
 People explicitly select calendars for conflict checks and an owned calendar for new
 booking events. Connecting alone enables neither: new calendars have `check_conflicts=false`
@@ -62,13 +64,15 @@ same separate consent flow. Temporary provider failures preserve the connection 
 | `GET /api/v1/calendar-connections` | Own connection/calendar metadata and whether Google is configured; no credentials |
 | `POST /api/v1/calendar-connections/google/authorize` with `{access?}` | Same-origin browser session; returns a Google authorization URL |
 | `GET /api/calendar/google/callback` | Google OAuth protocol callback; immediately redirects to `/app/calendars` with a fixed result code |
-| `POST /api/v1/calendar-connections/{id}/refresh` with `{}` | Browser session; refresh own calendar list, obtaining a fresh access token when needed |
+| `POST /api/v1/calendar-connections/{id}/refresh` with `{}` | Session or own API key; refresh own calendar list, obtaining a fresh access token when needed |
 | `PATCH /api/v1/calendars/{id}` with `{checkConflicts}` | Select up to 20 owned/accessible readable calendars for conflict checks; queues an initial sync transactionally |
 | `POST /api/v1/calendars/{id}/sync` with `{}` | Synchronize a selected calendar now |
 | `PUT /api/v1/calendar-destination` with `{calendarId}` | Set/clear the profile's owned default destination for new bookings |
 | `DELETE /api/v1/calendar-connections/{id}` | Browser session; remove own local connection, credentials and calendars |
 
-Writes require the app's origin and reject API keys. Missing/foreign connections return
+Non-credential settings accept the user's own API keys with the same ownership checks.
+Cookie-authenticated writes require the app's origin. OAuth authorization, code exchange
+and disconnect remain session-only. Missing/foreign connections return
 404 `calendar_connection_not_found`. Disabled Google configuration returns 409
 `google_calendar_disabled`; failed refreshes return 409 `google_calendar_needs_reauth`,
 `google_calendar_permissions_missing` or `google_calendar_provider_unavailable`.

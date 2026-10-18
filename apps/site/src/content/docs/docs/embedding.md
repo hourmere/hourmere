@@ -40,8 +40,21 @@ For client-side apps, call `window.Hourmere.init()` after adding placeholders or
 `initInline({element, url})`, whose returned `destroy()` must run when the component unmounts.
 `openPopup({url})`, `closePopup()` and `destroyInline(element)` are also available.
 
-A `hourmere:booking-completed` event on the container has no details; it is a UI signal,
-including retry confirmations. Booking identifiers, attendee information, answers and manage
+A `hourmere:booking-completed` event fires on an inline container or a popup's focused opener
+when the iframe shows confirmation, including retry confirmations. If the popup opener has
+been removed, it fires on `document`. The event bubbles, so a listener on `document` handles
+both modes:
+
+```js
+document.addEventListener('hourmere:booking-completed', () => {
+  // Update your local UI; the event has no details.
+});
+```
+
+The widget checks the iframe's completion postMessage origin, Window and correlation
+identifier first. This is a UI signal, not a trusted booking or billing record, and repeated
+confirmations do not necessarily mean new bookings. The popup stays open for the visitor to
+copy their private manage link. Booking identifiers, attendee information, answers and manage
 tokens are never sent to the parent. Manage links stay inside the Hourmere frame. Regular
 account, OAuth and management pages cannot be framed. Nesting inside an outer frame with a
 different origin is not supported.

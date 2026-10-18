@@ -164,6 +164,10 @@ export const ListBookingsQuery = z.object({
   }),
   from: Instant.optional().openapi({ description: 'Only bookings starting at or after' }),
   to: Instant.optional().openapi({ description: 'Only bookings starting before' }),
+  endAfter: Instant.optional().openapi({ description: 'Only bookings ending after (exclusive)' }),
+  endTo: Instant.optional().openapi({
+    description: 'Only bookings ending at or before (inclusive)',
+  }),
   status: z.enum(['confirmed', 'cancelled']).optional(),
   limit: z.coerce
     .number()
@@ -544,6 +548,8 @@ export function bookingRoutes({
           order: q.order,
           from: q.from === undefined ? undefined : Temporal.Instant.from(q.from),
           to: q.to === undefined ? undefined : Temporal.Instant.from(q.to),
+          endAfter: q.endAfter === undefined ? undefined : Temporal.Instant.from(q.endAfter),
+          endTo: q.endTo === undefined ? undefined : Temporal.Instant.from(q.endTo),
           status: q.status,
           limit: q.limit,
           cursor: q.cursor,

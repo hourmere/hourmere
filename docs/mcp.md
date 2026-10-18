@@ -42,6 +42,9 @@ Session cookies are never accepted on `/mcp`, even alongside a
 key: a JSON-RPC endpoint that cookies could authenticate would let any web page act as a
 signed-in visitor (CSRF).
 
+Session cookies never authenticate MCP. API keys keep working when OAuth is disabled;
+the optional OAuth flow below grants access only to MCP tools.
+
 **Origin:** clients that are not browsers send no `Origin` header and are not affected. A
 request that carries one (it comes from a web page) is refused with **403** unless it is
 Hourmere's own `PUBLIC_URL` origin. This is the MCP specification's protection against DNS
@@ -158,7 +161,9 @@ parts of its link, `https://<host>/<handle>/<slug>`.
 | `get_event_type` | One visible event type's full configuration | read-only |
 | `list_schedules` | Compact, paginated summaries of your working-hours schedules | read-only |
 | `get_schedule` | One of your schedules, including weekly hours in its time zone | read-only |
-| `find_available_slots` | The event type (title, duration, questions, host's time zone) and its free slots between two dates | read-only |
+| `list_calendar_connections` | Your calendar connection status, calendar IDs, conflict settings and write destination; no credentials | read-only |
+| `list_conference_connections` | Your Zoom connection IDs, modes and status; no credentials or browser authorization attempts | read-only |
+| `find_available_slots` | The event type (title, duration, questions, host's time zone when applicable) and its free slots between two dates | read-only |
 | `create_booking` | Books a slot for an invitee; returns the booking and its `manageToken` | open world |
 | `reschedule_booking` | Moves a booking you host (`bookingId`, token is null) or one you made (`manageToken`, returns a new token) | destructive, open world |
 | `cancel_booking` | Cancels a booking you host (`bookingId`) or one you made (`manageToken`) | destructive, idempotent, open world |
@@ -171,6 +176,17 @@ is not proof of public availability: use `find_available_slots` before booking.
 `list_schedules` includes only your schedules, which follow your user across organizations.
 Use the corresponding `get_` tool for full details; `get_schedule` returns weekly hours,
 not date overrides. Configuration changes and date overrides use the REST API or web app.
+
+The two connection tools take `{}` and call the same services as
+`GET /api/v1/calendar-connections` and `GET /api/v1/conference-connections`. They read only
+the caller's own connections across organizations and make no provider requests. API keys
+and enabled MCP OAuth grants can use both tools. The user's own API keys can change calendar
+conflict selection, the writeback destination, refresh the calendar list and sync now through
+REST. They can also select their own meeting-mode Zoom connection on event types they
+actually host, subject to the same organization permissions as browser sessions.
+OAuth authorization, code exchange and disconnect require a live browser session;
+explicit Zoom credential refresh remains session-only. No MCP settings mutation tools are
+provided. MCP OAuth grants do not authenticate REST requests.
 
 `find_available_slots` and `create_booking` accept exactly one public namespace:
 `handle` for `/{handle}/{slug}`, or `teamSlug` for `/team/{teamSlug}/{slug}`. Personal
@@ -190,7 +206,9 @@ weekly hours; each database query fetches at most `limit + 1` summaries.
 
 `list_bookings` defaults to ascending start time (then ID). Set `order: "desc"` for newest
 first; keep the same order and filters when following `nextCursor`. The host's Past page
-uses descending order for the complete paginated history.
+uses descending order for the complete paginated history. Optional `endAfter` (strictly
+after) and `endTo` (at or before) filter by booking end time; Upcoming includes in-progress
+meetings. Keep filters unchanged while paginating.
 
 Each tool's description and JSON Schemas (`tools/list`) say what it needs and returns; the
 fields are those of the REST API (`/api/v1/openapi.json`). Results come as
@@ -286,9 +304,11 @@ See [automatic-google-meet.md](automatic-google-meet.md) for optional copies and
 ## Automatic Zoom reconciliation
 
 Personal and individual single-host team events may opt into automatic Zoom using the actual
-host's private meeting-mode connection. Enabling or changing that configuration requires the
-actual host's live browser session; API keys/MCP grants and another team administrator cannot
-select a private connection. Passive Zoom labels remain unchanged; collective/round-robin
+host's private meeting-mode connection. Enabling or changing that configuration accepts the
+actual host's session or own API key through REST, with the same organization checks.
+Another team administrator cannot select a host's private connection. MCP OAuth grants can
+list their own connections but do not authenticate REST settings mutations.
+Passive Zoom labels remain unchanged; collective/round-robin
 automatic Zoom is rejected. Booking an already configured event uses existing caller authority.
 
 `create_booking` and `list_bookings` use `conference.provider = "zoom"` with pending/ready/failed

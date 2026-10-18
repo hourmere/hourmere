@@ -34,7 +34,10 @@ export const PublicEventType = z
       .openapi({ description: 'Booking-form fields beyond name and email' }),
     host: z.object({
       name: z.string(),
-      timeZone: z.string().openapi({ description: "The host's IANA time zone" }),
+      timeZone: z
+        .string()
+        .optional()
+        .openapi({ description: "The host's IANA time zone; omitted for round-robin pools" }),
     }),
     team: z
       .object({ name: z.string(), slug: z.string() })
