@@ -21,6 +21,7 @@ import {
   createGoogleCalendarClient,
   createMicrosoftCalendarClient,
 } from '@hourmere/calendars'
+import { type ConferenceDeps, createZoomClient } from '@hourmere/conferences'
 import { createDb, createPool, type Db, runMigrations } from '@hourmere/db'
 import { createJobs } from '@hourmere/jobs'
 import { createLogMailer, createSmtpMailer, type Mailer } from '@hourmere/mail'
@@ -47,6 +48,7 @@ import type { RouteModule } from './openapi.ts'
 import { analyticsRoutes } from './routes/analytics.ts'
 import { bookingRoutes } from './routes/bookings.ts'
 import { calendarRoutes } from './routes/calendars.ts'
+import { conferenceRoutes } from './routes/conferences.ts'
 import { eventTypeRoutes } from './routes/event-types.ts'
 import { instanceRoutes } from './routes/instance.ts'
 import { profileRoutes } from './routes/profile.ts'
@@ -66,6 +68,7 @@ export function productRoutes({
   socialProviders,
   notify,
   googleCalendar,
+  zoomConference,
   enqueueCalendarSync,
   mcpAuth,
   publicUrl = 'http://localhost',
@@ -81,12 +84,14 @@ export function productRoutes({
   /** Queues booking emails in the booking's transaction (the OpenAPI document needs none). */
   notify?: BookingNotifier | undefined
   googleCalendar?: CalendarDeps['google']
+  zoomConference?: ConferenceDeps['zoom']
   enqueueCalendarSync?: CalendarDeps['enqueueSync']
 }): RouteModule[] {
   return [
     mcpOAuthRoutes({ auth: mcpAuth, db, publicUrl }),
     instanceRoutes({ socialProviders, automaticMeet }),
     calendarRoutes({ db, google: googleCalendar, enqueueSync: enqueueCalendarSync }),
+    conferenceRoutes({ db, zoom: zoomConference }),
     profileRoutes({ db }),
     scheduleRoutes({ db }),
     webhookRoutes({ db, ...webhooks }),
@@ -200,6 +205,17 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
           encryptionKey: config.CALENDAR_ENCRYPTION_KEY,
         }
       : undefined
+  const zoomConference =
+    config.ZOOM_CLIENT_ID && config.ZOOM_CLIENT_SECRET && config.CONFERENCE_ENCRYPTION_KEY
+      ? {
+          client: createZoomClient({
+            clientId: config.ZOOM_CLIENT_ID,
+            clientSecret: config.ZOOM_CLIENT_SECRET,
+            publicUrl: config.PUBLIC_URL,
+          }),
+          encryptionKey: config.CONFERENCE_ENCRYPTION_KEY,
+        }
+      : undefined
   const webhookSettings = {
     enabled: config.WEBHOOKS_ENABLED,
     encryptionKey: config.WEBHOOK_ENCRYPTION_KEY,
@@ -301,6 +317,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
         webhooks: webhookSettings,
         notify,
         googleCalendar,
+        zoomConference,
         enqueueCalendarSync: (id, trx) =>
           jobs.enqueue('calendar-sync', { calendarId: id }, { singletonKey: id, transaction: trx }),
       }),

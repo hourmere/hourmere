@@ -26,6 +26,8 @@ describe('routing between the app and the public pages', () => {
           totals: { created: 0, rescheduled: 0, cancelled: 0 },
           data: [],
         }),
+      'GET /api/v1/conference-connections': () =>
+        json(200, { data: [], zoomEnabled: false, maximumConnections: 5, pendingAttempts: 0 }),
       'GET /api/v1/calendar-connections': () => json(200, { googleEnabled: false, data: [] }),
       'GET /api/auth/api-key/list': () => json(200, { apiKeys: [], total: 0 }),
     })

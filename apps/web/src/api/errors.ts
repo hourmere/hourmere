@@ -68,6 +68,18 @@ export function errorMessage(err: unknown): UiText {
   if (!(err instanceof RequestError)) return msg(UNREACHABLE)
   if (err.displayMessage) return err.displayMessage
   const known: Readonly<Record<string, MessageKey>> = {
+    conference_session_required: 'Sign in again to manage conference accounts.',
+    zoom_disabled: 'Zoom connections are not configured on this instance.',
+    zoom_connection_not_found: 'This Zoom connection is not available.',
+    zoom_connection_limit: 'This account has reached its limit of five connected Zoom identities.',
+    zoom_needs_reauth: 'Reconnect this Zoom account before refreshing it.',
+    zoom_permissions_missing:
+      'Zoom did not grant only the requested identity access. Check the app configuration and reconnect.',
+    zoom_provider_unavailable:
+      'Zoom could not be reached. Check the connection status before trying again.',
+    zoom_identity_mismatch: 'Choose the same Zoom account when reconnecting this connection.',
+    zoom_refresh_incomplete: 'This Zoom refresh could not be confirmed. Reconnect the account.',
+
     mcp_oauth_disabled: 'MCP OAuth is disabled on this Hourmere instance.',
     oauth_request_expired:
       'This connection attempt expired or was already used. Restart it from your AI app.',
