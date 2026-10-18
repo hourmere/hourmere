@@ -847,6 +847,13 @@ describe.skipIf(!serverUrl)('public routes', () => {
       ]),
     )
     expect(doc.paths['/api/v1/public/{handle}/{slug}/bookings']?.post?.security).toBeUndefined()
+    for (const namespace of ['/api/v1/public', '/api/v1/public/teams']) {
+      const conflict =
+        doc.paths[`${namespace}/{handle}/{slug}/bookings`]?.post?.responses?.['409']?.description
+      expect(conflict).toContain('booking_changed')
+      expect(conflict).toContain('round-robin host pool changed')
+      expect(conflict).toContain('fetch current availability before retrying')
+    }
     expect(doc.paths['/api/v1/bookings']?.get?.security).toEqual([{ apiKey: [] }, { session: [] }])
     expect(doc.paths['/api/v1/bookings/manage']?.get?.security).toBeUndefined()
     for (const path of ['/api/v1/bookings/manage', '/api/v1/bookings/manage/slots']) {

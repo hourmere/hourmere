@@ -1,6 +1,8 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
   '.': '。',
+  '{0}–{1}.': '{0}–{1}。',
+  '= {0}.': '= {0}。',
   'Anyone who knows or guesses the direct link can still book it. Unlisted is not access control.':
     '任何知道或猜到直接链接的人仍可预约。未公开列出不代表访问控制。',
   'You can add a random suffix to make the link harder to guess. This is optional.':

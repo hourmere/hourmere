@@ -253,7 +253,7 @@ for (const locale of ['en', 'zh-CN'] as const) {
   }) => {
     await language(page, locale)
     await app.configure()
-    await book(page, app.url + app.personalPath, zh)
+    const created = await book(page, app.url + app.personalPath, zh)
     await app.advance('unsafe')
     await expect(
       page.getByRole('heading', {
@@ -267,6 +267,18 @@ for (const locale of ['en', 'zh-CN'] as const) {
     const retrying = page.waitForResponse(
       (r) => r.request().method() === 'POST' && r.url().endsWith('/conference/retry'),
     )
+    // The worker can finish between browser polls. Start observing before retry so both
+    // its immediate refresh and a later poll can satisfy the same readiness condition.
+    const ready = page.waitForResponse(async (r) => {
+      if (
+        r.request().method() !== 'GET' ||
+        new URL(r.url()).pathname !== `/api/v1/bookings/${created.value.booking.id}` ||
+        r.status() !== 200
+      )
+        return false
+      const booking = await r.json()
+      return booking.conference?.status === 'ready' && typeof booking.location?.url === 'string'
+    })
     await page
       .getByRole('button', { name: zh ? '重试生成会议链接' : 'Retry meeting link', exact: true })
       .click()
@@ -274,6 +286,7 @@ for (const locale of ['en', 'zh-CN'] as const) {
     expect(retry.status()).toBe(204)
     expect(retry.request().postData()).toBe('{}')
     await app.advance()
+    await ready
     await expect(page.getByRole('link', { name: text.join, exact: true })).toBeVisible()
     expect(await app.state()).toMatchObject({ posts: 1, meetings: 1, requestMail: 2 })
   })
