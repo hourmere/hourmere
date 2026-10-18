@@ -152,6 +152,7 @@ describe.skipIf(!serverUrl)('sign-up control', () => {
     expect(res.status, email).toBe(302)
     expect(res.headers.get('location'), email).toBe(`${origin}/`)
     expect(hasSession(res), email).toBe(true)
+    return res
   }
 
   /** A new address gets no link, so no account. */
@@ -290,6 +291,103 @@ describe.skipIf(!serverUrl)('sign-up control', () => {
       { mode: 'first-user', allowedDomains: [] },
     ]
 
+    /** Exercise the same organization APIs any signed-in account holder can call. */
+    async function inviteFromTeam(app: App, signedIn: Response, email: string) {
+      const headers = {
+        'content-type': 'application/json',
+        origin,
+        cookie: signedIn.headers
+          .getSetCookie()
+          .map((c) => c.split(';')[0])
+          .join('; '),
+      }
+      const created = await app.request('/api/auth/organization/create', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ name: 'Inviting team', slug: randomUUID() }),
+      })
+      expect(created.status).toBe(200)
+      const organization = (await created.json()) as { id: string }
+      const invited = await app.request('/api/auth/organization/invite-member', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ email, role: 'member', organizationId: organization.id }),
+      })
+      expect(invited.status).toBe(200)
+      const invitation = (await invited.json()) as { id: string; status: string }
+      expect(invitation.status).toBe('pending')
+      return { ...invitation, organizationId: organization.id }
+    }
+
+    it.each([CLOSED, FIRST_USER])(
+      'allows a domain-admitted inviter but blocks an invitee invitation chain in $mode',
+      async (policy) => {
+        // Ensure the domain-admitted inviter is not also the first-user exception.
+        await signIn(instance(OPEN), 'first@outside.example')
+        const app = instance(policy)
+        const alice = await signIn(app, 'alice@team.example')
+        await noLink(app, 'outsider@gmail.example')
+        const invitation = await inviteFromTeam(app, alice, 'outsider@gmail.example')
+        const outsider = await signIn(app, 'outsider@gmail.example')
+        // Signing up did not accept Alice's invitation or join her team.
+        expect(
+          await db
+            .selectFrom('auth.member')
+            .select('id')
+            .where('organizationId', '=', invitation.organizationId)
+            .execute(),
+        ).toHaveLength(1)
+        await inviteFromTeam(app, outsider, 'third@elsewhere.example')
+        await noLink(app, 'third@elsewhere.example')
+        // An already issued link and another verified provider are blocked by the hook too.
+        const earlierLink = await askForLink(instance(OPEN), 'third@elsewhere.example')
+        expectSignupDisabled(await useLink(app, earlierLink))
+        const provider = await googleSignIn(instance(policy, { google: 'third@elsewhere.example' }))
+        expect(provider.status).toBe(403)
+        expect(await provider.json()).toMatchObject({ code: 'SIGNUP_DISABLED' })
+        await expect(
+          authPool(policy).query(
+            `INSERT INTO auth."user" (name, email, "emailVerified") VALUES ('', 'third@elsewhere.example', true)`,
+          ),
+        ).rejects.toMatchObject({ code: '42501' })
+        expect(await users()).toEqual([
+          'alice@team.example',
+          'first@outside.example',
+          'outsider@gmail.example',
+        ])
+      },
+    )
+
+    it.each(restricted)(
+      'allows the first user to invite outside domains without delegating admission in $mode',
+      async (policy) => {
+        // In closed mode this also covers an instance bootstrapped before signup closed.
+        if (policy.mode === 'closed') await signIn(instance(OPEN), 'owner@outside.example')
+        const app = instance(policy)
+        const owner = await signIn(app, 'owner@outside.example')
+        await inviteFromTeam(app, owner, 'guest@outside.example')
+        await inviteFromTeam(app, owner, 'db-guest@outside.example')
+        await expect(
+          authPool(policy).query(
+            `INSERT INTO auth."user" (name, email, "emailVerified") VALUES ('', 'db-guest@outside.example', true)`,
+          ),
+        ).resolves.toBeDefined()
+        const guest = await signIn(app, 'guest@outside.example')
+        await inviteFromTeam(app, guest, 'next@outside.example')
+        await noLink(app, 'next@outside.example')
+        await expect(
+          authPool(policy).query(
+            `INSERT INTO auth."user" (name, email, "emailVerified") VALUES ('', 'next@outside.example', true)`,
+          ),
+        ).rejects.toMatchObject({ code: '42501' })
+        expect(await users()).toEqual([
+          'db-guest@outside.example',
+          'guest@outside.example',
+          'owner@outside.example',
+        ])
+      },
+    )
+
     async function invite({
       email = 'invitee@outside.example',
       status = 'pending',
@@ -330,6 +428,47 @@ describe.skipIf(!serverUrl)('sign-up control', () => {
         .returningAll()
         .executeTakeFirstOrThrow()
     }
+
+    it('uses createdAt then id to choose the one first-user inviter', async () => {
+      const invitation = await invite()
+      const owner = await db
+        .selectFrom('auth.user')
+        .select('id')
+        .where('email', '=', 'inviter@team.example')
+        .executeTakeFirstOrThrow()
+      // Assign the same whole-millisecond timestamp explicitly: reading Postgres's default
+      // timestamp into a JS Date would truncate microseconds and make this an unequal pair.
+      const createdAt = new Date('2026-01-01T00:00:00Z')
+      await db.updateTable('auth.user').set({ createdAt }).where('id', '=', owner.id).execute()
+      const earlier = '00000000-0000-4000-8000-000000000001'
+      await db
+        .insertInto('auth.user')
+        .values({
+          id: earlier,
+          email: 'earlier@outside.example',
+          name: 'Earlier',
+          emailVerified: true,
+          createdAt,
+        })
+        .execute()
+      const policy = restricted[0] as SignupPolicy
+      const app = instance(policy)
+      await noLink(app, invitation.email)
+      const insert = () =>
+        authPool(policy).query(
+          `INSERT INTO auth."user" (name, email, "emailVerified") VALUES ('', $1, true)`,
+          [invitation.email],
+        )
+      await expect(insert()).rejects.toMatchObject({ code: '42501' })
+      // Creation time takes precedence over the UUID tie-breaker.
+      await db
+        .updateTable('auth.user')
+        .set({ createdAt: new Date(createdAt.getTime() + 60_000) })
+        .where('id', '=', earlier)
+        .execute()
+      expect(await askForLink(app, invitation.email)).toBeDefined()
+      await insert()
+    })
 
     it.each(restricted)(
       'allows a live exact-address invitation in $mode, joining only on acceptance',
@@ -502,6 +641,98 @@ describe.skipIf(!serverUrl)('sign-up control', () => {
         await revoked
         signingUp.release()
         revoking.release()
+      }
+    })
+
+    it('rechecks the clock after waiting for an invitation row lock', async () => {
+      const invitation = await invite()
+      const holding = await testDb.pool.connect()
+      const signingUp = await authPool(restricted[0] as SignupPolicy).connect()
+      let insertion: Promise<{ error?: { code?: string } }> | undefined
+      try {
+        await holding.query('BEGIN')
+        const { rows } = await holding.query<{ expiresAt: Date }>(
+          `UPDATE auth.invitation SET "expiresAt" = clock_timestamp() + interval '1 second'
+           WHERE id = $1 RETURNING "expiresAt"`,
+          [invitation.id],
+        )
+        // Publish the expiry, then take a lock without changing the row. Updating it while
+        // waiting would make EvalPlanQual recheck the scan predicate and hide this guard.
+        await holding.query('COMMIT')
+        await holding.query('BEGIN')
+        await holding.query('SELECT id FROM auth.invitation WHERE id = $1 FOR UPDATE', [
+          invitation.id,
+        ])
+        const backend = await signingUp.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')
+        insertion = signingUp
+          .query(`INSERT INTO auth."user" (name, email, "emailVerified") VALUES ('', $1, true)`, [
+            invitation.email,
+          ])
+          .then(
+            () => ({}),
+            (error: { code?: string }) => ({ error }),
+          )
+        await vi.waitFor(async () => {
+          const activity = await testDb.pool.query(
+            'SELECT wait_event_type FROM pg_stat_activity WHERE pid = $1',
+            [backend.rows[0]?.pid],
+          )
+          expect(activity.rows[0]?.wait_event_type).toBe('Lock')
+        })
+        await holding.query(
+          `SELECT pg_sleep(greatest(0, extract(epoch FROM $1::timestamptz - clock_timestamp())) + 0.02)`,
+          [rows[0]?.expiresAt],
+        )
+        await holding.query('COMMIT')
+        expect(await insertion).toMatchObject({ error: { code: '42501' } })
+        expect(await users()).toEqual(['inviter@team.example'])
+      } finally {
+        await holding.query('ROLLBACK')
+        await insertion
+        holding.release()
+        signingUp.release()
+      }
+    })
+
+    it('locks a domain-admitted inviter against email changes until signup commits', async () => {
+      await db
+        .insertInto('auth.user')
+        .values({ email: 'first@outside.example', name: 'First', emailVerified: true })
+        .execute()
+      const invitation = await invite()
+      const signingUp = await authPool(CLOSED).connect()
+      const changing = await testDb.pool.connect()
+      let changed: Promise<unknown> | undefined
+      try {
+        await signingUp.query('BEGIN')
+        await signingUp.query(
+          `INSERT INTO auth."user" (name, email, "emailVerified") VALUES ('', $1, true)`,
+          [invitation.email],
+        )
+        const backend = await changing.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')
+        changed = changing.query(
+          `UPDATE auth."user" SET email = 'inviter@outside.example' WHERE id = $1`,
+          [invitation.inviterId],
+        )
+        await vi.waitFor(async () => {
+          const activity = await testDb.pool.query(
+            'SELECT wait_event_type FROM pg_stat_activity WHERE pid = $1',
+            [backend.rows[0]?.pid],
+          )
+          expect(activity.rows[0]?.wait_event_type).toBe('Lock')
+        })
+        await signingUp.query('COMMIT')
+        await changed
+        expect(await users()).toEqual([
+          'first@outside.example',
+          'invitee@outside.example',
+          'inviter@outside.example',
+        ])
+      } finally {
+        await signingUp.query('ROLLBACK')
+        await changed
+        signingUp.release()
+        changing.release()
       }
     })
 

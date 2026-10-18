@@ -12,7 +12,7 @@
 // with its arguments passed as an array, and everything printed has control characters
 // escaped, so a commit cannot add lines (or GitHub Actions workflow commands) to the output.
 
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { parseArgs } from 'node:util'
 
 /**
@@ -33,6 +33,8 @@ export const EXEMPT_AUTHOR_EMAILS: readonly string[] = [
 export interface Commit {
   sha: string
   parents: string[]
+  /** Exactly two parents, merged without conflicts to this commit's tree. */
+  cleanMerge: boolean
   authorName: string
   authorEmail: string
   subject: string
@@ -85,7 +87,30 @@ function resolveCommit(cwd: string | undefined, rev: string): string {
 // Fields are separated by NUL, which git does not allow in names or commit messages. The
 // trailers come last, one value per field, unfolded onto one line each.
 const FORMAT =
-  '%P%x00%an%x00%ae%x00%s%x00%(trailers:key=Signed-off-by,valueonly,unfold,separator=%x00)'
+  '%T%x00%P%x00%an%x00%ae%x00%s%x00%(trailers:key=Signed-off-by,valueonly,unfold,separator=%x00)'
+
+function isCleanMerge(cwd: string | undefined, parents: string[], tree: string): boolean {
+  // Octopus merges require a sign-off: a two-parent automatic merge cannot verify them.
+  if (parents.length !== 2) return false
+  const merged = spawnSync('git', ['merge-tree', '--write-tree', ...parents], {
+    cwd,
+    encoding: 'utf8',
+    env: { ...process.env, LC_ALL: 'C' },
+    stdio: ['ignore', 'pipe', 'pipe'],
+    maxBuffer: 64 * 1024 * 1024,
+  })
+  // A synthetic merge may join unrelated histories. Git cannot verify it with the ordinary
+  // automatic merge, so require its author's sign-off rather than reject signed work.
+  if (merged.status === 128 && merged.stderr.includes('refusing to merge unrelated histories')) {
+    return false
+  }
+  // merge-tree exits 1 for conflicts, and still prints a tree (with conflict markers).
+  // Neither that tree nor a tree containing manual resolutions qualifies as a clean merge.
+  if (merged.error || (merged.status !== 0 && merged.status !== 1)) {
+    throw new Error(`git merge-tree failed: ${merged.error?.message ?? merged.stderr.trim()}`)
+  }
+  return merged.status === 0 && merged.stdout.split('\n')[0] === tree
+}
 
 /** The commits in base..head, oldest first. */
 export function readCommits(base: string, head: string, cwd?: string): Commit[] {
@@ -93,12 +118,19 @@ export function readCommits(base: string, head: string, cwd?: string): Commit[] 
   const shas = git(cwd, ['rev-list', '--reverse', range]).split('\n').filter(Boolean)
   return shas.map((sha) => {
     const out = git(cwd, ['show', '--no-show-signature', '-s', `--format=${FORMAT}`, sha])
-    const [parents = '', authorName = '', authorEmail = '', subject = '', ...signOffs] = out
-      .replace(/\n$/, '')
-      .split('\0')
+    const [
+      tree = '',
+      parentText = '',
+      authorName = '',
+      authorEmail = '',
+      subject = '',
+      ...signOffs
+    ] = out.replace(/\n$/, '').split('\0')
+    const parents = parentText.split(' ').filter(Boolean)
     return {
       sha,
-      parents: parents.split(' ').filter(Boolean),
+      parents,
+      cleanMerge: isCleanMerge(cwd, parents, tree),
       authorName,
       authorEmail,
       subject,
@@ -121,10 +153,10 @@ function namesAuthor(signOff: string, commit: Commit): boolean {
 }
 
 export function checkCommit(commit: Commit, options: { honorExemptions: boolean }): Result {
-  // Merge commits are not checked. Each commit a merge brings in that is not on the base branch
-  // yet is in the range and checked on its own. GitHub's "Update branch" button, `git pull` and
-  // `git merge` (without --signoff) do not add a sign-off.
-  if (commit.parents.length > 1) return { status: 'merge' }
+  // Only a conflict-free automatic merge adds no work needing its own sign-off. Every
+  // introduced commit is also checked; manual resolutions and extra merge content are not
+  // represented by those commits, so they follow the ordinary author/sign-off rules below.
+  if (commit.cleanMerge) return { status: 'merge' }
 
   const exempt = EXEMPT_AUTHOR_EMAILS.includes(commit.authorEmail.toLowerCase())
   if (exempt && options.honorExemptions) return { status: 'exempt' }
@@ -168,7 +200,7 @@ export function formatReport(
     result.status === 'missing' ? [{ commit, result }] : [],
   )
   if (failed.length === 0) {
-    lines.push('', 'Every commit is signed off, exempt or a merge.')
+    lines.push('', 'Every commit is signed off, exempt or a clean merge.')
     return lines.join('\n')
   }
 

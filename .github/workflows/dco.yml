@@ -38,6 +38,7 @@ jobs:
           # every commit needs a sign-off.
           FROM_FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
         run: |
+          # Fail closed: only the literal false enables same-repository exemptions.
           if [ "$FROM_FORK" = false ]; then
             node scripts/check-dco.ts "$BASE_SHA" "$HEAD_SHA"
           else
