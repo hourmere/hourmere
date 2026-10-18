@@ -205,17 +205,22 @@ describe('creating an event type', () => {
     expect(document.body.textContent).not.toMatch(/How far ahead|Free time kept/)
   })
 
-  it('offers an optional random unlisted suffix without changing the link until accepted', async () => {
+  it('offers an optional random unlisted suffix on plain HTTP without changing the link until accepted', async () => {
     const user = userEvent.setup()
-    vi.spyOn(crypto, 'randomUUID').mockReturnValue('c6bdce31-1d4f-4579-b36f-8f75fe2ca76a')
+    vi.stubGlobal('crypto', {
+      getRandomValues: (bytes: Uint8Array) => {
+        bytes.set([0x06, 0xbd, 0x00, 0x31])
+        return bytes
+      },
+    })
     const api = eventTypeServer([])
     await openNew()
     await user.type(field('Title'), 'A private chat')
     await user.click(field('Hide from your booking page'))
     expect(field('Booking link').value).toBe('a-private-chat')
+    expect(screen.queryByText('a-private-chat-06bd0031')).not.toBeNull()
     expect(screen.getByText(/Unlisted is not access control/)).toBeDefined()
     expect(screen.getByText(/This is optional/)).toBeDefined()
-    expect(screen.getByText('a-private-chat-c6bdce31')).toBeDefined()
     await user.click(screen.getByRole('button', { name: 'Create event type' }))
     await screen.findByText('Created “A private chat”.')
     expect(api.to('POST /api/v1/event-types')[0]?.body).toHaveProperty('slug', 'a-private-chat')
@@ -223,13 +228,18 @@ describe('creating an event type', () => {
 
   it('uses a bounded suffix only when the host accepts it and keeps later title edits independent', async () => {
     const user = userEvent.setup()
-    vi.spyOn(crypto, 'randomUUID').mockReturnValue('c6bdce31-1d4f-4579-b36f-8f75fe2ca76a')
+    vi.stubGlobal('crypto', {
+      getRandomValues: (bytes: Uint8Array) => {
+        bytes.set([0x06, 0xbd, 0x00, 0x31])
+        return bytes
+      },
+    })
     eventTypeServer([])
     await openNew()
     await user.type(field('Title'), 'x'.repeat(64))
     await user.click(field('Hide from your booking page'))
     await user.click(screen.getByRole('button', { name: 'Use suggested link' }))
-    const chosen = `${'x'.repeat(55)}-c6bdce31`
+    const chosen = `${'x'.repeat(55)}-06bd0031`
     expect(field('Booking link').value).toBe(chosen)
     await user.type(field('Title'), ' changed')
     expect(field('Booking link').value).toBe(chosen)

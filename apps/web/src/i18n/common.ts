@@ -159,7 +159,7 @@ export const common = {
   'Pick a time': '选择时间',
   'Pick an event to see available times.': '选择活动以查看可用时间。',
   'Pick another time': '选择其他时间',
-  'Powered by': '由以下服务提供',
+  'Powered by {0}': '由 {0} 提供支持',
   'Create your own booking link': '创建你自己的预约链接',
   'Previous month': '上个月',
   Question: '问题',
