@@ -33,6 +33,7 @@ export default defineConfig({
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/cobaltmere' }],
       sidebar: [
         { label: 'Overview', link: '/docs' },
+        { label: 'Compare scheduling options', link: '/docs/comparison' },
         { label: 'Self-hosting', link: '/docs/self-hosting' },
         { label: 'Configuration', link: '/docs/configuration' },
         { label: 'REST quickstart', link: '/docs/rest' },
