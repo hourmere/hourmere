@@ -38,24 +38,55 @@ const uuid = (value: unknown): value is string =>
   typeof value === 'string' && z.uuid().safeParse(value).success
 const missing = () => new DomainError('not_found', 'webhook_not_found')
 const invalid = () => new DomainError('invalid', 'invalid_webhook', 'Invalid webhook configuration')
+const insufficientRole = () =>
+  new DomainError(
+    'forbidden',
+    'insufficient_role',
+    'Only organization owners and admins can manage webhooks',
+  )
 
 /** Check current verified membership; a stale resolver principal cannot retain admin rights. */
-async function requireAdmin(db: Db, ctx: ServiceContext) {
-  const membership = await db
+async function requireAdmin(db: Db, ctx: ServiceContext, lock = false) {
+  let query = db
     .selectFrom('auth.member as m')
     .innerJoin('auth.user as u', 'u.id', 'm.userId')
     .select('m.role')
     .where('m.organizationId', '=', ctx.principal.organization.id)
     .where('m.userId', '=', ctx.principal.user.id)
     .where('u.emailVerified', '=', true)
-    .executeTakeFirst()
+  if (lock) query = query.forShare('m')
+  const membership = await query.executeTakeFirst()
   const roles = membership?.role.split(',').map((role) => role.trim()) ?? []
-  if (!roles.includes('owner') && !roles.includes('admin'))
-    throw new DomainError(
-      'forbidden',
-      'insufficient_role',
-      'Only organization owners and admins can manage webhooks',
-    )
+  if (!roles.includes('owner') && !roles.includes('admin')) throw insufficientRole()
+}
+
+/**
+ * All mutations take authorization parents before any endpoint/member lock. User deletion
+ * starts at user; organization deletion starts at organization then cascades to members
+ * and endpoints. Taking those parents first avoids an inverse cascade lock order. A
+ * shared user lock also serializes email unverification with the eventual mutation.
+ * Membership is deliberately locked/rechecked AFTER waiting for the organization and
+ * endpoint: a demotion or removal already committed during that wait must win.
+ */
+async function lockAuthorizationParents(
+  trx: Db,
+  ctx: ServiceContext,
+  exclusiveOrganization = false,
+) {
+  const user = await trx
+    .selectFrom('auth.user')
+    .select('id')
+    .where('id', '=', ctx.principal.user.id)
+    .where('emailVerified', '=', true)
+    .forShare()
+    .executeTakeFirst()
+  if (!user) throw insufficientRole()
+  let organization = trx
+    .selectFrom('auth.organization')
+    .select('id')
+    .where('id', '=', ctx.principal.organization.id)
+  organization = exclusiveOrganization ? organization.forUpdate() : organization.forKeyShare()
+  if (!(await organization.executeTakeFirst())) throw insufficientRole()
 }
 
 function requireEnabled(settings: WebhookSettings): string {
@@ -123,13 +154,9 @@ export async function createWebhook(
   const encryptionKey = requireEnabled(settings)
   return ctx.db.transaction().execute(async (trx) => {
     await requireAdmin(trx, ctx)
-    // Serialize the endpoint cap across all writers of this organization.
-    await trx
-      .selectFrom('auth.organization')
-      .select('id')
-      .where('id', '=', ctx.principal.organization.id)
-      .forUpdate()
-      .executeTakeFirstOrThrow()
+    // Exclusive organization lock also serializes the cap across concurrent creates.
+    await lockAuthorizationParents(trx, ctx, true)
+    await requireAdmin(trx, ctx, true)
     const rows = await trx
       .selectFrom('webhooks')
       .select('id')
@@ -168,6 +195,7 @@ export async function createWebhook(
 async function lockedWebhook(trx: Db, ctx: ServiceContext, id: unknown) {
   await requireAdmin(trx, ctx)
   if (!uuid(id)) throw missing()
+  await lockAuthorizationParents(trx, ctx)
   const row = await trx
     .selectFrom('webhooks')
     .select(visibleColumns)
@@ -175,6 +203,7 @@ async function lockedWebhook(trx: Db, ctx: ServiceContext, id: unknown) {
     .where('organization_id', '=', ctx.principal.organization.id)
     .forUpdate()
     .executeTakeFirst()
+  await requireAdmin(trx, ctx, true)
   if (!row) throw missing()
   return row
 }

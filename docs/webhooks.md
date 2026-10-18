@@ -111,6 +111,13 @@ signature values, destination queries and network error text are never recorded 
 delivery status or thrown job errors. Ordinary outbound network policy should still limit
 the process to its intended destinations.
 
+Configuration mutations lock the acting user, then organization, then endpoint, and finally
+lock/recheck the current owner/admin membership. These locks remain through commit:
+demotion/removal already committed while waiting for an organization/endpoint is refused;
+once membership is locked, revocation waits for the authorized mutation. Email
+unverification similarly serializes through the user lock. The parent-first order also
+allows organization/user deletion cascades to complete without an inverse lock order.
+
 An already-started attempt holds the endpoint's share lock until it acknowledges or fails.
 Pause, subscription changes, rotation and deletion wait for that attempt to finish before
 they return. Subsequent queued attempts use the current subscription/state and current
