@@ -44,7 +44,7 @@ describe('comparison review information', () => {
       expect(source.match(/\b\d{4}-\d{2}-\d{2}\b/g)).toHaveLength(1)
       expect(source).not.toMatch(/(?:checked|verified) on [A-Z][a-z]+ \d/i)
       expect(source).not.toMatch(
-        /(?:repository|project|link).{0,35}(?:remains?|is|currently) private/i,
+        /(?:repository|project|link).{0,35}(?:remains?|is|currently) private|private[- ]repository/i,
       )
     })
 
@@ -72,12 +72,21 @@ describe('comparison review information', () => {
     it(`${page} states development, image and Cloud launch limits in its sourced introduction`, () => {
       const source = read(`./content/docs/docs/${page}`)
       const intro = source.split(/^## /m)[0] ?? ''
-      expect(intro).toMatch(/README.*early development and not yet ready to use/)
+      expect(intro).toMatch(/\[in development and not yet ready to use\]\(\/#faq\)/)
+      expect(intro).not.toMatch(/README/)
       expect(intro).toMatch(/no prebuilt public image is published/)
       expect(intro).toContain('](/docs/self-hosting)')
       expect(intro).toMatch(/Hourmere Cloud has not launched\]\(\/privacy\)/)
     })
   }
+
+  it('links the development status to the home-page FAQ answer', () => {
+    const home = read('./pages/index.astro')
+    expect(home).toMatch(/<section[^>]*\sid="faq"/)
+    expect(plainText(home)).toMatch(
+      /Can I use Hourmere today\? Not yet\. Hourmere is in development\./,
+    )
+  })
 
   it('displays the date from page metadata through the registered Starlight component', () => {
     expect(read('../astro.config.ts')).toMatch(/PageTitle:\s*['"].*DocsPageTitle\.astro/)
@@ -85,6 +94,18 @@ describe('comparison review information', () => {
     const title = read('./components/DocsPageTitle.astro')
     expect(title).toContain('Astro.locals.starlightRoute.entry.data')
     expect(title).toMatch(/<time datetime=\{lastVerified\}>\{lastVerified\}<\/time>/)
+  })
+})
+
+describe('MCP quickstart authentication', () => {
+  it('states API keys and operator-enabled OAuth 2.1 without an API-key-only claim', () => {
+    const source = read('./content/docs/docs/mcp.md')
+    const parts = source.split(/^## Connect with OAuth$/m)
+    expect(parts).toHaveLength(2)
+    expect(plainText(parts[0] ?? '')).toMatch(
+      /accepts API keys and, when the instance operator enables it, organization-bound \[OAuth 2\.1 connections\]\(#connect-with-oauth\)/,
+    )
+    expect(source).not.toMatch(/no OAuth 2\.1 connector flow|OAuth-only client cannot connect/)
   })
 })
 
@@ -194,13 +215,17 @@ describe('privacy data-flow disclosures', () => {
     )
   })
 
-  it('discloses encrypted sign-in OAuth tokens in collection and security sections', () => {
-    expect(section('information-we-collect')).toMatch(
-      /Google or Microsoft:.*sign-in OAuth tokens.*stored encrypted/,
+  it('discloses encrypted sign-in access and refresh tokens and the stored ID token', () => {
+    const collected = section('information-we-collect')
+    expect(collected).toMatch(
+      /Google or Microsoft:.*sign-in access and refresh tokens are stored encrypted; the ID token returned at sign-in, which contains your name, email address and account identifier, is stored as received/,
     )
-    expect(section('security')).toMatch(
-      /encrypted storage of Google and Microsoft sign-in OAuth tokens/,
+    expect(collected).not.toMatch(/sign-in OAuth tokens/)
+    const security = section('security')
+    expect(security).toMatch(
+      /encrypted storage of Google and Microsoft sign-in access and refresh tokens, calendar and Zoom connection tokens/,
     )
+    expect(security).not.toMatch(/sign-in OAuth tokens/)
   })
 
   it('discloses the organizer identity retained with conference records', () => {

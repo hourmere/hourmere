@@ -22,10 +22,10 @@ header on every request:
 ```
 
 This shows the connection values; client-specific configuration keys may differ. Store the
-real key privately. Hourmere currently accepts API keys, with no OAuth 2.1 connector flow.
-An OAuth-only client cannot connect directly yet. Browser session cookies do not authenticate
-MCP. A browser request from a different origin is refused; non-browser clients normally send
-no `Origin` header.
+real key privately. Hourmere's MCP server accepts API keys and, when the instance operator
+enables it, organization-bound [OAuth 2.1 connections](#connect-with-oauth). Browser session
+cookies do not authenticate MCP. A browser request from a different origin is refused;
+non-browser clients normally send no `Origin` header.
 
 Ask the client to list tools, then call `whoami` to verify the user and organization before
 changing bookings. The endpoint is stateless: it does not issue a session ID or maintain a

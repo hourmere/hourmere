@@ -114,7 +114,8 @@ const privacyMail = `mailto:${contact.privacy}`
       picture. We use them to create your account and sign you in, and as your account profile:
       your name (and picture, if shown) appears in Hourmere, on your booking pages and in booking
       emails, and we send account and booking emails to your email address. Google and Microsoft
-      sign-in OAuth tokens are stored encrypted.
+      sign-in access and refresh tokens are stored encrypted; the ID token returned at sign-in,
+      which contains your name, email address and account identifier, is stored as received.
     </li>
     <li>
       <strong>Calendar connection information:</strong> when you connect a Google or Microsoft
@@ -597,9 +598,9 @@ const privacyMail = `mailto:${contact.privacy}`
   <h2 id="security">11. Security</h2>
   <p>
     We protect personal data with measures appropriate to the risk, including encryption in transit,
-    encrypted storage of Google and Microsoft sign-in OAuth tokens, calendar and Zoom connection
-    tokens, queued sign-in emails and webhook signing secrets, hashed API keys, access controls and
-    the principle of least
+    encrypted storage of Google and Microsoft sign-in access and refresh tokens, calendar and
+    Zoom connection tokens, queued sign-in emails and webhook signing secrets, hashed API keys,
+    access controls and the principle of least
     privilege. No system is completely secure. If a data breach affects your personal data, we will
     notify you as required by law. To report a security issue, email <a
       href={`mailto:${contact.security}`}>{contact.security}</a
