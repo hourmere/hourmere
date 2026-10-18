@@ -435,6 +435,38 @@ describe('MCP transport', () => {
 })
 
 describe('MCP authentication', () => {
+  it('rejects a session principal even if caller resolution incorrectly accepts the bearer', async () => {
+    const incorrectResolver: AppDeps['resolveCaller'] = async () => ({
+      ok: true,
+      principal: { ...principal, kind: 'session', sessionId: 's' },
+      setCookie: [],
+    })
+    const res = await rpc(initialize, {}, appWith(undefined, { resolveCaller: incorrectResolver }))
+    expect(res.status).toBe(401)
+    expect(await res.json()).toMatchObject({ error: 'unauthorized' })
+  })
+
+  it('formats OAuth metadata challenges for bare and parameterized Bearer responses', async () => {
+    const withOAuth = appWith(undefined, {
+      mcp: mcpEndpoint({
+        tools: [whoamiTool],
+        oauth: {
+          resolve: async () => ({ ok: false, error: 'invalid_token' }),
+          handler: async () => new Response(null, { status: 404 }),
+        },
+      }),
+    })
+    const metadata = `resource_metadata="${PUBLIC_URL}/.well-known/oauth-protected-resource/mcp"`
+    const missing = await withOAuth.request(url, { method: 'POST' })
+    expect(missing.status).toBe(401)
+    expect(missing.headers.get('www-authenticate')).toBe(`Bearer ${metadata}`)
+    const invalid = await rpc(initialize, { authorization: 'Bearer hm_nope' }, withOAuth)
+    expect(invalid.status).toBe(401)
+    expect(invalid.headers.get('www-authenticate')).toBe(
+      `Bearer error="invalid_token", ${metadata}`,
+    )
+  })
+
   it('needs an API key: none, unknown and malformed keys get 401 with WWW-Authenticate', async () => {
     for (const [authorization, challenge] of [
       ['', 'Bearer'],

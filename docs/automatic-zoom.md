@@ -75,7 +75,7 @@ continue reconciling. Disconnecting retires credentials and may require explicit
 before a known meeting can be updated or removed; it does not revoke the whole Marketplace grant.
 
 The single-create claim commits before POST. A claimed create with no validated known meeting
-ID **never authorizes another POST**, including after timeout, a lost database result or a
+ID **never authorizes another POST** after timeout, a connection reset, a 5xx response, a lost database result or a
 crash. There is no list-based adoption, agenda marker, arbitrary-ID adoption or force-create
 endpoint. `ambiguous_create` asks the host to inspect and remove any orphan in their own Zoom
 account before replacing the booking. Retry can reconcile a known ID; it cannot prove that
@@ -83,11 +83,28 @@ an unknown create did not happen. A late validated ID is retained after a move, 
 expired lease or failed credential transaction so that the same meeting can be reconciled
 or removed. Stale absence results cannot strand a newly discovered ID.
 
+Definitive create rejections (HTTP 400, 401, 403 and 429) establish `knownNoCreate` and
+clear the create claim. Authentication and permission failures require reconnection;
+rate limits and other rejected requests use bounded provider backoff. A subsequent retry
+may POST because the rejected operation did not create a meeting. This policy does not
+apply to unknown transport outcomes or server failures.
+
 Provider I/O holds only owner/connection protection, with bounded deadlines. No booking,
 host, fairness or root-intent lock spans the network. Results apply after credential I/O
 commits, under booking then intent/mirror locks with revision and lease checks. Expired
-credentials are durably retired before the rotating refresh request. An unknown, malformed,
-over-scoped or uncommittable rotation never retries the old refresh token.
+credentials are durably removed from the row before the rotating refresh request. Refresh
+transport failures (5xx, rate limit, timeout or network failure) receive at most three
+attempts with 100 ms then 200 ms backoff inside the operation deadline. Exhausted transient
+failures restore the original encrypted credentials and keep the connection active so a
+later worker/action can recover; they do not request reconnection. Other token rejections
+(including `invalid_client`) and malformed successful responses also preserve the old grant;
+an unknown rotation may later resolve to `invalid_grant`, which retires it. A successful
+noncanonical scope grant or an identity mismatch fails closed as an authorization failure.
+A crash or uncommittable rotation stays `refreshing`
+without reusable credentials and still requires explicit recovery. Public slots and new
+bookings accept an otherwise eligible meeting connection while it is refreshing;
+configuration selection requires active status. The worker rechecks its pinned identity
+before any meeting operation, including after refresh.
 
 ## Optional ordinary Google copy
 
@@ -130,6 +147,7 @@ replacement meeting or accepts force/adoption fields.
 The adapter uses fixed `https://api.zoom.us/v2`, disables redirects, bounds response size and
 deadlines, and never retries POST. Create uses `/users/me/meetings`, scheduled type 2, UTC
 timestamps, whole-minute duration 1–1440, `use_pmi:false` and `default_password:true`. It
+truncates the booking title to 200 Unicode code points before sending the meeting topic. It
 leaves account passcode/waiting-room policy intact. No delegated host, invitees, alternative
 hosts, recurrence or paid tracking/list/settings privilege is used. Fixed users/me identity
 and every returned/get `host_id` must match the pinned Zoom identity before a meeting ID is
@@ -175,7 +193,7 @@ used. Populated actual 0024→0025 preservation/no-op, generated API/DB parity, 
 Chrome/privacy and non-author review remain required before this branch can be merged.
 Production Marketplace deauthorization/compliance webhooks remain a separate requirement.
 
-Primary references checked 17 October 2026:
+Primary references checked 18 October 2026:
 [OAuth](https://developers.zoom.us/docs/integrations/oauth/),
 [PKCE](https://developers.zoom.us/blog/public-pkce/),
 [advanced scope query](https://godevelopers.zoom.us/docs/integrations/oauth-scopes-overview/),

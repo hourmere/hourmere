@@ -83,14 +83,14 @@ function BookingList({
 
   // Every page of a list uses the same moment, as the API's cursors require the same filters.
   const [now] = useState(() => new Date().toISOString())
-  const range = tab === 'upcoming' ? { from: now } : { to: now }
+  const range = tab === 'upcoming' ? { endAfter: now } : { endTo: now }
   const load = useCallback(
     async (signal: AbortSignal): Promise<ListState> => {
       const page = await unwrap(
         api.GET('/api/v1/bookings', {
           params: {
             query: {
-              ...(tab === 'upcoming' ? { from: now } : { to: now }),
+              ...(tab === 'upcoming' ? { endAfter: now } : { endTo: now }),
               order: tab === 'past' ? 'desc' : 'asc',
               limit: PAGE_SIZE,
             },

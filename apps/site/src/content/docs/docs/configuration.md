@@ -17,9 +17,10 @@ Restart/recreate affected processes after changing configuration.
 | `PGPASSWORD` | Unset | PostgreSQL client password when absent from the URL. Compose sets it from `POSTGRES_PASSWORD`; do not percent-encode this separate value. |
 | `PORT` | `3000` | Direct-server TCP port (`0`–`65535`). `0` lets the OS choose a port and requires an explicit `PUBLIC_URL`; links always use that configured external origin. In Compose, `.env` `PORT` changes the host port; the container still listens on `3000`. |
 | `PUBLIC_URL` | `http://localhost:<PORT>` | External HTTP(S) origin, with no path/query. Use HTTPS publicly. Compose defaults to `http://localhost:3000` independently of its host port setting. |
+| `HOSTED_SIGNUP_URL` | `https://hourmere.com` | Hosted service destination for public attribution and confirmation links. Set the hosted sign-up page URL when available; HTTP(S), no credentials, query or fragment. Independent of this instance’s `PUBLIC_URL`; attribution cannot be disabled. |
 | `BETTER_AUTH_SECRET` | Required | At least 32 non-whitespace random characters. Signs sessions and protects sign-in tokens. Changing it signs people out. |
-| `AUTO_MIGRATE` | `true` | Apply SQL/job migrations on startup. `false` requires manual migrations first; startup still needs database access. Not forwarded by the default Compose file. |
-| `WEB_DIST` | Unset | Built SPA directory. Docker sets `/app/apps/web/dist`; development uses Vite instead. |
+| `AUTO_MIGRATE` | `true` | Apply SQL/job migrations on startup. `false` requires manual migrations first; startup still needs database access. Forwarded by the default Compose file with a default of `true`. |
+| `WEB_DIST` | Unset | Built SPA directory. Not forwarded by the default Compose file: Docker sets `/app/apps/web/dist`; development uses Vite instead. |
 | `EMBED_ALLOWED_ORIGINS` | Unset | Up to 32 comma-separated exact HTTPS website origins permitted to embed public booking pages. Empty disables embedding; no wildcards or paths. Loopback HTTP is accepted for local development. |
 | `WEBHOOKS_ENABLED` | `false` | Capture new organization booking events for outbound HTTPS webhooks. No backfill; set identically on web and worker. See repository `docs/webhooks.md`. |
 | `WEBHOOK_ENCRYPTION_KEY` | Unset | Independent 32-byte base64 key required when webhooks are enabled. Encrypts signing secrets; keep stable and backed up. |
@@ -97,8 +98,9 @@ not change the password of an already initialized PostgreSQL volume; arrange dat
 credential changes separately. `PORT` publishes `127.0.0.1:<PORT>:3000`; update `PUBLIC_URL`
 if people use a different origin.
 
-To set server options not forwarded by the default file, add explicit service environment
-entries in a Compose override, including the worker if you enabled one. For example:
+To disable automatic migrations, set `AUTO_MIGRATE=false` in `.env`; the default Compose
+file forwards it to the app and its inherited worker. You can also set it explicitly in a
+Compose override, including the worker if you enabled one:
 
 ```yaml
 # compose.override.yaml

@@ -519,6 +519,7 @@ async function sendOnce(
           .where('attempts', '=', conferenceClaim.attempt)
           .where('lease_until', '>', new Date(clock().epochMilliseconds))
           .where('delivered', '=', false)
+          .where('skipped_at', 'is', null)
           .where('exhausted_at', 'is', null)
           .executeTakeFirst())
       )
@@ -546,7 +547,7 @@ const codesOf = (err: MailRejectedError) =>
  * Sends the emails for one booking event to every host and attendee who has not had them
  * yet, if they still describe the booking (a later change may have overtaken them).
  */
-export async function sendBookingNotification(
+async function deliverBookingNotification(
   deps: NotificationDeps,
   bookingId: string,
   kind: NotificationKind,
@@ -557,12 +558,12 @@ export async function sendBookingNotification(
     signal?: AbortSignal | undefined
     conferenceClaim?: ConferenceNotificationClaim | undefined
   } = {},
-): Promise<void> {
+): Promise<'completed' | 'skipped'> {
   const clock = deps.now ?? (() => Temporal.Now.instant())
   const now = clock()
-  if (!(await conferenceNotificationAllowed(deps.db, bookingId, kind))) return
+  if (!(await conferenceNotificationAllowed(deps.db, bookingId, kind))) return 'skipped'
   const data = await loadNotificationData(deps.db, bookingId)
-  if (!data || !stillApplies(kind, data, now)) return
+  if (!data || !stillApplies(kind, data, now)) return 'skipped'
   const { booking, hosts, attendees } = data
   const identity = data.conferenceIdentity
   const currentOrganizer = identity ? hosts.find((h) => h.id === identity.organizerId) : hosts[0]
@@ -587,7 +588,7 @@ export async function sendBookingNotification(
     log(
       `${new Date().toISOString()} WARN ${BOOKING_NOTIFICATION_JOB}: booking ${bookingId} has no host with a verified email address; not sending its ${kind} emails`,
     )
-    return
+    return 'skipped'
   }
   // Nobody it is for.
   if (!invitee) {
@@ -595,7 +596,7 @@ export async function sendBookingNotification(
       throw new NotificationRetryError(
         'The original invitee is unavailable; failure notification remains pending',
       )
-    return
+    return 'skipped'
   }
   const guests = kind === 'conference_failed' ? [] : attendees.filter((a) => a !== invitee)
   const email: typeof bookingEmail = (...args) => ({
@@ -702,7 +703,7 @@ export async function sendBookingNotification(
         conferenceClaim,
       )
       // A later change (e.g. a cancellation) sends its own email.
-      if (outcome === 'overtaken') return
+      if (outcome === 'overtaken') return 'skipped'
       if (outcome === 'sent') attempted++
     } catch (err) {
       if (!(err instanceof MailRejectedError) || !err.recipientOnly) throw err
@@ -733,6 +734,17 @@ export async function sendBookingNotification(
       `the mail server refused ${refused.length} of ${recipients.length} emails for now: ${refused.join(', ')}`,
     )
   }
+  return 'completed'
+}
+
+/** Legacy jobs retain their void handler contract; the outbox records skipped outcomes. */
+export async function sendBookingNotification(
+  deps: NotificationDeps,
+  bookingId: string,
+  kind: NotificationKind,
+  options: Parameters<typeof deliverBookingNotification>[3] = {},
+): Promise<void> {
+  await deliverBookingNotification(deps, bookingId, kind, options)
 }
 
 export {
@@ -798,6 +810,7 @@ async function claimConferenceNotification(
       .innerJoin('booking_conferences as c', 'c.booking_id', 'b.id')
       .select(['n.booking_id', 'n.kind', 'n.attempts'])
       .where('n.delivered', '=', false)
+      .where('n.skipped_at', 'is', null)
       .where('n.exhausted_at', 'is', null)
       .where('n.attempts', '<', CONFERENCE_NOTIFICATION_ATTEMPTS)
       .where('n.due_at', '<=', now)
@@ -855,10 +868,30 @@ export async function dispatchConferenceNotifications(
   // A crashed last attempt already consumed the budget. Its expired claim becomes an
   // inspectable failure, not permission for a fourteenth send or a fabricated receipt.
   const expiredAt = clock()
+  // Lifecycle changes need no delivery attempt. Leave live claims alone: their owner
+  // records a skipped result after its per-recipient recheck, or a later sweep does.
+  await sql`
+    WITH obsolete AS (
+      SELECT n.booking_id,n.kind FROM booking_conference_notifications AS n
+      JOIN bookings AS b ON b.id=n.booking_id
+      LEFT JOIN booking_conferences AS c ON c.booking_id=b.id
+      WHERE NOT n.delivered AND n.skipped_at IS NULL AND n.exhausted_at IS NULL
+        AND (n.lease_until IS NULL OR n.lease_until <= ${expiredAt})
+        AND (b.status <> 'confirmed'
+          OR EXISTS (SELECT 1 FROM bookings AS successor WHERE successor.rescheduled_from_id=b.id)
+          OR (n.kind = 'conference_failed' AND c.state = 'ready')
+          OR (n.kind <> 'conference_failed' AND b.start_at <= ${expiredAt}))
+      ORDER BY n.due_at,n.booking_id,n.kind LIMIT 100 FOR UPDATE OF n SKIP LOCKED
+    )
+    UPDATE booking_conference_notifications AS n
+      SET skipped_at=${expiredAt},last_error=NULL,lease_id=NULL,lease_until=NULL
+      FROM obsolete WHERE n.booking_id=obsolete.booking_id AND n.kind=obsolete.kind`.execute(
+    deps.db,
+  )
   const expired = await sql<{ booking_id: string; kind: string }>`
     WITH expired AS (
       SELECT booking_id,kind FROM booking_conference_notifications
-       WHERE NOT delivered AND exhausted_at IS NULL
+       WHERE NOT delivered AND skipped_at IS NULL AND exhausted_at IS NULL
          AND attempts >= ${CONFERENCE_NOTIFICATION_ATTEMPTS} AND lease_until <= ${expiredAt}
        ORDER BY lease_until,booking_id,kind LIMIT 100 FOR UPDATE SKIP LOCKED
     )
@@ -884,10 +917,12 @@ export async function dispatchConferenceNotifications(
         .where('lease_until', '>', clock())
         .where('exhausted_at', 'is', null)
         .where('delivered', '=', false)
+        .where('skipped_at', 'is', null)
     let errorCode: 'recipient_retry' | 'delivery_failed' | 'interrupted' | undefined
+    let outcome: 'completed' | 'skipped' | undefined
     const timeout = AbortSignal.timeout(CONFERENCE_NOTIFICATION_SEND_MS)
     try {
-      await sendBookingNotification(deps, row.booking_id, kind, {
+      outcome = await deliverBookingNotification(deps, row.booking_id, kind, {
         signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
         conferenceClaim: { leaseId: row.leaseId, attempt: row.attempt },
       })
@@ -902,7 +937,8 @@ export async function dispatchConferenceNotifications(
     const exhausted = errorCode !== undefined && row.attempt >= CONFERENCE_NOTIFICATION_ATTEMPTS
     const result = await finish()
       .set({
-        delivered: errorCode === undefined,
+        delivered: errorCode === undefined && outcome === 'completed',
+        skipped_at: outcome === 'skipped' ? clock() : null,
         last_error: errorCode ?? null,
         exhausted_at: exhausted ? clock() : null,
         lease_id: null,

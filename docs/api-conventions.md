@@ -99,6 +99,8 @@ A request is authenticated by one of:
 
 `GET /api/v1/instance` needs no credentials: it tells clients what the instance offers before
 anyone signs in, such as which sign-in methods are enabled (`signIn.google`, …).
+`hostedSignupUrl` is the public destination for attribution and confirmation links, configured
+with `HOSTED_SIGNUP_URL` and defaulting to `https://hourmere.com`.
 
 `GET /api/v1/me` returns the caller, the organization they act in and whether they used a
 session or an API key. The MCP server at `/mcp` ([mcp.md](mcp.md)) accepts API keys and,
@@ -184,6 +186,11 @@ works before profile onboarding and across acting organizations, and accepts the
 session/API-key authentication as profile updates. The legacy Better Auth update-user guard
 remains enforced so that endpoint cannot bypass the text rules.
 
+Account creation through magic links, Google and Microsoft applies the same text bounds by
+sanitizing rather than rejecting provider names: repair malformed Unicode, replace controls
+and line separators with spaces, trim, and clip to 200 UTF-16 code units without splitting a
+surrogate pair. A name that becomes empty stays empty until the person chooses one.
+
 ## Lists
 
 `GET /api/v1/analytics/bookings` returns bounded daily activity counts (at most 90 inclusive
@@ -197,6 +204,11 @@ A list response is `{ "data": [ … ] }`. Lists that can grow without bound use 
 pagination and add `nextCursor`: pass it as `cursor` (with the same filters) for the next page;
 it is null on the last page. Cursors are opaque; `limit` sets the page size (1–100, default
 50). Small lists return everything and have no `nextCursor`.
+
+Booking lists accept `endAfter` (end strictly after this instant) and `endTo` (end at or
+before it), alongside the existing start-time `from`/`to` filters. The web app splits Upcoming
+and Past at the end time, so a meeting in progress stays Upcoming. Ordering and cursors
+remain based on start time and ID; keep all filters when paginating.
 
 ## Public endpoints
 
@@ -300,7 +312,10 @@ their current default schedules; see [collective scheduling](collective-scheduli
 configuration, concurrency and rescheduling rules. Round-robin types offer the union of
 currently eligible hosts and assign one available host in a durable equal rotation. Legacy
 and newly saved round-robin pools need explicit activation; ordinary metadata saves never
-activate them. Booking results include only safe assigned-host name/time zone. See
+activate them. Round-robin event metadata omits `host.timeZone`; invitees view slots in
+their own zone. Booking results include only safe assigned-host name/time zone. A pool edit
+committed while a booking waits returns retryable `409 booking_changed` when the event
+still exists; fetch current availability before retrying. See
 [round-robin scheduling](round-robin-scheduling.md) for activation, fairness and failure rules.
 Team bookings use the same availability rules, locks, idempotency scope, notifications and
 manage links as personal bookings.
@@ -310,7 +325,9 @@ manage links as personal bookings.
 Event type writes accept `isHidden` (default `false`). A hidden event type is omitted from
 the host's public event list, while its direct page, slots and booking endpoints continue to
 work when it is active. Anyone who knows or guesses the link can book it; hiding is not
-authentication or access control. Inactive or deleted event types remain unbookable.
+authentication or access control. The editor offers an optional random slug suffix to make
+a link less guessable; applying it changes the URL and never adds access control. Inactive
+or deleted event types remain unbookable.
 Authenticated REST and MCP catalog reads retain hidden configurations and their `isHidden`
 flag so owners and authorized team members can manage them.
 

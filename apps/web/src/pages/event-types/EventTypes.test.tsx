@@ -2,6 +2,7 @@ import { createEvent, fireEvent, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { EventType } from '../../api/resources.ts'
+import { chooseLanguage } from '../../i18n/store.ts'
 import {
   emptyAccount,
   fakeApi,
@@ -189,6 +190,54 @@ describe('the event types list', () => {
 })
 
 describe('creating an event type', () => {
+  it('translates the minimum notice and buffer hints in Simplified Chinese', async () => {
+    chooseLanguage('zh-CN')
+    eventTypeServer([])
+    renderApp('/app/event-types/new')
+    await screen.findByRole('heading', { name: '新活动类型', level: 1 })
+    for (const [id, hint] of [
+      ['minimumNoticeMinutes', '会议至少需要提前多久预约。'],
+      ['bufferBeforeMinutes', '每次会议前保留的空闲时间。'],
+      ['bufferAfterMinutes', '每次会议后保留的空闲时间。'],
+    ]) {
+      expect(document.getElementById(`${id}-hint`)?.textContent).toContain(hint)
+    }
+    expect(document.body.textContent).not.toMatch(/How far ahead|Free time kept/)
+  })
+
+  it('offers an optional random unlisted suffix without changing the link until accepted', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(crypto, 'randomUUID').mockReturnValue('c6bdce31-1d4f-4579-b36f-8f75fe2ca76a')
+    const api = eventTypeServer([])
+    await openNew()
+    await user.type(field('Title'), 'A private chat')
+    await user.click(field('Hide from your booking page'))
+    expect(field('Booking link').value).toBe('a-private-chat')
+    expect(screen.getByText(/Unlisted is not access control/)).toBeDefined()
+    expect(screen.getByText(/This is optional/)).toBeDefined()
+    expect(screen.getByText('a-private-chat-c6bdce31')).toBeDefined()
+    await user.click(screen.getByRole('button', { name: 'Create event type' }))
+    await screen.findByText('Created “A private chat”.')
+    expect(api.to('POST /api/v1/event-types')[0]?.body).toHaveProperty('slug', 'a-private-chat')
+  })
+
+  it('uses a bounded suffix only when the host accepts it and keeps later title edits independent', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(crypto, 'randomUUID').mockReturnValue('c6bdce31-1d4f-4579-b36f-8f75fe2ca76a')
+    eventTypeServer([])
+    await openNew()
+    await user.type(field('Title'), 'x'.repeat(64))
+    await user.click(field('Hide from your booking page'))
+    await user.click(screen.getByRole('button', { name: 'Use suggested link' }))
+    const chosen = `${'x'.repeat(55)}-c6bdce31`
+    expect(field('Booking link').value).toBe(chosen)
+    await user.type(field('Title'), ' changed')
+    expect(field('Booking link').value).toBe(chosen)
+    await user.click(field('Hide from your booking page'))
+    expect(screen.queryByRole('button', { name: 'Use suggested link' })).toBeNull()
+    expect(field('Booking link').value).toBe(chosen)
+  })
+
   it('sends every setting the form has', async () => {
     const user = userEvent.setup()
     const api = eventTypeServer([])
@@ -655,7 +704,9 @@ describe('editing an event type', () => {
     const api = eventTypeServer([eventType({ isHidden: true })])
     await openExisting()
     expect(field('Hide from your booking page').checked).toBe(true)
-    expect(screen.getByText(/Anyone with the direct link can still book it/)).toBeDefined()
+    expect(
+      screen.getByText(/Anyone who knows or guesses the direct link can still book it/),
+    ).toBeDefined()
     await user.clear(field('Title'))
     await user.type(field('Title'), 'Unlisted call')
     await user.click(screen.getByRole('button', { name: 'Save changes' }))

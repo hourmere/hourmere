@@ -142,7 +142,8 @@ export function ApiKeysPage() {
         </div>
         <p>
           {t('The API is described in its')}{' '}
-          <a href="/api/v1/openapi.json">{t('OpenAPI document')}</a>.
+          <a href="/api/v1/openapi.json">{t('OpenAPI document')}</a>
+          {t('.')}
         </p>
       </section>
     </>
@@ -215,7 +216,8 @@ function CreateKeyForm({
       <h2 id="create-heading">{t('Create a key')}</h2>
       <p>
         {t('The key will act in')} <strong>{organization.name}</strong>
-        {organization.personal && t(', your personal organization')}.
+        {organization.personal && t(', your personal organization')}
+        {t('.')}
       </p>
       <form className="form-row" onSubmit={submit}>
         <div className="field">

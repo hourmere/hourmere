@@ -163,7 +163,7 @@ parts of its link, `https://<host>/<handle>/<slug>`.
 | `get_schedule` | One of your schedules, including weekly hours in its time zone | read-only |
 | `list_calendar_connections` | Your calendar connection status, calendar IDs, conflict settings and write destination; no credentials | read-only |
 | `list_conference_connections` | Your Zoom connection IDs, modes and status; no credentials or browser authorization attempts | read-only |
-| `find_available_slots` | The event type (title, duration, questions, host's time zone) and its free slots between two dates | read-only |
+| `find_available_slots` | The event type (title, duration, questions, host's time zone when applicable) and its free slots between two dates | read-only |
 | `create_booking` | Books a slot for an invitee; returns the booking and its `manageToken` | open world |
 | `reschedule_booking` | Moves a booking you host (`bookingId`) or one you made (`manageToken`); returns the new booking and a new token | destructive, open world |
 | `cancel_booking` | Cancels a booking you host (`bookingId`) or one you made (`manageToken`) | destructive, idempotent, open world |
@@ -206,7 +206,9 @@ weekly hours; each database query fetches at most `limit + 1` summaries.
 
 `list_bookings` defaults to ascending start time (then ID). Set `order: "desc"` for newest
 first; keep the same order and filters when following `nextCursor`. The host's Past page
-uses descending order for the complete paginated history.
+uses descending order for the complete paginated history. Optional `endAfter` (strictly
+after) and `endTo` (at or before) filter by booking end time; Upcoming includes in-progress
+meetings. Keep filters unchanged while paginating.
 
 Each tool's description and JSON Schemas (`tools/list`) say what it needs and returns; the
 fields are those of the REST API (`/api/v1/openapi.json`). Results come as

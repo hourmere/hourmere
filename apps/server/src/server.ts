@@ -79,10 +79,12 @@ export function productRoutes({
   webhooks = { enabled: false },
   automaticMeet = false,
   automaticZoom = false,
+  hostedSignupUrl,
 }: {
   db: Db
   automaticMeet?: boolean
   automaticZoom?: boolean
+  hostedSignupUrl?: string
   webhooks?: import('@hourmere/webhooks').WebhookSettings
   mcpAuth?: Pick<ReturnType<typeof createAuth>, 'handler'> | undefined
   publicUrl?: string
@@ -95,7 +97,7 @@ export function productRoutes({
 }): RouteModule[] {
   return [
     mcpOAuthRoutes({ auth: mcpAuth, db, publicUrl }),
-    instanceRoutes({ socialProviders, automaticMeet, automaticZoom }),
+    instanceRoutes({ socialProviders, automaticMeet, automaticZoom, hostedSignupUrl }),
     calendarRoutes({ db, google: googleCalendar, enqueueSync: enqueueCalendarSync }),
     conferenceRoutes({ db, zoom: zoomConference }),
     profileRoutes({ db }),
@@ -361,6 +363,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
         socialProviders: config.socialProviders,
         automaticMeet: config.GOOGLE_MEET_ENABLED,
         automaticZoom: config.ZOOM_MEETINGS_ENABLED,
+        hostedSignupUrl: config.HOSTED_SIGNUP_URL,
         webhooks: webhookSettings,
         notify,
         googleCalendar,

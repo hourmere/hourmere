@@ -47,7 +47,8 @@ Public slots are the sorted, deduplicated **union of complete start/end interval
 by eligible hosts, using the existing availability engine's local-time and DST rules.
 Different grids can contribute different intervals. The 20,000-candidate budget is shared
 across the configured pool; a larger pool can require a shorter search range. No response
-maps a slot to particular hosts or discloses their private schedules.
+maps a slot to particular hosts or discloses their private schedules. Public event metadata
+uses the team name and omits `host.timeZone`; invitees view offered times in their own zone.
 
 A configured host who has left, been deleted, or lost verified status is ineligible. An
 otherwise eligible host without a default schedule, with a conflicting booking/busy block,
@@ -101,8 +102,10 @@ historical snapshot cannot reliably be inferred to have once been collective.
 
 New bookings pre-read the complete configured pool, lock the organization lifecycle and
 all pool host advisory locks in normalized UUID order, then share-lock/recheck event
-configuration and current user/member eligibility. A changed lock set is refused rather
-than appending locks. The per-event fairness row is locked after the event, and selection,
+configuration and current user/member eligibility. If the event still exists but the pool
+changed while the booking waited, it returns retryable `409 booking_changed`; fetch current
+availability and retry. It never appends new host locks to a changed lock set. The per-event
+fairness row is locked after the event, and selection,
 counter/last-sequence changes, the booking, required snapshots and all delivery enqueues
 commit atomically. Overlapping pools use the same host locks as individual/collective
 bookings, protecting buffers and daily caps across event types. Configuration/activation

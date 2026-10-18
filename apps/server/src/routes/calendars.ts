@@ -167,7 +167,7 @@ export function calendarRoutes(deps: CalendarDeps): RouteModule {
           204: { description: 'Selection saved; enabled calendars synchronize in the background' },
           ...errorResponses({
             400: 'invalid_request',
-            403: CROSS_ORIGIN_WRITE,
+            403: `${CROSS_ORIGIN_WRITE} or session_required when the browser session becomes invalid during the request`,
             404: 'calendar_not_found',
             409: 'google_calendar_permissions_missing or calendar_events_unreadable',
           }),
@@ -196,7 +196,7 @@ export function calendarRoutes(deps: CalendarDeps): RouteModule {
         responses: {
           204: { description: 'Busy intervals synchronized' },
           ...errorResponses({
-            403: CROSS_ORIGIN_WRITE,
+            403: `${CROSS_ORIGIN_WRITE} or session_required when the browser session becomes invalid during the request`,
             404: 'calendar_not_found',
             409: 'calendar_sync_disabled or google_calendar_provider_unavailable',
           }),
@@ -225,7 +225,7 @@ export function calendarRoutes(deps: CalendarDeps): RouteModule {
         responses: {
           204: { description: 'Default booking calendar saved' },
           ...errorResponses({
-            403: CROSS_ORIGIN_WRITE,
+            403: `${CROSS_ORIGIN_WRITE} or session_required when the browser session becomes invalid during the request`,
             404: 'calendar_not_found or profile_not_found',
             409: 'calendar_not_writable',
           }),
@@ -278,7 +278,7 @@ export function calendarRoutes(deps: CalendarDeps): RouteModule {
           204: { description: 'The calendar list was refreshed' },
           ...errorResponses({
             400: 'invalid_request',
-            403: CROSS_ORIGIN_WRITE,
+            403: `${CROSS_ORIGIN_WRITE} or session_required when the browser session becomes invalid during the request`,
             404: 'calendar_connection_not_found',
             409: 'The provider calendar integration is disabled, needs reauthorization, lacks permissions or is unavailable',
           }),

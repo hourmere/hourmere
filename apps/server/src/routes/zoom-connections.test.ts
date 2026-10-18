@@ -275,34 +275,43 @@ describe.skipIf(!databaseUrl)('Zoom HTTP integration settings (real Postgres)', 
     )
     expect(await db.selectFrom('conference_connections').select('id').execute()).toEqual([{ id }])
   })
-  it('redirects callback errors to bounded outcomes without secrets, query strings or provider prose in logs', async () => {
-    const logs = vi.spyOn(console, 'log').mockImplementation(() => {}),
-      errors = vi.spyOn(console, 'error').mockImplementation(() => {})
-    try {
-      const state = await start()
-      provider.controls.tokenStatus = 400
-      provider.controls.token = { error_description: 'synthetic-private-provider-prose' }
-      const response = await req(
-        `/api/conference/zoom/callback?state=${state}&code=synthetic-private-code`,
-      )
-      expect(response.status).toBe(303)
-      expect(response.headers.get('location')).toBe('/app/conferences?zoom=needs_reauth')
-      expect(response.headers.get('referrer-policy')).toBe('no-referrer')
-      expect(response.headers.get('cache-control')).toBe('no-store')
-      const logText = [...logs.mock.calls, ...errors.mock.calls].flat().join(' ')
-      expect(logText).not.toContain(state)
-      expect(logText).not.toMatch(/synthetic-private|synthetic-zoom-(access|refresh)|code=/)
-      const noSession = await app.request(
-        '/api/conference/zoom/callback?state=synthetic-private-state&code=synthetic-private-code',
-      )
-      expect(noSession.status).toBe(303)
-      expect(noSession.headers.get('location')).toBe('/app/conferences?zoom=session_required')
-      expect(noSession.headers.get('referrer-policy')).toBe('no-referrer')
-    } finally {
-      logs.mockRestore()
-      errors.mockRestore()
-    }
-  })
+  it.each([
+    [undefined, 'provider_unavailable'],
+    ['invalid_grant', 'needs_reauth'],
+  ])(
+    'redirects callback errors (%s) to bounded outcomes without secrets, query strings or provider prose in logs',
+    async (error, outcome) => {
+      const logs = vi.spyOn(console, 'log').mockImplementation(() => {}),
+        errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+      try {
+        const state = await start()
+        provider.controls.tokenStatus = 400
+        provider.controls.token = {
+          ...(error && { error }),
+          error_description: 'synthetic-private-provider-prose',
+        }
+        const response = await req(
+          `/api/conference/zoom/callback?state=${state}&code=synthetic-private-code`,
+        )
+        expect(response.status).toBe(303)
+        expect(response.headers.get('location')).toBe(`/app/conferences?zoom=${outcome}`)
+        expect(response.headers.get('referrer-policy')).toBe('no-referrer')
+        expect(response.headers.get('cache-control')).toBe('no-store')
+        const logText = [...logs.mock.calls, ...errors.mock.calls].flat().join(' ')
+        expect(logText).not.toContain(state)
+        expect(logText).not.toMatch(/synthetic-private|synthetic-zoom-(access|refresh)|code=/)
+        const noSession = await app.request(
+          '/api/conference/zoom/callback?state=synthetic-private-state&code=synthetic-private-code',
+        )
+        expect(noSession.status).toBe(303)
+        expect(noSession.headers.get('location')).toBe('/app/conferences?zoom=session_required')
+        expect(noSession.headers.get('referrer-policy')).toBe('no-referrer')
+      } finally {
+        logs.mockRestore()
+        errors.mockRestore()
+      }
+    },
+  )
   it('sets private response headers before refusing unauthenticated or credential-management callers', async () => {
     for (const response of [
       await app.request('/api/v1/conference-connections'),

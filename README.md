@@ -69,6 +69,10 @@ the background jobs (booking emails); to run them in a container of their own, s
 `HOURMERE_ROLE=web` and enable the `worker` service in `docker-compose.yml` (same image,
 `HOURMERE_ROLE=worker`). Give containers at least 35 seconds to stop, so running jobs can finish. Put a reverse proxy with TLS in front of it, and set `TRUSTED_PROXIES` to the proxy's address as the app sees it (for a proxy on the host or on the compose network that is the Docker network, e.g. `172.16.0.0/12`), so rate limits apply per visitor rather than to everyone behind the proxy.
 
+The official image retains small public attribution and booking-confirmation links to the
+hosted service. `HOSTED_SIGNUP_URL` sets their destination (default `https://hourmere.com`);
+there is no setting to hide them.
+
 Team owners and admins can configure [collective meetings](docs/collective-scheduling.md)
 with two to eight required hosts, or [round-robin pools](docs/round-robin-scheduling.md)
 with one to eight hosts and explicit activation.

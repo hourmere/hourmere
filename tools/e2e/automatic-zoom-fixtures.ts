@@ -36,7 +36,13 @@ interface ZoomMeetingApp {
   signIn: (kind: 'personal' | 'team' | 'foreign') => Promise<void>
   advance: (mode?: 'ready' | 'lost' | 'unsafe') => Promise<void>
   failAccountRead: (fail: boolean) => void
-  foreignAndKey: () => Promise<{ foreign: number; key: number; privateKey: number }>
+  foreignAndKey: () => Promise<{
+    foreign: number
+    key: number
+    privateKey: number
+    foreignKey: number
+    foreignKeyError: string
+  }>
   state: () => Promise<{
     roots: number
     meetings: number
@@ -380,6 +386,24 @@ export const test = base.extend<{
             { location: { kind: 'zoom', autoCreate: true }, zoomConnectionId: pin },
             'PATCH',
           )
+          const foreignKey = await auth.api.createApiKey({
+            body: {
+              userId: other.userId,
+              name: 'Synthetic admin key',
+              metadata: { organizationId: team },
+            },
+          })
+          const foreignKeyResult = await app.request(`/api/v1/event-types/${id}`, {
+            method: 'PATCH',
+            headers: {
+              authorization: `Bearer ${foreignKey.key}`,
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+              location: { kind: 'zoom', autoCreate: true },
+              zoomConnectionId: pin,
+            }),
+          })
           const key = await auth.api.createApiKey({
             body: {
               userId: host.userId,
@@ -398,7 +422,13 @@ export const test = base.extend<{
           const privateKey = await app.request('/api/v1/conference-connections', {
             headers: { authorization: `Bearer ${key.key}` },
           })
-          return { foreign: foreign.status, key: keyResult.status, privateKey: privateKey.status }
+          return {
+            foreign: foreign.status,
+            key: keyResult.status,
+            privateKey: privateKey.status,
+            foreignKey: foreignKeyResult.status,
+            foreignKeyError: (await foreignKeyResult.json()).error,
+          }
         },
         state: async () => {
           const roots = await db.selectFrom('booking_conferences').selectAll().execute(),

@@ -2,7 +2,9 @@ import { act, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { ApiKey } from '../api/auth.ts'
+import { chooseLanguage } from '../i18n/store.ts'
 import type { Me } from '../session.tsx'
+import { browserLocale } from '../test/browser-locale.ts'
 import {
   fakeApi,
   json,
@@ -76,6 +78,50 @@ const rowFor = async (name: string) =>
   (await within(await table()).findByRole('rowheader', { name: new RegExp(name) })).closest('tr')
 
 describe('the API keys page', () => {
+  it('uses Chinese sentence punctuation in the usage and organization hints', async () => {
+    chooseLanguage('zh-CN')
+    keyServer()
+    renderApp('/app/api-keys')
+    await screen.findByRole('heading', { name: 'API 密钥', level: 1 })
+    expect(screen.getByRole('link', { name: 'OpenAPI 文档' }).closest('p')?.textContent).toBe(
+      'API 说明参见 OpenAPI 文档。',
+    )
+    expect(screen.getByText('密钥将作用于', { exact: false }).textContent).toBe(
+      `密钥将作用于 ${ME.organization.name}（你的个人组织）。`,
+    )
+    await screen.findByText('hm_Old…')
+  })
+
+  it.each(['fa-IR', 'th-TH'])(
+    'keeps API key dates Gregorian for browser locale %s',
+    async (locale) => {
+      browserLocale(locale)
+      keyServer([{ ...existing, expiresAt: '2030-11-02T09:00:00.000Z' }])
+      renderApp('/app/api-keys')
+      const row = await rowFor('Claude Desktop')
+      for (const iso of [
+        existing.createdAt,
+        existing.lastRequest as string,
+        '2030-11-02T09:00:00.000Z',
+      ]) {
+        const time = row?.querySelector(`time[datetime="${iso}"]`)
+        const full = new Intl.DateTimeFormat(locale, {
+          calendar: 'gregory',
+          dateStyle: 'medium',
+          timeStyle: 'short',
+        }).format(new Date(iso))
+        expect(time?.getAttribute('title')).toBe(full)
+        expect(time?.textContent).toBe(
+          iso === existing.lastRequest
+            ? full
+            : new Intl.DateTimeFormat(locale, { calendar: 'gregory', dateStyle: 'medium' }).format(
+                new Date(iso),
+              ),
+        )
+      }
+    },
+  )
+
   it('lists keys by name and prefix, never by secret', async () => {
     keyServer()
     renderApp('/app/api-keys')

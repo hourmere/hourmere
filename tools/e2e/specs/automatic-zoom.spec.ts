@@ -90,7 +90,13 @@ for (const locale of ['en', 'zh-CN'] as const) {
     const body = (await metadata).request().postDataJSON()
     for (const key of ['zoomConnectionId', 'hosts', 'location', 'scheduleId'])
       expect(body).not.toHaveProperty(key)
-    expect(await app.foreignAndKey()).toEqual({ foreign: 403, key: 403, privateKey: 403 })
+    expect(await app.foreignAndKey()).toEqual({
+      foreign: 403,
+      key: 200,
+      privateKey: 200,
+      foreignKey: 403,
+      foreignKeyError: 'zoom_host_session_required',
+    })
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,

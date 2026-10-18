@@ -28,7 +28,7 @@ the automated tests use synthetic provider responses only.
    access implicitly to the identity action, and never add admin/unrelated scopes. Zoom's basic authorization query can include the required and
    optional scopes configured in Marketplace.
 2. Enable the client's S256 PKCE capability, while using its **confidential** client ID and
-   secret. Hourmere sends HTTP Basic client authentication and the verifier in the token body,
+   secret. Hourmere sends client credentials only through HTTP Basic authentication and the verifier in the token body,
    as in Zoom's confidential PKCE example. It does not use a public-client ID or expose a
    client secret to the browser.
 3. Register exactly `{PUBLIC_URL}/api/conference/zoom/callback`. No dynamic redirect URL or
@@ -60,10 +60,15 @@ challenge to the browser.
 
 ## Refresh, reconnect and disconnect
 
-- **Refresh Zoom account** explicitly rotates credentials and updates identity metadata. Old
-  credentials are durably retired before the provider request. If the result is unknown,
-  malformed, over-scoped, or cannot be committed, Hourmere requires reconnection and never
-  automatically retries the old refresh token. A confirmed rotation followed only by a
+- **Refresh Zoom account** explicitly rotates credentials and updates identity metadata. The
+  durable `refreshing` claim clears stored credentials before the provider request. Transient
+  transport failures retry at most three times with bounded backoff; exhausted transient
+  failures restore the original encrypted credentials as active for a later attempt.
+  Other token rejections and malformed successful responses also preserve the previous grant
+  for later recovery; an unknown rotation may later resolve to `invalid_grant`. That explicit
+  invalid grant or a successful scope/identity mismatch requires reconnection.
+  A crashed or uncommittable rotation remains incomplete.
+  A confirmed rotation followed only by a
   transient identity lookup error retains the **new** token and reports the metadata error.
 - **Reconnect Zoom** replaces existing local access and requires the same Zoom identity. Its saved identity/meeting permission mode and
   stable connection ID remain unchanged. A Zoom identity already owned by another Hourmere

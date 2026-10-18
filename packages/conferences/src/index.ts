@@ -13,6 +13,7 @@ import {
 import { credentials, readTokens } from './tokens.ts'
 import {
   matchingZoomScopes,
+  refreshZoomTokens,
   type ZoomClient,
   ZoomError,
   type ZoomIdentity,
@@ -498,7 +499,8 @@ export async function disconnectConference(deps: ConferenceDeps, principal: Prin
 }
 /** Clear old credentials in a committed claim before contacting a rotating-token endpoint.
  * Phase two uses the same owner-first lock protocol for provider I/O and final storage.
- * A crash, invalid response or failed final commit can never reuse the old refresh token. */
+ * Retryable/provider response failures preserve the prior grant for later recovery;
+ * a crash or failed final commit leaves the durable refresh claim incomplete. */
 export async function refreshConference(deps: ConferenceDeps, principal: Principal, id: string) {
   const session = requireConferenceSession(principal),
     { client, key } = configured(deps)
@@ -529,7 +531,12 @@ export async function refreshConference(deps: ConferenceDeps, principal: Princip
         .set({ credentials: null, operation_id: operation, status: 'refreshing', last_error: null })
         .where('id', '=', id)
         .execute()
-      return { tokens, external: row.external_user_id, mode: row.mode as ZoomMode }
+      return {
+        tokens,
+        original: row.credentials,
+        external: row.external_user_id,
+        mode: row.mode as ZoomMode,
+      }
     } catch (error) {
       if (!(error instanceof ZoomError)) throw error
       await db
@@ -560,11 +567,15 @@ export async function refreshConference(deps: ConferenceDeps, principal: Princip
         .executeTakeFirst()
       if (!row) return 'needs_reauth'
       let tokens: ZoomTokens | undefined,
+        recoverable = false,
         identity: ZoomIdentity | undefined,
         errorCode: string | null = null
       try {
         const signal = AbortSignal.timeout(deps.timeoutMs ?? 15000)
-        tokens = await client.refresh(claim.tokens.refreshToken, signal, claim.mode)
+        tokens = await refreshZoomTokens(
+          () => client.refresh(claim.tokens.refreshToken, signal, claim.mode),
+          signal,
+        )
         if (!matchingZoomScopes(tokens.scopes, claim.mode)) {
           tokens = undefined
           throw new ZoomError('permissions_missing')
@@ -576,11 +587,14 @@ export async function refreshConference(deps: ConferenceDeps, principal: Princip
         }
       } catch (error) {
         errorCode = error instanceof ZoomError ? error.code : 'provider_unavailable'
-        // Only a known successful rotation with a transient metadata failure may stay active.
+        recoverable = !tokens && error instanceof ZoomError && error.code === 'provider_unavailable'
+        // Keep a known rotated grant after transient metadata failure; a missing grant does
+        // not prove revocation, so preserve the previous credential for later recovery.
         if (errorCode !== 'provider_unavailable') tokens = undefined
       }
       if (!(await sessionAlive(db, session, clock(deps)))) {
         tokens = undefined
+        recoverable = false
         errorCode = 'needs_reauth'
       }
       await db
@@ -588,9 +602,11 @@ export async function refreshConference(deps: ConferenceDeps, principal: Princip
         .set({
           credentials: tokens
             ? credentials(key, session.user.id, id, claim.external, tokens, claim.mode)
-            : null,
+            : recoverable
+              ? claim.original
+              : null,
           operation_id: null,
-          status: tokens ? 'active' : 'needs_reauth',
+          status: tokens || recoverable ? 'active' : 'needs_reauth',
           last_error: errorCode,
           ...(tokens && { scopes: tokens.scopes }),
           ...(tokens && identity && { account_email: identity.email, display_name: identity.name }),
