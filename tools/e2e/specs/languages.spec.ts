@@ -282,7 +282,8 @@ for (const selected of ['en', 'zh-CN'] as const) {
           if (
             event.isTrusted &&
             event.data?.id === messageId &&
-            ['hourmere:resize', 'hourmere:close'].includes(event.data?.type)
+            (event.data?.type === 'hourmere:close' ||
+              (event.data?.type === 'hourmere:resize' && event.data?.height === 1999))
           ) {
             state.fixtureProbeMessages++
             if (state.fixtureProbeMessages === 2) window.removeEventListener('message', received)
@@ -307,29 +308,45 @@ for (const selected of ['en', 'zh-CN'] as const) {
       await expect(dialog).toBeVisible()
       expect(await popupFrame.evaluate((frame) => frame.style.height)).toBe(before)
     }
-    // Real sibling Window: expected origin and ID, but a different sender WindowProxy.
-    await rejectMessages(inlineBody, popupId)
-    // Real popup Window: expected origin and sender, but a different correlation ID.
-    await rejectMessages(popupBody, 'different_embed_id')
-    // Navigate the same popup WindowProxy to an owned parent-origin document. Its
-    // sender and ID match, while the origin differs from the captured app origin.
-    const senderUrl = `${app.parentUrl}/sender-probe`
-    await page.route(senderUrl, (route) =>
-      route.fulfill({
-        status: 200,
-        contentType: 'text/html',
-        headers: { 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' },
-        body: '<!doctype html><title>Owned sender probe</title><body>Sender probe</body>',
-      }),
-    )
+    // Keep the popup WindowProxy, but retire the actual app/ResizeObserver before
+    // comparing heights. Navigation preserves sender identity across documents.
+    const appSenderUrl = `${app.url}/sender-probe`,
+      parentSenderUrl = `${app.parentUrl}/sender-probe`
+    for (const url of [appSenderUrl, parentSenderUrl])
+      await page.route(url, (route) =>
+        route.fulfill({
+          status: 200,
+          contentType: 'text/html',
+          headers: { 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' },
+          body: '<!doctype html><title>Owned sender probe</title><body>Sender probe</body>',
+        }),
+      )
     try {
       await popupFrame.evaluate((frame, url) => {
         frame.setAttribute('src', url)
-      }, senderUrl)
+      }, appSenderUrl)
+      await expect(popupBody).toHaveText('Sender probe')
+      // A valid real sender is accepted; this also follows any messages queued by
+      // the retired app. The earlier inline assertions still exercise its real observer.
+      await popupBody.evaluate(
+        (_, { id, target }) =>
+          window.parent.postMessage({ type: 'hourmere:resize', id, height: 777 }, target),
+        { id: popupId, target: app.parentUrl },
+      )
+      await expect(popupFrame).toHaveCSS('height', '777px')
+      // Expected origin and ID, but a different sender WindowProxy.
+      await rejectMessages(inlineBody, popupId)
+      // Expected origin and sender Window, but a different correlation ID.
+      await rejectMessages(popupBody, 'different_embed_id')
+      // Expected sender Window and ID, but a different origin.
+      await popupFrame.evaluate((frame, url) => {
+        frame.setAttribute('src', url)
+      }, parentSenderUrl)
       await expect(popupBody).toHaveText('Sender probe')
       await rejectMessages(popupBody, popupId)
     } finally {
-      await page.unroute(senderUrl)
+      await page.unroute(appSenderUrl)
+      await page.unroute(parentSenderUrl)
     }
     await popupFrame.evaluate((frame, url) => {
       frame.setAttribute('src', url)
