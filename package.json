@@ -12,6 +12,7 @@
     "tools/*"
   ],
   "scripts": {
+    "cli": "node tools/cli/src/index.ts",
     "dev": "node scripts/dev.ts",
     "db:up": "docker compose -f docker-compose.dev.yml up -d --wait",
     "db:down": "docker compose -f docker-compose.dev.yml down",

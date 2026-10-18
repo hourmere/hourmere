@@ -14,6 +14,7 @@ export default defineConfig({
             'apps/*/src/**/*.test.{ts,tsx}',
             'packages/*/src/**/*.test.ts',
             'scripts/**/*.test.ts',
+            'tools/cli/src/**/*.test.ts',
           ],
           exclude: [...configDefaults.exclude, 'apps/web/**'],
         },
