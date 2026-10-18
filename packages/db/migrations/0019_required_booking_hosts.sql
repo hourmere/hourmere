@@ -2,9 +2,13 @@
 -- surviving host cannot silently reschedule a collective meeting without that person.
 -- Historical identities already deleted before this migration cannot be recovered.
 ALTER TABLE bookings ADD COLUMN required_host_user_ids uuid[] NOT NULL DEFAULT '{}';
+-- Preserve historical updated_at values while backfilling the new column.
+-- ALTER TABLE retains its exclusive lock until this migration transaction commits.
+ALTER TABLE bookings DISABLE TRIGGER bookings_updated_at;
 UPDATE bookings b SET required_host_user_ids = ARRAY(
   SELECT h.user_id FROM booking_hosts h WHERE h.booking_id = b.id ORDER BY h.user_id
 );
+ALTER TABLE bookings ENABLE TRIGGER bookings_updated_at;
 CREATE FUNCTION immutable_required_booking_hosts() RETURNS trigger
 LANGUAGE plpgsql SET search_path = public, pg_temp AS $$
 BEGIN
