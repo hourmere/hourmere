@@ -738,6 +738,65 @@ describe.skipIf(!serverUrl)('automatic Zoom durable booking lifecycle (real Post
     expect((await row()).state).toBe('ready')
     expect(posts()).toHaveLength(1)
   })
+  it('withholds a late created URL after host membership withdrawal while keeping the exact ID available for cancellation cleanup', async () => {
+    const member = await db
+      .selectFrom('auth.member')
+      .selectAll()
+      .where('userId', '=', owner.user.id)
+      .where('organizationId', '=', owner.organization.id)
+      .executeTakeFirstOrThrow()
+    const b = await book(),
+      entered = barrier(),
+      release = barrier<Response>()
+    const value = {
+      id: 81234567890,
+      host_id: 'synthetic-zoom-identity',
+      type: 2,
+      join_url: 'https://zoom.us/j/81234567890',
+      start_time: START,
+      duration: 30,
+    }
+    provider.controls.meetingHook = async () => {
+      entered.resolve()
+      return release.promise
+    }
+    const running = writeBookingConference(deps, b.booking.id)
+    await entered.promise
+    try {
+      await db.deleteFrom('auth.member').where('id', '=', member.id).execute()
+      provider.controls.storedMeetings.set('81234567890', value)
+      release.resolve(Response.json(value))
+      await running
+      expect(await row()).toMatchObject({
+        state: 'failed',
+        error_code: 'organizer_unavailable',
+        zoom_meeting_id: '81234567890',
+      })
+      const managed = await getManagedBooking(ctx, b.manageToken as string)
+      expect(managed.location?.url).toBeUndefined()
+      expect(managed.conference?.errorCode).toBe('organizer_unavailable')
+      await sendBookingNotification(mail(), b.booking.id, 'confirmed')
+      await dispatchConferenceNotifications(mail())
+      expect(sent.some((message) => message.attachments?.length)).toBe(false)
+      provider.controls.meetingHook = undefined
+      await cancelManagedBooking(ctx, b.manageToken as string)
+      await writeBookingConference(deps, b.booking.id)
+      expect((await row()).state).toBe('ready')
+      expect(provider.controls.storedMeetings.size).toBe(0)
+      expect(posts()).toHaveLength(1)
+      expect(provider.calls.filter((c) => c.init.method === 'DELETE').map((c) => c.url)).toEqual([
+        'https://api.zoom.us/v2/meetings/81234567890',
+      ])
+    } finally {
+      release.resolve(Response.json(value))
+      await running
+      await db
+        .insertInto('auth.member')
+        .values(member)
+        .onConflict((oc) => oc.column('id').doNothing())
+        .execute()
+    }
+  })
   it('rejects a cached principal after logout before allowing private connection reactivation', async () => {
     const id = randomUUID()
     await db
