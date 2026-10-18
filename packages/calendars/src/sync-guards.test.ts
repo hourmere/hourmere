@@ -130,6 +130,39 @@ describe.skipIf(!url)('Google sync authorization and fail-closed guards (real Po
     await expect(availability()).rejects.toMatchObject({ code: 'calendar_sync_unavailable' })
   })
 
+  it('clears a previous connection error after a successful sync', async () => {
+    provider.controls.eventStatus = 503
+    await expect(syncGoogleCalendar(deps, calendarId)).rejects.toMatchObject({
+      code: 'provider_unavailable',
+    })
+    const connection = () =>
+      db
+        .selectFrom('calendar_connections')
+        .select(['status', 'last_error'])
+        .where('id', '=', connectionId)
+        .executeTakeFirstOrThrow()
+    expect(await connection()).toEqual({ status: 'active', last_error: 'provider_unavailable' })
+    provider.controls.eventStatus = 200
+    await syncGoogleCalendar(deps, calendarId)
+    expect(await connection()).toEqual({ status: 'active', last_error: null })
+    expect((await calendar()).sync_error).toBeNull()
+  })
+
+  it('preserves the safe OAuth enum in the sync-now error cause', async () => {
+    await db
+      .updateTable('calendar_connections')
+      .set({ credentials: credentials(now - 1) })
+      .where('id', '=', connectionId)
+      .execute()
+    provider.controls.tokenStatus = 401
+    provider.controls.tokenError = 'invalid_client'
+    const error = await syncOwnedCalendar(deps, owner, calendarId).catch((error) => error)
+    expect(error).toMatchObject({
+      code: 'google_calendar_provider_unavailable',
+      cause: { code: 'provider_unavailable', oauthError: 'invalid_client', status: 401 },
+    })
+  })
+
   it('renews the daily window with a full fetch and replaces the old snapshot', async () => {
     provider.controls.eventPages = [{ items: [timed('previous-day')], nextSyncToken: 'before' }]
     await syncGoogleCalendar(deps, calendarId)

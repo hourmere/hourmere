@@ -37,6 +37,11 @@ These settings do not enable Google sign-in. `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT
 `/api/auth/callback/google` continue to configure only sign-in. Separate clients also avoid
 combining sign-in and calendar grants for the same OAuth client.
 
+Upgrade note: `CALENDAR_ENCRYPTION_KEY` must now differ from `WEBHOOK_ENCRYPTION_KEY` and
+`BETTER_AUTH_SECRET`; startup refuses a reused key. Keep the calendar key stable and backed
+up: rotating it makes stored calendar tokens undecryptable, and affected accounts must be
+connected again.
+
 The default API request (`access=list`) requests `openid`, `email`, and
 `https://www.googleapis.com/auth/calendar.calendarlist.readonly`. The web app requests
 `access=sync`, adding `https://www.googleapis.com/auth/calendar.events.readonly` and
@@ -165,6 +170,10 @@ other hosts' copies. Its original destination is retained even for bookings made
 reauthorization is needed. Each destination has its own ten-second deadline inside a shared two-minute writeback
 deadline, so a stalled provider call for one host also leaves time for other hosts.
 Temporary failures are collected after every destination has been attempted and use the normal job backoff (12 retries, up to one hour between attempts).
+Google event API 403 responses with `rateLimitExceeded`, `userRateLimitExceeded` or
+`quotaExceeded` use this retry path. Other 403 responses record `permissions_missing` in the
+owner's `lastError` metadata, and the Calendars page prompts the host to reconnect even while
+the connection is active. Successful synchronization or writeback clears the previous error.
 Availability continues to fail closed immediately for selected calendars with sync failures.
 
 Reauthorizing an existing Google connection queues a finite `booking-calendar-recover`
@@ -183,8 +192,16 @@ node --env-file=.env scripts/redispatch-calendar-writeback.ts --connection-id <c
 ```
 
 Run this from the repository checkout with the deployment's environment and workers running.
+The Docker runtime includes this recovery script. With Docker Compose, use the container's
+configured environment instead:
+
+```sh
+docker compose exec app node scripts/redispatch-calendar-writeback.ts --connection-id <connection UUID>
+```
+
 The command queues one finite recovery pass through the same bounded pages, for one active
-Google connection; it prints no credentials. Use the connection ID from that user's calendar
+Google connection; it prints no credentials. It reports `already queued` when queue
+deduplication keeps an existing job. Use the connection ID from that user's calendar
 connection metadata. Each missing copy receives the ordinary bounded writeback retry budget.
 Account recovery excludes past/cancelled meetings, removed hosts, non-owned destinations,
 inactive accounts and successful copies. To retry one exhausted projection, including a
@@ -194,7 +211,8 @@ This queues exactly one ordinary booking-calendar job with the same 12-retry lim
 not a background loop that grants retries indefinitely.
 
 Token-endpoint failures read at most 4 KiB and recognize only a fixed OAuth `error` enum.
-`invalid_grant` means the user must reauthorize. `invalid_client` and `unauthorized_client`
+On HTTP 400/401, `invalid_grant` means the user must reauthorize; Microsoft's
+`interaction_required` and `consent_required` also prompt reconnection. `invalid_client` and `unauthorized_client`
 indicate instance client configuration errors: the connection remains active, jobs retain
 their retry/backoff behavior, and an operator-visible fixed error code identifies the
 configuration problem. Other request/provider failures also preserve retry eligibility.

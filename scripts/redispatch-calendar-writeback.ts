@@ -42,14 +42,18 @@ if (
   })
   try {
     await jobs.start()
-    if (values['booking-id']) await redispatchBookingCalendar(db, jobs, id.data)
-    else
-      await jobs.enqueue(
-        'booking-calendar-recover',
-        { connectionId: id.data },
-        { singletonKey: id.data },
-      )
-    console.log('Calendar writeback recovery queued.')
+    const queued = values['booking-id']
+      ? await redispatchBookingCalendar(db, jobs, id.data)
+      : await jobs.enqueue(
+          'booking-calendar-recover',
+          { connectionId: id.data },
+          { singletonKey: id.data },
+        )
+    console.log(
+      queued === null
+        ? 'Calendar writeback recovery already queued.'
+        : 'Calendar writeback recovery queued.',
+    )
   } catch {
     console.error('Calendar writeback recovery could not be queued.')
     process.exitCode = 1

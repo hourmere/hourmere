@@ -92,7 +92,13 @@ export async function useGoogleConnection<T>(
           throw new GoogleCalendarError('permissions_missing')
         accessToken = next.accessToken
       }
-      return { ok: true as const, value: await work(trx, accessToken, owner.user_id) }
+      const value = await work(trx, accessToken, owner.user_id)
+      await trx
+        .updateTable('calendar_connections')
+        .set({ last_error: null })
+        .where('id', '=', id)
+        .execute()
+      return { ok: true as const, value }
     } catch (error) {
       if (!(error instanceof GoogleCalendarError)) throw error
       await trx
@@ -350,6 +356,7 @@ export async function syncOwnedCalendar(deps: CalendarDeps, principal: Principal
         'conflict',
         `google_calendar_${error.code}`,
         'Calendar synchronization could not complete. Reconnect if access has expired, or try again shortly.',
+        { cause: error },
       )
     throw error
   }

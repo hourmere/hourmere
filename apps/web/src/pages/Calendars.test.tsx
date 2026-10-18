@@ -33,6 +33,21 @@ const list = (data = [connection], googleEnabled = true, microsoftEnabled = fals
 const authorizationUrl = 'https://accounts.google.com/o/oauth2/v2/auth?state=fake-state'
 
 describe('the calendars page', () => {
+  it('prompts the host to reconnect an active account with a writeback permissions failure', async () => {
+    fakeApi({
+      ...signedIn,
+      ...list([{ ...connection, syncAuthorized: true, lastError: 'permissions_missing' }]),
+    })
+    renderApp('/app/calendars')
+    const article = (await screen.findByRole('heading', { name: 'calendar@example.com' })).closest(
+      'article',
+    ) as HTMLElement
+    expect(within(article).queryByRole('alert')?.textContent).toContain(
+      'account again to restore it.',
+    )
+    expect(screen.getByRole('button', { name: 'Connect Google Calendar' })).toBeDefined()
+  })
+
   it('connects Microsoft separately and exposes only its available calendar-list actions', async () => {
     const user = userEvent.setup()
     const microsoft: Schemas['CalendarConnection'] = {

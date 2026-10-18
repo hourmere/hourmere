@@ -4791,6 +4791,8 @@ export interface components {
             createdAt: string;
             /** Format: uuid */
             id: string;
+            /** @enum {string|null} */
+            lastError?: "provider_unavailable" | "needs_reauth" | "permissions_missing" | null;
             /** @enum {string} */
             provider: "google" | "microsoft";
             /** @enum {string} */

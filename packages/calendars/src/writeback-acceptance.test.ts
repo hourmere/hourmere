@@ -1,5 +1,6 @@
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import { createJobs } from '@hourmere/jobs'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createFixtures } from '../../scheduling/src/testing.ts'
 import {
@@ -10,8 +11,8 @@ import {
 } from './booking-events.ts'
 import { calendarEncryptionKey, encryptCredential } from './credentials.ts'
 import { GOOGLE_CALENDAR_SYNC_SCOPES, GoogleCalendarError } from './google.ts'
-import type { CalendarDeps } from './index.ts'
-import { bookingCalendarRecoveryJob, calendarDispatchJob } from './jobs.ts'
+import { type CalendarDeps, listCalendarConnections } from './index.ts'
+import { bookingCalendarJob, bookingCalendarRecoveryJob, calendarDispatchJob } from './jobs.ts'
 import { calendarTestSession, fakeGoogle, TEST_CALENDAR_KEY } from './testing.ts'
 
 const url = process.env.DATABASE_URL
@@ -150,6 +151,79 @@ describe.skipIf(!url)('Calendar writeback acceptance (real Postgres)', () => {
     })
     expect(await mappings()).toEqual([{ booking_id: id, calendar_id: calB }])
   })
+  it.each(['rateLimitExceeded', 'userRateLimitExceeded', 'quotaExceeded', 'forbidden'])(
+    'runs a real writeback job for a Google 403 %s without silently losing the calendar copy',
+    async (reason) => {
+      // A prior parameter may have left a deliberately delayed retry in this file's DB.
+      await database.pool
+        .query("DELETE FROM pgboss.job WHERE name='booking-calendar'")
+        .catch((error: { code?: string }) => {
+          if (error.code !== '42P01') throw error
+        })
+      const id = await booking()
+      await notify(id)
+      provider.controls.eventHook = async () =>
+        Response.json({ error: { errors: [{ reason }] } }, { status: 403 })
+      const jobs = createJobs({
+        connectionString: database.url,
+        definitions: [bookingCalendarJob(deps)],
+        work: true,
+        migrate: true,
+        maxConnections: 2,
+        pollingIntervalSeconds: 0.5,
+        log: () => {},
+      })
+      try {
+        await jobs.start()
+        const jobId = await jobs.enqueue(
+          'booking-calendar',
+          { bookingId: id },
+          { singletonKey: id },
+        )
+        const retryable = reason !== 'forbidden'
+        await vi.waitFor(
+          async () => {
+            const row = await database.pool.query(
+              'SELECT state, retry_count, retry_limit, retry_backoff, start_after > now() AS delayed FROM pgboss.job WHERE id=$1',
+              [jobId],
+            )
+            expect(row.rows[0]).toMatchObject({
+              state: retryable ? 'retry' : 'completed',
+              retry_count: 0,
+              retry_limit: 12,
+              retry_backoff: true,
+              ...(retryable && { delayed: true }),
+            })
+          },
+          { timeout: 5000, interval: 50 },
+        )
+        expect(await mappings()).toEqual([])
+        expect((await listCalendarConnections(deps, a)).data[0]).toMatchObject({
+          status: 'active',
+          lastError: retryable ? 'provider_unavailable' : 'permissions_missing',
+        })
+        if (retryable) {
+          // Simulate the scheduled retry becoming due after the provider recovers.
+          provider.controls.eventHook = undefined
+          await database.pool.query('UPDATE pgboss.job SET start_after=now() WHERE id=$1', [jobId])
+          await vi.waitFor(
+            async () => {
+              const row = await database.pool.query(
+                'SELECT state, retry_count FROM pgboss.job WHERE id=$1',
+                [jobId],
+              )
+              expect(row.rows[0]).toMatchObject({ state: 'completed', retry_count: 1 })
+            },
+            { timeout: 5000, interval: 50 },
+          )
+          expect(await mappings()).toEqual([{ booking_id: id, calendar_id: calA }])
+          expect((await listCalendarConnections(deps, a)).data[0]?.lastError).toBeNull()
+        }
+      } finally {
+        await jobs.stop()
+      }
+    },
+  )
   it('bounds a stalled host attempt so a healthy later host still receives its copy', async () => {
     const id = await booking([a.user.id, b.user.id])
     await notify(id)

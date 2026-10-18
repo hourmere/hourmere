@@ -74,7 +74,9 @@ export function createMicrosoftCalendarClient(
         if (!tokenEndpoint) await response.body?.cancel()
         throw new MicrosoftCalendarError(
           tokenEndpoint
-            ? oauthError === 'invalid_grant' && [400, 401].includes(response.status)
+            ? oauthError !== undefined &&
+              ['invalid_grant', 'interaction_required', 'consent_required'].includes(oauthError) &&
+              [400, 401].includes(response.status)
               ? 'needs_reauth'
               : 'provider_unavailable'
             : response.status === 401

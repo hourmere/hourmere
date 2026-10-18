@@ -33,6 +33,10 @@ const CalendarConnection = z
     provider: z.enum(['google', 'microsoft']),
     accountEmail: z.string().nullable(),
     status: z.enum(['active', 'needs_reauth', 'revoked']),
+    lastError: z
+      .enum(['provider_unavailable', 'needs_reauth', 'permissions_missing'])
+      .nullable()
+      .optional(),
     createdAt: z.iso.datetime(),
     updatedAt: z.iso.datetime(),
     syncAuthorized: z.boolean(),

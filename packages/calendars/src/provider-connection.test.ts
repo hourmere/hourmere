@@ -121,6 +121,33 @@ describe.skipIf(!url)('OAuth token error recovery (real Postgres)', () => {
     })
   }
 
+  it.each(['interaction_required', 'consent_required'])(
+    'Microsoft prompts for reconnection after %s and refuses further silent refreshes',
+    async (error) => {
+      const { id } = await connect('microsoft')
+      microsoft.controls.tokenStatus = 400
+      microsoft.controls.token.error = error
+      await expect(refreshCalendarList(deps, owner, id)).rejects.toMatchObject({
+        code: 'microsoft_calendar_needs_reauth',
+        cause: { oauthError: error },
+      })
+      expect(
+        await db
+          .selectFrom('calendar_connections')
+          .select(['status', 'last_error'])
+          .where('id', '=', id)
+          .executeTakeFirstOrThrow(),
+      ).toEqual({ status: 'needs_reauth', last_error: 'needs_reauth' })
+      const attempts = microsoft.calls.length
+      microsoft.controls.tokenStatus = 200
+      delete microsoft.controls.token.error
+      await expect(refreshCalendarList(deps, owner, id)).rejects.toMatchObject({
+        code: 'microsoft_calendar_needs_reauth',
+      })
+      expect(microsoft.calls).toHaveLength(attempts)
+    },
+  )
+
   it('Google sync preserves the active connection and safe operator error until a retry succeeds', async () => {
     const { id } = await connect('google')
     google.controls.tokenStatus = 401

@@ -19,6 +19,8 @@ export type CalendarProvider = 'google' | 'microsoft'
 
 const oauthTokenErrors = [
   'invalid_grant',
+  'interaction_required',
+  'consent_required',
   'invalid_client',
   'unauthorized_client',
   'invalid_request',

@@ -214,7 +214,16 @@ export async function listCalendarConnections(deps: CalendarDeps, principal: Pri
     .executeTakeFirst()
   const connections = await deps.db
     .selectFrom('calendar_connections')
-    .select(['id', 'provider', 'account_email', 'status', 'created_at', 'updated_at', 'scopes'])
+    .select([
+      'id',
+      'provider',
+      'account_email',
+      'status',
+      'last_error',
+      'created_at',
+      'updated_at',
+      'scopes',
+    ])
     .where('user_id', '=', principal.user.id)
     .where('provider', 'in', ['google', 'microsoft'])
     .orderBy('created_at')
@@ -251,6 +260,11 @@ export async function listCalendarConnections(deps: CalendarDeps, principal: Pri
       provider: connection.provider as CalendarProvider,
       accountEmail: connection.account_email,
       status: connection.status as 'active' | 'needs_reauth' | 'revoked',
+      lastError: z
+        .enum(['provider_unavailable', 'needs_reauth', 'permissions_missing'])
+        .nullable()
+        .catch(null)
+        .parse(connection.last_error),
       createdAt: connection.created_at.toISOString(),
       updatedAt: connection.updated_at.toISOString(),
       syncAuthorized:
