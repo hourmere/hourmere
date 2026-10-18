@@ -539,7 +539,7 @@ async function publicSlots(
   if (automaticZoom(et.location)) {
     if (et.schedulingType !== 'individual' || et.hostUserIds.length !== 1)
       throw new DomainError('conflict', 'automatic_zoom_host_policy')
-    await requireZoomConnection(ctx.db, et.hostUserId, et.zoomConnectionId, ctx.automaticZoom)
+    await requireZoomConnection(ctx.db, et.hostUserId, et.zoomConnectionId, ctx.automaticZoom, true)
   }
   if (automaticMeet(et.location)) {
     if (et.schedulingType === 'round_robin')

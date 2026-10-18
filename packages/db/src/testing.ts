@@ -14,7 +14,10 @@ export interface TestDatabase {
 }
 
 /** Creates and migrates a new database on the server that `serverUrl` points to. */
-export async function createTestDatabase(serverUrl: string): Promise<TestDatabase> {
+export async function createTestDatabase(
+  serverUrl: string,
+  migrationsDirectory?: string,
+): Promise<TestDatabase> {
   const name = `hourmere_test_${process.pid}_${randomBytes(4).toString('hex')}`
   const admin = createPool(serverUrl)
   try {
@@ -29,7 +32,7 @@ export async function createTestDatabase(serverUrl: string): Promise<TestDatabas
   u.pathname = `/${name}`
   const url = u.toString()
   const pool = createPool(url)
-  await runMigrations(pool)
+  await runMigrations(pool, migrationsDirectory)
   return {
     url,
     pool,

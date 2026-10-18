@@ -185,7 +185,7 @@ describe('separate conference accounts page', () => {
     )
     await user.selectOptions(screen.getByRole('combobox', { name: 'Interface language' }), 'zh-CN')
     expect(screen.getByRole('alert').textContent).toContain('无法确认此次 Zoom 刷新结果')
-    expect(await screen.findByText('刷新未完成，请重新连接')).toBeDefined()
+    expect(await screen.findByText('正在刷新连接')).toBeDefined()
     expect(screen.getByRole('button', { name: '刷新 Zoom 账号' }).hasAttribute('disabled')).toBe(
       true,
     )
