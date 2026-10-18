@@ -84,6 +84,10 @@ describe('changing interface language through booking and account flows', () => 
       expect(screen.getByText('Enter your name.')).toBeDefined()
       const name = screen.getByLabelText<HTMLInputElement>('Your name')
       await setLanguage(user, 'zh-CN')
+      const attribution = screen.getByRole('contentinfo').querySelector('a')
+      expect(attribution?.textContent).toBe('由 Hourmere 提供支持')
+      expect(attribution?.getAttribute('href')).toBe('https://hourmere.com')
+      expect(attribution?.querySelector('.logo-word')?.textContent).toBe('Hourmere')
       expect(screen.getByText('请输入你的姓名。')).toBeDefined()
       expect(screen.getByLabelText('你的姓名')).toBe(name)
       expect(screen.getByRole('heading', { name: 'Settings', level: 1 })).toBeDefined()
@@ -220,6 +224,14 @@ describe('changing interface language through booking and account flows', () => 
     expect(screen.getByLabelText('标题')).toBe(title)
     expect(title.value).toBe('Settings')
     expect(screen.getByRole('alert').textContent).toContain('请输入数字。')
+    expect(document.getElementById('minimumNoticeMinutes-hint')?.textContent).toBe(
+      '会议至少需要提前多久预约。0–525,600。',
+    )
+    await user.clear(screen.getByLabelText('最短提前预约时间（分钟）'))
+    await user.type(screen.getByLabelText('最短提前预约时间（分钟）'), '1440')
+    expect(document.getElementById('minimumNoticeMinutes-hint')?.textContent).toBe(
+      '会议至少需要提前多久预约。0–525,600。= 1 天。',
+    )
     expect(confirm).not.toHaveBeenCalled()
     await user.click(screen.getByRole('link', { name: '预约' }))
     expect(confirm).toHaveBeenCalledWith('你有未保存的更改。离开此页面并放弃更改？')
