@@ -106,7 +106,9 @@ describe('comparison review information', () => {
     expect(terms).toMatch(
       /Actions that applications take with your API key or an OAuth connection you approve, such as booking/,
     )
-    expect(terms).toMatch(/revoke a connected application's OAuth access at any time in Connected apps/)
+    expect(terms).toMatch(
+      /revoke a connected application's OAuth access at any time in Connected apps/,
+    )
     expect(terms).toMatch(
       /do not give API keys to, or approve OAuth connections for, applications you do not trust/,
     )
