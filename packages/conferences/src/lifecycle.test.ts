@@ -474,6 +474,67 @@ describe.skipIf(!serverUrl)('automatic Zoom durable booking lifecycle (real Post
     await writeBookingCalendar(calendar, b.booking.id)
     expect(google.controls.storedEvents.get('event-1')?.status).toBe('cancelled')
   })
+  it('does not attach a later Google destination to an old Zoom root or let a mirror failure hide ready Zoom', async () => {
+    const original = await book()
+    await writeBookingConference(deps, original.booking.id)
+    // A same-key retry after readiness still identifies the original reservation.
+    expect((await book()).booking.id).toBe(original.booking.id)
+    expect(posts()).toHaveLength(1)
+    const google = fakeGoogle()
+    google.controls.token.scope = GOOGLE_CALENDAR_SYNC_SCOPES.join(' ')
+    const calendar: CalendarDeps = {
+      db,
+      google: { client: google.client, encryptionKey: TEST_CALENDAR_KEY },
+      now: () => NOW.epochMilliseconds,
+    }
+    const auth = new URL((await beginGoogleConnection(calendar, owner, 'sync')).authorizationUrl)
+    expect(
+      await finishGoogleConnection(
+        calendar,
+        owner,
+        new URLSearchParams({
+          state: auth.searchParams.get('state') as string,
+          code: 'synthetic-code',
+        }),
+      ),
+    ).toBe('connected')
+    const calendarId = (await db.selectFrom('calendars').select('id').executeTakeFirstOrThrow()).id
+    await setCalendarDestination(calendar, owner, calendarId)
+    await writeBookingCalendar(calendar, original.booking.id)
+    const moved = await rescheduleManagedBooking(ctx, original.manageToken as string, {
+      start: Temporal.Instant.from('2030-11-04T11:00Z'),
+    })
+    await writeBookingConference(deps, original.booking.id)
+    await writeBookingCalendar(calendar, original.booking.id)
+    expect(await db.selectFrom('booking_conference_mirrors').selectAll().execute()).toMatchObject([
+      { state: 'not_configured', calendar_id: null, connection_id: null },
+    ])
+    expect(
+      google.calls.filter((c) => c.init.method === 'POST' && c.url.pathname.endsWith('/import')),
+    ).toHaveLength(0)
+    expect((await getManagedBooking(ctx, moved.manageToken as string)).location?.url).toContain(
+      '/j/81234567890',
+    )
+    // A new booking commits a configured pin; a later calendar failure remains private.
+    const next = await book('second-root')
+    await db.updateTable('calendar_connections').set({ status: 'needs_reauth' }).execute()
+    await writeBookingConference(deps, next.booking.id)
+    await writeBookingCalendar(calendar, next.booking.id)
+    expect(
+      await db
+        .selectFrom('booking_conference_mirrors')
+        .selectAll()
+        .where('root_booking_id', '=', next.booking.id)
+        .execute(),
+    ).toMatchObject([{ state: 'failed', error_code: 'needs_reauth', calendar_id: calendarId }])
+    const ready = await getManagedBooking(ctx, next.manageToken as string)
+    expect(ready.conference?.status).toBe('ready')
+    expect(ready.location?.url).toContain('/j/')
+    expect(posts()).toHaveLength(2)
+    await sendBookingNotification(mail(), next.booking.id, 'confirmed')
+    await dispatchConferenceNotifications(mail())
+    expect(sent.some((message) => message.attachments?.length)).toBe(true)
+  })
   it('retires an expired rotating token before I/O and never retries it after a malformed grant', async () => {
     const value = credentials(
       conferenceEncryptionKey(TEST_CONFERENCE_KEY),

@@ -135,13 +135,17 @@ mailer still prints delivered links, and anyone reading them can sign in.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `ZOOM_CLIENT_ID` | Unset | Confidential user OAuth client; only `user:read:user`, S256 PKCE, fixed `{PUBLIC_URL}/api/conference/zoom/callback`. |
+| `ZOOM_CLIENT_ID` | Unset | Confidential user OAuth client; identity scope `user:read:user`, S256 PKCE, fixed `{PUBLIC_URL}/api/conference/zoom/callback`. |
 | `ZOOM_CLIENT_SECRET` | Unset | Matching confidential client secret; never expose it to the browser. |
 | `CONFERENCE_ENCRYPTION_KEY` | Unset | Independent canonical 32-byte base64 key for conference credentials and OAuth verifiers. Keep stable and back up privately. |
+| `ZOOM_MEETINGS_ENABLED` | `false` | Explicit meeting authorization and automatic Zoom for personal/individual single-host events; requires all three settings above. |
 
 All three are required together when either Zoom client field is configured. A key alone
 does not enable Zoom. These settings do not enable sign-in, calendar access or meeting
-creation. See [Zoom account connections](/docs/zoom-connections/) for the conservative
+creation by themselves. Automatic creation also requires the flag, explicit meeting permissions
+and the actual host’s live-session account selection on each opted-in event. Existing passive
+Zoom labels remain inert. Collective/round-robin automatic Zoom is unsupported. Existing
+committed meeting intents reconcile after disabling the flag. See [Zoom account connections](/docs/zoom-connections/) for the conservative
 returned-scope policy, actual-client prerequisites and local-disconnect semantics.
 
 ## Automatic Google Meet

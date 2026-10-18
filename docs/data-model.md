@@ -278,13 +278,22 @@ connected at once (including reauthorization and incomplete refresh states). Dis
 tombstones release capacity and are excluded from the default metadata list; reauthorizing the same identity reuses its stable ID. A BEFORE DELETE owner
 trigger locks all owner sessions in ID order before clearing connections/states, matching
 session logout’s cascade order. It clears credentials, OAuth attempts, scopes, operation, external ID, email and display name before retaining an
-unowned secret-free tombstone. Equal email addresses never establish ownership. No meeting
-intent or calendar rows are created by this foundation. See the Zoom setup guide for the
+unowned secret-free tombstone. Equal email addresses never establish ownership. Identity-only connections create no meeting intents or calendar rows. Explicit meeting mode
+uses a separate exact scope set and mode-bound v2 ciphertext; old identity v1 ciphertext remains
+usable. New OAuth attempts bind mode and expected connection under v2; retained old v1 attempts
+require a restart without code exchange. See the Zoom setup guide for the
 explicit local-disconnect versus provider-wide revocation distinction.
 
 ## Automatic conferences
 
-`booking_conferences` retains one provider intent per opted-in root booking, pinned organizer/destination IDs, desired/applied revision, request identity, create ambiguity, bounded state/error and recoverable operation lease. It intentionally survives calendar/connection deletion. `booking_conference_notifications` is the durable release outbox for final linked messages and no-ICS failure notices; recipient deduplication remains in `booking_notifications`. `calendars.supports_google_meet` is cached capability, default false. The join URL is stored only in the current ready protected booking location. See [automatic-google-meet.md](automatic-google-meet.md).
+`booking_conferences` retains one provider intent per opted-in root booking, pinned organizer/destination IDs, desired/applied revision, request identity, create ambiguity, bounded state/error and recoverable operation lease. It intentionally survives calendar/connection deletion. `booking_conference_notifications` is the durable release outbox for final linked messages and no-ICS failure notices; recipient deduplication remains in `booking_notifications`. `calendars.supports_google_meet` is cached capability, default false. `provider` defaults to `google_meet` for old roots. New Zoom roots have independent immutable
+`zoom_connection_id`/`zoom_user_id` pins, a validated `zoom_meeting_id`, and no Google
+calendar/connection/event identity. `event_types.zoom_connection_id` is private host-selected
+configuration; it is not exposed in public catalogs. `booking_conference_mirrors` preserves
+ordinary calendar targets and unknown-import claims; a single-host Zoom organizer may have
+one such optional copy. The join URL is stored only in the current ready protected booking
+location. See [automatic-google-meet.md](automatic-google-meet.md) and
+[automatic-zoom.md](automatic-zoom.md).
 
 ## Round-robin assignment state
 

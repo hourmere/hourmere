@@ -170,3 +170,13 @@ permissions, and never accept a replacement calendar, organizer or management to
 accepted imports are reconciled without a second blind POST. Unconfigured original copies
 cannot be added by retry. Collective organizer selection is authenticated event-type configuration;
 round-robin allocation uses the actual eligible winner and public `book` cannot select one.
+
+
+Automatic single-host Zoom uses the existing `retry-meeting` command and MCP
+`retry_conference` authority. Supply `{"bookingId":"<id>"}` through `--input`; an API key
+may retry an already authorized booking for its current verified pinned organizer. It cannot
+authorize Zoom permissions or select someone's private meeting connection. A claimed create
+with no validated ID remains ambiguous: retry does not issue another POST or adopt a guessed
+meeting. Inspect/remove any orphan in Zoom before replacing the booking. Personal and
+individual single-host team events are supported; collective/round-robin automatic Zoom
+requires a later per-host policy. See [automatic-zoom.md](automatic-zoom.md).

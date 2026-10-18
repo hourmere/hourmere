@@ -1,13 +1,13 @@
 ---
 title: Zoom account connections
-description: Optional independent Zoom identity OAuth, without meeting creation.
+description: Independent Zoom identity OAuth and explicit single-host meeting authorization.
 ---
 
 Hourmere can connect a personal Zoom identity under **Conference accounts**, separately from
 sign-in, Google/Microsoft calendar connections, and the passive Zoom location label on event
 types. The identity-only choice does **not** create or read meetings. Optional automatic meeting
 authorization is a separate explicit choice; see the repository `docs/automatic-zoom.md`
-for its implementation status and acceptance limits. API keys and MCP OAuth cannot manage these
+for lifecycle, private host selection, safe retry and acceptance limits. API keys and MCP OAuth cannot manage these
 connections. A live browser session and same-origin writes are required.
 
 ## Configure an optional confidential client
@@ -78,8 +78,13 @@ challenge to the browser.
 User operations and deletion use the same owner-first row-lock order. Durable claims prevent
 callback replay and rotating-token reuse after failed commits. Provider calls have a bounded
 deadline and response size. The retained connection foundation intentionally does not yet
-implement Zoom Marketplace production deauthorization/compliance webhooks. The separate
-automatic-meeting branch must complete lifecycle and acceptance checks before publication.
+implement Zoom Marketplace production deauthorization/compliance webhooks. Automatic personal and individual single-host team events require an explicit meeting-mode
+connection, a default-off instance flag and the actual host’s own live-session selection.
+They reconcile one pinned meeting through reschedule/cancellation, hold final mail/ICS until
+ready and can pin one optional ordinary Google copy. Collective/round-robin automatic Zoom
+is unsupported. An unknown create is never retried with another POST: inspect/remove any
+orphan in Zoom before replacing the booking. See `docs/automatic-zoom.md` for the complete
+contract and real-client acceptance limits.
 
 ## Reference API
 
