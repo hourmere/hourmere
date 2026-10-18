@@ -18,7 +18,12 @@ interface ZoomApp {
   setScopeFailure: () => void
   restoreScope: () => void
   disconnectForeign: () => Promise<number>
-  apiKeyListStatus: () => Promise<number>
+  apiKeyListStatus: () => Promise<{
+    status: number
+    body: { data: { id: string }[]; pendingAttempts: number }
+    ownConnectionIds: string[]
+    browserPendingAttempts: number
+  }>
   state: () => Promise<{
     connections: number
     active: number
@@ -72,6 +77,15 @@ export const test = base.extend<{
       await f.schedule(host.userId, { timeZone: 'UTC' })
       await f.eventType(host.organizationId, host.userId, { slug: 'call', title: 'Synthetic call' })
       const other = await f.host({ handle: null, name: 'Synthetic Other Host' })
+      await db
+        .insertInto('conference_connections')
+        .values({
+          user_id: other.userId,
+          provider: 'zoom',
+          external_user_id: 'synthetic-foreign-zoom',
+          status: 'needs_reauth',
+        })
+        .execute()
       const signup = { mode: 'closed', allowedDomains: [] } as const,
         secret = randomBytes(32).toString('base64')
       authPool = createAuthPool(owned.url, signup)
@@ -191,10 +205,42 @@ export const test = base.extend<{
           const key = await auth.api.createApiKey({
             body: { userId: host.userId, name: 'synthetic-conference-isolation' },
           })
-          const response = await app.request('/api/v1/conference-connections', {
-            headers: { authorization: `Bearer ${key.key}` },
-          })
-          return response.status
+          const ownConnections = await db
+            .selectFrom('conference_connections')
+            .select('id')
+            .where('user_id', '=', host.userId)
+            .where('status', '!=', 'disconnected')
+            .execute()
+          try {
+            const pending = await app.request('/api/v1/conference-connections/zoom/authorize', {
+              method: 'POST',
+              headers: {
+                cookie: `better-auth.session_token=${cookie}`,
+                origin: url,
+                'content-type': 'application/json',
+              },
+              body: '{}',
+            })
+            expect(pending.status).toBe(200)
+            const browser = await app.request('/api/v1/conference-connections', {
+              headers: { cookie: `better-auth.session_token=${cookie}` },
+            })
+            expect(browser.status).toBe(200)
+            const response = await app.request('/api/v1/conference-connections', {
+              headers: { authorization: `Bearer ${key.key}` },
+            })
+            return {
+              status: response.status,
+              body: await response.json(),
+              ownConnectionIds: ownConnections.map((connection) => connection.id),
+              browserPendingAttempts: (await browser.json()).pendingAttempts,
+            }
+          } finally {
+            await db
+              .deleteFrom('conference_oauth_states')
+              .where('user_id', '=', host.userId)
+              .execute()
+          }
         },
         state: async () => {
           const rows = await db

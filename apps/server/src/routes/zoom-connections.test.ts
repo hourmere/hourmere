@@ -8,9 +8,10 @@ import {
 } from '../../../../packages/conferences/src/testing.ts'
 import { createApp } from '../app.ts'
 import { conferenceRoutes } from './conferences.ts'
+import { eventTypeRoutes } from './event-types.ts'
 
 const databaseUrl = process.env.DATABASE_URL
-describe.skipIf(!databaseUrl)('Zoom HTTP session-only routes (real Postgres)', () => {
+describe.skipIf(!databaseUrl)('Zoom HTTP integration settings (real Postgres)', () => {
   let database: TestDatabase,
     db: Db,
     owner: Awaited<ReturnType<typeof conferenceTestSession>>,
@@ -29,8 +30,9 @@ describe.skipIf(!databaseUrl)('Zoom HTTP session-only routes (real Postgres)', (
             ? {
                 ...current,
                 kind: 'oauth' as const,
-                oauthClientId: 'synthetic-client',
-                oauthGrantId: 'synthetic-grant',
+                clientId: 'synthetic-client',
+                oauthConsentId: 'synthetic-grant',
+                scopes: ['mcp:tools'],
               }
             : headers.has('cookie')
               ? current
@@ -46,6 +48,7 @@ describe.skipIf(!databaseUrl)('Zoom HTTP session-only routes (real Postgres)', (
             zoom: { client: provider.client, encryptionKey: TEST_CONFERENCE_KEY, meetingsEnabled },
           }),
         }),
+        eventTypeRoutes({ db, automaticZoom: enabled && meetingsEnabled }),
       ],
     })
   }
@@ -56,6 +59,7 @@ describe.skipIf(!databaseUrl)('Zoom HTTP session-only routes (real Postgres)', (
     other = await conferenceTestSession(db)
   })
   beforeEach(async () => {
+    await db.deleteFrom('event_types').execute()
     await db.deleteFrom('conference_oauth_states').execute()
     await db.deleteFrom('conference_connections').execute()
     provider = fakeZoom()
@@ -113,10 +117,12 @@ describe.skipIf(!databaseUrl)('Zoom HTTP session-only routes (real Postgres)', (
     ['x-oauth', 'synthetic-oauth'],
   ])('refuses %s callers before state or provider I/O', async (header, value) => {
     for (const [path, method] of [
-      ['/api/v1/conference-connections', 'GET'],
       ['/api/v1/conference-connections/zoom/authorize', 'POST'],
       ['/api/v1/conference-connections/zoom/authorize-meetings', 'POST'],
       [`/api/v1/conference-connections/${owner.sessionId}/authorize-meetings`, 'POST'],
+      [`/api/v1/conference-connections/${owner.sessionId}/reconnect`, 'POST'],
+      [`/api/v1/conference-connections/${owner.sessionId}/refresh`, 'POST'],
+      [`/api/v1/conference-connections/${owner.sessionId}`, 'DELETE'],
     ] as const) {
       expect(
         (await req(path, method, method === 'POST' ? '{}' : undefined, { [header]: value })).status,
@@ -124,6 +130,96 @@ describe.skipIf(!databaseUrl)('Zoom HTTP session-only routes (real Postgres)', (
     }
     expect(provider.calls).toHaveLength(0)
     expect(await db.selectFrom('conference_oauth_states').selectAll().execute()).toHaveLength(0)
+  })
+  it('lets API keys list only their own safe metadata and select automatic Zoom through public event APIs', async () => {
+    app = composition(true, true)
+    const response = await req(
+      '/api/v1/conference-connections/zoom/authorize-meetings',
+      'POST',
+      '{}',
+    )
+    expect(response.status).toBe(200)
+    const url = new URL(((await response.json()) as { authorizationUrl: string }).authorizationUrl)
+    provider.controls.token.scope = [
+      'user:read:user',
+      'meeting:write:meeting',
+      'meeting:read:meeting',
+      'meeting:update:meeting',
+      'meeting:delete:meeting',
+    ].join(' ')
+    expect(
+      (
+        await req(
+          `/api/conference/zoom/callback?state=${url.searchParams.get('state')}&code=synthetic-code`,
+        )
+      ).headers.get('location'),
+    ).toBe('/app/conferences?zoom=connected')
+    const before = provider.calls.length
+    const keyHeaders = {
+      authorization: 'Bearer synthetic-api-key',
+      origin: 'https://agent.invalid',
+    }
+    const listed = await req('/api/v1/conference-connections', 'GET', undefined, keyHeaders)
+    expect(listed.status).toBe(200)
+    const connections = (await listed.json()) as { data: { id: string }[]; pendingAttempts: number }
+    expect(connections.data).toHaveLength(1)
+    expect(connections.pendingAttempts).toBe(0)
+    expect(Object.keys(connections.data[0] ?? {}).sort()).toEqual([
+      'accountEmail',
+      'createdAt',
+      'displayName',
+      'id',
+      'lastError',
+      'mode',
+      'provider',
+      'status',
+      'updatedAt',
+    ])
+    const otherList = await req('/api/v1/conference-connections', 'GET', undefined, {
+      ...keyHeaders,
+      cookie: 'other',
+    })
+    expect(otherList.status).toBe(200)
+    expect(await otherList.json()).toMatchObject({ data: [] })
+    const input = {
+      slug: 'agent-zoom',
+      title: 'Agent Zoom',
+      durationMinutes: 30,
+      location: { kind: 'zoom', autoCreate: true },
+      zoomConnectionId: connections.data[0]?.id,
+    }
+    const created = await req('/api/v1/event-types', 'POST', JSON.stringify(input), keyHeaders)
+    expect(created.status).toBe(201)
+    const event = (await created.json()) as { id: string }
+    expect(
+      (
+        await req(
+          `/api/v1/event-types/${event.id}`,
+          'PATCH',
+          JSON.stringify({ location: { kind: 'zoom' }, zoomConnectionId: null }),
+          keyHeaders,
+        )
+      ).status,
+    ).toBe(200)
+    const selected = await req(
+      `/api/v1/event-types/${event.id}`,
+      'PATCH',
+      JSON.stringify({ location: input.location, zoomConnectionId: input.zoomConnectionId }),
+      keyHeaders,
+    )
+    expect(selected.status).toBe(200)
+    expect(await selected.json()).toMatchObject({
+      zoomConnectionId: input.zoomConnectionId,
+      location: input.location,
+    })
+    const foreign = await req('/api/v1/event-types', 'POST', JSON.stringify(input), {
+      ...keyHeaders,
+      cookie: 'other',
+    })
+    expect(foreign.status).toBe(409)
+    expect(await foreign.json()).toMatchObject({ error: 'automatic_zoom_unavailable' })
+    expect(provider.calls).toHaveLength(before)
+    await req(`/api/v1/event-types/${event.id}`, 'DELETE', undefined, keyHeaders)
   })
   it('rejects cross-origin writes, unknown/malformed/nonempty bodies and excessive size before state/provider mutation', async () => {
     expect(
@@ -216,10 +312,10 @@ describe.skipIf(!databaseUrl)('Zoom HTTP session-only routes (real Postgres)', (
       }
     },
   )
-  it('sets private response headers before refusing unauthenticated or non-session callers', async () => {
+  it('sets private response headers before refusing unauthenticated or credential-management callers', async () => {
     for (const response of [
       await app.request('/api/v1/conference-connections'),
-      await req('/api/v1/conference-connections', 'GET', undefined, {
+      await req('/api/v1/conference-connections/zoom/authorize', 'POST', '{}', {
         authorization: 'Bearer synthetic-api-key',
       }),
       await req('/api/v1/conference-connections/zoom/authorize', 'POST', '{}', {

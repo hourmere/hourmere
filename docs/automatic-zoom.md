@@ -32,20 +32,25 @@ Configuring meeting access as required in a way that also grants it to the ident
 is incompatible. Do not configure admin, recording, settings, list-meetings or unrelated
 scopes. A synthetic test does not authorize changing a real client or granting access.
 
-Only the owner's live browser session can manage a connection. The new and existing-account
+OAuth authorization, code exchange and disconnect require a live browser session.
+Explicit Zoom credential refresh also remains session-only. The new and existing-account
 meeting actions are POST `/api/v1/conference-connections/zoom/authorize-meetings` and
 `/api/v1/conference-connections/{id}/authorize-meetings`; writes require JSON `{}` and the
-same origin. Another team administrator, an API key or an MCP OAuth grant cannot manage
-someone's private connection. Enabling automatic creation, changing its selected account,
-changing its actual host, or reactivating a disabled automatic event requires the actual
-host's live browser session. The server rechecks that session inside the write transaction.
+same origin. The user's own API keys can list Zoom connection metadata and select their
+own meeting-mode connection for automatic Zoom through the event-type REST API. Enabling
+automatic creation, changing its selected account, changing its actual host, or reactivating
+a disabled automatic event requires the actual host's identity and current organization
+permissions. Another team administrator cannot select someone's private connection.
+The server retains live-session checks for browser callers inside the write transaction.
 Knowing a connection UUID does not confer permission. Metadata edits and disabling may
 preserve an already authorized configuration without granting new access.
 
 In **Conference accounts**, explicitly authorize meeting permissions; then choose that account
 in the event editor. No first account is selected automatically. Booking and safe retry of an
 already configured event remain available through the existing REST, API-key, MCP and CLI
-permissions. Those credentials cannot select a private account for a new configuration.
+permissions. Read-only MCP `list_conference_connections` accepts API keys and enabled MCP
+OAuth grants; settings mutations use REST with an API key. MCP OAuth grants do not grant
+REST access or start provider authorization.
 
 Every exchange and refresh response must explicitly contain exactly the requested set;
 missing, duplicate or extra scopes fail closed and accepted scopes are stored in canonical

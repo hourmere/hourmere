@@ -19,7 +19,7 @@ Restart/recreate affected processes after changing configuration.
 | `PUBLIC_URL` | `http://localhost:<PORT>` | External HTTP(S) origin, with no path/query. Use HTTPS publicly. Compose defaults to `http://localhost:3000` independently of its host port setting. |
 | `HOSTED_SIGNUP_URL` | `https://hourmere.com` | Hosted service destination for public attribution and confirmation links. Set the hosted sign-up page URL when available; HTTP(S), no credentials, query or fragment. Independent of this instance’s `PUBLIC_URL`; attribution cannot be disabled. |
 | `BETTER_AUTH_SECRET` | Required | At least 32 non-whitespace random characters. Signs sessions and protects sign-in tokens. Changing it signs people out. |
-| `AUTO_MIGRATE` | `true` | Apply SQL/job migrations on startup. `false` requires manual migrations first; startup still needs database access. Not forwarded by the default Compose file. |
+| `AUTO_MIGRATE` | `true` | Apply SQL/job migrations on startup. `false` requires manual migrations first; startup still needs database access. Forwarded by the default Compose file with a default of `true`. |
 | `WEB_DIST` | Unset | Built SPA directory. Not forwarded by the default Compose file: Docker sets `/app/apps/web/dist`; development uses Vite instead. |
 | `EMBED_ALLOWED_ORIGINS` | Unset | Up to 32 comma-separated exact HTTPS website origins permitted to embed public booking pages. Empty disables embedding; no wildcards or paths. Loopback HTTP is accepted for local development. |
 | `WEBHOOKS_ENABLED` | `false` | Capture new organization booking events for outbound HTTPS webhooks. No backfill; set identically on web and worker. See repository `docs/webhooks.md`. |
@@ -105,8 +105,9 @@ not change the password of an already initialized PostgreSQL volume; arrange dat
 credential changes separately. `PORT` publishes `127.0.0.1:<PORT>:3000`; update `PUBLIC_URL`
 if people use a different origin.
 
-To set server options not forwarded by the default file, add explicit service environment
-entries in a Compose override, including the worker if you enabled one. For example:
+To disable automatic migrations, set `AUTO_MIGRATE=false` in `.env`; the default Compose
+file forwards it to the app and its inherited worker. You can also set it explicitly in a
+Compose override, including the worker if you enabled one:
 
 ```yaml
 # compose.override.yaml
@@ -151,7 +152,7 @@ mailer still prints delivered links, and anyone reading them can sign in.
 All three are required together when either Zoom client field is configured. A key alone
 does not enable Zoom. These settings do not enable sign-in, calendar access or meeting
 creation by themselves. Automatic creation also requires the flag, explicit meeting permissions
-and the actual host’s live-session account selection on each opted-in event. Existing passive
+and the actual host's session or own API-key account selection on each opted-in event. Existing passive
 Zoom labels remain inert. Collective/round-robin automatic Zoom is unsupported. Existing
 committed meeting intents reconcile after disabling the flag. See [Zoom account connections](/docs/zoom-connections/) for the conservative
 returned-scope policy, actual-client prerequisites and local-disconnect semantics.

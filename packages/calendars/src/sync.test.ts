@@ -1,3 +1,4 @@
+import type { Principal } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createJobs } from '@hourmere/jobs'
@@ -13,7 +14,9 @@ import {
   type CalendarDeps,
   disconnectCalendar,
   finishGoogleConnection,
+  listCalendarConnections,
   readTokens,
+  refreshCalendarList,
   refreshGoogleCalendars,
 } from './index.ts'
 import { bookingCalendarJob, calendarDispatchJob, calendarSyncJob } from './jobs.ts'
@@ -22,6 +25,7 @@ import {
   eventPeriod,
   setCalendarDestination,
   syncGoogleCalendar,
+  syncOwnedCalendar,
 } from './sync.ts'
 import { calendarTestSession, fakeGoogle, TEST_CALENDAR_KEY } from './testing.ts'
 
@@ -48,6 +52,10 @@ describe.skipIf(!url)('Google busy and booking synchronization (real Postgres)',
     db = createDb(database.pool)
     owner = await calendarTestSession(db)
     other = await calendarTestSession(db)
+    await db
+      .insertInto('profiles')
+      .values({ user_id: other.user.id, handle: 'sync-other', time_zone: 'UTC' })
+      .execute()
     f = createFixtures(db)
   })
   afterAll(async () => {
@@ -205,6 +213,76 @@ describe.skipIf(!url)('Google busy and booking synchronization (real Postgres)',
           .executeTakeFirstOrThrow()
       ).check_conflicts,
     ).toBe(false)
+  })
+  const delegated = (kind: 'api_key' | 'oauth', user = owner): Principal => ({
+    user: user.user,
+    organization: owner.organization,
+    ...(kind === 'api_key'
+      ? { kind, apiKeyId: user.sessionId }
+      : {
+          kind,
+          oauthConsentId: user.sessionId,
+          clientId: 'synthetic-client',
+          scopes: ['mcp:tools'],
+        }),
+  })
+  it.each(['api_key', 'oauth'] as const)(
+    'lets an owner %s principal manage existing non-credential settings with the shared services',
+    async (kind) => {
+      const principal = delegated(kind)
+      await expect(configureCalendar(deps, principal, calendarId, true)).resolves.toBeUndefined()
+      await expect(syncOwnedCalendar(deps, principal, calendarId)).resolves.toBeUndefined()
+      await expect(setCalendarDestination(deps, principal, calendarId)).resolves.toBeUndefined()
+      await expect(refreshCalendarList(deps, principal, connectionId)).resolves.toBeUndefined()
+      const listed = await listCalendarConnections(deps, principal)
+      expect(listed.destinationCalendarId).toBe(calendarId)
+      expect(listed.data).toHaveLength(1)
+      expect(listed.data[0]?.calendars[0]).toMatchObject({
+        id: calendarId,
+        checkConflicts: true,
+        lastSyncedAt: new Date(now).toISOString(),
+      })
+      expect(
+        (await listCalendarConnections(deps, delegated(kind, other))).destinationCalendarId,
+      ).toBeNull()
+      await setCalendarDestination(deps, principal, null)
+      expect((await listCalendarConnections(deps, principal)).destinationCalendarId).toBeNull()
+    },
+  )
+  it.each(['api_key', 'oauth'] as const)(
+    'keeps another user’s calendars private from a %s principal in the same organization',
+    async (kind) => {
+      const principal = delegated(kind, other)
+      expect((await listCalendarConnections(deps, principal)).data).toEqual([])
+      await configureCalendar(deps, owner, calendarId, true)
+      const calls = provider.calls.length
+      await expect(configureCalendar(deps, principal, calendarId, true)).rejects.toMatchObject({
+        code: 'calendar_not_found',
+      })
+      await expect(syncOwnedCalendar(deps, principal, calendarId)).rejects.toMatchObject({
+        code: 'calendar_not_found',
+      })
+      await expect(setCalendarDestination(deps, principal, calendarId)).rejects.toMatchObject({
+        code: 'calendar_not_found',
+      })
+      await expect(refreshCalendarList(deps, principal, connectionId)).rejects.toMatchObject({
+        code: 'calendar_connection_not_found',
+      })
+      expect(provider.calls).toHaveLength(calls)
+    },
+  )
+  it('still requires a live browser session when session callers change calendar settings', async () => {
+    await db
+      .updateTable('auth.session')
+      .set({ expiresAt: new Date(now - 1) })
+      .where('id', '=', owner.sessionId)
+      .execute()
+    for (const change of [
+      () => configureCalendar(deps, owner, calendarId, true),
+      () => setCalendarDestination(deps, owner, calendarId),
+      () => refreshCalendarList(deps, owner, connectionId),
+    ])
+      await expect(change()).rejects.toMatchObject({ code: 'session_required' })
   })
   it('combines all pages atomically and persists only busy intervals', async () => {
     await select()
