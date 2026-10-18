@@ -24,7 +24,7 @@ test('booking activity reports real personal actions and enforces current team p
     data: original.postDataJSON(),
   })
   expect(replay.status()).toBe(200)
-  expect((await replay.json()).manageToken).toBeNull()
+  expect((await replay.json()).manageToken === null).toBe(true)
   expect(await app.rows()).toHaveLength(1)
   await app.authorizeHost()
   await page.goto(`${app.url}/app/analytics`)
