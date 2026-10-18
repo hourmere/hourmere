@@ -163,3 +163,4 @@ Optional [independent Zoom account connections](apps/site/src/content/docs/docs/
 provide a separate minimum-scope identity foundation. They do not create meetings or enable
 Zoom sign-in. See the repository guide in
 `apps/site/src/content/docs/docs/zoom-connections.md` before configuring a real client.
+Optional [automatic Google Meet](docs/automatic-google-meet.md) creates one conference per explicitly opted-in single-host booking, with durable pending/failure state and final invitations held until its link is ready.

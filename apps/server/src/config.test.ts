@@ -7,6 +7,21 @@ const base = {
 }
 
 describe('loadConfig', () => {
+  it('keeps automatic Meet opt-in and requires Google Calendar write configuration', () => {
+    expect(loadConfig(base).GOOGLE_MEET_ENABLED).toBe(false)
+    expect(loadConfig({ ...base, GOOGLE_MEET_ENABLED: '' }).GOOGLE_MEET_ENABLED).toBe(false)
+    expect(() => loadConfig({ ...base, GOOGLE_MEET_ENABLED: 'yes' })).toThrow(/GOOGLE_MEET_ENABLED/)
+    expect(() => loadConfig({ ...base, GOOGLE_MEET_ENABLED: 'true' })).toThrow(/Google Meet/)
+    expect(
+      loadConfig({
+        ...base,
+        GOOGLE_MEET_ENABLED: 'true',
+        GOOGLE_CALENDAR_CLIENT_ID: 'synthetic-client',
+        GOOGLE_CALENDAR_CLIENT_SECRET: 'synthetic-secret',
+        CALENDAR_ENCRYPTION_KEY: Buffer.alloc(32, 8).toString('base64'),
+      }).GOOGLE_MEET_ENABLED,
+    ).toBe(true)
+  })
   it('keeps webhooks off and requires an independent well-formed encryption key when enabled', () => {
     expect(loadConfig(base).WEBHOOKS_ENABLED).toBe(false)
     expect(() => loadConfig({ ...base, WEBHOOKS_ENABLED: 'true' })).toThrow(

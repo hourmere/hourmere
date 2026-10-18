@@ -27,6 +27,8 @@ export type BookingNotifier = (trx: Db, event: BookingEvent, now: Temporal.Insta
  */
 export interface ServiceContext {
   db: Db
+  /** Explicit instance capability; defaults off. */
+  automaticMeet?: boolean | undefined
   principal: Principal
   /** The clock, injectable for tests. */
   now: () => Temporal.Instant
@@ -37,6 +39,8 @@ export interface ServiceContext {
 /** For unauthenticated flows such as public booking pages and invitee links. */
 export interface PublicContext {
   db: Db
+  /** Explicit instance capability; defaults off. */
+  automaticMeet?: boolean | undefined
   now: () => Temporal.Instant
   /** Told about booking changes in their transaction; nobody is told when absent. */
   notify?: BookingNotifier | undefined

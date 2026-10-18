@@ -14,6 +14,13 @@ import {
   toInstant,
   toIso,
 } from './availability.ts'
+import {
+  bookingConferenceStates,
+  type ConferenceStatus,
+  cancelBookingConference,
+  prepareBookingConference,
+  unresolvedLocation,
+} from './conferences.ts'
 import type { BookingNotifier, PublicContext, ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { bookingHostIds, lockOrganization } from './hosts.ts'
@@ -42,6 +49,7 @@ export interface Booking {
   title: string
   /** Where the meeting happens, with its details (number, address, link). */
   location: Location | null
+  conference?: ConferenceStatus
   responses: Responses
   /** The invitee first, then guests. */
   attendees: Attendee[]
@@ -406,6 +414,10 @@ async function toBookings(db: Db, rows: readonly BookingRow[]): Promise<Booking[
     })
     byBooking.set(a.booking_id, list)
   }
+  const conferences = await bookingConferenceStates(
+    db,
+    rows.map((r) => r.id),
+  )
   const assigned = new Map<string, { name: string; timeZone: string }>()
   const assignedIds = rows
     .filter((row) => row.hosts_use_default_schedule && row.required_host_user_ids.length === 1)
@@ -440,6 +452,7 @@ async function toBookings(db: Db, rows: readonly BookingRow[]): Promise<Booking[
     end: toIso(toInstant(r.end_at)),
     title: r.title,
     location: parseLocation(r.location),
+    ...(conferences.has(r.id) ? { conference: conferences.get(r.id) } : {}),
     responses: (isRecord(r.responses) ? r.responses : {}) as Responses,
     attendees: byBooking.get(r.id) ?? [],
     rescheduledFromId: r.rescheduled_from_id,
@@ -544,7 +557,7 @@ async function insertBooking(db: Db, b: NewBooking): Promise<{ id: string; manag
       start_at: b.start.toString(),
       end_at: b.end.toString(),
       title: b.title,
-      location: b.location && JSON.stringify(b.location),
+      location: b.location && JSON.stringify(unresolvedLocation(b.location as Json)),
       responses: JSON.stringify(b.responses),
       manage_token_hash: hash,
       source: b.source,
@@ -622,6 +635,7 @@ async function cancelLocked(
     })
     .where('id', '=', row.id)
     .execute()
+  await cancelBookingConference(db, row.id, now)
   // In this transaction: the cancellation email exists exactly when the cancellation does.
   await notify?.(db, { type: 'cancelled', bookingId: row.id }, now)
   return loadBooking(db, row.id)
@@ -818,6 +832,7 @@ async function publicBooking(
       })
       // In this transaction, and never on the replay paths: one set of emails per booking,
       // queued only if the booking commits.
+      await prepareBookingConference(ctx, trx, id)
       await ctx.notify?.(trx, { type: 'created', bookingId: id, start: input.start }, now)
       return { booking: await loadBooking(trx, id), manageToken, replayed: false }
     })
@@ -995,6 +1010,7 @@ async function rescheduleLocked(
   })
   // In this transaction: the new booking's emails. The old booking's queued ones find it
   // cancelled and replaced when they run, and send nothing.
+  await prepareBookingConference(ctx, trx, id)
   await ctx.notify?.(trx, { type: 'rescheduled', bookingId: id, start }, now)
   return { booking: await loadBooking(trx, id), manageToken }
 }

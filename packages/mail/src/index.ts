@@ -14,6 +14,8 @@ export interface MailAttachment {
 }
 
 export interface MailMessage {
+  /** Meeting capabilities must never appear in the development log mailer. */
+  sensitive?: boolean | undefined
   /** One address. It is never parsed as a list, so a comma in it cannot add recipients. */
   to: string
   subject: string
@@ -214,8 +216,12 @@ const unicodeEscape = (c: string) => `\\u${c.charCodeAt(0).toString(16).padStart
  */
 export function createLogMailer(print: (line: string) => void = console.log): Mailer {
   return {
-    async send({ to, subject, text, attachments }, { signal } = {}) {
+    async send({ to, subject, text, attachments, sensitive }, { signal } = {}) {
       signal?.throwIfAborted()
+      if (sensitive) {
+        print(`[mail] ${JSON.stringify({ notSent: 'SMTP_URL is not set', sensitive: true })}`)
+        return
+      }
       const links = text.match(/https?:\/\/\S+/g) ?? []
       const record = JSON.stringify({
         notSent: 'SMTP_URL is not set',

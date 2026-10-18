@@ -10,10 +10,13 @@ import {
 } from '@hourmere/auth'
 import {
   bookingCalendarJob,
+  bookingConferenceJob,
   type CalendarDeps,
   calendarBookingNotifier,
   calendarDispatchJob,
   calendarSyncJob,
+  conferenceBookingNotifier,
+  conferenceDispatchJob,
   createGoogleCalendarClient,
   createMicrosoftCalendarClient,
 } from '@hourmere/calendars'
@@ -24,6 +27,7 @@ import { createLogMailer, createSmtpMailer, type Mailer } from '@hourmere/mail'
 import {
   bookingNotificationJob,
   bookingNotifier,
+  conferenceNotificationDispatchJob,
   queuedSignInEmail,
   signInEmailJobs,
 } from '@hourmere/notifications'
@@ -68,8 +72,10 @@ export function productRoutes({
   mcpAuth,
   publicUrl = 'http://localhost',
   webhooks = { enabled: false },
+  automaticMeet = false,
 }: {
   db: Db
+  automaticMeet?: boolean
   webhooks?: import('@hourmere/webhooks').WebhookSettings
   mcpAuth?: Pick<ReturnType<typeof createAuth>, 'handler'> | undefined
   publicUrl?: string
@@ -82,15 +88,15 @@ export function productRoutes({
 }): RouteModule[] {
   return [
     mcpOAuthRoutes({ auth: mcpAuth, db, publicUrl }),
-    instanceRoutes({ socialProviders }),
+    instanceRoutes({ socialProviders, automaticMeet }),
     calendarRoutes({ db, google: googleCalendar, enqueueSync: enqueueCalendarSync }),
     conferenceRoutes({ db, zoom: zoomConference }),
     profileRoutes({ db }),
     scheduleRoutes({ db }),
     webhookRoutes({ db, ...webhooks }),
-    eventTypeRoutes({ db }),
-    publicRoutes({ db, notify }),
-    bookingRoutes({ db, notify }),
+    eventTypeRoutes({ db, automaticMeet }),
+    publicRoutes({ db, notify, automaticMeet }),
+    bookingRoutes({ db, notify, automaticMeet }),
     analyticsRoutes({ db }),
   ]
 }
@@ -214,6 +220,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
     encryptionKey: config.WEBHOOK_ENCRYPTION_KEY,
   }
   const calendarDeps: CalendarDeps = { db, google: googleCalendar, microsoft: microsoftCalendar }
+  let enqueueConference: (id: string) => Promise<unknown> = async () => {}
   let enqueueCalendar: (calendarId: string) => Promise<unknown> = async () => {}
   // Background jobs: every role queues them, `all` and `worker` run them.
   const jobs = createJobs({
@@ -228,6 +235,9 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
         signup: config.signup,
       }),
       bookingNotificationJob({ db, mailer, publicUrl: config.PUBLIC_URL }),
+      conferenceNotificationDispatchJob({ db, mailer, publicUrl: config.PUBLIC_URL }),
+      bookingConferenceJob(calendarDeps),
+      conferenceDispatchJob(calendarDeps, (id) => enqueueConference(id)),
       webhookDeliveryJob({ db, ...webhookSettings }),
       webhookCleanupJob(db),
       calendarSyncJob(calendarDeps),
@@ -247,6 +257,8 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
     await Promise.all([db.destroy(), authPool?.end()])
     throw err
   }
+  enqueueConference = (id) =>
+    jobs.enqueue('booking-conference', { rootBookingId: id }, { singletonKey: id })
   const checkDb = async () => {
     await sql`SELECT 1`.execute(db)
   }
@@ -258,8 +270,10 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
     // Booking changes over REST and MCP queue their emails in their own transactions.
     const emailNotifier = bookingNotifier(jobs)
     const calendarNotifier = calendarBookingNotifier(jobs)
+    const conferenceNotifier = conferenceBookingNotifier(jobs)
     const webhookNotifier = webhookBookingNotifier(jobs, webhookSettings)
     const notify: BookingNotifier = async (trx, event, now) => {
+      await conferenceNotifier(trx, event)
       await emailNotifier(trx, event, now)
       if (googleCalendar) await calendarNotifier(trx, event)
       await webhookNotifier(trx, event, now)
@@ -294,6 +308,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
         publicUrl: config.PUBLIC_URL,
         db,
         socialProviders: config.socialProviders,
+        automaticMeet: config.GOOGLE_MEET_ENABLED,
         webhooks: webhookSettings,
         notify,
         googleCalendar,
@@ -310,7 +325,11 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
               },
             }
           : {}),
-        tools: [whoamiTool, ...bookingTools({ db, notify }), ...catalogTools({ db })],
+        tools: [
+          whoamiTool,
+          ...bookingTools({ db, notify, automaticMeet: config.GOOGLE_MEET_ENABLED }),
+          ...catalogTools({ db }),
+        ],
       }),
     }).fetch
   }

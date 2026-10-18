@@ -281,6 +281,9 @@ OAuth attempts, scopes, operation, external ID, email and display name before re
 unowned secret-free tombstone. Equal email addresses never establish ownership. No meeting
 intent or calendar rows are created by this foundation. See the Zoom setup guide for the
 explicit local-disconnect versus provider-wide revocation distinction.
+## Automatic conferences
+
+`booking_conferences` retains one provider intent per opted-in root booking, pinned organizer/destination IDs, desired/applied revision, request identity, create ambiguity, bounded state/error and recoverable operation lease. It intentionally survives calendar/connection deletion. `booking_conference_notifications` is the durable release outbox for final linked messages and no-ICS failure notices; recipient deduplication remains in `booking_notifications`. `calendars.supports_google_meet` is cached capability, default false. The join URL is stored only in the current ready protected booking location. See [automatic-google-meet.md](automatic-google-meet.md).
 ## Round-robin assignment state
 
 Migration 0020 adds `round_robin_state` (event primary key, monotonic `bigint` sequence,

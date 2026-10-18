@@ -92,6 +92,16 @@ describe('Zoom confidential OAuth transport and separate encryption', () => {
       }
     },
   )
+  it('bounds fallback names by Unicode code points without creating malformed display text', async () => {
+    const provider = fakeZoom()
+    delete provider.controls.identity.display_name
+    provider.controls.identity.first_name = 'a'.repeat(198)
+    provider.controls.identity.last_name = '😀suffix'
+    const identity = await provider.client.identity('synthetic-access', signal())
+    expect(identity.name?.isWellFormed()).toBe(true)
+    expect(Array.from(identity.name ?? '')).toHaveLength(200)
+    expect(identity.name?.endsWith('😀')).toBe(true)
+  })
   it('bounds response size and rejects malformed JSON/identity and redirects', async () => {
     const p = fakeZoom()
     p.controls.tokenHook = async () => new Response('x'.repeat(32769))

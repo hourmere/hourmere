@@ -53,16 +53,17 @@ export type RouteModule = (shared: { app: OpenAPIHono; caller: CallerMiddleware 
 /** What a route module needs to call the service layer; server.ts provides it. */
 export interface ServiceDeps {
   db: Db
+  automaticMeet?: boolean | undefined
   /** The clock; defaults to the real one. */
   now?: () => Temporal.Instant
 }
 
 /** The ServiceContext for the authenticated caller of a request. */
 export function serviceContext(
-  { db, now = () => Temporal.Now.instant() }: ServiceDeps,
+  { db, now = () => Temporal.Now.instant(), automaticMeet }: ServiceDeps,
   principal: Principal,
 ): ServiceContext {
-  return { db, principal, now }
+  return { db, principal, now, automaticMeet }
 }
 
 type ErrorStatus = 400 | 403 | 404 | 409

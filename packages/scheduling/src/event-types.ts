@@ -13,6 +13,7 @@ import {
   catalogPage,
   checkedCatalogPage,
 } from './catalog-page.ts'
+import { automaticMeet, requireMeetDestination, requireSingleMeetHost } from './conferences.ts'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { assertHosts, lockOrganization } from './hosts.ts'
@@ -29,7 +30,7 @@ import { cleanText } from './text.ts'
 
 /** Where the meeting happens. Meet and Zoom links are generated per booking. */
 export type EventTypeLocation =
-  | { kind: 'google_meet' }
+  | { kind: 'google_meet'; autoCreate?: true }
   | { kind: 'zoom' }
   /** The host's number, in E.164 (`+14155550123`). */
   | { kind: 'phone'; number: string }
@@ -293,6 +294,8 @@ export async function createEventType(
         throw insufficientRole()
       }
       const schedulingType = input.schedulingType ?? 'individual'
+      if (automaticMeet(fields.location) && schedulingType !== 'individual')
+        requireSingleMeetHost(schedulingType, [])
       const hostIds = validHosts(
         input.hosts ?? [{ userId: ctx.principal.user.id }],
         schedulingType,
@@ -301,6 +304,10 @@ export async function createEventType(
       const scheduleId = validScheduleId(input.scheduleId) ?? null
       if (schedulingType !== 'individual' && scheduleId !== null) throw invalidScheduleId()
       await assertHosts(trx, ctx.principal.organization.id, hostIds, true)
+      if (automaticMeet(fields.location)) {
+        requireSingleMeetHost(schedulingType, hostIds)
+        await requireMeetDestination(trx, hostIds[0] as string, undefined, ctx.automaticMeet)
+      }
       const { id } = await trx
         .insertInto('event_types')
         .values({
@@ -367,6 +374,14 @@ export async function updateEventType(
       if (schedulingType !== 'individual' && scheduleId != null) throw invalidScheduleId()
       if (Object.keys(changes).length > 0 || scheduleId !== undefined || changingHosts) {
         const fields = validFields({ ...fieldsOf(row), ...changes })
+        if (
+          automaticMeet(fields.location) &&
+          (input.location !== undefined || changingHosts || scheduleId !== undefined)
+        ) {
+          const configuredHosts = hostIds ?? existing.map((h) => h.user_id)
+          requireSingleMeetHost(schedulingType, configuredHosts)
+          await requireMeetDestination(trx, configuredHosts[0] as string, row.id, ctx.automaticMeet)
+        }
         await trx
           .updateTable('event_types')
           .set({ ...columns(fields), scheduling_type: schedulingType })
@@ -694,6 +709,10 @@ function validLocation(value: unknown): EventTypeLocation | null {
   }
   switch (kind) {
     case 'google_meet':
+      expect(['autoCreate'])
+      if (value.autoCreate !== undefined && value.autoCreate !== true)
+        return fail('autoCreate must be true when specified')
+      return value.autoCreate === true ? { kind, autoCreate: true } : { kind }
     case 'zoom':
       expect([])
       return { kind }

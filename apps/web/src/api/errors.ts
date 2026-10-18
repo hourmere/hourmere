@@ -100,6 +100,12 @@ export function errorMessage(err: unknown): UiText {
     default_schedule: 'Make another schedule the default before deleting this one',
     default_schedule_required: 'Make another schedule the default before deleting this one',
     invalid_hosts: 'Check the form and try again.',
+    automatic_meet_disabled:
+      'Automatic meeting links are unavailable. Contact the host or choose another meeting type.',
+    automatic_meet_unavailable:
+      'Automatic meeting links are unavailable. Contact the host or choose another meeting type.',
+    automatic_meet_mode_unsupported:
+      'Automatic Google Meet supports individual meetings with one host only.',
     booking_hosts_unavailable:
       'This booking can no longer be moved to another time. You can still cancel it, or contact your host.',
   }

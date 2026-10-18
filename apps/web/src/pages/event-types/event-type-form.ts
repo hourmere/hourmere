@@ -24,8 +24,8 @@ export const QUESTION_TYPES: { value: QuestionType; label: string }[] = [
 
 export const LOCATION_KINDS: { value: LocationKind | ''; label: string }[] = [
   { value: '', label: 'Not set' },
-  { value: 'google_meet', label: 'Google Meet (link created per booking)' },
-  { value: 'zoom', label: 'Zoom (link created per booking)' },
+  { value: 'google_meet', label: 'Google Meet (provider label only)' },
+  { value: 'zoom', label: 'Zoom (provider label only)' },
   { value: 'phone', label: 'Phone call' },
   { value: 'in_person', label: 'In person' },
   { value: 'link', label: 'Other video or meeting link' },
@@ -59,6 +59,7 @@ export interface EventTypeDraft {
   durationMinutes: string
   slotStepMinutes: string
   locationKind: LocationKind | ''
+  autoCreateMeet: boolean
   phone: string
   address: string
   url: string
@@ -101,6 +102,7 @@ export function emptyDraft(): EventTypeDraft {
     durationMinutes: '30',
     slotStepMinutes: '',
     locationKind: '',
+    autoCreateMeet: false,
     phone: '',
     address: '',
     url: '',
@@ -131,6 +133,7 @@ export function draftFromEventType(e: EventType): EventTypeDraft {
     durationMinutes: String(e.durationMinutes),
     slotStepMinutes: text(e.slotStepMinutes),
     locationKind: location?.kind ?? '',
+    autoCreateMeet: location?.kind === 'google_meet' && location.autoCreate === true,
     phone: location?.kind === 'phone' ? location.number : '',
     address: location?.kind === 'in_person' ? location.address : '',
     url: location?.kind === 'link' ? location.url : '',
@@ -196,6 +199,14 @@ const NUMBER_FIELDS = [
 /** The problems with a draft, by field id; empty when it can be sent. */
 export function validateDraft(draft: EventTypeDraft): FieldErrors {
   const errors: FieldErrors = {}
+  if (
+    draft.locationKind === 'google_meet' &&
+    draft.autoCreateMeet &&
+    draft.schedulingType !== 'individual'
+  )
+    errors['location-kind'] = msg(
+      'Automatic Google Meet supports individual meetings with one host only.',
+    )
   if (
     draft.schedulingType === 'collective' &&
     (draft.hostUserIds.length < 2 || draft.hostUserIds.length > 8)
@@ -327,6 +338,10 @@ export function toInput(draft: EventTypeDraft): EventTypeBody {
         return { kind: 'in_person', address: draft.address.trim() }
       case 'link':
         return { kind: 'link', url: draft.url.trim() }
+      case 'google_meet':
+        return draft.autoCreateMeet
+          ? { kind: 'google_meet', autoCreate: true }
+          : { kind: 'google_meet' }
       default:
         return { kind: draft.locationKind }
     }
@@ -418,6 +433,21 @@ export function serverErrors(
   const field = (id: string, message: UiText) => ({ fields: { [id]: message }, message: null })
   const detail = err.message
   switch (err.code) {
+    case 'automatic_meet_disabled':
+      return field(
+        'location-kind',
+        'Automatic creation is unavailable on this instance or meeting mode. You can keep the provider label or use your own meeting link.',
+      )
+    case 'automatic_meet_mode_unsupported':
+      return field(
+        'location-kind',
+        'Automatic Google Meet supports individual meetings with one host only.',
+      )
+    case 'automatic_meet_unavailable':
+      return field(
+        'location-kind',
+        'The assigned individual host must connect an owned, Meet-capable Google calendar. Final invitations wait for the link.',
+      )
     case 'invalid_slug':
       return field(
         'slug',

@@ -3,6 +3,7 @@ import { json, type RouteModule } from '../openapi.ts'
 
 const Instance = z
   .object({
+    automaticGoogleMeet: z.boolean().optional(),
     signIn: z
       .object({
         email: z.boolean().openapi({ description: 'Sign-in links sent by email' }),
@@ -20,11 +21,14 @@ const Instance = z
  */
 export function instanceRoutes({
   socialProviders,
+  automaticMeet = false,
 }: {
   /** The configured sign-in providers (config.socialProviders); only their presence counts. */
   socialProviders: { google?: unknown; microsoft?: unknown }
+  automaticMeet?: boolean
 }): RouteModule {
   const body: z.infer<typeof Instance> = {
+    automaticGoogleMeet: automaticMeet,
     signIn: {
       email: true,
       google: socialProviders.google !== undefined,

@@ -8,8 +8,31 @@ const time = z.object({
   dateTime: z.string().optional(),
   timeZone: text.optional(),
 })
+export const safeGoogleEventId = (value: string) => /^[A-Za-z0-9_-]{1,1024}$/.test(value)
+export function googleMeetUrl(value: unknown): string | undefined {
+  if (
+    typeof value !== 'string' ||
+    value.length > 200 ||
+    !/^https:\/\/meet\.google\.com\/[a-z]{3}-[a-z]{4}-[a-z]{3}$/.test(value)
+  )
+    return undefined
+  return value
+}
+const conferenceData = z.object({
+  createRequest: z
+    .object({
+      status: z.object({ statusCode: z.enum(['pending', 'success', 'failure']) }).optional(),
+    })
+    .optional(),
+  conferenceSolution: z.object({ key: z.object({ type: z.string().max(100) }) }).optional(),
+  entryPoints: z
+    .array(z.object({ entryPointType: z.string().max(100), uri: z.string().max(2048) }))
+    .max(20)
+    .optional(),
+})
 const event = z.object({
   id: text,
+  conferenceData: conferenceData.optional(),
   etag: text.optional(),
   iCalUID: text.optional(),
   status: z.enum(['confirmed', 'tentative', 'cancelled']).optional(),
@@ -38,6 +61,9 @@ export interface GoogleEventWrite {
   sequence: number
   status: 'confirmed' | 'cancelled'
   transparency: 'opaque'
+  conferenceData?: {
+    createRequest: { requestId: string; conferenceSolutionKey: { type: 'hangoutsMeet' } }
+  }
 }
 export interface EventWindow {
   start: string
@@ -134,10 +160,42 @@ export function googleEventMethods(
         throw new GoogleCalendarError('provider_unavailable')
       return found
     },
+    async getConferenceEvent(token: string, calendar: string, id: string, signal: AbortSignal) {
+      if (!safeGoogleEventId(id)) throw new GoogleCalendarError('provider_unavailable')
+      const url = new URL(`${base(calendar)}/${encodeURIComponent(id)}`)
+      url.searchParams.set(
+        'fields',
+        'id,etag,iCalUID,status,start,end,conferenceData(createRequest/status,conferenceSolution/key,entryPoints(entryPointType,uri))',
+      )
+      return parsed(url.href, { headers: headers(token) }, signal)
+    },
+    async findConferenceEvent(token: string, calendar: string, uid: string, signal: AbortSignal) {
+      const url = new URL(base(calendar))
+      url.search = new URLSearchParams({
+        iCalUID: uid,
+        maxResults: '2',
+        showDeleted: 'true',
+        fields:
+          'items(id,etag,iCalUID,status,start,end,recurringEventId,recurrence,conferenceData(createRequest/status,conferenceSolution/key,entryPoints(entryPointType,uri))),nextPageToken',
+      }).toString()
+      const result = pageSchema.safeParse(await json(url.href, { headers: headers(token) }, signal))
+      if (!result.success || result.data.nextPageToken || (result.data.items?.length ?? 0) > 1)
+        throw new GoogleCalendarError('provider_unavailable')
+      const found = result.data.items?.[0]
+      if (
+        found &&
+        (!safeGoogleEventId(found.id) ||
+          found.iCalUID !== uid ||
+          found.recurringEventId ||
+          found.recurrence?.length)
+      )
+        throw new GoogleCalendarError('provider_unavailable')
+      return found
+    },
     importEvent(token: string, calendar: string, value: GoogleEventWrite, signal: AbortSignal) {
       // Import a private host copy with the same UID as our ICS. No attendees or invitation email.
       return parsed(
-        `${base(calendar)}/import`,
+        `${base(calendar)}/import${value.conferenceData ? '?conferenceDataVersion=1' : ''}`,
         {
           method: 'POST',
           headers: { ...headers(token), 'content-type': 'application/json' },
@@ -154,9 +212,10 @@ export function googleEventMethods(
       value: GoogleEventWrite,
       signal: AbortSignal,
     ) {
+      if (!safeGoogleEventId(id)) throw new GoogleCalendarError('provider_unavailable')
       const { iCalUID: _uid, ...patch } = value
       return parsed(
-        `${base(calendar)}/${encodeURIComponent(id)}?sendUpdates=none`,
+        `${base(calendar)}/${encodeURIComponent(id)}?sendUpdates=none&conferenceDataVersion=1`,
         {
           method: 'PATCH',
           headers: {

@@ -375,6 +375,91 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/bookings/{id}/conference/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Retry safe conference reconciliation for an assigned host */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            responses: {
+                /** @description Durable reconciliation requested */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description The id is not a UUID (`invalid_request`) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No valid session or API key */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description A cookie-authenticated write that does not come from the app itself (`forbidden`) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such booking or conference */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description conference_not_retryable */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/bookings/manage": {
         parameters: {
             query?: never;
@@ -4304,6 +4389,13 @@ export interface components {
              */
             cancelledAt: string | null;
             cancelReason: string | null;
+            conference?: {
+                errorCode: string | null;
+                /** @enum {string} */
+                provider: "google_meet";
+                /** @enum {string} */
+                status: "pending" | "ready" | "failed";
+            };
             /**
              * Format: date-time
              * @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix.
@@ -4488,6 +4580,8 @@ export interface components {
             isHidden: boolean;
             /** @description Where the meeting happens, by kind; Meet and Zoom links are generated per booking. null = not set. */
             location: {
+                /** @enum {boolean} */
+                autoCreate?: true;
                 /** @enum {string} */
                 kind: "google_meet";
             } | {
@@ -4585,6 +4679,8 @@ export interface components {
             isHidden: boolean;
             /** @description Where the meeting happens, by kind; Meet and Zoom links are generated per booking. null = not set. */
             location?: {
+                /** @enum {boolean} */
+                autoCreate?: true;
                 /** @enum {string} */
                 kind: "google_meet";
             } | {
@@ -4667,6 +4763,8 @@ export interface components {
             isHidden?: boolean;
             /** @description Where the meeting happens, by kind; Meet and Zoom links are generated per booking. null = not set. */
             location?: {
+                /** @enum {boolean} */
+                autoCreate?: true;
                 /** @enum {string} */
                 kind: "google_meet";
             } | {
@@ -4725,6 +4823,7 @@ export interface components {
             status: "ok" | "degraded";
         };
         Instance: {
+            automaticGoogleMeet?: boolean;
             /** @description The sign-in methods people can use on this instance */
             signIn: {
                 /** @description Sign-in links sent by email */

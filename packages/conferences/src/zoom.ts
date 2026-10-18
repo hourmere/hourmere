@@ -182,10 +182,12 @@ export function createZoomClient(
       )
       if (!parsed.success) throw new ZoomError('provider_unavailable')
       const value = parsed.data,
-        full = (
+        full = Array.from(
           value.display_name?.trim() ||
-          [value.first_name, value.last_name].filter(Boolean).join(' ').trim()
-        ).slice(0, 200)
+            [value.first_name, value.last_name].filter(Boolean).join(' ').trim(),
+        )
+          .slice(0, 200)
+          .join('')
       return { id: value.id, email: value.email ?? null, name: full || null }
     },
   }

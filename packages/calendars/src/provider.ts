@@ -11,6 +11,7 @@ export interface ProviderCalendar {
   name: string
   isPrimary: boolean
   accessRole: 'freeBusyReader' | 'reader' | 'writer' | 'writerWithoutPrivateAccess' | 'owner'
+  supportsGoogleMeet?: boolean
   timeZone: string | null
 }
 

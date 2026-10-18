@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, useLocation, useParams } from 'react-router'
+import { ConferenceNotice } from '../components/ConferenceNotice.tsx'
 import { usePageTitle } from '../hooks.ts'
 import { useI18n } from '../i18n/runtime.tsx'
 import { literal, msg, type UiText } from '../i18n/translate.ts'
@@ -333,13 +334,16 @@ function Confirmation({
       notifyEmbedBooked()
     }
   }, [embedded])
-  const { booking, manageToken, replayed, timeZone } = confirmed
+  const { booking: initialBooking, manageToken, replayed, timeZone } = confirmed
+  const [booking, setBooking] = useState(initialBooking)
   const invitee = booking.attendees.find((a) => a.isBooker)
   const guests = booking.attendees.filter((a) => !a.isBooker)
   const hostName =
     booking.assignedHost === null
       ? t('Host no longer available')
-      : (booking.assignedHost?.name ?? event.host.name)
+      : booking.assignedHost
+        ? booking.assignedHost.name.trim() || t('Host')
+        : event.host.name
   const hostDetail = booking.assignedHost
     ? `${hostName} (${booking.assignedHost.timeZone})`
     : hostName
@@ -347,12 +351,27 @@ function Confirmation({
   return (
     <PublicLayout>
       <div className="card public-card confirmation">
-        <FocusHeading>{t('You’re booked')}</FocusHeading>
+        <FocusHeading>
+          {t(
+            booking.status === 'cancelled'
+              ? 'Cancelled booking'
+              : booking.conference?.status === 'failed'
+                ? 'Time reserved; meeting link needs attention'
+                : booking.conference?.status === 'pending'
+                  ? 'Time reserved; meeting link pending'
+                  : 'You’re booked',
+          )}
+        </FocusHeading>
         <p className="lede">
-          {t('Your {event} with {host} is confirmed.', {
-            event: event.title,
-            host: hostName,
-          })}
+          {t(
+            booking.status === 'cancelled'
+              ? 'This booking was already cancelled.'
+              : 'Your {event} with {host} is confirmed.',
+            {
+              event: event.title,
+              host: hostName,
+            },
+          )}
         </p>
         <DetailList
           items={[
@@ -377,16 +396,25 @@ function Confirmation({
               : []),
           ]}
         />
-        <AddToCalendar
-          event={{
-            id: booking.id,
-            title,
-            start: Date.parse(booking.start),
-            end: Date.parse(booking.end),
-            description: event.description ?? undefined,
-            location: locationText(booking.location, ui),
-          }}
+        <ConferenceNotice
+          key={booking.id}
+          booking={booking}
+          manageToken={manageToken}
+          onChange={setBooking}
         />
+        {booking.status === 'confirmed' &&
+          (!booking.conference || booking.conference.status === 'ready') && (
+            <AddToCalendar
+              event={{
+                id: booking.id,
+                title,
+                start: Date.parse(booking.start),
+                end: Date.parse(booking.end),
+                description: event.description ?? undefined,
+                location: locationText(booking.location, ui),
+              }}
+            />
+          )}
         {manageToken ? (
           <ManageLink token={manageToken} intro={t('Use this link to reschedule or cancel.')} />
         ) : replayed ? (
