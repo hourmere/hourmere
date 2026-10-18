@@ -1,5 +1,56 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  Retry: '重试',
+  'Working…': '正在处理…',
+  'Conference accounts': '会议账号',
+  'Connect your own Zoom identity separately from sign-in and calendars. This connection cannot create or read meetings.':
+    '单独连接你自己的 Zoom 身份，与登录和日历互相独立。此连接不能创建或读取会议。',
+  'Only basic Zoom account identity is requested. Calendar access and automatic meeting creation are separate features.':
+    '仅请求基本 Zoom 账号身份。日历访问和自动创建会议属于独立功能。',
+  'Zoom account connected.': 'Zoom 账号已连接。',
+  'Zoom was not connected because you cancelled authorization.': '你已取消授权，Zoom 未连接。',
+  'This Zoom connection attempt expired or was already used. Start again.':
+    '此次 Zoom 连接尝试已过期或已使用。请重新开始。',
+  'Zoom connections are not configured on this instance.': '此实例尚未配置 Zoom 连接。',
+  'Zoom could not be reached. Check the connection status before trying again.':
+    '无法连接 Zoom。请检查连接状态后再试。',
+  'Reconnect this Zoom account before refreshing it.': '请先重新连接此 Zoom 账号，再刷新。',
+  'Zoom did not grant only the requested identity access. Check the app configuration and reconnect.':
+    'Zoom 返回的权限不符合所请求的最小身份权限。请检查应用配置后重新连接。',
+  'Choose the same Zoom account when reconnecting this connection.':
+    '重新连接时，请选择同一个 Zoom 账号。',
+  'This Zoom identity is already connected to another Hourmere account.':
+    '此 Zoom 身份已连接到另一个 Hourmere 账号。',
+  'This account has reached its limit of five connected Zoom identities.':
+    '此账号已达到同时连接五个 Zoom 身份的上限。',
+  'Sign in again to manage conference accounts.': '请重新登录以管理会议账号。',
+  Connected: '已连接',
+  'Refresh incomplete — reconnect': '刷新未完成，请重新连接',
+  'Reconnection required': '需要重新连接',
+  Disconnected: '已断开',
+  'Zoom account refreshed.': 'Zoom 账号已刷新。',
+  'Local Zoom access disconnected.': '本地 Zoom 访问已断开。',
+  'Loading conference accounts…': '正在加载会议账号…',
+  'Connecting to Zoom…': '正在连接 Zoom…',
+  'Connect Zoom': '连接 Zoom',
+  'Connect up to five Zoom identities at once. Disconnecting frees a place and keeps the connection ID for a future reconnection.':
+    '最多同时连接五个 Zoom 身份。断开会释放名额，并保留连接编号以供今后重新连接。',
+  'A Zoom authorization attempt is pending. It expires after ten minutes. Starting again replaces the oldest pending attempt when the limit is reached.':
+    '有一项 Zoom 授权正在等待完成，将在十分钟后过期。达到上限后，重新开始会替换最早的待完成尝试。',
+  'No Zoom accounts connected.': '尚未连接 Zoom 账号。',
+  'Zoom account': 'Zoom 账号',
+  'Connection updated': '连接更新时间',
+  'Reconnect Zoom': '重新连接 Zoom',
+  'Refresh Zoom account': '刷新 Zoom 账号',
+  'Disconnect Zoom': '断开 Zoom',
+  'Disconnect local Zoom access? Pending authorization attempts will also be cancelled. Remove the app separately in Zoom to revoke its grant.':
+    '确定断开本地 Zoom 访问吗？待完成的授权尝试也将被取消。要撤销应用授权，请另行在 Zoom 中移除应用。',
+  'Could not disconnect Zoom.': '无法断开 Zoom。',
+  'Disconnecting removes local credentials. The retained account record keeps its identity and does not revoke the app in Zoom. Deleting your Hourmere account also removes the stored identity details.':
+    '断开会删除本地凭据。保留的账号记录仍包含身份信息，且不会撤销 Zoom 中的应用授权。删除 Hourmere 账号也会删除已存储的身份信息。',
+  'This Zoom refresh could not be confirmed. Reconnect the account.':
+    '无法确认此次 Zoom 刷新结果。请重新连接账号。',
+  'This Zoom connection is not available.': '此 Zoom 连接不可用。',
   'Activate round robin to get a public booking link.': '请先激活轮询，以获取公开预约链接。',
   'Round robin: one available host': '轮询：分配一位可用主持人',
   'Choose one individual host, two to eight collective hosts, or one to eight round-robin pool members. Changes affect new bookings; existing meetings retain their original hosts.':

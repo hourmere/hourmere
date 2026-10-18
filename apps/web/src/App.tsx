@@ -10,6 +10,7 @@ import {
   BookingPage,
   BookingsPage,
   CalendarsPage,
+  ConferencesPage,
   ConnectedAppsPage,
   EmbeddedBookingPage,
   EmbeddedTeamBookingPage,
@@ -66,6 +67,7 @@ export function App() {
               <Route path="bookings" element={<BookingsPage />} />
               <Route path="analytics" element={<AnalyticsPage />} />
               <Route path="bookings/:id" element={<BookingDetailPage />} />
+              <Route path="conferences" element={<ConferencesPage />} />
               <Route path="calendars" element={<CalendarsPage />} />
               <Route path="connected-apps" element={<ConnectedAppsPage />} />
               <Route path="api-keys" element={<ApiKeysPage />} />

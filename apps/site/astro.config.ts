@@ -41,6 +41,7 @@ export default defineConfig({
         { label: 'Website widgets', link: '/docs/embedding' },
         { label: 'Google Calendar', link: '/docs/google-calendar' },
         { label: 'Microsoft Calendar', link: '/docs/microsoft-calendar' },
+        { label: 'Zoom accounts', link: '/docs/zoom-connections' },
       ],
       customCss: ['@fontsource-variable/manrope', './src/styles/starlight.css'],
       components: { Footer: './src/components/DocsFooter.astro' },
