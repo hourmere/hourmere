@@ -1,6 +1,8 @@
 import { type MouseEvent, useEffect, useRef, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router'
 import { errorMessage } from '../api/errors.ts'
+import { LanguageSwitcher, useI18n } from '../i18n/runtime.tsx'
+import { msg, type UiText } from '../i18n/translate.ts'
 import { PATHS } from '../paths.ts'
 import { useMe, useSession } from '../session.tsx'
 import { leavesPage, UnsavedChangesProvider, useConfirmLeave } from '../unsaved-changes.tsx'
@@ -26,9 +28,11 @@ export function AppShell() {
 }
 
 function Shell() {
+  const { t, ui } = useI18n()
+
   const me = useMe()
   const { signOut, notice, setNotice } = useSession()
-  const [signOutError, setSignOutError] = useState<string | null>(null)
+  const [signOutError, setSignOutError] = useState<UiText | null>(null)
   const main = useRef<HTMLElement>(null)
   const nav = useRef<HTMLElement>(null)
   const location = useLocation()
@@ -80,39 +84,40 @@ function Shell() {
     try {
       await signOut()
     } catch (err) {
-      setSignOutError(`Could not sign out. ${errorMessage(err)}`)
+      setSignOutError(msg('Could not sign out. {0}', { '0': errorMessage(err) }))
     }
   }
 
   return (
     <div className="shell" onClickCapture={guardLinks}>
       <a className="skip-link" href="#main">
-        Skip to content
+        {t('Skip to content')}
       </a>
       <header className="topbar">
-        <Link to={PATHS.home} className="brand" aria-label="Hourmere home">
+        <Link to={PATHS.home} className="brand" aria-label={t('Hourmere home')}>
           <Logo />
         </Link>
         <div className="account">
+          <LanguageSwitcher />
           <span className="account-email" title={me.user.email}>
             {me.user.email}
           </span>
           <button type="button" className="button button-small" onClick={handleSignOut}>
-            Sign out
+            {t('Sign out')}
           </button>
         </div>
       </header>
       {signOutError && (
         <p className="alert alert-error shell-alert" role="alert">
-          {signOutError}
+          {ui(signOutError)}
         </p>
       )}
       <div className="layout">
-        <nav className="sidenav" aria-label="Main" ref={nav}>
+        <nav className="sidenav" aria-label={t('Main')} ref={nav}>
           <ul>
             {NAV_ITEMS.map((item) => (
               <li key={item.to}>
-                <NavLink to={item.to}>{item.label}</NavLink>
+                <NavLink to={item.to}>{ui(item.label)}</NavLink>
               </li>
             ))}
           </ul>
@@ -120,9 +125,9 @@ function Shell() {
         <main id="main" ref={main} tabIndex={-1}>
           {shownNotice && (
             <div className="alert alert-info notice">
-              <p role="alert">{shownNotice}</p>
+              <p role="alert">{ui(shownNotice)}</p>
               <button type="button" className="button button-small" onClick={() => setNotice(null)}>
-                Dismiss
+                {t('Dismiss')}
               </button>
             </div>
           )}

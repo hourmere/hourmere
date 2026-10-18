@@ -11,6 +11,7 @@ import { CopyButton } from '../../components/CopyButton.tsx'
 import { useFlash } from '../../flash.ts'
 import { formatMinutes } from '../../format.ts'
 import { useLoad, usePageTitle } from '../../hooks.ts'
+import { useI18n } from '../../i18n/runtime.tsx'
 import {
   eventTypePath,
   PATHS,
@@ -30,6 +31,8 @@ async function loadPage(signal: AbortSignal) {
 }
 
 export function EventTypesPage() {
+  const { t, ui } = useI18n()
+
   usePageTitle('Event types')
   const me = useMe()
   const [state, reload] = useLoad(loadPage)
@@ -38,24 +41,26 @@ export function EventTypesPage() {
   return (
     <>
       <div className="page-header">
-        <h1>Event types</h1>
+        <h1>{t('Event types')}</h1>
         <Link to={PATHS.newEventType} className="button button-primary">
-          New event type
+          {t('New event type')}
         </Link>
       </div>
       <p className="lede">
-        The kinds of meetings people can book with you, each with its own link.
+        {t('The kinds of meetings people can book with you, each with its own link.')}
       </p>
       <p className="flash" role="status">
-        {message}
+        {ui(message)}
       </p>
 
-      {state.status === 'loading' && <p role="status">Loading event types…</p>}
+      {state.status === 'loading' && <p role="status">{t('Loading event types…')}</p>}
       {state.status === 'error' && (
         <div className="alert alert-error" role="alert">
-          <p>Could not load your event types. {state.message}</p>
+          <p>
+            {t('Could not load your event types.')} {ui(state.message)}
+          </p>
           <button type="button" className="button button-small" onClick={reload}>
-            Try again
+            {t('Try again')}
           </button>
         </div>
       )}
@@ -64,9 +69,9 @@ export function EventTypesPage() {
           <SetupHints me={me} profile={state.data.profile} hasSchedule={state.data.hasSchedule} />
           {state.data.eventTypes.length === 0 ? (
             <div className="empty">
-              <p>You have no event types yet. Create one to start taking bookings.</p>
+              <p>{t('You have no event types yet. Create one to start taking bookings.')}</p>
               <p>
-                <Link to={PATHS.newEventType}>Create your first event type</Link>
+                <Link to={PATHS.newEventType}>{t('Create your first event type')}</Link>
               </p>
             </div>
           ) : (
@@ -92,6 +97,8 @@ function SetupHints({
   profile: Profile | null
   hasSchedule: boolean
 }) {
+  const { t } = useI18n()
+
   const needsHandle = me.organization.personal && !profile
   if (!needsHandle && hasSchedule) return null
   return (
@@ -99,12 +106,13 @@ function SetupHints({
       <ul className="plain-list">
         {needsHandle && (
           <li>
-            <Link to={PATHS.settings}>Choose your handle</Link> to get booking links.
+            <Link to={PATHS.settings}>{t('Choose your handle')}</Link> {t('to get booking links.')}
           </li>
         )}
         {!hasSchedule && (
           <li>
-            <Link to={PATHS.newSchedule}>Set your weekly hours</Link>, so there are times to book.
+            <Link to={PATHS.newSchedule}>{t('Set your weekly hours')}</Link>
+            {t(', so there are times to book.')}
           </li>
         )}
       </ul>
@@ -121,16 +129,18 @@ function EventTypeTable({
   me: Me
   profile: Profile | null
 }) {
+  const { t, locale: displayLocale } = useI18n()
+
   return (
     <table className="table">
       <thead>
         <tr>
-          <th scope="col">Title</th>
-          <th scope="col">Duration</th>
-          <th scope="col">Booking link</th>
-          <th scope="col">Status</th>
+          <th scope="col">{t('Title')}</th>
+          <th scope="col">{t('Duration')}</th>
+          <th scope="col">{t('Booking link')}</th>
+          <th scope="col">{t('Status')}</th>
           <th scope="col">
-            <span className="visually-hidden">Actions</span>
+            <span className="visually-hidden">{t('Actions')}</span>
           </th>
         </tr>
       </thead>
@@ -147,21 +157,21 @@ function EventTypeTable({
                 : null
           return (
             <tr key={e.id}>
-              <th scope="row" data-label="Title">
+              <th scope="row" data-label={t('Title')}>
                 <Link to={eventTypePath(e.id)}>{e.title}</Link>
               </th>
-              <td data-label="Duration">{formatMinutes(e.durationMinutes)}</td>
-              <td data-label="Booking link" className="link-cell">
+              <td data-label={t('Duration')}>{formatMinutes(e.durationMinutes, displayLocale)}</td>
+              <td data-label={t('Booking link')} className="link-cell">
                 {url ? (
                   <span className="booking-link">
                     <a href={url} target="_blank" rel="noreferrer" className="mono">
                       {url.replace(/^https?:\/\//, '')}
-                      <span className="visually-hidden"> (opens in a new tab)</span>
+                      <span className="visually-hidden"> {t('(opens in a new tab)')}</span>
                     </a>
                     <CopyButton
                       text={url}
-                      label="Copy link"
-                      accessibleLabel={`Copy link for ${e.title}`}
+                      label={t('Copy link')}
+                      accessibleLabel={t('Copy link for {0}', { '0': e.title })}
                     />
                   </span>
                 ) : (
@@ -169,26 +179,26 @@ function EventTypeTable({
                     {e.ownerUserId === null
                       ? e.schedulingType === 'individual' && !isPublicTeamSlug(me.organization.slug)
                         ? TEAM_LINK_SLUG_HINT
-                        : 'No public booking link'
+                        : t('No public booking link')
                       : `/${e.slug}`}
                   </span>
                 )}
               </td>
-              <td data-label="Status">
-                {e.isHidden && <span className="badge">Unlisted</span>}
+              <td data-label={t('Status')}>
+                {e.isHidden && <span className="badge">{t('Unlisted')}</span>}
                 {e.isActive ? (
-                  <span className="badge badge-success">Active</span>
+                  <span className="badge badge-success">{t('Active')}</span>
                 ) : (
-                  <span className="badge">Inactive</span>
+                  <span className="badge">{t('Inactive')}</span>
                 )}
               </td>
               <td className="actions">
                 <Link
                   to={eventTypePath(e.id)}
                   className="button button-small"
-                  aria-label={`Edit ${e.title}`}
+                  aria-label={t('Edit {0}', { '0': e.title })}
                 >
-                  Edit
+                  {t('Edit')}
                 </Link>
               </td>
             </tr>

@@ -1,6 +1,8 @@
 // One searchable IANA picker for public slot selection and editable admin fields.
 import { type KeyboardEvent, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { isKnownTimeZone } from '../format.ts'
+import { useI18n } from '../i18n/runtime.tsx'
+import type { UiText } from '../i18n/translate.ts'
 import { availableTimeZones } from '../public/env.ts'
 import { currentZoneId, offsetLabel, zoneName } from '../public/time.ts'
 import type { ControlProps } from './forms.tsx'
@@ -12,7 +14,7 @@ interface TimeZonePickerProps {
   control?: ControlProps
   /** Otherwise show a toggle and a separate search field, for public slot selection. */
   now?: number
-  error?: string | undefined
+  error?: UiText | undefined
 }
 
 const MAX_SHOWN = 100
@@ -54,6 +56,8 @@ function zoneInfo(id: string, now: number): Zone {
 }
 
 export function TimeZonePicker({ value, onChange, control, now, error }: TimeZonePickerProps) {
+  const { t, ui } = useI18n()
+
   const editable = control !== undefined
   const id = useId()
   const [mountedAt] = useState(Date.now)
@@ -149,24 +153,24 @@ export function TimeZonePicker({ value, onChange, control, now, error }: TimeZon
             }
           }}
         >
-          <span className="tz-caption">Time zone</span>
+          <span className="tz-caption">{t('Time zone')}</span>
           <span className="tz-current">
             <span className="tz-name">{current?.name ?? zoneName(value)}</span>{' '}
             <span className="tz-offset">{current?.offset}</span>
           </span>
-          <span className="tz-change">{open ? 'Close' : 'Change'}</span>
+          <span className="tz-change">{open ? t('Close') : t('Change')}</span>
         </button>
       )}
       {error && (
         <p className="field-error" id={`${id}-error`}>
-          {error}
+          {ui(error)}
         </p>
       )}
       {(editable || open) && (
         <div className={editable ? undefined : 'tz-panel'} id={`${id}-panel`}>
           {!editable && (
             <label htmlFor={`${id}-search`} className="visually-hidden">
-              Search time zones
+              {t('Search time zones')}
             </label>
           )}
           <input
@@ -179,7 +183,7 @@ export function TimeZonePicker({ value, onChange, control, now, error }: TimeZon
             aria-controls={`${id}-options`}
             aria-autocomplete="list"
             aria-activedescendant={open && shown[active] ? optionId(active) : undefined}
-            placeholder={editable ? undefined : 'Search by city or offset'}
+            placeholder={editable ? undefined : t('Search by city or offset')}
             autoComplete="off"
             spellCheck={false}
             value={text}
@@ -204,7 +208,7 @@ export function TimeZonePicker({ value, onChange, control, now, error }: TimeZon
             className={editable ? 'combobox-list' : 'tz-options'}
             id={`${id}-options`}
             role="listbox"
-            aria-label="Time zones"
+            aria-label={t('Time zones')}
             ref={list}
             hidden={!open || shown.length === 0}
           >
@@ -230,16 +234,20 @@ export function TimeZonePicker({ value, onChange, control, now, error }: TimeZon
           </div>
           {!editable && (
             <p className="visually-hidden" role="status">
-              {matches.length === 1 ? '1 time zone' : `${matches.length} time zones`}
+              {matches.length === 1
+                ? t('1 time zone')
+                : t('{0} time zones', { '0': matches.length })}
             </p>
           )}
           {open && shown.length === 0 && (
             <div className={editable ? 'combobox-list combobox-empty' : 'muted tz-empty'}>
-              No time zone matches “{text}”.
+              {t('No time zone matches “{query}”.', { query: text })}
             </div>
           )}
           {editable && open && shown.length < matches.length && (
-            <p className="hint">Type to narrow down the {matches.length} time zones.</p>
+            <p className="hint">
+              {t('Type to narrow down the')} {matches.length} {t('time zones.')}
+            </p>
           )}
         </div>
       )}

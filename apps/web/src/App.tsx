@@ -1,5 +1,6 @@
 import { Suspense } from 'react'
 import { Navigate, Route, Routes } from 'react-router'
+import { useI18n } from './i18n/runtime.tsx'
 import {
   ApiKeysPage,
   AppShell,
@@ -36,11 +37,13 @@ import { PATHS } from './paths.ts'
  * kept: they are free for public pages.
  */
 export function App() {
+  const { t } = useI18n()
+
   return (
     <Suspense
       fallback={
         <div className="page-status" role="status">
-          Loading…
+          {t('Loading…')}
         </div>
       }
     >

@@ -4,6 +4,7 @@
 // onto the fields by bookingErrors below.
 import type { Schemas } from '../api/client.ts'
 import type { RequestError } from '../api/errors.ts'
+import { literal, msg, type UiText } from '../i18n/translate.ts'
 
 export type Question = Schemas['Question']
 export type Answer = string | string[] | boolean
@@ -46,17 +47,17 @@ export function isAllowedText(value: string, { multiline = false } = {}): boolea
 }
 
 /** An error message for a person's name, or null when it is fine. */
-export function nameError(value: string, who = 'your name'): string | null {
+export function nameError(value: string, who = 'your name'): UiText | null {
   const text = value.trim()
-  if (!text) return `Enter ${who}.`
-  if (text.length > LIMITS.name) return `Use at most ${LIMITS.name} characters.`
+  if (!text) return who === 'your name' ? 'Enter your name.' : 'Enter a name.'
+  if (text.length > LIMITS.name) return msg('Use at most {0} characters.', { '0': LIMITS.name })
   if (!isAllowedText(text)) return 'Use letters, digits and punctuation only, on one line.'
   return null
 }
 
 const EMAIL_HINT = 'Enter a valid email address, like name@example.com.'
 
-export function emailError(value: string): string | null {
+export function emailError(value: string): UiText | null {
   const text = value.trim()
   if (!text) return 'Enter an email address.'
   if (text.length > LIMITS.email || !EMAIL.test(text)) return EMAIL_HINT
@@ -64,7 +65,7 @@ export function emailError(value: string): string | null {
 }
 
 /** An error message for an answer, or null when it is fine (an empty optional answer is). */
-export function answerError(q: Question, value: Answer | undefined): string | null {
+export function answerError(q: Question, value: Answer | undefined): UiText | null {
   switch (q.type) {
     case 'short_text':
     case 'long_text':
@@ -72,7 +73,7 @@ export function answerError(q: Question, value: Answer | undefined): string | nu
       const text = typeof value === 'string' ? value.trim() : ''
       if (!text) return q.required ? 'This answer is required.' : null
       const max = LIMITS[q.type]
-      if (text.length > max) return `Use at most ${max} characters.`
+      if (text.length > max) return msg('Use at most {0} characters.', { '0': max })
       if (!isAllowedText(text, { multiline: q.type === 'long_text' })) {
         return q.type === 'long_text'
           ? 'Remove control characters from this answer.'
@@ -123,9 +124,9 @@ export function bookingLocale(locale: string): string | undefined {
   return locale.length <= LIMITS.locale && LOCALE.test(locale) ? locale : undefined
 }
 
-export function reasonError(value: string): string | null {
+export function reasonError(value: string): UiText | null {
   const text = value.trim()
-  if (text.length > LIMITS.reason) return `Use at most ${LIMITS.reason} characters.`
+  if (text.length > LIMITS.reason) return msg('Use at most {0} characters.', { '0': LIMITS.reason })
   if (!isAllowedText(text, { multiline: true })) return 'Remove control characters from the reason.'
   return null
 }
@@ -133,12 +134,12 @@ export function reasonError(value: string): string | null {
 // --- Mapping the API's answers onto the form ---------------------------------------------
 
 /** Field ids the booking form uses: name, email, timeZone, guests, guest-N-name/-email, q-<id>. */
-export type FieldErrors = Record<string, string>
+export type FieldErrors = Record<string, UiText>
 
 export interface MappedErrors {
   fields: FieldErrors
   /** A message for the form as a whole, when no field explains the problem. */
-  form: string | null
+  form: UiText | null
 }
 
 const questionField = (id: string) => `q-${id}`
@@ -161,7 +162,8 @@ export function bookingErrors(err: RequestError, questions: readonly Question[])
         if (path === 'invitee.name') fields.name = 'Enter your name, at most 200 characters.'
         else if (path === 'invitee.email') fields.email = EMAIL_HINT
         else if (path === 'invitee.timeZone') fields.timeZone = 'Choose a time zone from the list.'
-        else if (path === 'guests') fields.guests = `Add at most ${LIMITS.guests} guests.`
+        else if (path === 'guests')
+          fields.guests = msg('Add at most {0} guests.', { '0': LIMITS.guests })
         else if (guest) {
           fields[`guest-${guest[1]}-${guest[2]}`] =
             guest[2] === 'name' ? 'Enter a name, at most 200 characters.' : EMAIL_HINT
@@ -178,7 +180,7 @@ export function bookingErrors(err: RequestError, questions: readonly Question[])
       if (/name/i.test(message))
         fields.name = 'Enter your name on one line, at most 200 characters.'
       else if (/email/i.test(message)) fields.email = EMAIL_HINT
-      else return { fields, form: message }
+      else return { fields, form: literal(message) }
       return { fields, form: null }
     case 'guests_not_allowed':
       fields.guests = 'The host no longer allows guests. Remove the guests to continue.'
@@ -187,7 +189,7 @@ export function bookingErrors(err: RequestError, questions: readonly Question[])
     case 'too_many_guests':
       fields.guests =
         err.code === 'too_many_guests'
-          ? `Add at most ${LIMITS.guests} guests.`
+          ? msg('Add at most {0} guests.', { '0': LIMITS.guests })
           : /email/i.test(message)
             ? 'Each guest needs a valid email address.'
             : 'Each guest needs a name on one line, at most 200 characters.'
@@ -196,7 +198,7 @@ export function bookingErrors(err: RequestError, questions: readonly Question[])
       const id = /^Question "([^"]+)"/.exec(message)?.[1]
       const name = id === undefined ? undefined : label(id)
       if (id !== undefined && name !== undefined) {
-        fields[questionField(id)] = message.replace(/^Question "[^"]+"/, `“${name}”`)
+        fields[questionField(id)] = literal(message.replace(/^Question "[^"]+"/, `“${name}”`))
         return { fields, form: null }
       }
       return {
@@ -208,6 +210,6 @@ export function bookingErrors(err: RequestError, questions: readonly Question[])
       fields.timeZone = 'Choose a time zone from the list.'
       return { fields, form: null }
     default:
-      return { fields, form: message }
+      return { fields, form: literal(message) }
   }
 }

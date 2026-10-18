@@ -3,6 +3,8 @@
 // moves are announced, so the list works from the keyboard and with a screen reader.
 import { useEffect, useRef, useState } from 'react'
 import { Field, FieldError, type FieldErrors } from '../../components/forms.tsx'
+import { useI18n } from '../../i18n/runtime.tsx'
+import { msg, type UiText } from '../../i18n/translate.ts'
 import { QUESTIONS } from '../../limits.ts'
 import {
   isChoice,
@@ -27,8 +29,10 @@ export function QuestionsEditor({
   onChange: (questions: QuestionDraft[]) => void
   errors: FieldErrors
 }) {
+  const { t, ui } = useI18n()
+
   const [focus, setFocus] = useState<FocusTarget>(null)
-  const [announcement, setAnnouncement] = useState('')
+  const [announcement, setAnnouncement] = useState<UiText>('')
   const addButton = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
@@ -57,7 +61,12 @@ export function QuestionsEditor({
     // To the question that took its place, or the one before, or the add button.
     const next = rest[index] ?? rest[index - 1]
     setFocus(next ? questionField(next, 'label') : 'add-question')
-    setAnnouncement(`Removed question ${index + 1}${removed.label ? `, “${removed.label}”` : ''}.`)
+    setAnnouncement(
+      msg('Removed question {0}{1}.', {
+        '0': index + 1,
+        '1': removed.label ? `, “${removed.label}”` : '',
+      }),
+    )
   }
 
   function move(index: number, by: -1 | 1) {
@@ -73,7 +82,11 @@ export function QuestionsEditor({
     const button = by === -1 ? (atEnd ? 'down' : 'up') : atEnd ? 'up' : 'down'
     setFocus(`question-${moved.key}-move-${button}`)
     setAnnouncement(
-      `Moved ${moved.label ? `“${moved.label}”` : 'the question'} to position ${target + 1} of ${questions.length}.`,
+      msg('Moved {0} to position {1} of {2}.', {
+        '0': moved.label ? `“${moved.label}”` : msg('the question'),
+        '1': target + 1,
+        '2': questions.length,
+      }),
     )
   }
 
@@ -87,12 +100,14 @@ export function QuestionsEditor({
   return (
     <div className="questions">
       <p className="hint">
-        Invitees always give their name and email. Add questions for anything else you need to know,
-        up to {QUESTIONS.maxQuestions}.
+        {t(
+          'Invitees always give their name and email. Add questions for anything else you need to know, up to',
+        )}{' '}
+        {QUESTIONS.maxQuestions}.
       </p>
       {listError && <FieldError id="questions-error">{listError}</FieldError>}
       {questions.length === 0 ? (
-        <p className="muted">No extra questions.</p>
+        <p className="muted">{t('No extra questions.')}</p>
       ) : (
         <ol className="question-list">
           {questions.map((q, index) => (
@@ -120,10 +135,10 @@ export function QuestionsEditor({
         onClick={add}
         disabled={questions.length >= QUESTIONS.maxQuestions}
       >
-        Add a question
+        {t('Add a question')}
       </button>
       <p className="visually-hidden" role="status">
-        {announcement}
+        {ui(announcement)}
       </p>
     </div>
   )
@@ -150,8 +165,12 @@ function QuestionCard({
   onRemove: () => void
   setFocus: (id: FocusTarget) => void
 }) {
+  const { t, ui } = useI18n()
+
   const number = index + 1
-  const name = q.label.trim() ? `question ${number}, “${q.label.trim()}”` : `question ${number}`
+  const name = q.label.trim()
+    ? t('question {number}, “{label}”', { number, label: q.label.trim() })
+    : t('question {number}', { number })
   const legendId = `question-${q.key}-legend`
   const optionsError = errors[questionField(q, 'options')]
 
@@ -171,13 +190,13 @@ function QuestionCard({
   return (
     <fieldset className="question-card" aria-labelledby={legendId}>
       <legend id={legendId} className="question-legend">
-        Question {number}
+        {t('Question')} {number}
       </legend>
       <div className="question-fields">
         <Field
           id={questionField(q, 'label')}
-          label="Question"
-          error={errors[questionField(q, 'label')]}
+          label={t('Question')}
+          error={ui(errors[questionField(q, 'label')])}
         >
           {(props) => (
             <input
@@ -190,8 +209,8 @@ function QuestionCard({
         </Field>
         <Field
           id={questionField(q, 'type')}
-          label="Answer type"
-          error={errors[questionField(q, 'type')]}
+          label={t('Answer type')}
+          error={ui(errors[questionField(q, 'type')])}
         >
           {(props) => (
             <select
@@ -201,7 +220,7 @@ function QuestionCard({
             >
               {QUESTION_TYPES.map((t) => (
                 <option key={t.value} value={t.value}>
-                  {t.label}
+                  {ui(t.label)}
                 </option>
               ))}
             </select>
@@ -214,7 +233,7 @@ function QuestionCard({
           checked={q.required}
           onChange={(e) => onUpdate({ required: e.target.checked })}
         />
-        {q.type === 'checkbox' ? 'Must be ticked to book' : 'Required'}
+        {q.type === 'checkbox' ? t('Must be ticked to book') : t('Required')}
       </label>
 
       {isChoice(q.type) && (
@@ -226,7 +245,7 @@ function QuestionCard({
           aria-describedby={optionsError ? `${questionField(q, 'options')}-error` : undefined}
         >
           <p id={`question-${q.key}-options-label`} className="options-label">
-            Options for question {number}
+            {t('Options for question')} {number}
           </p>
           {optionsError && (
             <FieldError id={`${questionField(q, 'options')}-error`}>{optionsError}</FieldError>
@@ -238,9 +257,9 @@ function QuestionCard({
               return (
                 <li key={o.key} className={`option${error ? ' field-invalid' : ''}`}>
                   <label htmlFor={id} className="visually-hidden">
-                    Option {optionIndex + 1} of question {number}
+                    {t('Option')} {optionIndex + 1} {t('of question')} {number}
                   </label>
-                  {error && <FieldError id={`${id}-error`}>{error}</FieldError>}
+                  {error && <FieldError id={`${id}-error`}>{ui(error)}</FieldError>}
                   <div className="option-row">
                     <input
                       id={id}
@@ -260,9 +279,13 @@ function QuestionCard({
                       type="button"
                       className="button button-small"
                       onClick={() => removeOption(optionIndex)}
-                      aria-label={`Remove option ${optionIndex + 1}${o.text.trim() ? `, “${o.text.trim()}”` : ''}, of question ${number}`}
+                      aria-label={t('Remove option {0}{1}, of question {2}', {
+                        '0': optionIndex + 1,
+                        '1': o.text.trim() ? `, “${o.text.trim()}”` : '',
+                        '2': number,
+                      })}
                     >
-                      Remove
+                      {t('Remove')}
                     </button>
                   </div>
                 </li>
@@ -276,7 +299,7 @@ function QuestionCard({
             onClick={addOption}
             disabled={q.options.length >= QUESTIONS.maxOptions}
           >
-            Add an option
+            {t('Add an option')}
           </button>
         </div>
       )}
@@ -288,9 +311,9 @@ function QuestionCard({
           className="button button-small"
           onClick={() => onMove(-1)}
           disabled={index === 0}
-          aria-label={`Move up: ${name}`}
+          aria-label={t('Move up: {0}', { '0': name })}
         >
-          Move up
+          {t('Move up')}
         </button>
         <button
           id={`question-${q.key}-move-down`}
@@ -298,17 +321,17 @@ function QuestionCard({
           className="button button-small"
           onClick={() => onMove(1)}
           disabled={index === count - 1}
-          aria-label={`Move down: ${name}`}
+          aria-label={t('Move down: {0}', { '0': name })}
         >
-          Move down
+          {t('Move down')}
         </button>
         <button
           type="button"
           className="button button-small"
           onClick={onRemove}
-          aria-label={`Remove question: ${name}`}
+          aria-label={t('Remove question: {0}', { '0': name })}
         >
-          Remove question
+          {t('Remove question')}
         </button>
       </div>
     </fieldset>

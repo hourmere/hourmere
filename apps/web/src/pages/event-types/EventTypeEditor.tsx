@@ -16,6 +16,8 @@ import { ErrorSummary, Field, type FieldErrors, parseWhole } from '../../compone
 import { flash } from '../../flash.ts'
 import { formatMinutes } from '../../format.ts'
 import { useLoad, useMounted, usePageTitle } from '../../hooks.ts'
+import { useI18n } from '../../i18n/runtime.tsx'
+import { msg, type UiText } from '../../i18n/translate.ts'
 import { EVENT_TYPE, RULES } from '../../limits.ts'
 import { PATHS, publicPageUrl, publicTeamPageUrl, TEAM_LINK_SLUG_HINT } from '../../paths.ts'
 import { type Me, useMe } from '../../session.tsx'
@@ -50,6 +52,8 @@ export function EventTypeEditorPage() {
 }
 
 function EventTypeEditor({ id }: { id: string | undefined }) {
+  const { t, ui } = useI18n()
+
   const load = useCallback(
     async (signal: AbortSignal): Promise<Loaded | 'missing'> => {
       const [eventType, schedules, profile] = await Promise.all([
@@ -72,15 +76,17 @@ function EventTypeEditor({ id }: { id: string | undefined }) {
   const [state, reload] = useLoad(load)
   usePageTitle(id === undefined ? 'New event type' : 'Edit event type')
 
-  if (state.status === 'loading') return <p role="status">Loading…</p>
+  if (state.status === 'loading') return <p role="status">{t('Loading…')}</p>
   if (state.status === 'error') {
     return (
       <>
-        <h1>{id === undefined ? 'New event type' : 'Edit event type'}</h1>
+        <h1>{id === undefined ? t('New event type') : t('Edit event type')}</h1>
         <div className="alert alert-error" role="alert">
-          <p>Could not load the event type. {state.message}</p>
+          <p>
+            {t('Could not load the event type.')} {ui(state.message)}
+          </p>
           <button type="button" className="button button-small" onClick={reload}>
-            Try again
+            {t('Try again')}
           </button>
         </div>
       </>
@@ -89,7 +95,7 @@ function EventTypeEditor({ id }: { id: string | undefined }) {
   if (state.data === 'missing') {
     return (
       <MissingRecord
-        title="Event type not found"
+        title={t('Event type not found')}
         message="This event type does not exist, or it was deleted."
         back={{ to: PATHS.eventTypes, label: 'Back to event types' }}
       />
@@ -99,6 +105,8 @@ function EventTypeEditor({ id }: { id: string | undefined }) {
 }
 
 function EventTypeForm({ eventType, schedules, profile }: Loaded) {
+  const { t, ui, locale: displayLocale } = useI18n()
+
   const me = useMe()
   const navigate = useNavigate()
   const [saved, setSaved] = useState<EventType | null>(eventType)
@@ -109,10 +117,10 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
   // On a new event type the slug follows the title until it is edited by hand.
   const [slugTouched, setSlugTouched] = useState(eventType !== null)
   const [errors, setErrors] = useState<FieldErrors>({})
-  const [formError, setFormError] = useState<string | null>(null)
+  const [formError, setFormError] = useState<UiText | null>(null)
   const [attempt, setAttempt] = useState(0)
   const [saving, setSaving] = useState(false)
-  const [status, setStatus] = useState('')
+  const [status, setStatus] = useState<UiText>('')
   const statusRef = useRef<HTMLParagraphElement>(null)
   const mounted = useMounted()
 
@@ -120,7 +128,7 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
   useUnsavedChanges(dirty)
 
   const editing = saved !== null
-  const title = editing ? `Edit “${saved.title}”` : 'New event type'
+  const title = editing ? msg('Edit “{0}”', { '0': saved.title }) : 'New event type'
 
   function set<K extends keyof EventTypeDraft>(name: K, value: EventTypeDraft[K]) {
     setDraft((d) => ({ ...d, [name]: value }))
@@ -159,7 +167,7 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
         // Left meanwhile: don't pull the person away from the page they are on now.
         if (!mounted.current) return
         setBaseline(draft)
-        navigate(PATHS.eventTypes, { state: flash(`Created “${created.title}”.`) })
+        navigate(PATHS.eventTypes, { state: flash(msg('Created “{0}”.', { '0': created.title })) })
         return
       }
     } catch (err) {
@@ -170,7 +178,7 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
       setFormError(
         Object.keys(mapped.fields).length > 0
           ? null
-          : `Could not save the event type. ${mapped.message ?? errorMessage(err)}`,
+          : msg('Could not save the event type. {0}', { '0': mapped.message ?? errorMessage(err) }),
       )
       setAttempt((n) => n + 1)
     }
@@ -182,7 +190,7 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
     await unwrap(api.DELETE('/api/v1/event-types/{id}', { params: { path: { id: saved.id } } }))
     if (!mounted.current) return
     setBaseline(draft)
-    navigate(PATHS.eventTypes, { state: flash(`Deleted “${saved.title}”.`) })
+    navigate(PATHS.eventTypes, { state: flash(msg('Deleted “{0}”.', { '0': saved.title })) })
   }
 
   const slugPreview = bookingLinkPreview(me, profile, draft.slug.trim(), saved?.schedulingType)
@@ -191,22 +199,27 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
   return (
     <>
       <p className="breadcrumb">
-        <Link to={PATHS.eventTypes}>Event types</Link>
+        <Link to={PATHS.eventTypes}>{t('Event types')}</Link>
       </p>
-      <h1>{title}</h1>
+      <h1>{ui(title)}</h1>
       <form className="editor" onSubmit={submit} noValidate>
         <ErrorSummary
           errors={errors}
           labels={fieldLabels(draft)}
-          message={formError}
+          message={ui(formError)}
           attempt={attempt}
         />
 
         <fieldset className="form-fieldset" disabled={saving} role="presentation">
           <section className="panel" aria-labelledby="basics-heading">
-            <h2 id="basics-heading">Basics</h2>
+            <h2 id="basics-heading">{t('Basics')}</h2>
             <div className="stack">
-              <Field id="title" label="Title" error={errors.title} hint="For example “Intro call”.">
+              <Field
+                id="title"
+                label={t('Title')}
+                error={errors.title}
+                hint={t('For example “Intro call”.')}
+              >
                 {(props) => (
                   <input
                     {...props}
@@ -226,11 +239,11 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
               </Field>
               <Field
                 id="slug"
-                label="Booking link"
+                label={t('Booking link')}
                 error={errors.slug}
                 hint={
                   <>
-                    Lowercase letters, digits and hyphens.{' '}
+                    {t('Lowercase letters, digits and hyphens.')}{' '}
                     <span className="mono preview">{slugPreview}</span>
                   </>
                 }
@@ -252,10 +265,10 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
               </Field>
               <Field
                 id="description"
-                label="Description"
+                label={t('Description')}
                 optional
                 error={errors.description}
-                hint="Shown on the booking page. Line breaks are kept."
+                hint={t('Shown on the booking page. Line breaks are kept.')}
               >
                 {(props) => (
                   <textarea
@@ -269,7 +282,7 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
               <div className="field-grid">
                 <MinutesField
                   id="durationMinutes"
-                  label="Duration"
+                  label={t('Duration')}
                   value={draft.durationMinutes}
                   error={errors.durationMinutes}
                   onChange={(v) => set('durationMinutes', v)}
@@ -277,9 +290,9 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
                 />
                 <Field
                   id="position"
-                  label="Position"
+                  label={t('Position')}
                   error={errors.position}
-                  hint="Lower numbers come first on your booking page."
+                  hint={t('Lower numbers come first on your booking page.')}
                 >
                   {(props) => (
                     <input
@@ -297,7 +310,7 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
                   checked={draft.isActive}
                   onChange={(e) => set('isActive', e.target.checked)}
                 />
-                Active: invitees can book it
+                {t('Active: invitees can book it')}
               </label>
               <label className="checkbox">
                 <input
@@ -306,21 +319,21 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
                   onChange={(e) => set('isHidden', e.target.checked)}
                   aria-describedby="hidden-hint"
                 />
-                Hide from your booking page
+                {t('Hide from your booking page')}
               </label>
               <p className="hint" id="hidden-hint">
-                Anyone with the direct link can still book it. This does not restrict access.
+                {t('Anyone with the direct link can still book it. This does not restrict access.')}
               </p>
             </div>
           </section>
 
           <section className="panel" aria-labelledby="location-heading">
-            <h2 id="location-heading">Location</h2>
+            <h2 id="location-heading">{t('Location')}</h2>
             <LocationFields draft={draft} errors={errors} set={set} />
           </section>
 
           <section className="panel" aria-labelledby="questions-heading">
-            <h2 id="questions-heading">Booking form</h2>
+            <h2 id="questions-heading">{t('Booking form')}</h2>
             <label className="checkbox">
               <input
                 type="checkbox"
@@ -328,11 +341,12 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
                 onChange={(e) => set('allowGuests', e.target.checked)}
                 aria-describedby="guests-hint"
               />
-              Allow invitees to add guests
+              {t('Allow invitees to add guests')}
             </label>
             <p className="hint" id="guests-hint">
-              Guests receive confirmation emails and calendar invitations. Off by default; changing
-              this does not remove guests from existing bookings.
+              {t(
+                'Guests receive confirmation emails and calendar invitations. Off by default; changing this does not remove guests from existing bookings.',
+              )}
             </p>
             <QuestionsEditor
               questions={draft.questions}
@@ -342,22 +356,22 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
           </section>
 
           <section className="panel" aria-labelledby="rules-heading">
-            <h2 id="rules-heading">When people can book</h2>
+            <h2 id="rules-heading">{t('When people can book')}</h2>
             <div className="stack">
               <Field
                 id="scheduleId"
-                label="Schedule"
+                label={t('Schedule')}
                 error={errors.scheduleId}
                 hint={
                   schedules.length === 0 ? (
                     <>
-                      You have no schedule yet, so no times are offered.{' '}
-                      <Link to={PATHS.newSchedule}>Set your availability</Link>.
+                      {t('You have no schedule yet, so no times are offered.')}{' '}
+                      <Link to={PATHS.newSchedule}>{t('Set your availability')}</Link>.
                     </>
                   ) : (
                     <>
-                      The weekly hours times are offered in.{' '}
-                      <Link to={PATHS.availability}>Manage schedules</Link>
+                      {t('The weekly hours times are offered in.')}{' '}
+                      <Link to={PATHS.availability}>{t('Manage schedules')}</Link>
                     </>
                   )
                 }
@@ -369,7 +383,7 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
                     onChange={(e) => set('scheduleId', e.target.value)}
                   >
                     <option value="">
-                      Your default schedule
+                      {t('Your default schedule')}
                       {defaultName(schedules) ? ` (${defaultName(schedules)})` : ''}
                     </option>
                     {schedules.map((s) => (
@@ -378,7 +392,9 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
                       </option>
                     ))}
                     {draft.scheduleId && !schedules.some((s) => s.id === draft.scheduleId) && (
-                      <option value={draft.scheduleId}>A schedule that no longer exists</option>
+                      <option value={draft.scheduleId}>
+                        {t('A schedule that no longer exists')}
+                      </option>
                     )}
                   </select>
                 )}
@@ -386,19 +402,21 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
               <div className="field-grid">
                 <MinutesField
                   id="slotStepMinutes"
-                  label="Start times every"
+                  label={t('Start times every')}
                   optional
                   value={draft.slotStepMinutes}
                   error={errors.slotStepMinutes}
                   onChange={(v) => set('slotStepMinutes', v)}
                   rule={RULES.slotStepMinutes}
                   empty={
-                    duration ? `every ${formatMinutes(duration)} (the duration)` : 'the duration'
+                    duration
+                      ? `every ${formatMinutes(duration, displayLocale)} (the duration)`
+                      : t('the duration')
                   }
                 />
                 <MinutesField
                   id="minimumNoticeMinutes"
-                  label="Minimum notice"
+                  label={t('Minimum notice')}
                   value={draft.minimumNoticeMinutes}
                   error={errors.minimumNoticeMinutes}
                   onChange={(v) => set('minimumNoticeMinutes', v)}
@@ -407,10 +425,13 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
                 />
                 <Field
                   id="bookingWindowDays"
-                  label="Booking window"
+                  label={t('Booking window')}
                   optional
                   error={errors.bookingWindowDays}
-                  hint={`Days ahead people can book, ${RULES.bookingWindowDays.min}–${RULES.bookingWindowDays.max}. Empty: no limit.`}
+                  hint={t('Days ahead people can book, {0}–{1}. Empty: no limit.', {
+                    '0': RULES.bookingWindowDays.min,
+                    '1': RULES.bookingWindowDays.max,
+                  })}
                 >
                   {(props) => (
                     <input
@@ -423,10 +444,13 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
                 </Field>
                 <Field
                   id="maxBookingsPerDay"
-                  label="Daily limit"
+                  label={t('Daily limit')}
                   optional
                   error={errors.maxBookingsPerDay}
-                  hint={`Bookings per day, ${RULES.maxBookingsPerDay.min}–${RULES.maxBookingsPerDay.max}. Empty: no limit.`}
+                  hint={t('Bookings per day, {0}–{1}. Empty: no limit.', {
+                    '0': RULES.maxBookingsPerDay.min,
+                    '1': RULES.maxBookingsPerDay.max,
+                  })}
                 >
                   {(props) => (
                     <input
@@ -439,7 +463,7 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
                 </Field>
                 <MinutesField
                   id="bufferBeforeMinutes"
-                  label="Buffer before"
+                  label={t('Buffer before')}
                   value={draft.bufferBeforeMinutes}
                   error={errors.bufferBeforeMinutes}
                   onChange={(v) => set('bufferBeforeMinutes', v)}
@@ -448,7 +472,7 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
                 />
                 <MinutesField
                   id="bufferAfterMinutes"
-                  label="Buffer after"
+                  label={t('Buffer after')}
                   value={draft.bufferAfterMinutes}
                   error={errors.bufferAfterMinutes}
                   onChange={(v) => set('bufferAfterMinutes', v)}
@@ -462,30 +486,31 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
 
         <div className="form-actions">
           <button type="submit" className="button button-primary" disabled={saving}>
-            {saving ? 'Saving…' : editing ? 'Save changes' : 'Create event type'}
+            {saving ? t('Saving…') : editing ? t('Save changes') : t('Create event type')}
           </button>
           <Link to={PATHS.eventTypes} className="button">
-            {editing ? 'Back to event types' : 'Cancel'}
+            {editing ? t('Back to event types') : t('Cancel')}
           </Link>
           <p className="form-status" role="status" tabIndex={-1} ref={statusRef}>
-            {status || (dirty && editing ? 'Unsaved changes' : '')}
+            {ui(status || (dirty && editing ? 'Unsaved changes' : ''))}
           </p>
         </div>
       </form>
 
       {saved && (
         <section className="panel panel-danger" aria-labelledby="delete-heading">
-          <h2 id="delete-heading">Delete this event type</h2>
+          <h2 id="delete-heading">{t('Delete this event type')}</h2>
           <p>
-            Its booking link stops working at once. Bookings already made are kept, and you can
-            still see them under Bookings.
+            {t(
+              'Its booking link stops working at once. Bookings already made are kept, and you can still see them under Bookings.',
+            )}
           </p>
           <ConfirmAction
-            label="Delete event type"
-            prompt={`Delete “${saved.title}”? This cannot be undone.`}
-            confirmLabel="Delete event type"
-            busyLabel="Deleting…"
-            failure="Could not delete the event type."
+            label={t('Delete event type')}
+            prompt={t('Delete “{0}”? This cannot be undone.', { '0': saved.title })}
+            confirmLabel={t('Delete event type')}
+            busyLabel={t('Deleting…')}
+            failure={t('Could not delete the event type.')}
             onConfirm={remove}
           />
         </section>
@@ -527,7 +552,7 @@ function MinutesField({
   id: string
   label: string
   value: string
-  error: string | undefined
+  error: UiText | undefined
   onChange: (value: string) => void
   rule: { min: number; max: number }
   optional?: boolean
@@ -535,22 +560,24 @@ function MinutesField({
   empty?: string
   extra?: string
 }) {
+  const { t, ui, locale: displayLocale } = useI18n()
+
   const minutes = parseWhole(value)
   const amount =
     minutes === null
       ? optional && empty
-        ? `Empty: ${empty}.`
+        ? msg('Empty: {0}.', { '0': empty })
         : ''
       : Number.isSafeInteger(minutes) && minutes >= 60
-        ? `= ${formatMinutes(minutes)}.`
+        ? `= ${formatMinutes(minutes, displayLocale)}.`
         : ''
   return (
     <Field
       id={id}
-      label={`${label} (minutes)`}
+      label={t('{0} (minutes)', { '0': label })}
       optional={optional}
-      error={error}
-      hint={`${extra ? `${extra} ` : ''}${rule.min}–${rule.max.toLocaleString('en')}. ${amount}`.trim()}
+      error={ui(error)}
+      hint={`${extra ? `${extra} ` : ''}${rule.min}–${rule.max.toLocaleString('en')}. ${ui(amount)}`.trim()}
     >
       {(props) => (
         <input
@@ -573,9 +600,15 @@ function LocationFields({
   errors: FieldErrors
   set: <K extends keyof EventTypeDraft>(name: K, value: EventTypeDraft[K]) => void
 }) {
+  const { t, ui } = useI18n()
+
   return (
     <div className="stack">
-      <Field id="location-kind" label="Where the meeting happens" error={errors['location-kind']}>
+      <Field
+        id="location-kind"
+        label={t('Where the meeting happens')}
+        error={ui(errors['location-kind'])}
+      >
         {(props) => (
           <select
             {...props}
@@ -584,7 +617,7 @@ function LocationFields({
           >
             {LOCATION_KINDS.map((k) => (
               <option key={k.value} value={k.value}>
-                {k.label}
+                {ui(k.label)}
               </option>
             ))}
           </select>
@@ -593,9 +626,9 @@ function LocationFields({
       {draft.locationKind === 'phone' && (
         <Field
           id="location-phone"
-          label="Your phone number"
-          error={errors['location-phone']}
-          hint="In international format, e.g. +14155550123. Invitees see it after booking."
+          label={t('Your phone number')}
+          error={ui(errors['location-phone'])}
+          hint={t('In international format, e.g. +14155550123. Invitees see it after booking.')}
         >
           {(props) => (
             <input
@@ -611,9 +644,9 @@ function LocationFields({
       {draft.locationKind === 'in_person' && (
         <Field
           id="location-address"
-          label="Address"
-          error={errors['location-address']}
-          hint={`Up to ${EVENT_TYPE.addressMaxLength} characters on one line.`}
+          label={t('Address')}
+          error={ui(errors['location-address'])}
+          hint={t('Up to {0} characters on one line.', { '0': EVENT_TYPE.addressMaxLength })}
         >
           {(props) => (
             <input
@@ -628,9 +661,9 @@ function LocationFields({
       {draft.locationKind === 'link' && (
         <Field
           id="location-url"
-          label="Meeting link"
-          error={errors['location-url']}
-          hint="An https:// or http:// link, e.g. to your video room."
+          label={t('Meeting link')}
+          error={ui(errors['location-url'])}
+          hint={t('An https:// or http:// link, e.g. to your video room.')}
         >
           {(props) => (
             <input

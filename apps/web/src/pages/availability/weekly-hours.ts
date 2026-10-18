@@ -1,3 +1,4 @@
+import type { InterfaceLanguage } from '@hourmere/core/language'
 // Schedules in the form: weekly hours as days with intervals, checked with the availability
 // engine's rules (packages/core: "HH:MM" times, end after start, no overlaps within a day;
 // touching intervals are fine, the server joins them).
@@ -9,6 +10,14 @@ import { RequestError } from '../../api/errors.ts'
 import type { Schedule } from '../../api/resources.ts'
 import type { FieldErrors } from '../../components/forms.tsx'
 import { isKnownTimeZone } from '../../format.ts'
+import {
+  joinMessages,
+  literal,
+  type MessageKey,
+  msg,
+  translateMessage,
+  type UiText,
+} from '../../i18n/translate.ts'
 import { SCHEDULE } from '../../limits.ts'
 import { singleLineProblem } from '../../text.ts'
 
@@ -130,16 +139,17 @@ export function validateIntervals(
     parsed.push({ start, end, label: `${i.start}–${toApiTime(i.end, true)}` })
   }
   parsed.sort((a, b) => a.start - b.start)
-  const overlaps: string[] = []
+  const overlaps: UiText[] = []
   // Each range against the one reaching furthest so far, which any overlap must hit.
   let furthest: (typeof parsed)[number] | undefined
   for (const current of parsed) {
     if (furthest && current.start < furthest.end) {
-      overlaps.push(`${furthest.label} and ${current.label}`)
+      overlaps.push(msg('{first} and {second}', { first: furthest.label, second: current.label }))
     }
     if (!furthest || current.end > furthest.end) furthest = current
   }
-  if (overlaps.length) errors[prefix] = `These hours overlap: ${overlaps.join('; ')}.`
+  if (overlaps.length)
+    errors[prefix] = msg('These hours overlap: {0}.', { '0': joinMessages(overlaps) })
   return errors
 }
 
@@ -177,13 +187,19 @@ export function toScheduleBody(draft: ScheduleDraft) {
 }
 
 /** Labels for the error summary, by field id. */
-export function scheduleLabels(draft: ScheduleDraft): Record<string, string> {
-  const labels: Record<string, string> = { name: 'Name', timeZone: 'Time zone' }
+export function scheduleLabels(draft: ScheduleDraft): Record<string, UiText> {
+  const labels: Record<string, UiText> = { name: 'Name', timeZone: 'Time zone' }
   for (const { day, label } of WEEKDAYS) {
     labels[dayField(day)] = label
     draft.days[day].intervals.forEach((i, n) => {
-      labels[intervalField(dayField(day), i, 'start')] = `${label}, hours ${n + 1}, from`
-      labels[intervalField(dayField(day), i, 'end')] = `${label}, hours ${n + 1}, until`
+      labels[intervalField(dayField(day), i, 'start')] = msg('{label}, hours {count}, from', {
+        label: msg(label as MessageKey),
+        count: n + 1,
+      })
+      labels[intervalField(dayField(day), i, 'end')] = msg('{label}, hours {count}, until', {
+        label: msg(label as MessageKey),
+        count: n + 1,
+      })
     })
   }
   return labels
@@ -192,7 +208,7 @@ export function scheduleLabels(draft: ScheduleDraft): Record<string, string> {
 /** The server's refusal as field messages (codes documented on the schedule routes). */
 export function scheduleServerErrors(err: unknown): {
   fields: FieldErrors
-  message: string | null
+  message: UiText | null
 } {
   if (!(err instanceof RequestError)) return { fields: {}, message: null }
   const detail = err.message
@@ -200,7 +216,7 @@ export function scheduleServerErrors(err: unknown): {
     case 'invalid_schedule':
       return /^name\b/.test(detail)
         ? { fields: { name: 'Use one line of up to 100 characters.' }, message: null }
-        : { fields: {}, message: detail }
+        : { fields: {}, message: literal(detail) }
     case 'invalid_time_zone':
       return {
         fields: { timeZone: 'This is not a time zone the server knows. Choose one from the list.' },
@@ -209,24 +225,28 @@ export function scheduleServerErrors(err: unknown): {
     case 'invalid_weekly_hours': {
       // "weeklyHours.monday has overlapping intervals 09:00–12:00 and 11:00–13:00", …
       const day = /^weeklyHours\.(\w+)/.exec(detail)?.[1] as Weekday | undefined
-      if (!day || !WEEKDAYS.some((w) => w.day === day)) return { fields: {}, message: detail }
+      if (!day || !WEEKDAYS.some((w) => w.day === day))
+        return { fields: {}, message: literal(detail) }
       const overlap = /overlapping intervals (.+)$/.exec(detail)?.[1]
       return {
         fields: {
           [dayField(day)]: overlap
-            ? `These hours overlap: ${overlap}.`
+            ? msg('These hours overlap: {0}.', { '0': overlap })
             : 'Check these hours: each must end after it starts.',
         },
         message: null,
       }
     }
     default:
-      return { fields: {}, message: detail }
+      return { fields: {}, message: literal(detail) }
   }
 }
 
 /** "Mon–Fri 09:00–17:00 · Sat 10:00–12:00", or "No hours set". */
-export function summarize(weeklyHours: Schemas['WeeklyHours']): string {
+export function summarize(
+  weeklyHours: Schemas['WeeklyHours'],
+  locale: InterfaceLanguage = 'en',
+): string {
   const groups: { from: string; to: string; hours: string }[] = []
   for (const { day, short } of WEEKDAYS) {
     const hours = (weeklyHours[day] ?? []).map((i) => `${i.start}–${i.end}`).join(', ')
@@ -234,9 +254,12 @@ export function summarize(weeklyHours: Schemas['WeeklyHours']): string {
     if (hours && last && last.hours === hours && last.to === previousShort(short)) last.to = short
     else if (hours) groups.push({ from: short, to: short, hours })
   }
-  if (!groups.length) return 'No hours set'
+  if (!groups.length) return translateMessage(locale, 'No hours set')
   return groups
-    .map((g) => `${g.from === g.to ? g.from : `${g.from}–${g.to}`} ${g.hours}`)
+    .map(
+      (g) =>
+        `${g.from === g.to ? translateMessage(locale, g.from) : `${translateMessage(locale, g.from)}–${translateMessage(locale, g.to)}`} ${g.hours}`,
+    )
     .join(' · ')
 }
 

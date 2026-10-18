@@ -56,7 +56,7 @@ describe('MCP connection approval', () => {
         })
       renderApp(`/oauth/consent?${query}#intent=00000000-0000-7000-8000-000000000004`)
       await screen.findByText('Team Alpha')
-      expect(screen.queryByRole('combobox')).toBeNull()
+      expect(screen.queryByRole('combobox', { name: 'Organization to connect' })).toBeNull()
       expect(api.to('POST /api/v1/mcp-oauth/request')[0]?.body).toEqual({
         oauthQuery: query,
         intentId: '00000000-0000-7000-8000-000000000004',

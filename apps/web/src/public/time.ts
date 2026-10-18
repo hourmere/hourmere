@@ -178,7 +178,12 @@ export function zoneName(timeZone: string): string {
 }
 
 /** `30 min`, `1 h`, `1 h 30 min`. */
-export function formatDuration(minutes: number): string {
+export function formatDuration(minutes: number, locale = 'en'): string {
+  if (locale.startsWith('zh')) {
+    const hours = Math.floor(minutes / 60),
+      rest = minutes % 60
+    return hours ? `${hours} 小时${rest ? ` ${rest} 分钟` : ''}` : `${minutes} 分钟`
+  }
   if (minutes < 60) return `${minutes} min`
   const hours = Math.floor(minutes / 60)
   const rest = minutes % 60

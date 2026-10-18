@@ -1,6 +1,8 @@
 // The hours of one day (a weekday or a date override): time ranges to add and remove.
 import { useEffect, useState } from 'react'
 import { FieldError, type FieldErrors } from '../../components/forms.tsx'
+import { useI18n } from '../../i18n/runtime.tsx'
+import type { UiText } from '../../i18n/translate.ts'
 import { type IntervalDraft, intervalDraft, intervalField } from './weekly-hours.ts'
 
 /** A range after the last one, or 9 to 5 for the first. */
@@ -30,6 +32,8 @@ export function IntervalsEditor({
   onChange: (intervals: IntervalDraft[]) => void
   errors: FieldErrors
 }) {
+  const { t, ui } = useI18n()
+
   const [focus, setFocus] = useState<string | null>(null)
 
   useEffect(() => {
@@ -61,7 +65,7 @@ export function IntervalsEditor({
   return (
     <div className="intervals">
       {dayError && <FieldError id={`${prefix}-error`}>{dayError}</FieldError>}
-      {intervals.length === 0 && <p className="muted">No hours: unavailable.</p>}
+      {intervals.length === 0 && <p className="muted">{t('No hours: unavailable.')}</p>}
       {intervals.length > 0 && (
         <ul className="interval-list">
           {intervals.map((interval, index) => {
@@ -69,15 +73,16 @@ export function IntervalsEditor({
             const endId = intervalField(prefix, interval, 'end')
             const startError = errors[startId]
             const endError = errors[endId]
-            const name = `${label}, hours ${index + 1}`
-            const describe = (id: string, error: string | undefined) =>
+            const name = t('{label}, hours {count}', { label: ui(label), count: index + 1 })
+            const describe = (id: string, error: UiText | undefined) =>
               [error && `${id}-error`, dayError && `${prefix}-error`].filter(Boolean).join(' ') ||
               undefined
             return (
               <li key={interval.key} className="interval">
                 <div className="interval-row">
                   <label htmlFor={startId} className="visually-hidden">
-                    {name}, from
+                    {name}
+                    {t(', from')}
                   </label>
                   <input
                     id={startId}
@@ -91,7 +96,8 @@ export function IntervalsEditor({
                   />
                   <span aria-hidden="true">–</span>
                   <label htmlFor={endId} className="visually-hidden">
-                    {name}, until
+                    {name}
+                    {t(', until')}
                   </label>
                   <input
                     id={endId}
@@ -107,9 +113,9 @@ export function IntervalsEditor({
                     type="button"
                     className="button button-small"
                     onClick={() => remove(index)}
-                    aria-label={`Remove ${name}`}
+                    aria-label={t('Remove {0}', { '0': name })}
                   >
-                    Remove
+                    {t('Remove')}
                   </button>
                 </div>
                 {startError && <FieldError id={`${startId}-error`}>{startError}</FieldError>}
@@ -124,9 +130,9 @@ export function IntervalsEditor({
         type="button"
         className="button button-small"
         onClick={add}
-        aria-label={`Add hours on ${label}`}
+        aria-label={t('Add hours on {0}', { '0': ui(label) })}
       >
-        Add hours
+        {t('Add hours')}
       </button>
     </div>
   )

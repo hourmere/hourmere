@@ -1,6 +1,8 @@
 import { type FormEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import { usePageTitle } from '../hooks.ts'
+import { useI18n } from '../i18n/runtime.tsx'
+import { msg, type UiText } from '../i18n/translate.ts'
 import { ManageLink } from './AddToCalendar.tsx'
 import {
   cancelManagedBooking,
@@ -69,15 +71,17 @@ export function ManageBookingPage() {
 }
 
 function NoToken() {
+  const { t } = useI18n()
+
   usePageTitle('Your booking')
   return (
     <PublicLayout>
       <div className="card public-card">
-        <h1>Open your booking link</h1>
+        <h1>{t('Open your booking link')}</h1>
         <p>
-          To see, reschedule or cancel a booking, open the link from your confirmation email or the
-          one you saved when you booked. For your security it is removed from the address bar once
-          opened, so reloading this page needs the link again.
+          {t(
+            'To see, reschedule or cancel a booking, open the link from your confirmation email or the one you saved when you booked. For your security it is removed from the address bar once opened, so reloading this page needs the link again.',
+          )}
         </p>
       </div>
     </PublicLayout>
@@ -85,12 +89,14 @@ function NoToken() {
 }
 
 type Mode =
-  | { kind: 'view'; message?: string | undefined }
+  | { kind: 'view'; message?: UiText | undefined }
   | { kind: 'cancel' }
-  | { kind: 'reschedule'; notice?: string | undefined }
+  | { kind: 'reschedule'; notice?: UiText | undefined }
   | { kind: 'confirm-reschedule'; slot: Slot }
 
 function ManageBooking({ token: initialToken, action }: { token: string; action: Action | null }) {
+  const { t, ui } = useI18n()
+
   // A reschedule makes a new booking with a new token; the page then manages that one.
   const [token, setToken] = useState(initialToken)
   const [newToken, setNewToken] = useState<string | null>(null)
@@ -109,7 +115,7 @@ function ManageBooking({ token: initialToken, action }: { token: string; action:
   if (state.status === 'loading' && !booking) {
     return (
       <PublicLayout>
-        <PublicStatus>Loading your booking…</PublicStatus>
+        <PublicStatus>{t('Loading your booking…')}</PublicStatus>
       </PublicLayout>
     )
   }
@@ -118,17 +124,18 @@ function ManageBooking({ token: initialToken, action }: { token: string; action:
     return (
       <PublicLayout>
         <div className="card public-card">
-          <h1>{notFound ? 'This link doesn’t work' : 'Your booking could not be loaded'}</h1>
+          <h1>{notFound ? t('This link doesn’t work') : t('Your booking could not be loaded')}</h1>
           {notFound ? (
             <p>
-              It may be incomplete or mistyped. Open the link from your email again, or ask your
-              host for help.
+              {t(
+                'It may be incomplete or mistyped. Open the link from your email again, or ask your host for help.',
+              )}
             </p>
           ) : (
             <>
-              <p role="alert">{failureMessage(state.error)}</p>
+              <p role="alert">{ui(failureMessage(state.error))}</p>
               <button type="button" className="button" onClick={reload}>
-                Try again
+                {t('Try again')}
               </button>
             </>
           )}
@@ -184,7 +191,10 @@ function ManageView({
   /** Loads the booking again; null when that fails too. */
   onStale: () => Promise<ManagedBooking | null>
 }) {
-  const locale = useMemo(preferredLocale, [])
+  const { t, explicit } = useI18n()
+
+  const browserFormatLocale = useMemo(preferredLocale, [])
+  const locale = explicit ?? browserFormatLocale
   const [timeZone, setTimeZone] = useState(detectTimeZone)
   const [now, setNow] = useState(currentTime)
   const [version, setVersion] = useState(0)
@@ -212,7 +222,7 @@ function ManageView({
       : undefined
 
   /** What to say after a reschedule whose answer never arrived, from the booking as it is now. */
-  async function afterUnknownMove(slot: Slot): Promise<string> {
+  async function afterUnknownMove(slot: Slot): Promise<UiText> {
     const fresh = await onStale()
     if (!fresh) {
       return 'We could not confirm whether your booking was moved. Open your link again to check before trying again.'
@@ -279,9 +289,9 @@ function ManageView({
         <div className="reschedule">
           <div className="reschedule-header">
             <p className="muted">
-              Rescheduling {title}
-              {hosts && ` with ${hosts}`}, now on{' '}
-              {formatDate(Date.parse(booking.start), timeZone, locale)},{' '}
+              {t('Rescheduling')} {title}
+              {hosts && t('with {0}', { '0': hosts })}
+              {t(', now on')} {formatDate(Date.parse(booking.start), timeZone, locale)},{' '}
               {formatTimeRange(
                 Date.parse(booking.start),
                 Date.parse(booking.end),
@@ -294,7 +304,7 @@ function ManageView({
               className="button button-small"
               onClick={() => setMode({ kind: 'view' })}
             >
-              Keep the current time
+              {t('Keep the current time')}
             </button>
           </div>
           <SlotPicker
@@ -308,7 +318,7 @@ function ManageView({
             excludeStart={booking.start}
             onSelect={(slot) => setMode({ kind: 'confirm-reschedule', slot })}
             version={version}
-            title="Pick a new time"
+            title={t('Pick a new time')}
             focusTitle
             notice={mode.notice}
           />
@@ -334,10 +344,10 @@ function ManageView({
                 className="button button-primary"
                 onClick={() => setMode({ kind: 'reschedule' })}
               >
-                Reschedule
+                {t('Reschedule')}
               </button>
               <button type="button" className="button" onClick={() => setMode({ kind: 'cancel' })}>
-                Cancel booking
+                {t('Cancel booking')}
               </button>
             </div>
           )}
@@ -356,7 +366,9 @@ function ManageView({
                   if (await failed(err, 'cancel')) return null
                   if (err instanceof PublicRequestError && err.code === 'invalid_reason') {
                     return {
-                      field: `Use at most ${LIMITS.reason} characters, without control characters.`,
+                      field: msg('Use at most {0} characters, without control characters.', {
+                        '0': LIMITS.reason,
+                      }),
                     }
                   }
                   return { form: failureMessage(err) }
@@ -415,33 +427,37 @@ function BookingSummary({
   timeZone: string
   locale: string
   started: boolean
-  message: string | undefined
+  message: UiText | undefined
   newToken: string | null
 }) {
+  const { t, ui } = useI18n()
+
   const invitee = booking.attendees.find((a) => a.isBooker)
   const guests = booking.attendees.filter((a) => !a.isBooker)
   const cancelled = booking.status === 'cancelled'
   return (
     <>
-      <FocusHeading>{cancelled ? 'Cancelled booking' : 'Your booking'}</FocusHeading>
+      <FocusHeading>{cancelled ? t('Cancelled booking') : t('Your booking')}</FocusHeading>
       {message && (
         <div className="alert alert-info">
-          <p role="status">{message}</p>
+          <p role="status">{ui(message)}</p>
         </div>
       )}
       {!message && cancelled && (
         <div className="alert alert-info">
           <p>
-            This booking is cancelled
+            {t('This booking is cancelled')}
             {booking.cancelledAt &&
-              ` (since ${formatDate(Date.parse(booking.cancelledAt), timeZone, locale)})`}
-            . If it was moved to another time, the new booking has its own link.
+              t('(since {0})', {
+                '0': formatDate(Date.parse(booking.cancelledAt), timeZone, locale),
+              })}
+            {t('. If it was moved to another time, the new booking has its own link.')}
           </p>
         </div>
       )}
       {!message && !cancelled && started && (
         <div className="alert alert-info">
-          <p>This meeting has already started, so it can’t be changed here.</p>
+          <p>{t('This meeting has already started, so it can’t be changed here.')}</p>
         </div>
       )}
       <DetailList
@@ -469,7 +485,9 @@ function BookingSummary({
       {newToken && !cancelled && (
         <ManageLink
           token={newToken}
-          intro="Moving the booking gave it a new link. Links in Hourmere’s emails keep working; the link shown when you first booked now shows the old, cancelled time."
+          intro={t(
+            'Moving the booking gave it a new link. Links in Hourmere’s emails keep working; the link shown when you first booked now shows the old, cancelled time.',
+          )}
         />
       )}
     </>
@@ -485,11 +503,13 @@ function CancelForm({
   title: string
   when: string
   onBack: () => void
-  onCancel: (reason: string) => Promise<{ field?: string; form?: string } | null>
+  onCancel: (reason: string) => Promise<{ field?: UiText; form?: UiText } | null>
 }) {
+  const { t, ui } = useI18n()
+
   const id = useId()
   const [reason, setReason] = useState('')
-  const [error, setError] = useState<{ field?: string; form?: string } | null>(null)
+  const [error, setError] = useState<{ field?: UiText; form?: UiText } | null>(null)
   const [busy, setBusy] = useState(false)
 
   async function submit(event: FormEvent) {
@@ -509,13 +529,13 @@ function CancelForm({
 
   return (
     <form className="stack" onSubmit={submit} noValidate>
-      <FocusHeading>Cancel this booking?</FocusHeading>
+      <FocusHeading>{t('Cancel this booking?')}</FocusHeading>
       <p>
         {title}, {when}
       </p>
       <div className="field">
         <label htmlFor={`${id}-reason`}>
-          Reason <span className="optional">(optional, shared with your host)</span>
+          {t('Reason')} <span className="optional">{t('(optional, shared with your host)')}</span>
         </label>
         <textarea
           id={`${id}-reason`}
@@ -527,21 +547,21 @@ function CancelForm({
         />
         {error?.field && (
           <p className="field-error" id={`${id}-reason-error`}>
-            {error.field}
+            {ui(error.field)}
           </p>
         )}
       </div>
       {error?.form && (
         <div className="alert alert-error">
-          <p role="alert">{error.form}</p>
+          <p role="alert">{ui(error.form)}</p>
         </div>
       )}
       <div className="manage-actions">
         <button type="submit" className="button button-danger" disabled={busy}>
-          {busy ? 'Cancelling…' : 'Cancel booking'}
+          {busy ? t('Cancelling…') : t('Cancel booking')}
         </button>
         <button type="button" className="button" onClick={onBack} disabled={busy}>
-          Keep booking
+          {t('Keep booking')}
         </button>
       </div>
     </form>
@@ -561,16 +581,18 @@ function ConfirmReschedule({
   timeZone: string
   locale: string
   onBack: () => void
-  onConfirm: () => Promise<string | null>
+  onConfirm: () => Promise<UiText | null>
 }) {
-  const [error, setError] = useState<string | null>(null)
+  const { t, ui } = useI18n()
+
+  const [error, setError] = useState<UiText | null>(null)
   const [busy, setBusy] = useState(false)
   // A reschedule is not idempotent: one request at a time, and only when people press.
   const inFlight = useRef(false)
   const start = Date.parse(slot.start)
   return (
     <div className="stack">
-      <FocusHeading>Move your booking?</FocusHeading>
+      <FocusHeading>{t('Move your booking?')}</FocusHeading>
       <DetailList
         items={[
           [
@@ -597,7 +619,7 @@ function ConfirmReschedule({
       />
       {error && (
         <div className="alert alert-error">
-          <p role="alert">{error}</p>
+          <p role="alert">{ui(error)}</p>
         </div>
       )}
       <div className="manage-actions">
@@ -616,10 +638,10 @@ function ConfirmReschedule({
             if (problem) setError(problem)
           }}
         >
-          {busy ? 'Moving…' : 'Confirm new time'}
+          {busy ? t('Moving…') : t('Confirm new time')}
         </button>
         <button type="button" className="button" onClick={onBack} disabled={busy}>
-          Pick another time
+          {t('Pick another time')}
         </button>
       </div>
     </div>

@@ -69,3 +69,24 @@ describe('embed origin and route boundaries', () => {
     }
   })
 })
+
+describe('embedded interface language allowlist', () => {
+  it('accepts one exact language without weakening parent-origin validation', () => {
+    for (const language of ['en', 'zh-CN']) {
+      const url = new URL(
+        `https://hourmere.test/embed/ada/intro?parentOrigin=https%3A%2F%2Fparent.example&embedId=abcdefghijklmnop&language=${language}`,
+      )
+      expect(embedParent(url, ['https://parent.example'])).toBe('https://parent.example')
+      expect(embedParent(url, ['https://other.example'])).toBeUndefined()
+    }
+  })
+  it.each(['zh', 'en-US', '__proto__', 'en&language=zh-CN', ''])(
+    'refuses invalid or repeated language %s',
+    (language) => {
+      const url = new URL(
+        `https://hourmere.test/embed/ada/intro?parentOrigin=https%3A%2F%2Fparent.example&embedId=abcdefghijklmnop&language=${language}`,
+      )
+      expect(embedParent(url, ['https://parent.example'])).toBeUndefined()
+    },
+  )
+})

@@ -294,11 +294,13 @@ describe('the booking page', () => {
     expect(options.map((o) => o.textContent)).toEqual(['Asia/KolkataGMT+05:30'])
     await user.clear(search)
     await user.type(search, 'gmt+05:45')
-    expect(screen.getAllByRole('option').map((o) => o.textContent)).toEqual([
-      'Asia/KathmanduGMT+05:45',
-    ])
+    expect(
+      within(screen.getByRole('listbox', { name: 'Time zones' }))
+        .getAllByRole('option')
+        .map((o) => o.textContent),
+    ).toEqual(['Asia/KathmanduGMT+05:45'])
     await user.keyboard('{Escape}')
-    expect(screen.queryByRole('combobox')).toBeNull()
+    expect(screen.queryByRole('combobox', { name: 'Search time zones' })).toBeNull()
     await waitFor(() => expect(document.activeElement).toBe(toggle))
   })
 

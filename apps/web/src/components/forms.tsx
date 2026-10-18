@@ -2,9 +2,11 @@
 // that a failed submit shows and moves focus to (the GOV.UK pattern: each entry links to its
 // field).
 import { type ReactNode, useEffect, useId, useRef } from 'react'
+import { useI18n } from '../i18n/runtime.tsx'
+import { msg, type UiText } from '../i18n/translate.ts'
 
 /** Error messages by field id; a field without an entry is fine. */
-export type FieldErrors = Record<string, string>
+export type FieldErrors = Record<string, UiText>
 
 /** What a field's control needs to be labelled and described. */
 export interface ControlProps {
@@ -19,7 +21,7 @@ export function describedBy(...ids: (string | false | null | undefined)[]): stri
 }
 
 /** The props for the control of field `id`, given its hint and error. */
-export function controlProps(id: string, hint: boolean, error: string | undefined): ControlProps {
+export function controlProps(id: string, hint: boolean, error: UiText | undefined): ControlProps {
   const describedById = describedBy(hint && `${id}-hint`, error && `${id}-error`)
   return {
     id,
@@ -29,12 +31,14 @@ export function controlProps(id: string, hint: boolean, error: string | undefine
 }
 
 /** The message under a field (or a group of fields) that failed. */
-export function FieldError({ id, children }: { id: string; children: ReactNode }) {
+export function FieldError({ id, children }: { id: string; children: UiText }) {
+  const { t, ui } = useI18n()
+
   return (
     // Focusable, so the error summary can lead to errors that belong to a group of fields.
     <p id={id} className="field-error" tabIndex={-1}>
-      <span className="visually-hidden">Error: </span>
-      {children}
+      <span className="visually-hidden">{t('Error:')} </span>
+      {ui(children)}
     </p>
   )
 }
@@ -55,24 +59,26 @@ export function Field({
   id: string
   label: ReactNode
   hint?: ReactNode
-  error?: string | undefined
+  error?: UiText | undefined
   /** Says "(optional)" after the label. */
   optional?: boolean
   className?: string
   children: (props: ControlProps) => ReactNode
 }) {
+  const { t, ui } = useI18n()
+
   return (
     <div className={`field${error ? ' field-invalid' : ''} ${className}`.trim()}>
       <label htmlFor={id}>
         {label}
-        {optional && <span className="optional"> (optional)</span>}
+        {optional && <span className="optional"> {t('(optional)')}</span>}
       </label>
       {hint && (
         <p id={`${id}-hint`} className="hint">
           {hint}
         </p>
       )}
-      {error && <FieldError id={`${id}-error`}>{error}</FieldError>}
+      {error && <FieldError id={`${id}-error`}>{ui(error)}</FieldError>}
       {children(controlProps(id, Boolean(hint), error))}
     </div>
   )
@@ -92,11 +98,13 @@ export function ErrorSummary({
 }: {
   errors: FieldErrors
   /** What to call each field in the list, by id; entries without one show the message alone. */
-  labels?: Record<string, string>
-  message?: string | null | undefined
+  labels?: Record<string, UiText>
+  message?: UiText | null | undefined
   /** Changes with every submit, so the summary takes focus again. */
   attempt: number
 }) {
+  const { t, ui } = useI18n()
+
   const box = useRef<HTMLDivElement>(null)
   const titleId = useId()
   const entries = Object.entries(errors)
@@ -116,8 +124,8 @@ export function ErrorSummary({
       tabIndex={-1}
       aria-labelledby={titleId}
     >
-      <h2 id={titleId}>{entries.length > 0 ? 'Please check the form' : 'Could not save'}</h2>
-      {message && <p>{message}</p>}
+      <h2 id={titleId}>{entries.length > 0 ? t('Please check the form') : t('Could not save')}</h2>
+      {message && <p>{ui(message)}</p>}
       {entries.length > 0 && (
         <ul>
           {entries.map(([id, error]) => (
@@ -133,8 +141,8 @@ export function ErrorSummary({
                   field?.scrollIntoView?.({ block: 'center' })
                 }}
               >
-                {labels?.[id] ? `${labels[id]}: ` : ''}
-                {error}
+                {labels?.[id] ? `${ui(labels[id])}: ` : ''}
+                {ui(error)}
               </a>
             </li>
           ))}
@@ -162,12 +170,15 @@ export function wholeNumberProblem(
   text: string,
   { min, max }: { min: number; max: number },
   required: boolean,
-): string | null {
+): UiText | null {
   const value = parseWhole(text)
   if (value === null) return required ? 'Enter a number.' : null
   if (!Number.isSafeInteger(value)) return 'Enter a whole number.'
   if (value < min || value > max) {
-    return `Enter a number from ${min.toLocaleString('en')} to ${max.toLocaleString('en')}.`
+    return msg('Enter a number from {0} to {1}.', {
+      '0': min.toLocaleString('en'),
+      '1': max.toLocaleString('en'),
+    })
   }
   return null
 }

@@ -142,6 +142,7 @@ describe('the session gate', () => {
   it('offers a retry when the server cannot be reached', async () => {
     let up = false
     fakeApi({
+      ...profile(),
       'GET /api/v1/me': () => {
         if (!up) throw new TypeError('Failed to fetch')
         return json(200, ME)
@@ -192,6 +193,7 @@ describe('the session gate', () => {
   it('checks the session again when the window regains focus', async () => {
     let me: Schemas['Me'] = ME
     const api = fakeApi({
+      ...profile(),
       'GET /api/v1/me': () => json(200, me),
       ...instance(),
       ...profile(),
@@ -224,6 +226,7 @@ describe('the session gate', () => {
   it('keeps the page when a background check cannot reach the server', async () => {
     let up = true
     fakeApi({
+      ...profile(),
       'GET /api/v1/me': () => {
         if (!up) throw new TypeError('Failed to fetch')
         return json(200, ME)
@@ -245,6 +248,7 @@ describe('the session gate', () => {
     let answer: (res: Response) => void = () => {}
     let pending = false
     const api = fakeApi({
+      ...profile(),
       'GET /api/v1/me': () => {
         if (!pending) return json(200, ME)
         // The server answers this check only after the sign-out has gone through.
@@ -277,6 +281,7 @@ describe('the session gate', () => {
   it('goes into the app when a check after signing out finds a new sign-in', async () => {
     let signedInElsewhere = false
     fakeApi({
+      ...profile(),
       'GET /api/v1/me': () =>
         signedInElsewhere ? json(200, ME) : json(401, { error: 'unauthorized' }),
       ...instance(),
@@ -319,6 +324,7 @@ describe('when the account or organization changes elsewhere', () => {
   /** Ada, who has one key, creates another and is looking at its secret. */
   async function adaLookingAtANewKey(me: { current: Schemas['Me'] }) {
     const api = fakeApi({
+      ...profile(),
       'GET /api/v1/me': () => json(200, me.current),
       'GET /api/auth/organization/list': () =>
         json(

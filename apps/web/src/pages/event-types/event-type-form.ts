@@ -5,6 +5,7 @@ import type { Schemas } from '../../api/client.ts'
 import { RequestError } from '../../api/errors.ts'
 import type { EventType } from '../../api/resources.ts'
 import { type FieldErrors, parseWhole, wholeNumberProblem } from '../../components/forms.tsx'
+import { literal, msg, type UiText } from '../../i18n/translate.ts'
 import { EVENT_TYPE, QUESTIONS, RULES } from '../../limits.ts'
 import { isMultiLineText, isSingleLineText, singleLineProblem } from '../../text.ts'
 
@@ -189,7 +190,7 @@ const NUMBER_FIELDS = [
 /** The problems with a draft, by field id; empty when it can be sent. */
 export function validateDraft(draft: EventTypeDraft): FieldErrors {
   const errors: FieldErrors = {}
-  const add = (field: string, problem: string | null) => {
+  const add = (field: string, problem: UiText | null) => {
     if (problem) errors[field] = problem
   }
 
@@ -197,7 +198,7 @@ export function validateDraft(draft: EventTypeDraft): FieldErrors {
   const slug = draft.slug.trim()
   if (slug === '') add('slug', 'Enter the last part of the booking link.')
   else if (slug.length > EVENT_TYPE.slugMaxLength) {
-    add('slug', `Use at most ${EVENT_TYPE.slugMaxLength} characters.`)
+    add('slug', msg('Use at most {0} characters.', { '0': EVENT_TYPE.slugMaxLength }))
   } else if (!EVENT_TYPE.slugPattern.test(slug)) {
     add(
       'slug',
@@ -208,7 +209,10 @@ export function validateDraft(draft: EventTypeDraft): FieldErrors {
   if (description.length > EVENT_TYPE.descriptionMaxLength) {
     add(
       'description',
-      `Use at most ${EVENT_TYPE.descriptionMaxLength} characters (now ${description.length}).`,
+      msg('Use at most {0} characters (now {1}).', {
+        '0': EVENT_TYPE.descriptionMaxLength,
+        '1': description.length,
+      }),
     )
   } else if (!isMultiLineText(description)) {
     add('description', 'Remove special control characters (tabs and line breaks are fine).')
@@ -244,7 +248,7 @@ export function validateDraft(draft: EventTypeDraft): FieldErrors {
   }
 
   if (draft.questions.length > QUESTIONS.maxQuestions) {
-    add('questions', `Ask at most ${QUESTIONS.maxQuestions} questions.`)
+    add('questions', msg('Ask at most {0} questions.', { '0': QUESTIONS.maxQuestions }))
   }
   for (const q of draft.questions) {
     add(
@@ -254,7 +258,10 @@ export function validateDraft(draft: EventTypeDraft): FieldErrors {
     if (!isChoice(q.type)) continue
     if (q.options.length === 0) add(questionField(q, 'options'), 'Add at least one option.')
     if (q.options.length > QUESTIONS.maxOptions) {
-      add(questionField(q, 'options'), `Offer at most ${QUESTIONS.maxOptions} options.`)
+      add(
+        questionField(q, 'options'),
+        msg('Offer at most {0} options.', { '0': QUESTIONS.maxOptions }),
+      )
     }
     const seen = new Set<string>()
     for (const o of q.options) {
@@ -270,7 +277,7 @@ export function validateDraft(draft: EventTypeDraft): FieldErrors {
   return errors
 }
 
-function urlProblem(value: string): string | null {
+function urlProblem(value: string): UiText | null {
   const given = value.trim()
   const max = EVENT_TYPE.urlMaxLength
   if (given === '') return 'Enter the link.'
@@ -284,7 +291,7 @@ function urlProblem(value: string): string | null {
   if (url.protocol !== 'https:' && url.protocol !== 'http:') {
     return 'Enter a link starting with https:// or http://.'
   }
-  if (url.href.length > max) return `Use a link of at most ${max} characters.`
+  if (url.href.length > max) return msg('Use a link of at most {0} characters.', { '0': max })
   return null
 }
 
@@ -334,8 +341,8 @@ export function toInput(draft: EventTypeDraft): EventTypeBody {
 }
 
 /** Field labels for the error summary, by field id. */
-export function fieldLabels(draft: EventTypeDraft): Record<string, string> {
-  const labels: Record<string, string> = {
+export function fieldLabels(draft: EventTypeDraft): Record<string, UiText> {
+  const labels: Record<string, UiText> = {
     title: 'Title',
     slug: 'Booking link',
     description: 'Description',
@@ -355,21 +362,24 @@ export function fieldLabels(draft: EventTypeDraft): Record<string, string> {
     position: 'Position',
   }
   draft.questions.forEach((q, i) => {
-    const name = `Question ${i + 1}`
+    const name = msg('Question {0}', { '0': i + 1 })
     labels[questionField(q, 'label')] = name
-    labels[questionField(q, 'type')] = `${name} type`
-    labels[questionField(q, 'options')] = `${name} options`
+    labels[questionField(q, 'type')] = msg('Question {0} type', { '0': i + 1 })
+    labels[questionField(q, 'options')] = msg('Question {0} options', { '0': i + 1 })
     q.options.forEach((o, j) => {
-      labels[optionField(q, o)] = `${name}, option ${j + 1}`
+      labels[optionField(q, o)] = msg('Question {0}, option {1}', { '0': i + 1, '1': j + 1 })
     })
   })
   return labels
 }
 
-const RULE_MESSAGES: Record<string, string> = Object.fromEntries(
+const RULE_MESSAGES: Record<string, UiText> = Object.fromEntries(
   Object.entries(RULES).map(([name, { min, max }]) => [
     name,
-    `Enter a number from ${min.toLocaleString('en')} to ${max.toLocaleString('en')}.`,
+    msg('Enter a number from {0} to {1}.', {
+      '0': min.toLocaleString('en'),
+      '1': max.toLocaleString('en'),
+    }),
   ]),
 )
 
@@ -380,9 +390,9 @@ const RULE_MESSAGES: Record<string, string> = Object.fromEntries(
 export function serverErrors(
   err: unknown,
   draft: EventTypeDraft,
-): { fields: FieldErrors; message: string | null } {
+): { fields: FieldErrors; message: UiText | null } {
   if (!(err instanceof RequestError)) return { fields: {}, message: null }
-  const field = (id: string, message: string) => ({ fields: { [id]: message }, message: null })
+  const field = (id: string, message: UiText) => ({ fields: { [id]: message }, message: null })
   const detail = err.message
   switch (err.code) {
     case 'invalid_slug':
@@ -397,7 +407,7 @@ export function serverErrors(
     case 'invalid_event_type': {
       // The message names the field first: "durationMinutes must be …".
       const name = /^([A-Za-z]+)\b/.exec(detail)?.[1] ?? ''
-      if (name in RULE_MESSAGES) return field(name, RULE_MESSAGES[name] as string)
+      if (Object.hasOwn(RULE_MESSAGES, name)) return field(name, RULE_MESSAGES[name] as UiText)
       if (name === 'title') {
         return field('title', 'Use one line of up to 200 characters without control characters.')
       }
@@ -408,7 +418,7 @@ export function serverErrors(
         )
       }
       if (name === 'position') return field('position', 'Enter a whole number.')
-      return { fields: {}, message: detail }
+      return { fields: {}, message: literal(detail) }
     }
     case 'invalid_location': {
       if (/location\.number/.test(detail)) {
@@ -423,22 +433,24 @@ export function serverErrors(
       if (/location\.url/.test(detail)) {
         return field('location-url', 'Enter an http or https link of up to 2000 characters.')
       }
-      return field('location-kind', detail)
+      return field('location-kind', literal(detail))
     }
     case 'invalid_questions': {
       // "questions.2.options.1: …", "questions.0.label: …" or a message about the list.
       const match = /^questions\.(\d+)(?:\.(\w+))?(?:\.(\d+))?: (.*)$/s.exec(detail)
       const q = match ? draft.questions[Number(match[1])] : undefined
-      if (!match || !q) return field('questions', detail)
+      if (!match || !q) return field('questions', literal(detail))
       const [, , part, optionIndex, problem = detail] = match
       if (part === 'options') {
         const o = optionIndex === undefined ? undefined : q.options[Number(optionIndex)]
-        return o ? field(optionField(q, o), problem) : field(questionField(q, 'options'), problem)
+        return o
+          ? field(optionField(q, o), literal(problem))
+          : field(questionField(q, 'options'), literal(problem))
       }
-      if (part === 'type') return field(questionField(q, 'type'), problem)
-      return field(questionField(q, 'label'), problem)
+      if (part === 'type') return field(questionField(q, 'type'), literal(problem))
+      return field(questionField(q, 'label'), literal(problem))
     }
     default:
-      return { fields: {}, message: detail }
+      return { fields: {}, message: literal(detail) }
   }
 }
