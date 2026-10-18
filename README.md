@@ -19,6 +19,7 @@ Open-source scheduling for people and AI agents. Self-host or use the cloud.
 | `packages/jobs` | Background jobs on Postgres (pg-boss): typed job definitions, enqueueing inside a transaction, workers. |
 | `packages/notifications` | Durable booking and sign-in email delivery, retries and the encrypted credential outbox. See [docs/notifications.md](docs/notifications.md). |
 | `tools/api-types` | Generates the web app's API types from the server's OpenAPI document (`npm run api:types`). |
+| `tools/cli` | API-key command-line client using the existing MCP tools (`npm run --silent cli -- --help`). See [docs/cli.md](docs/cli.md). |
 
 ## Development
 
@@ -129,6 +130,9 @@ app's API keys page (`/app/api-keys`), or with Better Auth's endpoints while sig
 `/api/v1/openapi.json`; its conventions are in [docs/api-conventions.md](docs/api-conventions.md).
 The same keys connect MCP clients such as Claude Code to the remote MCP server at `/mcp`; see
 [docs/mcp.md](docs/mcp.md).
+
+For terminal scripts, the dependency-free [CLI](docs/cli.md) supports configuration discovery,
+slots, booking, host history, rescheduling and cancellation with the same API key.
 
 ## Contributing
 

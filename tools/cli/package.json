@@ -1,0 +1,9 @@
+{
+  "name": "@hourmere/cli",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.ts",
+    "typecheck": "tsc -p tsconfig.json"
+  }
+}
