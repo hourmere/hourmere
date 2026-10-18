@@ -184,7 +184,8 @@ Background jobs (notification emails, reminders, calendar synchronization and we
 delivery/retries) use pg-boss (`@hourmere/jobs`), which keeps its queue in its own `pgboss` schema and
 installs and upgrades it itself (on start, or with `npm run db:migrate` when
 `AUTO_MIGRATE=false`). Our migration runner never touches that schema, `db:types` leaves it
-out, and nothing of ours references its tables.
+out. Webhook cleanup reads its pinned job state to reconcile orphaned deliveries; no
+application foreign keys reference its tables.
 
 ## Changing the schema
 
@@ -259,7 +260,8 @@ snapshot plus bounded attempt metadata). The booking transaction captures subscr
 endpoints and queues only delivery IDs. Composite foreign keys keep deliveries in their
 endpoint organization; endpoint/booking/organization deletion cascades snapshots. Runtime
 locks use endpoint then delivery so deletion, pause and rotation cannot deadlock delivery
-through inverse lock order. Details and retention are in [webhooks.md](webhooks.md).
+through inverse lock order. Migration 0026 adds safe `interrupted`/`job_missing` error
+classifications for finite retry accounting and orphan reconciliation. Details and retention are in [webhooks.md](webhooks.md).
 
 ## Independent conference identities
 

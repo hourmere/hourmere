@@ -211,6 +211,7 @@ describe.skipIf(!serverUrl)('durable organization booking webhooks', () => {
       type: 'booking.created',
       data: { status: 'confirmed', source: 'api' },
     })
+    expect(Object.keys(payload).sort()).toEqual(['data', 'id', 'occurredAt', 'type'])
     expect(Object.keys(payload.data).sort()).toEqual(
       [
         'bookingId',
@@ -570,7 +571,7 @@ describe.skipIf(!serverUrl)('durable organization booking webhooks', () => {
     await deliverWebhook(d, old.delivery.id, signal())
   })
 
-  it('rolls a shutdown attempt back and retries after decryption failure without leaking keys', async () => {
+  it('counts a shutdown attempt and retries after decryption failure without leaking keys', async () => {
     const { delivery } = await captured()
     const abort = new AbortController()
     await expect(
@@ -588,7 +589,7 @@ describe.skipIf(!serverUrl)('durable organization booking webhooks', () => {
       .selectAll()
       .where('id', '=', delivery.id)
       .executeTakeFirstOrThrow()
-    expect(row).toMatchObject({ attempts: 0, status: 'pending' })
+    expect(row).toMatchObject({ attempts: 1, status: 'pending', last_error: 'interrupted' })
     await expect(
       deliverWebhook(
         { ...deps(async () => 204), encryptionKey: Buffer.alloc(32, 8).toString('base64') },
@@ -601,6 +602,168 @@ describe.skipIf(!serverUrl)('durable organization booking webhooks', () => {
       .selectAll()
       .where('id', '=', delivery.id)
       .executeTakeFirstOrThrow()
-    expect(row).toMatchObject({ attempts: 1, status: 'pending', last_error: 'secret_unavailable' })
+    expect(row).toMatchObject({ attempts: 2, status: 'pending', last_error: 'secret_unavailable' })
+  })
+
+  it('includes killed runs in the pg-boss attempt budget and fails the last retry', async () => {
+    const { delivery } = await captured()
+    let sends = 0
+    const job = webhookDeliveryJob(
+      deps(async () => {
+        sends++
+        return 503
+      }),
+    )
+    // A killed first run left no committed delivery metadata. pg-boss starts retry #1.
+    for (let attempt = 2; attempt <= 13; attempt++)
+      await expect(
+        job.handler({ deliveryId: delivery.id }, { id: randomUUID(), attempt, signal: signal() }),
+      ).rejects.toThrow(/^Webhook delivery failed$/)
+    await job.handler(
+      { deliveryId: delivery.id },
+      { id: randomUUID(), attempt: 14, signal: signal() },
+    )
+    expect(sends).toBe(12)
+    expect(
+      await db
+        .selectFrom('webhook_deliveries')
+        .selectAll()
+        .where('id', '=', delivery.id)
+        .executeTakeFirstOrThrow(),
+    ).toMatchObject({
+      attempts: 13,
+      status: 'failed',
+      last_error: 'http_error',
+    })
+  })
+
+  it('commits an interrupted final attempt as failed and does not send when already aborted', async () => {
+    const { delivery } = await captured()
+    const abort = new AbortController()
+    abort.abort()
+    let sends = 0
+    const job = webhookDeliveryJob(
+      deps(async () => {
+        sends++
+        return 204
+      }),
+    )
+    await expect(
+      job.handler(
+        { deliveryId: delivery.id },
+        { id: randomUUID(), attempt: 13, signal: abort.signal },
+      ),
+    ).rejects.toThrow(/^Webhook delivery interrupted$/)
+    expect(sends).toBe(0)
+    expect(
+      await db
+        .selectFrom('webhook_deliveries')
+        .selectAll()
+        .where('id', '=', delivery.id)
+        .executeTakeFirstOrThrow(),
+    ).toMatchObject({
+      attempts: 13,
+      status: 'failed',
+      last_error: 'interrupted',
+      http_status: null,
+    })
+  })
+
+  it('reconciles missing and terminal jobs while preserving created, delayed retries and active jobs', async () => {
+    const cleanup = webhookCleanupJob(db, () => NOW)
+    expect(cleanup.schedule?.cron).toBe('*/15 * * * *')
+    const cases = []
+    for (const state of [
+      'missing',
+      'failed',
+      'cancelled',
+      'completed',
+      'created',
+      'retry',
+      'active',
+    ]) {
+      const { delivery, ctx, webhook } = await captured()
+      if (state === 'missing')
+        await testDb.pool.query('DELETE FROM pgboss.job WHERE name=$1 AND singleton_key=$2', [
+          WEBHOOK_DELIVERY_JOB,
+          delivery.id,
+        ])
+      else
+        await testDb.pool.query(
+          `UPDATE pgboss.job SET state=$3::pgboss.job_state,
+             retry_count=CASE WHEN $3='failed' THEN 12 ELSE 0 END,
+             started_on=CASE WHEN $3 IN ('failed','completed','active','retry') THEN now() ELSE NULL END,
+             start_after=now()+interval '1 hour'
+           WHERE name=$1 AND singleton_key=$2`,
+          [WEBHOOK_DELIVERY_JOB, delivery.id, state],
+        )
+      cases.push({ state, delivery, ctx, webhook })
+    }
+    await cleanup.handler({}, { id: randomUUID(), attempt: 1, signal: signal() })
+    await cleanup.handler({}, { id: randomUUID(), attempt: 1, signal: signal() })
+    for (const { state, delivery, ctx, webhook } of cases) {
+      const row = await db
+        .selectFrom('webhook_deliveries')
+        .selectAll()
+        .where('id', '=', delivery.id)
+        .executeTakeFirstOrThrow()
+      if (['created', 'retry', 'active'].includes(state))
+        expect(row).toMatchObject({ status: 'pending', attempts: 0, last_error: null })
+      else {
+        expect(row).toMatchObject({ status: 'failed', last_error: 'job_missing' })
+        expect(row.attempts).toBe(
+          ['missing', 'cancelled'].includes(state) ? 0 : state === 'failed' ? 13 : 1,
+        )
+        expect((await listWebhookDeliveries(ctx, webhook.id)).data[0]).toMatchObject({
+          status: 'failed',
+          lastError: 'job_missing',
+          attempts: row.attempts,
+        })
+      }
+    }
+  })
+
+  it('does not overwrite an in-flight acknowledgement during reconciliation', async () => {
+    const { delivery } = await captured()
+    const entered = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    const running = deliverWebhook(
+      deps(async () => {
+        entered.resolve()
+        await release.promise
+        return 204
+      }),
+      delivery.id,
+      signal(),
+    )
+    await entered.promise
+    try {
+      await testDb.pool.query(
+        "UPDATE pgboss.job SET state='failed', retry_count=12 WHERE name=$1 AND singleton_key=$2",
+        [WEBHOOK_DELIVERY_JOB, delivery.id],
+      )
+      await webhookCleanupJob(db, () => NOW).handler(
+        {},
+        { id: randomUUID(), attempt: 1, signal: signal() },
+      )
+    } finally {
+      release.resolve()
+      await running
+    }
+    await webhookCleanupJob(db, () => NOW).handler(
+      {},
+      { id: randomUUID(), attempt: 1, signal: signal() },
+    )
+    expect(
+      await db
+        .selectFrom('webhook_deliveries')
+        .selectAll()
+        .where('id', '=', delivery.id)
+        .executeTakeFirstOrThrow(),
+    ).toMatchObject({
+      status: 'delivered',
+      attempts: 1,
+      last_error: null,
+    })
   })
 })

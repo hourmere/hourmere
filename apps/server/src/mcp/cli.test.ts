@@ -79,6 +79,7 @@ describe.skipIf(!bootstrap)('CLI through HTTP and PostgreSQL', () => {
       ) {
         let stdout = ''
         let stderr = ''
+        let returnedTokenCount = 0
         const code = await runCli({
           argv: [command, '--input', '-', ...(options.output ? ['--output', options.output] : [])],
           env: { HOURMERE_URL: url, HOURMERE_API_KEY: options.key ?? key.key },
@@ -91,10 +92,25 @@ describe.skipIf(!bootstrap)('CLI through HTTP and PostgreSQL', () => {
           stderr: (text) => {
             stderr += text
           },
+          fetch: async (request, init) => {
+            const response = await fetch(request, init)
+            // Observe real capabilities in JSON or SSE structuredContent without logging them.
+            for (const match of (await response.clone().text()).matchAll(
+              /"manageToken"\s*:\s*"([A-Za-z0-9_-]{43})"/g,
+            )) {
+              const token = match[1]
+              if (token) {
+                secrets.push(token)
+                returnedTokenCount += 1
+              }
+            }
+            return response
+          },
         })
         expect(secrets.some((secret) => (stdout + stderr).includes(secret))).toBe(false)
         return {
           code,
+          returnedTokenCount,
           data: stdout ? JSON.parse(stdout) : undefined,
           error: stderr ? JSON.parse(stderr) : undefined,
         }
@@ -186,6 +202,20 @@ describe.skipIf(!bootstrap)('CLI through HTTP and PostgreSQL', () => {
         (await run('cancel', { manageToken: moved.manageToken, reason: 'CLI integration cleanup' }))
           .data.status,
       ).toBe('cancelled')
+      const printedBooking = await run('book', { ...request, idempotencyKey: randomUUID() })
+      expect(printedBooking.code).toBe(0)
+      expect(printedBooking.returnedTokenCount).toBe(1)
+      expect(printedBooking.data.manageToken === '[redacted]').toBe(true)
+      const printedMove = await run('reschedule', {
+        bookingId: printedBooking.data.booking.id,
+        start: next.data.slots[0].start,
+      })
+      expect(printedMove.code).toBe(0)
+      expect(printedMove.returnedTokenCount).toBe(1)
+      expect(printedMove.data.manageToken === '[redacted]').toBe(true)
+      expect((await run('cancel', { bookingId: printedMove.data.booking.id })).data.status).toBe(
+        'cancelled',
+      )
       const audit = await db
         .selectFrom('bookings')
         .select(['id', 'source', 'api_key_id', 'cancelled_source', 'cancelled_api_key_id'])

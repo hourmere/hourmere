@@ -97,8 +97,17 @@ export function initInline({ element, url, height = 720, language }: InlineOptio
     )
       iframe.style.height = `${data.height}px`
     if (data.type === 'hourmere:close' && popup?.handle.iframe === iframe) closePopup()
-    if (data.type === 'hourmere:booked')
-      element.dispatchEvent(new CustomEvent('hourmere:booking-completed'))
+    if (data.type === 'hourmere:booked') {
+      const completionTarget =
+        popup?.handle.iframe === iframe
+          ? popup.previous instanceof HTMLElement && popup.previous.isConnected
+            ? popup.previous
+            : document
+          : element
+      completionTarget.dispatchEvent(
+        new CustomEvent('hourmere:booking-completed', { bubbles: true }),
+      )
+    }
   }
   const handle: EmbedHandle = {
     iframe,

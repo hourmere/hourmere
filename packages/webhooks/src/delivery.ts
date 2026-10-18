@@ -117,12 +117,18 @@ export function webhookDeliveryJob(deps: WebhookDeps) {
     expireInSeconds: 30,
     retentionSeconds: 30 * 24 * 3600,
     concurrency: 2,
-    handler: ({ deliveryId }, { signal }) => deliverWebhook(deps, deliveryId, signal),
+    handler: ({ deliveryId }, { signal, attempt }) =>
+      deliverWebhook(deps, deliveryId, signal, attempt),
   })
 }
 
 /** At least once. A crash after the receiver accepts but before commit can duplicate an ID. */
-export async function deliverWebhook(deps: WebhookDeps, deliveryId: string, signal: AbortSignal) {
+export async function deliverWebhook(
+  deps: WebhookDeps,
+  deliveryId: string,
+  signal: AbortSignal,
+  jobAttempt = 1,
+) {
   const found = await deps.db
     .selectFrom('webhook_deliveries')
     .select('webhook_id')
@@ -166,12 +172,11 @@ export async function deliverWebhook(deps: WebhookDeps, deliveryId: string, sign
         .execute()
       return false
     }
-    const attempt = delivery.attempts + 1
-    if (attempt > 13) return false
-    signal.throwIfAborted()
+    // pg-boss also counts runs lost to a killed worker, whose transaction rolled back.
+    const attempt = Math.min(13, Math.max(delivery.attempts + 1, jobAttempt))
     const timestamp = Math.floor(now.epochMilliseconds / 1000).toString()
     let status: number | null = null
-    let error: 'secret_unavailable' | 'transport_error' | 'http_error' | null = null
+    let error: 'secret_unavailable' | 'transport_error' | 'http_error' | 'interrupted' | null = null
     let secret: string
     try {
       secret = decryptWebhookSecret(
@@ -184,7 +189,7 @@ export async function deliverWebhook(deps: WebhookDeps, deliveryId: string, sign
       error = 'secret_unavailable'
       secret = ''
     }
-    if (!error) {
+    if (!error && !signal.aborted) {
       try {
         status = await (deps.transport ?? sendWebhook)({
           url: endpoint.url,
@@ -205,8 +210,12 @@ export async function deliverWebhook(deps: WebhookDeps, deliveryId: string, sign
         error = 'transport_error'
       }
     }
-    // Shutdown rolls back the attempt, rather than turning it into a permanent failure.
-    signal.throwIfAborted()
+    // Commit shutdown consumption before asking pg-boss to retry. A killed process is
+    // accounted for by the next jobAttempt or by periodic orphan reconciliation.
+    if (signal.aborted) {
+      error = 'interrupted'
+      status = null
+    }
     await trx
       .updateTable('webhook_deliveries')
       .set({
@@ -222,7 +231,8 @@ export async function deliverWebhook(deps: WebhookDeps, deliveryId: string, sign
     return error !== null
   })
   // Safe even when a request failed with a body, query credential, headers or secret.
-  if (retry) throw new Error('Webhook delivery failed')
+  if (retry)
+    throw new Error(signal.aborted ? 'Webhook delivery interrupted' : 'Webhook delivery failed')
 }
 
 export function webhookCleanupJob(db: Db, now = () => Temporal.Now.instant()) {
@@ -233,6 +243,28 @@ export function webhookCleanupJob(db: Db, now = () => Temporal.Now.instant()) {
     schedule: { cron: '*/15 * * * *', payload: {} },
     expireInSeconds: 30,
     handler: async () => {
+      // Capture and enqueue are atomic. A visible pending row with no created/retry/active
+      // job cannot make progress. Keep this test in the UPDATE statement and skip locked
+      // deliveries so reconciliation never races an in-flight acknowledgement.
+      // pg-boss is pinned; its schema belongs to pg-boss and is never migrated here.
+      await sql`
+        WITH orphaned AS (
+          SELECT d.id FROM webhook_deliveries d
+          WHERE d.status = 'pending' AND NOT EXISTS (
+            SELECT 1 FROM pgboss.job j
+            WHERE j.name = ${WEBHOOK_DELIVERY_JOB} AND j.singleton_key = d.id::text
+              AND j.state IN ('created', 'retry', 'active')
+          )
+          ORDER BY d.id LIMIT 1000 FOR UPDATE OF d SKIP LOCKED
+        )
+        UPDATE webhook_deliveries d SET status = 'failed', last_error = 'job_missing',
+          attempts = LEAST(13, GREATEST(d.attempts, COALESCE((
+            SELECT MAX(CASE WHEN j.started_on IS NULL THEN 0 ELSE j.retry_count + 1 END)
+            FROM pgboss.job j
+            WHERE j.name = ${WEBHOOK_DELIVERY_JOB} AND j.singleton_key = d.id::text
+          ), 0)))
+        FROM orphaned o WHERE d.id = o.id AND d.status = 'pending'
+      `.execute(db)
       const expired = await db
         .selectFrom('webhook_deliveries')
         .select('id')
