@@ -216,16 +216,18 @@ export function mcpOAuthPlugins(
           return intent.grantId
         },
       },
+      // Runs at the token endpoint (code exchange and refresh), where a grant that no
+      // longer holds is RFC 6749 invalid_grant, never the browser flow's 403.
       customAccessTokenClaims: async ({ user, referenceId, scopes }) => {
-        if (!user || !referenceId || !isUuid(referenceId)) throw refused()
+        if (!user || !referenceId || !isUuid(referenceId)) throw invalidGrant()
         const grant = await db
           .selectFrom('mcp_oauth_grants')
           .select('organization_id')
           .where('id', '=', referenceId)
           .where('user_id', '=', user.id)
           .executeTakeFirst()
-        if (!grant) throw refused()
-        await requireMembership(db, user.id, grant.organization_id)
+        if (!grant) throw invalidGrant()
+        await requireMembership(db, user.id, grant.organization_id, invalidGrant)
         const consent = await currentConsent(db, referenceId, user.id)
         if (
           !Array.isArray(consent.scopes) ||

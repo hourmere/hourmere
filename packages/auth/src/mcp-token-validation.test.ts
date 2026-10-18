@@ -239,9 +239,11 @@ describe.skipIf(!serverUrl)('MCP access-token profile validation', () => {
     try {
       const claims = provider.customAccessTokenClaims
       if (!claims) throw new Error('Missing token policy')
+      // Issuance answers the token endpoint's client: RFC 6749 invalid_grant, not the
+      // browser flow's organization selection.
       await expect(
         claims({ user, referenceId: grantId, scopes: ['mcp:tools'] }),
-      ).rejects.toMatchObject({ status: 'FORBIDDEN' })
+      ).rejects.toMatchObject({ status: 'BAD_REQUEST', body: { error: 'invalid_grant' } })
       const intent = { id: randomUUID(), userId, sessionId: randomUUID(), organizationId, grantId }
       const bind = provider.postLogin?.consentReferenceId
       if (typeof bind !== 'function') throw new Error('Missing consent binding policy')

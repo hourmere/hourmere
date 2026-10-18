@@ -996,6 +996,35 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
     expect(error.access_token === undefined && error.refresh_token === undefined).toBe(true)
     expect((await refreshState()) === before).toBe(true)
   })
+  it('returns invalid_grant when membership ends between approval and code exchange', async () => {
+    const s = await session(),
+      team = await createTestTeam(db, [{ user: s.user, role: 'owner' }]),
+      a = await begin(s, team.id),
+      url = await approved(s, a)
+    await db
+      .deleteFrom('auth.member')
+      .where('organizationId', '=', team.id)
+      .where('userId', '=', s.user.id)
+      .execute()
+    const denied = await exchange(a, url.searchParams.get('code') as string)
+    expect(denied.status).toBe(400)
+    const error = (await denied.json()) as {
+      error: string
+      code?: string
+      access_token?: string
+      refresh_token?: string
+    }
+    expect(error.error).toBe('invalid_grant')
+    expect(error.code).toBeUndefined()
+    expect(error.access_token === undefined && error.refresh_token === undefined).toBe(true)
+    expect(
+      await db
+        .selectFrom('auth.oauthRefreshToken')
+        .select('id')
+        .where('userId', '=', s.user.id)
+        .execute(),
+    ).toEqual([])
+  })
   it('immediately rejects removed members and disabled OAuth clients', async () => {
     const s = await session(),
       team = await createTestTeam(db, [{ user: s.user, role: 'owner' }]),
