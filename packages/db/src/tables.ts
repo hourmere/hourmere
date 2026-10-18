@@ -375,7 +375,7 @@ export interface Bookings {
   idempotency_fingerprint: Buffer | null;
   idempotency_key: string | null;
   location: Json | null;
-  manage_token_hash: Buffer;
+  manage_token_hash: Buffer | null;
   oauth_consent_id: string | null;
   organization_id: string;
   required_host_user_ids: Generated<string[]>;

@@ -171,7 +171,7 @@ describe.skipIf(!bootstrap)('CLI through HTTP and PostgreSQL', () => {
         ).code,
       ).toBe(0)
       const moved = JSON.parse(await readFile(movedPath, 'utf8'))
-      secrets.push(moved.manageToken)
+      expect(moved.manageToken === null).toBe(true)
       expect(moved.booking.rescheduledFromId).toBe(created.booking.id)
       expect(moved.booking.source).toBe('mcp')
       expect(
@@ -183,8 +183,12 @@ describe.skipIf(!bootstrap)('CLI through HTTP and PostgreSQL', () => {
         ).error.error,
       ).toBe('booking_cancelled')
       expect(
-        (await run('cancel', { manageToken: moved.manageToken, reason: 'CLI integration cleanup' }))
-          .data.status,
+        (
+          await run('cancel', {
+            manageToken: created.manageToken,
+            reason: 'CLI integration cleanup',
+          })
+        ).data.status,
       ).toBe('cancelled')
       const audit = await db
         .selectFrom('bookings')

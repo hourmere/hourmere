@@ -8,15 +8,19 @@ import {
   getHostBooking,
   getManagedBookingDetails,
   LOCATION_KINDS,
+  listHostBookingSlots,
   listHostBookings,
   listManagedSlots,
   MAX_PAGE_SIZE,
   MAX_SLOT_RANGE_DAYS,
   type PublicContext,
   ResponsesSchema,
+  rescheduleHostBooking,
   rescheduleManagedBooking,
   type ServiceContext,
 } from '@hourmere/scheduling'
+import type { MiddlewareHandler } from 'hono'
+import type { CallerEnv } from '../caller.ts'
 import { authenticated, ErrorBody, json, type RouteModule } from '../openapi.ts'
 import { createRateLimiter, PUBLIC_RATE_LIMITS, type RateLimit, rateLimit } from '../rate-limit.ts'
 
@@ -133,7 +137,7 @@ export const BookingWithToken = z
     booking: Booking,
     manageToken: z.string().nullable().openapi({
       description:
-        "The booking's own manage token (it stays with this booking; emails carry their own), sent as X-Manage-Token to /api/v1/bookings/manage. Returned only once and never stored, so a replayed request (same Idempotency-Key) gets null.",
+        "The invitee's own manage token, sent as X-Manage-Token to /api/v1/bookings/manage. Returned once on creation or an invitee reschedule; creation replays and host reschedules return null. A host reschedule transfers the existing hash to the successor so the invitee's original token keeps working; an invitee reschedule leaves the old token on the cancelled booking. Emails carry their own tokens that follow the chain.",
     }),
   })
   .openapi('BookingWithToken')
@@ -141,6 +145,8 @@ export const BookingWithToken = z
 export const CancelBody = z
   .strictObject({ reason: z.string().max(1000).optional() })
   .openapi('CancelBooking')
+
+export const RescheduleBody = z.strictObject({ start: Instant }).openapi('Reschedule')
 
 export const BookingPage = z
   .object({
@@ -174,7 +180,7 @@ const error = (description: string) => ({ description, content: json(ErrorBody) 
 const ManageToken = z.object({
   'x-manage-token': z.string().optional().openapi({
     description:
-      "The invitee's secret: the `manageToken` the booking API returned, or the `token` in a link from a booking email (https://<app>/booking#token=…). A missing or unknown token gets 404 `booking_not_found`. After a reschedule, the token returned for the old booking shows that cancelled booking, while tokens from emails open the booking that replaced it.",
+      "The invitee's secret: the `manageToken` the booking API returned, or the `token` in a link from a booking email (https://<app>/booking#token=…). A missing or unknown token gets 404 `booking_not_found`. After an invitee reschedule, the previous response token shows the cancelled booking; a host reschedule transfers that token's hash to the successor so it keeps working. Email tokens always follow the reschedule chain.",
   }),
 })
 const manageNotFound = error('Missing or unknown manage token (`booking_not_found`)')
@@ -226,6 +232,9 @@ export function bookingRoutes({
   )
 
   return ({ app, caller }) => {
+    // Tuples preserve caller's principal type through createRoute's middleware inference.
+    const hostManage: [typeof caller, MiddlewareHandler<CallerEnv>] = [caller, manageLimit]
+    const hostSlots: [typeof caller, MiddlewareHandler<CallerEnv>] = [caller, manageSlotsLimit]
     const context = (principal: ServiceContext['principal']): ServiceContext => ({
       db,
       principal,
@@ -408,7 +417,7 @@ export function bookingRoutes({
         request: {
           headers: ManageToken,
           body: {
-            content: json(z.strictObject({ start: Instant }).openapi('Reschedule')),
+            content: json(RescheduleBody),
             required: true,
           },
         },
@@ -427,6 +436,86 @@ export function bookingRoutes({
           publicContext,
           c.req.valid('header')['x-manage-token'],
           { start: Temporal.Instant.from(c.req.valid('json').start) },
+        )
+        return c.json(result, 200)
+      },
+    )
+
+    app.openapi(
+      createRoute({
+        method: 'get',
+        path: '/api/v1/bookings/{id}/slots',
+        summary: 'Times a booking the caller hosts can move to',
+        description: `The same reschedule slots as the invitee sees, with the current booking ignored so a new time may overlap it. The caller must host this booking in their acting organization. The range is at most ${MAX_SLOT_RANGE_DAYS} days.`,
+        security: authenticated,
+        middleware: hostSlots,
+        request: {
+          params: z.object({ id: z.uuid() }),
+          query: z.object({ start: Instant, end: Instant }),
+        },
+        responses: {
+          200: {
+            description: 'Slots, sorted by start',
+            content: json(z.object({ data: z.array(Slot) })),
+          },
+          400: error('Invalid parameters (`invalid_request`, `invalid_range`, `range_too_long`)'),
+          401: unauthorized,
+          404: hostNotFound,
+          409: error(
+            'Already cancelled (`booking_cancelled`), already started (`booking_in_past`), the event type no longer takes bookings (`event_type_unavailable`), or required hosts are unavailable (`booking_has_no_host`, `booking_hosts_unavailable`)',
+          ),
+          429: rateLimited,
+        },
+      }),
+      async (c) => {
+        const { start, end } = c.req.valid('query')
+        const slots = await listHostBookingSlots(
+          context(c.var.principal),
+          c.req.valid('param').id,
+          {
+            start: Temporal.Instant.from(start),
+            end: Temporal.Instant.from(end),
+          },
+        )
+        return c.json({ data: slots }, 200)
+      },
+    )
+
+    app.openapi(
+      createRoute({
+        method: 'post',
+        path: '/api/v1/bookings/{id}/reschedule',
+        summary: 'Reschedule a booking the caller hosts',
+        description:
+          'Cancels the old booking and creates its successor in one transaction. The caller must host the booking in their acting organization. Invitee links keep working, and manageToken is always null: host authority does not reveal an invitee bearer secret. Retrying the old id gets booking_cancelled.',
+        security: authenticated,
+        middleware: hostManage,
+        request: {
+          params: z.object({ id: z.uuid() }),
+          body: { content: json(RescheduleBody), required: true },
+        },
+        responses: {
+          200: {
+            description: 'The successor booking, with manageToken null',
+            content: json(BookingWithToken),
+          },
+          400: error('Invalid request (`invalid_request`)'),
+          401: unauthorized,
+          403: crossOrigin,
+          404: hostNotFound,
+          409: error(
+            'Already cancelled (`booking_cancelled`), already started (`booking_in_past`), the event type no longer takes bookings (`event_type_unavailable`), required hosts are unavailable (`booking_has_no_host`, `booking_hosts_unavailable`), or the time is not offered (`slot_unavailable`, `slot_taken`)',
+          ),
+          429: rateLimited,
+        },
+      }),
+      async (c) => {
+        const result = await rescheduleHostBooking(
+          context(c.var.principal),
+          c.req.valid('param').id,
+          {
+            start: Temporal.Instant.from(c.req.valid('json').start),
+          },
         )
         return c.json(result, 200)
       },

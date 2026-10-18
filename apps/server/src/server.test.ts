@@ -98,6 +98,63 @@ describe.skipIf(!serverUrl)('startServer', () => {
     }
   }
 
+  it('registers every catalog tool in the production MCP composition', async () => {
+    const db = createDb(testDb.pool)
+    const f = createFixtures(db)
+    const host = await f.host()
+    const secret = randomBytes(32).toString('base64')
+    const signup = { mode: 'open', allowedDomains: [] } as const
+    const authPool = createAuthPool(testDb.url, signup)
+    let key: string
+    try {
+      const auth = createAuth({
+        pool: authPool,
+        db,
+        baseURL: 'http://localhost',
+        secret,
+        mailer: { send: async () => {} },
+        signup,
+      })
+      key = (await auth.api.createApiKey({ body: { userId: host.userId, name: 'catalog' } })).key
+    } finally {
+      await authPool.end()
+    }
+    const printed = await quietly(async () => {
+      const server = await startServer({
+        DATABASE_URL: testDb.url,
+        PORT: '0',
+        PUBLIC_URL: 'http://localhost',
+        BETTER_AUTH_SECRET: secret,
+        HOURMERE_ROLE: 'web',
+      })
+      const client = new Client({ name: 'catalog-registration-test', version: '1.0.0' })
+      try {
+        await client.connect(
+          new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`), {
+            requestInit: { headers: { authorization: `Bearer ${key}` } },
+          }),
+        )
+        const result = await client.listTools()
+        expect(result.tools.map((tool) => tool.name)).toEqual(
+          expect.arrayContaining([
+            'get_profile',
+            'list_event_types',
+            'get_event_type',
+            'list_schedules',
+            'get_schedule',
+          ]),
+        )
+        const profile = await client.callTool({ name: 'get_profile', arguments: {} })
+        expect(profile.isError).toBeFalsy()
+        expect(profile.structuredContent).toMatchObject({ handle: host.handle })
+      } finally {
+        await client.close()
+        await server.close()
+      }
+    })
+    expect(printed.error).toEqual([])
+  })
+
   it('answers sign-in requests without waiting for email, and closes while one is sending', async () => {
     // An SMTP server that accepts connections and never says a word.
     const sockets = new Set<Socket>()

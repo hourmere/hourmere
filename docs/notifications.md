@@ -92,7 +92,7 @@ All notifications go through one job, `booking-notification`, with payload
 | Event (service) | Jobs queued in its transaction |
 |---|---|
 | Booking created (`createPublicBooking`, not on an idempotent replay) | `confirmed` now; `reminder` 24 hours before the start, unless that is less than an hour away |
-| Booking rescheduled (`rescheduleManagedBooking`) | for the **new** booking: `rescheduled` now; `reminder` as above. Nothing for the old one (see below) |
+| Booking rescheduled (`rescheduleManagedBooking`, `rescheduleHostBooking`) | for the **new** booking: `rescheduled` now; `reminder` as above. Nothing for the old one (see below) |
 | Booking cancelled (`cancelManagedBooking`, `cancelHostBooking`) | `cancelled` now |
 
 The same services serve the booking page, the REST API and the MCP tools, so a booking an
@@ -209,8 +209,9 @@ another process. Options:
 
 **Decision: option 3 without the rotation.** Each invitee email mints its own token when it
 is sent and stores its SHA-256 in that email's `booking_notifications` row, in the same
-transaction (so a failed send leaves no token behind). The booking's own hash is never
-changed. Every token, the API's and each email's, opens the booking for as long as it
+transaction (so a failed send leaves no token behind). Email delivery never rotates the
+booking's own hash. Host moves transfer that hash to the successor without revealing a
+token. Every token, the API's and each email's, opens the booking for as long as it
 exists. No raw secret is stored anywhere, encrypted or not, and the queue holds only
 `{ bookingId, kind }`; nothing depends on `BETTER_AUTH_SECRET`; retries are harmless (at
 worst an unused hash); reminders carry working links. The cost is a second place to look
@@ -230,10 +231,15 @@ keeps no hash (a check constraint), so the secret it would have carried never op
 anything. Showing and acting resolve the booking through the same function, so they
 always agree on which booking a token means.
 
-- **The API's token stays with its booking.** After a reschedule it shows the old, cancelled
+- **After an invitee move, the API's token stays with its booking.** It shows the old, cancelled
   booking, and cancelling or rescheduling with it gets 409 `booking_cancelled`. That is the
   documented contract agents rely on: a reschedule retried after a lost response cannot move
   the meeting twice. The reschedule's response carries the new booking's token.
+- **A host move preserves the invitee's API token.** `rescheduleHostBooking` returns
+  `manageToken: null`, clears the old booking's hash and sets it on the successor in the
+  same transaction. The host receives no invitee capability, and existing invitee links
+  continue to work before the reschedule email arrives. Repeated host moves carry the
+  same hash; an invitee move still has the retry behavior above.
 - **An email's token stands for the meeting.** After the booking it was sent about is
   rescheduled, it follows the chain (`rescheduled_from_id`) to the booking that replaced it,
   the latest one, and shows, cancels or reschedules that one. The chain needs no hop limit:
@@ -255,8 +261,8 @@ always agree on which booking a token means.
   row is the latest (none can replace it while the lock is held), and only that locked row
   is checked and changed. Each further round means yet another reschedule committed while
   the request waited; after ten the request gets 409 `booking_changed` (try again) instead
-  of chasing the meeting. The API's token is locked as before and then finds its booking
-  cancelled.
+  of chasing the meeting. An API token whose hash moved while waiting on a host move is
+  resolved again under the same bound; after an invitee move it finds its booking cancelled.
 
 Links put the secret in the URL fragment,
 `https://<app>/booking#token=<token>&action=reschedule` (or `action=cancel`), which browsers
@@ -297,7 +303,7 @@ So the services pass only ids:
   the replay paths (a replay found before or after the host lock returns before it, and
   a concurrent duplicate's unique violation rolls back its jobs with it):
   `{ type: 'created', bookingId, start }`.
-- `rescheduleManagedBooking`, after `insertBooking`: `{ type: 'rescheduled', bookingId:
+- `rescheduleManagedBooking` and `rescheduleHostBooking`, after `insertBooking`: `{ type: 'rescheduled', bookingId:
   <new booking>, start }`. The old booking gets no job of its own: its queued confirmation
   and reminder find it cancelled when they run, and a `cancelled` job would find it
   replaced and send nothing either.
