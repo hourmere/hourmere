@@ -279,6 +279,91 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/bookings/{id}/calendar-copy/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reconcile my pinned ordinary calendar copy */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            responses: {
+                /** @description Durable copy reconciliation requested */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description The id is not a UUID (`invalid_request`) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No valid session or API key */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description A cookie-authenticated write that does not come from the app itself (`forbidden`) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such booking among those the caller hosts in this organization (`booking_not_found`) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description calendar_copy_not_retryable */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/bookings/{id}/cancel": {
         parameters: {
             query?: never;
@@ -3939,6 +4024,13 @@ export interface components {
             } | null;
             /** @description The invitee first, then guests */
             attendees: components["schemas"]["Attendee"][];
+            /** @description Authenticated host reads only: this caller’s ordinary calendar copy. */
+            calendarCopy?: {
+                canRetry: boolean;
+                errorCode: string | null;
+                /** @enum {string} */
+                status: "pending" | "ready" | "failed" | "not_configured";
+            };
             /**
              * Format: date-time
              * @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix.
@@ -3953,6 +4045,8 @@ export interface components {
                 /** @enum {string} */
                 status: "pending" | "ready" | "failed";
             };
+            /** @description Authenticated host reads only: whether this caller is the pinned organizer. */
+            conferenceCanRetry?: boolean;
             /**
              * Format: date-time
              * @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix.
@@ -4105,6 +4199,10 @@ export interface components {
             bufferAfterMinutes: number;
             /** @description Free time kept before a meeting */
             bufferBeforeMinutes: number;
+            conferenceOrganizer: {
+                /** Format: uuid */
+                userId: string;
+            } | null;
             /** Format: date-time */
             createdAt: string;
             description: string | null;
@@ -4203,6 +4301,9 @@ export interface components {
              * @default 0
              */
             bufferBeforeMinutes: number;
+            conferenceOrganizer?: {
+                userId: string;
+            } | null;
             description?: string | null;
             /** @description Length of a meeting */
             durationMinutes: number;
@@ -4293,6 +4394,9 @@ export interface components {
             bufferAfterMinutes?: number;
             /** @description Free time kept before a meeting */
             bufferBeforeMinutes?: number;
+            conferenceOrganizer?: {
+                userId: string;
+            } | null;
             description?: string | null;
             /** @description Length of a meeting */
             durationMinutes?: number;

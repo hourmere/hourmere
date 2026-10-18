@@ -92,8 +92,8 @@ describe('validateDraft', () => {
     })
     expect(toInput({ ...enabled, locationKind: 'zoom' }).location).toEqual({ kind: 'zoom' })
     expect(renderedDraftErrors({ ...enabled, schedulingType: 'collective' })).toHaveProperty(
-      'location-kind',
-      'Automatic Google Meet supports individual meetings with one host only.',
+      'conferenceOrganizer',
+      'Choose the meeting organizer from the required hosts.',
     )
   })
   it('accepts the defaults with a title and slug', () => {

@@ -73,6 +73,7 @@ describe.skipIf(!serverUrl)('event type service', () => {
         maxBookingsPerDay: null,
         schedulingType: 'individual',
         roundRobinActive: false,
+        conferenceOrganizer: null,
         hosts: [{ userId: user.id }],
         location: null,
         questions: [],

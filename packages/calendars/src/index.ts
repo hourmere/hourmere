@@ -588,6 +588,7 @@ async function refreshCalendarProvider(
     )
 }
 
+export { conferenceMirrorDispatchJob, retryConferenceMirror } from './conference-mirrors.ts'
 export {
   bookingConferenceJob,
   conferenceBookingNotifier,
