@@ -25,7 +25,11 @@ const cursor = z.object({
 export type CalendarSyncState = z.infer<typeof cursor>
 const failure = () => new GoogleCalendarError('provider_unavailable')
 
-/** Network errors commit refreshed credentials before being reported. Owner lock serializes disconnect. */
+/**
+ * Keep deletion/disconnect behind the owner key-share lock, and serialize token rotations
+ * through this connection row. Booking verification share-locks the owner without waiting
+ * for a provider network call. Network errors retain refreshed credentials on commit.
+ */
 export async function useGoogleConnection<T>(
   deps: CalendarDeps,
   id: string,
@@ -45,13 +49,14 @@ export async function useGoogleConnection<T>(
       .selectFrom('auth.user')
       .select('id')
       .where('id', '=', owner.user_id)
-      .forNoKeyUpdate()
+      .forKeyShare()
       .execute()
     const connection = await trx
       .selectFrom('calendar_connections')
       .selectAll()
       .where('id', '=', id)
       .where('provider', '=', 'google')
+      .forUpdate()
       .executeTakeFirst()
     if (!connection) return { ok: true as const, value: undefined }
     try {
