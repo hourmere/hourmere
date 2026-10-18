@@ -295,7 +295,6 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
       authHandler: auth.handler,
       resolveCaller: createCallerResolver({ auth, db }),
       publicUrl: BASE,
-      mcpOAuthEnabled: true,
       trustedProxies,
       routes: [mcpOAuthRoutes({ auth, db, publicUrl: BASE })],
       mcp: mcpEndpoint({

@@ -32,14 +32,21 @@ To book time with someone, call find_available_slots for their event type (handl
 Times are RFC 3339: results give each time in UTC (Z) and, where you pass a timeZone, in that IANA time zone too.
 create_booking and reschedule_booking return a manageToken once: keep it, it is the only way to reschedule or cancel that booking as the invitee.`
 
-/** What createApp passes to the MCP module. */
-export type McpModule = (shared: {
-  app: OpenAPIHono
-  /** The REST resolver handles API keys; optional OAuth is verified separately. */
-  resolveCaller: CallerResolver
-  /** PUBLIC_URL: the only origin browsers may send requests from. */
-  publicUrl: string
-}) => void
+/** The MCP module as createApp mounts it. */
+export interface McpModule {
+  /**
+   * Whether OAuth grants authenticate /mcp. createApp reads the authorize boundary from
+   * this, so the provider's authorize endpoint cannot be enabled without its guard.
+   */
+  readonly oauth: boolean
+  mount(shared: {
+    app: OpenAPIHono
+    /** The REST resolver handles API keys; optional OAuth is verified separately. */
+    resolveCaller: CallerResolver
+    /** PUBLIC_URL: the only origin browsers may send requests from. */
+    publicUrl: string
+  }): void
+}
 
 type McpEnv = { Variables: { mcpCaller: McpCaller } }
 
@@ -246,7 +253,7 @@ export function mcpEndpoint({ tools, oauth }: McpEndpointOptions): McpModule {
     },
   )
 
-  return ({ app, resolveCaller, publicUrl }) => {
+  const mount: McpModule['mount'] = ({ app, resolveCaller, publicUrl }) => {
     if (oauth) {
       for (const path of [
         '/.well-known/oauth-protected-resource',
@@ -307,4 +314,5 @@ export function mcpEndpoint({ tools, oauth }: McpEndpointOptions): McpModule {
       app.all(path, (c) => c.json({ error: 'not_found' }, 404))
     }
   }
+  return { oauth: oauth !== undefined, mount }
 }

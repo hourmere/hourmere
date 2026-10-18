@@ -50,10 +50,11 @@ export interface AppDeps {
   webDist?: string | undefined
   /** Groups of /api/v1 routes, created by the composition root with their services. */
   routes?: readonly RouteModule[]
-  /** The remote MCP server, served at /mcp (see apps/server/src/mcp). */
+  /**
+   * The remote MCP server, served at /mcp (see apps/server/src/mcp). When it accepts OAuth
+   * grants, the provider's authorize endpoint is guarded here as well.
+   */
   mcp?: McpModule | undefined
-  /** Enables the MCP OAuth authorization request boundary. */
-  mcpOAuthEnabled?: boolean | undefined
 }
 
 const Health = z
@@ -263,7 +264,6 @@ export function createApp({
   webDist,
   routes = [],
   mcp,
-  mcpOAuthEnabled = false,
 }: AppDeps) {
   const app = new OpenAPIHono({ defaultHook: validationHook })
   // Logs one line with control characters escaped: error text can carry request input
@@ -356,7 +356,10 @@ export function createApp({
   // follows Better Auth's versioning, not ours, so it lives outside /api/v1.
   // Count even malformed requests that are refused before reaching Better Auth. This is
   // the provider's 30/minute authorize limit, independent of NODE_ENV.
-  if (mcpOAuthEnabled) {
+  // Mounted exactly when the MCP module accepts OAuth grants, which the composition root
+  // enables together with the provider: there is no separate switch to forget. With OAuth
+  // off the provider has no authorize endpoint and dispatch stays as it was.
+  if (mcp?.oauth) {
     const authorizeLimit = rateLimit(createRateLimiter({ limit: 30, windowSeconds: 60 }))
     for (const path of ['/api/auth/oauth2/authorize', '/api/auth/oauth2/authorize/']) {
       app.use(path, authorizeLimit)
@@ -417,7 +420,7 @@ export function createApp({
   app.openapi(meRoute, (c) => c.json(describeCaller(c.var.principal), 200))
 
   for (const register of routes) register({ app, caller })
-  mcp?.({ app, resolveCaller, publicUrl })
+  mcp?.mount({ app, resolveCaller, publicUrl })
 
   // The product API is versioned under /api/v1 (agents depend on it for years);
   // /api/health is operational and stays unversioned. doc31 renders schemas the 3.1 way:
