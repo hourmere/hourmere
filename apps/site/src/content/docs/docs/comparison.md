@@ -77,8 +77,10 @@ Before evaluating it for real scheduling, account for the unfinished work:
   not establish Safari or Firefox compatibility.
 - Real Gmail, Outlook and Apple calendar invitation lifecycle and inbox-delivery acceptance
   are pending; local mail/ICS tests do not establish deliverability.
-- Round-robin assignment, automatic conference creation, billing and
-  a managed Hourmere service are not available.
+- Automatic conference creation, billing and a managed Hourmere service are not available.
+- Team round-robin pools support one to eight hosts with explicit activation. Newly saved
+  and legacy pools remain unbookable until activated; ordinary metadata saves never activate
+  them. Assignment uses current availability and equal rotation.
 - Public release, fresh-machine deployment acceptance and four weeks of actual self-use
   have not been completed.
 

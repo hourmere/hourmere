@@ -19,6 +19,7 @@ import type { PublicContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { assertHosts } from './hosts.ts'
 import { parseQuestions, type Question } from './questions.ts'
+import { eligibleRoundRobinHosts } from './round-robin.ts'
 
 /** Longest range one public slots request may cover. */
 export const MAX_SLOT_RANGE_DAYS = 62
@@ -84,6 +85,8 @@ export interface PublicEventTypeRecord {
   /** The assigned host, or the owner on a personal page. */
   hostUserId: string
   hostUserIds: string[]
+  eligibleHostUserIds: string[]
+  schedulingType: 'individual' | 'collective' | 'round_robin'
   hosts: { name: string; timeZone: string }[]
   handle: string
   slug: string
@@ -164,6 +167,8 @@ export async function findPublicEventType(
     organizationId: row.organization_id,
     hostUserId: row.user_id,
     hostUserIds: [row.user_id],
+    eligibleHostUserIds: [row.user_id],
+    schedulingType: 'individual',
     hosts: [{ name: row.name.trim() || row.handle, timeZone: row.time_zone }],
     handle: row.handle,
     slug: row.slug,
@@ -207,7 +212,21 @@ export async function findPublicTeamEventType(
     .where('et.owner_user_id', 'is', null)
     .where('et.is_active', '=', true)
     .where('et.deleted_at', 'is', null)
-    .where('et.scheduling_type', 'in', ['individual', 'collective'])
+    .where((eb) =>
+      eb.or([
+        eb('et.scheduling_type', 'in', ['individual', 'collective']),
+        eb.and([
+          eb('et.scheduling_type', '=', 'round_robin'),
+          eb.exists(
+            eb
+              .selectFrom('round_robin_state as rr')
+              .select('rr.event_type_id')
+              .whereRef('rr.event_type_id', '=', 'et.id')
+              .where('rr.enabled', '=', true),
+          ),
+        ]),
+      ]),
+    )
   if (options.lock) query = query.forShare('et')
   const row = await query.executeTakeFirst()
   if (!row) return undefined
@@ -235,15 +254,38 @@ export async function findPublicTeamEventType(
     .limit(9)
     .execute()
   if (
-    row.scheduling_type === 'individual' ? hosts.length !== 1 : hosts.length < 2 || hosts.length > 8
+    row.scheduling_type === 'individual'
+      ? hosts.length !== 1
+      : hosts.length < (row.scheduling_type === 'collective' ? 2 : 1) || hosts.length > 8
   )
     return undefined
   const hostUserIds = hosts.map((h) => h.user_id)
-  try {
-    await assertHosts(db, row.organization_id, hostUserIds, options.lock)
-  } catch (error) {
-    if (error instanceof DomainError && error.code === 'invalid_hosts') return undefined
-    throw error
+  let eligibleHostUserIds = hostUserIds
+  if (row.scheduling_type === 'round_robin') {
+    eligibleHostUserIds = await eligibleRoundRobinHosts(
+      db,
+      row.organization_id,
+      hostUserIds,
+      options.lock,
+    )
+    if (!eligibleHostUserIds.length) return undefined
+    if (options.lock) {
+      const current = await db
+        .selectFrom('event_type_hosts')
+        .select('user_id')
+        .where('event_type_id', '=', row.id)
+        .orderBy('user_id')
+        .execute()
+      if (current.map((host) => host.user_id).join() !== hostUserIds.join())
+        throw new DomainError('conflict', 'booking_changed', 'The host pool changed; try again')
+    }
+  } else {
+    try {
+      await assertHosts(db, row.organization_id, hostUserIds, options.lock)
+    } catch (error) {
+      if (error instanceof DomainError && error.code === 'invalid_hosts') return undefined
+      throw error
+    }
   }
   const views = hosts.map((h) => ({ name: h.name.trim() || row.team_name, timeZone: h.time_zone }))
   return {
@@ -251,6 +293,8 @@ export async function findPublicTeamEventType(
     organizationId: row.organization_id,
     hostUserId: hostUserIds[0] as string,
     hostUserIds,
+    eligibleHostUserIds,
+    schedulingType: row.scheduling_type as PublicEventTypeRecord['schedulingType'],
     hosts: views,
     handle: row.team_slug,
     slug: row.slug,
@@ -263,7 +307,8 @@ export async function findPublicTeamEventType(
     location: parseLocation(row.location),
     questions: parseQuestions(row.questions),
     allowGuests: row.allow_guests,
-    hostName: views.map((h) => h.name).join(', '),
+    hostName:
+      row.scheduling_type === 'round_robin' ? row.team_name : views.map((h) => h.name).join(', '),
     hostTimeZone: views[0]?.timeZone ?? 'UTC',
     team: { name: row.team_name, slug: row.team_slug },
   }
@@ -286,6 +331,7 @@ export interface PublicEventType {
   host: { name: string; timeZone: string }
   /** Every required host, without private identities or availability. */
   hosts?: { name: string; timeZone: string }[]
+  schedulingType?: 'round_robin'
   team?: { name: string; slug: string }
 }
 
@@ -315,7 +361,8 @@ function publicEventType(et: PublicEventTypeRecord | undefined): PublicEventType
     questions: et.questions,
     allowGuests: et.allowGuests,
     host: { name: et.hostName, timeZone: et.hostTimeZone },
-    ...(et.hosts.length > 1 && { hosts: et.hosts }),
+    ...(et.schedulingType === 'collective' && et.hosts.length > 1 && { hosts: et.hosts }),
+    ...(et.schedulingType === 'round_robin' && { schedulingType: 'round_robin' as const }),
     ...(et.team && { team: et.team }),
   }
 }
@@ -475,6 +522,8 @@ async function publicSlots(
   if (!et) throw eventTypeNotFound()
   const now = ctx.now()
   if (!hasBookablePart(et, input.start, input.end, now, et.hostUserIds.length)) return []
+  if (et.schedulingType === 'round_robin')
+    return unionRoundRobinSlots(ctx.db, et.id, et.eligibleHostUserIds, input.start, input.end, now)
   return intersectSlots(ctx.db, et.id, et.hostUserIds, input.start, input.end, now)
 }
 
@@ -782,6 +831,7 @@ export async function intersectSlots(
   rangeEnd: Temporal.Instant,
   now: Temporal.Instant,
   excludeBookingId?: string,
+  useDefaultSchedule = hostUserIds.length > 1,
 ): Promise<SlotView[]> {
   let offered: SlotView[] | undefined
   for (const hostUserId of hostUserIds) {
@@ -792,7 +842,7 @@ export async function intersectSlots(
       rangeEnd,
       now,
       excludeBookingId,
-      useDefaultSchedule: hostUserIds.length > 1,
+      useDefaultSchedule,
     })
     const views = slots.map((s) => ({ start: toIso(s.start), end: toIso(s.end) }))
     if (offered === undefined) offered = views
@@ -802,4 +852,45 @@ export async function intersectSlots(
     }
   }
   return offered ?? []
+}
+
+/** Only known stale-calendar failures degrade one pool member; every other error propagates. */
+export async function unionRoundRobinSlots(
+  db: Db,
+  eventTypeId: string,
+  userIds: readonly string[],
+  rangeStart: Temporal.Instant,
+  rangeEnd: Temporal.Instant,
+  now: Temporal.Instant,
+): Promise<SlotView[]> {
+  const offered = new Map<string, SlotView>()
+  let stale = false
+  for (const hostUserId of userIds) {
+    try {
+      const slots = await findSlots(db, {
+        eventTypeId,
+        hostUserId,
+        rangeStart,
+        rangeEnd,
+        now,
+        useDefaultSchedule: true,
+      })
+      for (const slot of slots) {
+        const view = { start: toIso(slot.start), end: toIso(slot.end) }
+        offered.set(`${view.start}/${view.end}`, view)
+      }
+    } catch (error) {
+      if (!(error instanceof DomainError) || error.code !== 'calendar_sync_unavailable') throw error
+      stale = true
+    }
+  }
+  if (!offered.size && stale)
+    throw new DomainError(
+      'conflict',
+      'calendar_sync_unavailable',
+      'The host calendars are temporarily unavailable. Try again shortly.',
+    )
+  return [...offered.values()].sort(
+    (a, b) => a.start.localeCompare(b.start) || a.end.localeCompare(b.end),
+  )
 }

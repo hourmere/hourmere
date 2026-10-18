@@ -46,7 +46,10 @@ for the MCP envelope. The server enforces the tool's full schema and domain rule
 
 `catalog` includes the key's visible team and personal configurations. Booking and slot
 commands accept exactly one of `handle` (personal link) or `teamSlug` (team link). Team
-slugs keep their stored case; collective types require every configured host. `reschedule` and `cancel` by ID require hosting that booking in the key's
+slugs keep their stored case; collective types require every configured host. Activated
+round-robin types offer the union and assign one available host; `book` returns its safe
+`assignedHost` name/time zone. Replaying the same JSON/key retains the selection. See
+[round-robin scheduling](round-robin-scheduling.md) for explicit activation and fairness. `reschedule` and `cancel` by ID require hosting that booking in the key's
 organization. A management token instead acts as the invitee. These operations can send
 the same notification emails and calendar updates as the booking page.
 
@@ -142,3 +145,18 @@ successful booking, and retain the original request. Inspect the server before r
 All local integration tests use synthetic identities, real HTTP and helper-owned temporary
 PostgreSQL databases. They do not send mail, access a real calendar or configure hosted
 ChatGPT/claude.ai connectors.
+
+For an activated round-robin link `/team/Cobaltmere/intro`, use the same JSON shape:
+
+```json
+{
+  "teamSlug": "Cobaltmere",
+  "slug": "intro",
+  "timeZone": "UTC",
+  "startDate": "2026-11-02",
+  "endDate": "2026-11-02"
+}
+```
+
+Pass the returned start to `book` with a fresh random `idempotencyKey`; retry that same
+input if the response is lost. Clients do not choose a pool host.

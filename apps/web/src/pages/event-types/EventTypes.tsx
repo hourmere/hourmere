@@ -150,7 +150,11 @@ function EventTypeTable({
             e.ownerUserId === null &&
             !me.organization.personal &&
             ((e.schedulingType === 'individual' && e.hosts.length === 1) ||
-              (e.schedulingType === 'collective' && e.hosts.length >= 2 && e.hosts.length <= 8)) &&
+              (e.schedulingType === 'collective' && e.hosts.length >= 2 && e.hosts.length <= 8) ||
+              (e.schedulingType === 'round_robin' &&
+                e.roundRobinActive &&
+                e.hosts.length >= 1 &&
+                e.hosts.length <= 8)) &&
             isPublicTeamSlug(me.organization.slug)
               ? publicTeamPageUrl(me.organization.slug, e.slug)
               : profile && e.ownerUserId === me.user.id
@@ -188,7 +192,9 @@ function EventTypeTable({
               </td>
               <td data-label={t('Status')}>
                 {e.isHidden && <span className="badge">{t('Unlisted')}</span>}
-                {e.isActive ? (
+                {e.schedulingType === 'round_robin' && !e.roundRobinActive ? (
+                  <span className="badge">{t('Needs activation')}</span>
+                ) : e.isActive ? (
                   <span className="badge badge-success">{t('Active')}</span>
                 ) : (
                   <span className="badge">{t('Inactive')}</span>

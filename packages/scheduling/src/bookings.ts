@@ -18,6 +18,7 @@ import type { BookingNotifier, PublicContext, ServiceContext } from './context.t
 import { DomainError } from './errors.ts'
 import { bookingHostIds, lockOrganization } from './hosts.ts'
 import { type Responses, validateResponses } from './questions.ts'
+import { assignRoundRobinHost, lockRoundRobinState } from './round-robin.ts'
 import { cleanText } from './text.ts'
 
 export type BookingStatus = 'confirmed' | 'cancelled'
@@ -50,6 +51,8 @@ export interface Booking {
   cancelReason: string | null
   source: BookingSource
   createdAt: string
+  /** Actual round-robin winner; never a pool availability map or private identity. */
+  assignedHost?: { name: string; timeZone: string } | null
 }
 
 export interface BookingWithToken {
@@ -261,6 +264,7 @@ const RESCHEDULE_COLUMNS = [
   'location',
   'responses',
   'required_host_user_ids',
+  'hosts_use_default_schedule',
 ] as const
 
 /**
@@ -354,6 +358,8 @@ const BOOKING_COLUMNS = [
   'b.cancel_reason',
   'b.source',
   'b.created_at',
+  'b.required_host_user_ids',
+  'b.hosts_use_default_schedule',
 ] as const
 
 interface BookingRow {
@@ -370,6 +376,8 @@ interface BookingRow {
   cancel_reason: string | null
   source: string
   created_at: Date
+  required_host_user_ids: string[]
+  hosts_use_default_schedule: boolean
 }
 
 /** Adds the attendees (one query for all rows) and maps rows to the API shape. */
@@ -398,6 +406,32 @@ async function toBookings(db: Db, rows: readonly BookingRow[]): Promise<Booking[
     })
     byBooking.set(a.booking_id, list)
   }
+  const assigned = new Map<string, { name: string; timeZone: string }>()
+  const assignedIds = rows
+    .filter((row) => row.hosts_use_default_schedule && row.required_host_user_ids.length === 1)
+    .map((row) => row.id)
+  if (assignedIds.length) {
+    const hosts = await db
+      .selectFrom('booking_hosts as h')
+      .innerJoin('auth.user as u', 'u.id', 'h.user_id')
+      .leftJoin('profiles as p', 'p.user_id', 'h.user_id')
+      .leftJoin('schedules as s', (join) =>
+        join.onRef('s.user_id', '=', 'h.user_id').on('s.is_default', '=', true),
+      )
+      .select([
+        'h.booking_id',
+        'u.name',
+        'p.handle',
+        sql<string>`coalesce(p.time_zone,s.time_zone,'UTC')`.as('time_zone'),
+      ])
+      .where('h.booking_id', 'in', assignedIds)
+      .execute()
+    for (const host of hosts)
+      assigned.set(host.booking_id, {
+        name: host.name.trim() || host.handle || '',
+        timeZone: host.time_zone,
+      })
+  }
   return rows.map((r) => ({
     id: r.id,
     eventTypeId: r.event_type_id,
@@ -413,6 +447,8 @@ async function toBookings(db: Db, rows: readonly BookingRow[]): Promise<Booking[
     cancelReason: r.cancel_reason,
     source: r.source as BookingSource,
     createdAt: toIso(toInstant(r.created_at)),
+    ...(r.hosts_use_default_schedule &&
+      r.required_host_user_ids.length === 1 && { assignedHost: assigned.get(r.id) ?? null }),
   }))
 }
 
@@ -493,6 +529,7 @@ interface NewBooking {
   idempotency?: { key: string; fingerprint: Buffer } | undefined
   rescheduledFromId?: string | undefined
   hostUserIds: readonly string[]
+  hostsUseDefaultSchedule: boolean
   attendees: readonly Attendee[]
 }
 
@@ -517,6 +554,7 @@ async function insertBooking(db: Db, b: NewBooking): Promise<{ id: string; manag
       idempotency_fingerprint: b.idempotency?.fingerprint ?? null,
       rescheduled_from_id: b.rescheduledFromId ?? null,
       required_host_user_ids: [...b.hostUserIds].sort(),
+      hosts_use_default_schedule: b.hostsUseDefaultSchedule,
     })
     .returning('id')
     .executeTakeFirstOrThrow()
@@ -706,7 +744,8 @@ async function publicBooking(
       if (
         !current ||
         current.id !== et.id ||
-        current.hostUserIds.join() !== et.hostUserIds.join()
+        current.hostUserIds.join() !== et.hostUserIds.join() ||
+        current.schedulingType !== et.schedulingType
       ) {
         throw eventTypeNotFound()
       }
@@ -720,15 +759,47 @@ async function publicBooking(
       const now = ctx.now()
       const responses = validateResponses(current.questions, input.responses ?? {})
       const end = input.start.add({ minutes: current.durationMinutes })
-      for (const hostUserId of current.hostUserIds)
-        await requireOfferedSlot(trx, {
-          eventTypeId: current.id,
-          hostUserId,
-          start: input.start,
-          end,
-          now,
-          useDefaultSchedule: current.hostUserIds.length > 1,
-        })
+      let selectedHostIds = current.hostUserIds
+      if (current.schedulingType === 'round_robin') {
+        await lockRoundRobinState(trx, current.id)
+        const available: string[] = []
+        let stale = false
+        for (const hostUserId of current.eligibleHostUserIds) {
+          try {
+            const slots = await findSlots(trx, {
+              eventTypeId: current.id,
+              hostUserId,
+              rangeStart: input.start,
+              rangeEnd: end,
+              now,
+              useDefaultSchedule: true,
+            })
+            if (slots.some((slot) => slot.start.equals(input.start) && slot.end.equals(end)))
+              available.push(hostUserId)
+          } catch (error) {
+            if (!(error instanceof DomainError) || error.code !== 'calendar_sync_unavailable')
+              throw error
+            stale = true
+          }
+        }
+        if (!available.length && stale)
+          throw new DomainError(
+            'conflict',
+            'calendar_sync_unavailable',
+            'The host calendars are temporarily unavailable. Try again shortly.',
+          )
+        selectedHostIds = [await assignRoundRobinHost(trx, current.id, available)]
+      } else {
+        for (const hostUserId of current.hostUserIds)
+          await requireOfferedSlot(trx, {
+            eventTypeId: current.id,
+            hostUserId,
+            start: input.start,
+            end,
+            now,
+            useDefaultSchedule: current.schedulingType === 'collective',
+          })
+      }
       const { id, manageToken } = await insertBooking(trx, {
         organizationId: current.organizationId,
         eventTypeId: current.id,
@@ -741,7 +812,8 @@ async function publicBooking(
         apiKeyId: origin.apiKeyId,
         oauthConsentId: origin.oauthConsentId ?? null,
         idempotency: scope && { key: scope.key, fingerprint: scope.fingerprint },
-        hostUserIds: current.hostUserIds,
+        hostUserIds: selectedHostIds,
+        hostsUseDefaultSchedule: current.schedulingType !== 'individual',
         attendees: [invitee, ...guests],
       })
       // In this transaction, and never on the replay paths: one set of emails per booking,
@@ -883,7 +955,7 @@ async function rescheduleLocked(
       end,
       now,
       excludeBookingId: old.id,
-      useDefaultSchedule: hostUserIds.length > 1,
+      useDefaultSchedule: old.hosts_use_default_schedule || hostUserIds.length > 1,
     })
   }
 
@@ -912,6 +984,7 @@ async function rescheduleLocked(
     oauthConsentId: origin.oauthConsentId ?? null,
     rescheduledFromId: old.id,
     hostUserIds,
+    hostsUseDefaultSchedule: old.hosts_use_default_schedule || hostUserIds.length > 1,
     attendees: attendees.map((a) => ({
       name: a.name,
       email: a.email,

@@ -264,7 +264,7 @@ an email's token would move the meeting again; clients must not resubmit it on t
 
 ### Team booking links
 
-Individual and collective team event types have a public page at `/team/{teamSlug}/{slug}`. The matching
+Individual, collective and explicitly activated round-robin team event types have a public page at `/team/{teamSlug}/{slug}`. The matching
 API is `GET /api/v1/public/teams/{handle}/{slug}`, with `/slots` and `POST /bookings` suffixes
 as on personal pages; `handle` here is the organization slug in its exact stored case.
 Organization slug uniqueness is case-sensitive, so these routes preserve case and never
@@ -277,7 +277,11 @@ this namespace. Only active, non-deleted types with valid, verified team members
 are served: `individual` types have one assigned host, while `collective` types require all
 two to eight assigned hosts to be available for the complete interval. Collective hosts use
 their current default schedules; see [collective scheduling](collective-scheduling.md) for
-configuration, concurrency and rescheduling rules. Legacy round-robin types remain metadata-only.
+configuration, concurrency and rescheduling rules. Round-robin types offer the union of
+currently eligible hosts and assign one available host in a durable equal rotation. Legacy
+and newly saved round-robin pools need explicit activation; ordinary metadata saves never
+activate them. Booking results include only safe assigned-host name/time zone. See
+[round-robin scheduling](round-robin-scheduling.md) for activation, fairness and failure rules.
 Team bookings use the same availability rules, locks, idempotency scope, notifications and
 manage links as personal bookings.
 

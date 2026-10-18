@@ -42,6 +42,7 @@ export const PublicEventType = z
       .openapi({ description: 'Present for a team booking link' }),
   })
   .extend({
+    schedulingType: z.literal('round_robin').optional(),
     hosts: z
       .array(z.object({ name: z.string(), timeZone: z.string() }))
       .max(8)

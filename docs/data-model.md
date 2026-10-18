@@ -260,3 +260,11 @@ endpoints and queues only delivery IDs. Composite foreign keys keep deliveries i
 endpoint organization; endpoint/booking/organization deletion cascades snapshots. Runtime
 locks use endpoint then delivery so deletion, pause and rotation cannot deadlock delivery
 through inverse lock order. Details and retention are in [webhooks.md](webhooks.md).
+
+## Round-robin assignment state
+
+Migration 0020 adds `round_robin_state` (event primary key, monotonic `bigint` sequence,
+explicit enabled flag), retained host `last_assigned_sequence`, and immutable booking
+`hosts_use_default_schedule`. Activation and mode changes preserve sequence history;
+new successful bookings update fairness with the booking/outbox transaction. No legacy
+configuration is activated by migration. See [round-robin scheduling](round-robin-scheduling.md).
