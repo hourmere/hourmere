@@ -1,17 +1,13 @@
 import { randomUUID } from 'node:crypto'
 import { defineJob } from '@hourmere/jobs'
 import type { ServiceContext } from '@hourmere/scheduling'
+import { conferenceJoinUrl } from '@hourmere/scheduling/conference-url'
 import { conferenceOrganizerAvailable } from '@hourmere/scheduling/conferences'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { sql } from 'kysely'
 import { z } from 'zod'
 import { GoogleCalendarError } from './google.ts'
-import {
-  type GoogleEvent,
-  type GoogleEventWrite,
-  googleMeetUrl,
-  safeGoogleEventId,
-} from './google-events.ts'
+import { type GoogleEvent, type GoogleEventWrite, safeGoogleEventId } from './google-events.ts'
 import type { CalendarDeps } from './index.ts'
 import { useGoogleConnection } from './sync.ts'
 
@@ -98,7 +94,7 @@ async function claim(deps: CalendarDeps, root: string, userId: string) {
       b.location !== null &&
       !Array.isArray(b.location) &&
       'url' in b.location
-        ? googleMeetUrl(b.location.url)
+        ? conferenceJoinUrl(c.provider, b.location.url, c.zoom_meeting_id)
         : undefined
     if (b.status === 'confirmed' && !url) return
     const lease = randomUUID(),

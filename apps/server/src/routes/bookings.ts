@@ -79,7 +79,7 @@ export const Booking = z
     location: BookingLocation.nullable(),
     conference: z
       .object({
-        provider: z.literal('google_meet'),
+        provider: z.enum(['google_meet', 'zoom']),
         status: z.enum(['pending', 'ready', 'failed']),
         errorCode: z.string().max(64).nullable(),
       })
@@ -197,6 +197,7 @@ const invalidCancel = error(
 export interface BookingRoutesDeps {
   db: Db
   automaticMeet?: boolean | undefined
+  automaticZoom?: boolean | undefined
   now?: () => Temporal.Instant
   /** Queues the booking emails in the transaction of each change; none are sent without it. */
   notify?: BookingNotifier | undefined
@@ -214,9 +215,10 @@ export function bookingRoutes({
   now = () => Temporal.Now.instant(),
   notify,
   automaticMeet,
+  automaticZoom,
   rateLimits = {},
 }: BookingRoutesDeps): RouteModule {
-  const publicContext: PublicContext = { db, now, notify, automaticMeet }
+  const publicContext: PublicContext = { db, now, notify, automaticMeet, automaticZoom }
   const manageLimit = rateLimit(createRateLimiter(rateLimits.manage ?? PUBLIC_RATE_LIMITS.manage))
   // Picking a new time pages through months of slots, so it counts like public slots.
   const manageSlotsLimit = rateLimit(
@@ -230,6 +232,7 @@ export function bookingRoutes({
       now,
       notify,
       automaticMeet,
+      automaticZoom,
     })
 
     app.openapi(

@@ -180,6 +180,7 @@ export interface BookingToolsDeps {
   /** Queues the booking emails in the transaction of each change, as for REST. */
   notify?: BookingNotifier | undefined
   automaticMeet?: boolean | undefined
+  automaticZoom?: boolean | undefined
   /**
    * Per-user limits for discovery, booking and both reschedule modes; defaults to the public
    * endpoints' per-address limits (PUBLIC_RATE_LIMITS). Replaced in tests.
@@ -199,15 +200,17 @@ export function bookingTools({
   now = () => Temporal.Now.instant(),
   notify,
   automaticMeet,
+  automaticZoom,
   rateLimits = {},
 }: BookingToolsDeps): Tool[] {
-  const pub: PublicContext = { db, now, notify, automaticMeet }
+  const pub: PublicContext = { db, now, notify, automaticMeet, automaticZoom }
   const context = (caller: McpCaller): ServiceContext => ({
     db,
     principal: caller,
     now,
     notify,
     automaticMeet,
+    automaticZoom,
   })
   const origin = (caller: McpCaller): BookingOrigin => ({
     source: 'mcp',
@@ -416,7 +419,7 @@ export function bookingTools({
     name: 'retry_conference',
     title: 'Reconcile the original meeting',
     description:
-      'For the current verified pinned organizer only. Safely reconciles a failed original Meet or its cancellation; never changes organizer/calendar or blindly imports after an unknown outcome. Give the current booking ID, not a management token.',
+      'For the current verified pinned organizer only. Safely reconciles a failed original Google Meet or Zoom meeting, or its cancellation. Never changes the pinned account/organizer/calendar or creates a replacement after an unknown outcome; a Zoom create with no validated ID remains ambiguous. Give the current booking ID, not a management token.',
     input: retryInput,
     output: retryOutput,
     annotations: retryAnnotations,

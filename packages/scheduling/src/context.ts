@@ -29,6 +29,7 @@ export interface ServiceContext {
   db: Db
   /** Explicit instance capability; defaults off. */
   automaticMeet?: boolean | undefined
+  automaticZoom?: boolean | undefined
   principal: Principal
   /** The clock, injectable for tests. */
   now: () => Temporal.Instant
@@ -41,6 +42,7 @@ export interface PublicContext {
   db: Db
   /** Explicit instance capability; defaults off. */
   automaticMeet?: boolean | undefined
+  automaticZoom?: boolean | undefined
   now: () => Temporal.Instant
   /** Told about booking changes in their transaction; nobody is told when absent. */
   notify?: BookingNotifier | undefined

@@ -12,7 +12,7 @@ const labels = {
     disconnected: 'No Zoom accounts connected.',
     cancel: 'Cancel',
     permission:
-      'Zoom did not grant only the requested identity access. Check the app configuration and reconnect.',
+      'Zoom did not return exactly the requested permissions. Check the app configuration and reconnect.',
     reauth: 'Reconnection required',
     disabled: 'Zoom connections are not configured on this instance.',
   },
@@ -26,7 +26,7 @@ const labels = {
     disconnect: '断开 Zoom',
     disconnected: '尚未连接 Zoom 账号。',
     cancel: '取消',
-    permission: 'Zoom 返回的权限不符合所请求的最小身份权限。请检查应用配置后重新连接。',
+    permission: 'Zoom 返回的权限与所请求的权限不完全一致。请检查应用配置后重新连接。',
     reauth: '需要重新连接',
     disabled: '此实例尚未配置 Zoom 连接。',
   },
@@ -151,5 +151,93 @@ test.describe('Zoom disabled by default', () => {
         'Public booking must not request a private session or Zoom connections',
       ).toBe(0)
       expect(conferenceChunks, 'Public booking must not load the conference admin chunk').toBe(0)
+    })
+})
+
+test.describe('Zoom explicit meeting authorization', () => {
+  test.use({ zoomMeetingsEnabled: true })
+  for (const language of ['en', 'zh-CN'] as const)
+    test(`Zoom ${language}: explicit upgrade, wrong-mode retirement and saved-mode reconnect`, async ({
+      page,
+      zoomApp,
+    }) => {
+      const text = labels[language],
+        meeting = language === 'en' ? 'Authorize Zoom meetings' : '授权 Zoom 会议',
+        identity = language === 'en' ? 'Identity only' : '仅身份访问',
+        permission = language === 'en' ? 'Meeting permissions' : '会议权限'
+      await page.goto(`${zoomApp.url}/app/conferences`)
+      await page.getByRole('combobox', { name: 'Interface language' }).selectOption(language)
+      await page.getByRole('button', { name: text.connect, exact: true }).click()
+      await expect(page.getByText(text.connected, { exact: true })).toBeVisible()
+      await expect(page.getByText(identity, { exact: true })).toBeVisible()
+      expect(await zoomApp.state()).toMatchObject({
+        connections: 1,
+        identityConnections: 1,
+        meetingConnections: 0,
+        calendars: 0,
+      })
+      await page
+        .locator('article.conference-account')
+        .getByRole('button', { name: meeting, exact: true })
+        .click()
+      await expect(page.getByText(permission, { exact: true })).toBeVisible()
+      expect(await zoomApp.state()).toMatchObject({
+        connections: 1,
+        identityConnections: 0,
+        meetingConnections: 1,
+        secrets: 1,
+        attempts: 0,
+        calendars: 0,
+      })
+      await page.getByRole('button', { name: text.connect, exact: true }).click()
+      await expect(
+        page
+          .getByRole('status')
+          .filter({
+            hasText:
+              language === 'en'
+                ? 'Identity-only authorization cannot replace meeting permissions'
+                : '仅身份授权不能替换会议权限',
+          })
+          .first(),
+      ).toBeVisible()
+      await expect(page.getByRole('button', { name: text.refresh, exact: true })).toBeDisabled()
+      expect(await zoomApp.state()).toMatchObject({
+        connections: 1,
+        meetingConnections: 1,
+        active: 0,
+        secrets: 0,
+        attempts: 0,
+      })
+      await page.getByRole('button', { name: text.reconnect, exact: true }).click()
+      await expect(page.getByText(text.connected, { exact: true })).toBeVisible()
+      await expect(page.getByText(permission, { exact: true })).toBeVisible()
+      expect(await zoomApp.state()).toMatchObject({
+        connections: 1,
+        meetingConnections: 1,
+        active: 1,
+        secrets: 1,
+        attempts: 0,
+      })
+      await page.getByRole('button', { name: text.disconnect, exact: true }).click()
+      await page
+        .getByRole('group')
+        .getByRole('button', { name: text.disconnect, exact: true })
+        .click()
+      await expect(page.getByText(text.disconnected, { exact: true })).toBeVisible()
+      await page.getByRole('button', { name: text.connect, exact: true }).click()
+      await expect(page.getByText(identity, { exact: true })).toBeVisible()
+      expect(await zoomApp.state()).toMatchObject({
+        connections: 1,
+        identityConnections: 1,
+        meetingConnections: 0,
+        active: 1,
+        secrets: 1,
+      })
+      expect(
+        await page.evaluate(
+          () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+        ),
+      ).toBe(true)
     })
 })

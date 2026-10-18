@@ -40,16 +40,19 @@ import {
   serverErrors,
   slugify,
   toInput,
+  toPatchInput,
   validateDraft,
 } from './event-type-form.ts'
 import { HostAssignment } from './HostAssignment.tsx'
 import { QuestionsEditor } from './QuestionsEditor.tsx'
+import { ZoomMeetingFields } from './ZoomMeetingFields.tsx'
 
 interface Loaded {
   eventType: EventType | null
   schedules: Schedule[]
   profile: Profile | null
   automaticGoogleMeet: boolean
+  automaticZoom: boolean
 }
 
 /** Creates an event type (/app/event-types/new) or edits one (/app/event-types/:id). */
@@ -83,6 +86,7 @@ function EventTypeEditor({ id }: { id: string | undefined }) {
         schedules,
         profile,
         automaticGoogleMeet: instance.automaticGoogleMeet === true,
+        automaticZoom: instance.automaticZoom === true,
       }
     },
     [id],
@@ -118,7 +122,13 @@ function EventTypeEditor({ id }: { id: string | undefined }) {
   return <EventTypeForm {...state.data} />
 }
 
-function EventTypeForm({ eventType, schedules, profile, automaticGoogleMeet }: Loaded) {
+function EventTypeForm({
+  eventType,
+  schedules,
+  profile,
+  automaticGoogleMeet,
+  automaticZoom,
+}: Loaded) {
   const { t, ui, locale: displayLocale } = useI18n()
 
   const me = useMe()
@@ -177,29 +187,7 @@ function EventTypeForm({ eventType, schedules, profile, automaticGoogleMeet }: L
     setStatus('Saving…')
     statusRef.current?.focus()
     setSaving(true)
-    const body = toInput(draft)
-    if (
-      saved &&
-      draft.schedulingType === baseline.schedulingType &&
-      [...draft.hostUserIds].sort().join() === [...baseline.hostUserIds].sort().join()
-    ) {
-      delete body.schedulingType
-      delete body.hosts
-      if (draft.conferenceOrganizerUserId === baseline.conferenceOrganizerUserId)
-        delete body.conferenceOrganizer
-    }
-    // The instance flag gates new opt-ins and configuration changes. Preserve an
-    // unchanged automatic location during an ordinary metadata save after it is off.
-    if (
-      saved &&
-      baseline.autoCreateMeet &&
-      draft.autoCreateMeet &&
-      draft.locationKind === 'google_meet'
-    ) {
-      delete body.location
-      if (draft.scheduleId === baseline.scheduleId) delete body.scheduleId
-    }
-    if (draft.schedulingType === 'round_robin' && unchangedPool) delete body.scheduleId
+    const body = saved ? toPatchInput(draft, baseline) : toInput(draft)
     try {
       if (saved) {
         const updated = await unwrap(
@@ -488,6 +476,17 @@ function EventTypeForm({ eventType, schedules, profile, automaticGoogleMeet }: L
           <section className="panel" aria-labelledby="location-heading">
             <h2 id="location-heading">{t('Location')}</h2>
             <LocationFields draft={draft} errors={errors} set={set} />
+            {draft.locationKind === 'zoom' && (
+              <ZoomMeetingFields
+                draft={draft}
+                errors={errors}
+                set={set}
+                enabled={automaticZoom}
+                userId={me.user.id}
+                personal={me.organization.personal}
+                session={me.principal.kind === 'session'}
+              />
+            )}
             {draft.locationKind === 'google_meet' && (
               <div>
                 <label className="checkbox">

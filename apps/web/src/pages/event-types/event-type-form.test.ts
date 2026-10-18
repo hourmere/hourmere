@@ -13,6 +13,7 @@ import {
   serverErrors,
   slugify,
   toInput,
+  toPatchInput,
   validateDraft,
 } from './event-type-form.ts'
 
@@ -214,5 +215,62 @@ describe('serverErrors', () => {
       fields: {},
       message: null,
     })
+  })
+})
+
+describe('explicit Zoom configuration', () => {
+  const pin = '00000000-0000-7000-8000-000000000099'
+  it('keeps passive labels inert, requires a deliberate account and preserves an automatic round trip', () => {
+    const value = draftFromEventType(
+      eventType({ location: { kind: 'zoom' }, zoomConnectionId: null }),
+    )
+    expect(value.autoCreateZoom).toBe(false)
+    expect(value.zoomConnectionId).toBe('')
+    expect(toInput(value)).not.toHaveProperty('zoomConnectionId')
+    expect(toInput(value).location).toEqual({ kind: 'zoom' })
+    expect(renderedDraftErrors({ ...value, autoCreateZoom: true })).toHaveProperty(
+      'zoomConnectionId',
+    )
+    const enabled = { ...value, autoCreateZoom: true, zoomConnectionId: pin }
+    expect(renderedDraftErrors(enabled)).toEqual({})
+    expect(toInput(enabled)).toMatchObject({
+      location: { kind: 'zoom', autoCreate: true },
+      zoomConnectionId: pin,
+    })
+    expect(draftFromEventType(eventType(toInput(enabled)))).toMatchObject({
+      autoCreateZoom: true,
+      zoomConnectionId: pin,
+    })
+    expect(renderedDraftErrors({ ...enabled, schedulingType: 'round_robin' })).toHaveProperty(
+      'location-kind',
+    )
+  })
+  it('omits unchanged authorization on metadata saves and disable, but sends an explicitly changed account', () => {
+    const original = draftFromEventType(
+      eventType({ location: { kind: 'zoom', autoCreate: true }, zoomConnectionId: pin }),
+    )
+    const metadata = toPatchInput({ ...original, title: 'literal unsaved title' }, original)
+    for (const key of ['location', 'hosts', 'schedulingType', 'zoomConnectionId', 'scheduleId'])
+      expect(metadata).not.toHaveProperty(key)
+    const disabled = toPatchInput({ ...original, autoCreateZoom: false }, original)
+    expect(disabled.location).toEqual({ kind: 'zoom' })
+    expect(disabled).not.toHaveProperty('zoomConnectionId')
+    expect(
+      toPatchInput(
+        { ...original, zoomConnectionId: '00000000-0000-7000-8000-000000000100' },
+        original,
+      ),
+    ).toHaveProperty('zoomConnectionId', '00000000-0000-7000-8000-000000000100')
+  })
+  it.each([
+    'automatic_zoom_disabled',
+    'automatic_zoom_unavailable',
+    'automatic_zoom_host_policy',
+    'zoom_host_session_required',
+    'invalid_zoom_connection',
+  ])('maps %s to a bounded local message', (code) => {
+    const result = serverErrors(new RequestError(403, code, 'unsafe provider detail'), emptyDraft())
+    expect(JSON.stringify(result)).not.toContain('unsafe provider detail')
+    expect(Object.keys(result.fields)).toHaveLength(1)
   })
 })

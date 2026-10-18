@@ -56,6 +56,7 @@ const schema = z
         })
         .transform((list) => [...new Set(list.map((v) => embedOrigin(v) as string))]),
     ).transform((v) => v ?? []),
+    ZOOM_MEETINGS_ENABLED: optional(z.enum(['true', 'false'])).transform((v) => v === 'true'),
     GOOGLE_MEET_ENABLED: optional(z.enum(['true', 'false'])).transform((v) => v === 'true'),
     WEBHOOKS_ENABLED: optional(z.enum(['true', 'false'])).transform((v) => v === 'true'),
     WEBHOOK_ENCRYPTION_KEY: optional(
@@ -330,6 +331,15 @@ const schema = z
         path: ['CONFERENCE_ENCRYPTION_KEY'],
         message:
           'Use an independent CONFERENCE_ENCRYPTION_KEY, separate from authentication, calendar and webhook keys',
+      })
+    if (
+      c.ZOOM_MEETINGS_ENABLED &&
+      !(c.ZOOM_CLIENT_ID && c.ZOOM_CLIENT_SECRET && c.CONFERENCE_ENCRYPTION_KEY)
+    )
+      ctx.addIssue({
+        code: 'custom',
+        path: ['ZOOM_MEETINGS_ENABLED'],
+        message: 'Automatic Zoom meetings require separately configured Zoom credentials',
       })
     if (c.ZOOM_CLIENT_ID || c.ZOOM_CLIENT_SECRET) {
       for (const key of [

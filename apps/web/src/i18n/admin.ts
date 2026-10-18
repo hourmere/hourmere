@@ -1,5 +1,19 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  'Connect your own Zoom account separately from sign-in and calendars. Identity access and automatic meeting permissions are separate choices.':
+    '单独连接你自己的 Zoom 账号，与登录和日历互相独立。身份访问与自动创建会议权限需要分别选择。',
+  'Connect Zoom requests only basic account identity. Authorize Zoom meetings also requests create, read, update and delete meeting access. You choose your own connection when configuring automatic meetings.':
+    '“连接 Zoom”仅请求基本账号身份。“授权 Zoom 会议”还会请求创建、读取、更新和删除会议的权限。配置自动会议时，由你选择自己的连接。',
+  'Authorize Zoom meetings': '授权 Zoom 会议',
+  'Meeting permissions': '会议权限',
+  'Identity only': '仅身份访问',
+  'New automatic Zoom authorization is disabled on this instance. Existing connections reconnect with their saved permissions.':
+    '此实例已关闭新的自动 Zoom 授权。现有连接会按已保存的权限重新连接。',
+  'Identity-only authorization cannot replace meeting permissions. Reconnect this Zoom account with its existing meeting permissions.':
+    '仅身份授权不能替换会议权限。请使用此 Zoom 账号原有的会议权限重新连接。',
+  'Zoom did not return exactly the requested permissions. Check the app configuration and reconnect.':
+    'Zoom 返回的权限与所请求的权限不完全一致。请检查应用配置后重新连接。',
+  'Automatic Zoom meetings are disabled on this instance.': '此实例已关闭自动 Zoom 会议。',
   'Choose the meeting organizer from the required hosts.': '请从必需主持人中选择会议组织者。',
   'Meeting organizer': '会议组织者',
   'Choose an organizer': '选择组织者',
@@ -742,4 +756,13 @@ export const admin = {
   'Choose two to eight required hosts to get a collective booking link.':
     '选择两至八位必选主持人后即可获取集体会议预约链接。',
   'every {0} (the duration)': '每 {0}（会议时长）',
+  'Create a unique Zoom meeting for each booking': '为每次预约创建独立的 Zoom 会议',
+  'Choose your own authorized meetings account. Final invitations wait for the link. A Google calendar is optional.':
+    '请选择自己已授权会议权限的账号。链接生成后才会发送最终邀请，无需连接 Google 日历。',
+  'Zoom meetings account': 'Zoom 会议账号',
+  'Choose your own authorized Zoom meetings account.': '请选择自己已授权会议权限的 Zoom 账号。',
+  'Choose an account': '选择账号',
+  'Saved account — unavailable for a new selection': '已保存的账号，目前无法重新选择',
+  'No active Zoom meetings account is available. Authorize meeting permissions in Conference accounts first.':
+    '没有可用的已启用 Zoom 会议账号。请先在会议账号页面授予会议权限。',
 } as const

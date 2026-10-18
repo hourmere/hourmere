@@ -1,5 +1,6 @@
 import { createRoute, z } from '@hono/zod-openapi'
 import {
+  authorizeZoomMeetings,
   beginZoomConnection,
   type ConferenceDeps,
   disconnectConference,
@@ -20,6 +21,7 @@ const Connection = z
   .object({
     id: z.uuid(),
     provider: z.literal('zoom'),
+    mode: z.enum(['identity', 'meetings']),
     accountEmail: z.string().nullable(),
     displayName: z.string().nullable(),
     status: z.enum(['active', 'refreshing', 'needs_reauth', 'disconnected']),
@@ -39,16 +41,22 @@ const privateHeaders = createMiddleware(async (c, next) => {
   c.header('Referrer-Policy', 'no-referrer')
   await next()
 })
+const jsonCommand = createMiddleware(async (c, next) => {
+  if (c.req.header('content-type')?.split(';')[0]?.trim().toLowerCase() !== 'application/json')
+    return c.json({ error: 'invalid_request', message: 'Send an empty JSON object.' }, 400)
+  await next()
+})
 export function conferenceRoutes(deps: ConferenceDeps): RouteModule {
   const limit = rateLimit(createRateLimiter({ limit: 20, windowSeconds: 60 }))
   return ({ app, caller }) => {
     const session: [CallerMiddleware, MiddlewareHandler<CallerEnv>, MiddlewareHandler<CallerEnv>] =
       [privateHeaders, caller, sessionOnly]
-    const write: [...typeof session, MiddlewareHandler<CallerEnv>, MiddlewareHandler<CallerEnv>] = [
-      ...session,
-      limit,
-      routeBodyLimit(1024),
-    ]
+    const write: [
+      ...typeof session,
+      MiddlewareHandler<CallerEnv>,
+      MiddlewareHandler<CallerEnv>,
+      MiddlewareHandler<CallerEnv>,
+    ] = [...session, limit, routeBodyLimit(1024), jsonCommand]
     app.openapi(
       createRoute({
         method: 'get',
@@ -63,6 +71,7 @@ export function conferenceRoutes(deps: ConferenceDeps): RouteModule {
             content: json(
               z.object({
                 zoomEnabled: z.boolean(),
+                zoomMeetingsEnabled: z.boolean(),
                 pendingAttempts: z.number().int(),
                 maximumConnections: z.number().int(),
                 data: z.array(Connection),
@@ -104,7 +113,9 @@ export function conferenceRoutes(deps: ConferenceDeps): RouteModule {
         method: 'post',
         path: '/api/v1/conference-connections/{id}/reconnect',
         tags: ['Conferences'],
-        summary: 'Reconnect the same Zoom identity, replacing existing local access',
+        summary: 'Reconnect the same Zoom identity with its saved permissions',
+        description:
+          'Retains the stored identity or meeting authorization mode. A changed instance flag does not widen a saved identity grant.',
         security: [{ session: [] }],
         middleware: write,
         request: { ...emptyBody, params: Id },
@@ -124,6 +135,43 @@ export function conferenceRoutes(deps: ConferenceDeps): RouteModule {
       async (c) =>
         c.json(await beginZoomConnection(deps, c.var.principal, c.req.valid('param').id), 200),
     )
+    for (const existing of [false, true] as const)
+      app.openapi(
+        createRoute({
+          method: 'post',
+          path: existing
+            ? '/api/v1/conference-connections/{id}/authorize-meetings'
+            : '/api/v1/conference-connections/zoom/authorize-meetings',
+          tags: ['Conferences'],
+          summary: 'Explicitly authorize automatic single-host Zoom meetings',
+          description:
+            'Session-only opt-in. Requests exact identity plus meeting create/read/update/delete scopes, bound to one short-lived PKCE attempt. Reconnecting does not silently change its stored mode.',
+          security: [{ session: [] }],
+          middleware: write,
+          request: { ...emptyBody, ...(existing ? { params: Id } : {}) },
+          responses: {
+            200: {
+              description: 'Explicit meeting-permission OAuth attempt',
+              content: json(z.object({ authorizationUrl: z.url() })),
+            },
+            ...errorResponses({
+              400: 'invalid_request',
+              403: 'conference_session_required',
+              404: 'zoom_connection_not_found',
+              409: 'zoom_disabled, zoom_meetings_disabled or zoom_connection_limit',
+            }),
+          },
+        }),
+        async (c) =>
+          c.json(
+            await authorizeZoomMeetings(
+              deps,
+              c.var.principal,
+              existing ? c.req.param('id') : undefined,
+            ),
+            200,
+          ),
+      )
     app.openapi(
       createRoute({
         method: 'post',
@@ -131,7 +179,7 @@ export function conferenceRoutes(deps: ConferenceDeps): RouteModule {
         tags: ['Conferences'],
         summary: 'Explicitly rotate Zoom credentials and refresh identity metadata',
         description:
-          'Old credentials are durably retired before the provider call. Unknown or failed rotation requires reconnection. No meetings are read or written.',
+          'Old credentials are durably retired before the provider call. Unknown or failed rotation requires reconnection. Only identity metadata is fetched; each connection retains its explicitly authorized mode.',
         security: [{ session: [] }],
         middleware: write,
         request: { ...emptyBody, params: Id },

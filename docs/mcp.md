@@ -277,3 +277,22 @@ invitations wait for readiness. `list_bookings` exposes only the caller's option
 organizer; `retry_calendar_copy({bookingId})` reconciles the caller's original failed configured
 copy. Both reject unknown/force-create fields and never choose a replacement account/calendar.
 See [automatic-google-meet.md](automatic-google-meet.md) for optional copies and identity policy.
+
+
+## Automatic Zoom reconciliation
+
+Personal and individual single-host team events may opt into automatic Zoom using the actual
+host's private meeting-mode connection. Enabling or changing that configuration requires the
+actual host's live browser session; API keys/MCP grants and another team administrator cannot
+select a private connection. Passive Zoom labels remain unchanged; collective/round-robin
+automatic Zoom is rejected. Booking an already configured event uses existing caller authority.
+
+`create_booking` and `list_bookings` use `conference.provider = "zoom"` with pending/ready/failed
+status. A participant URL appears only when the current meeting is ready, never in public event
+catalogs. `retry_conference({bookingId})` and CLI `npm run --silent cli -- retry-meeting --input retry.json`
+(with `{"bookingId":"<id>"}` in the private input file)
+retain existing pinned-organizer permissions, including authorized API keys. They reconcile
+a known meeting ID without selecting another account or creating a replacement. An unknown
+claimed create remains ambiguous even after retry; no force-create/list/adoption argument is
+accepted. A private optional ordinary Google copy does not create a second conference or gate
+ready Zoom mail. See [automatic-zoom.md](automatic-zoom.md) for setup and acceptance limits.

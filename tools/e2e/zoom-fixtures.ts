@@ -27,11 +27,18 @@ interface ZoomApp {
     attempts: number
     calendars: number
     identityLiteral: boolean
+    meetingConnections: number
+    identityConnections: number
   }>
 }
-export const test = base.extend<{ zoomApp: ZoomApp; zoomEnabled: boolean }>({
+export const test = base.extend<{
+  zoomApp: ZoomApp
+  zoomEnabled: boolean
+  zoomMeetingsEnabled: boolean
+}>({
   zoomEnabled: [true, { option: true }],
-  zoomApp: async ({ context, zoomEnabled }, use) => {
+  zoomMeetingsEnabled: [false, { option: true }],
+  zoomApp: async ({ context, zoomEnabled, zoomMeetingsEnabled }, use) => {
     const bootstrap = process.env.HOURMERE_E2E_BOOTSTRAP_URL
     if (!bootstrap)
       throw new Error('HOURMERE_E2E_BOOTSTRAP_URL must bootstrap helper-owned scratch databases')
@@ -111,7 +118,11 @@ export const test = base.extend<{ zoomApp: ZoomApp; zoomEnabled: boolean }>({
           publicUrl: url,
           socialProviders: {},
           ...(zoomEnabled && {
-            zoomConference: { client: provider.client, encryptionKey: TEST_CONFERENCE_KEY },
+            zoomConference: {
+              client: provider.client,
+              encryptionKey: TEST_CONFERENCE_KEY,
+              meetingsEnabled: zoomMeetingsEnabled,
+            },
           }),
         }),
       })
@@ -128,6 +139,7 @@ export const test = base.extend<{ zoomApp: ZoomApp; zoomEnabled: boolean }>({
         const target = new URL(route.request().url())
         if (target.origin === url) return route.continue()
         if (target.origin === 'https://zoom.us' && target.pathname === '/oauth/authorize') {
+          provider.controls.token.scope = target.searchParams.get('scope')
           const callback = new URL('/api/conference/zoom/callback', url)
           callback.search = new URLSearchParams({
             state: target.searchParams.get('state') ?? '',
@@ -187,7 +199,7 @@ export const test = base.extend<{ zoomApp: ZoomApp; zoomEnabled: boolean }>({
         state: async () => {
           const rows = await db
             .selectFrom('conference_connections')
-            .select(['status', 'credentials', 'display_name'])
+            .select(['status', 'credentials', 'display_name', 'mode'])
             .where('user_id', '=', host.userId)
             .execute()
           return {
@@ -200,6 +212,12 @@ export const test = base.extend<{ zoomApp: ZoomApp; zoomEnabled: boolean }>({
             ).length,
             calendars: (await db.selectFrom('calendar_connections').select('id').execute()).length,
             identityLiteral: rows.every((r) => r.display_name === 'Settings'),
+            meetingConnections: rows.filter(
+              (r) => r.mode === 'meetings' && r.status !== 'disconnected',
+            ).length,
+            identityConnections: rows.filter(
+              (r) => r.mode === 'identity' && r.status !== 'disconnected',
+            ).length,
           }
         },
       })

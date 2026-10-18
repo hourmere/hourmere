@@ -120,6 +120,7 @@ const eventTypeNotFound = error('No such public event type (`event_type_not_foun
 export interface PublicRoutesDeps {
   db: Db
   automaticMeet?: boolean | undefined
+  automaticZoom?: boolean | undefined
   now?: () => Temporal.Instant
   /** Queues the booking emails in the booking's transaction; none are sent without it. */
   notify?: BookingNotifier | undefined
@@ -136,9 +137,10 @@ export function publicRoutes({
   now = () => Temporal.Now.instant(),
   notify,
   automaticMeet,
+  automaticZoom,
   rateLimits = {},
 }: PublicRoutesDeps): RouteModule {
-  const ctx: PublicContext = { db, now, notify, automaticMeet }
+  const ctx: PublicContext = { db, now, notify, automaticMeet, automaticZoom }
   const limit = (group: keyof typeof PUBLIC_RATE_LIMITS) =>
     rateLimit(createRateLimiter(rateLimits[group] ?? PUBLIC_RATE_LIMITS[group]))
   const pageLimit = limit('page')

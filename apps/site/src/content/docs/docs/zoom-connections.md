@@ -1,12 +1,13 @@
 ---
 title: Zoom account connections
-description: Optional independent Zoom identity OAuth, without meeting creation.
+description: Independent Zoom identity OAuth and explicit single-host meeting authorization.
 ---
 
 Hourmere can connect a personal Zoom identity under **Conference accounts**, separately from
 sign-in, Google/Microsoft calendar connections, and the passive Zoom location label on event
-types. This foundation does **not** create meetings, read meetings, join meetings, send
-invitations, or enable automatic conferencing. API keys and MCP OAuth cannot manage these
+types. The identity-only choice does **not** create or read meetings. Optional automatic meeting
+authorization is a separate explicit choice; see the repository `docs/automatic-zoom.md`
+for lifecycle, private host selection, safe retry and acceptance limits. API keys and MCP OAuth cannot manage these
 connections. A live browser session and same-origin writes are required.
 
 ## Configure an optional confidential client
@@ -16,8 +17,10 @@ approve a suitable user-authorized Zoom Marketplace OAuth client. Creating or mo
 real client, accepting terms and granting real-account access require their own authorization;
 the automated tests use synthetic provider responses only.
 
-1. Configure **only** the granular `user:read:user` scope. Do not add meeting, admin or optional
-   scopes for this phase. Zoom's basic authorization query can include the required and
+1. For identity-only use configure **only** granular `user:read:user`. Enabling separate
+   meeting authorization requires an independently approved compatible client configuration
+   and `ZOOM_MEETINGS_ENABLED=true`; follow `docs/automatic-zoom.md`. Never grant meeting
+   access implicitly to the identity action, and never add admin/unrelated scopes. Zoom's basic authorization query can include the required and
    optional scopes configured in Marketplace.
 2. Enable the client's S256 PKCE capability, while using its **confidential** client ID and
    secret. Hourmere sends HTTP Basic client authentication and the verifier in the token body,
@@ -38,9 +41,9 @@ the automated tests use synthetic provider responses only.
 
 Hourmere uses the official fixed authorize/token/users-me hosts. The advanced authorization
 query includes `scope=user:read:user`, empty `optional_scope`, and omits
-`include_granted_scopes`. Requests cannot select a broader scope. This implementation also
-conservatively requires **every** code exchange and refresh response to explicitly report
-exactly `user:read:user`. An absent, duplicated, unknown or broader scope fails closed. This is
+`include_granted_scopes`. Requests cannot select a broader scope. Each connection stores its explicitly requested mode. Identity mode conservatively
+requires every code exchange and refresh response to report exactly `user:read:user`;
+meeting mode requires its distinct exact set from `docs/automatic-zoom.md`. An absent, duplicated, unknown or broader scope fails closed. This is
 Hourmere's conservative policy, not a claim that OAuth or Zoom universally guarantees a scope
 field on every response. Check actual client response compatibility before enabling a real
 integration; do not work around the policy by requesting broader access.
@@ -57,8 +60,8 @@ challenge to the browser.
   malformed, over-scoped, or cannot be committed, Hourmere requires reconnection and never
   automatically retries the old refresh token. A confirmed rotation followed only by a
   transient identity lookup error retains the **new** token and reports the metadata error.
-- **Reconnect Zoom** replaces existing local access and requires the same Zoom identity. Its
-  stable connection ID remains unchanged. A Zoom identity already owned by another Hourmere
+- **Reconnect Zoom** replaces existing local access and requires the same Zoom identity. Its saved identity/meeting permission mode and
+  stable connection ID remain unchanged. A Zoom identity already owned by another Hourmere
   account cannot be silently transferred, even when email addresses match.
 - **Disconnect Zoom** removes local credentials and all that user's pending connection
   attempts. It retains the identity record for future references and does **not** revoke the
@@ -75,8 +78,13 @@ challenge to the browser.
 User operations and deletion use the same owner-first row-lock order. Durable claims prevent
 callback replay and rotating-token reuse after failed commits. Provider calls have a bounded
 deadline and response size. The retained connection foundation intentionally does not yet
-implement Zoom Marketplace production deauthorization/compliance webhooks or automated meeting
-lifecycle; those must be designed and verified before publishing a meeting integration.
+implement Zoom Marketplace production deauthorization/compliance webhooks. Automatic personal and individual single-host team events require an explicit meeting-mode
+connection, a default-off instance flag and the actual host’s own live-session selection.
+They reconcile one pinned meeting through reschedule/cancellation, hold final mail/ICS until
+ready and can pin one optional ordinary Google copy. Collective/round-robin automatic Zoom
+is unsupported. An unknown create is never retried with another POST: inspect/remove any
+orphan in Zoom before replacing the booking. See `docs/automatic-zoom.md` for the complete
+contract and real-client acceptance limits.
 
 ## Reference API
 
@@ -86,6 +94,8 @@ All writes require an empty JSON object and a live owner browser session:
 | --- | --- | --- |
 | GET | `/api/v1/conference-connections` | Own safe metadata and availability; never tokens |
 | POST | `/api/v1/conference-connections/zoom/authorize` | New minimum-scope authorization attempt |
+| POST | `/api/v1/conference-connections/zoom/authorize-meetings` | Explicit new meeting authorization, if enabled |
+| POST | `/api/v1/conference-connections/{id}/authorize-meetings` | Explicit owner upgrade to meeting authorization |
 | POST | `/api/v1/conference-connections/{id}/reconnect` | Replace access for the same identity |
 | POST | `/api/v1/conference-connections/{id}/refresh` | Explicit credential rotation and metadata refresh |
 | DELETE | `/api/v1/conference-connections/{id}` | Local disconnect; retain stable record |

@@ -68,13 +68,25 @@ export function errorMessage(err: unknown): UiText {
   if (!(err instanceof RequestError)) return msg(UNREACHABLE)
   if (err.displayMessage) return err.displayMessage
   const known: Readonly<Record<string, MessageKey>> = {
+    automatic_zoom_disabled: 'Automatic Zoom meetings are disabled on this instance.',
+    automatic_zoom_unavailable:
+      'Automatic Zoom meetings are unavailable. Contact the host or choose another meeting type.',
+    automatic_zoom_host_policy:
+      'Automatic Zoom supports individual meetings with exactly one host.',
+    zoom_host_session_required:
+      'The assigned host must configure Zoom in their own signed-in session.',
+    invalid_zoom_connection:
+      'Choose your own active Zoom account with meeting permissions. Reconnect it in Conference accounts if needed.',
     conference_session_required: 'Sign in again to manage conference accounts.',
+    zoom_meetings_disabled: 'Automatic Zoom meetings are disabled on this instance.',
+    zoom_mode_conflict:
+      'Identity-only authorization cannot replace meeting permissions. Reconnect this Zoom account with its existing meeting permissions.',
     zoom_disabled: 'Zoom connections are not configured on this instance.',
     zoom_connection_not_found: 'This Zoom connection is not available.',
     zoom_connection_limit: 'This account has reached its limit of five connected Zoom identities.',
     zoom_needs_reauth: 'Reconnect this Zoom account before refreshing it.',
     zoom_permissions_missing:
-      'Zoom did not grant only the requested identity access. Check the app configuration and reconnect.',
+      'Zoom did not return exactly the requested permissions. Check the app configuration and reconnect.',
     zoom_provider_unavailable:
       'Zoom could not be reached. Check the connection status before trying again.',
     zoom_identity_mismatch: 'Choose the same Zoom account when reconnecting this connection.',

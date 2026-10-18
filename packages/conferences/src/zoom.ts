@@ -1,19 +1,33 @@
 import { createHash } from 'node:crypto'
 import { isSingleLineText } from '@hourmere/scheduling/text'
 import { z } from 'zod'
+import { boundedZoomJson, ZoomError } from './transport.ts'
 
 export const ZOOM_CALLBACK = '/api/conference/zoom/callback'
 export const ZOOM_SCOPE = 'user:read:user'
-export type ZoomFailure = 'provider_unavailable' | 'needs_reauth' | 'permissions_missing'
-/** Upstream bodies, request URLs and credentials never become messages/causes. */
-export class ZoomError extends Error {
-  readonly code: ZoomFailure
-  constructor(code: ZoomFailure) {
-    super(code)
-    this.name = 'ZoomError'
-    this.code = code
-  }
+export const ZOOM_MEETING_SCOPES = [
+  ZOOM_SCOPE,
+  'meeting:write:meeting',
+  'meeting:read:meeting',
+  'meeting:update:meeting',
+  'meeting:delete:meeting',
+] as const
+export type ZoomMode = 'identity' | 'meetings'
+export function zoomScopes(mode: ZoomMode): string[] {
+  return mode === 'meetings' ? [...ZOOM_MEETING_SCOPES] : [ZOOM_SCOPE]
 }
+/** Conservative exact-set policy; order is canonicalized before persistence. */
+export function matchingZoomScopes(scopes: readonly string[], mode: string): boolean {
+  if (mode !== 'identity' && mode !== 'meetings') return false
+  const expected = zoomScopes(mode)
+  return (
+    scopes.length === expected.length &&
+    new Set(scopes).size === scopes.length &&
+    expected.every((scope) => scopes.includes(scope))
+  )
+}
+
+export { ZoomError, type ZoomFailure } from './transport.ts'
 export interface ZoomTokens {
   accessToken: string
   refreshToken: string
@@ -52,22 +66,9 @@ const identitySchema = z.object({
   last_name: name.optional(),
 })
 export function minimalZoomScopes(scopes: readonly string[]): boolean {
-  return scopes.length === 1 && scopes[0] === ZOOM_SCOPE
+  return matchingZoomScopes(scopes, 'identity')
 }
 
-async function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
-  signal.throwIfAborted()
-  let rejectAbort: (() => void) | undefined
-  const aborted = new Promise<never>((_resolve, reject) => {
-    rejectAbort = () => reject(new ZoomError('provider_unavailable'))
-    signal.addEventListener('abort', rejectAbort, { once: true })
-  })
-  try {
-    return await Promise.race([promise, aborted])
-  } finally {
-    if (rejectAbort) signal.removeEventListener('abort', rejectAbort)
-  }
-}
 /** Fixed official hosts and fixed callback; provider api_url fields are intentionally ignored. */
 export function createZoomClient(
   config: ZoomConfig,
@@ -75,48 +76,13 @@ export function createZoomClient(
   now: () => number = Date.now,
 ) {
   const callback = new URL(ZOOM_CALLBACK, config.publicUrl).href
-  async function json(
-    url: string,
-    init: RequestInit,
+  const json = (url: string, init: RequestInit, signal: AbortSignal, maximum?: number) =>
+    boundedZoomJson(request, url, init, signal, { maximum, badRequestReauth: true })
+  async function tokens(
+    body: Record<string, string>,
     signal: AbortSignal,
-    maximum = 131072,
-  ): Promise<unknown> {
-    let response: Response | undefined
-    try {
-      signal.throwIfAborted()
-      response = await abortable(request(url, { ...init, redirect: 'error', signal }), signal)
-      if (!response.ok) {
-        void response.body?.cancel().catch(() => {})
-        throw new ZoomError(
-          response.status === 400 || response.status === 401
-            ? 'needs_reauth'
-            : response.status === 403
-              ? 'permissions_missing'
-              : 'provider_unavailable',
-        )
-      }
-      if (!response.body) throw new ZoomError('provider_unavailable')
-      const reader = response.body.getReader(),
-        parts: Uint8Array[] = []
-      let length = 0
-      try {
-        for (;;) {
-          const { done, value } = await abortable(reader.read(), signal)
-          if (done) break
-          length += value.byteLength
-          if (length > maximum) throw new ZoomError('provider_unavailable')
-          parts.push(value)
-        }
-      } finally {
-        void reader.cancel().catch(() => {})
-      }
-      return JSON.parse(Buffer.concat(parts).toString('utf8')) as unknown
-    } catch (error) {
-      if (error instanceof ZoomError) throw error
-      throw new ZoomError('provider_unavailable')
-    }
-  }
-  async function tokens(body: Record<string, string>, signal: AbortSignal): Promise<ZoomTokens> {
+    mode: ZoomMode,
+  ): Promise<ZoomTokens> {
     const parsed = tokenSchema.safeParse(
       await json(
         'https://zoom.us/oauth/token',
@@ -140,16 +106,16 @@ export function createZoomClient(
     const value = parsed.data,
       scopes = value.scope.trim().split(/\s+/)
     // Never infer omitted scope or inherit an older, broader grant.
-    if (!minimalZoomScopes(scopes)) throw new ZoomError('permissions_missing')
+    if (!matchingZoomScopes(scopes, mode)) throw new ZoomError('permissions_missing')
     return {
       accessToken: value.access_token,
       refreshToken: value.refresh_token,
       expiresAt: now() + value.expires_in * 1000,
-      scopes,
+      scopes: zoomScopes(mode),
     }
   }
   return {
-    authorizationUrl(state: string, verifier: string) {
+    authorizationUrl(state: string, verifier: string, mode: ZoomMode = 'identity') {
       const url = new URL('https://zoom.us/oauth/authorize')
       url.search = new URLSearchParams({
         response_type: 'code',
@@ -158,19 +124,20 @@ export function createZoomClient(
         state,
         code_challenge: createHash('sha256').update(verifier).digest('base64url'),
         code_challenge_method: 'S256',
-        scope: ZOOM_SCOPE,
+        scope: zoomScopes(mode).join(' '),
         optional_scope: '',
       }).toString()
       return url.href
     },
-    exchange(code: string, verifier: string, signal: AbortSignal) {
+    exchange(code: string, verifier: string, signal: AbortSignal, mode: ZoomMode = 'identity') {
       return tokens(
         { grant_type: 'authorization_code', code, code_verifier: verifier, redirect_uri: callback },
         signal,
+        mode,
       )
     },
-    refresh(refreshToken: string, signal: AbortSignal) {
-      return tokens({ grant_type: 'refresh_token', refresh_token: refreshToken }, signal)
+    refresh(refreshToken: string, signal: AbortSignal, mode: ZoomMode = 'identity') {
+      return tokens({ grant_type: 'refresh_token', refresh_token: refreshToken }, signal, mode)
     },
     async identity(accessToken: string, signal: AbortSignal): Promise<ZoomIdentity> {
       const parsed = identitySchema.safeParse(

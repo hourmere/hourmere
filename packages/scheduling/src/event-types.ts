@@ -15,9 +15,11 @@ import {
 } from './catalog-page.ts'
 import {
   automaticMeet,
+  automaticZoom,
   eligibleMeetHosts,
   meetOrganizer,
   requireMeetDestination,
+  requireZoomConnection,
 } from './conferences.ts'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
@@ -36,7 +38,7 @@ import { cleanText } from './text.ts'
 /** Where the meeting happens. Meet and Zoom links are generated per booking. */
 export type EventTypeLocation =
   | { kind: 'google_meet'; autoCreate?: true }
-  | { kind: 'zoom' }
+  | { kind: 'zoom'; autoCreate?: true }
   /** The host's number, in E.164 (`+14155550123`). */
   | { kind: 'phone'; number: string }
   | { kind: 'in_person'; address: string }
@@ -71,6 +73,7 @@ export interface EventType {
   roundRobinActive: boolean
   /** Current configured hosts; at most eight. */
   hosts: { userId: string }[]
+  zoomConnectionId?: string | null | undefined
   conferenceOrganizer: { userId: string } | null
   location: EventTypeLocation | null
   questions: Question[]
@@ -89,6 +92,7 @@ export interface EventType {
 export interface EventTypeInput {
   schedulingType?: SchedulingType | undefined
   hosts?: { userId: string }[] | undefined
+  zoomConnectionId?: string | null | undefined
   conferenceOrganizer?: { userId: string } | null | undefined
   slug: string
   title: string
@@ -309,8 +313,20 @@ export async function createEventType(
       const scheduleId = validScheduleId(input.scheduleId) ?? null
       if (schedulingType !== 'individual' && scheduleId !== null) throw invalidScheduleId()
       await assertHosts(trx, ctx.principal.organization.id, hostIds, true)
-      const organizer = validOrganizer(input.conferenceOrganizer) ?? null
-      await validateConference(trx, ctx, fields.location, schedulingType, hostIds, organizer)
+      const organizer = validOrganizer(input.conferenceOrganizer) ?? null,
+        zoomConnection = validZoomConnection(input.zoomConnectionId) ?? null
+      if (zoomConnection && !automaticZoom(fields.location))
+        throw new DomainError('invalid', 'invalid_zoom_connection')
+      await validateConference(
+        trx,
+        ctx,
+        fields.location,
+        schedulingType,
+        hostIds,
+        organizer,
+        undefined,
+        zoomConnection,
+      )
 
       const { id } = await trx
         .insertInto('event_types')
@@ -320,6 +336,7 @@ export async function createEventType(
           owner_user_id: personalOwnerId,
           scheduling_type: schedulingType,
           conference_organizer_user_id: organizer,
+          zoom_connection_id: zoomConnection,
         })
         .returning('id')
         .executeTakeFirstOrThrow()
@@ -377,19 +394,29 @@ export async function updateEventType(
         await assertHosts(trx, row.organization_id, hostIds, true)
       }
       if (schedulingType !== 'individual' && scheduleId != null) throw invalidScheduleId()
-      const organizer = validOrganizer(input.conferenceOrganizer)
+      const organizer = validOrganizer(input.conferenceOrganizer),
+        zoomConnection = validZoomConnection(input.zoomConnectionId)
       if (
         Object.keys(changes).length > 0 ||
         scheduleId !== undefined ||
         changingHosts ||
-        organizer !== undefined
+        organizer !== undefined ||
+        zoomConnection !== undefined
       ) {
         const fields = validFields({ ...fieldsOf(row), ...changes })
+        if (
+          zoomConnection &&
+          zoomConnection !== row.zoom_connection_id &&
+          !automaticZoom(fields.location)
+        )
+          throw new DomainError('invalid', 'invalid_zoom_connection')
         if (
           input.location !== undefined ||
           changingHosts ||
           scheduleId !== undefined ||
-          organizer !== undefined
+          organizer !== undefined ||
+          zoomConnection !== undefined ||
+          (input.isActive === true && !row.is_active)
         ) {
           const configuredHosts = hostIds ?? existing.map((h) => h.user_id)
           await assertHosts(trx, row.organization_id, configuredHosts, true)
@@ -401,6 +428,16 @@ export async function updateEventType(
             configuredHosts,
             organizer === undefined ? row.conference_organizer_user_id : organizer,
             row.id,
+            zoomConnection === undefined ? row.zoom_connection_id : zoomConnection,
+            !automaticZoom(row.location) ||
+              schedulingType !== row.scheduling_type ||
+              [...configuredHosts].sort().join() !==
+                existing
+                  .map((h) => h.user_id)
+                  .sort()
+                  .join() ||
+              (zoomConnection !== undefined && zoomConnection !== row.zoom_connection_id) ||
+              (input.isActive === true && !row.is_active),
           )
         }
         await trx
@@ -409,6 +446,7 @@ export async function updateEventType(
             ...columns(fields),
             scheduling_type: schedulingType,
             ...(organizer !== undefined ? { conference_organizer_user_id: organizer } : {}),
+            ...(zoomConnection !== undefined ? { zoom_connection_id: zoomConnection } : {}),
           })
           .where('id', '=', row.id)
           .execute()
@@ -734,13 +772,11 @@ function validLocation(value: unknown): EventTypeLocation | null {
   }
   switch (kind) {
     case 'google_meet':
+    case 'zoom':
       expect(['autoCreate'])
       if (value.autoCreate !== undefined && value.autoCreate !== true)
         return fail('autoCreate must be true when specified')
       return value.autoCreate === true ? { kind, autoCreate: true } : { kind }
-    case 'zoom':
-      expect([])
-      return { kind }
     case 'phone': {
       expect(['number'])
       const { number } = value
@@ -847,6 +883,7 @@ function toEventType(row: EventTypeRow): EventType {
     schedulingType: row.scheduling_type as SchedulingType,
     roundRobinActive: row.scheduling_type === 'round_robin' && row.round_robin_active,
     hosts: row.hosts,
+    ...(row.zoom_connection_id ? { zoomConnectionId: row.zoom_connection_id } : {}),
     conferenceOrganizer: row.conference_organizer_user_id
       ? { userId: row.conference_organizer_user_id }
       : null,
@@ -941,6 +978,12 @@ function validOrganizer(value: unknown): string | null | undefined {
     throw new DomainError('invalid', 'invalid_conference_organizer')
   return (value.userId as string).toLowerCase()
 }
+function validZoomConnection(value: unknown): string | null | undefined {
+  if (value === null || value === undefined) return value
+  if (!isUuid(value))
+    throw new DomainError('invalid', 'invalid_zoom_connection', 'Choose your own Zoom connection.')
+  return (value as string).toLowerCase()
+}
 async function validateConference(
   db: Db,
   ctx: ServiceContext,
@@ -949,6 +992,8 @@ async function validateConference(
   hosts: string[],
   selected: string | null,
   eventTypeId?: string,
+  zoomConnectionId?: string | null,
+  authorizeZoom = true,
 ) {
   if (selected !== null && (mode !== 'collective' || !hosts.includes(selected)))
     throw new DomainError(
@@ -956,6 +1001,38 @@ async function validateConference(
       'invalid_conference_organizer',
       'Choose an organizer from the required hosts.',
     )
+  if (automaticZoom(location)) {
+    if (mode !== 'individual' || hosts.length !== 1)
+      throw new DomainError(
+        'invalid',
+        'automatic_zoom_host_policy',
+        'Automatic Zoom requires one explicitly authorized host.',
+      )
+    if (authorizeZoom) {
+      if (ctx.principal.kind !== 'session' || hosts[0] !== ctx.principal.user.id)
+        throw new DomainError(
+          'forbidden',
+          'zoom_host_session_required',
+          'Only the host can choose their Zoom connection in a signed-in browser.',
+        )
+      const session = await db
+        .selectFrom('auth.session')
+        .select('id')
+        .where('id', '=', ctx.principal.sessionId)
+        .where('userId', '=', ctx.principal.user.id)
+        .where('expiresAt', '>', new Date(ctx.now().epochMilliseconds))
+        .forShare()
+        .executeTakeFirst()
+      if (!session)
+        throw new DomainError(
+          'forbidden',
+          'zoom_host_session_required',
+          'Sign in again before choosing a private Zoom connection.',
+        )
+      await requireZoomConnection(db, hosts[0] as string, zoomConnectionId, ctx.automaticZoom)
+    }
+    return
+  }
   if (!automaticMeet(location)) return
   if (mode === 'round_robin') await eligibleMeetHosts(db, hosts, eventTypeId, ctx.automaticMeet)
   else

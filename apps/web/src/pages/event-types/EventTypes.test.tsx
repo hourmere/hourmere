@@ -1252,3 +1252,156 @@ describe('round-robin pool and explicit activation', () => {
     expect(screen.queryByText('Needs activation')).toBeNull()
   })
 })
+
+describe('explicit private Zoom opt-in', () => {
+  const pin = '00000000-0000-7000-8000-000000000099'
+  const connections = {
+    zoomEnabled: true,
+    zoomMeetingsEnabled: true,
+    maximumConnections: 5,
+    pendingAttempts: 0,
+    data: [
+      {
+        id: pin,
+        displayName: 'Settings',
+        accountEmail: 'synthetic@hourmere.invalid',
+        status: 'active',
+        mode: 'meetings',
+      },
+      {
+        id: 'identity-only',
+        displayName: 'Identity only secret',
+        status: 'active',
+        mode: 'identity',
+      },
+    ],
+  }
+  const capability = {
+    'GET /api/v1/instance': () =>
+      json(200, { registrationMode: 'closed', socialProviders: [], automaticZoom: true }),
+  }
+  it('does not fetch private accounts for passive Zoom; requires an explicit account and retains draft when errors translate', async () => {
+    const user = userEvent.setup(),
+      api = eventTypeServer([eventType({ location: { kind: 'zoom' } })], {
+        ...capability,
+        'GET /api/v1/conference-connections': () => json(200, connections),
+      })
+    await openExisting()
+    expect(api.to('GET /api/v1/conference-connections')).toHaveLength(0)
+    await user.click(
+      screen.getByRole('checkbox', { name: 'Create a unique Zoom meeting for each booking' }),
+    )
+    const select = await screen.findByLabelText('Zoom meetings account')
+    expect((select as HTMLSelectElement).value).toBe('')
+    expect(screen.queryByRole('option', { name: 'Identity only secret' })).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    expect(
+      await screen.findByText('Choose your own authorized Zoom meetings account.'),
+    ).toBeDefined()
+    await user.selectOptions(select, pin)
+    await user.clear(field('Title'))
+    await user.type(field('Title'), 'Settings')
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    await screen.findByText('Saved.')
+    expect(api.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`)[0]?.body).toMatchObject({
+      location: { kind: 'zoom', autoCreate: true },
+      zoomConnectionId: pin,
+      title: 'Settings',
+    })
+  })
+  it('retains an existing pin with flag-off metadata saves and explicit disable without a private list read', async () => {
+    const user = userEvent.setup(),
+      api = eventTypeServer([
+        eventType({ location: { kind: 'zoom', autoCreate: true }, zoomConnectionId: pin }),
+      ])
+    await openExisting()
+    await user.clear(field('Title'))
+    await user.type(field('Title'), 'Metadata only')
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    await screen.findByText('Saved.')
+    for (const key of ['location', 'hosts', 'zoomConnectionId', 'scheduleId'])
+      expect(api.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`)[0]?.body).not.toHaveProperty(key)
+    expect(api.to('GET /api/v1/conference-connections')).toHaveLength(0)
+    await user.click(
+      screen.getByRole('checkbox', { name: 'Create a unique Zoom meeting for each booking' }),
+    )
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    await screen.findByText('Saved.')
+    expect(api.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`)[1]?.body).toMatchObject({
+      location: { kind: 'zoom' },
+    })
+    expect(api.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`)[1]?.body).not.toHaveProperty(
+      'zoomConnectionId',
+    )
+  })
+  it('shows private list errors with an explicit retry without choosing or losing the selected draft', async () => {
+    const user = userEvent.setup()
+    let failed = true
+    eventTypeServer([eventType({ location: { kind: 'zoom' } })], {
+      ...capability,
+      'GET /api/v1/conference-connections': () =>
+        failed ? json(503, { error: 'failed' }) : json(200, connections),
+    })
+    await openExisting()
+    await user.click(
+      screen.getByRole('checkbox', { name: 'Create a unique Zoom meeting for each booking' }),
+    )
+    expect(await screen.findByRole('button', { name: 'Retry' })).toBeDefined()
+    failed = false
+    await user.click(screen.getByRole('button', { name: 'Retry' }))
+    await screen.findByRole('option', { name: 'Settings' })
+    expect((screen.getByLabelText('Zoom meetings account') as HTMLSelectElement).value).toBe('')
+  })
+})
+
+it('an API key principal cannot enable automatic Zoom or read the private connection picker', async () => {
+  const user = userEvent.setup()
+  const principal = {
+    ...ME,
+    principal: { kind: 'api_key' as const, apiKeyId: '00000000-0000-7000-8000-000000000099' },
+  }
+  const api = eventTypeServer([eventType({ location: { kind: 'zoom' } })], {
+    ...signedInAs(principal),
+    ...profile(),
+    'GET /api/v1/instance': () => json(200, { automaticZoom: true }),
+  })
+  await openExisting()
+  const checkbox = screen.getByRole<HTMLInputElement>('checkbox', {
+    name: 'Create a unique Zoom meeting for each booking',
+  })
+  expect(checkbox.disabled).toBe(true)
+  await user.click(checkbox)
+  expect(api.to('GET /api/v1/conference-connections')).toHaveLength(0)
+})
+
+it('a different team administrator can edit saved Zoom metadata without reading or rebinding the actual host account', async () => {
+  const user = userEvent.setup()
+  const me = { ...ME, organization: { ...ME.organization, personal: false } }
+  const other = '00000000-0000-7000-8000-000000000100'
+  const api = eventTypeServer(
+    [
+      eventType({
+        schedulingType: 'individual',
+        hosts: [{ userId: other }],
+        location: { kind: 'zoom', autoCreate: true },
+        zoomConnectionId: '00000000-0000-7000-8000-000000000099',
+      }),
+    ],
+    {
+      ...signedInAs(me),
+      ...profile(),
+      'GET /api/v1/instance': () => json(200, { automaticZoom: true }),
+    },
+  )
+  await openExisting()
+  expect(
+    screen.getByText('The assigned host must configure Zoom in their own signed-in session.'),
+  ).toBeDefined()
+  await user.clear(field('Title'))
+  await user.type(field('Title'), 'Metadata by another admin')
+  await user.click(screen.getByRole('button', { name: 'Save changes' }))
+  await screen.findByText('Saved.')
+  for (const key of ['location', 'hosts', 'zoomConnectionId', 'scheduleId'])
+    expect(api.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`)[0]?.body).not.toHaveProperty(key)
+  expect(api.to('GET /api/v1/conference-connections')).toHaveLength(0)
+})

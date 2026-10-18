@@ -5,6 +5,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import {
   conferenceAad,
   conferenceEncryptionKey,
+  conferenceStateAad,
   decryptConferenceCredential,
 } from './credentials.ts'
 import {
@@ -105,7 +106,7 @@ describe.skipIf(!databaseUrl)('independent Zoom connections (real Postgres)', ()
     expect(saved.state_hash).toBe(createHash('sha256').update(state).digest('hex'))
     const verifier = decryptConferenceCredential(
       conferenceEncryptionKey(TEST_CONFERENCE_KEY),
-      conferenceAad('oauth-state', owner.user.id, saved.state_hash, owner.sessionId),
+      conferenceStateAad(owner.user.id, saved.state_hash, owner.sessionId, 'identity', null),
       saved.verifier as Buffer,
     )
     expect(url.searchParams.get('code_challenge')).toBe(

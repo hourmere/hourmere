@@ -16,7 +16,7 @@ describe.skipIf(!databaseUrl)('Zoom HTTP session-only routes (real Postgres)', (
     owner: Awaited<ReturnType<typeof conferenceTestSession>>,
     other: typeof owner
   let provider: ReturnType<typeof fakeZoom>, app: ReturnType<typeof createApp>
-  function composition(enabled = true) {
+  function composition(enabled = true, meetingsEnabled = false) {
     return createApp({
       checkDb: async () => {},
       authHandler: async () => new Response(null, { status: 404 }),
@@ -42,7 +42,9 @@ describe.skipIf(!databaseUrl)('Zoom HTTP session-only routes (real Postgres)', (
       routes: [
         conferenceRoutes({
           db,
-          ...(enabled && { zoom: { client: provider.client, encryptionKey: TEST_CONFERENCE_KEY } }),
+          ...(enabled && {
+            zoom: { client: provider.client, encryptionKey: TEST_CONFERENCE_KEY, meetingsEnabled },
+          }),
         }),
       ],
     })
@@ -113,6 +115,8 @@ describe.skipIf(!databaseUrl)('Zoom HTTP session-only routes (real Postgres)', (
     for (const [path, method] of [
       ['/api/v1/conference-connections', 'GET'],
       ['/api/v1/conference-connections/zoom/authorize', 'POST'],
+      ['/api/v1/conference-connections/zoom/authorize-meetings', 'POST'],
+      [`/api/v1/conference-connections/${owner.sessionId}/authorize-meetings`, 'POST'],
     ] as const) {
       expect(
         (await req(path, method, method === 'POST' ? '{}' : undefined, { [header]: value })).status,
@@ -147,9 +151,11 @@ describe.skipIf(!databaseUrl)('Zoom HTTP session-only routes (real Postgres)', (
   })
   it('does not disclose another owner’s connection through refresh/reconnect/disconnect', async () => {
     const { id } = await connect()
+    app = composition(true, true)
     for (const [suffix, method] of [
       ['/refresh', 'POST'],
       ['/reconnect', 'POST'],
+      ['/authorize-meetings', 'POST'],
       ['', 'DELETE'],
     ] as const)
       expect(
@@ -232,6 +238,101 @@ describe.skipIf(!databaseUrl)('Zoom HTTP session-only routes (real Postgres)', (
     expect(response.headers.get('referrer-policy')).toBe('no-referrer')
     expect(response.headers.get('cache-control')).toBe('no-store')
     expect(provider.calls).toHaveLength(0)
+  })
+  it('refuses bodyless or non-JSON meeting commands before creating state, while retaining caller/origin gates', async () => {
+    app = composition(true, true)
+    const path = '/api/v1/conference-connections/zoom/authorize-meetings'
+    for (const headers of [
+      { cookie: 'owner', origin: 'http://localhost:5173' },
+      { cookie: 'owner', origin: 'http://localhost:5173', 'content-type': 'text/plain' },
+      { cookie: 'owner', origin: 'http://localhost:5173', 'content-type': 'application/json' },
+    ]) {
+      const response = await app.request(path, { method: 'POST', headers })
+      expect(response.status).toBe(400)
+      expect(response.headers.get('cache-control')).toBe('no-store')
+    }
+    expect(
+      await db.selectFrom('conference_oauth_states').select('state_hash').execute(),
+    ).toHaveLength(0)
+    expect(provider.calls).toHaveLength(0)
+    expect(
+      (await app.request(path, { method: 'POST', headers: { origin: 'http://localhost:5173' } }))
+        .status,
+    ).toBe(401)
+    expect(
+      (
+        await app.request(path, {
+          method: 'POST',
+          headers: {
+            cookie: 'owner',
+            origin: 'http://localhost:5173',
+            authorization: 'Bearer synthetic-key',
+          },
+        })
+      ).status,
+    ).toBe(403)
+    expect(
+      (
+        await app.request(path, {
+          method: 'POST',
+          headers: { cookie: 'owner', origin: 'https://untrusted.invalid' },
+        })
+      ).status,
+    ).toBe(403)
+    expect(
+      await db.selectFrom('conference_oauth_states').select('state_hash').execute(),
+    ).toHaveLength(0)
+  })
+  it('uses a distinct session-only meeting action and refuses caller-supplied modes/scopes/connection IDs', async () => {
+    expect(
+      (await req('/api/v1/conference-connections/zoom/authorize-meetings', 'POST', '{}')).status,
+    ).toBe(409)
+    app = composition(true, true)
+    for (const path of ['/api/v1/conference-connections/zoom/authorize-meetings']) {
+      for (const body of [
+        '{"mode":"identity"}',
+        '{"scope":"meeting:read:admin"}',
+        '{"connectionId":"synthetic"}',
+        '[]',
+      ])
+        expect((await req(path, 'POST', body)).status).toBe(400)
+      expect((await req(path, 'POST', '{}', { origin: 'https://untrusted.invalid' })).status).toBe(
+        403,
+      )
+    }
+    expect(
+      await db.selectFrom('conference_oauth_states').select('state_hash').execute(),
+    ).toHaveLength(0)
+    const response = await req(
+      '/api/v1/conference-connections/zoom/authorize-meetings',
+      'POST',
+      '{}',
+    )
+    expect(response.status).toBe(200)
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    const result = (await response.json()) as { authorizationUrl: string },
+      url = new URL(result.authorizationUrl)
+    expect(url.searchParams.get('scope')?.split(' ')).toEqual([
+      'user:read:user',
+      'meeting:write:meeting',
+      'meeting:read:meeting',
+      'meeting:update:meeting',
+      'meeting:delete:meeting',
+    ])
+    provider.controls.token.scope = url.searchParams.get('scope')
+    const callback = await req(
+      `/api/conference/zoom/callback?state=${url.searchParams.get('state')}&code=synthetic-code`,
+    )
+    expect(callback.headers.get('location')).toBe('/app/conferences?zoom=connected')
+    const row = await db.selectFrom('conference_connections').selectAll().executeTakeFirstOrThrow()
+    expect(row.mode).toBe('meetings')
+    expect(row.status).toBe('active')
+    const data = (await (await req('/api/v1/conference-connections')).json()) as {
+      zoomMeetingsEnabled: boolean
+      data: { mode: string }[]
+    }
+    expect(data.zoomMeetingsEnabled).toBe(true)
+    expect(data.data[0]?.mode).toBe('meetings')
   })
   it('keeps disabled composition honest and makes no provider request', async () => {
     app = composition(false)

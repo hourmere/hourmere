@@ -59,6 +59,8 @@ export interface EventTypeDraft {
   durationMinutes: string
   slotStepMinutes: string
   locationKind: LocationKind | ''
+  autoCreateZoom: boolean
+  zoomConnectionId: string
   autoCreateMeet: boolean
   conferenceOrganizerUserId: string
   phone: string
@@ -103,6 +105,8 @@ export function emptyDraft(): EventTypeDraft {
     durationMinutes: '30',
     slotStepMinutes: '',
     locationKind: '',
+    autoCreateZoom: false,
+    zoomConnectionId: '',
     autoCreateMeet: false,
     conferenceOrganizerUserId: '',
     phone: '',
@@ -135,6 +139,8 @@ export function draftFromEventType(e: EventType): EventTypeDraft {
     durationMinutes: String(e.durationMinutes),
     slotStepMinutes: text(e.slotStepMinutes),
     locationKind: location?.kind ?? '',
+    autoCreateZoom: location?.kind === 'zoom' && location.autoCreate === true,
+    zoomConnectionId: e.zoomConnectionId ?? '',
     autoCreateMeet: location?.kind === 'google_meet' && location.autoCreate === true,
     conferenceOrganizerUserId: e.conferenceOrganizer?.userId ?? '',
     phone: location?.kind === 'phone' ? location.number : '',
@@ -202,6 +208,14 @@ const NUMBER_FIELDS = [
 /** The problems with a draft, by field id; empty when it can be sent. */
 export function validateDraft(draft: EventTypeDraft): FieldErrors {
   const errors: FieldErrors = {}
+  if (draft.locationKind === 'zoom' && draft.autoCreateZoom) {
+    if (draft.schedulingType !== 'individual' || draft.hostUserIds.length > 1)
+      errors['location-kind'] = msg(
+        'Automatic Zoom supports individual meetings with exactly one host.',
+      )
+    if (!draft.zoomConnectionId)
+      errors.zoomConnectionId = msg('Choose your own authorized Zoom meetings account.')
+  }
   if (
     draft.locationKind === 'google_meet' &&
     draft.autoCreateMeet &&
@@ -340,6 +354,8 @@ export function toInput(draft: EventTypeDraft): EventTypeBody {
         return { kind: 'in_person', address: draft.address.trim() }
       case 'link':
         return { kind: 'link', url: draft.url.trim() }
+      case 'zoom':
+        return draft.autoCreateZoom ? { kind: 'zoom', autoCreate: true } : { kind: 'zoom' }
       case 'google_meet':
         return draft.autoCreateMeet
           ? { kind: 'google_meet', autoCreate: true }
@@ -357,6 +373,8 @@ export function toInput(draft: EventTypeDraft): EventTypeBody {
           : null,
       hosts: draft.hostUserIds.map((userId) => ({ userId })),
     }),
+    ...(draft.locationKind === 'zoom' &&
+      draft.autoCreateZoom && { zoomConnectionId: draft.zoomConnectionId || null }),
     title: draft.title.trim(),
     slug: draft.slug.trim(),
     description: draft.description.trim() || null,
@@ -383,10 +401,41 @@ export function toInput(draft: EventTypeDraft): EventTypeBody {
   }
 }
 
+/** Preserve saved authorization and dormant pools during ordinary metadata edits. */
+export function toPatchInput(draft: EventTypeDraft, baseline: EventTypeDraft): EventTypeBody {
+  const body = toInput(draft)
+  const sameHosts =
+    draft.schedulingType === baseline.schedulingType &&
+    [...draft.hostUserIds].sort().join() === [...baseline.hostUserIds].sort().join()
+  if (sameHosts) {
+    delete body.schedulingType
+    delete body.hosts
+    if (draft.conferenceOrganizerUserId === baseline.conferenceOrganizerUserId)
+      delete body.conferenceOrganizer
+  }
+  if (draft.zoomConnectionId === baseline.zoomConnectionId) delete body.zoomConnectionId
+  if (
+    draft.locationKind === 'zoom' &&
+    baseline.locationKind === 'zoom' &&
+    draft.autoCreateZoom === baseline.autoCreateZoom
+  )
+    delete body.location
+  if (
+    (baseline.autoCreateMeet && draft.autoCreateMeet && draft.locationKind === 'google_meet') ||
+    (baseline.autoCreateZoom && draft.autoCreateZoom && draft.locationKind === 'zoom')
+  ) {
+    if (draft.locationKind === 'google_meet') delete body.location
+    if (draft.scheduleId === baseline.scheduleId) delete body.scheduleId
+  }
+  if (draft.schedulingType === 'round_robin' && sameHosts) delete body.scheduleId
+  return body
+}
+
 /** Field labels for the error summary, by field id. */
 export function fieldLabels(draft: EventTypeDraft): Record<string, UiText> {
   const labels: Record<string, UiText> = {
     hosts: 'Hosts',
+    zoomConnectionId: 'Zoom meetings account',
     conferenceOrganizer: 'Meeting organizer',
     title: 'Title',
     slug: 'Booking link',
@@ -440,6 +489,24 @@ export function serverErrors(
   const field = (id: string, message: UiText) => ({ fields: { [id]: message }, message: null })
   const detail = err.message
   switch (err.code) {
+    case 'automatic_zoom_disabled':
+      return field('location-kind', 'Automatic Zoom meetings are disabled on this instance.')
+    case 'automatic_zoom_unavailable':
+    case 'invalid_zoom_connection':
+      return field(
+        'zoomConnectionId',
+        'Choose your own active Zoom account with meeting permissions. Reconnect it in Conference accounts if needed.',
+      )
+    case 'automatic_zoom_host_policy':
+      return field(
+        'location-kind',
+        'Automatic Zoom supports individual meetings with exactly one host.',
+      )
+    case 'zoom_host_session_required':
+      return field(
+        'zoomConnectionId',
+        'The assigned host must configure Zoom in their own signed-in session.',
+      )
     case 'invalid_conference_organizer':
       return field('conferenceOrganizer', 'Choose the meeting organizer from the required hosts.')
     case 'automatic_meet_disabled':

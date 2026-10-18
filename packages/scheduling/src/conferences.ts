@@ -12,8 +12,78 @@ export const automaticMeet = (location: unknown): boolean =>
   'autoCreate' in location &&
   location.autoCreate === true
 
+export const automaticZoom = (location: unknown): boolean =>
+  typeof location === 'object' &&
+  location !== null &&
+  'kind' in location &&
+  location.kind === 'zoom' &&
+  'autoCreate' in location &&
+  location.autoCreate === true
+export const automaticConference = (location: unknown): boolean =>
+  automaticMeet(location) || automaticZoom(location)
+export interface ConferenceWork {
+  rootBookingId: string
+  organizerUserId: string
+  connectionId: string | null
+  externalUserId: string | null
+  meetingId: string | null
+  create: boolean
+  createStarted: boolean
+  booking: { title: string; start_at: Date; end_at: Date; status: string }
+}
+export interface ConferenceResult {
+  meetingId?: string
+  url?: string
+  pending?: boolean
+  cancelled?: boolean
+  error?: string
+  knownNoCreate?: boolean
+}
+/** Cache-only check, never a provider lock/network under booking or host locks. */
+export async function requireZoomConnection(
+  db: Db,
+  user: string,
+  id: string | null | undefined,
+  enabled = false,
+) {
+  if (!enabled)
+    throw new DomainError(
+      'conflict',
+      'automatic_zoom_disabled',
+      'Automatic Zoom meetings are disabled on this instance.',
+    )
+  const row = id
+    ? await db
+        .selectFrom('conference_connections')
+        .select(['id', 'external_user_id', 'mode', 'scopes', 'status'])
+        .where('id', '=', id)
+        .where('user_id', '=', user)
+        .where('provider', '=', 'zoom')
+        .executeTakeFirst()
+    : undefined
+  const scopes = [
+    'user:read:user',
+    'meeting:write:meeting',
+    'meeting:read:meeting',
+    'meeting:update:meeting',
+    'meeting:delete:meeting',
+  ]
+  if (
+    row?.status !== 'active' ||
+    row.mode !== 'meetings' ||
+    !row.external_user_id ||
+    row.scopes.length !== scopes.length ||
+    scopes.some((s, i) => row.scopes[i] !== s)
+  )
+    throw new DomainError(
+      'conflict',
+      'automatic_zoom_unavailable',
+      'Choose your own connected Zoom account with meeting permissions.',
+    )
+  return { zoom_connection_id: row.id, zoom_user_id: row.external_user_id }
+}
 export interface ConferenceStatus {
-  provider: 'google_meet'
+  provider: 'google_meet' | 'zoom'
   status: 'pending' | 'ready' | 'failed'
   errorCode: string | null
 }
@@ -163,7 +233,7 @@ export async function prepareBookingConference(ctx: PublicContext, trx: Db, book
     .select(['location', 'event_type_id', 'organization_id', 'rescheduled_from_id'])
     .where('id', '=', bookingId)
     .executeTakeFirstOrThrow()
-  if (!automaticMeet(booking.location)) return
+  if (!automaticConference(booking.location)) return
   const root = await conferenceRoot(trx, bookingId)
   if (!root) return
   const existing = await trx
@@ -207,7 +277,7 @@ export async function prepareBookingConference(ctx: PublicContext, trx: Db, book
       .execute()
     const et = await trx
       .selectFrom('event_types')
-      .select(['scheduling_type', 'conference_organizer_user_id'])
+      .select(['scheduling_type', 'conference_organizer_user_id', 'zoom_connection_id'])
       .where('id', '=', booking.event_type_id ?? '')
       .executeTakeFirst()
     const ids = hosts.map((h) => h.user_id)
@@ -217,12 +287,21 @@ export async function prepareBookingConference(ctx: PublicContext, trx: Db, book
         : meetOrganizer(et?.scheduling_type ?? '', ids, et?.conference_organizer_user_id ?? null)
     if (!organizer || !ids.includes(organizer))
       throw new DomainError('conflict', 'automatic_meet_unavailable')
-    const target = await requireMeetDestination(
-      trx,
-      organizer,
-      booking.event_type_id ?? undefined,
-      ctx.automaticMeet,
-    )
+    const zoom = automaticZoom(booking.location)
+    if (zoom && (et?.scheduling_type !== 'individual' || ids.length !== 1))
+      throw new DomainError(
+        'conflict',
+        'automatic_zoom_host_policy',
+        'Automatic Zoom requires one explicitly authorized host.',
+      )
+    const target = zoom
+      ? await requireZoomConnection(trx, organizer, et?.zoom_connection_id, ctx.automaticZoom)
+      : await requireMeetDestination(
+          trx,
+          organizer,
+          booking.event_type_id ?? undefined,
+          ctx.automaticMeet,
+        )
     const identity = await trx
       .selectFrom('auth.user')
       .select(['name', 'email'])
@@ -237,13 +316,14 @@ export async function prepareBookingConference(ctx: PublicContext, trx: Db, book
         booking_id: bookingId,
         organization_id: booking.organization_id,
         organizer_user_id: organizer,
+        provider: zoom ? 'zoom' : 'google_meet',
         invitation_organizer_name: cleanText(identity.name, { max: 200 }) ?? 'Host',
         invitation_organizer_email: identity.email,
         ...target,
         next_attempt_at: ctx.now().toString(),
       })
       .execute()
-    for (const userId of ids.filter((id) => id !== organizer)) {
+    for (const userId of ids.filter((id) => zoom || id !== organizer)) {
       const mirror = await googleWriteDestination(trx, userId, booking.event_type_id ?? undefined)
       await trx
         .insertInto('booking_conference_mirrors')
@@ -323,7 +403,7 @@ export async function bookingConferenceStates(db: Db, ids: readonly string[]) {
     rows.map((r) => [
       r.booking_id,
       {
-        provider: 'google_meet' as const,
+        provider: r.provider as ConferenceStatus['provider'],
         status: unavailable.has(r.booking_id) ? 'failed' : (r.state as ConferenceStatus['status']),
         errorCode: unavailable.has(r.booking_id) ? 'organizer_unavailable' : r.error_code,
       },
@@ -333,7 +413,9 @@ export async function bookingConferenceStates(db: Db, ids: readonly string[]) {
 
 /** Only resolved data changes asynchronously; it must not affect idempotency fingerprints. */
 export function unresolvedLocation(location: Json | null): Json | null {
-  return automaticMeet(location) ? { kind: 'google_meet', autoCreate: true } : location
+  return automaticConference(location)
+    ? { kind: automaticZoom(location) ? 'zoom' : 'google_meet', autoCreate: true }
+    : location
 }
 
 /** New roots require the exact verified application identity; old0021 roots keep current-ID compatibility. */
