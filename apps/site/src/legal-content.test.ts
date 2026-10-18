@@ -88,6 +88,16 @@ describe('comparison review information', () => {
     )
   })
 
+  it('describes MCP OAuth 2.1 as operator-enabled in the home-page FAQ', () => {
+    const home = read('./pages/index.astro')
+    const start = home.indexOf('id="faq"')
+    const faq = plainText(home.slice(start, home.indexOf('</section>', start)))
+    expect(faq).toMatch(
+      /through the API or the remote MCP server\. MCP clients can also connect with OAuth 2\.1 when the instance operator enables it\./,
+    )
+    expect(faq).not.toMatch(/OAuth for AI connectors is planned/)
+  })
+
   it('displays the date from page metadata through the registered Starlight component', () => {
     expect(read('../astro.config.ts')).toMatch(/PageTitle:\s*['"].*DocsPageTitle\.astro/)
     expect(read('./content.config.ts')).toMatch(/lastVerified:\s*z\.iso\.date\(\)/)
