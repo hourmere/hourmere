@@ -34,6 +34,7 @@ import {
   toInput,
   validateDraft,
 } from './event-type-form.ts'
+import { HostAssignment } from './HostAssignment.tsx'
 import { QuestionsEditor } from './QuestionsEditor.tsx'
 
 interface Loaded {
@@ -103,7 +104,9 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
   const navigate = useNavigate()
   const [saved, setSaved] = useState<EventType | null>(eventType)
   const [baseline, setBaseline] = useState(() =>
-    eventType ? draftFromEventType(eventType) : emptyDraft(),
+    eventType
+      ? draftFromEventType(eventType)
+      : { ...emptyDraft(), ...(!me.organization.personal && { hostUserIds: [me.user.id] }) },
   )
   const [draft, setDraft] = useState(baseline)
   // On a new event type the slug follows the title until it is edited by hand.
@@ -133,6 +136,12 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
     setFormError(null)
     setStatus('')
     const problems = validateDraft(draft)
+    if (
+      !me.organization.personal &&
+      draft.schedulingType === 'individual' &&
+      draft.hostUserIds.length !== 1
+    )
+      problems.hosts = 'Choose exactly one required host.'
     setErrors(problems)
     if (Object.keys(problems).length > 0) return
     // The fields are locked until the answer comes, so it cannot overwrite later edits.
@@ -141,6 +150,15 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
     statusRef.current?.focus()
     setSaving(true)
     const body = toInput(draft)
+    if (
+      saved &&
+      draft.schedulingType === baseline.schedulingType &&
+      [...draft.hostUserIds].sort().join() === [...baseline.hostUserIds].sort().join()
+    ) {
+      delete body.schedulingType
+      delete body.hosts
+    }
+    if (draft.schedulingType === 'round_robin') delete body.scheduleId
     try {
       if (saved) {
         const updated = await unwrap(
@@ -185,7 +203,13 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
     navigate(PATHS.eventTypes, { state: flash(`Deleted “${saved.title}”.`) })
   }
 
-  const slugPreview = bookingLinkPreview(me, profile, draft.slug.trim(), saved?.schedulingType)
+  const slugPreview = bookingLinkPreview(
+    me,
+    profile,
+    draft.slug.trim(),
+    draft.schedulingType,
+    draft.hostUserIds.length,
+  )
   const duration = parseWhole(draft.durationMinutes)
 
   return (
@@ -314,6 +338,10 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
             </div>
           </section>
 
+          {!me.organization.personal && (
+            <HostAssignment draft={draft} error={errors.hosts} set={set} />
+          )}
+
           <section className="panel" aria-labelledby="location-heading">
             <h2 id="location-heading">Location</h2>
             <LocationFields draft={draft} errors={errors} set={set} />
@@ -344,45 +372,53 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
           <section className="panel" aria-labelledby="rules-heading">
             <h2 id="rules-heading">When people can book</h2>
             <div className="stack">
-              <Field
-                id="scheduleId"
-                label="Schedule"
-                error={errors.scheduleId}
-                hint={
-                  schedules.length === 0 ? (
-                    <>
-                      You have no schedule yet, so no times are offered.{' '}
-                      <Link to={PATHS.newSchedule}>Set your availability</Link>.
-                    </>
-                  ) : (
-                    <>
-                      The weekly hours times are offered in.{' '}
-                      <Link to={PATHS.availability}>Manage schedules</Link>
-                    </>
-                  )
-                }
-              >
-                {(props) => (
-                  <select
-                    {...props}
-                    value={draft.scheduleId}
-                    onChange={(e) => set('scheduleId', e.target.value)}
-                  >
-                    <option value="">
-                      Your default schedule
-                      {defaultName(schedules) ? ` (${defaultName(schedules)})` : ''}
-                    </option>
-                    {schedules.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name}
+              {draft.schedulingType === 'collective' ? (
+                <p>
+                  Each required host uses their current default schedule. Times are offered only
+                  when every host offers the same start and end.
+                </p>
+              ) : (
+                <Field
+                  id="scheduleId"
+                  label="Schedule"
+                  error={errors.scheduleId}
+                  hint={
+                    schedules.length === 0 ? (
+                      <>
+                        You have no schedule yet, so no times are offered.{' '}
+                        <Link to={PATHS.newSchedule}>Set your availability</Link>.
+                      </>
+                    ) : (
+                      <>
+                        The weekly hours times are offered in.{' '}
+                        <Link to={PATHS.availability}>Manage schedules</Link>
+                      </>
+                    )
+                  }
+                >
+                  {(props) => (
+                    <select
+                      {...props}
+                      value={draft.scheduleId}
+                      disabled={!me.organization.personal && draft.hostUserIds[0] !== me.user.id}
+                      onChange={(e) => set('scheduleId', e.target.value)}
+                    >
+                      <option value="">
+                        Your default schedule
+                        {defaultName(schedules) ? ` (${defaultName(schedules)})` : ''}
                       </option>
-                    ))}
-                    {draft.scheduleId && !schedules.some((s) => s.id === draft.scheduleId) && (
-                      <option value={draft.scheduleId}>A schedule that no longer exists</option>
-                    )}
-                  </select>
-                )}
-              </Field>
+                      {schedules.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                        </option>
+                      ))}
+                      {draft.scheduleId && !schedules.some((s) => s.id === draft.scheduleId) && (
+                        <option value={draft.scheduleId}>A schedule that no longer exists</option>
+                      )}
+                    </select>
+                  )}
+                </Field>
+              )}
               <div className="field-grid">
                 <MinutesField
                   id="slotStepMinutes"
@@ -502,9 +538,16 @@ function bookingLinkPreview(
   profile: Profile | null,
   slug: string,
   schedulingType: EventType['schedulingType'] = 'individual',
+  hostCount = 1,
 ): string {
-  if (!me.organization.personal && schedulingType !== 'individual')
+  if (!me.organization.personal && schedulingType === 'round_robin')
     return 'Public booking links for this scheduling mode are not available yet.'
+  if (
+    !me.organization.personal &&
+    schedulingType === 'collective' &&
+    (hostCount < 2 || hostCount > 8)
+  )
+    return 'Choose two to eight required hosts to get a collective booking link.'
   if (!me.organization.personal && !isPublicTeamSlug(me.organization.slug))
     return TEAM_LINK_SLUG_HINT
   if (!me.organization.personal) return publicTeamPageUrl(me.organization.slug, slug || 'your-link')

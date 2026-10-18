@@ -39,6 +39,8 @@ function eventTypeServer(
       json(200, {
         data: [schedule(), schedule({ id: OTHER_SCHEDULE_ID, name: 'Evenings', isDefault: false })],
       }),
+    'GET /api/v1/event-type-hosts': () =>
+      json(200, { data: [{ id: ME.user.id, name: ME.user.name }], nextAfter: null }),
     'GET /api/v1/event-types': () => json(200, { data: list }),
     [`GET /api/v1/event-types/${EVENT_TYPE_ID}`]: () => {
       const found = list.find((e) => e.id === EVENT_TYPE_ID)
@@ -1000,8 +1002,61 @@ describe('unavailable team booking links', () => {
       screen.getByText(
         mode === 'individual'
           ? /Choose a non-reserved team slug/
-          : 'Public booking links for this scheduling mode are not available yet.',
+          : mode === 'collective'
+            ? 'Choose two to eight required hosts to get a collective booking link.'
+            : 'Public booking links for this scheduling mode are not available yet.',
       ),
     ).toBeDefined()
+  })
+})
+
+describe('collective host assignment', () => {
+  const secondId = '00000000-0000-7000-8000-000000000003'
+  const me = {
+    ...ME,
+    organization: { ...ME.organization, name: 'Team', slug: 'Team', personal: false },
+  }
+  it('loads member pages, validates required hosts and saves a collective type with default schedules', async () => {
+    const user = userEvent.setup()
+    const calls = eventTypeServer([eventType({ ownerUserId: null })], {
+      ...signedInAs(me),
+      'GET /api/v1/event-type-hosts': ({ path }) =>
+        path.includes('after=')
+          ? json(200, { data: [{ id: secondId, name: 'Grace' }], nextAfter: null })
+          : json(200, { data: [{ id: ME.user.id, name: 'Ada' }], nextAfter: ME.user.id }),
+    })
+    renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
+    await screen.findByRole('heading', { name: 'Edit “Intro call”' })
+    await user.selectOptions(screen.getByLabelText('Scheduling'), 'collective')
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    expect(screen.getAllByText('Choose two to eight required hosts.').length).toBeGreaterThan(0)
+    expect(calls.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`)).toHaveLength(0)
+    await user.click(await screen.findByRole('button', { name: 'Load more members' }))
+    await user.click(await screen.findByLabelText('Grace'))
+    expect(screen.queryByLabelText('Schedule')).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    await screen.findByText('Saved.')
+    const request = calls.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`)[0]?.body
+    expect(request).toMatchObject({
+      schedulingType: 'collective',
+      hosts: [{ userId: ME.user.id }, { userId: secondId }],
+      scheduleId: null,
+    })
+    expect(calls.to('GET /api/v1/event-type-hosts')).toHaveLength(2)
+  })
+  it('shows member directory failures and retries without losing existing configuration', async () => {
+    const user = userEvent.setup()
+    let attempt = 0
+    eventTypeServer([eventType({ ownerUserId: null })], {
+      ...signedInAs(me),
+      'GET /api/v1/event-type-hosts': () =>
+        ++attempt === 1
+          ? json(403, { error: 'insufficient_role' })
+          : json(200, { data: [{ id: ME.user.id, name: 'Ada' }], nextAfter: null }),
+    })
+    renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
+    expect((await screen.findByRole('alert')).textContent).toContain('Could not load team members')
+    await user.click(screen.getByRole('button', { name: 'Try again' }))
+    expect(((await screen.findByLabelText('Ada')) as HTMLInputElement).checked).toBe(true)
   })
 })

@@ -316,6 +316,7 @@ export interface Bookings {
   manage_token_hash: Buffer;
   oauth_consent_id: string | null;
   organization_id: string;
+  required_host_user_ids: Generated<string[]>;
   rescheduled_from_id: string | null;
   responses: Generated<Json>;
   source: string;

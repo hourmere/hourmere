@@ -1,10 +1,11 @@
 // What the invitee's manage page needs beyond the booking itself: who hosts it and what the
 // event is (to show it), and the times it can move to (to reschedule it). Both go through
 // getManagedBooking, so they accept exactly the tokens that open the booking.
-import { checkSlotRange, findSlots, hasBookablePart, type SlotView, toIso } from './availability.ts'
+import { checkSlotRange, hasBookablePart, intersectSlots, type SlotView } from './availability.ts'
 import { type Booking, getManagedBooking } from './bookings.ts'
 import type { PublicContext } from './context.ts'
 import { DomainError } from './errors.ts'
+import { bookingHostIds } from './hosts.ts'
 
 /** The booking behind a manage token, with what the invitee needs to recognize it. */
 export interface ManagedBooking extends Booking {
@@ -91,44 +92,23 @@ export async function listManagedSlots(
       'This event type no longer takes bookings',
     )
   }
-  const hosts = await ctx.db
-    .selectFrom('booking_hosts')
-    .select('user_id')
-    .where('booking_id', '=', booking.id)
-    .orderBy('user_id')
-    .execute()
-  if (!hosts.length) {
-    throw new DomainError(
-      'conflict',
-      'booking_has_no_host',
-      'This booking has no host, so it cannot be rescheduled',
-    )
-  }
+  const snapshot = await ctx.db
+    .selectFrom('bookings')
+    .select(['organization_id', 'required_host_user_ids'])
+    .where('id', '=', booking.id)
+    .executeTakeFirstOrThrow()
+  const hostIds = await bookingHostIds(
+    ctx.db,
+    booking.id,
+    snapshot.organization_id,
+    snapshot.required_host_user_ids,
+  )
   const rules = {
     minimumNoticeMinutes: eventType.minimum_notice_minutes,
     bookingWindowDays: eventType.booking_window_days,
     slotStepMinutes: eventType.slot_step_minutes ?? eventType.duration_minutes,
   }
-  if (!hasBookablePart(rules, start, end, now)) return []
+  if (!hasBookablePart(rules, start, end, now, hostIds.length)) return []
 
-  // A time is offered when every host offers it (one host for personal event types).
-  let offered: SlotView[] | undefined
-  for (const { user_id } of hosts) {
-    const slots = await findSlots(ctx.db, {
-      eventTypeId: eventType.id,
-      hostUserId: user_id,
-      rangeStart: start,
-      rangeEnd: end,
-      now,
-      excludeBookingId: booking.id,
-    })
-    const views = slots.map((s) => ({ start: toIso(s.start), end: toIso(s.end) }))
-    if (offered === undefined) {
-      offered = views
-    } else {
-      const keys = new Set(views.map((v) => `${v.start}/${v.end}`))
-      offered = offered.filter((v) => keys.has(`${v.start}/${v.end}`))
-    }
-  }
-  return offered ?? []
+  return intersectSlots(ctx.db, eventType.id, hostIds, start, end, now, booking.id)
 }

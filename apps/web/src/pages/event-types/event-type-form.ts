@@ -50,6 +50,8 @@ export interface QuestionDraft {
 }
 
 export interface EventTypeDraft {
+  schedulingType: EventType['schedulingType']
+  hostUserIds: string[]
   title: string
   slug: string
   description: string
@@ -90,6 +92,8 @@ export const newOption = (text = ''): OptionDraft => ({ key: newKey('o'), text }
 /** A new event type: the API's defaults, 30 minutes long. */
 export function emptyDraft(): EventTypeDraft {
   return {
+    schedulingType: 'individual',
+    hostUserIds: [],
     title: '',
     slug: '',
     description: '',
@@ -118,6 +122,8 @@ const text = (n: number | null) => (n === null ? '' : String(n))
 export function draftFromEventType(e: EventType): EventTypeDraft {
   const location = e.location
   return {
+    schedulingType: e.schedulingType,
+    hostUserIds: (e.hosts ?? []).map((h) => h.userId),
     title: e.title,
     slug: e.slug,
     description: e.description ?? '',
@@ -189,6 +195,13 @@ const NUMBER_FIELDS = [
 /** The problems with a draft, by field id; empty when it can be sent. */
 export function validateDraft(draft: EventTypeDraft): FieldErrors {
   const errors: FieldErrors = {}
+  if (
+    draft.schedulingType === 'collective' &&
+    (draft.hostUserIds.length < 2 || draft.hostUserIds.length > 8)
+  )
+    errors.hosts = 'Choose two to eight required hosts.'
+  if (new Set(draft.hostUserIds).size !== draft.hostUserIds.length)
+    errors.hosts = 'Choose each host once.'
   const add = (field: string, problem: string | null) => {
     if (problem) errors[field] = problem
   }
@@ -307,6 +320,11 @@ export function toInput(draft: EventTypeDraft): EventTypeBody {
     }
   })()
   return {
+    ...(draft.schedulingType !== 'round_robin' &&
+      draft.hostUserIds.length > 0 && {
+        schedulingType: draft.schedulingType,
+        hosts: draft.hostUserIds.map((userId) => ({ userId })),
+      }),
     title: draft.title.trim(),
     slug: draft.slug.trim(),
     description: draft.description.trim() || null,
@@ -325,7 +343,7 @@ export function toInput(draft: EventTypeDraft): EventTypeBody {
       required: q.required,
       ...(isChoice(q.type) && { options: q.options.map((o) => o.text.trim()) }),
     })),
-    scheduleId: draft.scheduleId || null,
+    scheduleId: draft.schedulingType === 'collective' ? null : draft.scheduleId || null,
     position: whole(draft.position) as number,
     isActive: draft.isActive,
     isHidden: draft.isHidden,
@@ -336,6 +354,7 @@ export function toInput(draft: EventTypeDraft): EventTypeBody {
 /** Field labels for the error summary, by field id. */
 export function fieldLabels(draft: EventTypeDraft): Record<string, string> {
   const labels: Record<string, string> = {
+    hosts: 'Hosts',
     title: 'Title',
     slug: 'Booking link',
     description: 'Description',
@@ -392,6 +411,11 @@ export function serverErrors(
       )
     case 'slug_taken':
       return field('slug', 'Another of your event types already uses this link. Choose another.')
+    case 'invalid_hosts':
+      return field(
+        'hosts',
+        'Choose current verified team members: one individual host or two to eight collective hosts.',
+      )
     case 'invalid_schedule_id':
       return field('scheduleId', 'This schedule no longer exists. Choose another one.')
     case 'invalid_event_type': {

@@ -127,7 +127,8 @@ describe('the session gate', () => {
     renderApp('/app/event-types')
     await screen.findByRole('heading', { name: 'Event types', level: 1 })
     const list = within(screen.getByRole('navigation', { name: 'Main' })).getByRole('list')
-    expect(list.scrollLeft).toBe(expected)
+    // The heading can appear before AppShell's passive navigation effect runs.
+    await waitFor(() => expect(list.scrollLeft).toBe(expected))
     expect(document.activeElement).toBe(document.body)
   })
 

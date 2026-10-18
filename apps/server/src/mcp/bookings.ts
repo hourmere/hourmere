@@ -8,10 +8,13 @@ import {
   cancelHostBooking,
   cancelManagedBooking,
   createPublicBooking,
+  createPublicTeamBooking,
   DomainError,
   getPublicEventType,
+  getPublicTeamEventType,
   listHostBookings,
   listPublicSlots,
+  listPublicTeamSlots,
   MAX_SLOT_RANGE_DAYS,
   type PublicContext,
   rescheduleHostBooking,
@@ -53,27 +56,36 @@ const localTime = (iso: string, timeZone: string) =>
 const DEFAULT_MCP_SLOTS = 100
 const MAX_MCP_SLOTS = 500
 
-const FindSlotsInput = z.strictObject({
-  handle,
-  slug,
-  timeZone: z.string().min(1).max(64).openapi({
-    description:
-      'IANA time zone name, e.g. Europe/Berlin or America/New_York (numeric offsets such as +01:00 are refused: they ignore daylight saving time). startDate and endDate are days in this zone, and each slot is also given in it. Use the time zone of the person you are booking for.',
-    example: 'Europe/Berlin',
-  }),
-  maxSlots: z.number().int().min(1).max(MAX_MCP_SLOTS).optional().openapi({
-    description: 'Maximum slots in this page; use after=nextAfter to continue with the same query',
-    default: DEFAULT_MCP_SLOTS,
-  }),
-  after: Instant.optional().openapi({
-    description:
-      'Exclusive start instant from the previous page nextAfter; keep the same handle, slug, dates and timeZone',
-  }),
-  startDate: z.iso.date().openapi({ description: 'First day to search, YYYY-MM-DD in timeZone' }),
-  endDate: z.iso.date().openapi({
-    description: `Last day to search (inclusive), YYYY-MM-DD in timeZone; at most ${MAX_SLOT_RANGE_DAYS} days in all`,
-  }),
-})
+const FindSlotsInput = z
+  .strictObject({
+    handle: handle.optional(),
+    teamSlug: z.string().min(1).max(64).optional().openapi({
+      description:
+        'Exact-case team organization slug from /team/{teamSlug}/{slug}; give exactly one of handle or teamSlug',
+    }),
+    slug,
+    timeZone: z.string().min(1).max(64).openapi({
+      description:
+        'IANA time zone name, e.g. Europe/Berlin or America/New_York (numeric offsets such as +01:00 are refused: they ignore daylight saving time). startDate and endDate are days in this zone, and each slot is also given in it. Use the time zone of the person you are booking for.',
+      example: 'Europe/Berlin',
+    }),
+    maxSlots: z.number().int().min(1).max(MAX_MCP_SLOTS).optional().openapi({
+      description:
+        'Maximum slots in this page; use after=nextAfter to continue with the same query',
+      default: DEFAULT_MCP_SLOTS,
+    }),
+    after: Instant.optional().openapi({
+      description:
+        'Exclusive start instant from the previous page nextAfter; keep the same handle, slug, dates and timeZone',
+    }),
+    startDate: z.iso.date().openapi({ description: 'First day to search, YYYY-MM-DD in timeZone' }),
+    endDate: z.iso.date().openapi({
+      description: `Last day to search (inclusive), YYYY-MM-DD in timeZone; at most ${MAX_SLOT_RANGE_DAYS} days in all`,
+    }),
+  })
+  .refine((v) => (v.handle === undefined) !== (v.teamSlug === undefined), {
+    message: 'Give exactly one of handle or teamSlug',
+  })
 
 const LocalSlot = Slot.extend({
   localStart: z.string().openapi({
@@ -101,18 +113,26 @@ const FindSlotsOutput = z.object({
 })
 
 // The REST body's fields, after the page they belong to.
-const CreateBookingInput = z.strictObject({
-  handle,
-  slug,
-  ...CreateBooking.omit({ source: true }).shape,
-  start: CreateBooking.shape.start.openapi({
-    description: 'The exact `start` of a slot from find_available_slots, unchanged',
-  }),
-  idempotencyKey: z.string().optional().openapi({
-    description:
-      'Makes retries safe: a retry with the same key and the same arguments returns the original booking (replayed: true, manageToken null) instead of booking again; the same key with different arguments fails with idempotency_key_reused. Use a new random value (e.g. a UUIDv4) per booking; 1–255 printable ASCII characters. Keys are scoped to your API key.',
-  }),
-})
+const CreateBookingInput = z
+  .strictObject({
+    handle: handle.optional(),
+    teamSlug: z.string().min(1).max(64).optional().openapi({
+      description:
+        'Exact-case team organization slug from /team/{teamSlug}/{slug}; give exactly one of handle or teamSlug',
+    }),
+    slug,
+    ...CreateBooking.omit({ source: true }).shape,
+    start: CreateBooking.shape.start.openapi({
+      description: 'The exact `start` of a slot from find_available_slots, unchanged',
+    }),
+    idempotencyKey: z.string().optional().openapi({
+      description:
+        'Makes retries safe: a retry with the same key and the same arguments returns the original booking (replayed: true, manageToken null) instead of booking again; the same key with different arguments fails with idempotency_key_reused. Use a new random value (e.g. a UUIDv4) per booking; 1–255 printable ASCII characters. Keys are scoped to your API key.',
+    }),
+  })
+  .refine((v) => (v.handle === undefined) !== (v.teamSlug === undefined), {
+    message: 'Give exactly one of handle or teamSlug',
+  })
 
 const CreateBookingOutput = BookingWithToken.extend({
   replayed: z.boolean().openapi({
@@ -224,8 +244,14 @@ export function bookingTools({
       const nextDay = last.add({ days: 1 }).toZonedDateTime(timeZone).toInstant()
       const longest = start.add({ hours: MAX_SLOT_RANGE_DAYS * 24 })
       const end = Temporal.Instant.compare(nextDay, longest) > 0 ? longest : nextDay
-      const eventType = await getPublicEventType(pub, args)
-      const slots = await listPublicSlots(pub, { handle: args.handle, slug: args.slug, start, end })
+      const pageInput = { handle: (args.teamSlug ?? args.handle) as string, slug: args.slug }
+      const eventType = await (args.teamSlug !== undefined
+        ? getPublicTeamEventType
+        : getPublicEventType)(pub, pageInput)
+      const slots = await (args.teamSlug !== undefined ? listPublicTeamSlots : listPublicSlots)(
+        pub,
+        { ...pageInput, start, end },
+      )
       const after = args.after === undefined ? null : Temporal.Instant.from(args.after)
       const remaining =
         after === null
@@ -261,10 +287,12 @@ export function bookingTools({
     },
     async run(args, call) {
       call.rateLimit(bookLimit)
-      const { replayed, ...result } = await createPublicBooking(
+      const { replayed, ...result } = await (args.teamSlug !== undefined
+        ? createPublicTeamBooking
+        : createPublicBooking)(
         pub,
         {
-          handle: args.handle,
+          handle: (args.teamSlug ?? args.handle) as string,
           slug: args.slug,
           start: Temporal.Instant.from(args.start),
           invitee: args.invitee,

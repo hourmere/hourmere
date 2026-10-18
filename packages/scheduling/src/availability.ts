@@ -17,6 +17,7 @@ import type { Db, Json } from '@hourmere/db'
 import { type Expression, type ExpressionBuilder, sql } from 'kysely'
 import type { PublicContext } from './context.ts'
 import { DomainError } from './errors.ts'
+import { assertHosts } from './hosts.ts'
 import { parseQuestions, type Question } from './questions.ts'
 
 /** Longest range one public slots request may cover. */
@@ -82,6 +83,8 @@ export interface PublicEventTypeRecord {
   organizationId: string
   /** The assigned host, or the owner on a personal page. */
   hostUserId: string
+  hostUserIds: string[]
+  hosts: { name: string; timeZone: string }[]
   handle: string
   slug: string
   title: string
@@ -160,6 +163,8 @@ export async function findPublicEventType(
     id: row.id,
     organizationId: row.organization_id,
     hostUserId: row.user_id,
+    hostUserIds: [row.user_id],
+    hosts: [{ name: row.name.trim() || row.handle, timeZone: row.time_zone }],
     handle: row.handle,
     slug: row.slug,
     title: row.title,
@@ -192,43 +197,8 @@ export async function findPublicTeamEventType(
   let query = db
     .selectFrom('auth.organization as o')
     .innerJoin('event_types as et', 'et.organization_id', 'o.id')
-    .innerJoin('event_type_hosts as eh', 'eh.event_type_id', 'et.id')
-    .innerJoin('auth.user as u', 'u.id', 'eh.user_id')
-    .innerJoin('auth.member as m', (join) =>
-      join.onRef('m.userId', '=', 'eh.user_id').onRef('m.organizationId', '=', 'o.id'),
-    )
-    .leftJoin('profiles as p', 'p.user_id', 'eh.user_id')
-    .leftJoin('schedules as sc', (join) =>
-      join.on((eb) =>
-        eb.or([
-          eb('sc.id', '=', eb.ref('eh.schedule_id')),
-          eb.and([
-            eb('eh.schedule_id', 'is', null),
-            eb('sc.user_id', '=', eb.ref('eh.user_id')),
-            eb('sc.is_default', '=', true),
-          ]),
-        ]),
-      ),
-    )
-    .select([
-      'et.id',
-      'et.organization_id',
-      'et.slug',
-      'et.title',
-      'et.description',
-      'et.duration_minutes',
-      'et.slot_step_minutes',
-      'et.minimum_notice_minutes',
-      'et.booking_window_days',
-      'et.location',
-      'et.questions',
-      'et.allow_guests',
-      'eh.user_id',
-      'o.slug as team_slug',
-      'o.name as team_name',
-      'u.name',
-      sql<string>`coalesce(p.time_zone, sc.time_zone, 'UTC')`.as('time_zone'),
-    ])
+    .selectAll('et')
+    .select(['o.slug as team_slug', 'o.name as team_name'])
     .where('o.slug', '=', teamSlug)
     .where('o.id', 'not in', (eb) =>
       eb.selectFrom('personal_organizations').select('organization_id'),
@@ -237,18 +207,51 @@ export async function findPublicTeamEventType(
     .where('et.owner_user_id', 'is', null)
     .where('et.is_active', '=', true)
     .where('et.deleted_at', 'is', null)
-    .where('et.scheduling_type', '=', 'individual')
-    .where(
-      sql<boolean>`(SELECT count(*) FROM event_type_hosts all_hosts WHERE all_hosts.event_type_id = et.id) = 1`,
-    )
-  // Serialize host settings changes with approval of a new booking.
+    .where('et.scheduling_type', 'in', ['individual', 'collective'])
   if (options.lock) query = query.forShare('et')
   const row = await query.executeTakeFirst()
   if (!row) return undefined
+  const hosts = await db
+    .selectFrom('event_type_hosts as h')
+    .innerJoin('auth.user as u', 'u.id', 'h.user_id')
+    .leftJoin('profiles as p', 'p.user_id', 'h.user_id')
+    .leftJoin('schedules as sc', (join) =>
+      join
+        .onRef('sc.user_id', '=', 'h.user_id')
+        .on((eb) =>
+          eb.or([
+            eb('sc.id', '=', eb.ref('h.schedule_id')),
+            eb.and([eb('h.schedule_id', 'is', null), eb('sc.is_default', '=', true)]),
+          ]),
+        ),
+    )
+    .select([
+      'h.user_id',
+      'u.name',
+      sql<string>`coalesce(p.time_zone, sc.time_zone, 'UTC')`.as('time_zone'),
+    ])
+    .where('h.event_type_id', '=', row.id)
+    .orderBy('h.user_id')
+    .limit(9)
+    .execute()
+  if (
+    row.scheduling_type === 'individual' ? hosts.length !== 1 : hosts.length < 2 || hosts.length > 8
+  )
+    return undefined
+  const hostUserIds = hosts.map((h) => h.user_id)
+  try {
+    await assertHosts(db, row.organization_id, hostUserIds, options.lock)
+  } catch (error) {
+    if (error instanceof DomainError && error.code === 'invalid_hosts') return undefined
+    throw error
+  }
+  const views = hosts.map((h) => ({ name: h.name.trim() || row.team_name, timeZone: h.time_zone }))
   return {
     id: row.id,
     organizationId: row.organization_id,
-    hostUserId: row.user_id,
+    hostUserId: hostUserIds[0] as string,
+    hostUserIds,
+    hosts: views,
     handle: row.team_slug,
     slug: row.slug,
     title: row.title,
@@ -260,8 +263,8 @@ export async function findPublicTeamEventType(
     location: parseLocation(row.location),
     questions: parseQuestions(row.questions),
     allowGuests: row.allow_guests,
-    hostName: row.name.trim() || row.team_name,
-    hostTimeZone: row.time_zone,
+    hostName: views.map((h) => h.name).join(', '),
+    hostTimeZone: views[0]?.timeZone ?? 'UTC',
     team: { name: row.team_name, slug: row.team_slug },
   }
 }
@@ -281,6 +284,8 @@ export interface PublicEventType {
   questions: Question[]
   allowGuests: boolean
   host: { name: string; timeZone: string }
+  /** Every required host, without private identities or availability. */
+  hosts?: { name: string; timeZone: string }[]
   team?: { name: string; slug: string }
 }
 
@@ -310,6 +315,7 @@ function publicEventType(et: PublicEventTypeRecord | undefined): PublicEventType
     questions: et.questions,
     allowGuests: et.allowGuests,
     host: { name: et.hostName, timeZone: et.hostTimeZone },
+    ...(et.hosts.length > 1 && { hosts: et.hosts }),
     ...(et.team && { team: et.team }),
   }
 }
@@ -417,6 +423,7 @@ export function hasBookablePart(
   start: Temporal.Instant,
   end: Temporal.Instant,
   now: Temporal.Instant,
+  hostCount = 1,
 ): boolean {
   // Nothing before now plus the minimum notice, nothing after the booking window (calendar
   // days in the host's zone, so one spare day here).
@@ -428,7 +435,7 @@ export function hasBookablePart(
   if (Temporal.Instant.compare(bookableEnd, bookableStart) <= 0) return false
   if (
     bookableEnd.since(bookableStart).total('minutes') / rules.slotStepMinutes >
-    MAX_SLOT_CANDIDATES
+    MAX_SLOT_CANDIDATES / hostCount
   ) {
     throw new DomainError(
       'invalid',
@@ -467,15 +474,8 @@ async function publicSlots(
   const et = await resolve(ctx.db, input.handle, input.slug)
   if (!et) throw eventTypeNotFound()
   const now = ctx.now()
-  if (!hasBookablePart(et, input.start, input.end, now)) return []
-  const slots = await findSlots(ctx.db, {
-    eventTypeId: et.id,
-    hostUserId: et.hostUserId,
-    rangeStart: input.start,
-    rangeEnd: input.end,
-    now,
-  })
-  return slots.map((s) => ({ start: toIso(s.start), end: toIso(s.end) }))
+  if (!hasBookablePart(et, input.start, input.end, now, et.hostUserIds.length)) return []
+  return intersectSlots(ctx.db, et.id, et.hostUserIds, input.start, input.end, now)
 }
 
 // --- The database → engine mapping ------------------------------------------------------
@@ -496,6 +496,8 @@ export interface AvailabilityQuery {
   now: Temporal.Instant
   /** A booking that must not block, e.g. the one being rescheduled. */
   excludeBookingId?: string | undefined
+  /** Collective snapshots always use each original host’s current default schedule. */
+  useDefaultSchedule?: boolean | undefined
 }
 
 /**
@@ -540,12 +542,13 @@ export async function buildAvailabilityInput(
     .executeTakeFirst()
   if (!eventType) throw eventTypeNotFound()
 
+  const scheduleId = query.useDefaultSchedule ? null : eventType.schedule_id
   const schedule = await db
     .selectFrom('schedules')
     .select(['id', 'time_zone', 'weekly_hours'])
     .where('user_id', '=', hostUserId)
-    .$if(eventType.schedule_id !== null, (q) => q.where('id', '=', eventType.schedule_id as string))
-    .$if(eventType.schedule_id === null, (q) => q.where('is_default', '=', true))
+    .$if(scheduleId !== null, (q) => q.where('id', '=', scheduleId as string))
+    .$if(scheduleId === null, (q) => q.where('is_default', '=', true))
     .executeTakeFirst()
   if (!schedule) return undefined
 
@@ -768,4 +771,35 @@ export async function findSlots(db: Db, query: AvailabilityQuery): Promise<Slot[
   if (Temporal.Instant.compare(rangeEnd, rangeStart) <= 0) return []
   const input = await buildAvailabilityInput(db, { ...query, rangeStart, rangeEnd })
   return input ? getAvailableSlots(input) : []
+}
+
+/** Full interval intersection; all hosts share the public candidate budget. */
+export async function intersectSlots(
+  db: Db,
+  eventTypeId: string,
+  hostUserIds: readonly string[],
+  rangeStart: Temporal.Instant,
+  rangeEnd: Temporal.Instant,
+  now: Temporal.Instant,
+  excludeBookingId?: string,
+): Promise<SlotView[]> {
+  let offered: SlotView[] | undefined
+  for (const hostUserId of hostUserIds) {
+    const slots = await findSlots(db, {
+      eventTypeId,
+      hostUserId,
+      rangeStart,
+      rangeEnd,
+      now,
+      excludeBookingId,
+      useDefaultSchedule: hostUserIds.length > 1,
+    })
+    const views = slots.map((s) => ({ start: toIso(s.start), end: toIso(s.end) }))
+    if (offered === undefined) offered = views
+    else {
+      const keys = new Set(views.map((v) => `${v.start}/${v.end}`))
+      offered = offered.filter((v) => keys.has(`${v.start}/${v.end}`))
+    }
+  }
+  return offered ?? []
 }

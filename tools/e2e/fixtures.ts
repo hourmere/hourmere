@@ -32,6 +32,8 @@ interface FixtureApp {
   parentUrl: string
   personalPath: string
   teamPath: string
+  collectivePath: string
+  hostCounts: () => Promise<number[]>
   rows: () => Promise<{ source: string; status: string }[]>
   authorizeHost: (teamRole?: 'owner' | 'member') => Promise<void>
 }
@@ -85,6 +87,24 @@ export const test = base.extend<{ app: FixtureApp; suppressFailureDom: undefined
         minimumNoticeMinutes: 30,
         hosts: [{ userId: host.userId }],
       })
+      const secondHost = await f.host({
+        handle: null,
+        name: 'Second Required Host',
+        timeZone: 'UTC',
+      })
+      await f.schedule(secondHost.userId, { timeZone: 'UTC' })
+      await f.member(secondHost.userId, team)
+      const collectiveId = await f.eventType(team, null, {
+        title: 'Collective fixture call',
+        slug: 'collective',
+        minimumNoticeMinutes: 30,
+        hosts: [{ userId: host.userId }, { userId: secondHost.userId }],
+      })
+      await db
+        .updateTable('event_types')
+        .set({ scheduling_type: 'collective' })
+        .where('id', '=', collectiveId)
+        .execute()
       parent = createHttpServer((request, response) => {
         response.setHeader('Cache-Control', 'no-store')
         if (request.url === '/parent.js') {
@@ -94,9 +114,11 @@ export const test = base.extend<{ app: FixtureApp; suppressFailureDom: undefined
           )
           return
         }
+        const bookingPath =
+          request.url === '/collective' ? '/team/FixtureTeam/collective' : '/fixture-host/call'
         response.setHeader('Content-Type', 'text/html; charset=utf-8')
         response.end(
-          `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Fixture website</title><button type="button" data-hourmere-popup data-hourmere-url="${url}/fixture-host/call">Book a meeting</button><div data-hourmere-inline data-hourmere-url="${url}/fixture-host/call"></div><script src="/parent.js" defer></script><script src="${url}/hourmere-embed.js" defer></script>`,
+          `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Fixture website</title><button type="button" data-hourmere-popup data-hourmere-url="${url}${bookingPath}">Book a meeting</button><div data-hourmere-inline data-hourmere-url="${url}${bookingPath}"></div><script src="/parent.js" defer></script><script src="${url}/hourmere-embed.js" defer></script>`,
         )
       })
       const parentUrl = `http://127.0.0.1:${await listenLoopback(parent)}`
@@ -134,6 +156,26 @@ export const test = base.extend<{ app: FixtureApp; suppressFailureDom: undefined
         parentUrl,
         personalPath: '/fixture-host/call',
         teamPath: '/team/FixtureTeam/call',
+        collectivePath: '/team/FixtureTeam/collective',
+        hostCounts: async () => {
+          const bookings = await db
+            .selectFrom('bookings')
+            .select('id')
+            .orderBy('created_at')
+            .execute()
+          return Promise.all(
+            bookings.map(
+              async (booking) =>
+                (
+                  await db
+                    .selectFrom('booking_hosts')
+                    .select('user_id')
+                    .where('booking_id', '=', booking.id)
+                    .execute()
+                ).length,
+            ),
+          )
+        },
         authorizeHost: async (teamRole) => {
           const signup = { mode: 'closed', allowedDomains: [] } as const
           authPool ??= createAuthPool(owned.url, signup)
