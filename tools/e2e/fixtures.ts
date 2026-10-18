@@ -6,7 +6,7 @@ import {
   type Server as SocketServer,
 } from 'node:net'
 import { fileURLToPath } from 'node:url'
-import { test as base, expect, type Locator, type Page } from '@playwright/test'
+import { test as base, expect, type FrameLocator, type Locator, type Page } from '@playwright/test'
 import { type RunningServer, startServer } from '../../apps/server/src/server.ts'
 import { createAuth, createAuthPool } from '../../packages/auth/src/index.ts'
 import { createDb, createPool } from '../../packages/db/src/index.ts'
@@ -37,6 +37,8 @@ interface FixtureApp {
   personalPath: string
   teamPath: string
   collectivePath: string
+  roundRobinPath: string
+  roundRobinState: (slug?: string) => Promise<{ sequence: string; assignedNames: string[] }>
   hostCounts: () => Promise<number[]>
   rows: () => Promise<{ source: string; status: string }[]>
   authorizeHost: (teamRole?: 'owner' | 'member') => Promise<void>
@@ -119,6 +121,21 @@ export const test = base.extend<{ app: FixtureApp; suppressFailureDom: undefined
         .set({ scheduling_type: 'collective' })
         .where('id', '=', collectiveId)
         .execute()
+      const roundId = await f.eventType(team, null, {
+        title: 'Round-robin fixture call',
+        slug: 'round',
+        minimumNoticeMinutes: 30,
+        hosts: [{ userId: host.userId }, { userId: secondHost.userId }],
+      })
+      await db
+        .updateTable('event_types')
+        .set({ scheduling_type: 'round_robin' })
+        .where('id', '=', roundId)
+        .execute()
+      await db
+        .insertInto('round_robin_state')
+        .values({ event_type_id: roundId, enabled: true })
+        .execute()
       parent = createHttpServer((request, response) => {
         const language = new URL(request.url ?? '/', 'http://localhost').searchParams.get(
           'language',
@@ -136,7 +153,9 @@ export const test = base.extend<{ app: FixtureApp; suppressFailureDom: undefined
         const bookingPath =
           new URL(request.url ?? '/', 'http://localhost').pathname === '/collective'
             ? '/team/FixtureTeam/collective'
-            : '/fixture-host/call'
+            : new URL(request.url ?? '/', 'http://localhost').pathname === '/round'
+              ? '/team/FixtureTeam/round'
+              : '/fixture-host/call'
         response.setHeader('Content-Type', 'text/html; charset=utf-8')
         response.end(
           `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Fixture website</title><button type="button" data-hourmere-popup${languageAttribute} data-hourmere-url="${url}${bookingPath}">Book a meeting</button><div data-hourmere-inline${languageAttribute} data-hourmere-url="${url}${bookingPath}"></div><script src="/parent.js" defer></script><script src="${url}/hourmere-embed.js" defer></script>`,
@@ -185,6 +204,28 @@ export const test = base.extend<{ app: FixtureApp; suppressFailureDom: undefined
         personalPath: '/fixture-host/call',
         teamPath: '/team/FixtureTeam/call',
         collectivePath: '/team/FixtureTeam/collective',
+        roundRobinPath: '/team/FixtureTeam/round',
+        roundRobinState: async (slug = 'round') => {
+          const state = await db
+            .selectFrom('round_robin_state as r')
+            .innerJoin('event_types as e', 'e.id', 'r.event_type_id')
+            .select('r.next_sequence')
+            .where('e.organization_id', '=', team)
+            .where('e.slug', '=', slug)
+            .executeTakeFirstOrThrow()
+          const assigned = await db
+            .selectFrom('bookings as b')
+            .innerJoin('event_types as e', 'e.id', 'b.event_type_id')
+            .innerJoin('booking_hosts as h', 'h.booking_id', 'b.id')
+            .innerJoin('auth.user as u', 'u.id', 'h.user_id')
+            .select('u.name')
+            .where('e.organization_id', '=', team)
+            .where('e.slug', '=', slug)
+            .orderBy('b.created_at')
+            .orderBy('b.id')
+            .execute()
+          return { sequence: state.next_sequence, assignedNames: assigned.map((h) => h.name) }
+        },
         hostCounts: async () => {
           const bookings = await db
             .selectFrom('bookings')
@@ -319,7 +360,7 @@ export const test = base.extend<{ app: FixtureApp; suppressFailureDom: undefined
   },
 })
 export { expect }
-export async function pickSlot(scope: Page | Locator, page: Page) {
+export async function pickSlot(scope: Page | Locator | FrameLocator, page: Page) {
   for (let month = 0; month < 4; month++) {
     await expect(scope.locator('.calendar-month')).toBeVisible()
     await expect(scope.locator('.calendar-grid[aria-busy="true"]')).toHaveCount(0)
@@ -340,7 +381,7 @@ export async function pickSlot(scope: Page | Locator, page: Page) {
   }
   throw new Error('No fixture availability within four months')
 }
-export async function fillInvitee(scope: Page | Locator) {
+export async function fillInvitee(scope: Page | Locator | FrameLocator) {
   await scope.getByLabel(/^(Your name|你的姓名)$/, { exact: true }).fill('Fixture Invitee')
   await scope.getByLabel(/^(Email|邮箱)$/, { exact: true }).fill('fixture-invitee@hourmere.invalid')
 }

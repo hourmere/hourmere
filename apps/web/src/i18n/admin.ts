@@ -1,5 +1,32 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  'Activate round robin to get a public booking link.': '请先激活轮询，以获取公开预约链接。',
+  'Round robin: one available host': '轮询：分配一位可用主持人',
+  'Choose one individual host, two to eight collective hosts, or one to eight round-robin pool members. Changes affect new bookings; existing meetings retain their original hosts.':
+    '单人会议选择一位主持人，集体会议选择两至八位，轮询池选择一至八位。更改只影响新预约；已有会议保留原主持人。',
+  'Host pool': '主持人池',
+  'Remove selected host {0}': '移除已选主持人 {0}',
+  'Choose one to eight pool members.': '请选择一至八位主持人池成员。',
+  'Choose one to eight pool members to get a round-robin booking link.':
+    '请选择一至八位主持人池成员，以获取轮询预约链接。',
+  'Round-robin activation': '轮询激活',
+  'Needs activation': '待激活',
+  'Activate round robin': '激活轮询',
+  'Activating…': '正在激活…',
+  'Round robin activated.': '轮询已激活。',
+  'Save the pool first, then activate it here. Saving changes never activates a dormant pool.':
+    '请先保存主持人池，再在此激活。保存更改不会自动激活尚未激活的主持人池。',
+  'Save your changes before using these actions.': '使用这些操作前，请先保存更改。',
+  'Use hosts’ default availability': '使用主持人的默认可用时间',
+  'Using default availability…': '正在使用默认可用时间…',
+  'Default availability saved. Activate round robin separately when ready.':
+    '默认可用时间已保存。准备好后，请单独激活轮询。',
+  'This uses each selected host’s current default availability. Activation is a separate action.':
+    '此操作将使用每位已选主持人当前的默认可用时间。激活需要单独操作。',
+  'Could not update round robin. {0}': '无法更新轮询。{0}',
+  'Each pool member uses their current default availability. An available member is assigned when someone books.':
+    '每位池成员使用当前的默认可用时间；有人预约时，将分配一位可用成员。',
+
   'Choose current verified team members: one individual host or two to eight collective hosts.':
     '请选择当前已验证的团队成员：单人会议选择一位，集体会议选择两至八位。',
   ', from': '，从',

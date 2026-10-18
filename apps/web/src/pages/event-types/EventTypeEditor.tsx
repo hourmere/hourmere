@@ -19,7 +19,13 @@ import { useLoad, useMounted, usePageTitle } from '../../hooks.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
 import { msg, type UiText } from '../../i18n/translate.ts'
 import { EVENT_TYPE, RULES } from '../../limits.ts'
-import { PATHS, publicPageUrl, publicTeamPageUrl, TEAM_LINK_SLUG_HINT } from '../../paths.ts'
+import {
+  eventTypePath,
+  PATHS,
+  publicPageUrl,
+  publicTeamPageUrl,
+  TEAM_LINK_SLUG_HINT,
+} from '../../paths.ts'
 import { type Me, useMe } from '../../session.tsx'
 import { useUnsavedChanges } from '../../unsaved-changes.tsx'
 import { MissingRecord } from '../NotFound.tsx'
@@ -130,6 +136,11 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
   const dirty = comparable(draft) !== comparable(baseline)
   useUnsavedChanges(dirty)
 
+  const unchangedPool =
+    saved !== null &&
+    draft.schedulingType === baseline.schedulingType &&
+    [...draft.hostUserIds].sort().join() === [...baseline.hostUserIds].sort().join()
+
   const editing = saved !== null
   const title = editing ? msg('Edit “{0}”', { '0': saved.title }) : 'New event type'
 
@@ -144,6 +155,8 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
     setFormError(null)
     setStatus('')
     const problems = validateDraft(draft)
+    // A dormant configuration can retain an invalid old pool during metadata-only saves.
+    if (saved?.schedulingType === 'round_robin' && unchangedPool) delete problems.hosts
     if (
       !me.organization.personal &&
       draft.schedulingType === 'individual' &&
@@ -166,7 +179,7 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
       delete body.schedulingType
       delete body.hosts
     }
-    if (draft.schedulingType === 'round_robin') delete body.scheduleId
+    if (draft.schedulingType === 'round_robin' && unchangedPool) delete body.scheduleId
     try {
       if (saved) {
         const updated = await unwrap(
@@ -185,7 +198,10 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
         // Left meanwhile: don't pull the person away from the page they are on now.
         if (!mounted.current) return
         setBaseline(draft)
-        navigate(PATHS.eventTypes, { state: flash(msg('Created “{0}”.', { '0': created.title })) })
+        navigate(
+          created.schedulingType === 'round_robin' ? eventTypePath(created.id) : PATHS.eventTypes,
+          { state: flash(msg('Created “{0}”.', { '0': created.title })) },
+        )
         return
       }
     } catch (err) {
@@ -198,6 +214,51 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
           ? null
           : msg('Could not save the event type. {0}', { '0': mapped.message ?? errorMessage(err) }),
       )
+      setAttempt((n) => n + 1)
+    }
+    setSaving(false)
+  }
+
+  async function roundRobinAction(action: 'activate' | 'defaults') {
+    if (!saved || dirty || saving) return
+    const poolProblem = validateDraft(draft).hosts
+    if (poolProblem) {
+      setErrors({ hosts: poolProblem })
+      setAttempt((n) => n + 1)
+      return
+    }
+    setErrors({})
+    setFormError(null)
+    setStatus(action === 'activate' ? 'Activating…' : 'Using default availability…')
+    statusRef.current?.focus()
+    setSaving(true)
+    try {
+      const updated = await unwrap(
+        action === 'activate'
+          ? api.POST('/api/v1/event-types/{id}/round-robin/activate', {
+              params: { path: { id: saved.id } },
+              body: {},
+            })
+          : api.PATCH('/api/v1/event-types/{id}', {
+              params: { path: { id: saved.id } },
+              body: { schedulingType: 'round_robin', hosts: saved.hosts, scheduleId: null },
+            }),
+      )
+      if (!mounted.current) return
+      const next = draftFromEventType(updated)
+      setSaved(updated)
+      setBaseline(next)
+      setDraft(next)
+      setStatus(
+        action === 'activate'
+          ? 'Round robin activated.'
+          : 'Default availability saved. Activate round robin separately when ready.',
+      )
+      statusRef.current?.focus()
+    } catch (error) {
+      if (!mounted.current) return
+      setStatus('')
+      setFormError(msg('Could not update round robin. {0}', { '0': errorMessage(error) }))
       setAttempt((n) => n + 1)
     }
     setSaving(false)
@@ -217,6 +278,7 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
     draft.slug.trim(),
     draft.schedulingType,
     draft.hostUserIds.length,
+    saved?.roundRobinActive ?? false,
   )
   const duration = parseWhole(draft.durationMinutes)
 
@@ -355,6 +417,49 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
             <HostAssignment draft={draft} error={errors.hosts} set={set} />
           )}
 
+          {!me.organization.personal && draft.schedulingType === 'round_robin' && (
+            <section className="panel" aria-labelledby="round-robin-heading">
+              <h2 id="round-robin-heading">{t('Round-robin activation')}</h2>
+              <p>
+                {t(
+                  saved?.roundRobinActive && saved.schedulingType === 'round_robin'
+                    ? 'Active'
+                    : 'Needs activation',
+                )}
+              </p>
+              <p>
+                {t(
+                  'Save the pool first, then activate it here. Saving changes never activates a dormant pool.',
+                )}
+              </p>
+              {saved?.schedulingType === 'round_robin' && !saved.roundRobinActive && (
+                <>
+                  <p>
+                    {t(
+                      'This uses each selected host’s current default availability. Activation is a separate action.',
+                    )}
+                  </p>
+                  <button
+                    type="button"
+                    disabled={dirty || saving}
+                    onClick={() => roundRobinAction('defaults')}
+                  >
+                    {t('Use hosts’ default availability')}
+                  </button>
+                  <button
+                    type="button"
+                    className="button button-primary"
+                    disabled={dirty || saving}
+                    onClick={() => roundRobinAction('activate')}
+                  >
+                    {t('Activate round robin')}
+                  </button>
+                  {dirty && <p>{t('Save your changes before using these actions.')}</p>}
+                </>
+              )}
+            </section>
+          )}
+
           <section className="panel" aria-labelledby="location-heading">
             <h2 id="location-heading">{t('Location')}</h2>
             <LocationFields draft={draft} errors={errors} set={set} />
@@ -386,7 +491,13 @@ function EventTypeForm({ eventType, schedules, profile }: Loaded) {
           <section className="panel" aria-labelledby="rules-heading">
             <h2 id="rules-heading">{t('When people can book')}</h2>
             <div className="stack">
-              {draft.schedulingType === 'collective' ? (
+              {draft.schedulingType === 'round_robin' ? (
+                <p>
+                  {t(
+                    'Each pool member uses their current default availability. An available member is assigned when someone books.',
+                  )}
+                </p>
+              ) : draft.schedulingType === 'collective' ? (
                 <p>
                   {t(
                     'Each required host uses their current default schedule. Times are offered only when every host offers the same start and end.',
@@ -566,15 +677,22 @@ function bookingLinkPreview(
   slug: string,
   schedulingType: EventType['schedulingType'] = 'individual',
   hostCount = 1,
+  roundRobinActive = false,
 ): string {
-  if (!me.organization.personal && schedulingType === 'round_robin')
-    return 'Public booking links for this scheduling mode are not available yet.'
+  if (
+    !me.organization.personal &&
+    schedulingType === 'round_robin' &&
+    (hostCount < 1 || hostCount > 8)
+  )
+    return 'Choose one to eight pool members to get a round-robin booking link.'
   if (
     !me.organization.personal &&
     schedulingType === 'collective' &&
     (hostCount < 2 || hostCount > 8)
   )
     return 'Choose two to eight required hosts to get a collective booking link.'
+  if (!me.organization.personal && schedulingType === 'round_robin' && !roundRobinActive)
+    return 'Activate round robin to get a public booking link.'
   if (!me.organization.personal && !isPublicTeamSlug(me.organization.slug))
     return TEAM_LINK_SLUG_HINT
   if (!me.organization.personal) return publicTeamPageUrl(me.organization.slug, slug || 'your-link')
