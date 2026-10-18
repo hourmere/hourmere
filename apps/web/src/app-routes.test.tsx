@@ -52,7 +52,10 @@ describe('the app under /app', () => {
     renderApp('/app/nothing-here')
     expect(await screen.findByRole('heading', { name: 'Page not found', level: 1 })).toBeDefined()
     const nav = screen.getByRole('navigation', { name: 'Main' })
-    expect(within(nav).getAllByRole('link')).toHaveLength(8)
+    expect(within(nav).getAllByRole('link')).toHaveLength(9)
+    expect(
+      within(nav).getByRole('link', { name: 'Conference accounts' }).getAttribute('href'),
+    ).toBe('/app/conferences')
     expect(within(nav).getByRole('link', { name: 'Calendars' }).getAttribute('href')).toBe(
       '/app/calendars',
     )

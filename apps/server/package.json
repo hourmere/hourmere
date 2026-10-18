@@ -12,6 +12,7 @@
     "@hono/zod-openapi": "1.6.3",
     "@hourmere/auth": "*",
     "@hourmere/calendars": "*",
+    "@hourmere/conferences": "*",
     "@hourmere/core": "*",
     "@hourmere/db": "*",
     "@hourmere/jobs": "*",

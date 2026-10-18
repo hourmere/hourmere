@@ -410,6 +410,33 @@ export interface Calendars {
   time_zone: string | null;
 }
 
+export interface ConferenceConnections {
+  account_email: string | null;
+  created_at: Generated<Timestamp>;
+  credentials: Buffer | null;
+  display_name: string | null;
+  external_user_id: string | null;
+  id: Generated<string>;
+  last_error: string | null;
+  operation_id: string | null;
+  provider: string;
+  scopes: Generated<string[]>;
+  status: string;
+  updated_at: Generated<Timestamp>;
+  user_id: string | null;
+}
+
+export interface ConferenceOauthStates {
+  claimed: Generated<boolean>;
+  connection_id: string | null;
+  created_at: Generated<Timestamp>;
+  expires_at: Timestamp;
+  session_id: string;
+  state_hash: string;
+  user_id: string;
+  verifier: Buffer | null;
+}
+
 export interface EventTypeHosts {
   destination_calendar_id: string | null;
   event_type_id: string;
@@ -567,6 +594,8 @@ export interface DB {
   calendar_connections: CalendarConnections;
   calendar_oauth_states: CalendarOauthStates;
   calendars: Calendars;
+  conference_connections: ConferenceConnections;
+  conference_oauth_states: ConferenceOauthStates;
   event_type_hosts: EventTypeHosts;
   event_types: EventTypes;
   mcp_oauth_grants: McpOauthGrants;

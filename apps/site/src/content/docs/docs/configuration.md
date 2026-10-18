@@ -131,4 +131,19 @@ after such a change. An SMTP acceptance followed by a lost database commit can p
 duplicate copy of the same one-time link. Configure SMTP before inviting others: the log
 mailer still prints delivered links, and anyone reading them can sign in.
 
+## Independent Zoom account connections
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `ZOOM_CLIENT_ID` | Unset | Confidential user OAuth client; only `user:read:user`, S256 PKCE, fixed `{PUBLIC_URL}/api/conference/zoom/callback`. |
+| `ZOOM_CLIENT_SECRET` | Unset | Matching confidential client secret; never expose it to the browser. |
+| `CONFERENCE_ENCRYPTION_KEY` | Unset | Independent canonical 32-byte base64 key for conference credentials and OAuth verifiers. Keep stable and back up privately. |
+
+All three are required together when either Zoom client field is configured. A key alone
+does not enable Zoom. These settings do not enable sign-in, calendar access or meeting
+creation. See [Zoom account connections](/docs/zoom-connections/) for the conservative
+returned-scope policy, actual-client prerequisites and local-disconnect semantics.
+
+## Automatic Google Meet
+
 `GOOGLE_MEET_ENABLED` defaults to `false`. With Google Calendar write configuration it allows explicit single-host automatic Meet event types. Existing committed intents continue reconciling after disabling the flag; no old provider labels are activated. See the repository automatic Google Meet guide for pending/failure and notification semantics.
