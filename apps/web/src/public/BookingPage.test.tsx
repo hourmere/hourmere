@@ -662,7 +662,7 @@ describe('the booking page', () => {
     expect(screen.getByText(/Enter a valid email address/)).toBeDefined()
 
     await confirm()
-    expect(await screen.findByText('“Topic” is required')).toBeDefined()
+    expect(await screen.findByText('Check this answer.')).toBeDefined()
     await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Topic')))
 
     await confirm()
