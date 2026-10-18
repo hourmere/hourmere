@@ -274,16 +274,18 @@ I/O stays bounded under that owner lock; state claims and token retirement commi
 connection, encrypted PKCE verifier, single-use claim and ten-minute expiry. A durable claim
 clears the verifier. Disconnect invalidates all pending owner attempts and clears credentials;
 it retains identity metadata and the stable connection ID. At most five identities can be
-connected at once (including reauthorization and incomplete refresh states). Disconnected tombstones release capacity and are excluded from the default
-metadata list; reauthorizing the same identity reuses its stable ID. A BEFORE DELETE owner
-trigger clears credentials,
-OAuth attempts, scopes, operation, external ID, email and display name before retaining an
+connected at once (including reauthorization and incomplete refresh states). Disconnected
+tombstones release capacity and are excluded from the default metadata list; reauthorizing the same identity reuses its stable ID. A BEFORE DELETE owner
+trigger locks all owner sessions in ID order before clearing connections/states, matching
+session logout’s cascade order. It clears credentials, OAuth attempts, scopes, operation, external ID, email and display name before retaining an
 unowned secret-free tombstone. Equal email addresses never establish ownership. No meeting
 intent or calendar rows are created by this foundation. See the Zoom setup guide for the
 explicit local-disconnect versus provider-wide revocation distinction.
+
 ## Automatic conferences
 
 `booking_conferences` retains one provider intent per opted-in root booking, pinned organizer/destination IDs, desired/applied revision, request identity, create ambiguity, bounded state/error and recoverable operation lease. It intentionally survives calendar/connection deletion. `booking_conference_notifications` is the durable release outbox for final linked messages and no-ICS failure notices; recipient deduplication remains in `booking_notifications`. `calendars.supports_google_meet` is cached capability, default false. The join URL is stored only in the current ready protected booking location. See [automatic-google-meet.md](automatic-google-meet.md).
+
 ## Round-robin assignment state
 
 Migration 0020 adds `round_robin_state` (event primary key, monotonic `bigint` sequence,

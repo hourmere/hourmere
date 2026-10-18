@@ -143,4 +143,7 @@ All three are required together when either Zoom client field is configured. A k
 does not enable Zoom. These settings do not enable sign-in, calendar access or meeting
 creation. See [Zoom account connections](/docs/zoom-connections/) for the conservative
 returned-scope policy, actual-client prerequisites and local-disconnect semantics.
+
+## Automatic Google Meet
+
 `GOOGLE_MEET_ENABLED` defaults to `false`. With Google Calendar write configuration it allows explicit single-host automatic Meet event types. Existing committed intents continue reconciling after disabling the flag; no old provider labels are activated. See the repository automatic Google Meet guide for pending/failure and notification semantics.
