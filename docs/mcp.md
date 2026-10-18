@@ -177,6 +177,9 @@ not date overrides. Configuration changes and date overrides use the REST API or
 handles are case-insensitive; team slugs use exact stored case. Old `handle` inputs remain
 valid. A collective team type offers only intervals every required host offers; see
 [collective scheduling](collective-scheduling.md) for its bounds and rescheduling rules.
+An activated round-robin type offers the union and assigns one available host. Its booking
+result includes safe `assignedHost` name/time zone; retries and rescheduling retain that
+selection. See [round-robin scheduling](round-robin-scheduling.md).
 
 Both catalog lists accept `limit` (default 20, maximum 100) and `after`. Results are
 `{ data, nextAfter }`, sorted by ID. Set `after` to the previous `nextAfter`, keep the same key

@@ -168,6 +168,7 @@ describe.skipIf(!serverUrl)('event type routes', () => {
       bookingWindowDays: null,
       maxBookingsPerDay: null,
       schedulingType: 'individual',
+      roundRobinActive: false,
       hosts: [{ userId: user.id }],
       location: { kind: 'phone', number: '+14155550123' },
       questions: [{ id: 'company', label: 'Company', type: 'short_text', required: false }],

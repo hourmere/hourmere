@@ -61,6 +61,8 @@ export interface EventType {
   /** null = no limit. */
   maxBookingsPerDay: number | null
   schedulingType: SchedulingType
+  /** Round-robin booking requires a separate explicit activation action. */
+  roundRobinActive: boolean
   /** Current configured hosts; at most eight. */
   hosts: { userId: string }[]
   location: EventTypeLocation | null
@@ -78,7 +80,7 @@ export interface EventType {
 }
 
 export interface EventTypeInput {
-  schedulingType?: 'individual' | 'collective' | undefined
+  schedulingType?: SchedulingType | undefined
   hosts?: { userId: string }[] | undefined
   slug: string
   title: string
@@ -297,7 +299,7 @@ export async function createEventType(
         personalOwnerId,
       )
       const scheduleId = validScheduleId(input.scheduleId) ?? null
-      if (schedulingType === 'collective' && scheduleId !== null) throw invalidScheduleId()
+      if (schedulingType !== 'individual' && scheduleId !== null) throw invalidScheduleId()
       await assertHosts(trx, ctx.principal.organization.id, hostIds, true)
       const { id } = await trx
         .insertInto('event_types')
@@ -337,13 +339,6 @@ export async function updateEventType(
       // Locked, so concurrent updates of different fields cannot undo each other.
       const row = await visibleRow(trx, ctx, id, { lock: true })
       await assertCanWrite(trx, ctx, row, true)
-      if (
-        row.scheduling_type === 'round_robin' &&
-        (input.hosts !== undefined ||
-          input.schedulingType !== undefined ||
-          input.scheduleId !== undefined)
-      )
-        throw invalidHosts('Legacy round-robin configurations support metadata changes only')
       const changingHosts = input.hosts !== undefined || input.schedulingType !== undefined
       if (
         input.schedulingType !== undefined &&
@@ -369,7 +364,7 @@ export async function updateEventType(
         )
         await assertHosts(trx, row.organization_id, hostIds, true)
       }
-      if (schedulingType === 'collective' && scheduleId != null) throw invalidScheduleId()
+      if (schedulingType !== 'individual' && scheduleId != null) throw invalidScheduleId()
       if (Object.keys(changes).length > 0 || scheduleId !== undefined || changingHosts) {
         const fields = validFields({ ...fieldsOf(row), ...changes })
         await trx
@@ -380,7 +375,7 @@ export async function updateEventType(
       }
       if (hostIds) {
         const resolvedSchedule =
-          schedulingType === 'collective'
+          schedulingType !== 'individual'
             ? null
             : scheduleId !== undefined
               ? scheduleId
@@ -414,6 +409,14 @@ export async function updateEventType(
           .where('event_type_id', '=', row.id)
           .execute()
       }
+      if (input.schedulingType !== undefined && input.schedulingType !== row.scheduling_type) {
+        // Preserve the sequence and all surviving host rows; switching back needs Activate.
+        await trx
+          .updateTable('round_robin_state')
+          .set({ enabled: false })
+          .where('event_type_id', '=', row.id)
+          .execute()
+      }
       return toEventType(await loadEventType(trx, row.id))
     }),
   )
@@ -435,6 +438,11 @@ function selectEventTypes(db: Db) {
   return db
     .selectFrom('event_types as e')
     .selectAll('e')
+    .select(
+      sql<boolean>`coalesce((SELECT r.enabled FROM round_robin_state r WHERE r.event_type_id=e.id),false)`.as(
+        'round_robin_active',
+      ),
+    )
     .select(
       sql<
         { userId: string }[]
@@ -793,6 +801,7 @@ function toEventType(row: EventTypeRow): EventType {
     ownerUserId: row.owner_user_id,
     ...fieldsOf(row),
     schedulingType: row.scheduling_type as SchedulingType,
+    roundRobinActive: row.scheduling_type === 'round_robin' && row.round_robin_active,
     hosts: row.hosts,
     scheduleId: row.schedule_id,
     createdAt: timestamp(row.created_at),
@@ -805,12 +814,12 @@ const invalidHosts = (
 ) => new DomainError('invalid', 'invalid_hosts', message)
 
 function validHosts(value: unknown, mode: string, personalOwnerId: string | null): string[] {
-  if (mode !== 'individual' && mode !== 'collective')
+  if (mode !== 'individual' && mode !== 'collective' && mode !== 'round_robin')
     throw invalidHosts('This scheduling mode cannot be configured')
   if (
     !Array.isArray(value) ||
     value.length < (mode === 'collective' ? 2 : 1) ||
-    value.length > (mode === 'collective' ? 8 : 1)
+    value.length > (mode === 'individual' ? 1 : 8)
   )
     throw invalidHosts()
   const ids: string[] = []
@@ -847,4 +856,34 @@ export async function listEventTypeHosts(
       .execute(),
     limit,
   )
+}
+
+/** Explicit activation; metadata saves and mode changes never invoke this operation. */
+export async function activateRoundRobin(ctx: ServiceContext, id: string): Promise<EventType> {
+  return ctx.db.transaction().execute(async (trx) => {
+    await lockOrganization(trx, ctx.principal.organization.id)
+    const row = await visibleRow(trx, ctx, id, { lock: true })
+    await assertCanWrite(trx, ctx, row, true)
+    if (row.owner_user_id !== null || row.scheduling_type !== 'round_robin')
+      throw invalidHosts('Only team round-robin configurations can be activated')
+    const hosts = await trx
+      .selectFrom('event_type_hosts')
+      .select(['user_id', 'schedule_id'])
+      .where('event_type_id', '=', row.id)
+      .orderBy('user_id')
+      .execute()
+    const ids = validHosts(
+      hosts.map((host) => ({ userId: host.user_id })),
+      'round_robin',
+      null,
+    )
+    if (hosts.some((host) => host.schedule_id !== null)) throw invalidScheduleId()
+    await assertHosts(trx, row.organization_id, ids, true)
+    await trx
+      .insertInto('round_robin_state')
+      .values({ event_type_id: row.id, enabled: true })
+      .onConflict((conflict) => conflict.column('event_type_id').doUpdateSet({ enabled: true }))
+      .execute()
+    return toEventType(await loadEventType(trx, row.id))
+  })
 }

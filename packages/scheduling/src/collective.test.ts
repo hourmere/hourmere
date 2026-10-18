@@ -561,8 +561,8 @@ describe.skipIf(!serverUrl)('collective scheduling', () => {
     const updated = await updateEventType(s.ctx, s.event.id, { title: 'Legacy metadata' })
     expect(updated.schedulingType).toBe('round_robin')
     expect(updated.hosts).toEqual(before.hosts)
-    expect(await code(() => updateEventType(s.ctx, s.event.id, { scheduleId: null }))).toBe(
-      'invalid_hosts',
+    expect((await updateEventType(s.ctx, s.event.id, { scheduleId: null })).roundRobinActive).toBe(
+      false,
     )
     expect(await code(() => getPublicTeamEventType(s.pub, s.page))).toBe('event_type_not_found')
   })

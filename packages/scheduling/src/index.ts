@@ -68,6 +68,7 @@ export type {
 } from './context.ts'
 export { DomainError, type DomainErrorKind, RESERVED_ERROR_CODES } from './errors.ts'
 export {
+  activateRoundRobin,
   createEventType,
   deleteEventType,
   EVENT_TYPE_LIMITS,
