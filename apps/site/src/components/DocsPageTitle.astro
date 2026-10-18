@@ -1,0 +1,8 @@
+---
+import Default from '@astrojs/starlight/components/PageTitle.astro'
+
+const { lastVerified } = Astro.locals.starlightRoute.entry.data
+---
+
+<Default />
+{lastVerified && <p>Last verified: <time datetime={lastVerified}>{lastVerified}</time>.</p>}

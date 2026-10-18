@@ -44,7 +44,10 @@ export default defineConfig({
         { label: 'Zoom accounts', link: '/docs/zoom-connections' },
       ],
       customCss: ['@fontsource-variable/manrope', './src/styles/starlight.css'],
-      components: { Footer: './src/components/DocsFooter.astro' },
+      components: {
+        Footer: './src/components/DocsFooter.astro',
+        PageTitle: './src/components/DocsPageTitle.astro',
+      },
       routeMiddleware: './src/route-data.ts',
       // The site has its own 404 page in src/pages.
       disable404Route: true,

@@ -33,6 +33,10 @@ const privacyMail = `mailto:${contact.privacy}`
   sections={sections}
 >
   <Fragment slot="intro">
+    <p class="callout">
+      <strong>Draft for owner review:</strong> the feature descriptions and TODOs below need the
+      owner's approval before this draft is published or takes effect.
+    </p>
     <p>
       This Privacy Policy explains how {company.name} ("{company.shortName}", "we", "us") collects,
       uses, stores, shares and deletes personal data in connection with Hourmere: the website at
@@ -51,15 +55,21 @@ const privacyMail = `mailto:${contact.privacy}`
       <ul>
         <li>We use your data to run Hourmere and to provide the scheduling features you use.</li>
         <li>
-          Calendar data from Google or Microsoft is used only to show your availability and manage
-          your bookings. We never sell it, never use it for advertising and never use it to train
+          Calendar data is used only for the connection and scheduling features described below.
+          We never sell it, never use it for advertising and never use it to train
           generalized AI or machine learning models.
         </li>
-        <li>AI assistants can access your account only with an API key that you create.</li>
-        <li>If you self-host Hourmere, your data stays on your server and we do not receive it.</li>
         <li>
-          You can disconnect calendars and delete your data at any time, and request a copy of your
-          data by email.
+          AI assistants can access Hourmere through an API key you create or an MCP OAuth connection
+          you approve, within your permissions and the selected organization.
+        </li>
+        <li>
+          If you self-host Hourmere, its operator handles your data and any connected providers;
+          Cobaltmere does not receive instance data automatically.
+        </li>
+        <li>
+          You can disconnect providers and revoke agent access. You can request a copy or deletion
+          of your data by email.
         </li>
       </ul>
     </section>
@@ -67,8 +77,9 @@ const privacyMail = `mailto:${contact.privacy}`
 
   <h2 id="scope">1. Who we are and what this policy covers</h2>
   <p>
-    Hourmere is scheduling software that is being developed as open source. It is developed and
-    operated by {company.name}, a Delaware limited liability company. For Hourmere, this policy
+    Hourmere is open-source scheduling software developed by {company.name}, a Delaware limited
+    liability company. {company.name} operates Hourmere Cloud; self-hosted instances are operated by
+    whoever runs them. For Hourmere Cloud and this website, this policy
     replaces the general privacy policy at <a href={company.privacyPolicy}>cobaltmere.com/privacy</a>.
   </p>
   <p>
@@ -95,11 +106,11 @@ const privacyMail = `mailto:${contact.privacy}`
       address and a one-time sign-in token that expires after a short time.
     </li>
     <li>
-      <strong>Sign-in with Google or Microsoft:</strong> we receive your name, email address,
-      profile picture (if available) and your Google account ID or Microsoft account identifier. We
-      use them to create your account and sign you in, and as your account profile: your name (and
-      picture, if shown) appears in Hourmere, on your booking pages and in booking emails, and we
-      send account and booking emails to your email address.
+      <strong>Sign-in with Google or Microsoft:</strong> we receive your name, email address and
+      your Google account ID or Microsoft account identifier; Google may also provide a profile
+      picture. We use them to create your account and sign you in, and as your account profile:
+      your name (and picture, if shown) appears in Hourmere, on your booking pages and in booking
+      emails, and we send account and booking emails to your email address.
     </li>
     <li>
       <strong>Calendar connection information:</strong> when you connect a Google or Microsoft
@@ -107,10 +118,11 @@ const privacyMail = `mailto:${contact.privacy}`
       of the connected account.
     </li>
     <li>
-      <strong>Calendar data:</strong> free/busy information; the times and busy or free status of
-      your events, with the event identifiers and sync metadata needed to keep them up to date; and
-      the events Hourmere creates for your bookings. See <a href="#google-user-data">section 4</a>
-      and <a href="#microsoft-calendar-data">section 5</a>.
+      <strong>Calendar data:</strong> Google calendar metadata, event identifiers, times and status
+      used to calculate busy intervals, sync metadata, and the events Hourmere writes for bookings.
+      Microsoft connections currently retrieve account and calendar-list metadata only. See
+      <a href="#google-user-data">section 4</a> and
+      <a href="#microsoft-calendar-data">section 5</a>.
     </li>
     <li>
       <strong>Scheduling information:</strong> the event types, availability settings and booking pages
@@ -122,8 +134,20 @@ const privacyMail = `mailto:${contact.privacy}`
       booking.
     </li>
     <li>
-      <strong>API and agent access:</strong> the API keys you create for AI assistants and other
-      applications, and records of the requests they make.
+      <strong>API and agent access:</strong> hashed API keys, MCP OAuth client and consent records,
+      the organization you authorize, tokens needed for OAuth connections, and booking records
+      identifying the credential used to create, reschedule or cancel a booking.
+    </li>
+    <li>
+      <strong>Conference information:</strong> for automatic Google Meet or Zoom, the provider and
+      organizer identifiers, meeting or event identifiers, provisioning status and participant join
+      link. Zoom connections also store account display information and encrypted access and refresh
+      tokens. See <a href="#automatic-conferences">section 7</a>.
+    </li>
+    <li>
+      <strong>Webhook information:</strong> organization-configured destination URLs, encrypted
+      signing secrets, minimal booking-event snapshots and delivery status. See
+      <a href="#booking-webhooks">section 7</a>.
     </li>
     <li>
       <strong>Billing information</strong> (paid plans only): your plan, number of seats, billing
@@ -200,19 +224,20 @@ const privacyMail = `mailto:${contact.privacy}`
       you can choose which calendars to check for conflicts and which calendar receives new
       bookings;
     </li>
-    <li>free/busy information for the calendars you select;</li>
     <li>
-      events on the calendars you select, so Hourmere can work out when you are available. Google's
-      Calendar API returns full event details, such as titles, descriptions and attendees. Hourmere
-      uses and stores only each event's start and end times, whether it shows you as busy or free,
-      and the event identifier and sync metadata (such as a sync cursor) needed to keep this
-      information up to date. It does not store the titles, descriptions or attendees of events it
-      did not create; and
+      event identifiers, start and end times, cancellation and busy/free status, and your own
+      attendance status on the calendars you select for conflict checks. Hourmere uses these to
+      calculate and store busy intervals, with event identifiers and sync metadata needed to keep
+      them up to date. Busy-time synchronization does not request or store event titles,
+      descriptions, locations or attendee names or email addresses; and
     </li>
     <li>
-      the events Hourmere creates on your calendar for bookings, including the details written to
-      them (such as the title, time, description and attendees), so that Hourmere can update or
-      remove them when a booking is rescheduled or cancelled.
+      identifiers and status of the booking events Hourmere writes to your selected destination
+      calendar, so it can reconcile updates and cancellations. The ordinary booking copy contains
+      the booking title, start and end times, calendar UID, revision and status. It does not send an
+      attendee list, booking answers or private management links to Google. Automatic Google Meet
+      and optional calendar copies with join links are described in
+      <a href="#automatic-conferences">section 7</a>.
     </li>
   </ul>
   <p>
@@ -291,22 +316,26 @@ const privacyMail = `mailto:${contact.privacy}`
   </p>
   <ul>
     <li>
-      <strong>When you disconnect Google Calendar,</strong> Hourmere stops accessing it and deletes
-      the connection tokens and the data it cached from Google (your calendar list, busy times,
-      event identifiers and sync state) within 30 days.
+      <strong>When you disconnect Google Calendar,</strong> Hourmere deletes the local connection,
+      encrypted tokens, calendar list, busy intervals and dependent sync and event mappings from
+      its active database, and stops using that connection. This does not automatically revoke
+      Google's account-wide grant; remove Hourmere separately in your Google Account's third-party
+      connections if you want to revoke that grant.
     </li>
     <li>
-      <strong>Your Hourmere booking records</strong> are part of your Hourmere account. They are kept
-      while your account exists, unless you delete them.
+      <strong>Your Hourmere booking records and automatic conference records</strong> are separate
+      from the connection. Disconnecting does not delete them or an existing join link. The
+      retention and deletion decisions still requiring owner review are listed in
+      <a href="#retention">section 10</a>.
     </li>
     <li>
       <strong>Events that Hourmere created in your Google Calendar</strong> remain at Google until
       you delete them there.
     </li>
     <li>
-      <strong>When you delete your Hourmere account,</strong> we delete your Google user data,
-      including sign-in data, within 30 days. Copies in our backups are rotated out and deleted
-      within a further 30 days.
+      <strong>TODO for owner before publication:</strong> confirm the procedure and timing for
+      deleting Google sign-in data and other account data, including backup copies, as described
+      in <a href="#retention">section 10</a>.
     </li>
   </ul>
   <p>
@@ -332,37 +361,42 @@ const privacyMail = `mailto:${contact.privacy}`
 
   <h2 id="microsoft-calendar-data">5. Microsoft sign-in and calendar data</h2>
   <p>
-    If you sign in with Microsoft, Hourmere receives your name, email address, profile picture (if
-    available) and Microsoft account identifier. We use them to create your account and sign you
-    in, and as your account profile: your name (and picture, if shown) appears in Hourmere, on your
-    booking pages and in booking emails, and we send account and booking emails to your email
-    address. Signing in does not give Hourmere access to your calendar.
+    If you sign in with Microsoft, Hourmere receives your name, email address and Microsoft account
+    identifier. The current Microsoft sign-in configuration does not request a profile photo. We
+    use this information to create your account, sign you in and show your account profile; your
+    name appears on booking pages and in booking emails, and we send account and booking emails to
+    your email address. Signing in does not give Hourmere access to your calendar.
   </p>
   <p>
-    When you connect a Microsoft 365 calendar, Hourmere accesses the same kinds of data described for
-    Google in section 4: the connected account's email address, your calendar list, free/busy
-    information, the events on the calendars you select, and the events it creates for bookings. As
-    with Google, Microsoft returns full event details, but for events it did not create Hourmere
-    uses and stores only their times, their busy or free status, and the event identifiers and sync
-    metadata needed to keep this information up to date, not their titles, descriptions or
-    attendees.
+    Connecting Microsoft Calendar is a separate, optional authorization. Hourmere currently reads
+    the connected account identifier and email address, and a calendar list containing identifiers,
+    names, default-calendar status and access permissions. It requests basic calendar and offline
+    access to list calendars and refresh credentials. Although that provider permission can allow
+    access to basic event metadata, the current integration does not read event times or busy
+    intervals, synchronize events, or write booking events to Microsoft.
   </p>
   <p>
-    We use, share, protect, retain and delete Microsoft data in the same way and under the same
-    restrictions as Google user data in section 4: only to provide Hourmere's features, never sold,
-    never used for advertising and never used to train generalized AI or machine learning models.
-    When you disconnect a Microsoft calendar, its tokens and cached data are deleted within 30 days,
-    your Hourmere booking records stay in your account, and the events Hourmere created remain in
-    your Microsoft calendar until you delete them. You can remove Hourmere's access from your
-    Microsoft account's app permissions, or ask your organization's administrator.
+    Microsoft connection access and refresh tokens are stored encrypted on the server. We use
+    Microsoft data only for the features described here, never sell it, never use it for advertising
+    and never use it to train generalized AI or machine learning models. Disconnecting deletes the
+    local connection, encrypted credentials, calendar metadata and outstanding connection attempts
+    from the active database. It does not automatically revoke the provider-side grant. Remove
+    that grant separately in your Microsoft account's app permissions, or ask your organization's
+    administrator. Account-data and backup retention require the owner decisions in
+    <a href="#retention">section 10</a>.
   </p>
 
   <h2 id="ai-assistants">6. AI assistants and API access</h2>
   <p>
     Hourmere has an API and a remote MCP server that AI assistants and other applications can use.
-    They can access your account only with an API key that you create; OAuth authorization for AI
-    connectors is planned. An authorized application can do what the API allows: list your event
-    types, check your availability, and book, reschedule or cancel meetings.
+    You can authorize them with an API key you create or, when enabled by the instance operator,
+    an MCP OAuth connection you approve while signed in. Both act as you in the selected
+    organization, subject to your current permissions. API keys can use permitted REST and MCP
+    operations. MCP OAuth permission covers the available MCP tools, including reading your
+    profile, event-type configurations, working-hours schedules and hosted bookings with attendee
+    details, checking availability, and creating, rescheduling or cancelling bookings. MCP OAuth
+    does not grant REST API access or account or API-key administration. If you approve offline
+    access, the connector can refresh its access without asking you to sign in for each request.
   </p>
   <p>
     Availability and booking data that Hourmere returns to an AI agent or application you authorized
@@ -372,7 +406,9 @@ const privacyMail = `mailto:${contact.privacy}`
     or machine learning models) apply to Hourmere. Once the data is delivered to the application,
     its handling is governed by the terms and privacy policy of the application's provider, and of
     the AI model behind it, not by this policy. Only authorize agents and applications you trust.
-    You can revoke an API key at any time.
+    You can revoke an API key on the API keys page or an MCP OAuth grant in Connected apps.
+    Revocation stops future requests using that credential; it does not retrieve information the
+    application has already received.
   </p>
 
   <h2 id="sharing">7. How we share information</h2>
@@ -393,8 +429,10 @@ const privacyMail = `mailto:${contact.privacy}`
       <a href="https://stripe.com/privacy">Stripe's privacy policy</a>.
     </li>
     <li>
-      <strong>Calendar providers you connect</strong> (Google and Microsoft), to read your
-      availability and to create, update and remove events for your bookings.
+      <strong>Calendar and conference providers you connect:</strong> Google receives the calendar
+      and automatic Meet requests described in sections 4 and 7; Microsoft currently receives
+      account and calendar-list requests as described in section 5; Zoom receives the automatic
+      meeting requests described below.
     </li>
     <li>
       <strong>Applications you authorize</strong>, such as AI assistants, as described in
@@ -415,6 +453,71 @@ const privacyMail = `mailto:${contact.privacy}`
     </li>
   </ul>
 
+  <h3 id="automatic-conferences">Automatic Google Meet and Zoom</h3>
+  <p>
+    Automatic meeting creation requires an explicit event-type opt-in and the organizer's
+    authorized provider connection. For Google Meet, Hourmere sends Google the booking title,
+    start and end times, calendar UID, revision and status, and a conference-creation request
+    identifier on the selected organizer's calendar. It does not send attendee names, email
+    addresses, booking answers or management links in these requests. Rescheduling updates the
+    pinned event; cancellation asks Google to cancel that event. Cancelling an event does not
+    guarantee that access to an existing Meet link is revoked.
+  </p>
+  <p>
+    Zoom authorization is separate from sign-in and calendar connections. Connecting an identity
+    reads the Zoom account identifier and, when available, email and display name. Meeting creation
+    requires a separate authorization to create, read, update and delete meetings. Hourmere sends
+    Zoom the booking title as the meeting topic, start time, duration and time zone, with settings
+    to use a scheduled meeting rather than a personal meeting ID and request a generated passcode.
+    These requests do not send attendee names, email addresses, booking answers or management
+    links. Hourmere stores Zoom connection tokens encrypted and retains the provider identifiers
+    needed to update the same meeting on reschedule or request deletion on cancellation.
+  </p>
+  <p>
+    Hourmere stores the validated participant join link with the protected booking when the meeting
+    is ready. A Zoom participant link may include a passcode. Authorized booking views, invitee
+    management links and participant emails and ICS attachments can reveal the join link; an
+    explicitly configured ordinary Google calendar copy can also contain it. Public event-type
+    catalogs and webhook payloads do not include it, and Hourmere does not place it in logs, job
+    payloads or browser storage. Hourmere does not retain Zoom host start links or standalone
+    provider passcodes or PINs. Google and Zoom handle meetings and any information you give them under their own terms
+    and privacy policies.
+  </p>
+  <p>
+    Disconnecting Zoom clears local credentials and pending authorization attempts, while keeping
+    connection identity metadata and existing booking and conference records. It does not
+    automatically revoke Zoom's provider-side grant or delete existing provider meetings. A
+    disconnected provider can prevent later updates or remote cancellation; manage the grant and
+    any remaining meetings with the provider. Retention of remaining Hourmere records is an owner
+    TODO in <a href="#retention">section 10</a>.
+  </p>
+
+  <h3 id="booking-webhooks">Organization booking webhooks</h3>
+  <p>
+    If the instance operator enables webhooks, organization owners and administrators can configure
+    recipients for signed HTTPS notifications of booking creation, rescheduling and cancellation
+    across their organization. The payload contains event, booking, organization and event-type
+    identifiers, timestamps, booking status and source, and a predecessor booking identifier for
+    rescheduling. It does not include names, email addresses, attendees, booking answers, meeting
+    locations or join links, private management links, API keys or OAuth credentials. The
+    organization chooses the receiving services and is responsible for how they use those
+    notifications. Hourmere stores the minimal payload and delivery status to deliver and retry it.
+  </p>
+
+  <h3>Email notifications and calendar attachments</h3>
+  <p>
+    Hourmere sends sign-in emails and booking confirmations, changes, cancellations and reminders
+    through the instance operator's configured email service. Ordinary booking messages go to current
+    eligible hosts, the invitee and any guests added when the host permits them. Host emails
+    include the invitee's contact details, guests and answers; private management links go only to
+    the invitee. Confirmations, reschedules and cancellations can carry ICS calendar attachments
+    containing the meeting title, times, location or ready join link, and organizer and attendee
+    names and email addresses. Those attachments do not contain private management links or booking
+    answers. Automatic meeting invitations wait for a ready join link; a provisioning-failure
+    notice has no invitation attachment. Email services and recipients' mail and calendar systems
+    process these messages and attachments.
+  </p>
+
   <h2 id="invitees">8. If you book a meeting through Hourmere</h2>
   <p>
     If you book a meeting on someone's Hourmere booking page, the person or organization you are
@@ -429,42 +532,45 @@ const privacyMail = `mailto:${contact.privacy}`
   <p>
     Hourmere is designed so that anyone can run it on their own servers. A self-hosted instance is
     operated by whoever runs it, and that operator is responsible for the data it holds and for its
-    connections to calendar providers. {company.shortName} does not receive data from self-hosted
-    instances. If we ever add telemetry to the software, it will be optional, opt-in and anonymous,
-    and we will document what it sends.
+    connections to calendar, conference and email providers, webhook recipients and authorized
+    agents. {company.name} does not automatically receive data from self-hosted instances. The
+    flows described here explain software features; a self-hosted operator chooses which to
+    enable and supplies its own privacy information, provider configuration, retention and
+    handling of data requests. Contact that operator about data held by its instance. If we ever
+    add telemetry to the software, it will be optional, opt-in and anonymous, and we will document
+    what it sends.
   </p>
 
   <h2 id="retention">10. Retention and deletion</h2>
   <ul>
     <li>
       <strong>Account, scheduling and booking information</strong> is kept while your account
-      exists. You can delete event types, bookings and calendar connections at any time.
+      exists, subject to the owner decisions below. Disconnecting a calendar removes its local
+      connection data; cancelling a booking keeps its booking record and is not a deletion request.
     </li>
     <li>
       <strong>Calendar data</strong> is retained and deleted as described in section 4 (Google) and
       section 5 (Microsoft).
     </li>
     <li>
-      <strong>When you delete your account,</strong> we delete your data, including booking
-      information about your invitees, within 30 days, except records we must keep for legal, tax or
-      accounting purposes. Those records never include calendar data. Copies in our backups are
-      rotated out and deleted within a further 30 days.
-    </li>
-    <li><strong>Server and API logs</strong> are kept for 30 days.</li>
-    <li>
-      <strong>Support requests and other correspondence</strong> are kept for up to 2 years after
-      the last message.
-    </li>
-    <li>
       <strong>Requests for launch updates</strong> are kept until you ask us to stop or we have sent
       the launch announcement.
     </li>
   </ul>
+  <p class="callout">
+    <strong>TODO for owner before publication:</strong> confirm the account and booking deletion
+    procedure and retention periods for account data, conference identity and meeting records,
+    OAuth records, webhook and email delivery records, server and API logs, support correspondence
+    and backup copies. Confirm any legal, tax or accounting exceptions and the treatment of data
+    already sent to providers, webhook recipients, agents or email recipients. This draft does not
+    establish those periods or promise a backup-deletion deadline.
+  </p>
 
   <h2 id="security">11. Security</h2>
   <p>
     We protect personal data with measures appropriate to the risk, including encryption in transit,
-    encrypted storage of calendar connection tokens, access controls and the principle of least
+    encrypted storage of calendar and Zoom connection tokens and webhook signing secrets, hashed
+    API keys, access controls and the principle of least
     privilege. No system is completely secure. If a data breach affects your personal data, we will
     notify you as required by law. To report a security issue, email <a
       href={`mailto:${contact.security}`}>{contact.security}</a
@@ -484,8 +590,9 @@ const privacyMail = `mailto:${contact.privacy}`
   <p>
     Depending on where you live, you may have the right to access, correct, delete or export your
     personal data, to restrict or object to its processing, and to withdraw consent at any time. You
-    can disconnect calendars, revoke API keys and delete your account in the Service. To request a
-    copy or export of your data, or to exercise any of these rights, email
+    can disconnect calendar and Zoom connections, revoke API keys and revoke MCP OAuth grants in
+    the Service. To request deletion, a copy or export of your data, or to exercise any of these
+    rights, email
     <a href={privacyMail}>{contact.privacy}</a>. We will not discriminate against you for exercising
     them. You may also lodge a complaint with your local data protection authority.
   </p>
@@ -506,6 +613,16 @@ const privacyMail = `mailto:${contact.privacy}`
   <p>
     When Hourmere Cloud launches, it will use only cookies that are strictly necessary for it to
     work, such as keeping you signed in. We do not use advertising cookies.
+  </p>
+  <p>
+    Booking widgets display an Hourmere booking page in an isolated frame on a website allowed by
+    the instance operator, inline or in a popup. Booking details you enter are sent directly to
+    that Hourmere instance through its public booking API; the widget does not require an account
+    or third-party cookies. Messages from the frame to the surrounding website contain only a
+    correlation identifier, height or completion/close signal, not booking identifiers, names,
+    email addresses, answers, management tokens or join links. The surrounding website has its own
+    privacy practices, so use a host website you trust. Hourmere may record the booking source as
+    an embed; this is not visitor tracking or proof of the embedding website's identity.
   </p>
 
   <h2 id="children">15. Children</h2>
