@@ -43,10 +43,17 @@ not a separate Hourmere mode switch.
 
 With `first-user`, the first person who signs in can register; after that the domain allowlist
 applies. In either restricted mode, a pending, unexpired team invitation also permits its
-exact email address to register. With `closed` and no domains, only these invitees can
-register. They must still prove ownership of the email address and accept the invitation
-separately to join the team. Canceled, expired and accepted invitations grant no registration
-exception. New addresses that are not allowed get the same sign-in response, but no email.
+exact email address to register only when the inviter's current email domain is in
+`SIGNUP_ALLOWED_DOMAINS` or the inviter is the first user: the earliest remaining auth user
+by creation time, with user id breaking ties. This check uses the current allowlist, including
+for existing invitations. An invitee outside those domains cannot admit another address by
+creating a team and inviting it; neither team creation nor invitation acceptance delegates
+registration authority. With `closed` and no domains, only invitations from the first user
+admit new accounts, so an empty instance must first be bootstrapped in `first-user` mode or
+by an administrator. Invitees must still prove ownership of the email address and accept the
+invitation separately to join the team. Canceled, expired and accepted invitations grant no
+registration exception. New addresses that are not allowed get the same sign-in response,
+but no email.
 
 ## Proxy, security headers and timeouts
 

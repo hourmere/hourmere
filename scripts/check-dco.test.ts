@@ -1,5 +1,13 @@
 import { execFileSync, spawnSync } from 'node:child_process'
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -73,6 +81,20 @@ function scratchRepo() {
   return {
     dir,
     git,
+    file(name: string, contents: string) {
+      writeFileSync(join(dir, name), contents)
+      git(['add', '--', name])
+    },
+    /** Creates a merge with a chosen tree, without asking git to generate its content. */
+    mergeCommit(tree: string, parents: string[], who: Person, message: string) {
+      const sha = git(
+        ['commit-tree', tree, ...parents.flatMap((sha) => ['-p', sha]), '-F', '-'],
+        who,
+        message,
+      )
+      git(['update-ref', 'refs/heads/pr', sha])
+      return sha
+    },
     /** Commits on the current branch as `who`, with `message` taken verbatim. */
     commit(who: Person, message: string) {
       git(['commit', '--quiet', '--allow-empty', '--file=-'], who, message)
@@ -200,11 +222,13 @@ describe('checkCommit on commits read with readCommits', () => {
     expect(repo.check()[0]?.result).toEqual({ status: 'signed' })
   })
 
-  it('skips merge commits but checks every commit they bring in', () => {
+  it('skips clean merges but checks every commit they bring in', () => {
     const repo = scratchRepo()
+    repo.file('feature.txt', 'Feature\n')
     repo.commit(jane, `Add a feature\n\n${signOff(jane)}\n`)
     // main moves on; the contributor merges it in, as CONTRIBUTING.md asks.
     repo.git(['switch', '--quiet', 'main'])
+    repo.file('main.txt', 'Main\n')
     repo.commit(maintainer, 'Change main\n')
     repo.git(['switch', '--quiet', 'pr'])
     repo.git(['merge', '--quiet', '--no-edit', 'main'], jane)
@@ -222,6 +246,126 @@ describe('checkCommit on commits read with readCommits', () => {
       "Merge branch 'side' into pr": 'merge',
     })
   })
+
+  it.each([false, true])('requires the author sign-off for an evil merge (signed=%s)', (signed) => {
+    const repo = scratchRepo()
+    const first = repo.commit(maintainer, 'Move main forward\n')
+    const second = repo.git(['rev-parse', 'main'])
+    repo.file('evil.txt', 'Content in neither parent\n')
+    const tree = repo.git(['write-tree'])
+    const sha = repo.mergeCommit(
+      tree,
+      [first, second],
+      jane,
+      `Merge main\n${signed ? `\n${signOff(jane)}\n` : ''}`,
+    )
+    const merge = repo.check().find(({ commit }) => commit.sha === sha)
+    expect(merge?.commit.cleanMerge).toBe(false)
+    expect(merge?.result).toMatchObject({ status: signed ? 'signed' : 'missing' })
+    const cli = spawnSync(process.execPath, [script, '--no-exemptions', first, sha], {
+      cwd: repo.dir,
+      encoding: 'utf8',
+    })
+    expect(cli.status).toBe(signed ? 0 : 1)
+  })
+
+  it('applies ordinary same-repository exemptions to evil merges, but never to forks', () => {
+    const repo = scratchRepo()
+    const first = repo.commit(maintainer, 'Move main forward\n')
+    repo.file('extra.txt', 'Extra content\n')
+    const sha = repo.mergeCommit(
+      repo.git(['write-tree']),
+      [first, repo.git(['rev-parse', 'main'])],
+      maintainer,
+      'Merge main\n',
+    )
+    expect(repo.check().find(({ commit }) => commit.sha === sha)?.result).toEqual({
+      status: 'exempt',
+    })
+    expect(
+      repo.check({ honorExemptions: false }).find(({ commit }) => commit.sha === sha)?.result,
+    ).toMatchObject({ status: 'missing', authorExempt: true })
+  })
+
+  it('requires a sign-off for a merge that resolves conflicts', () => {
+    const repo = scratchRepo()
+    repo.file('shared.txt', 'Feature content\n')
+    repo.commit(jane, `Feature\n\n${signOff(jane)}\n`)
+    repo.git(['switch', '--quiet', 'main'])
+    repo.file('shared.txt', 'Main content\n')
+    repo.commit(maintainer, 'Change main\n')
+    repo.git(['switch', '--quiet', 'pr'])
+    expect(() => repo.git(['merge', '--quiet', '--no-edit', 'main'], jane)).toThrow()
+    repo.file('shared.txt', 'Resolved content\n')
+    const sha = repo.commit(jane, 'Resolve the conflict\n')
+    const merge = repo.check().find(({ commit }) => commit.sha === sha)
+    expect(merge?.commit).toMatchObject({ cleanMerge: false, parents: expect.any(Array) })
+    expect(merge?.commit.parents).toHaveLength(2)
+    expect(merge?.result).toMatchObject({ status: 'missing' })
+    repo.git(
+      ['commit', '--quiet', '--amend', '-F', '-'],
+      jane,
+      `Resolve the conflict\n\n${signOff(jane)}\n`,
+    )
+    expect(repo.check().at(-1)?.result).toEqual({ status: 'signed' })
+  })
+
+  it('requires a sign-off even when a conflicted merge commits the automatic conflict-marker tree', () => {
+    const repo = scratchRepo()
+    repo.file('shared.txt', 'Feature content\n')
+    const feature = repo.commit(jane, `Feature\n\n${signOff(jane)}\n`)
+    repo.git(['switch', '--quiet', 'main'])
+    repo.file('shared.txt', 'Main content\n')
+    const main = repo.commit(maintainer, 'Change main\n')
+    const automatic = spawnSync('git', ['merge-tree', '--write-tree', feature, main], {
+      cwd: repo.dir,
+      encoding: 'utf8',
+    })
+    expect(automatic.status).toBe(1)
+    const tree = automatic.stdout.split('\n')[0] ?? ''
+    const sha = repo.mergeCommit(tree, [feature, main], jane, 'Merge with conflict markers\n')
+    const merge = repo.check().find(({ commit }) => commit.sha === sha)
+    expect(merge?.commit.cleanMerge).toBe(false)
+    expect(merge?.result).toMatchObject({ status: 'missing' })
+  })
+
+  it('requires a sign-off for octopus merges', () => {
+    const repo = scratchRepo()
+    const main = repo.git(['rev-parse', 'main'])
+    const first = repo.commit(maintainer, 'First parent\n')
+    const second = repo.commit(maintainer, 'Second parent\n')
+    const sha = repo.mergeCommit(repo.git(['write-tree']), [main, first, second], jane, 'Octopus\n')
+    const merge = repo.check().find(({ commit }) => commit.sha === sha)
+    expect(merge?.commit.parents).toHaveLength(3)
+    expect(merge?.result).toMatchObject({ status: 'missing' })
+  })
+
+  it.each([false, true])(
+    'checks an unrelated-histories merge with ordinary sign-off rules (signed=%s)',
+    (signed) => {
+      const repo = scratchRepo()
+      const main = repo.git(['rev-parse', 'main'])
+      repo.git(['switch', '--quiet', '--orphan', 'unrelated'])
+      repo.file('unrelated.txt', 'Separate history\n')
+      const unrelated = repo.commit(jane, `Unrelated root\n\n${signOff(jane)}\n`)
+      const tree = repo.git(['write-tree'])
+      repo.git(['switch', '--quiet', 'pr'])
+      const sha = repo.mergeCommit(
+        tree,
+        [main, unrelated],
+        jane,
+        `Join unrelated histories\n${signed ? `\n${signOff(jane)}\n` : ''}`,
+      )
+      const cli = spawnSync(process.execPath, [script, '--no-exemptions', 'main', 'pr'], {
+        cwd: repo.dir,
+        encoding: 'utf8',
+      })
+      expect(cli.status).toBe(signed ? 0 : 1)
+      const merge = repo.check().find(({ commit }) => commit.sha === sha)
+      expect(merge?.commit.cleanMerge).toBe(false)
+      expect(merge?.result).toMatchObject({ status: signed ? 'signed' : 'missing' })
+    },
+  )
 
   it('without exemptions (pull requests from forks), the maintainer needs a sign-off too', () => {
     const repo = scratchRepo()
@@ -250,6 +394,7 @@ describe('formatReport', () => {
   const commit = (fields: Partial<Commit>): Commit => ({
     sha: 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678',
     parents: ['0'.repeat(40)],
+    cleanMerge: false,
     authorName: jane.name,
     authorEmail: jane.email,
     subject: 'Fix the thing',
@@ -327,7 +472,7 @@ describe('the command line', () => {
     repo.commit(maintainer, 'Tidy up\n')
     const passed = run(repo.dir, 'main', 'pr')
     expect(passed.status).toBe(0)
-    expect(passed.stdout).toContain('Every commit is signed off, exempt or a merge.')
+    expect(passed.stdout).toContain('Every commit is signed off, exempt or a clean merge.')
 
     const failed = run(repo.dir, '--no-exemptions', 'main', 'pr')
     expect(failed.status).toBe(1)
@@ -364,4 +509,33 @@ describe('the command line', () => {
     expect(failed.stderr).not.toContain('##[')
     expect(failed.stderr).toContain('\\u{23}#[error]forged is not a commit')
   })
+})
+
+describe('the DCO workflow fork boundary', () => {
+  const workflow = () =>
+    readFileSync(new URL('../.github/workflows/dco.yml', import.meta.url), 'utf8')
+
+  it('detects forks by comparing the head repository with the current repository', () => {
+    const expression = /^\s+FROM_FORK: \$\{\{ (.+) \}\}$/m.exec(workflow())?.[1]
+    expect(expression).toBe('github.event.pull_request.head.repo.full_name != github.repository')
+  })
+
+  it.each(['false', 'true', '', 'False', 'FALSE', ' false', 'false ', '0', 'unknown'])(
+    'enables exemptions only for the literal false (FROM_FORK=%j)',
+    (fromFork) => {
+      const repo = scratchRepo()
+      repo.commit(maintainer, 'Unsigned maintainer commit\n')
+      mkdirSync(join(repo.dir, 'scripts'))
+      copyFileSync(script, join(repo.dir, 'scripts/check-dco.ts'))
+      const block = /\n {8}run: \|\n((?: {10}.*(?:\n|$))*)/.exec(workflow())?.[1]
+      expect(block).toBeDefined()
+      const result = spawnSync('bash', ['-e', '-c', block ?? 'exit 99'], {
+        cwd: repo.dir,
+        encoding: 'utf8',
+        env: { ...process.env, FROM_FORK: fromFork, BASE_SHA: 'main', HEAD_SHA: 'pr' },
+      })
+      expect(result.status).toBe(fromFork === 'false' ? 0 : 1)
+      expect(result.stdout).toContain(fromFork === 'false' ? 'exempt' : 'MISSING')
+    },
+  )
 })

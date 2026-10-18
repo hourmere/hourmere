@@ -5,7 +5,7 @@ import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createJobs, type EnqueueOptions } from '@hourmere/jobs'
 import type { MailMessage } from '@hourmere/mail'
 import type pg from 'pg'
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   deliverSignInEmail,
   queuedSignInEmail,
@@ -54,8 +54,10 @@ describe.skipIf(!serverUrl)('queued sign-in email', () => {
     db = createDb(owned.pool)
   })
   afterAll(async () => {
-    await Promise.all(pools.map((pool) => pool.end()))
     await owned?.drop()
+  })
+  afterEach(async () => {
+    await Promise.all(pools.splice(0).map((pool) => pool.end()))
   })
   beforeEach(async () => {
     await db.deleteFrom('sign_in_emails').execute()
@@ -131,7 +133,9 @@ describe.skipIf(!serverUrl)('queued sign-in email', () => {
       },
     })
     await existing()
-    const auth = authWith({ appDb })
+    // Observe both the auth hooks and the queue's own reads: even an unused account lookup
+    // inside queuedSignInEmail would make request timing depend on the address.
+    const auth = authWith({ appDb, sender: queuedSignInEmail(queue, deps({ db: appDb })) })
     const answers = []
     for (const email of ['existing@example.com', 'denied@example.com']) {
       const response = await request(auth, email)
@@ -184,6 +188,39 @@ describe.skipIf(!serverUrl)('queued sign-in email', () => {
     expect(await rows()).toEqual([])
     await deliverSignInEmail(deps(), row.id)
     expect(sent).toHaveLength(1)
+  })
+
+  it.each(['foreign-origin', 'query-token'])(
+    'refuses to queue an otherwise valid proof in an unsafe URL: %s',
+    async (mode) => {
+      await existing()
+      const send = queuedSignInEmail(queue, deps())
+      const auth = authWith({
+        sender: async (input) => {
+          const link = new URL(input.url)
+          if (mode === 'foreign-origin') link.host = 'untrusted.example'
+          else link.search = link.hash.slice(1)
+          await send({ ...input, url: link.href })
+        },
+      })
+      await expect(request(auth)).rejects.toThrow('Sign-in email could not be queued')
+      expect(queued).toEqual([])
+      expect(await rows()).toEqual([])
+      expect(sent.length).toBe(0)
+    },
+  )
+
+  it('discards an expired outbox even when its verification is still live', async () => {
+    const row = await enqueueExisting()
+    await db
+      .updateTable('sign_in_emails')
+      .set({ expires_at: new Date(0) })
+      .where('id', '=', row.id)
+      .execute()
+    await deliverSignInEmail(deps(), row.id)
+    expect(sent.length).toBe(0)
+    expect(await rows()).toEqual([])
+    expect(await db.selectFrom('auth.verification').select('id').execute()).toHaveLength(1)
   })
 
   it('uses worker-time registration policy and live invitations, with separate team acceptance', async () => {
@@ -380,6 +417,40 @@ describe.skipIf(!serverUrl)('queued sign-in email', () => {
       await blocker.query('COMMIT')
       await delivery
       expect(sent).toEqual([])
+      expect(await rows()).toEqual([])
+    } finally {
+      await blocker.query('ROLLBACK')
+      await delivery
+      blocker.release()
+    }
+  })
+
+  it('rechecks expiry after a blocked worker eligibility query', async () => {
+    const row = await enqueueExisting()
+    const proof = await db
+      .selectFrom('auth.verification')
+      .select('expiresAt')
+      .executeTakeFirstOrThrow()
+    let now = new Date()
+    const blocker = await owned.pool.connect()
+    let delivery: Promise<void> | undefined
+    try {
+      await blocker.query('BEGIN')
+      await blocker.query('LOCK TABLE auth.invitation IN ACCESS EXCLUSIVE MODE')
+      const pid = (await blocker.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0]
+        ?.pid
+      delivery = deliverSignInEmail(deps({ now: () => now }), row.id)
+      await vi.waitFor(async () => {
+        const waiting = await owned.pool.query(
+          'SELECT pid FROM pg_stat_activity WHERE datname = current_database() AND $1 = ANY(pg_blocking_pids(pid))',
+          [pid],
+        )
+        expect(waiting.rows.length).toBeGreaterThan(0)
+      })
+      now = proof.expiresAt
+      await blocker.query('COMMIT')
+      await delivery
+      expect(sent.length).toBe(0)
       expect(await rows()).toEqual([])
     } finally {
       await blocker.query('ROLLBACK')
