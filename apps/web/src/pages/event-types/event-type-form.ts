@@ -60,6 +60,7 @@ export interface EventTypeDraft {
   slotStepMinutes: string
   locationKind: LocationKind | ''
   autoCreateMeet: boolean
+  conferenceOrganizerUserId: string
   phone: string
   address: string
   url: string
@@ -103,6 +104,7 @@ export function emptyDraft(): EventTypeDraft {
     slotStepMinutes: '',
     locationKind: '',
     autoCreateMeet: false,
+    conferenceOrganizerUserId: '',
     phone: '',
     address: '',
     url: '',
@@ -134,6 +136,7 @@ export function draftFromEventType(e: EventType): EventTypeDraft {
     slotStepMinutes: text(e.slotStepMinutes),
     locationKind: location?.kind ?? '',
     autoCreateMeet: location?.kind === 'google_meet' && location.autoCreate === true,
+    conferenceOrganizerUserId: e.conferenceOrganizer?.userId ?? '',
     phone: location?.kind === 'phone' ? location.number : '',
     address: location?.kind === 'in_person' ? location.address : '',
     url: location?.kind === 'link' ? location.url : '',
@@ -202,11 +205,10 @@ export function validateDraft(draft: EventTypeDraft): FieldErrors {
   if (
     draft.locationKind === 'google_meet' &&
     draft.autoCreateMeet &&
-    draft.schedulingType !== 'individual'
+    draft.schedulingType === 'collective' &&
+    !draft.hostUserIds.includes(draft.conferenceOrganizerUserId)
   )
-    errors['location-kind'] = msg(
-      'Automatic Google Meet supports individual meetings with one host only.',
-    )
+    errors.conferenceOrganizer = msg('Choose the meeting organizer from the required hosts.')
   if (
     draft.schedulingType === 'collective' &&
     (draft.hostUserIds.length < 2 || draft.hostUserIds.length > 8)
@@ -349,6 +351,10 @@ export function toInput(draft: EventTypeDraft): EventTypeBody {
   return {
     ...(draft.hostUserIds.length > 0 && {
       schedulingType: draft.schedulingType,
+      conferenceOrganizer:
+        draft.schedulingType === 'collective' && draft.conferenceOrganizerUserId
+          ? { userId: draft.conferenceOrganizerUserId }
+          : null,
       hosts: draft.hostUserIds.map((userId) => ({ userId })),
     }),
     title: draft.title.trim(),
@@ -381,6 +387,7 @@ export function toInput(draft: EventTypeDraft): EventTypeBody {
 export function fieldLabels(draft: EventTypeDraft): Record<string, UiText> {
   const labels: Record<string, UiText> = {
     hosts: 'Hosts',
+    conferenceOrganizer: 'Meeting organizer',
     title: 'Title',
     slug: 'Booking link',
     description: 'Description',
@@ -433,6 +440,8 @@ export function serverErrors(
   const field = (id: string, message: UiText) => ({ fields: { [id]: message }, message: null })
   const detail = err.message
   switch (err.code) {
+    case 'invalid_conference_organizer':
+      return field('conferenceOrganizer', 'Choose the meeting organizer from the required hosts.')
     case 'automatic_meet_disabled':
       return field(
         'location-kind',
@@ -446,7 +455,7 @@ export function serverErrors(
     case 'automatic_meet_unavailable':
       return field(
         'location-kind',
-        'The assigned individual host must connect an owned, Meet-capable Google calendar. Final invitations wait for the link.',
+        'The organizer needs an owned, Meet-capable Google calendar. Other hosts can receive invitations without connecting a calendar. Configured Google calendars get ordinary copies after the link is ready.',
       )
     case 'invalid_slug':
       return field(

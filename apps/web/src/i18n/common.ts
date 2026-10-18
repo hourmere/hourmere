@@ -1,5 +1,8 @@
 // Public/shared UI messages. Admin messages live in a lazy catalog.
 export const common = {
+  'The original organizer’s verified invitation identity is unavailable. This booking will not switch organizers. Contact the host or cancel the booking.':
+    '原组织者已验证的邀请身份不可用。此预约不会更换组织者。请联系主持人或取消预约。',
+
   'Automatic meeting links are unavailable. Contact the host or choose another meeting type.':
     '自动会议链接暂不可用，请联系主持人或选择其他活动类型。',
   'Meeting link': '会议链接',

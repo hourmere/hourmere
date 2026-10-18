@@ -83,6 +83,8 @@ describe('CLI transport and arguments', () => {
     ['list', 'list_bookings'],
     ['reschedule', 'reschedule_booking'],
     ['cancel', 'cancel_booking'],
+    ['retry-meeting', 'retry_conference'],
+    ['retry-calendar-copy', 'retry_calendar_copy'],
   ])(
     'maps %s to the existing %s tool and sends one authenticated request',
     async (command, tool) => {

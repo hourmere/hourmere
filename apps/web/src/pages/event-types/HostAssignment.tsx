@@ -8,11 +8,12 @@ import type { EventTypeDraft } from './event-type-form.ts'
 interface Props {
   draft: EventTypeDraft
   error?: UiText | undefined
+  organizerError?: UiText | undefined
   set: <K extends keyof EventTypeDraft>(name: K, value: EventTypeDraft[K]) => void
 }
 
 /** A paged directory, never another person's private schedules or email address. */
-export function HostAssignment({ draft, error, set }: Props) {
+export function HostAssignment({ draft, error, organizerError, set }: Props) {
   const { t, ui } = useI18n()
   const [after, setAfter] = useState<string | undefined>()
   const [previous, setPrevious] = useState<{ id: string; name: string }[]>([])
@@ -39,6 +40,7 @@ export function HostAssignment({ draft, error, set }: Props) {
         onChange={(event) => {
           const mode = event.target.value as EventTypeDraft['schedulingType']
           set('schedulingType', mode)
+          set('conferenceOrganizerUserId', '')
           set('scheduleId', '')
           if (mode === 'individual') set('hostUserIds', draft.hostUserIds.slice(0, 1))
         }}
@@ -118,6 +120,53 @@ export function HostAssignment({ draft, error, set }: Props) {
           </>
         )}
       </fieldset>
+      {draft.locationKind === 'google_meet' &&
+        draft.autoCreateMeet &&
+        draft.schedulingType === 'collective' && (
+          <div>
+            <label htmlFor="conferenceOrganizer">{t('Meeting organizer')}</label>
+            <select
+              id="conferenceOrganizer"
+              value={draft.conferenceOrganizerUserId}
+              aria-invalid={!!organizerError}
+              onChange={(e) => set('conferenceOrganizerUserId', e.target.value)}
+            >
+              <option value="">{t('Choose an organizer')}</option>
+              {members
+                .filter((m) => draft.hostUserIds.includes(m.id))
+                .map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name.trim() || t('Unnamed team member')}
+                  </option>
+                ))}
+              {draft.conferenceOrganizerUserId &&
+                !members.some((m) => m.id === draft.conferenceOrganizerUserId) && (
+                  <option value={draft.conferenceOrganizerUserId}>
+                    {t('Selected organizer: load the member pages to check')}
+                  </option>
+                )}
+            </select>
+            {organizerError && (
+              <p role="alert" className="field-error">
+                {ui(organizerError)}
+              </p>
+            )}
+            <p className="hint">
+              {t(
+                'Choose one required host to create the Meet link. Existing bookings keep their organizer, invitation identity and original calendars.',
+              )}
+            </p>
+          </div>
+        )}
+      {draft.locationKind === 'google_meet' &&
+        draft.autoCreateMeet &&
+        draft.schedulingType === 'round_robin' && (
+          <p>
+            {t(
+              'The assigned available host creates the Meet link. Only pool members with an eligible Google calendar can receive new bookings.',
+            )}
+          </p>
+        )}
       {state.status === 'ready' && state.data.nextAfter && (
         <button
           type="button"

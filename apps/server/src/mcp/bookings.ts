@@ -1,6 +1,7 @@
 // Booking tools: the same services, schemas and rules as the REST booking routes
 // (routes/public.ts, routes/bookings.ts), shaped for agents.
 import { z } from '@hono/zod-openapi'
+import { retryBookingConference, retryConferenceMirror } from '@hourmere/calendars'
 import type { Db } from '@hourmere/db'
 import {
   type BookingNotifier,
@@ -403,5 +404,47 @@ export function bookingTools({
     },
   })
 
-  return [findAvailableSlots, createBooking, rescheduleBooking, cancelBooking, listBookings]
+  const retryInput = z.strictObject({ bookingId: z.uuid() })
+  const retryOutput = z.object({ accepted: z.literal(true) })
+  const retryAnnotations = {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: false,
+    openWorldHint: true,
+  }
+  const retryConference = defineTool({
+    name: 'retry_conference',
+    title: 'Reconcile the original meeting',
+    description:
+      'For the current verified pinned organizer only. Safely reconciles a failed original Meet or its cancellation; never changes organizer/calendar or blindly imports after an unknown outcome. Give the current booking ID, not a management token.',
+    input: retryInput,
+    output: retryOutput,
+    annotations: retryAnnotations,
+    async run(args, call) {
+      await retryBookingConference(context(call.caller), args.bookingId)
+      return { accepted: true as const }
+    },
+  })
+  const retryCalendarCopy = defineTool({
+    name: 'retry_calendar_copy',
+    title: 'Reconcile my original calendar copy',
+    description:
+      'For the current verified original host only. Reconciles this caller’s failed pinned ordinary Google copy, without replacing the shared meeting or changing calendars. A copy that was not configured at creation cannot be added by retry. Inspect list_bookings.calendarCopy first.',
+    input: retryInput,
+    output: retryOutput,
+    annotations: retryAnnotations,
+    async run(args, call) {
+      await retryConferenceMirror(context(call.caller), args.bookingId)
+      return { accepted: true as const }
+    },
+  })
+  return [
+    findAvailableSlots,
+    createBooking,
+    rescheduleBooking,
+    cancelBooking,
+    listBookings,
+    retryConference,
+    retryCalendarCopy,
+  ]
 }

@@ -160,3 +160,13 @@ For an activated round-robin link `/team/Cobaltmere/intro`, use the same JSON sh
 
 Pass the returned start to `book` with a fresh random `idempotencyKey`; retry that same
 input if the response is lost. Clients do not choose a pool host.
+
+## Automatic Meet and original calendar copies
+
+`list` returns only this key user's optional `calendarCopy` status. `retry-meeting` forwards
+`retry_conference`; `retry-calendar-copy` forwards `retry_calendar_copy`. Both use
+`{"bookingId":"<current-booking-uuid>"}` in `--input`, require current verified original-host
+permissions, and never accept a replacement calendar, organizer or management token. Unknown
+accepted imports are reconciled without a second blind POST. Unconfigured original copies
+cannot be added by retry. Collective organizer selection is authenticated event-type configuration;
+round-robin allocation uses the actual eligible winner and public `book` cannot select one.

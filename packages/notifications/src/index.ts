@@ -1,6 +1,7 @@
 // Booking notifications (docs/notifications.md): the job that emails attendees and hosts
 // when a booking is confirmed, rescheduled or cancelled and before it starts, and the helper
 // the booking services call inside their transactions to queue those jobs.
+
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import type { Db, Json } from '@hourmere/db'
 import { defineJob, type EnqueueOptions, type KyselyTransactionLike } from '@hourmere/jobs'
@@ -16,6 +17,7 @@ import {
   type MeetingLocation,
   meetingLocationText,
 } from '@hourmere/mail'
+import { conferenceOrganizerAvailable } from '@hourmere/scheduling/conferences'
 import { sql } from 'kysely'
 import { z } from 'zod'
 
@@ -250,6 +252,9 @@ interface NotificationData {
   /** A booking that replaced this one (it was cancelled by a reschedule). */
   replaced: boolean
   automaticConference: boolean
+  conferenceIdentity:
+    | { organizerId: string; name: string | null; email: string | null; available: boolean }
+    | undefined
 }
 
 /**
@@ -264,6 +269,7 @@ function loadNotificationData(db: Db, bookingId: string): Promise<NotificationDa
       .leftJoin('event_types as et', 'et.id', 'b.event_type_id')
       .select([
         'b.id',
+        'b.organization_id',
         'b.status',
         'b.start_at',
         'b.end_at',
@@ -281,6 +287,9 @@ function loadNotificationData(db: Db, bookingId: string): Promise<NotificationDa
     const hosts = await conn
       .selectFrom('booking_hosts as bh')
       .innerJoin('auth.user as u', 'u.id', 'bh.user_id')
+      .innerJoin('auth.member as member', (j) =>
+        j.onRef('member.userId', '=', 'u.id').on('member.organizationId', '=', b.organization_id),
+      )
       .leftJoin('profiles as p', 'p.user_id', 'bh.user_id')
       .leftJoin('schedules as s', (join) =>
         join.onRef('s.user_id', '=', 'bh.user_id').on('s.is_default', '=', true),
@@ -315,6 +324,19 @@ function loadNotificationData(db: Db, bookingId: string): Promise<NotificationDa
          WHERE c.depth < 1000
       )
       SELECT id, depth FROM chain ORDER BY depth DESC LIMIT 1`.execute(conn)
+    const conference = await conn
+      .selectFrom('booking_conferences')
+      .selectAll()
+      .where('booking_id', '=', bookingId)
+      .executeTakeFirst()
+    const conferenceIdentity = conference
+      ? {
+          organizerId: conference.organizer_user_id,
+          name: conference.invitation_organizer_name,
+          email: conference.invitation_organizer_email,
+          available: await conferenceOrganizerAvailable(conn, conference),
+        }
+      : undefined
     const previous = b.rescheduled_from_id
       ? await conn
           .selectFrom('bookings')
@@ -329,6 +351,7 @@ function loadNotificationData(db: Db, bookingId: string): Promise<NotificationDa
       .executeTakeFirst()
 
     return {
+      conferenceIdentity,
       booking: {
         id: b.id,
         status: b.status,
@@ -434,6 +457,15 @@ async function sendOnce(
           .forShare()
           .executeTakeFirst()
         if (!host) throw new RecipientUnavailable()
+        const member = await trx
+          .selectFrom('auth.member as m')
+          .innerJoin('bookings as b', 'b.organization_id', 'm.organizationId')
+          .select('m.id')
+          .where('b.id', '=', key.bookingId)
+          .where('m.userId', '=', key.verifiedHost.id)
+          .forShare('m')
+          .executeTakeFirst()
+        if (!member) throw new RecipientUnavailable()
       }
       // The same format as the token the booking services issue (32 random bytes, base64url).
       const token = withManageLink ? randomBytes(32).toString('base64url') : undefined
@@ -468,6 +500,7 @@ async function sendOnce(
       ) {
         throw new Overtaken()
       }
+      await requireConferenceInvitationIdentity(trx, key.bookingId, key.kind, true)
       if (
         conferenceClaim &&
         !(await trx
@@ -524,18 +557,29 @@ export async function sendBookingNotification(
   const data = await loadNotificationData(deps.db, bookingId)
   if (!data || !stillApplies(kind, data, now)) return
   const { booking, hosts, attendees } = data
-  const organizer = hosts[0]
+  const identity = data.conferenceIdentity
+  const currentOrganizer = identity ? hosts.find((h) => h.id === identity.organizerId) : hosts[0]
+  const organizer =
+    identity?.email && identity.name
+      ? { id: identity.organizerId, name: identity.name, email: identity.email }
+      : currentOrganizer
+  if (
+    data.automaticConference &&
+    kind !== 'cancelled' &&
+    kind !== 'conference_failed' &&
+    (!identity?.available || !organizer)
+  )
+    throw new NotificationRetryError(
+      'The pinned invitation organizer is unavailable; delivery remains pending',
+    )
   const invitee =
     attendees.find((a) => a.isBooker) ?? (kind === 'conference_failed' ? undefined : attendees[0])
   const log = deps.log ?? ((line: string) => console.warn(line))
-  // No trusted organizer means no REQUEST. Automatic roots must retain their durable
-  // pending notice instead of claiming delivery, so restored proof may still release it.
+  // Automatic invitation proof is checked above. Preserve the legacy no-host behavior.
   if (!organizer && kind !== 'conference_failed' && kind !== 'cancelled') {
     log(
       `${new Date().toISOString()} WARN ${BOOKING_NOTIFICATION_JOB}: booking ${bookingId} has no host with a verified email address; not sending its ${kind} emails`,
     )
-    if (data.automaticConference)
-      throw new NotificationRetryError('A verified conference organizer is unavailable')
     return
   }
   // Nobody it is for.
@@ -583,7 +627,9 @@ export async function sendBookingNotification(
           organizer: { name: organizer.name, email: organizer.email },
           attendees: [
             ...attendees.map(({ name, email }) => ({ name, email })),
-            ...hosts.slice(1).map(({ name, email }) => ({ name, email })),
+            ...hosts
+              .filter((h) => h.id !== organizer.id)
+              .map(({ name, email }) => ({ name, email })),
           ],
         })
   const toAttendee = (attendee: (typeof attendees)[number]) => ({
@@ -608,10 +654,7 @@ export async function sendBookingNotification(
   const recipients = [
     ...hosts.map((host) => ({
       key: `host:${host.id}`,
-      verifiedHost:
-        kind === 'conference_failed' || kind === 'cancelled'
-          ? { id: host.id, email: host.email }
-          : undefined,
+      verifiedHost: { id: host.id, email: host.email },
       withLinks: false,
       message: () =>
         email(
@@ -869,4 +912,39 @@ export function conferenceNotificationDispatchJob(deps: NotificationDeps) {
     retry: { limit: 12, delaySeconds: 30, backoff: true, maxDelaySeconds: 3600 },
     handler: (_payload, { signal }) => dispatchConferenceNotifications(deps, signal),
   })
+}
+
+async function requireConferenceInvitationIdentity(
+  db: Db,
+  bookingId: string,
+  kind: NotificationKind,
+  lock = false,
+) {
+  if (kind === 'cancelled' || kind === 'conference_failed') return
+  const c = await db
+    .selectFrom('booking_conferences')
+    .selectAll()
+    .where('booking_id', '=', bookingId)
+    .executeTakeFirst()
+  if (!c) return
+  let user = db
+    .selectFrom('auth.user')
+    .select('id')
+    .where('id', '=', c.organizer_user_id)
+    .where('emailVerified', '=', true)
+  if (c.invitation_organizer_email !== null)
+    user = user.where('email', '=', c.invitation_organizer_email)
+  if (lock) user = user.forShare()
+  const u = await user.executeTakeFirst()
+  let member = db
+    .selectFrom('auth.member')
+    .select('id')
+    .where('userId', '=', c.organizer_user_id)
+    .where('organizationId', '=', c.organization_id)
+  if (lock) member = member.forShare()
+  const m = await member.executeTakeFirst()
+  if (!u || !m)
+    throw new NotificationRetryError(
+      'The pinned invitation organizer is unavailable; delivery remains pending',
+    )
 }

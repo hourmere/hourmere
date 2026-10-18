@@ -317,6 +317,92 @@ describe.skipIf(!serverUrl)('bounded conference notification outbox (real Postgr
     }
   })
 
+  it('checks its lease after waiting for the pinned organizer before the original booker send', async () => {
+    const { id, host } = await fixture()
+    await db
+      .updateTable('bookings')
+      .set({
+        location: {
+          kind: 'google_meet',
+          autoCreate: true,
+          url: 'https://meet.google.com/abc-defg-hij',
+        },
+      })
+      .where('id', '=', id)
+      .execute()
+    await db
+      .updateTable('booking_conferences')
+      .set({ state: 'ready', applied_revision: 0, error_code: null })
+      .where('root_booking_id', '=', id)
+      .execute()
+    await db
+      .updateTable('booking_conference_notifications')
+      .set({ kind: 'confirmed' })
+      .where('booking_id', '=', id)
+      .execute()
+    const entered = gate(),
+      hold = gate(),
+      messages: MailMessage[] = []
+    const config = deps({
+      send: async (message) => {
+        messages.push(message)
+        if (messages.length === 1) {
+          entered.release()
+          await hold.promise
+        }
+      },
+    })
+    const sending = dispatchConferenceNotifications(config)
+    const blocker = await owned.pool.connect()
+    let acquiring: Promise<unknown> | undefined
+    try {
+      await entered.promise
+      await blocker.query('BEGIN')
+      const pid = (await blocker.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0]
+        ?.pid
+      expect(pid).toBeDefined()
+      acquiring = blocker.query('SELECT id FROM auth."user" WHERE id=$1 FOR UPDATE', [host.userId])
+      await until(
+        async () =>
+          (
+            await owned.pool.query<{ blocked: boolean }>(
+              'SELECT cardinality(pg_blocking_pids($1))>0 AS blocked',
+              [pid],
+            )
+          ).rows[0]?.blocked === true,
+      )
+      hold.release()
+      await acquiring
+      await until(
+        async () =>
+          (
+            await owned.pool.query<{ blocked: boolean }>(
+              'SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND $1=ANY(pg_blocking_pids(pid))) AS blocked',
+              [pid],
+            )
+          ).rows[0]?.blocked === true,
+      )
+      now = NOW.add({ minutes: 11 })
+      await blocker.query('ROLLBACK')
+      await sending
+      expect(messages).toHaveLength(1)
+      expect(messages[0]?.to).not.toBe('booker@example.test')
+      expect((await row(id)).delivered).toBe(false)
+      expect((await row(id)).attempts).toBe(1)
+      await dispatchConferenceNotifications(config)
+      expect(messages).toHaveLength(2)
+      expect(messages[1]?.to).toBe('booker@example.test')
+      expect((await row(id)).attempts).toBe(2)
+      expect((await row(id)).delivered).toBe(true)
+    } finally {
+      hold.release()
+      await acquiring?.catch(() => {})
+      await blocker.query('ROLLBACK')
+      blocker.release()
+      await sending
+    }
+  })
+
   it('turns an expired final claim into an inspectable failure without a fourteenth send', async () => {
     const { id } = await fixture()
     await db

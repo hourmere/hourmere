@@ -2,6 +2,7 @@ import type { Db, Json } from '@hourmere/db'
 import { sql } from 'kysely'
 import type { PublicContext } from './context.ts'
 import { DomainError } from './errors.ts'
+import { cleanText } from './text.ts'
 
 export const automaticMeet = (location: unknown): boolean =>
   typeof location === 'object' &&
@@ -27,7 +28,58 @@ export async function conferenceRoot(db: Db, bookingId: string): Promise<string 
   return result.rows[0]?.id
 }
 
-/** Cache-only eligibility: never wait for provider/credential locks in a booking transaction. */
+export type WriteDestination =
+  | { eligible: true; calendar_id: string; connection_id: string }
+  | {
+      eligible: false
+      reason:
+        | 'not_configured'
+        | 'unsupported_provider'
+        | 'calendar_unavailable'
+        | 'needs_reauth'
+        | 'permissions_missing'
+        | 'meet_unsupported'
+    }
+
+/** Tagged cache-only eligibility; unknown SQL/parse failures are deliberately not caught. */
+export async function googleWriteDestination(
+  db: Db,
+  userId: string,
+  eventTypeId?: string,
+  meet = false,
+): Promise<WriteDestination> {
+  const result = await sql<{
+    destination: string | null
+    calendar_id: string | null
+    connection_id: string | null
+    provider: string | null
+    status: string | null
+    access_role: string | null
+    supports_google_meet: boolean | null
+    scopes: string[] | null
+  }>`SELECT coalesce(h.destination_calendar_id,p.destination_calendar_id) AS destination,
+      c.id AS calendar_id,cc.id AS connection_id,cc.provider,cc.status,c.access_role,c.supports_google_meet,cc.scopes
+    FROM profiles p LEFT JOIN event_type_hosts h ON h.user_id=p.user_id AND h.event_type_id=${eventTypeId ?? null}::uuid
+    LEFT JOIN calendars c ON c.id=coalesce(h.destination_calendar_id,p.destination_calendar_id)
+    LEFT JOIN calendar_connections cc ON cc.id=c.connection_id AND cc.user_id=p.user_id
+    WHERE p.user_id=${userId}::uuid`.execute(db)
+  const r = result.rows[0]
+  if (!r?.destination) return { eligible: false, reason: 'not_configured' }
+  if (!r.calendar_id || !r.connection_id) return { eligible: false, reason: 'calendar_unavailable' }
+  if (r.provider !== 'google') return { eligible: false, reason: 'unsupported_provider' }
+  if (r.status !== 'active') return { eligible: false, reason: 'needs_reauth' }
+  if (r.access_role !== 'owner') return { eligible: false, reason: 'permissions_missing' }
+  if (
+    !r.scopes ||
+    ![
+      'https://www.googleapis.com/auth/calendar.events.owned',
+      'https://www.googleapis.com/auth/calendar.events.readonly',
+    ].every((s) => r.scopes?.includes(s))
+  )
+    return { eligible: false, reason: 'permissions_missing' }
+  if (meet && !r.supports_google_meet) return { eligible: false, reason: 'meet_unsupported' }
+  return { eligible: true, calendar_id: r.calendar_id, connection_id: r.connection_id }
+}
 export async function requireMeetDestination(
   db: Db,
   userId: string,
@@ -40,32 +92,68 @@ export async function requireMeetDestination(
       'automatic_meet_disabled',
       'Automatic Google Meet is disabled on this instance.',
     )
-  const result = await sql<{ calendar_id: string; connection_id: string }>`
-    SELECT c.id AS calendar_id,cc.id AS connection_id FROM profiles p
-    LEFT JOIN event_type_hosts h ON h.user_id=p.user_id AND h.event_type_id=${eventTypeId ?? null}::uuid
-    JOIN calendars c ON c.id=coalesce(h.destination_calendar_id,p.destination_calendar_id)
-    JOIN calendar_connections cc ON cc.id=c.connection_id AND cc.user_id=p.user_id
-    WHERE p.user_id=${userId}::uuid AND cc.provider='google' AND cc.status='active'
-      AND c.access_role='owner' AND c.supports_google_meet
-      AND cc.scopes @> ARRAY['https://www.googleapis.com/auth/calendar.events.owned','https://www.googleapis.com/auth/calendar.events.readonly']::text[]
-  `.execute(db)
-  const value = result.rows[0]
-  if (!value)
+  const value = await googleWriteDestination(db, userId, eventTypeId, true)
+  if (!value.eligible)
     throw new DomainError(
       'conflict',
       'automatic_meet_unavailable',
       'Choose an owned Meet-capable Google calendar and enable calendar synchronization first.',
     )
-  return value
+  return { calendar_id: value.calendar_id, connection_id: value.connection_id }
 }
-
-export function requireSingleMeetHost(schedulingType: string, hosts: readonly string[]) {
-  if (schedulingType !== 'individual' || hosts.length !== 1)
+export async function eligibleMeetHosts(
+  db: Db,
+  ids: readonly string[],
+  eventTypeId: string | undefined,
+  enabled = false,
+) {
+  if (!enabled)
+    throw new DomainError(
+      'conflict',
+      'automatic_meet_disabled',
+      'Automatic Google Meet is disabled on this instance.',
+    )
+  const eligible: string[] = []
+  for (const id of ids)
+    if ((await googleWriteDestination(db, id, eventTypeId, true)).eligible) eligible.push(id)
+  if (!eligible.length)
+    throw new DomainError(
+      'conflict',
+      'automatic_meet_unavailable',
+      'No available host has a Meet-capable owned Google calendar.',
+    )
+  return eligible
+}
+export function meetOrganizer(
+  mode: string,
+  hosts: readonly string[],
+  selected: string | null,
+): string | undefined {
+  if (mode === 'round_robin') {
+    if (selected !== null)
+      throw new DomainError(
+        'invalid',
+        'invalid_conference_organizer',
+        'Round robin uses the assigned host as organizer.',
+      )
+    return undefined
+  }
+  if (mode === 'individual') {
+    if (selected !== null)
+      throw new DomainError(
+        'invalid',
+        'invalid_conference_organizer',
+        'Individual meetings use their host as organizer.',
+      )
+    return hosts[0]
+  }
+  if (!selected || !hosts.includes(selected))
     throw new DomainError(
       'invalid',
-      'automatic_meet_mode_unsupported',
-      'Automatic Google Meet currently supports one individual host only.',
+      'invalid_conference_organizer',
+      'Choose an organizer from the selected required hosts.',
     )
+  return selected
 }
 
 /** Called after booking insertion, before its notifier, while booking/host locks are held. */
@@ -97,6 +185,18 @@ export async function prepareBookingConference(ctx: PublicContext, trx: Db, book
       })
       .where('root_booking_id', '=', root)
       .execute()
+    await trx
+      .updateTable('booking_conference_mirrors')
+      .set({
+        revision: sql`revision+1`,
+        state: 'pending',
+        error_code: null,
+        attempts: 0,
+        next_attempt_at: ctx.now().toString(),
+      })
+      .where('root_booking_id', '=', root)
+      .where('calendar_id', 'is not', null)
+      .execute()
   } else {
     // No old provider-label booking is ever upgraded through a later reschedule.
     if (booking.rescheduled_from_id) return
@@ -107,31 +207,65 @@ export async function prepareBookingConference(ctx: PublicContext, trx: Db, book
       .execute()
     const et = await trx
       .selectFrom('event_types')
-      .select('scheduling_type')
+      .select(['scheduling_type', 'conference_organizer_user_id'])
       .where('id', '=', booking.event_type_id ?? '')
       .executeTakeFirst()
-    requireSingleMeetHost(
-      et?.scheduling_type ?? '',
-      hosts.map((h) => h.user_id),
-    )
-    const host = hosts[0] as { user_id: string }
+    const ids = hosts.map((h) => h.user_id)
+    const organizer =
+      et?.scheduling_type === 'round_robin'
+        ? ids[0]
+        : meetOrganizer(et?.scheduling_type ?? '', ids, et?.conference_organizer_user_id ?? null)
+    if (!organizer || !ids.includes(organizer))
+      throw new DomainError('conflict', 'automatic_meet_unavailable')
     const target = await requireMeetDestination(
       trx,
-      host.user_id,
+      organizer,
       booking.event_type_id ?? undefined,
       ctx.automaticMeet,
     )
+    const identity = await trx
+      .selectFrom('auth.user')
+      .select(['name', 'email'])
+      .where('id', '=', organizer)
+      .where('emailVerified', '=', true)
+      .executeTakeFirst()
+    if (!identity) throw new DomainError('conflict', 'automatic_meet_unavailable')
     await trx
       .insertInto('booking_conferences')
       .values({
         root_booking_id: root,
         booking_id: bookingId,
         organization_id: booking.organization_id,
-        organizer_user_id: host.user_id,
+        organizer_user_id: organizer,
+        invitation_organizer_name: cleanText(identity.name, { max: 200 }) ?? 'Host',
+        invitation_organizer_email: identity.email,
         ...target,
         next_attempt_at: ctx.now().toString(),
       })
       .execute()
+    for (const userId of ids.filter((id) => id !== organizer)) {
+      const mirror = await googleWriteDestination(trx, userId, booking.event_type_id ?? undefined)
+      await trx
+        .insertInto('booking_conference_mirrors')
+        .values({
+          root_booking_id: root,
+          user_id: userId,
+          calendar_id: mirror.eligible ? mirror.calendar_id : null,
+          connection_id: mirror.eligible ? mirror.connection_id : null,
+          state: mirror.eligible
+            ? 'pending'
+            : mirror.reason === 'not_configured'
+              ? 'not_configured'
+              : 'failed',
+          error_code: mirror.eligible
+            ? null
+            : mirror.reason === 'meet_unsupported'
+              ? 'calendar_unavailable'
+              : mirror.reason,
+          next_attempt_at: ctx.now().toString(),
+        })
+        .execute()
+    }
   }
 }
 
@@ -149,22 +283,49 @@ export async function cancelBookingConference(trx: Db, bookingId: string, now: T
     })
     .where('booking_id', '=', bookingId)
     .execute()
+  const root = await conferenceRoot(trx, bookingId)
+  if (root)
+    await trx
+      .updateTable('booking_conference_mirrors')
+      .set({
+        revision: sql`revision+1`,
+        state: 'pending',
+        error_code: null,
+        attempts: 0,
+        next_attempt_at: now.toString(),
+      })
+      .where('root_booking_id', '=', root)
+      .where('calendar_id', 'is not', null)
+      .execute()
 }
 
 export async function bookingConferenceStates(db: Db, ids: readonly string[]) {
   if (!ids.length) return new Map<string, ConferenceStatus>()
   const rows = await db
     .selectFrom('booking_conferences')
-    .select(['booking_id', 'state', 'error_code'])
+    .selectAll()
+    .select(
+      sql<string>`(SELECT status FROM bookings WHERE id=booking_conferences.booking_id)`.as(
+        'booking_status',
+      ),
+    )
     .where('booking_id', 'in', ids)
     .execute()
+  const unavailable = new Set<string>()
+  for (const r of rows)
+    if (
+      r.booking_status === 'confirmed' &&
+      r.invitation_organizer_email !== null &&
+      !(await conferenceOrganizerAvailable(db, r))
+    )
+      unavailable.add(r.booking_id)
   return new Map(
     rows.map((r) => [
       r.booking_id,
       {
         provider: 'google_meet' as const,
-        status: r.state as ConferenceStatus['status'],
-        errorCode: r.error_code,
+        status: unavailable.has(r.booking_id) ? 'failed' : (r.state as ConferenceStatus['status']),
+        errorCode: unavailable.has(r.booking_id) ? 'organizer_unavailable' : r.error_code,
       },
     ]),
   )
@@ -173,4 +334,51 @@ export async function bookingConferenceStates(db: Db, ids: readonly string[]) {
 /** Only resolved data changes asynchronously; it must not affect idempotency fingerprints. */
 export function unresolvedLocation(location: Json | null): Json | null {
   return automaticMeet(location) ? { kind: 'google_meet', autoCreate: true } : location
+}
+
+/** New roots require the exact verified application identity; old0021 roots keep current-ID compatibility. */
+export async function conferenceOrganizerAvailable(
+  db: Db,
+  c: {
+    organizer_user_id: string
+    organization_id: string
+    invitation_organizer_email: string | null
+  },
+) {
+  let q = db
+    .selectFrom('auth.user as u')
+    .innerJoin('auth.member as m', 'm.userId', 'u.id')
+    .select('u.id')
+    .where('u.id', '=', c.organizer_user_id)
+    .where('u.emailVerified', '=', true)
+    .where('m.organizationId', '=', c.organization_id)
+  if (c.invitation_organizer_email !== null)
+    q = q.where('u.email', '=', c.invitation_organizer_email)
+  return Boolean(await q.executeTakeFirst())
+}
+
+export interface CalendarCopyStatus {
+  status: 'pending' | 'ready' | 'failed' | 'not_configured'
+  errorCode: string | null
+  canRetry: boolean
+}
+export async function ownCalendarCopyStates(db: Db, ids: readonly string[], userId: string) {
+  if (!ids.length) return new Map<string, CalendarCopyStatus>()
+  const rows = await db
+    .selectFrom('booking_conference_mirrors as m')
+    .innerJoin('booking_conferences as c', 'c.root_booking_id', 'm.root_booking_id')
+    .select(['c.booking_id', 'm.state', 'm.error_code', 'm.calendar_id'])
+    .where('c.booking_id', 'in', ids)
+    .where('m.user_id', '=', userId)
+    .execute()
+  return new Map(
+    rows.map((r) => [
+      r.booking_id,
+      {
+        status: r.state as CalendarCopyStatus['status'],
+        errorCode: r.error_code,
+        canRetry: r.state === 'failed' && r.calendar_id !== null,
+      },
+    ]),
+  )
 }

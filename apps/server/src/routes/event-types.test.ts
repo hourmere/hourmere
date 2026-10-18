@@ -33,6 +33,7 @@ describe('event type routes in the OpenAPI document', () => {
       expect(closedObjects(doc, schema)).toEqual([
         '$',
         ...[0, 1, 2, 3, 4].map((i) => `$.location|oneOf${i}`),
+        '$.conferenceOrganizer',
         '$.questions[]',
         '$.hosts[]',
       ])
@@ -169,6 +170,7 @@ describe.skipIf(!serverUrl)('event type routes', () => {
       maxBookingsPerDay: null,
       schedulingType: 'individual',
       roundRobinActive: false,
+      conferenceOrganizer: null,
       hosts: [{ userId: user.id }],
       location: { kind: 'phone', number: '+14155550123' },
       questions: [{ id: 'company', label: 'Company', type: 'short_text', required: false }],
