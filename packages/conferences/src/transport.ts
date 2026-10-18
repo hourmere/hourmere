@@ -2,10 +2,14 @@ export type ZoomFailure = 'provider_unavailable' | 'needs_reauth' | 'permissions
 /** Upstream bodies, request URLs and credentials never become messages/causes. */
 export class ZoomError extends Error {
   readonly code: ZoomFailure
-  constructor(code: ZoomFailure) {
+  readonly knownNoCreate: boolean
+  readonly retryable: boolean
+  constructor(code: ZoomFailure, options: { knownNoCreate?: boolean; retryable?: boolean } = {}) {
     super(code)
     this.name = 'ZoomError'
     this.code = code
+    this.knownNoCreate = options.knownNoCreate === true
+    this.retryable = options.retryable === true
   }
 }
 
@@ -14,7 +18,7 @@ async function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T
   signal.throwIfAborted()
   let rejectAbort: (() => void) | undefined
   const aborted = new Promise<never>((_resolve, reject) => {
-    rejectAbort = () => reject(new ZoomError('provider_unavailable'))
+    rejectAbort = () => reject(new ZoomError('provider_unavailable', { retryable: true }))
     signal.addEventListener('abort', rejectAbort, { once: true })
   })
   try {
@@ -33,21 +37,51 @@ export async function boundedZoomJson(
     maximum?: number | undefined
     empty?: boolean
     missing?: boolean
-    badRequestReauth?: boolean
+    oauthTokens?: boolean
   } = {},
 ): Promise<unknown> {
   try {
     signal.throwIfAborted()
     const response = await abortable(request(url, { ...init, redirect: 'error', signal }), signal)
     if (!response.ok) {
+      let invalidGrant = false
+      if (options.oauthTokens && response.status >= 400 && response.status < 500) {
+        // Inspect only the bounded, documented OAuth discriminator; never retain its prose.
+        const reader = response.body?.getReader()
+        if (reader) {
+          try {
+            const parts: Uint8Array[] = []
+            let length = 0
+            for (;;) {
+              const { done, value } = await abortable(reader.read(), signal)
+              if (done) break
+              length += value.byteLength
+              if (length > 32768) break
+              parts.push(value)
+            }
+            if (length <= 32768) {
+              const body = JSON.parse(Buffer.concat(parts).toString('utf8')) as { error?: unknown }
+              invalidGrant = body.error === 'invalid_grant'
+            }
+          } catch {
+            // Malformed provider errors do not establish revoked authorization.
+          } finally {
+            void reader.cancel().catch(() => {})
+          }
+        }
+      }
       void response.body?.cancel().catch(() => {})
       if (options.missing && response.status === 404) return ZOOM_NOT_FOUND
       throw new ZoomError(
-        response.status === 401 || (options.badRequestReauth && response.status === 400)
+        (!options.oauthTokens && response.status === 401) || invalidGrant
           ? 'needs_reauth'
-          : response.status === 403
+          : !options.oauthTokens && response.status === 403
             ? 'permissions_missing'
             : 'provider_unavailable',
+        {
+          knownNoCreate: [400, 401, 403, 429].includes(response.status),
+          retryable: response.status === 429 || response.status >= 500,
+        },
       )
     }
     if (options.empty && response.status === 204) {
@@ -72,6 +106,6 @@ export async function boundedZoomJson(
     return JSON.parse(Buffer.concat(parts).toString('utf8')) as unknown
   } catch (error) {
     if (error instanceof ZoomError) throw error
-    throw new ZoomError('provider_unavailable')
+    throw new ZoomError('provider_unavailable', { retryable: !(error instanceof SyntaxError) })
   }
 }

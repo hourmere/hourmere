@@ -10,11 +10,13 @@ import {
   getHostBooking,
   getManagedBooking,
   listHostBookings,
+  listPublicSlots,
   type PublicContext,
   rescheduleManagedBooking,
   updateEventType,
 } from '@hourmere/scheduling'
-import { createFixtures } from '@hourmere/scheduling/testing'
+import { prepareBookingConference } from '@hourmere/scheduling/conferences'
+import { createFixtures, createTestUser } from '@hourmere/scheduling/testing'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { writeBookingCalendar } from '../../calendars/src/booking-events.ts'
@@ -138,6 +140,34 @@ describe.skipIf(!serverUrl)('automatic Zoom durable booking lifecycle (real Post
     })
   const posts = () =>
     provider.calls.filter((c) => c.init.method === 'POST' && c.url.endsWith('/users/me/meetings'))
+  const slots = () =>
+    listPublicSlots(ctx, {
+      handle: 'zoom-host',
+      slug: 'zoom',
+      start: Temporal.Instant.from('2030-11-04T08:00Z'),
+      end: Temporal.Instant.from('2030-11-04T17:00Z'),
+    })
+  async function expireTokens() {
+    await db
+      .updateTable('conference_connections')
+      .set({
+        credentials: credentials(
+          conferenceEncryptionKey(TEST_CONFERENCE_KEY),
+          owner.user.id,
+          connectionId,
+          'synthetic-zoom-identity',
+          {
+            accessToken: 'expired-access',
+            refreshToken: 'retry-refresh',
+            expiresAt: NOW.epochMilliseconds - 1,
+            scopes: zoomScopes('meetings'),
+          },
+          'meetings',
+        ),
+      })
+      .where('id', '=', connectionId)
+      .execute()
+  }
   const mail = () => ({
     db,
     publicUrl: 'https://hourmere.invalid',
@@ -382,6 +412,225 @@ describe.skipIf(!serverUrl)('automatic Zoom durable booking lifecycle (real Post
       provider.calls.filter((c) => c.url.includes('/meetings') && c.init.method === 'GET'),
     ).toHaveLength(0)
   })
+  it.each([400, 401, 403, 429])(
+    'allows a safe retry after definitive create HTTP %s without an ambiguity claim',
+    async (status) => {
+      const b = await book()
+      provider.controls.meetingHook = async () => Response.json({}, { status })
+      await writeBookingConference(deps, b.booking.id)
+      expect(await row()).toMatchObject({
+        create_started: false,
+        zoom_meeting_id: null,
+        error_code: status === 401 ? 'needs_reauth' : status === 403 ? 'permissions_missing' : null,
+      })
+      expect(posts()).toHaveLength(1)
+      provider.controls.meetingHook = undefined
+      if (status === 401 || status === 403) {
+        const auth = new URL(
+          (await authorizeZoomMeetings(conference, owner, connectionId)).authorizationUrl,
+        )
+        expect(
+          await finishZoomConnection(
+            conference,
+            owner,
+            new URLSearchParams({
+              state: auth.searchParams.get('state') as string,
+              code: 'synthetic-code',
+            }),
+          ),
+        ).toBe('connected')
+      }
+      if ((await row()).state === 'failed')
+        await retryBookingConference({ db, principal: owner, now: () => NOW }, b.booking.id)
+      await db
+        .updateTable('booking_conferences')
+        .set({ next_attempt_at: new Date(NOW.epochMilliseconds) })
+        .execute()
+      await writeBookingConference(deps, b.booking.id)
+      expect((await row()).state).toBe('ready')
+      expect(posts()).toHaveLength(2)
+    },
+  )
+  it.each([500, 503, 'timeout'])(
+    'retains ambiguous create after %s and never blindly POSTs again',
+    async (status) => {
+      const b = await book()
+      provider.controls.meetingHook = async () =>
+        status === 'timeout' ? new Promise(() => {}) : Response.json({}, { status: Number(status) })
+      if (status === 'timeout') {
+        const work = createZoomConferenceWork(conference, provider.meetings)
+        deps.zoomConferenceWork = (c) => work(c, AbortSignal.timeout(20))
+      }
+      await writeBookingConference(deps, b.booking.id)
+      expect(await row()).toMatchObject({
+        state: 'failed',
+        error_code: 'ambiguous_create',
+        create_started: true,
+      })
+      provider.controls.meetingHook = undefined
+      await retryBookingConference({ db, principal: owner, now: () => NOW }, b.booking.id)
+      await writeBookingConference(deps, b.booking.id)
+      expect(posts()).toHaveLength(1)
+    },
+  )
+  it('truncates long booking topics to 200 complete Unicode code points before POST', async () => {
+    await updateEventType({ db, principal: owner, automaticZoom: true, now: () => NOW }, eventId, {
+      title: 'T'.repeat(190),
+    })
+    const b = await createPublicBooking(ctx, {
+      handle: 'zoom-host',
+      slug: 'zoom',
+      start: Temporal.Instant.from(START),
+      invitee: { name: '😀'.repeat(30), email: 'synthetic@example.com', timeZone: 'UTC' },
+      idempotencyKey: 'long-topic',
+    })
+    await writeBookingConference(deps, b.booking.id)
+    expect((await row()).state).toBe('ready')
+    expect(posts()).toHaveLength(1)
+    const topic = JSON.parse(String(posts()[0]?.init.body)).topic as string
+    expect(Array.from(topic)).toHaveLength(200)
+    expect(topic.isWellFormed()).toBe(true)
+    expect(topic.endsWith('😀'.repeat(4))).toBe(true)
+  })
+  it.each([false, true])(
+    'rejects drifted worker users/me identity before meeting access (expired=%s)',
+    async (expired) => {
+      if (expired) await expireTokens()
+      const b = await book()
+      provider.controls.identity.id = 'someone-else'
+      await writeBookingConference(deps, b.booking.id)
+      expect(await row()).toMatchObject({
+        state: 'failed',
+        error_code: 'needs_reauth',
+        create_started: false,
+      })
+      expect(posts()).toHaveLength(0)
+      expect(provider.calls.filter((c) => c.url.includes('/meetings'))).toHaveLength(0)
+      expect(
+        await db
+          .selectFrom('conference_connections')
+          .select(['status', 'last_error', 'credentials'])
+          .executeTakeFirstOrThrow(),
+      ).toEqual({ status: 'needs_reauth', last_error: 'identity_mismatch', credentials: null })
+    },
+  )
+  it('withholds ready state when Zoom returns a meeting at a different start time', async () => {
+    const b = await book()
+    provider.controls.meetingHook = async (_url, init) =>
+      Response.json({
+        ...JSON.parse(String(init.body)),
+        id: 81234567890,
+        host_id: 'synthetic-zoom-identity',
+        join_url: 'https://zoom.us/j/81234567890',
+        start_time: '2030-11-04T10:00:00Z',
+      })
+    await writeBookingConference(deps, b.booking.id)
+    expect(await row()).toMatchObject({
+      state: 'failed',
+      error_code: 'invalid_response',
+      zoom_meeting_id: '81234567890',
+    })
+    expect((await getManagedBooking(ctx, b.manageToken as string)).location?.url).toBeUndefined()
+  })
+  it('keeps public slots and new bookings available throughout an expired token rotation', async () => {
+    await expireTokens()
+    const b = await book(),
+      entered = barrier(),
+      release = barrier<Response>()
+    provider.controls.tokenHook = async () => {
+      entered.resolve()
+      return release.promise
+    }
+    const running = writeBookingConference(deps, b.booking.id)
+    await entered.promise
+    try {
+      expect(
+        await db.selectFrom('conference_connections').select('status').executeTakeFirstOrThrow(),
+      ).toEqual({ status: 'refreshing' })
+      await expect(slots()).resolves.not.toHaveLength(0)
+      await expect(
+        createPublicBooking(ctx, {
+          handle: 'zoom-host',
+          slug: 'zoom',
+          start: Temporal.Instant.from('2030-11-04T11:00Z'),
+          invitee: { name: 'Second Invitee', email: 'second@example.com', timeZone: 'UTC' },
+          idempotencyKey: 'rotation-second',
+        }),
+      ).resolves.toMatchObject({ booking: { conference: { status: 'pending' } } })
+    } finally {
+      release.resolve(Response.json(provider.controls.token))
+      await running
+    }
+    expect(
+      (
+        await db
+          .selectFrom('booking_conferences')
+          .select('state')
+          .where('root_booking_id', '=', b.booking.id)
+          .executeTakeFirstOrThrow()
+      ).state,
+    ).toBe('ready')
+  })
+  it('waits for an already claimed Zoom refresh without retiring the connection or attempting create', async () => {
+    await db
+      .updateTable('conference_connections')
+      .set({ status: 'refreshing', credentials: null, operation_id: randomUUID() })
+      .where('id', '=', connectionId)
+      .execute()
+    const b = await book()
+    await writeBookingConference(deps, b.booking.id)
+    expect(await row()).toMatchObject({ state: 'pending', create_started: false, error_code: null })
+    expect(
+      await db
+        .selectFrom('conference_connections')
+        .select(['status', 'last_error'])
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ status: 'refreshing', last_error: null })
+    expect(posts()).toHaveLength(0)
+  })
+  it.each(['network', '503', 'timeout', 'malformed'])(
+    'retries transient worker refresh %s with a bounded budget and preserves credentials for later recovery',
+    async (kind) => {
+      await expireTokens()
+      const b = await book()
+      provider.controls.tokenHook = async () => {
+        if (kind === 'network') throw new TypeError('synthetic network reset')
+        if (kind === 'timeout') return new Promise(() => {})
+        if (kind === 'malformed') return new Response('{')
+        return Response.json({}, { status: 503 })
+      }
+      // The timeout uses an owned callback deadline rather than the root's production minute.
+      if (kind === 'timeout') {
+        const work = createZoomConferenceWork(conference, provider.meetings)
+        deps.zoomConferenceWork = (c) => work(c, AbortSignal.timeout(20))
+      }
+      await writeBookingConference(deps, b.booking.id)
+      const connection = await db
+        .selectFrom('conference_connections')
+        .selectAll()
+        .executeTakeFirstOrThrow()
+      expect(connection.status).toBe('active')
+      expect(connection.credentials !== null).toBe(true)
+      expect(connection.last_error).toBe('provider_unavailable')
+      expect(await row()).toMatchObject({
+        state: 'pending',
+        error_code: null,
+        create_started: false,
+      })
+      expect(provider.calls.filter((c) => c.url.endsWith('/oauth/token')).length).toBe(
+        kind === 'timeout' || kind === 'malformed' ? 2 : 4,
+      )
+      expect((await slots()).length).toBeGreaterThan(0)
+      provider.controls.tokenHook = undefined
+      await db
+        .updateTable('booking_conferences')
+        .set({ next_attempt_at: new Date(NOW.epochMilliseconds) })
+        .execute()
+      await writeBookingConference(deps, b.booking.id)
+      expect((await row()).state).toBe('ready')
+      expect(posts()).toHaveLength(1)
+    },
+  )
   it('retains a validated known ID after an unsafe response and only retries that ID', async () => {
     const b = await book()
     provider.controls.meetingHook = async (_url, init) => {
@@ -532,6 +781,159 @@ describe.skipIf(!serverUrl)('automatic Zoom durable booking lifecycle (real Post
         },
       ),
     ).rejects.toMatchObject({ code: 'automatic_zoom_host_policy' })
+  })
+  it.each(['key', 'non-host-admin', 'expired-host'])(
+    'requires the actual host live browser session when reactivating automatic Zoom (%s)',
+    async (kind) => {
+      let principal = owner
+      let id = eventId
+      if (kind === 'non-host-admin') {
+        const other = await conferenceTestSession(db),
+          f = createFixtures(db),
+          team = await f.organization('reactivation-team')
+        await f.member(owner.user.id, team, 'owner')
+        await f.member(other.user.id, team, 'admin')
+        const organization = {
+          id: team,
+          name: 'reactivation-team',
+          slug: 'reactivation-team',
+          personal: false,
+        }
+        id = (
+          await createEventType(
+            { db, principal: { ...owner, organization }, automaticZoom: true, now: () => NOW },
+            {
+              slug: 'team-reactivation',
+              title: 'Team Zoom',
+              durationMinutes: 30,
+              hosts: [{ userId: owner.user.id }],
+              location: { kind: 'zoom', autoCreate: true },
+              zoomConnectionId: connectionId,
+            },
+          )
+        ).id
+        principal = { ...other, organization }
+      } else if (kind === 'expired-host') {
+        const sessionId = randomUUID()
+        await db
+          .insertInto('auth.session')
+          .values({
+            id: sessionId,
+            userId: owner.user.id,
+            token: randomUUID(),
+            updatedAt: new Date(),
+            expiresAt: new Date(NOW.epochMilliseconds - 1),
+          })
+          .execute()
+        principal = { ...owner, sessionId }
+      }
+      const actor =
+        kind === 'key'
+          ? { ...owner, kind: 'api_key' as const, apiKeyId: 'synthetic-key' }
+          : principal
+      await updateEventType({ db, principal: actor, now: () => NOW }, id, { isActive: false })
+      await expect(
+        updateEventType({ db, principal: actor, automaticZoom: true, now: () => NOW }, id, {
+          isActive: true,
+        }),
+      ).rejects.toMatchObject({ code: 'zoom_host_session_required' })
+      expect(
+        (
+          await db
+            .selectFrom('event_types')
+            .select('is_active')
+            .where('id', '=', id)
+            .executeTakeFirstOrThrow()
+        ).is_active,
+      ).toBe(false)
+    },
+  )
+  it.each(['identity', 'needs_reauth', 'refreshing'])(
+    'rejects unsuitable Zoom connections at configuration time (%s)',
+    async (kind) => {
+      if (kind === 'identity')
+        await db
+          .updateTable('conference_connections')
+          .set({ mode: 'identity', scopes: zoomScopes('identity') })
+          .where('id', '=', connectionId)
+          .execute()
+      else
+        await db
+          .updateTable('conference_connections')
+          .set({
+            status: kind,
+            credentials: null,
+            operation_id: kind === 'refreshing' ? randomUUID() : null,
+          })
+          .where('id', '=', connectionId)
+          .execute()
+      const input = {
+        slug: 'unsuitable',
+        title: 'Unsuitable',
+        durationMinutes: 30,
+        location: { kind: 'zoom' as const, autoCreate: true as const },
+        zoomConnectionId: connectionId,
+      }
+      await expect(
+        createEventType({ db, principal: owner, automaticZoom: true, now: () => NOW }, input),
+      ).rejects.toMatchObject({ code: 'automatic_zoom_unavailable' })
+      await updateEventType({ db, principal: owner, now: () => NOW }, eventId, {
+        location: { kind: 'zoom' },
+        zoomConnectionId: null,
+      })
+      await expect(
+        updateEventType({ db, principal: owner, automaticZoom: true, now: () => NOW }, eventId, {
+          location: { kind: 'zoom', autoCreate: true },
+          zoomConnectionId: connectionId,
+        }),
+      ).rejects.toMatchObject({ code: 'automatic_zoom_unavailable' })
+    },
+  )
+  it.each(['identity', 'needs_reauth', 'missing-scopes'])(
+    'rechecks meeting mode and canonical scopes at public slots and booking (%s)',
+    async (kind) => {
+      if (kind === 'identity')
+        await db
+          .updateTable('conference_connections')
+          .set({ mode: 'identity', scopes: zoomScopes('identity') })
+          .where('id', '=', connectionId)
+          .execute()
+      else
+        await db
+          .updateTable('conference_connections')
+          .set({
+            status: kind === 'missing-scopes' ? 'refreshing' : 'needs_reauth',
+            credentials: null,
+            operation_id: kind === 'missing-scopes' ? randomUUID() : null,
+            ...(kind === 'missing-scopes' ? { scopes: [] } : {}),
+          })
+          .where('id', '=', connectionId)
+          .execute()
+      await expect(slots()).rejects.toMatchObject({ code: 'automatic_zoom_unavailable' })
+      await expect(book()).rejects.toMatchObject({ code: 'automatic_zoom_unavailable' })
+      expect(await db.selectFrom('bookings').select('id').execute()).toHaveLength(0)
+    },
+  )
+  it('rechecks single-host Zoom policy when preparing the booking intent', async () => {
+    const b = await book(),
+      other = await createTestUser(db)
+    await db.deleteFrom('booking_conferences').where('root_booking_id', '=', b.booking.id).execute()
+    const host = await db
+      .selectFrom('booking_hosts')
+      .selectAll()
+      .where('booking_id', '=', b.booking.id)
+      .executeTakeFirstOrThrow()
+    await db
+      .insertInto('booking_hosts')
+      .values({ ...host, user_id: other.id })
+      .execute()
+    await expect(prepareBookingConference(ctx, db, b.booking.id)).rejects.toMatchObject({
+      code: 'automatic_zoom_host_policy',
+    })
+    expect(
+      await db.selectFrom('booking_conferences').select('root_booking_id').execute(),
+    ).toHaveLength(0)
+    expect(posts()).toHaveLength(0)
   })
   it('pins the organizer optional Google copy at commit, uses an ordinary ready-link import and never adds a later destination', async () => {
     const google = fakeGoogle()

@@ -45,6 +45,7 @@ export async function requireZoomConnection(
   user: string,
   id: string | null | undefined,
   enabled = false,
+  allowRefreshing = false,
 ) {
   if (!enabled)
     throw new DomainError(
@@ -69,7 +70,7 @@ export async function requireZoomConnection(
     'meeting:delete:meeting',
   ]
   if (
-    row?.status !== 'active' ||
+    (row?.status !== 'active' && !(allowRefreshing && row?.status === 'refreshing')) ||
     row.mode !== 'meetings' ||
     !row.external_user_id ||
     row.scopes.length !== scopes.length ||
@@ -295,7 +296,7 @@ export async function prepareBookingConference(ctx: PublicContext, trx: Db, book
         'Automatic Zoom requires one explicitly authorized host.',
       )
     const target = zoom
-      ? await requireZoomConnection(trx, organizer, et?.zoom_connection_id, ctx.automaticZoom)
+      ? await requireZoomConnection(trx, organizer, et?.zoom_connection_id, ctx.automaticZoom, true)
       : await requireMeetDestination(
           trx,
           organizer,

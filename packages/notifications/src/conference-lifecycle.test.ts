@@ -251,6 +251,16 @@ describe.skipIf(!serverUrl)('conference lifecycle after real identity lock waits
               expect(messages[1]?.text).not.toContain('https://meet.google.com/abc-defg-hij')
             } else {
               expect(outcome).toBeUndefined()
+              if (path === 'outbox') {
+                const notice = await db
+                  .selectFrom('booking_conference_notifications')
+                  .selectAll()
+                  .where('booking_id', '=', id)
+                  .executeTakeFirstOrThrow()
+                expect(notice.delivered).toBe(false)
+                expect(notice.skipped_at).toEqual(new Date(NOW.epochMilliseconds))
+                expect(notice.exhausted_at).toBeNull()
+              }
               expect(
                 await db
                   .selectFrom('bookings')
