@@ -232,3 +232,55 @@ describe('protected meeting link status', () => {
     ).toBeNull()
   })
 })
+
+describe('Zoom meeting presentation', () => {
+  const join = 'https://us02web.zoom.us/j/81234567890?pwd=synthetic-only.1'
+  const value = (status: 'pending' | 'ready' | 'failed', errorCode: string | null = null) =>
+    booking({
+      start: '2030-11-02T14:00:00.000Z',
+      location: { kind: 'zoom', autoCreate: true, ...(status === 'ready' && { url: join }) },
+      conference: { provider: 'zoom', status, errorCode },
+    })
+  it('renders only a trusted ready participant URL, retains bilingual copy and never requests a private session', () => {
+    const api = fakeApi({})
+    render(
+      <>
+        <LanguageSwitcher />
+        <ConferenceNotice booking={value('ready')} />
+      </>,
+    )
+    expect(screen.getByRole('link', { name: 'Join Zoom meeting' }).getAttribute('href')).toBe(join)
+    fireEvent.change(screen.getByLabelText('Interface language'), { target: { value: 'zh-CN' } })
+    expect(screen.getByRole('link', { name: '加入 Zoom 会议' }).getAttribute('href')).toBe(join)
+    expect(api.calls).toHaveLength(0)
+  })
+  it('unknown creation requires host account inspection; no forced create or pretend safe recheck write is offered', async () => {
+    vi.useFakeTimers()
+    const api = fakeApi({})
+    render(<ConferenceNotice booking={value('failed', 'ambiguous_create')} host />)
+    expect(screen.getByText(/host must inspect their Zoom account/)).toBeDefined()
+    expect(screen.queryByRole('button', { name: /Retry|Recheck/ })).toBeNull()
+    await advance(60_000)
+    expect(api.calls).toHaveLength(0)
+  })
+  it.each([
+    'https://evil.invalid/j/81234567890',
+    'https://us02web.zoom.us/j/81234567890?start_url=private',
+    'https://zoom.us/j/81234567890#private',
+  ])('refuses unsafe Zoom participant link %s', (url) => {
+    fakeApi({})
+    render(
+      <ConferenceNotice
+        booking={{ ...value('ready'), location: { kind: 'zoom', autoCreate: true, url } }}
+      />,
+    )
+    expect(screen.queryByRole('link')).toBeNull()
+  })
+  it('cancelled Zoom cleanup never offers a join link and uses Zoom-specific status', () => {
+    fakeApi({})
+    render(<ConferenceNotice booking={{ ...value('ready'), status: 'cancelled' }} host />)
+    expect(screen.queryByRole('link')).toBeNull()
+    expect(screen.getByRole('heading', { name: 'Zoom meeting update' })).toBeDefined()
+    expect(screen.getByText('The original Zoom meeting has been cancelled.')).toBeDefined()
+  })
+})

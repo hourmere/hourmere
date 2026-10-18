@@ -1,3 +1,4 @@
+import { displayConferenceUrl } from '@hourmere/core/conference-url'
 // How bookings read: their location and answers, and the host's time zone they are shown in.
 import type { Booking, Profile } from '../../api/resources.ts'
 import { browserTimeZone } from '../../format.ts'
@@ -42,7 +43,10 @@ export function describeLocation(location: Booking['location']): LocationView | 
   const label = LOCATION_LABELS[location.kind] ?? location.kind
   const number = str(location.number)
   const address = str(location.address)
-  const url = str(location.url)
+  const url =
+    location.kind === 'google_meet' || location.kind === 'zoom'
+      ? (displayConferenceUrl(location.kind, location.url) ?? null)
+      : str(location.url)
   if (location.kind === 'phone' && number) {
     return { label, detail: number, href: `tel:${number.replace(/[^+0-9]/g, '')}` }
   }

@@ -68,6 +68,15 @@ export function errorMessage(err: unknown): UiText {
   if (!(err instanceof RequestError)) return msg(UNREACHABLE)
   if (err.displayMessage) return err.displayMessage
   const known: Readonly<Record<string, MessageKey>> = {
+    automatic_zoom_disabled: 'Automatic Zoom meetings are disabled on this instance.',
+    automatic_zoom_unavailable:
+      'Automatic Zoom meetings are unavailable. Contact the host or choose another meeting type.',
+    automatic_zoom_host_policy:
+      'Automatic Zoom supports individual meetings with exactly one host.',
+    zoom_host_session_required:
+      'The assigned host must configure Zoom in their own signed-in session.',
+    invalid_zoom_connection:
+      'Choose your own active Zoom account with meeting permissions. Reconnect it in Conference accounts if needed.',
     conference_session_required: 'Sign in again to manage conference accounts.',
     zoom_meetings_disabled: 'Automatic Zoom meetings are disabled on this instance.',
     zoom_mode_conflict:

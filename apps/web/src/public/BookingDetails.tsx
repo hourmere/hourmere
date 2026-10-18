@@ -1,3 +1,4 @@
+import { displayConferenceUrl } from '@hourmere/core/conference-url'
 import type { ReactNode } from 'react'
 import { useI18n } from '../i18n/runtime.tsx'
 import type { Booking } from './api.ts'
@@ -29,7 +30,10 @@ export function LocationDetails({ location }: { location: Booking['location'] })
   const { t, ui } = useI18n()
 
   if (!location) return <>{t('To be confirmed by the host')}</>
-  const url = safeUrl(location.url)
+  const url =
+    location.kind === 'google_meet' || location.kind === 'zoom'
+      ? displayConferenceUrl(location.kind, location.url)
+      : safeUrl(location.url)
   const number = typeof location.number === 'string' ? location.number : undefined
   const address = typeof location.address === 'string' ? location.address : undefined
   return (
@@ -60,7 +64,11 @@ export function locationText(
   labelText: (label: string) => string = (label) => label,
 ): string | undefined {
   if (!location) return undefined
-  const detail = [location.number, location.address, location.url].find(
+  const link =
+    location.kind === 'google_meet' || location.kind === 'zoom'
+      ? displayConferenceUrl(location.kind, location.url)
+      : safeUrl(location.url)
+  const detail = [location.number, location.address, link].find(
     (v): v is string => typeof v === 'string' && v !== '',
   )
   return detail

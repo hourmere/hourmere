@@ -756,4 +756,13 @@ export const admin = {
   'Choose two to eight required hosts to get a collective booking link.':
     '选择两至八位必选主持人后即可获取集体会议预约链接。',
   'every {0} (the duration)': '每 {0}（会议时长）',
+  'Create a unique Zoom meeting for each booking': '为每次预约创建独立的 Zoom 会议',
+  'Choose your own authorized meetings account. Final invitations wait for the link. A Google calendar is optional.':
+    '请选择自己已授权会议权限的账号。链接生成后才会发送最终邀请，无需连接 Google 日历。',
+  'Zoom meetings account': 'Zoom 会议账号',
+  'Choose your own authorized Zoom meetings account.': '请选择自己已授权会议权限的 Zoom 账号。',
+  'Choose an account': '选择账号',
+  'Saved account — unavailable for a new selection': '已保存的账号，目前无法重新选择',
+  'No active Zoom meetings account is available. Authorize meeting permissions in Conference accounts first.':
+    '没有可用的已启用 Zoom 会议账号。请先在会议账号页面授予会议权限。',
 } as const

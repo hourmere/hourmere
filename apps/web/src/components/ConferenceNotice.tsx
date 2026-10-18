@@ -1,3 +1,4 @@
+import { displayConferenceUrl } from '@hourmere/core/conference-url'
 import { useEffect, useRef, useState } from 'react'
 import { api, type Schemas, unwrap } from '../api/client.ts'
 import { useI18n } from '../i18n/runtime.tsx'
@@ -121,34 +122,39 @@ export function ConferenceNotice({
 
   if (!current.conference) return null
   const cancelled = current.status === 'cancelled'
-  const url =
-    typeof current.location?.url === 'string' &&
-    /^https:\/\/meet\.google\.com\/[a-z]{3}-[a-z]{4}-[a-z]{3}$/.test(current.location.url)
-      ? current.location.url
-      : undefined
+  const zoom = current.conference.provider === 'zoom'
+  const url = displayConferenceUrl(current.conference.provider, current.location?.url)
   const ambiguous = current.conference.errorCode === 'ambiguous_create'
   return (
     <section className="alert alert-info" aria-label={t('Meeting link')} aria-live="polite">
-      <h2>{t(cancelled ? 'Google calendar update' : 'Meeting link')}</h2>
+      <h2>
+        {t(cancelled ? (zoom ? 'Zoom meeting update' : 'Google calendar update') : 'Meeting link')}
+      </h2>
       {status === 'pending' ? (
         <p>
           {t(
             cancelled
-              ? 'Your booking is cancelled. The Google calendar update is pending.'
-              : 'Your time is reserved. The Google Meet link and final calendar invitation are being prepared.',
+              ? zoom
+                ? 'Your booking is cancelled. The Zoom meeting update is pending.'
+                : 'Your booking is cancelled. The Google calendar update is pending.'
+              : zoom
+                ? 'Your time is reserved. The Zoom link and final calendar invitation are being prepared.'
+                : 'Your time is reserved. The Google Meet link and final calendar invitation are being prepared.',
           )}
         </p>
       ) : status === 'ready' ? (
         cancelled ? (
           <p>
             {t(
-              'The Google calendar copy is cancelled. Cancelling does not revoke access to an existing Meet link.',
+              zoom
+                ? 'The original Zoom meeting has been cancelled.'
+                : 'The Google calendar copy is cancelled. Cancelling does not revoke access to an existing Meet link.',
             )}
           </p>
         ) : url ? (
           <p>
-            <a href={url} target="_blank" rel="noreferrer">
-              {t('Join Google Meet')}
+            <a href={url} target="_blank" rel="noreferrer noopener">
+              {t(zoom ? 'Join Zoom meeting' : 'Join Google Meet')}
             </a>
           </p>
         ) : (
@@ -161,14 +167,18 @@ export function ConferenceNotice({
           <p>
             {t(
               cancelled
-                ? 'Your booking is cancelled, but Google calendar cleanup needs the host’s attention.'
+                ? zoom
+                  ? 'Your booking is cancelled, but Zoom cleanup needs the host’s attention.'
+                  : 'Your booking is cancelled, but Google calendar cleanup needs the host’s attention.'
                 : 'Your time is reserved, but the meeting link needs the host’s attention. The final calendar invitation has not been sent.',
             )}
           </p>
           {ambiguous && (
             <p>
               {t(
-                'Google may have created the meeting. Rechecking only looks for that meeting and never creates a replacement.',
+                zoom
+                  ? 'Zoom may have created the meeting. The host must inspect their Zoom account and remove any orphan before replacing or rebooking. This booking will never create another meeting.'
+                  : 'Google may have created the meeting. Rechecking only looks for that meeting and never creates a replacement.',
               )}
             </p>
           )}
@@ -190,7 +200,9 @@ export function ConferenceNotice({
             current.conference.errorCode === 'permissions_missing') && (
             <p>
               {t(
-                'The host needs to reconnect the original Google Calendar account before retrying.',
+                zoom
+                  ? 'The host needs to reconnect the original Zoom meetings account before retrying.'
+                  : 'The host needs to reconnect the original Google Calendar account before retrying.',
               )}
             </p>
           )}
@@ -209,13 +221,16 @@ export function ConferenceNotice({
       {host &&
         current.conferenceCanRetry !== false &&
         status === 'failed' &&
+        !(zoom && ambiguous) &&
         (cancelled || Date.parse(current.start) > Date.now()) && (
           <button type="button" className="button button-small" onClick={retry} disabled={retrying}>
             {t(
               retrying
                 ? 'Requesting…'
                 : cancelled
-                  ? 'Retry Google calendar cleanup'
+                  ? zoom
+                    ? 'Retry Zoom cleanup'
+                    : 'Retry Google calendar cleanup'
                   : ambiguous
                     ? 'Recheck existing meeting'
                     : 'Retry meeting link',

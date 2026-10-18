@@ -278,4 +278,27 @@ export const common = {
   'an AI agent (MCP)': 'AI 代理（MCP）',
   '{event} with {host}': '与 {host} 的{event}',
   'Required hosts:': '必选主持人：',
+  'Zoom meeting update': 'Zoom 会议更新',
+  'Your booking is cancelled. The Zoom meeting update is pending.':
+    '预约已取消，Zoom 会议仍在更新。',
+  'Your time is reserved. The Zoom link and final calendar invitation are being prepared.':
+    '时段已为你保留，正在准备 Zoom 链接和最终日历邀请。',
+  'The original Zoom meeting has been cancelled.': '原 Zoom 会议已取消。',
+  'Join Zoom meeting': '加入 Zoom 会议',
+  'Your booking is cancelled, but Zoom cleanup needs the host’s attention.':
+    '预约已取消，但主持人仍需处理 Zoom 中的清理。',
+  'Zoom may have created the meeting. The host must inspect their Zoom account and remove any orphan before replacing or rebooking. This booking will never create another meeting.':
+    'Zoom 可能已创建会议。主持人必须检查自己的 Zoom 账号，并在替换或重新预约前删除可能遗留的会议。此预约不会再创建其他会议。',
+  'The host needs to reconnect the original Zoom meetings account before retrying.':
+    '主持人需要重新连接原 Zoom 会议账号，然后再重试。',
+  'Retry Zoom cleanup': '重试清理 Zoom',
+  'Automatic Zoom meetings are disabled on this instance.': '此实例未启用自动 Zoom 会议。',
+  'Automatic Zoom meetings are unavailable. Contact the host or choose another meeting type.':
+    '自动 Zoom 会议暂不可用。请联系主持人或选择其他活动类型。',
+  'Automatic Zoom supports individual meetings with exactly one host.':
+    '自动 Zoom 仅支持恰好一位主持人的单人会议。',
+  'The assigned host must configure Zoom in their own signed-in session.':
+    '指定的主持人必须登录自己的账号配置 Zoom。',
+  'Choose your own active Zoom account with meeting permissions. Reconnect it in Conference accounts if needed.':
+    '请选择自己已启用且具有会议权限的 Zoom 账号。需要时请在会议账号页面重新连接。',
 } as const
