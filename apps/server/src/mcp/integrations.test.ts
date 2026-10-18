@@ -273,6 +273,7 @@ describe.skipIf(!process.env.DATABASE_URL)('MCP integration discovery with real 
         'provider',
         'accountEmail',
         'status',
+        'lastError',
         'createdAt',
         'updatedAt',
         'syncAuthorized',
