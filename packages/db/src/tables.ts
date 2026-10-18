@@ -280,10 +280,15 @@ export interface BookingCalendarTargets {
 }
 
 export interface BookingConferenceNotifications {
+  attempts: Generated<number>;
   booking_id: string;
   delivered: Generated<boolean>;
   due_at: Generated<Timestamp>;
+  exhausted_at: Timestamp | null;
   kind: string;
+  last_error: string | null;
+  lease_id: string | null;
+  lease_until: Timestamp | null;
 }
 
 export interface BookingConferences {

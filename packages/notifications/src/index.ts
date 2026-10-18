@@ -1,7 +1,7 @@
 // Booking notifications (docs/notifications.md): the job that emails attendees and hosts
 // when a booking is confirmed, rescheduled or cancelled and before it starts, and the helper
 // the booking services call inside their transactions to queue those jobs.
-import { createHash, randomBytes } from 'node:crypto'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import type { Db, Json } from '@hourmere/db'
 import { defineJob, type EnqueueOptions, type KyselyTransactionLike } from '@hourmere/jobs'
 import {
@@ -392,6 +392,12 @@ class Overtaken extends Error {}
 /** An obsolete host recipient must not suppress the original invitee's failure notice. */
 class RecipientUnavailable extends Error {}
 
+/** Private worker fence, never an externally supplied send/force-send capability. */
+interface ConferenceNotificationClaim {
+  leaseId: string
+  attempt: number
+}
+
 /**
  * Sends one recipient's email once, with a narrow duplicate window. The row in
  * booking_notifications is inserted first and the transaction stays open while the mail
@@ -412,6 +418,7 @@ async function sendOnce(
   message: (manageToken: string | undefined) => MailMessage,
   clock: () => Temporal.Instant,
   signal: AbortSignal | undefined,
+  conferenceClaim: ConferenceNotificationClaim | undefined,
 ): Promise<'sent' | 'sent before' | 'overtaken' | 'recipient unavailable'> {
   try {
     return await deps.db.transaction().execute(async (trx) => {
@@ -461,6 +468,21 @@ async function sendOnce(
       ) {
         throw new Overtaken()
       }
+      if (
+        conferenceClaim &&
+        !(await trx
+          .selectFrom('booking_conference_notifications')
+          .select('booking_id')
+          .where('booking_id', '=', key.bookingId)
+          .where('kind', '=', key.kind)
+          .where('lease_id', '=', conferenceClaim.leaseId)
+          .where('attempts', '=', conferenceClaim.attempt)
+          .where('lease_until', '>', new Date(clock().epochMilliseconds))
+          .where('delivered', '=', false)
+          .where('exhausted_at', 'is', null)
+          .executeTakeFirst())
+      )
+        throw new Overtaken()
       // An abort (worker shutdown) rejects here and rolls the row back for another worker.
       await deps.mailer.send(message(token), { signal })
       return 'sent'
@@ -488,7 +510,13 @@ export async function sendBookingNotification(
   deps: NotificationDeps,
   bookingId: string,
   kind: NotificationKind,
-  { signal }: { signal?: AbortSignal | undefined } = {},
+  {
+    signal,
+    conferenceClaim,
+  }: {
+    signal?: AbortSignal | undefined
+    conferenceClaim?: ConferenceNotificationClaim | undefined
+  } = {},
 ): Promise<void> {
   const clock = deps.now ?? (() => Temporal.Now.instant())
   const now = clock()
@@ -500,12 +528,14 @@ export async function sendBookingNotification(
   const invitee =
     attendees.find((a) => a.isBooker) ?? (kind === 'conference_failed' ? undefined : attendees[0])
   const log = deps.log ?? ((line: string) => console.warn(line))
-  // Nobody to send on behalf of: no host with a verified address. Worth a line, since then
-  // the invitee hears nothing either.
+  // No trusted organizer means no REQUEST. Automatic roots must retain their durable
+  // pending notice instead of claiming delivery, so restored proof may still release it.
   if (!organizer && kind !== 'conference_failed' && kind !== 'cancelled') {
     log(
       `${new Date().toISOString()} WARN ${BOOKING_NOTIFICATION_JOB}: booking ${bookingId} has no host with a verified email address; not sending its ${kind} emails`,
     )
+    if (data.automaticConference)
+      throw new NotificationRetryError('A verified conference organizer is unavailable')
     return
   }
   // Nobody it is for.
@@ -613,6 +643,7 @@ export async function sendBookingNotification(
         r.message,
         clock,
         signal,
+        conferenceClaim,
       )
       // A later change (e.g. a cancellation) sends its own email.
       if (outcome === 'overtaken') return
@@ -682,55 +713,132 @@ export async function conferenceNotificationAllowed(
   )
 }
 
-/** A durable outbox is retried independently of legacy exclusive notification keys. */
+// An initial attempt plus twelve retries, counted durably across cron jobs and crashes.
+const CONFERENCE_NOTIFICATION_ATTEMPTS = 13
+const CONFERENCE_NOTIFICATION_LEASE_MS = 600_000
+const CONFERENCE_NOTIFICATION_SEND_MS = 240_000
+const conferenceRetryDelay = (attempt: number) => Math.min(60_000 * 2 ** (attempt - 1), 3_600_000)
+
+function logConferenceNotificationExhausted(
+  deps: NotificationDeps,
+  row: { booking_id: string; kind: string },
+) {
+  const log = deps.log ?? ((line: string) => console.warn(line))
+  log(
+    `WARN conference-notification-dispatch: booking ${row.booking_id} kind ${row.kind} exhausted its delivery budget`,
+  )
+}
+
+/** Claim only the outbox row; commit before any recipient transaction or network I/O. */
+async function claimConferenceNotification(deps: NotificationDeps, now: Date) {
+  return deps.db.transaction().execute(async (trx) => {
+    const row = await trx
+      .selectFrom('booking_conference_notifications as n')
+      .innerJoin('bookings as b', 'b.id', 'n.booking_id')
+      .innerJoin('booking_conferences as c', 'c.booking_id', 'b.id')
+      .select(['n.booking_id', 'n.kind', 'n.attempts'])
+      .where('n.delivered', '=', false)
+      .where('n.exhausted_at', 'is', null)
+      .where('n.attempts', '<', CONFERENCE_NOTIFICATION_ATTEMPTS)
+      .where('n.due_at', '<=', now)
+      .where((eb) => eb.or([eb('n.lease_until', 'is', null), eb('n.lease_until', '<=', now)]))
+      .where('b.status', '=', 'confirmed')
+      .where((eb) => eb.or([eb('n.kind', '=', 'conference_failed'), eb('b.start_at', '>', now)]))
+      .where((eb) =>
+        eb.or([
+          eb.and([eb('n.kind', '=', 'conference_failed'), eb('c.state', '=', 'failed')]),
+          eb.and([eb('n.kind', '!=', 'conference_failed'), eb('c.state', '=', 'ready')]),
+        ]),
+      )
+      .orderBy('n.due_at')
+      .orderBy('n.booking_id')
+      .orderBy('n.kind')
+      .limit(1)
+      .forUpdate('n')
+      .skipLocked()
+      .executeTakeFirst()
+    if (!row) return
+    const attempt = row.attempts + 1
+    const leaseId = randomUUID()
+    await trx
+      .updateTable('booking_conference_notifications')
+      .set({
+        attempts: attempt,
+        lease_id: leaseId,
+        lease_until: new Date(now.getTime() + CONFERENCE_NOTIFICATION_LEASE_MS),
+        due_at: new Date(now.getTime() + conferenceRetryDelay(attempt)),
+      })
+      .where('booking_id', '=', row.booking_id)
+      .where('kind', '=', row.kind)
+      .execute()
+    return { ...row, attempt, leaseId }
+  })
+}
+
+/** A durable, bounded per-row outbox independent of legacy exclusive notification keys. */
 export async function dispatchConferenceNotifications(
   deps: NotificationDeps,
   signal?: AbortSignal,
 ) {
-  const now = new Date((deps.now?.() ?? Temporal.Now.instant()).epochMilliseconds)
-  const rows = await deps.db
-    .selectFrom('booking_conference_notifications as n')
-    .innerJoin('bookings as b', 'b.id', 'n.booking_id')
-    .innerJoin('booking_conferences as c', 'c.booking_id', 'b.id')
-    .select(['n.booking_id', 'n.kind'])
-    .where('n.delivered', '=', false)
-    .where('n.due_at', '<=', now)
-    .where('b.status', '=', 'confirmed')
-    .where((eb) => eb.or([eb('n.kind', '=', 'conference_failed'), eb('b.start_at', '>', now)]))
-    .where((eb) =>
-      eb.or([
-        eb.and([eb('n.kind', '=', 'conference_failed'), eb('c.state', '=', 'failed')]),
-        eb.and([eb('n.kind', '!=', 'conference_failed'), eb('c.state', '=', 'ready')]),
-      ]),
+  const clock = () => new Date((deps.now?.() ?? Temporal.Now.instant()).epochMilliseconds)
+  signal?.throwIfAborted()
+  // A crashed last attempt already consumed the budget. Its expired claim becomes an
+  // inspectable failure, not permission for a fourteenth send or a fabricated receipt.
+  const expiredAt = clock()
+  const expired = await sql<{ booking_id: string; kind: string }>`
+    WITH expired AS (
+      SELECT booking_id,kind FROM booking_conference_notifications
+       WHERE NOT delivered AND exhausted_at IS NULL
+         AND attempts >= ${CONFERENCE_NOTIFICATION_ATTEMPTS} AND lease_until <= ${expiredAt}
+       ORDER BY lease_until,booking_id,kind LIMIT 100 FOR UPDATE SKIP LOCKED
     )
-    .orderBy('n.due_at')
-    .limit(100)
-    .execute()
-  for (const row of rows) {
+    UPDATE booking_conference_notifications AS n
+       SET exhausted_at=${expiredAt},last_error='attempt_expired',lease_id=NULL,lease_until=NULL
+      FROM expired WHERE n.booking_id=expired.booking_id AND n.kind=expired.kind
+    RETURNING n.booking_id,n.kind`.execute(deps.db)
+  for (const row of expired.rows) logConferenceNotificationExhausted(deps, row)
+  for (let batch = 0; batch < 100; batch++) {
     signal?.throwIfAborted()
+    const row = await claimConferenceNotification(deps, clock())
+    if (!row) return
     const kind = row.kind as NotificationKind
-    // Waiting rows remain durable. Stale rows can be marked done: the actual send gate
-    // suppresses a cancelled/superseded booking and a newer transition owns its own row.
-    if (!(await conferenceNotificationAllowed(deps.db, row.booking_id, kind))) continue
-    try {
-      await sendBookingNotification(deps, row.booking_id, kind, { signal })
-    } catch (error) {
-      if (!(error instanceof NotificationRetryError)) throw error
-      // One temporarily refused recipient must not starve other bookings in this batch.
-      await deps.db
+    const finish = () =>
+      deps.db
         .updateTable('booking_conference_notifications')
-        .set({ due_at: new Date(now.getTime() + 60_000) })
         .where('booking_id', '=', row.booking_id)
         .where('kind', '=', row.kind)
-        .execute()
-      continue
+        .where('lease_id', '=', row.leaseId)
+        .where('attempts', '=', row.attempt)
+        .where('exhausted_at', 'is', null)
+        .where('delivered', '=', false)
+    let errorCode: 'recipient_retry' | 'delivery_failed' | 'interrupted' | undefined
+    const timeout = AbortSignal.timeout(CONFERENCE_NOTIFICATION_SEND_MS)
+    try {
+      await sendBookingNotification(deps, row.booking_id, kind, {
+        signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+        conferenceClaim: { leaseId: row.leaseId, attempt: row.attempt },
+      })
+    } catch (error) {
+      // Never retain the SMTP/provider/error body: it may contain private recipients.
+      errorCode = signal?.aborted
+        ? 'interrupted'
+        : error instanceof NotificationRetryError
+          ? 'recipient_retry'
+          : 'delivery_failed'
     }
-    await deps.db
-      .updateTable('booking_conference_notifications')
-      .set({ delivered: true })
-      .where('booking_id', '=', row.booking_id)
-      .where('kind', '=', row.kind)
+    const exhausted = errorCode !== undefined && row.attempt >= CONFERENCE_NOTIFICATION_ATTEMPTS
+    const result = await finish()
+      .set({
+        delivered: errorCode === undefined,
+        last_error: errorCode ?? null,
+        exhausted_at: exhausted ? clock() : null,
+        lease_id: null,
+        lease_until: null,
+      })
+      .returning('booking_id')
       .execute()
+    if (exhausted && result.length) logConferenceNotificationExhausted(deps, row)
+    signal?.throwIfAborted()
   }
 }
 export function conferenceNotificationDispatchJob(deps: NotificationDeps) {
