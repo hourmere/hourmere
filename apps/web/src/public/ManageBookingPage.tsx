@@ -1,5 +1,6 @@
 import { type FormEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router'
+import { ConferenceNotice } from '../components/ConferenceNotice.tsx'
 import { usePageTitle } from '../hooks.ts'
 import { useI18n } from '../i18n/runtime.tsx'
 import { msg, type UiText } from '../i18n/translate.ts'
@@ -150,6 +151,7 @@ function ManageBooking({ token: initialToken, action }: { token: string; action:
       token={token}
       newToken={newToken}
       initialAction={action}
+      onUpdated={(fresh) => setBooking((previous) => previous && { ...previous, ...fresh })}
       onCancelled={(cancelled) => setBooking({ ...booking, ...cancelled })}
       onRescheduled={(next, nextToken) => {
         setBooking({ ...booking, ...next })
@@ -180,6 +182,7 @@ function ManageView({
   initialAction,
   onCancelled,
   onRescheduled,
+  onUpdated,
   onStale,
 }: {
   booking: ManagedBooking
@@ -188,6 +191,7 @@ function ManageView({
   initialAction: Action | null
   onCancelled: (booking: ManagedBooking) => void
   onRescheduled: (booking: ManagedBooking, token: string | null) => void
+  onUpdated: (booking: ManagedBooking) => void
   /** Loads the booking again; null when that fails too. */
   onStale: () => Promise<ManagedBooking | null>
 }) {
@@ -285,6 +289,12 @@ function ManageView({
 
   return (
     <PublicLayout wide={mode.kind === 'reschedule'}>
+      <ConferenceNotice
+        key={booking.id}
+        booking={booking}
+        manageToken={token}
+        onChange={(fresh) => onUpdated({ ...booking, ...fresh })}
+      />
       {mode.kind === 'reschedule' ? (
         <div className="reschedule">
           <div className="reschedule-header">

@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router'
 import { api, type Schemas, unwrap } from '../../api/client.ts'
 import { errorMessage, RequestError } from '../../api/errors.ts'
 import { type Booking, isNotFound, loadProfile } from '../../api/resources.ts'
+import { ConferenceNotice } from '../../components/ConferenceNotice.tsx'
 import { Field } from '../../components/forms.tsx'
 import { zoned } from '../../format.ts'
 import { useLoad, usePageTitle } from '../../hooks.ts'
@@ -137,6 +138,7 @@ function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loa
         {ui(status)}
       </p>
 
+      <ConferenceNotice key={booking.id} booking={booking} host onChange={setBooking} />
       <section className="panel" aria-labelledby="when-heading">
         <h2 id="when-heading">{t('When')}</h2>
         <p className="when">

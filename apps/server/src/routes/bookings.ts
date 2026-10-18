@@ -219,7 +219,10 @@ export function bookingRoutes({
         middleware: caller,
         tags: ['Bookings'],
         summary: 'Retry safe conference reconciliation for an assigned host',
-        request: { params: z.object({ id: z.uuid() }), body:{required:true,content:json(z.strictObject({}))} },
+        request: {
+          params: z.object({ id: z.uuid() }),
+          body: { required: true, content: json(z.strictObject({})) },
+        },
         responses: {
           204: { description: 'Durable reconciliation requested' },
           400: invalidId,

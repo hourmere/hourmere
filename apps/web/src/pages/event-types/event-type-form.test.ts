@@ -78,6 +78,24 @@ describe('question identity', () => {
 })
 
 describe('validateDraft', () => {
+  it('keeps provider labels inert until explicit automatic opt-in, and preserves that opt-in through a round trip', () => {
+    const legacy = draftFromEventType(eventType({ location: { kind: 'google_meet' } }))
+    expect(legacy.autoCreateMeet).toBe(false)
+    expect(toInput(legacy).location).toEqual({ kind: 'google_meet' })
+    const enabled = draftFromEventType(
+      eventType({ location: { kind: 'google_meet', autoCreate: true } }),
+    )
+    expect(enabled.autoCreateMeet).toBe(true)
+    expect(toInput({ ...enabled, title: 'Renamed' }).location).toEqual({
+      kind: 'google_meet',
+      autoCreate: true,
+    })
+    expect(toInput({ ...enabled, locationKind: 'zoom' }).location).toEqual({ kind: 'zoom' })
+    expect(renderedDraftErrors({ ...enabled, schedulingType: 'collective' })).toHaveProperty(
+      'location-kind',
+      'Automatic Google Meet supports individual meetings with one host only.',
+    )
+  })
   it('accepts the defaults with a title and slug', () => {
     expect(renderedDraftErrors({ ...emptyDraft(), title: 'Intro', slug: 'intro' })).toEqual({})
   })

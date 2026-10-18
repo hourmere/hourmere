@@ -1,7 +1,7 @@
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createJobs } from '@hourmere/jobs'
-import { createLogMailer, MailRejectedError, type MailMessage } from '@hourmere/mail'
+import { createLogMailer, type MailMessage, MailRejectedError } from '@hourmere/mail'
 import {
   cancelManagedBooking,
   createEventType,
@@ -18,7 +18,7 @@ import {
   dispatchConferenceNotifications,
   sendBookingNotification,
 } from '../../notifications/src/index.ts'
-import { writeBookingCalendar } from './booking-events.ts'
+import { calendarBookingNotifier, writeBookingCalendar } from './booking-events.ts'
 import { retryBookingConference, writeBookingConference } from './conferences.ts'
 import { GOOGLE_CALENDAR_SYNC_SCOPES } from './google.ts'
 import {
@@ -134,7 +134,12 @@ describe.skipIf(!serverUrl)('automatic Meet durable flow (real PostgreSQL)', () 
         values.set(item.id, item)
         return Response.json(item)
       }
-      if (url.searchParams.has('timeMin') || url.searchParams.has('syncToken')) return Response.json({items:[...values.values()],nextSyncToken:'meet-busy-cursor',timeZone:'UTC'})
+      if (url.searchParams.has('timeMin') || url.searchParams.has('syncToken'))
+        return Response.json({
+          items: [...values.values()],
+          nextSyncToken: 'meet-busy-cursor',
+          timeZone: 'UTC',
+        })
       const id = url.pathname.split('/').at(-1) as string
       if (init.method === 'PATCH') {
         const item = {
@@ -173,7 +178,7 @@ describe.skipIf(!serverUrl)('automatic Meet durable flow (real PostgreSQL)', () 
         }
       : {}),
   })
-  const book = (key = 'same-key', context = ctx, start=START, email='synthetic@example.com') =>
+  const book = (key = 'same-key', context = ctx, start = START, email = 'synthetic@example.com') =>
     createPublicBooking(context, {
       handle: 'meet-host',
       slug: 'meet',
@@ -232,6 +237,12 @@ describe.skipIf(!serverUrl)('automatic Meet durable flow (real PostgreSQL)', () 
     expect(retry.replayed).toBe(true)
     expect(retry.manageToken === null).toBe(true)
     expect(await db.selectFrom('booking_conferences').selectAll().execute()).toHaveLength(1)
+    await db.transaction().execute(async (trx) => {
+      await calendarBookingNotifier({ enqueue: async () => null })(trx, { bookingId: b.booking.id })
+    })
+    expect(await db.selectFrom('booking_calendar_targets').select('calendar_id').execute()).toEqual(
+      [{ calendar_id: calendarId }],
+    )
     await writeBookingCalendar(deps, b.booking.id)
     expect(imports()).toHaveLength(0)
     await writeBookingConference(deps, b.booking.id)
@@ -482,22 +493,55 @@ describe.skipIf(!serverUrl)('automatic Meet durable flow (real PostgreSQL)', () 
     expect(sent.every((m) => m.attachments?.[0]?.content.includes('METHOD:CANCEL'))).toBe(true)
     expect(provider.controls.storedEvents.get('meet-event')?.status).toBe('cancelled')
   })
-  it.each([false,true])('pending conference mirror does not block an overlapping reschedule (lost response: %s)',async lost=>{
-    await db.updateTable('event_types').set({slot_step_minutes:15}).execute()
-    await configureCalendar(deps,owner,calendarId,true)
-    await syncGoogleCalendar(deps,calendarId)
-    const b=await book()
-    if(lost){const hook=provider.controls.eventHook as NonNullable<typeof provider.controls.eventHook>;provider.controls.eventHook=async(u,i)=>{if(i.method==='POST'){await hook(u,i);throw new TypeError('synthetic lost response')}return hook(u,i)}}
-    await writeBookingConference(deps,b.booking.id)
-    await syncGoogleCalendar(deps,calendarId)
-    if(lost){await retryBookingConference({...ctx,principal:owner},b.booking.id);await writeBookingConference(deps,b.booking.id)}
-    expect((await row()).state).toBe('pending')
-    expect((await db.selectFrom('booking_calendar_events').selectAll().where('booking_id','=',b.booking.id).executeTakeFirstOrThrow()).external_event_id).toBe('meet-event')
-    expect(await db.selectFrom('calendar_busy').selectAll().where('external_event_id','=','meet-event').execute()).toHaveLength(1)
-    const moved=await rescheduleManagedBooking(ctx,b.manageToken as string,{start:Temporal.Instant.from('2030-11-04T09:15:00Z')})
-    expect(moved.booking.start).toBe('2030-11-04T09:15:00.000Z')
-    await sendBookingNotification(mail(),moved.booking.id,'rescheduled');expect(sent).toHaveLength(0);expect(imports()).toHaveLength(1)
-  })
+  it.each([false, true])(
+    'pending conference mirror does not block an overlapping reschedule (lost response: %s)',
+    async (lost) => {
+      await db.updateTable('event_types').set({ slot_step_minutes: 15 }).execute()
+      await configureCalendar(deps, owner, calendarId, true)
+      await syncGoogleCalendar(deps, calendarId)
+      const b = await book()
+      if (lost) {
+        const hook = provider.controls.eventHook as NonNullable<typeof provider.controls.eventHook>
+        provider.controls.eventHook = async (u, i) => {
+          if (i.method === 'POST') {
+            await hook(u, i)
+            throw new TypeError('synthetic lost response')
+          }
+          return hook(u, i)
+        }
+      }
+      await writeBookingConference(deps, b.booking.id)
+      await syncGoogleCalendar(deps, calendarId)
+      if (lost) {
+        await retryBookingConference({ ...ctx, principal: owner }, b.booking.id)
+        await writeBookingConference(deps, b.booking.id)
+      }
+      expect((await row()).state).toBe('pending')
+      expect(
+        (
+          await db
+            .selectFrom('booking_calendar_events')
+            .selectAll()
+            .where('booking_id', '=', b.booking.id)
+            .executeTakeFirstOrThrow()
+        ).external_event_id,
+      ).toBe('meet-event')
+      expect(
+        await db
+          .selectFrom('calendar_busy')
+          .selectAll()
+          .where('external_event_id', '=', 'meet-event')
+          .execute(),
+      ).toHaveLength(1)
+      const moved = await rescheduleManagedBooking(ctx, b.manageToken as string, {
+        start: Temporal.Instant.from('2030-11-04T09:15:00Z'),
+      })
+      expect(moved.booking.start).toBe('2030-11-04T09:15:00.000Z')
+      await sendBookingNotification(mail(), moved.booking.id, 'rescheduled')
+      expect(sent).toHaveLength(0)
+      expect(imports()).toHaveLength(1)
+    },
+  )
   it('disconnect preserves intent and ready URL, but later moves fail visibly without changing destination', async () => {
     const b = await ready()
     const before = await row()
@@ -583,33 +627,100 @@ describe.skipIf(!serverUrl)('automatic Meet durable flow (real PostgreSQL)', () 
     expect((await row()).error_code).toBeNull()
     expect(imports()).toHaveLength(0)
   })
-  it('cancel with an existing remote event and revoked credentials reports unresolved cleanup while still notifying',async()=>{
-    const b=await ready();provider.controls.tokenStatus=400
-    await cancelManagedBooking(ctx,b.manageToken as string);await sendBookingNotification(mail(),b.booking.id,'cancelled');expect(sent).toHaveLength(2)
-    await writeBookingConference(deps,b.booking.id);expect((await row()).state).toBe('failed');expect((await row()).error_code).toBe('needs_reauth');expect(provider.controls.storedEvents.get('meet-event')?.status).toBe('confirmed')
-  })
-  it('meeting start stops provider creation and final invites, but sends a terminal logistical failure notice',async()=>{
-    const b=await book();const late=Temporal.Instant.from(START).add({minutes:1})
-    await writeBookingConference({...deps,now:()=>late.epochMilliseconds},b.booking.id)
-    expect((await row()).error_code).toBe('meeting_started');expect(imports()).toHaveLength(0)
-    await sendBookingNotification({...mail(),now:()=>late},b.booking.id,'confirmed');expect(sent).toHaveLength(0)
-    await dispatchConferenceNotifications({...mail(),now:()=>late});expect(sent).toHaveLength(2);expect(sent.every(m=>!m.attachments?.length)).toBe(true)
-  })
-  it('one temporarily refused invitee does not starve another ready booking outbox',async()=>{
-    const first=await book('first');const second=await book('second',ctx,'2030-11-04T11:00:00Z','second@example.com');response='success'
-    // Independent roots must have independent provider identities and meeting links.
-    const hook=provider.controls.eventHook as NonNullable<typeof provider.controls.eventHook>
-    provider.controls.eventHook=async(u,i)=>{
-      if(i.method==='POST'){const v=JSON.parse(String(i.body));const item={...v,id:v.iCalUID.startsWith(first.booking.id)?'first-event':'second-event',conferenceData:conference()};provider.controls.storedEvents.set(item.id,item);return Response.json(item)}
-      return hook(u,i)
+  it('cancel with an existing remote event and revoked credentials reports unresolved cleanup while still notifying', async () => {
+    const b = await ready()
+    provider.controls.tokenStatus = 400
+    await cancelManagedBooking(ctx, b.manageToken as string)
+    await sendBookingNotification(mail(), b.booking.id, 'cancelled')
+    expect(sent).toHaveLength(2)
+    await writeBookingConference(deps, b.booking.id)
+    expect((await row()).state).toBe('failed')
+    expect((await row()).error_code).toBe('needs_reauth')
+    expect(provider.controls.storedEvents.get('meet-event')?.status).toBe('confirmed')
+    // Reconnecting the same identity permits explicit cleanup retry, even after the
+    // meeting start. It never grants authority to create another event.
+    provider.controls.tokenStatus = 200
+    await db.updateTable('calendar_connections').set({ status: 'active' }).execute()
+    const late = {
+      ...ctx,
+      principal: owner,
+      now: () => Temporal.Instant.from(START).add({ hours: 1 }),
     }
-    await writeBookingConference(deps,first.booking.id);await writeBookingConference(deps,second.booking.id)
-    let refuse=true
-    const config={...mail(),mailer:{send:async(m:MailMessage)=>{if(refuse&&m.to==='synthetic@example.com')throw new MailRejectedError({responseCode:450,enhancedCode:'4.2.0',atRecipient:true});sent.push(m)}}}
+    await retryBookingConference(late, b.booking.id)
+    await writeBookingConference({ ...deps, now: () => late.now().epochMilliseconds }, b.booking.id)
+    expect((await row()).state).toBe('ready')
+    expect(provider.controls.storedEvents.get('meet-event')?.status).toBe('cancelled')
+    expect(imports()).toHaveLength(1)
+    await dispatchConferenceNotifications(mail())
+    expect(sent).toHaveLength(2)
+  })
+  it('meeting start stops provider creation and final invites, but sends a terminal logistical failure notice', async () => {
+    const b = await book()
+    const late = Temporal.Instant.from(START).add({ minutes: 1 })
+    await writeBookingConference({ ...deps, now: () => late.epochMilliseconds }, b.booking.id)
+    expect((await row()).error_code).toBe('meeting_started')
+    expect(imports()).toHaveLength(0)
+    await sendBookingNotification({ ...mail(), now: () => late }, b.booking.id, 'confirmed')
+    expect(sent).toHaveLength(0)
+    await dispatchConferenceNotifications({ ...mail(), now: () => late })
+    expect(sent).toHaveLength(2)
+    expect(sent.every((m) => !m.attachments?.length)).toBe(true)
+  })
+  it('one temporarily refused invitee does not starve another ready booking outbox', async () => {
+    const first = await book('first')
+    const second = await book('second', ctx, '2030-11-04T11:00:00Z', 'second@example.com')
+    response = 'success'
+    // Independent roots must have independent provider identities and meeting links.
+    const hook = provider.controls.eventHook as NonNullable<typeof provider.controls.eventHook>
+    provider.controls.eventHook = async (u, i) => {
+      if (i.method === 'POST') {
+        const v = JSON.parse(String(i.body))
+        const item = {
+          ...v,
+          id: v.iCalUID.startsWith(first.booking.id) ? 'first-event' : 'second-event',
+          conferenceData: conference(),
+        }
+        provider.controls.storedEvents.set(item.id, item)
+        return Response.json(item)
+      }
+      return hook(u, i)
+    }
+    await writeBookingConference(deps, first.booking.id)
+    await writeBookingConference(deps, second.booking.id)
+    let refuse = true
+    const config = {
+      ...mail(),
+      mailer: {
+        send: async (m: MailMessage) => {
+          if (refuse && m.to === 'synthetic@example.com')
+            throw new MailRejectedError({
+              responseCode: 450,
+              enhancedCode: '4.2.0',
+              atRecipient: true,
+            })
+          sent.push(m)
+        },
+      },
+    }
     await dispatchConferenceNotifications(config)
     expect(sent).toHaveLength(3)
-    expect((await db.selectFrom('booking_conference_notifications').select('delivered').where('booking_id','=',second.booking.id).where('kind','=','confirmed').executeTakeFirstOrThrow()).delivered).toBe(true)
-    refuse=false;await db.updateTable('booking_conference_notifications').set({due_at:future()}).where('booking_id','=',first.booking.id).execute();await dispatchConferenceNotifications(config)
+    expect(
+      (
+        await db
+          .selectFrom('booking_conference_notifications')
+          .select('delivered')
+          .where('booking_id', '=', second.booking.id)
+          .where('kind', '=', 'confirmed')
+          .executeTakeFirstOrThrow()
+      ).delivered,
+    ).toBe(true)
+    refuse = false
+    await db
+      .updateTable('booking_conference_notifications')
+      .set({ due_at: future() })
+      .where('booking_id', '=', first.booking.id)
+      .execute()
+    await dispatchConferenceNotifications(config)
     expect(sent).toHaveLength(4)
   })
   it('calendar400 does not revoke credentials while token400 does, with no upstream body exposure', async () => {

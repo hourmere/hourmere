@@ -1,5 +1,52 @@
 // Public/shared UI messages. Admin messages live in a lazy catalog.
 export const common = {
+  'Automatic meeting links are unavailable. Contact the host or choose another meeting type.':
+    '自动会议链接暂不可用，请联系主持人或选择其他活动类型。',
+  'Meeting link': '会议链接',
+  'Google calendar update': 'Google 日历更新',
+  'Your booking is cancelled. The Google calendar update is pending.':
+    '预约已取消，Google 日历仍在更新。',
+  'Your time is reserved. The Google Meet link and final calendar invitation are being prepared.':
+    '时段已为你保留，正在准备 Google Meet 链接和最终日历邀请。',
+  'The Google calendar copy is cancelled. Cancelling does not revoke access to an existing Meet link.':
+    'Google 日历中的副本已取消。取消预约不会撤销现有 Meet 链接的访问权限。',
+  'Join Google Meet': '加入 Google Meet',
+  'The meeting link could not be displayed. Check its status or contact the host.':
+    '无法显示会议链接。请检查状态或联系主持人。',
+  'Your booking is cancelled, but Google calendar cleanup needs the host’s attention.':
+    '预约已取消，但主持人仍需处理 Google 日历中的清理。',
+  'Your time is reserved, but the meeting link needs the host’s attention. The final calendar invitation has not been sent.':
+    '时段已为你保留，但会议链接需要主持人处理，最终日历邀请尚未发送。',
+  'Google may have created the meeting. Rechecking only looks for that meeting and never creates a replacement.':
+    'Google 可能已创建会议。重新检查只会查找该会议，不会另外创建。',
+  'The original Google calendar is unavailable. This booking will not switch to a different account or calendar.':
+    '原 Google 日历不可用，此预约不会切换到其他账号或日历。',
+  'The host needs to reconnect the original Google Calendar account before retrying.':
+    '主持人需要重新连接原 Google 日历账号，然后再重试。',
+  'Could not check the meeting link. Your booking has not been changed.':
+    '无法检查会议链接，预约未被更改。',
+  'Could not request a safe retry. Check the booking status before trying again.':
+    '无法提交安全重试。请先检查预约状态，再决定是否重试。',
+  'Requesting…': '正在请求…',
+  'Retry Google calendar cleanup': '重试清理 Google 日历',
+  'Recheck existing meeting': '重新查找现有会议',
+  'Retry meeting link': '重试生成会议链接',
+  'Check meeting link status': '检查会议链接状态',
+  'Use the booking or failure email to check the meeting link.':
+    '请通过预约邮件或失败通知中的链接检查会议状态。',
+  'Time reserved; meeting link pending': '时段已保留，会议链接待生成',
+  'Time reserved; meeting link needs attention': '时段已保留，会议链接需要处理',
+  'Automatic Google Meet': '自动创建 Google Meet',
+  'Create a unique Google Meet link for each booking': '为每次预约创建独立的 Google Meet 链接',
+  'The assigned individual host must connect an owned, Meet-capable Google calendar. Final invitations wait for the link.':
+    '指定的单人主持人须连接支持 Meet 的自有 Google 日历，链接生成后才会发送最终邀请。',
+  'Automatic creation is unavailable on this instance or meeting mode. You can keep the provider label or use your own meeting link.':
+    '此实例或会议模式不支持自动创建。你可以保留服务名称，或使用自己的会议链接。',
+  'Google Meet (provider label only)': 'Google Meet（仅显示服务名称）',
+  'Zoom (provider label only)': 'Zoom（仅显示服务名称）',
+  'Automatic Google Meet supports individual meetings with one host only.':
+    '自动 Google Meet 目前仅支持一位主持人的单人会议。',
+
   Calendar: '日历',
   'Go to Hourmere': '前往 Hourmere',
   'Go to your event types': '前往你的活动类型',

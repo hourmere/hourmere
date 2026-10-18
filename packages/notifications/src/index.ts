@@ -661,7 +661,7 @@ export async function dispatchConferenceNotifications(
     .where('n.delivered', '=', false)
     .where('n.due_at', '<=', now)
     .where('b.status', '=', 'confirmed')
-    .where(eb=>eb.or([eb('n.kind','=','conference_failed'),eb('b.start_at','>',now)]))
+    .where((eb) => eb.or([eb('n.kind', '=', 'conference_failed'), eb('b.start_at', '>', now)]))
     .where((eb) =>
       eb.or([
         eb.and([eb('n.kind', '=', 'conference_failed'), eb('c.state', '=', 'failed')]),
@@ -679,10 +679,15 @@ export async function dispatchConferenceNotifications(
     if (!(await conferenceNotificationAllowed(deps.db, row.booking_id, kind))) continue
     try {
       await sendBookingNotification(deps, row.booking_id, kind, { signal })
-    } catch(error) {
+    } catch (error) {
       if (!(error instanceof NotificationRetryError)) throw error
       // One temporarily refused recipient must not starve other bookings in this batch.
-      await deps.db.updateTable('booking_conference_notifications').set({due_at:new Date(now.getTime()+60_000)}).where('booking_id','=',row.booking_id).where('kind','=',row.kind).execute()
+      await deps.db
+        .updateTable('booking_conference_notifications')
+        .set({ due_at: new Date(now.getTime() + 60_000) })
+        .where('booking_id', '=', row.booking_id)
+        .where('kind', '=', row.kind)
+        .execute()
       continue
     }
     await deps.db

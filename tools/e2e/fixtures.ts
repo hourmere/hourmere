@@ -9,8 +9,18 @@ import { fileURLToPath } from 'node:url'
 import { test as base, expect, type Locator, type Page } from '@playwright/test'
 import { type RunningServer, startServer } from '../../apps/server/src/server.ts'
 import { createAuth, createAuthPool } from '../../packages/auth/src/index.ts'
+import { writeBookingConference } from '../../packages/calendars/src/conferences.ts'
+import { encryptCredential } from '../../packages/calendars/src/credentials.ts'
+import { GOOGLE_CALENDAR_SYNC_SCOPES } from '../../packages/calendars/src/google.ts'
+import { tokenAad } from '../../packages/calendars/src/index.ts'
+import { fakeGoogle, TEST_CALENDAR_KEY } from '../../packages/calendars/src/testing.ts'
 import { createDb, createPool } from '../../packages/db/src/index.ts'
 import { createTestDatabase } from '../../packages/db/src/testing.ts'
+import type { MailMessage } from '../../packages/mail/src/index.ts'
+import {
+  dispatchConferenceNotifications,
+  sendBookingNotification,
+} from '../../packages/notifications/src/index.ts'
 import { createFixtures } from '../../packages/scheduling/src/testing.ts'
 
 async function listenLoopback(server: SocketServer): Promise<number> {
@@ -37,6 +47,18 @@ interface FixtureApp {
   personalPath: string
   teamPath: string
   collectivePath: string
+  meetPath: string
+  advanceMeet: (state: 'pending' | 'success' | 'failure' | 'lost') => Promise<void>
+  meetState: () => Promise<{
+    imports: number
+    rows: number
+    requests: number
+    cancellations: number
+    failures: number
+    linkedRequests: boolean
+    rootUidPreserved: boolean
+    hostBookingPath: string
+  }>
   hostCounts: () => Promise<number[]>
   rows: () => Promise<{ source: string; status: string }[]>
   authorizeHost: (teamRole?: 'owner' | 'member') => Promise<void>
@@ -49,7 +71,12 @@ interface FixtureApp {
     originalFingerprintPreserved: boolean
   }>
 }
-export const test = base.extend<{ app: FixtureApp; suppressFailureDom: undefined }>({
+export const test = base.extend<{
+  app: FixtureApp
+  suppressFailureDom: undefined
+  automaticMeet: boolean
+}>({
+  automaticMeet: [false, { option: true }],
   suppressFailureDom: [
     async ({ context }, use, testInfo) => {
       // Depending on context runs this teardown before its artifact finalization.
@@ -64,7 +91,7 @@ export const test = base.extend<{ app: FixtureApp; suppressFailureDom: undefined
     },
     { auto: true },
   ],
-  app: async ({ context }, use) => {
+  app: async ({ context, automaticMeet }, use) => {
     const bootstrap = process.env.HOURMERE_E2E_BOOTSTRAP_URL
     if (!bootstrap)
       throw new Error(
@@ -86,6 +113,98 @@ export const test = base.extend<{ app: FixtureApp; suppressFailureDom: undefined
         f = createFixtures(db),
         host = await f.host({ handle: 'fixture-host', name: 'Fixture Host', timeZone: 'UTC' })
       await f.schedule(host.userId, { timeZone: 'UTC' })
+      const provider = fakeGoogle(),
+        sent: MailMessage[] = []
+      let meetResponse: 'pending' | 'success' | 'failure' | 'lost' = 'pending'
+      const join = 'https://meet.google.com/abc-defg-hij'
+      const conferenceData = () => ({
+        createRequest: {
+          status: { statusCode: meetResponse === 'lost' ? 'pending' : meetResponse },
+        },
+        conferenceSolution: { key: { type: 'hangoutsMeet' } },
+        ...(meetResponse === 'success' && {
+          entryPoints: [{ entryPointType: 'video', uri: join }],
+        }),
+      })
+      provider.controls.eventHook = async (target, init) => {
+        const values = provider.controls.storedEvents
+        if (init.method === 'POST') {
+          const value = {
+            ...JSON.parse(String(init.body)),
+            id: 'fixture-meet-event',
+            conferenceData: conferenceData(),
+          }
+          values.set(value.id, value)
+          if (meetResponse === 'lost') throw new TypeError('Synthetic lost provider response')
+          return Response.json(value)
+        }
+        const id = target.pathname.split('/').at(-1) as string
+        if (init.method === 'PATCH') {
+          const value = {
+            ...values.get(id),
+            ...JSON.parse(String(init.body)),
+            id,
+            conferenceData: conferenceData(),
+          }
+          values.set(id, value)
+          return Response.json(value)
+        }
+        if (target.searchParams.has('iCalUID'))
+          return Response.json({
+            items: [...values.values()]
+              .filter((v) => v.iCalUID === target.searchParams.get('iCalUID'))
+              .map((v) => ({ ...v, conferenceData: conferenceData() })),
+          })
+        const value = values.get(id)
+        return value
+          ? Response.json({ ...value, conferenceData: conferenceData() })
+          : Response.json({}, { status: 404 })
+      }
+      if (automaticMeet) {
+        const account = 'fixture-google-account'
+        const connection = await db
+          .insertInto('calendar_connections')
+          .values({
+            user_id: host.userId,
+            provider: 'google',
+            external_account_id: account,
+            credentials: encryptCredential(
+              Buffer.from(TEST_CALENDAR_KEY, 'base64'),
+              tokenAad(host.userId, account),
+              JSON.stringify({
+                accessToken: 'synthetic-access',
+                refreshToken: 'synthetic-refresh',
+                expiresAt: Date.now() + 86_400_000,
+              }),
+            ),
+            scopes: [...GOOGLE_CALENDAR_SYNC_SCOPES],
+          })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+        const calendar = await db
+          .insertInto('calendars')
+          .values({
+            connection_id: connection.id,
+            external_id: 'fixture-meet-calendar',
+            name: 'Synthetic Meet calendar',
+            access_role: 'owner',
+            supports_google_meet: true,
+            check_conflicts: false,
+          })
+          .returning('id')
+          .executeTakeFirstOrThrow()
+        await db
+          .updateTable('profiles')
+          .set({ destination_calendar_id: calendar.id })
+          .where('user_id', '=', host.userId)
+          .execute()
+        await f.eventType(host.organizationId, host.userId, {
+          title: 'Fixture Meet call',
+          slug: 'meet',
+          location: { kind: 'google_meet', autoCreate: true },
+          minimumNoticeMinutes: 30,
+        })
+      }
       await f.eventType(host.organizationId, host.userId, {
         title: 'Fixture call',
         slug: 'call',
@@ -154,6 +273,12 @@ export const test = base.extend<{ app: FixtureApp; suppressFailureDom: undefined
         SIGNUP: 'closed',
         HOURMERE_ROLE: 'web',
         EMBED_ALLOWED_ORIGINS: parentUrl,
+        ...(automaticMeet && {
+          GOOGLE_MEET_ENABLED: 'true',
+          GOOGLE_CALENDAR_CLIENT_ID: 'synthetic-client',
+          GOOGLE_CALENDAR_CLIENT_SECRET: 'synthetic-secret',
+          CALENDAR_ENCRYPTION_KEY: TEST_CALENDAR_KEY,
+        }),
         WEB_DIST:
           process.env.HOURMERE_E2E_WEB_DIST ??
           fileURLToPath(new URL('../../apps/web/dist', import.meta.url)),
@@ -185,6 +310,82 @@ export const test = base.extend<{ app: FixtureApp; suppressFailureDom: undefined
         personalPath: '/fixture-host/call',
         teamPath: '/team/FixtureTeam/call',
         collectivePath: '/team/FixtureTeam/collective',
+        meetPath: '/fixture-host/meet',
+        advanceMeet: async (state) => {
+          if (!automaticMeet) throw new Error('Meet fixture is not enabled')
+          meetResponse = state
+          await db
+            .updateTable('booking_conferences')
+            .set({ next_attempt_at: new Date() })
+            .where('state', '=', 'pending')
+            .execute()
+          const intents = await db
+            .selectFrom('booking_conferences')
+            .select(['root_booking_id', 'booking_id'])
+            .execute()
+          const mail = {
+            db,
+            publicUrl: url,
+            mailer: {
+              send: async (message: MailMessage) => {
+                sent.push(message)
+              },
+            },
+          }
+          for (const intent of intents) {
+            await writeBookingConference(
+              { db, google: { client: provider.client, encryptionKey: TEST_CALENDAR_KEY } },
+              intent.root_booking_id,
+            )
+            const row = await db
+              .selectFrom('bookings')
+              .select('status')
+              .where('id', '=', intent.booking_id)
+              .executeTakeFirstOrThrow()
+            if (row.status === 'cancelled')
+              await sendBookingNotification(mail, intent.booking_id, 'cancelled')
+          }
+          await dispatchConferenceNotifications(mail)
+        },
+        meetState: async () => {
+          const intents = await db
+            .selectFrom('booking_conferences')
+            .select(['root_booking_id', 'booking_id'])
+            .execute()
+          const requests = sent.filter((message) =>
+            message.attachments?.some((attachment) =>
+              String(attachment.content).includes('METHOD:REQUEST'),
+            ),
+          )
+          const eventUids = [...provider.controls.storedEvents.values()].map(
+            (event) => event.iCalUID,
+          )
+          return {
+            imports: provider.calls.filter(
+              (call) => call.init.method === 'POST' && call.url.pathname.endsWith('/import'),
+            ).length,
+            rows: intents.length,
+            requests: requests.length,
+            cancellations: sent.filter((message) =>
+              message.attachments?.some((attachment) =>
+                String(attachment.content).includes('METHOD:CANCEL'),
+              ),
+            ).length,
+            failures: sent.filter((message) =>
+              message.subject.startsWith('Meeting link needs attention'),
+            ).length,
+            linkedRequests: requests.every(
+              (message) =>
+                message.text.includes(join) &&
+                message.attachments?.every((attachment) =>
+                  String(attachment.content).includes(join),
+                ),
+            ),
+            rootUidPreserved:
+              eventUids.length === 1 && eventUids[0] === `${intents[0]?.root_booking_id}@hourmere`,
+            hostBookingPath: `/app/bookings/${intents[0]?.booking_id}`,
+          }
+        },
         hostCounts: async () => {
           const bookings = await db
             .selectFrom('bookings')

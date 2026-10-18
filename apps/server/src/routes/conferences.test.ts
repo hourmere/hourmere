@@ -21,7 +21,11 @@ describe.skipIf(!process.env.DATABASE_URL)('conference protected REST', () => {
       '2030-01-01T10:30:00Z',
       {},
     )
-    await t.db.updateTable('bookings').set({location:JSON.stringify({kind:'google_meet',autoCreate:true})}).where('id','=',id).execute()
+    await t.db
+      .updateTable('bookings')
+      .set({ location: JSON.stringify({ kind: 'google_meet', autoCreate: true }) })
+      .where('id', '=', id)
+      .execute()
     await t.db
       .insertInto('booking_conferences')
       .values({
@@ -50,6 +54,13 @@ describe.skipIf(!process.env.DATABASE_URL)('conference protected REST', () => {
     expect(
       (await t.as(other.principal).post(`/api/v1/bookings/${id}/conference/retry`, {})).status,
     ).toBe(404)
+    expect(
+      (
+        await t
+          .as(user.principal)
+          .post(`/api/v1/bookings/${id}/conference/retry`, { forceCreate: true })
+      ).status,
+    ).toBe(400)
     expect(
       (await t.as(user.principal).post(`/api/v1/bookings/${id}/conference/retry`, {})).status,
     ).toBe(204)

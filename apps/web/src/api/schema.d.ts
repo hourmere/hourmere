@@ -394,7 +394,11 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody?: never;
+            requestBody: {
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
             responses: {
                 /** @description Durable reconciliation requested */
                 204: {

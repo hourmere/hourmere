@@ -56,6 +56,43 @@ async function chooseSlot(user: ReturnType<typeof userEvent.setup>, dayName: Reg
 }
 
 describe('the booking page', () => {
+  it('withholds every calendar export until the protected Meet status becomes ready', async () => {
+    const user = userEvent.setup(),
+      JOIN = 'https://meet.google.com/abc-defg-hij'
+    const pending = booking({
+      location: { kind: 'google_meet', autoCreate: true },
+      conference: { provider: 'google_meet', status: 'pending', errorCode: null },
+    })
+    const api = fakeApi({
+      ...eventRoutes({ ...EVENT, location: { kind: 'google_meet' } }, DST_SLOTS),
+      'POST /api/v1/public/ada/intro/bookings': () =>
+        json(201, { booking: pending, manageToken: TOKEN }),
+      'GET /api/v1/bookings/manage': () =>
+        json(200, {
+          ...pending,
+          location: { ...pending.location, url: JOIN },
+          conference: { provider: 'google_meet', status: 'ready', errorCode: null },
+        }),
+    })
+    renderApp('/ada/intro')
+    await chooseSlot(user, /November 2, available/, '9:00 AM')
+    await user.type(screen.getByLabelText('Your name'), 'Invitee')
+    await user.type(screen.getByLabelText('Email'), 'invitee@example.com')
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+    await screen.findByRole('heading', { name: 'Time reserved; meeting link pending' })
+    expect(screen.queryByRole('link', { name: 'Download .ics file' })).toBeNull()
+    expect(screen.queryByRole('link', { name: 'Google Calendar' })).toBeNull()
+    expect(screen.queryByRole('link', { name: 'Outlook' })).toBeNull()
+    expect(screen.queryByRole('link', { name: 'Join Google Meet' })).toBeNull()
+    // Keep the real two-second protected status poll: this exercises the page's parent
+    // update, not just the isolated notice component.
+    await screen.findByRole('link', { name: 'Join Google Meet' }, { timeout: 4000 })
+    const download =
+      screen.getByRole('link', { name: 'Download .ics file' }).getAttribute('href') ?? ''
+    expect(decodeURIComponent(download)).toContain(JOIN)
+    expect(api.to('GET /api/v1/bookings/manage')[0]?.headers.get('x-manage-token')).toBe(TOKEN)
+    expect(api.calls.every((call) => !call.path.includes(TOKEN))).toBe(true)
+  })
   it.each([false, true])(
     'books inside an embedded personal/team page without a session and sends no private data to its parent (team=%s)',
     async (team) => {

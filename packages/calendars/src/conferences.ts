@@ -98,11 +98,7 @@ async function claim(deps: CalendarDeps, root: string) {
       .forUpdate()
       .executeTakeFirst()
     const now = clock(deps)
-    if (
-      c?.state !== 'pending' ||
-      c.next_attempt_at > now ||
-      (c.lease_until && c.lease_until > now)
-    )
+    if (c?.state !== 'pending' || c.next_attempt_at > now || (c.lease_until && c.lease_until > now))
       return
     const booking = await trx
       .selectFrom('bookings')
@@ -186,7 +182,8 @@ function interpretation(event: GoogleEvent, c: Claim): Outcome {
   return { event, error: 'invalid_response' }
 }
 async function providerWork(deps: CalendarDeps, c: Claim, signal: AbortSignal): Promise<Outcome> {
-  if (c.booking.status === 'cancelled' && !c.create_started && !c.external_event_id) return {cancelled:true}
+  if (c.booking.status === 'cancelled' && !c.create_started && !c.external_event_id)
+    return { cancelled: true }
   if (!deps.google || !c.connection_id || !c.calendar_id)
     return { error: 'calendar_unavailable', knownNoCreate: c.create }
   let attemptedCreate = false
@@ -270,8 +267,27 @@ async function providerWork(deps: CalendarDeps, c: Claim, signal: AbortSignal): 
     )
     return result ?? { error: 'calendar_unavailable', knownNoCreate: c.create }
   } catch (error) {
-    if (error instanceof GoogleCalendarError && error.status===404 && c.booking.status==='cancelled' && c.external_event_id) return {cancelled:true}
-    if (error instanceof GoogleCalendarError && attemptedCreate && [400,401,403,404].includes(error.status ?? 0)) return {error:error.status===400?'invalid_response':error.status===404?'calendar_unavailable':error.code,knownNoCreate:true}
+    if (
+      error instanceof GoogleCalendarError &&
+      error.status === 404 &&
+      c.booking.status === 'cancelled' &&
+      c.external_event_id
+    )
+      return { cancelled: true }
+    if (
+      error instanceof GoogleCalendarError &&
+      attemptedCreate &&
+      [400, 401, 403, 404].includes(error.status ?? 0)
+    )
+      return {
+        error:
+          error.status === 400
+            ? 'invalid_response'
+            : error.status === 404
+              ? 'calendar_unavailable'
+              : error.code,
+        knownNoCreate: true,
+      }
     if (error instanceof GoogleCalendarError)
       return {
         error: attemptedCreate ? 'ambiguous_create' : error.code,
@@ -293,7 +309,10 @@ export async function writeBookingConference(
 ) {
   const c = await claim(deps, root)
   if (!c) return
-  const outcome: Outcome = c.booking.status==='confirmed' && c.booking.start_at<=clock(deps) ? {error:'meeting_started',knownNoCreate:c.create} : await providerWork(deps, c, signal)
+  const outcome: Outcome =
+    c.booking.status === 'confirmed' && c.booking.start_at <= clock(deps)
+      ? { error: 'meeting_started', knownNoCreate: c.create }
+      : await providerWork(deps, c, signal)
   await deps.db.transaction().execute(async (trx) => {
     // Actual service order: booking before intent. Never take these locks over network.
     const booking = await trx
@@ -375,12 +394,10 @@ export async function writeBookingConference(
             etag: outcome.event.etag ?? null,
           })
           .onConflict((oc) =>
-            oc
-              .columns(['booking_id', 'calendar_id'])
-              .doUpdateSet({
-                external_event_id: outcome.event?.id as string,
-                etag: outcome.event?.etag ?? null,
-              }),
+            oc.columns(['booking_id', 'calendar_id']).doUpdateSet({
+              external_event_id: outcome.event?.id as string,
+              etag: outcome.event?.etag ?? null,
+            }),
           )
           .execute()
         if (booking.status === 'confirmed')
@@ -405,7 +422,12 @@ export async function writeBookingConference(
             .execute()
       }
     }
-    if (outcome.cancelled && c.calendar_id && c.external_event_id) await trx.deleteFrom('calendar_busy').where('calendar_id','=',c.calendar_id).where('external_event_id','=',c.external_event_id).execute()
+    if (outcome.cancelled && c.calendar_id && c.external_event_id)
+      await trx
+        .deleteFrom('calendar_busy')
+        .where('calendar_id', '=', c.calendar_id)
+        .where('external_event_id', '=', c.external_event_id)
+        .execute()
     if (ready && outcome.url && booking.status === 'confirmed') {
       await trx
         .updateTable('bookings')
@@ -442,15 +464,41 @@ export async function retryBookingConference(ctx: ServiceContext, bookingId: str
     // Match the service's parent protection before booking -> intent, and retain current
     // membership through the retry commit. These share locks are compatible with a
     // provider's owner KEY SHARE and never cover network work.
-    const user=await trx.selectFrom('auth.user').select('id').where('id','=',ctx.principal.user.id).where('emailVerified','=',true).forShare().executeTakeFirst()
-    const organization=await trx.selectFrom('auth.organization').select('id').where('id','=',ctx.principal.organization.id).forKeyShare().executeTakeFirst()
-    const member=await trx.selectFrom('auth.member').select('id').where('userId','=',ctx.principal.user.id).where('organizationId','=',ctx.principal.organization.id).forShare().executeTakeFirst()
-    if(!user||!organization||!member) throw new DomainError('not_found','conference_not_found')
+    const user = await trx
+      .selectFrom('auth.user')
+      .select('id')
+      .where('id', '=', ctx.principal.user.id)
+      .where('emailVerified', '=', true)
+      .forShare()
+      .executeTakeFirst()
+    const organization = await trx
+      .selectFrom('auth.organization')
+      .select('id')
+      .where('id', '=', ctx.principal.organization.id)
+      .forKeyShare()
+      .executeTakeFirst()
+    const member = await trx
+      .selectFrom('auth.member')
+      .select('id')
+      .where('userId', '=', ctx.principal.user.id)
+      .where('organizationId', '=', ctx.principal.organization.id)
+      .forShare()
+      .executeTakeFirst()
+    if (!user || !organization || !member)
+      throw new DomainError('not_found', 'conference_not_found')
     const b = await trx
       .selectFrom('bookings')
       .select(['status', 'start_at', 'organization_id'])
       .where('id', '=', bookingId)
-      .where(eb=>eb.exists(eb.selectFrom('booking_hosts').select('booking_id').whereRef('booking_id','=','bookings.id').where('user_id','=',ctx.principal.user.id)))
+      .where((eb) =>
+        eb.exists(
+          eb
+            .selectFrom('booking_hosts')
+            .select('booking_id')
+            .whereRef('booking_id', '=', 'bookings.id')
+            .where('user_id', '=', ctx.principal.user.id),
+        ),
+      )
       .where((eb) =>
         eb.exists(
           eb
@@ -478,8 +526,7 @@ export async function retryBookingConference(ctx: ServiceContext, bookingId: str
     )
       throw new DomainError('not_found', 'conference_not_found')
     if (
-      b.status !== 'confirmed' ||
-      b.start_at <= new Date(ctx.now().epochMilliseconds) ||
+      (b.status === 'confirmed' && b.start_at <= new Date(ctx.now().epochMilliseconds)) ||
       c.state !== 'failed'
     )
       throw new DomainError('conflict', 'conference_not_retryable')
