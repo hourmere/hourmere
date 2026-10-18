@@ -524,6 +524,83 @@ describe.skipIf(!bootstrap)('automatic Zoom real TCP/session/API-key boundaries'
         JSON.stringify(own),
       ),
     ).toBe(false)
+    // A verified identity change leaves immutable invitation pins unavailable. Every
+    // booking transport must use the same non-ready location mapping, not expose a stale URL.
+    const oldEmail = (
+      await db
+        .selectFrom('auth.user')
+        .select('email')
+        .where('id', '=', host.userId)
+        .executeTakeFirstOrThrow()
+    ).email
+    await db
+      .updateTable('auth.user')
+      .set({ email: 'changed-verified-zoom@hourmere.invalid' })
+      .where('id', '=', host.userId)
+      .execute()
+    try {
+      const assertUnavailable = (value: unknown) => {
+        expect(typeof value === 'object' && value !== null).toBe(true)
+        const response = value as
+          | {
+              location?: { url?: string }
+              conference?: { status: string; errorCode: string | null }
+            }
+          | undefined
+        expect(response?.conference).toMatchObject({
+          status: 'failed',
+          errorCode: 'organizer_unavailable',
+        })
+        expect(response?.location?.url === undefined).toBe(true)
+      }
+      const details = await request(
+        `/api/v1/bookings/${booking.booking.id}`,
+        'GET',
+        '',
+        undefined,
+        { authorization: `Bearer ${key}` },
+      )
+      expect(details.status).toBe(200)
+      assertUnavailable(await details.json())
+      const management = await request('/api/v1/bookings/manage', 'GET', '', undefined, {
+        'X-Manage-Token': booking.manageToken,
+      })
+      expect(management.status).toBe(200)
+      assertUnavailable(await management.json())
+      const listing = await request('/api/v1/bookings', 'GET', '', undefined, {
+        authorization: `Bearer ${key}`,
+      })
+      expect(listing.status).toBe(200)
+      type Unavailable = {
+        id: string
+        location?: { url?: string }
+        conference?: { status: string; errorCode: string | null }
+      }
+      assertUnavailable(
+        ((await listing.json()) as { data: Unavailable[] }).data.find(
+          (b) => b.id === booking.booking.id,
+        ),
+      )
+      const mcpList = (await mcp('list_bookings', {})) as { data: Unavailable[] }
+      assertUnavailable(mcpList.data.find((b) => b.id === booking.booking.id))
+      const cliList = (await cli('list', {})) as { data: Unavailable[] }
+      assertUnavailable(cliList.data.find((b) => b.id === booking.booking.id))
+      expect(
+        (
+          await db
+            .selectFrom('bookings')
+            .select('location')
+            .where('id', '=', booking.booking.id)
+            .executeTakeFirstOrThrow()
+        ).location,
+      ).toHaveProperty('url')
+    } finally {
+      await db
+        .updateTable('auth.user')
+        .set({ email: oldEmail })
+        .where('id', '=', host.userId)
+        .execute()
+    }
     const moved = (await mcp('reschedule_booking', {
       bookingId: booking.booking.id,
       start: '2030-11-04T16:00:00Z',

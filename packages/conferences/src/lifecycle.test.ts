@@ -738,6 +738,33 @@ describe.skipIf(!serverUrl)('automatic Zoom durable booking lifecycle (real Post
     expect((await row()).state).toBe('ready')
     expect(posts()).toHaveLength(1)
   })
+  it('withholds a previously ready Zoom link when its current conference view becomes unavailable', async () => {
+    const b = await book()
+    await writeBookingConference(deps, b.booking.id)
+    expect((await getManagedBooking(ctx, b.manageToken as string)).location?.url).toContain('/j/')
+    const member = await db
+      .selectFrom('auth.member')
+      .selectAll()
+      .where('userId', '=', owner.user.id)
+      .where('organizationId', '=', owner.organization.id)
+      .executeTakeFirstOrThrow()
+    try {
+      await db.deleteFrom('auth.member').where('id', '=', member.id).execute()
+      const managed = await getManagedBooking(ctx, b.manageToken as string)
+      expect(managed.conference).toMatchObject({
+        status: 'failed',
+        errorCode: 'organizer_unavailable',
+      })
+      expect(managed.location?.url === undefined).toBe(true)
+      expect(posts()).toHaveLength(1)
+    } finally {
+      await db
+        .insertInto('auth.member')
+        .values(member)
+        .onConflict((oc) => oc.column('id').doNothing())
+        .execute()
+    }
+  })
   it('withholds a late created URL after host membership withdrawal while keeping the exact ID available for cancellation cleanup', async () => {
     const member = await db
       .selectFrom('auth.member')

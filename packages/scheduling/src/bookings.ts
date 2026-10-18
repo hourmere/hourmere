@@ -16,6 +16,7 @@ import {
 } from './availability.ts'
 import {
   automaticMeet,
+  automaticZoom,
   bookingConferenceStates,
   type CalendarCopyStatus,
   type ConferenceStatus,
@@ -458,7 +459,11 @@ async function toBookings(db: Db, rows: readonly BookingRow[]): Promise<Booking[
     start: toIso(toInstant(r.start_at)),
     end: toIso(toInstant(r.end_at)),
     title: r.title,
-    location: parseLocation(r.location),
+    location: parseLocation(
+      automaticZoom(r.location) && conferences.get(r.id)?.status !== 'ready'
+        ? unresolvedLocation(r.location)
+        : r.location,
+    ),
     ...(conferences.has(r.id) ? { conference: conferences.get(r.id) } : {}),
     responses: (isRecord(r.responses) ? r.responses : {}) as Responses,
     attendees: byBooking.get(r.id) ?? [],
