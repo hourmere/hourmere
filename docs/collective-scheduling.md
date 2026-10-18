@@ -3,8 +3,9 @@
 A collective event type books **every selected host** together. Team owners and admins can
 choose two to eight current members with verified email addresses in the event editor.
 An individual team event has one host. Personal event types keep one host, their owner.
-Round-robin assignment is not implemented; legacy round-robin configurations keep their
-metadata-editing path without becoming publicly bookable.
+For one-host equal rotation, see [round-robin scheduling](round-robin-scheduling.md). Legacy
+and newly saved round-robin pools remain metadata-only until explicitly activated; ordinary
+metadata saves never activate them.
 
 ## Configuration
 

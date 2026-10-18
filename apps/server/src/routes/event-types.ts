@@ -1,6 +1,7 @@
 import { createRoute, z } from '@hono/zod-openapi'
 import { EVENT_TYPE_RULE_BOUNDS } from '@hourmere/core'
 import {
+  activateRoundRobin,
   createEventType,
   deleteEventType,
   EVENT_TYPE_LIMITS,
@@ -174,6 +175,9 @@ export const EventType = z
     }),
     ...fields,
     schedulingType: z.enum(['individual', 'round_robin', 'collective']),
+    roundRobinActive: z
+      .boolean()
+      .openapi({ description: 'Explicit round-robin activation; metadata saves never enable it' }),
     hosts: z.array(z.object({ userId: z.uuid() })).max(8),
     questions: z.array(Question),
     createdAt: z.iso.datetime(),
@@ -204,7 +208,7 @@ const EventTypeInput = z
     allowGuests: fields.allowGuests.optional().openapi({ default: false }),
     position: fields.position.optional().openapi({ default: 0 }),
     scheduleId: fields.scheduleId.optional(),
-    schedulingType: z.enum(['individual', 'collective']).optional(),
+    schedulingType: z.enum(['individual', 'collective', 'round_robin']).optional(),
     hosts: z
       .array(z.strictObject({ userId: z.string() }))
       .optional()
@@ -231,7 +235,7 @@ const EventTypeUpdate = z
     allowGuests: fields.allowGuests.optional(),
     position: fields.position.optional(),
     scheduleId: fields.scheduleId.optional(),
-    schedulingType: z.enum(['individual', 'collective']).optional(),
+    schedulingType: z.enum(['individual', 'collective', 'round_robin']).optional(),
     hosts: z
       .array(z.strictObject({ userId: z.string() }))
       .optional()
@@ -377,6 +381,28 @@ export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
             c.req.valid('param').id,
             c.req.valid('json'),
           ),
+          200,
+        ),
+    )
+
+    app.openapi(
+      createRoute({
+        ...route,
+        middleware: callerWithBodyLimit(caller, 1024),
+        method: 'post',
+        path: '/api/v1/event-types/{id}/round-robin/activate',
+        summary: 'Explicitly activate a team round-robin pool',
+        description:
+          'Validates the complete current verified host pool. Ordinary metadata saves and mode changes never activate it. Existing fairness sequence values are preserved.',
+        request: { params: IdParams, body: { content: json(z.strictObject({})), required: true } },
+        responses: {
+          200: { description: 'The activated configuration', content: json(EventType) },
+          ...errorResponses({ 400: invalid, 403: forbidden, 404: notFound }),
+        },
+      }),
+      async (c) =>
+        c.json(
+          await activateRoundRobin(serviceContext(deps, c.var.principal), c.req.valid('param').id),
           200,
         ),
     )

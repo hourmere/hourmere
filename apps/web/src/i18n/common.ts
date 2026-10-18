@@ -46,6 +46,9 @@ export const common = {
   'Zoom (provider label only)': 'Zoom（仅显示服务名称）',
   'Automatic Google Meet supports individual meetings with one host only.':
     '自动 Google Meet 目前仅支持一位主持人的单人会议。',
+  'An available team member will be assigned when you book.':
+    '预约时将为你分配一位可用的团队成员。',
+  'Host no longer available': '原主持人已不可用',
 
   Calendar: '日历',
   'Go to Hourmere': '前往 Hourmere',

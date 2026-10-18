@@ -1871,6 +1871,96 @@ export interface paths {
         };
         trace?: never;
     };
+    "/api/v1/event-types/{id}/round-robin/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Explicitly activate a team round-robin pool
+         * @description Validates the complete current verified host pool. Ordinary metadata saves and mode changes never activate it. Existing fairness sequence values are preserved.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            responses: {
+                /** @description The activated configuration */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["EventType"];
+                    };
+                };
+                /** @description invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_hosts, or invalid_schedule_id (scheduleId is not one of the host’s schedules) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No valid session or API key */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description insufficient_role: team event types need the owner or admin role; forbidden: a cookie-authenticated write from another origin */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description event_type_not_found: no such event type in the organization, or one the caller cannot see */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The API key's rate limit is used up */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/instance": {
         parameters: {
             query?: never;
@@ -3842,6 +3932,11 @@ export interface components {
             timeZone: string;
         };
         Booking: {
+            /** @description The actual round-robin winner; no private host identity or availability mapping */
+            assignedHost?: {
+                name: string;
+                timeZone: string;
+            } | null;
             /** @description The invitee first, then guests */
             attendees: components["schemas"]["Attendee"][];
             /**
@@ -4069,6 +4164,8 @@ export interface components {
             /** @description Order on the page, ascending */
             position: number;
             questions: components["schemas"]["Question"][];
+            /** @description Explicit round-robin activation; metadata saves never enable it */
+            roundRobinActive: boolean;
             /**
              * Format: uuid
              * @description One of the host's schedules; null = the host's default schedule
@@ -4172,7 +4269,7 @@ export interface components {
              */
             scheduleId?: string | null;
             /** @enum {string} */
-            schedulingType?: "individual" | "collective";
+            schedulingType?: "individual" | "collective" | "round_robin";
             /** @description Distance between start times; null = the duration */
             slotStepMinutes?: number | null;
             /**
@@ -4250,7 +4347,7 @@ export interface components {
              */
             scheduleId?: string | null;
             /** @enum {string} */
-            schedulingType?: "individual" | "collective";
+            schedulingType?: "individual" | "collective" | "round_robin";
             /** @description Distance between start times; null = the duration */
             slotStepMinutes?: number | null;
             /**
@@ -4370,6 +4467,8 @@ export interface components {
             } | null;
             /** @description Booking-form fields beyond name and email */
             questions: components["schemas"]["Question"][];
+            /** @enum {string} */
+            schedulingType?: "round_robin";
             slug: string;
             /** @description Present for a team booking link */
             team?: {

@@ -52,6 +52,9 @@ describe.skipIf(!process.env.DATABASE_URL)('conference protected REST', () => {
     )
     expect((await t.anonymous.post(`/api/v1/bookings/${id}/conference/retry`, {})).status).toBe(401)
     expect(
+      (await t.anonymous.post(`/api/v1/bookings/${id}/conference/retry`, undefined)).status,
+    ).toBe(401)
+    expect(
       (await t.as(other.principal).post(`/api/v1/bookings/${id}/conference/retry`, {})).status,
     ).toBe(404)
     expect(
@@ -60,6 +63,17 @@ describe.skipIf(!process.env.DATABASE_URL)('conference protected REST', () => {
           .as(user.principal)
           .post(`/api/v1/bookings/${id}/conference/retry`, { forceCreate: true })
       ).status,
+    ).toBe(400)
+    expect(
+      (await t.as(user.principal).post(`/api/v1/bookings/${id}/conference/retry`, undefined))
+        .status,
+    ).toBe(400)
+    expect(
+      (await t.as(user.principal).raw('POST', `/api/v1/bookings/${id}/conference/retry`, ''))
+        .status,
+    ).toBe(400)
+    expect(
+      (await t.as(user.principal).post(`/api/v1/bookings/${id}/conference/retry`, [])).status,
     ).toBe(400)
     expect(
       (await t.as(user.principal).post(`/api/v1/bookings/${id}/conference/retry`, {})).status,

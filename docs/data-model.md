@@ -264,3 +264,10 @@ through inverse lock order. Details and retention are in [webhooks.md](webhooks.
 ## Automatic conferences
 
 `booking_conferences` retains one provider intent per opted-in root booking, pinned organizer/destination IDs, desired/applied revision, request identity, create ambiguity, bounded state/error and recoverable operation lease. It intentionally survives calendar/connection deletion. `booking_conference_notifications` is the durable release outbox for final linked messages and no-ICS failure notices; recipient deduplication remains in `booking_notifications`. `calendars.supports_google_meet` is cached capability, default false. The join URL is stored only in the current ready protected booking location. See [automatic-google-meet.md](automatic-google-meet.md).
+## Round-robin assignment state
+
+Migration 0020 adds `round_robin_state` (event primary key, monotonic `bigint` sequence,
+explicit enabled flag), retained host `last_assigned_sequence`, and immutable booking
+`hosts_use_default_schedule`. Activation and mode changes preserve sequence history;
+new successful bookings update fairness with the booking/outbox transaction. No legacy
+configuration is activated by migration. See [round-robin scheduling](round-robin-scheduling.md).

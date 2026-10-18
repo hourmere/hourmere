@@ -856,3 +856,64 @@ describe('the host page', () => {
     expect(await screen.findByRole('heading', { name: 'Page not found' })).toBeDefined()
   })
 })
+
+it.each(['', ' \t '])(
+  'uses a generic host name for a nameless assigned person (%j)',
+  async (name) => {
+    const user = userEvent.setup()
+    fakeApi({
+      ...eventRoutes(
+        { ...EVENT, schedulingType: 'round_robin', host: { name: 'Team pool', timeZone: 'UTC' } },
+        DST_SLOTS,
+      ),
+      'POST /api/v1/public/ada/intro/bookings': () =>
+        json(201, {
+          booking: booking({ assignedHost: { name, timeZone: 'UTC' } }),
+          manageToken: TOKEN,
+        }),
+    })
+    renderApp('/ada/intro')
+    await chooseSlot(user, /November 2, available/, '9:00 AM')
+    await user.type(screen.getByLabelText('Your name'), 'Synthetic')
+    await user.type(screen.getByLabelText('Email'), 'synthetic@example.com')
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+    await screen.findByRole('heading', { name: 'You’re booked' })
+    expect(screen.getByText('Host (UTC)')).toBeDefined()
+    expect(screen.getByText('Your Intro call with Host is confirmed.')).toBeDefined()
+    expect(screen.queryByText('Team pool')).toBeNull()
+  },
+)
+
+it.each([false, true])(
+  'uses the actual safe assigned host in confirmation, including unavailable fallback (%s)',
+  async (deleted) => {
+    const user = userEvent.setup()
+    fakeApi({
+      ...eventRoutes(
+        { ...EVENT, schedulingType: 'round_robin', host: { name: 'Team pool', timeZone: 'UTC' } },
+        DST_SLOTS,
+      ),
+      'POST /api/v1/public/ada/intro/bookings': () =>
+        json(201, {
+          booking: booking({
+            assignedHost: deleted
+              ? null
+              : { name: 'Actual selected person', timeZone: 'Asia/Shanghai' },
+          }),
+          manageToken: TOKEN,
+        }),
+    })
+    renderApp('/ada/intro')
+    await chooseSlot(user, /November 2, available/, '9:00 AM')
+    await user.type(screen.getByLabelText('Your name'), 'Synthetic')
+    await user.type(screen.getByLabelText('Email'), 'synthetic@example.com')
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+    await screen.findByRole('heading', { name: 'You’re booked' })
+    expect(
+      screen.getByText(
+        deleted ? 'Host no longer available' : 'Actual selected person (Asia/Shanghai)',
+      ),
+    ).toBeDefined()
+    expect(screen.queryByText('Team pool')).toBeNull()
+  },
+)

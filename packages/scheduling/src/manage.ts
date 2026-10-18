@@ -94,7 +94,7 @@ export async function listManagedSlots(
   }
   const snapshot = await ctx.db
     .selectFrom('bookings')
-    .select(['organization_id', 'required_host_user_ids'])
+    .select(['organization_id', 'required_host_user_ids', 'hosts_use_default_schedule'])
     .where('id', '=', booking.id)
     .executeTakeFirstOrThrow()
   const hostIds = await bookingHostIds(
@@ -110,5 +110,14 @@ export async function listManagedSlots(
   }
   if (!hasBookablePart(rules, start, end, now, hostIds.length)) return []
 
-  return intersectSlots(ctx.db, eventType.id, hostIds, start, end, now, booking.id)
+  return intersectSlots(
+    ctx.db,
+    eventType.id,
+    hostIds,
+    start,
+    end,
+    now,
+    booking.id,
+    snapshot.hosts_use_default_schedule,
+  )
 }

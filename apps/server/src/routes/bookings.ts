@@ -95,6 +95,14 @@ export const Booking = z
       description: 'How the booking was made; api and mcp are agents',
     }),
     createdAt: Instant,
+    assignedHost: z
+      .object({ name: z.string(), timeZone: z.string() })
+      .nullable()
+      .optional()
+      .openapi({
+        description:
+          'The actual round-robin winner; no private host identity or availability mapping',
+      }),
   })
   .openapi('Booking')
 
@@ -233,6 +241,13 @@ export function bookingRoutes({
         },
       }),
       async (c) => {
+        // Hono can skip JSON validation when Content-Type is absent. The documented
+        // empty-object command still requires JSON, after authentication/CSRF checks.
+        if (
+          c.req.header('content-type')?.split(';', 1)[0]?.trim().toLowerCase() !==
+          'application/json'
+        )
+          return c.json({ error: 'invalid_request', message: 'Send an empty JSON object.' }, 400)
         await retryBookingConference(context(c.var.principal), c.req.valid('param').id)
         return c.body(null, 204)
       },

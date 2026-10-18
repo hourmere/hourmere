@@ -240,6 +240,11 @@ function BookingFlow({
         <aside className="event-info" aria-label={t('About this event')}>
           <p className="event-host">{event.team?.name ?? event.host.name}</p>
           <h1 className="event-title">{event.title}</h1>
+          {event.schedulingType === 'round_robin' && (
+            <p className="event-description">
+              {t('An available team member will be assigned when you book.')}
+            </p>
+          )}
           {event.hosts && (
             <p className="event-description">
               {t('Required hosts:')}{' '}
@@ -333,7 +338,16 @@ function Confirmation({
   const [booking, setBooking] = useState(initialBooking)
   const invitee = booking.attendees.find((a) => a.isBooker)
   const guests = booking.attendees.filter((a) => !a.isBooker)
-  const title = t('{event} with {host}', { event: event.title, host: event.host.name })
+  const hostName =
+    booking.assignedHost === null
+      ? t('Host no longer available')
+      : booking.assignedHost
+        ? booking.assignedHost.name.trim() || t('Host')
+        : event.host.name
+  const hostDetail = booking.assignedHost
+    ? `${hostName} (${booking.assignedHost.timeZone})`
+    : hostName
+  const title = t('{event} with {host}', { event: event.title, host: hostName })
   return (
     <PublicLayout>
       <div className="card public-card confirmation">
@@ -355,7 +369,7 @@ function Confirmation({
               : 'Your {event} with {host} is confirmed.',
             {
               event: event.title,
-              host: event.host.name,
+              host: hostName,
             },
           )}
         </p>
@@ -373,7 +387,7 @@ function Confirmation({
               />,
             ],
             ['Where', <LocationDetails key="where" location={booking.location} />],
-            ['Host', event.host.name],
+            ['Host', hostDetail],
             ...(invitee
               ? ([['You', `${invitee.name} (${invitee.email})`]] as [string, string][])
               : []),

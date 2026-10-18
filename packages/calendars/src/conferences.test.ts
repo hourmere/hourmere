@@ -71,6 +71,11 @@ describe.skipIf(!serverUrl)('automatic Meet durable flow (real PostgreSQL)', () 
     await owned?.drop()
   })
   beforeEach(async () => {
+    await db
+      .updateTable('auth.user')
+      .set({ emailVerified: true })
+      .where('id', '=', owner.user.id)
+      .execute()
     await db.deleteFrom('bookings').execute()
     await db.deleteFrom('event_types').execute()
     await db.deleteFrom('profiles').execute()
@@ -90,10 +95,20 @@ describe.skipIf(!serverUrl)('automatic Meet durable flow (real PostgreSQL)', () 
         ],
       },
     ]
+    // Restoring email proof revokes the old session by the real auth trigger. Each
+    // fixture starts with a fresh synthetic sign-in rather than bypassing that guard.
     await db
-      .updateTable('auth.session')
-      .set({ expiresAt: new Date('2035-01-01T00:00:00Z') })
-      .where('id', '=', owner.sessionId)
+      .insertInto('auth.session')
+      .values({
+        id: owner.sessionId,
+        userId: owner.user.id,
+        token: `synthetic-${owner.sessionId}`,
+        updatedAt: future(),
+        expiresAt: new Date('2035-01-01T00:00:00Z'),
+      })
+      .onConflict((oc) =>
+        oc.column('id').doUpdateSet({ expiresAt: new Date('2035-01-01T00:00:00Z') }),
+      )
       .execute()
     deps = {
       db,
@@ -361,6 +376,258 @@ describe.skipIf(!serverUrl)('automatic Meet durable flow (real PostgreSQL)', () 
         (c) => c.init.method === 'PATCH' && c.url.searchParams.get('conferenceDataVersion') === '1',
       ),
     ).toBe(true)
+  })
+  it('failure logistics still reach the original invitee after host verification is revoked', async () => {
+    const b = await book()
+    response = 'failure'
+    await writeBookingConference(deps, b.booking.id)
+    await db
+      .updateTable('auth.user')
+      .set({ emailVerified: false })
+      .where('id', '=', owner.user.id)
+      .execute()
+    await dispatchConferenceNotifications(mail())
+    await dispatchConferenceNotifications(mail())
+    expect(sent.map((message) => message.to)).toEqual(['synthetic@example.com'])
+    expect(sent[0]?.attachments?.length ?? 0).toBe(0)
+    expect(sent[0]?.subject).toContain('needs attention')
+    const token = sent[0]?.text.match(/#token=([A-Za-z0-9_-]+)/)?.[1]
+    expect(typeof token).toBe('string')
+    expect((await getManagedBooking(ctx, token as string)).id).toBe(b.booking.id)
+    expect(
+      (
+        await db
+          .selectFrom('booking_conference_notifications')
+          .select('delivered')
+          .where('booking_id', '=', b.booking.id)
+          .where('kind', '=', 'conference_failed')
+          .executeTakeFirstOrThrow()
+      ).delivered,
+    ).toBe(true)
+    expect(
+      (
+        await db
+          .selectFrom('booking_notifications')
+          .select('recipient')
+          .where('booking_id', '=', b.booking.id)
+          .execute()
+      ).every((row) => row.recipient.startsWith('attendee:')),
+    ).toBe(true)
+  })
+  it('a deleted team organizer does not erase failure logistics, and later cancellation suppresses it', async () => {
+    const f = createFixtures(db),
+      gone = await f.host({ handle: null }),
+      team = await f.organization()
+    await f.member(owner.user.id, team, 'owner')
+    await f.member(gone.userId, team)
+    const event = await f.eventType(team, null, {
+      slug: 'deleted-meet',
+      hosts: [{ userId: gone.userId }],
+      location: { kind: 'google_meet', autoCreate: true },
+    })
+    const id = await f.booking(team, [gone.userId], START, '2030-11-04T09:30Z', {
+      eventTypeId: event,
+      attendee: { name: 'Synthetic Invitee', email: 'synthetic@example.com' },
+    })
+    await db
+      .updateTable('bookings')
+      .set({ location: JSON.stringify({ kind: 'google_meet', autoCreate: true }) })
+      .where('id', '=', id)
+      .execute()
+    await db
+      .insertInto('booking_conferences')
+      .values({
+        root_booking_id: id,
+        booking_id: id,
+        organization_id: team,
+        organizer_user_id: gone.userId,
+        state: 'failed',
+        error_code: 'calendar_unavailable',
+        external_event_id: 'deleted-host-event',
+        create_started: true,
+      })
+      .execute()
+    await db
+      .insertInto('booking_conference_notifications')
+      .values({ booking_id: id, kind: 'conference_failed', due_at: future() })
+      .execute()
+    await db.deleteFrom('auth.user').where('id', '=', gone.userId).execute()
+    expect(
+      await db.selectFrom('bookings').select('id').where('id', '=', id).execute(),
+    ).toHaveLength(1)
+    expect((await row()).organizer_user_id).toBe(gone.userId)
+    await dispatchConferenceNotifications(mail())
+    await sendBookingNotification(mail(), id, 'conference_failed')
+    expect(sent.map((message) => message.to)).toEqual(['synthetic@example.com'])
+    expect(sent[0]?.attachments?.length ?? 0).toBe(0)
+    const token = sent[0]?.text.match(/#token=([A-Za-z0-9_-]+)/)?.[1] as string
+    expect((await getManagedBooking(ctx, token)).id).toBe(id)
+    await cancelManagedBooking(ctx, token)
+    await db
+      .updateTable('booking_conference_notifications')
+      .set({ delivered: false, due_at: future() })
+      .where('booking_id', '=', id)
+      .execute()
+    await dispatchConferenceNotifications(mail())
+    await sendBookingNotification(mail(), id, 'conference_failed')
+    expect(sent).toHaveLength(1)
+    expect(
+      (
+        await db
+          .selectFrom('bookings')
+          .select('status')
+          .where('id', '=', id)
+          .executeTakeFirstOrThrow()
+      ).status,
+    ).toBe('cancelled')
+    await sendBookingNotification(mail(), id, 'cancelled')
+    await sendBookingNotification(mail(), id, 'cancelled')
+    expect(sent.map((message) => message.to)).toEqual([
+      'synthetic@example.com',
+      'synthetic@example.com',
+    ])
+    expect(sent[1]?.attachments?.length ?? 0).toBe(0)
+    expect(sent[1]?.subject).toContain('Cancelled')
+  })
+  it('a locally cancelled pending booking still notifies its invitee without an unverified organizer or forged ICS', async () => {
+    const b = await book()
+    await db
+      .updateTable('auth.user')
+      .set({ emailVerified: false })
+      .where('id', '=', owner.user.id)
+      .execute()
+    await cancelManagedBooking(ctx, b.manageToken as string)
+    await sendBookingNotification(mail(), b.booking.id, 'cancelled')
+    await sendBookingNotification(mail(), b.booking.id, 'cancelled')
+    expect(sent.map((message) => message.to)).toEqual(['synthetic@example.com'])
+    expect(sent[0]?.attachments?.length ?? 0).toBe(0)
+    expect(sent[0]?.subject).toContain('Cancelled')
+    expect((await getManagedBooking(ctx, b.manageToken as string)).status).toBe('cancelled')
+  })
+  it('a temporarily refused original invitee retains the failure outbox without a verified organizer', async () => {
+    const b = await book()
+    response = 'failure'
+    await writeBookingConference(deps, b.booking.id)
+    await db
+      .updateTable('auth.user')
+      .set({ emailVerified: false })
+      .where('id', '=', owner.user.id)
+      .execute()
+    let refusing = true
+    const config = {
+      ...mail(),
+      mailer: {
+        send: async (message: MailMessage) => {
+          if (refusing)
+            throw new MailRejectedError({
+              responseCode: 450,
+              enhancedCode: '4.2.0',
+              atRecipient: true,
+            })
+          sent.push(message)
+        },
+      },
+    }
+    await dispatchConferenceNotifications(config)
+    expect(sent).toHaveLength(0)
+    expect(
+      (
+        await db
+          .selectFrom('booking_conference_notifications')
+          .select('delivered')
+          .where('booking_id', '=', b.booking.id)
+          .where('kind', '=', 'conference_failed')
+          .executeTakeFirstOrThrow()
+      ).delivered,
+    ).toBe(false)
+    expect(
+      await db
+        .selectFrom('booking_notifications')
+        .select('recipient')
+        .where('booking_id', '=', b.booking.id)
+        .execute(),
+    ).toHaveLength(0)
+    refusing = false
+    await db
+      .updateTable('booking_conference_notifications')
+      .set({ due_at: future() })
+      .where('booking_id', '=', b.booking.id)
+      .execute()
+    await dispatchConferenceNotifications(config)
+    await dispatchConferenceNotifications(config)
+    expect(sent.map((message) => message.to)).toEqual(['synthetic@example.com'])
+    expect(sent[0]?.attachments?.length ?? 0).toBe(0)
+  })
+  it('missing original invitee never redirects failure mail to a guest or marks its outbox delivered', async () => {
+    const b = await book()
+    response = 'failure'
+    await writeBookingConference(deps, b.booking.id)
+    await db
+      .insertInto('booking_attendees')
+      .values({
+        booking_id: b.booking.id,
+        name: 'Guest',
+        email: 'guest@example.com',
+        time_zone: 'UTC',
+        is_booker: false,
+      })
+      .execute()
+    await db
+      .deleteFrom('booking_attendees')
+      .where('booking_id', '=', b.booking.id)
+      .where('is_booker', '=', true)
+      .execute()
+    await dispatchConferenceNotifications(mail())
+    expect(sent).toHaveLength(0)
+    expect(
+      (
+        await db
+          .selectFrom('booking_conference_notifications')
+          .select('delivered')
+          .where('booking_id', '=', b.booking.id)
+          .where('kind', '=', 'conference_failed')
+          .executeTakeFirstOrThrow()
+      ).delivered,
+    ).toBe(false)
+  })
+  it('host verification changing after load skips only that recipient and still notifies the invitee', async () => {
+    const b = await book()
+    response = 'failure'
+    await writeBookingConference(deps, b.booking.id)
+    const blocker = await owned.pool.connect()
+    await blocker.query('BEGIN')
+    await blocker.query('UPDATE auth."user" SET "emailVerified"=false WHERE id=$1', [owner.user.id])
+    const sending = dispatchConferenceNotifications(mail())
+    let open = true
+    try {
+      let waiting = false
+      for (let n = 0; n < 200 && !waiting; n++) {
+        waiting = (
+          await owned.pool.query(
+            "SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND lower(query) LIKE '%auth%user%for share%') AS waiting",
+          )
+        ).rows[0].waiting
+        if (!waiting) await new Promise((resolve) => setTimeout(resolve, 5))
+      }
+      expect(waiting).toBe(true)
+      await blocker.query('COMMIT')
+      open = false
+      await sending
+      expect(sent.map((message) => message.to)).toEqual(['synthetic@example.com'])
+      expect(sent[0]?.attachments?.length ?? 0).toBe(0)
+      expect(
+        await db
+          .selectFrom('booking_notifications')
+          .select('recipient')
+          .where('booking_id', '=', b.booking.id)
+          .where('recipient', 'like', 'host:%')
+          .execute(),
+      ).toHaveLength(0)
+    } finally {
+      if (open) await blocker.query('ROLLBACK')
+      blocker.release()
+      await sending
+    }
   })
   it('rejects unsafe join URLs without producing a final invitation or logging upstream fields', async () => {
     const b = await book()
