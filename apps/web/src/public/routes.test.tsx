@@ -18,6 +18,14 @@ describe('routing between the app and the public pages', () => {
       'GET /api/v1/event-types': () => json(200, { data: [] }),
       'GET /api/v1/schedules': () => json(200, { data: [] }),
       'GET /api/v1/bookings': () => json(200, { data: [], nextCursor: null }),
+      'GET /api/v1/analytics/bookings': () =>
+        json(200, {
+          startDate: '2026-10-01',
+          endDate: '2026-10-01',
+          timeZone: 'UTC',
+          totals: { created: 0, rescheduled: 0, cancelled: 0 },
+          data: [],
+        }),
       'GET /api/v1/calendar-connections': () => json(200, { googleEnabled: false, data: [] }),
       'GET /api/auth/api-key/list': () => json(200, { apiKeys: [], total: 0 }),
     })
