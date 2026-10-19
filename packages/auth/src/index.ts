@@ -191,6 +191,9 @@ export function createAuth({
         google: {
           clientId: google.clientId,
           clientSecret: google.clientSecret,
+          // Omit incremental authorization so a prior Calendar grant in the same Google
+          // project cannot widen this identity-only sign-in grant.
+          includeGrantedScopes: false,
           requireEmailVerification: true,
           ...socialProviderOptions.google,
         },
@@ -212,10 +215,33 @@ export function createAuth({
     databaseHooks: {
       account: {
         // Sign-in ID tokens contain identity claims needed only during authentication.
-        // Cover creation, linking, repeat sign-in and refresh without changing the
-        // access/refresh token encryption Better Auth has already applied.
-        create: { before: async (account) => ({ data: { ...account, idToken: null } }) },
-        update: { before: async (account) => ({ data: { ...account, idToken: null } }) },
+        // Google sign-in/linking needs no refresh token: Hourmere renews its own session.
+        // Clear even an unexpected provider token or a legacy value on repeat sign-in.
+        // Other retained OAuth tokens keep Better Auth's encryption.
+        create: {
+          before: async (account) => ({
+            data: {
+              ...account,
+              idToken: null,
+              ...(account.providerId === 'google' && {
+                refreshToken: null,
+                refreshTokenExpiresAt: null,
+              }),
+            },
+          }),
+        },
+        update: {
+          before: async (account) => ({
+            data: {
+              ...account,
+              idToken: null,
+              ...(account.providerId === 'google' && {
+                refreshToken: null,
+                refreshTokenExpiresAt: null,
+              }),
+            },
+          }),
+        },
       },
       user: {
         create: {

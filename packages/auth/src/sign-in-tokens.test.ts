@@ -1,5 +1,6 @@
 import { createDb } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import { symmetricEncrypt } from 'better-auth/crypto'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createAuth, createAuthPool } from './index.ts'
 
@@ -12,6 +13,7 @@ const cookies = (response: Response) =>
   response.headers
     .getSetCookie()
     .map((cookie) => cookie.split(';')[0])
+    .filter((cookie) => !cookie?.endsWith('='))
     .join('; ')
 
 describe.skipIf(!serverUrl)('sign-in token minimisation', () => {
@@ -31,6 +33,7 @@ describe.skipIf(!serverUrl)('sign-in token minimisation', () => {
   function fixture(provider: Provider, scenario: string) {
     const identity = `${provider}-${scenario}`
     let version = 0
+    let returnRefreshToken = true
     let refreshedWithExpectedToken = false
     const access = () => `synthetic-access-${identity}-${version}`
     const refresh = () => `synthetic-refresh-${identity}-${version}`
@@ -76,7 +79,7 @@ describe.skipIf(!serverUrl)('sign-in token minimisation', () => {
       version++
       return Response.json({
         access_token: access(),
-        refresh_token: refresh(),
+        ...(returnRefreshToken && { refresh_token: refresh(), refresh_token_expires_in: 7200 }),
         id_token: idToken,
         token_type: 'Bearer',
         expires_in: 3600,
@@ -128,6 +131,7 @@ describe.skipIf(!serverUrl)('sign-in token minimisation', () => {
         idToken: string | null
         accessToken: string | null
         refreshToken: string | null
+        refreshTokenExpiresAt: Date | null
       }>('SELECT * FROM auth.account WHERE "providerId" = $1 AND "accountId" = $2', [
         provider,
         identity,
@@ -135,13 +139,17 @@ describe.skipIf(!serverUrl)('sign-in token minimisation', () => {
       expect(result.rowCount).toBe(1)
       return result.rows[0] as NonNullable<(typeof result.rows)[number]>
     }
-    const stored = async (hasRefresh = true) => {
+    const stored = async (hasRefresh = provider !== 'google') => {
       const row = await account()
       expect(row.idToken === null).toBe(true)
       // Inspect actual persisted ciphertext, then decrypt via Better Auth's server API.
       expect(Boolean(row.accessToken) && row.accessToken !== access()).toBe(true)
       expect(row.refreshToken === null || row.refreshToken !== refresh()).toBe(true)
       if (hasRefresh) expect(Boolean(row.refreshToken)).toBe(true)
+      else if (provider === 'google') {
+        expect(row.refreshToken === null).toBe(true)
+        expect(row.refreshTokenExpiresAt === null).toBe(true)
+      }
       const result = await auth.api.getAccessToken({
         body: { accountId: row.id, userId: row.userId },
       })
@@ -159,8 +167,52 @@ describe.skipIf(!serverUrl)('sign-in token minimisation', () => {
       access,
       refresh,
       refreshed: () => refreshedWithExpectedToken,
+      omitRefreshToken: () => {
+        returnRefreshToken = false
+      },
     }
   }
+
+  it.each(providers)('requests only identity scopes for %s sign-in', async (provider) => {
+    const f = fixture(provider, 'authorization')
+    const started = await f.auth.handler(
+      new Request(`${origin}/api/auth/sign-in/social`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin },
+        body: JSON.stringify({ provider, callbackURL: '/app' }),
+      }),
+    )
+    expect(started.status).toBe(200)
+    const { url: authorizationUrl } = (await started.json()) as { url: string }
+    const url = new URL(authorizationUrl)
+    expect(url.searchParams.getAll('scope')).toHaveLength(1)
+    expect(url.searchParams.get('scope')?.split(' ').sort()).toEqual(['email', 'openid', 'profile'])
+    // Better Auth 1.7.10 omits this opt-in parameter for includeGrantedScopes: false.
+    expect(url.searchParams.has('include_granted_scopes')).toBe(false)
+    // Google's omitted access_type defaults to online; Microsoft has no offline_access.
+    expect(url.searchParams.has('access_type')).toBe(false)
+    expect(url.searchParams.has('prompt')).toBe(false)
+    expect(url.searchParams.get('redirect_uri')).toBe(`${origin}/api/auth/callback/${provider}`)
+    expect(f.fetch).not.toHaveBeenCalled()
+  })
+
+  it('clears legacy Google refresh credentials on sign-in/relink without a replacement', async () => {
+    const f = fixture('google', 'legacy-refresh')
+    const signedIn = await f.redirect()
+    const first = await f.stored()
+    f.omitRefreshToken()
+    for (const linking of [false, true]) {
+      await owned.pool.query(
+        'UPDATE auth.account SET "refreshToken" = $1, "refreshTokenExpiresAt" = now() WHERE id = $2',
+        ['synthetic-legacy-refresh', first.id],
+      )
+      await f.redirect(cookies(signedIn), linking)
+      const row = await f.stored()
+      expect(row.id).toBe(first.id)
+      expect(row.userId).toBe(first.userId)
+    }
+    expect(f.fetch).toHaveBeenCalledTimes(3)
+  })
 
   it.each(providers)(
     'discards %s callback tokens on first/repeat sign-in and implicit linking',
@@ -217,6 +269,18 @@ describe.skipIf(!serverUrl)('sign-in token minimisation', () => {
       const f = fixture(provider, 'refresh')
       const signedIn = await f.redirect()
       const first = await f.stored()
+      // Google sign-in discards refresh tokens. Seed a legacy encrypted credential only
+      // to retain ID-token regression coverage of these disabled, server-only APIs.
+      if (provider === 'google') {
+        const encrypted = await symmetricEncrypt({
+          key: (await f.auth.$context).secretConfig,
+          data: f.refresh(),
+        })
+        await owned.pool.query('UPDATE auth.account SET "refreshToken" = $1 WHERE id = $2', [
+          encrypted,
+          first.id,
+        ])
+      }
       const headers = new Headers({ origin, cookie: cookies(signedIn) })
       const refreshed = await f.auth.api.refreshToken({
         body: { accountId: first.id },
@@ -227,7 +291,7 @@ describe.skipIf(!serverUrl)('sign-in token minimisation', () => {
       expect(f.refreshed()).toBe(true)
       const tokens = (await refreshed.json()) as { accessToken: string; refreshToken: string }
       expect(tokens.accessToken === f.access() && tokens.refreshToken === f.refresh()).toBe(true)
-      await f.stored()
+      await f.stored(true)
       await owned.pool.query(
         'UPDATE auth.account SET "accessTokenExpiresAt" = now() - interval \'1 minute\' WHERE id = $1',
         [first.id],
@@ -242,7 +306,7 @@ describe.skipIf(!serverUrl)('sign-in token minimisation', () => {
       expect(((await automatic.json()) as { accessToken: string }).accessToken === f.access()).toBe(
         true,
       )
-      await f.stored()
+      await f.stored(true)
       // Even an update without idToken must clear a legacy value rather than preserve it.
       await owned.pool.query('UPDATE auth.account SET "idToken" = $1 WHERE id = $2', [
         'synthetic-legacy-id-token',
@@ -251,7 +315,7 @@ describe.skipIf(!serverUrl)('sign-in token minimisation', () => {
       await (await f.auth.$context).internalAdapter.updateAccount(first.id, {
         scope: 'openid email',
       })
-      await f.stored()
+      await f.stored(true)
       expect(f.fetch).toHaveBeenCalledTimes(3)
     },
   )

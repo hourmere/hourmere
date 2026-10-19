@@ -7,12 +7,44 @@ const config = {
   publicUrl: 'http://localhost:5173',
 }
 describe('Google response boundary', () => {
-  it('requests a separate grant instead of inheriting scopes from another consent', () => {
-    const url = new URL(
-      createGoogleCalendarClient(config).authorizationUrl('fake-state', 'fake-verifier'),
-    )
-    expect(url.searchParams.get('include_granted_scopes')).toBe('false')
-  })
+  it.each([
+    {
+      access: 'list' as const,
+      scopes: ['openid', 'email', 'https://www.googleapis.com/auth/calendar.calendarlist.readonly'],
+    },
+    {
+      access: 'sync' as const,
+      scopes: [
+        'openid',
+        'email',
+        'https://www.googleapis.com/auth/calendar.calendarlist.readonly',
+        'https://www.googleapis.com/auth/calendar.events.readonly',
+        'https://www.googleapis.com/auth/calendar.events.owned',
+      ],
+    },
+  ])(
+    'preserves the independent $access grant and offline calendar authorization',
+    ({ access, scopes }) => {
+      const url = new URL(
+        createGoogleCalendarClient(config).authorizationUrl('fake-state', 'fake-verifier', access),
+      )
+      expect(url.origin + url.pathname).toBe('https://accounts.google.com/o/oauth2/v2/auth')
+      expect(url.searchParams.get('scope')?.split(/\s+/).sort()).toEqual([...scopes].sort())
+      expect(url.searchParams.get('include_granted_scopes')).toBe('false')
+      expect(url.searchParams.get('access_type')).toBe('offline')
+      expect(url.searchParams.get('prompt')).toBe('consent')
+      expect(url.searchParams.get('client_id')).toBe(config.clientId)
+      expect(url.searchParams.get('redirect_uri')).toBe(
+        'http://localhost:5173/api/calendar/google/callback',
+      )
+      expect(url.searchParams.get('response_type')).toBe('code')
+      expect(url.searchParams.get('state')).toBe('fake-state')
+      expect(url.searchParams.get('code_challenge')).toBe(
+        'ulA2Yl9LlxIZqoV-8flS7dbAIUnmr3XfT6kZBh5rsyQ',
+      )
+      expect(url.searchParams.get('code_challenge_method')).toBe('S256')
+    },
+  )
 
   it('rejects oversized valid JSON before accepting an otherwise valid identity', async () => {
     const client = createGoogleCalendarClient(config, async () =>

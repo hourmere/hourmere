@@ -36,8 +36,13 @@ readable; booking events can only be written to calendars the connected account 
    workers also poll selected calendars every minute. **Refresh calendar list** updates metadata.
 
 These settings do not enable Google sign-in. `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` and
-`/api/auth/callback/google` continue to configure only sign-in. Separate clients also avoid
-combining sign-in and calendar grants for the same OAuth client.
+`/api/auth/callback/google` continue to configure only sign-in. Separate clients in the same
+Google project can still share previously granted scopes through incremental authorization.
+Both flows disable it: sign-in sets Better Auth's `includeGrantedScopes: false` (which omits
+the opt-in parameter), while calendar URLs explicitly send `include_granted_scopes=false`.
+Sign-in requests only `email profile openid`, without offline access; calendar connections
+keep their separate offline grant and refresh credentials. See the
+[sign-in storage contract](data-model.md#auth-better-auth-core--organization--api-key-plugins).
 
 Upgrade note: `CALENDAR_ENCRYPTION_KEY` must now differ from `WEBHOOK_ENCRYPTION_KEY` and
 `BETTER_AUTH_SECRET`; startup refuses a reused key. Keep the calendar key stable and backed
