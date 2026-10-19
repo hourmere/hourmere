@@ -45,7 +45,7 @@ describe('MCP Registry launch metadata', () => {
           headers: [
             {
               name: 'Authorization',
-              description: 'Bearer API key; omit when the client uses OAuth',
+              description: 'Bearer <API key>; omit when the client uses OAuth',
               isRequired: false,
               isSecret: true,
             },
@@ -91,6 +91,9 @@ describe('MCP Registry launch metadata', () => {
     (mode) => {
       const draft = mode === 'draft' ? metadata() : approvedMetadata()
       if (mode === 'concrete') draft.remotes[0].url = 'https://hourmere.example.invalid/mcp'
+      expect(draft.remotes[0].headers[0].description).toBe(
+        'Bearer <API key>; omit when the client uses OAuth',
+      )
       expect(draft.remotes[0].headers[0].isRequired).toBe(false)
       expect(validateMcpRegistry(draft, mode)).toEqual([])
 
