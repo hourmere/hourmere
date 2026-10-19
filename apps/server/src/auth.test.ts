@@ -1752,11 +1752,12 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
       }),
     })
 
+    // HTTP sign-in accepts only the web app's redirect flow. Use Better Auth's trusted
+    // server API for synthetic ID-token fixtures while retaining the real account hooks.
     const socialSignIn = (i: Instance, provider: 'google' | 'microsoft') =>
-      i.app.request('/api/auth/sign-in/social', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ provider, idToken: { token: 'header.payload.signature' } }),
+      i.auth.api.signInSocial({
+        body: { provider, idToken: { token: 'header.payload.signature' } },
+        asResponse: true,
       })
 
     it.each(['google', 'microsoft'] as const)(
@@ -2014,7 +2015,7 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
       async function startGoogle(i: Instance, redirects: Record<string, string>) {
         const res = await i.app.request('/api/auth/sign-in/social', {
           method: 'POST',
-          headers: { 'content-type': 'application/json' },
+          headers: { 'content-type': 'application/json', origin },
           body: JSON.stringify({ provider: 'google', ...redirects }),
         })
         expect(res.status).toBe(200)

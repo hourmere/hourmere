@@ -106,12 +106,13 @@ describe.skipIf(!serverUrl)('sign-up control', () => {
         ...(microsoft && { microsoft: vouching(microsoft) }),
       },
     })
-    return createApp({
+    const app = createApp({
       checkDb: async () => {},
       authHandler: auth.handler,
       resolveCaller: createCallerResolver({ auth, db }),
       publicUrl: origin,
     })
+    return Object.assign(app, { auth })
   }
 
   type App = ReturnType<typeof instance>
@@ -172,11 +173,12 @@ describe.skipIf(!serverUrl)('sign-up control', () => {
     expect(hasSession(res)).toBe(false)
   }
 
+  // The public HTTP endpoint starts redirects; trusted server calls keep these synthetic
+  // ID-token fixtures focused on registration policy and account hooks.
   const idTokenSignIn = (app: App, provider: 'google' | 'microsoft') =>
-    app.request('/api/auth/sign-in/social', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ provider, idToken: { token: 'header.payload.signature' } }),
+    app.auth.api.signInSocial({
+      body: { provider, idToken: { token: 'header.payload.signature' } },
+      asResponse: true,
     })
   const googleSignIn = (app: App) => idTokenSignIn(app, 'google')
 
@@ -597,16 +599,10 @@ describe.skipIf(!serverUrl)('sign-up control', () => {
           },
         },
       })
-      const res = await auth.handler(
-        new Request(`${origin}/api/auth/sign-in/social`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            provider: 'google',
-            idToken: { token: 'header.payload.signature' },
-          }),
-        }),
-      )
+      const res = await auth.api.signInSocial({
+        body: { provider: 'google', idToken: { token: 'header.payload.signature' } },
+        asResponse: true,
+      })
       expect(res.status).toBe(403)
       expect(await res.json()).toMatchObject({ code: 'EMAIL_NOT_VERIFIED' })
       expect(await users()).toEqual(['inviter@team.example'])
@@ -841,7 +837,7 @@ describe.skipIf(!serverUrl)('sign-up control', () => {
       const app = instance(CLOSED, { google: 'stranger@elsewhere.example' })
       const started = await app.request('/api/auth/sign-in/social', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', origin },
         body: JSON.stringify({
           provider: 'google',
           callbackURL: '/',

@@ -2,6 +2,7 @@ import { apiKey } from '@better-auth/api-key'
 import { type Db, guardPoolErrors } from '@hourmere/db'
 import { type Mailer, magicLinkEmail } from '@hourmere/mail'
 import { betterAuth } from 'better-auth'
+import type { DBTransactionAdapter } from 'better-auth/adapters'
 import { APIError } from 'better-auth/api'
 import { magicLink } from 'better-auth/plugins/magic-link'
 import { organization } from 'better-auth/plugins/organization'
@@ -235,10 +236,6 @@ export function createAuth({
             data: {
               ...account,
               idToken: null,
-              ...(account.providerId === 'google' && {
-                refreshToken: null,
-                refreshTokenExpiresAt: null,
-              }),
             },
           }),
         },
@@ -289,6 +286,40 @@ export function createAuth({
     },
     hooks: { before: beforeHook(db) },
     plugins: [
+      {
+        id: 'sign-in-token-updates',
+        init(ctx) {
+          // Better Auth 1.7.10 passes only the patch to update.before, without its id or
+          // selector. Refresh patches also omit providerId. Read the stored provider at
+          // the adapter boundary, where the actual selector is available, before writing.
+          const guard = (adapter: DBTransactionAdapter): DBTransactionAdapter => {
+            const update = adapter.update
+            adapter.update = async (request) => {
+              if (request.model === 'account') {
+                const account = await adapter.findOne<{ providerId: string }>({
+                  model: 'account',
+                  where: request.where,
+                  select: ['providerId'],
+                })
+                if (account?.providerId === 'google') {
+                  return update({
+                    ...request,
+                    update: { ...request.update, refreshToken: null, refreshTokenExpiresAt: null },
+                  })
+                }
+              }
+              return update(request)
+            }
+            return adapter
+          }
+          const adapter = ctx.adapter
+          guard(adapter)
+          const transaction = adapter.transaction
+          adapter.transaction = (callback) => transaction((trx) => callback(guard(trx)))
+          // The only account updateMany path is updatePassword, whose selector fixes
+          // providerId to credential; Hourmere does not enable password authentication.
+        },
+      },
       ...(mcpOAuth ? mcpOAuthPlugins(db, baseURL, mcpMetadataFetcher) : []),
       organization({
         // An invitation is accepted only by someone who proved they own the invited address.

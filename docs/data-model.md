@@ -59,9 +59,11 @@ with separate sign-in/calendar clients: Google's
 can include grants to other clients in the same project. `accessType` remains unset, so
 `access_type` is omitted and Google's default online access applies; no offline access or
 forced consent is requested. Hourmere's session renewal needs no Google refresh token.
-Google account creation and sign-in/linking updates therefore discard any returned refresh
-token and its expiry, and clear legacy refresh credentials on the next successful sign-in
-or relink, even when Google omits a replacement. The account's provider/subject/user binding
+Google account creation and every account update therefore discard any returned refresh
+token and its expiry, and clear legacy refresh credentials on the next successful sign-in,
+relink or partial update, even when Google omits a replacement. Updates look up the stored
+account's provider, including internal refresh updates that omit `providerId`.
+The account's provider/subject/user binding
 is retained so automatic account linking and repeat sign-in continue to work. Existing
 credentials are not bulk-rewritten or revoked. Calendar connections still explicitly send
 `include_granted_scopes=false`, `access_type=offline` and `prompt=consent` for their own

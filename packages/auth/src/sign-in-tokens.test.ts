@@ -94,8 +94,8 @@ describe.skipIf(!serverUrl)('sign-in token minimisation', () => {
           body: JSON.stringify(body),
         }),
       )
-    // HTTP linking/token endpoints are disabled; use server APIs to retain hook and
-    // encryption coverage while sign-in and provider callbacks still use the handler.
+    // HTTP ID-token/linking/token endpoints are disabled; use trusted server APIs to
+    // retain hook and encryption coverage while browser redirects use the handler.
     const headers = (cookie: string) => new Headers({ origin, cookie })
     const direct = (cookie = '', selected = provider, linking = false) => {
       const body = {
@@ -104,7 +104,7 @@ describe.skipIf(!serverUrl)('sign-in token minimisation', () => {
       }
       return linking
         ? auth.api.linkSocialAccount({ body, headers: headers(cookie), asResponse: true })
-        : post('/sign-in/social', body, cookie)
+        : auth.api.signInSocial({ body, headers: headers(cookie), asResponse: true })
     }
     const redirect = async (cookie = '', linking = false) => {
       const body = { provider, callbackURL: '/app' }
@@ -185,6 +185,15 @@ describe.skipIf(!serverUrl)('sign-in token minimisation', () => {
     expect(started.status).toBe(200)
     const { url: authorizationUrl } = (await started.json()) as { url: string }
     const url = new URL(authorizationUrl)
+    expect([...url.searchParams.keys()].sort()).toEqual([
+      'client_id',
+      'code_challenge',
+      'code_challenge_method',
+      'redirect_uri',
+      'response_type',
+      'scope',
+      'state',
+    ])
     expect(url.searchParams.getAll('scope')).toHaveLength(1)
     expect(url.searchParams.get('scope')?.split(' ').sort()).toEqual(['email', 'openid', 'profile'])
     // Better Auth 1.7.10 omits this opt-in parameter for includeGrantedScopes: false.
@@ -271,7 +280,8 @@ describe.skipIf(!serverUrl)('sign-in token minimisation', () => {
       const first = await f.stored()
       // Google sign-in discards refresh tokens. Seed a legacy encrypted credential only
       // to retain ID-token regression coverage of these disabled, server-only APIs.
-      if (provider === 'google') {
+      const seedLegacyRefresh = async () => {
+        if (provider !== 'google') return
         const encrypted = await symmetricEncrypt({
           key: (await f.auth.$context).secretConfig,
           data: f.refresh(),
@@ -281,6 +291,7 @@ describe.skipIf(!serverUrl)('sign-in token minimisation', () => {
           first.id,
         ])
       }
+      await seedLegacyRefresh()
       const headers = new Headers({ origin, cookie: cookies(signedIn) })
       const refreshed = await f.auth.api.refreshToken({
         body: { accountId: first.id },
@@ -291,7 +302,8 @@ describe.skipIf(!serverUrl)('sign-in token minimisation', () => {
       expect(f.refreshed()).toBe(true)
       const tokens = (await refreshed.json()) as { accessToken: string; refreshToken: string }
       expect(tokens.accessToken === f.access() && tokens.refreshToken === f.refresh()).toBe(true)
-      await f.stored(true)
+      await f.stored()
+      await seedLegacyRefresh()
       await owned.pool.query(
         'UPDATE auth.account SET "accessTokenExpiresAt" = now() - interval \'1 minute\' WHERE id = $1',
         [first.id],
@@ -306,7 +318,7 @@ describe.skipIf(!serverUrl)('sign-in token minimisation', () => {
       expect(((await automatic.json()) as { accessToken: string }).accessToken === f.access()).toBe(
         true,
       )
-      await f.stored(true)
+      await f.stored()
       // Even an update without idToken must clear a legacy value rather than preserve it.
       await owned.pool.query('UPDATE auth.account SET "idToken" = $1 WHERE id = $2', [
         'synthetic-legacy-id-token',
@@ -315,7 +327,7 @@ describe.skipIf(!serverUrl)('sign-in token minimisation', () => {
       await (await f.auth.$context).internalAdapter.updateAccount(first.id, {
         scope: 'openid email',
       })
-      await f.stored(true)
+      await f.stored()
       expect(f.fetch).toHaveBeenCalledTimes(3)
     },
   )
