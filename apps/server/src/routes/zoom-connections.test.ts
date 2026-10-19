@@ -112,6 +112,36 @@ describe.skipIf(!databaseUrl)('Zoom HTTP integration settings (real Postgres)', 
     )
     expect((await req(`/api/v1/conference-connections/${id}`, 'DELETE', '{}')).status).toBe(204)
   })
+  it('returns an in-progress conflict for a concurrent refresh without another rotation', async () => {
+    const { id } = await connect()
+    let entered!: () => void, release!: () => void
+    const pending = new Promise<void>((resolve) => {
+        entered = resolve
+      }),
+      gate = new Promise<void>((resolve) => {
+        release = resolve
+      })
+    provider.controls.tokenHook = async () => {
+      entered()
+      await gate
+      return Response.json(provider.controls.token)
+    }
+    const first = req(`/api/v1/conference-connections/${id}/refresh`, 'POST', '{}')
+    try {
+      await pending
+      const count = provider.calls.length,
+        second = await req(`/api/v1/conference-connections/${id}/refresh`, 'POST', '{}')
+      expect(second.status).toBe(409)
+      expect(await second.json()).toEqual({
+        error: 'zoom_refresh_in_progress',
+        message: 'This Zoom connection is already refreshing. Wait for it to finish.',
+      })
+      expect(provider.calls).toHaveLength(count)
+    } finally {
+      release()
+      expect((await first).status).toBe(204)
+    }
+  })
   it.each([
     ['authorization', 'Bearer synthetic-api-key'],
     ['x-oauth', 'synthetic-oauth'],

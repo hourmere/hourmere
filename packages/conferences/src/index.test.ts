@@ -515,7 +515,9 @@ describe.skipIf(!databaseUrl)('independent Zoom connections (real Postgres)', ()
     expect(await row(first.id)).toMatchObject({ status: 'refreshing', credentials: null })
     try {
       await expect(refreshConference(deps, owner, first.id)).rejects.toMatchObject({
-        code: 'zoom_needs_reauth',
+        kind: 'conflict',
+        code: 'zoom_refresh_in_progress',
+        message: 'This Zoom connection is already refreshing. Wait for it to finish.',
       })
     } finally {
       provider.controls.token.refresh_token = 'synthetic-rotated-refresh'
@@ -632,7 +634,7 @@ describe.skipIf(!databaseUrl)('independent Zoom connections (real Postgres)', ()
       expect(await row(first.id)).toMatchObject({ status: 'refreshing', credentials: null })
       const count = provider.calls.length
       await expect(refreshConference(deps, owner, first.id)).rejects.toMatchObject({
-        code: 'zoom_needs_reauth',
+        code: 'zoom_refresh_in_progress',
       })
       expect(provider.calls).toHaveLength(count)
     } finally {
@@ -824,6 +826,41 @@ describe.skipIf(!databaseUrl)('independent Zoom connections (real Postgres)', ()
       await paused.close()
     }
   })
+  it.each(['logout', 'expiry'] as const)(
+    '%s after durable token retirement clears the claim before provider I/O',
+    async (change) => {
+      const disposable = await conferenceTestSession(db),
+        first = await connect(disposable),
+        paused = await pauseFirstCommit(),
+        count = provider.calls.length
+      const refreshing = refreshConference({ ...deps, db: paused.db }, disposable, first.id)
+      const outcome = refreshing.catch((error: unknown) => error)
+      try {
+        await paused.reached
+        expect(await row(first.id)).toMatchObject({ status: 'refreshing', credentials: null })
+        if (change === 'logout')
+          await db.deleteFrom('auth.session').where('id', '=', disposable.sessionId).execute()
+        else
+          await db
+            .updateTable('auth.session')
+            .set({ expiresAt: new Date(0) })
+            .where('id', '=', disposable.sessionId)
+            .execute()
+        paused.resume()
+        expect(await outcome).toMatchObject({ code: 'zoom_needs_reauth' })
+        expect(await row(first.id)).toMatchObject({
+          status: 'needs_reauth',
+          operation_id: null,
+          credentials: null,
+        })
+        expect(provider.calls).toHaveLength(count)
+      } finally {
+        paused.resume()
+        await outcome
+        await paused.close()
+      }
+    },
+  )
   it('failed callback commit leaves a durable consumed claim that cannot redeem the code again', async () => {
     const { state } = await start()
     await database.pool.query(

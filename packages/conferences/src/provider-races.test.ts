@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
+import { requireZoomConnection } from '../../scheduling/src/conferences.ts'
 import {
   authorizeZoomMeetings,
   beginZoomConnection,
@@ -11,6 +12,7 @@ import {
   refreshConference,
 } from './index.ts'
 import { conferenceTestSession, fakeZoom, TEST_CONFERENCE_KEY } from './testing.ts'
+import { createZoomConferenceWork } from './worker.ts'
 import { zoomScopes } from './zoom.ts'
 
 const databaseUrl = process.env.DATABASE_URL
@@ -112,8 +114,13 @@ describe.skipIf(!databaseUrl)('Zoom provider phase races (real Postgres)', () =>
     const authorization = await beginZoomConnection(deps, owner, id)
     return new URL(authorization.authorizationUrl).searchParams.get('state') as string
   }
-  async function connect() {
-    expect(await finishZoomConnection(deps, owner, query(await start()))).toBe('connected')
+  async function connect(meetings = false) {
+    const state = meetings
+      ? (new URL((await authorizeZoomMeetings(deps, owner)).authorizationUrl).searchParams.get(
+          'state',
+        ) as string)
+      : await start()
+    expect(await finishZoomConnection(deps, owner, query(state))).toBe('connected')
     return db
       .selectFrom('conference_connections')
       .selectAll()
@@ -333,18 +340,59 @@ describe.skipIf(!databaseUrl)('Zoom provider phase races (real Postgres)', () =>
   })
 
   it('logout completes during refresh I/O without persisting its rotated grant', async () => {
-    const initial = await connect(),
+    provider.controls.token.scope = zoomScopes('meetings').join(' ')
+    const initial = await connect(true),
       gate = pause('token'),
       refreshing = observe(refreshConference(deps, owner, initial.id))
     await gate.entered
+    await expect(requireZoomConnection(db, owner.user.id, initial.id, true, true)).resolves.toEqual(
+      {
+        zoom_connection_id: initial.id,
+        zoom_user_id: initial.external_user_id,
+      },
+    )
     const logout = observe(
       db.deleteFrom('auth.session').where('id', '=', owner.sessionId).execute(),
     )
     expect(await progresses(logout)).toBe(true)
     expect((await logout).status).toBe('fulfilled')
     gate.release()
-    expect((await refreshing).status).toBe('rejected')
-    expect((await row(initial.id)).credentials).toBeNull()
+    expect(await refreshing).toMatchObject({
+      status: 'rejected',
+      error: { code: 'zoom_needs_reauth' },
+    })
+    expect(await row(initial.id)).toMatchObject({
+      status: 'needs_reauth',
+      operation_id: null,
+      credentials: null,
+    })
+    await expect(
+      requireZoomConnection(db, owner.user.id, initial.id, true, true),
+    ).rejects.toMatchObject({
+      code: 'automatic_zoom_unavailable',
+    })
+    const count = provider.calls.length
+    expect(
+      await createZoomConferenceWork(deps, provider.meetings)(
+        {
+          rootBookingId: randomUUID(),
+          organizerUserId: owner.user.id,
+          connectionId: initial.id,
+          externalUserId: initial.external_user_id,
+          meetingId: null,
+          create: true,
+          createStarted: false,
+          booking: {
+            title: 'Synthetic meeting',
+            start_at: new Date('2027-01-01T09:00Z'),
+            end_at: new Date('2027-01-01T09:30Z'),
+            status: 'confirmed',
+          },
+        },
+        AbortSignal.timeout(1500),
+      ),
+    ).toEqual({ error: 'needs_reauth', knownNoCreate: true })
+    expect(provider.calls).toHaveLength(count)
   })
 
   it('session expiry during refresh I/O clears its claimed grant without restoring access', async () => {

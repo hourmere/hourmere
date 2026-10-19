@@ -194,6 +194,38 @@ describe('separate conference accounts page', () => {
     ).toEqual({})
     expect(screen.queryByText('synthetic provider prose')).toBeNull()
   })
+  it('explains an in-progress refresh in both languages and prevents another attempt after reloading', async () => {
+    const user = userEvent.setup()
+    let current = account
+    const requests = fakeApi({
+      ...signedIn,
+      'GET /api/v1/conference-connections': () => json(200, list([current])),
+      [`POST /api/v1/conference-connections/${account.id}/refresh`]: () => {
+        current = { ...account, status: 'refreshing' }
+        return json(409, { error: 'zoom_refresh_in_progress', message: 'synthetic provider prose' })
+      },
+    })
+    renderApp('/app/conferences')
+    await user.click(await screen.findByRole('button', { name: 'Refresh Zoom account' }))
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      'This Zoom account is already being refreshed. Wait for it to finish, then reload.',
+    )
+    await screen.findByText('Refreshing connection')
+    const refresh = screen.getByRole('button', { name: 'Refresh Zoom account' })
+    expect(refresh.hasAttribute('disabled')).toBe(true)
+    await user.click(refresh)
+    expect(requests.to(`POST /api/v1/conference-connections/${account.id}/refresh`)).toHaveLength(1)
+    expect(requests.to('GET /api/v1/conference-connections')).toHaveLength(2)
+    expect(screen.queryByText('synthetic provider prose')).toBeNull()
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Interface language' }), 'zh-CN')
+    expect(screen.getByRole('alert').textContent).toBe(
+      '此 Zoom 账号正在刷新。请等待刷新完成后重新加载页面。',
+    )
+    expect(screen.getByText('正在刷新连接')).toBeDefined()
+    expect(screen.getByRole('button', { name: '刷新 Zoom 账号' }).hasAttribute('disabled')).toBe(
+      true,
+    )
+  })
   it('requires a focused in-place disconnect confirmation and removes the disconnected identity from the active list', async () => {
     const user = userEvent.setup()
     let current = account

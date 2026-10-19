@@ -306,7 +306,10 @@ provider I/O, which runs without row locks so public bookings can proceed. Compl
 and rechecks the session and claimed state or refresh operation. OAuth also compares the
 connection row version captured before I/O, preventing a stale callback from overwriting
 reconnection, upgrade or worker credential changes. Concurrent explicit refreshes fail while
-the durable operation is in flight; only a later action may rotate its committed new token.
+the durable operation is in flight with `zoom_refresh_in_progress`; only a later action may
+rotate its committed new token. Logout or session expiry retires a still-owned refresh claim
+to `needs_reauth`, clears its operation and credentials, and prevents new automatic bookings.
+If observed before provider I/O, it skips the rotation entirely.
 Transient refresh transport failures retry at most three times with backoff; if they remain
 transient, the operation restores the original encrypted grant as active for later recovery.
 Other token rejections or malformed successful responses also preserve the prior grant;

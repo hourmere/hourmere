@@ -97,7 +97,7 @@ async function lockSession(db: Db, session: Session, now: () => number, allowExp
     .where('userId', '=', session.user.id)
     .forUpdate()
     .executeTakeFirst()
-  if (!user || !current || (!allowExpired && new Date(current.expiresAt).getTime() <= now()))
+  if (!user || (!allowExpired && (!current || new Date(current.expiresAt).getTime() <= now())))
     throw new DomainError(
       'forbidden',
       'conference_session_required',
@@ -547,6 +547,12 @@ export async function refreshConference(deps: ConferenceDeps, principal: Princip
       .forUpdate()
       .executeTakeFirst()
     if (!row) throw missing()
+    if (row.status === 'refreshing')
+      throw new DomainError(
+        'conflict',
+        'zoom_refresh_in_progress',
+        'This Zoom connection is already refreshing. Wait for it to finish.',
+      )
     if (row.status !== 'active' || !row.credentials || !row.external_user_id) return undefined
     try {
       if (!matchingZoomScopes(row.scopes, row.mode)) throw new ZoomError('permissions_missing')
@@ -599,7 +605,27 @@ export async function refreshConference(deps: ConferenceDeps, principal: Princip
       .executeTakeFirst()
   let outcome: string
   try {
-    const current = await owned(deps, session, currentClaim)
+    const current = await owned(
+      deps,
+      session,
+      async (db) => {
+        const current = await currentClaim(db)
+        if (!current || (await sessionAlive(db, session, clock(deps)))) return current
+        // Logout/expiry after retirement must release the claim without rotating Zoom.
+        await db
+          .updateTable('conference_connections')
+          .set({
+            credentials: null,
+            operation_id: null,
+            status: 'needs_reauth',
+            last_error: 'needs_reauth',
+          })
+          .where('id', '=', id)
+          .execute()
+        return undefined
+      },
+      true,
+    )
     if (!current) throw reauth()
     let tokens: ZoomTokens | undefined,
       recoverable = false,
@@ -655,7 +681,7 @@ export async function refreshConference(deps: ConferenceDeps, principal: Princip
           .execute()
         return errorCode ?? 'ok'
       },
-      // An expired session may only retire its still-owned claim, never restore access.
+      // An expired/deleted session may only retire its claim, never restore access.
       true,
     )
   } catch (error) {
