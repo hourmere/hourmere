@@ -25,7 +25,7 @@ git clone https://github.com/hourmere/hourmere.git
 cd hourmere
 ./scripts/setup.sh
 docker compose up -d --build --wait
-curl --fail https://app.hourmere.com/api/health
+curl --retry 20 --retry-delay 3 --retry-all-errors --fail https://app.hourmere.com/api/health
 ```
 
 In setup, accept the default `proxy` mode, enter your exact HTTPS origin (the example is
@@ -86,11 +86,15 @@ HTTP to HTTPS, and preserves the original Host while setting `X-Forwarded-For` a
 checks, redirects and Secure cookies. HTTPS origins also enable the app's HSTS header.
 
 Caddy has a fixed address (`PROXY_IP=172.30.62.2`) on a dedicated ingress network
-(`PROXY_SUBNET=172.30.62.0/29`). The override sets `TRUSTED_PROXIES` to that one address so
-client-IP rate limits use the visitor address and ignore client-supplied forwarding headers.
+(`PROXY_SUBNET=172.30.62.0/29`). Dynamic app/worker addresses are allocated only from
+`PROXY_DYNAMIC_RANGE=172.30.62.4/30`, keeping Caddy's address outside that range. The
+override sets `TRUSTED_PROXIES` to Caddy's address so client-IP rate limits use the visitor
+address and ignore client-supplied forwarding headers.
 Do not replace this with a broad private-network range. If the subnet overlaps an existing
-network, change both values in `.env`, choosing a free private subnet and an unused address
-inside it. Caddy's certificates and state persist in `caddy-data` and `caddy-config` volumes.
+network or another deployment, change all three values (`PROXY_SUBNET`, `PROXY_IP` and
+`PROXY_DYNAMIC_RANGE`) in `.env` before starting. Choose a free private subnet, a dynamic
+range inside it and a free usable proxy address outside that dynamic range. Caddy's
+certificates and state persist in `caddy-data` and `caddy-config` volumes.
 
 If you already operate a proxy, select `plain` during setup. This selects only
 `docker-compose.yml`, which publishes `127.0.0.1:${PORT:-3000}:3000`; PostgreSQL remains
@@ -160,8 +164,12 @@ and four weekly copies), monitor backup failures and periodically test a restore
 volumes are persistent storage, not a backup.
 
 To test restoration, clone a separate checkout, use the backed-up revision and secrets,
-and select a **new** project name so Compose creates a fresh database volume. Keep the
-original deployment running, and start only the restore project's database:
+and select a **new, unused** project name so Compose creates a fresh database volume;
+`hourmere-restore` below is an example. Keep the original deployment running and start only
+the restore project's database. Before even this database-only start, choose a free ingress
+subnet and change all three proxy network settings: Compose can create the declared
+networks even when only `db` is targeted. The example below uses `172.30.63.0/29`; confirm
+that it does not overlap any host, Docker or VPN network before using it:
 
 ```sh
 git clone https://github.com/hourmere/hourmere.git hourmere-restore
@@ -169,6 +177,9 @@ cd hourmere-restore
 git checkout --detach "$(cat "$backup_dir/commit")"
 install -m 600 "$backup_dir/.env" .env
 sed -i 's/^APP_IMAGE=.*/APP_IMAGE=hourmere:restore/' .env
+sed -i -e 's|^PROXY_SUBNET=.*|PROXY_SUBNET=172.30.63.0/29|' \
+  -e 's/^PROXY_IP=.*/PROXY_IP=172.30.63.2/' \
+  -e 's|^PROXY_DYNAMIC_RANGE=.*|PROXY_DYNAMIC_RANGE=172.30.63.4/30|' .env
 docker compose --project-name hourmere-restore up -d --wait db
 docker compose --project-name hourmere-restore exec -T db \
   pg_restore -U hourmere -d hourmere --exit-on-error --single-transaction < "$backup_dir/hourmere.dump"
@@ -178,8 +189,8 @@ docker compose --project-name hourmere-restore exec -T db \
 
 Set `backup_dir` to the chosen backup directory if using a new shell. The separate
 `APP_IMAGE` tag also prevents restore builds from replacing the original deployment's
-local image tag. Compare the count with
-your expected account data, and inspect other expected records privately. Do not start the
+local image tag. Compare the count with your expected account data, and inspect other
+expected records privately. Do not start the
 restored app or workers for a drill until SMTP, provider credentials and outbound webhooks
 have been isolated: restored queued jobs can otherwise send duplicate messages or modify
 real calendars. Never restore over a running app, and never delete a production `db-data`
@@ -196,10 +207,9 @@ docker compose --project-name hourmere-restore cp "$backup_dir/caddy-config/." p
 docker compose --project-name hourmere-restore up -d --build --wait
 ```
 
-Before creating its proxy/app, choose a different `PROXY_SUBNET`/`PROXY_IP` in the restore
-`.env` if the original project's network still exists; overlapping ingress networks cannot
-coexist. Plain
-mode omits the proxy restoration. Verify health, expected data, sign-in and a booking before
+Keep the free `PROXY_SUBNET`, `PROXY_IP` and `PROXY_DYNAMIC_RANGE` selected before the
+database restore; overlapping ingress networks cannot coexist. Plain mode omits the proxy
+restoration. Verify health, expected data, sign-in and a booking before
 reopening traffic. Keep the old volumes and backup until recovery is accepted.
 
 ## Upgrade and roll back
@@ -211,7 +221,7 @@ can be updated with:
 ```sh
 git pull --ff-only
 docker compose up -d --build --wait
-curl --fail https://app.hourmere.com/api/health
+curl --retry 20 --retry-delay 3 --retry-all-errors --fail https://app.hourmere.com/api/health
 ```
 
 For a pinned release, fetch and check out the reviewed tag/commit instead of pulling the

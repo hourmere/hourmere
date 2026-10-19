@@ -67,14 +67,16 @@ git clone https://github.com/hourmere/hourmere.git
 cd hourmere
 ./scripts/setup.sh
 docker compose up -d --build --wait
-curl --fail https://app.hourmere.com/api/health
+curl --retry 20 --retry-delay 3 --retry-all-errors --fail https://app.hourmere.com/api/health
 ```
 
 Accept `proxy`, enter your HTTPS origin (replace `app.hourmere.com` with your hostname),
 and configure SMTP and its sender. Setup generates separate secrets directly into a mode
 `600` `.env`, refuses to overwrite an existing file, and selects the optional Caddy override.
 Caddy obtains/renews TLS certificates; only TCP 80/443 are published, and the app trusts only
-the proxy's dedicated address for forwarded client IPs. **No prebuilt public image is
+the proxy's dedicated address for forwarded client IPs. If its network overlaps an existing
+network or another instance, change `PROXY_SUBNET`, `PROXY_IP` and `PROXY_DYNAMIC_RANGE` together
+in `.env` before starting. **No prebuilt public image is
 published yet**; Compose builds the checked-out source. Application and job migrations run
 automatically (`AUTO_MIGRATE=true`). Open `/sign-in` and claim the first account immediately;
 `SIGNUP=first-user` restricts later registration as described below.

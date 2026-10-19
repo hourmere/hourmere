@@ -41,11 +41,11 @@ prompt() {
 }
 
 prompt_secret() {
-  printf '%s' "$1" >&2
   if [ -t 0 ]; then
     terminal_state=$(stty -g)
     stty -echo
   fi
+  printf '%s' "$1" >&2
   if IFS= read -r answer; then
     read_ok=true
   else
@@ -62,7 +62,7 @@ prompt_secret() {
 # DNS labels and numeric ports only; no credentials, path, query, fragment or whitespace.
 # Caddy's public path deliberately requires one HTTPS DNS hostname without a port.
 valid_origin() {
-  printf '%s\n' "$1" | LC_ALL=C awk -v mode="$mode" '
+  printf '%s\n' "$1" | LC_ALL=C awk -v mode="${2:-$mode}" '
     function hostname(value, labels, count, i) {
       if (length(value) > 253) return 0
       count = split(value, labels, ".")
@@ -97,6 +97,7 @@ esac
 prompt "Public origin ($default_url): "
 public_url=${answer:-$default_url}
 valid_origin "$public_url" || fail 'Use an HTTP(S) origin without a path; proxy mode requires an HTTPS DNS hostname without a port.'
+app_port=3000
 
 prompt_secret 'SMTP URL (hidden; blank only for a private loopback trial): '
 smtp_url=$answer
@@ -108,17 +109,27 @@ if [ -n "$smtp_url" ]; then
     *) fail 'SMTP URL must start with smtp:// or smtps://.' ;;
   esac
   case "$smtp_url" in
-    *[[:space:]]*|*\#*) fail 'SMTP URL must not contain whitespace or a fragment; percent-encode credentials.' ;;
+    *[[:space:][:cntrl:]]*|*\#*|*\?*) fail 'SMTP URL must not contain whitespace, query or fragment; percent-encode credentials.' ;;
   esac
+  smtp_authority=${smtp_url#*://}
+  case "$smtp_authority" in
+    */*) fail 'SMTP URL must not contain a path; percent-encode credentials.' ;;
+  esac
+  smtp_host=${smtp_authority##*@}
+  valid_origin "http://$smtp_host" plain || fail 'SMTP URL needs a valid mail server hostname and optional port.'
   prompt 'Mail sender (for example Hourmere <bookings@example.com>): '
   mail_from=$answer
-  [ -n "$mail_from" ] || fail 'MAIL_FROM is required with SMTP_URL.'
+  case "$mail_from" in
+    *[![:space:]]*) ;;
+    *) fail 'MAIL_FROM is required with SMTP_URL.' ;;
+  esac
   case "$mail_from" in
     *[[:cntrl:]]*) fail 'Mail sender must contain only single-line text.' ;;
   esac
 else
   case "$mode:$public_url" in
-    plain:http://localhost|plain:http://localhost:*|plain:http://127.0.0.1|plain:http://127.0.0.1:*|plain:http://\[::1\]|plain:http://\[::1\]:*) ;;
+    plain:http://localhost|plain:http://127.0.0.1) app_port=80 ;;
+    plain:http://localhost:*|plain:http://127.0.0.1:*) app_port=${public_url##*:} ;;
     *) fail 'Public deployments require SMTP_URL and MAIL_FROM before starting.' ;;
   esac
   printf '%s\n' 'Private trial: sign-in links go to container logs; readers of those logs can sign in.' >&2
@@ -155,7 +166,7 @@ staging=$(mktemp -d "$repo/.env.setup.XXXXXXXX")
 {
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in
-      BETTER_AUTH_SECRET=*|POSTGRES_PASSWORD=*|PUBLIC_URL=*|SMTP_URL=*|MAIL_FROM=*|SIGNUP=*|AUTO_MIGRATE=*|COMPOSE_FILE=*) continue ;;
+      BETTER_AUTH_SECRET=*|POSTGRES_PASSWORD=*|PUBLIC_URL=*|PORT=*|SMTP_URL=*|MAIL_FROM=*|SIGNUP=*|AUTO_MIGRATE=*|COMPOSE_FILE=*) continue ;;
     esac
     printf '%s\n' "$line"
   done < "$repo/.env.example"
@@ -163,6 +174,7 @@ staging=$(mktemp -d "$repo/.env.setup.XXXXXXXX")
   write_setting BETTER_AUTH_SECRET "$auth_secret"
   write_setting POSTGRES_PASSWORD "$postgres_password"
   write_setting PUBLIC_URL "$public_url"
+  write_setting PORT "$app_port"
   write_setting SMTP_URL "$smtp_url"
   write_setting MAIL_FROM "$mail_from"
   write_setting SIGNUP first-user

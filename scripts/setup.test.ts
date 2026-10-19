@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import {
   copyFileSync,
   existsSync,
@@ -105,13 +105,67 @@ describe('first-run deployment setup', () => {
     expect(text.includes("MAIL_FROM=''\n")).toBe(true)
   })
 
-  it.each(['http://127.0.0.1:3100', 'http://[::1]:3100'])(
-    'allows an explicit private trial on %s',
-    (url) => {
-      const setup = fixture()
-      expect(setup.run(`plain\n${url}\n\nyes\n`).status).toBe(0)
-    },
-  )
+  it('disables terminal echo while a real terminal reads SMTP credentials', async () => {
+    const setup = fixture()
+    // Node's macOS pipe is a socketpair, which script(1) cannot inspect with tcgetattr.
+    // cat supplies a real pipe while script gives setup a genuine pseudo-terminal.
+    const command =
+      process.platform === 'darwin'
+        ? 'cat | script -q /dev/null /bin/sh scripts/setup.sh'
+        : 'cat | script -q -e -c "/bin/sh scripts/setup.sh" /dev/null'
+    const child = spawn('/bin/sh', ['-c', command], {
+      cwd: setup.directory,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+    let transcript = ''
+    const steps = [
+      ['Deployment mode [proxy/plain] (proxy): ', '\n'],
+      ['Public origin (https://app.hourmere.com): ', '\n'],
+      ['SMTP URL (hidden; blank only for a private loopback trial): ', `${smtp}\n`],
+      ['Mail sender (for example Hourmere <bookings@example.com>): ', `${sender}\n`],
+    ]
+    let step = 0
+    const output = (chunk: Buffer) => {
+      transcript += chunk.toString()
+      if (transcript.includes(steps[step]?.[0] ?? '\0')) {
+        child.stdin.write(steps[step]?.[1])
+        step++
+        if (step === steps.length) child.stdin.end()
+      }
+    }
+    child.stdout.on('data', output)
+    child.stderr.on('data', output)
+    const status = await new Promise<number | null>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        child.kill('SIGTERM')
+        reject(new Error('Interactive setup did not finish'))
+      }, 4000)
+      child.once('error', (error) => {
+        clearTimeout(timeout)
+        reject(error)
+      })
+      child.once('exit', (code) => {
+        clearTimeout(timeout)
+        resolve(code)
+      })
+    })
+    expect(status).toBe(0)
+    expect(step).toBe(4)
+    expect(transcript.includes(smtp)).toBe(false)
+    expect(setup.text().includes('SMTP_URL=')).toBe(true)
+  })
+
+  it.each([
+    ['http://127.0.0.1:3100', '3100'],
+    ['http://localhost:3100', '3100'],
+    ['http://127.0.0.1', '80'],
+    ['http://localhost', '80'],
+  ])('matches the published port to a private trial on %s', (url, port) => {
+    const setup = fixture()
+    expect(setup.run(`plain\n${url}\n\nyes\n`).status).toBe(0)
+    expect(setup.text().includes(`PORT='${port}'\n`)).toBe(true)
+    expect(setup.text().match(/^PORT=/gm)?.length).toBe(1)
+  })
 
   it.each(['', 'no', 'y'])('requires the exact private-trial confirmation (%j)', (confirmation) => {
     const setup = fixture()
@@ -120,9 +174,10 @@ describe('first-run deployment setup', () => {
   })
 
   it.each([
-    '\n\n\n',
-    'plain\nhttps://meet.example.test\n\n',
-    'plain\nhttp://localhost.evil.test\n\n',
+    '\n\n\nyes\n',
+    'plain\nhttps://meet.example.test\n\nyes\n',
+    'plain\nhttp://localhost.evil.test\n\nyes\n',
+    'plain\nhttp://[::1]:3100\n\nyes\n',
   ])('refuses public deployments without SMTP', (input) => {
     const setup = fixture()
     expect(setup.run(input).status).toBe(1)
@@ -157,7 +212,12 @@ describe('first-run deployment setup', () => {
   it.each([
     `\n\nnot-smtp\n${sender}\n`,
     `\n\n${smtp}\n\n`,
+    `\n\n${smtp}\n   \n`,
+    `\n\n${smtp}\nHourmere\u0001 <bookings@example.test>\n`,
     `\n\nsmtp://user:password@smtp.test#fragment\n${sender}\n`,
+    `\n\nsmtp://user:password@\n${sender}\n`,
+    `\n\nsmtp://user:password@smtp.test/path\n${sender}\n`,
+    `\n\nsmtp://user:password@smtp.test?query=value\n${sender}\n`,
   ])('requires a plausible SMTP URL and a matching mail sender', (input) => {
     const setup = fixture()
     const result = setup.run(input)
@@ -223,5 +283,21 @@ fi`)
     expect(setup.run(proxyInput, setup.fakeOpenSSL(command)).status).toBe(1)
     expect(existsSync(setup.envFile)).toBe(false)
     expect(setup.noStaging()).toBe(true)
+  })
+
+  it.each([
+    ['short-one', 'short-two'],
+    ['!'.repeat(43) + '=', '?'.repeat(43) + '='],
+  ])('rejects distinct malformed random-generator results', (first, second) => {
+    const setup = fixture()
+    const command = `
+if [ ! -e count ]; then
+  : > count
+  printf '%s\\n' '${first}'
+else
+  printf '%s\\n' '${second}'
+fi`
+    expect(setup.run(proxyInput, setup.fakeOpenSSL(command)).status).toBe(1)
+    expect(existsSync(setup.envFile)).toBe(false)
   })
 })

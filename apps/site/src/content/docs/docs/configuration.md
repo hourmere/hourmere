@@ -117,8 +117,9 @@ keeps the plain path.
 | `POSTGRES_PASSWORD` | Required | Initializes the PostgreSQL role and becomes the app's `PGPASSWORD`. Changing `.env` does not change an already initialized database role's password. |
 | `COMPOSE_FILE` | `docker-compose.yml` | Not forwarded by the default Compose file: consumed by the Compose CLI. Setup writes `docker-compose.yml:docker-compose.proxy.yml` for bundled HTTPS, or `docker-compose.yml` for plain mode. |
 | `APP_IMAGE` | `hourmere:local` | Local image tag built from this checkout; `pull_policy: never` remains in force. Use a distinct tag for independent deployments on one Docker host. No prebuilt public image is published yet. |
-| `PROXY_SUBNET` | `172.30.62.0/29` | Not forwarded by the default Compose file: the HTTPS override uses this dedicated ingress subnet. Change it together with `PROXY_IP` if it overlaps another network or another deployment. |
-| `PROXY_IP` | `172.30.62.2` | Not forwarded by the default Compose file: the HTTPS override assigns Caddy this address and forwards it as the app's `TRUSTED_PROXIES`. Must be a free usable address in `PROXY_SUBNET`. |
+| `PROXY_SUBNET` | `172.30.62.0/29` | Not forwarded by the default Compose file: the HTTPS override uses this dedicated ingress subnet. Change it together with `PROXY_IP` and `PROXY_DYNAMIC_RANGE` before starting if it overlaps another network or another deployment. |
+| `PROXY_IP` | `172.30.62.2` | Not forwarded by the default Compose file: the HTTPS override assigns Caddy this address and forwards it as the app's `TRUSTED_PROXIES`. Must be a free usable address in `PROXY_SUBNET`, outside `PROXY_DYNAMIC_RANGE`. |
+| `PROXY_DYNAMIC_RANGE` | `172.30.62.4/30` | Not forwarded by the default Compose file: the HTTPS override restricts dynamically allocated app/worker addresses to this range inside `PROXY_SUBNET`, keeping Caddy's `PROXY_IP` outside it. Change all three network settings together for another subnet/deployment. |
 
 Plain mode publishes `127.0.0.1:<PORT>:3000` for your own host proxy or a private local
 trial. The HTTPS override removes all app host mappings, publishes only TCP 80/443 on

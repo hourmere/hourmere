@@ -44,7 +44,7 @@ function render(override?: string, env: Record<string, string> = {}) {
     expect(result.status, 'Compose must merge the deployment files successfully').toBe(0)
     return JSON.parse(result.stdout) as {
       services: Record<'app' | 'db' | 'proxy', Service>
-      networks: Record<string, { ipam: { config: { subnet: string }[] } }>
+      networks: Record<string, { ipam: { config: { subnet: string; ip_range: string }[] } }>
       volumes: Record<string, unknown>
     }
   } finally {
@@ -63,7 +63,7 @@ describe.skipIf(!hasCompose)('Caddy deployment (requires Compose CLI)', () => {
   })
 
   it('publishes only the TLS proxy, preserves certificates and trusts only its address', () => {
-    const { services, volumes } = render(proxy)
+    const { services, volumes, networks } = render(proxy)
     expect(services.app.ports ?? []).toEqual([])
     expect(services.db.ports ?? []).toEqual([])
     expect(services.proxy.ports?.map(({ published, target }) => [published, target])).toEqual([
@@ -72,6 +72,9 @@ describe.skipIf(!hasCompose)('Caddy deployment (requires Compose CLI)', () => {
     ])
     expect(services.app.environment.TRUSTED_PROXIES).toBe('172.30.62.2')
     expect(services.proxy.networks.ingress?.ipv4_address).toBe('172.30.62.2')
+    expect(networks.ingress?.ipam.config).toEqual([
+      { subnet: '172.30.62.0/29', ip_range: '172.30.62.4/30' },
+    ])
     expect(Object.keys(services.proxy.networks)).toEqual(['ingress'])
     expect(Object.keys(services.db.networks)).toEqual(['default'])
     expect(volumes).toHaveProperty('caddy-data')
@@ -88,10 +91,13 @@ describe.skipIf(!hasCompose)('Caddy deployment (requires Compose CLI)', () => {
     const { services, networks } = render(proxy, {
       PROXY_SUBNET: '172.30.63.0/29',
       PROXY_IP: '172.30.63.2',
+      PROXY_DYNAMIC_RANGE: '172.30.63.4/30',
       TRUSTED_PROXIES: '0.0.0.0/0',
       APP_IMAGE: 'hourmere:isolated-deploy-test',
     })
-    expect(networks.ingress?.ipam.config).toEqual([{ subnet: '172.30.63.0/29' }])
+    expect(networks.ingress?.ipam.config).toEqual([
+      { subnet: '172.30.63.0/29', ip_range: '172.30.63.4/30' },
+    ])
     expect(services.proxy.networks.ingress?.ipv4_address).toBe('172.30.63.2')
     expect(services.app.environment.TRUSTED_PROXIES).toBe('172.30.63.2')
     expect(services.app).toHaveProperty('image', 'hourmere:isolated-deploy-test')
