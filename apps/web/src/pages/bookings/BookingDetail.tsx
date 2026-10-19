@@ -183,7 +183,7 @@ function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loa
           <dt>{t('Booked')}</dt>
           <dd>
             {format.dateTime(booking.createdAt)}
-            {t(', through')} {ui(SOURCE_LABELS[booking.source])}
+            {t(', through {0}', { '0': ui(SOURCE_LABELS[booking.source]) })}
           </dd>
           {booking.rescheduledFromId && (
             <>

@@ -34,7 +34,7 @@ export function integrationTools({
       name: 'list_conference_connections',
       title: 'List my Zoom connections',
       description:
-        'Lists only your Zoom connection IDs, identity/meetings mode, safe status and instance availability, as GET /api/v1/conference-connections does. Never returns credentials, provider meeting links or browser authorization attempts, and never contacts Zoom. Your API key can select your own meeting-mode connection for an event type you actually host through the REST API. Starting authorization, refreshing Zoom credentials and disconnecting require a browser session.',
+        'Lists your Zoom connection IDs, accountEmail, displayName, identity/meetings mode, safe status and instance availability, as GET /api/v1/conference-connections does. Never returns credentials, provider meeting links or browser authorization attempts, and never contacts Zoom. Your API key can select your own meeting-mode connection for an event type you actually host through the REST API. Starting authorization, refreshing Zoom credentials and disconnecting require a browser session.',
       input: z.strictObject({}),
       output: ConferenceConnections,
       annotations,

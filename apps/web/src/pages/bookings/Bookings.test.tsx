@@ -2,6 +2,7 @@ import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { Booking } from '../../api/resources.ts'
+import { chooseLanguage } from '../../i18n/store.ts'
 import { browserLocale } from '../../test/browser-locale.ts'
 import { fakeApi, json, profile, type Routes, renderApp, signedIn } from '../../test/fake-api.tsx'
 import { BOOKING_ID, booking, EVENT_TYPE_ID, eventType } from '../../test/fixtures.ts'
@@ -345,6 +346,24 @@ describe('a booking', () => {
       ...extra,
     })
   }
+
+  it.each([
+    ['web', 'the booking page', '预约页面'],
+    ['embed', 'an embedded booking page', '嵌入的预约页面'],
+    ['api', 'an agent or script (API)', '代理或脚本（API）'],
+    ['mcp', 'an AI agent (MCP)', 'AI 代理（MCP）'],
+  ] as const)('localizes the %s source clause on a rescheduled booking', async (source, en, zh) => {
+    const user = userEvent.setup()
+    chooseLanguage('en')
+    bookingServer(booking({ source, rescheduledFromId: 'b0000000-0000-7000-8000-000000000002' }))
+    renderApp(`/app/bookings/${BOOKING_ID}`)
+    const when = await screen.findByRole('region', { name: 'When' })
+    const booked = within(when).getByText('Booked').nextElementSibling
+    expect(booked?.textContent?.endsWith(`, through ${en}`)).toBe(true)
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Interface language' }), 'zh-CN')
+    expect(within(when).getByText('已预约').nextElementSibling).toBe(booked)
+    expect(booked?.textContent?.endsWith(`，通过${zh}`)).toBe(true)
+  })
 
   it.each(['fa-IR', 'th-TH'])(
     'uses Gregorian dates in booking detail for browser locale %s',

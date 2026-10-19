@@ -162,6 +162,18 @@ afterEach(() => {
 })
 
 describe('MCP transport', () => {
+  it('distinguishes invitee tokens from host booking IDs in server instructions', async () => {
+    const { result } = await message(await rpc(initialize))
+    const { instructions } = result as { instructions: string }
+    expect(instructions).toContain('create_booking returns a manageToken once for a new booking')
+    expect(instructions).toContain('idempotent replays return null')
+    expect(instructions).toContain('reschedule_booking with manageToken returns a new token')
+    expect(instructions).toContain('Tokens from invitee emails follow the meeting')
+    expect(instructions).toContain('use bookingId from list_bookings')
+    expect(instructions).toContain('Host reschedules return manageToken: null')
+    expect(instructions).toContain("preserve the invitee's existing token on the successor")
+  })
+
   it.each(['legacy', 'modern'] as const)(
     'serves %s clients: tools in order, then a call',
     async (era) => {

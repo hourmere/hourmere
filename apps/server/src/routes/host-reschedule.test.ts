@@ -7,7 +7,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createApp } from '../app.ts'
 import { bookingTools } from '../mcp/bookings.ts'
 import type { RateLimit } from '../rate-limit.ts'
-import { bookingRoutes } from './bookings.ts'
+import { type BookingRoutesDeps, bookingRoutes } from './bookings.ts'
 import { publicRoutes } from './public.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -25,7 +25,10 @@ describe.skipIf(!serverUrl)('host rescheduling over REST', () => {
     events.push(event)
   }
 
-  const appWith = (rateLimits = { manage: plenty, slots: plenty }, notifier = notify) =>
+  const appWith = (
+    rateLimits = { manage: plenty, slots: plenty },
+    hostRateLimits: BookingRoutesDeps['hostRateLimits'] = { manage: plenty, slots: plenty },
+  ) =>
     createApp({
       publicUrl: PUBLIC_URL,
       checkDb: async () => {},
@@ -39,7 +42,7 @@ describe.skipIf(!serverUrl)('host rescheduling over REST', () => {
           : { ok: false, error: 'unauthorized', setCookie: [] }
       },
       routes: [
-        bookingRoutes({ db, now: () => NOW, notify: notifier, rateLimits }),
+        bookingRoutes({ db, now: () => NOW, notify, rateLimits, hostRateLimits }),
         publicRoutes({ db, now: () => NOW }),
       ],
     })
@@ -255,13 +258,96 @@ describe.skipIf(!serverUrl)('host rescheduling over REST', () => {
     }
   })
 
-  it('shares manage and slots IP budgets with invitee endpoints and limits before reading a body', async () => {
+  it('keeps host reschedules and slots independent of exhausted invitee IP budgets', async () => {
     const { id, key } = await fixture()
-    const app = appWith({
+    const limits = {
       manage: { limit: 1, windowSeconds: 60 },
       slots: { limit: 1, windowSeconds: 60 },
-    })
+    }
+    const app = appWith(limits, limits)
     expect((await app.request('/api/v1/bookings/manage')).status).toBe(404)
+    expect((await app.request('/api/v1/bookings/manage')).status).toBe(429)
+    expect((await app.request(`/api/v1/bookings/manage/slots?${RANGE}`)).status).toBe(404)
+    expect((await app.request(`/api/v1/bookings/manage/slots?${RANGE}`)).status).toBe(429)
+    const headers = { authorization: `Bearer ${key}` }
+    expect((await app.request(`/api/v1/bookings/${id}/slots?${RANGE}`, { headers })).status).toBe(
+      200,
+    )
+    expect((await post(app, id, headers)).status).toBe(200)
+  })
+
+  it('keeps invitee IP budgets independent of host reschedules and slots', async () => {
+    const { id, key } = await fixture()
+    const limits = {
+      manage: { limit: 1, windowSeconds: 60 },
+      slots: { limit: 1, windowSeconds: 60 },
+    }
+    const app = appWith(limits, limits)
+    const headers = { authorization: `Bearer ${key}` }
+    expect((await app.request(`/api/v1/bookings/${id}/slots?${RANGE}`, { headers })).status).toBe(
+      200,
+    )
+    expect((await post(app, id, headers)).status).toBe(200)
+    expect((await app.request('/api/v1/bookings/manage')).status).toBe(404)
+    expect((await app.request('/api/v1/bookings/manage')).status).toBe(429)
+    expect((await app.request(`/api/v1/bookings/manage/slots?${RANGE}`)).status).toBe(404)
+    expect((await app.request(`/api/v1/bookings/manage/slots?${RANGE}`)).status).toBe(429)
+  })
+
+  it.each(['manage', 'slots'] as const)(
+    'shares the host %s budget by user across credentials, organizations and IPs',
+    async (kind) => {
+      const { id, key, session, base } = await fixture()
+      const other = await fixture()
+      const limits = {
+        manage: { limit: 1, windowSeconds: 60 },
+        slots: { limit: 1, windowSeconds: 60 },
+      }
+      const app = appWith(undefined, limits)
+      const otherKey = crypto.randomUUID()
+      principals.set(otherKey, {
+        ...base,
+        kind: 'api_key',
+        apiKeyId: crypto.randomUUID(),
+        organization: { ...base.organization, id: other.base.organization.id },
+      })
+      const request = (bookingId: string, headers: Record<string, string>, ip: string) =>
+        app.request(
+          `/api/v1/bookings/${bookingId}/${kind === 'manage' ? 'reschedule' : `slots?${RANGE}`}`,
+          kind === 'manage'
+            ? {
+                method: 'POST',
+                headers: { 'content-type': 'application/json', ...headers },
+                body: JSON.stringify({ start: '2026-11-04T09:00:00Z' }),
+              }
+            : { headers },
+          { incoming: { socket: { remoteAddress: ip } } },
+        )
+      // Refused authentication must not consume a user's budget or read a principal early.
+      expect((await request(id, {}, '203.0.113.1')).status).toBe(401)
+      expect((await request(id, { authorization: `Bearer ${key}` }, '203.0.113.1')).status).toBe(
+        200,
+      )
+      const alternateHeaders: Record<string, string>[] = [
+        { cookie: session, origin: PUBLIC_URL },
+        { authorization: `Bearer ${otherKey}` },
+      ]
+      for (const headers of alternateHeaders) {
+        const limited = await request(id, headers, '203.0.113.2')
+        expect(limited.status).toBe(429)
+        expect(limited.headers.get('retry-after')).toBe('60')
+        expect(await limited.json()).toEqual({ error: 'rate_limited' })
+      }
+      expect(
+        (await request(other.id, { authorization: `Bearer ${other.key}` }, '203.0.113.1')).status,
+      ).toBe(200)
+    },
+  )
+
+  it('limits host reschedules after authentication and before reading a body', async () => {
+    const { id, key } = await fixture()
+    const app = appWith(undefined, { manage: { limit: 1, windowSeconds: 60 }, slots: plenty })
+    expect((await post(app, id, { authorization: `Bearer ${key}` }, {})).status).toBe(400)
     let read = false
     const body = new ReadableStream(
       {
@@ -283,14 +369,17 @@ describe.skipIf(!serverUrl)('host rescheduling over REST', () => {
     expect(res.headers.get('retry-after')).toBe('60')
     expect(await res.json()).toEqual({ error: 'rate_limited' })
     expect(read).toBe(false)
-    expect(
-      (
-        await app.request(`/api/v1/bookings/${id}/slots?${RANGE}`, {
-          headers: { authorization: `Bearer ${key}` },
-        })
-      ).status,
-    ).toBe(200)
-    expect((await app.request(`/api/v1/bookings/manage/slots?${RANGE}`)).status).toBe(429)
+  })
+
+  it('defaults to 30 host reschedules and 120 host slot requests per minute', async () => {
+    const { id, key } = await fixture()
+    const app = appWith(undefined, {})
+    const headers = { authorization: `Bearer ${key}` }
+    for (let i = 0; i < 30; i++) expect((await post(app, id, headers, {})).status).toBe(400)
+    expect((await post(app, id, headers, {})).status).toBe(429)
+    const path = `/api/v1/bookings/${id}/slots`
+    for (let i = 0; i < 120; i++) expect((await app.request(path, { headers })).status).toBe(400)
+    expect((await app.request(path, { headers })).status).toBe(429)
   })
 
   it('keeps REST equivalents for each existing MCP booking mutation', async () => {
