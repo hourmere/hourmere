@@ -11,7 +11,8 @@ const caddy = readFileSync(new URL('Caddyfile', root), 'utf8')
 const hasCompose = spawnSync('docker', ['compose', 'version'], { encoding: 'utf8' }).status === 0
 
 interface Service {
-  ports?: { host_ip?: string; published: string; target: number }[]
+  image?: string
+  ports?: { host_ip?: string; published: string; target: number; protocol: string }[]
   environment: Record<string, string>
   networks: Record<string, { ipv4_address?: string }>
   volumes?: { source: string; target: string }[]
@@ -66,14 +67,18 @@ describe.skipIf(!hasCompose)('Caddy deployment (requires Compose CLI)', () => {
     const { services, volumes, networks } = render(proxy)
     expect(services.app.ports ?? []).toEqual([])
     expect(services.db.ports ?? []).toEqual([])
-    expect(services.proxy.ports?.map(({ published, target }) => [published, target])).toEqual([
-      ['80', 80],
-      ['443', 443],
+    expect(
+      services.proxy.ports?.map(({ published, target, protocol }) => [published, target, protocol]),
+    ).toEqual([
+      ['80', 80, 'tcp'],
+      ['443', 443, 'tcp'],
+      ['443', 443, 'udp'],
     ])
+    expect(services.proxy.image).toBe('caddy:2.11-alpine')
     expect(services.app.environment.TRUSTED_PROXIES).toBe('172.30.62.2')
     expect(services.proxy.networks.ingress?.ipv4_address).toBe('172.30.62.2')
     expect(networks.ingress?.ipam.config).toEqual([
-      { subnet: '172.30.62.0/29', ip_range: '172.30.62.4/30' },
+      { subnet: '172.30.62.0/28', ip_range: '172.30.62.8/29' },
     ])
     expect(Object.keys(services.proxy.networks)).toEqual(['ingress'])
     expect(Object.keys(services.db.networks)).toEqual(['default'])
@@ -89,14 +94,14 @@ describe.skipIf(!hasCompose)('Caddy deployment (requires Compose CLI)', () => {
 
   it('moves proxy identity and app trust together when avoiding a network overlap', () => {
     const { services, networks } = render(proxy, {
-      PROXY_SUBNET: '172.30.63.0/29',
+      PROXY_SUBNET: '172.30.63.0/28',
       PROXY_IP: '172.30.63.2',
-      PROXY_DYNAMIC_RANGE: '172.30.63.4/30',
+      PROXY_DYNAMIC_RANGE: '172.30.63.8/29',
       TRUSTED_PROXIES: '0.0.0.0/0',
       APP_IMAGE: 'hourmere:isolated-deploy-test',
     })
     expect(networks.ingress?.ipam.config).toEqual([
-      { subnet: '172.30.63.0/29', ip_range: '172.30.63.4/30' },
+      { subnet: '172.30.63.0/28', ip_range: '172.30.63.8/29' },
     ])
     expect(services.proxy.networks.ingress?.ipv4_address).toBe('172.30.63.2')
     expect(services.app.environment.TRUSTED_PROXIES).toBe('172.30.63.2')
@@ -109,5 +114,17 @@ it('routes the complete public HTTPS origin with Caddy forwarding defaults', () 
     .split('\n')
     .filter((line) => line.trim() && !line.trimStart().startsWith('#'))
     .join('\n')
-  expect(active).toBe('{$PUBLIC_URL} {\n  reverse_proxy app:3000\n}')
+  expect(active).toBe(
+    String.raw`{
+	log default {
+		format filter {
+			request>uri regexp "\?.*$" "?REDACTED"
+			request>headers delete
+		}
+	}
+}
+{$PUBLIC_URL} {
+	reverse_proxy app:3000
+}`,
+  )
 })

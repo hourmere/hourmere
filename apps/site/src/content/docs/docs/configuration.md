@@ -126,17 +126,21 @@ keeps the plain path.
 |---|---|---|
 | `POSTGRES_PASSWORD` | Required | Initializes the PostgreSQL role and becomes the app's `PGPASSWORD`. Changing `.env` does not change an already initialized database role's password. |
 | `COMPOSE_FILE` | `docker-compose.yml` | Not forwarded by the default Compose file: consumed by the Compose CLI. Setup writes `docker-compose.yml:docker-compose.proxy.yml` for bundled HTTPS, or `docker-compose.yml` for plain mode. |
+| `COMPOSE_PROJECT_NAME` | `hourmere` | Not forwarded by the default Compose file: consumed by the Compose CLI to select containers, networks and volumes. Setup persists this name; set it in setup's environment to choose an independent deployment. Keep the original name when migrating an existing installation; persist the new name when restoring to a separate project. |
 | `APP_IMAGE` | `hourmere:local` | Local image tag built from this checkout; `pull_policy: never` remains in force. Use a distinct tag for independent deployments on one Docker host. No prebuilt public image is published yet. |
-| `PROXY_SUBNET` | `172.30.62.0/29` | Not forwarded by the default Compose file: the HTTPS override uses this dedicated ingress subnet. Change it together with `PROXY_IP` and `PROXY_DYNAMIC_RANGE` before starting if it overlaps another network or another deployment. |
+| `PROXY_SUBNET` | `172.30.62.0/28` | Not forwarded by the default Compose file: the HTTPS override uses this dedicated IPv4 ingress subnet. Change it together with `PROXY_IP` and `PROXY_DYNAMIC_RANGE` before starting if it overlaps another network or another deployment. |
 | `PROXY_IP` | `172.30.62.2` | Not forwarded by the default Compose file: the HTTPS override assigns Caddy this address and forwards it as the app's `TRUSTED_PROXIES`. Must be a free usable address in `PROXY_SUBNET`, outside `PROXY_DYNAMIC_RANGE`. |
-| `PROXY_DYNAMIC_RANGE` | `172.30.62.4/30` | Not forwarded by the default Compose file: the HTTPS override restricts dynamically allocated app/worker addresses to this range inside `PROXY_SUBNET`, keeping Caddy's `PROXY_IP` outside it. Change all three network settings together for another subnet/deployment. |
+| `PROXY_DYNAMIC_RANGE` | `172.30.62.8/29` | Not forwarded by the default Compose file: the HTTPS override allocates app/worker and one-off addresses from this range inside `PROXY_SUBNET`, keeping Caddy's `PROXY_IP` outside it. Change all three network settings together for another subnet/deployment. |
 
 Plain mode publishes `127.0.0.1:<PORT>:3000` for your own host proxy or a private local
-trial. The HTTPS override removes all app host mappings, publishes only TCP 80/443 on
+trial. The HTTPS override removes all app host mappings, publishes TCP 80/443 and UDP 443 on
 `proxy`, and keeps PostgreSQL unpublished. Caddy preserves Host and sets forwarded
 client/protocol headers; `PUBLIC_URL` must remain the exact external HTTPS origin for
 origin checks, redirects and Secure cookies. Its `caddy-data` and `caddy-config` volumes
 persist certificates and state across recreations. Keep them in the backup/recovery plan.
+Publish only DNS A with the IPv4-only bundled ingress network; see the self-hosting guide
+before enabling IPv6/AAAA. Proxy setup requires SMTP for sign-in; private log-mailer tests
+are described there too. Setup omits the development `DATABASE_URL` from the generated `.env`.
 
 To disable automatic migrations, set `AUTO_MIGRATE=false` in `.env`; the default Compose
 file forwards it to the app and its inherited worker. You can also set it explicitly in a

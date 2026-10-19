@@ -11,12 +11,13 @@ services:
       ingress:
 
   proxy:
-    image: caddy:2-alpine
+    image: caddy:2.11-alpine
     environment:
       PUBLIC_URL: ${PUBLIC_URL:?set an https PUBLIC_URL in .env}
     ports:
       - "80:80"
       - "443:443"
+      - "443:443/udp"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
@@ -33,9 +34,10 @@ networks:
   ingress:
     ipam:
       config:
-        - subnet: ${PROXY_SUBNET:-172.30.62.0/29}
+        - subnet: ${PROXY_SUBNET:-172.30.62.0/28}
           # Dynamic app/worker addresses must never claim the proxy's static .2.
-          ip_range: ${PROXY_DYNAMIC_RANGE:-172.30.62.4/30}
+          # Leave room for app, worker and documented one-off Compose commands.
+          ip_range: ${PROXY_DYNAMIC_RANGE:-172.30.62.8/29}
 
 volumes:
   caddy-data:

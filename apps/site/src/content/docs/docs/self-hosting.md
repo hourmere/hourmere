@@ -12,8 +12,13 @@ release workflow is being prepared separately. Allow disk space for the source, 
 builds, PostgreSQL data and backups. Choose a dedicated deployment directory and volumes.
 
 For the bundled HTTPS proxy, point your hostname's DNS A record at the VPS, for example
-`app.hourmere.com`. Publish an AAAA record only if IPv6 actually reaches this host. Make
-TCP ports 80 and 443 reachable for Caddy's certificate validation, HTTPS and HTTP redirects;
+`app.hourmere.com`. **Publish only an A record with the bundled configuration.** Its
+ingress network is IPv4-only: IPv6 connections can arrive through Docker's userland proxy
+with the bridge gateway as their source, putting all IPv6 visitors in one rate-limit bucket.
+Do not publish AAAA merely because the host has IPv6. Supporting it requires a custom
+ingress network with `enable_ipv6`, a fixed Caddy IPv6 address, and both exact Caddy
+addresses in the app's `TRUSTED_PROXIES` override, followed by independent IPv6 client-IP
+rate-limit testing. Make TCP ports 80 and 443 and UDP 443 (HTTP/3) reachable;
 keep SSH available on TCP 22. PostgreSQL and the application port must stay private.
 
 ## First start with automatic HTTPS
@@ -28,7 +33,7 @@ docker compose up -d --build --wait
 curl --retry 20 --retry-delay 3 --retry-all-errors --fail https://app.hourmere.com/api/health
 ```
 
-In setup, accept the default `proxy` mode, enter your exact HTTPS origin (the example is
+In setup, accept the default `proxy` mode, explicitly enter your exact HTTPS origin (the example is
 `https://app.hourmere.com`), then enter your SMTP URL and sender. Use your own hostname in
 all commands. A path prefix and a nonstandard public HTTPS port are not supported by this
 bundled proxy setup. Use a sender your SMTP provider accepts, for example
@@ -40,15 +45,21 @@ The script copies `.env.example`, generates independent `POSTGRES_PASSWORD` and
 `BETTER_AUTH_SECRET` values with `openssl rand -base64 32`, and writes `.env` with mode
 `600`. It never prints the secrets or overwrites an existing `.env`. Keep this file private
 and out of Git; do not paste a rendered `docker compose config` into an issue. To change an
-existing deployment, edit its `.env` rather than rerunning setup.
+existing deployment, edit its `.env` rather than rerunning setup. The development example
+`DATABASE_URL` is omitted: Compose supplies its own container database URL and password.
 
 Setup selects both Compose files using
-`COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml`, and sets `SIGNUP=first-user`
+`COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml`, persists
+`COMPOSE_PROJECT_NAME=hourmere`, and sets `SIGNUP=first-user`
 and `AUTO_MIGRATE=true`. `docker compose up` then builds the checked-out application,
 starts PostgreSQL 18, and applies application and job migrations before serving requests.
 `--wait` waits for the app and database health checks; the curl command also checks the
 public TLS/proxy path. A health response checks the process/database, not SMTP delivery or
-external calendar access.
+external calendar access. For an independent installation, choose a unique lowercase project
+name before setup, for example `COMPOSE_PROJECT_NAME=hourmere-staging ./scripts/setup.sh`.
+Run every later Compose command from that checkout so it reads the persisted project and
+file selection. Avoid exporting a conflicting `COMPOSE_PROJECT_NAME` or `COMPOSE_FILE` in
+your shell, which would override `.env`.
 
 Open `https://app.hourmere.com/sign-in` and sign in immediately with your own email. There
 is no separate sign-up page and no initial password: proving an eligible email address
@@ -79,22 +90,24 @@ through [Google Calendar](/docs/google-calendar), then use the [REST](/docs/rest
 
 ## Proxy behavior and an existing proxy
 
-The HTTPS override publishes only TCP **80 and 443**, on Caddy's `proxy` service. Neither
+The HTTPS override publishes TCP **80 and 443** and UDP **443** (HTTP/3), on Caddy's `proxy` service. Neither
 `app` nor PostgreSQL publishes a host port. Caddy obtains and renews certificates, redirects
 HTTP to HTTPS, and preserves the original Host while setting `X-Forwarded-For` and
 `X-Forwarded-Proto`. The app's `PUBLIC_URL` is the external HTTPS origin used by origin
 checks, redirects and Secure cookies. HTTPS origins also enable the app's HSTS header.
 
 Caddy has a fixed address (`PROXY_IP=172.30.62.2`) on a dedicated ingress network
-(`PROXY_SUBNET=172.30.62.0/29`). Dynamic app/worker addresses are allocated only from
-`PROXY_DYNAMIC_RANGE=172.30.62.4/30`, keeping Caddy's address outside that range. The
+(`PROXY_SUBNET=172.30.62.0/28`). Dynamic app/worker and one-off container addresses are allocated from
+`PROXY_DYNAMIC_RANGE=172.30.62.8/29`, keeping Caddy's address outside that range. The
 override sets `TRUSTED_PROXIES` to Caddy's address so client-IP rate limits use the visitor
 address and ignore client-supplied forwarding headers.
 Do not replace this with a broad private-network range. If the subnet overlaps an existing
 network or another deployment, change all three values (`PROXY_SUBNET`, `PROXY_IP` and
 `PROXY_DYNAMIC_RANGE`) in `.env` before starting. Choose a free private subnet, a dynamic
 range inside it and a free usable proxy address outside that dynamic range. Caddy's
-certificates and state persist in `caddy-data` and `caddy-config` volumes.
+certificates and state persist in `caddy-data` and `caddy-config` volumes. Caddy's global log
+filter replaces query strings with `?REDACTED` and deletes request headers, including on
+upstream errors; retain this filter when customizing the Caddyfile.
 
 If you already operate a proxy, select `plain` during setup. This selects only
 `docker-compose.yml`, which publishes `127.0.0.1:${PORT:-3000}:3000`; PostgreSQL remains
@@ -119,7 +132,50 @@ curl --fail http://127.0.0.1:3000/api/health
 
 Without SMTP, sign-in links and ordinary booking emails appear in `docker compose logs app`.
 Anyone who can read those links can act as their recipient. Setup requires SMTP for the
-bundled public HTTPS path; use log email only for a private loopback trial.
+bundled public HTTPS path: sign-in requires email delivery. For a private HTTPS proxy test
+without SMTP, run setup with synthetic SMTP settings, then clear `SMTP_URL` and `MAIL_FROM`
+in the private `.env` before starting. Restrict the test to your machine or a private network,
+use synthetic accounts and read sign-in mail privately from app/worker logs. The log mailer
+is supported behind Caddy too, but must never be used for a public deployment. Never copy
+those logs into reports. For a simple trial, prefer the loopback plain-mode sequence above.
+
+## Migrate an existing installation to Caddy
+
+Take a full backup using your current configuration first. Update to the reviewed source
+revision and keep the existing secrets, database volume and **existing Compose project
+name**. Determine that name with `docker compose ls` or the containers' Compose labels;
+old default installations use `hourmere`. Changing it would select a different database.
+Stop the old app and any worker during the switch; stop an existing proxy before Caddy
+claims 80/443. Configure a real SMTP provider and explicit HTTPS `PUBLIC_URL` in `.env`,
+point only DNS A at the host, and allow the ports listed above.
+
+Older `.env` files may lack every deployment setting below. This sequence replaces or adds
+the keys, rather than silently relying on `sed` matching an existing key. Set the project
+name to the original one and select a free subnet before running it:
+
+```sh
+umask 077
+env_update=$(mktemp .env.update.XXXXXXXX)
+awk '!/^(COMPOSE_PROJECT_NAME|COMPOSE_FILE|APP_IMAGE|PROXY_SUBNET|PROXY_IP|PROXY_DYNAMIC_RANGE|DATABASE_URL)=/' .env > "$env_update"
+cat >> "$env_update" <<'EOF'
+COMPOSE_PROJECT_NAME=hourmere
+COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml
+APP_IMAGE=hourmere:local
+PROXY_SUBNET=172.30.62.0/28
+PROXY_IP=172.30.62.2
+PROXY_DYNAMIC_RANGE=172.30.62.8/29
+EOF
+chmod 600 "$env_update"
+mv "$env_update" .env
+```
+
+Review the private file locally, then run `docker compose build`, `docker compose pull proxy db`
+and `docker compose up -d --wait`. Verify HTTPS health, sign-in and a booking before
+reopening traffic. Do not recreate or delete the database volume. If the old installation
+used a custom Compose override, carry its settings over deliberately; `.env` entries alone
+do not forward arbitrary server variables. If resizing an already deployed `/29` ingress
+network, stop app/worker/proxy, remove only that project's obsolete ingress network, then
+start again; Docker cannot resize an existing network. Keep database volumes intact.
 
 ## Run workers separately
 
@@ -168,7 +224,7 @@ and select a **new, unused** project name so Compose creates a fresh database vo
 `hourmere-restore` below is an example. Keep the original deployment running and start only
 the restore project's database. Before even this database-only start, choose a free ingress
 subnet and change all three proxy network settings: Compose can create the declared
-networks even when only `db` is targeted. The example below uses `172.30.63.0/29`; confirm
+networks even when only `db` is targeted. The example below uses `172.30.63.0/28`; confirm
 that it does not overlap any host, Docker or VPN network before using it:
 
 ```sh
@@ -176,35 +232,53 @@ git clone https://github.com/hourmere/hourmere.git hourmere-restore
 cd hourmere-restore
 git checkout --detach "$(cat "$backup_dir/commit")"
 install -m 600 "$backup_dir/.env" .env
-sed -i 's/^APP_IMAGE=.*/APP_IMAGE=hourmere:restore/' .env
-sed -i -e 's|^PROXY_SUBNET=.*|PROXY_SUBNET=172.30.63.0/29|' \
-  -e 's/^PROXY_IP=.*/PROXY_IP=172.30.63.2/' \
-  -e 's|^PROXY_DYNAMIC_RANGE=.*|PROXY_DYNAMIC_RANGE=172.30.63.4/30|' .env
-docker compose --project-name hourmere-restore up -d --wait db
-docker compose --project-name hourmere-restore exec -T db \
+umask 077
+env_update=$(mktemp .env.update.XXXXXXXX)
+awk '!/^(COMPOSE_PROJECT_NAME|COMPOSE_FILE|APP_IMAGE|PROXY_SUBNET|PROXY_IP|PROXY_DYNAMIC_RANGE|DATABASE_URL)=/' .env > "$env_update"
+cat >> "$env_update" <<'EOF'
+COMPOSE_PROJECT_NAME=hourmere-restore
+COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml
+APP_IMAGE=hourmere:restore
+PROXY_SUBNET=172.30.63.0/28
+PROXY_IP=172.30.63.2
+PROXY_DYNAMIC_RANGE=172.30.63.8/29
+EOF
+chmod 600 "$env_update"
+mv "$env_update" .env
+docker compose up -d --wait db
+docker compose exec -T db \
   pg_restore -U hourmere -d hourmere --exit-on-error --single-transaction < "$backup_dir/hourmere.dump"
-docker compose --project-name hourmere-restore exec -T db \
+docker compose exec -T db \
   psql -U hourmere -d hourmere -Atc 'SELECT count(*) FROM auth."user";'
 ```
 
 Set `backup_dir` to the chosen backup directory if using a new shell. The separate
 `APP_IMAGE` tag also prevents restore builds from replacing the original deployment's
 local image tag. Compare the count with your expected account data, and inspect other
-expected records privately. Do not start the
+expected records privately. Persisting `COMPOSE_PROJECT_NAME=hourmere-restore` ensures later
+backup, upgrade and log commands in this checkout target the restored project too. These
+assignments also work with backups from before the deployment settings existed, provided
+the selected source revision contains `Caddyfile` and `docker-compose.proxy.yml`. If the
+backup commit predates this kit, select a reviewed newer revision containing these files
+instead of that old commit before using the HTTPS commands; startup will apply its pending
+migrations, so retain the original dump for rollback. Plain-mode
+restores use `COMPOSE_FILE=docker-compose.yml` and omit the Caddy steps. Do not start the
 restored app or workers for a drill until SMTP, provider credentials and outbound webhooks
 have been isolated: restored queued jobs can otherwise send duplicate messages or modify
 real calendars. Never restore over a running app, and never delete a production `db-data`
 volume as an upgrade or troubleshooting step.
 
 For actual recovery, take the old deployment offline before reusing its hostname/ports.
-Restore the original `.env` and revision, restore the database as above, then create the
+Use the backed-up secrets and revision with the new persisted deployment settings above;
+do not overwrite the prepared `.env` again. Restore the database as above, then create the
 proxy container and copy its saved state into the new volumes before starting it:
 
 ```sh
-docker compose --project-name hourmere-restore create --build proxy
-docker compose --project-name hourmere-restore cp "$backup_dir/caddy-data/." proxy:/data
-docker compose --project-name hourmere-restore cp "$backup_dir/caddy-config/." proxy:/config
-docker compose --project-name hourmere-restore up -d --build --wait
+docker compose build
+docker compose create proxy
+docker compose cp "$backup_dir/caddy-data/." proxy:/data
+docker compose cp "$backup_dir/caddy-config/." proxy:/config
+docker compose up -d --wait
 ```
 
 Keep the free `PROXY_SUBNET`, `PROXY_IP` and `PROXY_DYNAMIC_RANGE` selected before the
@@ -220,13 +294,20 @@ can be updated with:
 
 ```sh
 git pull --ff-only
+docker compose pull proxy db
 docker compose up -d --build --wait
 curl --retry 20 --retry-delay 3 --retry-all-errors --fail https://app.hourmere.com/api/health
 ```
 
 For a pinned release, fetch and check out the reviewed tag/commit instead of pulling the
 branch. No public image can currently be pulled as a substitute for building the source.
-Rebuild any separate worker too. `AUTO_MIGRATE=true` applies pending application and job
+Plain mode pulls only `db`. Caddy is pinned to the `2.11` minor line (`caddy:2.11-alpine`),
+and PostgreSQL to major 18 (`postgres:18-alpine`): pulling refreshes their patch/security
+updates, then `up` recreates affected containers. Review Caddy releases and deliberately
+test newer minor versions before updating that pin; review PostgreSQL release notes before
+patch updates, and plan a separate database migration for a future major upgrade. Container
+image updates are separate from host apt updates. Rebuild any separate worker too.
+`AUTO_MIGRATE=true` applies pending application and job
 migrations on startup; applied migrations have checksums and must not be edited. Keep the
 same secrets across upgrades. PostgreSQL password changes in `.env` do not change an
 already-initialized database role's password.
@@ -251,19 +332,68 @@ database is needed at startup even with `AUTO_MIGRATE=false`. Repeated restarts 
 incorrect secrets, SMTP settings or a missing worker; consult the
 [configuration reference](/docs/configuration).
 
-Before admitting public traffic:
+On Ubuntu 24.04, allow SSH before enabling the firewall. For the standard SSH port:
 
-- Allow inbound TCP 22 (or your chosen SSH port), 80 and 443 only in the VPS/network firewall;
-  verify PostgreSQL and port 3000 cannot be reached remotely. Docker publishes ports
-  independently of some host firewall rules, so retain the supplied private bindings.
-- Use SSH keys, verify a second key-based session works, then disable SSH password login and
-  direct root login. Restrict SSH source addresses when practical.
-- Enable Ubuntu unattended security updates and keep Docker Engine/Compose updated. Plan
-  reboots and verify health afterward.
-- Keep `.env` mode `600`, restrict Docker/host administrator access, and maintain tested
-  off-host backups. Docker access can read container secrets.
-- Configure real SMTP, claim the first account, review signup policy and check health,
-  sign-in and a booking through the HTTPS hostname.
+```sh
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
+sudo ufw allow OpenSSH
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw allow 443/udp
+sudo ufw enable
+sudo ufw status verbose
+```
+
+Allow your actual SSH port instead if it differs from the OpenSSH profile. Mirror these
+rules in the VPS/network firewall. [Docker-published ports bypass ufw rules](https://docs.docker.com/engine/install/ubuntu/);
+the supplied proxy configuration therefore publishes only 80/tcp, 443/tcp and 443/udp.
+Keep app/database ports unpublished and verify them from another machine. Restrict SSH
+source addresses when practical.
+
+Verify a second key-based SSH session works before changing authentication. Keep the
+current session open. Create `/etc/ssh/sshd_config.d/00-hardening.conf`:
+
+```sh
+sudo tee /etc/ssh/sshd_config.d/00-hardening.conf >/dev/null <<'EOF'
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitRootLogin prohibit-password
+EOF
+sudo sshd -t
+sudo systemctl restart ssh
+```
+
+Run the restart only after `sshd -t` succeeds, then verify a new key-based login.
+The `00-` prefix sorts before `50-cloud-init.conf`: [OpenSSH uses the first value for
+most settings](https://ubuntu.com/server/docs/openssh-server/). Root key login remains
+possible; use a regular sudo account for routine administration.
+
+Ubuntu 24.04 normally has unattended security upgrades enabled. Verify the machine's
+policy and timers (`systemctl list-timers 'apt-daily*'`), especially on minimal/cloud images.
+Docker's apt repository is absent from `Unattended-Upgrade::Allowed-Origins` by default.
+To opt into automatic Docker package updates, confirm its Origin/Suite in the locally
+downloaded `InRelease` metadata (normally `Docker` / `noble`) and add:
+
+```sh
+sudo tee /etc/apt/apt.conf.d/52unattended-upgrades-docker >/dev/null <<'EOF'
+Unattended-Upgrade::Allowed-Origins {
+    "Docker:${distro_codename}";
+};
+EOF
+sudo unattended-upgrade --dry-run --debug
+```
+
+Review the dry run and plan service restarts/reboots. See Ubuntu's
+[automatic update policy and origin configuration](https://ubuntu.com/server/docs/how-to/software/automatic-updates/).
+This updates host packages; refresh container images through the upgrade procedure above.
+
+Use `sudo docker …` unless your deployment account is already authorized for Docker.
+Membership in the [docker group grants root-level privileges](https://docs.docker.com/engine/install/linux-postinstall/),
+including access to container secrets; grant it only to trusted administrators. Keep `.env`
+mode `600` and maintain tested off-host backups. Before admitting public traffic, configure
+real SMTP, claim the first account, review signup policy and check health, sign-in and a
+booking through the HTTPS hostname.
 
 ## Public attribution
 

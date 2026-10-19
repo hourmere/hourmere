@@ -60,7 +60,7 @@ The Starlight documentation includes a [self-hosting guide](apps/site/src/conten
 and [REST](apps/site/src/content/docs/docs/rest.md) / [MCP](apps/site/src/content/docs/docs/mcp.md) quickstarts.
 
 Requires Git, OpenSSL, Docker Engine and Docker Compose 2.24.4 or newer. Point your hostname
-at the host and allow TCP 80/443 (plus SSH) before using automatic HTTPS:
+at the host with an A record only and allow TCP 80/443 and UDP 443 (plus SSH) before using automatic HTTPS:
 
 ```sh
 git clone https://github.com/hourmere/hourmere.git
@@ -73,7 +73,7 @@ curl --retry 20 --retry-delay 3 --retry-all-errors --fail https://app.hourmere.c
 Accept `proxy`, enter your HTTPS origin (replace `app.hourmere.com` with your hostname),
 and configure SMTP and its sender. Setup generates separate secrets directly into a mode
 `600` `.env`, refuses to overwrite an existing file, and selects the optional Caddy override.
-Caddy obtains/renews TLS certificates; only TCP 80/443 are published, and the app trusts only
+Caddy obtains/renews TLS certificates; only TCP 80/443 and UDP 443 are published, and the app trusts only
 the proxy's dedicated address for forwarded client IPs. If its network overlaps an existing
 network or another instance, change `PROXY_SUBNET`, `PROXY_IP` and `PROXY_DYNAMIC_RANGE` together
 in `.env` before starting. **No prebuilt public image is

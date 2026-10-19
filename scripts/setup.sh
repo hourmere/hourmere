@@ -35,6 +35,13 @@ for utility in openssl awk mktemp link; do
   command -v "$utility" >/dev/null 2>&1 || fail "Required command is missing: $utility"
 done
 
+# Persist the project identity so later backup, restore and upgrade commands use
+# the same containers and volumes, regardless of the checkout directory's name.
+project_name=${COMPOSE_PROJECT_NAME:-hourmere}
+case "$project_name" in
+  [!a-z0-9]*|*[!a-z0-9_-]*) fail 'COMPOSE_PROJECT_NAME must start with a lowercase letter or digit and contain only lowercase letters, digits, hyphens or underscores.' ;;
+esac
+
 prompt() {
   printf '%s' "$1" >&2
   IFS= read -r answer || fail 'Setup cancelled before configuration was written.'
@@ -90,12 +97,17 @@ valid_origin() {
 prompt 'Deployment mode [proxy/plain] (proxy): '
 mode=${answer:-proxy}
 case "$mode" in
-  proxy) default_url=https://app.hourmere.com ;;
-  plain) default_url=http://localhost:3000 ;;
+  proxy)
+    prompt 'Public HTTPS origin (required): '
+    public_url=$answer
+    [ -n "$public_url" ] || fail 'Proxy mode requires an explicit HTTPS origin for your own hostname.'
+    ;;
+  plain)
+    prompt 'Public origin (http://localhost:3000): '
+    public_url=${answer:-http://localhost:3000}
+    ;;
   *) fail 'Choose proxy or plain.' ;;
 esac
-prompt "Public origin ($default_url): "
-public_url=${answer:-$default_url}
 valid_origin "$public_url" || fail 'Use an HTTP(S) origin without a path; proxy mode requires an HTTPS DNS hostname without a port.'
 app_port=3000
 
@@ -125,6 +137,7 @@ if [ -n "$smtp_url" ]; then
   esac
   case "$mail_from" in
     *[[:cntrl:]]*) fail 'Mail sender must contain only single-line text.' ;;
+    *\\) fail 'Mail sender must not end with a backslash.' ;;
   esac
 else
   case "$mode:$public_url" in
@@ -166,7 +179,7 @@ staging=$(mktemp -d "$repo/.env.setup.XXXXXXXX")
 {
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in
-      BETTER_AUTH_SECRET=*|POSTGRES_PASSWORD=*|PUBLIC_URL=*|PORT=*|SMTP_URL=*|MAIL_FROM=*|SIGNUP=*|AUTO_MIGRATE=*|COMPOSE_FILE=*) continue ;;
+      BETTER_AUTH_SECRET=*|POSTGRES_PASSWORD=*|PUBLIC_URL=*|PORT=*|SMTP_URL=*|MAIL_FROM=*|SIGNUP=*|AUTO_MIGRATE=*|COMPOSE_FILE=*|COMPOSE_PROJECT_NAME=*|DATABASE_URL=*) continue ;;
     esac
     printf '%s\n' "$line"
   done < "$repo/.env.example"
@@ -179,6 +192,7 @@ staging=$(mktemp -d "$repo/.env.setup.XXXXXXXX")
   write_setting MAIL_FROM "$mail_from"
   write_setting SIGNUP first-user
   write_setting AUTO_MIGRATE true
+  write_setting COMPOSE_PROJECT_NAME "$project_name"
   if [ "$mode" = proxy ]; then
     write_setting COMPOSE_FILE docker-compose.yml:docker-compose.proxy.yml
   else

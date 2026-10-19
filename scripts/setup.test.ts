@@ -21,7 +21,8 @@ const example = new URL('../.env.example', import.meta.url)
 const directories: string[] = []
 const smtp = "smtps://synthetic:$literal'pass@smtp.example.test:465"
 const sender = "Hourmere's scheduling <bookings@example.test>"
-const proxyInput = `\n\n${smtp}\n${sender}\n`
+const origin = 'https://meet.example.test'
+const proxyInput = `\n${origin}\n${smtp}\n${sender}\n`
 const plainInput = 'plain\n\n\nyes\n'
 
 afterAll(() => {
@@ -43,7 +44,7 @@ function fixture(script = source) {
         encoding: 'utf8',
         input,
         timeout: 5000,
-        env: { ...process.env, ...env },
+        env: { ...process.env, COMPOSE_PROJECT_NAME: '', ...env },
       })
     },
     text() {
@@ -80,8 +81,11 @@ describe('first-run deployment setup', () => {
     expect(auth !== postgres).toBe(true)
     const output = result.stdout + result.stderr
     expect([auth, postgres, smtp].some((secret) => output.includes(secret))).toBe(false)
-    expect(text.includes("PUBLIC_URL='https://app.hourmere.com'\n")).toBe(true)
+    expect(text.includes(`PUBLIC_URL='${origin}'\n`)).toBe(true)
     expect(text.includes("COMPOSE_FILE='docker-compose.yml:docker-compose.proxy.yml'\n")).toBe(true)
+    expect(text.includes("COMPOSE_PROJECT_NAME='hourmere'\n")).toBe(true)
+    expect(text.match(/^COMPOSE_PROJECT_NAME=/gm)?.length).toBe(1)
+    expect(/^DATABASE_URL=/m.test(text)).toBe(false)
     expect(text.includes("SIGNUP='first-user'\n")).toBe(true)
     expect(text.includes("AUTO_MIGRATE='true'\n")).toBe(true)
     expect(
@@ -95,6 +99,44 @@ describe('first-run deployment setup', () => {
     expect(setup.noStaging()).toBe(true)
   })
 
+  it('persists an explicitly selected Compose project for subsequent commands', () => {
+    const setup = fixture()
+    expect(setup.run(proxyInput, { COMPOSE_PROJECT_NAME: 'hourmere-staging_2' }).status).toBe(0)
+    expect(setup.text().includes("COMPOSE_PROJECT_NAME='hourmere-staging_2'\n")).toBe(true)
+    expect(setup.text().match(/^COMPOSE_PROJECT_NAME=/gm)?.length).toBe(1)
+  })
+
+  it.each([
+    'Hourmere',
+    '-hourmere',
+    '_hourmere',
+    'hourmere staging',
+    'hourmere.test',
+    'hourmere\nOTHER=value',
+  ])('rejects an invalid Compose project identity (%j)', (name) => {
+    const setup = fixture()
+    expect(setup.run(proxyInput, { COMPOSE_PROJECT_NAME: name }).status).toBe(1)
+    expect(existsSync(setup.envFile)).toBe(false)
+    expect(setup.noStaging()).toBe(true)
+  })
+
+  it('requires the proxy origin to be entered explicitly', () => {
+    const setup = fixture()
+    expect(setup.run(`\n\n${smtp}\n${sender}\n`).status).toBe(1)
+    expect(existsSync(setup.envFile)).toBe(false)
+    expect(setup.noStaging()).toBe(true)
+  })
+
+  it.each([`${sender}\\`, `${sender}\\\\`, `${sender}'\\`])(
+    'rejects mail senders ending in a backslash (%j)',
+    (mailFrom) => {
+      const setup = fixture()
+      expect(setup.run(`\n${origin}\n${smtp}\n${mailFrom}\n`).status).toBe(1)
+      expect(existsSync(setup.envFile)).toBe(false)
+      expect(setup.noStaging()).toBe(true)
+    },
+  )
+
   it('supports an explicitly confirmed loopback trial with the plain Compose path', () => {
     const setup = fixture()
     expect(setup.run(plainInput).status).toBe(0)
@@ -103,6 +145,8 @@ describe('first-run deployment setup', () => {
     expect(text.includes("PUBLIC_URL='http://localhost:3000'\n")).toBe(true)
     expect(text.includes("SMTP_URL=''\n")).toBe(true)
     expect(text.includes("MAIL_FROM=''\n")).toBe(true)
+    expect(text.includes("COMPOSE_PROJECT_NAME='hourmere'\n")).toBe(true)
+    expect(/^DATABASE_URL=/m.test(text)).toBe(false)
   })
 
   it('disables terminal echo while a real terminal reads SMTP credentials', async () => {
@@ -120,7 +164,7 @@ describe('first-run deployment setup', () => {
     let transcript = ''
     const steps = [
       ['Deployment mode [proxy/plain] (proxy): ', '\n'],
-      ['Public origin (https://app.hourmere.com): ', '\n'],
+      ['Public HTTPS origin (required): ', `${origin}\n`],
       ['SMTP URL (hidden; blank only for a private loopback trial): ', `${smtp}\n`],
       ['Mail sender (for example Hourmere <bookings@example.com>): ', `${sender}\n`],
     ]
@@ -174,7 +218,7 @@ describe('first-run deployment setup', () => {
   })
 
   it.each([
-    '\n\n\nyes\n',
+    `\n${origin}\n\nyes\n`,
     'plain\nhttps://meet.example.test\n\nyes\n',
     'plain\nhttp://localhost.evil.test\n\nyes\n',
     'plain\nhttp://[::1]:3100\n\nyes\n',
@@ -210,14 +254,14 @@ describe('first-run deployment setup', () => {
   )
 
   it.each([
-    `\n\nnot-smtp\n${sender}\n`,
-    `\n\n${smtp}\n\n`,
-    `\n\n${smtp}\n   \n`,
-    `\n\n${smtp}\nHourmere\u0001 <bookings@example.test>\n`,
-    `\n\nsmtp://user:password@smtp.test#fragment\n${sender}\n`,
-    `\n\nsmtp://user:password@\n${sender}\n`,
-    `\n\nsmtp://user:password@smtp.test/path\n${sender}\n`,
-    `\n\nsmtp://user:password@smtp.test?query=value\n${sender}\n`,
+    `\n${origin}\nnot-smtp\n${sender}\n`,
+    `\n${origin}\n${smtp}\n\n`,
+    `\n${origin}\n${smtp}\n   \n`,
+    `\n${origin}\n${smtp}\nHourmere\u0001 <bookings@example.test>\n`,
+    `\n${origin}\nsmtp://user:password@smtp.test#fragment\n${sender}\n`,
+    `\n${origin}\nsmtp://user:password@\n${sender}\n`,
+    `\n${origin}\nsmtp://user:password@smtp.test/path\n${sender}\n`,
+    `\n${origin}\nsmtp://user:password@smtp.test?query=value\n${sender}\n`,
   ])('requires a plausible SMTP URL and a matching mail sender', (input) => {
     const setup = fixture()
     const result = setup.run(input)
