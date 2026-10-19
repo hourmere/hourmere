@@ -317,6 +317,9 @@ describe('privacy data-flow disclosures', () => {
     expect(agents).toMatch(/MCP OAuth access tokens.*5 minutes/)
     expect(agents).toMatch(/refresh tokens.*30 days/)
     expect(agents).not.toMatch(/records.*deleted.*30 days/)
+    expect(agents).toMatch(
+      /When MCP OAuth is enabled, a background cleanup runs every 15 minutes and deletes OAuth access and refresh tokens one day after they expire, expired authorization attempts and client assertions, authorization grants left unfinished for more than one day, and dynamically registered clients that did not complete consent within 24 hours or have been unused for more than 90 days\./,
+    )
   })
 
   it('discloses webhook payload deletion by creation age and earlier endpoint deletion', () => {
@@ -352,9 +355,16 @@ describe('privacy data-flow disclosures', () => {
   })
 
   it('does not promise a hosting region or transfer safeguards before Cloud launches', () => {
-    expect(section('international-transfers')).not.toMatch(
+    expect(plainText(privacy)).not.toMatch(
       /Standard Contractual Clauses|intended to be hosted|European Union/,
     )
+    expect(section('google-user-data')).toMatch(
+      /Before Hourmere Cloud launches, we will state where its data is hosted in section 12 ?\./,
+    )
+  })
+
+  it('names no payment processor while Hourmere Cloud takes no payments', () => {
+    expect(plainText(privacy)).not.toMatch(/Stripe|Link, LLC|merchant-of-record/)
   })
 
   it('discloses widget submission and excludes booking details from parent messages', () => {

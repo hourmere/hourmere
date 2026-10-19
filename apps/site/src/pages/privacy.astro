@@ -139,6 +139,11 @@ const privacyMail = `mailto:${contact.privacy}`
       the organization you authorize, tokens needed for OAuth connections, and booking records
       identifying the credential used to create, reschedule or cancel a booking. MCP OAuth access
       tokens expire after 5 minutes; refresh tokens expire after 30 days and rotate when used.
+      When MCP OAuth is enabled, a background cleanup runs every 15 minutes and deletes OAuth
+      access and refresh tokens one day after they expire, expired authorization attempts and
+      client assertions, authorization grants left unfinished for more than one day, and
+      dynamically registered clients that did not complete consent within 24 hours or have been
+      unused for more than 90 days.
     </li>
     <li>
       <strong>Conference information:</strong> for automatic Google Meet or Zoom, the provider and
@@ -156,12 +161,6 @@ const privacyMail = `mailto:${contact.privacy}`
       <strong>Background jobs:</strong> job payloads contain record IDs and job-control fields,
       rather than message contents, booking answers, management links or credentials. Completed
       job records are deleted after 7 days by default; sign-in-email job records are deleted sooner.
-    </li>
-    <li>
-      <strong>Billing information</strong> (paid plans only): your plan, number of seats, billing
-      country and transaction records. Card details are collected and processed by Stripe or, for
-      purchases made through Stripe's merchant-of-record service, by Link, LLC, an affiliate of
-      Stripe. We do not store full card numbers.
     </li>
     <li>
       <strong>Usage and diagnostic information:</strong> server and API log data such as IP
@@ -319,9 +318,9 @@ const privacyMail = `mailto:${contact.privacy}`
 
   <h3>How we store and protect it</h3>
   <p>
-    Google user data is stored with our cloud hosting providers. Hourmere Cloud is intended to be
-    hosted in the United States and/or the European Union (see
-    <a href="#international-transfers">section 12</a>). Google user data is encrypted in transit,
+    Google user data is stored with our cloud hosting providers. Before Hourmere Cloud launches, we
+    will state where its data is hosted in
+    <a href="#international-transfers">section 12</a>. Google user data is encrypted in transit,
     and calendar connection tokens are stored encrypted. Access is limited to the systems and
     personnel that need it to run the Service. See <a href="#security">section 11</a>.
   </p>
@@ -440,13 +439,6 @@ const privacyMail = `mailto:${contact.privacy}`
       <strong>Service providers</strong> that act only on our instructions, under contracts that
       require them to protect the data: cloud hosting and database providers, and an email delivery
       provider for sign-in links, booking confirmations and reminders.
-    </li>
-    <li>
-      <strong>Payment providers:</strong> Stripe and Link, LLC, an affiliate of Stripe, process
-      payments for paid plans and handle sales tax, VAT or GST. They also act as independent
-      controllers for their own purposes, such as fraud prevention and meeting their legal and
-      regulatory obligations, under their own privacy policies, including
-      <a href="https://stripe.com/privacy">Stripe's privacy policy</a>.
     </li>
     <li>
       <strong>Calendar and conference providers you connect:</strong> Google receives the calendar
