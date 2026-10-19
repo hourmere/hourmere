@@ -685,6 +685,69 @@ describe.skipIf(!serverUrl)('durable organization booking webhooks', () => {
     expect(row).toMatchObject({ attempts: 1, status: 'pending', last_error: 'secret_unavailable' })
   })
 
+  it('counts shutdown during decryption failure and preserves the retry history through recovery', async () => {
+    const { delivery } = await captured()
+    const abort = new AbortController()
+    let sends = 0
+    const d = deps(async () => {
+      sends++
+      return 204
+    })
+    const wrongKey = { ...d, encryptionKey: Buffer.alloc(32, 8).toString('base64') }
+    const interrupted = {
+      ...wrongKey,
+      now: () => {
+        // Request shutdown after the delivery is locked, immediately before decryption.
+        abort.abort()
+        return NOW
+      },
+    }
+    const read = () =>
+      db
+        .selectFrom('webhook_deliveries')
+        .selectAll()
+        .where('id', '=', delivery.id)
+        .executeTakeFirstOrThrow()
+
+    // Shutdown takes precedence over secret_unavailable, consumes one attempt and commits
+    // before throwing the safe interruption error. Neither failure permits a send.
+    await expect(deliverWebhook(interrupted, delivery.id, abort.signal)).rejects.toThrow(
+      /^Webhook delivery interrupted$/,
+    )
+    expect(sends).toBe(0)
+    expect(await read()).toMatchObject({
+      attempts: 1,
+      status: 'pending',
+      last_error: 'interrupted',
+      http_status: null,
+      delivered_at: null,
+      last_attempt_at: new Date(NOW.epochMilliseconds),
+    })
+
+    await expect(deliverWebhook(wrongKey, delivery.id, signal())).rejects.toThrow(
+      /^Webhook delivery failed$/,
+    )
+    expect(sends).toBe(0)
+    expect(await read()).toMatchObject({
+      attempts: 2,
+      status: 'pending',
+      last_error: 'secret_unavailable',
+      http_status: null,
+      delivered_at: null,
+    })
+
+    await deliverWebhook(d, delivery.id, signal())
+    expect(await read()).toMatchObject({
+      attempts: 3,
+      status: 'delivered',
+      last_error: null,
+      http_status: 204,
+      delivered_at: new Date(NOW.epochMilliseconds),
+    })
+    await deliverWebhook(d, delivery.id, signal())
+    expect(sends).toBe(1)
+  })
+
   it('includes killed runs in the pg-boss attempt budget and fails the last retry', async () => {
     const { delivery } = await captured()
     let sends = 0

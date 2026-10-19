@@ -247,7 +247,10 @@ export function webhookCleanupJob(db: Db, now = () => Temporal.Now.instant()) {
       // One orphan batch and one retention batch per dispatch; unfinished work stays for
       // the next scheduled run. Leave 20s of the 30s pg-boss lease for scheduling/commit.
       const deadline = performance.now() + 10_000
-      async function batch(run: (trx: Db) => Promise<unknown>) {
+      async function batch(
+        phase: 'reconciliation' | 'retention',
+        run: (trx: Db) => Promise<unknown>,
+      ) {
         if (signal.aborted || performance.now() >= deadline) return
         try {
           await db.transaction().execute(async (trx) => {
@@ -266,13 +269,16 @@ export function webhookCleanupJob(db: Db, now = () => Temporal.Now.instant()) {
           // overrunning the lease; unrelated SQL failures must still fail the job.
           const code = (error as { code?: string } | null)?.code
           if (code !== '57014' && code !== '55P03') throw error
+          // SQL error text can contain private data. Log only fixed metadata and the
+          // recognized SQLSTATE so a repeatedly deferred phase stays observable.
+          console.warn(JSON.stringify({ event: 'webhook_cleanup_timeout', phase, code }))
         }
       }
       // Capture and enqueue are atomic. A visible pending row with no created/retry/active
       // job cannot make progress. Keep this test in the UPDATE statement and skip locked
       // deliveries so reconciliation never races an in-flight acknowledgement.
       // pg-boss is pinned; its schema belongs to pg-boss and is never migrated here.
-      await batch((trx) =>
+      await batch('reconciliation', (trx) =>
         sql`
         WITH orphaned AS MATERIALIZED (
           SELECT d.id FROM webhook_deliveries d
@@ -296,7 +302,7 @@ export function webhookCleanupJob(db: Db, now = () => Temporal.Now.instant()) {
         WHERE d.id = o.id AND d.status = 'pending'
       `.execute(trx),
       )
-      await batch((trx) =>
+      await batch('retention', (trx) =>
         sql`
         WITH expired AS (
           SELECT id FROM webhook_deliveries
