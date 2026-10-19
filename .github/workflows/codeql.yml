@@ -15,8 +15,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Code scanning on a private repository needs GitHub Code Security, which the Free plan
-  # cannot buy, so analysis is skipped (not failed) until the repository is public.
+  # Run code scanning only for public repositories.
   visibility:
     runs-on: ubuntu-latest
     outputs:
