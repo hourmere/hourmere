@@ -279,8 +279,12 @@ then `POST /api/v1/bookings/{id}/reschedule` with a strict `{ "start": "…" }` 
 Both require the caller to host that booking in the caller's acting organization, with the
 same authorization and service layer as MCP `reschedule_booking({bookingId,start})`.
 Slot lookup ignores the booking's own busy time and checks all original hosts; it uses
-the same range bounds and per-client slots rate limit as invitee slot lookup. Host moves
-use the manage mutation rate limit; API-key limits also apply.
+the same range bounds as invitee slot lookup. Authenticated host requests have separate
+per-user limits: 120 slot lookups and 30 reschedules per minute, shared by all of the user's
+sessions and API keys across organizations and addresses. Invitee traffic from the same
+address does not consume these budgets. API-key limits also apply. Host limits run after
+authentication and before the request body is read; exceeding one returns 429 `rate_limited`
+with `Retry-After`. Like the invitee limits, their counters are per server process.
 
 Host moves always return `{ booking, manageToken: null }`. No invitee token is minted or
 revealed: the existing booking-token hash moves to the successor, and per-email tokens
