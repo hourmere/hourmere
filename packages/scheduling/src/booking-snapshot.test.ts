@@ -313,6 +313,7 @@ describe.skipIf(!serverUrl)('booking hydration snapshot', () => {
           expect(current.cancelReason).toBeNull()
           expect(current.conference).toEqual({ provider, status: 'ready', errorCode: null })
           expect(current.location?.url).toBe(b.url)
+          if (reader !== 'public manage') expect(current.conferenceCanRetry).toBe(true)
         },
       )
     }
@@ -545,6 +546,7 @@ describe.skipIf(!serverUrl)('booking hydration snapshot', () => {
         errorCode: 'organizer_unavailable',
       })
       expect(current.location).toEqual({ kind: 'google_meet', autoCreate: true })
+      expect(current.conferenceCanRetry).toBe(false)
     }
   })
 
@@ -583,6 +585,7 @@ describe.skipIf(!serverUrl)('booking hydration snapshot', () => {
             errorCode: afterHydration ? null : 'organizer_unavailable',
           })
           expect(current.location?.url).toBe(afterHydration ? b.url : undefined)
+          if (reader !== 'public manage') expect(current.conferenceCanRetry).toBe(afterHydration)
           expect((await b.read(reader)).conference?.status).toBe('failed')
         },
       )
@@ -623,4 +626,88 @@ describe.skipIf(!serverUrl)('booking hydration snapshot', () => {
       expect(next.location?.url).toBeUndefined()
     },
   )
+
+  it('keeps calendar-copy retries limited to future meetings or cancelled cleanup', async () => {
+    const b = await setup('zoom')
+    await db
+      .insertInto('booking_conference_mirrors')
+      .values({
+        root_booking_id: b.booking.id,
+        user_id: b.host.userId,
+        calendar_id: randomUUID(),
+        connection_id: randomUUID(),
+        state: 'failed',
+        error_code: 'permissions_missing',
+      })
+      .execute()
+    let now = NOW
+    const observed = db.withPlugin({
+      transformQuery: ({ node }) => node,
+      async transformResult({ result }) {
+        if (result.rows.some((row) => Object.hasOwn(row, 'booking_location')))
+          now = Temporal.Instant.from('2026-11-02T09:01:00Z')
+        return result
+      },
+    })
+    expect(
+      (await getHostBooking({ ...b.service, db: observed, now: () => now }, b.booking.id))
+        .calendarCopy?.canRetry,
+    ).toBe(false)
+    const past = { ...b.service, now: () => Temporal.Instant.from('2026-11-02T09:01:00Z') }
+    expect((await getHostBooking(past, b.booking.id)).calendarCopy?.canRetry).toBe(false)
+    await b.cancel(false)
+    await db
+      .updateTable('booking_conference_mirrors')
+      .set({ state: 'failed', error_code: 'permissions_missing' })
+      .where('root_booking_id', '=', b.booking.id)
+      .execute()
+    expect((await getHostBooking(past, b.booking.id)).calendarCopy?.canRetry).toBe(true)
+    const unconfigured = await setup('zoom')
+    await db
+      .insertInto('booking_conference_mirrors')
+      .values({
+        root_booking_id: unconfigured.booking.id,
+        user_id: unconfigured.host.userId,
+        state: 'failed',
+        error_code: 'not_configured',
+      })
+      .execute()
+    expect(
+      (await getHostBooking(unconfigured.service, unconfigured.booking.id)).calendarCopy?.canRetry,
+    ).toBe(false)
+  })
+
+  it('keeps conference retry ownership and calendar copies private to their caller', async () => {
+    const b = await setup('google_meet')
+    const organizer = await f.user()
+    await db.deleteFrom('booking_conferences').where('root_booking_id', '=', b.booking.id).execute()
+    await db
+      .insertInto('booking_conferences')
+      .values({
+        root_booking_id: b.booking.id,
+        booking_id: b.booking.id,
+        organization_id: b.host.organizationId,
+        organizer_user_id: organizer,
+        state: 'failed',
+        error_code: 'provider_unavailable',
+      })
+      .execute()
+    await db
+      .insertInto('booking_conference_mirrors')
+      .values({
+        root_booking_id: b.booking.id,
+        user_id: organizer,
+        calendar_id: randomUUID(),
+        connection_id: randomUUID(),
+        state: 'failed',
+        error_code: 'permissions_missing',
+      })
+      .execute()
+    const host = await b.read('host detail')
+    expect(host.conferenceCanRetry).toBe(false)
+    expect(Object.hasOwn(host, 'calendarCopy')).toBe(false)
+    const manage = await b.read('public manage')
+    expect(Object.hasOwn(manage, 'conferenceCanRetry')).toBe(false)
+    expect(Object.hasOwn(manage, 'calendarCopy')).toBe(false)
+  })
 })

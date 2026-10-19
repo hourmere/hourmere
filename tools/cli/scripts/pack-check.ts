@@ -23,11 +23,11 @@ export function assertPackedScripts(
   files: readonly string[],
 ) {
   for (const [name, command] of Object.entries(manifest.scripts ?? {})) {
-    // Only a plain Node entrypoint is supported. Reject other shell syntax rather
-    // than overlook a path hidden in a development command or option.
+    // Only a plain Node entrypoint and an optional --version operand are supported.
+    // Reject other shell syntax rather than overlook a hidden path or Node option.
     const args = command.match(/"[^"]*"|'[^']*'|[^\s]+/g) ?? []
     assert.ok(
-      args.length === 2 && args[0] === 'node',
+      args[0] === 'node' && (args.length === 2 || (args.length === 3 && args[2] === '--version')),
       `Packed CLI script ${name} must use node <packed-file>`,
     )
     const path = (args[1] ?? '').replace(/^(['"])(.*)\1$/, '$2')

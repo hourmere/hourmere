@@ -330,7 +330,6 @@ export interface BookingConferences {
   organizer_user_id: string;
   provider: Generated<string>;
   request_id: Generated<string>;
-  retry_conference: Generated<boolean>;
   revision: Generated<number>;
   root_booking_id: string;
   state: Generated<string>;

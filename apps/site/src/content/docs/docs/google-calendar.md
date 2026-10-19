@@ -100,3 +100,13 @@ Up to N−1 configured collective destinations receive ordinary private copies o
 link, without creating more conferences or provider attendee invitations. Other hosts retain
 normal email/ICS invitations. Existing roots never switch calendars or gain new copies when
 settings change. The host booking page shows only the caller's copy state and safe retry.
+
+Automatic Meet reports `conference_pending_timeout` when Google still has not finished
+after the bounded polling budget. **Retry meeting** checks the same event and request again;
+it can recover a link that became ready later, but does not force a new conference. A
+permanently pending request needs the repository's
+[operator repair](https://github.com/hourmere/hourmere/blob/main/docs/google-calendar.md#automatic-meet-projection).
+After upgrade, legacy pending requests receive one same-UUID conference PATCH automatically;
+already failed requests need the pinned host to retry. Google HTTP 400 on a known-event
+PATCH, including moves and cancellation, is terminal `invalid_response`; correct the
+request/integration before retrying. The known event remains pinned.

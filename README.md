@@ -107,6 +107,11 @@ The application image retains small public attribution and booking-confirmation 
 hosted service. `HOSTED_SIGNUP_URL` sets their destination (default `https://hourmere.com`);
 there is no setting to hide them.
 
+Set `PRIVACY_POLICY_URL` and `TERMS_URL` to your operator's absolute HTTP(S) legal-page
+URLs to display them in the app. Both default to empty, which hides the corresponding
+link; self-hosted installations do not inherit Hourmere Cloud's policies. The hosted
+instance must explicitly set `https://hourmere.com/privacy` and `https://hourmere.com/terms`.
+
 Team owners and admins can configure [collective meetings](docs/collective-scheduling.md)
 with two to eight required hosts, or [round-robin pools](docs/round-robin-scheduling.md)
 with one to eight hosts and explicit activation.

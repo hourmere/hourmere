@@ -1,5 +1,14 @@
 // Public/shared UI messages. Admin messages live in a lazy catalog.
 export const common = {
+  'Privacy policy': '隐私政策',
+  'Terms of service': '服务条款',
+  // Google's official Simplified Chinese branding guidelines approve this wording.
+  'Continue with Google': '继续使用 Google',
+  'Sign in with Microsoft': '使用 Microsoft 登录',
+  'Use a personal Microsoft account or a work or school account.':
+    '使用个人 Microsoft 账号或工作或学校账号。',
+  'Google sign-in shares your name, email and profile picture with Hourmere. Calendar access is a separate, optional step in Calendars.':
+    '通过 Google 登录会向 Hourmere 提供你的姓名、邮箱和头像。日历访问是独立的可选步骤，可在“日历”页面连接。',
   'The original organizer’s verified invitation identity is unavailable. This booking will not switch organizers. Contact the host or cancel the booking.':
     '原组织者已验证的邀请身份不可用。此预约不会更换组织者。请联系主持人或取消预约。',
 
@@ -22,6 +31,8 @@ export const common = {
     '时段已为你保留，但会议链接需要主持人处理，最终日历邀请尚未发送。',
   'Google may have created the meeting. Rechecking only looks for that meeting and never creates a replacement.':
     'Google 可能已创建会议。重新检查只会查找该会议，不会另外创建。',
+  'Google is still preparing the Meet link after repeated checks. The host can recheck the existing request; a retry does not create a replacement meeting.':
+    '多次检查后，Google 仍在准备 Meet 链接。主持人可重新检查现有请求；重试不会创建替代会议。',
   'The original Google calendar is unavailable. This booking will not switch to a different account or calendar.':
     '原 Google 日历不可用，此预约不会切换到其他账号或日历。',
   'The host needs to reconnect the original Google Calendar account before retrying.':

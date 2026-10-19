@@ -94,12 +94,19 @@ describe.skipIf(!serverUrl)('conference migrations preserve populated predecesso
         'conference_oauth_states',
       ] as const
       const before = new Map<string, Record<string, unknown>[]>()
-      for (const table of tables)
-        before.set(
-          table,
-          (await owned.pool.query(`SELECT *,xmin::text AS original_xmin FROM ${table} ORDER BY 1`))
-            .rows,
-        )
+      for (const table of tables) {
+        const rows = (
+          await owned.pool.query(`SELECT *,xmin::text AS original_xmin FROM ${table} ORDER BY 1`)
+        ).rows
+        // 0037 intentionally retires this unused flag; every other predecessor
+        // value and physical tuple must remain unchanged.
+        if (table === 'booking_conferences')
+          for (const row of rows) {
+            expect(row.retry_conference).toBe(false)
+            delete row.retry_conference
+          }
+        before.set(table, rows)
+      }
       const applied = await runMigrations(owned.pool)
       let previousIndex = -1
       for (const migration of [
@@ -121,6 +128,8 @@ describe.skipIf(!serverUrl)('conference migrations preserve populated predecesso
           await owned.pool.query(`SELECT *,xmin::text AS original_xmin FROM ${table} ORDER BY 1`)
         ).rows
         expect(after).toHaveLength(old.length)
+        if (table === 'booking_conferences')
+          for (const row of after) expect(row).not.toHaveProperty('retry_conference')
         expect(
           after.map((row, index) =>
             Object.fromEntries(Object.keys(old[index] ?? {}).map((key) => [key, row[key]])),

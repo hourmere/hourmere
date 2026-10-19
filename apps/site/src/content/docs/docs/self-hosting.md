@@ -207,14 +207,95 @@ calendar updates. The worker exposes only `/api/health` for health checks. Keep 
 worker on the same version and secrets. Development's `docker-compose.dev.yml` and
 `hourmere-dev` project remain independent of this production selection.
 
-If moving from the old commented worker block, restore `docker-compose.yml` to the tracked
-version after selecting the overlay. To return to one container, stop the worker while the
-overlay is still selected, remove the worker overlay from `COMPOSE_FILE`, remove any old
-`HOURMERE_ROLE=web` setting from `.env`, then recreate the app. Its default `all` role resumes
-job processing.
+If moving from the old commented worker block, follow the migration steps under
+[Upgrade and roll back](#upgrade-and-roll-back) before pulling the new source.
+
+### Switch back to a single container
+
+Remove the worker container while the overlay is still selected:
+
+```sh
+docker compose rm -sf worker
+```
+
+Then remove the worker overlay from `COMPOSE_FILE`, remove any old `HOURMERE_ROLE=web`
+setting from `.env`, and run `docker compose up -d --build --wait`. Its default `all` role
+resumes job processing. Removing the container prevents an orphaned worker from continuing
+to process jobs after the overlay is deselected.
 
 Compose allows 35 seconds to stop a process, leaving margin around the server's 10-second
 HTTP drain and 20-second job drain. Preserve that grace period in deployment overrides.
+
+## Private webhook receivers
+
+The default webhook policy accepts only public HTTPS receivers. Self-hosted operators may
+set `WEBHOOK_PRIVATE_TARGETS` to exact trusted private destinations; see the
+[configuration reference](/docs/configuration#private-webhook-receivers) for syntax and
+restrictions. **Hourmere Cloud MUST NEVER set this setting.** It is empty by default, and
+nonempty configurations print a startup warning without listing destinations.
+
+For an n8n receiver on the same Compose network, keep the tracked files unchanged and
+create your own `docker-compose.webhooks.yml` override. This example adds a dedicated
+receiver network to both the web process and job runner, while retaining their database
+network and the proxy's existing ingress network:
+
+```yaml
+services:
+  app:
+    networks:
+      default:
+      webhook-receivers:
+  worker:
+    networks:
+      default:
+      webhook-receivers:
+  n8n:
+    image: ${N8N_IMAGE:?set a pinned n8n image in .env}
+    networks:
+      webhook-receivers:
+    volumes:
+      - n8n-data:/home/node/.n8n
+    restart: unless-stopped
+
+networks:
+  webhook-receivers:
+
+volumes:
+  n8n-data:
+```
+
+Set these entries in your private `.env`, retaining the proxy overlay only when you use
+the bundled HTTPS proxy. Keep the custom override after the worker overlay:
+
+```dotenv
+COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml:docker-compose.worker.yml:docker-compose.webhooks.yml
+WEBHOOKS_ENABLED=true
+WEBHOOK_PRIVATE_TARGETS=n8n:5678
+```
+
+Also set the independent `WEBHOOK_ENCRYPTION_KEY` as described in the configuration
+reference, and set `N8N_IMAGE` to the pinned n8n image you operate. Configure n8n's own
+authentication, backups and private editor access separately; this example publishes no
+n8n port. Run `docker compose up -d --build --wait` to recreate both app and worker. Create
+a webhook endpoint using `http://n8n:5678/webhook/<your-workflow-path>` through the REST API.
+The service name resolves inside that network, and the worker sends the event with the
+usual HMAC headers. Require signature verification in the receiving workflow. HTTP is
+unencrypted within the selected network; use HTTPS where transport confidentiality is
+required. The allowlist trusts a host and port, not a single URL path.
+
+For an existing LAN receiver, list its exact private IP and port, for example
+`192.168.1.10:8080`, and use `http://192.168.1.10:8080/hook`. A narrow CIDR and port can
+cover a controlled receiver network. `localhost` or `127.0.0.1` refers to the delivering
+container itself, rather than the Docker host or another service. Keep operator-selected
+destinations narrow: organization owners/admins can configure any path at an allowed
+destination. IP/CIDR entries also allow every virtual host resolving entirely into the
+range: administrators choose the URL hostname and HTTP Host header, so a reverse proxy
+routing by Host may expose multiple internal services. Delivery records include HTTP
+status (`httpStatus`, stored as `http_status`) and reveal whether an allowed internal
+destination responded; this visibility is inherent to allowing it.
+Configure the same setting on every web and worker process and recreate them
+together when changing it. Saving an endpoint performs no DNS lookup or network probe;
+delivery re-resolves and revalidates every DNS answer on every attempt.
 
 ## Back up and restore
 
@@ -301,9 +382,12 @@ assignments also work with backups from before the deployment settings existed, 
 the selected source revision contains `Caddyfile` and `docker-compose.proxy.yml`. If the
 backup commit predates this kit, select a reviewed newer revision containing these files
 instead of that old commit before using the HTTPS commands; startup will apply its pending
-migrations, so retain the original dump for rollback. The rewrite preserves
-`docker-compose.worker.yml` when present in the saved `COMPOSE_FILE`, including setup's
-quoted values. Plain-mode restores remove only `:docker-compose.proxy.yml` from the
+migrations, so retain the original dump for rollback. The rewrite preserves only the exact
+`docker-compose.worker.yml` filename in a `COMPOSE_FILE=` assignment, including setup's
+quoted values. It does not recognise `./docker-compose.worker.yml` or
+`export COMPOSE_FILE=` forms. Normalize those forms in the saved `.env` before running the
+rewrite, and verify the rewritten `COMPOSE_FILE` still selects the worker overlay before
+starting any app or worker. Plain-mode restores remove only `:docker-compose.proxy.yml` from the
 rewritten `COMPOSE_FILE` and omit the Caddy steps; keep `:docker-compose.worker.yml` if it
 was selected. Do not start the
 restored app or workers for a drill until SMTP, provider credentials and outbound webhooks
@@ -336,14 +420,28 @@ preserve its `.env` and Caddy state. Enable separate workers through `COMPOSE_FI
 `.env`, keeping the tracked Compose files unchanged so local deployment choices do not
 block `git pull --ff-only`. The persisted file selection also rebuilds/recreates the
 worker during upgrades. In the deployment checkout, a branch following `main` can be
-updated with:
+updated with the commands below.
+
+**If you uncommented the old worker block in `docker-compose.yml`, migrate it before
+pulling.** Those tracked edits make `git pull --ff-only` refuse the upgrade. First append
+`:docker-compose.worker.yml` to the existing `COMPOSE_FILE` in `.env` (preserve any proxy
+overlay); if the setting is absent, add
+`COMPOSE_FILE=docker-compose.yml:docker-compose.worker.yml`. Then restore the tracked
+Compose file before pulling:
 
 ```sh
+git restore docker-compose.yml
 git pull --ff-only
 docker compose pull proxy db
 docker compose up -d --build --wait
 curl --retry 20 --retry-delay 3 --retry-all-errors --fail https://app.hourmere.com/api/health
 ```
+
+For installations already using the tracked overlay, skip `git restore docker-compose.yml`.
+Restoring the Compose file without selecting the worker overlay leaves the old worker
+container orphaned on the old image, and the app may remain web-only if `.env` still sets
+`HOURMERE_ROLE=web`. Select the overlay before restoring so the upgrade recreates both
+services on the new image.
 
 For a pinned release, fetch and check out the reviewed tag/commit instead of pulling the
 branch. No public image can currently be pulled as a substitute for building the source.

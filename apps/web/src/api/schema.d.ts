@@ -473,7 +473,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Retry safe conference reconciliation for an assigned host */
+        /**
+         * Retry safe conference reconciliation for an assigned host
+         * @description A Google Meet conference_pending_timeout retry rechecks the same event and conference request without creating a replacement. Only an explicit conference_failed result permits a new request on that event.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -4797,7 +4800,10 @@ export interface paths {
         /** List the current organization’s webhooks (owner/admin) */
         get: operations["listWebhooks"];
         put?: never;
-        /** Create an HTTPS webhook and reveal its signing secret once */
+        /**
+         * Create a webhook and reveal its signing secret once
+         * @description Public HTTPS destinations by default. Operators may allow exact private HTTP(S) targets. URL checks do not resolve DNS; every delivery revalidates all resolved addresses. Destinations are immutable.
+         */
         post: operations["createWebhook"];
         delete?: never;
         options?: never;
@@ -4893,6 +4899,10 @@ export interface components {
             cancelledAt: string | null;
             cancelReason: string | null;
             conference?: {
+                /**
+                 * @description Stable failure code, or null. conference_pending_timeout means Google still reports a pending conference after the polling budget; provider_unavailable means a provider or transport failure. Clients must accept additional codes.
+                 * @example conference_pending_timeout
+                 */
                 errorCode: string | null;
                 /** @enum {string} */
                 provider: "google_meet" | "zoom";
@@ -5359,6 +5369,11 @@ export interface components {
              * @description Hosted service destination for public attribution and sign-up links
              */
             hostedSignupUrl: string;
+            /**
+             * Format: uri
+             * @description This instance operator's privacy policy; absent when not configured
+             */
+            privacyPolicyUrl?: string;
             /** @description The sign-in methods people can use on this instance */
             signIn: {
                 /** @description Sign-in links sent by email */
@@ -5366,6 +5381,11 @@ export interface components {
                 google: boolean;
                 microsoft: boolean;
             };
+            /**
+             * Format: uri
+             * @description This instance operator's terms; absent when not configured
+             */
+            termsUrl?: string;
         };
         ManagedBooking: components["schemas"]["Booking"] & {
             /** @description The event type as it is now; null once it is deleted */

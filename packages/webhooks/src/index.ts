@@ -10,6 +10,10 @@ export {
   webhookDeliveryJob,
 } from './delivery.ts'
 export {
+  parseWebhookPrivateTargets,
+  type WebhookPrivateTarget,
+} from './private-targets.ts'
+export {
   createWebhook,
   deleteWebhook,
   listWebhookDeliveries,
