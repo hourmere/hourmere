@@ -88,6 +88,16 @@ configuration add optional ID token claims `verified_primary_email` and
 `verified_secondary_email`; without verified email, the user gets `EMAIL_NOT_VERIFIED` and
 must use an email link. Microsoft calendar synchronization is not implemented yet.
 
+Microsoft sign-in requests only `openid`, `profile` and `email`. It establishes an Hourmere
+session; subsequent requests and session renewal use that session without refreshing the
+Microsoft access token. No sign-in feature consumes that token after authentication, and
+the unused Better Auth token retrieval/refresh endpoints are disabled. Sign-in therefore
+does not request `offline_access` or need a Microsoft refresh token. Microsoft requires
+[`offline_access` to issue refresh tokens](https://learn.microsoft.com/en-us/entra/identity-platform/scopes-oidc#the-offline_access-scope).
+The separate [Microsoft Calendar connection](/docs/microsoft-calendar) requests it with
+`Calendars.ReadBasic`, uses the `MICROSOFT_CALENDAR_*` client credentials and stores its own
+encrypted tokens; Microsoft sign-in credentials never authorize calendar access.
+
 ## Google Calendar
 
 These three settings are a separate client/key from social sign-in. Configure all three
