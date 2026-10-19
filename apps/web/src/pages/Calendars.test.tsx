@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest'
 import type { Schemas } from '../api/client.ts'
 import { goTo } from '../browser.ts'
 import styles from '../styles.css?raw'
-import { fakeApi, json, PROFILE, profile, renderApp, signedIn } from '../test/fake-api.tsx'
+import { fakeApi, json, later, PROFILE, profile, renderApp, signedIn } from '../test/fake-api.tsx'
 
 vi.mock('../browser.ts', () => ({ goTo: vi.fn() }))
 const connection: Schemas['CalendarConnection'] = {
@@ -260,24 +260,220 @@ describe('the calendars page', () => {
       expect(screen.getByTestId('location').textContent).toBe('/app/calendars'),
     )
   })
-  it('lists calendars and explains the current permissions before connecting', async () => {
+  it.each([
+    ['Connect Google Calendar', 'needs_reauth'],
+    ['Enable calendar synchronization', 'active'],
+  ] as const)(
+    'explains permissions and revocation before %s redirects to Google',
+    async (action, status) => {
+      const user = userEvent.setup()
+      vi.mocked(goTo).mockClear()
+      const requests = fakeApi({
+        ...signedIn,
+        ...list([{ ...connection, status }]),
+        'POST /api/v1/calendar-connections/google/authorize': () => json(200, { authorizationUrl }),
+      })
+      renderApp('/app/calendars')
+      expect(await screen.findByText('Work calendar (primary)')).toBeDefined()
+      const section = screen.getByRole('region', { name: 'Connect Google Calendar' })
+      const disclosure = within(section).getByText(/Google will ask for your email/)
+      expect(disclosure.textContent).toContain('calendar list')
+      expect(disclosure.textContent).toContain('check busy times on selected calendars')
+      expect(disclosure.textContent).toContain('create one private copy of each new booking')
+      expect(disclosure.textContent).toContain('the calendar you own and select')
+      expect(disclosure.textContent).toContain(
+        'Automatic Google Meet adds a link only when you enable it',
+      )
+      expect(disclosure.textContent).toContain('not event titles or descriptions')
+      expect(disclosure.textContent).toContain('optional and separate from signing in')
+      expect(within(section).getByText(/Disconnect below/).textContent).toContain(
+        'deletes stored credentials and local calendar data',
+      )
+      const revoke = within(section).getByRole('link', { name: 'Google Account connections' })
+      expect(revoke.getAttribute('href')).toBe('https://myaccount.google.com/connections')
+      expect(revoke.getAttribute('rel')).toContain('noreferrer')
+      const button = screen.getByRole('button', { name: action })
+      const descriptionId = button.getAttribute('aria-describedby')
+      expect(descriptionId).toBeTruthy()
+      expect(document.getElementById(descriptionId as string)?.contains(disclosure)).toBe(true)
+      expect(disclosure.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+        Node.DOCUMENT_POSITION_FOLLOWING,
+      )
+      expect(requests.to('POST /api/v1/calendar-connections/google/authorize')).toHaveLength(0)
+      expect(goTo).not.toHaveBeenCalled()
+      await user.click(button)
+      await vi.waitFor(() => expect(goTo).toHaveBeenCalledWith(authorizationUrl))
+      expect(requests.to('POST /api/v1/calendar-connections/google/authorize')[0]?.body).toEqual({
+        access: 'sync',
+      })
+    },
+  )
+
+  it('localizes Google calendar permissions and revocation in Simplified Chinese', async () => {
+    fakeApi({
+      ...signedIn,
+      ...profile({ ...PROFILE, locale: 'zh-CN' }),
+      ...list(),
+    })
+    renderApp('/app/calendars')
+    const section = await screen.findByRole('region', { name: '连接 Google 日历' })
+    const disclosure = within(section).getByText(/Google 将请求你的邮箱/)
+    expect(disclosure.textContent).toContain('读取所选日历的忙闲时间来检查冲突')
+    expect(disclosure.textContent).toContain('为每个新预约创建一份私有副本')
+    expect(disclosure.textContent).toContain('只有启用自动 Google Meet 时才会添加会议链接')
+    expect(disclosure.textContent).toContain('不保存事件标题或描述')
+    expect(disclosure.textContent).toContain('与登录相互独立')
+    expect(within(section).getByText(/使用下方的“断开连接”/).textContent).toContain(
+      '删除已存储的凭证和本地日历数据',
+    )
+    expect(
+      within(section).getByRole('link', { name: 'Google 账号连接' }).getAttribute('href'),
+    ).toBe('https://myaccount.google.com/connections')
+  })
+
+  it.each([undefined, '', 'https://operator.example/privacy'])(
+    'shows the pre-consent privacy link only when configured: %s',
+    async (privacyPolicyUrl) => {
+      fakeApi({
+        ...signedIn,
+        ...list([]),
+        'GET /api/v1/instance': () =>
+          json(200, {
+            signIn: { email: true, google: false, microsoft: false },
+            privacyPolicyUrl,
+          }),
+      })
+      renderApp('/app/calendars')
+      const section = await screen.findByRole('region', { name: 'Connect Google Calendar' })
+      if (privacyPolicyUrl) {
+        const privacy = await within(section).findByRole('link', { name: 'Privacy policy' })
+        expect(privacy.getAttribute('href')).toBe(privacyPolicyUrl)
+        expect(privacy.getAttribute('target')).toBe('_blank')
+        expect(privacy.getAttribute('rel')).toContain('noreferrer')
+        expect(
+          privacy.compareDocumentPosition(
+            within(section).getByRole('button', { name: 'Connect Google Calendar' }),
+          ) & Node.DOCUMENT_POSITION_FOLLOWING,
+        ).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+      } else {
+        await vi.waitFor(() =>
+          expect(
+            within(section)
+              .getByRole('button', { name: 'Connect Google Calendar' })
+              .matches(':disabled'),
+          ).toBe(false),
+        )
+        expect(within(section).queryByRole('link', { name: 'Privacy policy' })).toBeNull()
+      }
+    },
+  )
+
+  it('waits for configured privacy information before allowing a Google redirect', async () => {
     const user = userEvent.setup()
+    const instance = later()
+    vi.mocked(goTo).mockClear()
     const requests = fakeApi({
       ...signedIn,
       ...list(),
+      'GET /api/v1/instance': async () => (await instance.response).clone(),
       'POST /api/v1/calendar-connections/google/authorize': () => json(200, { authorizationUrl }),
     })
     renderApp('/app/calendars')
-    expect(await screen.findByText('Work calendar (primary)')).toBeDefined()
-    expect(screen.getByText(/separate from signing in/).textContent).toContain(
-      'event read access and permission to',
+    const section = await screen.findByRole('region', { name: 'Connect Google Calendar' })
+    for (const name of ['Connect Google Calendar', 'Enable calendar synchronization']) {
+      const button = screen.getByRole('button', { name })
+      expect(button.matches(':disabled')).toBe(true)
+      await user.click(button)
+    }
+    expect(requests.to('POST /api/v1/calendar-connections/google/authorize')).toHaveLength(0)
+    expect(goTo).not.toHaveBeenCalled()
+    await instance.answer(
+      json(200, {
+        signIn: { email: true, google: false, microsoft: false },
+        privacyPolicyUrl: 'https://operator.example/privacy',
+      }),
     )
-    await user.click(screen.getByRole('button', { name: 'Connect Google Calendar' }))
+    expect(within(section).getByRole('link', { name: 'Privacy policy' }).getAttribute('href')).toBe(
+      'https://operator.example/privacy',
+    )
+    const connect = within(section).getByRole('button', { name: 'Connect Google Calendar' })
+    expect(connect.matches(':disabled')).toBe(false)
+    await user.click(connect)
     await vi.waitFor(() => expect(goTo).toHaveBeenCalledWith(authorizationUrl))
-    expect(requests.to('POST /api/v1/calendar-connections/google/authorize')[0]?.body).toEqual({
-      access: 'sync',
-    })
   })
+
+  it.each([
+    ['en', 'Connect Google Calendar'],
+    ['en', 'Enable calendar synchronization'],
+    ['zh-CN', '连接 Google 日历'],
+  ] as const)(
+    'blocks %s %s after privacy discovery fails and recovers through retry',
+    async (locale, action) => {
+      const user = userEvent.setup()
+      const retry = later()
+      let retrying = false
+      vi.mocked(goTo).mockClear()
+      const requests = fakeApi({
+        ...signedIn,
+        ...profile({ ...PROFILE, locale }),
+        ...list(),
+        'GET /api/v1/instance': async () =>
+          retrying ? (await retry.response).clone() : json(503, { error: 'service_unavailable' }),
+        'POST /api/v1/calendar-connections/google/authorize': () => json(200, { authorizationUrl }),
+      })
+      renderApp('/app/calendars')
+      const chinese = locale === 'zh-CN'
+      const section = await screen.findByRole('region', {
+        name: chinese ? '连接 Google 日历' : 'Connect Google Calendar',
+      })
+      expect((await within(section).findByRole('alert')).textContent).toBe(
+        chinese
+          ? '无法加载隐私信息。请重试后再连接 Google 日历。'
+          : 'Could not load privacy information. Try again before connecting Google Calendar.',
+      )
+      const names = chinese
+        ? ['连接 Google 日历', '启用日历同步']
+        : ['Connect Google Calendar', 'Enable calendar synchronization']
+      for (const name of names) {
+        const button = screen.getByRole('button', { name })
+        expect(button.matches(':disabled')).toBe(true)
+        await user.click(button)
+      }
+      expect(requests.to('POST /api/v1/calendar-connections/google/authorize')).toHaveLength(0)
+      expect(goTo).not.toHaveBeenCalled()
+      const discoveryCalls = requests.to('GET /api/v1/instance').length
+      retrying = true
+      await user.click(
+        within(section).getByRole('button', { name: chinese ? '重试' : 'Try again' }),
+      )
+      await vi.waitFor(() =>
+        expect(requests.to('GET /api/v1/instance')).toHaveLength(discoveryCalls + 1),
+      )
+      for (const name of names)
+        expect(screen.getByRole('button', { name }).matches(':disabled')).toBe(true)
+      expect(goTo).not.toHaveBeenCalled()
+      await retry.answer(
+        json(200, {
+          signIn: { email: true, google: false, microsoft: false },
+          privacyPolicyUrl: 'https://operator.example/privacy',
+        }),
+      )
+      expect(
+        within(section)
+          .getByRole('link', { name: chinese ? '隐私政策' : 'Privacy policy' })
+          .getAttribute('href'),
+      ).toBe('https://operator.example/privacy')
+      expect(within(section).queryByRole('alert')).toBeNull()
+      for (const name of names)
+        expect(screen.getByRole('button', { name }).matches(':disabled')).toBe(false)
+      expect(requests.to('POST /api/v1/calendar-connections/google/authorize')).toHaveLength(0)
+      await user.click(screen.getByRole('button', { name: action }))
+      await vi.waitFor(() => expect(goTo).toHaveBeenCalledWith(authorizationUrl))
+      expect(requests.to('POST /api/v1/calendar-connections/google/authorize')[0]?.body).toEqual({
+        access: 'sync',
+      })
+    },
+  )
 
   it('shows a disabled instance without hiding existing connections', async () => {
     fakeApi({ ...signedIn, ...list([connection], false) })
