@@ -85,6 +85,27 @@ describe.skipIf(!serverUrl)('bookings', () => {
     return { ...host, eventTypeId, book }
   }
 
+  /** A manage token minted by a successfully sent invitee email. */
+  async function emailToken(bookingId: string, kind = 'confirmed') {
+    const token = randomBytes(32).toString('base64url')
+    const invitee = await db
+      .selectFrom('booking_attendees')
+      .select('id')
+      .where('booking_id', '=', bookingId)
+      .where('is_booker', '=', true)
+      .executeTakeFirstOrThrow()
+    await db
+      .insertInto('booking_notifications')
+      .values({
+        booking_id: bookingId,
+        kind,
+        recipient: `attendee:${invitee.id}`,
+        manage_token_hash: createHash('sha256').update(token).digest(),
+      })
+      .execute()
+    return token
+  }
+
   const count = async (sql: string, params: unknown[] = []) =>
     (await testDb.pool.query<{ n: number }>(sql, params)).rows[0]?.n
 
@@ -998,30 +1019,6 @@ describe.skipIf(!serverUrl)('bookings', () => {
   })
 
   describe('manage links from emails', () => {
-    /**
-     * A token as an invitee email carries it: minted by the notification job, its SHA-256
-     * kept in that email's booking_notifications row.
-     */
-    async function emailToken(bookingId: string, kind = 'confirmed') {
-      const token = randomBytes(32).toString('base64url')
-      const invitee = await db
-        .selectFrom('booking_attendees')
-        .select('id')
-        .where('booking_id', '=', bookingId)
-        .where('is_booker', '=', true)
-        .executeTakeFirstOrThrow()
-      await db
-        .insertInto('booking_notifications')
-        .values({
-          booking_id: bookingId,
-          kind,
-          recipient: `attendee:${invitee.id}`,
-          manage_token_hash: createHash('sha256').update(token).digest(),
-        })
-        .execute()
-      return token
-    }
-
     it("open, cancel and reschedule the booking, and the API's token keeps working", async () => {
       const s = await setup()
       const { booking, manageToken } = await s.book('2026-11-02T10:00:00Z')
@@ -1528,12 +1525,14 @@ describe.skipIf(!serverUrl)('bookings', () => {
                   organization: base.principal.organization,
                 },
               }
-        const moved = await rescheduleHostBooking(
+        const moving = rescheduleHostBooking(
           caller,
           old.id,
           { start: instant('2026-11-02T09:15Z') },
           via === 'mcp' ? { source: 'mcp', apiKeyId: key } : undefined,
         )
+        await expect(moving.then((moved) => moved.manageToken === null)).resolves.toBe(true)
+        const moved = await moving
         expect(moved.booking).toMatchObject({
           status: 'confirmed',
           start: '2026-11-02T09:15:00.000Z',
@@ -1544,12 +1543,23 @@ describe.skipIf(!serverUrl)('bookings', () => {
           location: old.location,
           source: via === 'session' ? 'web' : via,
         })
-        expect(moved.manageToken).toMatch(/^[A-Za-z0-9_-]{43}$/)
-        expect(moved.manageToken).not.toBe(manageToken)
-        expect((await getManagedBooking(ctx, manageToken as string)).status).toBe('cancelled')
-        expect((await getManagedBooking(ctx, moved.manageToken as string)).id).toBe(
-          moved.booking.id,
-        )
+        expect(moved.manageToken === null).toBe(true)
+        const hashes = await db
+          .selectFrom('bookings')
+          .select(['id', 'manage_token_hash'])
+          .where('id', 'in', [old.id, moved.booking.id])
+          .execute()
+        expect(hashes.find((b) => b.id === old.id)?.manage_token_hash === null).toBe(true)
+        expect(
+          hashes
+            .find((b) => b.id === moved.booking.id)
+            ?.manage_token_hash?.equals(
+              createHash('sha256')
+                .update(manageToken as string)
+                .digest(),
+            ),
+        ).toBe(true)
+        expect((await getManagedBooking(ctx, manageToken as string)).id).toBe(moved.booking.id)
         expect(
           await db
             .selectFrom('bookings')
@@ -1572,6 +1582,110 @@ describe.skipIf(!serverUrl)('bookings', () => {
         await expect(
           rescheduleHostBooking(caller, old.id, { start: instant('2026-11-02T10:00Z') }),
         ).rejects.toMatchObject({ code: 'booking_cancelled' })
+      },
+    )
+
+    it('keeps invitee and email links through host moves while invitee moves still rotate', async () => {
+      const h = await setup()
+      const { booking: original, manageToken } = await h.book('2026-11-02T09:00Z')
+      const fromEmail = await emailToken(original.id)
+      const fromReminder = await emailToken(original.id, 'reminder')
+      const caller = as(h, h.organizationId)
+      let current = original
+      for (const start of ['10:00', '11:00']) {
+        const moved = await rescheduleHostBooking(caller, current.id, {
+          start: instant(`2026-11-02T${start}Z`),
+        })
+        expect(moved.manageToken === null).toBe(true)
+        current = moved.booking
+        for (const token of [manageToken, fromEmail, fromReminder])
+          expect((await getManagedBooking(ctx, token as string)).id).toBe(current.id)
+      }
+
+      const inviteeMove = await rescheduleManagedBooking(ctx, manageToken as string, {
+        start: instant('2026-11-02T12:00Z'),
+      })
+      expect(typeof inviteeMove.manageToken === 'string').toBe(true)
+      expect(inviteeMove.manageToken !== manageToken).toBe(true)
+      expect(await getManagedBooking(ctx, manageToken as string)).toMatchObject({
+        id: current.id,
+        status: 'cancelled',
+      })
+      await expect(
+        rescheduleManagedBooking(ctx, manageToken as string, {
+          start: instant('2026-11-02T13:00Z'),
+        }),
+      ).rejects.toMatchObject({ code: 'booking_cancelled' })
+
+      const nextHostMove = await rescheduleHostBooking(caller, inviteeMove.booking.id, {
+        start: instant('2026-11-02T13:00Z'),
+      })
+      expect(nextHostMove.manageToken === null).toBe(true)
+      for (const token of [inviteeMove.manageToken, fromEmail, fromReminder])
+        expect((await getManagedBooking(ctx, token as string)).id).toBe(nextHostMove.booking.id)
+      expect((await getManagedBooking(ctx, manageToken as string)).id).toBe(current.id)
+      expect((await cancelManagedBooking(ctx, fromEmail)).id).toBe(nextHostMove.booking.id)
+      expect((await getManagedBooking(ctx, inviteeMove.manageToken as string)).status).toBe(
+        'cancelled',
+      )
+    })
+
+    it.each(['team organization', 'personal owner'] as const)(
+      'locks the %s before the booking to preserve deletion lock order',
+      SERIALIZED,
+      async (parent) => {
+        const h = await setup()
+        const organizationId =
+          parent === 'personal owner' ? h.organizationId : await f.organization()
+        if (parent === 'team organization') await f.member(h.userId, organizationId)
+        const eventTypeId =
+          parent === 'personal owner'
+            ? h.eventTypeId
+            : await f.eventType(organizationId, null, { hosts: [{ userId: h.userId }] })
+        const bookingId = await f.booking(
+          organizationId,
+          [h.userId],
+          '2026-11-02T09:00Z',
+          '2026-11-02T09:30Z',
+          { eventTypeId },
+        )
+        const blocker = await testDb.pool.connect()
+        let pending: ReturnType<typeof rescheduleHostBooking> | undefined
+        try {
+          await blocker.query('BEGIN')
+          const { rows } = await blocker.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')
+          if (parent === 'personal owner')
+            await blocker.query('SELECT id FROM auth."user" WHERE id = $1 FOR UPDATE', [h.userId])
+          else
+            await blocker.query('SELECT id FROM auth.organization WHERE id = $1 FOR UPDATE', [
+              organizationId,
+            ])
+          pending = rescheduleHostBooking(as(h, organizationId), bookingId, {
+            start: instant('2026-11-02T10:00Z'),
+          })
+          pending.catch(() => {})
+          await expect
+            .poll(
+              () =>
+                count(
+                  `SELECT count(*)::int AS n FROM pg_stat_activity
+                    WHERE datname = current_database() AND $1 = ANY(pg_blocking_pids(pid))`,
+                  [rows[0]?.pid],
+                ),
+              { timeout: 5000 },
+            )
+            .toBe(1)
+          // The move has reached the held parent lock but must not yet hold the booking.
+          await expect(
+            testDb.pool.query('SELECT id FROM bookings WHERE id = $1 FOR UPDATE NOWAIT', [
+              bookingId,
+            ]),
+          ).resolves.toMatchObject({ rowCount: 1 })
+        } finally {
+          await blocker.query('ROLLBACK')
+          blocker.release()
+          await pending
+        }
       },
     )
 
@@ -1662,7 +1776,10 @@ describe.skipIf(!serverUrl)('bookings', () => {
 
     it('passes the same transaction to notifications and rolls back a failed notification', async () => {
       const h = await setup()
-      const { booking: old } = await h.book('2026-11-02T09:00Z')
+      const { booking: old, manageToken } = await h.book('2026-11-02T09:00Z')
+      const hash = createHash('sha256')
+        .update(manageToken as string)
+        .digest()
       let calls = 0
       const caller = {
         ...as(h, h.organizationId),
@@ -1673,11 +1790,20 @@ describe.skipIf(!serverUrl)('bookings', () => {
             (
               await trx
                 .selectFrom('bookings')
-                .select('status')
+                .select(['status', 'manage_token_hash'])
                 .where('id', '=', old.id)
                 .executeTakeFirstOrThrow()
             ).status,
           ).toBe('cancelled')
+          expect(
+            (
+              await trx
+                .selectFrom('bookings')
+                .select('manage_token_hash')
+                .where('id', '=', old.id)
+                .executeTakeFirstOrThrow()
+            ).manage_token_hash === null,
+          ).toBe(true)
           expect(
             (
               await trx
@@ -1687,6 +1813,15 @@ describe.skipIf(!serverUrl)('bookings', () => {
                 .executeTakeFirstOrThrow()
             ).rescheduled_from_id,
           ).toBe(old.id)
+          expect(
+            (
+              await trx
+                .selectFrom('bookings')
+                .select('manage_token_hash')
+                .where('id', '=', event.bookingId)
+                .executeTakeFirstOrThrow()
+            ).manage_token_hash?.equals(hash),
+          ).toBe(true)
           throw new Error('queue unavailable')
         },
       }
@@ -1695,6 +1830,7 @@ describe.skipIf(!serverUrl)('bookings', () => {
       ).rejects.toThrow('queue unavailable')
       expect(calls).toBe(1)
       expect((await getHostBooking(as(h, h.organizationId), old.id)).status).toBe('confirmed')
+      expect((await getManagedBooking(ctx, manageToken as string)).id).toBe(old.id)
       expect(
         await count('SELECT count(*)::int AS n FROM bookings WHERE rescheduled_from_id = $1', [
           old.id,
@@ -1702,39 +1838,86 @@ describe.skipIf(!serverUrl)('bookings', () => {
       ).toBe(0)
     })
 
-    it.each(['host', 'invitee'] as const)(
-      'commits one successor when a host races another %s move',
+    it('commits one successor when a host races another host move', SERIALIZED, async () => {
+      const h = await setup()
+      const { booking: old } = await h.book('2026-11-02T09:00Z')
+      const caller = as(h, h.organizationId)
+      const release = await holdHostLock(h.userId)
+      const pending = Promise.allSettled([
+        rescheduleHostBooking(caller, old.id, { start: instant('2026-11-02T10:00Z') }),
+        rescheduleHostBooking(caller, old.id, { start: instant('2026-11-02T11:00Z') }),
+      ])
+      try {
+        await untilSomeoneWaits(2)
+      } finally {
+        await release()
+      }
+      const results = await pending
+      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1)
+      expect(results.find((r) => r.status === 'rejected')).toMatchObject({
+        reason: { code: 'booking_cancelled' },
+      })
+      expect(
+        await count('SELECT count(*)::int AS n FROM bookings WHERE rescheduled_from_id = $1', [
+          old.id,
+        ]),
+      ).toBe(1)
+    })
+
+    it(
+      'follows the transferred own token when cancellation waited for a host move',
       SERIALIZED,
-      async (other) => {
+      async () => {
         const h = await setup()
         const { booking: old, manageToken } = await h.book('2026-11-02T09:00Z')
-        const caller = as(h, h.organizationId)
         const release = await holdHostLock(h.userId)
-        const pending = Promise.allSettled([
-          rescheduleHostBooking(caller, old.id, { start: instant('2026-11-02T10:00Z') }),
-          other === 'host'
-            ? rescheduleHostBooking(caller, old.id, { start: instant('2026-11-02T11:00Z') })
-            : rescheduleManagedBooking(ctx, manageToken as string, {
-                start: instant('2026-11-02T11:00Z'),
-              }),
-        ])
+        let moving: ReturnType<typeof rescheduleHostBooking> | undefined
+        let cancelling: ReturnType<typeof cancelManagedBooking> | undefined
         try {
+          moving = rescheduleHostBooking(as(h, h.organizationId), old.id, {
+            start: instant('2026-11-02T10:00Z'),
+          })
+          moving.catch(() => {})
+          await untilSomeoneWaits()
+          cancelling = cancelManagedBooking(ctx, manageToken as string)
+          cancelling.catch(() => {})
           await untilSomeoneWaits(2)
         } finally {
           await release()
         }
-        const results = await pending
-        expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1)
-        expect(results.find((r) => r.status === 'rejected')).toMatchObject({
-          reason: { code: 'booking_cancelled' },
+        const moved = await moving
+        await expect(cancelling).resolves.toMatchObject({
+          id: moved?.booking.id,
+          status: 'cancelled',
         })
-        expect(
-          await count('SELECT count(*)::int AS n FROM bookings WHERE rescheduled_from_id = $1', [
-            old.id,
-          ]),
-        ).toBe(1)
+        expect((await getManagedBooking(ctx, manageToken as string)).id).toBe(moved?.booking.id)
       },
     )
+
+    it('does not create a new token when the predecessor has only email tokens', async () => {
+      const h = await setup()
+      const { booking: old } = await h.book('2026-11-02T09:00Z')
+      const fromEmail = await emailToken(old.id)
+      await db
+        .updateTable('bookings')
+        .set({ manage_token_hash: null })
+        .where('id', '=', old.id)
+        .execute()
+      const moved = await rescheduleHostBooking(as(h, h.organizationId), old.id, {
+        start: instant('2026-11-02T10:00Z'),
+      })
+      expect(moved.manageToken === null).toBe(true)
+      expect(
+        (
+          await db
+            .selectFrom('bookings')
+            .select('manage_token_hash')
+            .where('id', '=', moved.booking.id)
+            .executeTakeFirstOrThrow()
+        ).manage_token_hash === null,
+      ).toBe(true)
+      expect((await getManagedBooking(ctx, fromEmail)).id).toBe(moved.booking.id)
+    })
 
     it('checks the clock after waiting for the host lock', SERIALIZED, async () => {
       const h = await setup()

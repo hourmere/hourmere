@@ -31,6 +31,7 @@ import {
   CancelBody,
   Instant,
   ListBookingsQuery,
+  RescheduleBody,
 } from '../routes/bookings.ts'
 import { CreateBooking, PageParams, PublicEventType, Slot } from '../routes/public.ts'
 import { defineTool, type McpCaller, type Tool } from './tools.ts'
@@ -45,7 +46,7 @@ const slug = PageParams.shape.slug.openapi({
 
 const manageToken = z.string().openapi({
   description:
-    "The manageToken that create_booking or reschedule_booking returned for this booking, or the token in a link from one of the invitee's booking emails (https://<host>/booking#token=<token>). A token from an email follows the meeting when it is rescheduled; one returned by a tool stays with its booking.",
+    'The manageToken returned when booking or moving as the invitee, or the token in a link from an invitee booking email (https://<host>/booking#token=<token>). Email tokens follow the meeting. A response token follows host moves, but stays on the cancelled booking after an invitee move.',
 })
 
 /** RFC 3339 with the zone's offset, e.g. 2026-11-02T10:00:00+01:00. */
@@ -149,7 +150,7 @@ const RescheduleInput = z
       .optional()
       .openapi({ description: 'Move a booking you host, by its id (see list_bookings)' }),
     manageToken: manageToken.optional(),
-    start: Instant.openapi({
+    start: RescheduleBody.shape.start.openapi({
       description:
         'The new start: the exact `start` of a slot from find_available_slots for the same event type',
     }),
@@ -322,7 +323,7 @@ export function bookingTools({
     name: 'reschedule_booking',
     title: 'Reschedule a booking',
     description:
-      "Moves a booking you host by bookingId, or one you made as the invitee by manageToken (give exactly one). In one step the booking is cancelled and a new one is created at start, with the same invitee, guests and answers; the new time may overlap the old one. Returns the new booking and its new manageToken (the token returned for the old booking then belongs to the cancelled booking; tokens from emails follow the meeting to the new one). Not idempotent: with a bookingId or a token a tool returned, a retry after a lost response fails with booking_cancelled, because the booking has already moved; with a token from an email it would move the meeting again. Fails with booking_in_past once the meeting has started, and with booking_changed (try again) if, with an email's token, the meeting kept being rescheduled while the call waited.",
+      "Moves a booking you host by bookingId, or one you made as the invitee by manageToken (give exactly one). Cancels the old booking and creates its successor at start with the same invitee, guests and answers; the new time may overlap the old one. Host moves return manageToken:null and preserve the invitee's existing token on the successor. Invitee moves return a new manageToken; the previous response token stays on the cancelled booking. Email tokens always follow the meeting. Not idempotent: retrying the old bookingId or the response token used for an invitee move fails with booking_cancelled; an email token would move the meeting again. Never retry automatically. Fails with booking_in_past once the meeting has started, and booking_changed if the token's meeting keeps moving while the call waits.",
     input: RescheduleInput,
     output: BookingWithToken,
     annotations: {

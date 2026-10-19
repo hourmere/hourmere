@@ -486,6 +486,12 @@ export const admin = {
   'Removing…': '正在移除…',
   Replaced: '已替换',
   Required: '必填',
+  'Reschedule this booking': '为此预约改期',
+  'Choose a new time. The invitee and hosts will be notified.':
+    '选择新的时间。系统会通知受邀人和主持人。',
+  'The booking is moved to the new time.': '预约已移至新时间。',
+  'The response was lost. The booking may have moved. Check your bookings before trying again.':
+    '未收到响应。预约可能已改期。再次尝试前请先查看预约列表。',
   Rescheduled: '已改期',
   'Return address:': '返回地址：',
   Revoke: '撤销',

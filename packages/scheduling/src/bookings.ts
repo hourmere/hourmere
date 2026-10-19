@@ -74,9 +74,9 @@ export interface Booking {
 export interface BookingWithToken {
   booking: Booking
   /**
-   * The booking's own manage token (it stays with this booking; emails carry their own).
-   * Only its SHA-256 is stored, so it is returned once, when the booking is created; a
-   * replayed request (same Idempotency-Key) gets null.
+   * The invitee's own manage token; emails carry their own. Returned once on creation or
+   * an invitee move. Host moves return null and transfer the existing hash to the successor,
+   * keeping the invitee's link private and usable. Idempotent creation replays return null.
    */
   manageToken: string | null
 }
@@ -226,9 +226,9 @@ interface ManagedTarget {
  * the same booking. The token is found by its hash in one statement that probes both places
  * a hash can be, each through its unique index, whatever the token turns out to be, so every
  * unknown token costs the same (two index probes that find nothing):
- * - `bookings.manage_token_hash`, the token the booking API returned: it stays with that
- *   booking. After a reschedule it shows the cancelled booking and acting on it gets
- *   `booking_cancelled`, so an agent retrying a reschedule cannot move the meeting twice.
+ * - `bookings.manage_token_hash`, the token the booking API returned: an invitee move leaves
+ *   it on the cancelled booking, making retries safe. A host move transfers it to the
+ *   successor without revealing or minting a secret, so the invitee's link keeps working.
  * - `booking_notifications.manage_token_hash`, the token in an invitee email (only emails
  *   that went out; one the mail server refused has no hash): it stands for the meeting the
  *   email was about, so it opens the latest booking of that booking's reschedule chain and
@@ -281,6 +281,7 @@ const RESCHEDULE_COLUMNS = [
   'responses',
   'required_host_user_ids',
   'hosts_use_default_schedule',
+  'manage_token_hash',
 ] as const
 
 /**
@@ -288,9 +289,9 @@ const RESCHEDULE_COLUMNS = [
  * transaction. For an email's token, a reschedule that committed while this waited for the
  * lock has moved the meeting on, so the chain is followed again from the locked row until
  * the locked row is the latest (no reschedule can replace it while the lock is held). Each
- * further round means yet another reschedule of the meeting committed while this request
- * waited; after MAX_FOLLOW_ROUNDS of those it answers `booking_changed` (try again) rather
- * than chase the meeting indefinitely.
+ * further round means yet another reschedule committed while this request waited. The
+ * booking's own token is also resolved again if a host transferred its hash while this
+ * waited. After MAX_FOLLOW_ROUNDS it answers `booking_changed` (try again).
  */
 async function lockManagedBooking(trx: Db, hash: Buffer) {
   const target = await resolveManagedTarget(trx, hash)
@@ -303,8 +304,12 @@ async function lockManagedBooking(trx: Db, hash: Buffer) {
       .where('id', '=', id)
       .forUpdate()
       .executeTakeFirst()
-    if (!row || !target.fromEmail) return row
-    const latest = await latestInChain(trx, id)
+    if (!row) return undefined
+    if (!target.fromEmail && row.manage_token_hash?.equals(hash)) return row
+    const latest = target.fromEmail
+      ? await latestInChain(trx, id)
+      : (await resolveManagedTarget(trx, hash))?.id
+    if (!latest) return undefined
     if (latest === id) return row
     if (round === MAX_FOLLOW_ROUNDS) {
       throw new DomainError(
@@ -563,11 +568,17 @@ interface NewBooking {
   hostUserIds: readonly string[]
   hostsUseDefaultSchedule: boolean
   attendees: readonly Attendee[]
+  /** Present only on a host move: transfer the invitee's hash without minting a token. */
+  manageTokenHash?: Buffer | null | undefined
 }
 
 /** Inserts a booking with its hosts and attendees; call inside a transaction. */
-async function insertBooking(db: Db, b: NewBooking): Promise<{ id: string; manageToken: string }> {
-  const { token, hash } = newManageToken()
+async function insertBooking(
+  db: Db,
+  b: NewBooking,
+): Promise<{ id: string; manageToken: string | null }> {
+  const { token, hash } =
+    b.manageTokenHash === undefined ? newManageToken() : { token: null, hash: b.manageTokenHash }
   const { id } = await db
     .insertInto('bookings')
     .values({
@@ -942,6 +953,7 @@ async function rescheduleLocked(
   old: NonNullable<Awaited<ReturnType<typeof lockManagedBooking>>>,
   start: Temporal.Instant,
   origin: BookingOrigin,
+  carryManageToken = false,
 ): Promise<BookingWithToken> {
   // The status cannot change while the row is locked; the time check waits for the locks.
   if (old.status === 'cancelled') throw bookingCancelled()
@@ -1005,6 +1017,7 @@ async function rescheduleLocked(
       cancelled_source: origin.source,
       cancelled_api_key_id: origin.apiKeyId,
       cancelled_oauth_consent_id: origin.oauthConsentId ?? null,
+      ...(carryManageToken ? { manage_token_hash: null } : {}),
     })
     .where('id', '=', old.id)
     .execute()
@@ -1020,6 +1033,7 @@ async function rescheduleLocked(
     apiKeyId: origin.apiKeyId,
     oauthConsentId: origin.oauthConsentId ?? null,
     rescheduledFromId: old.id,
+    manageTokenHash: carryManageToken ? old.manage_token_hash : undefined,
     hostUserIds,
     hostsUseDefaultSchedule: old.hosts_use_default_schedule || hostUserIds.length > 1,
     attendees: attendees.map((a) => ({
@@ -1215,7 +1229,10 @@ export async function getHostBooking(ctx: ServiceContext, id: string): Promise<B
   return (await withOwnCalendarCopies(ctx, [booking as Booking]))[0] as Booking
 }
 
-/** Moves a booking in the caller's organization that the caller hosts; never follows an old id. */
+/**
+ * Moves a booking in the caller's organization that the caller hosts; never follows an old id.
+ * Transfers the invitee's token hash to the successor and returns manageToken: null.
+ */
 export async function rescheduleHostBooking(
   ctx: ServiceContext,
   id: string,
@@ -1253,6 +1270,7 @@ export async function rescheduleHostBooking(
         apiKeyId: ctx.principal.kind === 'api_key' ? ctx.principal.apiKeyId : null,
         oauthConsentId: ctx.principal.kind === 'oauth' ? ctx.principal.oauthConsentId : null,
       },
+      true,
     )
   })
 }

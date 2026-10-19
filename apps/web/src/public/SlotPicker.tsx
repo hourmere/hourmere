@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import './SlotPicker.css'
 import { TimeZonePicker } from '../components/TimeZonePicker.tsx'
 import { useI18n } from '../i18n/runtime.tsx'
 import type { UiText } from '../i18n/translate.ts'
