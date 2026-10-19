@@ -328,9 +328,15 @@ Completion checks
 the live lease ID and expiry under a short share lock before storing credentials. Release
 compares the operation ID; a stale operation cannot release a successor. Crash recovery
 can take over an expired lease. Callbacks acquire the lease before claiming OAuth state;
-an occupied lease returns `busy` immediately without consuming state or exchanging the code.
-Explicit refresh returns `zoom_refresh_in_progress` with a busy/retry message and workers
-retry while the lease is occupied. A newly acquired valid lease that finds `refreshing`
+an occupied lease returns `busy` immediately without inspecting or consuming state or exchanging
+the code. This includes a replay of an already claimed or completed attempt: `busy` does not
+prove that the attempt is valid or reusable. After the lease is released, that replay returns
+`invalid_state` without a second exchange. See [Zoom connections](zoom-connections.md#callback-replay-and-busy)
+for the distinction from a still-unclaimed retry.
+Explicit refresh returns the legacy `zoom_refresh_in_progress` code with the neutral
+`errorAlias: "zoom_operation_busy"` and a busy/retry message; workers retry while the lease
+is occupied. The legacy code is deprecated for one release and retained for v1 compatibility.
+A newly acquired valid lease that finds `refreshing`
 proves the old rotation was abandoned: worker and explicit refresh retire it to
 `needs_reauth`, clearing the old operation and credentials so the user can reconnect.
 Disconnect/logout/deletion do not wait for token operations. Completion rechecks the session
