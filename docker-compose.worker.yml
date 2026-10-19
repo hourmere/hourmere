@@ -1,0 +1,20 @@
+# Optional separate worker. Append this file to COMPOSE_FILE in .env after setup.sh,
+# e.g. docker-compose.yml:docker-compose.proxy.yml:docker-compose.worker.yml.
+# The overlay selects both roles so only the worker runs background jobs.
+services:
+  app:
+    environment:
+      HOURMERE_ROLE: web
+
+  worker:
+    # Extend the base app directly so the proxy overlay's ingress network is not inherited.
+    extends:
+      file: docker-compose.yml
+      service: app
+    build: !reset null
+    environment:
+      HOURMERE_ROLE: worker
+    # A worker only answers its image health check; never publish its port.
+    ports: !reset []
+    networks:
+      default:
