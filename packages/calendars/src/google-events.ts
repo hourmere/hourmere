@@ -14,6 +14,7 @@ export { googleMeetUrl } from '@hourmere/scheduling/conference-url'
 const conferenceData = z.object({
   createRequest: z
     .object({
+      requestId: text.optional(),
       status: z.object({ statusCode: z.enum(['pending', 'success', 'failure']) }).optional(),
     })
     .optional(),
@@ -161,7 +162,7 @@ export function googleEventMethods(
       const url = new URL(`${base(calendar)}/${encodeURIComponent(id)}`)
       url.searchParams.set(
         'fields',
-        'id,etag,iCalUID,status,start,end,location,conferenceData(createRequest/status,conferenceSolution/key,entryPoints(entryPointType,uri))',
+        'id,etag,iCalUID,status,start,end,location,conferenceData(createRequest(requestId,status),conferenceSolution/key,entryPoints(entryPointType,uri))',
       )
       return parsed(url.href, { headers: headers(token) }, signal)
     },
@@ -172,7 +173,7 @@ export function googleEventMethods(
         maxResults: '2',
         showDeleted: 'true',
         fields:
-          'items(id,etag,iCalUID,status,start,end,location,recurringEventId,recurrence,conferenceData(createRequest/status,conferenceSolution/key,entryPoints(entryPointType,uri))),nextPageToken',
+          'items(id,etag,iCalUID,status,start,end,location,recurringEventId,recurrence,conferenceData(createRequest(requestId,status),conferenceSolution/key,entryPoints(entryPointType,uri))),nextPageToken',
       }).toString()
       const result = pageSchema.safeParse(await json(url.href, { headers: headers(token) }, signal))
       if (!result.success || result.data.nextPageToken || (result.data.items?.length ?? 0) > 1)
@@ -196,6 +197,36 @@ export function googleEventMethods(
           method: 'POST',
           headers: { ...headers(token), 'content-type': 'application/json' },
           body: JSON.stringify(value),
+        },
+        signal,
+      )
+    },
+    createConferenceEvent(
+      token: string,
+      calendar: string,
+      id: string,
+      etag: string | undefined,
+      requestId: string,
+      signal: AbortSignal,
+    ) {
+      if (!safeGoogleEventId(id) || !etag) throw new GoogleCalendarError('provider_unavailable')
+      return parsed(
+        `${base(calendar)}/${encodeURIComponent(id)}?sendUpdates=none&conferenceDataVersion=1`,
+        {
+          method: 'PATCH',
+          headers: {
+            ...headers(token),
+            'content-type': 'application/json',
+            'if-match': etag,
+          },
+          body: JSON.stringify({
+            conferenceData: {
+              createRequest: {
+                requestId,
+                conferenceSolutionKey: { type: 'hangoutsMeet' },
+              },
+            },
+          }),
         },
         signal,
       )

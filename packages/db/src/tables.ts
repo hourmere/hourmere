@@ -316,6 +316,7 @@ export interface BookingConferences {
   attempts: Generated<number>;
   booking_id: string;
   calendar_id: string | null;
+  conference_patch_request_id: string | null;
   connection_id: string | null;
   create_started: Generated<boolean>;
   error_code: string | null;

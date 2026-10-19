@@ -47,6 +47,12 @@ must approve publication through the [release workflow](https://github.com/hourm
 - Docker Compose self-hosting with PostgreSQL-backed jobs, optional separate web/worker
   processes, health checks, security headers, request limits and graceful shutdown.
 
+### Fixed
+
+- Automatic Google Meet now imports the private calendar copy first and requests its
+  conference through a separate conditional PATCH. Retries preserve the event and request
+  identity, including recovery of legacy import-created pending requests.
+
 ### Upgrade notes
 
 These notes apply to existing installations of the development source tree. Back up the

@@ -147,7 +147,7 @@ describe.skipIf(!serverUrl)('automatic Meet durable flow (real PostgreSQL)', () 
       const values = provider.controls.storedEvents
       if (init.method === 'POST') {
         const value = JSON.parse(String(init.body))
-        const item = { ...value, id: 'meet-event', etag: '"v1"', conferenceData: conference() }
+        const item = { ...value, id: 'meet-event', etag: '"v1"' }
         values.set(item.id, item)
         return Response.json(item)
       }
@@ -173,11 +173,14 @@ describe.skipIf(!serverUrl)('automatic Meet durable flow (real PostgreSQL)', () 
         return Response.json({
           items: [...values.values()]
             .filter((v) => v.iCalUID === url.searchParams.get('iCalUID'))
-            .map((v) => ({ ...v, conferenceData: conference() })),
+            .map((v) => ({ ...v, ...(v.conferenceData ? { conferenceData: conference() } : {}) })),
         })
       const item = values.get(id)
       return item
-        ? Response.json({ ...item, conferenceData: conference() })
+        ? Response.json({
+            ...item,
+            ...(item.conferenceData ? { conferenceData: conference() } : {}),
+          })
         : Response.json({}, { status: 404 })
     }
   })
@@ -265,7 +268,7 @@ describe.skipIf(!serverUrl)('automatic Meet durable flow (real PostgreSQL)', () 
     await writeBookingConference(deps, b.booking.id)
     await writeBookingCalendar(deps, b.booking.id)
     expect(imports()).toHaveLength(1)
-    expect(imports()[0]?.url.searchParams.get('conferenceDataVersion')).toBe('1')
+    expect(JSON.parse(String(imports()[0]?.init.body))).not.toHaveProperty('conferenceData')
     expect((await row()).state).toBe('pending')
     expect(provider.calls.some((c) => String(c.init.body).includes('attendees'))).toBe(false)
   })
