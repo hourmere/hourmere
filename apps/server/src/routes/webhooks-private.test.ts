@@ -82,6 +82,26 @@ describe.skipIf(!serverUrl)('private webhook configuration and signed HTTP deliv
   }
   const create = (url: string) => ({ url, events: ['booking.created'] })
 
+  it('keeps legacy URL refusals without a configured allowlist', async () => {
+    const { request } = await client()
+    for (const privateTargets of [undefined, [], parseWebhookPrivateTargets(`n8n:${port}`)]) {
+      const response = await request('POST', '', create(`http://unlisted:${port}/hook`), {
+        enabled: true,
+        encryptionKey: key,
+        privateTargets,
+      })
+      expect(response.status).toBe(400)
+      expect(await response.json()).toEqual({
+        error: 'invalid_webhook',
+        message: privateTargets?.length
+          ? 'Webhook destination is not allowed on this instance'
+          : 'Invalid webhook configuration',
+      })
+    }
+    expect(network.lookup).not.toHaveBeenCalled()
+    expect(requests).toBe(0)
+  })
+
   it('returns identical creation refusals regardless of internal DNS success or failure', async () => {
     const { request } = await client(`n8n:${port}`)
     const refusals: unknown[] = []
@@ -140,8 +160,61 @@ describe.skipIf(!serverUrl)('private webhook configuration and signed HTTP deliv
       expect(updated.status).toBe(400)
       errors.push(await updated.json())
     }
-    expect(errors[0]).toEqual(errors[1])
+    expect(errors).toEqual(
+      Array(2).fill({ error: 'invalid_webhook', message: 'Invalid webhook configuration' }),
+    )
     expect(network.lookup).not.toHaveBeenCalled()
+  })
+
+  it('allows only pausing a saved destination after operator revocation', async () => {
+    const { request } = await client(`n8n:${port}`)
+    const url = `http://n8n:${port}/hook`
+    const created = await request('POST', '', create(url))
+    expect(created.status).toBe(201)
+    const { webhook } = (await created.json()) as { webhook: { id: string } }
+    for (const privateTargets of [undefined, [], parseWebhookPrivateTargets(`other:${port}`)]) {
+      const current = { enabled: true, encryptionKey: key, privateTargets }
+      const paused = await request('PATCH', `/${webhook.id}`, { isActive: false }, current)
+      expect(paused.status).toBe(200)
+      expect(await paused.json()).toMatchObject({
+        id: webhook.id,
+        url,
+        events: ['booking.created'],
+        isActive: false,
+      })
+      for (const body of [
+        { isActive: true },
+        { events: ['booking.cancelled'] },
+        { isActive: false, events: ['booking.cancelled'] },
+      ]) {
+        const refused = await request('PATCH', `/${webhook.id}`, body, current)
+        expect(refused.status).toBe(400)
+        expect(await refused.json()).toEqual({
+          error: 'invalid_webhook',
+          message: privateTargets?.length
+            ? 'Webhook destination is not allowed on this instance'
+            : 'Invalid webhook configuration',
+        })
+      }
+      for (const destination of [url, `http://other:${port}/hook`]) {
+        const refused = await request(
+          'PATCH',
+          `/${webhook.id}`,
+          { isActive: false, url: destination },
+          current,
+        )
+        expect(refused.status).toBe(400)
+        expect(await refused.json()).toMatchObject({ error: 'invalid_request' })
+      }
+    }
+    const saved = await db
+      .selectFrom('webhooks')
+      .select(['url', 'events', 'is_active'])
+      .where('id', '=', webhook.id)
+      .executeTakeFirstOrThrow()
+    expect(saved).toEqual({ url, events: ['booking.created'], is_active: false })
+    expect(network.lookup).not.toHaveBeenCalled()
+    expect(requests).toBe(0)
   })
 
   async function captured(entries: string, url: string) {

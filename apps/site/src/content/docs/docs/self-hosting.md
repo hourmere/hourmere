@@ -278,7 +278,12 @@ For an existing LAN receiver, list its exact private IP and port, for example
 cover a controlled receiver network. `localhost` or `127.0.0.1` refers to the delivering
 container itself, rather than the Docker host or another service. Keep operator-selected
 destinations narrow: organization owners/admins can configure any path at an allowed
-destination. Configure the same setting on every web and worker process and recreate them
+destination. IP/CIDR entries also allow every virtual host resolving entirely into the
+range: administrators choose the URL hostname and HTTP Host header, so a reverse proxy
+routing by Host may expose multiple internal services. Delivery records include HTTP
+status (`httpStatus`, stored as `http_status`) and reveal whether an allowed internal
+destination responded; this visibility is inherent to allowing it.
+Configure the same setting on every web and worker process and recreate them
 together when changing it. Saving an endpoint performs no DNS lookup or network probe;
 delivery re-resolves and revalidates every DNS answer on every attempt.
 

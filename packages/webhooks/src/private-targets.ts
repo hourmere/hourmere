@@ -41,12 +41,40 @@ const privateNetworks = [
   ['fc00::', 7, 6],
   ['::1', 128, 6],
 ] as const
-const metadataV6 = addressNumber('fd00:ec2::254') as bigint
+// These provider metadata endpoints cannot be opted into. IPv4 link-local includes
+// 169.254.169.254 (AWS/GCP/OCI); AWS reserves its whole IPv6 service range.
+const metadataNetworks = [
+  // https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html
+  ['169.254.0.0', 16, 4],
+  // https://www.alibabacloud.com/help/en/ecs/user-guide/view-instance-metadata/
+  ['100.100.100.200', 32, 4],
+  // IMDS is fd00:ec2::254; this enclosing range is reserved for AWS services:
+  // https://docs.aws.amazon.com/vpc/latest/userguide/subnet-route-tables.html
+  ['fd00:ec2::', 32, 6],
+  // https://cloud.google.com/compute/docs/metadata/querying-metadata
+  ['fd20:ce::254', 128, 6],
+  // Oracle documents this address as its VCN resolver; its SDK also uses it for IMDS.
+  // https://docs.oracle.com/en-us/iaas/Content/Network/Tasks/managingDHCP.htm
+  // https://docs.oracle.com/en-us/iaas/tools/python/latest/api/signing.html
+  // https://github.com/oracle/oci-python-sdk/blob/master/src/oci/auth/signers/instance_principals_security_token_signer.py
+  ['fd00:c1::a9fe:a9fe', 128, 6],
+] as const
 
 function eligibleNetwork(network: string, prefix: number, family: 4 | 6): boolean {
   const range = bounds(network, prefix, family)
   if (!range || range.start % range.size !== 0n) return false
-  if (family === 6 && range.start <= metadataV6 && metadataV6 <= range.end) return false
+  if (
+    metadataNetworks.some(([base, length, version]) => {
+      const excluded = bounds(base, length, version)
+      return (
+        version === family &&
+        excluded !== undefined &&
+        range.start <= excluded.end &&
+        excluded.start <= range.end
+      )
+    })
+  )
+    return false
   return privateNetworks.some(([base, length, version]) => {
     const allowed = bounds(base, length, version)
     return (

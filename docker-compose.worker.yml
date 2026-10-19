@@ -14,7 +14,6 @@ services:
     build: !reset null
     environment:
       HOURMERE_ROLE: worker
-      WEBHOOK_PRIVATE_TARGETS: ${WEBHOOK_PRIVATE_TARGETS:-}
     # A worker only answers its image health check; never publish its port.
     ports: !reset []
     networks:

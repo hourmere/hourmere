@@ -36,7 +36,9 @@ URLs require HTTPS on port 443, a fully qualified public DNS hostname, no user i
 or fragment, and at most 2048 characters. Private, loopback and special-purpose destinations
 are refused unless the operator explicitly allows an eligible private destination below.
 Syntax and the current operator policy are checked when creating an endpoint and updating
-its subscription/active settings. DNS is checked on every actual delivery. Registration does no DNS
+its subscription/active settings. A PATCH containing only `isActive: false` can always pause
+an endpoint, including after its allowlist entry is removed; all other updates recheck the
+policy. DNS is checked on every actual delivery. Registration does no DNS
 lookup or verification request: accepted configuration does not prove availability, and
 rejected creation/update errors do not disclose whether an internal hostname exists.
 Treat any credential in your destination's query as sensitive, even though Hourmere never
@@ -62,8 +64,13 @@ case-insensitive, with no trailing dot or wildcard. Ports are explicit decimal v
 1–65535 without leading zeros; ranges are inclusive and ascending. CIDRs must use their
 network base. Only RFC1918 IPv4, IPv4 loopback, IPv6 unique-local and IPv6 loopback addresses
 are eligible. Public addresses, unspecified/broad ranges such as `0.0.0.0/0` or `[::/0]`,
-link-local/metadata addresses (including `169.254.0.0/16`, `100.100.100.200` and
-`fd00:ec2::254`) and CIDRs containing metadata addresses are forbidden even if listed.
+link-local addresses (including the entire `169.254.0.0/16`, which contains the
+`169.254.169.254` metadata endpoint), Alibaba's `100.100.100.200`, AWS's entire reserved
+service range `fd00:ec2::/32` (including metadata at `fd00:ec2::254`), GCP metadata at
+`fd20:ce::254` and OCI metadata at `fd00:c1::a9fe:a9fe` are forbidden even if listed.
+Any CIDR overlapping a refused range or containing one of those endpoints is refused at
+startup; the same addresses are refused in DNS answers at delivery. IPv4-mapped IPv6
+(`::ffff:0:0/96`) and NAT64 prefixes `64:ff9b::/96` and `64:ff9b:1::/48` are ineligible too.
 Invalid settings prevent startup, including when event capture is disabled.
 
 Matching destinations may use HTTP or HTTPS, explicit nonstandard ports, dotless hostnames
@@ -85,7 +92,13 @@ handling retain the restrictions below.
 Set the allowlist identically on all web and worker processes and recreate both after
 changes. The current policy is checked again before each actual send, including queued
 events captured under an older policy. Trust entries narrowly: organization administrators
-can choose any URL path on an allowed host and port. See the
+can choose any URL path on an allowed host and port. An IP/CIDR entry also permits every
+virtual host whose DNS answers fit that range: the organization administrator chooses the
+URL hostname and therefore the HTTP Host header. An internal reverse proxy that routes by
+Host can expose multiple services through one allowed address. Delivery records expose
+`httpStatus` (stored as `http_status`), revealing whether an allowed internal destination
+responded and its HTTP status; this visibility is inherent to allowing that destination.
+See the
 [same-network n8n Compose example](../apps/site/src/content/docs/docs/self-hosting.md#private-webhook-receivers).
 
 ## Payload and signatures

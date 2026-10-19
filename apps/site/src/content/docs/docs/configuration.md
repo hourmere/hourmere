@@ -55,8 +55,13 @@ Ports are 1–65535 without leading zeros. IPv6 entries require brackets around 
 and optional prefix. CIDRs must name their network base, without host bits. Wildcards,
 missing ports, public IPs, unspecified addresses, link-local addresses and metadata endpoints
 are rejected at startup, even when webhooks are disabled. Eligible addresses are RFC1918
-IPv4, IPv4 loopback, IPv6 unique-local and IPv6 loopback; ranges containing cloud metadata
-addresses such as `fd00:ec2::254` are always refused.
+IPv4, IPv4 loopback, IPv6 unique-local and IPv6 loopback. Always refused are the entire
+`169.254.0.0/16` link-local range (including metadata at `169.254.169.254`), Alibaba metadata
+at `100.100.100.200`, AWS's reserved service range `fd00:ec2::/32` (including metadata at
+`fd00:ec2::254`), GCP metadata at `fd20:ce::254` and OCI metadata at
+`fd00:c1::a9fe:a9fe`. CIDRs overlapping those ranges or containing those endpoints are
+refused at startup; the same addresses are refused in DNS answers at delivery. IPv4-mapped
+IPv6 (`::ffff:0:0/96`) and NAT64 prefixes `64:ff9b::/96` and `64:ff9b:1::/48` are ineligible too.
 
 An allowed destination may use HTTP or HTTPS, a dotless hostname, an IP literal and a
 nonstandard port. Matching uses the URL's effective port: omitted HTTP/HTTPS ports mean
@@ -70,6 +75,13 @@ binds that host and port to private addresses, including after a DNS change; unr
 ordinary public HTTPS URLs retain their public-only delivery path. The checked address is pinned to the socket;
 redirects, proxies from environment variables and cookies remain disabled. HTTP requests
 carry the same HMAC signature headers as HTTPS.
+
+Organization administrators can choose any path on an allowed host and port. IP/CIDR
+entries also permit every virtual host resolving entirely into the allowed range: the
+administrator chooses the URL hostname and therefore the HTTP Host header, so an internal
+reverse proxy routing by Host may expose multiple services. Delivery records include the
+HTTP status (`httpStatus`, stored as `http_status`), revealing whether an allowed internal
+destination responded. This visibility is inherent to allowing that destination.
 
 Recreate web and worker together after changing the setting; pending attempts use the new
 policy. See the [same-network n8n example](/docs/self-hosting#private-webhook-receivers)

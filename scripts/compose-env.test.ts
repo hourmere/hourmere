@@ -115,12 +115,10 @@ describe('documented Compose configuration', () => {
     expect(row).toContain('| Unset |')
   })
 
-  it('keeps private webhook destinations empty by default in both web and worker', () => {
+  it('keeps private webhook destinations empty by default', () => {
     expect(composeAppEnvironment(compose).get('WEBHOOK_PRIVATE_TARGETS') ?? '').toMatch(
       /^\$\{WEBHOOK_PRIVATE_TARGETS:-\}$/,
     )
-    const worker = readFileSync(new URL('../docker-compose.worker.yml', import.meta.url), 'utf8')
-    expect(worker).toMatch(/^ {6}WEBHOOK_PRIVATE_TARGETS: \$\{WEBHOOK_PRIVATE_TARGETS:-\}$/m)
     expect(example).toMatch(/^WEBHOOK_PRIVATE_TARGETS=$/m)
     const row = reference
       .split('\n')

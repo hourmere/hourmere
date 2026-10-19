@@ -40,12 +40,14 @@ const uuid = (value: unknown): value is string =>
   typeof value === 'string' && z.uuid().safeParse(value).success
 const missing = () => new DomainError('not_found', 'webhook_not_found')
 const invalid = () => new DomainError('invalid', 'invalid_webhook', 'Invalid webhook configuration')
-const destinationNotAllowed = () =>
-  new DomainError(
-    'invalid',
-    'invalid_webhook',
-    'Webhook destination is not allowed on this instance',
-  )
+const destinationNotAllowed = (settings: Pick<WebhookSettings, 'privateTargets'>) =>
+  settings.privateTargets?.length
+    ? new DomainError(
+        'invalid',
+        'invalid_webhook',
+        'Webhook destination is not allowed on this instance',
+      )
+    : invalid()
 const insufficientRole = () =>
   new DomainError(
     'forbidden',
@@ -158,7 +160,7 @@ export async function createWebhook(
   if (!parsed.success) throw invalid()
   const url = webhookUrl(parsed.data.url, settings.privateTargets)
   const events = eventsOf(parsed.data.events)
-  if (!url) throw destinationNotAllowed()
+  if (!url) throw destinationNotAllowed(settings)
   const encryptionKey = requireEnabled(settings)
   return ctx.db.transaction().execute(async (trx) => {
     await requireAdmin(trx, ctx)
@@ -226,11 +228,14 @@ export async function updateWebhook(
   const parsed = WebhookUpdateInput.safeParse(input)
   if (!parsed.success || Object.keys(parsed.data).length === 0) throw invalid()
   const events = parsed.data.events === undefined ? undefined : eventsOf(parsed.data.events)
+  const pauseOnly = parsed.data.isActive === false && parsed.data.events === undefined
   return ctx.db.transaction().execute(async (trx) => {
     const row = await lockedWebhook(trx, ctx, id)
-    // The operator may have revoked a destination since creation. This is syntax/policy
-    // only: resolving here would expose an internal-host existence oracle to callers.
-    if (!webhookUrl(row.url, settings.privateTargets)) throw destinationNotAllowed()
+    // Pausing must remain available after an operator revokes a destination. Every
+    // other update rechecks syntax/policy only: resolving here would expose an
+    // internal-host existence oracle to callers.
+    if (!pauseOnly && !webhookUrl(row.url, settings.privateTargets))
+      throw destinationNotAllowed(settings)
     const updated = await trx
       .updateTable('webhooks')
       .set({

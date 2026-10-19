@@ -403,7 +403,8 @@ are immutable HTTPS public DNS URLs by default. Self-hosted operators may explic
 allow private HTTP(S) host/IP/CIDR and port destinations with `WEBHOOK_PRIVATE_TARGETS`;
 Hourmere Cloud must never set it. Saving and updating endpoint settings rechecks URL policy
 without DNS lookups or verification requests, and gives the same safe refusal regardless
-of internal hostname existence.
+of internal hostname existence. A PATCH containing only `isActive: false` can pause an
+endpoint even after its allowlist entry is removed; all other updates recheck the policy.
 Every actual send re-resolves all addresses against the current policy and pins a validated
 address to the socket. Accepted configuration does not establish receiver availability.
 The instance must explicitly enable new captures; no historical bookings are backfilled.

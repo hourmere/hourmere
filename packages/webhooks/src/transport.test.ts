@@ -255,6 +255,43 @@ function respondHttp(statusCode = 204) {
   })
 }
 describe('pinned private webhook transport', () => {
+  it.each([
+    '169.254.169.254',
+    '169.254.0.0',
+    '169.254.255.255',
+    '100.100.100.200',
+    'fd00:ec2::254',
+    'fd00:ec2::',
+    'fd00:ec2::255',
+    'fd00:ec2:ffff:ffff:ffff:ffff:ffff:ffff',
+    'fd20:ce::254',
+    'fd20:00ce:0:0:0:0:0:0254',
+    'fd00:c1::a9fe:a9fe',
+    'fd00:00c1:0:0:0:0:a9fe:a9fe',
+    '::ffff:169.254.169.254',
+    '::ffff:a9fe:a9fe',
+    '64:ff9b::169.254.169.254',
+    '64:ff9b::a9fe:a9fe',
+    '64:ff9b:1::169.254.169.254',
+    '64:ff9b:1::a9fe:a9fe',
+    '::ffff:100.100.100.200',
+    '::ffff:6464:64c8',
+    '64:ff9b::100.100.100.200',
+    '64:ff9b::6464:64c8',
+    '64:ff9b:1::100.100.100.200',
+    '64:ff9b:1::6464:64c8',
+  ])('refuses cloud metadata DNS answer %s before opening a socket', async (address) => {
+    network.lookup.mockResolvedValue([
+      { address: '192.168.1.10', family: 4 },
+      { address, family: address.includes(':') ? 6 : 4 },
+    ])
+    respondHttp()
+    await expect(sendWebhook(privateInput())).rejects.toThrow('refused')
+    expect(network.lookup).toHaveBeenCalledExactlyOnceWith('n8n', { all: true, verbatim: true })
+    expect(network.httpRequest).not.toHaveBeenCalled()
+    expect(network.request).not.toHaveBeenCalled()
+  })
+
   it.each(['127.0.0.1', '10.0.0.1', '172.16.0.1', '192.168.1.1', 'fd12::1', '::1'])(
     'permits an exact host entry resolving to eligible private address %s',
     async (address) => {

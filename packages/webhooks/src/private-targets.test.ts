@@ -24,7 +24,11 @@ describe('operator private webhook target setting', () => {
     '[::1]:443',
     '[fc00::/8]:80',
     '[fd12:3456::/64]:8443',
-    '[fd00:ec2::255]:80',
+    '[fd00:ec3::]:80',
+    '[fd20:ce::253]:80',
+    '[fd20:ce::255]:80',
+    '[fd00:c1::a9fe:a9fd]:80',
+    '[fd00:c1::a9fe:a9ff]:80',
   ])('accepts the explicit private entry %s', (value) => {
     const targets = parseWebhookPrivateTargets(value)
     expect(targets).toHaveLength(1)
@@ -137,9 +141,19 @@ describe('operator private webhook target setting', () => {
     ['fc00::', true],
     ['fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff', true],
     ['fe00::', false],
-    ['fd00:ec2::253', true],
+    ['fd00:ec1:ffff:ffff:ffff:ffff:ffff:ffff', true],
+    ['fd00:ec2::', false],
+    ['fd00:ec2::253', false],
     ['fd00:ec2::254', false],
-    ['fd00:ec2::255', true],
+    ['fd00:ec2::255', false],
+    ['fd00:ec2:ffff:ffff:ffff:ffff:ffff:ffff', false],
+    ['fd00:ec3::', true],
+    ['fd20:ce::253', true],
+    ['fd20:ce::254', false],
+    ['fd20:ce::255', true],
+    ['fd00:c1::a9fe:a9fd', true],
+    ['fd00:c1::a9fe:a9fe', false],
+    ['fd00:c1::a9fe:a9ff', true],
     ['169.254.169.254', false],
     ['100.100.100.200', false],
     ['::ffff:10.0.0.1', false],
@@ -167,5 +181,65 @@ describe('operator private webhook target setting', () => {
     expect(privateTargetContains(ipv6, 'fd12::')).toBe(true)
     expect(privateTargetContains(ipv6, 'fd12::ffff:ffff:ffff:ffff')).toBe(true)
     expect(privateTargetContains(ipv6, 'fd12:0:0:1::')).toBe(false)
+  })
+})
+
+describe('cloud metadata exclusions', () => {
+  it.each([
+    '169.254.169.254:80',
+    '169.254.0.0/16:80',
+    '169.254.168.0/22:80',
+    '100.100.100.200:80',
+    '100.100.100.200/31:80',
+    '100.64.0.0/10:80',
+    '[fd00:ec2::254]:80',
+    '[fd00:ec2::254/127]:80',
+    '[fd00:ec2::/64]:80',
+    '[fd00:ec2::/32]:80',
+    '[fd00:ec2::/31]:80',
+    '[fd00:ec2::255]:80',
+    '[fd00:ec2:ffff:ffff:ffff:ffff:ffff:ffff]:80',
+    '[fd20:ce::254]:80',
+    '[fd20:ce::254/127]:80',
+    '[fd20:ce::/64]:80',
+    '[fd20::/20]:80',
+    '[fd00:c1::a9fe:a9fe]:80',
+    '[fd00:00c1:0:0:0:0:a9fe:a9fe]:80',
+    '[fd00:c1::a9fe:a9fe/127]:80',
+    '[fd00:c1::/64]:80',
+    '[fd00:c1::/32]:80',
+    '[fd00::/24]:80',
+    '[fd00::/8]:80',
+    '[fc00::/7]:80',
+  ])('refuses metadata endpoint or intersecting range %s at startup', (entry) => {
+    expect(() => parseWebhookPrivateTargets(entry)).toThrow(
+      /^Invalid WEBHOOK_PRIVATE_TARGETS setting$/,
+    )
+  })
+
+  it.each(
+    ['169.254.169.254', '100.100.100.200'].flatMap((address) => {
+      const words = address.split('.').map(Number)
+      const hex = `${((words[0] ?? 0) * 256 + (words[1] ?? 0)).toString(16)}:${((words[2] ?? 0) * 256 + (words[3] ?? 0)).toString(16)}`
+      return [
+        `::ffff:${address}`,
+        `::ffff:${hex}`,
+        `64:ff9b::${address}`,
+        `64:ff9b::${hex}`,
+        `64:ff9b:1::${address}`,
+        `64:ff9b:1::${hex}`,
+      ]
+    }),
+  )('refuses IPv4-mapped/NAT64 metadata address %s', (address) => {
+    expect(() => parseWebhookPrivateTargets(`[${address}]:80`)).toThrow(
+      /^Invalid WEBHOOK_PRIVATE_TARGETS setting$/,
+    )
+    expect(() => parseWebhookPrivateTargets(`[${address}/128]:80`)).toThrow(
+      /^Invalid WEBHOOK_PRIVATE_TARGETS setting$/,
+    )
+    expect(isWebhookPrivateAddress(address)).toBe(false)
+    const host = parseWebhookPrivateTargets('receiver:80')[0]
+    if (!host) throw new Error('Missing target')
+    expect(privateTargetContains(host, address)).toBe(false)
   })
 })
