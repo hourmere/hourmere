@@ -43,7 +43,10 @@ function releaseNotes(changelog: string, version: string): string {
   if (matches.length !== 1 || !matches[0]) {
     throw new Error('CHANGELOG must contain exactly one nonempty section matching the tag version')
   }
-  return `${matches[0]}\n`
+  return `${matches[0]}\n`.replaceAll(
+    'https://github.com/hourmere/hourmere/blob/main/',
+    `https://github.com/hourmere/hourmere/blob/v${version}/`,
+  )
 }
 
 function git(...args: string[]): string {

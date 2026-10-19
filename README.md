@@ -86,8 +86,11 @@ It keeps the app on `127.0.0.1:3000` and PostgreSQL unpublished. For your own pr
 exact address as the app sees it in `TRUSTED_PROXIES` and preserve Host/forwarded headers;
 see the [self-hosting guide](apps/site/src/content/docs/docs/self-hosting.md) for the complete
 TLS, backup/restore, upgrade and host-hardening procedures. The default app also runs
-background jobs; to split them, set `HOURMERE_ROLE=web` and enable the commented `worker`
-service (same image, `HOURMERE_ROLE=worker`). Give containers at least 35 seconds to stop.
+background jobs; to split them after setup, append `:docker-compose.worker.yml` to
+`COMPOSE_FILE` in `.env` and recreate the stack. The tracked overlay automatically selects
+`web` for the app and `worker` for the separate worker, using the same image and secrets.
+The `.env` backup preserves this choice, and upgrades need no tracked Compose edits.
+Give containers at least 35 seconds to stop.
 
 The application image retains small public attribution and booking-confirmation links to the
 hosted service. `HOSTED_SIGNUP_URL` sets their destination (default `https://hourmere.com`);

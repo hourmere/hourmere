@@ -6,7 +6,7 @@ The CLI uses the instance's existing MCP tools over HTTPS and needs no runtime d
 
 ## Install
 
-Requires **Node.js 26 or later**. Once the owner publishes the first release:
+Requires **Node.js 22 or later**. Once the owner publishes the first release:
 
 ```sh
 npm install --global @hourmere/cli

@@ -15,7 +15,7 @@
     "hourmere": "dist/index.js"
   },
   "engines": {
-    "node": ">=26"
+    "node": ">=22"
   },
   "files": [
     "dist/index.js",
@@ -28,9 +28,6 @@
     "access": "public"
   },
   "scripts": {
-    "start": "node src/index.ts",
-    "build": "tsc -p tsconfig.build.json",
-    "prepack": "npm run build",
-    "typecheck": "tsc -p tsconfig.json"
+    "start": "node dist/index.js"
   }
 }

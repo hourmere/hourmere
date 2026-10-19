@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { posix } from 'node:path'
 
 export const PACK_FILES = [
   'LICENSE',
@@ -15,6 +16,26 @@ export function assertPackFiles(files: readonly string[]) {
     [...PACK_FILES],
     'CLI tarball must match the exact allow-list',
   )
+}
+
+export function assertPackedScripts(
+  manifest: { scripts?: Record<string, string> },
+  files: readonly string[],
+) {
+  for (const [name, command] of Object.entries(manifest.scripts ?? {})) {
+    // Only a plain Node entrypoint is supported. Reject other shell syntax rather
+    // than overlook a path hidden in a development command or option.
+    const args = command.match(/"[^"]*"|'[^']*'|[^\s]+/g) ?? []
+    assert.ok(
+      args.length === 2 && args[0] === 'node',
+      `Packed CLI script ${name} must use node <packed-file>`,
+    )
+    const path = (args[1] ?? '').replace(/^(['"])(.*)\1$/, '$2')
+    assert.ok(
+      files.includes(posix.normalize(path)),
+      `Packed CLI script ${name} references a missing tarball path: ${path}`,
+    )
+  }
 }
 
 export function assertPackage(manifest: {
