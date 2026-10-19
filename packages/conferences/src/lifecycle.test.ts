@@ -596,22 +596,43 @@ describe.skipIf(!serverUrl)('automatic Zoom durable booking lifecycle (real Post
       ).state,
     ).toBe('ready')
   })
-  it('waits for an already claimed Zoom refresh without retiring the connection or attempting create', async () => {
+  it('waits for a live Zoom token lease without retiring the connection or attempting create', async () => {
+    const operation = randomUUID()
     await db
       .updateTable('conference_connections')
-      .set({ status: 'refreshing', credentials: null, operation_id: randomUUID() })
+      .set({ status: 'refreshing', credentials: null, operation_id: operation })
       .where('id', '=', connectionId)
       .execute()
-    const b = await book()
-    await writeBookingConference(deps, b.booking.id)
-    expect(await row()).toMatchObject({ state: 'pending', create_started: false, error_code: null })
-    expect(
+    await db
+      .insertInto('conference_token_operations')
+      .values({
+        user_id: owner.user.id,
+        operation_id: operation,
+        expires_at: new Date(Date.now() + 60000),
+      })
+      .execute()
+    try {
+      const b = await book()
+      await writeBookingConference(deps, b.booking.id)
+      expect(await row()).toMatchObject({
+        state: 'pending',
+        create_started: false,
+        error_code: null,
+      })
+      expect(
+        await db
+          .selectFrom('conference_connections')
+          .select(['status', 'last_error'])
+          .executeTakeFirstOrThrow(),
+      ).toEqual({ status: 'refreshing', last_error: null })
+      expect(posts()).toHaveLength(0)
+    } finally {
       await db
-        .selectFrom('conference_connections')
-        .select(['status', 'last_error'])
-        .executeTakeFirstOrThrow(),
-    ).toEqual({ status: 'refreshing', last_error: null })
-    expect(posts()).toHaveLength(0)
+        .deleteFrom('conference_token_operations')
+        .where('user_id', '=', owner.user.id)
+        .where('operation_id', '=', operation)
+        .execute()
+    }
   })
   it.each(['network', '503', 'timeout', 'malformed'])(
     'retries transient worker refresh %s with a bounded budget and preserves credentials for later recovery',

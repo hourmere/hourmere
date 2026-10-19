@@ -125,6 +125,7 @@ export function ConferenceNotice({
   const zoom = current.conference.provider === 'zoom'
   const url = displayConferenceUrl(current.conference.provider, current.location?.url)
   const ambiguous = current.conference.errorCode === 'ambiguous_create'
+  const pendingTimeout = !zoom && current.conference.errorCode === 'conference_pending_timeout'
   return (
     <section className="alert alert-info" aria-label={t('Meeting link')} aria-live="polite">
       <h2>
@@ -182,6 +183,13 @@ export function ConferenceNotice({
               )}
             </p>
           )}
+          {pendingTimeout && !cancelled && (
+            <p>
+              {t(
+                'Google is still preparing the Meet link after repeated checks. The host can recheck the existing request; a retry does not create a replacement meeting.',
+              )}
+            </p>
+          )}
           {current.conference.errorCode === 'organizer_unavailable' && (
             <p>
               {t(
@@ -231,7 +239,7 @@ export function ConferenceNotice({
                   ? zoom
                     ? 'Retry Zoom cleanup'
                     : 'Retry Google calendar cleanup'
-                  : ambiguous
+                  : ambiguous || pendingTimeout
                     ? 'Recheck existing meeting'
                     : 'Retry meeting link',
             )}

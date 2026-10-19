@@ -169,6 +169,48 @@ describe.skipIf(!databaseUrl)('Zoom worker unlocked provider phases (real Postgr
   }
   const meetingCalls = () => provider.calls.filter((call) => call.url.includes('/meetings'))
 
+  it('retires a crashed refresh after taking over its expired token lease', async () => {
+    const abandoned = randomUUID()
+    await db
+      .updateTable('conference_connections')
+      .set({ status: 'refreshing', credentials: null, operation_id: abandoned })
+      .where('id', '=', c.connectionId as string)
+      .execute()
+    await db
+      .insertInto('conference_token_operations')
+      .values({ user_id: owner.user.id, operation_id: abandoned, expires_at: new Date(0) })
+      .execute()
+
+    expect(await run()).toMatchObject({ error: 'needs_reauth' })
+    expect(await row()).toMatchObject({
+      status: 'needs_reauth',
+      credentials: null,
+      operation_id: null,
+      last_error: 'needs_reauth',
+    })
+    expect(provider.calls).toHaveLength(0)
+  })
+
+  it('preserves a refreshing claim while another worker owns its live token lease', async () => {
+    await expire()
+    const gate = pause('refresh'),
+      running = run()
+    await gate.entered
+    const original = await row()
+
+    expect(await run()).toMatchObject({ error: 'provider_unavailable' })
+    expect(await row()).toMatchObject({
+      status: 'refreshing',
+      credentials: null,
+      operation_id: original.operation_id,
+      last_error: null,
+    })
+    expect(provider.calls).toHaveLength(1)
+    gate.release()
+    expect(await running).toMatchObject({ meetingId: '81234567890' })
+    expect(await row()).toMatchObject({ status: 'active', operation_id: null })
+  })
+
   for (const stage of ['refresh', 'identity', 'meeting'] as const)
     for (const action of ['disconnect', 'delete owner'] as const)
       it(`allows ${action} to commit while worker ${stage} is blocked`, async () => {
@@ -230,6 +272,41 @@ describe.skipIf(!databaseUrl)('Zoom worker unlocked provider phases (real Postgr
       },
     }) as Db
   }
+
+  it('preserves an abandoned refresh if its newly acquired lease is lost before recovery', async () => {
+    const abandoned = randomUUID()
+    await db
+      .updateTable('conference_connections')
+      .set({ status: 'refreshing', credentials: null, operation_id: abandoned })
+      .where('id', '=', c.connectionId as string)
+      .execute()
+    let lost = false
+    const observed = afterCommit(db, async () => {
+      if (lost) return
+      const lease = await db
+        .selectFrom('conference_token_operations')
+        .select('operation_id')
+        .where('user_id', '=', owner.user.id)
+        .executeTakeFirst()
+      if (!lease) return
+      lost = true
+      await requestDb
+        .updateTable('conference_token_operations')
+        .set({ expires_at: new Date(0) })
+        .where('user_id', '=', owner.user.id)
+        .execute()
+    })
+
+    expect(await run({ ...deps, db: observed })).toMatchObject({ error: 'provider_unavailable' })
+    expect(lost).toBe(true)
+    expect(await row()).toMatchObject({
+      status: 'refreshing',
+      credentials: null,
+      operation_id: abandoned,
+      last_error: null,
+    })
+    expect(provider.calls).toHaveLength(0)
+  })
 
   it('checks refresh ownership again before contacting the rotating endpoint', async () => {
     await expire()
@@ -320,6 +397,51 @@ describe.skipIf(!databaseUrl)('Zoom worker unlocked provider phases (real Postgr
     gate.release()
     expect(await running).toMatchObject({ error: 'needs_reauth' })
     expect(await row()).toMatchObject({ status: 'refreshing', credentials: null })
+    expect(meetingCalls()).toHaveLength(0)
+  })
+
+  it('recovers on the next attempt when the lease expires after a successful refresh response', async () => {
+    await expire()
+    let responseReturned = false,
+      expired = false
+    provider.controls.tokenHook = async () => {
+      responseReturned = true
+      return Response.json(provider.controls.token)
+    }
+    const observed = new Proxy(db, {
+      get(target, property, receiver) {
+        if (property === 'transaction')
+          return () => ({
+            execute: async (body: (db: Db) => Promise<unknown>) => {
+              // Model a stalled database between the successful response and the
+              // credential transaction, without waiting for the real lease clock.
+              if (responseReturned && !expired) {
+                expired = true
+                await requestDb
+                  .updateTable('conference_token_operations')
+                  .set({ expires_at: new Date(0) })
+                  .where('user_id', '=', owner.user.id)
+                  .execute()
+              }
+              return target.transaction().execute(body)
+            },
+          })
+        const value = Reflect.get(target, property, receiver)
+        return typeof value === 'function' ? value.bind(target) : value
+      },
+    }) as Db
+
+    expect(await run({ ...deps, db: observed })).toMatchObject({ error: 'needs_reauth' })
+    expect(expired).toBe(true)
+    expect(await row()).toMatchObject({ status: 'refreshing', credentials: null })
+    expect(await run()).toMatchObject({ error: 'needs_reauth' })
+    expect(await row()).toMatchObject({
+      status: 'needs_reauth',
+      credentials: null,
+      operation_id: null,
+      last_error: 'needs_reauth',
+    })
+    expect(provider.calls).toHaveLength(1)
     expect(meetingCalls()).toHaveLength(0)
   })
 
@@ -508,7 +630,7 @@ describe.skipIf(!databaseUrl)('Zoom worker unlocked provider phases (real Postgr
       expect(meetingCalls()).toHaveLength(0)
     })
 
-  it('serializes a later OAuth exchange after worker rotation and stores the newer grant', async () => {
+  it('lets a later OAuth callback retry after worker rotation and stores the newer grant', async () => {
     const authorization = new URL((await authorizeZoomMeetings(deps, owner)).authorizationUrl)
     await expire()
     const gate = pause('refresh'),
@@ -518,42 +640,26 @@ describe.skipIf(!databaseUrl)('Zoom worker unlocked provider phases (real Postgr
     later.controls.token.scope = zoomScopes('meetings').join(' ')
     later.controls.token.refresh_token = 'synthetic-later-oauth-refresh'
     await gate.entered
-    const busy = deferred(),
-      inserts = new Set<object>(),
-      observed = db.withPlugin({
-        transformQuery({ node, queryId }) {
-          if (
-            node.kind === 'InsertQueryNode' &&
-            node.into?.table.identifier.name === 'conference_token_operations'
-          )
-            inserts.add(queryId)
-          return node
-        },
-        async transformResult({ result, queryId }) {
-          if (inserts.delete(queryId) && result.rows.length === 0) busy.resolve()
-          return result
-        },
-      })
-    const callback = finishZoomConnection(
-      {
+    const callbackDeps = {
         ...deps,
-        db: observed,
         zoom: { client: later.client, encryptionKey: TEST_CONFERENCE_KEY, meetingsEnabled: true },
       },
-      owner,
-      new URLSearchParams({
+      query = new URLSearchParams({
         state: authorization.searchParams.get('state') as string,
         code: 'synthetic-later',
-      }),
-    )
-    pending.push(callback)
-    expect(await Promise.race([busy.promise.then(() => true), callback.then(() => false)])).toBe(
-      true,
-    )
+      })
+    expect(await finishZoomConnection(callbackDeps, owner, query)).toBe('busy')
+    const state = await db
+      .selectFrom('conference_oauth_states')
+      .select(['claimed', 'verifier'])
+      .where('user_id', '=', owner.user.id)
+      .executeTakeFirstOrThrow()
+    expect(state.claimed).toBe(false)
+    expect(state.verifier).not.toBeNull()
     expect(later.calls).toHaveLength(0)
     gate.release()
     await running
-    expect(await callback).toBe('connected')
+    expect(await finishZoomConnection(callbackDeps, owner, query)).toBe('connected')
     const stored = await row()
     expect(
       readTokens(

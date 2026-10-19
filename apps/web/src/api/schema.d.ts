@@ -473,7 +473,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Retry safe conference reconciliation for an assigned host */
+        /**
+         * Retry safe conference reconciliation for an assigned host
+         * @description A Google Meet conference_pending_timeout retry rechecks the same event and conference request without creating a replacement. Only an explicit conference_failed result permits a new request on that event.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -4896,6 +4899,10 @@ export interface components {
             cancelledAt: string | null;
             cancelReason: string | null;
             conference?: {
+                /**
+                 * @description Stable failure code, or null. conference_pending_timeout means Google still reports a pending conference after the polling budget; provider_unavailable means a provider or transport failure. Clients must accept additional codes.
+                 * @example conference_pending_timeout
+                 */
                 errorCode: string | null;
                 /** @enum {string} */
                 provider: "google_meet" | "zoom";

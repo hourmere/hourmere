@@ -56,6 +56,8 @@ must approve publication through the [release workflow](https://github.com/hourm
 - Automatic Google Meet now imports the private calendar copy first and requests its
   conference through a separate conditional PATCH. Retries preserve the event and request
   identity, including recovery of legacy import-created pending requests.
+- Exhausted automatic Meet polling reports `conference_pending_timeout`, distinct from
+  transport/provider failures, and explains the safe host retry in both interface languages.
 
 ### Upgrade notes
 
@@ -90,6 +92,14 @@ stack includes PostgreSQL 18.
   Connect directly to PostgreSQL: the sign-up check requires preserved `options` startup
   settings (`hourmere.*` and `search_path`), and PgBouncer is unsupported. Use read committed
   or serializable isolation for first-user registration.
+- **Move old worker edits to the tracked overlay before pulling.** If you uncommented the
+  old worker block, `git pull --ff-only` refuses to overwrite the edited
+  `docker-compose.yml`. First append `:docker-compose.worker.yml` to `COMPOSE_FILE` in
+  `.env` (or add `COMPOSE_FILE=docker-compose.yml:docker-compose.worker.yml`), preserving
+  any proxy overlay. Then run `git restore docker-compose.yml`, pull, and recreate the
+  stack. Restoring without selecting the overlay leaves the old worker container orphaned
+  on the old image and the app possibly web-only. See the
+  [worker upgrade steps](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/self-hosting.md#upgrade-and-roll-back).
 - **Sign-in ID tokens are discarded.** Migration `0031_discard_sign_in_id_tokens.sql`
   clears existing `auth.account."idToken"` values, and account create/update hooks keep
   them NULL. Other account data is preserved; sign-in access/refresh tokens remain
@@ -150,6 +160,24 @@ stack includes PostgreSQL 18.
   authorization attempts without redeeming their codes: restart those attempts. Existing
   pre-0023 Meet roots retain their documented legacy organizer behavior; new roots pin
   invitation identity and ordinary calendar-copy targets at creation.
+- **Review legacy Meet requests and terminal PATCH errors.** Migration 0036 leaves existing
+  conference PATCH markers empty: pending import-created requests receive one automatic
+  same-UUID PATCH and a fresh bounded polling budget; failed rows need the pinned host's
+  explicit retry. Google may ignore the duplicate UUID. Exhausted pending requests now
+  report `conference_pending_timeout`; host retry retains the UUID and polls the known
+  event again, without repeating an acknowledged PATCH. A request that stays pending needs
+  the [quiesced operator repair](https://github.com/hourmere/hourmere/blob/main/docs/google-calendar.md#automatic-meet-projection)
+  before deliberate UUID rotation; no host/CLI force-create path is added. Migration 0037
+  adds the timeout classification and drops the unused database `retry_conference` flag;
+  the public retry endpoint, MCP tool and CLI command remain available. Existing error
+  codes and terminal rows are preserved, not reclassified or requeued.
+  Stop old web/all/worker processes before applying 0037: old binaries still write the
+  removed column. Resume every role with the upgraded code.
+  A Google HTTP 400 from PATCH on a known event, including conference creation, rescheduling
+  and cancellation, intentionally becomes terminal `invalid_response` rather than retryable
+  `provider_unavailable`: Google's [error guidance](https://developers.google.com/workspace/calendar/api/guides/errors#400_bad_request)
+  identifies 400 as a permanent request error. Fix the request/integration before explicit
+  retry; the known event is retained and a replacement import is never authorized.
 - **Optional integrations and attribution need explicit configuration.** Embedding stays
   disabled until `EMBED_ALLOWED_ORIGINS` lists exact allowed origins. Booking webhooks
   default off (`WEBHOOKS_ENABLED=false`) and do not backfill past booking changes when

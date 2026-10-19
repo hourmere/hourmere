@@ -191,16 +191,38 @@ the migration does not requeue terminal work. An existing valid Meet link is pre
 updates the same event without replacing its conference; cancellation patches
 `status=cancelled`. Every PATCH suppresses provider updates; no DELETE is used.
 
+HTTP 412 on the conditional conference PATCH causes a re-GET and retry with the current ETag
+and the same UUID, following Google's [precondition-failure guidance](https://developers.google.com/workspace/calendar/api/guides/errors#412_precondition_failed).
+HTTP 400 on a known-event PATCH (conference, reschedule or cancellation) is deliberately
+terminal `invalid_response`: Google's [400 guidance](https://developers.google.com/workspace/calendar/api/guides/errors#400_bad_request)
+requires correcting the invalid request. The known event survives; no new import is allowed.
+
 Google [documents duplicate request IDs as ignored](https://developers.google.com/workspace/calendar/api/v3/reference/events#conferenceData.createRequest).
 Whether a same-ID PATCH unsticks an old import-created request still needs live acceptance.
 The worker never automatically rotates an indefinitely pending request: after bounded
-polling it reports failure. If that legacy request remains stuck, an operator must inspect
-the known event, stop reconciliation for that intent and ensure any old lease has ended,
-then deliberately persist a fresh `request_id`, clear `conference_patch_request_id`, and
-reset the intent to pending before resuming. Recovery must re-read the same event and
-preserve any already-ready conference before sending the new request. This is an explicit
-repair decision because an old asynchronous request may still complete; it never permits
-another import or a replacement calendar. Normal retries retain the UUID. See
+polling it reports `conference_pending_timeout`, distinct from `provider_unavailable`
+transport failures and a provider-reported `conference_failed`. Host retry grants one new
+bounded read/poll budget for the same event and UUID; it does not repeat an acknowledged
+PATCH. If Google keeps ignoring the duplicate UUID, host retry can time out again.
+
+For a request that remains stuck, an operator must perform an explicit maintenance repair:
+
+1. Stop reconciliation for that intent and ensure every previous operation and lease has
+   ended. Inspect the exact pinned Google event; verify the current booking is confirmed,
+   its poll budget exhausted, the root UID matches and Google still reports a pending
+   create request without a valid Meet link. Preserve any already-ready conference instead.
+2. In one short transaction, lock the current booking then intent and recheck the booking,
+   revision and request identity. Persist a fresh `request_id`, clear
+   `conference_patch_request_id`, `error_code` and lease fields, reset `attempts` to zero,
+   set `state=pending` and make `next_attempt_at` due. Retain the known event and every
+   provider/account/calendar pin.
+3. Resume reconciliation. Recovery re-reads that same event and preserves any ready
+   conference before it sends the new request.
+
+This repair remains an operator decision because an old asynchronous request may still
+complete. There is no host/CLI UUID-rotation path; normal retries retain the UUID except
+after a known provider `conference_failed`. Neither repair nor retry permits another import
+or a replacement calendar. See
 [automatic Meet](automatic-google-meet.md) for identity, notification and recovery policy.
 
 A host whose destination needs reauthorization or lacks sync permissions does not block
