@@ -86,7 +86,11 @@ export const Booking = z
       .object({
         provider: z.enum(['google_meet', 'zoom']),
         status: z.enum(['pending', 'ready', 'failed']),
-        errorCode: z.string().max(64).nullable(),
+        errorCode: z.string().max(64).nullable().openapi({
+          description:
+            'Stable failure code, or null. conference_pending_timeout means Google still reports a pending conference after the polling budget; provider_unavailable means a provider or transport failure. Clients must accept additional codes.',
+          example: 'conference_pending_timeout',
+        }),
       })
       .optional(),
     conferenceCanRetry: z.boolean().optional().openapi({
@@ -278,6 +282,8 @@ export function bookingRoutes({
         middleware: caller,
         tags: ['Bookings'],
         summary: 'Retry safe conference reconciliation for an assigned host',
+        description:
+          'A Google Meet conference_pending_timeout retry rechecks the same event and conference request without creating a replacement. Only an explicit conference_failed result permits a new request on that event.',
         request: {
           params: z.object({ id: z.uuid() }),
           body: { required: true, content: json(z.strictObject({})) },

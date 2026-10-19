@@ -22,6 +22,8 @@ export const common = {
     '时段已为你保留，但会议链接需要主持人处理，最终日历邀请尚未发送。',
   'Google may have created the meeting. Rechecking only looks for that meeting and never creates a replacement.':
     'Google 可能已创建会议。重新检查只会查找该会议，不会另外创建。',
+  'Google is still preparing the Meet link after repeated checks. The host can recheck the existing request; a retry does not create a replacement meeting.':
+    '多次检查后，Google 仍在准备 Meet 链接。主持人可重新检查现有请求；重试不会创建替代会议。',
   'The original Google calendar is unavailable. This booking will not switch to a different account or calendar.':
     '原 Google 日历不可用，此预约不会切换到其他账号或日历。',
   'The host needs to reconnect the original Google Calendar account before retrying.':
