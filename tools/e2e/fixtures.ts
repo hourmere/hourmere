@@ -62,6 +62,10 @@ interface FixtureApp {
   advanceMeet: (state: 'pending' | 'success' | 'failure' | 'lost') => Promise<void>
   meetState: () => Promise<{
     imports: number
+    privateImports: boolean
+    conferencePatches: number
+    conferenceSafe: boolean
+    deletes: number
     rows: number
     requests: number
     cancellations: number
@@ -132,42 +136,74 @@ export const test = base.extend<{
         sent: MailMessage[] = []
       let meetResponse: 'pending' | 'success' | 'failure' | 'lost' = 'pending'
       const join = 'https://meet.google.com/abc-defg-hij'
-      const conferenceData = () => ({
-        createRequest: {
-          status: { statusCode: meetResponse === 'lost' ? 'pending' : meetResponse },
-        },
-        conferenceSolution: { key: { type: 'hangoutsMeet' } },
-        ...(meetResponse === 'success' && {
-          entryPoints: [{ entryPointType: 'video', uri: join }],
-        }),
-      })
+      const conferenceRequests = new Map<string, { requestId: string; polls: number }>()
       let loseMirror = false
       provider.controls.eventHook = async (target, init) => {
         const values = provider.controls.storedEvents,
           calendar = decodeURIComponent(target.pathname.split('/')[4] as string)
-        const describe = (value: Record<string, unknown>) => ({
-          ...value,
-          ...(value.conferenceData ? { conferenceData: conferenceData() } : {}),
-        })
+        const describe = (value: Record<string, unknown>, poll = false) => {
+          const request = conferenceRequests.get(String(value.id))
+          if (!request) return value
+          if (poll) request.polls++
+          const status = request.polls > 0 && meetResponse !== 'lost' ? meetResponse : 'pending'
+          return {
+            ...value,
+            conferenceData: {
+              createRequest: { requestId: request.requestId, status: { statusCode: status } },
+              ...(status === 'success'
+                ? {
+                    conferenceSolution: { key: { type: 'hangoutsMeet' } },
+                    entryPoints: [{ entryPointType: 'video', uri: join }],
+                  }
+                : {}),
+            },
+          }
+        }
         if (init.method === 'POST') {
           const input = JSON.parse(String(init.body)),
             value = {
               ...input,
               id: multiHostMeet ? `fixture-${calendar}` : 'fixture-meet-event',
+              etag: '"v1"',
               fixtureCalendar: calendar,
-              ...(input.conferenceData ? { conferenceData: conferenceData() } : {}),
+              // Reproduce Google: an import createRequest is accepted but stays
+              // pending forever. Only a later conference PATCH starts progress.
+              ...(input.conferenceData
+                ? {
+                    conferenceData: {
+                      createRequest: {
+                        ...input.conferenceData.createRequest,
+                        status: { statusCode: 'pending' },
+                      },
+                    },
+                  }
+                : {}),
             }
           values.set(value.id, value)
-          if (
-            (input.conferenceData && meetResponse === 'lost') ||
-            (!input.conferenceData && loseMirror)
-          )
+          const ordinaryCopy = input.location === join
+          if ((!ordinaryCopy && meetResponse === 'lost') || (ordinaryCopy && loseMirror))
             throw new TypeError('Synthetic lost provider response')
           return Response.json(value)
         }
         const id = target.pathname.split('/').at(-1) as string
         if (init.method === 'PATCH') {
-          const value = describe({ ...values.get(id), ...JSON.parse(String(init.body)), id })
+          const previous = values.get(id)
+          if (!previous) return Response.json({}, { status: 404 })
+          if (new Headers(init.headers).get('if-match') !== previous.etag)
+            return Response.json({}, { status: 412 })
+          const input = JSON.parse(String(init.body))
+          if (input.conferenceData) {
+            const requestId = input.conferenceData.createRequest.requestId
+            const previousRequest = conferenceRequests.get(id)
+            if (!previousRequest || previousRequest.requestId !== requestId)
+              conferenceRequests.set(id, { requestId, polls: 0 })
+          }
+          const value = describe({
+            ...previous,
+            ...input,
+            id,
+            etag: `"v${provider.calls.filter((call) => call.init.method === 'PATCH').length + 1}"`,
+          })
           values.set(id, value)
           return Response.json(value)
         }
@@ -179,10 +215,10 @@ export const test = base.extend<{
                   v.iCalUID === target.searchParams.get('iCalUID') &&
                   v.fixtureCalendar === calendar,
               )
-              .map(describe),
+              .map((value) => describe(value, true)),
           })
         const value = values.get(id)
-        return value ? Response.json(describe(value)) : Response.json({}, { status: 404 })
+        return value ? Response.json(describe(value, true)) : Response.json({}, { status: 404 })
       }
       if (automaticMeet) {
         const account = 'fixture-google-account'
@@ -481,10 +517,25 @@ export const test = base.extend<{
             },
           }
           for (const intent of intents) {
-            await writeBookingConference(
-              { db, google: { client: provider.client, encryptionKey: TEST_CALENDAR_KEY } },
-              intent.root_booking_id,
-            )
+            // The fake provider needs one read after the conference PATCH. Drive
+            // that transition without a wall-clock wait when readiness is requested.
+            for (let attempt = 0; attempt < 2; attempt++) {
+              await writeBookingConference(
+                { db, google: { client: provider.client, encryptionKey: TEST_CALENDAR_KEY } },
+                intent.root_booking_id,
+              )
+              const current = await db
+                .selectFrom('booking_conferences')
+                .select('state')
+                .where('root_booking_id', '=', intent.root_booking_id)
+                .executeTakeFirstOrThrow()
+              if (current.state !== 'pending' || state === 'pending' || state === 'lost') break
+              await db
+                .updateTable('booking_conferences')
+                .set({ next_attempt_at: new Date() })
+                .where('root_booking_id', '=', intent.root_booking_id)
+                .execute()
+            }
             await writeBookingCalendar(
               { db, google: { client: provider.client, encryptionKey: TEST_CALENDAR_KEY } },
               intent.root_booking_id,
@@ -502,7 +553,7 @@ export const test = base.extend<{
         meetState: async () => {
           const intents = await db
             .selectFrom('booking_conferences')
-            .select(['root_booking_id', 'booking_id'])
+            .select(['root_booking_id', 'booking_id', 'request_id', 'external_event_id'])
             .execute()
           const requests = sent.filter((message) =>
             message.attachments?.some((attachment) =>
@@ -512,10 +563,43 @@ export const test = base.extend<{
           const eventUids = [...provider.controls.storedEvents.values()].map(
             (event) => event.iCalUID,
           )
+          const imports = provider.calls.filter(
+            (call) => call.init.method === 'POST' && call.url.pathname.endsWith('/import'),
+          )
+          const conferences = provider.calls.filter(
+            (call) =>
+              call.init.method === 'PATCH' && JSON.parse(String(call.init.body)).conferenceData,
+          )
           return {
-            imports: provider.calls.filter(
-              (call) => call.init.method === 'POST' && call.url.pathname.endsWith('/import'),
-            ).length,
+            imports: imports.length,
+            privateImports: imports.every((call) => {
+              const body = JSON.parse(String(call.init.body))
+              return (
+                call.url.search === '' &&
+                !Object.hasOwn(body, 'attendees') &&
+                !Object.hasOwn(body, 'conferenceData')
+              )
+            }),
+            conferencePatches: conferences.length,
+            conferenceSafe: conferences.every((call) => {
+              const body = JSON.parse(String(call.init.body)),
+                request = body.conferenceData.createRequest
+              return (
+                Object.keys(body).join() === 'conferenceData' &&
+                Object.keys(body.conferenceData).join() === 'createRequest' &&
+                Object.keys(request).sort().join() === 'conferenceSolutionKey,requestId' &&
+                Object.keys(request.conferenceSolutionKey).join() === 'type' &&
+                request.conferenceSolutionKey.type === 'hangoutsMeet' &&
+                intents.some(
+                  (intent) =>
+                    request.requestId === intent.request_id &&
+                    call.url.pathname.endsWith(`/events/${intent.external_event_id}`),
+                ) &&
+                call.url.search === '?sendUpdates=none&conferenceDataVersion=1' &&
+                Boolean(new Headers(call.init.headers).get('if-match'))
+              )
+            }),
+            deletes: provider.calls.filter((call) => call.init.method === 'DELETE').length,
             rows: intents.length,
             requests: requests.length,
             cancellations: sent.filter((message) =>
