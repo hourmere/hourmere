@@ -124,8 +124,10 @@ describe.skipIf(!databaseUrl)('Zoom HTTP integration settings (real Postgres)', 
     )
     expect((await req(`/api/v1/conference-connections/${id}`, 'DELETE', '{}')).status).toBe(204)
   })
-  it('returns an in-progress conflict for a concurrent refresh without another rotation', async () => {
-    const { id } = await connect()
+  it('returns retryable busy outcomes for concurrent refresh and callback without provider I/O', async () => {
+    const { id } = await connect(),
+      state = await start(),
+      callback = `/api/conference/zoom/callback?state=${state}&code=synthetic-code`
     let entered!: () => void, release!: () => void
     const pending = new Promise<void>((resolve) => {
         entered = resolve
@@ -146,13 +148,26 @@ describe.skipIf(!databaseUrl)('Zoom HTTP integration settings (real Postgres)', 
       expect(second.status).toBe(409)
       expect(await second.json()).toEqual({
         error: 'zoom_refresh_in_progress',
-        message: 'This Zoom connection is already refreshing. Wait for it to finish.',
+        message: 'Zoom account operations are busy. Try again shortly.',
       })
+      const busy = await req(callback)
+      expect(busy.status).toBe(303)
+      expect(busy.headers.get('location')).toBe('/app/conferences?zoom=busy')
+      expect(busy.headers.get('cache-control')).toBe('no-store')
+      expect(busy.headers.get('referrer-policy')).toBe('no-referrer')
+      const attempt = await db
+        .selectFrom('conference_oauth_states')
+        .select(['claimed', 'verifier'])
+        .where('user_id', '=', owner.user.id)
+        .executeTakeFirstOrThrow()
+      expect(attempt.claimed).toBe(false)
+      expect(attempt.verifier).not.toBeNull()
       expect(provider.calls).toHaveLength(count)
     } finally {
       release()
       expect((await first).status).toBe(204)
     }
+    expect((await req(callback)).headers.get('location')).toBe('/app/conferences?zoom=connected')
   })
   it.each([
     ['authorization', 'Bearer synthetic-api-key'],
