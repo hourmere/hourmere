@@ -15,6 +15,20 @@ additive within a version. The OpenAPI document is served at `/api/v1/openapi.js
 - `/api/calendar/google/callback` is the separate calendar OAuth protocol callback. The
   owner-side connection API is versioned under `/api/v1/calendar-connections`; see
   [Google Calendar connections](google-calendar.md).
+- `/api/conference/zoom/callback` is the separate conference OAuth callback.
+  `POST /api/conference/zoom/events` is Zoom's signed webhook protocol, enabled only by
+  `ZOOM_WEBHOOK_SECRET_TOKEN`, independently of OAuth or automatic meeting configuration.
+  It authenticates the exact body bytes with `x-zm-signature` HMAC-SHA256 and requires
+  `x-zm-request-timestamp` within five minutes of the server clock. Its limit is 16 KiB
+  and 120 requests per minute per client per process (503 with `Retry-After` on exhaustion,
+  so Zoom can retry; configure `TRUSTED_PROXIES` behind a reverse proxy). It answers `endpoint.url_validation`
+  with `plainToken` and its HMAC `encryptedToken`, and handles `app_deauthorized` by
+  removing the matching Zoom user's local connection credentials and identity metadata.
+  Unknown users, events older than the current OAuth authorization and repeated events
+  return 200 without creating records. `deauthorization_time` is required; when
+  `ZOOM_CLIENT_ID` is configured, missing/different payload client IDs are ignored. It requires no
+  browser session or API key; invalid signatures/timestamps return 401. See
+  [automatic Zoom](automatic-zoom.md#app-removal-and-event-endpoint) for operator setup.
 
 Magic-link verification failures default to `/sign-in?error=CODE`, where the app explains
 the failure and offers a new link. An explicit `errorCallbackURL` still applies (subject
@@ -279,8 +293,12 @@ then `POST /api/v1/bookings/{id}/reschedule` with a strict `{ "start": "…" }` 
 Both require the caller to host that booking in the caller's acting organization, with the
 same authorization and service layer as MCP `reschedule_booking({bookingId,start})`.
 Slot lookup ignores the booking's own busy time and checks all original hosts; it uses
-the same range bounds and per-client slots rate limit as invitee slot lookup. Host moves
-use the manage mutation rate limit; API-key limits also apply.
+the same range bounds as invitee slot lookup. Authenticated host requests have separate
+per-user limits: 120 slot lookups and 30 reschedules per minute, shared by all of the user's
+sessions and API keys across organizations and addresses. Invitee traffic from the same
+address does not consume these budgets. API-key limits also apply. Host limits run after
+authentication and before the request body is read; exceeding one returns 429 `rate_limited`
+with `Retry-After`. Like the invitee limits, their counters are per server process.
 
 Host moves always return `{ booking, manageToken: null }`. No invitee token is minted or
 revealed: the existing booking-token hash moves to the successor, and per-email tokens

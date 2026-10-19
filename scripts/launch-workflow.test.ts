@@ -8,17 +8,23 @@ import { parse } from 'yaml'
 interface Job {
   if?: string
   environment?: string
-  steps: Array<{ name?: string; run?: string }>
+  needs?: string[]
+  permissions?: Record<string, string>
+  steps?: Array<{ name?: string; run?: string }>
 }
 
 const workflow = parse(
-  readFileSync(new URL('../.github/workflows/release.yml', import.meta.url), 'utf8'),
+  readFileSync(
+    process.env.HOURMERE_RELEASE_WORKFLOW ??
+      new URL('../.github/workflows/release.yml', import.meta.url),
+    'utf8',
+  ),
 ) as { jobs: Record<string, Job> }
 
 describe('launch-only npm release scaffold', () => {
   it('disables every job that could publish a package', () => {
     const publishers = Object.values(workflow.jobs).filter((job) =>
-      job.steps.some((step) => /\bnpm publish\b/.test(step.run ?? '')),
+      (job.steps ?? []).some((step) => /\bnpm publish\b/.test(step.run ?? '')),
     )
     expect(publishers).toHaveLength(1)
     for (const job of publishers) {
@@ -28,8 +34,14 @@ describe('launch-only npm release scaffold', () => {
     }
   })
 
+  it('requires release preparation and CI with only npm provenance permissions', () => {
+    const job = workflow.jobs['publish-cli']
+    expect(job?.needs).toEqual(['prepare', 'ci'])
+    expect(job?.permissions).toEqual({ contents: 'read', 'id-token': 'write' })
+  })
+
   it('refuses an unstamped or mismatched CLI release version', () => {
-    const guard = workflow.jobs['publish-cli']?.steps.find((step) =>
+    const guard = workflow.jobs['publish-cli']?.steps?.find((step) =>
       step.name?.startsWith('Require the committed CLI version'),
     )?.run
     expect(guard).toBeTypeOf('string')

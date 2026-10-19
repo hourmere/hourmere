@@ -8,8 +8,10 @@ submission.
 ## Prepared metadata
 
 [`server.json`](../server.json) describes the remote Streamable HTTP server at
-`https://{instance}/mcp`. `{instance}` is an unresolved hostname input, not a live demo URL.
-It deliberately carries `publicationStatus: draft`. The intended registry name is
+`https://{hourmere_host}/mcp`. `{hourmere_host}` is an unresolved hostname input, not a live demo URL.
+It deliberately carries `publicationStatus: draft`. The product-specific variable name
+avoids a generic remote URL template shared by unrelated entries; the Registry allows
+only one server name per remote URL. The intended registry name is
 `io.github.hourmere/hourmere`: the repository belongs to the Hourmere GitHub organization,
 and its owner can prove that namespace without adding DNS records. A GitHub organization
 **Owner**, rather than an ordinary member, must authenticate. The alternative
@@ -42,21 +44,24 @@ npm test -- scripts/validate-mcp-registry.test.ts --maxWorkers=2
 ```
 
 The first command validates the official schema and Hourmere's secret-header contract. It
-does not test a deployment or prove namespace ownership. The submission check below must
-fail against the checked-in draft:
+does not test a deployment or prove namespace ownership. Both submission modes below must
+fail against the checked-in draft because it has not been owner-approved:
 
 ```sh
 npm run mcp:registry:validate -- --for-submission
+npm run mcp:registry:validate -- --for-template-submission
 ```
 
 ## Shared owner preparation
 
-- Choose and operate a stable, publicly reachable HTTPS deployment with `/mcp`; confirm
-  domain ownership, supported signup, support contact, privacy policy and terms. Use
+- For a concrete Registry entry or connector-directory review, operate a stable,
+  publicly reachable HTTPS deployment with `/mcp`; confirm domain ownership, supported
+  signup, support contact, privacy policy and terms. A template-only Registry entry needs
+  metadata; users supply their own deployment endpoints. For deployment review, use
   synthetic data and a populated reviewer/demo organization. Do not put reviewer
   credentials, API keys, booking management tokens or calendar credentials in this repo.
-- Confirm account permissions, tool descriptions, titles, annotations and expected booking
-  side effects in the actual hosted clients. Exercise discovery, slots, create, list,
+- For connector-directory review, confirm account permissions, tool descriptions, titles,
+  annotations and expected booking side effects in the actual hosted clients. Exercise discovery, slots, create, list,
   reschedule, cancel, revocation and denied access. Record the precise tested deployment
   and client versions; local protocol tests do not establish hosted acceptance.
 - Enable OAuth on the selected deployment for connector directories. Keep review accounts
@@ -64,15 +69,16 @@ npm run mcp:registry:validate -- --for-submission
   development mail logger is not a public-demo sign-in method.
 - Decide the release version. `1.0.0` in this draft is the intended launch version, not a
   released-server claim. The current MCP implementation advertises `0.0.0` in
-  `apps/server/src/mcp/endpoint.ts`; the release must align the deployed implementation and
-  registry version before submission. See [releasing](releasing.md).
-- Prepare a separate submission copy of `server.json`: replace the URL with the verified
-  concrete deployment URL, remove the unused `instance` variable, update the version,
-  replace the draft notice with accurate deployment information, and set
+  `apps/server/src/mcp/endpoint.ts`; at release, align that advertised server version with
+  `server.json` and the deployed implementation before submission. The CLI also follows
+  the product tag: each product release must bump/stamp `tools/cli/package.json` and its
+  lockfile entry to match, or `publish-cli` fails. See [releasing](releasing.md).
+- Prepare a separate submission copy of `server.json`, choosing the template or concrete
+  Registry option below. Update the version and draft notice to describe that choice
+  accurately, and set
   `_meta["io.modelcontextprotocol.registry/publisher-provided"]["com.hourmere"].publicationStatus`
-  to `owner-approved` only after the owner approves that exact copy. Run
-  `npm run mcp:registry:validate -- /path/to/submission/server.json --for-submission`.
-  This remains an offline check, not an approval service or a live reachability check.
+  to `owner-approved` only after the owner approves that exact copy. Validation stays
+  offline; it neither grants approval nor checks live reachability.
 
 ## Official MCP Registry — owner submission
 
@@ -83,11 +89,27 @@ and endpoint before the owner runs `mcp-publisher publish`. These commands are i
 for a later owner action; they have not been run by this task. Follow the current official
 [quickstart](https://github.com/modelcontextprotocol/registry/blob/11b7b0e274d518b6f449c5ee3518a6151d9848b9/docs/modelcontextprotocol-io/quickstart.mdx).
 
-A remote entry must be publicly accessible at the stated URL. The registry supports URL
-templates, but the launch copy should use the concrete owner-operated endpoint tested
-above. A remote-only entry needs no package: the npm CLI is an MCP **client**, so it is not
-listed as an installable MCP server package. Only the official publisher-provided `_meta`
-key is preserved, with a 4096-byte extension limit. Namespace authentication is a separate
+The owner has two Registry submission options:
+
+- **Template entry:** retain `https://{hourmere_host}/mcp` and its declared hostname input.
+  This fits the **2026-11-30 self-hosted launch**: each user supplies their own deployment's
+  hostname, without implying an Hourmere-operated public endpoint. Run
+  `npm run mcp:registry:validate -- /path/to/submission/server.json --for-template-submission`.
+- **Concrete endpoint:** replace the template with the verified public HTTPS deployment
+  URL and remove the unused `hourmere_host` variable. Run
+  `npm run mcp:registry:validate -- /path/to/submission/server.json --for-submission`.
+  This mode deliberately rejects unresolved template variables.
+
+The official Registry accepts fully templated hosts. Its
+[URL validator](https://github.com/modelcontextprotocol/registry/blob/main/internal/validators/utils.go)
+substitutes placeholders before checking URL structure, HTTPS and non-localhost status;
+it does not probe reachability. These two local modes also validate metadata offline.
+Actual deployments supplied by users must still provide a reachable HTTPS `/mcp` endpoint;
+connector directories can require a working reviewer endpoint even for a template listing.
+
+A remote-only entry needs no package: the npm CLI is an MCP **client**, so it is not listed
+as an installable MCP server package. Only the official publisher-provided `_meta` key is
+preserved, with a 4096-byte extension limit. Namespace authentication is a separate
 requirement from local schema validation.
 [Remote-server requirements](https://github.com/modelcontextprotocol/registry/blob/11b7b0e274d518b6f449c5ee3518a6151d9848b9/docs/modelcontextprotocol-io/remote-servers.mdx),
 [official registry requirements](https://github.com/modelcontextprotocol/registry/blob/11b7b0e274d518b6f449c5ee3518a6151d9848b9/docs/reference/server-json/official-registry-requirements.md).
@@ -126,6 +148,13 @@ populated reviewer account. A paid Claude plan can submit through the developer 
 account/organization permissions, terms and all portal questions. Screenshots are needed
 for MCP Apps with UI; Hourmere currently exposes tools, so do not claim an MCP App UI.
 
+For the self-hosted launch, choose **Users connect to different URLs → URL pattern** in
+the Connection step. Each user supplies their own HTTPS `/mcp` URL, which must match the
+owner's anchored regular expression. This route supports independent self-hosted instances.
+Enable OAuth with CIMD or DCR on each instance; Anthropic-held client credentials do not
+support URL patterns. These listings take longer to review, so allow time for that review.
+See Claude's [per-customer URL and authentication guidance](https://claude.com/docs/connectors/building/authentication#servers-with-per-customer-urls).
+
 Enable and test Hourmere's OAuth flow before submitting this authenticated service.
 API-key header support in custom connectors does not replace the directory's OAuth
 requirement. Validate browser login, organization choice, consent, refresh and disconnect
@@ -140,7 +169,8 @@ The owner must verify their individual/business developer identity, ensure the r
 `api.apps.write` permission, provide a real public production endpoint, and test the MCP
 connection in ChatGPT. A universal endpoint is preferred: template URLs are currently
 restricted to trusted developers with an established OpenAI relationship. The checked-in
-`{instance}` draft is not a review endpoint.
+`{hourmere_host}` draft is not a review endpoint. Even an eligible template submission
+needs a separate concrete, working Example MCP Server URL that matches its template.
 [Remote MCP review requirements](https://developers.openai.com/plugins/deploy/app-review).
 
 Prepare the plugin ZIP/MCP configuration and listing website, support, privacy and terms

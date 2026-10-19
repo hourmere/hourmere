@@ -10,6 +10,15 @@ import { MCP_REGISTRY_SCHEMA, validateMcpRegistry } from './validate-mcp-registr
 const root = fileURLToPath(new URL('../', import.meta.url))
 const script = fileURLToPath(new URL('./validate-mcp-registry.ts', import.meta.url))
 const metadata = () => JSON.parse(readFileSync(new URL('../server.json', import.meta.url), 'utf8'))
+const approvedMetadata = () => {
+  const draft = metadata()
+  draft._meta['io.modelcontextprotocol.registry/publisher-provided'][
+    'com.hourmere'
+  ].publicationStatus = 'owner-approved'
+  return draft
+}
+const templateError =
+  'Submission requires owner approval and an HTTPS /mcp URL template with declared variables.'
 const dirs: string[] = []
 
 afterAll(() => {
@@ -31,8 +40,8 @@ describe('MCP Registry launch metadata', () => {
       remotes: [
         {
           type: 'streamable-http',
-          url: 'https://{instance}/mcp',
-          variables: { instance: { isRequired: true } },
+          url: 'https://{hourmere_host}/mcp',
+          variables: { hourmere_host: { isRequired: true } },
         },
       ],
       _meta: {
@@ -107,13 +116,13 @@ describe('MCP Registry launch metadata', () => {
   it('requires owner approval independently of replacing the placeholder', () => {
     const draft = metadata()
     draft.remotes[0].url = 'https://calendar.hourmere.com/mcp'
-    expect(validateMcpRegistry(draft, true)).toContain(
+    expect(validateMcpRegistry(draft, 'concrete')).toContain(
       'Submission requires owner approval and a concrete HTTPS /mcp URL.',
     )
   })
 
   it.each([
-    'https://{instance}/mcp',
+    'https://{hourmere_host}/mcp',
     'http://calendar.hourmere.com/mcp',
     'https://calendar.hourmere.com/',
   ])('requires a concrete HTTPS /mcp URL independently of approval: %s', (url) => {
@@ -122,7 +131,7 @@ describe('MCP Registry launch metadata', () => {
       'com.hourmere'
     ].publicationStatus = 'owner-approved'
     draft.remotes[0].url = url
-    expect(validateMcpRegistry(draft, true)).toContain(
+    expect(validateMcpRegistry(draft, 'concrete')).toContain(
       'Submission requires owner approval and a concrete HTTPS /mcp URL.',
     )
   })
@@ -133,7 +142,117 @@ describe('MCP Registry launch metadata', () => {
       'com.hourmere'
     ].publicationStatus = 'owner-approved'
     draft.remotes[0].url = 'https://calendar.hourmere.com/mcp'
-    expect(validateMcpRegistry(draft, true)).toEqual([])
+    expect(validateMcpRegistry(draft, 'concrete')).toEqual([])
+  })
+
+  it('requires owner approval for a template submission', () => {
+    expect(validateMcpRegistry(metadata(), 'template')).toContain(templateError)
+  })
+
+  it('rejects a template submission without a remote', () => {
+    const draft = approvedMetadata()
+    delete draft.remotes
+    expect(validateMcpRegistry(draft, 'template')).toContain(templateError)
+  })
+
+  it.each([
+    'https://{hourmere_host}/mcp',
+    'https://{hourmere_host}.example.invalid/mcp',
+    'https://{hourmere_host}:{port}/mcp',
+  ])('accepts an approved declared URL template offline: %s', (url) => {
+    const draft = approvedMetadata()
+    draft.remotes[0].url = url
+    draft.remotes[0].variables.port = { isRequired: true }
+    expect(validateMcpRegistry(draft, 'template')).toEqual([])
+  })
+
+  it.each([
+    [
+      'missing variables',
+      (draft: ReturnType<typeof metadata>) => delete draft.remotes[0].variables,
+    ],
+    [
+      'undeclared variable',
+      (draft: ReturnType<typeof metadata>) => (draft.remotes[0].url = 'https://{other_host}/mcp'),
+    ],
+    [
+      'concrete URL',
+      (draft: ReturnType<typeof metadata>) =>
+        (draft.remotes[0].url = 'https://hourmere.example.invalid/mcp'),
+    ],
+    [
+      'malformed placeholder',
+      (draft: ReturnType<typeof metadata>) =>
+        (draft.remotes[0].url = 'https://{hourmere_host}}/mcp'),
+    ],
+  ])('rejects a template submission with a %s', (_name, mutate) => {
+    const draft = approvedMetadata()
+    mutate(draft)
+    expect(validateMcpRegistry(draft, 'template')).toContain(templateError)
+  })
+
+  it.each([
+    'http://{hourmere_host}/mcp',
+    'https://{hourmere_host}/',
+    'https://{hourmere_host}/mcp?path=/mcp',
+    'https://{hourmere_host}/mcp#path=/mcp',
+    'https://{hourmere_host}.localhost/mcp',
+  ])('rejects an unsuitable substituted template URL: %s', (url) => {
+    const draft = approvedMetadata()
+    draft.remotes[0].url = url
+    expect(validateMcpRegistry(draft, 'template')).toContain(templateError)
+  })
+
+  it.each([
+    'https://localhost/mcp',
+    'https://api.localhost/mcp',
+    'https://127.0.0.1/mcp',
+    'https://[::1]/mcp',
+    'https://not^a-host/mcp',
+  ])('rejects a local or malformed concrete submission URL: %s', (url) => {
+    const draft = approvedMetadata()
+    draft.remotes[0].url = url
+    expect(validateMcpRegistry(draft, 'concrete')).toContain(
+      'Submission requires owner approval and a concrete HTTPS /mcp URL.',
+    )
+  })
+
+  it('selects the template submission mode explicitly from the CLI', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hourmere-mcp-template-'))
+    dirs.push(dir)
+    const path = join(dir, 'server.json')
+    writeFileSync(path, JSON.stringify(approvedMetadata()))
+    const template = spawnSync(process.execPath, [script, path, '--for-template-submission'], {
+      cwd: root,
+      encoding: 'utf8',
+    })
+    expect(template.status).toBe(0)
+    expect(template.stdout).toContain('No publication or live check performed.')
+    const concrete = spawnSync(process.execPath, [script, path, '--for-submission'], {
+      cwd: root,
+      encoding: 'utf8',
+    })
+    expect(concrete.status).toBe(1)
+    const unapproved = spawnSync(process.execPath, [script, '--for-template-submission'], {
+      cwd: root,
+      encoding: 'utf8',
+    })
+    expect(unapproved.status).toBe(1)
+    expect(unapproved.stderr).toContain(templateError)
+  })
+
+  it('rejects conflicting submission mode flags', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hourmere-mcp-modes-'))
+    dirs.push(dir)
+    const path = join(dir, 'server.json')
+    writeFileSync(path, JSON.stringify(approvedMetadata()))
+    const result = spawnSync(
+      process.execPath,
+      [script, path, '--for-submission', '--for-template-submission'],
+      { cwd: root, encoding: 'utf8' },
+    )
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain('Usage:')
   })
 
   it('validates offline from the CLI and refuses the draft submission check', () => {

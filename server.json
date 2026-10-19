@@ -12,10 +12,10 @@
   "remotes": [
     {
       "type": "streamable-http",
-      "url": "https://{instance}/mcp",
+      "url": "https://{hourmere_host}/mcp",
       "variables": {
-        "instance": {
-          "description": "Your publicly reachable Hourmere instance hostname, without a scheme or path. Owner must select and verify a deployment before submission.",
+        "hourmere_host": {
+          "description": "Your publicly reachable Hourmere instance hostname, without a scheme or path. Each user supplies their own self-hosted instance.",
           "isRequired": true
         }
       },
