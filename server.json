@@ -22,7 +22,7 @@
       "headers": [
         {
           "name": "Authorization",
-          "description": "Bearer API key; omit when the client uses OAuth",
+          "description": "Bearer <API key>; omit when the client uses OAuth",
           "isRequired": false,
           "isSecret": true
         }

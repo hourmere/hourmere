@@ -1,14 +1,17 @@
 import type { SocialProvider } from '../api/auth.ts'
-import googleButton from '../assets/identity/google-sign-in-light.svg?raw'
+import googleDarkButton from '../assets/identity/google-sign-in-dark.svg?raw'
+import googleLightButton from '../assets/identity/google-sign-in-light.svg?raw'
 import microsoftSymbol from '../assets/identity/microsoft-symbol.svg'
 import { useI18n } from '../i18n/runtime.tsx'
 import './SocialSignInButton.css'
 
-// This is Google's trusted, vendored SVG, never user content. Keep its geometry and
-// colors untouched; move its two inline styles into CSP-compatible external CSS.
-const googleMark = googleButton
-  .replace('style="mask-type:alpha"', 'mask-type="alpha"')
-  .replace(/style="background:conic-gradient\([^"]+"/, 'class="google-mark-gradient"')
+// These are Google's trusted, vendored SVGs, never user content. Keep their geometry and
+// colors untouched; move their two inline styles into CSP-compatible external CSS.
+const googleMarks = [googleLightButton, googleDarkButton].map((asset) =>
+  asset
+    .replace('style="mask-type:alpha"', 'mask-type="alpha"')
+    .replace(/style="background:conic-gradient\([^"]+"/, 'class="google-mark-gradient"'),
+)
 
 export function SocialSignInButton({
   provider,
@@ -35,8 +38,14 @@ export function SocialSignInButton({
       <span className="social-sign-in-state" aria-hidden="true" />
       {provider === 'google' ? (
         <span className="social-sign-in-google-mark" aria-hidden="true">
-          {/* biome-ignore lint/security/noDangerouslySetInnerHtml: trusted local official SVG, see above */}
-          <span dangerouslySetInnerHTML={{ __html: googleMark }} />
+          {googleMarks.map((mark, index) => (
+            <span
+              key={index === 0 ? 'light' : 'dark'}
+              className={index === 0 ? 'google-mark-light' : 'google-mark-dark'}
+              // biome-ignore lint/security/noDangerouslySetInnerHtml: trusted local official SVG, see above
+              dangerouslySetInnerHTML={{ __html: mark }}
+            />
+          ))}
         </span>
       ) : (
         <img src={microsoftSymbol} width="21" height="21" alt="" aria-hidden="true" />

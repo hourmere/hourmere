@@ -88,7 +88,9 @@ registry push or release creation. There is no manual or branch-push publication
 
 The [release workflow](../.github/workflows/release.yml) runs the existing CI workflow
 against the tagged source, including lint, types, tests, generated-type parity, builds,
-the Compose smoke test and browser/privacy checks. Once those succeed, the publishing
+the Compose smoke test and browser/privacy checks. Its `cli-compatibility` job runs through
+`workflow_call` inside the release workflow, so a Node 22 compatibility failure blocks a
+release before publication. Once those checks succeed, the publishing
 job waits at the protected **`release`** environment. The owner reviews the tag, immutable
 commit, notes and successful checks in that run, then approves this one pending deployment.
 That approval is the final action authorizing the image push and GitHub Release. Reject or
@@ -128,8 +130,9 @@ availability. After the first successful image push, complete this publication c
 Make the documentation changes in a separate follow-up after verifying public access:
 
 - After the first authorized `GITHUB_TOKEN` push, check the GHCR package's **Manage Actions
-  access** settings: that first push normally grants this repository **Write** access
-  automatically. Grant **Write** if it is missing, set visibility to **Public**, and verify
+  access** settings: publishing a package through a workflow automatically grants the
+  repository **Admin** access, as described in GitHub's [Container registry documentation](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry).
+  Confirm **Admin** access, repair missing access, set visibility to **Public**, and verify
   unauthenticated access. Check this after the push, when the package exists.
 - Rename the changelog heading to `## [1.0.0] - 2026-11-30` and remove the introductory
   candidate note above the first `##` heading.
@@ -206,6 +209,9 @@ CI performs this inspection and smoke test on pull requests. The `files` allow-l
 limits executable code to the three runtime JavaScript files, alongside the manifest, README
 and AGPL-3.0-only license. Tests, TypeScript source, build tools, credentials and workspace
 dependencies have no place in the release tarball.
+
+The package's `prepublishOnly` script runs `node dist/index.js --version`. A local
+`npm publish` fails if the compiled CLI has not been built; run `npm run cli:build` first.
 
 ## CLI owner approval and publishing (not enabled)
 

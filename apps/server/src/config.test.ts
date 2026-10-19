@@ -1,3 +1,4 @@
+import { parseWebhookPrivateTargets } from '@hourmere/webhooks'
 import { describe, expect, it } from 'vitest'
 import { loadConfig } from './config.ts'
 
@@ -54,6 +55,33 @@ describe('loadConfig', () => {
     })
   })
 
+  it('keeps private webhook targets opt-in and validates them before startup in every role', () => {
+    expect(loadConfig(base).WEBHOOK_PRIVATE_TARGETS).toEqual([])
+    expect(loadConfig({ ...base, WEBHOOK_PRIVATE_TARGETS: '' }).WEBHOOK_PRIVATE_TARGETS).toEqual([])
+    const value = 'n8n:5678,192.168.1.0/24:8080-8081,[fd12:3456::/64]:8443'
+    for (const HOURMERE_ROLE of ['all', 'web', 'worker']) {
+      expect(
+        loadConfig({ ...base, HOURMERE_ROLE, WEBHOOK_PRIVATE_TARGETS: value })
+          .WEBHOOK_PRIVATE_TARGETS,
+      ).toEqual(parseWebhookPrivateTargets(value))
+      for (const WEBHOOK_PRIVATE_TARGETS of [
+        'n8n',
+        '0.0.0.0/0:80',
+        '[::/0]:443',
+        '8.8.8.8:443',
+        '169.254.169.254:80',
+        '100.100.100.200:80',
+        '[fd00:ec2::254]:80',
+        Array.from({ length: 33 }, (_, i) => `synthetic${i}:5678`).join(','),
+      ])
+        expect(() => loadConfig({ ...base, HOURMERE_ROLE, WEBHOOK_PRIVATE_TARGETS })).toThrow(
+          /WEBHOOK_PRIVATE_TARGETS/,
+        )
+    }
+    expect(() =>
+      loadConfig({ ...base, WEBHOOK_PRIVATE_TARGETS: 'untrusted-private-value' }),
+    ).not.toThrow(/untrusted-private-value/)
+  })
   it('requires calendar encryption to be independent of authentication and webhook keys', () => {
     const key = Buffer.alloc(32, 'k').toString('base64')
     for (const reused of [

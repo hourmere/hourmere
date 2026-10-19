@@ -10,14 +10,21 @@ not licensed under Hourmere's AGPL; the provider's brand permissions apply.
 `Android + Web/SVG/Light/Theme=Light, Show text=No, Shape=Square, Platform=Android+Web.svg`.
 SHA-256: `6587b180203a99da15c0a041018e15c94ffd9556c4b9855bdc69806081a93791`.
 
+`google-sign-in-dark.svg` is **unmodified** from the same official bundle:
+`Android + Web/SVG/Dark/Theme=Dark, Show text=No, Shape=Square, Platform=Android+Web.svg`.
+SHA-256: `2f7ecc307b1db0f1738456269ee2c4433b3a73c35060ced67a9afcfc6821e786`.
+
 The [English branding guidelines](https://developers.google.com/identity/branding-guidelines)
 (updated 2026-07-07) require the current gradient super G and Google Sans Medium.
 The Figma SVG export uses `foreignObject` and a CSS conic gradient, which needs
-inline SVG to render reliably. `SocialSignInButton` inserts only this trusted
-local SVG, moves its two inline styles into external CSS for Hourmere's CSP, and
+inline SVG to render reliably. `SocialSignInButton` inserts only these trusted
+local SVGs, moves their two inline styles into external CSS for Hourmere's CSP, and
 crops the original button boundary. The G keeps its original 20 × 20 geometry,
-gradient, and white background. No logo is redrawn. The matching external CSS
-gradient is tested against every stop in the original source.
+gradient, and official theme background: white in light mode, #131314 in dark mode,
+without a white container. CSS selects the matching official SVG for the user's
+color scheme. The 1px button border plus 11px content padding place the G 12px from
+the outer edge; the gap after the G remains 10px. No logo is redrawn. The matching
+external CSS gradient is tested against every stop in both original sources.
 
 The Google G is a trademark of Google LLC. Its use is permitted here only as a
 Google sign-in brand feature under those guidelines and Google's

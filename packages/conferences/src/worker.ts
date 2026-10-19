@@ -163,7 +163,22 @@ export function createZoomConferenceWork(deps: ConferenceDeps, meetings: ZoomMee
       }
     }
     async function sample(db: Db, r: Awaited<ReturnType<typeof row>>, lease?: TokenOperation) {
-      if (r?.status === 'refreshing') return failure('provider_unavailable', c)
+      if (r?.status === 'refreshing') {
+        if (!lease) return failure('provider_unavailable', c)
+        // A live token lease excludes every earlier refresh. Its cleared grant cannot
+        // be recovered after a crash or a discarded late result; reconnect safely.
+        await db
+          .updateTable('conference_connections')
+          .set({
+            credentials: null,
+            operation_id: null,
+            status: 'needs_reauth',
+            last_error: 'needs_reauth',
+          })
+          .where('id', '=', r.id)
+          .execute()
+        return failure('needs_reauth', c)
+      }
       if (!active(r) || !r?.credentials) return failure('needs_reauth', c)
       try {
         return {
@@ -196,9 +211,13 @@ export function createZoomConferenceWork(deps: ConferenceDeps, meetings: ZoomMee
       }
     }
     try {
-      const first = await connection(deps, c, sample)
-      if (!('tokens' in first)) return first
-      if (first.tokens.expiresAt > clock(deps) + 60000)
+      // A refreshing row needs a lease check: the holder may still be working, or
+      // its lease may have expired and left an abandoned credential-free claim.
+      const first = await connection(deps, c, async (db, r) =>
+        r?.status === 'refreshing' ? undefined : sample(db, r),
+      )
+      if (first && !('tokens' in first)) return first
+      if (first && first.tokens.expiresAt > clock(deps) + 60000)
         return await perform({ access: first.tokens.accessToken, revision: first.revision })
       const refreshed = await withTokenOperation(
         deps.db,

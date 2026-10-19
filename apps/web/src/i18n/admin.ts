@@ -62,8 +62,7 @@ export const admin = {
   'Zoom could not be reached. Check the connection status before trying again.':
     '无法连接 Zoom。请检查连接状态后再试。',
   'Reconnect this Zoom account before refreshing it.': '请先重新连接此 Zoom 账号，再刷新。',
-  'This Zoom account is already being refreshed. Wait for it to finish, then reload.':
-    '此 Zoom 账号正在刷新。请等待刷新完成后重新加载页面。',
+  'Zoom account operations are busy. Try again shortly.': 'Zoom 账号操作繁忙。请稍后重试。',
   'Zoom did not grant only the requested identity access. Check the app configuration and reconnect.':
     'Zoom 返回的权限不符合所请求的最小身份权限。请检查应用配置后重新连接。',
   'Choose the same Zoom account when reconnecting this connection.':
@@ -205,7 +204,41 @@ export const admin = {
   'Cancel booking…': '取消预约…',
   'Cancel this booking': '取消此预约',
   Cancelled: '已取消',
-  'Check conflicts in': '检查以下日历的冲突',
+  'Check this calendar for conflicts': '检查此日历的冲突',
+  'Write new bookings here': '将新预约写入此日历',
+  'Stop writing bookings here': '停止向此日历写入预约',
+  'Sync now': '立即同步',
+  '{0} Calendar connected. Your calendar list is ready.': '{0} 日历已连接。日历列表已就绪。',
+  '{0} Calendar was not connected because you cancelled authorization.':
+    '你已取消授权，因此未连接 {0} 日历。',
+  '{0} did not grant the requested access. Connect again and allow the requested permissions.':
+    '{0} 未授予所需权限。请重新连接并允许请求的权限。',
+  '{0} did not provide continuing access. Connect again to try again.':
+    '{0} 未提供持续访问权限。请重新连接后重试。',
+  '{0} Calendar could not be reached. Try connecting again shortly.':
+    '暂时无法连接 {0} 日历。请稍后重新连接。',
+  '{0} Calendar disconnected. Stored credentials and local calendar data were deleted.':
+    '{0} 日历已断开连接。保存的凭据和本地日历数据已删除。',
+  'Create a profile before choosing where new bookings are written.':
+    '请先创建个人资料，再选择用于写入新预约的日历。',
+  'Create your profile in Settings first.': '请先在“设置”中创建个人资料。',
+  'Check your calendar settings and try again.': '请检查日历设置后重试。',
+  'Choose calendar-list access or calendar synchronization.': '请选择日历列表访问或日历同步权限。',
+  'This calendar connection no longer exists.': '此日历连接已不存在。',
+  'This calendar is no longer available. Refresh the calendar list.':
+    '此日历已不可用。请刷新日历列表。',
+  'Select at most 20 conflict calendars.': '最多可选择 20 个用于检查冲突的日历。',
+  'This calendar does not allow event synchronization.': '此日历不允许同步事件。',
+  'Select this calendar for conflict checks before synchronizing it.':
+    '请先选择此日历用于检查冲突，再进行同步。',
+  'Choose an owned Google calendar and enable synchronization first.':
+    '请先选择你拥有的 Google 日历并启用同步。',
+  'Google Calendar could not be reached. Try again shortly.': '无法连接 Google 日历。请稍后重试。',
+  'Microsoft Calendar could not be reached. Try again shortly.':
+    '无法连接 Microsoft 日历。请稍后重试。',
+  'Reconnect Microsoft Calendar to restore access.': '请重新连接 Microsoft 日历以恢复访问。',
+  'Reconnect Microsoft Calendar and allow the requested permissions.':
+    '请重新连接 Microsoft 日历并允许请求的权限。',
   'Check that it works:': '检查是否可用：',
   'Check these hours: each must end after it starts.':
     '请检查这些时间段：每段的结束时间必须晚于开始时间。',
@@ -358,10 +391,10 @@ export const admin = {
   'Google did not provide continuing access. Connect again to try again.':
     'Google 未提供持续访问权限。请重新连接后重试。',
   'Google Meet (link created per booking)': 'Google Meet（每次预约时创建链接）',
-  'Google will ask for your email, calendar list and event access: to check busy times on selected calendars, and to create, update and cancel one private booking copy on the one calendar you own and select for new bookings. Automatic Google Meet adds a link only when you enable it. Busy-time synchronization stores times and event IDs, not event titles or descriptions. Connecting is optional and separate from signing in.':
-    'Google 将请求你的邮箱、日历列表和事件访问权限：读取所选日历的忙闲时间来检查冲突，并在你拥有且选作新预约写入目标的唯一日历中，创建、更新和取消每个预约的一份私有副本。只有启用自动 Google Meet 时才会添加会议链接。忙闲同步保存时间和事件 ID，不保存事件标题或描述。连接日历是可选的，与登录相互独立。',
-  'Disconnect below deletes stored credentials and local calendar data. You can also revoke access in your Google Account:':
-    '使用下方的“断开连接”可删除已存储的凭证和本地日历数据。你也可以在 Google 账号中撤销授权：',
+  'Google will ask for your email, calendar list and event access: to check busy times on selected calendars, and to create one private copy of each new booking on the calendar you own and select. Changing this destination affects new bookings; existing booking copies continue to be updated or cancelled on their original calendar. Automatic Google Meet adds a link only when you enable it. Busy-time synchronization stores times and event IDs, not event titles or descriptions. Connecting is optional and separate from signing in.':
+    'Google 将请求你的邮箱、日历列表和事件访问权限：读取所选日历的忙闲时间来检查冲突，并在你拥有且选作写入目标的日历中，为每个新预约创建一份私有副本。更改写入目标只影响新预约；现有预约的副本仍会在原日历中更新或取消。只有启用自动 Google Meet 时才会添加会议链接。忙闲同步保存时间和事件 ID，不保存事件标题或描述。连接日历是可选的，与登录相互独立。',
+  'Disconnect below deletes stored credentials and local calendar data, but leaves existing event copies in Google Calendar and does not revoke your Google grant. You can revoke access in your Google Account:':
+    '使用下方的“断开连接”可删除已存储的凭证和本地日历数据，但会保留 Google 日历中的现有事件副本，也不会撤销 Google 授权。你可以在 Google 账号中撤销授权：',
   'Google Account connections': 'Google 账号连接',
   'Could not load privacy information. Try again before connecting Google Calendar.':
     '无法加载隐私信息。请重试后再连接 Google 日历。',

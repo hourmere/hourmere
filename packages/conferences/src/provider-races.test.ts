@@ -170,7 +170,7 @@ describe.skipIf(!databaseUrl)('Zoom provider phase races (real Postgres)', () =>
     await gate.entered
     const replay = observe(finishZoomConnection(deps, owner, query(state)))
     expect(await progresses(replay)).toBe(true)
-    expect(await replay).toEqual({ status: 'fulfilled', value: 'invalid_state' })
+    expect(await replay).toEqual({ status: 'fulfilled', value: 'busy' })
     expect(provider.calls.filter((call) => call.url.endsWith('/oauth/token'))).toHaveLength(1)
     gate.release()
     expect(await first).toEqual({ status: 'fulfilled', value: 'connected' })
@@ -299,10 +299,13 @@ describe.skipIf(!databaseUrl)('Zoom provider phase races (real Postgres)', () =>
         ),
       )
     await waiter.waited(upgrading)
+    expect(await upgrading).toEqual({ status: 'fulfilled', value: 'busy' })
     expect(replacement.calls).toHaveLength(0)
     gate.release()
     expect(await finishing).toEqual({ status: 'fulfilled', value: 'invalid_state' })
-    expect(await upgrading).toEqual({ status: 'fulfilled', value: 'connected' })
+    expect(await finishZoomConnection(withProvider(replacement), owner, query(newerState))).toBe(
+      'connected',
+    )
     const upgraded = await row(initial.id)
     const current = await row(initial.id)
     expect(current.mode).toBe('meetings')
@@ -328,7 +331,7 @@ describe.skipIf(!databaseUrl)('Zoom provider phase races (real Postgres)', () =>
     expect((await row(initial.id)).status).toBe('active')
   })
 
-  it('an unbound callback waits for refresh and stores its newer grant', async () => {
+  it('an unbound callback retries after busy refresh and stores its newer grant', async () => {
     const initial = await connect(),
       state = await start(),
       gate = pause('token'),
@@ -340,10 +343,13 @@ describe.skipIf(!databaseUrl)('Zoom provider phase races (real Postgres)', () =>
         finishZoomConnection({ ...withProvider(replacement), db: waiter.db }, owner, query(state)),
       )
     await waiter.waited(finishing)
+    expect(await finishing).toEqual({ status: 'fulfilled', value: 'busy' })
     expect(replacement.calls).toHaveLength(0)
     gate.release()
     expect((await refreshing).status).toBe('fulfilled')
-    expect(await finishing).toEqual({ status: 'fulfilled', value: 'connected' })
+    expect(await finishZoomConnection(withProvider(replacement), owner, query(state))).toBe(
+      'connected',
+    )
     const current = await row(initial.id)
     expect(current.status).toBe('active')
     expect(
@@ -358,7 +364,7 @@ describe.skipIf(!databaseUrl)('Zoom provider phase races (real Postgres)', () =>
     ).toBe(true)
   })
 
-  it('two unbound callbacks exchange in order and retain the later grant', async () => {
+  it('two unbound callbacks exchange in order after retry and retain the later grant', async () => {
     await connect()
     const firstState = await start(),
       secondState = await start(),
@@ -375,10 +381,13 @@ describe.skipIf(!databaseUrl)('Zoom provider phase races (real Postgres)', () =>
         ),
       )
     await waiter.waited(second)
+    expect(await second).toEqual({ status: 'fulfilled', value: 'busy' })
     expect(replacement.calls).toHaveLength(0)
     gate.release()
     expect(await first).toEqual({ status: 'fulfilled', value: 'connected' })
-    expect(await second).toEqual({ status: 'fulfilled', value: 'connected' })
+    expect(await finishZoomConnection(withProvider(replacement), owner, query(secondState))).toBe(
+      'connected',
+    )
     const current = await db
       .selectFrom('conference_connections')
       .selectAll()
@@ -417,7 +426,7 @@ describe.skipIf(!databaseUrl)('Zoom provider phase races (real Postgres)', () =>
     },
   )
 
-  it('reconnection queues behind refresh and its newer grant wins', async () => {
+  it('reconnection retries after refresh and its newer grant wins', async () => {
     const initial = await connect(),
       gate = pause('token'),
       refreshing = observe(refreshConference(deps, owner, initial.id))
@@ -434,10 +443,13 @@ describe.skipIf(!databaseUrl)('Zoom provider phase races (real Postgres)', () =>
         finishZoomConnection({ ...withProvider(replacement), db: waiter.db }, owner, query(state)),
       )
     await waiter.waited(finishing)
+    expect(await finishing).toEqual({ status: 'fulfilled', value: 'busy' })
     expect(replacement.calls).toHaveLength(0)
     gate.release()
     expect((await refreshing).status).toBe('rejected')
-    expect(await finishing).toEqual({ status: 'fulfilled', value: 'connected' })
+    expect(await finishZoomConnection(withProvider(replacement), owner, query(state))).toBe(
+      'connected',
+    )
     const reconnected = await row(initial.id)
     const current = await row(initial.id)
     expect(current.status).toBe('active')
@@ -602,7 +614,7 @@ describe.skipIf(!databaseUrl)('Zoom provider phase races (real Postgres)', () =>
       // Return a provider error only after proving the durable claim is already one-use.
       const replay = observe(finishZoomConnection(deps, owner, query(state)))
       expect(await progresses(replay)).toBe(true)
-      expect(await replay).toEqual({ status: 'fulfilled', value: 'invalid_state' })
+      expect(await replay).toEqual({ status: 'fulfilled', value: 'busy' })
       gate.release(503)
       expect(await finishing).toEqual({ status: 'fulfilled', value: 'provider_unavailable' })
       expect(await finishZoomConnection(deps, owner, query(state))).toBe('invalid_state')

@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { createDb, createPool, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import type pg from 'pg'
@@ -114,7 +114,12 @@ describe.skipIf(!databaseUrl)('browser Zoom token lease fencing (real Postgres)'
   }
   async function connect() {
     expect(await finishZoomConnection(deps, owner, query(await start()))).toBe('connected')
-    const connection = (await connections())[0]
+    const connection = await db
+      .selectFrom('conference_connections')
+      .select('id')
+      .where('user_id', '=', owner.user.id)
+      .where('external_user_id', '=', String(provider.controls.identity.id))
+      .executeTakeFirst()
     if (!connection) throw new Error('Expected the synthetic Zoom connection')
     return connection.id
   }
@@ -159,9 +164,177 @@ describe.skipIf(!databaseUrl)('browser Zoom token lease fencing (real Postgres)'
       .executeTakeFirst()
   }
 
+  it('returns busy on one lease attempt without consuming state, then accepts the same callback', async () => {
+    const state = await start(),
+      hash = createHash('sha256').update(state).digest('hex'),
+      operation = randomUUID()
+    await db
+      .insertInto('conference_token_operations')
+      .values({
+        user_id: owner.user.id,
+        operation_id: operation,
+        expires_at: new Date(Date.now() + 60000),
+      })
+      .execute()
+    const attempt = () =>
+        db
+          .selectFrom('conference_oauth_states')
+          .selectAll()
+          .where('state_hash', '=', hash)
+          .executeTakeFirstOrThrow(),
+      original = await attempt()
+    let attempts = 0
+    const failOnRetry = db.withPlugin({
+      transformQuery(args) {
+        if (
+          args.node.kind === 'InsertQueryNode' &&
+          args.node.into?.table.identifier.name === 'conference_token_operations'
+        ) {
+          // A regression to polling fails a real result assertion instead of a test timeout.
+          if (++attempts > 1) throw new Error('Unexpected callback lease polling')
+        }
+        return args.node
+      },
+      async transformResult(args) {
+        return args.result
+      },
+    })
+    expect(await finishZoomConnection({ ...deps, db: failOnRetry }, owner, query(state))).toBe(
+      'busy',
+    )
+    expect(attempts).toBe(1)
+    expect(await attempt()).toEqual(original)
+    expect(provider.calls).toHaveLength(0)
+    expect((await leaseRow())?.operation_id).toBe(operation)
+    await db
+      .deleteFrom('conference_token_operations')
+      .where('user_id', '=', owner.user.id)
+      .execute()
+    expect(await finishZoomConnection(deps, owner, query(state))).toBe('connected')
+    expect(await connections()).toHaveLength(1)
+    expect(provider.calls.filter((call) => call.url.endsWith('/oauth/token'))).toHaveLength(1)
+  })
+
+  it('does not consume callback state after its lease is replaced before the claim', async () => {
+    const state = await start(),
+      hash = createHash('sha256').update(state).digest('hex'),
+      gate = pauseCommit(1),
+      finishing = observe(finishZoomConnection({ ...deps, db: controlledDb }, owner, query(state)))
+    await gate.entered
+    const replacement = await replaceLease()
+    gate.release()
+    expect(await finishing).toEqual({ status: 'fulfilled', value: 'invalid_state' })
+    const attempt = await db
+      .selectFrom('conference_oauth_states')
+      .select(['claimed', 'verifier'])
+      .where('state_hash', '=', hash)
+      .executeTakeFirstOrThrow()
+    expect(attempt.claimed).toBe(false)
+    expect(attempt.verifier).not.toBeNull()
+    expect(provider.calls).toHaveLength(0)
+    expect((await leaseRow())?.operation_id).toBe(replacement)
+  })
+
+  it('retires an abandoned refresh after taking over its expired lease without contacting Zoom', async () => {
+    const id = await connect()
+    await db
+      .updateTable('conference_connections')
+      .set({ status: 'refreshing', credentials: null, operation_id: randomUUID() })
+      .where('id', '=', id)
+      .execute()
+    await db
+      .insertInto('conference_token_operations')
+      .values({ user_id: owner.user.id, operation_id: randomUUID(), expires_at: new Date(0) })
+      .execute()
+    const calls = provider.calls.length
+    await expect(refreshConference(deps, owner, id)).rejects.toMatchObject({
+      code: 'zoom_needs_reauth',
+    })
+    expect(await row(id)).toMatchObject({
+      status: 'needs_reauth',
+      credentials: null,
+      operation_id: null,
+      last_error: 'needs_reauth',
+    })
+    expect(provider.calls).toHaveLength(calls)
+    expect(await leaseRow()).toBeUndefined()
+  })
+
+  it('preserves an abandoned refresh when a replacement lease owns recovery', async () => {
+    const id = await connect()
+    await db
+      .updateTable('conference_connections')
+      .set({ status: 'refreshing', credentials: null, operation_id: randomUUID() })
+      .where('id', '=', id)
+      .execute()
+    const original = await row(id),
+      calls = provider.calls.length,
+      gate = pauseCommit(1),
+      refreshing = observe(refreshConference({ ...deps, db: controlledDb }, owner, id))
+    await gate.entered
+    const replacement = await replaceLease()
+    gate.release()
+    expect(await refreshing).toMatchObject({
+      status: 'rejected',
+      error: { code: 'zoom_needs_reauth' },
+    })
+    expect(await row(id)).toEqual(original)
+    expect(provider.calls).toHaveLength(calls)
+    expect((await leaseRow())?.operation_id).toBe(replacement)
+  })
+
+  it('returns a neutral busy message for a different identity while preserving its active credentials', async () => {
+    const first = await connect()
+    provider.controls.identity.id = `synthetic-second-${owner.user.id}`
+    const second = await connect(),
+      original = await row(second)
+    provider.controls.identity.id = (await row(first)).external_user_id
+    const gate = pauseIdentity(),
+      refreshing = observe(refreshConference(deps, owner, first))
+    await gate.entered
+    const calls = provider.calls.length
+    await expect(refreshConference(deps, owner, second)).rejects.toMatchObject({
+      code: 'zoom_refresh_in_progress',
+      message: 'Zoom account operations are busy. Try again shortly.',
+    })
+    expect(await row(second)).toEqual(original)
+    expect(provider.calls).toHaveLength(calls)
+    gate.release()
+    await refreshing
+  })
+
+  it('recovers a refresh discarded after its provider response outlives the lease', async () => {
+    const id = await connect(),
+      gate = pauseIdentity(),
+      refreshing = observe(refreshConference(deps, owner, id))
+    await gate.entered
+    await db
+      .updateTable('conference_token_operations')
+      .set({ expires_at: new Date(0) })
+      .where('user_id', '=', owner.user.id)
+      .execute()
+    gate.release()
+    expect(await refreshing).toMatchObject({
+      status: 'rejected',
+      error: { code: 'zoom_needs_reauth' },
+    })
+    expect(await row(id)).toMatchObject({ status: 'refreshing', credentials: null })
+    const calls = provider.calls.length
+    await expect(refreshConference(deps, owner, id)).rejects.toMatchObject({
+      code: 'zoom_needs_reauth',
+    })
+    expect(await row(id)).toMatchObject({
+      status: 'needs_reauth',
+      credentials: null,
+      operation_id: null,
+      last_error: 'needs_reauth',
+    })
+    expect(provider.calls).toHaveLength(calls)
+  })
+
   it('refuses callback exchange after its acquired lease is replaced', async () => {
     const state = await start(),
-      gate = pauseCommit(2), // State consumption commits before the token lease acquisition.
+      gate = pauseCommit(1), // Lease acquisition commits before consuming the OAuth state.
       finishing = observe(finishZoomConnection({ ...deps, db: controlledDb }, owner, query(state)))
     await gate.entered
     const replacement = await replaceLease()
