@@ -629,7 +629,8 @@ describe.skipIf(!bootstrap)('automatic Zoom real TCP/session/API-key boundaries'
     const moved = (await mcp('reschedule_booking', {
       bookingId: booking.booking.id,
       start: '2030-11-04T16:00:00Z',
-    })) as typeof booking
+    })) as Omit<typeof booking, 'manageToken'> & { manageToken: null }
+    expect(moved.manageToken === null).toBe(true)
     await writeBookingConference(worker, booking.booking.id)
     const assertCancelled = (value: unknown, cleaned: boolean) => {
       const response = value as
@@ -646,7 +647,7 @@ describe.skipIf(!bootstrap)('automatic Zoom real TCP/session/API-key boundaries'
       expect(details.status).toBe(200)
       assertCancelled(await details.json(), cleaned)
       const manage = await request('/api/v1/bookings/manage', 'GET', '', undefined, {
-        'X-Manage-Token': moved.manageToken,
+        'X-Manage-Token': booking.manageToken,
       })
       expect(manage.status).toBe(200)
       assertCancelled(await manage.json(), cleaned)

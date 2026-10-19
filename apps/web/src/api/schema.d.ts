@@ -549,6 +549,198 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/bookings/{id}/reschedule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reschedule a booking the caller hosts
+         * @description Cancels the old booking and creates its successor in one transaction. The caller must host the booking in their acting organization. Invitee links keep working, and manageToken is always null: host authority does not reveal an invitee bearer secret. Retrying the old id gets booking_cancelled.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["Reschedule"];
+                };
+            };
+            responses: {
+                /** @description The successor booking, with manageToken null */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BookingWithToken"];
+                    };
+                };
+                /** @description Invalid request (`invalid_request`) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No valid session or API key */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description A cookie-authenticated write that does not come from the app itself (`forbidden`) */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such booking among those the caller hosts in this organization (`booking_not_found`) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Already cancelled (`booking_cancelled`), already started (`booking_in_past`), the event type no longer takes bookings (`event_type_unavailable`), required hosts are unavailable (`booking_has_no_host`, `booking_hosts_unavailable`), or the time is not offered (`slot_unavailable`, `slot_taken`) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Too many requests from this address (`rate_limited`); see Retry-After */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/bookings/{id}/slots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Times a booking the caller hosts can move to
+         * @description The same reschedule slots as the invitee sees, with the current booking ignored so a new time may overlap it. The caller must host this booking in their acting organization. The range is at most 62 days.
+         */
+        get: {
+            parameters: {
+                query: {
+                    /** @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix. */
+                    end: string;
+                    /** @description An instant (RFC 3339, up to nine fractional digits; stored with microsecond precision). Responses always use UTC with a Z suffix. */
+                    start: string;
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Slots, sorted by start */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data: components["schemas"]["Slot"][];
+                        };
+                    };
+                };
+                /** @description Invalid parameters (`invalid_request`, `invalid_range`, `range_too_long`) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No valid session or API key */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No such booking among those the caller hosts in this organization (`booking_not_found`) */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Already cancelled (`booking_cancelled`), already started (`booking_in_past`), the event type no longer takes bookings (`event_type_unavailable`), or required hosts are unavailable (`booking_has_no_host`, `booking_hosts_unavailable`) */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description Too many requests from this address (`rate_limited`); see Retry-After */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/bookings/manage": {
         parameters: {
             query?: never;
@@ -561,7 +753,7 @@ export interface paths {
             parameters: {
                 query?: never;
                 header?: {
-                    /** @description The invitee's secret: the `manageToken` the booking API returned, or the `token` in a link from a booking email (https://<app>/booking#token=…). A missing or unknown token gets 404 `booking_not_found`. After a reschedule, the token returned for the old booking shows that cancelled booking, while tokens from emails open the booking that replaced it. */
+                    /** @description The invitee's secret: the `manageToken` the booking API returned, or the `token` in a link from a booking email (https://<app>/booking#token=…). A missing or unknown token gets 404 `booking_not_found`. After an invitee reschedule, the previous response token shows the cancelled booking; a host reschedule transfers that token's hash to the successor so it keeps working. Email tokens always follow the reschedule chain. */
                     "x-manage-token"?: string;
                 };
                 path?: never;
@@ -620,7 +812,7 @@ export interface paths {
             parameters: {
                 query?: never;
                 header?: {
-                    /** @description The invitee's secret: the `manageToken` the booking API returned, or the `token` in a link from a booking email (https://<app>/booking#token=…). A missing or unknown token gets 404 `booking_not_found`. After a reschedule, the token returned for the old booking shows that cancelled booking, while tokens from emails open the booking that replaced it. */
+                    /** @description The invitee's secret: the `manageToken` the booking API returned, or the `token` in a link from a booking email (https://<app>/booking#token=…). A missing or unknown token gets 404 `booking_not_found`. After an invitee reschedule, the previous response token shows the cancelled booking; a host reschedule transfers that token's hash to the successor so it keeps working. Email tokens always follow the reschedule chain. */
                     "x-manage-token"?: string;
                 };
                 path?: never;
@@ -702,7 +894,7 @@ export interface paths {
             parameters: {
                 query?: never;
                 header?: {
-                    /** @description The invitee's secret: the `manageToken` the booking API returned, or the `token` in a link from a booking email (https://<app>/booking#token=…). A missing or unknown token gets 404 `booking_not_found`. After a reschedule, the token returned for the old booking shows that cancelled booking, while tokens from emails open the booking that replaced it. */
+                    /** @description The invitee's secret: the `manageToken` the booking API returned, or the `token` in a link from a booking email (https://<app>/booking#token=…). A missing or unknown token gets 404 `booking_not_found`. After an invitee reschedule, the previous response token shows the cancelled booking; a host reschedule transfers that token's hash to the successor so it keeps working. Email tokens always follow the reschedule chain. */
                     "x-manage-token"?: string;
                 };
                 path?: never;
@@ -787,7 +979,7 @@ export interface paths {
                     start: string;
                 };
                 header?: {
-                    /** @description The invitee's secret: the `manageToken` the booking API returned, or the `token` in a link from a booking email (https://<app>/booking#token=…). A missing or unknown token gets 404 `booking_not_found`. After a reschedule, the token returned for the old booking shows that cancelled booking, while tokens from emails open the booking that replaced it. */
+                    /** @description The invitee's secret: the `manageToken` the booking API returned, or the `token` in a link from a booking email (https://<app>/booking#token=…). A missing or unknown token gets 404 `booking_not_found`. After an invitee reschedule, the previous response token shows the cancelled booking; a host reschedule transfers that token's hash to the successor so it keeps working. Email tokens always follow the reschedule chain. */
                     "x-manage-token"?: string;
                 };
                 path?: never;
@@ -4780,7 +4972,7 @@ export interface components {
         };
         BookingWithToken: {
             booking: components["schemas"]["Booking"];
-            /** @description The booking's own manage token (it stays with this booking; emails carry their own), sent as X-Manage-Token to /api/v1/bookings/manage. Returned only once and never stored, so a replayed request (same Idempotency-Key) gets null. */
+            /** @description The invitee's own manage token, sent as X-Manage-Token to /api/v1/bookings/manage. Returned once on creation or an invitee reschedule; creation replays and host reschedules return null. A host reschedule transfers the existing hash to the successor so the invitee's original token keeps working; an invitee reschedule leaves the old token on the cancelled booking. Emails carry their own tokens that follow the chain. */
             manageToken: string | null;
         };
         CalendarConnection: {

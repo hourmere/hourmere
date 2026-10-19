@@ -5,6 +5,7 @@ import { errorMessage, RequestError } from '../../api/errors.ts'
 import { type Booking, isNotFound, loadProfile } from '../../api/resources.ts'
 import { ConferenceNotice } from '../../components/ConferenceNotice.tsx'
 import { Field } from '../../components/forms.tsx'
+import { useFlash } from '../../flash.ts'
 import { zoned } from '../../format.ts'
 import { useLoad, usePageTitle } from '../../hooks.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
@@ -16,6 +17,7 @@ import { useUnsavedChanges } from '../../unsaved-changes.tsx'
 import { MissingRecord } from '../NotFound.tsx'
 import { answerText, describeLocation, hostZone, SOURCE_LABELS } from './booking-format.ts'
 import { CalendarCopyNotice } from './CalendarCopyNotice.tsx'
+import { RescheduleBooking } from './RescheduleBooking.tsx'
 
 type Question = Schemas['Question']
 
@@ -106,9 +108,10 @@ function BookingDetail({ id }: { id: string }) {
 
 function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loaded) {
   const { t, ui, formatLocale: displayLocale } = useI18n()
+  const flash = useFlash()
 
   const [booking, setBooking] = useState(initial)
-  const [status, setStatus] = useState<UiText>('')
+  const [status, setStatus] = useState<UiText>(flash ?? '')
   const statusRef = useRef<HTMLParagraphElement>(null)
   const format = zoned(timeZone, displayLocale)
   const zoneName = format.timeZone.replaceAll('_', ' ')
@@ -278,6 +281,8 @@ function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loa
           </dl>
         )}
       </section>
+
+      {!cancelled && !started && <RescheduleBooking booking={booking} timeZone={timeZone} />}
 
       {!cancelled && !started && (
         <CancelBooking

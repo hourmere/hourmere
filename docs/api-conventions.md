@@ -224,7 +224,7 @@ root, `/{handle}` and `/{handle}/{slug}`, and the invitee's page at `/booking`:
   fragment, `https://<app>/booking#token=<token>`, which browsers never send to servers or in
   `Referer`; the web app reads it and sends the header. A missing, malformed or unknown token
   gets the same 404 `booking_not_found`. Only the token's SHA-256 is stored, so it is returned
-  once, when the booking is made (and with the new booking after a reschedule).
+  once, when the booking is made (and with the new booking after an invitee reschedule).
   `…/slots` ignores the booking itself, as rescheduling does, so it offers times that overlap
   the current one; a booking that cannot move answers 409 as a reschedule would
   (`booking_cancelled`, `booking_in_past`, `event_type_unavailable`). Like every manage
@@ -235,8 +235,10 @@ Two kinds of manage token are accepted, alike in shape (43 base64url characters)
 everywhere a token is taken, REST and MCP:
 
 - **The booking's own token**, the `manageToken` the create (or reschedule) response
-  returned. It stays with that booking: after a reschedule it shows the old booking as
-  cancelled, and cancelling or rescheduling with it gets 409 `booking_cancelled`.
+  returned. An invitee reschedule leaves it with the old, cancelled booking: cancelling or
+  rescheduling with it gets 409 `booking_cancelled`. A host reschedule instead transfers
+  its hash to the successor, clearing it on the predecessor in the same transaction, so
+  the invitee's existing link opens the new booking without exposing a secret to the host.
 - **An email's token**, from the manage links in the invitee's booking emails; each email
   carries its own ([notifications.md](notifications.md#which-booking-a-token-opens)). It
   follows the meeting: after a reschedule it opens the booking that replaced it (the latest
@@ -255,6 +257,23 @@ creating bookings, 30 for the other manage endpoints;
 beyond that 429 `rate_limited` with `Retry-After`, decided before the request body is read
 (only a `Content-Length` over the body limit is refused first). The counters live in each server process's memory, so with several instances a client gets that budget once per instance; a shared store
 comes with multi-instance deployments.
+
+### Host rescheduling
+
+Authenticated hosts use `GET /api/v1/bookings/{id}/slots?start=…&end=…` to find a new time,
+then `POST /api/v1/bookings/{id}/reschedule` with a strict `{ "start": "…" }` body.
+Both require the caller to host that booking in the caller's acting organization, with the
+same authorization and service layer as MCP `reschedule_booking({bookingId,start})`.
+Slot lookup ignores the booking's own busy time and checks all original hosts; it uses
+the same range bounds and per-client slots rate limit as invitee slot lookup. Host moves
+use the manage mutation rate limit; API-key limits also apply.
+
+Host moves always return `{ booking, manageToken: null }`. No invitee token is minted or
+revealed: the existing booking-token hash moves to the successor, and per-email tokens
+continue to follow the reschedule chain. Repeated host moves preserve those links; a later
+invitee move still rotates the booking token as described above. Notifications and origin
+attribution use the same transactional reschedule behavior as invitee moves. The web admin
+booking detail uses these public endpoints.
 
 A slots request may span at most 62 days, and its bookable part (from now plus the event
 type's minimum notice to the end of its booking window) at most 20 000 possible start times at
@@ -288,11 +307,14 @@ UUIDv4), never derived from the request.
 A replay never sends the booking emails a second time: they are queued only in the
 transaction that creates the booking.
 
-Rescheduling is not idempotent: it cancels the booking and creates a new one with a new
-manage token, so retrying it with the booking's own token after a lost response gets 409
+Invitee rescheduling is not idempotent: it cancels the booking and creates a new one with a
+new manage token, so retrying it with the booking's own token after a lost response gets 409
 `booking_cancelled`. The invitee does not lose access: the reschedule email carries a new
 link, and links in earlier emails follow the meeting to the new booking. (So a retry with
 an email's token would move the meeting again; clients must not resubmit it on their own.)
+Host rescheduling is also not idempotent, but returns no token; retrying the predecessor
+booking ID gets `booking_cancelled`. Inspect host booking history and `rescheduledFromId`
+after a lost response before deciding to move the successor.
 
 ### Team booking links
 

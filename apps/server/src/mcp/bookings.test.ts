@@ -445,7 +445,7 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
         rescheduledFromId: booked.booking.id,
         source: 'mcp',
       })
-      expect(moved.manageToken).toMatch(/^[A-Za-z0-9_-]{43}$/)
+      expect(moved.manageToken === null).toBe(true)
       const old = await db
         .selectFrom('bookings')
         .select(['source', 'api_key_id', 'cancelled_source', 'cancelled_api_key_id'])
@@ -478,6 +478,67 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
       const listed = ok<{ data: { id: string }[] }>(await call('list_bookings', {}, key.key))
       expect(listed.data.some((b) => b.id === moved.booking.id)).toBe(true)
       expect(host.userId).not.toBe(agent.userId)
+    })
+
+    it('gives a removed team host no invitee capability while preserving the invitee link', async () => {
+      const host = await f.host()
+      await f.schedule(host.userId)
+      const team = await f.organization()
+      await f.member(host.userId, team)
+      await f.eventType(team, null, { slug: 'intro', hosts: [{ userId: host.userId }] })
+      const teamSlug = (
+        await db
+          .selectFrom('auth.organization')
+          .select('slug')
+          .where('id', '=', team)
+          .executeTakeFirstOrThrow()
+      ).slug
+      const key = await createKey(host.userId, 'team-host-move', team)
+      const booked = ok<Booked>(
+        await call('create_booking', {
+          teamSlug,
+          slug: 'intro',
+          start: '2026-11-02T09:00:00Z',
+          invitee: { name: 'Invitee', email: 'invitee@example.com', timeZone: 'UTC' },
+        }),
+      )
+      const moved = ok<Booked>(
+        await call(
+          'reschedule_booking',
+          {
+            bookingId: booked.booking.id,
+            start: '2026-11-02T10:00:00Z',
+          },
+          key.key,
+        ),
+      )
+      // Compare capability presence as a boolean so an intentional regression cannot print it.
+      expect(moved.manageToken === null).toBe(true)
+      await db
+        .deleteFrom('auth.member')
+        .where('userId', '=', host.userId)
+        .where('organizationId', '=', team)
+        .execute()
+      const revoked = await app.request('/api/v1/bookings', {
+        headers: { authorization: `Bearer ${key.key}` },
+      })
+      expect(revoked.status).toBe(401)
+      const denied = await app.request('/api/v1/bookings/manage/cancel', {
+        method: 'POST',
+        headers: { 'x-manage-token': moved.manageToken ?? '' },
+      })
+      expect(denied.status).toBe(404)
+      const invitee = await app.request('/api/v1/bookings/manage', {
+        headers: { 'x-manage-token': booked.manageToken as string },
+      })
+      expect(invitee.status).toBe(200)
+      expect(((await invitee.json()) as { id: string }).id).toBe(moved.booking.id)
+      const current = await db
+        .selectFrom('bookings')
+        .select('status')
+        .where('id', '=', moved.booking.id)
+        .executeTakeFirstOrThrow()
+      expect(current.status).toBe('confirmed')
     })
 
     it('requires exactly one selector and refuses forged audit fields', async () => {
@@ -549,13 +610,14 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
         errorOf(
           await call(
             'reschedule_booking',
-            { manageToken: moved.manageToken, start: '2026-11-02T11:00:00Z' },
+            { manageToken: booked.manageToken, start: '2026-11-02T11:00:00Z' },
             second.key,
             limited,
           ),
         ).error,
       ).toBe('rate_limited')
-      ok(await call('cancel_booking', { manageToken: moved.manageToken }, agent.key, limited))
+      expect(moved.manageToken === null).toBe(true)
+      ok(await call('cancel_booking', { manageToken: booked.manageToken }, agent.key, limited))
     })
   })
 
@@ -725,6 +787,30 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
         expect(empty.nextAfter).toBeNull()
       },
     )
+
+    it('ends an exactly full final slot page without a continuation', async () => {
+      const query = {
+        handle: 'ada',
+        slug: 'intro',
+        timeZone: 'Europe/Berlin',
+        startDate: '2026-11-05',
+        endDate: '2026-11-05',
+      }
+      type Page = { slots: { start: string }[]; nextAfter: string | null }
+      const all = ok<Page>(await call('find_available_slots', { ...query, maxSlots: 500 }))
+      expect(all.slots.length).toBeGreaterThan(1)
+      const exact = ok<Page>(
+        await call('find_available_slots', { ...query, maxSlots: all.slots.length }),
+      )
+      expect(exact.slots).toEqual(all.slots)
+      expect(exact.nextAfter).toBeNull()
+      const after = all.slots[0]?.start
+      const final = ok<Page>(
+        await call('find_available_slots', { ...query, after, maxSlots: all.slots.length - 1 }),
+      )
+      expect(final.slots).toEqual(all.slots.slice(1))
+      expect(final.nextAfter).toBeNull()
+    })
 
     it('compares continuation instants by time rather than their UTC-offset spelling', async () => {
       const query = {

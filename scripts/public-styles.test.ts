@@ -3,7 +3,9 @@
 import { readFileSync } from 'node:fs'
 import { expect, it } from 'vitest'
 
-const publicStyles = readFileSync('apps/web/src/public/public.css', 'utf8')
+const publicStyles = ['public.css', 'SlotPicker.css']
+  .map((file) => readFileSync(`apps/web/src/public/${file}`, 'utf8'))
+  .join('\n')
 
 it('keeps public styles scoped so visiting a booking page cannot restyle admin fields', () => {
   const style = document.createElement('style')
@@ -14,9 +16,9 @@ it('keeps public styles scoped so visiting a booking page cannot restyle admin f
     function inspect(rules: CSSRuleList) {
       for (const rule of rules) {
         if ('selectorText' in rule) {
-          for (const selector of (rule as CSSStyleRule).selectorText.split(',')) {
-            expect(selector.trim(), 'public selector must require the public container').toMatch(
-              /^\.public(?:-embedded)?(?:$|[\s.:#[>+~])/,
+          for (const selector of (rule as CSSStyleRule).selectorText.split(/,(?![^()]*\))/)) {
+            expect(selector.trim(), 'selector must require the public or picker container').toMatch(
+              /^(?:\.public(?:-embedded)?|\.picker|:is\(\.public,\s*\.picker\))(?:$|[\s.:#[>+~])/,
             )
             selectors++
           }

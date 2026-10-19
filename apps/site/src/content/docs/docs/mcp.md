@@ -70,7 +70,7 @@ API key; MCP OAuth grants do not authenticate REST requests.
 | `whoami` | No arguments; shows the key's user, organization and key ID. |
 | `find_available_slots` | A booking page's `handle`, `slug`, `startDate`, `endDate`, `timeZone`; returns event details and slots. Dates span at most 62 days inclusive. |
 | `create_booking` | `handle`, `slug`, a returned slot's `start`, `invitee`, and an optional `idempotencyKey`; returns the booking and manage token. |
-| `reschedule_booking` | Exactly one of hosted `bookingId` or invitee `manageToken`, plus new `start`; returns a replacement booking and token. |
+| `reschedule_booking` | Exactly one of hosted `bookingId` or invitee `manageToken`, plus new `start`; returns a replacement booking, with a new token for invitee moves and null for host moves. |
 | `cancel_booking` | Either a hosted `bookingId` or an invitee `manageToken`; cancels the booking. |
 | `list_bookings` | Lists bookings hosted by the key owner in its organization, with pagination. `order` defaults to `asc`; use `desc` for newest first and keep it unchanged between pages. |
 
@@ -93,8 +93,9 @@ configured calendar. Use a controlled test address when trying it out.
 
 Keep manage tokens privately to reschedule/cancel. A create retry with the same idempotency
 key and arguments returns the existing booking but no new manage token. A different booking
-needs a new key. Rescheduling is not idempotent and returns a new manage token; the previous
-API token remains bound to the old cancelled booking. An email token follows the meeting.
+needs a new key. Rescheduling is not idempotent. Invitee moves return a new manage token;
+the previous API token remains bound to the old cancelled booking. Host moves preserve
+the existing invitee token on the successor. An email token always follows the meeting.
 
 Tool results include `structuredContent` and a JSON text copy. Tool failures set `isError`
 and return the same stable error codes as REST, such as `slot_unavailable`, `slot_taken`,
@@ -111,7 +112,9 @@ notification and per-user management limits.
 
 A move creates a new booking with `rescheduledFromId` pointing to the old one. Retrying the
 old ID fails with `booking_cancelled`. If an answer is lost, inspect `list_bookings` before
-trying another move. The returned new manage token is shown once, as with an invitee move.
+trying another move. Host moves return `manageToken: null`; the invitee's existing links
+continue to work without revealing their secret to the host. The web booking detail page
+and `POST /api/v1/bookings/{id}/reschedule` offer the same host action.
 
 ## Connect with OAuth
 
