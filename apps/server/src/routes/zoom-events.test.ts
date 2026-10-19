@@ -18,7 +18,11 @@ vi.mock('node:crypto', async (original) => {
 const databaseUrl = process.env.DATABASE_URL
 const SECRET = 'synthetic-webhook-token'
 const NOW = 1_900_000_000_000
-const payload = { user_id: 'zoom-target', account_id: 'shared-zoom-account' }
+const payload = {
+  user_id: 'zoom-target',
+  account_id: 'shared-zoom-account',
+  deauthorization_time: new Date(NOW).toISOString(),
+}
 const deauthorized = { event: 'app_deauthorized', payload }
 const validation = {
   event: 'endpoint.url_validation',
@@ -35,13 +39,18 @@ describe.skipIf(!databaseUrl)('Zoom event endpoint (real Postgres, no provider c
     eventId: string,
     app: ReturnType<typeof createApp>
 
-  function composition(secretToken: string | undefined = SECRET, database = db) {
+  function composition(
+    secretToken: string | undefined = SECRET,
+    database = db,
+    clientId?: string,
+    now = () => NOW,
+  ) {
     return createApp({
       checkDb: async () => {},
       authHandler: async () => new Response(null, { status: 404 }),
       resolveCaller: async () => ({ ok: false, error: 'unauthorized', setCookie: [] }),
       publicUrl: 'https://hourmere.invalid',
-      routes: [zoomEventRoutes({ db: database, secretToken, now: () => NOW })],
+      routes: [zoomEventRoutes({ db: database, secretToken, clientId, now })],
     })
   }
   function signed(body: string, timestamp = String(NOW / 1000), secret = SECRET) {
@@ -166,7 +175,7 @@ describe.skipIf(!databaseUrl)('Zoom event endpoint (real Postgres, no provider c
   it.each([-300, 300])('accepts the timestamp window boundary (%s seconds)', async (offset) => {
     expect((await post(validation, String(NOW / 1000 + offset))).status).toBe(200)
   })
-  it('deletes only the matching user data, invalidates OAuth attempts and flags automatic settings', async () => {
+  it('deletes only the matching user data and keeps automatic settings as a local disconnect does', async () => {
     const beforeOther = await db
       .selectFrom('conference_connections')
       .selectAll()
@@ -198,10 +207,28 @@ describe.skipIf(!databaseUrl)('Zoom event endpoint (real Postgres, no provider c
         .where('id', '=', eventId)
         .executeTakeFirstOrThrow(),
     ).toEqual({
-      is_active: false,
+      is_active: true,
       zoom_connection_id: connectionId,
       location: { kind: 'zoom', autoCreate: true },
     })
+  })
+  it('ignores missing and other-app client IDs when an OAuth client is configured', async () => {
+    app = composition(SECRET, db, 'configured-client')
+    const before = await target()
+    for (const client_id of [undefined, '', 'old-client']) {
+      expect((await post({ ...deauthorized, payload: { ...payload, client_id } })).status).toBe(200)
+      expect(await target()).toEqual(before)
+    }
+    expect((await post(validation)).status).toBe(200)
+    expect(
+      (
+        await post({
+          ...deauthorized,
+          payload: { ...payload, client_id: 'configured-client' },
+        })
+      ).status,
+    ).toBe(200)
+    expect((await target()).credentials).toBeNull()
   })
   it('acknowledges unknown users and repeated deliveries without any further changes', async () => {
     const before = await target()
@@ -216,6 +243,28 @@ describe.skipIf(!databaseUrl)('Zoom event endpoint (real Postgres, no provider c
     expect(await target()).toEqual(after)
     expect(await db.selectFrom('conference_connections').select('id').execute()).toHaveLength(2)
   })
+  it('uses the event removal time so a valid retry cannot clear a newer authorization', async () => {
+    await db
+      .updateTable('conference_connections')
+      .set({ created_at: new Date(NOW).toISOString() })
+      .where('id', '=', connectionId)
+      .execute()
+    const before = await target()
+    expect(
+      (
+        await post({
+          ...deauthorized,
+          payload: {
+            ...payload,
+            deauthorization_time: new Date(NOW - 1000).toISOString(),
+          },
+        })
+      ).status,
+    ).toBe(200)
+    expect(await target()).toEqual(before)
+    expect((await post()).status).toBe(200)
+    expect((await target()).credentials).toBeNull()
+  })
   it.each([
     null,
     [],
@@ -224,6 +273,9 @@ describe.skipIf(!databaseUrl)('Zoom event endpoint (real Postgres, no provider c
     { account_id: payload.account_id },
     { ...payload, user_id: '' },
     { ...payload, account_id: 'bad\u0000id' },
+    { ...payload, deauthorization_time: undefined },
+    { ...payload, deauthorization_time: 'not-a-timestamp' },
+    { ...payload, deauthorization_time: '2026-10-19T12:00:00.1234567891Z' },
   ])(
     'refuses malformed deauthorization identities without a broad account match (%j)',
     async (value) => {
@@ -311,8 +363,11 @@ describe.skipIf(!databaseUrl)('Zoom event endpoint (real Postgres, no provider c
     }
     expect((await target()).status).toBe('active')
   })
-  it('rate limits requests before reading their bodies', async () => {
-    for (let i = 0; i < 120; i++) expect((await post(validation)).status).toBe(200)
+  it('returns a retryable overload before reading bodies and accepts delivery after Retry-After', async () => {
+    let now = NOW
+    app = composition(SECRET, db, undefined, () => now)
+    for (let i = 0; i < 120; i++)
+      expect((await app.request(ZOOM_EVENTS_PATH, { method: 'POST' })).status).toBe(401)
     let read = false
     const body = new ReadableStream<Uint8Array>(
       {
@@ -329,10 +384,13 @@ describe.skipIf(!databaseUrl)('Zoom event endpoint (real Postgres, no provider c
       duplex: 'half',
       headers: signed(''),
     } as RequestInit)
-    expect(response.status).toBe(429)
-    expect(response.headers.get('retry-after')).toBeTruthy()
+    expect(response.status).toBe(503)
+    expect(response.headers.get('retry-after')).toBe('60')
     expect(read).toBe(false)
     expect((await target()).status).toBe('active')
+    now += 60_000
+    expect((await post()).status).toBe(200)
+    expect((await target()).credentials).toBeNull()
   })
   it('keeps payloads, signatures, secrets and database error details out of responses and logs', async () => {
     const logs = vi.spyOn(console, 'log').mockImplementation(() => {})
@@ -381,6 +439,9 @@ describe.skipIf(!databaseUrl)('Zoom event endpoint (real Postgres, no provider c
           HOURMERE_ROLE: 'web',
           SIGNUP: 'closed',
           ZOOM_WEBHOOK_SECRET_TOKEN: token,
+          ZOOM_CLIENT_ID: 'configured-client',
+          ZOOM_CLIENT_SECRET: 'synthetic-oauth-secret',
+          CONFERENCE_ENCRYPTION_KEY: Buffer.alloc(32, 23).toString('base64'),
         })
         const body = JSON.stringify(validation)
         const response = await fetch(`http://127.0.0.1:${running.port}${ZOOM_EVENTS_PATH}`, {
@@ -390,6 +451,25 @@ describe.skipIf(!databaseUrl)('Zoom event endpoint (real Postgres, no provider c
         })
         expect(response.status).toBe(token ? 200 : 404)
         await response.body?.cancel()
+        if (token) {
+          for (const client_id of [undefined, 'old-client', 'configured-client']) {
+            const body = JSON.stringify({
+              ...deauthorized,
+              payload: { ...payload, client_id },
+            })
+            const eventResponse = await fetch(
+              `http://127.0.0.1:${running.port}${ZOOM_EVENTS_PATH}`,
+              {
+                method: 'POST',
+                body,
+                headers: signed(body, String(Math.floor(Date.now() / 1000))),
+              },
+            )
+            expect(eventResponse.status).toBe(200)
+            await eventResponse.body?.cancel()
+            expect((await target()).credentials === null).toBe(client_id === 'configured-client')
+          }
+        }
         await running.close()
         running = undefined
       }

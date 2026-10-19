@@ -45,8 +45,8 @@ the automated tests use synthetic provider responses only.
    **Secret Token** and configure both its **Event notification endpoint URL** and
    **Deauthorization Notification Endpoint URL** as
    `{PUBLIC_URL}/api/conference/zoom/events`. Validate and save the publicly reachable HTTPS
-   endpoint; see `docs/automatic-zoom.md` for setup. This endpoint remains enabled independently
-   of OAuth and automatic meeting flags. Zoom documents deauthorization delivery for public
+   endpoint; see `docs/automatic-zoom.md` for build-flow details and delivery limitations.
+   This endpoint remains enabled independently of OAuth and automatic meeting flags. Zoom documents deauthorization delivery for public
    apps; private/development apps do not trigger it.
 6. Sign in, open **Conference accounts**, and explicitly choose **Connect Zoom**. Do not use a
    provider email address as evidence of a verified Hourmere sign-in identity.
@@ -85,7 +85,8 @@ challenge to the browser.
   entire Marketplace app grant. Remove the app separately in Zoom to revoke that grant.
 - **Remove the app in Zoom** also clears local Zoom connection credentials and identity
   metadata when the operator configured the signed event endpoint and Zoom delivers the
-  deauthorization notification. Affected automatic event settings require host attention;
+  deauthorization notification. As with local disconnect, automatic event types keep their
+  activation and configuration, but the saved meeting account is unavailable until the host authorizes and selects one;
   other Zoom users are unchanged. This does not delete existing bookings or provider meetings.
 - At most five identities can be connected per Hourmere user at once, including accounts
   requiring reconnection or with an incomplete refresh. Disconnecting releases capacity. The

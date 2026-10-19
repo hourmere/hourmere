@@ -9,19 +9,36 @@ export const ZOOM_EVENTS_PATH = '/api/conference/zoom/events'
 const MAX_CLOCK_SKEW_SECONDS = 300
 const identity = z.string().regex(/^[A-Za-z0-9_-]{1,128}$/)
 const eventSchema = z.object({ event: z.string().min(1).max(128), payload: z.unknown() })
-const deauthorization = z.object({ user_id: identity, account_id: identity })
+const deauthorization = z.object({
+  user_id: identity,
+  account_id: identity,
+  client_id: z.string().max(256).optional(),
+  deauthorization_time: z.iso.datetime({ offset: true }).refine((value) => {
+    try {
+      Temporal.Instant.from(value)
+      return true
+    } catch {
+      return false
+    }
+  }),
+})
 const challenge = z.object({ plainToken: z.string().min(1).max(1024) })
 
 /** Zoom's protocol endpoint is independent of browser OAuth and meeting provisioning. */
 export function zoomEventRoutes({
   db,
   secretToken,
+  clientId,
   now = Date.now,
 }: Pick<ConferenceDeps, 'db'> & {
   secretToken?: string | undefined
+  clientId?: string | undefined
   now?: () => number
 }): RouteModule {
-  const limit = rateLimit(createRateLimiter({ limit: 120, windowSeconds: 60 }))
+  // Zoom does not retry 4xx responses; overload must remain a retryable failure.
+  const limit = rateLimit(createRateLimiter({ limit: 120, windowSeconds: 60 }, { now }), {
+    refusalStatus: 503,
+  })
   return ({ app }) => {
     if (!secretToken) return
     app.post(
@@ -73,10 +90,15 @@ export function zoomEventRoutes({
         if (event === 'app_deauthorized') {
           const parsed = deauthorization.safeParse(payload)
           if (!parsed.success) return c.json({ error: 'invalid_request' }, 400)
+          if (clientId && parsed.data.client_id !== clientId) return c.json({})
           try {
             await deauthorizeZoomConnections(
               { db },
-              { userId: parsed.data.user_id, accountId: parsed.data.account_id },
+              {
+                userId: parsed.data.user_id,
+                accountId: parsed.data.account_id,
+                deauthorizationTime: parsed.data.deauthorization_time,
+              },
             )
           } catch {
             // Database exceptions can echo bound identity values. Log only this fixed label;

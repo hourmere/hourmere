@@ -20,10 +20,13 @@ additive within a version. The OpenAPI document is served at `/api/v1/openapi.js
   `ZOOM_WEBHOOK_SECRET_TOKEN`, independently of OAuth or automatic meeting configuration.
   It authenticates the exact body bytes with `x-zm-signature` HMAC-SHA256 and requires
   `x-zm-request-timestamp` within five minutes of the server clock. Its limit is 16 KiB
-  and 120 requests per minute per client per process. It answers `endpoint.url_validation`
+  and 120 requests per minute per client per process (503 with `Retry-After` on exhaustion,
+  so Zoom can retry; configure `TRUSTED_PROXIES` behind a reverse proxy). It answers `endpoint.url_validation`
   with `plainToken` and its HMAC `encryptedToken`, and handles `app_deauthorized` by
   removing the matching Zoom user's local connection credentials and identity metadata.
-  Unknown users and repeated events return 200 without creating records. It requires no
+  Unknown users, events older than the current OAuth authorization and repeated events
+  return 200 without creating records. `deauthorization_time` is required; when
+  `ZOOM_CLIENT_ID` is configured, missing/different payload client IDs are ignored. It requires no
   browser session or API key; invalid signatures/timestamps return 401. See
   [automatic Zoom](automatic-zoom.md#app-removal-and-event-endpoint) for operator setup.
 

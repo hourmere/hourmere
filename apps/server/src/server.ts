@@ -77,6 +77,7 @@ export function productRoutes({
   microsoftCalendar,
   zoomConference,
   zoomWebhookSecretToken,
+  zoomWebhookClientId,
   enqueueCalendarSync,
   enqueueCalendarWritebackRecovery,
   mcpAuth,
@@ -100,6 +101,7 @@ export function productRoutes({
   microsoftCalendar?: CalendarDeps['microsoft']
   zoomConference?: ConferenceDeps['zoom']
   zoomWebhookSecretToken?: string | undefined
+  zoomWebhookClientId?: string | undefined
   enqueueCalendarSync?: CalendarDeps['enqueueSync']
   enqueueCalendarWritebackRecovery?: CalendarDeps['enqueueWritebackRecovery']
 }): RouteModule[] {
@@ -114,7 +116,11 @@ export function productRoutes({
       enqueueWritebackRecovery: enqueueCalendarWritebackRecovery,
     }),
     conferenceRoutes({ db, zoom: zoomConference }),
-    zoomEventRoutes({ db, secretToken: zoomWebhookSecretToken }),
+    zoomEventRoutes({
+      db,
+      secretToken: zoomWebhookSecretToken,
+      clientId: zoomWebhookClientId,
+    }),
     profileRoutes({ db }),
     scheduleRoutes({ db }),
     webhookRoutes({ db, ...webhooks }),
@@ -403,6 +409,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
         microsoftCalendar,
         zoomConference,
         zoomWebhookSecretToken: config.ZOOM_WEBHOOK_SECRET_TOKEN,
+        zoomWebhookClientId: config.ZOOM_CLIENT_ID,
         enqueueCalendarSync: (id, trx) =>
           jobs.enqueue('calendar-sync', { calendarId: id }, { singletonKey: id, transaction: trx }),
         enqueueCalendarWritebackRecovery: (connectionId, trx) =>

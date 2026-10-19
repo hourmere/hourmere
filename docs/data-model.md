@@ -346,8 +346,12 @@ unique stored Zoom `external_user_id`. The notification's `account_id` is valida
 is not persisted or used to widen deletion to other users in that Zoom account. Cleanup
 shares local disconnect's credential, scope, operation and pending-attempt retirement, and
 additionally clears the connection's external ID, email and display name. The secret-free
-disconnected row remains for existing references. Affected active automatic Zoom event
-types become inactive while retaining their selected configuration for host attention.
+disconnected row remains for existing references. Like local disconnect, automatic Zoom
+event types retain activation and configuration, with the saved account unavailable in the
+dashboard editor. Migration 0033 adds nullable `authorized_at`, set on every successful OAuth
+connection/reconsent and unchanged by refresh. Removal events older than that time are ignored
+under the owner lock, preventing delayed deliveries from retiring a new grant. Existing rows
+are not rewritten; a null value uses `created_at` as the only known lower bound.
 Existing booking and conference records follow their existing retention policy; cleanup
 does not contact Zoom or store the event payload. Repeated notifications and unknown users
 make no change. See [automatic Zoom](automatic-zoom.md#app-removal-and-event-endpoint).

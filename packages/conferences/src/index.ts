@@ -469,6 +469,7 @@ export async function finishZoomConnection(
         return 'connection_limit'
       const id = previous?.id ?? randomUUID(),
         value = {
+          authorized_at: new Date(clock(deps)),
           account_email: identity.email,
           display_name: identity.name,
           credentials: credentials(key, session.user.id, id, identity.id, tokens, mode),

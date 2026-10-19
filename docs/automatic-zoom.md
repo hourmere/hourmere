@@ -66,37 +66,60 @@ requires disconnecting locally first. Provider-side grant effects need real-clie
 
 Before a multi-user deployment lets real Zoom users connect, configure
 `ZOOM_WEBHOOK_SECRET_TOKEN` with the **Secret Token** shown in that Zoom app's webhook/event
-configuration. This is separate from the OAuth client secret. Restart the server after setting
+configuration (at least 16 characters; shorter values prevent startup without printing the
+value). This is separate from the OAuth client secret. Restart the server after setting
 it; Compose forwards it to the app and inherited worker. An empty value leaves
 `POST /api/conference/zoom/events` disabled with 404. The endpoint is enabled independently
 of the OAuth credentials and `ZOOM_MEETINGS_ENABLED`, so keep the token configured when
 turning off new connections or meeting authorization.
 
 1. Use a publicly reachable HTTPS `PUBLIC_URL` with a valid certificate and TLS 1.2 or later.
-   In the Zoom app's **Features → Access**, enable **Event Subscriptions** and set its
-   **Event notification endpoint URL** (Event Subscription URL) to
-   `{PUBLIC_URL}/api/conference/zoom/events`.
-2. Set the app's **Deauthorization Notification Endpoint URL** on its App Listing to the
-   same URL. App removal uses this field; an ordinary event subscription alone does not
-   replace it. No meeting, recording or unrelated event subscription is needed by Hourmere.
-3. Ensure the Secret Token configured in Hourmere matches that app, then click **Validate**
-   for the Event notification endpoint URL and save the app configuration. Hourmere answers
-   signed `endpoint.url_validation` challenges with the plain token and its HMAC-SHA256 hex
-   digest. Zoom also revalidates the endpoint periodically; keep it publicly reachable.
+   In the Zoom General App build flow, open **Production → App Listing → Link & Support**
+   and find **Deauthorization Notification Endpoint URL** (older app flows call this the
+   App Listing page). Set it to `{PUBLIC_URL}/api/conference/zoom/events`. Zoom's OAuth
+   documentation identifies App Listing as the destination; exact subpage labels can vary.
+2. To obtain the Secret Token and exercise endpoint validation, open **Features → Access →
+   Event Subscriptions**, use the same URL as the **Event notification endpoint URL**, and
+   click **Validate**. Hourmere answers signed `endpoint.url_validation` challenges with the
+   plain token and its HMAC-SHA256 hex digest. Save the configuration and keep it reachable
+   for Zoom's periodic revalidation. No meeting, recording or unrelated event subscription
+   is needed by Hourmere.
+3. App removal is delivered to the separate Deauthorization Notification Endpoint URL.
+   Zoom's documentation does not clearly establish whether enabling an ordinary Event
+   Subscription is a prerequisite for that delivery in every current app build flow.
+   Do not assume an Event Subscription URL replaces the deauthorization field; verify the
+   published app's actual delivery with Zoom support if the build flow is unclear.
 
 The endpoint authenticates `x-zm-signature` using HMAC-SHA256 over
 `v0:{x-zm-request-timestamp}:{raw request body}` with the webhook Secret Token, compares the
 signature in constant time, and requires the request timestamp to be within five minutes of
 the server clock in either direction. Keep server time synchronized; `event_ts` does not
 replace the signed header's freshness check. Requests are limited to 16 KiB and 120 per
-minute per client address per server process (`TRUSTED_PROXIES` controls proxy addresses);
-it never logs payloads, user identifiers or secrets and does not store the incoming event.
+minute per client address per server process. Rate-limited requests receive **503** and
+`Retry-After`: Zoom retries server failures/timeouts but does not retry 4xx, including 429.
+Its retries are finite, so monitor persistent 503 responses. Behind a reverse proxy, set
+`TRUSTED_PROXIES` to the proxy addresses/CIDRs as seen by Hourmere, and have that trusted
+proxy replace incoming forwarded headers. Otherwise unrelated deliveries share the proxy's
+IP bucket; trusting arbitrary client-supplied forwarding headers permits limit evasion.
+The endpoint never logs payloads, user identifiers or secrets and does not store the
+incoming event.
 The payload's legacy `signature` field is not authentication.
 
 A verified `app_deauthorized` event removes the matching stored Zoom user's local connection
-credentials and identity metadata, clears pending connection attempts and marks affected
-automatic event settings inactive for host attention. The stored Zoom user ID selects the
-connection; the account ID never widens deletion to other users' connections in that account.
+credentials and identity metadata and clears pending connection attempts. As with local
+**Disconnect Zoom**, automatic event types retain their activation and selected configuration;
+automatic Zoom becomes unavailable until the host authorizes and selects an available
+meeting account. The dashboard event editor shows the saved account as unavailable and
+links to **Conference accounts**, whose list no longer contains the disconnected grant.
+The stored Zoom user ID selects the connection; the account ID never widens deletion to other users' connections in that account.
+The signed payload must contain a valid `deauthorization_time`. Events older than the
+connection's last successful OAuth authorization are ignored, protecting a new grant from
+replayed notifications and delayed retries; credential refresh does not change that boundary.
+Migration 0033 preserves legacy rows with a null authorization time, for which creation time
+is the only known lower bound. A pre-upgrade reauthorization time cannot be reconstructed.
+When `ZOOM_CLIENT_ID` is configured, `payload.client_id` must match; missing or different
+client IDs are acknowledged without cleanup. Switching Zoom apps therefore ignores old-app
+events: retire any old grants deliberately as part of that operator migration.
 Repeated notifications and unknown users succeed without creating records.
 Local **Disconnect Zoom** continues to retain its stable identity metadata; removing the app
 in Zoom additionally removes that metadata when this configured endpoint receives the event.
@@ -105,8 +128,14 @@ the endpoint does not delete provider meetings or call Zoom.
 
 Zoom documents these deauthorization notifications for publicly published apps. Private apps
 and apps in development do not trigger them, so a local or development installation cannot
-establish production notification delivery. Tests use signed synthetic events only; verify
-the public app's endpoint configuration before deployment.
+establish production notification delivery. Developer forum reports describe deauthorization
+events arriving without `x-zm-signature`/`x-zm-request-timestamp`; one March 2026 report was
+later marked resolved. These reports do not establish current universal behavior. Hourmere
+returns **401** to unsigned requests by design, including ones with the legacy payload
+`signature`; it never falls back to unauthenticated deletion. Operators must verify the first
+real published-app removal using access-log **status only** (no payload, identity, headers or
+tokens), confirm local cleanup, and report missing signing headers/delivery to Zoom support.
+Tests use signed synthetic events only and do not establish production delivery.
 
 ## One meeting and safe reconciliation
 
@@ -252,4 +281,8 @@ Primary references checked 19 October 2026:
 [Meetings API](https://developers.zoom.us/docs/api/meetings/),
 [documented commercial web hosts](https://support.zoom.com/hc/en/article?id=zm_kb&sysparm_article=KB0078410),
 [webhook signatures and endpoint validation](https://developers.zoom.us/docs/api/webhooks/),
-[app deauthorization](https://developers.zoom.us/docs/integrations/end-user-auth/).
+[app deauthorization](https://developers.zoom.us/docs/integrations/end-user-auth/),
+[General App OAuth deauthorization](https://developers.zoom.us/docs/integrations/oauth/).
+Operator reports (not protocol guarantees):
+[missing deauthorization verification headers, March 2026](https://devforum.zoom.us/t/oauth-app-deauthorization-webhook-requests-missing-verification-headers-authorization-x-zm-signature/142352),
+[missing signing headers, August 2022](https://devforum.zoom.us/t/x-zm-signature-x-zm-request-timestamp-are-missed-in-deauthorization-webhook/73990).

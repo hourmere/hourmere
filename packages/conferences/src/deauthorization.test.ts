@@ -17,13 +17,30 @@ import { conferenceTestSession, fakeZoom, TEST_CONFERENCE_KEY } from './testing.
 import { zoomScopes } from './zoom.ts'
 
 const serverUrl = process.env.DATABASE_URL
-const removedIdentity = { userId: 'removed-zoom-user', accountId: 'shared-zoom-account' }
+const removedIdentity = {
+  userId: 'removed-zoom-user',
+  accountId: 'shared-zoom-account',
+  deauthorizationTime: '2100-01-01T00:00:00Z',
+}
 function barrier<T = void>() {
   let resolve!: (value: T) => void
   const promise = new Promise<T>((r) => {
     resolve = r
   })
   return { promise, resolve }
+}
+async function completes(promise: Promise<unknown>) {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      promise.then(() => true),
+      new Promise<false>((resolve) => {
+        timer = setTimeout(() => resolve(false), 1500)
+      }),
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 describe('Zoom deauthorization identity validation', () => {
@@ -35,7 +52,12 @@ describe('Zoom deauthorization identity validation', () => {
     { userId: 'user', accountId: 'bad account' },
     { userId: 'user', accountId: 'x'.repeat(129) },
   ])('rejects malformed identity before accessing storage: %#', async (identity) => {
-    await expect(deauthorizeZoomConnections({ db: {} as Db }, identity)).resolves.toBeUndefined()
+    await expect(
+      deauthorizeZoomConnections(
+        { db: {} as Db },
+        { ...identity, deauthorizationTime: removedIdentity.deauthorizationTime },
+      ),
+    ).resolves.toBeUndefined()
   })
 })
 
@@ -153,7 +175,7 @@ describe.skipIf(!serverUrl)('Zoom deauthorization cleanup (real Postgres)', () =
     },
   )
 
-  it('erases only the matching Zoom user and flags its automatic settings without account-wide deletion', async () => {
+  it('erases only the matching Zoom user and preserves its event settings like local disconnect', async () => {
     const removed = await connect(removedIdentity.userId)
     const sameOwner = await connect('another-zoom-user')
     const sameAccount = await connect('another-owner-zoom-user', other)
@@ -181,6 +203,7 @@ describe.skipIf(!serverUrl)('Zoom deauthorization cleanup (real Postgres)', () =
       [unaffected, otherUserEvent, inactive, passive].map((value) => setting(value.id)),
     )
     const calls = provider.calls.length
+    const originalAffected = await setting(affected.id)
 
     // Cleanup needs only storage; it still works after operator disables OAuth.
     await deauthorizeZoomConnections({ db }, removedIdentity)
@@ -198,11 +221,7 @@ describe.skipIf(!serverUrl)('Zoom deauthorization cleanup (real Postgres)', () =
     })
     expect(await row(sameOwner.id)).toEqual(sameOwner)
     expect(await row(sameAccount.id)).toEqual(sameAccount)
-    expect(await setting(affected.id)).toMatchObject({
-      is_active: false,
-      zoom_connection_id: removed.id,
-      location: { kind: 'zoom', autoCreate: true },
-    })
+    expect(await setting(affected.id)).toEqual(originalAffected)
     expect(
       await Promise.all(
         [unaffected, otherUserEvent, inactive, passive].map((value) => setting(value.id)),
@@ -301,7 +320,7 @@ describe.skipIf(!serverUrl)('Zoom deauthorization cleanup (real Postgres)', () =
     expect((await row(connection.id)).external_user_id).toBeNull()
   })
 
-  it('serializes after an in-flight refresh and cannot resurrect credentials', async () => {
+  it('completes during an in-flight refresh and prevents credential resurrection', async () => {
     const connection = await connect(removedIdentity.userId)
     const entered = barrier(),
       release = barrier<Response>()
@@ -309,27 +328,97 @@ describe.skipIf(!serverUrl)('Zoom deauthorization cleanup (real Postgres)', () =
       entered.resolve()
       return release.promise
     }
-    const refreshing = refreshConference(deps, owner, connection.id)
+    const refreshing = refreshConference(deps, owner, connection.id).then(
+      () => ({ status: 'fulfilled' as const }),
+      (error: unknown) => ({ status: 'rejected' as const, error }),
+    )
     await entered.promise
     const cleanup = deauthorizeZoomConnections({ db }, removedIdentity)
+    let cleared: Awaited<ReturnType<typeof row>> | undefined
     try {
-      await vi.waitFor(async () => {
-        const result = await database.pool.query<{ blocked: boolean }>(
-          'SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND cardinality(pg_blocking_pids(pid)) > 0) AS blocked',
-        )
-        expect(result.rows[0]?.blocked).toBe(true)
+      expect(await completes(cleanup)).toBe(true)
+      cleared = await row(connection.id)
+      expect(cleared).toMatchObject({
+        status: 'disconnected',
+        credentials: null,
+        operation_id: null,
+        external_user_id: null,
       })
     } finally {
       release.resolve(Response.json(provider.controls.token))
+      await Promise.all([refreshing, cleanup])
     }
-    await Promise.all([refreshing, cleanup])
-    expect(await row(connection.id)).toMatchObject({
-      status: 'disconnected',
-      credentials: null,
-      operation_id: null,
-      external_user_id: null,
+    expect(await refreshing).toMatchObject({
+      status: 'rejected',
+      error: { code: 'zoom_needs_reauth' },
     })
+    expect(await row(connection.id)).toEqual(cleared)
   })
+
+  for (const authorization of ['unbound', 'reconnect'] as const)
+    it.each(['token', 'identity'] as const)(
+      `completes during ${authorization} OAuth %s I/O and retires the claimed state`,
+      async (phase) => {
+        const connection = await connect(removedIdentity.userId)
+        const pending = new URL(
+          (
+            await authorizeZoomMeetings(
+              deps,
+              owner,
+              authorization === 'reconnect' ? connection.id : undefined,
+            )
+          ).authorizationUrl,
+        )
+        const entered = barrier(),
+          release = barrier<Response>()
+        const hook = async () => {
+          entered.resolve()
+          return release.promise
+        }
+        if (phase === 'token') provider.controls.tokenHook = hook
+        else provider.controls.identityHook = hook
+        const query = new URLSearchParams({
+          state: pending.searchParams.get('state') as string,
+          code: 'synthetic-code',
+        })
+        const finishing = finishZoomConnection(deps, owner, query)
+        await entered.promise
+        const cleanup = deauthorizeZoomConnections({ db }, removedIdentity)
+        let cleared: Awaited<ReturnType<typeof row>> | undefined
+        try {
+          expect(await completes(cleanup)).toBe(true)
+          cleared = await row(connection.id)
+          expect(cleared).toMatchObject({
+            status: 'disconnected',
+            credentials: null,
+            operation_id: null,
+            external_user_id: null,
+          })
+          expect(
+            await db
+              .selectFrom('conference_oauth_states')
+              .select('state_hash')
+              .where('user_id', '=', owner.user.id)
+              .execute(),
+          ).toEqual([])
+        } finally {
+          release.resolve(
+            Response.json(phase === 'token' ? provider.controls.token : provider.controls.identity),
+          )
+          await Promise.all([finishing, cleanup])
+        }
+        expect(await finishing).toBe('invalid_state')
+        expect(await row(connection.id)).toEqual(cleared)
+        expect(
+          await db
+            .selectFrom('conference_connections')
+            .select('id')
+            .where('user_id', '=', owner.user.id)
+            .execute(),
+        ).toEqual([{ id: connection.id }])
+        expect(await finishZoomConnection(deps, owner, query)).toBe('invalid_state')
+      },
+    )
 
   it('retries concurrent settings edits without an owner/event lock deadlock', async () => {
     const connection = await connect(removedIdentity.userId)
@@ -371,11 +460,59 @@ describe.skipIf(!serverUrl)('Zoom deauthorization cleanup (real Postgres)', () =
     const outcomes = await Promise.allSettled([cleanup, editing])
     expect(outcomes.map((outcome) => outcome.status)).toEqual(['fulfilled', 'fulfilled'])
     expect(queries).toBeGreaterThan(3)
-    expect(await setting(affected.id)).toMatchObject({ title: 'Concurrent edit', is_active: false })
+    expect(await setting(affected.id)).toMatchObject({ title: 'Concurrent edit', is_active: true })
     expect((await row(connection.id)).external_user_id).toBeNull()
   })
 
-  it('bounds contention retries and rolls back without erasing or disabling anything', async () => {
+  it('allows booking foreign-key inserts while holding automatic event settings locks', async () => {
+    const connection = await connect(removedIdentity.userId)
+    const affected = await event('booking-key-share', connection.id)
+    const entered = barrier(),
+      release = barrier()
+    let queries = 0
+    const paused = db.withPlugin({
+      transformQuery(args) {
+        return args.node
+      },
+      async transformResult(args) {
+        // Candidate, owner, connection, event discovery, organization, event lock.
+        // Hold the event lock while a booking insert checks its composite FK.
+        if (++queries === 6) {
+          entered.resolve()
+          await release.promise
+        }
+        return args.result
+      },
+    })
+    const cleanup = deauthorizeZoomConnections({ db: paused }, removedIdentity)
+    await entered.promise
+    const inserting = createFixtures(db).booking(
+      owner.organization.id,
+      [],
+      '2026-11-01T12:00:00Z',
+      '2026-11-01T12:30:00Z',
+      { eventTypeId: affected.id, attendee: null },
+    )
+    try {
+      expect(await completes(inserting)).toBe(true)
+      const id = await inserting
+      expect(
+        await db
+          .selectFrom('bookings')
+          .select('event_type_id')
+          .where('id', '=', id)
+          .executeTakeFirstOrThrow(),
+      ).toEqual({ event_type_id: affected.id })
+    } finally {
+      release.resolve()
+      const [, id] = await Promise.all([cleanup, inserting])
+      await db.deleteFrom('bookings').where('id', '=', id).execute()
+    }
+    expect((await row(connection.id)).external_user_id).toBeNull()
+    expect((await setting(affected.id)).is_active).toBe(true)
+  })
+
+  it('bounds contention retries and rolls back without erasing or changing settings', async () => {
     const connection = await connect(removedIdentity.userId)
     const affected = await event('contended', connection.id)
     const before = await setting(affected.id)

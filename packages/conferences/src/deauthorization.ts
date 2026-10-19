@@ -1,3 +1,4 @@
+import { setTimeout } from 'node:timers/promises'
 import type { Db } from '@hourmere/db'
 import { sql } from 'kysely'
 import { clearConferenceConnection } from './disconnect.ts'
@@ -18,9 +19,15 @@ function affectedEvents(db: Db, connectionId: string) {
  * external_user_id is globally unique, so an account must never widen deletion. */
 export async function deauthorizeZoomConnections(
   deps: Pick<ConferenceDeps, 'db'>,
-  identity: { userId: string; accountId: string },
+  identity: { userId: string; accountId: string; deauthorizationTime: string },
 ): Promise<void> {
   if (!identityId.test(identity.userId) || !identityId.test(identity.accountId)) return
+  let removedAt: string
+  try {
+    removedAt = Temporal.Instant.from(identity.deauthorizationTime).toString()
+  } catch {
+    return
+  }
   for (let attempt = 0; ; attempt++) {
     try {
       await deps.db.transaction().execute(async (db) => {
@@ -48,6 +55,9 @@ export async function deauthorizeZoomConnections(
           .where('user_id', '=', owner.id)
           .where('provider', '=', 'zoom')
           .where('external_user_id', '=', identity.userId)
+          // Compare again under owner protection: a reconnect may have completed
+          // after the candidate read. Refreshes never move this grant boundary.
+          .where(sql<boolean>`coalesce(authorized_at, created_at) <= ${removedAt}::timestamptz`)
           .forUpdate()
           .executeTakeFirst()
         if (!current) return
@@ -67,22 +77,16 @@ export async function deauthorizeZoomConnections(
             .forShare()
             .noWait()
             .execute()
-        const events = await affectedEvents(db, current.id).forUpdate().noWait().execute()
-        if (events.length)
-          await db
-            .updateTable('event_types')
-            .set({ is_active: false })
-            .where(
-              'id',
-              'in',
-              events.map((row) => row.id),
-            )
-            .execute()
+        // Match local Disconnect: retain event activation and configuration. This
+        // lock stabilizes selected settings but permits FK KEY SHARE checks when
+        // inserting bookings; no event key is changed by credential retirement.
+        await affectedEvents(db, current.id).forNoKeyUpdate().noWait().execute()
         await clearConferenceConnection(db, owner.id, current.id, true)
       })
       return
     } catch (error) {
       if ((error as { code?: string }).code !== '55P03' || attempt >= 2) throw error
+      await setTimeout(20 * (attempt + 1))
     }
   }
 }

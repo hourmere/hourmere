@@ -26,6 +26,18 @@ describe('independent opt-in Zoom configuration', () => {
     expect(config.GOOGLE_CLIENT_ID).toBeUndefined()
     expect(config.MICROSOFT_CLIENT_ID).toBeUndefined()
   })
+  it('requires at least 16 characters without exposing a short webhook token', () => {
+    const shortToken = 'short-token-123'
+    let message = ''
+    try {
+      loadConfig({ ...base, ZOOM_WEBHOOK_SECRET_TOKEN: shortToken })
+    } catch (error) {
+      message = error instanceof Error ? error.message : ''
+    }
+    expect(message).toContain('ZOOM_WEBHOOK_SECRET_TOKEN must have at least 16 characters')
+    expect(message.includes(shortToken)).toBe(false)
+    expect(() => loadConfig({ ...base, ZOOM_WEBHOOK_SECRET_TOKEN: 'a'.repeat(16) })).not.toThrow()
+  })
   it('enables webhook verification independently of OAuth and automatic meetings', () => {
     expect(() => loadConfig(base)).not.toThrow()
     expect(() => loadConfig({ ...base, ZOOM_WEBHOOK_SECRET_TOKEN: '' })).not.toThrow()
