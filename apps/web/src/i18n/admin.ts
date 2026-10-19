@@ -358,8 +358,13 @@ export const admin = {
   'Google did not provide continuing access. Connect again to try again.':
     'Google 未提供持续访问权限。请重新连接后重试。',
   'Google Meet (link created per booking)': 'Google Meet（每次预约时创建链接）',
-  'Google will ask for your email, calendar list, event read access and permission to change events on calendars you own. Busy-time synchronization stores times and event IDs, without event titles or descriptions. Connecting is separate from signing in.':
-    'Google 将请求你的邮箱、日历列表、事件读取权限，以及修改自有日历事件的权限。忙闲同步仅保存时间和事件 ID，不保存事件标题或描述。连接日历与登录相互独立。',
+  'Google will ask for your email, calendar list and event access: to check busy times on selected calendars, and to create, update and cancel one private booking copy on the one calendar you own and select for new bookings. Automatic Google Meet adds a link only when you enable it. Busy-time synchronization stores times and event IDs, not event titles or descriptions. Connecting is optional and separate from signing in.':
+    'Google 将请求你的邮箱、日历列表和事件访问权限：读取所选日历的忙闲时间来检查冲突，并在你拥有且选作新预约写入目标的唯一日历中，创建、更新和取消每个预约的一份私有副本。只有启用自动 Google Meet 时才会添加会议链接。忙闲同步保存时间和事件 ID，不保存事件标题或描述。连接日历是可选的，与登录相互独立。',
+  'Disconnect below deletes stored credentials and local calendar data. You can also revoke access in your Google Account:':
+    '使用下方的“断开连接”可删除已存储的凭证和本地日历数据。你也可以在 Google 账号中撤销授权：',
+  'Google Account connections': 'Google 账号连接',
+  'Could not load privacy information. Try again before connecting Google Calendar.':
+    '无法加载隐私信息。请重试后再连接 Google 日历。',
   'Guests receive confirmation emails and calendar invitations. Off by default; changing this does not remove guests from existing bookings.':
     '来宾会收到确认邮件和日历邀请。默认关闭；更改此项不会移除现有预约的来宾。',
   Handle: '用户名',

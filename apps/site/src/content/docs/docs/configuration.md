@@ -21,6 +21,8 @@ plain Compose file or the optional automatic HTTPS override; see
 | `PORT` | `3000` | Direct-server TCP port (`0`–`65535`). `0` lets the OS choose a port and requires an explicit `PUBLIC_URL`; links always use that configured external origin. In plain Compose, `.env` `PORT` changes the loopback host port; the container still listens on `3000`. The HTTPS override removes that host mapping, so `PORT` has no effect there. |
 | `PUBLIC_URL` | `http://localhost:<PORT>` | External HTTP(S) origin, with no path/query. Use HTTPS publicly. Plain Compose defaults to `http://localhost:3000` independently of its host port setting. Bundled Caddy requires an HTTPS hostname origin; setup does not accept a public port or path. |
 | `HOSTED_SIGNUP_URL` | `https://hourmere.com` | Hosted service destination for public attribution and confirmation links. Set the hosted sign-up page URL when available; HTTP(S), no credentials, query or fragment. Independent of this instance’s `PUBLIC_URL`; attribution cannot be disabled. |
+| `PRIVACY_POLICY_URL` | Unset | This instance operator's privacy policy. Absolute HTTP(S) URL, at most 2048 characters, without credentials, whitespace or control characters. Empty hides the privacy link. |
+| `TERMS_URL` | Unset | This instance operator's terms. Same URL rules as `PRIVACY_POLICY_URL`. Empty hides the terms link. |
 | `BETTER_AUTH_SECRET` | Required | At least 32 non-whitespace random characters. Signs sessions and protects sign-in tokens. Changing it signs people out. |
 | `AUTO_MIGRATE` | `true` | Apply SQL/job migrations on startup. `false` requires manual migrations first; startup still needs database access. Forwarded by the default Compose file with a default of `true`. |
 | `WEB_DIST` | Unset | Built SPA directory. Not forwarded by the default Compose file: Docker sets `/app/apps/web/dist`; development uses Vite instead. |
@@ -29,6 +31,22 @@ plain Compose file or the optional automatic HTTPS override; see
 | `WEBHOOK_ENCRYPTION_KEY` | Unset | Independent 32-byte base64 key required when webhooks are enabled. Encrypts signing secrets; keep stable and backed up. |
 | `MCP_OAUTH_ENABLED` | `false` | Enable MCP OAuth connectors alongside API keys. Requires HTTPS except on loopback; explicit organization approval and revocation at `/app/connected-apps`. No calendar/provider client credentials needed. Set identically on web and worker. |
 | `HOURMERE_ROLE` | `all` | `all`: API and workers; `web`: API/queues only; `worker`: jobs and health endpoint only. The separate-worker Compose overlay fixes the app to `web` and the worker to `worker`, independently of this `.env` setting. |
+
+Policy links belong to the instance's operator and are independent of `PUBLIC_URL` and
+`HOSTED_SIGNUP_URL`. Self-hosted instances have no policy URL defaults: configure your own
+legal pages before inviting users. Setup preserves the empty example values; Compose forwards
+both variables to the app and its inherited worker. The app's public instance endpoint exposes
+each configured URL so signed-out, signed-in, booking and MCP consent pages can link to it.
+
+For the Hourmere hosted instance, set these values in its deployment environment and recreate
+the app after deployment:
+
+```dotenv
+PRIVACY_POLICY_URL=https://hourmere.com/privacy
+TERMS_URL=https://hourmere.com/terms
+```
+
+These values are explicit deployment settings; the server does not infer policies from a hostname.
 
 `npm run dev` points the application at Vite (`http://localhost:5173`) and defaults signup to
 open only when neither signup setting was supplied. Node 26 runs TypeScript sources

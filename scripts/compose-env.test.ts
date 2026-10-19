@@ -104,6 +104,16 @@ describe('documented Compose configuration', () => {
     expect(compose).toMatch(/^ {6}ZOOM_MEETINGS_ENABLED: \$\{ZOOM_MEETINGS_ENABLED:-false\}$/m)
   })
 
+  it('forwards operator policy links without supplying a hosted policy for self-hosted instances', () => {
+    const environment = composeAppEnvironment(compose)
+    for (const key of ['PRIVACY_POLICY_URL', 'TERMS_URL']) {
+      expect(environment.get(key)).toBe(`\${${key}:-}`)
+      expect(example).toMatch(new RegExp(`^${key}=$`, 'm'))
+      const row = reference.split('\n').find((line) => line.startsWith(`| \`${key}\` |`))
+      expect(row).toContain('| Unset |')
+    }
+  })
+
   it('forwards the optional Zoom webhook token without enabling it by default', () => {
     expect(composeAppEnvironment(compose).get('ZOOM_WEBHOOK_SECRET_TOKEN') ?? '').toMatch(
       /^\$\{ZOOM_WEBHOOK_SECRET_TOKEN:-\}$/,

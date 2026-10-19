@@ -31,6 +31,22 @@ const HSTS_MAX_AGE_FORMAT = 'HSTS_MAX_AGE must be a whole number of seconds (0 o
 const SMTP_URL_FORMAT =
   'SMTP_URL must look like smtps://user:password@host:465 or smtp://user:password@host:587, with no path (percent-encode special characters in the password)'
 
+// Policy links describe this instance's operator, so self-hosted installations have no default.
+const policyUrl = (name: string) =>
+  optional(
+    z
+      .string()
+      .max(2048, `${name} must be at most 2048 characters`)
+      .refine((value) => isSingleLineText(value) && !/\s/u.test(value), {
+        error: `${name} must not contain whitespace or control characters`,
+      })
+      .pipe(z.url({ protocol: /^https?$/, error: `${name} must be an HTTP(S) URL` }))
+      .refine(
+        (value) => URL.canParse(value) && !new URL(value).username && !new URL(value).password,
+        { error: `${name} must not contain credentials` },
+      ),
+  )
+
 const schema = z
   .object({
     DATABASE_URL: z
@@ -93,6 +109,8 @@ const schema = z
         },
       ),
     ).transform((value) => value ?? 'https://hourmere.com'),
+    PRIVACY_POLICY_URL: policyUrl('PRIVACY_POLICY_URL'),
+    TERMS_URL: policyUrl('TERMS_URL'),
     BETTER_AUTH_SECRET: z
       .string({
         error:

@@ -11,6 +11,7 @@ import { leavesPage } from '../unsaved-changes.tsx'
 
 type Connection = Schemas['CalendarConnection']
 const load = (signal: AbortSignal) => unwrap(api.GET('/api/v1/calendar-connections', { signal }))
+const loadInstance = (signal: AbortSignal) => unwrap(api.GET('/api/v1/instance', { signal }))
 const outcomes = new Map([
   ['connected', 'Google Calendar connected. Your calendar list is ready.'],
   ['denied', 'Google Calendar was not connected because you cancelled authorization.'],
@@ -35,6 +36,7 @@ export function CalendarsPage() {
 
   usePageTitle('Calendars')
   const [state, reload] = useLoad(load)
+  const [instance, reloadInstance] = useLoad(loadInstance)
   const [search, setSearch] = useSearchParams()
   const [notice, setNotice] = useState(() => noticeFor(search))
   const [error, setError] = useState<UiText | null>(null)
@@ -232,16 +234,55 @@ export function CalendarsPage() {
         <>
           {state.data.googleEnabled ? (
             <section className="stack" aria-label={t('Connect Google Calendar')}>
-              <p>
-                {t(
-                  'Google will ask for your email, calendar list, event read access and permission to change events on calendars you own. Busy-time synchronization stores times and event IDs, without event titles or descriptions. Connecting is separate from signing in.',
+              <div id="google-calendar-permissions" className="stack">
+                <p>
+                  {t(
+                    'Google will ask for your email, calendar list and event access: to check busy times on selected calendars, and to create, update and cancel one private booking copy on the one calendar you own and select for new bookings. Automatic Google Meet adds a link only when you enable it. Busy-time synchronization stores times and event IDs, not event titles or descriptions. Connecting is optional and separate from signing in.',
+                  )}
+                </p>
+                <p>
+                  {t(
+                    'Disconnect below deletes stored credentials and local calendar data. You can also revoke access in your Google Account:',
+                  )}{' '}
+                  <a
+                    href="https://myaccount.google.com/connections"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {t('Google Account connections')}
+                  </a>
+                  .
+                </p>
+                {instance.status === 'ready' && instance.data.privacyPolicyUrl && (
+                  <p>
+                    <a
+                      href={instance.data.privacyPolicyUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      {t('Privacy policy')}
+                    </a>
+                  </p>
                 )}
-              </p>
+                {instance.status === 'error' && (
+                  <div className="alert alert-error">
+                    <p role="alert">
+                      {t(
+                        'Could not load privacy information. Try again before connecting Google Calendar.',
+                      )}
+                    </p>
+                    <button type="button" className="button" onClick={reloadInstance}>
+                      {t('Try again')}
+                    </button>
+                  </div>
+                )}
+              </div>
               <div>
                 <button
                   type="button"
                   className="button button-primary"
-                  disabled={pending !== null}
+                  aria-describedby="google-calendar-permissions"
+                  disabled={pending !== null || instance.status !== 'ready'}
                   onClick={() => connect()}
                 >
                   {pending === 'connect' ? t('Opening Google…') : t('Connect Google Calendar')}
@@ -319,7 +360,12 @@ export function CalendarsPage() {
                     <button
                       type="button"
                       className="button"
-                      disabled={pending !== null || !state.data.googleEnabled}
+                      aria-describedby={
+                        state.data.googleEnabled ? 'google-calendar-permissions' : undefined
+                      }
+                      disabled={
+                        pending !== null || !state.data.googleEnabled || instance.status !== 'ready'
+                      }
                       onClick={() => connect('sync')}
                     >
                       {t('Enable calendar synchronization')}

@@ -7,6 +7,53 @@ const base = {
 }
 
 describe('loadConfig', () => {
+  describe.each(['PRIVACY_POLICY_URL', 'TERMS_URL'] as const)('%s', (name) => {
+    it('has no default for any instance and treats an empty value as unset', () => {
+      for (const PUBLIC_URL of ['https://self.example', 'https://app.hourmere.com']) {
+        expect(loadConfig({ ...base, PUBLIC_URL })[name]).toBeUndefined()
+        expect(loadConfig({ ...base, PUBLIC_URL, [name]: '' })[name]).toBeUndefined()
+      }
+    })
+
+    it('accepts an operator-supplied HTTP(S) policy URL independently of the instance', () => {
+      for (const value of [
+        'https://operator.example/legal/privacy?lang=zh-CN#data',
+        'http://localhost:4321/terms',
+        `https://operator.example/${'a'.repeat(2023)}`,
+      ])
+        expect(loadConfig({ ...base, [name]: value })[name]).toBe(value)
+    })
+
+    it('rejects non-HTTP(S), malformed, credential-bearing and oversized URLs', () => {
+      for (const value of [
+        'javascript:alert(1)',
+        'data:text/html,test',
+        'ftp://operator.example/privacy',
+        '/privacy',
+        'not a url',
+        'https://user@operator.example/privacy',
+        'https://:secret@operator.example/privacy',
+        `https://operator.example/${'a'.repeat(2024)}`,
+      ])
+        expect(() => loadConfig({ ...base, [name]: value })).toThrow(new RegExp(name))
+    })
+
+    it('rejects whitespace, control characters and malformed Unicode instead of normalizing them', () => {
+      for (const value of [
+        ' https://operator.example/privacy',
+        'https://operator.example/privacy ',
+        'https://operator.example/my policy',
+        'https://operator.example/pri\nvacy',
+        'https://operator.example/pri\tvacy',
+        'https://operator.example/pri\u0000vacy',
+        'https://operator.example/pri\u0085vacy',
+        'https://operator.example/pri\u2028vacy',
+        'https://operator.example/pri\ud800vacy',
+      ])
+        expect(() => loadConfig({ ...base, [name]: value })).toThrow(new RegExp(name))
+    })
+  })
+
   it('requires calendar encryption to be independent of authentication and webhook keys', () => {
     const key = Buffer.alloc(32, 'k').toString('base64')
     for (const reused of [

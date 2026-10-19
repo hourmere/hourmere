@@ -5359,6 +5359,11 @@ export interface components {
              * @description Hosted service destination for public attribution and sign-up links
              */
             hostedSignupUrl: string;
+            /**
+             * Format: uri
+             * @description This instance operator's privacy policy; absent when not configured
+             */
+            privacyPolicyUrl?: string;
             /** @description The sign-in methods people can use on this instance */
             signIn: {
                 /** @description Sign-in links sent by email */
@@ -5366,6 +5371,11 @@ export interface components {
                 google: boolean;
                 microsoft: boolean;
             };
+            /**
+             * Format: uri
+             * @description This instance operator's terms; absent when not configured
+             */
+            termsUrl?: string;
         };
         ManagedBooking: components["schemas"]["Booking"] & {
             /** @description The event type as it is now; null once it is deleted */
