@@ -459,8 +459,8 @@ async function toBookings(db: Db, rows: readonly BookingRow[]): Promise<Booking[
   }
   return rows.map((row) => {
     const view = conferences.get(row.id)
-    // Cancellation may commit after the first booking read. Keep its top-level state
-    // on the same snapshot as conference readiness and the protected location.
+    // Cancellation/rescheduling may commit after the first booking read, even moving
+    // the conference pointer away. Hydrate lifecycle state for every booking id.
     const r = view
       ? {
           ...row,
@@ -481,11 +481,11 @@ async function toBookings(db: Db, rows: readonly BookingRow[]): Promise<Booking[
         (automaticZoom(location) || automaticMeet(location)) &&
           (r.status !== 'confirmed' ||
             view?.bookingStatus !== 'confirmed' ||
-            view?.conference.status !== 'ready')
+            view?.conference?.status !== 'ready')
           ? unresolvedLocation(location)
           : location,
       ),
-      ...(view ? { conference: view.conference } : {}),
+      ...(view?.conference ? { conference: view.conference } : {}),
       responses: (isRecord(r.responses) ? r.responses : {}) as Responses,
       attendees: byBooking.get(r.id) ?? [],
       rescheduledFromId: r.rescheduled_from_id,

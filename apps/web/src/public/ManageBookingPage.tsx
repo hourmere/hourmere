@@ -151,7 +151,7 @@ function ManageBooking({ token: initialToken, action }: { token: string; action:
       token={token}
       newToken={newToken}
       initialAction={action}
-      onUpdated={(fresh) => setBooking((previous) => previous && { ...previous, ...fresh })}
+      onUpdated={setBooking}
       onCancelled={(cancelled) => setBooking({ ...booking, ...cancelled })}
       onRescheduled={(next, nextToken) => {
         setBooking({ ...booking, ...next })
@@ -293,7 +293,12 @@ function ManageView({
         key={booking.id}
         booking={booking}
         manageToken={token}
-        onChange={(fresh) => onUpdated({ ...booking, ...fresh })}
+        onChange={(fresh) => {
+          // A reschedule can remove the old booking's optional conference entirely.
+          // Replace the read state; retain only metadata absent from the base callback type.
+          onUpdated({ eventType: booking.eventType, hosts: booking.hosts, ...fresh })
+          if (fresh.id !== booking.id || fresh.status !== booking.status) setMode({ kind: 'view' })
+        }}
       />
       {mode.kind === 'reschedule' ? (
         <div className="reschedule">

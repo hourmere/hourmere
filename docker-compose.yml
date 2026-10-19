@@ -4,14 +4,14 @@
 # The app listens on 127.0.0.1:3000; put a reverse proxy with TLS in front of it. Until SMTP
 # is configured, sign-in links are printed by `docker compose logs app`. With the default
 # SIGNUP=first-user, sign in right after the first start: the first account should be yours.
-# Background jobs (booking emails) run inside `app` unless you split them out (the `worker`
-# service below).
+# Background jobs run inside `app` unless COMPOSE_FILE in .env also selects
+# docker-compose.worker.yml, which runs them in a separate worker.
 name: hourmere
 
 services:
   app:
     build: .
-    # Built here, never pulled; the optional worker below runs the same image.
+    # Built here, never pulled; the optional worker overlay runs the same image.
     image: ${APP_IMAGE:-hourmere:local}
     pull_policy: never
     environment:
@@ -61,19 +61,6 @@ services:
     # Allow a 10 s HTTP drain, 20 s job drain and 5 s margin before Docker kills it.
     stop_grace_period: 35s
     restart: unless-stopped
-
-  # To run background jobs in a container of their own (same image), set HOURMERE_ROLE=web
-  # in .env and uncomment this service. Its port stays unpublished: it only answers the
-  # health check.
-  # worker:
-  #   extends: app
-  #   build: !reset null
-  #   environment:
-  #     HOURMERE_ROLE: worker
-  #   ports: !reset []
-  #   depends_on:
-  #     db:
-  #       condition: service_healthy
 
   db:
     image: postgres:18-alpine

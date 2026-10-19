@@ -28,7 +28,7 @@ plain Compose file or the optional automatic HTTPS override; see
 | `WEBHOOKS_ENABLED` | `false` | Capture new organization booking events for outbound HTTPS webhooks. No backfill; set identically on web and worker. See repository `docs/webhooks.md`. |
 | `WEBHOOK_ENCRYPTION_KEY` | Unset | Independent 32-byte base64 key required when webhooks are enabled. Encrypts signing secrets; keep stable and backed up. |
 | `MCP_OAUTH_ENABLED` | `false` | Enable MCP OAuth connectors alongside API keys. Requires HTTPS except on loopback; explicit organization approval and revocation at `/app/connected-apps`. No calendar/provider client credentials needed. Set identically on web and worker. |
-| `HOURMERE_ROLE` | `all` | `all`: API and workers; `web`: API/queues only; `worker`: jobs and health endpoint only. |
+| `HOURMERE_ROLE` | `all` | `all`: API and workers; `web`: API/queues only; `worker`: jobs and health endpoint only. The separate-worker Compose overlay fixes the app to `web` and the worker to `worker`, independently of this `.env` setting. |
 
 `npm run dev` points the application at Vite (`http://localhost:5173`) and defaults signup to
 open only when neither signup setting was supplied. Node 26 runs TypeScript sources
@@ -118,14 +118,14 @@ keeps local connections visible so people can disconnect or stop using their cal
 ## Compose-only settings and overrides
 
 These settings control Docker Compose rather than the server configuration loader. Compose
-2.24.4 or newer is required for the HTTPS override's `!reset` tag. Setup defaults to the
+2.24.4 or newer is required for the HTTPS and worker overlays' `!reset` tags. Setup defaults to the
 HTTPS path and writes the combined `COMPOSE_FILE`; copying `.env.example` without setup
 keeps the plain path.
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `POSTGRES_PASSWORD` | Required | Initializes the PostgreSQL role and becomes the app's `PGPASSWORD`. Changing `.env` does not change an already initialized database role's password. |
-| `COMPOSE_FILE` | `docker-compose.yml` | Not forwarded by the default Compose file: consumed by the Compose CLI. Setup writes `docker-compose.yml:docker-compose.proxy.yml` for bundled HTTPS, or `docker-compose.yml` for plain mode. |
+| `COMPOSE_FILE` | `docker-compose.yml` | Not forwarded by the default Compose file: consumed by the Compose CLI. Setup writes `docker-compose.yml:docker-compose.proxy.yml` for bundled HTTPS, or `docker-compose.yml` for plain mode. After setup, append `:docker-compose.worker.yml` to run a separate worker; the overlay automatically switches the app to `web`. The saved `.env` preserves this choice for backups and upgrades without editing tracked Compose files. |
 | `COMPOSE_PROJECT_NAME` | `hourmere` | Not forwarded by the default Compose file: consumed by the Compose CLI to select containers, networks and volumes. Setup persists this name; set it in setup's environment to choose an independent deployment. Keep the original name when migrating an existing installation; persist the new name when restoring to a separate project. |
 | `APP_IMAGE` | `hourmere:local` | Local image tag built from this checkout; `pull_policy: never` remains in force. Use a distinct tag for independent deployments on one Docker host. No prebuilt public image is published yet. |
 | `PROXY_SUBNET` | `172.30.62.0/28` | Not forwarded by the default Compose file: the HTTPS override uses this dedicated IPv4 ingress subnet. Change it together with `PROXY_IP` and `PROXY_DYNAMIC_RANGE` before starting if it overlaps another network or another deployment. |
@@ -143,13 +143,19 @@ before enabling IPv6/AAAA. Proxy setup requires SMTP for sign-in; private log-ma
 are described there too. Setup omits the development `DATABASE_URL` from the generated `.env`.
 
 To disable automatic migrations, set `AUTO_MIGRATE=false` in `.env`; the default Compose
-file forwards it to the app and its inherited worker. You can also set it explicitly in a
-Compose override, including the worker if you enabled one:
+file forwards it to the app and the worker overlay inherits it. The overlay inherits the
+base app's configuration, so custom app-only overrides do not also configure the worker.
+For example, to disable automatic migrations in a custom override when using a worker,
+set both services explicitly:
 
 ```yaml
 # compose.override.yaml
 services:
   app:
+    environment:
+      AUTO_MIGRATE: 'false'
+    stop_grace_period: 35s
+  worker:
     environment:
       AUTO_MIGRATE: 'false'
     stop_grace_period: 35s

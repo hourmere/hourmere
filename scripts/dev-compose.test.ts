@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 const root = new URL('../', import.meta.url)
@@ -12,6 +12,7 @@ const devScripts = Object.entries(scripts).filter(([, command]) =>
   command.includes('docker-compose.dev.yml'),
 )
 const example = readFileSync(new URL('.env.example', root), 'utf8')
+const productionFiles = 'docker-compose.yml:docker-compose.proxy.yml:docker-compose.worker.yml'
 const hasCompose = spawnSync('docker', ['compose', 'version'], { encoding: 'utf8' }).status === 0
 
 describe('development Compose isolation', () => {
@@ -27,8 +28,10 @@ describe('development Compose isolation', () => {
     expect(example).not.toMatch(/^[\t ]*(?:export[\t ]+)?COMPOSE_PROJECT_NAME[\t ]*=/m)
   })
 
-  it.skipIf(!hasCompose)('preserves the development volume despite production settings', () => {
+  it.skipIf(!hasCompose)('ignores production proxy and worker settings for development', () => {
     const directory = mkdtempSync(join(tmpdir(), 'hourmere-dev-compose-'))
+    const project = basename(directory).toLowerCase()
+    const productionProject = `${project}-production`
     try {
       writeFileSync(
         join(directory, 'docker-compose.dev.yml'),
@@ -36,23 +39,27 @@ describe('development Compose isolation', () => {
       )
       writeFileSync(
         join(directory, '.env'),
-        `${example}\nCOMPOSE_PROJECT_NAME=hourmere\nCOMPOSE_FILE=production-only.yml\n`,
+        `${example}\nCOMPOSE_PROJECT_NAME=${productionProject}\nCOMPOSE_FILE=${productionFiles}\n`,
       )
       for (const [, command] of devScripts) {
-        // Use the actual script's Compose options, replacing only its lifecycle operation.
+        // Use the script's options but render under an owned project instead of hourmere-dev.
         const args = command
           .slice('docker '.length)
           .split(/\s+(?:up|down)\b/)[0]
           ?.split(/\s+/)
         expect(args).toBeDefined()
+        const projectIndex = args?.indexOf('-p') ?? -1
+        if (args && projectIndex >= 0 && args[projectIndex + 1] === 'hourmere-dev') {
+          args[projectIndex + 1] = project
+        }
         const result = spawnSync('docker', [...(args ?? []), 'config', '--format', 'json'], {
           cwd: directory,
           encoding: 'utf8',
           env: {
             PATH: process.env.PATH,
             HOME: process.env.HOME,
-            COMPOSE_PROJECT_NAME: 'hourmere',
-            COMPOSE_FILE: 'production-only.yml',
+            COMPOSE_PROJECT_NAME: productionProject,
+            COMPOSE_FILE: productionFiles,
           },
         })
         expect(
@@ -60,8 +67,9 @@ describe('development Compose isolation', () => {
           'Compose must render the dev script without starting containers',
         ).toBe(0)
         const config = JSON.parse(result.stdout)
-        expect(config.name).toBe('hourmere-dev')
-        expect(config.volumes['db-data'].name).toBe('hourmere-dev_db-data')
+        expect(config.name).toBe(project)
+        expect(Object.keys(config.services)).toEqual(['db'])
+        expect(config.volumes['db-data'].name).toBe(`${project}_db-data`)
       }
     } finally {
       rmSync(directory, { recursive: true, force: true })
