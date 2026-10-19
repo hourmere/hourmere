@@ -101,6 +101,22 @@ describe.skipIf(!serverUrl)('durable organization booking webhooks', () => {
     transport,
     now,
   })
+  async function waitForBlocked(query: string) {
+    await expect
+      .poll(
+        async () =>
+          (
+            await testDb.pool.query<{ blocked: boolean }>(
+              `SELECT EXISTS(SELECT 1 FROM pg_stat_activity
+                WHERE datname=current_database() AND wait_event_type='Lock'
+                  AND query ILIKE $1) AS blocked`,
+              [query],
+            )
+          ).rows[0]?.blocked,
+        { timeout: 3000 },
+      )
+      .toBe(true)
+  }
 
   it('requires a fresh owner/admin membership for configuration and delivery reads', async () => {
     const { user, webhook } = await fixture()
@@ -422,16 +438,25 @@ describe.skipIf(!serverUrl)('durable organization booking webhooks', () => {
 
   it('serializes duplicate jobs and never sends the same successful delivery concurrently', async () => {
     const { delivery } = await captured()
+    const started = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
     let count = 0
     const d = deps(async () => {
       count++
-      await new Promise((resolve) => setTimeout(resolve, 20))
+      started.resolve()
+      await release.promise
       return 204
     })
-    await Promise.all([
-      deliverWebhook(d, delivery.id, signal()),
-      deliverWebhook(d, delivery.id, signal()),
-    ])
+    const first = deliverWebhook(d, delivery.id, signal())
+    await started.promise
+    const second = deliverWebhook(d, delivery.id, signal())
+    try {
+      await waitForBlocked('%from "webhook_deliveries"%for update%')
+      expect(count).toBe(1)
+    } finally {
+      release.resolve()
+      await Promise.all([first, second])
+    }
     expect(count).toBe(1)
   })
 
@@ -465,10 +490,14 @@ describe.skipIf(!serverUrl)('durable organization booking webhooks', () => {
         finished = true
         return result
       })
-      await new Promise((resolve) => setTimeout(resolve, 30))
-      expect(finished).toBe(false)
-      release.resolve()
-      await runningResult
+      try {
+        await waitForBlocked('%from "webhooks"%for update%')
+        expect(finished).toBe(false)
+      } finally {
+        release.resolve()
+        await runningResult
+        await change
+      }
       const changed = await change
       expect(
         capturedRequest?.headers['webhook-signature'] ===
