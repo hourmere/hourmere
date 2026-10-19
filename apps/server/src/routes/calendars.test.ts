@@ -38,6 +38,19 @@ describe.skipIf(!databaseUrl)('calendar HTTP routes (real Postgres)', () => {
       organization: team.as({ ...owner.user, principal: owner }).organization,
     }
     otherInTeam = { ...other, organization: ownerInTeam.organization }
+    for (const principal of [owner, ownerInTeam, otherInTeam])
+      await db
+        .insertInto('auth.apikey')
+        .values({
+          id: principal === ownerInTeam ? team.id : principal.sessionId,
+          configId: 'default',
+          referenceId: principal.user.id,
+          key: `synthetic-${principal === ownerInTeam ? team.id : principal.sessionId}`,
+          metadata: JSON.stringify({ organizationId: principal.organization.id }),
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .execute()
     await db
       .insertInto('profiles')
       .values({ user_id: owner.user.id, handle: 'calendar-http-owner', time_zone: 'UTC' })
@@ -63,7 +76,7 @@ describe.skipIf(!databaseUrl)('calendar HTTP routes (real Postgres)', () => {
         const principal = headers.has('authorization')
           ? {
               kind: 'api_key' as const,
-              apiKeyId: keyOwner.sessionId,
+              apiKeyId: keyOwner === ownerInTeam ? ownerInTeam.organization.id : keyOwner.sessionId,
               user: keyOwner.user,
               organization: keyOwner.organization,
             }

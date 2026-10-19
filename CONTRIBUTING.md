@@ -50,6 +50,34 @@ npm run db:migrate
 npm run db:types
 ```
 
+## Database upgrade tests
+
+`packages/db/src/upgrade-path.test.ts` runs in the unit suite and CI. It upgrades populated
+databases from checkpoints 0012, 0023 and 0030, compares their `auth`/`public` schema with a
+fresh install, checks data preservation and documented backfills, and verifies that running
+migrations again is a no-op. New migration files are picked up automatically; never edit
+merged migrations to make the test pass.
+
+Run it locally with the database-creation account:
+
+```sh
+DATABASE_URL=postgres://hourmere:hourmere@localhost:5432/hourmere npm test -- packages/db/src/upgrade-path.test.ts --maxWorkers=2
+```
+
+The URL is used only by the throwaway-database helper to create and drop isolated databases;
+the test never reads or writes application data in the named development database. Keep
+pool counts bounded and close every pool in teardown; CI uses PostgreSQL's default
+`max_connections=100`.
+
+When adding tables or columns, extend the seed at a checkpoint whose schema contains them.
+The early checkpoint ends at migration 0012; use a later checkpoint for newer tables, or
+add a later checkpoint when needed. Seed realistic related rows through that historical
+schema so subsequent migrations exercise existing data, including non-default settings and
+nullable values. Preserve the snapshot of existing columns. For intentional transformations,
+document the reason and assert the exact expected change or backfill instead of silently
+excluding the affected columns from preservation checks. Keep migration-specific tests for
+behavior that needs additional fixtures.
+
 ## Browser tests
 
 Install Google Chrome separately if it is not already available. The Playwright suite uses
