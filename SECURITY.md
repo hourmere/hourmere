@@ -14,8 +14,8 @@ Please report vulnerabilities privately. Do not open a public issue, pull reques
 discussion for them.
 
 - **Email:** [security@hourmere.com](mailto:security@hourmere.com)
-- **GitHub:** once the repository is public and private vulnerability reporting is enabled,
-  you can also use **Report a vulnerability** on the repository's Security tab.
+- **GitHub:** use **Report a vulnerability** on the repository's
+  [Security tab](https://github.com/hourmere/hourmere/security).
 
 Reports are handled in written English, by email or on GitHub. Phone and video calls are not
 available.
@@ -44,8 +44,9 @@ After that we keep you informed as we work on a fix, and we may ask you to check
 
 We ask you to give us 90 days from your report before disclosing it publicly, or less if a
 fix is released sooner. If a fix needs more time, we will tell you why and agree on a new date
-with you. When the fix is out, we publish a security advisory (on GitHub once the repository
-is public) and credit you unless you prefer to remain anonymous.
+with you. When the fix is out, we publish a
+[GitHub security advisory](https://github.com/hourmere/hourmere/security/advisories) and credit
+you unless you prefer to remain anonymous.
 
 ## Scope
 

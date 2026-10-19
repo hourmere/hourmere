@@ -134,7 +134,7 @@ function Authorization({ email }: { email: string }) {
             {info.data.scopes.includes('offline_access') && (
               <p>
                 {t(
-                  'It can stay connected for up to 30 days without another sign-in. You can revoke access in Connected apps.',
+                  'It can stay connected after you sign out, for up to 30 days from its original approval. Refreshing does not extend that time. Leaving the organization or revoking access in Connected apps stops the connection immediately.',
                 )}
               </p>
             )}

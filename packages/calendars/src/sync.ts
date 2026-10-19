@@ -86,7 +86,17 @@ export async function useGoogleConnection<T>(
           throw new GoogleCalendarError('permissions_missing')
         accessToken = next.accessToken
       }
-      return { ok: true as const, value: await work(trx, accessToken, owner.user_id) }
+      const value = await work(trx, accessToken, owner.user_id)
+      // Only a transient failure clears itself. A permissions failure recorded by one booking
+      // write stays visible while unrelated busy syncs and writes on the same connection
+      // succeed; reconnecting clears it and queues recovery of the copies that were refused.
+      await trx
+        .updateTable('calendar_connections')
+        .set({ last_error: null })
+        .where('id', '=', id)
+        .where('last_error', '=', 'provider_unavailable')
+        .execute()
+      return { ok: true as const, value }
     } catch (error) {
       if (!(error instanceof GoogleCalendarError)) throw error
       await trx
@@ -342,6 +352,7 @@ export async function syncOwnedCalendar(deps: CalendarDeps, principal: Principal
         'conflict',
         `google_calendar_${error.code}`,
         'Calendar synchronization could not complete. Reconnect if access has expired, or try again shortly.',
+        { cause: error },
       )
     throw error
   }

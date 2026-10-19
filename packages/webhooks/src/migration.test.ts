@@ -79,6 +79,8 @@ it.skipIf(!serverUrl)(
         deliveries: await db.selectFrom('webhook_deliveries').selectAll().orderBy('id').execute(),
       })
       const before = await snapshot()
+      // Only this migration joins the predecessor set, so later migrations cannot change
+      // what this test applies or observes.
       await copyFile(new URL(migration, source), join(dir, migration))
       expect(await runMigrations(pool, dir)).toEqual([migration])
       expect(isDeepStrictEqual(await snapshot(), before)).toBe(true)

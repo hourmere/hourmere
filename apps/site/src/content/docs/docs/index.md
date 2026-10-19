@@ -19,5 +19,7 @@ from your Hourmere instance.
 - [Microsoft Calendar](/docs/microsoft-calendar): register an Entra application and connect,
   refresh or disconnect an Outlook calendar list. Busy-time sync and event writes are pending.
 
-The software is licensed under AGPL-3.0. Report vulnerabilities privately to
-[security@hourmere.com](mailto:security@hourmere.com).
+The software is licensed under AGPL-3.0. File bugs and feature ideas in
+[GitHub Issues](https://github.com/hourmere/hourmere/issues). Report vulnerabilities privately
+to [security@hourmere.com](mailto:security@hourmere.com) or through the repository's
+[Security tab](https://github.com/hourmere/hourmere/security/advisories/new).

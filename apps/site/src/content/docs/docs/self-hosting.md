@@ -5,13 +5,13 @@ description: Run the current development version of Hourmere with Docker Compose
 
 ## Prepare an instance
 
-Use a machine with Git, Docker Engine and Docker Compose. The repository is currently
-private; cloning requires repository access. No prebuilt public image is published. Choose
+Use a machine with Git, Docker Engine and Docker Compose. The repository is public.
+No prebuilt public image is published. Choose
 an unused deployment directory and database volume, separate from development or other
 instances.
 
 ```sh
-git clone https://github.com/cobaltmere/hourmere.git
+git clone https://github.com/hourmere/hourmere.git
 cd hourmere
 cp .env.example .env
 chmod 600 .env

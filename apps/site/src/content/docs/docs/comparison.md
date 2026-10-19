@@ -5,8 +5,8 @@ description: Compare Hourmere, Calendly, Cal.com and Cal.diy by deployment, agen
 
 Hourmere is an early development project for people who want to run their own scheduling
 service and connect agents through an API key. There is no stable release, public
-container image or hosted Hourmere booking service yet. The current repository is private;
-evaluating it requires access. This page describes the current source, rather than promising
+container image or hosted Hourmere booking service yet. The current repository is public.
+This page describes the current source, rather than promising
 feature parity with an established service.
 
 Vendor documentation was checked on October 17, 2026. Follow the linked sources for current
@@ -31,8 +31,7 @@ describes its installation model and operating warning.
 
 For Hourmere's actual setup and maintenance requirements, read the
 [self-hosting guide](/docs/self-hosting), [configuration reference](/docs/configuration)
-and [security policy](https://github.com/cobaltmere/hourmere/blob/main/SECURITY.md).
-The repository link requires access while the project remains private.
+and [security policy](https://github.com/hourmere/hourmere/security/policy).
 
 ## Access for agents
 
@@ -46,7 +45,7 @@ Hourmere also has an opt-in OAuth connector protocol for clients that need it. L
 protocol tests are separate from a successful connection to a hosted client: actual
 ChatGPT or claude.ai interoperability has not been verified. A hosted connector needs an
 externally reachable HTTPS instance. See the
-[MCP protocol documentation](https://github.com/cobaltmere/hourmere/blob/main/docs/mcp.md)
+[MCP protocol documentation](https://github.com/hourmere/hourmere/blob/main/docs/mcp.md)
 for the current implementation and limits.
 
 Calendly also has both a REST API and MCP support. Its

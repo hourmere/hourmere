@@ -2,7 +2,13 @@ import { createHash } from 'node:crypto'
 import { isSingleLineText } from '@hourmere/scheduling/text'
 import { z } from 'zod'
 import { googleEventMethods } from './google-events.ts'
-import { CalendarProviderError, type CalendarTokens, type ProviderCalendar } from './provider.ts'
+import {
+  CalendarProviderError,
+  type CalendarTokens,
+  type OAuthTokenError,
+  type ProviderCalendar,
+  readOAuthTokenError,
+} from './provider.ts'
 
 export const GOOGLE_CALENDAR_CALLBACK = '/api/calendar/google/callback'
 export const GOOGLE_CALENDAR_SCOPES = [
@@ -20,8 +26,9 @@ export class GoogleCalendarError extends CalendarProviderError {
   constructor(
     code: 'provider_unavailable' | 'needs_reauth' | 'permissions_missing',
     status?: number,
+    oauthError?: OAuthTokenError,
   ) {
-    super(code, status)
+    super(code, status, oauthError)
     this.name = 'GoogleCalendarError'
   }
 }
@@ -106,24 +113,31 @@ export function createGoogleCalendarClient(
     try {
       const response = await request(url, { ...init, signal, redirect: 'error' })
       if (!response.ok) {
-        // Read only bounded JSON to classify documented rejection reasons. Retain only
-        // our allowlisted code, never the upstream body (which may echo credentials).
-        const parsed = errorResponse.safeParse(await responseJson(response).catch(() => undefined))
-        const detail = parsed.success ? parsed.data.error : undefined
+        // Token errors retain only a bounded, allow-listed OAuth enum. Resource errors
+        // use their separately bounded JSON to distinguish usage limits from lost access.
+        const tokenEndpoint = url === 'https://oauth2.googleapis.com/token'
+        const oauthError = tokenEndpoint ? await readOAuthTokenError(response) : undefined
+        const parsed = tokenEndpoint
+          ? undefined
+          : errorResponse.safeParse(await responseJson(response).catch(() => undefined))
+        const detail = parsed?.success ? parsed.data.error : undefined
         const rateLimited =
           typeof detail === 'object' &&
           detail.errors?.some((e) =>
-            ['rateLimitExceeded', 'userRateLimitExceeded'].includes(e.reason),
+            ['rateLimitExceeded', 'userRateLimitExceeded', 'quotaExceeded'].includes(e.reason),
           )
-        const tokenEndpoint = url === 'https://oauth2.googleapis.com/token'
         throw new GoogleCalendarError(
-          (tokenEndpoint && response.status === 400 && detail === 'invalid_grant') ||
-            (!tokenEndpoint && response.status === 401)
-            ? 'needs_reauth'
-            : !tokenEndpoint && response.status === 403 && !rateLimited
-              ? 'permissions_missing'
-              : 'provider_unavailable',
+          tokenEndpoint
+            ? oauthError === 'invalid_grant' && [400, 401].includes(response.status)
+              ? 'needs_reauth'
+              : 'provider_unavailable'
+            : response.status === 401
+              ? 'needs_reauth'
+              : response.status === 403 && !rateLimited
+                ? 'permissions_missing'
+                : 'provider_unavailable',
           response.status,
+          oauthError,
         )
       }
       return await responseJson(response)

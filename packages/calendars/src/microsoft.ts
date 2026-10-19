@@ -1,7 +1,13 @@
 import { createHash } from 'node:crypto'
 import { isSingleLineText } from '@hourmere/scheduling/text'
 import { z } from 'zod'
-import { CalendarProviderError, type CalendarTokens, type ProviderCalendar } from './provider.ts'
+import {
+  CalendarProviderError,
+  type CalendarTokens,
+  type OAuthTokenError,
+  type ProviderCalendar,
+  readOAuthTokenError,
+} from './provider.ts'
 
 export const MICROSOFT_CALENDAR_CALLBACK = '/api/calendar/microsoft/callback'
 export const MICROSOFT_CALENDAR_SCOPES = [
@@ -12,8 +18,8 @@ export const MICROSOFT_CALENDAR_SCOPES = [
 ] as const
 
 export class MicrosoftCalendarError extends CalendarProviderError {
-  constructor(code: CalendarProviderError['code'], status?: number) {
-    super(code, status)
+  constructor(code: CalendarProviderError['code'], status?: number, oauthError?: OAuthTokenError) {
+    super(code, status, oauthError)
     this.name = 'MicrosoftCalendarError'
   }
 }
@@ -63,14 +69,23 @@ export function createMicrosoftCalendarClient(
     try {
       const response = await request(url, { ...init, signal, redirect: 'error' })
       if (!response.ok) {
-        await response.body?.cancel()
+        const tokenEndpoint = url === tokenUrl
+        const oauthError = tokenEndpoint ? await readOAuthTokenError(response) : undefined
+        if (!tokenEndpoint) await response.body?.cancel()
         throw new MicrosoftCalendarError(
-          response.status === 401 || (url === tokenUrl && response.status === 400)
-            ? 'needs_reauth'
-            : response.status === 403
-              ? 'permissions_missing'
-              : 'provider_unavailable',
+          tokenEndpoint
+            ? oauthError !== undefined &&
+              ['invalid_grant', 'interaction_required', 'consent_required'].includes(oauthError) &&
+              [400, 401].includes(response.status)
+              ? 'needs_reauth'
+              : 'provider_unavailable'
+            : response.status === 401
+              ? 'needs_reauth'
+              : response.status === 403
+                ? 'permissions_missing'
+                : 'provider_unavailable',
           response.status,
+          oauthError,
         )
       }
       if (!response.body) throw new MicrosoftCalendarError('provider_unavailable')

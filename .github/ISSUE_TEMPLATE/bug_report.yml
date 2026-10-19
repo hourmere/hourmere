@@ -6,7 +6,7 @@ body:
     attributes:
       value: |
         Thanks for taking the time to report this. **Security vulnerabilities must not be
-        reported here:** follow [SECURITY.md](https://github.com/cobaltmere/hourmere/blob/main/SECURITY.md) instead.
+        reported here:** follow [SECURITY.md](https://github.com/hourmere/hourmere/security/policy) instead.
 
         Please remove secrets (`BETTER_AUTH_SECRET`, passwords, API keys, sign-in links) and
         other people's personal data from anything you paste.

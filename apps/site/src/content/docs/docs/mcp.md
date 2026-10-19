@@ -1,6 +1,6 @@
 ---
 title: MCP quickstart
-description: Connect an AI client to Hourmere's remote MCP server using an API key.
+description: Connect an AI client to Hourmere's remote MCP server using an API key or OAuth.
 ---
 
 ## Connect a client
@@ -126,6 +126,16 @@ registration, and requires Authorization Code with S256 PKCE and the MCP resourc
 
 Sign in, choose an organization explicitly, and review the app's requested access. MCP
 access includes booking details and mutations with your current permissions in that
-organization. Optional offline access keeps the connection for up to 30 days. Revoke an
+organization. Optional `offline_access` keeps the connection working after browser sign-out
+or session expiry, for at most 30 days from the original approval. Refreshing does not extend
+that deadline; reconnect when it expires. Every request checks your current membership and
+permissions. Removal from the organization or revocation ends access immediately. Revoke an
 app at **Connected apps**; old tokens stop working immediately. API keys remain available
 when OAuth is disabled. Calendar connections are configured separately.
+
+OAuth limits apply regardless of `NODE_ENV`: registration allows 5 requests per minute per
+IP, authorization 30 and token requests 20. Code exchanges, refreshes and failed token
+requests share that token budget; provider 429 responses include `X-Retry-After` seconds
+(the authorization entrance limiter uses `Retry-After`). Workers remove DCR
+clients without completed consent after 24 hours and clients unused for at least 90 days
+(with up to one day of grace for daily activity writes).

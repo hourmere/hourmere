@@ -7,6 +7,7 @@ import {
   sign,
 } from 'node:crypto'
 import {
+  CLIENT_IP_HEADER,
   createAuth,
   createAuthPool,
   createCallerResolver,
@@ -17,7 +18,7 @@ import {
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createTestTeam, createTestUser } from '@hourmere/scheduling/testing'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.ts'
 import { mcpEndpoint } from './mcp/endpoint.ts'
 import { mcpOAuthCleanupJob, mcpOAuthRoutes } from './mcp/oauth.ts'
@@ -28,6 +29,8 @@ const BASE = 'http://localhost:4197'
 const CLIENT = 'https://client.test/metadata.json'
 const CALLBACK = 'https://client.test/callback'
 const secret = randomBytes(32).toString('base64')
+let nextAddress = 0
+const testIp = () => `198.18.${Math.floor(++nextAddress / 250)}.${(nextAddress % 250) + 1}`
 const queryOf = (url: URL) => url.searchParams.toString()
 function redirectOf(value: unknown) {
   const v = value as { url?: unknown; redirect_uri?: unknown }
@@ -78,8 +81,13 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
     await pool?.end()
     await owned?.drop()
   })
-  const request = (path: string, init?: RequestInit) =>
-    auth.handler(new Request(new URL(path, BASE), init))
+  const request = (path: string, init?: RequestInit) => {
+    // Each independent synthetic flow has its own transport address. Rate-limit behavior
+    // itself is exercised separately with a fixed address.
+    const headers = new Headers(init?.headers)
+    headers.set(CLIENT_IP_HEADER, testIp())
+    return auth.handler(new Request(new URL(path, BASE), { ...init, headers }))
+  }
   async function session(existingUser?: Awaited<ReturnType<typeof createTestUser>>) {
     const user = existingUser ?? (await createTestUser(db))
     const token = randomBytes(24).toString('base64url')
@@ -156,6 +164,9 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
     }
     const s = await session()
     expect((await request('/api/auth/token', { headers: s.headers })).status).toBe(404)
+    const sessionResponse = await request('/api/auth/get-session', { headers: s.headers })
+    expect(sessionResponse.status).toBe(200)
+    expect(sessionResponse.headers.has('set-auth-jwt')).toBe(false)
   })
   it('signs continuations, resolves only injected HTTPS metadata and refuses tampering', async () => {
     const { query } = authorization()
@@ -278,12 +289,13 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
     )
     expect(nextClaims['https://hourmere.com/organization']).toBe(team.id)
   })
-  function app() {
+  function app(trustedProxies: readonly string[] = []) {
     return createApp({
       checkDb: async () => {},
       authHandler: auth.handler,
       resolveCaller: createCallerResolver({ auth, db }),
       publicUrl: BASE,
+      trustedProxies,
       routes: [mcpOAuthRoutes({ auth, db, publicUrl: BASE })],
       mcp: mcpEndpoint({
         tools: [whoamiTool],
@@ -302,11 +314,15 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
   ) {
     const headers = new Headers(s.headers)
     headers.set('content-type', 'application/json')
-    return app().request(`${BASE}/api/v1/mcp-oauth/${path}`, {
-      method,
-      headers,
-      ...(body ? { body: JSON.stringify(body) } : {}),
-    })
+    return app().request(
+      `${BASE}/api/v1/mcp-oauth/${path}`,
+      {
+        method,
+        headers,
+        ...(body ? { body: JSON.stringify(body) } : {}),
+      },
+      { incoming: { socket: { remoteAddress: testIp() } } },
+    )
   }
   async function begin(
     s: Awaited<ReturnType<typeof session>>,
@@ -410,16 +426,157 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
       '/.well-known/oauth-protected-resource/mcp',
       '/.well-known/oauth-authorization-server/api/auth',
     ]) {
-      const response = await app().request(`${BASE}${path}`)
+      const response = await app().request(`${BASE}${path}`, undefined, {
+        incoming: { socket: { remoteAddress: testIp() } },
+      })
       expect(response.status).toBe(200)
       expect(response.headers.get('cache-control')).toBe('no-store')
     }
     const denied = await app().request(mcpRequest())
     expect(denied.status).toBe(401)
-    expect(denied.headers.get('www-authenticate')).toContain(
-      `resource_metadata="${BASE}/.well-known/oauth-protected-resource/mcp"`,
+    expect(denied.headers.get('www-authenticate')).toBe(
+      `Bearer resource_metadata="${BASE}/.well-known/oauth-protected-resource/mcp"`,
     )
+    expect(await denied.json()).toMatchObject({ message: expect.stringContaining('OAuth') })
     expect((await app().request(mcpRequest('bad-token'))).status).toBe(401)
+  })
+  it('isolates discovery rate limits by transport address without missing-IP warnings', async () => {
+    const warnings = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const server = app()
+      const paths = [
+        '/.well-known/oauth-protected-resource',
+        '/.well-known/oauth-protected-resource/mcp',
+        '/.well-known/oauth-authorization-server',
+        '/.well-known/oauth-authorization-server/api/auth',
+        '/.well-known/openid-configuration/api/auth',
+      ]
+      const discovery = (path: string, peer: string, headers?: Record<string, string>) =>
+        server.request(
+          `${BASE}${path}`,
+          { headers },
+          {
+            incoming: { socket: { remoteAddress: peer } },
+          },
+        )
+      for (const path of paths) {
+        // Keep the provider's existing 404s for the issuer root and disabled OIDC metadata.
+        const status =
+          path === '/.well-known/oauth-authorization-server' ||
+          path === '/.well-known/openid-configuration/api/auth'
+            ? 404
+            : 200
+        // Forged IP headers cannot collapse unrelated peers into one bucket.
+        for (let count = 0; count < 130; count++)
+          expect(
+            (
+              await discovery(path, testIp(), {
+                [CLIENT_IP_HEADER]: '203.0.113.1',
+                'x-forwarded-for': '203.0.113.1',
+              })
+            ).status,
+          ).toBe(status)
+        const noisyPeer = testIp()
+        // Nor may a noisy peer evade its own bucket with forged addresses.
+        for (let count = 0; count < 100; count++)
+          expect(
+            (
+              await discovery(path, noisyPeer, {
+                [CLIENT_IP_HEADER]: testIp(),
+                'x-forwarded-for': testIp(),
+              })
+            ).status,
+          ).toBe(status)
+        expect((await discovery(path, noisyPeer)).status).toBe(429)
+        expect((await discovery(path, testIp())).status).toBe(status)
+        expect((await discovery(path, noisyPeer)).status).toBe(429)
+      }
+      expect(
+        warnings.mock.calls.some((call) =>
+          call.some((value) => String(value).includes('could not determine a client IP')),
+        ),
+      ).toBe(false)
+    } finally {
+      warnings.mockRestore()
+    }
+  })
+  it('uses a trusted proxy client address for discovery rate limits', async () => {
+    const server = app(['10.0.0.7'])
+    const path = '/.well-known/oauth-authorization-server/api/auth'
+    const discovery = (ip: string) =>
+      server.request(
+        `${BASE}${path}`,
+        {
+          headers: { 'x-forwarded-for': ip },
+        },
+        { incoming: { socket: { remoteAddress: '10.0.0.7' } } },
+      )
+    for (let count = 0; count < 130; count++) expect((await discovery(testIp())).status).toBe(200)
+    const noisyPeer = testIp()
+    for (let count = 0; count < 100; count++) expect((await discovery(noisyPeer)).status).toBe(200)
+    expect((await discovery(noisyPeer)).status).toBe(429)
+    expect((await discovery(testIp())).status).toBe(200)
+  })
+  it('limits OAuth MCP calls to 120 per consent and advertises when to retry', async () => {
+    const s = await session(),
+      tokens = await connected(s),
+      server = app()
+    for (let i = 0; i < 120; i++)
+      expect((await server.request(mcpRequest(tokens.access_token))).status).toBe(200)
+    const limited = await server.request(mcpRequest(tokens.access_token))
+    expect(limited.status).toBe(429)
+    expect(await limited.json()).toEqual({ error: 'rate_limited' })
+    expect(Number(limited.headers.get('retry-after'))).toBeGreaterThan(0)
+    expect(Number(limited.headers.get('retry-after'))).toBeLessThanOrEqual(60)
+    const other = await session(),
+      otherTokens = await connected(other)
+    expect((await server.request(mcpRequest(otherTokens.access_token))).status).toBe(200)
+  })
+  it('renders authorization errors locally for DCR clients, invalid clients and mismatched callbacks', async () => {
+    const server = app()
+    const registration = await server.request(`${BASE}/api/auth/oauth2/register`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        client_name: 'Unapproved dynamic connector',
+        redirect_uris: ['https://phish.invalid/landing'],
+        token_endpoint_auth_method: 'none',
+      }),
+    })
+    expect(registration.status).toBe(201)
+    const { client_id: clientId } = (await registration.json()) as { client_id: string }
+    const { query } = authorization()
+    query.set('client_id', clientId)
+    query.set('redirect_uri', 'https://phish.invalid/landing')
+    for (const [key, value] of [
+      ['response_type', 'token'],
+      ['scope', 'admin'],
+      ['code_challenge', ''],
+      ['prompt', 'none'],
+      ['client_id', 'not-a-client'],
+      ['redirect_uri', 'https://unregistered.invalid/callback'],
+    ]) {
+      const invalid = new URLSearchParams(query)
+      invalid.set(key as string, value as string)
+      const response = await server.request(`${BASE}/api/auth/oauth2/authorize?${invalid}`)
+      expect(response.status).toBe(400)
+      expect(response.headers.has('location')).toBe(false)
+      expect(response.headers.get('content-type')).toContain('text/html')
+      expect(await response.text()).toContain('Unable to connect to Hourmere')
+    }
+    for (const headers of [{ accept: 'application/json' }, { 'sec-fetch-mode': 'cors' }]) {
+      const invalid = new URLSearchParams(query)
+      invalid.set('client_id', 'not-a-client')
+      const response = await server.request(`${BASE}/api/auth/oauth2/authorize?${invalid}`, {
+        headers,
+      })
+      expect(response.status).toBe(400)
+      expect(response.headers.get('content-type')).toContain('text/html')
+      expect(response.headers.has('location')).toBe(false)
+    }
+    const valid = await server.request(`${BASE}/api/auth/oauth2/authorize?${query}`)
+    expect(valid.status).toBe(302)
+    expect(new URL(valid.headers.get('location') as string, BASE).pathname).toBe('/oauth/authorize')
   })
   it('binds browser approval to one session, signed request and fixed organization', async () => {
     const s = await session(),
@@ -598,6 +755,15 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
       404,
     )
     expect((await api(`connections/${data.data[0]?.id}`, s, undefined, 'DELETE')).status).toBe(200)
+    const retired = await db
+      .selectFrom('auth.oauthRefreshToken')
+      .select(['revoked', 'rotationReplayResponse'])
+      .where('userId', '=', s.user.id)
+      .execute()
+    expect(retired.length).toBeGreaterThan(0)
+    expect(
+      retired.every((row) => row.revoked !== null && row.rotationReplayResponse === null),
+    ).toBe(true)
     expect((await app().request(mcpRequest(tokens.access_token))).status).toBe(401)
     const refreshed = await request('/api/auth/oauth2/token', {
       method: 'POST',
@@ -637,9 +803,126 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
     await connected(s)
     expect((await app().request(mcpRequest(tokens.access_token))).status).toBe(401)
   })
-  it('honors the session liveness of session-bound access tokens', async () => {
+  it('keeps offline access usable after browser expiry and sign-out, including rotated tokens', async () => {
+    for (const end of ['expiry', 'sign-out']) {
+      const s = await session(),
+        tokens = await connected(s)
+      if (end === 'expiry')
+        await db
+          .updateTable('auth.session')
+          .set({ expiresAt: new Date(0) })
+          .where('id', '=', s.sessionId)
+          .execute()
+      else
+        expect(
+          (await request('/api/auth/sign-out', { method: 'POST', headers: s.headers })).status,
+        ).toBe(200)
+      expect((await app().request(mcpRequest(tokens.access_token))).status).toBe(200)
+      let previous = tokens.refresh_token
+      for (let rotation = 0; rotation < 2; rotation++) {
+        const refresh = await request('/api/auth/oauth2/token', {
+          method: 'POST',
+          headers: { 'content-type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({
+            grant_type: 'refresh_token',
+            client_id: CLIENT,
+            refresh_token: previous,
+            resource: `${BASE}/mcp`,
+          }),
+        })
+        expect(refresh.status).toBe(200)
+        const next = (await refresh.json()) as { access_token: string; refresh_token: string }
+        expect((await app().request(mcpRequest(next.access_token))).status).toBe(200)
+        previous = next.refresh_token
+      }
+    }
+  })
+  it('preserves the original consent deadline through rotation and refuses the expired connection', async () => {
     const s = await session(),
       tokens = await connected(s)
+    const consentDate = new Date(Date.now() - 30 * 86400000 + 60000)
+    const deadline = new Date(consentDate.getTime() + 30 * 86400000)
+    await db
+      .updateTable('auth.oauthConsent')
+      .set({ createdAt: consentDate })
+      .where('userId', '=', s.user.id)
+      .execute()
+    const refresh = (token: string) =>
+      request('/api/auth/oauth2/token', {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'refresh_token',
+          client_id: CLIENT,
+          refresh_token: token,
+          resource: `${BASE}/mcp`,
+        }),
+      })
+    const rotated = await refresh(tokens.refresh_token)
+    expect(rotated.status).toBe(200)
+    const next = (await rotated.json()) as { access_token: string; refresh_token: string }
+    const row = await db
+      .selectFrom('auth.oauthRefreshToken')
+      .select('expiresAt')
+      .where('userId', '=', s.user.id)
+      .where('revoked', 'is', null)
+      .where('rotatedAt', 'is', null)
+      .executeTakeFirstOrThrow()
+    expect(new Date(row.expiresAt).getTime()).toBe(deadline.getTime())
+    await db
+      .updateTable('auth.oauthConsent')
+      .set({ createdAt: new Date(Date.now() - 30 * 86400000 - 1000) })
+      .where('userId', '=', s.user.id)
+      .execute()
+    expect((await refresh(next.refresh_token)).status).toBe(400)
+    expect((await app().request(mcpRequest(next.access_token))).status).toBe(401)
+  })
+  it('starts a fresh consent lifetime on normal reconnect after expiry and retires the old generation', async () => {
+    const s = await session(),
+      tokens = await connected(s),
+      pending = await begin(s)
+    const oldCode = (await approved(s, pending)).searchParams.get('code') as string
+    const oldConsent = await db
+      .selectFrom('auth.oauthConsent')
+      .select(['id', 'referenceId'])
+      .where('userId', '=', s.user.id)
+      .executeTakeFirstOrThrow()
+    await db
+      .updateTable('auth.oauthConsent')
+      .set({ createdAt: new Date(Date.now() - 30 * 86400000 - 1000) })
+      .where('id', '=', oldConsent.id)
+      .execute()
+    const reconnect = await begin(s),
+      approvedUrl = await approved(s, reconnect)
+    const response = await exchange(reconnect, approvedUrl.searchParams.get('code') as string)
+    expect(response.status).toBe(200)
+    const current = (await response.json()) as { access_token: string }
+    const consent = await db
+      .selectFrom('auth.oauthConsent')
+      .select(['referenceId', 'createdAt'])
+      .where('userId', '=', s.user.id)
+      .executeTakeFirstOrThrow()
+    expect(consent.referenceId === oldConsent.referenceId).toBe(false)
+    expect(Date.now() - new Date(consent.createdAt).getTime()).toBeLessThan(60000)
+    expect((await app().request(mcpRequest(current.access_token))).status).toBe(200)
+    expect((await app().request(mcpRequest(tokens.access_token))).status).toBe(401)
+    expect((await exchange(pending, oldCode)).status >= 400).toBe(true)
+    const retired = await db
+      .selectFrom('auth.oauthRefreshToken')
+      .select('revoked')
+      .where('userId', '=', s.user.id)
+      .where('referenceId', '=', oldConsent.referenceId)
+      .execute()
+    expect(retired.length).toBeGreaterThan(0)
+    expect(retired.every((row) => row.revoked !== null)).toBe(true)
+  })
+  it('keeps session-bound access tied to a live browser when offline access was not approved', async () => {
+    const s = await session(),
+      a = await begin(s, s.user.principal.organization.id, { scope: MCP_OAUTH_SCOPE })
+    const url = await approved(s, a),
+      response = await exchange(a, url.searchParams.get('code') as string)
+    expect(response.status).toBe(200)
+    const tokens = (await response.json()) as { access_token: string }
     expect((await app().request(mcpRequest(tokens.access_token))).status).toBe(200)
     await db
       .updateTable('auth.session')
@@ -647,8 +930,100 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
       .where('id', '=', s.sessionId)
       .execute()
     expect((await app().request(mcpRequest(tokens.access_token))).status).toBe(401)
-    await db.deleteFrom('auth.session').where('id', '=', s.sessionId).execute()
-    expect((await app().request(mcpRequest(tokens.access_token))).status).toBe(401)
+  })
+  it.each(
+    ['membership', 'email', 'offline-consent'].flatMap((change) =>
+      ['initial', 'replay', 'rotated'].map((mode) => [change, mode] as const),
+    ),
+  )('returns invalid_grant for %s during %s refresh', async (change, mode) => {
+    const s = await session(),
+      team = await createTestTeam(db, [{ user: s.user, role: 'owner' }]),
+      tokens = await connected(s, team.id)
+    let refreshToken = tokens.refresh_token
+    const refresh = () =>
+      request('/api/auth/oauth2/token', {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'refresh_token',
+          client_id: CLIENT,
+          refresh_token: refreshToken,
+          resource: `${BASE}/mcp`,
+        }),
+      })
+    if (mode !== 'initial') {
+      const first = await refresh()
+      expect(first.status).toBe(200)
+      const rotated = (await first.json()) as { refresh_token: string }
+      if (mode === 'rotated') refreshToken = rotated.refresh_token
+    }
+    if (change === 'membership')
+      await db
+        .deleteFrom('auth.member')
+        .where('organizationId', '=', team.id)
+        .where('userId', '=', s.user.id)
+        .execute()
+    else if (change === 'email')
+      await db
+        .updateTable('auth.user')
+        .set({ emailVerified: false })
+        .where('id', '=', s.user.id)
+        .execute()
+    else
+      await db
+        .updateTable('auth.oauthConsent')
+        .set({ scopes: JSON.stringify([MCP_OAUTH_SCOPE]) })
+        .where('userId', '=', s.user.id)
+        .execute()
+    const refreshState = async () =>
+      JSON.stringify(
+        await db
+          .selectFrom('auth.oauthRefreshToken')
+          .selectAll()
+          .where('userId', '=', s.user.id)
+          .orderBy('id')
+          .execute(),
+      )
+    const before = await refreshState()
+    const denied = await refresh()
+    expect(denied.status).toBe(400)
+    const error = (await denied.json()) as {
+      error: string
+      access_token?: string
+      refresh_token?: string
+    }
+    expect(error.error).toBe('invalid_grant')
+    expect(error.access_token === undefined && error.refresh_token === undefined).toBe(true)
+    expect((await refreshState()) === before).toBe(true)
+  })
+  it('returns invalid_grant when membership ends between approval and code exchange', async () => {
+    const s = await session(),
+      team = await createTestTeam(db, [{ user: s.user, role: 'owner' }]),
+      a = await begin(s, team.id),
+      url = await approved(s, a)
+    await db
+      .deleteFrom('auth.member')
+      .where('organizationId', '=', team.id)
+      .where('userId', '=', s.user.id)
+      .execute()
+    const denied = await exchange(a, url.searchParams.get('code') as string)
+    expect(denied.status).toBe(400)
+    const error = (await denied.json()) as {
+      error: string
+      code?: string
+      access_token?: string
+      refresh_token?: string
+    }
+    expect(error.error).toBe('invalid_grant')
+    expect(error.code).toBeUndefined()
+    expect(error.access_token === undefined && error.refresh_token === undefined).toBe(true)
+    expect(
+      await db
+        .selectFrom('auth.oauthRefreshToken')
+        .select('id')
+        .where('userId', '=', s.user.id)
+        .execute(),
+    ).toEqual([])
   })
   it('immediately rejects removed members and disabled OAuth clients', async () => {
     const s = await session(),
@@ -660,6 +1035,17 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
       .where('userId', '=', s.user.id)
       .execute()
     expect((await app().request(mcpRequest(tokens.access_token))).status).toBe(401)
+    const removedRefresh = await request('/api/auth/oauth2/token', {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        client_id: CLIENT,
+        refresh_token: tokens.refresh_token,
+        resource: `${BASE}/mcp`,
+      }),
+    })
+    expect(removedRefresh.status >= 400).toBe(true)
     const personal = await connected(s)
     await db
       .updateTable('auth.oauthClient')
