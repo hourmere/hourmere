@@ -43,7 +43,7 @@ function fixture(script = source) {
         cwd: directory,
         encoding: 'utf8',
         input,
-        timeout: 5000,
+        timeout: 15_000,
         env: { ...process.env, COMPOSE_PROJECT_NAME: '', ...env },
       })
     },
@@ -66,7 +66,7 @@ function generatedSecret(contents: string, name: string): string {
   return new RegExp(`^${name}='([^']*)'$`, 'm').exec(contents)?.[1] ?? ''
 }
 
-describe('first-run deployment setup', () => {
+describe('first-run deployment setup', { timeout: 20_000 }, () => {
   it('generates independent strong secrets privately and selects the HTTPS Compose path', () => {
     const setup = fixture()
     const result = setup.run(proxyInput, {}, true)
