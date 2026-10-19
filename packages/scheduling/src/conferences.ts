@@ -384,6 +384,8 @@ interface BookingConferenceView {
   conference: ConferenceStatus
   location: Json | null
   bookingStatus: string
+  bookingCancelledAt: Date | null
+  bookingCancelReason: string | null
 }
 
 export async function bookingConferenceViews(db: Db, ids: readonly string[]) {
@@ -392,9 +394,14 @@ export async function bookingConferenceViews(db: Db, ids: readonly string[]) {
     .selectFrom('booking_conferences')
     .innerJoin('bookings as b', 'b.id', 'booking_conferences.booking_id')
     .selectAll('booking_conferences')
-    // Read the resolved link and readiness from one snapshot: the worker commits them
-    // together, while a booking row loaded before this query may still have no link.
-    .select(['b.status as booking_status', 'b.location as booking_location'])
+    // Read cancellation, the resolved link and readiness from one snapshot. A booking
+    // row loaded before this query may predate a worker or cancellation commit.
+    .select([
+      'b.status as booking_status',
+      'b.location as booking_location',
+      'b.cancelled_at as booking_cancelled_at',
+      'b.cancel_reason as booking_cancel_reason',
+    ])
     .where('booking_id', 'in', ids)
     .execute()
   const unavailable = new Set<string>()
@@ -418,6 +425,8 @@ export async function bookingConferenceViews(db: Db, ids: readonly string[]) {
         },
         location: r.booking_location,
         bookingStatus: r.booking_status,
+        bookingCancelledAt: r.booking_cancelled_at,
+        bookingCancelReason: r.booking_cancel_reason,
       },
     ]),
   )
