@@ -315,16 +315,31 @@ index; delivery metadata pages use the existing `(webhook_id,id)` index in rever
 `calendar_connections`. It has a stable UUID, owner FK, provider/external-identity uniqueness,
 optional bounded display metadata, minimal scopes, a safe status/error and purpose-bound
 AES-256-GCM ciphertext. A durable `refreshing` operation holds no reusable credentials.
-Browser connection operations use short transactions that lock the owner, then the live
-session, then the connection/state. State claims and token retirement commit before bounded
-provider I/O, which runs without row locks so public bookings can proceed. Completion locks
-and rechecks the session and claimed state or refresh operation. OAuth also compares the
-connection row version captured before I/O, preventing a stale callback from overwriting
-reconnection, upgrade or worker credential changes. Concurrent explicit refreshes fail while
-the durable operation is in flight with `zoom_refresh_in_progress`; only a later action may
-rotate its committed new token. Logout or session expiry retires a still-owned refresh claim
-to `needs_reauth`, clears its operation and credentials, and prevents new automatic bookings.
-If observed before provider I/O, it skips the rotation entirely.
+Browser and worker connection operations use short transactions that lock the owner,
+then the session (for browser operations), then the connection/state. State claims and
+token retirement commit before bounded provider I/O, which runs without row locks.
+Migration 0035 adds `conference_token_operations`: an owner-keyed, expiring operation UUID
+lease that cascades on user deletion without changing existing connections or OAuth states.
+OAuth only learns the external identity after exchange, so token-changing operations
+serialize by owner. Claims and consumption use short owner-first transactions; no lock or
+pool connection spans provider I/O. Token-changing provider calls have a hard deadline
+(15 seconds by default), with a lease of at least one minute measured by database time.
+Completion checks
+the live lease ID and expiry under a short share lock before storing credentials. Release
+compares the operation ID; a stale operation cannot release a successor. Crash recovery
+can take over an expired lease. Callbacks wait; explicit refresh returns
+`zoom_refresh_in_progress` and workers retry while the lease is occupied.
+Disconnect/logout/deletion do not wait for token operations. Completion rechecks the session
+and claimed state or refresh operation; OAuth additionally checks current acting-organization
+membership before exchange and before persistence. Workers check credential revisions around
+identity/meeting I/O and operation/revision around rotation. Their best-effort credential
+retirement skips writes while another token operation owns a live lease.
+OAuth expiry is validated with atomic single-use consumption before exchange, without
+rejecting a successful exchange solely because time elapsed. Expiry cleanup retains
+claimed attempts. A wrong-mode identity exchange retires an existing meetings grant even
+if unrelated metadata changed. Logout or session expiry retires a still-owned browser
+refresh claim to `needs_reauth`, clears its operation and credentials, and prevents new
+automatic bookings. If observed before provider I/O, it skips the rotation entirely.
 Transient refresh transport failures retry at most three times with backoff; if they remain
 transient, the operation restores the original encrypted grant as active for later recovery.
 Other token rejections or malformed successful responses also preserve the prior grant;

@@ -12,6 +12,7 @@ import {
   encryptConferenceCredential,
 } from './credentials.ts'
 import { clearConferenceConnection } from './disconnect.ts'
+import { type TokenOperation, withTokenOperation } from './token-operation.ts'
 import { credentials, readTokens } from './tokens.ts'
 import {
   matchingZoomScopes,
@@ -113,6 +114,15 @@ async function sessionAlive(db: Db, session: Session, now: number) {
     .where('id', '=', session.sessionId)
     .where('userId', '=', session.user.id)
     .where('expiresAt', '>', new Date(now))
+    .executeTakeFirst())
+}
+async function organizationMember(db: Db, session: Session) {
+  return !!(await db
+    .selectFrom('auth.member')
+    .select('id')
+    .where('userId', '=', session.user.id)
+    .where('organizationId', '=', session.organization.id)
+    .forShare()
     .executeTakeFirst())
 }
 function owned<T>(
@@ -261,6 +271,7 @@ async function beginConnection(
     await db
       .deleteFrom('conference_oauth_states')
       .where('user_id', '=', session.user.id)
+      .where('claimed', '=', false)
       .where('expires_at', '<=', new Date(clock(deps)))
       .execute()
     if (id)
@@ -333,6 +344,7 @@ export async function finishZoomConnection(
     return 'invalid_state'
   const hash = digest(state)
   const attempt = await owned(deps, session, async (db) => {
+    if (!(await organizationMember(db, session))) return undefined
     const row = await db
       .selectFrom('conference_oauth_states')
       .select(['verifier', 'connection_id', 'mode'])
@@ -354,6 +366,7 @@ export async function finishZoomConnection(
   })
   if (!attempt?.verifier) return 'invalid_state'
   const validClaim = async (db: Db) => {
+    if (!(await organizationMember(db, session))) return false
     const valid = await db
       .selectFrom('conference_oauth_states')
       .select(['connection_id', 'mode', 'binding_version'])
@@ -361,7 +374,6 @@ export async function finishZoomConnection(
       .where('user_id', '=', session.user.id)
       .where('session_id', '=', session.sessionId)
       .where('claimed', '=', true)
-      .where('expires_at', '>', new Date(clock(deps)))
       .forUpdate()
       .executeTakeFirst()
     return (
@@ -371,133 +383,151 @@ export async function finishZoomConnection(
     )
   }
   try {
-    // Recheck after the durable claim: disconnect/logout may have committed meanwhile.
-    const before = await owned(deps, session, async (db) => {
-      if (!(await validClaim(db))) return undefined
-      return db
-        .selectFrom('conference_connections')
-        .select(['id', sql<string>`xmin::text`.as('revision')])
-        .where('user_id', '=', session.user.id)
-        .execute()
-    })
-    if (!before) return 'invalid_state'
-    let failure: ZoomOutcome | undefined,
-      tokens: ZoomTokens | undefined,
-      identity: ZoomIdentity | undefined
-    const keys = [...query.keys()],
-      code = query.get('code'),
-      mode = attempt.mode as ZoomMode
-    if (
-      query.toString().length > 8192 ||
-      keys.some(
-        (k) =>
-          !['state', 'code', 'error', 'error_description'].includes(k) ||
-          query.getAll(k).length !== 1,
-      )
-    )
-      failure = 'invalid_state'
-    else if (query.has('error'))
-      failure =
-        query.get('error') === 'access_denied' && !query.has('code')
-          ? 'denied'
-          : 'provider_unavailable'
-    else if (!code || code.length > 4096 || !isSingleLineText(code) || /\s/u.test(code))
-      failure = 'invalid_state'
-    else {
-      try {
-        const signal = AbortSignal.timeout(deps.timeoutMs ?? 15000)
-        const verifier = decryptConferenceCredential(
-          key,
-          conferenceStateAad(session.user.id, hash, session.sessionId, mode, attempt.connection_id),
-          attempt.verifier as Buffer,
+    return await withTokenOperation(
+      deps.db,
+      session.user.id,
+      async (db, lease) => {
+        deps = { ...deps, db }
+        // Recheck after the durable claim: disconnect/logout may have committed meanwhile.
+        const before = await owned(deps, session, async (db) => {
+          if (!(await lease.current(db)) || !(await validClaim(db))) return undefined
+          return db
+            .selectFrom('conference_connections')
+            .select(['id', sql<string>`xmin::text`.as('revision')])
+            .where('user_id', '=', session.user.id)
+            .execute()
+        })
+        if (!before) return 'invalid_state'
+        let failure: ZoomOutcome | undefined,
+          tokens: ZoomTokens | undefined,
+          identity: ZoomIdentity | undefined
+        const keys = [...query.keys()],
+          code = query.get('code'),
+          mode = attempt.mode as ZoomMode
+        if (
+          query.toString().length > 8192 ||
+          keys.some(
+            (k) =>
+              !['state', 'code', 'error', 'error_description'].includes(k) ||
+              query.getAll(k).length !== 1,
+          )
         )
-        tokens = await client.exchange(code, verifier, signal, mode)
-        if (!matchingZoomScopes(tokens.scopes, mode)) throw new ZoomError('permissions_missing')
-        identity = await client.identity(tokens.accessToken, signal)
-      } catch (error) {
-        failure = error instanceof ZoomError ? error.code : 'provider_unavailable'
-      }
-    }
-    return await owned(deps, session, async (db) => {
-      if (!(await validClaim(db))) return 'invalid_state'
-      await db.deleteFrom('conference_oauth_states').where('state_hash', '=', hash).execute()
-      if (failure) return failure
-      if (!tokens || !identity) return 'provider_unavailable'
-      const previous = await db
-        .selectFrom('conference_connections')
-        .select([
-          'id',
-          'user_id',
-          'external_user_id',
-          'status',
-          'mode',
-          sql<string>`xmin::text`.as('revision'),
-        ])
-        .where('provider', '=', 'zoom')
-        .where('external_user_id', '=', identity.id)
-        .forUpdate()
-        .executeTakeFirst()
-      if (previous && previous.user_id !== session.user.id) return 'account_in_use'
-      // xmin detects every committed connection change, including worker token rotation,
-      // without timestamp precision loss or a schema change. A newly discovered identity
-      // must also have been absent before I/O; an older callback cannot overwrite a winner.
-      if (previous && before.find((row) => row.id === previous.id)?.revision !== previous.revision)
-        return 'invalid_state'
-      if (
-        previous?.mode === 'meetings' &&
-        previous.status !== 'disconnected' &&
-        mode === 'identity'
-      ) {
-        await db
-          .updateTable('conference_connections')
-          .set({
-            credentials: null,
-            operation_id: null,
-            status: 'needs_reauth',
-            last_error: 'mode_conflict',
-          })
-          .where('id', '=', previous.id)
-          .execute()
-        return 'mode_conflict'
-      }
-      if (attempt.connection_id && previous?.id !== attempt.connection_id)
-        return 'identity_mismatch'
-      if (
-        (!previous || previous.status === 'disconnected') &&
-        (await atConnectionLimit(db, session.user.id))
-      )
-        return 'connection_limit'
-      const id = previous?.id ?? randomUUID(),
-        value = {
-          authorized_at: new Date(clock(deps)),
-          account_email: identity.email,
-          display_name: identity.name,
-          credentials: credentials(key, session.user.id, id, identity.id, tokens, mode),
-          operation_id: null,
-          scopes: tokens.scopes,
-          mode,
-          status: 'active',
-          last_error: null,
+          failure = 'invalid_state'
+        else if (query.has('error'))
+          failure =
+            query.get('error') === 'access_denied' && !query.has('code')
+              ? 'denied'
+              : 'provider_unavailable'
+        else if (!code || code.length > 4096 || !isSingleLineText(code) || /\s/u.test(code))
+          failure = 'invalid_state'
+        else {
+          try {
+            const signal = lease.signal
+            const verifier = decryptConferenceCredential(
+              key,
+              conferenceStateAad(
+                session.user.id,
+                hash,
+                session.sessionId,
+                mode,
+                attempt.connection_id,
+              ),
+              attempt.verifier as Buffer,
+            )
+            tokens = await client.exchange(code, verifier, signal, mode)
+            if (!matchingZoomScopes(tokens.scopes, mode)) throw new ZoomError('permissions_missing')
+            identity = await client.identity(tokens.accessToken, signal)
+          } catch (error) {
+            failure = error instanceof ZoomError ? error.code : 'provider_unavailable'
+          }
         }
-      if (previous)
-        await db.updateTable('conference_connections').set(value).where('id', '=', id).execute()
-      else {
-        const inserted = await db
-          .insertInto('conference_connections')
-          .values({
-            id,
-            user_id: session.user.id,
-            provider: 'zoom',
-            external_user_id: identity.id,
-            ...value,
-          })
-          .onConflict((oc) => oc.columns(['provider', 'external_user_id']).doNothing())
-          .returning('id')
-          .executeTakeFirst()
-        if (!inserted) return 'account_in_use'
-      }
-      return 'connected'
-    })
+        return await owned(deps, session, async (db) => {
+          if (!(await lease.current(db)) || !(await validClaim(db))) return 'invalid_state'
+          await db.deleteFrom('conference_oauth_states').where('state_hash', '=', hash).execute()
+          if (failure) return failure
+          if (!tokens || !identity) return 'provider_unavailable'
+          const previous = await db
+            .selectFrom('conference_connections')
+            .select([
+              'id',
+              'user_id',
+              'external_user_id',
+              'status',
+              'mode',
+              sql<string>`xmin::text`.as('revision'),
+            ])
+            .where('provider', '=', 'zoom')
+            .where('external_user_id', '=', identity.id)
+            .forUpdate()
+            .executeTakeFirst()
+          if (previous && previous.user_id !== session.user.id) return 'account_in_use'
+          // Token changes share the durable lease. Disconnect/reconsent still invalidate
+          // state; xmin detects other concurrent connection changes before storing access.
+          // A wrong-mode exchange may invalidate the old grant, even after a metadata write.
+          if (
+            previous?.mode === 'meetings' &&
+            previous.status !== 'disconnected' &&
+            mode === 'identity'
+          ) {
+            await db
+              .updateTable('conference_connections')
+              .set({
+                credentials: null,
+                operation_id: null,
+                status: 'needs_reauth',
+                last_error: 'mode_conflict',
+              })
+              .where('id', '=', previous.id)
+              .execute()
+            return 'mode_conflict'
+          }
+          if (
+            previous &&
+            before.find((row) => row.id === previous.id)?.revision !== previous.revision
+          )
+            return 'invalid_state'
+          if (attempt.connection_id && previous?.id !== attempt.connection_id)
+            return 'identity_mismatch'
+          if (
+            (!previous || previous.status === 'disconnected') &&
+            (await atConnectionLimit(db, session.user.id))
+          )
+            return 'connection_limit'
+          const id = previous?.id ?? randomUUID(),
+            value = {
+              authorized_at: new Date(clock(deps)),
+              account_email: identity.email,
+              display_name: identity.name,
+              credentials: credentials(key, session.user.id, id, identity.id, tokens, mode),
+              operation_id: null,
+              scopes: tokens.scopes,
+              mode,
+              status: 'active',
+              last_error: null,
+            }
+          if (previous)
+            await db.updateTable('conference_connections').set(value).where('id', '=', id).execute()
+          else {
+            const inserted = await db
+              .insertInto('conference_connections')
+              .values({
+                id,
+                user_id: session.user.id,
+                provider: 'zoom',
+                external_user_id: identity.id,
+                ...value,
+              })
+              .onConflict((oc) => oc.columns(['provider', 'external_user_id']).doNothing())
+              .returning('id')
+              .executeTakeFirst()
+            if (!inserted) return 'account_in_use'
+          }
+          return 'connected'
+        })
+      },
+      undefined,
+      deps.timeoutMs,
+    )
   } catch (error) {
     if (error instanceof DomainError && error.code === 'conference_session_required')
       return 'invalid_state'
@@ -526,11 +556,35 @@ export async function disconnectConference(deps: ConferenceDeps, principal: Prin
  * Retryable/provider response failures preserve the prior grant for later recovery;
  * a crash or failed final commit leaves the durable refresh claim incomplete. */
 export async function refreshConference(deps: ConferenceDeps, principal: Principal, id: string) {
+  const session = requireConferenceSession(principal)
+  configured(deps)
+  if (!z.uuid().safeParse(id).success) throw missing()
+  return withTokenOperation(
+    deps.db,
+    session.user.id,
+    (db, lease) => refreshConnection({ ...deps, db }, principal, id, lease),
+    async () => {
+      throw new DomainError(
+        'conflict',
+        'zoom_refresh_in_progress',
+        'This Zoom connection is already refreshing. Wait for it to finish.',
+      )
+    },
+    deps.timeoutMs,
+  )
+}
+async function refreshConnection(
+  deps: ConferenceDeps,
+  principal: Principal,
+  id: string,
+  lease: TokenOperation,
+) {
   const session = requireConferenceSession(principal),
     { client, key } = configured(deps)
   if (!z.uuid().safeParse(id).success) throw missing()
   const operation = randomUUID()
   const claim = await owned(deps, session, async (db) => {
+    if (!(await lease.current(db))) return undefined
     const row = await db
       .selectFrom('conference_connections')
       .select(['id', 'status', 'external_user_id', 'credentials', 'scopes', 'mode'])
@@ -583,8 +637,9 @@ export async function refreshConference(deps: ConferenceDeps, principal: Princip
     }
   })
   if (!claim) throw reauth()
-  const currentClaim = (db: Db) =>
-    db
+  const currentClaim = async (db: Db) => {
+    if (!(await lease.current(db))) return undefined
+    return db
       .selectFrom('conference_connections')
       .select('id')
       .where('id', '=', id)
@@ -595,6 +650,7 @@ export async function refreshConference(deps: ConferenceDeps, principal: Princip
       .where('mode', '=', claim.mode)
       .forUpdate()
       .executeTakeFirst()
+  }
   let outcome: string
   try {
     const current = await owned(
@@ -624,7 +680,7 @@ export async function refreshConference(deps: ConferenceDeps, principal: Princip
       identity: ZoomIdentity | undefined,
       errorCode: string | null = null
     try {
-      const signal = AbortSignal.timeout(deps.timeoutMs ?? 15000)
+      const signal = lease.signal
       tokens = await refreshZoomTokens(
         () => client.refresh(claim.tokens.refreshToken, signal, claim.mode),
         signal,

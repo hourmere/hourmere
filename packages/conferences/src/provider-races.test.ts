@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import type { QueryId } from 'kysely'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { requireZoomConnection } from '../../scheduling/src/conferences.ts'
+import { conferenceEncryptionKey } from './credentials.ts'
 import {
   authorizeZoomMeetings,
   beginZoomConnection,
@@ -12,6 +14,7 @@ import {
   refreshConference,
 } from './index.ts'
 import { conferenceTestSession, fakeZoom, TEST_CONFERENCE_KEY } from './testing.ts'
+import { readTokens } from './tokens.ts'
 import { createZoomConferenceWork } from './worker.ts'
 import { zoomScopes } from './zoom.ts'
 
@@ -82,6 +85,31 @@ describe.skipIf(!databaseUrl)('Zoom provider phase races (real Postgres)', () =>
       ])
     } finally {
       clearTimeout(timer)
+    }
+  }
+  function leaseWaiter() {
+    const busy = deferred(),
+      attempts = new WeakSet<QueryId>()
+    return {
+      db: db.withPlugin({
+        transformQuery(args) {
+          if (
+            args.node.kind === 'InsertQueryNode' &&
+            args.node.into?.table.identifier.name === 'conference_token_operations'
+          )
+            attempts.add(args.queryId)
+          return args.node
+        },
+        async transformResult(args) {
+          if (attempts.has(args.queryId) && args.result.rows.length === 0) busy.resolve()
+          return args.result
+        },
+      }),
+      async waited(operation: Promise<unknown>) {
+        expect(
+          await Promise.race([busy.promise.then(() => true), operation.then(() => false)]),
+        ).toBe(true)
+      },
     }
   }
   function pause(phase: 'token' | 'identity') {
@@ -216,7 +244,7 @@ describe.skipIf(!databaseUrl)('Zoom provider phase races (real Postgres)', () =>
     ).toHaveLength(0)
   })
 
-  it.each(['expiry', 'mode', 'connection', 'claim'] as const)(
+  it.each(['mode', 'connection', 'claim'] as const)(
     'rechecks state %s after callback I/O without overwriting unchanged credentials',
     async (change) => {
       const initial = await connect(),
@@ -225,7 +253,6 @@ describe.skipIf(!databaseUrl)('Zoom provider phase races (real Postgres)', () =>
         finishing = observe(finishZoomConnection(deps, owner, query(state)))
       await gate.entered
       const changes = {
-          expiry: { expires_at: new Date(0) },
           mode: { mode: 'meetings' },
           connection: { connection_id: initial.id },
           claim: { claimed: false, verifier: Buffer.alloc(32) },
@@ -263,19 +290,27 @@ describe.skipIf(!databaseUrl)('Zoom provider phase races (real Postgres)', () =>
       ) as string,
       replacement = replacementProvider()
     replacement.controls.token.scope = zoomScopes('meetings').join(' ')
-    expect(await finishZoomConnection(withProvider(replacement), owner, query(newerState))).toBe(
-      'connected',
-    )
-    const upgraded = await row(initial.id)
+    const waiter = leaseWaiter(),
+      upgrading = observe(
+        finishZoomConnection(
+          { ...withProvider(replacement), db: waiter.db },
+          owner,
+          query(newerState),
+        ),
+      )
+    await waiter.waited(upgrading)
+    expect(replacement.calls).toHaveLength(0)
     gate.release()
     expect(await finishing).toEqual({ status: 'fulfilled', value: 'invalid_state' })
+    expect(await upgrading).toEqual({ status: 'fulfilled', value: 'connected' })
+    const upgraded = await row(initial.id)
     const current = await row(initial.id)
     expect(current.mode).toBe('meetings')
     expect(current.status).toBe('active')
     expect(current.credentials?.equals(upgraded.credentials as Buffer)).toBe(true)
   })
 
-  it('an unbound callback cannot overwrite credentials refreshed during its provider I/O', async () => {
+  it('an OAuth exchange prevents a competing refresh from rotating the old grant', async () => {
     const initial = await connect(),
       state = await start(),
       gate = pause('identity'),
@@ -283,15 +318,82 @@ describe.skipIf(!databaseUrl)('Zoom provider phase races (real Postgres)', () =>
     await gate.entered
     const replacement = replacementProvider(),
       refreshing = observe(refreshConference(withProvider(replacement), owner, initial.id))
-    expect(await progresses(refreshing)).toBe(true)
-    expect((await refreshing).status).toBe('fulfilled')
-    const refreshed = await row(initial.id)
-    expect(refreshed.credentials?.equals(initial.credentials as Buffer)).toBe(false)
+    expect(await refreshing).toMatchObject({
+      status: 'rejected',
+      error: { code: 'zoom_refresh_in_progress' },
+    })
+    expect(replacement.calls).toHaveLength(0)
     gate.release()
-    expect(await finishing).toEqual({ status: 'fulfilled', value: 'invalid_state' })
+    expect(await finishing).toEqual({ status: 'fulfilled', value: 'connected' })
+    expect((await row(initial.id)).status).toBe('active')
+  })
+
+  it('an unbound callback waits for refresh and stores its newer grant', async () => {
+    const initial = await connect(),
+      state = await start(),
+      gate = pause('token'),
+      refreshing = observe(refreshConference(deps, owner, initial.id))
+    await gate.entered
+    const replacement = replacementProvider(),
+      waiter = leaseWaiter(),
+      finishing = observe(
+        finishZoomConnection({ ...withProvider(replacement), db: waiter.db }, owner, query(state)),
+      )
+    await waiter.waited(finishing)
+    expect(replacement.calls).toHaveLength(0)
+    gate.release()
+    expect((await refreshing).status).toBe('fulfilled')
+    expect(await finishing).toEqual({ status: 'fulfilled', value: 'connected' })
     const current = await row(initial.id)
     expect(current.status).toBe('active')
-    expect(current.credentials?.equals(refreshed.credentials as Buffer)).toBe(true)
+    expect(
+      readTokens(
+        conferenceEncryptionKey(TEST_CONFERENCE_KEY),
+        owner.user.id,
+        current.id,
+        current.external_user_id as string,
+        current.credentials as Buffer,
+        'identity',
+      ).refreshToken === 'synthetic-new-refresh',
+    ).toBe(true)
+  })
+
+  it('two unbound callbacks exchange in order and retain the later grant', async () => {
+    await connect()
+    const firstState = await start(),
+      secondState = await start(),
+      gate = pause('token'),
+      first = observe(finishZoomConnection(deps, owner, query(firstState)))
+    await gate.entered
+    const replacement = replacementProvider(),
+      waiter = leaseWaiter(),
+      second = observe(
+        finishZoomConnection(
+          { ...withProvider(replacement), db: waiter.db },
+          owner,
+          query(secondState),
+        ),
+      )
+    await waiter.waited(second)
+    expect(replacement.calls).toHaveLength(0)
+    gate.release()
+    expect(await first).toEqual({ status: 'fulfilled', value: 'connected' })
+    expect(await second).toEqual({ status: 'fulfilled', value: 'connected' })
+    const current = await db
+      .selectFrom('conference_connections')
+      .selectAll()
+      .where('user_id', '=', owner.user.id)
+      .executeTakeFirstOrThrow()
+    expect(
+      readTokens(
+        conferenceEncryptionKey(TEST_CONFERENCE_KEY),
+        owner.user.id,
+        current.id,
+        current.external_user_id as string,
+        current.credentials as Buffer,
+        'identity',
+      ).refreshToken === 'synthetic-new-refresh',
+    ).toBe(true)
   })
 
   it.each(['token', 'identity'] as const)(
@@ -315,7 +417,7 @@ describe.skipIf(!databaseUrl)('Zoom provider phase races (real Postgres)', () =>
     },
   )
 
-  it('reconnection completes during refresh I/O and the old operation preserves its new grant', async () => {
+  it('reconnection queues behind refresh and its newer grant wins', async () => {
     const initial = await connect(),
       gate = pause('token'),
       refreshing = observe(refreshConference(deps, owner, initial.id))
@@ -327,12 +429,16 @@ describe.skipIf(!databaseUrl)('Zoom provider phase races (real Postgres)', () =>
     if (authorization.status !== 'fulfilled') throw new Error('Expected reconnection authorization')
     const state = new URL(authorization.value.authorizationUrl).searchParams.get('state') as string,
       replacement = replacementProvider()
-    expect(await finishZoomConnection(withProvider(replacement), owner, query(state))).toBe(
-      'connected',
-    )
-    const reconnected = await row(initial.id)
+    const waiter = leaseWaiter(),
+      finishing = observe(
+        finishZoomConnection({ ...withProvider(replacement), db: waiter.db }, owner, query(state)),
+      )
+    await waiter.waited(finishing)
+    expect(replacement.calls).toHaveLength(0)
     gate.release()
     expect((await refreshing).status).toBe('rejected')
+    expect(await finishing).toEqual({ status: 'fulfilled', value: 'connected' })
+    const reconnected = await row(initial.id)
     const current = await row(initial.id)
     expect(current.status).toBe('active')
     expect(current.operation_id).toBeNull()
