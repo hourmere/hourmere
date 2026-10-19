@@ -3,6 +3,7 @@
 // in a team it belongs to the team page (owner_user_id NULL), readable by every member and
 // managed by owners and admins. Deleting one only marks it deleted, so past bookings keep
 // pointing at the event type they were made with.
+import { requireActiveApiKey } from '@hourmere/auth'
 import { validateEventTypeRules } from '@hourmere/core'
 import type { Db, Json } from '@hourmere/db'
 import { sql } from 'kysely'
@@ -1031,6 +1032,8 @@ async function validateConference(
             'Sign in again before choosing a private Zoom connection.',
           )
       }
+      if (ctx.principal.kind === 'api_key')
+        await requireActiveApiKey(db, ctx.principal, () => ctx.now().epochMilliseconds)
       await requireZoomConnection(db, hosts[0] as string, zoomConnectionId, ctx.automaticZoom)
     }
     return

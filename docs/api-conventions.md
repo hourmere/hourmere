@@ -126,6 +126,12 @@ user across organizations; event-type writes still require the acting organizati
 permissions and the actual host's identity. Another administrator cannot select a host's
 private connection. IDs do not grant access to another user's connections.
 
+Calendar settings, calendar refresh/sync and private Zoom configuration writes recheck the
+API key inside the write transaction, after locking its owner. The key must still exist,
+be enabled and unexpired, and belong to the same user and acting organization. Revocation
+before that check returns the same `401 unauthorized` and `WWW-Authenticate: Bearer` as a
+key rejected at request authentication, without changing settings or contacting a provider.
+
 OAuth authorization, code exchange and disconnect require a live browser session.
 Explicit Zoom credential refresh also remains session-only. Calendar list refresh and sync
 may internally refresh existing access tokens without exposing them or granting new scopes.

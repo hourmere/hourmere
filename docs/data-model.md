@@ -50,6 +50,16 @@ repeat sign-in and token refresh. Migration 0031 clears existing values without 
 other account data. Sign-in access and refresh tokens remain encrypted by Better Auth's
 `encryptOAuthTokens` option. Calendar credentials and MCP OAuth grants are independent.
 
+Microsoft sign-in requests only `openid`, `profile` and `email`: it needs identity once to
+create an Hourmere session, whose lifetime and renewal do not depend on Microsoft tokens.
+No application feature reads or refreshes the stored sign-in access token, and the unused
+Better Auth token retrieval/refresh HTTP endpoints are disabled. A Microsoft sign-in
+refresh token is therefore unnecessary; `offline_access` is intentionally omitted.
+Microsoft calendar connections use separate `MICROSOFT_CALENDAR_*` client credentials,
+their own callback and the `calendar_connections.credentials` ciphertext. That flow requests
+`offline_access` with `Calendars.ReadBasic` and requires a refresh token for continued
+calendar-list access.
+
 ### `public`
 
 | Table | Owner | Purpose |
@@ -333,6 +343,16 @@ ordinary calendar targets and unknown-import claims; a single-host Zoom organize
 one such optional copy. The join URL is stored only in the current ready protected booking
 location. See [automatic-google-meet.md](automatic-google-meet.md) and
 [automatic-zoom.md](automatic-zoom.md).
+
+Protected booking reads hydrate the booking status, cancellation time/reason, resolved
+location and conference state from the same joined snapshot. A cancellation committed
+after the initial booking lookup therefore cannot leave a confirmed booking paired with
+the cancelled conference's cleared link. These reads take no booking row locks.
+
+Migration 0032 indexes the mutable `booking_conferences.booking_id` pointer used by
+booking reads and cancellation. The index is non-unique: the existing schema guarantees
+one intent per `root_booking_id`, but does not constrain distinct roots' current pointers
+to be unique. The migration preserves those existing rows without adding a new invariant.
 
 Migration 0024 adds a persisted attempt count, random bounded lease, safe error class and
 exhausted timestamp to each conference notification. Existing due times and delivery flags
