@@ -1,3 +1,4 @@
+import { setImmediate } from 'node:timers/promises'
 import { describe, expect, it } from 'vitest'
 import { createZoomMeetingsClient, zoomJoinUrl, zoomMeetingId } from './zoom-meetings.ts'
 
@@ -175,10 +176,32 @@ describe('fixed Zoom meeting lifecycle adapter', () => {
     )
     p.controls.hook = async () => new Response('{')
     await expect(p.client.get(ACCESS, HOST, ID, signal())).rejects.toThrow('provider_unavailable')
-    p.controls.hook = async () => new Promise(() => {})
-    await expect(p.client.create(ACCESS, HOST, input(), AbortSignal.timeout(20))).rejects.toThrow(
-      'provider_unavailable',
+    const response = Promise.withResolvers<Response>(),
+      controller = new AbortController()
+    p.controls.hook = () => response.promise
+    let settled = false
+    const result = p.client.create(ACCESS, HOST, input(), controller.signal).then(
+      (value) => {
+        settled = true
+        return { value }
+      },
+      (error) => {
+        settled = true
+        return { error }
+      },
     )
+    try {
+      expect(p.calls).toHaveLength(3)
+      expect(controller.signal.aborted).toBe(false)
+      controller.abort(new DOMException('Synthetic timeout', 'TimeoutError'))
+      // Drain abort continuations while the provider response remains unresolved.
+      await setImmediate()
+      expect(settled).toBe(true)
+      expect(await result).toMatchObject({ error: { message: 'provider_unavailable' } })
+    } finally {
+      response.resolve(Response.json(p.controls.response))
+      await result
+    }
     expect(p.calls).toHaveLength(3)
     await expect(p.client.create(ACCESS, HOST, input(), AbortSignal.abort())).rejects.toThrow(
       'provider_unavailable',
