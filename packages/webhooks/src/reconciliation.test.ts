@@ -424,26 +424,76 @@ describe.skipIf(!serverUrl)('bounded webhook delivery reconciliation', () => {
     expect(observed.mutations.map((entry) => entry.affected)).toEqual([1n, 0n])
   })
 
-  it.each(['57014', '55P03', '23514'])(
-    'defers only recognized timeout SQLSTATE %s',
-    async (code) => {
+  it.each(
+    (['reconciliation', 'retention'] as const).flatMap((phase) =>
+      ['57014', '55P03', '23514'].map((code) => ({ phase, code })),
+    ),
+  )(
+    '$phase defers only recognized timeout SQLSTATE $code and warns once when swallowed',
+    async ({ phase, code }) => {
       await deliveries()
-      const failure = Object.assign(new Error('synthetic SQL failure'), { code })
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+      const failure = Object.assign(new Error('synthetic private SQL error detail'), {
+        code,
+        detail: 'synthetic private payload detail',
+      })
+      const isPhase = phase === 'reconciliation' ? isReconciliation : isRetention
       const observed = observe(undefined, (query) => {
-        if (isReconciliation(query)) throw failure
+        if (isPhase(query)) throw failure
       })
       if (code === '23514') await expect(run(observed.connection)).rejects.toBe(failure)
       else await expect(run(observed.connection)).resolves.toBeUndefined()
-      expect((await rows())[0]?.status).toBe('pending')
+      expect(warn).toHaveBeenCalledTimes(code === '23514' ? 0 : 1)
+      if (code !== '23514')
+        expect(warn).toHaveBeenCalledWith(
+          JSON.stringify({ event: 'webhook_cleanup_timeout', phase, code }),
+        )
+      expect((await rows())[0]?.status).toBe(phase === 'reconciliation' ? 'pending' : 'failed')
       await run()
       expect((await rows())[0]?.status).toBe('failed')
+      expect(warn).toHaveBeenCalledTimes(code === '23514' ? 0 : 1)
     },
   )
+
+  it('warns once for each phase when both batches time out in the same dispatch', async () => {
+    await deliveries()
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const observed = observe(undefined, (query) => {
+      if (isReconciliation(query) || isRetention(query))
+        throw Object.assign(new Error('synthetic private SQL detail'), {
+          code: isReconciliation(query) ? '57014' : '55P03',
+        })
+    })
+    await expect(run(observed.connection)).resolves.toBeUndefined()
+    expect(warn.mock.calls).toEqual([
+      [
+        JSON.stringify({
+          event: 'webhook_cleanup_timeout',
+          phase: 'reconciliation',
+          code: '57014',
+        }),
+      ],
+      [JSON.stringify({ event: 'webhook_cleanup_timeout', phase: 'retention', code: '55P03' })],
+    ])
+    expect((await rows())[0]?.status).toBe('pending')
+  })
+
+  it('does not warn when reconciliation and retention succeed, including empty batches', async () => {
+    await deliveries()
+    await deliveries(1, OLD)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const observed = observe()
+    await run(observed.connection)
+    await run(observed.connection)
+    expect(observed.mutations.map((entry) => entry.affected)).toEqual([2n, 1n, 0n, 0n])
+    expect(warn).not.toHaveBeenCalled()
+  })
 
   it.each(['57014', '55P03'])(
     'rolls back a partially applied batch on SQLSTATE %s and restores transaction-local timeouts',
     async (code) => {
       await deliveries(3)
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
       await testDb.pool.query(`
         CREATE SEQUENCE webhook_reconciliation_test_sequence;
         CREATE FUNCTION webhook_reconciliation_test_cancel() RETURNS trigger LANGUAGE plpgsql AS $$
@@ -480,6 +530,9 @@ describe.skipIf(!serverUrl)('bounded webhook delivery reconciliation', () => {
         expect(
           (await rows()).every((row) => row.status === 'pending' && row.last_error === null),
         ).toBe(true)
+        expect(warn).toHaveBeenCalledExactlyOnceWith(
+          JSON.stringify({ event: 'webhook_cleanup_timeout', phase: 'reconciliation', code }),
+        )
       } finally {
         await testDb.pool.query(`
           DROP TRIGGER webhook_reconciliation_test_cancel ON webhook_deliveries;
@@ -489,6 +542,7 @@ describe.skipIf(!serverUrl)('bounded webhook delivery reconciliation', () => {
       }
       await run()
       expect((await rows()).every((row) => row.status === 'failed')).toBe(true)
+      expect(warn).toHaveBeenCalledTimes(1)
     },
   )
 

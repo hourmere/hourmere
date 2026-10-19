@@ -304,6 +304,11 @@ through inverse lock order. Details and retention are in [webhooks.md](webhooks.
 Migration 0028 adds safe `interrupted`/`job_missing` error classifications for finite retry
 accounting and orphan reconciliation, preserving existing webhook delivery data.
 
+Migration 0034 adds a partial `webhook_deliveries(id)` index for `status = 'pending'`.
+Reconciliation reads pending deliveries in ID order, so terminal history is excluded from
+its bounded locking scan. Retention has no status filter and uses the existing `created_at`
+index; delivery metadata pages use the existing `(webhook_id,id)` index in reverse order.
+
 ## Independent conference identities
 
 `conference_connections` stores Zoom identities separately from `auth.account` and

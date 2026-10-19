@@ -104,8 +104,12 @@ including attempts whose send outcome is unknown. After thirteen total attempts,
 delivery is failed. A surviving retry uses pg-boss's attempt number to include runs lost
 before the delivery transaction committed. Graceful shutdown records `interrupted` and
 consumes an attempt before retrying unless a valid 2xx acknowledgement arrived: that
-delivery remains successful even when shutdown raced the response. Every fifteen minutes,
-cleanup also marks up to 1000 pending deliveries without a created, retrying or active
+delivery remains successful even when shutdown raced the response. Shutdown also takes
+precedence over a signing-secret decryption failure: it records `interrupted`, sends
+nothing and consumes the attempt. A later attempt without shutdown records
+`secret_unavailable` if the key is still unavailable; restoring the key allows recovery
+within the remaining retry budget. Every fifteen minutes, cleanup also marks up to 1000
+pending deliveries without a created, retrying or active
 pg-boss job as failed with
 `job_missing`; retained job metadata supplies any missing attempt count. If the job was
 already deleted, only known attempts can be reported. Active jobs remain pending until
@@ -113,8 +117,13 @@ pg-boss expires/retries or terminates them. Cleanup groups retained attempt hist
 whole batch rather than looking it up once per delivery. Each dispatch has a ten-second
 database-work budget within its thirty-second job lease; each reconciliation/retention
 statement is limited to five seconds, with at most one second waiting for locks. A timed-out
-batch rolls back and stays eligible for the next scheduled run. Row locks skip deliveries
-already being acknowledged or reconciled by another worker. There is no manual replay endpoint.
+batch rolls back and stays eligible for the next scheduled run. Each swallowed PostgreSQL
+statement (`57014`) or lock (`55P03`) timeout emits one structured warning with
+`event: "webhook_cleanup_timeout"`, `phase: "reconciliation"` or `"retention"`, and `code`.
+The warning contains no query, error text, delivery payload or credentials. Repeated
+warnings indicate cleanup is making insufficient progress and needs investigation.
+Row locks skip deliveries already being acknowledged or reconciled by another worker.
+There is no manual replay endpoint.
 
 Two delivery jobs run concurrently per worker. Each attempt has one ten-second deadline
 covering DNS, TCP/TLS and response headers, and a 16 KiB response-header limit. The transport
