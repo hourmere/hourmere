@@ -386,9 +386,15 @@ interface BookingConferenceView {
   bookingStatus: string
   bookingCancelledAt: Date | null
   bookingCancelReason: string | null
+  calendarCopy?: CalendarCopyStatus
+  conferenceCanRetry?: boolean
 }
 
-export async function bookingConferenceViews(db: Db, ids: readonly string[]) {
+export async function bookingConferenceViews(
+  db: Db,
+  ids: readonly string[],
+  callerUserId?: string,
+) {
   if (!ids.length) return new Map<string, BookingConferenceView>()
   const rows = await db
     .selectFrom('bookings as b')
@@ -406,7 +412,21 @@ export async function bookingConferenceViews(db: Db, ids: readonly string[]) {
       'c.provider',
       'c.state',
       'c.error_code',
+      'c.organizer_user_id',
     ])
+    .$if(callerUserId !== undefined, (q) =>
+      q
+        .leftJoin('booking_conference_mirrors as m', (join) =>
+          join
+            .onRef('m.root_booking_id', '=', 'c.root_booking_id')
+            .on('m.user_id', '=', callerUserId as string),
+        )
+        .select([
+          'm.state as copy_state',
+          'm.error_code as copy_error_code',
+          'm.calendar_id as copy_calendar_id',
+        ]),
+    )
     .select((eb) =>
       eb
         .or([
@@ -427,8 +447,18 @@ export async function bookingConferenceViews(db: Db, ids: readonly string[]) {
     .where('b.id', 'in', ids)
     .execute()
   const unavailable = new Set<string>()
-  for (const r of rows)
+  const ownOrganizers = new Set<string>()
+  const copies = new Map<string, CalendarCopyStatus>()
+  for (const r of rows) {
     if (r.booking_status === 'confirmed' && !r.organizer_available) unavailable.add(r.booking_id)
+    if (r.organizer_user_id === callerUserId) ownOrganizers.add(r.booking_id)
+    if (r.copy_state)
+      copies.set(r.booking_id, {
+        status: r.copy_state as CalendarCopyStatus['status'],
+        errorCode: r.copy_error_code ?? null,
+        canRetry: r.copy_state === 'failed' && r.copy_calendar_id != null,
+      })
+  }
   return new Map(
     rows.map((r) => [
       r.booking_id,
@@ -446,6 +476,15 @@ export async function bookingConferenceViews(db: Db, ids: readonly string[]) {
         bookingStatus: r.booking_status,
         bookingCancelledAt: r.booking_cancelled_at,
         bookingCancelReason: r.booking_cancel_reason,
+        ...(copies.has(r.booking_id) ? { calendarCopy: copies.get(r.booking_id) } : {}),
+        ...(callerUserId !== undefined && r.root_booking_id
+          ? {
+              conferenceCanRetry:
+                !unavailable.has(r.booking_id) &&
+                r.error_code !== 'organizer_unavailable' &&
+                ownOrganizers.has(r.booking_id),
+            }
+          : {}),
       },
     ]),
   )
@@ -483,24 +522,4 @@ export interface CalendarCopyStatus {
   status: 'pending' | 'ready' | 'failed' | 'not_configured'
   errorCode: string | null
   canRetry: boolean
-}
-export async function ownCalendarCopyStates(db: Db, ids: readonly string[], userId: string) {
-  if (!ids.length) return new Map<string, CalendarCopyStatus>()
-  const rows = await db
-    .selectFrom('booking_conference_mirrors as m')
-    .innerJoin('booking_conferences as c', 'c.root_booking_id', 'm.root_booking_id')
-    .select(['c.booking_id', 'm.state', 'm.error_code', 'm.calendar_id'])
-    .where('c.booking_id', 'in', ids)
-    .where('m.user_id', '=', userId)
-    .execute()
-  return new Map(
-    rows.map((r) => [
-      r.booking_id,
-      {
-        status: r.state as CalendarCopyStatus['status'],
-        errorCode: r.error_code,
-        canRetry: r.state === 'failed' && r.calendar_id !== null,
-      },
-    ]),
-  )
 }

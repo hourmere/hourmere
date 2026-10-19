@@ -25,6 +25,8 @@ export default defineConfig({
           name: 'web',
           include: ['apps/web/src/**/*.test.{ts,tsx}'],
           environment: 'jsdom',
+          // Layout assertions need the real stylesheet instead of Vitest's empty CSS mock.
+          css: { include: [/\/apps\/web\/src\/styles\.css\?raw$/] },
           setupFiles: ['apps/web/src/test/setup.ts'],
         },
       },

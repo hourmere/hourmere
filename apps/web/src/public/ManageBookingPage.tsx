@@ -95,6 +95,22 @@ type Mode =
   | { kind: 'reschedule'; notice?: UiText | undefined }
   | { kind: 'confirm-reschedule'; slot: Slot }
 
+async function followReschedule(
+  booking: ManagedBooking,
+  token: string,
+  signal?: AbortSignal,
+): Promise<ManagedBooking> {
+  if (booking.status !== 'cancelled' || booking.conference) return booking
+  // Token resolution can precede a reschedule while hydration sees its cancelled
+  // predecessor. Resolve the same capability once more, using its existing successor
+  // rules. The result is final, even when cancelled too; this must not become polling.
+  try {
+    return await getManagedBooking(token, signal)
+  } catch {
+    return booking
+  }
+}
+
 function ManageBooking({ token: initialToken, action }: { token: string; action: Action | null }) {
   const { t, ui } = useI18n()
 
@@ -102,7 +118,8 @@ function ManageBooking({ token: initialToken, action }: { token: string; action:
   const [token, setToken] = useState(initialToken)
   const [newToken, setNewToken] = useState<string | null>(null)
   const load = useCallback(
-    (signal: AbortSignal) => getManagedBooking(initialToken, signal),
+    async (signal: AbortSignal) =>
+      followReschedule(await getManagedBooking(initialToken, signal), initialToken, signal),
     [initialToken],
   )
   const [state, reload] = useRequest(load)
@@ -151,7 +168,11 @@ function ManageBooking({ token: initialToken, action }: { token: string; action:
       token={token}
       newToken={newToken}
       initialAction={action}
-      onUpdated={setBooking}
+      onUpdated={async (fresh) => {
+        const next = await followReschedule(fresh, token)
+        // A later action or snapshot wins over a slow successor lookup.
+        setBooking((current) => (current === booking ? next : current))
+      }}
       onCancelled={(cancelled) => setBooking({ ...booking, ...cancelled })}
       onRescheduled={(next, nextToken) => {
         setBooking({ ...booking, ...next })
@@ -164,7 +185,7 @@ function ManageBooking({ token: initialToken, action }: { token: string; action:
         // The booking changed elsewhere (cancelled in another tab, say), or an answer was
         // lost: show it as the server has it now.
         try {
-          const fresh = await getManagedBooking(token)
+          const fresh = await followReschedule(await getManagedBooking(token), token)
           setBooking(fresh)
           return fresh
         } catch {

@@ -278,6 +278,12 @@ booking is deleted. Responses never contain an email's token. With an email's to
 cancel or reschedule that keeps finding the meeting rescheduled again while it waits gets
 409 `booking_changed`; trying again is safe.
 
+The web manage page immediately reads once more when it receives a cancelled booking
+without a conference: a reschedule may have committed between token resolution and booking
+hydration. That read uses the same token and the successor rules above. Its result is final
+for that transition, including a cancelled successor or the same cancelled booking; failure
+keeps the first snapshot. It never automatically repeats a write or starts a polling loop.
+
 They are rate limited per client (`TRUSTED_PROXIES` decides which address that is; IPv6
 clients count per /64 network, since one subscriber usually has a whole /64): 120 requests a
 minute for host and event pages and for slots (the manage link's slots included), 10 for
