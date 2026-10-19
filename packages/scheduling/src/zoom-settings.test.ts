@@ -19,6 +19,8 @@ describe.skipIf(!databaseUrl)('automatic Zoom connection settings parity (real P
     db = createDb(database.pool)
     owner = await createTestUser(db)
     other = await createTestUser(db)
+    await persistKey(owner.principal)
+    await persistKey(other.principal)
     for (const user of [owner, other]) {
       const connection = await db
         .insertInto('conference_connections')
@@ -52,6 +54,22 @@ describe.skipIf(!databaseUrl)('automatic Zoom connection settings parity (real P
     automaticZoom: true,
     now: () => Temporal.Now.instant(),
   })
+  async function persistKey(principal: Principal, legacy = false) {
+    if (principal.kind !== 'api_key') throw new Error('Expected API-key fixture')
+    await database.pool.query(
+      `INSERT INTO auth.apikey
+        (id, "configId", "referenceId", key, "createdAt", "updatedAt", enabled, metadata)
+       VALUES ($1, 'default', $2, $3, now(), now(), $4, $5)
+       ON CONFLICT (id) DO UPDATE SET enabled = EXCLUDED.enabled, metadata = EXCLUDED.metadata`,
+      [
+        principal.apiKeyId,
+        principal.user.id,
+        randomUUID(),
+        legacy ? null : true,
+        legacy ? null : JSON.stringify({ organizationId: principal.organization.id }),
+      ],
+    )
+  }
   const input = (connection = connectionId) => ({
     slug: `zoom-${randomUUID()}`,
     title: 'Zoom configuration',
@@ -59,7 +77,7 @@ describe.skipIf(!databaseUrl)('automatic Zoom connection settings parity (real P
     location: { kind: 'zoom' as const, autoCreate: true as const },
     zoomConnectionId: connection,
   })
-  it.each(['session', 'api_key', 'oauth'] as const)(
+  it.each(['session', 'api_key', 'api_key_legacy', 'oauth'] as const)(
     'allows the actual host to select and replace their connection as %s',
     async (kind) => {
       const principal: Principal =
@@ -80,7 +98,7 @@ describe.skipIf(!databaseUrl)('automatic Zoom connection settings parity (real P
                   .executeTakeFirstOrThrow()
               ).id,
             }
-          : kind === 'api_key'
+          : kind === 'api_key' || kind === 'api_key_legacy'
             ? owner.principal
             : {
                 user: owner.principal.user,
@@ -90,6 +108,7 @@ describe.skipIf(!databaseUrl)('automatic Zoom connection settings parity (real P
                 oauthConsentId: 'synthetic-consent',
                 scopes: ['mcp:tools'],
               }
+      if (principal.kind === 'api_key') await persistKey(principal, kind === 'api_key_legacy')
       const creating = createEventType(context(principal), input())
       await expect(creating).resolves.toMatchObject({ zoomConnectionId: connectionId })
       const created = await creating
@@ -125,6 +144,7 @@ describe.skipIf(!databaseUrl)('automatic Zoom connection settings parity (real P
   it('keeps event selection in the key acting organization even for an owner of both organizations', async () => {
     const first = await createTestTeam(db, [{ user: owner, role: 'owner' }])
     const second = await createTestTeam(db, [{ user: owner, role: 'owner' }])
+    await persistKey(first.as(owner))
     const event = await createEventType(context(first.as(owner)), input())
     await expect(
       updateEventType(context(second.as(owner)), event.id, {

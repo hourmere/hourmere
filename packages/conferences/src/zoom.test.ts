@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { setImmediate, setTimeout } from 'node:timers/promises'
 import { describe, expect, it, vi } from 'vitest'
 import {
   conferenceAad,
@@ -9,19 +10,51 @@ import {
 import { fakeZoom, TEST_CONFERENCE_KEY } from './testing.ts'
 import { createZoomClient, refreshZoomTokens, ZOOM_SCOPE, ZoomError } from './zoom.ts'
 
+vi.mock('node:timers/promises', async (importOriginal) => {
+  const original = await importOriginal<typeof import('node:timers/promises')>()
+  return { ...original, setTimeout: vi.fn(original.setTimeout) }
+})
+
 const signal = () => AbortSignal.timeout(1000)
 describe('Zoom confidential OAuth transport and separate encryption', () => {
   it('bounds refresh retries to three attempts with 100 ms then 200 ms backoff', async () => {
-    const times: number[] = [],
-      start = performance.now()
-    const error = await refreshZoomTokens(async () => {
-      times.push(performance.now() - start)
-      throw new ZoomError('provider_unavailable', { retryable: true })
-    }, new AbortController().signal).catch((error) => error)
-    expect(error).toMatchObject({ code: 'provider_unavailable' })
-    expect(times).toHaveLength(3)
-    expect((times[1] ?? 0) - (times[0] ?? 0)).toBeGreaterThanOrEqual(90)
-    expect((times[2] ?? 0) - (times[1] ?? 0)).toBeGreaterThanOrEqual(190)
+    const firstDelay = Promise.withResolvers<void>(),
+      secondDelay = Promise.withResolvers<void>(),
+      firstStarted = Promise.withResolvers<void>(),
+      secondStarted = Promise.withResolvers<void>(),
+      controller = new AbortController(),
+      sleep = vi
+        .mocked(setTimeout)
+        .mockImplementationOnce(() => {
+          firstStarted.resolve()
+          return firstDelay.promise
+        })
+        .mockImplementationOnce(() => {
+          secondStarted.resolve()
+          return secondDelay.promise
+        }),
+      refresh = vi.fn(async () => {
+        throw new ZoomError('provider_unavailable', { retryable: true })
+      }),
+      result = refreshZoomTokens(refresh, controller.signal).catch((error) => error)
+    try {
+      await Promise.race([firstStarted.promise, result])
+      expect(refresh).toHaveBeenCalledTimes(1)
+      expect(sleep).toHaveBeenNthCalledWith(1, 100, undefined, { signal: controller.signal })
+      firstDelay.resolve()
+      await Promise.race([secondStarted.promise, result])
+      expect(refresh).toHaveBeenCalledTimes(2)
+      expect(sleep).toHaveBeenNthCalledWith(2, 200, undefined, { signal: controller.signal })
+      secondDelay.resolve()
+      expect(await result).toMatchObject({ code: 'provider_unavailable' })
+      expect(refresh).toHaveBeenCalledTimes(3)
+      expect(sleep).toHaveBeenCalledTimes(2)
+    } finally {
+      firstDelay.resolve()
+      secondDelay.resolve()
+      await result
+      sleep.mockRestore()
+    }
   })
   it('uses advanced minimal scopes, S256 and the fixed callback without secret/verifier URL values', () => {
     const p = fakeZoom(),
@@ -129,28 +162,92 @@ describe('Zoom confidential OAuth transport and separate encryption', () => {
     await expect(p.client.refresh('refresh', signal())).rejects.toThrow('provider_unavailable')
   })
   it('enforces deadlines even when fetch or a stream ignores the signal', async () => {
-    const stuck: typeof fetch = () => new Promise(() => {})
+    const response = Promise.withResolvers<Response>(),
+      fetchController = new AbortController(),
+      stuck = vi.fn<typeof fetch>(() => response.promise)
     const client = createZoomClient(
       { clientId: 'client', clientSecret: 'secret', publicUrl: 'http://localhost:5173' },
       stuck,
     )
-    await expect(client.refresh('refresh', AbortSignal.timeout(20))).rejects.toThrow(
-      'provider_unavailable',
+    let fetchSettled = false
+    const fetchResult = client.refresh('refresh', fetchController.signal).then(
+      (value) => {
+        fetchSettled = true
+        return { value }
+      },
+      (error) => {
+        fetchSettled = true
+        return { error }
+      },
     )
-    const p = fakeZoom()
-    let cancelled = false
-    p.controls.tokenHook = async () =>
-      new Response(
-        new ReadableStream({
-          cancel() {
-            cancelled = true
-          },
+    try {
+      expect(stuck).toHaveBeenCalledTimes(1)
+      expect(fetchController.signal.aborted).toBe(false)
+      fetchController.abort(new DOMException('Synthetic timeout', 'TimeoutError'))
+      // Drain abort continuations while the provider response remains unresolved.
+      await setImmediate()
+      expect(fetchSettled).toBe(true)
+      expect(await fetchResult).toMatchObject({ error: { message: 'provider_unavailable' } })
+    } finally {
+      response.resolve(
+        Response.json({
+          access_token: 'synthetic-access',
+          refresh_token: 'synthetic-refresh',
+          expires_in: 3600,
+          token_type: 'bearer',
+          scope: ZOOM_SCOPE,
         }),
       )
-    await expect(p.client.refresh('refresh', AbortSignal.timeout(20))).rejects.toThrow(
-      'provider_unavailable',
+      await fetchResult
+    }
+    const p = fakeZoom(),
+      reading = Promise.withResolvers<void>(),
+      streamController = new AbortController()
+    let cancelled = false,
+      streamSettled = false,
+      body: ReadableStreamDefaultController<Uint8Array> | undefined
+    p.controls.tokenHook = async () =>
+      new Response(
+        new ReadableStream<Uint8Array>(
+          {
+            start(controller) {
+              body = controller
+            },
+            pull() {
+              reading.resolve()
+            },
+            cancel() {
+              cancelled = true
+            },
+          },
+          { highWaterMark: 0 },
+        ),
+      )
+    const streamResult = p.client.refresh('refresh', streamController.signal).then(
+      (value) => {
+        streamSettled = true
+        return { value }
+      },
+      (error) => {
+        streamSettled = true
+        return { error }
+      },
     )
-    await vi.waitFor(() => expect(cancelled).toBe(true))
+    try {
+      await reading.promise
+      expect(streamController.signal.aborted).toBe(false)
+      streamController.abort(new DOMException('Synthetic timeout', 'TimeoutError'))
+      await setImmediate()
+      expect(streamSettled).toBe(true)
+      expect(await streamResult).toMatchObject({ error: { message: 'provider_unavailable' } })
+      expect(cancelled).toBe(true)
+    } finally {
+      if (!cancelled) {
+        body?.enqueue(Buffer.from(JSON.stringify(p.controls.token)))
+        body?.close()
+      }
+      await streamResult
+    }
   })
   it('does not invoke a request for an already-aborted operation', async () => {
     const p = fakeZoom()

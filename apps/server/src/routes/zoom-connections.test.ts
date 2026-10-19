@@ -57,6 +57,18 @@ describe.skipIf(!databaseUrl)('Zoom HTTP integration settings (real Postgres)', 
     db = createDb(database.pool)
     owner = await conferenceTestSession(db)
     other = await conferenceTestSession(db)
+    for (const principal of [owner, other])
+      await database.pool.query(
+        `INSERT INTO auth.apikey
+          (id, "configId", "referenceId", key, "createdAt", "updatedAt", enabled, metadata)
+         VALUES ($1, 'default', $2, $3, now(), now(), true, $4)`,
+        [
+          principal.sessionId,
+          principal.user.id,
+          `synthetic-${principal.sessionId}`,
+          JSON.stringify({ organizationId: principal.organization.id }),
+        ],
+      )
   })
   beforeEach(async () => {
     await db.deleteFrom('event_types').execute()
