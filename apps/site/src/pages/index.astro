@@ -69,10 +69,10 @@ const plans = [
   <section class="hero">
     <div class="container hero-grid">
       <div>
-        <p class="status"><span class="status-dot" aria-hidden="true"></span>In development</p>
+        <p class="status"><span class="status-dot" aria-hidden="true"></span>Invitation-only preview</p>
         <h1>Open-source scheduling for people and AI agents.</h1>
         <p class="lead">
-          Hourmere is an alternative to Calendly, being built as open-source software. Share a
+          Hourmere is an open-source alternative to Calendly. Share a
           booking link and let invitees pick a time that works. Your AI assistant can check your availability and book, reschedule
           or cancel meetings through an API and a remote MCP server.
         </p>
@@ -85,8 +85,11 @@ const plans = [
           <a class="btn" href={site.github}>Follow on GitHub</a>
         </div>
         <p class="note">
-          Hourmere is not available yet, so there is no sign-up today. Email us and we will let you
-          know when it launches.
+          Hourmere Cloud, operated by {company.shortName}, is in an invitation-only preview at
+          <a href="https://app.hourmere.com">app.hourmere.com</a>. Sign-ups are currently closed.
+          The open-source release for self-hosting is planned for November 30, 2026.
+          <a href={launchUpdatesHref}>Email us</a> to hear when Hourmere Cloud opens to everyone.
+          Read the <a href="/privacy">Privacy Policy</a> and <a href="/terms">Terms of Service</a>.
         </p>
       </div>
       <BookingPreview />
@@ -207,7 +210,7 @@ const plans = [
     <div class="container">
       <p class="eyebrow">Self-host or cloud</p>
       <h2 id="self-host-title">Run it yourself, or let us run it</h2>
-      <p class="section-intro">The same open-source software will power both.</p>
+      <p class="section-intro">The same open-source software powers both.</p>
       <div class="grid two">
         <div class="card">
           <h3>Self-hosted</h3>
@@ -223,8 +226,9 @@ const plans = [
         <div class="card">
           <h3>Hourmere Cloud</h3>
           <p>
-            We will host, update and operate Hourmere for you, so you can share your booking link
-            without running a server. Hourmere Cloud is in development.
+            We host, update and operate Hourmere for you, so you can share your booking link
+            without running a server. Hourmere Cloud is in an invitation-only preview at
+            <a href="https://app.hourmere.com">app.hourmere.com</a>. Sign-ups are currently closed.
           </p>
           <p class="small">
             Operated by <a href={company.url}>{company.name}</a>.
@@ -267,8 +271,12 @@ const plans = [
         <details>
           <summary>Can I use Hourmere today?</summary>
           <p>
-            Not yet. Hourmere is in development.
-            Email <a href={launchUpdatesHref}>{contact.hello}</a> to hear when it launches.
+            Hourmere Cloud is in an invitation-only preview at
+            <a href="https://app.hourmere.com">app.hourmere.com</a>, operated by {company.shortName}.
+            Sign-ups are currently closed. The open-source release for self-hosting is planned
+            for November 30, 2026. You can <a href={site.github}>follow development on GitHub</a>,
+            and email <a href={launchUpdatesHref}>{contact.hello}</a> to hear when Hourmere Cloud
+            opens to everyone.
           </p>
         </details>
         <details>
@@ -304,7 +312,7 @@ const plans = [
 
   <section class="closing" aria-labelledby="closing-title">
     <div class="container closing-inner">
-      <h2 id="closing-title">Hourmere is in development.</h2>
+      <h2 id="closing-title">Hourmere Cloud is in an invitation-only preview.</h2>
       <div class="cta-row">
         <a class="btn btn-light" href={launchUpdatesHref}>Get launch updates</a>
         <a class="btn btn-outline-light" href={site.github}>Follow on GitHub</a>

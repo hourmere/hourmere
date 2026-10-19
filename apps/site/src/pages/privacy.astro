@@ -1,5 +1,6 @@
 ---
 import Legal from '../layouts/Legal.astro'
+import { resolvePrivacyPublicationDate } from '../privacy-publication'
 import { company, contact, googlePolicies, site } from '../site'
 
 const sections = [
@@ -23,28 +24,29 @@ const sections = [
 ]
 
 const privacyMail = `mailto:${contact.privacy}`
+const publicationDate = resolvePrivacyPublicationDate(import.meta.env.PRIVACY_PUBLICATION_DATE)
 ---
 
 <Legal
   title="Privacy Policy"
   description="How Hourmere, operated by Cobaltmere, LLC, collects, uses, stores, shares and deletes personal data, including data from Google and Microsoft."
   path="/privacy"
-  effective="2026-11-30"
+  effective={publicationDate}
+  lastUpdated
   sections={sections}
 >
   <Fragment slot="intro">
     <p>
       This Privacy Policy explains how {company.name} ("{company.shortName}", "we", "us") collects,
       uses, stores, shares and deletes personal data in connection with Hourmere: the website at
-      hourmere.com, the Hourmere cloud service that we host ("Hourmere Cloud"), and its API and
+      hourmere.com, the Hourmere cloud service that we host at app.hourmere.com ("Hourmere Cloud"), and its API and
       remote MCP server (together, the "Service").
     </p>
     <p class="callout">
-      Hourmere is in development and Hourmere Cloud has not launched yet. This policy describes how
-      we will handle personal data once it does. Until then, the only personal data we receive
-      through Hourmere is the website request data described in
-      <a href="#this-website">section 14</a> and any messages you choose to send us, such as a
-      request for launch updates.
+      Hourmere is in development. Hourmere Cloud, the hosted service we operate at
+      <a href="https://app.hourmere.com">app.hourmere.com</a>, is currently an invitation-only preview
+      while we prepare its public launch. This policy applies to that preview, including any
+      Google user data it receives, and to this website.
     </p>
     <section class="summary" aria-labelledby="summary-title">
       <h2 id="summary-title">The short version</h2>
@@ -181,7 +183,7 @@ const privacyMail = `mailto:${contact.privacy}`
     </li>
   </ul>
   <p class="callout">
-    Hourmere Cloud has not launched and takes no payments yet; the billing description above
+    Hourmere Cloud is in an invitation-only preview and takes no payments yet; the billing description above
     applies once paid plans are available.
   </p>
 
@@ -268,6 +270,36 @@ const privacyMail = `mailto:${contact.privacy}`
     We request only the permissions these features need. Google's consent screen shows the exact
     permissions before you agree.
   </p>
+  <h3>Google permissions Hourmere requests</h3>
+  <p>
+    Sign in with Google requests <code>openid</code>, <code>email</code> and <code>profile</code>
+    (your Google account ID, email address, name and profile picture) to create your account and
+    sign you in; it does not give Hourmere calendar access. Connecting Google Calendar is a
+    separate step that requests:
+  </p>
+  <ul>
+    <li>
+      <code>openid</code> and <code>email</code>, to identify the connected Google account;
+    </li>
+    <li>
+      <code>https://www.googleapis.com/auth/calendar.calendarlist.readonly</code>, to list your
+      calendars with their names, identifiers, primary-calendar status, time zones, your access
+      level and whether Google Meet is available, so you can choose calendars;
+    </li>
+    <li>
+      when you enable synchronization,
+      <code>https://www.googleapis.com/auth/calendar.events.readonly</code>, used only to read event
+      identifiers, start and end times, status, busy/free setting and your own response for events
+      on the calendars you select for conflict checks; and
+    </li>
+    <li>
+      when you enable synchronization,
+      <code>https://www.googleapis.com/auth/calendar.events.owned</code>, used only to create,
+      update and cancel the booking events Hourmere adds to the calendar you own and select for
+      new bookings, to add a Google Meet link to those events when you turn on automatic Google
+      Meet, and to read those booking events back to keep them in sync.
+    </li>
+  </ul>
 
   <h3>How we use it</h3>
   <p>
@@ -292,6 +324,11 @@ const privacyMail = `mailto:${contact.privacy}`
       learning models.
     </li>
   </ul>
+
+  <p>
+    Hourmere does not use data obtained through Google Workspace APIs to develop, improve, or
+    train generalized or non-personalized AI and/or ML models.
+  </p>
 
   <h3>How we share it</h3>
   <p>We do not share or transfer Google user data, except:</p>
@@ -327,17 +364,25 @@ const privacyMail = `mailto:${contact.privacy}`
 
   <h3>How we store and protect it</h3>
   <p>
-    Google user data is stored with our cloud hosting providers. Before Hourmere Cloud launches, we
-    will state where its data is hosted in
-    <a href="#international-transfers">section 12</a>. Google user data is encrypted in transit,
-    and calendar connection tokens are stored encrypted. Access is limited to the systems and
+    Hourmere Cloud, including the preview at app.hourmere.com, runs on a VPS in Los Angeles,
+    United States, operated by BandwagonHost. Google user data is stored in Hourmere's database
+    on that server and in its on-host backups (see <a href="#retention">section 10</a>).
+    Google user data is encrypted in transit. Google Calendar connection access and refresh
+    tokens are stored encrypted with AES-256-GCM; Google sign-in access and refresh tokens are
+    also stored encrypted. Access is limited to the systems and
     personnel that need it to run the Service. See <a href="#security">section 11</a>.
   </p>
 
   <h3>Retention and deletion</h3>
   <p>
     We keep Google user data only as long as we need it to provide the features described above.
-    The busy times and sync data Hourmere stores are refreshed and replaced as your calendar changes.
+    While synchronization is active, Hourmere reads busy intervals for a rolling window from
+    three days before the current UTC day to 403 days (about 13 months) ahead. It normally checks
+    selected calendars about every minute using incremental updates and rebuilds the window
+    daily. Events overlapping the window can start before it or end after it. If synchronization
+    stops, including when you turn off conflict checks, stored busy intervals and sync data remain
+    until the calendar is synchronized again, the connection is disconnected in Hourmere, or you
+    ask us to delete them.
   </p>
   <ul>
     <li>
@@ -368,6 +413,12 @@ const privacyMail = `mailto:${contact.privacy}`
       href={googlePolicies.connections}>third-party connections page</a
     >, and you can ask us to delete your data by emailing <a href={privacyMail}>{contact.privacy}</a
     >.
+  </p>
+  <p>
+    If you remove Hourmere's access in your Google Account, Hourmere can no longer read or update
+    your calendar. When Hourmere detects the authorization failure, it marks the connection as
+    needing reconnection; its stored connection data remains until you disconnect it in Hourmere
+    or ask us to delete it.
   </p>
 
   <h3>Limited Use</h3>
@@ -483,7 +534,7 @@ const privacyMail = `mailto:${contact.privacy}`
     </li>
   </ul>
   <p class="callout">
-    Hourmere Cloud has not launched and takes no payments yet; the payment-provider description
+    Hourmere Cloud is in an invitation-only preview and takes no payments yet; the payment-provider description
     above applies once paid plans are available.
   </p>
 
@@ -602,13 +653,18 @@ const privacyMail = `mailto:${contact.privacy}`
     </li>
   </ul>
   <p>
-    Beyond the cleanup described in sections 2 and 7, Hourmere does not currently run other
+    Beyond the cleanup described in sections 2, 4 and 7 and the backup rotation below, Hourmere does not currently run other
     automatic deletion schedules for account data, conference identity and meeting records,
-    remaining OAuth and notification metadata, server and API logs, support correspondence or
-    backup copies. You can ask about or request deletion of the data {company.shortName} holds
+    remaining OAuth and notification metadata, server and API logs or support correspondence.
+    You can ask about or request deletion of the data {company.shortName} holds
     about you by emailing <a href={privacyMail}>{contact.privacy}</a>; we respond within one
     month. Data already sent to calendar, conference and email providers, webhook recipients or
     applications you authorized is handled under their own policies.
+  </p>
+  <p>
+    Hourmere Cloud makes daily on-host backups, kept for 7 days, and keeps 4 weekly copies.
+    These backups rotate automatically; deleted data may remain in a retained backup until that
+    copy is rotated out. Off-site backups are not yet in place.
   </p>
 
   <h2 id="security">11. Security</h2>
@@ -625,9 +681,9 @@ const privacyMail = `mailto:${contact.privacy}`
 
   <h2 id="international-transfers">12. Where data is processed</h2>
   <p>
-    We are based in the United States. Hourmere Cloud has not launched. Before it does, we will
-    update this policy to state where Hourmere Cloud data is hosted and any mechanism we use for
-    international transfers of personal data. The hourmere.com website is published as static
+    We are based in the United States. Hourmere Cloud, including the invitation-only preview at
+    app.hourmere.com, runs on a VPS in Los Angeles, United States, operated by BandwagonHost.
+    Hourmere Cloud data and its on-host backups are stored there. The hourmere.com website is published as static
     files on Cloudflare Workers; the request data its hosting processes is described in
     <a href="#this-website">section 14</a>.
   </p>
@@ -657,7 +713,7 @@ const privacyMail = `mailto:${contact.privacy}`
     dark theme choice, in your browser's local storage; this stays on your device.
   </p>
   <p>
-    When Hourmere Cloud launches, it will use only cookies that are strictly necessary for it to
+    Hourmere Cloud, including the preview, uses only cookies that are strictly necessary for it to
     work, such as keeping you signed in. We do not use advertising cookies.
   </p>
   <p>

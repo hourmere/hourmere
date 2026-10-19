@@ -47,6 +47,9 @@ jobs:
       - name: Generated API types match the server's OpenAPI document
         run: npm run api:types && git diff --exit-code -- apps/web/src/api/schema.d.ts
       - run: npm run build
+        env:
+          # Nonpublishing build fixture only; deployment must use its publication day.
+          PRIVACY_PUBLICATION_DATE: '2000-01-01'
       - name: Inspect and smoke test the standalone npm CLI tarball
         run: npm run cli:pack-smoke
       - name: Validate the draft MCP Registry metadata against the official schema

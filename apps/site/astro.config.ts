@@ -1,5 +1,6 @@
 import starlight from '@astrojs/starlight'
 import { defineConfig } from 'astro/config'
+import { resolvePrivacyPublicationDate } from './src/privacy-publication.ts'
 
 // Static site for hourmere.com. The homepage and legal pages are plain Astro pages in
 // src/pages; Starlight serves documentation from src/content/docs.
@@ -14,6 +15,14 @@ export default defineConfig({
   // ("the\n<a>" renders as "the<a>"), which glues words together in the legal pages.
   compressHTML: false,
   integrations: [
+    {
+      name: 'privacy-publication-date',
+      hooks: {
+        'astro:build:start': () => {
+          resolvePrivacyPublicationDate(process.env.PRIVACY_PUBLICATION_DATE)
+        },
+      },
+    },
     starlight({
       title: 'Hourmere',
       description: 'Open-source scheduling for people and AI agents.',
