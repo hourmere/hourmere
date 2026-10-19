@@ -196,7 +196,7 @@ export function conferenceRoutes(deps: ConferenceDeps): RouteModule {
             400: 'invalid_request',
             403: 'conference_session_required',
             404: 'zoom_connection_not_found',
-            409: 'zoom_disabled, zoom_needs_reauth, zoom_refresh_incomplete, zoom_identity_mismatch or a safe provider failure',
+            409: 'zoom_disabled, zoom_needs_reauth, zoom_refresh_in_progress, zoom_refresh_incomplete, zoom_identity_mismatch or a safe provider failure',
           }),
         },
       }),

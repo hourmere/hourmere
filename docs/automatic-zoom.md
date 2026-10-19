@@ -89,8 +89,12 @@ rate limits and other rejected requests use bounded provider backoff. A subseque
 may POST because the rejected operation did not create a meeting. This policy does not
 apply to unknown transport outcomes or server failures.
 
-Provider I/O holds only owner/connection protection, with bounded deadlines. No booking,
-host, fairness or root-intent lock spans the network. Results apply after credential I/O
+Browser OAuth and explicit refresh perform bounded provider I/O without row locks, between
+short owner/session/claim transactions. Completion rechecks the live session and claim;
+OAuth also rejects changed connection row versions. A disconnect, logout or newer grant
+cannot be overwritten by an in-flight response. Meeting workers retain owner key-share and
+connection protection, compatible with public booking host share locks. No booking, host,
+fairness or root-intent lock spans the network. Results apply after credential I/O
 commits, under booking then intent/mirror locks with revision and lease checks. Expired
 credentials are durably removed from the row before the rotating refresh request. Refresh
 transport failures (5xx, rate limit, timeout or network failure) receive at most three

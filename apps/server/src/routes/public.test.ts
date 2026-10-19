@@ -851,7 +851,7 @@ describe.skipIf(!serverUrl)('public routes', () => {
       const conflict =
         doc.paths[`${namespace}/{handle}/{slug}/bookings`]?.post?.responses?.['409']?.description
       expect(conflict).toContain('booking_changed')
-      expect(conflict).toContain('round-robin host pool changed')
+      expect(conflict).toContain('round-robin host pool or activation changed')
       expect(conflict).toContain('fetch current availability before retrying')
     }
     expect(doc.paths['/api/v1/bookings']?.get?.security).toEqual([{ apiKey: [] }, { session: [] }])
