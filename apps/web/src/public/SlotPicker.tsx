@@ -199,6 +199,11 @@ export function SlotPicker({
   const focusDone = useCallback(() => setFocusRequested(false), [])
 
   const daySlots = day ? (byDay.get(day) ?? []) : []
+  // Before a day is chosen, use the focused day in the visible month. A date rather than
+  // today's instant lets every listed zone use its own DST rules for that calendar day.
+  const referenceDate =
+    day ??
+    (compareMonths(monthOf(focusDay), month) === 0 ? focusDay : toDateKey({ ...month, day: 1 }))
   const labels = daySlots.map((s) => formatTime(Date.parse(s.start), timeZone, locale))
   // Where clocks go back, one wall time happens twice: add the zone's abbreviation then.
   const repeated = new Set(labels.filter((l, i) => labels.indexOf(l) !== i))
@@ -281,6 +286,7 @@ export function SlotPicker({
             value={timeZone}
             onChange={onTimeZoneChange}
             now={now}
+            referenceDate={referenceDate}
             error={timeZoneError}
           />
         </div>

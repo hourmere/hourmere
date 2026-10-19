@@ -66,6 +66,21 @@ describe('API surface', () => {
     expect(Object.keys(doc.paths)).toEqual(expect.arrayContaining(['/api/health', '/api/v1/me']))
   })
 
+  it('documents the optional neutral Zoom alias without requiring it for other errors', async () => {
+    const response = await app.request('/api/v1/openapi.json')
+    const doc = (await response.json()) as {
+      components: {
+        schemas: { Error: { properties: Record<string, unknown>; required: string[] } }
+      }
+    }
+    expect(doc.components.schemas.Error.properties.errorAlias).toMatchObject({
+      type: 'string',
+      enum: ['zoom_operation_busy'],
+      description: expect.stringContaining('zoom_refresh_in_progress'),
+    })
+    expect(doc.components.schemas.Error.required).toEqual(['error'])
+  })
+
   it('answers 401 JSON on authenticated routes when nobody is signed in', async () => {
     const res = await app.request('/api/v1/me')
     expect(res.status).toBe(401)
@@ -164,6 +179,14 @@ describe('route modules and errors', () => {
         if (fail === 'conflict')
           throw new DomainError('conflict', 'slot_taken', 'Someone booked this time first')
         if (fail === 'empty') throw new DomainError('invalid', 'bad_thing', '')
+        if (fail === 'zoom_busy' || fail === 'zoom_busy_without_detail')
+          throw new DomainError(
+            'conflict',
+            'zoom_refresh_in_progress',
+            fail === 'zoom_busy'
+              ? 'Zoom account operations are busy. Try again shortly.'
+              : undefined,
+          )
         if (fail === 'weird') throw new DomainError('weird' as DomainErrorKind, 'weird')
         if (fail === 'prepared')
           throw new HTTPException(418, { res: new Response('teapot', { status: 418 }) })
@@ -237,6 +260,21 @@ describe('route modules and errors', () => {
     })
     expect(await (await post('?fail=empty', valid)).json()).toEqual({ error: 'bad_thing' })
   })
+
+  it.each(['zoom_busy', 'zoom_busy_without_detail'])(
+    'adds the neutral Zoom alias while preserving the legacy code (%s)',
+    async (fail) => {
+      const response = await post(`?fail=${fail}`, valid)
+      expect(response.status).toBe(409)
+      expect(await response.json()).toEqual({
+        error: 'zoom_refresh_in_progress',
+        errorAlias: 'zoom_operation_busy',
+        ...(fail === 'zoom_busy' && {
+          message: 'Zoom account operations are busy. Try again shortly.',
+        }),
+      })
+    },
+  )
 
   it('treats a DomainError with an unknown kind as a bug', async () => {
     const res = await post('?fail=weird', valid)

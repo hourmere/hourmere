@@ -3,8 +3,9 @@ import { type KeyboardEvent, useEffect, useId, useMemo, useRef, useState } from 
 import { isKnownTimeZone } from '../format.ts'
 import { useI18n } from '../i18n/runtime.tsx'
 import type { UiText } from '../i18n/translate.ts'
+import { type DateKey, parseDateKey } from '../public/calendar.ts'
 import { availableTimeZones } from '../public/env.ts'
-import { currentZoneId, offsetLabel, zoneName } from '../public/time.ts'
+import { currentZoneId, instantOf, offsetLabel, zoneName } from '../public/time.ts'
 import type { ControlProps } from './forms.tsx'
 
 interface TimeZonePickerProps {
@@ -12,7 +13,9 @@ interface TimeZonePickerProps {
   onChange: (value: string) => void
   /** With a field control, allow free typing so the surrounding form can validate it. */
   control?: ControlProps
-  /** Otherwise show a toggle and a separate search field, for public slot selection. */
+  /** Offsets on this calendar date, at local noon in each listed zone. */
+  referenceDate?: DateKey
+  /** Fallback offset instant when no calendar date is supplied. */
   now?: number
   error?: UiText | undefined
 }
@@ -43,9 +46,12 @@ interface Zone {
   haystack: string
 }
 
-function zoneInfo(id: string, now: number): Zone {
+function zoneInfo(id: string, now: number, referenceDate?: DateKey): Zone {
   const name = zoneName(id)
-  const offset = offsetLabel(id, now)
+  const offset = offsetLabel(
+    id,
+    referenceDate ? instantOf(parseDateKey(referenceDate), 12, 0, id) : now,
+  )
   return {
     id,
     name,
@@ -55,22 +61,32 @@ function zoneInfo(id: string, now: number): Zone {
   }
 }
 
-export function TimeZonePicker({ value, onChange, control, now, error }: TimeZonePickerProps) {
+export function TimeZonePicker({
+  value,
+  onChange,
+  control,
+  now,
+  referenceDate,
+  error,
+}: TimeZonePickerProps) {
   const { t, ui } = useI18n()
 
   const editable = control !== undefined
   const id = useId()
   const [mountedAt] = useState(Date.now)
   const at = now ?? mountedAt
-  // Typing changes only the search: offsets for all zones are computed once per instant.
-  const listed = useMemo(() => timeZoneNames().map((zone) => zoneInfo(zone, at)), [at])
+  // Typing changes only the search; changing the displayed date refreshes every offset.
+  const listed = useMemo(
+    () => timeZoneNames().map((zone) => zoneInfo(zone, at, referenceDate)),
+    [at, referenceDate],
+  )
   const zones = useMemo(() => {
     if (!value || listed.some((zone) => zone.id === value) || !isKnownTimeZone(value)) return listed
-    const alias = zoneInfo(value, at)
+    const alias = zoneInfo(value, at, referenceDate)
     return [...listed.filter((zone) => zone.canonical !== alias.canonical), alias].sort((a, b) =>
       a.id.localeCompare(b.id),
     )
-  }, [listed, value, at])
+  }, [listed, value, at, referenceDate])
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [filtering, setFiltering] = useState(false)

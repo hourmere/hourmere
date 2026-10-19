@@ -120,6 +120,7 @@ function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loa
   )
   const location = describeLocation(booking.location)
   const cancelled = booking.status === 'cancelled'
+  const rescheduled = cancelled && Boolean(booking.rescheduledToId)
   const started = new Date(booking.start).getTime() <= Date.now()
 
   // Answers in the order of the questions, then any the event type no longer asks.
@@ -136,7 +137,11 @@ function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loa
       </p>
       <h1>
         {booking.title}
-        {cancelled && <span className="badge badge-danger heading-badge">{t('Cancelled')}</span>}
+        {cancelled && (
+          <span className={`badge heading-badge${rescheduled ? '' : ' badge-danger'}`}>
+            {rescheduled ? t('Rescheduled') : t('Cancelled')}
+          </span>
+        )}
       </h1>
       <p className="flash" role="status" tabIndex={-1} ref={statusRef}>
         {ui(status)}
@@ -196,9 +201,17 @@ function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loa
           )}
           {cancelled && (
             <>
-              <dt>{t('Cancelled')}</dt>
+              <dt>{rescheduled ? t('Rescheduled') : t('Cancelled')}</dt>
               <dd>
                 {booking.cancelledAt ? format.dateTime(booking.cancelledAt) : t('Yes')}
+                {rescheduled && booking.rescheduledToId && (
+                  <>
+                    <br />
+                    <Link to={bookingPath(booking.rescheduledToId)}>
+                      {t('View rescheduled booking')}
+                    </Link>
+                  </>
+                )}
                 {booking.cancelReason && (
                   <>
                     <br />

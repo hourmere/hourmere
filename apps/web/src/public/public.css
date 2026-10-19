@@ -8,8 +8,14 @@
 
 .public {
   display: grid;
-  grid-template-rows: 1fr auto;
+  grid-template-rows: auto 1fr auto;
   min-height: 100vh;
+}
+
+.public .public-language {
+  width: 100%;
+  max-width: 1080px;
+  padding: var(--space-4) var(--space-4) 0;
 }
 
 .public .public-main {
