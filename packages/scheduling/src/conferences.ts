@@ -381,7 +381,7 @@ export async function cancelBookingConference(trx: Db, bookingId: string, now: T
 }
 
 interface BookingConferenceView {
-  conference: ConferenceStatus
+  conference: ConferenceStatus | undefined
   location: Json | null
   bookingStatus: string
   bookingCancelledAt: Date | null
@@ -391,38 +391,57 @@ interface BookingConferenceView {
 export async function bookingConferenceViews(db: Db, ids: readonly string[]) {
   if (!ids.length) return new Map<string, BookingConferenceView>()
   const rows = await db
-    .selectFrom('booking_conferences')
-    .innerJoin('bookings as b', 'b.id', 'booking_conferences.booking_id')
-    .selectAll('booking_conferences')
-    // Read cancellation, the resolved link and readiness from one snapshot. A booking
-    // row loaded before this query may predate a worker or cancellation commit.
+    .selectFrom('bookings as b')
+    .leftJoin('booking_conferences as c', 'c.booking_id', 'b.id')
+    // Drive hydration from every booking, including a predecessor whose conference
+    // pointer moved to its successor after the initial booking read. No extra query
+    // or transaction is needed to keep lifecycle, location and readiness together.
     .select([
+      'b.id as booking_id',
       'b.status as booking_status',
       'b.location as booking_location',
       'b.cancelled_at as booking_cancelled_at',
       'b.cancel_reason as booking_cancel_reason',
+      'c.root_booking_id',
+      'c.provider',
+      'c.state',
+      'c.error_code',
     ])
-    .where('booking_id', 'in', ids)
+    .select((eb) =>
+      eb
+        .or([
+          eb('c.invitation_organizer_email', 'is', null),
+          eb.exists(
+            eb
+              .selectFrom('auth.user as u')
+              .innerJoin('auth.member as m', 'm.userId', 'u.id')
+              .select('u.id')
+              .whereRef('u.id', '=', 'c.organizer_user_id')
+              .where('u.emailVerified', '=', true)
+              .whereRef('m.organizationId', '=', 'c.organization_id')
+              .whereRef('u.email', '=', 'c.invitation_organizer_email'),
+          ),
+        ])
+        .as('organizer_available'),
+    )
+    .where('b.id', 'in', ids)
     .execute()
   const unavailable = new Set<string>()
   for (const r of rows)
-    if (
-      r.booking_status === 'confirmed' &&
-      r.invitation_organizer_email !== null &&
-      !(await conferenceOrganizerAvailable(db, r))
-    )
-      unavailable.add(r.booking_id)
+    if (r.booking_status === 'confirmed' && !r.organizer_available) unavailable.add(r.booking_id)
   return new Map(
     rows.map((r) => [
       r.booking_id,
       {
-        conference: {
-          provider: r.provider as ConferenceStatus['provider'],
-          status: unavailable.has(r.booking_id)
-            ? 'failed'
-            : (r.state as ConferenceStatus['status']),
-          errorCode: unavailable.has(r.booking_id) ? 'organizer_unavailable' : r.error_code,
-        },
+        conference: r.root_booking_id
+          ? {
+              provider: r.provider as ConferenceStatus['provider'],
+              status: unavailable.has(r.booking_id)
+                ? 'failed'
+                : (r.state as ConferenceStatus['status']),
+              errorCode: unavailable.has(r.booking_id) ? 'organizer_unavailable' : r.error_code,
+            }
+          : undefined,
         location: r.booking_location,
         bookingStatus: r.booking_status,
         bookingCancelledAt: r.booking_cancelled_at,
