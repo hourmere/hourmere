@@ -1,0 +1,7 @@
+# PUBLIC_URL must be an HTTPS hostname origin, e.g. https://app.hourmere.com.
+# Caddy obtains/renews TLS certificates and redirects HTTP to HTTPS automatically.
+{$PUBLIC_URL} {
+  # Preserve Host and set X-Forwarded-For/Proto; Caddy ignores client-supplied
+  # forwarded values by default. Do not trust upstream proxies here without review.
+  reverse_proxy app:3000
+}
