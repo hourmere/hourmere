@@ -113,8 +113,10 @@ addresses an anonymous booker typed (up to 10 per booking); limiting abuse of th
 product follow-up. Times are shown in the recipient's zone with its IANA name: the attendee's zone from `booking_attendees`, a
 host's from their profile, else their default schedule, else UTC. Host emails add the
 invitee's contact details, guests and answers; only the invitee's email has manage links.
-Confirmed and rescheduled emails carry an invitation (`METHOD:REQUEST`), cancellations a
-cancellation (`METHOD:CANCEL`); reminders carry none.
+Invitee/guest confirmations and reschedules carry an invitation (`METHOD:REQUEST`),
+cancellations a cancellation (`METHOD:CANCEL`); reminders carry none. New host notifications
+carry the same calendar item only when there is no pinned provider calendar copy (details
+below). Legacy host notifications retain their invitations and cancellations.
 
 ### Checked when sent, not when queued
 
@@ -279,13 +281,77 @@ a UTF-8 sequence), TEXT values escaped (`\\`, `\;`, `\,`, `\n`), control charact
 removed and names quoted. The UID is `<first booking of the reschedule chain>@hourmere`
 (fixed, so a change of PUBLIC_URL does not orphan calendar entries made before; calendar
 write-sync must use the same iCalUID for the events it creates), so a reschedule updates the
-same calendar entry; `SEQUENCE` is the number of
-reschedules in the chain, plus one for a cancellation. Times are UTC. The organizer is the
-host; attendees are the invitee, guests and any other hosts, all `PARTSTAT=ACCEPTED`,
-`RSVP=FALSE`. It is attached as `invite.ics` (`cancel.ics`) with content type
-`text/calendar; method=REQUEST; charset=UTF-8` (or `CANCEL`), not as an alternative body
-part: clients that turn such a part into a meeting item would hide the email's own text and
-links.
+same calendar entry; `SEQUENCE` is the number of reschedules in the chain, plus one for
+cancellation. Times are UTC, including across daylight-saving changes. REQUEST adds/moves
+an event; CANCEL retains the identity and sets `STATUS:CANCELLED`.
+
+### Identity and recipients
+
+Migration0038 marks every existing booking as protocol v1; new booking roots default to v2.
+The **root's** version and organizer snapshot govern the entire reschedule chain, even when
+a successor has the new default. Stop all old web/all/worker processes before migration,
+then restart every role with the new code; mixed-version workers cannot pin the same policy.
+
+| Recipient | New root (v2, SMTP configured) | Legacy root (v1) |
+|---|---|---|
+| Invitee and guests | REQUEST/CANCEL; invitee/guests are `NEEDS-ACTION;RSVP=FALSE` | REQUEST/CANCEL with original `ACCEPTED;RSVP=FALSE` policy |
+| Host without a pinned provider copy | Same REQUEST/CANCEL; primary host is `CHAIR;PARTSTAT=ACCEPTED`, other hosts accepted required participants | Original host notification REQUEST/CANCEL |
+| Host with a pinned provider copy | Ordinary email; provider writeback updates/removes its calendar item | Keep REQUEST/CANCEL to update an existing emailed copy |
+| Reminder or conference failure | Ordinary email, no calendar part | Ordinary email, no calendar part |
+
+New invitations use the single mailbox from `MAIL_FROM` as ORGANIZER, with the verified
+primary host's name as CN. Hosts also appear as attendees; duplicate addresses are collapsed,
+including when the booker is a host or the sending mailbox is the host's own address.
+Every recipient sees the same summary and a neutral DESCRIPTION naming the host and Hourmere.
+No booking answers, private management links or tokens enter calendar data.
+
+The worker atomically pins the organizer email/name on the root before SMTP. Retries,
+reschedules and cancellations reuse it after host/profile or `MAIL_FROM` changes. Keep the
+sending mailbox stable: if it changes, the old ORGANIZER remains and `SENT-BY` names the
+current sender, but some clients (including Outlook) ignore that delegation parameter.
+For legacy roots, migration captures the stored conference organizer when available, else
+the first surviving verified host/member and its display-name fallback. Historical identity
+changes/deletions that happened before this snapshot cannot be reconstructed. The old
+organizer is retained rather than silently transferring an existing UID to a new mailbox.
+Without SMTP, the log mailer retains the legacy host-based preview and does not invent an
+instance mailbox; it sends no real calendar invitation.
+
+A pinned provider copy means a `booking_calendar_targets` destination, an automatic Meet
+organizer destination, or a conference mirror with an actual calendar destination. A
+`not_configured`/destination-less mirror still gets its email invitation. Pending or failed
+configured copies continue through provider reconciliation/retry; their emails do not add a
+second item. We do not use PUBLISH: it is a static publication with no ATTENDEE and cannot
+replace the REQUEST/CANCEL scheduling lifecycle.
+
+### Email headers, MIME and replies
+
+From always remains the authenticated, operator-configured `MAIL_FROM`; Hourmere does not
+impersonate a host's mailbox. No redundant Sender header is added. Ordinary email Reply-To
+is the verified primary host for invitee/guest mail, and the booker for host mail. This does
+not route calendar status replies: iTIP clients send those to ORGANIZER, even with SENT-BY.
+
+`NEEDS-ACTION` leaves adding/accepting the invitation to the recipient's calendar. The
+booking itself is already confirmed in Hourmere. `RSVP=FALSE` deliberately does not solicit
+REPLY messages: Hourmere has no inbound calendar-response processor, and a calendar decline
+never cancels a booking. Use the original confirmation's manage links for rescheduling or
+cancellation. Operators should monitor or deliberately forward the `MAIL_FROM` mailbox for
+unsolicited calendar replies; Reply-To is not a guarantee that those reach the host.
+
+SMTP uses Nodemailer's `icalEvent`: a `text/calendar; method=REQUEST` (or CANCEL) alternative
+with UTF-8 plus an identical downloadable `application/ics` attachment (`invite.ics` or
+`cancel.ics`). Text and HTML remain in the message, including the invitee's management links.
+Some clients display only the meeting card and hide those bodies; the neutral DESCRIPTION
+provides context, while management still requires opening the original email body. This
+MIME shape follows [Nodemailer's calendar guidance](https://nodemailer.com/message/calendar-events)
+and [Cal.com's Outlook compatibility fix](https://github.com/calcom/cal.com/commit/7adab1f65fab6c53b036beae2cd2a7479780ba55).
+
+This policy follows [RFC5545](https://www.rfc-editor.org/rfc/rfc5545.html),
+[RFC5546](https://www.rfc-editor.org/rfc/rfc5546.html#section-3.2.2) and
+[RFC6047](https://www.rfc-editor.org/rfc/rfc6047.html#section-2.4).
+It improves identity alignment and calendar MIME recognition; it does not guarantee Inbox
+placement, response buttons or automatic addition. Gmail's known-sender/invitation settings
+still apply, and the proposed Google-organizer UID lookup explanation remains unconfirmed.
+Real Gmail external-invitee and Outlook.com checks, including update/cancel, are required.
 
 ## How the booking services queue them
 
@@ -324,7 +390,7 @@ composition root, with the log mailer and a running worker).
 
 Hosts can edit their display name in Settings. Notifications read the current name when
 sent; an empty legacy name falls back to the profile handle, then the verified email
-address. The same label is used in email subjects and calendar organizer names.
+address. Email subjects use that current label; calendar organizer CN stays pinned once first sent.
 
 ## Sign-in links
 

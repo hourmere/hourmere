@@ -49,6 +49,11 @@ must approve publication through the [release workflow](https://github.com/hourm
 
 ### Fixed
 
+- Booking email invitations align new calendar organizers with the configured sending
+  mailbox, distinguish calendar acceptance from booking confirmation, and use calendar MIME
+  alternatives with downloadable ICS copies. Hosts with pinned provider copies receive
+  ordinary notifications; legacy meeting identities remain stable through updates/cancels.
+
 - Automatic Google Meet now imports the private calendar copy first and requests its
   conference through a separate conditional PATCH. Retries preserve the event and request
   identity, including recovery of legacy import-created pending requests.
@@ -64,6 +69,20 @@ schema downgrade is not automatic. Direct source deployments require Node.js 26.
 Hourmere requires PostgreSQL 18+ because migrations use `uuidv7()`; the provided Compose
 stack includes PostgreSQL 18.
 
+- **Coordinate the calendar-email upgrade.** Stop all old web/all/worker processes before
+  applying `0038_booking_ical_identity.sql`, then restart every role with the new code.
+  Existing roots retain their original host/conference organizer and UID; new roots pin
+  the sending mailbox from `MAIL_FROM`. Previously changed/deleted organizer identities
+  without a saved snapshot cannot be recovered. Keep `MAIL_FROM` stable for future updates;
+  a changed sender is declared with SENT-BY, which some clients ignore. `MAIL_FROM` must be
+  one bare mailbox or `Display name <mailbox>` (quote names containing commas); lists,
+  groups, comments, quoted local parts and address-literal domains are unsupported and now
+  fail startup with a value-free error. Arbitrary ordinary domains and IDN domains work.
+  Invitee calendar replies are not requested or processed; monitor/forward the sending
+  mailbox for unsolicited responses. Human email replies reach the host via Reply-To.
+  Calendar declines do not cancel bookings. Some clients show only the calendar card;
+  open the original confirmation body to access management links. See
+  [calendar invitations](https://github.com/hourmere/hourmere/blob/main/docs/notifications.md#calendar-invitations).
 - **Guests require renewed host opt-in.** Migration
   `0015_guest_email_controls.sql` adds `allow_guests=false` to **all existing event types**
   as well as defaulting new types to false. Hosts must re-enable **Allow invitees to add
