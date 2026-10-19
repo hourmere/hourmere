@@ -200,6 +200,13 @@ export function createAuth({
       }),
     },
     databaseHooks: {
+      account: {
+        // Sign-in ID tokens contain identity claims needed only during authentication.
+        // Cover creation, linking, repeat sign-in and refresh without changing the
+        // access/refresh token encryption Better Auth has already applied.
+        create: { before: async (account) => ({ data: { ...account, idToken: null } }) },
+        update: { before: async (account) => ({ data: { ...account, idToken: null } }) },
+      },
       user: {
         create: {
           before: async (user) => {

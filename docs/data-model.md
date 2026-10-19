@@ -44,6 +44,12 @@ types in `packages/db/src/tables.ts` are generated from the migrated database.
 | `organization`, `member`, `invitation` | Tenancy: personal and team organizations, roles, invitations |
 | `apikey` | Keys for agents (MCP, REST, CLI); hashed by Better Auth |
 
+Google and Microsoft sign-in ID tokens are used during authentication and are not stored:
+`account."idToken"` remains NULL on account creation and every update, including linking,
+repeat sign-in and token refresh. Migration 0031 clears existing values without changing
+other account data. Sign-in access and refresh tokens remain encrypted by Better Auth's
+`encryptOAuthTokens` option. Calendar credentials and MCP OAuth grants are independent.
+
 ### `public`
 
 | Table | Owner | Purpose |
