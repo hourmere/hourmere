@@ -152,15 +152,24 @@ point only DNS A at the host, and allow the ports listed above.
 
 Older `.env` files may lack every deployment setting below. This sequence replaces or adds
 the keys, rather than silently relying on `sed` matching an existing key. Set the project
-name to the original one and select a free subnet before running it:
+name to the original one and select a free subnet before running it. It preserves the
+separate-worker overlay when selected in `.env`:
 
 ```sh
 umask 077
 env_update=$(mktemp .env.update.XXXXXXXX)
-awk '!/^(COMPOSE_PROJECT_NAME|COMPOSE_FILE|APP_IMAGE|PROXY_SUBNET|PROXY_IP|PROXY_DYNAMIC_RANGE|DATABASE_URL)=/' .env > "$env_update"
+awk '
+  /^COMPOSE_FILE=/ {
+    selection = $0
+    sub(/[[:space:]]+#.*$/, "", selection)
+    if (selection ~ /[=:"\047]docker-compose\.worker\.yml([:"\047[:space:]]|$)/)
+      worker = ":docker-compose.worker.yml"
+  }
+  !/^(COMPOSE_PROJECT_NAME|COMPOSE_FILE|APP_IMAGE|PROXY_SUBNET|PROXY_IP|PROXY_DYNAMIC_RANGE|DATABASE_URL)=/ { print }
+  END { print "COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml" worker }
+' .env > "$env_update"
 cat >> "$env_update" <<'EOF'
 COMPOSE_PROJECT_NAME=hourmere
-COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml
 APP_IMAGE=hourmere:local
 PROXY_SUBNET=172.30.62.0/28
 PROXY_IP=172.30.62.2
@@ -181,11 +190,28 @@ start again; Docker cannot resize an existing network. Keep database volumes int
 ## Run workers separately
 
 The default `HOURMERE_ROLE=all` runs the API, booking email jobs and calendar synchronization
-in one container. To split them, set `HOURMERE_ROLE=web` in `.env` and enable the commented
-`worker` service in `docker-compose.yml`. It uses the same image and database with
-`HOURMERE_ROLE=worker`; its port stays unpublished. A web-only deployment needs a running
-worker for queued sign-in email, booking email and calendar updates. The worker exposes
-only `/api/health` for health checks. Keep web and worker on the same version and secrets.
+in one container. After setup, append `docker-compose.worker.yml` to the existing
+`COMPOSE_FILE` value in your private `.env`. For bundled HTTPS, use:
+
+```dotenv
+COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml:docker-compose.worker.yml
+```
+
+For plain mode, use `COMPOSE_FILE=docker-compose.yml:docker-compose.worker.yml`. Then run
+`docker compose up -d --build --wait`. The tracked overlay automatically sets the app to
+`HOURMERE_ROLE=web` and the worker to `HOURMERE_ROLE=worker`, so exactly one service runs
+jobs; no separate role edit or change to `docker-compose.yml` is needed. The worker uses
+the same image, environment and secrets as the base app, and its port stays unpublished.
+A web-only deployment needs a running worker for queued sign-in email, booking email and
+calendar updates. The worker exposes only `/api/health` for health checks. Keep web and
+worker on the same version and secrets. Development's `docker-compose.dev.yml` and
+`hourmere-dev` project remain independent of this production selection.
+
+If moving from the old commented worker block, restore `docker-compose.yml` to the tracked
+version after selecting the overlay. To return to one container, stop the worker while the
+overlay is still selected, remove the worker overlay from `COMPOSE_FILE`, remove any old
+`HOURMERE_ROLE=web` setting from `.env`, then recreate the app. Its default `all` role resumes
+job processing.
 
 Compose allows 35 seconds to stop a process, leaving margin around the server's 10-second
 HTTP drain and 20-second job drain. Preserve that grace period in deployment overrides.
@@ -195,7 +221,9 @@ HTTP drain and 20-second job drain. Preserve that grace period in deployment ove
 Back up the full database (`auth`, `public` and `pgboss` schemas), `.env`, the checked-out
 commit, and Caddy's data/configuration. Protect backups as sensitive data. Preserve all
 signing/encryption keys: for example, losing `CALENDAR_ENCRYPTION_KEY` makes saved calendar
-tokens unreadable. Do not generate replacement secrets during a restore.
+tokens unreadable. The saved `.env` includes `COMPOSE_FILE`, so the backup also records
+whether the tracked worker overlay is enabled. Do not generate replacement secrets during
+a restore.
 
 For the default HTTPS deployment, stop the app before taking a logical custom-format dump.
 Stop any separate worker too. The database stays running; these commands do not remove
@@ -205,6 +233,9 @@ volumes. Store the backup outside the checkout:
 umask 077
 backup_dir="$HOME/hourmere-backups/$(date -u +%Y%m%dT%H%M%SZ)"
 mkdir -p "$backup_dir"
+if docker compose config --services | grep -qx worker; then
+  docker compose stop worker
+fi
 docker compose stop app proxy
 docker compose exec -T db pg_dump -U hourmere -d hourmere -Fc > "$backup_dir/hourmere.dump"
 install -m 600 .env "$backup_dir/.env"
@@ -235,10 +266,18 @@ git checkout --detach "$(cat "$backup_dir/commit")"
 install -m 600 "$backup_dir/.env" .env
 umask 077
 env_update=$(mktemp .env.update.XXXXXXXX)
-awk '!/^(COMPOSE_PROJECT_NAME|COMPOSE_FILE|APP_IMAGE|PROXY_SUBNET|PROXY_IP|PROXY_DYNAMIC_RANGE|DATABASE_URL)=/' .env > "$env_update"
+awk '
+  /^COMPOSE_FILE=/ {
+    selection = $0
+    sub(/[[:space:]]+#.*$/, "", selection)
+    if (selection ~ /[=:"\047]docker-compose\.worker\.yml([:"\047[:space:]]|$)/)
+      worker = ":docker-compose.worker.yml"
+  }
+  !/^(COMPOSE_PROJECT_NAME|COMPOSE_FILE|APP_IMAGE|PROXY_SUBNET|PROXY_IP|PROXY_DYNAMIC_RANGE|DATABASE_URL)=/ { print }
+  END { print "COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml" worker }
+' .env > "$env_update"
 cat >> "$env_update" <<'EOF'
 COMPOSE_PROJECT_NAME=hourmere-restore
-COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml
 APP_IMAGE=hourmere:restore
 PROXY_SUBNET=172.30.63.0/28
 PROXY_IP=172.30.63.2
@@ -262,8 +301,11 @@ assignments also work with backups from before the deployment settings existed, 
 the selected source revision contains `Caddyfile` and `docker-compose.proxy.yml`. If the
 backup commit predates this kit, select a reviewed newer revision containing these files
 instead of that old commit before using the HTTPS commands; startup will apply its pending
-migrations, so retain the original dump for rollback. Plain-mode
-restores use `COMPOSE_FILE=docker-compose.yml` and omit the Caddy steps. Do not start the
+migrations, so retain the original dump for rollback. The rewrite preserves
+`docker-compose.worker.yml` when present in the saved `COMPOSE_FILE`, including setup's
+quoted values. Plain-mode restores remove only `:docker-compose.proxy.yml` from the
+rewritten `COMPOSE_FILE` and omit the Caddy steps; keep `:docker-compose.worker.yml` if it
+was selected. Do not start the
 restored app or workers for a drill until SMTP, provider credentials and outbound webhooks
 have been isolated: restored queued jobs can otherwise send duplicate messages or modify
 real calendars. Never restore over a running app, and never delete a production `db-data`
@@ -290,8 +332,11 @@ reopening traffic. Keep the old volumes and backup until recovery is accepted.
 ## Upgrade and roll back
 
 Read the intended release's changes and take the backup above first. Record its commit and
-preserve its `.env` and Caddy state. In the deployment checkout, a branch following `main`
-can be updated with:
+preserve its `.env` and Caddy state. Enable separate workers through `COMPOSE_FILE` in
+`.env`, keeping the tracked Compose files unchanged so local deployment choices do not
+block `git pull --ff-only`. The persisted file selection also rebuilds/recreates the
+worker during upgrades. In the deployment checkout, a branch following `main` can be
+updated with:
 
 ```sh
 git pull --ff-only
