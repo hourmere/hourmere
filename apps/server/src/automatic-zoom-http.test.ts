@@ -1,4 +1,4 @@
-import { createHmac, randomBytes } from 'node:crypto'
+import { createHmac, randomBytes, randomUUID } from 'node:crypto'
 import type { Server } from 'node:http'
 import { createConnection, createServer } from 'node:net'
 import { serve } from '@hono/node-server'
@@ -36,6 +36,7 @@ describe.skipIf(!bootstrap)('automatic Zoom real TCP/session/API-key boundaries'
     key: string,
     provider: ReturnType<typeof fakeZoom>
   const secret = randomBytes(32).toString('base64')
+  let afterApiKeyResolution: (() => Promise<void>) | undefined
   beforeAll(async () => {
     owned = await createTestDatabase(bootstrap as string)
     db = createDb(owned.pool)
@@ -98,11 +99,20 @@ describe.skipIf(!bootstrap)('automatic Zoom real TCP/session/API-key boundaries'
       { publicRoutes } = await import('./routes/public.ts'),
       { bookingRoutes } = await import('./routes/bookings.ts'),
       { conferenceRoutes } = await import('./routes/conferences.ts')
+    const resolveCaller = createCallerResolver({ auth, db })
     const fixed = createApp({
       publicUrl: url,
       checkDb: async () => {},
       authHandler: auth.handler,
-      resolveCaller: createCallerResolver({ auth, db }),
+      resolveCaller: async (headers) => {
+        const result = await resolveCaller(headers)
+        if (result.ok && result.principal.kind === 'api_key' && afterApiKeyResolution) {
+          const afterResolve = afterApiKeyResolution
+          afterApiKeyResolution = undefined
+          await afterResolve()
+        }
+        return result
+      },
       mcp: mcpEndpoint({ tools: bookingTools({ db, automaticZoom: true, now: () => NOW }) }),
       routes: [
         eventTypeRoutes({ db, automaticZoom: true, now: () => NOW }),
@@ -731,4 +741,75 @@ describe.skipIf(!bootstrap)('automatic Zoom real TCP/session/API-key boundaries'
       mcp('retry_conference', { bookingId: unknown.booking.id, forceCreate: true }),
     ).rejects.toMatchObject({ code: 'invalid_request' })
   })
+  it.each(['create', 'update'] as const)(
+    'rejects an API key disabled after resolution before automatic Zoom %s without changing configuration',
+    async (action) => {
+      const createdKey = await auth.api.createApiKey({
+        body: { userId: host.userId, metadata: { organizationId: team } },
+      })
+      const connection = await db
+        .insertInto('conference_connections')
+        .values({
+          user_id: host.userId,
+          provider: 'zoom',
+          mode: 'meetings',
+          external_user_id: `recheck-${randomUUID()}`,
+          status: 'active',
+          credentials: Buffer.from('synthetic'),
+          scopes: zoomScopes('meetings'),
+        })
+        .returning('id')
+        .executeTakeFirstOrThrow()
+      const eventId = await createFixtures(db).eventType(team, null, {
+        hosts: [{ userId: host.userId }],
+        location: { kind: 'zoom' },
+      })
+      const snapshot = async () => ({
+        events: await db.selectFrom('event_types').selectAll().orderBy('id').execute(),
+        hosts: await db
+          .selectFrom('event_type_hosts')
+          .selectAll()
+          .orderBy('event_type_id')
+          .orderBy('user_id')
+          .execute(),
+      })
+      const before = await snapshot(),
+        providerCalls = provider.calls.length,
+        path = action === 'create' ? '/api/v1/event-types' : `/api/v1/event-types/${eventId}`,
+        method = action === 'create' ? 'POST' : 'PATCH',
+        input = {
+          slug: `recheck-${randomUUID()}`,
+          title: 'Changed by revoked key',
+          durationMinutes: 30,
+          hosts: [{ userId: host.userId }],
+          location: { kind: 'zoom', autoCreate: true },
+          zoomConnectionId: connection.id,
+        },
+        authorization = { authorization: `Bearer ${createdKey.key}` }
+      let disabledAfterResolution = false
+      afterApiKeyResolution = async () => {
+        await db
+          .updateTable('auth.apikey')
+          .set({ enabled: false })
+          .where('id', '=', createdKey.id)
+          .executeTakeFirstOrThrow()
+        disabledAfterResolution = true
+      }
+      try {
+        const response = await request(path, method, '', input, authorization)
+        expect(disabledAfterResolution).toBe(true)
+        expect(response.status).toBe(401)
+        expect(response.headers.get('www-authenticate')).toBe('Bearer')
+        expect(await response.json()).toMatchObject({ error: 'unauthorized' })
+        const rejectedAtResolution = await request(path, method, '', input, authorization)
+        expect(rejectedAtResolution.status).toBe(response.status)
+        expect(rejectedAtResolution.headers.get('www-authenticate')).toBe('Bearer')
+        expect(await rejectedAtResolution.json()).toMatchObject({ error: 'unauthorized' })
+        expect(await snapshot()).toEqual(before)
+        expect(provider.calls).toHaveLength(providerCalls)
+      } finally {
+        afterApiKeyResolution = undefined
+      }
+    },
+  )
 })

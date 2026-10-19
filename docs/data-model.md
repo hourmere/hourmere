@@ -50,6 +50,16 @@ repeat sign-in and token refresh. Migration 0031 clears existing values without 
 other account data. Sign-in access and refresh tokens remain encrypted by Better Auth's
 `encryptOAuthTokens` option. Calendar credentials and MCP OAuth grants are independent.
 
+Microsoft sign-in requests only `openid`, `profile` and `email`: it needs identity once to
+create an Hourmere session, whose lifetime and renewal do not depend on Microsoft tokens.
+No application feature reads or refreshes the stored sign-in access token, and the unused
+Better Auth token retrieval/refresh HTTP endpoints are disabled. A Microsoft sign-in
+refresh token is therefore unnecessary; `offline_access` is intentionally omitted.
+Microsoft calendar connections use separate `MICROSOFT_CALENDAR_*` client credentials,
+their own callback and the `calendar_connections.credentials` ciphertext. That flow requests
+`offline_access` with `Calendars.ReadBasic` and requires a refresh token for continued
+calendar-list access.
+
 ### `public`
 
 | Table | Owner | Purpose |

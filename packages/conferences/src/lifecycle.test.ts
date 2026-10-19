@@ -61,12 +61,25 @@ describe.skipIf(!serverUrl)('automatic Zoom durable booking lifecycle (real Post
     deps: CalendarDeps,
     ctx: PublicContext,
     connectionId: string,
-    eventId: string
+    eventId: string,
+    apiKeyId: string
   let sent: MailMessage[]
   beforeAll(async () => {
     owned = await createTestDatabase(serverUrl as string)
     db = createDb(owned.pool)
     owner = await conferenceTestSession(db)
+    apiKeyId = randomUUID()
+    await owned.pool.query(
+      `INSERT INTO auth.apikey
+        (id, "configId", "referenceId", key, "createdAt", "updatedAt", enabled, metadata)
+       VALUES ($1, 'default', $2, $3, now(), now(), true, $4)`,
+      [
+        apiKeyId,
+        owner.user.id,
+        randomUUID(),
+        JSON.stringify({ organizationId: owner.organization.id }),
+      ],
+    )
     await db
       .updateTable('auth.session')
       .set({ expiresAt: new Date('2035-01-01Z') })
@@ -454,20 +467,33 @@ describe.skipIf(!serverUrl)('automatic Zoom durable booking lifecycle (real Post
   it.each([500, 503, 'timeout'])(
     'retains ambiguous create after %s and never blindly POSTs again',
     async (status) => {
-      const b = await book()
-      provider.controls.meetingHook = async () =>
-        status === 'timeout' ? new Promise(() => {}) : Response.json({}, { status: Number(status) })
-      if (status === 'timeout') {
-        const work = createZoomConferenceWork(conference, provider.meetings)
-        deps.zoomConferenceWork = (c) => work(c, AbortSignal.timeout(20))
+      const b = await book(),
+        timeout = new AbortController(),
+        entered = barrier(),
+        work = createZoomConferenceWork(conference, provider.meetings)
+      provider.controls.meetingHook = async () => {
+        if (status === 'timeout') {
+          entered.resolve()
+          return new Promise(() => {})
+        }
+        return Response.json({}, { status: Number(status) })
       }
-      await writeBookingConference(deps, b.booking.id)
+      if (status === 'timeout') {
+        deps.zoomConferenceWork = (c) => work(c, timeout.signal)
+      }
+      const running = writeBookingConference(deps, b.booking.id)
+      if (status === 'timeout') {
+        await entered.promise
+        timeout.abort(new DOMException('Synthetic deadline', 'TimeoutError'))
+      }
+      await running
       expect(await row()).toMatchObject({
         state: 'failed',
         error_code: 'ambiguous_create',
         create_started: true,
       })
       provider.controls.meetingHook = undefined
+      deps.zoomConferenceWork = work
       await retryBookingConference({ db, principal: owner, now: () => NOW }, b.booking.id)
       await writeBookingConference(deps, b.booking.id)
       expect(posts()).toHaveLength(1)
@@ -592,19 +618,29 @@ describe.skipIf(!serverUrl)('automatic Zoom durable booking lifecycle (real Post
     'retries transient worker refresh %s with a bounded budget and preserves credentials for later recovery',
     async (kind) => {
       await expireTokens()
-      const b = await book()
+      const b = await book(),
+        timeout = new AbortController(),
+        entered = barrier(),
+        work = createZoomConferenceWork(conference, provider.meetings)
       provider.controls.tokenHook = async () => {
         if (kind === 'network') throw new TypeError('synthetic network reset')
-        if (kind === 'timeout') return new Promise(() => {})
+        if (kind === 'timeout') {
+          entered.resolve()
+          return new Promise(() => {})
+        }
         if (kind === 'malformed') return new Response('{')
         return Response.json({}, { status: 503 })
       }
-      // The timeout uses an owned callback deadline rather than the root's production minute.
+      // Abort only after refresh starts, so database scheduling cannot consume the deadline.
       if (kind === 'timeout') {
-        const work = createZoomConferenceWork(conference, provider.meetings)
-        deps.zoomConferenceWork = (c) => work(c, AbortSignal.timeout(20))
+        deps.zoomConferenceWork = (c) => work(c, timeout.signal)
       }
-      await writeBookingConference(deps, b.booking.id)
+      const running = writeBookingConference(deps, b.booking.id)
+      if (kind === 'timeout') {
+        await entered.promise
+        timeout.abort(new DOMException('Synthetic deadline', 'TimeoutError'))
+      }
+      await running
       const connection = await db
         .selectFrom('conference_connections')
         .selectAll()
@@ -622,6 +658,8 @@ describe.skipIf(!serverUrl)('automatic Zoom durable booking lifecycle (real Post
       )
       expect((await slots()).length).toBeGreaterThan(0)
       provider.controls.tokenHook = undefined
+      // A later worker attempt gets its own live signal, independent of the expired one.
+      deps.zoomConferenceWork = work
       await db
         .updateTable('booking_conferences')
         .set({ next_attempt_at: new Date(NOW.epochMilliseconds) })
@@ -629,6 +667,8 @@ describe.skipIf(!serverUrl)('automatic Zoom durable booking lifecycle (real Post
       await writeBookingConference(deps, b.booking.id)
       expect((await row()).state).toBe('ready')
       expect(posts()).toHaveLength(1)
+      if (kind === 'timeout')
+        expect(provider.calls.filter((c) => c.url.endsWith('/oauth/token'))).toHaveLength(3)
     },
   )
   it('retains a validated known ID after an unsafe response and only retries that ID', async () => {
@@ -726,7 +766,7 @@ describe.skipIf(!serverUrl)('automatic Zoom durable booking lifecycle (real Post
     expect(posts()).toHaveLength(1)
   })
   it('allows own API-key configuration and ordinary metadata/disable changes while rejecting unavailable connections and round robin', async () => {
-    const key = { ...owner, kind: 'api_key' as const, apiKeyId: 'synthetic-key' }
+    const key = { ...owner, kind: 'api_key' as const, apiKeyId }
     await expect(
       updateEventType({ db, principal: key, automaticZoom: true, now: () => NOW }, eventId, {
         zoomConnectionId: null,
@@ -830,10 +870,7 @@ describe.skipIf(!serverUrl)('automatic Zoom durable booking lifecycle (real Post
           .execute()
         principal = { ...owner, sessionId }
       }
-      const actor =
-        kind === 'key'
-          ? { ...owner, kind: 'api_key' as const, apiKeyId: 'synthetic-key' }
-          : principal
+      const actor = kind === 'key' ? { ...owner, kind: 'api_key' as const, apiKeyId } : principal
       await updateEventType({ db, principal: actor, now: () => NOW }, id, { isActive: false })
       const reactivation = updateEventType(
         { db, principal: actor, automaticZoom: true, now: () => NOW },
