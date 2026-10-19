@@ -7,7 +7,10 @@ Server variables below come from `apps/server/src/config.ts`. Empty optional val
 mean unset; `AUTO_MIGRATE` must be omitted or explicitly `true`/`false`. Direct processes read
 their environment; Compose interpolates `.env` into the variables explicitly listed in
 `docker-compose.yml`. Adding an arbitrary entry to `.env` does not pass it to a container.
-Restart/recreate affected processes after changing configuration.
+Restart/recreate affected processes after changing configuration. The interactive
+`scripts/setup.sh` creates a private `.env` from `.env.example` and selects either the
+plain Compose file or the optional automatic HTTPS override; see
+[self-hosting](/docs/self-hosting) for the complete command sequence.
 
 ## Server and database
 
@@ -15,8 +18,8 @@ Restart/recreate affected processes after changing configuration.
 |---|---|---|
 | `DATABASE_URL` | Required | PostgreSQL connection URL. Direct connections must preserve custom startup options; PgBouncer is unsupported. Compose fixes this to `postgres://hourmere@db:5432/hourmere`. |
 | `PGPASSWORD` | Unset | PostgreSQL client password when absent from the URL. Compose sets it from `POSTGRES_PASSWORD`; do not percent-encode this separate value. |
-| `PORT` | `3000` | Direct-server TCP port (`0`–`65535`). `0` lets the OS choose a port and requires an explicit `PUBLIC_URL`; links always use that configured external origin. In Compose, `.env` `PORT` changes the host port; the container still listens on `3000`. |
-| `PUBLIC_URL` | `http://localhost:<PORT>` | External HTTP(S) origin, with no path/query. Use HTTPS publicly. Compose defaults to `http://localhost:3000` independently of its host port setting. |
+| `PORT` | `3000` | Direct-server TCP port (`0`–`65535`). `0` lets the OS choose a port and requires an explicit `PUBLIC_URL`; links always use that configured external origin. In plain Compose, `.env` `PORT` changes the loopback host port; the container still listens on `3000`. The HTTPS override removes that host mapping, so `PORT` has no effect there. |
+| `PUBLIC_URL` | `http://localhost:<PORT>` | External HTTP(S) origin, with no path/query. Use HTTPS publicly. Plain Compose defaults to `http://localhost:3000` independently of its host port setting. Bundled Caddy requires an HTTPS hostname origin; setup does not accept a public port or path. |
 | `HOSTED_SIGNUP_URL` | `https://hourmere.com` | Hosted service destination for public attribution and confirmation links. Set the hosted sign-up page URL when available; HTTP(S), no credentials, query or fragment. Independent of this instance’s `PUBLIC_URL`; attribution cannot be disabled. |
 | `BETTER_AUTH_SECRET` | Required | At least 32 non-whitespace random characters. Signs sessions and protects sign-in tokens. Changing it signs people out. |
 | `AUTO_MIGRATE` | `true` | Apply SQL/job migrations on startup. `false` requires manual migrations first; startup still needs database access. Forwarded by the default Compose file with a default of `true`. |
@@ -64,7 +67,7 @@ but no email.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `TRUSTED_PROXIES` | Unset | Comma-separated proxy IPs/CIDRs trusted to send `X-Forwarded-For`. Use addresses as seen by the app. |
+| `TRUSTED_PROXIES` | Unset | Comma-separated proxy IPs/CIDRs trusted to send `X-Forwarded-For`. Use addresses as seen by the app. The Caddy override sets this to the exact `PROXY_IP` regardless of this variable's `.env` value; do not trust the entire Docker/private subnet. |
 | `HSTS_MAX_AGE` | `31536000` | Whole non-negative seconds. Sent only for HTTPS `PUBLIC_URL` outside localhost; `0` asks browsers to forget the policy. Configure subdomains/preload at the proxy if desired. |
 | `HTTP_HEADERS_TIMEOUT` | `20` | Whole seconds, 1–3600, to receive request headers. Must not exceed request timeout. |
 | `HTTP_REQUEST_TIMEOUT` | `60` | Whole seconds, 1–3600, to receive the request. |
@@ -114,11 +117,30 @@ keeps local connections visible so people can disconnect or stop using their cal
 
 ## Compose-only settings and overrides
 
-`POSTGRES_PASSWORD` is required by Compose for its PostgreSQL service and is forwarded as
-`PGPASSWORD` to the app. It is not a server configuration key. Changing it in `.env` does
-not change the password of an already initialized PostgreSQL volume; arrange database
-credential changes separately. `PORT` publishes `127.0.0.1:<PORT>:3000`; update `PUBLIC_URL`
-if people use a different origin.
+These settings control Docker Compose rather than the server configuration loader. Compose
+2.24.4 or newer is required for the HTTPS override's `!reset` tag. Setup defaults to the
+HTTPS path and writes the combined `COMPOSE_FILE`; copying `.env.example` without setup
+keeps the plain path.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `POSTGRES_PASSWORD` | Required | Initializes the PostgreSQL role and becomes the app's `PGPASSWORD`. Changing `.env` does not change an already initialized database role's password. |
+| `COMPOSE_FILE` | `docker-compose.yml` | Not forwarded by the default Compose file: consumed by the Compose CLI. Setup writes `docker-compose.yml:docker-compose.proxy.yml` for bundled HTTPS, or `docker-compose.yml` for plain mode. |
+| `COMPOSE_PROJECT_NAME` | `hourmere` | Not forwarded by the default Compose file: consumed by the Compose CLI to select containers, networks and volumes. Setup persists this name; set it in setup's environment to choose an independent deployment. Keep the original name when migrating an existing installation; persist the new name when restoring to a separate project. |
+| `APP_IMAGE` | `hourmere:local` | Local image tag built from this checkout; `pull_policy: never` remains in force. Use a distinct tag for independent deployments on one Docker host. No prebuilt public image is published yet. |
+| `PROXY_SUBNET` | `172.30.62.0/28` | Not forwarded by the default Compose file: the HTTPS override uses this dedicated IPv4 ingress subnet. Change it together with `PROXY_IP` and `PROXY_DYNAMIC_RANGE` before starting if it overlaps another network or another deployment. |
+| `PROXY_IP` | `172.30.62.2` | Not forwarded by the default Compose file: the HTTPS override assigns Caddy this address and forwards it as the app's `TRUSTED_PROXIES`. Must be a free usable address in `PROXY_SUBNET`, outside `PROXY_DYNAMIC_RANGE`. |
+| `PROXY_DYNAMIC_RANGE` | `172.30.62.8/29` | Not forwarded by the default Compose file: the HTTPS override allocates app and one-off app container addresses from this range inside `PROXY_SUBNET`, keeping Caddy's `PROXY_IP` outside it. Workers use only the default network. Change all three network settings together for another subnet/deployment. |
+
+Plain mode publishes `127.0.0.1:<PORT>:3000` for your own host proxy or a private local
+trial. The HTTPS override removes all app host mappings, publishes TCP 80/443 and UDP 443 on
+`proxy`, and keeps PostgreSQL unpublished. Caddy preserves Host and sets forwarded
+client/protocol headers; `PUBLIC_URL` must remain the exact external HTTPS origin for
+origin checks, redirects and Secure cookies. Its `caddy-data` and `caddy-config` volumes
+persist certificates and state across recreations. Keep them in the backup/recovery plan.
+Publish only DNS A with the IPv4-only bundled ingress network; see the self-hosting guide
+before enabling IPv6/AAAA. Proxy setup requires SMTP for sign-in; private log-mailer tests
+are described there too. Setup omits the development `DATABASE_URL` from the generated `.env`.
 
 To disable automatic migrations, set `AUTO_MIGRATE=false` in `.env`; the default Compose
 file forwards it to the app and its inherited worker. You can also set it explicitly in a

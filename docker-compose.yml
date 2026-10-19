@@ -1,6 +1,6 @@
-# Self-hosting: copy .env.example to .env, set POSTGRES_PASSWORD, BETTER_AUTH_SECRET and
-# PUBLIC_URL (optionally SMTP and Google/Microsoft sign-in), then
-#   docker compose up -d
+# Self-hosting: ./scripts/setup.sh creates a private .env, then
+#   docker compose up -d --build --wait
+# The optional docker-compose.proxy.yml adds Caddy HTTPS (selected by setup.sh).
 # The app listens on 127.0.0.1:3000; put a reverse proxy with TLS in front of it. Until SMTP
 # is configured, sign-in links are printed by `docker compose logs app`. With the default
 # SIGNUP=first-user, sign in right after the first start: the first account should be yours.
@@ -12,7 +12,7 @@ services:
   app:
     build: .
     # Built here, never pulled; the optional worker below runs the same image.
-    image: hourmere:local
+    image: ${APP_IMAGE:-hourmere:local}
     pull_policy: never
     environment:
       # The password stays out of the URL so it may contain any characters (/, #, ?, …);

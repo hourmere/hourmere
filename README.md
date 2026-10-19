@@ -59,17 +59,37 @@ The Starlight documentation includes a [self-hosting guide](apps/site/src/conten
 [configuration reference](apps/site/src/content/docs/docs/configuration.md),
 and [REST](apps/site/src/content/docs/docs/rest.md) / [MCP](apps/site/src/content/docs/docs/mcp.md) quickstarts.
 
+Requires Git, OpenSSL, Docker Engine and Docker Compose 2.24.4 or newer. Point your hostname
+at the host with an A record only and allow TCP 80/443 and UDP 443 (plus SSH) before using automatic HTTPS:
+
 ```sh
-cp .env.example .env   # set POSTGRES_PASSWORD, BETTER_AUTH_SECRET and PUBLIC_URL
-docker compose up -d
+git clone https://github.com/hourmere/hourmere.git
+cd hourmere
+./scripts/setup.sh
+docker compose up -d --build --wait
+curl --retry 20 --retry-delay 3 --retry-all-errors --fail https://app.hourmere.com/api/health
 ```
 
-The app listens on `127.0.0.1:3000` and applies database migrations on start. It also runs
-the background jobs (booking emails); to run them in a container of their own, set
-`HOURMERE_ROLE=web` and enable the `worker` service in `docker-compose.yml` (same image,
-`HOURMERE_ROLE=worker`). Give containers at least 35 seconds to stop, so running jobs can finish. Put a reverse proxy with TLS in front of it, and set `TRUSTED_PROXIES` to the proxy's address as the app sees it (for a proxy on the host or on the compose network that is the Docker network, e.g. `172.16.0.0/12`), so rate limits apply per visitor rather than to everyone behind the proxy.
+Accept `proxy`, enter your HTTPS origin (replace `app.hourmere.com` with your hostname),
+and configure SMTP and its sender. Setup generates separate secrets directly into a mode
+`600` `.env`, refuses to overwrite an existing file, and selects the optional Caddy override.
+Caddy obtains/renews TLS certificates; only TCP 80/443 and UDP 443 are published, and the app trusts only
+the proxy's dedicated address for forwarded client IPs. If its network overlaps an existing
+network or another instance, change `PROXY_SUBNET`, `PROXY_IP` and `PROXY_DYNAMIC_RANGE` together
+in `.env` before starting. **No prebuilt public image is
+published yet**; Compose builds the checked-out source. Application and job migrations run
+automatically (`AUTO_MIGRATE=true`). Open `/sign-in` and claim the first account immediately;
+`SIGNUP=first-user` restricts later registration as described below.
 
-The official image retains small public attribution and booking-confirmation links to the
+Select `plain` for an existing proxy or an explicitly acknowledged private loopback trial.
+It keeps the app on `127.0.0.1:3000` and PostgreSQL unpublished. For your own proxy, set its
+exact address as the app sees it in `TRUSTED_PROXIES` and preserve Host/forwarded headers;
+see the [self-hosting guide](apps/site/src/content/docs/docs/self-hosting.md) for the complete
+TLS, backup/restore, upgrade and host-hardening procedures. The default app also runs
+background jobs; to split them, set `HOURMERE_ROLE=web` and enable the commented `worker`
+service (same image, `HOURMERE_ROLE=worker`). Give containers at least 35 seconds to stop.
+
+The application image retains small public attribution and booking-confirmation links to the
 hosted service. `HOSTED_SIGNUP_URL` sets their destination (default `https://hourmere.com`);
 there is no setting to hide them.
 
@@ -98,7 +118,9 @@ confirms: for Microsoft, add the optional ID token claims `verified_primary_emai
 users get `EMAIL_NOT_VERIFIED` and have to use an email link. Until `SMTP_URL` and `MAIL_FROM` are set, the server prints each
 sign-in link to its log (`docker compose logs app`), so you can sign in right after the first
 start. Anyone who can read that log can sign in as anyone: configure SMTP before inviting
-anyone else, and always on a hosted or internet-facing instance.
+anyone else, and always on a hosted or internet-facing instance. The setup script requires
+SMTP for public deployment; empty SMTP is accepted only for an explicitly acknowledged
+private loopback trial.
 
 `SIGNUP` decides who may create an account; existing users can always sign in. With
 `first-user` (the default), the first person to sign in gets an account, and after that only
