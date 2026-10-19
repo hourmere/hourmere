@@ -4933,6 +4933,11 @@ export interface components {
              * @description The booking this one replaced when it was rescheduled
              */
             rescheduledFromId: string | null;
+            /**
+             * Format: uuid
+             * @description Authenticated host reads only: the immediate successor booking in the same organization that this caller also hosts, or null. A rescheduled predecessor keeps status cancelled.
+             */
+            rescheduledToId?: string | null;
             responses: components["schemas"]["Responses"];
             /**
              * @description How the booking was made; api and mcp are agents

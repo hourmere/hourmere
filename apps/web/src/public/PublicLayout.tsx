@@ -52,9 +52,9 @@ export function PublicLayout({ children, wide = false }: { children: ReactNode; 
   return (
     <HostedSignupUrl value={hostedSignupUrl}>
       <div className={`public${embedded ? ' public-embedded' : ''}`}>
-        <div className="public-language">
+        <header className="public-language">
           <LanguageSwitcher />
-        </div>
+        </header>
         <main id="main" className={`public-main${wide ? ' public-main-wide' : ''}`}>
           {children}
         </main>
