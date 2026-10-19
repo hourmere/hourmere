@@ -6,12 +6,13 @@ import { setupWaitlistForms } from './waitlist-client'
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8')
 const formMarkup = (id: string) => `
   <form action="/api/waitlist" method="post" data-waitlist-form>
-    <input name="email" type="email" value="" />
-    <input name="website" value="" />
+    <input name="email" type="email" value="" aria-describedby="${id}-consent" />
+    <input name="hm_extra" value="" />
     <input name="locale" value="en" />
     <input name="source" value="${id}" />
     <button type="submit">Join the Cloud waitlist</button>
-    <p tabindex="-1" role="status" data-waitlist-status></p>
+    <p id="${id}-consent">We'll email you when Hourmere Cloud launches.</p>
+    <p id="${id}-status" tabindex="-1" role="status" data-waitlist-status></p>
   </form>`
 
 const getForm = (index = 0) => {
@@ -54,7 +55,7 @@ describe('waitlist progressive enhancement', () => {
     expect(options.headers).toEqual({ Accept: 'application/json' })
     expect([...options.body.entries()]).toEqual([
       ['email', 'visitor@example.com'],
-      ['website', ''],
+      ['hm_extra', ''],
       ['locale', 'en'],
       ['source', 'cloud'],
     ])
@@ -116,6 +117,8 @@ describe('waitlist progressive enhancement', () => {
       expect(status.textContent).toBe(message)
       expect(email.value).toBe('visitor@example.com')
       expect(email.getAttribute('aria-invalid')).toBe(code === 400 ? 'true' : null)
+      expect(email.getAttribute('aria-describedby')).toBe(`cloud-consent ${status.id}`)
+      expect(getForm(1).email.getAttribute('aria-describedby')).toBe('pricing-consent')
       expect(document.activeElement).toBe(status)
       expect(form.hasAttribute('aria-busy')).toBe(false)
     },
@@ -128,6 +131,7 @@ describe('waitlist progressive enhancement', () => {
     expect(status.getAttribute('role')).toBe('alert')
     expect(status.textContent).toBe("We couldn't save your request. Please try again.")
     expect(email.value).toBe('visitor@example.com')
+    expect(email.getAttribute('aria-describedby')).toBe(`cloud-consent ${status.id}`)
   })
 
   it('clears validation errors on a successful retry', async () => {
@@ -138,10 +142,35 @@ describe('waitlist progressive enhancement', () => {
     vi.stubGlobal('fetch', fetchMock)
     const { email, status } = await submit()
     expect(email.getAttribute('aria-invalid')).toBe('true')
+    expect(email.getAttribute('aria-describedby')).toBe(`cloud-consent ${status.id}`)
     await submit()
     expect(email.hasAttribute('aria-invalid')).toBe(false)
+    expect(email.getAttribute('aria-describedby')).toBe('cloud-consent')
     expect(status.getAttribute('role')).toBe('status')
     expect(status.dataset.state).toBe('success')
+  })
+
+  it('removes the previous error association while retrying and keeps the consent note', async () => {
+    let complete: (response: Response) => void = () => {}
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('{}', { status: 400 }))
+      .mockImplementationOnce(
+        () =>
+          new Promise<Response>((resolve) => {
+            complete = resolve
+          }),
+      )
+    vi.stubGlobal('fetch', fetchMock)
+    const { form, email, status, button } = await submit()
+    expect(email.getAttribute('aria-describedby')).toBe(`cloud-consent ${status.id}`)
+    form.dispatchEvent(new Event('submit', { cancelable: true }))
+    expect(button.disabled).toBe(true)
+    expect(status.dataset.state).toBe('pending')
+    expect(email.getAttribute('aria-describedby')).toBe('cloud-consent')
+    complete(new Response('{}', { status: 200 }))
+    await vi.waitFor(() => expect(button.disabled).toBe(false))
+    expect(email.getAttribute('aria-describedby')).toBe('cloud-consent')
   })
 })
 
@@ -175,8 +204,25 @@ describe('waitlist page integration', () => {
     )
     expect(component).toMatch(/role="status"[\s\S]*?aria-live="polite"[\s\S]*?aria-atomic="true"/)
     expect(component).toContain('tabindex="-1"')
-    expect(component).toMatch(/name="website"[\s\S]*?tabindex="-1"[\s\S]*?autocomplete="off"/)
+  })
+
+  it('keeps the honeypot hidden and out of keyboard navigation with an autofill-neutral name', () => {
+    expect(component).toMatch(/<label for=\{`\$\{id\}-hm-extra`\}>Leave this field empty<\/label>/)
+    const honeypot = component.match(/<input\s+id=\{`\$\{id\}-hm-extra`\}[^>]*>/)?.[0] ?? ''
+    expect(honeypot).toContain('name="hm_extra"')
+    expect(honeypot).toContain('autocomplete="off"')
+    expect(honeypot).toContain('tabindex="-1"')
     expect(component).toContain('class="waitlist-trap" aria-hidden="true"')
+    expect(component).toMatch(
+      /\.waitlist-trap\s*\{\s*position: absolute;\s*width: 1px;\s*height: 1px;\s*overflow: hidden;\s*clip-path: inset\(50%\)/,
+    )
+  })
+
+  it('deploys the pinned Wrangler version to the top-level environment explicitly', () => {
+    const config = JSON.parse(read('../package.json'))
+    expect(config.scripts.deploy).toBe(
+      'npm run build && npx --yes wrangler@4.151.0 deploy --env=""',
+    )
   })
 
   it('reveals the no-JavaScript success state only at its dedicated redirect target', () => {

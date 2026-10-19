@@ -181,6 +181,9 @@ describe('privacy data-flow disclosures', () => {
       /Cobaltmere stores your email address, the time you joined and the page language and source to tell you when Hourmere Cloud launches/,
     )
     expect(waitlist).toMatch(/The list is stored in Cloudflare D1/)
+    expect(section('international-transfers')).toMatch(
+      /The Hourmere Cloud waitlist is stored in Cloudflare D1 in the United States\./,
+    )
     expect(waitlist).toMatch(
       /do not use it for other purposes or share it except with service providers that host it/,
     )
@@ -189,7 +192,7 @@ describe('privacy data-flow disclosures', () => {
     expect(waitlist).toMatch(/each email includes a way to opt out/)
     expect(read('./site.ts')).toMatch(/privacy: 'privacy@cobaltmere\.com'/)
     expect(block('li', 'Cloud waitlist entries and requests for launch updates')).toMatch(
-      /until you ask us to stop or we have sent the launch announcement/,
+      /until you ask us to stop or we have sent the launch notification/,
     )
   })
 

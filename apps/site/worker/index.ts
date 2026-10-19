@@ -17,12 +17,12 @@ const successMessage = "Thanks. We'll email you when Hourmere Cloud launches."
 const invalidMessage = 'Enter one valid email address and try again.'
 const rateLimitedMessage = 'Too many attempts. Please try again in a minute.'
 const unavailableMessage = "We couldn't save your request. Please try again later."
-const fields = new Set(['email', 'website', 'locale', 'source'])
+const fields = new Set(['email', 'hm_extra', 'locale', 'source'])
 const sources = new Set(['pricing', 'cloud', 'faq'])
 
 interface Submission {
   email: string
-  website: string
+  hm_extra: string
   locale: string | null
   source: string | null
 }
@@ -162,18 +162,18 @@ async function submission(request: Request): Promise<Submission | null> {
     return null
   }
   const email = rawEmail.trim().toLowerCase()
-  const website = values.get('website') ?? ''
+  const hm_extra = values.get('hm_extra') ?? ''
   const locale = values.get('locale') ?? null
   const source = values.get('source') ?? null
   if (
     !validEmail(email) ||
-    website.length > 1024 ||
+    hm_extra.length > 1024 ||
     (locale !== null && locale !== 'en') ||
     (source !== null && !sources.has(source))
   ) {
     return null
   }
-  return { email, website, locale, source }
+  return { email, hm_extra, locale, source }
 }
 
 function wantsJson(request: Request): boolean {
@@ -215,12 +215,11 @@ function reply(request: Request, status: number, message: string): Response {
 async function rateLimitKey(request: Request, env: WaitlistEnv): Promise<string | null> {
   const ip = request.headers.get('CF-Connecting-IP')
   if (!ip && env.WAITLIST_DEVELOPMENT !== 'true') return null
-  // Cloudflare supplies the client IP. Only a minute-scoped digest reaches its transient
-  // rate-limit counter: raw IP addresses are never stored, logged or sent to D1.
-  const minute = Math.floor(Date.now() / 60_000)
+  // Cloudflare supplies the client IP. A stable digest lets the binding own its window.
+  // Only the digest reaches its transient counter: raw IPs never reach storage or logs.
   const digest = await crypto.subtle.digest(
     'SHA-256',
-    new TextEncoder().encode(`hourmere-waitlist:${minute}:${ip ?? 'local'}`),
+    new TextEncoder().encode(`hourmere-waitlist:${ip ?? 'local'}`),
   )
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
@@ -246,7 +245,7 @@ export async function handleWaitlist(request: Request, env: WaitlistEnv): Promis
     return reply(request, 400, invalidMessage)
   }
   if (!input) return reply(request, 400, invalidMessage)
-  if (input.website.length > 0) return reply(request, 200, successMessage)
+  if (input.hm_extra.length > 0) return reply(request, 200, successMessage)
   try {
     await env.WAITLIST_DB.prepare(
       'INSERT INTO waitlist (email, created_at, source, locale, consent_text_version) VALUES (?, ?, ?, ?, ?) ON CONFLICT(email) DO NOTHING',

@@ -24,8 +24,8 @@ const statusId = source === 'cloud' ? 'cloud-waitlist-success' : `${id}-status`
       <button class="btn btn-primary" type="submit">Join the Cloud waitlist</button>
     </div>
     <div class="waitlist-trap" aria-hidden="true">
-      <label for={`${id}-website`}>Leave this field empty</label>
-      <input id={`${id}-website`} name="website" type="text" tabindex="-1" autocomplete="off" />
+      <label for={`${id}-hm-extra`}>Leave this field empty</label>
+      <input id={`${id}-hm-extra`} name="hm_extra" type="text" tabindex="-1" autocomplete="off" />
     </div>
     <input name="source" type="hidden" value={source} />
     <input name="locale" type="hidden" value="en" />

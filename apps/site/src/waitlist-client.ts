@@ -6,6 +6,7 @@ export function setupWaitlistForms(document: Document) {
     const button = form.querySelector<HTMLButtonElement>('button[type="submit"]')
     const email = form.querySelector<HTMLInputElement>('input[name="email"]')
     if (!status || !button || !email) continue
+    const consentDescription = email.getAttribute('aria-describedby') ?? ''
 
     form.addEventListener('submit', async (event) => {
       event.preventDefault()
@@ -13,6 +14,7 @@ export function setupWaitlistForms(document: Document) {
       button.disabled = true
       form.setAttribute('aria-busy', 'true')
       email.removeAttribute('aria-invalid')
+      email.setAttribute('aria-describedby', consentDescription)
       status.dataset.state = 'pending'
       status.setAttribute('role', 'status')
       status.textContent = 'Joining the waitlist…'
@@ -44,6 +46,12 @@ export function setupWaitlistForms(document: Document) {
         status.setAttribute('role', 'alert')
         status.textContent = "We couldn't save your request. Please try again."
       } finally {
+        if (status.dataset.state === 'error') {
+          email.setAttribute(
+            'aria-describedby',
+            [consentDescription, status.id].filter(Boolean).join(' '),
+          )
+        }
         button.disabled = false
         form.removeAttribute('aria-busy')
         status.focus()

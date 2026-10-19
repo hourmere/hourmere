@@ -158,7 +158,7 @@ try {
   }
   const first = await post({ email: ' Smoke@Example.test ', source: 'cloud', locale: 'en' })
   const duplicate = await post({ email: 'smoke@example.test', source: 'pricing' })
-  const honeypot = await post({ email: 'bot@example.test', website: 'filled' })
+  const honeypot = await post({ email: 'bot@example.test', hm_extra: 'filled' })
   assert.equal(first, duplicate)
   assert.equal(first, honeypot)
   assert(!first.includes('smoke@example.test'))
@@ -177,7 +177,7 @@ try {
       email: 'smoke@example.test',
       source: 'faq',
       locale: 'en',
-      website: '',
+      hm_extra: '',
     }),
     redirect: 'manual',
   })
@@ -185,11 +185,27 @@ try {
   assert.equal(form.headers.get('Cache-Control'), 'no-store')
   assert.match(form.headers.get('Location') ?? '', /^\/\?waitlist=success#cloud-waitlist-success$/)
   assert.deepEqual(query('SELECT * FROM waitlist'), stored)
+
+  // The site's JavaScript submits FormData and asks for a JSON response.
+  const multipart = new FormData()
+  multipart.set('email', 'smoke@example.test')
+  multipart.set('source', 'cloud')
+  multipart.set('locale', 'en')
+  multipart.set('hm_extra', '')
+  const enhancedForm = await fetch(`${origin}/api/waitlist`, {
+    method: 'POST',
+    headers: { Origin: origin, Accept: 'application/json' },
+    body: multipart,
+  })
+  assert.equal(enhancedForm.status, 200)
+  assert.equal(enhancedForm.headers.get('Cache-Control'), 'no-store')
+  assert.equal(await enhancedForm.text(), first)
+  assert.deepEqual(query('SELECT * FROM waitlist'), stored)
   migrate()
   assert.deepEqual(query('SELECT * FROM waitlist'), stored)
   assert.deepEqual(query('SELECT value FROM predecessor_probe'), [{ value: 'keep' }])
   console.log(
-    'Local waitlist smoke passed: 5 byte-identical pages, headers/404/redirect, JSON/form POST, duplicate/honeypot, migration preservation/fresh/no-op.',
+    'Local waitlist smoke passed: 5 byte-identical pages, headers/404/redirect, JSON/URL-encoded/multipart POST, duplicate/honeypot, migration preservation/fresh/no-op.',
   )
 } finally {
   if (worker?.pid && worker.exitCode === null) {

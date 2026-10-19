@@ -57,7 +57,7 @@ describe('Cloud waitlist input', () => {
         email: '  Person+Launch@Example.COM ',
         source: 'cloud',
         locale: 'en',
-        website: '',
+        hm_extra: '',
       }),
       env,
     )
@@ -137,12 +137,13 @@ describe('Cloud waitlist input', () => {
     { email: ['person@example.com'] },
     { email: 42 },
     { email: 'person@example.com', extra: 'ignored?' },
+    { email: 'person@example.com', website: '' },
     { email: 'person@example.com', source: 'other' },
     { email: 'person@example.com', source: '' },
     { email: 'person@example.com', locale: 'fr' },
     { email: 'person@example.com', locale: null },
-    { email: 'person@example.com', website: false },
-    { email: 'person@example.com', website: 'x'.repeat(1025) },
+    { email: 'person@example.com', hm_extra: false },
+    { email: 'person@example.com', hm_extra: 'x'.repeat(1025) },
   ])('rejects an invalid shape or non-allowlisted field: %j', async (input) => {
     expect((await handleWaitlist(request(input), env)).status).toBe(400)
     expect(rows()).toHaveLength(0)
@@ -154,7 +155,7 @@ describe('Cloud waitlist input', () => {
     '{"email":"person@example.com"} trailing',
     '{"email":"person@example.com","email":"second@example.com"}',
     '{"email":"person@example.com","em\\u0061il":"second@example.com"}',
-    '{"email":"person@example.com","website":{}}',
+    '{"email":"person@example.com","hm_extra":{}}',
   ])('rejects malformed JSON and duplicate JSON fields: %s', async (body) => {
     expect((await handleWaitlist(rawRequest(body), env)).status).toBe(400)
     expect(rows()).toHaveLength(0)
@@ -162,7 +163,7 @@ describe('Cloud waitlist input', () => {
 
   it('accepts URL-encoded forms and redirects a browser to an inline success state', async () => {
     const response = await handleWaitlist(
-      rawRequest('email=Person%40Example.com&source=pricing&locale=en&website=', {
+      rawRequest('email=Person%40Example.com&source=pricing&locale=en&hm_extra=', {
         'Content-Type': 'application/x-www-form-urlencoded',
       }),
       env,
@@ -196,7 +197,7 @@ describe('Cloud waitlist input', () => {
   it('rejects uploaded files in form fields', async () => {
     const form = new FormData()
     form.set('email', 'person@example.com')
-    form.set('website', new Blob(['text']), 'test.txt')
+    form.set('hm_extra', new Blob(['text']), 'test.txt')
     const formRequest = new Request('https://hourmere.com/api/waitlist', {
       method: 'POST',
       headers: { Origin: headers.Origin, 'CF-Connecting-IP': '192.0.2.10' },
@@ -210,7 +211,7 @@ describe('Cloud waitlist input', () => {
     'email=one%40example.com&email=two%40example.com',
     'email=one%40example.com&source=pricing&source=faq',
     'email=one%40example.com&extra=value',
-    'email=one%40example.com&website=%ZZ',
+    'email=one%40example.com&hm_extra=%ZZ',
   ])('rejects duplicate, extra and malformed form fields: %s', async (body) => {
     const response = await handleWaitlist(
       rawRequest(body, { 'Content-Type': 'application/x-www-form-urlencoded' }),
@@ -244,7 +245,7 @@ describe('Cloud waitlist input', () => {
 
   it('does not decode malformed UTF-8 as a replacement character', async () => {
     const body = new Uint8Array([
-      ...new TextEncoder().encode('{"email":"person@example.com","website":"'),
+      ...new TextEncoder().encode('{"email":"person@example.com","hm_extra":"'),
       0xff,
       ...new TextEncoder().encode('"}'),
     ])
@@ -257,7 +258,7 @@ describe('waitlist privacy and abuse protections', () => {
   it('returns an identical success body for a new email, a duplicate and a honeypot', async () => {
     const first = await handleWaitlist(request(), env)
     const duplicate = await handleWaitlist(request(), env)
-    const bot = await handleWaitlist(request({ email: 'bot@example.com', website: 'filled' }), env)
+    const bot = await handleWaitlist(request({ email: 'bot@example.com', hm_extra: 'filled' }), env)
     expect([first.status, duplicate.status, bot.status]).toEqual([200, 200, 200])
     const body = await first.text()
     expect(await duplicate.text()).toBe(body)
@@ -286,9 +287,9 @@ describe('waitlist privacy and abuse protections', () => {
     ])
   })
 
-  it.each(['filled', ' '])('stores nothing for a filled honeypot: %j', async (website) => {
+  it.each(['filled', ' '])('stores nothing for a filled honeypot: %j', async (hm_extra) => {
     expect(
-      (await handleWaitlist(request({ email: 'person@example.com', website }), env)).status,
+      (await handleWaitlist(request({ email: 'person@example.com', hm_extra }), env)).status,
     ).toBe(200)
     expect(rows()).toHaveLength(0)
     expect(env.WAITLIST_DB.prepare).not.toHaveBeenCalled()
@@ -342,9 +343,9 @@ describe('waitlist privacy and abuse protections', () => {
     expect(await response.text()).not.toContain('192.0.2.10')
   })
 
-  it('limits by client IP without retaining the address in a counter key or D1', async () => {
+  it('uses a stable client IP digest across minute boundaries without retaining the address', async () => {
     vi.useFakeTimers()
-    vi.setSystemTime(new Date('2026-11-30T00:00:00.000Z'))
+    vi.setSystemTime(new Date('2026-11-30T00:00:59.000Z'))
     await handleWaitlist(request(), env)
     await handleWaitlist(request(), env)
     await handleWaitlist(request(undefined, { 'CF-Connecting-IP': '192.0.2.11' }), env)
@@ -355,9 +356,30 @@ describe('waitlist privacy and abuse protections', () => {
     expect(keys[0]).toMatch(/^[a-f0-9]{64}$/)
     expect(keys[1]).toBe(keys[0])
     expect(keys[2]).not.toBe(keys[0])
-    expect(keys[3]).not.toBe(keys[0])
+    expect(keys[3]).toBe(keys[0])
     expect(JSON.stringify(calls)).not.toContain('192.0.2.')
     expect(JSON.stringify(rows())).not.toContain('192.0.2.')
+  })
+
+  it('keeps using the binding counter when a burst crosses a minute boundary', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-11-30T00:00:59.000Z'))
+    const counters = new Map<string, number>()
+    env.WAITLIST_RATE_LIMITER.limit = vi.fn(async ({ key }) => {
+      const count = (counters.get(key) ?? 0) + 1
+      counters.set(key, count)
+      return { success: count <= 5 }
+    })
+    for (let attempt = 0; attempt < 5; attempt++) {
+      expect((await handleWaitlist(request(), env)).status).toBe(200)
+    }
+    vi.setSystemTime(new Date('2026-11-30T00:01:01.000Z'))
+    for (let attempt = 0; attempt < 5; attempt++) {
+      expect((await handleWaitlist(request(), env)).status).toBe(429)
+    }
+    expect(counters.size).toBe(1)
+    expect(env.WAITLIST_DB.prepare).toHaveBeenCalledTimes(5)
+    expect(rows()).toHaveLength(1)
   })
 
   it('fails closed if the trusted production client IP is absent', async () => {
