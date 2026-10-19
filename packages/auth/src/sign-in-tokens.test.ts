@@ -91,17 +91,23 @@ describe.skipIf(!serverUrl)('sign-in token minimisation', () => {
           body: JSON.stringify(body),
         }),
       )
-    const direct = (path = '/sign-in/social', cookie = '', selected = provider) =>
-      post(
-        path,
-        {
-          provider: selected,
-          idToken: { token: idToken, accessToken: access(), refreshToken: refresh() },
-        },
-        cookie,
-      )
-    const redirect = async (path = '/sign-in/social', cookie = '') => {
-      const started = await post(path, { provider, callbackURL: '/app' }, cookie)
+    // HTTP linking/token endpoints are disabled; use server APIs to retain hook and
+    // encryption coverage while sign-in and provider callbacks still use the handler.
+    const headers = (cookie: string) => new Headers({ origin, cookie })
+    const direct = (cookie = '', selected = provider, linking = false) => {
+      const body = {
+        provider: selected,
+        idToken: { token: idToken, accessToken: access(), refreshToken: refresh() },
+      }
+      return linking
+        ? auth.api.linkSocialAccount({ body, headers: headers(cookie), asResponse: true })
+        : post('/sign-in/social', body, cookie)
+    }
+    const redirect = async (cookie = '', linking = false) => {
+      const body = { provider, callbackURL: '/app' }
+      const started = linking
+        ? await auth.api.linkSocialAccount({ body, headers: headers(cookie), asResponse: true })
+        : await post('/sign-in/social', body, cookie)
       expect(started.status).toBe(200)
       const { url } = (await started.json()) as { url: string }
       const state = new URL(url).searchParams.get('state')
@@ -132,7 +138,7 @@ describe.skipIf(!serverUrl)('sign-in token minimisation', () => {
     const stored = async (hasRefresh = true) => {
       const row = await account()
       expect(row.idToken === null).toBe(true)
-      // Inspect actual persisted ciphertext, then decrypt via Better Auth's public API.
+      // Inspect actual persisted ciphertext, then decrypt via Better Auth's server API.
       expect(Boolean(row.accessToken) && row.accessToken !== access()).toBe(true)
       expect(row.refreshToken === null || row.refreshToken !== refresh()).toBe(true)
       if (hasRefresh) expect(Boolean(row.refreshToken)).toBe(true)
@@ -145,7 +151,6 @@ describe.skipIf(!serverUrl)('sign-in token minimisation', () => {
     }
     return {
       auth,
-      post,
       direct,
       redirect,
       account,
@@ -176,16 +181,12 @@ describe.skipIf(!serverUrl)('sign-in token minimisation', () => {
     'discards %s callback tokens when explicitly linking and relinking',
     async (provider) => {
       const f = fixture(provider, 'link')
-      const signedIn = await f.direct(
-        '/sign-in/social',
-        '',
-        provider === 'google' ? 'microsoft' : 'google',
-      )
+      const signedIn = await f.direct('', provider === 'google' ? 'microsoft' : 'google')
       expect(signedIn.status).toBe(200)
       const cookie = cookies(signedIn)
-      await f.redirect('/link-social', cookie)
+      await f.redirect(cookie, true)
       const first = await f.stored()
-      await f.redirect('/link-social', cookie)
+      await f.redirect(cookie, true)
       expect((await f.stored()).id).toBe(first.id)
     },
   )
@@ -201,10 +202,10 @@ describe.skipIf(!serverUrl)('sign-in token minimisation', () => {
       expect((await f.stored(false)).id).toBe(first.id)
       await owned.pool.query('DELETE FROM auth.account WHERE id = $1', [first.id])
       const cookie = cookies(signedIn)
-      expect((await f.direct('/link-social', cookie)).status).toBe(200)
+      expect((await f.direct(cookie, provider, true)).status).toBe(200)
       const linked = await f.stored()
       expect(linked.userId).toBe(first.userId)
-      expect((await f.direct('/link-social', cookie)).status).toBe(200)
+      expect((await f.direct(cookie, provider, true)).status).toBe(200)
       expect((await f.stored()).id).toBe(linked.id)
       expect(f.fetch).not.toHaveBeenCalled()
     },
@@ -216,7 +217,12 @@ describe.skipIf(!serverUrl)('sign-in token minimisation', () => {
       const f = fixture(provider, 'refresh')
       const signedIn = await f.redirect()
       const first = await f.stored()
-      const refreshed = await f.post('/refresh-token', { accountId: first.id }, cookies(signedIn))
+      const headers = new Headers({ origin, cookie: cookies(signedIn) })
+      const refreshed = await f.auth.api.refreshToken({
+        body: { accountId: first.id },
+        headers,
+        asResponse: true,
+      })
       expect(refreshed.status).toBe(200)
       expect(f.refreshed()).toBe(true)
       const tokens = (await refreshed.json()) as { accessToken: string; refreshToken: string }
@@ -226,11 +232,11 @@ describe.skipIf(!serverUrl)('sign-in token minimisation', () => {
         'UPDATE auth.account SET "accessTokenExpiresAt" = now() - interval \'1 minute\' WHERE id = $1',
         [first.id],
       )
-      const automatic = await f.post(
-        '/get-access-token',
-        { accountId: first.id },
-        cookies(signedIn),
-      )
+      const automatic = await f.auth.api.getAccessToken({
+        body: { accountId: first.id },
+        headers,
+        asResponse: true,
+      })
       expect(automatic.status).toBe(200)
       expect(f.refreshed()).toBe(true)
       expect(((await automatic.json()) as { accessToken: string }).accessToken === f.access()).toBe(

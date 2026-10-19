@@ -138,8 +138,17 @@ export function createAuth({
   const { google, microsoft } = socialProviders
   return betterAuth({
     database: pool,
-    // Consent changes must also retire Hourmere's grant generation and refresh tokens.
-    disabledPaths: mcpOAuth ? ['/token', '/oauth2/delete-consent', '/oauth2/update-consent'] : [],
+    disabledPaths: [
+      // Hourmere uses social providers only for sign-in. Browser sessions must not read
+      // or refresh their credentials or manage linked accounts through unused endpoints.
+      '/account-info',
+      '/get-access-token',
+      '/refresh-token',
+      '/link-social',
+      '/list-accounts',
+      // Consent changes must also retire Hourmere's grant generation and refresh tokens.
+      ...(mcpOAuth ? ['/token', '/oauth2/delete-consent', '/oauth2/update-consent'] : []),
+    ],
     baseURL,
     secret,
     // The OAuth attack surface is the same for every NODE_ENV.
