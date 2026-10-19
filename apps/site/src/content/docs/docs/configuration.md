@@ -27,6 +27,7 @@ plain Compose file or the optional automatic HTTPS override; see
 | `EMBED_ALLOWED_ORIGINS` | Unset | Up to 32 comma-separated exact HTTPS website origins permitted to embed public booking pages. Empty disables embedding; no wildcards or paths. Loopback HTTP is accepted for local development. |
 | `WEBHOOKS_ENABLED` | `false` | Capture new organization booking events for outbound HTTPS webhooks. No backfill; set identically on web and worker. See repository `docs/webhooks.md`. |
 | `WEBHOOK_ENCRYPTION_KEY` | Unset | Independent 32-byte base64 key required when webhooks are enabled. Encrypts signing secrets; keep stable and backed up. |
+| `WEBHOOK_PRIVATE_TARGETS` | Unset | Self-hosting only: up to 32 comma-separated exact `hostname:port`, `IPv4[/CIDR]:port[-port]` or `[IPv6[/CIDR]]:port[-port]` entries permitting private HTTP(S) webhook destinations. Empty preserves public HTTPS-only delivery. Set identically on web and worker. |
 | `MCP_OAUTH_ENABLED` | `false` | Enable MCP OAuth connectors alongside API keys. Requires HTTPS except on loopback; explicit organization approval and revocation at `/app/connected-apps`. No calendar/provider client credentials needed. Set identically on web and worker. |
 | `HOURMERE_ROLE` | `all` | `all`: API and workers; `web`: API/queues only; `worker`: jobs and health endpoint only. The separate-worker Compose overlay fixes the app to `web` and the worker to `worker`, independently of this `.env` setting. |
 
@@ -39,6 +40,52 @@ it is unset. Their per-IP limits are 5, 30 and 20 requests per minute respective
 exchanges, refreshes and failed token requests share the token endpoint budget. Provider
 429 responses carry `X-Retry-After` seconds; the authorization entrance limiter uses
 `Retry-After`.
+
+### Private webhook receivers
+
+**Hourmere Cloud MUST NEVER set `WEBHOOK_PRIVATE_TARGETS`.** There is no hosted execution
+mode in this codebase; `HOSTED_SIGNUP_URL` only controls attribution links. Every process
+with a nonempty allowlist prints a startup warning without its values. This setting trusts
+operators to choose the exact internal services an organization administrator may contact.
+
+For example, `n8n:5678,192.168.1.0/24:8080,[fd12:3456::/64]:8443-8444` permits those exact
+hosts/networks and ports. Hostnames use ASCII DNS labels, match case-insensitively and
+allow one explicit decimal port; IPs and CIDRs may use an inclusive ascending port range.
+Ports are 1–65535 without leading zeros. IPv6 entries require brackets around the address
+and optional prefix. CIDRs must name their network base, without host bits. Wildcards,
+missing ports, public IPs, unspecified addresses, link-local addresses and metadata endpoints
+are rejected at startup, even when webhooks are disabled. Eligible addresses are RFC1918
+IPv4, IPv4 loopback, IPv6 unique-local and IPv6 loopback. Always refused are the entire
+`169.254.0.0/16` link-local range (including metadata at `169.254.169.254`), Alibaba metadata
+at `100.100.100.200`, AWS's reserved service range `fd00:ec2::/32` (including metadata at
+`fd00:ec2::254`), GCP metadata at `fd20:ce::254` and OCI metadata at
+`fd00:c1::a9fe:a9fe`. CIDRs overlapping those ranges or containing those endpoints are
+refused at startup; the same addresses are refused in DNS answers at delivery. IPv4-mapped
+IPv6 (`::ffff:0:0/96`) and NAT64 prefixes `64:ff9b::/96` and `64:ff9b:1::/48` are ineligible too.
+
+An allowed destination may use HTTP or HTTPS, a dotless hostname, an IP literal and a
+nonstandard port. Matching uses the URL's effective port: omitted HTTP/HTTPS ports mean
+80/443, which must still be explicit in the allowlist. Credentials and fragments remain
+forbidden. Saving configuration does no DNS lookup or verification request, so acceptance
+does not prove that a receiver exists or can be reached. At each delivery attempt all DNS
+answers must fit one matching entry: hostname entries require every answer to be eligible
+private/loopback space, while IP/CIDR entries require every answer inside that IP/network.
+Mixed public/private answers and unions across entries are refused. An exact hostname entry
+binds that host and port to private addresses, including after a DNS change; unrelated
+ordinary public HTTPS URLs retain their public-only delivery path. The checked address is pinned to the socket;
+redirects, proxies from environment variables and cookies remain disabled. HTTP requests
+carry the same HMAC signature headers as HTTPS.
+
+Organization administrators can choose any path on an allowed host and port. IP/CIDR
+entries also permit every virtual host resolving entirely into the allowed range: the
+administrator chooses the URL hostname and therefore the HTTP Host header, so an internal
+reverse proxy routing by Host may expose multiple services. Delivery records include the
+HTTP status (`httpStatus`, stored as `http_status`), revealing whether an allowed internal
+destination responded. This visibility is inherent to allowing that destination.
+
+Recreate web and worker together after changing the setting; pending attempts use the new
+policy. See the [same-network n8n example](/docs/self-hosting#private-webhook-receivers)
+and repository `docs/webhooks.md` for configuration and delivery behavior.
 
 ## Email and registration
 

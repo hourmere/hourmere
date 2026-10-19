@@ -405,7 +405,14 @@ of committed bookings and existing attendees on reschedule/cancel remain intact.
 `/api/v1/webhooks` configuration and delivery metadata require a current verified owner/admin
 of the acting organization. Ordinary hosts cannot inspect organization-wide outbound
 events. Creation/rotation reveal a signing secret once; lists never recover it. Destinations
-are immutable HTTPS public DNS URLs and are resolved again with pinned addresses per send.
+are immutable HTTPS public DNS URLs by default. Self-hosted operators may explicitly
+allow private HTTP(S) host/IP/CIDR and port destinations with `WEBHOOK_PRIVATE_TARGETS`;
+Hourmere Cloud must never set it. Saving and updating endpoint settings rechecks URL policy
+without DNS lookups or verification requests, and gives the same safe refusal regardless
+of internal hostname existence. A PATCH containing only `isActive: false` can pause an
+endpoint even after its allowlist entry is removed; all other updates recheck the policy.
+Every actual send re-resolves all addresses against the current policy and pins a validated
+address to the socket. Accepted configuration does not establish receiver availability.
 The instance must explicitly enable new captures; no historical bookings are backfilled.
 See [webhooks.md](webhooks.md) for the payload, signed headers, retention and delivery contract.
 

@@ -115,6 +115,18 @@ describe('documented Compose configuration', () => {
     expect(row).toContain('| Unset |')
   })
 
+  it('keeps private webhook destinations empty by default', () => {
+    expect(composeAppEnvironment(compose).get('WEBHOOK_PRIVATE_TARGETS') ?? '').toMatch(
+      /^\$\{WEBHOOK_PRIVATE_TARGETS:-\}$/,
+    )
+    expect(example).toMatch(/^WEBHOOK_PRIVATE_TARGETS=$/m)
+    const row = reference
+      .split('\n')
+      .find((line) => line.startsWith('| `WEBHOOK_PRIVATE_TARGETS` |'))
+    expect(row).toContain('| Unset |')
+    expect(reference).toContain('Hourmere Cloud MUST NEVER set')
+  })
+
   it('forwards automatic migrations with the documented true default', () => {
     expect(composeAppEnvironment(compose).get('AUTO_MIGRATE')).toMatch(/^\$\{AUTO_MIGRATE:-true\}$/)
     const row = reference.split('\n').find((line) => line.startsWith('| `AUTO_MIGRATE` |'))

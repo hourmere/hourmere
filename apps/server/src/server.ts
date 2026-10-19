@@ -181,6 +181,10 @@ export async function startServer(env: NodeJS.ProcessEnv = process.env): Promise
 
 async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promise<RunningServer> {
   const config = loadConfig(env)
+  if (config.WEBHOOK_PRIVATE_TARGETS.length)
+    console.warn(
+      'WEBHOOK_PRIVATE_TARGETS permits operator-trusted private webhook destinations. Self-hosting only; Hourmere Cloud must never enable this setting.',
+    )
   const pool = createPool(config.DATABASE_URL)
   const db = createDb(pool)
 
@@ -276,6 +280,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
   const webhookSettings = {
     enabled: config.WEBHOOKS_ENABLED,
     encryptionKey: config.WEBHOOK_ENCRYPTION_KEY,
+    privateTargets: config.WEBHOOK_PRIVATE_TARGETS,
   }
   const calendarDeps: CalendarDeps = {
     db,
