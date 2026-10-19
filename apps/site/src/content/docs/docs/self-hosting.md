@@ -97,10 +97,11 @@ HTTP to HTTPS, and preserves the original Host while setting `X-Forwarded-For` a
 checks, redirects and Secure cookies. HTTPS origins also enable the app's HSTS header.
 
 Caddy has a fixed address (`PROXY_IP=172.30.62.2`) on a dedicated ingress network
-(`PROXY_SUBNET=172.30.62.0/28`). Dynamic app/worker and one-off container addresses are allocated from
-`PROXY_DYNAMIC_RANGE=172.30.62.8/29`, keeping Caddy's address outside that range. The
-override sets `TRUSTED_PROXIES` to Caddy's address so client-IP rate limits use the visitor
-address and ignore client-supplied forwarding headers.
+(`PROXY_SUBNET=172.30.62.0/28`). Dynamic app and one-off app container addresses are allocated from
+`PROXY_DYNAMIC_RANGE=172.30.62.8/29`, keeping Caddy's address outside that range. The worker
+uses only the default network shared with PostgreSQL. The override sets `TRUSTED_PROXIES`
+to Caddy's address so client-IP rate limits use the visitor address and ignore
+client-supplied forwarding headers.
 Do not replace this with a broad private-network range. If the subnet overlaps an existing
 network or another deployment, change all three values (`PROXY_SUBNET`, `PROXY_IP` and
 `PROXY_DYNAMIC_RANGE`) in `.env` before starting. Choose a free private subnet, a dynamic
@@ -325,6 +326,16 @@ Use `docker compose ps`, `docker compose logs --tail=100 app`,
 status and startup failures. `docker compose logs -f app` follows app/jobs output. Do not
 share log-email links or secrets. The health URL is `GET /api/health` on the public origin;
 verify it after deployments and monitor failures externally.
+
+On Linux, Caddy's quic-go may warn about small UDP buffers for HTTP/3. The
+[quic-go guidance](https://quic-go.net/docs/quic/optimizations/#udp-buffer-sizes) recommends
+raising the host's receive/send maxima (keep any already higher values):
+
+```sh
+sudo sysctl -w net.core.rmem_max=7340032 net.core.wmem_max=7340032
+```
+
+These changes last until reboot; persist them in the host's sysctl configuration if needed.
 
 A startup error about `hourmere.*` settings usually means a connection pooler stripped
 PostgreSQL startup options. Connect directly to PostgreSQL; PgBouncer is unsupported. The
