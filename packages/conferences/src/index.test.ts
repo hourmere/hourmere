@@ -323,11 +323,22 @@ describe.skipIf(!databaseUrl)('independent Zoom connections (real Postgres)', ()
   )
   it('redeems a concurrent callback at most once', async () => {
     const { state } = await start(),
-      outcomes = await Promise.all([
-        finishZoomConnection(deps, owner, query(state)),
-        finishZoomConnection(deps, owner, query(state)),
-      ])
-    expect(outcomes.sort()).toEqual(['connected', 'invalid_state'])
+      entered = deferred<void>(),
+      release = deferred<Response>()
+    provider.controls.tokenHook = async () => {
+      entered.resolve()
+      return release.promise
+    }
+    const first = finishZoomConnection(deps, owner, query(state))
+    try {
+      await entered.promise
+      expect(await finishZoomConnection(deps, owner, query(state))).toBe('busy')
+    } finally {
+      release.resolve(Response.json(provider.controls.token))
+      await first
+    }
+    expect(await first).toBe('connected')
+    expect(await finishZoomConnection(deps, owner, query(state))).toBe('invalid_state')
     expect(provider.calls.filter((c) => c.url.includes('/oauth/token'))).toHaveLength(1)
   })
   it('keeps the same stable ID for the same owner and prevents identity/owner transfer', async () => {
@@ -445,21 +456,22 @@ describe.skipIf(!databaseUrl)('independent Zoom connections (real Postgres)', ()
         },
       },
     }
-    const callbacks = [
-      finishZoomConnection(deps, owner, query(a.state, { code: 'new-identity-a' })),
-      finishZoomConnection(deps, owner, query(b.state, { code: 'new-identity-b' })),
-    ]
-    const settledCallbacks = Promise.allSettled(callbacks)
+    const first = finishZoomConnection(deps, owner, query(a.state, { code: 'new-identity-a' }))
     try {
       await firstIdentity.promise
+      expect(
+        await finishZoomConnection(deps, owner, query(b.state, { code: 'new-identity-b' })),
+      ).toBe('busy')
       expect(identitiesRead).toBe(1)
     } finally {
       releaseIdentities.resolve()
-      await settledCallbacks
+      await first
     }
+    expect(await first).toBe('connected')
+    expect(
+      await finishZoomConnection(deps, owner, query(b.state, { code: 'new-identity-b' })),
+    ).toBe('connection_limit')
     expect(identitiesRead).toBe(2)
-    const outcomes = await Promise.all(callbacks)
-    expect(outcomes.sort()).toEqual(['connected', 'connection_limit'])
     expect((await listConferenceConnections(deps, owner)).data).toHaveLength(5)
     expect(
       await db
@@ -511,7 +523,7 @@ describe.skipIf(!databaseUrl)('independent Zoom connections (real Postgres)', ()
       await expect(refreshConference(deps, owner, first.id)).rejects.toMatchObject({
         kind: 'conflict',
         code: 'zoom_refresh_in_progress',
-        message: 'This Zoom connection is already refreshing. Wait for it to finish.',
+        message: 'Zoom account operations are busy. Try again shortly.',
       })
     } finally {
       provider.controls.token.refresh_token = 'synthetic-rotated-refresh'
@@ -628,7 +640,13 @@ describe.skipIf(!databaseUrl)('independent Zoom connections (real Postgres)', ()
       expect(await row(first.id)).toMatchObject({ status: 'refreshing', credentials: null })
       const count = provider.calls.length
       await expect(refreshConference(deps, owner, first.id)).rejects.toMatchObject({
-        code: 'zoom_refresh_in_progress',
+        code: 'zoom_needs_reauth',
+      })
+      expect(await row(first.id)).toMatchObject({
+        status: 'needs_reauth',
+        credentials: null,
+        operation_id: null,
+        last_error: 'needs_reauth',
       })
       expect(provider.calls).toHaveLength(count)
     } finally {
@@ -727,11 +745,12 @@ describe.skipIf(!databaseUrl)('independent Zoom connections (real Postgres)', ()
       code: 'zoom_connection_not_found',
     })
   })
-  async function pauseFirstCommit(connectionId?: string) {
+  async function pauseFirstCommit(connectionId?: string, commitNumber = 1) {
     const pool = createPool(database.url),
       reached = deferred<void>(),
       resume = deferred<void>()
-    let armed = true
+    let armed = true,
+      commits = 0
     const proxy = new Proxy(pool, {
       get(target, property) {
         if (property === 'connect')
@@ -750,7 +769,8 @@ describe.skipIf(!databaseUrl)('independent Zoom connections (real Postgres)', ()
                     if (
                       armed &&
                       text?.trim().toLowerCase() === 'commit' &&
-                      (!connectionId || (await row(connectionId)).status === 'refreshing')
+                      (!connectionId || (await row(connectionId)).status === 'refreshing') &&
+                      ++commits === commitNumber
                     ) {
                       armed = false
                       reached.resolve()
@@ -777,7 +797,7 @@ describe.skipIf(!databaseUrl)('independent Zoom connections (real Postgres)', ()
   it('disconnect between the durable callback claim and exchange invalidates the attempt before I/O', async () => {
     const first = await connect(),
       pending = await start(),
-      paused = await pauseFirstCommit(),
+      paused = await pauseFirstCommit(undefined, 2),
       count = provider.calls.length
     try {
       const finishing = finishZoomConnection(

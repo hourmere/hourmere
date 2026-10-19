@@ -108,8 +108,7 @@ export function errorMessage(err: unknown): UiText {
     zoom_connection_not_found: 'This Zoom connection is not available.',
     zoom_connection_limit: 'This account has reached its limit of five connected Zoom identities.',
     zoom_needs_reauth: 'Reconnect this Zoom account before refreshing it.',
-    zoom_refresh_in_progress:
-      'This Zoom account is already being refreshed. Wait for it to finish, then reload.',
+    zoom_refresh_in_progress: 'Zoom account operations are busy. Try again shortly.',
     zoom_permissions_missing:
       'Zoom did not return exactly the requested permissions. Check the app configuration and reconnect.',
     zoom_provider_unavailable:

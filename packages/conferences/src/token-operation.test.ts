@@ -23,6 +23,26 @@ describe.skipIf(!databaseUrl)('Zoom token-operation durable leases', () => {
   afterAll(async () => {
     await database?.drop()
   })
+  it('takes over an already expired lease without taking the busy path', async () => {
+    await db
+      .insertInto('conference_token_operations')
+      .values({ user_id: owner, operation_id: randomUUID(), expires_at: new Date(0) })
+      .execute()
+    try {
+      const result = await withTokenOperation(
+        db,
+        owner,
+        async () => 'acquired',
+        async () => 'busy',
+      )
+      expect(result).toBe('acquired')
+      expect(await db.selectFrom('conference_token_operations').selectAll().execute()).toHaveLength(
+        0,
+      )
+    } finally {
+      await db.deleteFrom('conference_token_operations').where('user_id', '=', owner).execute()
+    }
+  })
   it.each(['success', 'rejection', 'rollback'] as const)(
     'releases the lease after %s without reserving a connection during I/O',
     async (outcome) => {

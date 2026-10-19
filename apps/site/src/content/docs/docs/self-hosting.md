@@ -207,11 +207,21 @@ calendar updates. The worker exposes only `/api/health` for health checks. Keep 
 worker on the same version and secrets. Development's `docker-compose.dev.yml` and
 `hourmere-dev` project remain independent of this production selection.
 
-If moving from the old commented worker block, restore `docker-compose.yml` to the tracked
-version after selecting the overlay. To return to one container, stop the worker while the
-overlay is still selected, remove the worker overlay from `COMPOSE_FILE`, remove any old
-`HOURMERE_ROLE=web` setting from `.env`, then recreate the app. Its default `all` role resumes
-job processing.
+If moving from the old commented worker block, follow the migration steps under
+[Upgrade and roll back](#upgrade-and-roll-back) before pulling the new source.
+
+### Switch back to a single container
+
+Remove the worker container while the overlay is still selected:
+
+```sh
+docker compose rm -sf worker
+```
+
+Then remove the worker overlay from `COMPOSE_FILE`, remove any old `HOURMERE_ROLE=web`
+setting from `.env`, and run `docker compose up -d --build --wait`. Its default `all` role
+resumes job processing. Removing the container prevents an orphaned worker from continuing
+to process jobs after the overlay is deselected.
 
 Compose allows 35 seconds to stop a process, leaving margin around the server's 10-second
 HTTP drain and 20-second job drain. Preserve that grace period in deployment overrides.
@@ -301,9 +311,12 @@ assignments also work with backups from before the deployment settings existed, 
 the selected source revision contains `Caddyfile` and `docker-compose.proxy.yml`. If the
 backup commit predates this kit, select a reviewed newer revision containing these files
 instead of that old commit before using the HTTPS commands; startup will apply its pending
-migrations, so retain the original dump for rollback. The rewrite preserves
-`docker-compose.worker.yml` when present in the saved `COMPOSE_FILE`, including setup's
-quoted values. Plain-mode restores remove only `:docker-compose.proxy.yml` from the
+migrations, so retain the original dump for rollback. The rewrite preserves only the exact
+`docker-compose.worker.yml` filename in a `COMPOSE_FILE=` assignment, including setup's
+quoted values. It does not recognise `./docker-compose.worker.yml` or
+`export COMPOSE_FILE=` forms. Normalize those forms in the saved `.env` before running the
+rewrite, and verify the rewritten `COMPOSE_FILE` still selects the worker overlay before
+starting any app or worker. Plain-mode restores remove only `:docker-compose.proxy.yml` from the
 rewritten `COMPOSE_FILE` and omit the Caddy steps; keep `:docker-compose.worker.yml` if it
 was selected. Do not start the
 restored app or workers for a drill until SMTP, provider credentials and outbound webhooks
@@ -336,14 +349,28 @@ preserve its `.env` and Caddy state. Enable separate workers through `COMPOSE_FI
 `.env`, keeping the tracked Compose files unchanged so local deployment choices do not
 block `git pull --ff-only`. The persisted file selection also rebuilds/recreates the
 worker during upgrades. In the deployment checkout, a branch following `main` can be
-updated with:
+updated with the commands below.
+
+**If you uncommented the old worker block in `docker-compose.yml`, migrate it before
+pulling.** Those tracked edits make `git pull --ff-only` refuse the upgrade. First append
+`:docker-compose.worker.yml` to the existing `COMPOSE_FILE` in `.env` (preserve any proxy
+overlay); if the setting is absent, add
+`COMPOSE_FILE=docker-compose.yml:docker-compose.worker.yml`. Then restore the tracked
+Compose file before pulling:
 
 ```sh
+git restore docker-compose.yml
 git pull --ff-only
 docker compose pull proxy db
 docker compose up -d --build --wait
 curl --retry 20 --retry-delay 3 --retry-all-errors --fail https://app.hourmere.com/api/health
 ```
+
+For installations already using the tracked overlay, skip `git restore docker-compose.yml`.
+Restoring the Compose file without selecting the worker overlay leaves the old worker
+container orphaned on the old image, and the app may remain web-only if `.env` still sets
+`HOURMERE_ROLE=web`. Select the overlay before restoring so the upgrade recreates both
+services on the new image.
 
 For a pinned release, fetch and check out the reviewed tag/commit instead of pulling the
 branch. No public image can currently be pulled as a substitute for building the source.

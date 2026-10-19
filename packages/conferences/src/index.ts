@@ -248,6 +248,12 @@ async function beginConnection(
     verifier = randomBytes(32).toString('base64url'),
     hash = digest(state)
   const mode = await owned(deps, session, async (db) => {
+    if (!(await organizationMember(db, session)))
+      throw new DomainError(
+        'forbidden',
+        'conference_access_denied',
+        'This organization is unavailable.',
+      )
     let mode: ZoomMode = requestedMode ?? 'identity'
     if (id) {
       const row = await db
@@ -320,6 +326,7 @@ async function beginConnection(
 }
 export type ZoomOutcome =
   | 'connected'
+  | 'busy'
   | 'denied'
   | 'invalid_state'
   | 'disabled'
@@ -330,7 +337,8 @@ export type ZoomOutcome =
   | 'account_in_use'
   | 'connection_limit'
   | 'mode_conflict'
-/** Durable one-use claim precedes I/O. A failed commit cannot make a code redeemable again. */
+/** Acquire without waiting before consuming state, then durably claim it before I/O.
+ * A busy callback preserves the attempt for retry; a failed commit cannot reuse a code. */
 export async function finishZoomConnection(
   deps: ConferenceDeps,
   principal: Principal,
@@ -343,51 +351,52 @@ export async function finishZoomConnection(
   if (!state || !/^[A-Za-z0-9_-]{43}$/.test(state) || query.getAll('state').length !== 1)
     return 'invalid_state'
   const hash = digest(state)
-  const attempt = await owned(deps, session, async (db) => {
-    if (!(await organizationMember(db, session))) return undefined
-    const row = await db
-      .selectFrom('conference_oauth_states')
-      .select(['verifier', 'connection_id', 'mode'])
-      .where('state_hash', '=', hash)
-      .where('user_id', '=', session.user.id)
-      .where('session_id', '=', session.sessionId)
-      .where('claimed', '=', false)
-      .where('binding_version', '=', 2)
-      .where('expires_at', '>', new Date(clock(deps)))
-      .forUpdate()
-      .executeTakeFirst()
-    if (!row?.verifier) return undefined
-    await db
-      .updateTable('conference_oauth_states')
-      .set({ claimed: true, verifier: null })
-      .where('state_hash', '=', hash)
-      .execute()
-    return row
-  })
-  if (!attempt?.verifier) return 'invalid_state'
-  const validClaim = async (db: Db) => {
-    if (!(await organizationMember(db, session))) return false
-    const valid = await db
-      .selectFrom('conference_oauth_states')
-      .select(['connection_id', 'mode', 'binding_version'])
-      .where('state_hash', '=', hash)
-      .where('user_id', '=', session.user.id)
-      .where('session_id', '=', session.sessionId)
-      .where('claimed', '=', true)
-      .forUpdate()
-      .executeTakeFirst()
-    return (
-      valid?.binding_version === 2 &&
-      valid.mode === attempt.mode &&
-      valid.connection_id === attempt.connection_id
-    )
-  }
   try {
     return await withTokenOperation(
       deps.db,
       session.user.id,
       async (db, lease) => {
         deps = { ...deps, db }
+        const attempt = await owned(deps, session, async (db) => {
+          if (!(await lease.current(db)) || !(await organizationMember(db, session)))
+            return undefined
+          const row = await db
+            .selectFrom('conference_oauth_states')
+            .select(['verifier', 'connection_id', 'mode'])
+            .where('state_hash', '=', hash)
+            .where('user_id', '=', session.user.id)
+            .where('session_id', '=', session.sessionId)
+            .where('claimed', '=', false)
+            .where('binding_version', '=', 2)
+            .where('expires_at', '>', new Date(clock(deps)))
+            .forUpdate()
+            .executeTakeFirst()
+          if (!row?.verifier) return undefined
+          await db
+            .updateTable('conference_oauth_states')
+            .set({ claimed: true, verifier: null })
+            .where('state_hash', '=', hash)
+            .execute()
+          return row
+        })
+        if (!attempt?.verifier) return 'invalid_state'
+        const validClaim = async (db: Db) => {
+          if (!(await organizationMember(db, session))) return false
+          const valid = await db
+            .selectFrom('conference_oauth_states')
+            .select(['connection_id', 'mode', 'binding_version'])
+            .where('state_hash', '=', hash)
+            .where('user_id', '=', session.user.id)
+            .where('session_id', '=', session.sessionId)
+            .where('claimed', '=', true)
+            .forUpdate()
+            .executeTakeFirst()
+          return (
+            valid?.binding_version === 2 &&
+            valid.mode === attempt.mode &&
+            valid.connection_id === attempt.connection_id
+          )
+        }
         // Recheck after the durable claim: disconnect/logout may have committed meanwhile.
         const before = await owned(deps, session, async (db) => {
           if (!(await lease.current(db)) || !(await validClaim(db))) return undefined
@@ -525,7 +534,7 @@ export async function finishZoomConnection(
           return 'connected'
         })
       },
-      undefined,
+      async () => 'busy' as const,
       deps.timeoutMs,
     )
   } catch (error) {
@@ -567,7 +576,7 @@ export async function refreshConference(deps: ConferenceDeps, principal: Princip
       throw new DomainError(
         'conflict',
         'zoom_refresh_in_progress',
-        'This Zoom connection is already refreshing. Wait for it to finish.',
+        'Zoom account operations are busy. Try again shortly.',
       )
     },
     deps.timeoutMs,
@@ -593,12 +602,21 @@ async function refreshConnection(
       .forUpdate()
       .executeTakeFirst()
     if (!row) throw missing()
-    if (row.status === 'refreshing')
-      throw new DomainError(
-        'conflict',
-        'zoom_refresh_in_progress',
-        'This Zoom connection is already refreshing. Wait for it to finish.',
-      )
+    if (row.status === 'refreshing') {
+      // A valid new owner lease proves the prior refresh can no longer commit.
+      // Commit retirement before returning the reconnect error to the caller.
+      await db
+        .updateTable('conference_connections')
+        .set({
+          credentials: null,
+          operation_id: null,
+          status: 'needs_reauth',
+          last_error: 'needs_reauth',
+        })
+        .where('id', '=', id)
+        .execute()
+      return undefined
+    }
     if (row.status !== 'active' || !row.credentials || !row.external_user_id) return undefined
     try {
       if (!matchingZoomScopes(row.scopes, row.mode)) throw new ZoomError('permissions_missing')

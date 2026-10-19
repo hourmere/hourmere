@@ -327,13 +327,18 @@ pool connection spans provider I/O. Token-changing provider calls have a hard de
 Completion checks
 the live lease ID and expiry under a short share lock before storing credentials. Release
 compares the operation ID; a stale operation cannot release a successor. Crash recovery
-can take over an expired lease. Callbacks wait; explicit refresh returns
-`zoom_refresh_in_progress` and workers retry while the lease is occupied.
+can take over an expired lease. Callbacks acquire the lease before claiming OAuth state;
+an occupied lease returns `busy` immediately without consuming state or exchanging the code.
+Explicit refresh returns `zoom_refresh_in_progress` with a busy/retry message and workers
+retry while the lease is occupied. A newly acquired valid lease that finds `refreshing`
+proves the old rotation was abandoned: worker and explicit refresh retire it to
+`needs_reauth`, clearing the old operation and credentials so the user can reconnect.
 Disconnect/logout/deletion do not wait for token operations. Completion rechecks the session
 and claimed state or refresh operation; OAuth additionally checks current acting-organization
-membership before exchange and before persistence. Workers check credential revisions around
-identity/meeting I/O and operation/revision around rotation. Their best-effort credential
-retirement skips writes while another token operation owns a live lease.
+membership at connection start, before exchange and before persistence. Workers check
+credential revisions around identity/meeting I/O and operation/revision around rotation.
+Their best-effort credential retirement skips writes while another token operation owns
+a live lease.
 OAuth expiry is validated with atomic single-use consumption before exchange, without
 rejecting a successful exchange solely because time elapsed. Expiry cleanup retains
 claimed attempts. A wrong-mode identity exchange retires an existing meetings grant even
@@ -421,6 +426,17 @@ the acknowledged Meet conference PATCH request identity separately from the impo
 Existing rows remain null and keep their original event/request identity, enabling a
 same-ID PATCH for old import-created pending requests. A lost PATCH response reuses the
 same persisted request ID; acknowledged pending requests only poll.
+
+Migration 0037 extends `booking_conferences.error_code`'s CHECK constraint with
+`conference_pending_timeout` for an exhausted pending-conference polling budget. Existing
+error codes and terminal state are preserved without reclassification or requeueing. It
+also drops the unused `retry_conference` column: no reader used that write-only flag, and
+durable `request_id`/`conference_patch_request_id` already distinguish a new conference
+request from safe polling. The public retry endpoint and MCP `retry_conference` tool are
+unaffected. A host timeout retry keeps those identities; a known provider
+`conference_failed` can rotate the UUID on the same event.
+Old web/all/worker processes must stop before applying this migration because they still
+write the removed flag; restart every role with the upgraded code.
 
 ## Round-robin assignment state
 

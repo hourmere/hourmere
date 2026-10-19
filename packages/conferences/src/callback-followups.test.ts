@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import { type QueryId, TableNode } from 'kysely'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import {
   authorizeZoomMeetings,
@@ -183,7 +184,7 @@ describe.skipIf(!databaseUrl)('Zoom callback acceptance follow-ups (real Postgre
         .where('state_hash', '=', hash)
         .executeTakeFirstOrThrow(),
     ).toEqual({ claimed: true, verifier: null })
-    expect(await finishZoomConnection(deps, owner, query(state))).toBe('invalid_state')
+    expect(await finishZoomConnection(deps, owner, query(state))).toBe('busy')
     now += 2
     // Starting another attempt may clean expired unclaimed rows, but this exchange owns its claim.
     await start()
@@ -199,6 +200,87 @@ describe.skipIf(!databaseUrl)('Zoom callback acceptance follow-ups (real Postgre
     now += 10 * 60_000
     expect(await finishZoomConnection(deps, owner, query(state))).toBe('invalid_state')
     expect(await connections()).toHaveLength(0)
+    expect(provider.calls).toHaveLength(0)
+  })
+
+  it.each([
+    ['identity', false],
+    ['identity', true],
+    ['meetings', false],
+    ['meetings', true],
+  ] as const)(
+    'refuses %s connect-start for a removed member (reconnect: %s)',
+    async (mode, reconnect) => {
+      let id: string | undefined
+      if (reconnect) {
+        expect(await finishZoomConnection(deps, owner, query(await start()))).toBe('connected')
+        id = (await connections())[0]?.id
+        if (!id) throw new Error('Expected the synthetic connection')
+      }
+      const original = await connections(),
+        attempts = await db
+          .selectFrom('conference_oauth_states')
+          .selectAll()
+          .where('user_id', '=', owner.user.id)
+          .execute(),
+        calls = provider.calls.length
+      await removeMember()
+      await expect(
+        mode === 'meetings'
+          ? authorizeZoomMeetings(deps, owner, id)
+          : beginZoomConnection(deps, owner, id),
+      ).rejects.toMatchObject({ code: 'conference_access_denied' })
+      expect(await connections()).toEqual(original)
+      expect(
+        await db
+          .selectFrom('conference_oauth_states')
+          .selectAll()
+          .where('user_id', '=', owner.user.id)
+          .execute(),
+      ).toEqual(attempts)
+      expect(provider.calls).toHaveLength(calls)
+    },
+  )
+
+  it('rechecks connect-start membership after the owner and session locks are acquired', async () => {
+    const entered = deferred(),
+      release = deferred(),
+      sessions = new WeakSet<QueryId>()
+    gates.push(release)
+    const controlled = db.withPlugin({
+        transformQuery(args) {
+          if (
+            args.node.kind === 'SelectQueryNode' &&
+            args.node.from?.froms.some(
+              (from) => TableNode.is(from) && from.table.identifier.name === 'session',
+            )
+          )
+            sessions.add(args.queryId)
+          return args.node
+        },
+        async transformResult(args) {
+          if (sessions.has(args.queryId)) {
+            entered.resolve()
+            await release.promise
+          }
+          return args.result
+        },
+      }),
+      beginning = observe(beginZoomConnection({ ...deps, db: controlled }, owner))
+    await entered.promise
+    await removeMember()
+    release.resolve()
+    expect(await beginning).toMatchObject({
+      status: 'rejected',
+      error: { code: 'conference_access_denied' },
+    })
+    expect(
+      await db
+        .selectFrom('conference_oauth_states')
+        .select('state_hash')
+        .where('user_id', '=', owner.user.id)
+        .execute(),
+    ).toHaveLength(0)
     expect(provider.calls).toHaveLength(0)
   })
 

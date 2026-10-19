@@ -62,8 +62,7 @@ export const admin = {
   'Zoom could not be reached. Check the connection status before trying again.':
     '无法连接 Zoom。请检查连接状态后再试。',
   'Reconnect this Zoom account before refreshing it.': '请先重新连接此 Zoom 账号，再刷新。',
-  'This Zoom account is already being refreshed. Wait for it to finish, then reload.':
-    '此 Zoom 账号正在刷新。请等待刷新完成后重新加载页面。',
+  'Zoom account operations are busy. Try again shortly.': 'Zoom 账号操作繁忙。请稍后重试。',
   'Zoom did not grant only the requested identity access. Check the app configuration and reconnect.':
     'Zoom 返回的权限不符合所请求的最小身份权限。请检查应用配置后重新连接。',
   'Choose the same Zoom account when reconnecting this connection.':
