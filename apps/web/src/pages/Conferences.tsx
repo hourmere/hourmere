@@ -312,7 +312,9 @@ export function ConferencesPage() {
                     type="button"
                     className="button button-small"
                     disabled={
-                      !state.data.zoomEnabled || pending !== null || connection.status !== 'active'
+                      !state.data.zoomEnabled ||
+                      pending !== null ||
+                      (connection.status !== 'active' && connection.status !== 'refreshing')
                     }
                     onClick={() => void refresh(connection.id)}
                   >

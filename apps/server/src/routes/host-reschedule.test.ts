@@ -141,6 +141,18 @@ describe.skipIf(!serverUrl)('host rescheduling over REST', () => {
         cancelled_api_key_id: kind === 'api_key' ? apiKeyId : null,
       })
       expect(successor.api_key_id).toBe(kind === 'api_key' ? apiKeyId : null)
+      const detail = await app.request(`/api/v1/bookings/${id}`, { headers })
+      expect(detail.status).toBe(200)
+      expect(await detail.json()).toMatchObject({
+        id,
+        status: 'cancelled',
+        rescheduledToId: result.booking.id,
+      })
+      const list = await app.request('/api/v1/bookings?status=cancelled&limit=1', { headers })
+      expect(list.status).toBe(200)
+      expect(await list.json()).toMatchObject({
+        data: [{ id, status: 'cancelled', rescheduledToId: result.booking.id }],
+      })
       expect(
         events.some(
           (event) => event.type === 'rescheduled' && event.bookingId === result.booking.id,

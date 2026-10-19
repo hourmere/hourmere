@@ -195,6 +195,56 @@ describe.skipIf(!databaseUrl)('Zoom callback acceptance follow-ups (real Postgre
     expect(await finishZoomConnection(deps, owner, query(state))).toBe('invalid_state')
   })
 
+  it.each(['token', 'identity'] as const)(
+    'reports a claimed callback replay as busy during %s I/O without another exchange',
+    async (phase) => {
+      const state = await start(),
+        hash = createHash('sha256').update(state).digest('hex'),
+        gate = pause(phase),
+        finishing = observe(finishZoomConnection(deps, owner, query(state)))
+      await gate.entered
+      const attempt = () =>
+          db
+            .selectFrom('conference_oauth_states')
+            .select(['claimed', 'verifier'])
+            .where('state_hash', '=', hash)
+            .executeTakeFirst(),
+        claimed = await attempt(),
+        calls = provider.calls.length
+      expect(claimed).toEqual({ claimed: true, verifier: null })
+      expect(await finishZoomConnection(deps, owner, query(state))).toBe('busy')
+      expect(await attempt()).toEqual(claimed)
+      expect(provider.calls).toHaveLength(calls)
+      gate.release()
+      expect(await finishing).toEqual({ status: 'fulfilled', value: 'connected' })
+      expect(await attempt()).toBeUndefined()
+      const completedCalls = provider.calls.length
+      expect(await finishZoomConnection(deps, owner, query(state))).toBe('invalid_state')
+      expect(provider.calls).toHaveLength(completedCalls)
+      expect(provider.calls.filter((call) => call.url.endsWith('/oauth/token'))).toHaveLength(1)
+      expect(await connections()).toHaveLength(1)
+    },
+  )
+
+  it('reports a consumed callback replay as busy while a different exchange owns the lease', async () => {
+    const consumedState = await start()
+    expect(await finishZoomConnection(deps, owner, query(consumedState))).toBe('connected')
+    const state = await start(),
+      gate = pause('identity'),
+      finishing = observe(finishZoomConnection(deps, owner, query(state)))
+    await gate.entered
+    const calls = provider.calls.length
+    expect(await finishZoomConnection(deps, owner, query(consumedState))).toBe('busy')
+    expect(provider.calls).toHaveLength(calls)
+    gate.release()
+    expect(await finishing).toEqual({ status: 'fulfilled', value: 'connected' })
+    const completedCalls = provider.calls.length
+    expect(await finishZoomConnection(deps, owner, query(consumedState))).toBe('invalid_state')
+    expect(provider.calls).toHaveLength(completedCalls)
+    expect(provider.calls.filter((call) => call.url.endsWith('/oauth/token'))).toHaveLength(2)
+    expect(await connections()).toHaveLength(1)
+  })
+
   it('rejects an already expired callback before exchanging a code', async () => {
     const state = await start()
     now += 10 * 60_000

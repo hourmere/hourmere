@@ -149,6 +149,58 @@ describe('the bookings list', () => {
     expect(screen.queryByRole('button', { name: 'Show more bookings' })).toBeNull()
   })
 
+  it.each([
+    ['en', 'Rescheduled', 'View rescheduled booking', 'Cancelled', 'Confirmed'],
+    ['zh-CN', '已改期', '查看改期后的预约', '已取消', '已确认'],
+  ] as const)(
+    'distinguishes rescheduled predecessors from cancellations in %s across pages',
+    async (language, rescheduled, viewSuccessor, cancelled, confirmed) => {
+      chooseLanguage(language)
+      const successor = 'b0000000-0000-7000-8000-000000000002'
+      fakeApi({
+        ...signedIn,
+        ...profile(),
+        'GET /api/v1/bookings': () =>
+          json(200, {
+            data: [
+              booking({ title: 'Original time', status: 'cancelled', rescheduledToId: successor }),
+              booking({
+                id: 'b0000000-0000-7000-8000-000000000003',
+                title: 'Cancelled meeting',
+                status: 'cancelled',
+                rescheduledToId: null,
+              }),
+              booking({
+                id: 'b0000000-0000-7000-8000-000000000004',
+                title: 'Current meeting',
+                rescheduledToId: successor,
+              }),
+            ],
+            nextCursor: 'successor-on-another-page',
+          }),
+      })
+      renderApp('/app/bookings')
+      const original = (await screen.findByRole('rowheader', { name: 'Original time' })).closest(
+        'tr',
+      ) as HTMLElement
+      expect(within(original).getByText(rescheduled)).toBeDefined()
+      expect(within(original).queryByText(cancelled)).toBeNull()
+      expect(within(original).getByRole('link', { name: viewSuccessor }).getAttribute('href')).toBe(
+        `/app/bookings/${successor}`,
+      )
+      const cancelledRow = screen
+        .getByRole('rowheader', { name: 'Cancelled meeting' })
+        .closest('tr') as HTMLElement
+      expect(within(cancelledRow).getByText(cancelled)).toBeDefined()
+      expect(within(cancelledRow).queryByRole('link', { name: viewSuccessor })).toBeNull()
+      const currentRow = screen
+        .getByRole('rowheader', { name: 'Current meeting' })
+        .closest('tr') as HTMLElement
+      expect(within(currentRow).getByText(confirmed)).toBeDefined()
+      expect(within(currentRow).queryByRole('link', { name: viewSuccessor })).toBeNull()
+    },
+  )
+
   it('loads more with the cursor, keeping the same filters', async () => {
     const user = userEvent.setup()
     const pages: Record<string, { data: Booking[]; nextCursor: string | null }> = {
@@ -346,6 +398,27 @@ describe('a booking', () => {
       ...extra,
     })
   }
+
+  it.each([
+    ['en', 'Rescheduled', 'View rescheduled booking', 'Cancelled'],
+    ['zh-CN', '已改期', '查看改期后的预约', '已取消'],
+  ] as const)(
+    'labels the rescheduled predecessor and links its successor in %s detail',
+    async (language, rescheduled, viewSuccessor, cancelled) => {
+      chooseLanguage(language)
+      const successor = 'b0000000-0000-7000-8000-000000000002'
+      bookingServer(booking({ status: 'cancelled', rescheduledToId: successor }))
+      renderApp(`/app/bookings/${BOOKING_ID}`)
+      const heading = await screen.findByRole('heading', { level: 1 })
+      expect(heading.textContent).toBe(`Intro call${rescheduled}`)
+      expect(screen.queryByText(cancelled)).toBeNull()
+      expect(screen.getByRole('link', { name: viewSuccessor }).getAttribute('href')).toBe(
+        `/app/bookings/${successor}`,
+      )
+      expect(screen.queryByRole('button', { name: 'Cancel booking…' })).toBeNull()
+      expect(screen.queryByRole('button', { name: 'Reschedule booking…' })).toBeNull()
+    },
+  )
 
   it.each([
     ['web', 'the booking page', '预约页面'],

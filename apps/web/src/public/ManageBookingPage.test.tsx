@@ -29,6 +29,13 @@ afterEach(() => {
 })
 
 const plain = (text: string | null | undefined) => (text ?? '').replace(/[   ]/g, ' ')
+const bookerIn = (timeZone: string) => ({
+  name: 'Grace Hopper',
+  email: 'grace@example.com',
+  timeZone,
+  locale: null,
+  isBooker: true,
+})
 
 /** Opens the app the way a browser opens an emailed link: the real address bar and history. */
 function openLink(url: string) {
@@ -136,6 +143,97 @@ describe('the invitee’s manage page', () => {
     expect(call?.body).toEqual({ reason: 'Something came up.' })
     expect(call?.headers.get('x-manage-token')).toBe(TOKEN)
   })
+
+  it.each([
+    [
+      'en',
+      true,
+      'Rescheduling ICS test with Adrian Lee, now on Monday, November 2, 2026, 9:00 – 9:30 AM',
+    ],
+    ['en', false, 'Rescheduling ICS test, now on Monday, November 2, 2026, 9:00 – 9:30 AM'],
+    ['zh-CN', true, '正在改期 ICS test 与 Adrian Lee，当前时间：2026年11月2日星期一，09:00–09:30'],
+    ['zh-CN', false, '正在改期 ICS test，当前时间：2026年11月2日星期一，09:00–09:30'],
+  ] as const)(
+    'localizes the complete reschedule description in %s (host: %s)',
+    async (language, hasHost, expected) => {
+      localStorage.setItem('hourmere-language', language)
+      manageServer({
+        ...managed(),
+        eventType: { title: 'ICS test', durationMinutes: 30 },
+        hosts: hasHost ? [{ name: 'Adrian Lee' }] : [],
+      })
+      renderApp(`/booking#token=${TOKEN}&action=reschedule`)
+
+      await screen.findByRole('heading', {
+        name: language === 'en' ? 'Pick a new time' : '选择新时间',
+      })
+      expect(plain(document.querySelector('.reschedule-header p')?.textContent)).toBe(expected)
+    },
+  )
+
+  it('starts in the booker’s stored time zone and lets them change it without shifting a slot', async () => {
+    const user = userEvent.setup()
+    const api = manageServer(
+      managed({
+        attendees: [
+          {
+            name: 'Guest',
+            email: 'guest@example.com',
+            timeZone: 'Asia/Tokyo',
+            locale: null,
+            isBooker: false,
+          },
+          bookerIn('Europe/London'),
+        ],
+      }),
+    )
+    renderApp(`/booking#token=${TOKEN}`)
+
+    await screen.findByRole('heading', { name: 'Your booking' })
+    expect(plain(screen.getByText(/Monday, November 2, 2026/).parentElement?.textContent)).toMatch(
+      /2:00 – 2:30 PM \(Europe\/London, GMT\+00:00\)/,
+    )
+    await user.click(screen.getByRole('button', { name: 'Reschedule' }))
+    expect(await screen.findByRole('button', { name: /Europe\/London/ })).toBeDefined()
+    await user.click(screen.getByRole('button', { name: /Europe\/London/ }))
+    await user.type(screen.getByRole('combobox', { name: 'Search time zones' }), 'Berlin')
+    await user.click(screen.getByRole('option', { name: /Europe\/Berlin/ }))
+    await user.click(await screen.findByRole('button', { name: 'Tuesday, November 3, available' }))
+    await user.click(screen.getByRole('button', { name: '4:00 PM' }))
+    expect(plain(screen.getByText(/Tuesday, November 3, 2026/).textContent)).toMatch(
+      /4:00 – 4:30 PM/,
+    )
+    await user.click(screen.getByRole('button', { name: 'Confirm new time' }))
+
+    expect(await screen.findByText('Your booking is moved to the new time.')).toBeDefined()
+    expect(api.to('POST /api/v1/bookings/manage/reschedule')[0]?.body).toEqual({
+      start: '2026-11-03T15:00:00.000Z',
+    })
+    expect(screen.getByText(/Europe\/Berlin, GMT\+01:00/)).toBeDefined()
+  })
+
+  it.each(['missing booker', 'empty zone', 'unknown zone'])(
+    'falls back to the browser time zone for %s',
+    async (scenario) => {
+      env.zone = 'Europe/Berlin'
+      manageServer(
+        managed({
+          attendees:
+            scenario === 'missing booker'
+              ? []
+              : [bookerIn(scenario === 'unknown zone' ? 'Unknown/Zone' : '')],
+        }),
+      )
+      renderApp(`/booking#token=${TOKEN}`)
+
+      await waitFor(() =>
+        expect(screen.queryByRole('heading', { name: 'Your booking' })).not.toBeNull(),
+      )
+      expect(
+        plain(screen.getByText(/Monday, November 2, 2026/).parentElement?.textContent),
+      ).toMatch(/3:00 – 3:30 PM \(Europe\/Berlin, GMT\+01:00\)/)
+    },
+  )
 
   it('checks the reason’s length before sending it', async () => {
     const user = userEvent.setup()
@@ -559,7 +657,11 @@ describe('the invitee’s manage page', () => {
     env.zone = 'Pacific/Pago_Pago'
     env.now = Date.parse('2026-11-20T00:00:00Z')
     const long = {
-      ...managed({ start: '2026-11-24T09:00:00.000Z', end: '2026-11-24T17:00:00.000Z' }),
+      ...managed({
+        start: '2026-11-24T09:00:00.000Z',
+        end: '2026-11-24T17:00:00.000Z',
+        attendees: [bookerIn(env.zone)],
+      }),
       eventType: { title: 'Workshop', durationMinutes: 480 },
     }
     manageServer(long, {

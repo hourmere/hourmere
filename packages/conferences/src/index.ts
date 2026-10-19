@@ -338,7 +338,7 @@ export type ZoomOutcome =
   | 'connection_limit'
   | 'mode_conflict'
 /** Acquire without waiting before consuming state, then durably claim it before I/O.
- * A busy callback preserves the attempt for retry; a failed commit cannot reuse a code. */
+ * A busy callback does not consume state; a failed commit cannot reuse a code. */
 export async function finishZoomConnection(
   deps: ConferenceDeps,
   principal: Principal,

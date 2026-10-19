@@ -5,6 +5,7 @@ import { instanceRoutes } from './instance.ts'
 const appWith = (
   socialProviders: Parameters<typeof instanceRoutes>[0]['socialProviders'],
   hostedSignupUrl?: string,
+  policies: Pick<Parameters<typeof instanceRoutes>[0], 'privacyPolicyUrl' | 'termsUrl'> = {},
 ) =>
   createApp({
     checkDb: async () => {},
@@ -12,7 +13,7 @@ const appWith = (
     authHandler: async () => new Response(null, { status: 404 }),
     // Nobody is signed in: the route must not need anyone to be.
     resolveCaller: async () => ({ ok: false, error: 'unauthorized', setCookie: [] }),
-    routes: [instanceRoutes({ socialProviders, hostedSignupUrl })],
+    routes: [instanceRoutes({ socialProviders, hostedSignupUrl, ...policies })],
   })
 
 const oauth = (name: string) => ({
@@ -73,14 +74,47 @@ describe('GET /api/v1/instance', () => {
     expect(await res.json()).toHaveProperty('hostedSignupUrl', 'https://hosted.example/sign-up')
   })
 
+  it('publishes operator policy links independently and without requiring a session', async () => {
+    const privacyPolicyUrl = 'https://operator.example/privacy'
+    const termsUrl = 'https://operator.example/terms'
+    for (const policies of [{ privacyPolicyUrl }, { termsUrl }, { privacyPolicyUrl, termsUrl }]) {
+      const app = appWith({}, undefined, policies)
+      for (const headers of [{}, { authorization: 'Bearer hm_unknown' }]) {
+        const res = await app.request('/api/v1/instance', { headers })
+        expect(res.status).toBe(200)
+        const body = await res.json()
+        expect(body).toMatchObject(policies)
+        for (const key of ['privacyPolicyUrl', 'termsUrl'] as const)
+          if (!(key in policies)) expect(body).not.toHaveProperty(key)
+      }
+    }
+  })
+
+  it('omits policy links when they are unset or empty', async () => {
+    for (const policies of [{}, { privacyPolicyUrl: '', termsUrl: '' }]) {
+      const res = await appWith({}, undefined, policies).request('/api/v1/instance')
+      const body = await res.json()
+      expect(body).not.toHaveProperty('privacyPolicyUrl')
+      expect(body).not.toHaveProperty('termsUrl')
+    }
+  })
+
   it('is documented as a public route', async () => {
     const res = await appWith({}).request('/api/v1/openapi.json')
     const doc = (await res.json()) as {
       paths: Record<string, { get?: { security?: unknown; responses: Record<string, unknown> } }>
+      components: {
+        schemas: Record<string, { properties: Record<string, unknown>; required: string[] }>
+      }
     }
     const operation = doc.paths['/api/v1/instance']?.get
     expect(operation).toBeDefined()
     expect(operation?.security).toBeUndefined()
     expect(Object.keys(operation?.responses ?? {})).toEqual(['200'])
+    const instance = doc.components.schemas.Instance
+    expect(instance?.properties).toHaveProperty('privacyPolicyUrl')
+    expect(instance?.properties).toHaveProperty('termsUrl')
+    expect(instance?.required).not.toContain('privacyPolicyUrl')
+    expect(instance?.required).not.toContain('termsUrl')
   })
 })
