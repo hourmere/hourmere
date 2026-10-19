@@ -526,6 +526,13 @@ const privacyMail = `mailto:${contact.privacy}`
     any remaining meetings with the provider. Retention of remaining Hourmere records is
     described in <a href="#retention">section 10</a>.
   </p>
+  <p>
+    When the instance operator has configured the signed Zoom event endpoint and Zoom delivers
+    an app deauthorization notification, removing the app in Zoom also deletes the matching
+    local Zoom connection credentials and identity metadata and clears pending authorization
+    attempts. Existing booking and conference records remain subject to the retention described
+    in <a href="#retention">section 10</a>; the notification does not delete meetings held by Zoom.
+  </p>
 
   <h3 id="booking-webhooks">Organization booking webhooks</h3>
   <p>

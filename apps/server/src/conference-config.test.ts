@@ -26,6 +26,55 @@ describe('independent opt-in Zoom configuration', () => {
     expect(config.GOOGLE_CLIENT_ID).toBeUndefined()
     expect(config.MICROSOFT_CLIENT_ID).toBeUndefined()
   })
+  it('requires at least 16 characters without exposing a short webhook token', () => {
+    const shortToken = 'short-token-123'
+    let message = ''
+    try {
+      loadConfig({ ...base, ZOOM_WEBHOOK_SECRET_TOKEN: shortToken })
+    } catch (error) {
+      message = error instanceof Error ? error.message : ''
+    }
+    expect(message).toContain('ZOOM_WEBHOOK_SECRET_TOKEN must have at least 16 characters')
+    expect(message.includes(shortToken)).toBe(false)
+    expect(() => loadConfig({ ...base, ZOOM_WEBHOOK_SECRET_TOKEN: 'a'.repeat(16) })).not.toThrow()
+  })
+  it('enables webhook verification independently of OAuth and automatic meetings', () => {
+    expect(() => loadConfig(base)).not.toThrow()
+    expect(() => loadConfig({ ...base, ZOOM_WEBHOOK_SECRET_TOKEN: '' })).not.toThrow()
+    expect(loadConfig(base).ZOOM_WEBHOOK_SECRET_TOKEN).toBeUndefined()
+    expect(
+      loadConfig({ ...base, ZOOM_WEBHOOK_SECRET_TOKEN: '' }).ZOOM_WEBHOOK_SECRET_TOKEN,
+    ).toBeUndefined()
+    const config = loadConfig({ ...base, ZOOM_WEBHOOK_SECRET_TOKEN: 'synthetic-webhook-secret' })
+    expect(config.ZOOM_WEBHOOK_SECRET_TOKEN === 'synthetic-webhook-secret').toBe(true)
+    expect(config.ZOOM_CLIENT_ID).toBeUndefined()
+    expect(config.ZOOM_MEETINGS_ENABLED).toBe(false)
+    expect(
+      loadConfig({ ...base, ...zoom, ZOOM_WEBHOOK_SECRET_TOKEN: 'synthetic-webhook-secret' })
+        .ZOOM_WEBHOOK_SECRET_TOKEN === 'synthetic-webhook-secret',
+    ).toBe(true)
+  })
+  it.each([
+    ' ',
+    'synthetic-private-webhook\nsecret',
+    'synthetic-private-webhook secret',
+    'synthetic-private-webhook\u0000secret',
+    'synthetic-private-webhook\ud800secret',
+    'x'.repeat(1025),
+  ])(
+    'rejects malformed webhook secret tokens without printing them (%#)',
+    (ZOOM_WEBHOOK_SECRET_TOKEN) => {
+      let message = ''
+      try {
+        loadConfig({ ...base, ZOOM_WEBHOOK_SECRET_TOKEN })
+      } catch (error) {
+        message = error instanceof Error ? error.message : ''
+      }
+      expect(message).toContain('ZOOM_WEBHOOK_SECRET_TOKEN')
+      if (ZOOM_WEBHOOK_SECRET_TOKEN.trim())
+        expect(message.includes(ZOOM_WEBHOOK_SECRET_TOKEN)).toBe(false)
+    },
+  )
   it.each(['ZOOM_CLIENT_ID', 'ZOOM_CLIENT_SECRET', 'CONFERENCE_ENCRYPTION_KEY'] as const)(
     'requires all fields when %s is absent',
     (key) => {

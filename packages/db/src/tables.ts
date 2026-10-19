@@ -438,6 +438,7 @@ export interface Calendars {
 
 export interface ConferenceConnections {
   account_email: string | null;
+  authorized_at: Timestamp | null;
   created_at: Generated<Timestamp>;
   credentials: Buffer | null;
   display_name: string | null;
