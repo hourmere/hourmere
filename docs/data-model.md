@@ -310,8 +310,16 @@ accounting and orphan reconciliation, preserving existing webhook delivery data.
 `calendar_connections`. It has a stable UUID, owner FK, provider/external-identity uniqueness,
 optional bounded display metadata, minimal scopes, a safe status/error and purpose-bound
 AES-256-GCM ciphertext. A durable `refreshing` operation holds no reusable credentials.
-All operations lock the owner, then the live session, then the connection/state. Provider
-I/O stays bounded under that owner lock; state claims and token retirement commit first.
+Browser connection operations use short transactions that lock the owner, then the live
+session, then the connection/state. State claims and token retirement commit before bounded
+provider I/O, which runs without row locks so public bookings can proceed. Completion locks
+and rechecks the session and claimed state or refresh operation. OAuth also compares the
+connection row version captured before I/O, preventing a stale callback from overwriting
+reconnection, upgrade or worker credential changes. Concurrent explicit refreshes fail while
+the durable operation is in flight with `zoom_refresh_in_progress`; only a later action may
+rotate its committed new token. Logout or session expiry retires a still-owned refresh claim
+to `needs_reauth`, clears its operation and credentials, and prevents new automatic bookings.
+If observed before provider I/O, it skips the rotation entirely.
 Transient refresh transport failures retry at most three times with backoff; if they remain
 transient, the operation restores the original encrypted grant as active for later recovery.
 Other token rejections or malformed successful responses also preserve the prior grant;
