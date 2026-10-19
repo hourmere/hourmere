@@ -407,6 +407,14 @@ See [webhooks.md](webhooks.md) for the payload, signed headers, retention and de
 
 The optional event-type input `location: {kind:"google_meet",autoCreate:true}` explicitly enables per-booking provisioning when the instance and selected owned calendar support it. Label-only existing input is unchanged. Collective opt-ins require an authenticated `conferenceOrganizer: {userId}` from their required hosts; individual and round-robin types use their actual host/winner and reject a fixed selection. Unsupported configurations return `automatic_meet_disabled`, `automatic_meet_unavailable` or `invalid_conference_organizer`. Protected booking details add optional bounded `conference` state; catalogs expose no join URL. The current verified pinned organizer can POST an empty strict JSON object to `/api/v1/bookings/{id}/conference/retry` for safe reconciliation. It never overrides an ambiguous create or switches the pinned destination. See [automatic-google-meet.md](automatic-google-meet.md) for ready-gated invitations, cancellation and retry limits.
 
+`conference.status="failed"` with `conference.errorCode="conference_pending_timeout"`
+means Google still reported pending when the bounded provisioning poll budget expired;
+`provider_unavailable` identifies a provider/transport failure instead. This is booking
+state in a successful protected read, not a new HTTP error status. Explicit host retry
+restarts a bounded reconciliation budget with the same event/request UUID and only polls
+an acknowledged PATCH; it cannot force Google to restart a stuck pending request. A fresh
+UUID is reserved for a known provider `conference_failed` or the documented operator repair.
+
 Authenticated host reads alone include optional caller-only `calendarCopy` and `conferenceCanRetry`.
 `POST /api/v1/bookings/{id}/calendar-copy/retry` takes an empty strict object, rechecks original
 host/current verified membership, and reconciles the immutable target. Unconfigured targets

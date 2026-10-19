@@ -30,11 +30,31 @@ One root booking chain has one pinned organizer, destination and conference-bear
 
 Google conference creation can be pending, successful or failed. The job persists a conference request identity before the first import, commits its claim, and imports a private copy without a conference request. It then adds Meet to that known event with a body-only conference PATCH, `sendUpdates=none`, `conferenceDataVersion=1` and `If-Match`. The acknowledged request ID is recorded durably; pending attempts poll rather than repeatedly patch. A lost PATCH response replays the same UUID. Existing import-created pending requests receive a same-ID PATCH first; request rollover is never automatic. See [Meet projection and the legacy repair fallback](google-calendar.md#automatic-meet-projection).
 
+A request still pending after the twelve-attempt provisioning budget ends in `failed` with
+`conference_pending_timeout`. This means the bounded wait expired, not that Google rejected
+creation or that a transport failed (`provider_unavailable`). The pinned host's explicit
+retry resets the bounded budget, keeps the same UUID/event and re-reads Google; an
+acknowledged request only polls. It can recover a request that completed later, but cannot
+unstick a duplicate UUID Google permanently ignores. Only a known provider
+`conference_failed` on an identified event rotates the UUID through ordinary host retry.
+An indefinitely pending request needs the documented operator repair, including quiescence
+and inspection of that same event; REST, MCP and CLI retry do not force a fresh request.
+
+A conference PATCH rejected with HTTP 412 is retried after re-reading the event and its
+current ETag, preserving the same request UUID. This follows Google's
+[precondition-failure guidance](https://developers.google.com/workspace/calendar/api/guides/errors#412_precondition_failed).
+
 Bounded provider work uses the established owner KEY SHARE / connection UPDATE protocol. It finishes that credential transaction before a separate short booking-row → intent-row result transaction. No booking, host-advisory or intent lock crosses a network call, and polling sleeps never hold the connection transaction. Lease/revision/request-identity checks reject stale results and releases; pending jobs and worker crashes are recovered by a dispatcher.
 
 Known pending event IDs are persisted with the existing calendar-event mapping before readiness, so busy polling cannot make the host's own copy block an overlapping legal reschedule. The conference worker is the only authority for the organizer event. For new roots, the ordinary writer separately reconciles the frozen non-organizer targets after the current conference revision is ready. For old0021 roots it retains the original whole-root skip; no new copy is inferred.
 
 A transport failure after an import may hide a successful provider side effect. That state is `ambiguous_create`: recovery only looks up the known ID or strict root UID and never blindly repeats the import. Zero lookup does not prove absence. A host retry repeats safe reconciliation, not creation. If Google reports a known failed conference on an identified event, an explicit retry uses a fresh conference request ID on that same event. A known rejected import HTTP 400/401/403/404/429 clears the import claim: it is not an ambiguous create. Once an import succeeded, any later PATCH failure retains the known event and never authorizes another import. HTTP 429 and Google 403 reasons `rateLimitExceeded`/`userRateLimitExceeded` retry with bounded backoff; other 400/401/403/404 retain their actionable terminal classification. This policy applies to the root and ordinary-copy imports. Unknown transport/5xx outcomes remain ambiguous and never authorize a blind re-POST. See [Google Calendar error guidance](https://developers.google.com/workspace/calendar/api/guides/errors). Calendar 400 does not automatically revoke an otherwise valid token. Token refresh errors retain credentials and retry with bounded backoff unless Google explicitly returns `invalid_grant`; only that documented invalid refresh grant requires reauthorization. Error JSON is read within the existing response bound only to recognize these allowlisted reasons; no provider error body is retained or echoed.
+
+For a known event, HTTP 400 from conference, reschedule or cancellation PATCH is terminal
+`invalid_response`, intentionally not a transient provider error. Google classifies 400 as
+an invalid request that must change before retry. Fix the integration/request first; local
+cancellation remains committed even if its remote cleanup fails. The existing event ID
+survives the error, so retry cannot import a replacement.
 
 An initial worker crash after committing its create claim but before the request reaches Google can consequently require host intervention even if no event was created. This conservative outcome avoids duplicate meetings without relying on an undocumented import idempotency guarantee. External deletion or an unrecoverable ambiguous create is not silently repaired with a replacement meeting. Cancel and make a new booking if the pinned event/account cannot be restored.
 
@@ -113,4 +133,10 @@ not globally disabled or forced to rebook during upgrade.
 
 Google API calls use fixed official hosts, no redirects, bounded responses and safe event-ID path segments. Only a successful `hangoutsMeet` response with the expected HTTPS `meet.google.com/aaa-bbbb-ccc` video URL is accepted. Raw conference data, signatures/PINs, provider error bodies and privileged meeting-start URLs are not retained. Join URLs are protected location data, never public catalog metadata, webhook snapshots, logs, job payloads or browser persistence. Async enrichment emits no new booking transition and does not change activity analytics.
 
-The migration is additive and does not activate old data. Automated validation uses fake Google/mail transports, helper-owned PostgreSQL and existing Chrome. These tests do not establish real account policy, consent or delivery acceptance. Actual Google consent/test events and Zoom app/account setup remain separately authorized operations; this slice does not claim live-provider acceptance or Zoom support.
+Migrations do not activate old data. Migration 0037 extends the error constraint and removes
+the unused database `retry_conference` flag; the persisted request UUID and PATCH marker
+already determine reconciliation, so that write-only flag grants no retry authority. The
+MCP tool of the same name remains available. Existing rows and error codes otherwise keep
+their values and are not automatically retried. Automated validation uses fake Google/mail
+transports and helper-owned PostgreSQL. These tests do not establish real account policy,
+consent or delivery acceptance. Actual provider acceptance remains separately authorized.

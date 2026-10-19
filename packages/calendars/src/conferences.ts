@@ -494,7 +494,10 @@ export async function writeBookingConference(
       ? 'organizer_unavailable'
       : expired
         ? 'meeting_started'
-        : outcome.error
+        : (outcome.error ??
+          (c.provider === 'google_meet' && outcome.pending && attempts >= POLL_LIMIT
+            ? 'conference_pending_timeout'
+            : undefined))
     const retryable =
       organizerAvailable &&
       !expired &&
@@ -514,7 +517,6 @@ export async function writeBookingConference(
         error_code: ready ? null : retryable ? null : (error ?? 'provider_unavailable'),
         lease_id: null,
         lease_until: null,
-        retry_conference: false,
         attempts,
         ...(outcome.knownNoCreate ? { create_started: false } : {}),
         next_attempt_at: new Date(
@@ -691,7 +693,7 @@ export async function retryBookingConference(ctx: ServiceContext, bookingId: str
         attempts: 0,
         error_code: null,
         next_attempt_at: ctx.now().toString(),
-        ...(knownFailure ? { request_id: randomUUID(), retry_conference: true } : {}),
+        ...(knownFailure ? { request_id: randomUUID() } : {}),
       })
       .where('root_booking_id', '=', c.root_booking_id)
       .execute()

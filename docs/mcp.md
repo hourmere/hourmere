@@ -323,6 +323,11 @@ invitations wait for readiness. `list_bookings` exposes only the caller's option
 `calendarCopy` state. `retry_conference({bookingId})` is restricted to the current verified pinned
 organizer; `retry_calendar_copy({bookingId})` reconciles the caller's original failed configured
 copy. Both reject unknown/force-create fields and never choose a replacement account/calendar.
+`conference.errorCode="conference_pending_timeout"` distinguishes exhausted pending polls
+from `provider_unavailable`. For that timeout, `retry_conference` (CLI `retry-meeting`)
+grants another bounded read/poll budget for the same event and UUID; it does not repeat an
+acknowledged PATCH or force-create a new request. A permanently stuck pending UUID needs
+the documented operator repair.
 See [automatic-google-meet.md](automatic-google-meet.md) for optional copies and identity policy.
 
 
