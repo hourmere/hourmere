@@ -133,8 +133,32 @@ describe.skipIf(!serverUrl)('Meet import then conference PATCH recovery (real Po
       createRequest: { requestId, conferenceSolutionKey: { type: 'hangoutsMeet' as const } },
     },
   })
+  const legacyPending = async () => {
+    const b = await book()
+    const initial = await intent()
+    const old = await provider.client.importEvent(
+      'fake-access',
+      'owned@example.com',
+      {
+        iCalUID: `${b.booking.id}@hourmere`,
+        summary: 'Legacy pending',
+        start: { dateTime: START.toString() },
+        end: { dateTime: START.add({ minutes: 30 }).toString() },
+        sequence: 0,
+        status: 'confirmed',
+        transparency: 'opaque',
+        ...request(initial.request_id),
+      },
+      AbortSignal.timeout(1000),
+    )
+    await db
+      .updateTable('booking_conferences')
+      .set({ create_started: true, external_event_id: old.id, attempts: 11 })
+      .execute()
+    return { b, initial, old }
+  }
 
-  it('becomes ready when import-only conference requests stay pending forever', async () => {
+  it('becomes ready without relying on import-created conference requests', async () => {
     const b = await book()
     for (let attempt = 0; attempt < 4; attempt++) await work(b.booking.id)
     expect((await intent()).state).toBe('ready')
@@ -259,28 +283,43 @@ describe.skipIf(!serverUrl)('Meet import then conference PATCH recovery (real Po
     },
   )
 
+  it.each(['conference', 'reschedule', 'cancel'] as const)(
+    'treats HTTP 400 from a known-event %s PATCH as terminal until host retry',
+    async (operation) => {
+      const b = operation === 'conference' ? await book() : await ready()
+      let currentBookingId = b.booking.id
+      if (operation === 'reschedule') {
+        const moved = await rescheduleManagedBooking(ctx, b.manageToken as string, {
+          start: START.add({ hours: 1 }),
+        })
+        currentBookingId = moved.booking.id
+      } else if (operation === 'cancel') await cancelManagedBooking(ctx, b.manageToken as string)
+      const originalId = (await intent()).request_id
+      provider.controls.eventPatchStatus = 400
+      await work(b.booking.id)
+      expect(await intent()).toMatchObject({
+        state: 'failed',
+        error_code: 'invalid_response',
+        external_event_id: 'event-1',
+        request_id: originalId,
+        create_started: true,
+      })
+      const stoppedCalls = provider.calls.length
+      await work(b.booking.id)
+      expect(provider.calls).toHaveLength(stoppedCalls)
+      expect(imports()).toHaveLength(1)
+      provider.controls.eventPatchStatus = 200
+      await retryBookingConference({ ...ctx, principal: owner }, currentBookingId)
+      await work(b.booking.id)
+      await work(b.booking.id)
+      expect(await intent()).toMatchObject({ state: 'ready', request_id: originalId })
+      expect(imports()).toHaveLength(1)
+    },
+  )
+
   it('converges an old import-created pending request using the same intent UUID', async () => {
-    const b = await book()
-    const initial = await intent()
-    const old = await provider.client.importEvent(
-      'fake-access',
-      'owned@example.com',
-      {
-        iCalUID: `${b.booking.id}@hourmere`,
-        summary: 'Legacy pending',
-        start: { dateTime: START.toString() },
-        end: { dateTime: START.add({ minutes: 30 }).toString() },
-        sequence: 0,
-        status: 'confirmed',
-        transparency: 'opaque',
-        ...request(initial.request_id),
-      },
-      AbortSignal.timeout(1000),
-    )
-    await db
-      .updateTable('booking_conferences')
-      .set({ create_started: true, external_event_id: old.id, attempts: 11 })
-      .execute()
+    provider.controls.importedConferenceRequestMode = 'process_duplicate'
+    const { b, initial, old } = await legacyPending()
     for (let poll = 0; poll < 20; poll++)
       expect(
         (
@@ -304,12 +343,98 @@ describe.skipIf(!serverUrl)('Meet import then conference PATCH recovery (real Po
     expect(provider.controls.conferenceRequests.size).toBe(1)
   })
 
+  it('exhausts ignored import-created requests and host retry only polls the same UUID', async () => {
+    provider.controls.importedConferenceRequestMode = 'ignore_duplicate'
+    const { b, initial } = await legacyPending()
+    for (let attempt = 0; attempt < 12; attempt++) await work(b.booking.id)
+    expect(await intent()).toMatchObject({
+      state: 'failed',
+      error_code: 'conference_pending_timeout',
+      attempts: 12,
+      request_id: initial.request_id,
+      conference_patch_request_id: initial.request_id,
+      external_event_id: 'event-1',
+    })
+    expect(provider.controls.conferenceRequests.get(initial.request_id)).toMatchObject({
+      patched: false,
+      polls: 0,
+    })
+    expect((await getManagedBooking(ctx, b.manageToken as string)).location?.url).toBeUndefined()
+    const stoppedCalls = provider.calls.length
+    await work(b.booking.id)
+    expect(provider.calls).toHaveLength(stoppedCalls)
+    await retryBookingConference({ ...ctx, principal: owner }, b.booking.id)
+    expect(await intent()).toMatchObject({
+      state: 'pending',
+      error_code: null,
+      attempts: 0,
+      request_id: initial.request_id,
+      conference_patch_request_id: initial.request_id,
+    })
+    for (let attempt = 0; attempt < 12; attempt++) await work(b.booking.id)
+    expect(await intent()).toMatchObject({
+      state: 'failed',
+      error_code: 'conference_pending_timeout',
+      attempts: 12,
+      request_id: initial.request_id,
+    })
+    expect(conferencePatches()).toHaveLength(1)
+    expect(JSON.parse(String(conferencePatches()[0]?.init.body))).toEqual(
+      request(initial.request_id),
+    )
+    expect(imports()).toHaveLength(1)
+    expect(provider.controls.conferenceRequests.size).toBe(1)
+  })
+
+  it('re-GETs after a conference PATCH 412 and converges with the same durable UUID', async () => {
+    provider.controls.conferencePatchEtagRaceOnce = true
+    const b = await book()
+    const initial = await intent()
+    await work(b.booking.id)
+    expect(await intent()).toMatchObject({
+      state: 'pending',
+      request_id: initial.request_id,
+      external_event_id: 'event-1',
+      conference_patch_request_id: null,
+    })
+    expect(provider.controls.storedEvents.get('event-1')?.etag).toBe('"v2"')
+    expect(provider.controls.conferenceRequests.size).toBe(0)
+    await work(b.booking.id)
+    expect(await intent()).toMatchObject({
+      state: 'pending',
+      request_id: initial.request_id,
+      conference_patch_request_id: initial.request_id,
+    })
+    await work(b.booking.id)
+    expect(await intent()).toMatchObject({ state: 'ready', request_id: initial.request_id })
+    expect(conferencePatches().map((call) => JSON.parse(String(call.init.body)))).toEqual([
+      request(initial.request_id),
+      request(initial.request_id),
+    ])
+    expect(
+      conferencePatches().map((call) => new Headers(call.init.headers).get('if-match')),
+    ).toEqual(['"v1"', '"v2"'])
+    expect(
+      provider.calls
+        .filter((call) => call.url.pathname.endsWith('/event-1'))
+        .map((call) => call.init.method ?? 'GET'),
+    ).toEqual(['PATCH', 'GET', 'PATCH', 'GET'])
+    expect(
+      await db.selectFrom('booking_calendar_events').select('etag').executeTakeFirstOrThrow(),
+    ).toEqual({ etag: '"v3"' })
+    expect(imports()).toHaveLength(1)
+    expect(provider.controls.conferenceRequests.size).toBe(1)
+  })
+
   it('bounds pending polling and does not rotate a still-pending request on retry', async () => {
     provider.controls.conferencePollsBeforeReady = 100
     const b = await book()
     const initial = await intent()
     for (let attempt = 0; attempt < 12; attempt++) await work(b.booking.id)
-    expect((await intent()).state).toBe('failed')
+    expect(await intent()).toMatchObject({
+      state: 'failed',
+      error_code: 'conference_pending_timeout',
+    })
     expect(conferencePatches()).toHaveLength(1)
     await retryBookingConference({ ...ctx, principal: owner }, b.booking.id)
     await work(b.booking.id)
@@ -325,7 +450,6 @@ describe.skipIf(!serverUrl)('Meet import then conference PATCH recovery (real Po
       .set({
         state: 'pending',
         conference_patch_request_id: null,
-        retry_conference: true,
       })
       .execute()
     const original = await intent()
@@ -514,5 +638,48 @@ describe.skipIf(!serverUrl)('Meet import then conference PATCH recovery (real Po
     expect(imports()).toHaveLength(1)
     expect(conferencePatches()).toHaveLength(2)
     expect(JSON.parse(String(conferencePatches()[1]?.init.body))).toEqual(request(retry.request_id))
+  })
+})
+
+describe('fake Google conditional conference updates', () => {
+  it('rejects stale and reused If-Match values without changing the event or request', async () => {
+    const provider = fakeGoogle()
+    const event = await provider.client.importEvent(
+      'fake-access',
+      'owned@example.com',
+      {
+        iCalUID: 'conditional@hourmere',
+        summary: 'Conditional conference',
+        start: { dateTime: START.toString() },
+        end: { dateTime: START.add({ minutes: 30 }).toString() },
+        sequence: 0,
+        status: 'confirmed',
+        transparency: 'opaque',
+      },
+      AbortSignal.timeout(1000),
+    )
+    const imported = structuredClone(provider.controls.storedEvents.get(event.id))
+    const create = (etag: string) =>
+      provider.client.createConferenceEvent(
+        'fake-access',
+        'owned@example.com',
+        event.id,
+        etag,
+        'same-durable-uuid',
+        AbortSignal.timeout(1000),
+      )
+    await expect(create('"stale"')).rejects.toMatchObject({ status: 412 })
+    expect(provider.controls.storedEvents.get(event.id)).toEqual(imported)
+    expect(provider.controls.conferenceRequests.size).toBe(0)
+    const accepted = await create(event.etag as string)
+    expect(accepted.etag).toBe('"v2"')
+    const updated = structuredClone(provider.controls.storedEvents.get(event.id))
+    await expect(create(event.etag as string)).rejects.toMatchObject({ status: 412 })
+    expect(provider.controls.storedEvents.get(event.id)).toEqual(updated)
+    expect(provider.controls.conferenceRequests.get('same-durable-uuid')).toEqual({
+      eventId: event.id,
+      polls: 0,
+      patched: true,
+    })
   })
 })

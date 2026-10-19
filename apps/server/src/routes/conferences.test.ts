@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { createFixtures, createTestTeam, createTestUser } from '@hourmere/scheduling/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createTestApp, type TestApp } from './test-app.ts'
@@ -86,6 +86,67 @@ describe.skipIf(!process.env.DATABASE_URL)('conference protected REST', () => {
       .executeTakeFirstOrThrow()
     expect(intent.state).toBe('pending')
     expect(intent.create_started).toBe(true)
+  })
+  it('preserves pending timeout separately from provider failure on protected reads', async () => {
+    const user = await createTestUser(t.db)
+    const id = await createFixtures(t.db).booking(
+      user.principal.organization.id,
+      [user.id],
+      '2030-01-01T10:00:00Z',
+      '2030-01-01T10:30:00Z',
+      {},
+    )
+    const token = randomBytes(32).toString('base64url')
+    await t.db
+      .updateTable('bookings')
+      .set({
+        location: JSON.stringify({ kind: 'google_meet', autoCreate: true }),
+        manage_token_hash: createHash('sha256').update(token).digest(),
+      })
+      .where('id', '=', id)
+      .execute()
+    await t.db
+      .insertInto('booking_conferences')
+      .values({
+        root_booking_id: id,
+        booking_id: id,
+        organization_id: user.principal.organization.id,
+        organizer_user_id: user.id,
+        state: 'failed',
+        error_code: 'conference_pending_timeout',
+      })
+      .execute()
+    const host = t.as(user.principal)
+    for (const errorCode of ['conference_pending_timeout', 'provider_unavailable']) {
+      await t.db
+        .updateTable('booking_conferences')
+        .set({ error_code: errorCode })
+        .where('root_booking_id', '=', id)
+        .execute()
+      const detail = await host.get(`/api/v1/bookings/${id}`)
+      const list = await host.get('/api/v1/bookings')
+      const managed = await t.app.request('/api/v1/bookings/manage', {
+        headers: { 'X-Manage-Token': token },
+      })
+      expect([detail.status, list.status, managed.status]).toEqual([200, 200, 200])
+      const views = [
+        detail.body,
+        (list.body as { data: unknown[] }).data.find(
+          (booking) => (booking as { id: string }).id === id,
+        ),
+        await managed.json(),
+      ]
+      for (const view of views) {
+        expect((view as { conference: unknown }).conference).toEqual({
+          provider: 'google_meet',
+          status: 'failed',
+          errorCode,
+        })
+        expect(JSON.stringify(view)).not.toMatch(
+          /requestId|lease|connectionId|calendarId|externalEventId/,
+        )
+      }
+    }
   })
   it('REST exposes only my pinned copy and enforces strict retry plus fresh membership/verification', async () => {
     const [owner, organizer, outsider] = await Promise.all(
