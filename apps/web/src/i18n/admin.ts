@@ -130,7 +130,7 @@ export const admin = {
   ', from': '，从',
   ', so there are times to book.': '，这样才会有可预约时间。',
   ', this browser’s time zone.': '（此浏览器的时区）。',
-  ', through': '，至',
+  ', through {0}': '，通过{0}',
   ', until': '，至',
   ', your personal organization': '（你的个人组织）',
   ', your time zone.': '（你的时区）。',

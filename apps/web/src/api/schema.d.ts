@@ -631,7 +631,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description Too many requests from this address (`rate_limited`); see Retry-After */
+                /** @description The caller's per-user limit or the API key's rate limit is used up (`rate_limited`); see Retry-After */
                 429: {
                     headers: {
                         [name: string]: unknown;
@@ -722,7 +722,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description Too many requests from this address (`rate_limited`); see Retry-After */
+                /** @description The caller's per-user limit or the API key's rate limit is used up (`rate_limited`); see Retry-After */
                 429: {
                     headers: {
                         [name: string]: unknown;
@@ -3878,7 +3878,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description The time is not offered (`slot_unavailable`) or was just booked by someone else (`slot_taken`), the Idempotency-Key was used for a different request (`idempotency_key_reused`), or the round-robin host pool changed while the request waited (`booking_changed`; fetch current availability before retrying) */
+                /** @description The time is not offered (`slot_unavailable`) or was just booked by someone else (`slot_taken`), the Idempotency-Key was used for a different request (`idempotency_key_reused`), or the round-robin host pool or activation changed while the request waited (`booking_changed`; fetch current availability before retrying) */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -4110,7 +4110,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description The time is not offered (`slot_unavailable`) or was just booked by someone else (`slot_taken`), the Idempotency-Key was used for a different request (`idempotency_key_reused`), or the round-robin host pool changed while the request waited (`booking_changed`; fetch current availability before retrying) */
+                /** @description The time is not offered (`slot_unavailable`) or was just booked by someone else (`slot_taken`), the Idempotency-Key was used for a different request (`idempotency_key_reused`), or the round-robin host pool or activation changed while the request waited (`booking_changed`; fetch current availability before retrying) */
                 409: {
                     headers: {
                         [name: string]: unknown;

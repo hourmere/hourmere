@@ -289,7 +289,7 @@ export function bookingTools({
     name: 'create_booking',
     title: 'Create a booking',
     description:
-      "Books a slot of someone's event type for an invitee, as their booking page would. start must be the exact start of a slot find_available_slots returned. Answer the event type's questions in responses, keyed by question id (required ones must be answered). Returns the booking and its manageToken: keep the token, it is shown only this once and is what reschedule_booking and cancel_booking need to act as the invitee. Fails with slot_unavailable if the time is not offered and slot_taken if someone else just booked it; then pick another slot. Fails with booking_changed if the round-robin host pool changed while the call waited; call find_available_slots again before retrying. Pass an idempotencyKey so that a retry after a lost response cannot book twice.",
+      "Books a slot of someone's event type for an invitee, as their booking page would. start must be the exact start of a slot find_available_slots returned. Answer the event type's questions in responses, keyed by question id (required ones must be answered). Returns the booking and its manageToken: keep the token, it is shown only this once and is what reschedule_booking and cancel_booking need to act as the invitee. Fails with slot_unavailable if the time is not offered and slot_taken if someone else just booked it; then pick another slot. Fails with booking_changed if the round-robin host pool or activation changed while the call waited; call find_available_slots again before retrying. Pass an idempotencyKey so that a retry after a lost response cannot book twice.",
     input: CreateBookingInput,
     output: CreateBookingOutput,
     annotations: {

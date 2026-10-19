@@ -202,6 +202,11 @@ describe.skipIf(!process.env.DATABASE_URL)('MCP integration discovery with real 
         })
         expect(tool?.outputSchema).toMatchObject({ properties: { data: { type: 'array' } } })
       }
+      const zoomDescription = tools.find(
+        (tool) => tool.name === 'list_conference_connections',
+      )?.description
+      expect(zoomDescription).toContain('accountEmail')
+      expect(zoomDescription).toContain('displayName')
     } finally {
       await client.close()
     }
