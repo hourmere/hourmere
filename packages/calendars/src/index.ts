@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto'
-import type { Principal } from '@hourmere/auth'
+import { type Principal, requireActiveApiKey } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { isSingleLineText } from '@hourmere/scheduling/text'
@@ -115,7 +115,7 @@ const configured = (deps: CalendarDeps, provider: CalendarProvider = 'google') =
 export async function lockUser(
   db: Db,
   principal: Principal,
-  now: number,
+  now: number | (() => number),
   mode: 'update' | 'key_share' = 'update',
 ) {
   const user = await db
@@ -126,6 +126,7 @@ export async function lockUser(
     .executeTakeFirst()
   if (principal.kind !== 'session') {
     if (!user) throw notFound()
+    if (principal.kind === 'api_key') await requireActiveApiKey(db, principal, now)
     return
   }
   const session = await db
@@ -133,7 +134,7 @@ export async function lockUser(
     .select('id')
     .where('id', '=', principal.sessionId)
     .where('userId', '=', principal.user.id)
-    .where('expiresAt', '>', new Date(now))
+    .where('expiresAt', '>', new Date(typeof now === 'function' ? now() : now))
     .executeTakeFirst()
   if (!user || !session)
     throw new DomainError(
@@ -566,7 +567,7 @@ async function refreshCalendarProvider(
   if (!z.uuid().safeParse(id).success) throw notFound()
   let providerError: CalendarProviderError | undefined
   const outcome = await deps.db.transaction().execute(async (trx) => {
-    await lockUser(trx, principal, (deps.now ?? Date.now)(), 'key_share')
+    await lockUser(trx, principal, deps.now ?? Date.now, 'key_share')
     const connection = await trx
       .selectFrom('calendar_connections')
       .selectAll()

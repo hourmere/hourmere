@@ -52,6 +52,19 @@ describe.skipIf(!url)('Google busy and booking synchronization (real Postgres)',
     db = createDb(database.pool)
     owner = await calendarTestSession(db)
     other = await calendarTestSession(db)
+    for (const principal of [owner, other])
+      await db
+        .insertInto('auth.apikey')
+        .values({
+          id: principal.sessionId,
+          configId: 'default',
+          referenceId: principal.user.id,
+          key: `synthetic-${principal.sessionId}`,
+          metadata: JSON.stringify({ organizationId: owner.organization.id }),
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .execute()
     await db
       .insertInto('profiles')
       .values({ user_id: other.user.id, handle: 'sync-other', time_zone: 'UTC' })

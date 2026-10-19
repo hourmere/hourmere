@@ -61,12 +61,25 @@ describe.skipIf(!serverUrl)('automatic Zoom durable booking lifecycle (real Post
     deps: CalendarDeps,
     ctx: PublicContext,
     connectionId: string,
-    eventId: string
+    eventId: string,
+    apiKeyId: string
   let sent: MailMessage[]
   beforeAll(async () => {
     owned = await createTestDatabase(serverUrl as string)
     db = createDb(owned.pool)
     owner = await conferenceTestSession(db)
+    apiKeyId = randomUUID()
+    await owned.pool.query(
+      `INSERT INTO auth.apikey
+        (id, "configId", "referenceId", key, "createdAt", "updatedAt", enabled, metadata)
+       VALUES ($1, 'default', $2, $3, now(), now(), true, $4)`,
+      [
+        apiKeyId,
+        owner.user.id,
+        randomUUID(),
+        JSON.stringify({ organizationId: owner.organization.id }),
+      ],
+    )
     await db
       .updateTable('auth.session')
       .set({ expiresAt: new Date('2035-01-01Z') })
@@ -726,7 +739,7 @@ describe.skipIf(!serverUrl)('automatic Zoom durable booking lifecycle (real Post
     expect(posts()).toHaveLength(1)
   })
   it('allows own API-key configuration and ordinary metadata/disable changes while rejecting unavailable connections and round robin', async () => {
-    const key = { ...owner, kind: 'api_key' as const, apiKeyId: 'synthetic-key' }
+    const key = { ...owner, kind: 'api_key' as const, apiKeyId }
     await expect(
       updateEventType({ db, principal: key, automaticZoom: true, now: () => NOW }, eventId, {
         zoomConnectionId: null,
@@ -830,10 +843,7 @@ describe.skipIf(!serverUrl)('automatic Zoom durable booking lifecycle (real Post
           .execute()
         principal = { ...owner, sessionId }
       }
-      const actor =
-        kind === 'key'
-          ? { ...owner, kind: 'api_key' as const, apiKeyId: 'synthetic-key' }
-          : principal
+      const actor = kind === 'key' ? { ...owner, kind: 'api_key' as const, apiKeyId } : principal
       await updateEventType({ db, principal: actor, now: () => NOW }, id, { isActive: false })
       const reactivation = updateEventType(
         { db, principal: actor, automaticZoom: true, now: () => NOW },

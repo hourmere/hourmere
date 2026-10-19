@@ -18,6 +18,7 @@ import { mcpOAuthPlugins } from './mcp-oauth.ts'
 import { ensurePersonalOrganization, organizationGuards } from './organizations.ts'
 import { hasAccount, maySignUp, type SignupPolicy, signupConnectionOptions } from './signup.ts'
 
+export { InvalidApiKeyError, requireActiveApiKey } from './api-key-principal.ts'
 export { API_KEY_RATE_LIMIT } from './api-keys.ts'
 export {
   API_KEY_PREFIX,
