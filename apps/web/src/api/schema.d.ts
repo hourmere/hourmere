@@ -2178,7 +2178,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description zoom_disabled, zoom_needs_reauth, zoom_refresh_incomplete, zoom_identity_mismatch or a safe provider failure */
+                /** @description zoom_disabled, zoom_needs_reauth, zoom_refresh_in_progress, zoom_refresh_incomplete, zoom_identity_mismatch or a safe provider failure */
                 409: {
                     headers: {
                         [name: string]: unknown;
