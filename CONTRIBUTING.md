@@ -5,9 +5,10 @@ keeping contributions easy to review. Issues and pull requests are handled in wr
 English.
 
 - **Security vulnerabilities:** do not open an issue; follow [SECURITY.md](SECURITY.md).
-- **Bugs and feature ideas:** open an issue using one of the templates.
-- **Anything larger than a small fix:** open an issue first so we can agree on the approach
-  before you write the code.
+- **Bugs and feature ideas:** open a [GitHub issue](https://github.com/hourmere/hourmere/issues/new/choose)
+  using one of the templates.
+- **Anything larger than a small fix:** open an [issue](https://github.com/hourmere/hourmere/issues)
+  first so we can agree on the approach before you write the code.
 
 Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 
@@ -131,10 +132,11 @@ wrote the change or otherwise have the right to submit it under the project's li
 - **Who signs off:** every external contributor, on every commit in the pull request. The
   sign-off must name the commit's author, with the same name and email address as the commit's
   author fields (case does not matter).
-- **Who is exempt:** commits authored by the maintainer and by Dependabot. The maintainer
-  commits as `adrian@cobaltmere.com` (so do Cobaltmere's AI coding agents) and, in GitHub's
-  web UI, as `167077805+adrian-lee-dev@users.noreply.github.com`. That code is Cobaltmere's own
-  work, so there is no outside contribution to certify. The list is kept in
+- **Who is exempt:** commits authored by Dependabot, by `adrian@cobaltmere.com` (also used by
+  Cobaltmere's AI coding agents), and by the maintainer's GitHub account (ID 167077805), on
+  commits made in GitHub's web UI. The account's numeric ID stays the same when its login
+  changes. That code is Cobaltmere's own work, so there is no outside contribution to certify.
+  The exemptions are kept in
   [`scripts/check-dco.ts`](scripts/check-dco.ts). In a pull request from a fork the exemptions
   do not apply, because anyone can put any email address on a commit.
 - **Clean merge commits** need no sign-off: their tree must exactly match the conflict-free

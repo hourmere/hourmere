@@ -142,6 +142,8 @@ export function createAuth({
     disabledPaths: mcpOAuth ? ['/token', '/oauth2/delete-consent', '/oauth2/update-consent'] : [],
     baseURL,
     secret,
+    // The OAuth attack surface is the same for every NODE_ENV.
+    ...(mcpOAuth ? { rateLimit: { enabled: true } } : {}),
     advanced: {
       database: { generateId: 'uuid' },
       useSecureCookies: new URL(baseURL).protocol === 'https:',

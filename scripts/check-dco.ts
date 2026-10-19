@@ -24,11 +24,12 @@ import { parseArgs } from 'node:util'
 export const EXEMPT_AUTHOR_EMAILS: readonly string[] = [
   // The maintainer, committing locally.
   'adrian@cobaltmere.com',
-  // The maintainer's GitHub account (adrian-lee-dev), on commits made in GitHub's web UI.
-  '167077805+adrian-lee-dev@users.noreply.github.com',
   // Dependabot.
   '49699333+dependabot[bot]@users.noreply.github.com',
 ]
+
+// The maintainer's stable GitHub account ID, on commits made in GitHub's web UI.
+const MAINTAINER_GITHUB_EMAIL = /^167077805\+[A-Za-z0-9-]+@users\.noreply\.github\.com$/i
 
 export interface Commit {
   sha: string
@@ -52,7 +53,7 @@ export type Result =
     }
 
 const CONTRIBUTING_URL =
-  'https://github.com/cobaltmere/hourmere/blob/main/CONTRIBUTING.md#license-and-sign-off'
+  'https://github.com/hourmere/hourmere/blob/main/CONTRIBUTING.md#license-and-sign-off'
 
 function git(cwd: string | undefined, args: string[]): string {
   try {
@@ -158,7 +159,9 @@ export function checkCommit(commit: Commit, options: { honorExemptions: boolean 
   // represented by those commits, so they follow the ordinary author/sign-off rules below.
   if (commit.cleanMerge) return { status: 'merge' }
 
-  const exempt = EXEMPT_AUTHOR_EMAILS.includes(commit.authorEmail.toLowerCase())
+  const exempt =
+    EXEMPT_AUTHOR_EMAILS.includes(commit.authorEmail.toLowerCase()) ||
+    MAINTAINER_GITHUB_EMAIL.test(commit.authorEmail)
   if (exempt && options.honorExemptions) return { status: 'exempt' }
   if (commit.signOffs.some((signOff) => namesAuthor(signOff, commit))) return { status: 'signed' }
 

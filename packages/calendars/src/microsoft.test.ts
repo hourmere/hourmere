@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { createMicrosoftCalendarClient, MICROSOFT_CALENDAR_SCOPES } from './microsoft.ts'
 import { fakeMicrosoft } from './testing.ts'
@@ -24,6 +25,9 @@ describe('Microsoft OAuth and Graph response boundary', () => {
     expect(url.searchParams.get('scope')).not.toMatch(/Calendars.ReadWrite|User.Read/)
     expect(url.searchParams.get('response_mode')).toBe('query')
     expect(url.searchParams.get('code_challenge_method')).toBe('S256')
+    expect(url.searchParams.get('code_challenge')).toBe(
+      createHash('sha256').update('fake-verifier').digest('base64url'),
+    )
     expect(url.searchParams.get('client_secret')).toBeNull()
     expect(() => createMicrosoftCalendarClient(config).authorizationUrl('s', 'v', 'sync')).toThrow()
   })

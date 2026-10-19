@@ -1,11 +1,13 @@
 // OAuth authorization for MCP is independent from Google/Microsoft calendar connections.
 // The provider handles PKCE, signed continuations, client discovery and token rotation.
 import { AsyncLocalStorage } from 'node:async_hooks'
+import { createHash } from 'node:crypto'
 import { cimd } from '@better-auth/cimd'
 import { fetchClientMetadataResource } from '@better-auth/cimd/node'
 import { mcp } from '@better-auth/mcp'
 import type { Db } from '@hourmere/db'
-import { APIError } from 'better-auth/api'
+import type { BetterAuthPlugin } from 'better-auth'
+import { APIError, createAuthMiddleware } from 'better-auth/api'
 import {
   createDpopReplayStore,
   enforceDpopBinding,
@@ -22,6 +24,13 @@ import { isUuid } from './organizations.ts'
 
 export const MCP_OAUTH_SCOPE = 'mcp:tools'
 export const MCP_OAUTH_SCOPES = [MCP_OAUTH_SCOPE, 'offline_access']
+const OFFLINE_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000
+const hashOAuthToken = (token: string) => createHash('sha256').update(token).digest('base64url')
+const invalidGrant = () =>
+  new APIError('BAD_REQUEST', {
+    error: 'invalid_grant',
+    error_description: 'Connection expired or revoked',
+  })
 
 /** Created and checked by the session-authenticated broker; never supplied by a client. */
 export interface BoundMcpOAuthIntent {
@@ -52,8 +61,13 @@ const refused = () =>
     message: 'Select an organization in the MCP connection flow',
   })
 
-async function requireMembership(db: Db, userId: string, organizationId: string) {
-  if (!isUuid(userId) || !isUuid(organizationId)) throw refused()
+async function requireMembership(
+  db: Db,
+  userId: string,
+  organizationId: string,
+  refusal = refused,
+) {
+  if (!isUuid(userId) || !isUuid(organizationId)) throw refusal()
   const row = await db
     .selectFrom('auth.member as m')
     .innerJoin('auth.user as u', 'u.id', 'm.userId')
@@ -62,7 +76,103 @@ async function requireMembership(db: Db, userId: string, organizationId: string)
     .where('m.organizationId', '=', organizationId)
     .where('u.emailVerified', '=', true)
     .executeTakeFirst()
-  if (!row) throw refused()
+  if (!row) throw refusal()
+}
+
+/** Activity survives revocation so cleanup can distinguish an abandoned registration. */
+async function touchClient(db: Db, clientId: string) {
+  const now = new Date()
+  await db
+    .insertInto('mcp_oauth_client_activity')
+    .values({ client_id: clientId, consented_at: now, last_used_at: now })
+    .onConflict((oc) =>
+      oc
+        .column('client_id')
+        .doUpdateSet({ last_used_at: now })
+        .where('mcp_oauth_client_activity.last_used_at', '<', new Date(now.getTime() - 86400000)),
+    )
+    .execute()
+}
+
+async function currentConsent(db: Db, grantId: string, userId: string, clientId?: string) {
+  const consent = await db
+    .selectFrom('mcp_oauth_grants as g')
+    .innerJoin('auth.oauthConsent as c', (j) => j.on(sql<boolean>`c."referenceId" = g.id::text`))
+    .select(['g.organization_id', 'g.client_id', 'c.createdAt', 'c.scopes', 'c.resources'])
+    .where('g.id', '=', grantId)
+    .where('g.user_id', '=', userId)
+    .whereRef('c.userId', '=', 'g.user_id')
+    .whereRef('c.clientId', '=', 'g.client_id')
+    .$if(clientId !== undefined, (q) => q.where('g.client_id', '=', clientId as string))
+    .executeTakeFirst()
+  if (!consent || new Date(consent.createdAt).getTime() + OFFLINE_LIFETIME_MS <= Date.now())
+    throw invalidGrant()
+  return consent
+}
+
+function offlineAccessLifecycle(db: Db, resource: string): BetterAuthPlugin {
+  return {
+    id: 'hourmere-mcp-offline-access',
+    hooks: {
+      before: [
+        {
+          matcher: (ctx) =>
+            ctx.path === '/oauth2/token' && ctx.body?.grant_type === 'refresh_token',
+          handler: createAuthMiddleware(async (ctx) => {
+            if (typeof ctx.body?.refresh_token !== 'string') return
+            const refresh = await db
+              .selectFrom('auth.oauthRefreshToken')
+              .select(['referenceId', 'userId', 'clientId', 'scopes'])
+              .where('token', '=', hashOAuthToken(ctx.body.refresh_token))
+              .executeTakeFirst()
+            // Unknown tokens and client authentication remain the provider's responsibility.
+            if (!refresh) return
+            if (!refresh.referenceId || !isUuid(refresh.referenceId)) throw invalidGrant()
+            const consent = await currentConsent(
+              db,
+              refresh.referenceId,
+              refresh.userId,
+              refresh.clientId,
+            )
+            if (
+              !Array.isArray(consent.scopes) ||
+              !consent.scopes.includes(MCP_OAUTH_SCOPE) ||
+              (Array.isArray(refresh.scopes) &&
+                refresh.scopes.includes('offline_access') &&
+                !consent.scopes.includes('offline_access')) ||
+              !Array.isArray(consent.resources) ||
+              !consent.resources.includes(resource)
+            )
+              throw invalidGrant()
+            // Check even lost-response replay, which bypasses customAccessTokenClaims.
+            await requireMembership(db, refresh.userId, consent.organization_id, invalidGrant)
+          }),
+        },
+      ],
+      after: [
+        {
+          matcher: (ctx) => ctx.path === '/oauth2/token',
+          handler: createAuthMiddleware(async (ctx) => {
+            const response = ctx.context.returned as { refresh_token?: unknown } | undefined
+            if (typeof response?.refresh_token !== 'string') return
+            // Better Auth rotates with a fresh relative TTL. Cap the persisted token before
+            // returning it, using the original consent time rather than the rotation time.
+            await db
+              .updateTable('auth.oauthRefreshToken as r')
+              .from('auth.oauthConsent as c')
+              .set({
+                expiresAt: sql<Date>`least(r."expiresAt", c."createdAt" + interval '720 hours')`,
+              })
+              .whereRef('r.referenceId', '=', 'c.referenceId')
+              .whereRef('r.userId', '=', 'c.userId')
+              .whereRef('r.clientId', '=', 'c.clientId')
+              .where('r.token', '=', hashOAuthToken(response.refresh_token))
+              .execute()
+          }),
+        },
+      ],
+    },
+  }
 }
 
 export function mcpOAuthPlugins(
@@ -72,7 +182,7 @@ export function mcpOAuthPlugins(
 ) {
   const { issuer, resource } = mcpOAuthUrls(baseUrl)
   return [
-    jwt({ jwt: { issuer } }),
+    jwt({ jwt: { issuer }, disableSettingJwtHeader: true }),
     mcp({
       resource,
       loginPage: '/oauth/authorize',
@@ -81,6 +191,8 @@ export function mcpOAuthPlugins(
       grantTypes: ['authorization_code', 'refresh_token'],
       accessTokenExpiresIn: 300,
       refreshTokenExpiresIn: 30 * 24 * 60 * 60,
+      // Explicit format lets the lifecycle guard look up hashed tokens without decoding.
+      storeTokens: { hash: async (value) => hashOAuthToken(value) },
       refreshTokenReuseInterval: 30,
       codeExpiresIn: 300,
       allowDynamicClientRegistration: true,
@@ -104,16 +216,28 @@ export function mcpOAuthPlugins(
           return intent.grantId
         },
       },
-      customAccessTokenClaims: async ({ user, referenceId }) => {
-        if (!user || !referenceId || !isUuid(referenceId)) throw refused()
+      // Runs at the token endpoint (code exchange and refresh), where a grant that no
+      // longer holds is RFC 6749 invalid_grant, never the browser flow's 403.
+      customAccessTokenClaims: async ({ user, referenceId, scopes }) => {
+        if (!user || !referenceId || !isUuid(referenceId)) throw invalidGrant()
         const grant = await db
           .selectFrom('mcp_oauth_grants')
           .select('organization_id')
           .where('id', '=', referenceId)
           .where('user_id', '=', user.id)
           .executeTakeFirst()
-        if (!grant) throw refused()
-        await requireMembership(db, user.id, grant.organization_id)
+        if (!grant) throw invalidGrant()
+        await requireMembership(db, user.id, grant.organization_id, invalidGrant)
+        const consent = await currentConsent(db, referenceId, user.id)
+        if (
+          !Array.isArray(consent.scopes) ||
+          !consent.scopes.includes(MCP_OAUTH_SCOPE) ||
+          (scopes.includes('offline_access') && !consent.scopes.includes('offline_access')) ||
+          !Array.isArray(consent.resources) ||
+          !consent.resources.includes(resource)
+        )
+          throw invalidGrant()
+        await touchClient(db, consent.client_id)
         return {
           'https://hourmere.com/organization': grant.organization_id,
           'https://hourmere.com/grant': referenceId,
@@ -121,6 +245,7 @@ export function mcpOAuthPlugins(
       },
     }),
     cimd({ fetchClientMetadataResource: metadataFetcher, metadataProfile: 'mcp-2026-07-28' }),
+    offlineAccessLifecycle(db, resource),
   ] as const
 }
 
@@ -241,7 +366,9 @@ export function createMcpOAuthResolver({
       typeof payload.scope !== 'string'
     )
       return invalid
-    if (payload.sid !== undefined) {
+    const scopes = payload.scope.split(' ')
+    // offline_access explicitly authorizes use after browser sign-out or session expiry.
+    if (!scopes.includes('offline_access') && payload.sid !== undefined) {
       if (typeof payload.sid !== 'string' || !isUuid(payload.sid)) return invalid
       const active = await db
         .selectFrom('auth.session')
@@ -252,7 +379,6 @@ export function createMcpOAuthResolver({
         .executeTakeFirst()
       if (!active) return invalid
     }
-    const scopes = payload.scope.split(' ')
     if (!scopes.includes(MCP_OAUTH_SCOPE)) return { ok: false, error: 'insufficient_scope' }
     const row = await db
       .selectFrom('mcp_oauth_grants as g')
@@ -266,6 +392,7 @@ export function createMcpOAuthResolver({
       .leftJoin('personal_organizations as p', 'p.organization_id', 'o.id')
       .select([
         'c.id',
+        'c.createdAt',
         'u.id as userId',
         'u.name',
         'u.email',
@@ -287,12 +414,15 @@ export function createMcpOAuthResolver({
       .executeTakeFirst()
     if (
       !row ||
+      new Date(row.createdAt).getTime() + OFFLINE_LIFETIME_MS <= Date.now() ||
       !Array.isArray(row.scopes) ||
       !row.scopes.includes(MCP_OAUTH_SCOPE) ||
+      (scopes.includes('offline_access') && !row.scopes.includes('offline_access')) ||
       !Array.isArray(row.resources) ||
       !row.resources.includes(resource)
     )
       return invalid
+    await touchClient(db, payload.client_id)
     return {
       ok: true,
       principal: {

@@ -157,14 +157,16 @@ tracking or attendee details.
 
 ## Contributing
 
-Bug reports, ideas and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers
+Bug reports and ideas are welcome in [GitHub Issues](https://github.com/hourmere/hourmere/issues),
+as are pull requests. [CONTRIBUTING.md](CONTRIBUTING.md) covers
 setup, checks, conventions and the DCO sign-off; everyone follows the
 [code of conduct](CODE_OF_CONDUCT.md).
 
 ## Security
 
-Report vulnerabilities privately to [security@hourmere.com](mailto:security@hourmere.com), not
-in a public issue. See [SECURITY.md](SECURITY.md).
+Report vulnerabilities privately through the repository's
+[Security tab](https://github.com/hourmere/hourmere/security) or to
+[security@hourmere.com](mailto:security@hourmere.com), not in a public issue. See [SECURITY.md](SECURITY.md).
 
 ## License
 

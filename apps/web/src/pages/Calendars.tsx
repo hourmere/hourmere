@@ -295,8 +295,9 @@ export function CalendarsPage() {
                 <p>
                   {providerName(connection)} {t('Calendar')}
                 </p>
-                {connection.status !== 'active' && (
-                  <p className="alert alert-error">
+                {(connection.status !== 'active' ||
+                  connection.lastError === 'permissions_missing') && (
+                  <p className="alert alert-error" role="alert">
                     {t('Access has expired or been removed. Connect this')}{' '}
                     {providerName(connection)} {t('account again to restore it.')}
                   </p>

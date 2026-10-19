@@ -30,7 +30,7 @@ export default defineConfig({
         },
         { tag: 'link', attrs: { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' } },
       ],
-      social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/cobaltmere' }],
+      social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/hourmere/hourmere' }],
       sidebar: [
         { label: 'Overview', link: '/docs' },
         { label: 'Compare scheduling options', link: '/docs/comparison' },

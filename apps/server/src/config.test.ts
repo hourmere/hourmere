@@ -7,6 +7,18 @@ const base = {
 }
 
 describe('loadConfig', () => {
+  it('requires calendar encryption to be independent of authentication and webhook keys', () => {
+    const key = Buffer.alloc(32, 'k').toString('base64')
+    for (const reused of [
+      { BETTER_AUTH_SECRET: key },
+      { BETTER_AUTH_SECRET: Buffer.alloc(32, 'k').toString() },
+      { WEBHOOK_ENCRYPTION_KEY: key },
+    ])
+      expect(() => loadConfig({ ...base, CALENDAR_ENCRYPTION_KEY: key, ...reused })).toThrow(
+        /independent CALENDAR_ENCRYPTION_KEY/,
+      )
+    expect(loadConfig({ ...base, CALENDAR_ENCRYPTION_KEY: key }).CALENDAR_ENCRYPTION_KEY).toBe(key)
+  })
   it('keeps public attribution on the hosted service independently of the instance origin', () => {
     expect(loadConfig({ ...base, PUBLIC_URL: 'https://self.example' }).HOSTED_SIGNUP_URL).toBe(
       'https://hourmere.com',

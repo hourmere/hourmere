@@ -127,6 +127,24 @@ describe.skipIf(!databaseUrl)('separate Google calendar connections (real Postgr
     expect(await finishGoogleConnection(deps, owner, query(state))).toBe('connected')
   })
 
+  it('exposes only safe connection errors so hosts can see terminal writeback failures', async () => {
+    const connection = await connect()
+    for (const lastError of ['permissions_missing', 'provider_unavailable', 'needs_reauth', null]) {
+      await db
+        .updateTable('calendar_connections')
+        .set({ last_error: lastError })
+        .where('id', '=', connection.id)
+        .execute()
+      expect((await listCalendarConnections(deps, owner)).data[0]?.lastError).toBe(lastError)
+    }
+    await db
+      .updateTable('calendar_connections')
+      .set({ last_error: 'untrusted-provider-detail' })
+      .where('id', '=', connection.id)
+      .execute()
+    expect((await listCalendarConnections(deps, owner)).data[0]?.lastError).toBeNull()
+  })
+
   it('refuses expired and duplicate states before contacting Google', async () => {
     const { state } = await start()
     const repeated = query(state)
@@ -201,6 +219,7 @@ describe.skipIf(!databaseUrl)('separate Google calendar connections (real Postgr
       'permissions_missing',
     )
     provider.controls.tokenStatus = 400
+    provider.controls.token = { error: 'invalid_grant' }
     attempt = await start()
     expect(await finishGoogleConnection(deps, owner, query(attempt.state))).toBe('needs_reauth')
     expect(await finishGoogleConnection(deps, owner, query(attempt.state))).toBe('invalid_state')
@@ -341,6 +360,7 @@ describe.skipIf(!databaseUrl)('separate Google calendar connections (real Postgr
     })
     expect((await listCalendarConnections(deps, owner)).data[0]?.status).toBe('active')
     provider.controls.tokenStatus = 400
+    provider.controls.token = { error: 'invalid_grant' }
     await expect(refreshGoogleCalendars(deps, owner, connection.id)).rejects.toMatchObject({
       code: 'google_calendar_needs_reauth',
     })

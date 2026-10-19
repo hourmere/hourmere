@@ -32,14 +32,21 @@ To book time with someone, call find_available_slots for their event type (handl
 Times are RFC 3339: results give each time in UTC (Z) and, where you pass a timeZone, in that IANA time zone too.
 create_booking and reschedule_booking return a manageToken once: keep it, it is the only way to reschedule or cancel that booking as the invitee.`
 
-/** What createApp passes to the MCP module. */
-export type McpModule = (shared: {
-  app: OpenAPIHono
-  /** The REST resolver handles API keys; optional OAuth is verified separately. */
-  resolveCaller: CallerResolver
-  /** PUBLIC_URL: the only origin browsers may send requests from. */
-  publicUrl: string
-}) => void
+/** The MCP module as createApp mounts it. */
+export interface McpModule {
+  /**
+   * Whether OAuth grants authenticate /mcp. createApp reads the authorize boundary from
+   * this, so the provider's authorize endpoint cannot be enabled without its guard.
+   */
+  readonly oauth: boolean
+  mount(shared: {
+    app: OpenAPIHono
+    /** The REST resolver handles API keys; optional OAuth is verified separately. */
+    resolveCaller: CallerResolver
+    /** PUBLIC_URL: the only origin browsers may send requests from. */
+    publicUrl: string
+  }): void
+}
 
 type McpEnv = { Variables: { mcpCaller: McpCaller } }
 
@@ -89,8 +96,7 @@ function callerOf(authInfo: AuthInfo | undefined): McpCaller {
 
 /**
  * 401 with the RFC 6750 challenge: `error="invalid_token"` when a bearer token was sent but
- * is not valid, a bare `Bearer` when there was none. Will also name the protected-resource
- * metadata (resource_metadata="…") once OAuth arrives.
+ * is not valid, a bare `Bearer` when there was none. OAuth adds resource metadata below.
  */
 const unauthorized = (c: Context, message: string, invalidToken = false) => {
   c.header('WWW-Authenticate', invalidToken ? 'Bearer error="invalid_token"' : 'Bearer')
@@ -116,9 +122,11 @@ function requireApiKey(
     if (c.req.header('authorization') === undefined) {
       return unauthorized(
         c,
-        c.req.header('cookie') === undefined
-          ? 'Send an API key as Authorization: Bearer hm_…'
-          : 'The MCP endpoint does not accept session cookies; send an API key as Authorization: Bearer hm_…',
+        oauth
+          ? 'Connect with OAuth or send an API key as Authorization: Bearer hm_…; session cookies do not authenticate MCP requests'
+          : c.req.header('cookie') === undefined
+            ? 'Send an API key as Authorization: Bearer hm_…'
+            : 'The MCP endpoint does not accept session cookies; send an API key as Authorization: Bearer hm_…',
       )
     }
     if (oauth && !/^Bearer[ \t]+hm_/i.test(c.req.header('authorization') ?? '')) {
@@ -245,7 +253,7 @@ export function mcpEndpoint({ tools, oauth }: McpEndpointOptions): McpModule {
     },
   )
 
-  return ({ app, resolveCaller, publicUrl }) => {
+  const mount: McpModule['mount'] = ({ app, resolveCaller, publicUrl }) => {
     if (oauth) {
       for (const path of [
         '/.well-known/oauth-protected-resource',
@@ -254,8 +262,12 @@ export function mcpEndpoint({ tools, oauth }: McpEndpointOptions): McpModule {
         '/.well-known/oauth-authorization-server/api/auth',
         '/.well-known/openid-configuration/api/auth',
       ]) {
-        app.get(path, async () => {
-          const response = await oauth.handler(new Request(new URL(path, publicUrl)))
+        app.get(path, async (c) => {
+          const response = await oauth.handler(
+            new Request(new URL(path, publicUrl), {
+              headers: withClientIpHeader(new Headers(), c.var.clientIp),
+            }),
+          )
           response.headers.set('Cache-Control', 'no-store')
           return response
         })
@@ -302,4 +314,5 @@ export function mcpEndpoint({ tools, oauth }: McpEndpointOptions): McpModule {
       app.all(path, (c) => c.json({ error: 'not_found' }, 404))
     }
   }
+  return { oauth: oauth !== undefined, mount }
 }

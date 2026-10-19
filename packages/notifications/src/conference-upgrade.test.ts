@@ -108,6 +108,7 @@ describe.skipIf(!serverUrl)('conference migrations preserve populated predecesso
         '0026_conference_notification_skips.sql',
         '0027_nontransitive_invited_signup.sql',
         '0028_webhook_interrupted_deliveries.sql',
+        '0030_mcp_oauth_client_activity.sql',
       ]) {
         const index = applied.indexOf(migration)
         expect(index, migration).toBeGreaterThan(previousIndex)

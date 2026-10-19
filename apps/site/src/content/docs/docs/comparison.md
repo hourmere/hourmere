@@ -30,7 +30,8 @@ explains commercial enterprise self-hosting. The
 describes its installation model and operating warning.
 
 For Hourmere's actual setup and maintenance requirements, read the
-[self-hosting guide](/docs/self-hosting) and [configuration reference](/docs/configuration).
+[self-hosting guide](/docs/self-hosting), [configuration reference](/docs/configuration)
+and [security policy](https://github.com/hourmere/hourmere/security/policy).
 
 ## Access for agents
 
@@ -43,7 +44,9 @@ still setup steps; possession of a key grants the permissions described in the
 Hourmere's [MCP OAuth guide](/docs/mcp#connect-with-oauth) also describes opt-in browser
 authorization, explicit organization approval and revocation through Connected apps.
 The instance needs HTTPS outside loopback development; verify the intended hosted client
-separately before relying on it.
+separately before relying on it. See the
+[MCP protocol documentation](https://github.com/hourmere/hourmere/blob/main/docs/mcp.md)
+for the current implementation and limits.
 
 Calendly also has both a REST API and MCP support. Its
 [REST API introduction](https://developer.calendly.com/docs/getting-started/introduction)

@@ -74,7 +74,9 @@ export function fakeGoogle() {
     if (url.href === 'https://oauth2.googleapis.com/token') {
       if (controls.tokenHook) return controls.tokenHook()
       return Response.json(
-        controls.tokenStatus === 200 ? controls.token : { error: controls.tokenError },
+        controls.tokenStatus === 200
+          ? controls.token
+          : { ...controls.token, error: controls.token.error ?? controls.tokenError },
         {
           status: controls.tokenStatus,
         },
@@ -120,6 +122,7 @@ export function fakeGoogle() {
   return {
     controls,
     calls,
+    request,
     client: createGoogleCalendarClient(
       {
         clientId: 'fake-calendar-client',

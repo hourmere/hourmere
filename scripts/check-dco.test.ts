@@ -33,6 +33,10 @@ const maintainerOnGitHub: Person = {
   name: 'adrian-lee-dev',
   email: '167077805+adrian-lee-dev@users.noreply.github.com',
 }
+const renamedMaintainerOnGitHub: Person = {
+  name: 'renamed-login',
+  email: '167077805+renamed-login@users.noreply.github.com',
+}
 const dependabot: Person = {
   name: 'dependabot[bot]',
   email: '49699333+dependabot[bot]@users.noreply.github.com',
@@ -134,16 +138,35 @@ describe('checkCommit on commits read with readCommits', () => {
     })
   })
 
-  it("exempts the maintainer, committing locally or in GitHub's web UI", () => {
+  it('exempts the maintainer, committing locally', () => {
     expect(EXEMPT_AUTHOR_EMAILS).toContain(maintainer.email)
-    expect(EXEMPT_AUTHOR_EMAILS).toContain(maintainerOnGitHub.email)
     const repo = scratchRepo()
     repo.commit(maintainer, 'Add a feature\n')
-    repo.commit(maintainerOnGitHub, 'Apply suggestions from code review\n')
-    expect(repo.check().map(({ result }) => result)).toEqual([
-      { status: 'exempt' },
-      { status: 'exempt' },
-    ])
+    expect(repo.check()[0]?.result).toEqual({ status: 'exempt' })
+  })
+
+  it.each([
+    maintainerOnGitHub.email,
+    renamedMaintainerOnGitHub.email,
+    '167077805+RENAMED-Login9@USERS.NOREPLY.GITHUB.COM',
+  ])("exempts the maintainer's stable GitHub account ID (%s)", (email) => {
+    const repo = scratchRepo()
+    repo.commit({ ...maintainerOnGitHub, email }, 'Apply suggestions from code review\n')
+    expect(repo.check()[0]?.result).toEqual({ status: 'exempt' })
+  })
+
+  it.each([
+    '167077806+adrian-lee-dev@users.noreply.github.com',
+    '1670778050+x@users.noreply.github.com',
+    'x167077805+x@users.noreply.github.com',
+    '167077805+x@users.noreply.github.com.evil',
+    '167077805+x@usersXnoreplyXgithubXcom',
+    '167077805+x_y@users.noreply.github.com',
+    '167077805+@users.noreply.github.com',
+  ])('requires sign-off for another account or a look-alike GitHub email (%s)', (email) => {
+    const repo = scratchRepo()
+    repo.commit({ ...maintainerOnGitHub, email }, 'Add a feature\n')
+    expect(repo.check()[0]?.result).toMatchObject({ status: 'missing', authorExempt: false })
   })
 
   it('exempts Dependabot, whose own sign-off names a different address', () => {
@@ -367,14 +390,17 @@ describe('checkCommit on commits read with readCommits', () => {
     },
   )
 
-  it('without exemptions (pull requests from forks), the maintainer needs a sign-off too', () => {
-    const repo = scratchRepo()
-    repo.commit(maintainer, 'Add a feature\n')
-    repo.commit(maintainer, `Add another\n\n${signOff(maintainer)}\n`)
-    const [unsigned, signed] = repo.check({ honorExemptions: false })
-    expect(unsigned?.result).toMatchObject({ status: 'missing', authorExempt: true })
-    expect(signed?.result).toEqual({ status: 'signed' })
-  })
+  it.each([maintainer, maintainerOnGitHub, renamedMaintainerOnGitHub])(
+    'without exemptions (pull requests from forks), the maintainer needs a sign-off too (%j)',
+    (author) => {
+      const repo = scratchRepo()
+      repo.commit(author, 'Add a feature\n')
+      repo.commit(author, `Add another\n\n${signOff(author)}\n`)
+      const [unsigned, signed] = repo.check({ honorExemptions: false })
+      expect(unsigned?.result).toMatchObject({ status: 'missing', authorExempt: true })
+      expect(signed?.result).toEqual({ status: 'signed' })
+    },
+  )
 
   it('reads commits oldest first and rejects a revision that is not a commit', () => {
     const repo = scratchRepo()
@@ -416,7 +442,9 @@ describe('formatReport', () => {
     expect(report).toContain('    expected: Signed-off-by: Jane Doe <jane@example.com>')
     expect(report).toContain('git commit --amend --signoff --no-edit')
     expect(report).toContain('git rebase --signoff <base>')
-    expect(report).toContain('CONTRIBUTING.md#license-and-sign-off')
+    expect(report).toContain(
+      'https://github.com/hourmere/hourmere/blob/main/CONTRIBUTING.md#license-and-sign-off',
+    )
     expect(report).not.toContain('forks')
   })
 
