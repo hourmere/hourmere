@@ -457,8 +457,18 @@ async function toBookings(db: Db, rows: readonly BookingRow[]): Promise<Booking[
         timeZone: host.time_zone,
       })
   }
-  return rows.map((r) => {
-    const view = conferences.get(r.id)
+  return rows.map((row) => {
+    const view = conferences.get(row.id)
+    // Cancellation may commit after the first booking read. Keep its top-level state
+    // on the same snapshot as conference readiness and the protected location.
+    const r = view
+      ? {
+          ...row,
+          status: view.bookingStatus,
+          cancelled_at: view.bookingCancelledAt,
+          cancel_reason: view.bookingCancelReason,
+        }
+      : row
     const location = view ? view.location : r.location
     return {
       id: r.id,
