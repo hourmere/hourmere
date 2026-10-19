@@ -22,6 +22,28 @@ async function copySiteFixture(fixture: string) {
   await symlink(dependencies, join(fixture, 'node_modules'), 'dir')
 }
 
+async function copyPrivacyRenderFixture(fixture: string) {
+  // Render the actual privacy page and its components without Starlight's external
+  // Astro pages: symlinked dependency pages fail to compile under a temporary root on Linux.
+  for (const path of [
+    'package.json',
+    'src/pages/privacy.astro',
+    'src/privacy-publication.ts',
+    'src/site.ts',
+    'src/layouts',
+    'src/components',
+    'src/styles',
+    'src/assets',
+  ]) {
+    await cp(join(site, path), join(fixture, path), { recursive: true })
+  }
+  await writeFile(
+    join(fixture, 'astro.config.ts'),
+    "import { defineConfig } from 'astro/config'\nexport default defineConfig({ build: { format: 'preserve' }, compressHTML: false })\n",
+  )
+  await symlink(dependencies, join(fixture, 'node_modules'), 'dir')
+}
+
 function buildSiteFixture(fixture: string, date: string | undefined) {
   const env: NodeJS.ProcessEnv = { ...process.env, ASTRO_TELEMETRY_DISABLED: '1' }
   delete env.PRIVACY_PUBLICATION_DATE
@@ -78,7 +100,7 @@ describe('privacy publication date', () => {
   it('renders the supplied day as both the effective and last-updated dates', async () => {
     const fixture = await mkdtemp(join(await realpath(tmpdir()), 'hourmere-privacy-build-'))
     try {
-      await copySiteFixture(fixture)
+      await copyPrivacyRenderFixture(fixture)
       // A nonpublishing fixture date, deliberately unrelated to the planned release day.
       const result = buildSiteFixture(fixture, '2000-01-01')
       expect(result.error).toBeUndefined()
