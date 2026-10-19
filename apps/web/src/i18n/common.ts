@@ -171,6 +171,9 @@ export const common = {
   'Remove guest': '移除来宾',
   Reschedule: '改期',
   Rescheduling: '正在改期',
+  'Rescheduling {title} with {hosts}, now on {date}, {time}':
+    '正在改期 {title} 与 {hosts}，当前时间：{date}，{time}',
+  'Rescheduling {title}, now on {date}, {time}': '正在改期 {title}，当前时间：{date}，{time}',
   'Save your link to change or cancel': '保存用于更改或取消的链接',
   'Search by city or offset': '按城市或时差搜索',
   'Search time zones': '搜索时区',

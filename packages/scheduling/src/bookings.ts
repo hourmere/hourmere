@@ -62,6 +62,8 @@ export interface Booking {
   attendees: Attendee[]
   /** The booking this one replaced when it was rescheduled. */
   rescheduledFromId: string | null
+  /** Authenticated host reads only: the immediate successor the caller also hosts, or null. */
+  rescheduledToId?: string | null
   cancelledAt: string | null
   cancelReason: string | null
   source: BookingSource
@@ -430,6 +432,26 @@ async function toBookings(
     })
     byBooking.set(a.booking_id, list)
   }
+  const successors = new Map<string, string>()
+  if (host) {
+    const replacements = await db
+      .selectFrom('bookings as successor')
+      .innerJoin('bookings as predecessor', 'predecessor.id', 'successor.rescheduled_from_id')
+      .innerJoin('booking_hosts as successor_host', 'successor_host.booking_id', 'successor.id')
+      .select(['predecessor.id as predecessor_id', 'successor.id'])
+      .where(
+        'predecessor.id',
+        'in',
+        rows.map((row) => row.id),
+      )
+      .whereRef('successor.organization_id', '=', 'predecessor.organization_id')
+      .where('successor_host.user_id', '=', host.userId)
+      .execute()
+    for (const replacement of replacements)
+      successors.set(replacement.predecessor_id, replacement.id)
+  }
+  // Read successor metadata before the lifecycle snapshot so no later successor read
+  // can outlive the status, location and conference state returned together below.
   const conferences = await bookingConferenceViews(
     db,
     rows.map((r) => r.id),
@@ -508,6 +530,7 @@ async function toBookings(
       responses: (isRecord(r.responses) ? r.responses : {}) as Responses,
       attendees: byBooking.get(r.id) ?? [],
       rescheduledFromId: r.rescheduled_from_id,
+      ...(host ? { rescheduledToId: successors.get(r.id) ?? null } : {}),
       cancelledAt: r.cancelled_at && toIso(toInstant(r.cancelled_at)),
       cancelReason: r.cancel_reason,
       source: r.source as BookingSource,

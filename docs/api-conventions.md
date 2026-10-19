@@ -238,6 +238,12 @@ before it), alongside the existing start-time `from`/`to` filters. The web app s
 and Past at the end time, so a meeting in progress stays Upcoming. Ordering and cursors
 remain based on start time and ID; keep all filters when paginating.
 
+Authenticated host booking lists and details add optional `rescheduledToId`: the immediate
+successor in the same organization that the caller also hosts, or null when none is
+available. It is included even when the successor is outside the current page or filters,
+and omitted from public/manage responses. Rescheduling still leaves the predecessor's API
+`status` as `cancelled`; the host UI uses this link to label that withdrawal `Rescheduled`.
+
 ## Public endpoints
 
 Booking pages and invitee links work without credentials. The web app serves them at the
