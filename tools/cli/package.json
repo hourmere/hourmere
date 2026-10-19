@@ -28,6 +28,7 @@
     "access": "public"
   },
   "scripts": {
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "prepublishOnly": "node dist/index.js --version"
   }
 }

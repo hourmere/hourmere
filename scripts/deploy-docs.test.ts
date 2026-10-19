@@ -2,10 +2,17 @@ import { spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 const guide = readFileSync(
-  new URL('../apps/site/src/content/docs/docs/self-hosting.md', import.meta.url),
+  process.env.HOURMERE_DEPLOY_GUIDE ??
+    fileURLToPath(new URL('../apps/site/src/content/docs/docs/self-hosting.md', import.meta.url)),
+  'utf8',
+)
+const changelog = readFileSync(
+  process.env.HOURMERE_DEPLOY_CHANGELOG ??
+    fileURLToPath(new URL('../CHANGELOG.md', import.meta.url)),
   'utf8',
 )
 const updates = [...guide.matchAll(/env_update=\$\(mktemp[\s\S]*?mv "\$env_update" \.env/g)]
@@ -24,6 +31,7 @@ const selections = [
   { name: 'worker before proxy', file: `${base}:${worker}:${proxy}`, worker: true },
   { name: 'commented worker', file: `${base} # optional :${worker}`, worker: false },
   { name: 'different worker file', file: `${base}:${worker}.disabled`, worker: false },
+  { name: 'relative worker path', file: `${base}:./${worker}`, worker: false },
 ]
 
 describe('documented deployment operations', () => {
@@ -123,6 +131,14 @@ esac
       'Plain-mode restores remove only `:docker-compose.proxy.yml` from the\nrewritten `COMPOSE_FILE`',
     )
     expect(drill).toContain('keep `:docker-compose.worker.yml` if it\nwas selected')
+    expect(drill).toContain('preserves only the exact\n`docker-compose.worker.yml` filename')
+    expect(drill).toContain(
+      'does not recognise `./docker-compose.worker.yml` or\n`export COMPOSE_FILE=` forms',
+    )
+    expect(drill).toMatch(/Normalize those forms[\s\S]*?before running the\nrewrite/)
+    expect(drill).toMatch(
+      /verify the rewritten `COMPOSE_FILE`[\s\S]*?before\nstarting any app or worker/,
+    )
   })
 
   it('builds the app before creating the stopped proxy and restoring its state', () => {
@@ -139,5 +155,55 @@ docker compose up -d --wait`)
     expect(guide).toContain(`git pull --ff-only
 docker compose pull proxy db
 docker compose up -d --build --wait`)
+  })
+
+  it('migrates tracked worker edits before pulling and explains orphaned old images', () => {
+    const upgrade = guide.split('## Upgrade and roll back\n')[1]?.split('\n## ')[0]
+    if (!upgrade) throw new Error('Upgrade instructions must exist')
+    expect(upgrade).toContain('tracked edits make `git pull --ff-only` refuse the upgrade')
+    expect(upgrade).toMatch(
+      /First append\n`:docker-compose\.worker\.yml`[\s\S]*?`COMPOSE_FILE` in `\.env`[\s\S]*?git restore docker-compose\.yml\ngit pull --ff-only/,
+    )
+    for (const source of [upgrade, changelog]) {
+      expect(source).toMatch(
+        /First append\s+`:docker-compose\.worker\.yml`[\s\S]*?`COMPOSE_FILE`[\s\S]*?git restore docker-compose\.yml/,
+      )
+      expect(source).toMatch(/COMPOSE_FILE=docker-compose\.yml:docker-compose\.worker\.yml/)
+      expect(source).toMatch(/preserv(?:e|ing)\s+any proxy[\s\S]*?overlay/)
+      expect(source).toMatch(
+        /Restoring (?:the Compose file )?without selecting (?:the (?:worker )?)?overlay/,
+      )
+      expect(source).toMatch(/old worker\s+container orphaned\s+on the old image/)
+      expect(source).toMatch(/app (?:may remain|possibly) web-only/)
+    }
+    expect(changelog).toMatch(/git restore docker-compose\.yml`[\s\S]*?pull,[\s\S]*?recreate/)
+  })
+
+  it('removes the worker container before deselecting its overlay', () => {
+    const single = guide.split('### Switch back to a single container\n')[1]?.split('\n## ')[0]
+    if (!single) throw new Error('Single-container switch instructions must exist')
+    expect(single).toMatch(
+      /while the overlay is still selected:[\s\S]*?docker compose rm -sf worker[\s\S]*?Then remove the worker overlay from `COMPOSE_FILE`/,
+    )
+    expect(single).toContain('remove any old `HOURMERE_ROLE=web`')
+    expect(single).toContain('docker compose up -d --build --wait')
+    expect(single).toContain('default `all` role')
+    const command = single.match(/^docker compose rm .+$/m)?.[0]
+    const directory = mkdtempSync(join(tmpdir(), 'hourmere-single-container-docs-'))
+    try {
+      writeFileSync(join(directory, 'docker'), '#!/bin/sh\nprintf "%s\\n" "$*" > "$CALL_LOG"\n', {
+        mode: 0o755,
+      })
+      const callLog = join(directory, 'calls')
+      const result = spawnSync('sh', ['-eu', '-c', command ?? 'exit 1'], {
+        cwd: directory,
+        encoding: 'utf8',
+        env: { PATH: `${directory}:${process.env.PATH}`, CALL_LOG: callLog },
+      })
+      expect(result.status).toBe(0)
+      expect(readFileSync(callLog, 'utf8')).toBe('compose rm -sf worker\n')
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
   })
 })

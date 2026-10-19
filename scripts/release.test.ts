@@ -391,13 +391,22 @@ describe('release publication checklist', () => {
     )
   })
 
-  it('checks automatic GHCR repository write access after the first token push', () => {
+  it('checks automatic GHCR repository admin access after the first token push', () => {
     const [before, publication = ''] = docs().split('## Verify publication and handle failures')
     expect(before).not.toContain('Manage Actions access')
     expect(publication).toContain(
-      "After the first authorized `GITHUB_TOKEN` push, check the GHCR package's **Manage Actions access** settings: that first push normally grants this repository **Write** access automatically.",
+      "After the first authorized `GITHUB_TOKEN` push, check the GHCR package's **Manage Actions access** settings: publishing a package through a workflow automatically grants the repository **Admin** access",
     )
-    expect(publication).toContain('Grant **Write** if it is missing')
+    expect(publication).toContain('Confirm **Admin** access, repair missing access')
+    expect(publication).toContain(
+      'https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry',
+    )
+  })
+
+  it('explains that reusable CLI compatibility checks block release publication', () => {
+    expect(docs()).toContain(
+      'Its `cli-compatibility` job runs through `workflow_call` inside the release workflow, so a Node 22 compatibility failure blocks a release before publication.',
+    )
   })
 
   it('uses the root CLI build before inspecting and publishing the standalone artifact', () => {

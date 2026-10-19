@@ -72,6 +72,7 @@ jobs:
   docker:
     runs-on: ubuntu-latest
     env:
+      COMPOSE_PROJECT_NAME: hourmere-ci-${{ github.run_id }}-${{ github.run_attempt }}
       # Deliberately contains URL-special characters: self-hosters' passwords will.
       POSTGRES_PASSWORD: ci/pass#word?with+specials=
       BETTER_AUTH_SECRET: ci-only-secret-not-used-anywhere-else-0123456789
@@ -83,9 +84,29 @@ jobs:
         run: |
           curl --fail --silent --show-error http://127.0.0.1:3000/api/health
           curl --fail --silent --show-error http://127.0.0.1:3000/ | grep -q '<title>Hourmere</title>'
+      - name: Smoke test the separate worker overlay
+        timeout-minutes: 2
+        run: |
+          compose_worker() { docker compose -f docker-compose.yml -f docker-compose.worker.yml "$@"; }
+          compose_worker config --format json > "$RUNNER_TEMP/worker-compose.json"
+          node --input-type=module -e '
+            import assert from "node:assert/strict";
+            import { readFileSync } from "node:fs";
+            const { services } = JSON.parse(readFileSync(process.argv[1], "utf8"));
+            assert.equal(services.app.environment.HOURMERE_ROLE, "web");
+            assert.equal(services.worker.environment.HOURMERE_ROLE, "worker");
+            assert.equal(services.worker.image, services.app.image);
+          ' "$RUNNER_TEMP/worker-compose.json"
+          # Reuse the built image and this job's disposable db service; no second build.
+          compose_worker up -d --no-build --wait --wait-timeout 75
+          compose_worker logs --no-color app | grep -q 'queued for a worker'
+          compose_worker logs --no-color worker | grep -q 'running jobs'
       - name: Logs
         if: failure()
-        run: docker compose logs
+        run: docker compose -f docker-compose.yml -f docker-compose.worker.yml logs
+      - name: Tear down the self-hosting stack
+        if: always()
+        run: docker compose -f docker-compose.yml -f docker-compose.worker.yml down --remove-orphans
 
   e2e:
     runs-on: ubuntu-latest

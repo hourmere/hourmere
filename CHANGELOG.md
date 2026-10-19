@@ -88,6 +88,14 @@ stack includes PostgreSQL 18.
   Connect directly to PostgreSQL: the sign-up check requires preserved `options` startup
   settings (`hourmere.*` and `search_path`), and PgBouncer is unsupported. Use read committed
   or serializable isolation for first-user registration.
+- **Move old worker edits to the tracked overlay before pulling.** If you uncommented the
+  old worker block, `git pull --ff-only` refuses to overwrite the edited
+  `docker-compose.yml`. First append `:docker-compose.worker.yml` to `COMPOSE_FILE` in
+  `.env` (or add `COMPOSE_FILE=docker-compose.yml:docker-compose.worker.yml`), preserving
+  any proxy overlay. Then run `git restore docker-compose.yml`, pull, and recreate the
+  stack. Restoring without selecting the overlay leaves the old worker container orphaned
+  on the old image and the app possibly web-only. See the
+  [worker upgrade steps](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/self-hosting.md#upgrade-and-roll-back).
 - **Sign-in ID tokens are discarded.** Migration `0031_discard_sign_in_id_tokens.sql`
   clears existing `auth.account."idToken"` values, and account create/update hooks keep
   them NULL. Other account data is preserved; sign-in access/refresh tokens remain
