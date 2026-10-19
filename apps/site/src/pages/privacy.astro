@@ -109,9 +109,9 @@ const publicationDate = resolveLegalPublicationDate()
       expiry is detected by the delivery worker or periodic cleanup.
     </li>
     <li>
-      <strong>Sign-in with Google or Microsoft:</strong> Google sign-in provides only your name,
-      email address and profile picture (if available). Microsoft sign-in provides your name,
-      email address and Microsoft account identifier. We use them to create your account and sign
+      <strong>Sign-in with Google or Microsoft:</strong> Google sign-in provides your Google account
+      ID, name, email address and profile picture (if available). Microsoft sign-in provides your
+      Microsoft account identifier, name and email address. We use them to create your account and sign
       you in, and as your account profile:
       your name (and picture, if shown) appears in Hourmere, on your booking pages and in booking
       emails, and we send account and booking emails to your email address. Google and Microsoft
@@ -236,8 +236,8 @@ const publicationDate = resolveLegalPublicationDate()
 
   <h3>Signing in with Google</h3>
   <p>
-    If you sign in with Google, Hourmere receives only your name, email address and profile picture
-    (if available). We use them to create your account and sign you in, and as
+    If you sign in with Google, Hourmere receives your Google account ID, name, email address and
+    profile picture (if available). We use them to create your account and sign you in, and as
     your account profile: your name (and picture, if shown) appears in Hourmere, on your booking
     pages and in booking emails, and we send account and booking emails to your email address.
   </p>
@@ -277,7 +277,7 @@ const publicationDate = resolveLegalPublicationDate()
   <h3>Google permissions Hourmere requests</h3>
   <p>
     Sign in with Google requests <code>openid</code>, <code>email</code> and <code>profile</code>
-    (your name, email address and profile picture) to create your account and
+    (your Google account ID, name, email address and profile picture) to create your account and
     sign you in; it does not give Hourmere calendar access. Connecting Google Calendar is a
     separate step. The Connect Google Calendar button requests all of the following permissions
     together. A connection that has only the first two (for example, one created through the API
@@ -447,8 +447,8 @@ const publicationDate = resolveLegalPublicationDate()
 
   <h2 id="microsoft-calendar-data">5. Microsoft sign-in and calendar data</h2>
   <p>
-    If you sign in with Microsoft, Hourmere receives your name, email address and Microsoft account
-    identifier. The current Microsoft sign-in configuration does not request a profile photo. We
+    If you sign in with Microsoft, Hourmere receives your Microsoft account identifier, name and
+    email address. The current Microsoft sign-in configuration does not request a profile photo. We
     use this information to create your account, sign you in and show your account profile; your
     name appears on booking pages and in booking emails, and we send account and booking emails to
     your email address. Signing in does not give Hourmere access to your calendar.

@@ -216,6 +216,14 @@ describe('privacy data-flow disclosures', () => {
     )
   })
 
+  it('limits the terms service summary to Google Calendar synchronization', () => {
+    const terms = plainText(read('./pages/terms.astro'))
+    expect(terms).toContain(
+      'time that works, syncs with Google Calendar, sends email confirmations and reminders',
+    )
+    expect(terms).not.toMatch(/syncs with Google Calendar and Microsoft 365/)
+  })
+
   it('locks the Google Limited Use commitment and Workspace AI statement', () => {
     const google = section('google-user-data')
     expect(google.replace(/\s+([,.])/g, '$1')).toContain(
@@ -234,6 +242,9 @@ describe('privacy data-flow disclosures', () => {
   it('maps Google identity, calendar-list and synchronization scopes to their limited uses', () => {
     const google = section('google-user-data')
     expect(google).toMatch(/Sign in with Google requests openid , email and profile/)
+    expect(google).toMatch(
+      /Sign in with Google requests openid , email and profile \(your Google account ID, name, email address and profile picture\)/,
+    )
     expect(google).toMatch(
       /Connect Google Calendar button requests all of the following permissions together/,
     )
@@ -301,6 +312,9 @@ describe('privacy data-flow disclosures', () => {
 
   it('describes Microsoft as list-only with encrypted tokens and separate grant revocation', () => {
     const microsoft = section('microsoft-calendar-data')
+    expect(microsoft).toContain(
+      'If you sign in with Microsoft, Hourmere receives your Microsoft account identifier, name and email address.',
+    )
     expect(microsoft).toMatch(/calendar list containing identifiers/)
     expect(microsoft).toMatch(
       /does not read event times or busy intervals, synchronize events, or write booking events/,
@@ -379,15 +393,18 @@ describe('privacy data-flow disclosures', () => {
     )
   })
 
-  it('limits Google sign-in identity and discloses access tokens without offline access', () => {
+  it('discloses sign-in account identifiers and access tokens without offline access', () => {
     const collected = section('information-we-collect')
     expect(collected).toMatch(
-      /Google sign-in provides only your name, email address and profile picture \(if available\)/,
+      /Google sign-in provides your Google account ID, name, email address and profile picture \(if available\)/,
+    )
+    expect(collected).toContain(
+      'Microsoft sign-in provides your Microsoft account identifier, name and email address.',
     )
     expect(section('google-user-data')).toMatch(
-      /Hourmere receives only your name, email address and profile picture \(if available\)/,
+      /Hourmere receives your Google account ID, name, email address and profile picture \(if available\)/,
     )
-    expect(section('google-user-data')).not.toContain('Google account ID')
+    expect(section('google-user-data')).toContain('Google account ID')
     expect(collected).toMatch(
       /sign-in access tokens are stored encrypted; neither sign-in flow requests offline access or receives a refresh token\. The ID token returned at sign-in is not stored\./,
     )

@@ -28,7 +28,7 @@ describe('reviewed homepage and comparison disclosures', () => {
     ['supported-calendar FAQ', 'Which calendars does Hourmere work with? Google Calendar.'],
     [
       'preview sign-in disclosure',
-      'If you sign in with Google, Hourmere receives your name, email address and profile picture (if available).',
+      'If you sign in with Google, Hourmere receives your Google account ID, name, email address and profile picture (if available).',
     ],
   ])('limits the %s to the enabled Google integration', (_label, disclosure) => {
     expect(home).toContain(disclosure)
