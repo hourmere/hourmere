@@ -413,6 +413,12 @@ notices. Cancellation, replacement or a closed delivery gate records a skip with
 `delivered=false`; pending conference reconciliation remains eligible for a later attempt.
 The migration preserves existing delivery history and does not update old rows.
 
+Migration 0036 adds nullable `booking_conferences.conference_patch_request_id`. It records
+the acknowledged Meet conference PATCH request identity separately from the import claim.
+Existing rows remain null and keep their original event/request identity, enabling a
+same-ID PATCH for old import-created pending requests. A lost PATCH response reuses the
+same persisted request ID; acknowledged pending requests only poll.
+
 ## Round-robin assignment state
 
 Migration 0020 adds `round_robin_state` (event primary key, monotonic `bigint` sequence,

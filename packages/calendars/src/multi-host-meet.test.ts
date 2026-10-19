@@ -118,7 +118,24 @@ describe.skipIf(!serverUrl)('multi-host Meet identity and pinned mirrors (real P
       if (init.method === 'PATCH') {
         calls.push({ method: 'PATCH', calendar, value })
         const old = copies.get(`${calendar}/${id}`)
-        const result = { ...old, ...value, id, etag: '"v2"' }
+        const result = {
+          ...old,
+          ...value,
+          id,
+          etag: '"v2"',
+          ...(value.conferenceData
+            ? {
+                conferenceData: {
+                  createRequest: {
+                    ...value.conferenceData.createRequest,
+                    status: { statusCode: 'success' },
+                  },
+                  conferenceSolution: { key: { type: 'hangoutsMeet' } },
+                  entryPoints: [{ entryPointType: 'video', uri: URL }],
+                },
+              }
+            : {}),
+        }
         copies.set(`${calendar}/${id}`, result)
         return Response.json(result)
       }
@@ -271,10 +288,10 @@ describe.skipIf(!serverUrl)('multi-host Meet identity and pinned mirrors (real P
     await writeBookingCalendar(deps, id)
     expect(calls).toHaveLength(0)
     await writeBookingConference(deps, id)
-    expect(calls).toHaveLength(1)
+    expect(calls).toHaveLength(2)
     await Promise.all([writeBookingCalendar(deps, id), writeBookingCalendar(deps, id)])
     expect(calls.filter((c) => c.method === 'POST')).toHaveLength(2)
-    const mirror = calls.find((c) => c.method === 'POST' && !c.value.conferenceData)
+    const mirror = calls.find((c) => c.method === 'POST' && c.value.location === URL)
     expect(mirror?.value).toMatchObject({ iCalUID: `${id}@hourmere`, location: URL })
     expect(mirror?.value).not.toHaveProperty('attendees')
     expect(mirror?.value).not.toHaveProperty('conferenceData')
@@ -659,7 +676,7 @@ describe.skipIf(!serverUrl)('multi-host Meet identity and pinned mirrors (real P
       state: 'ready',
     })
     expect(calls.filter((c) => c.method === 'POST')).toHaveLength(2)
-    expect(calls.filter((c) => c.method === 'PATCH')).toHaveLength(2)
+    expect(calls.filter((c) => c.method === 'PATCH')).toHaveLength(3)
     expect(
       calls.every(
         (c) => c.value.iCalUID === undefined || c.value.iCalUID === `${b.booking.id}@hourmere`,

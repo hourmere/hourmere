@@ -54,8 +54,9 @@ consent is refused against the scopes saved in that particular authorization att
 Busy synchronization fetches event IDs, times, transparency and the current account's
 attendance status. Titles, descriptions, locations and contact addresses are not requested
 or stored for external events. Our own booking events contain their booking title and times;
-no attendee list, manage links, conference creation or invitation emails are sent by this
-integration. Booking email/ICS continues through the existing notification worker.
+no attendee list, manage links or invitation emails are sent by this integration. Ordinary
+writeback creates no conference; automatic Meet requires the separate explicit opt-in below.
+Booking email/ICS continues through the existing notification worker.
 
 Google's External Testing mode has short-lived refresh-token rules; see the official
 [web server OAuth guide](https://developers.google.com/identity/protocols/oauth2/web-server).
@@ -167,7 +168,40 @@ meeting back into its former slot while a newer write is queued. Connection-owne
 serialize refresh, busy sync, writeback and disconnect. Disconnect deletes local metadata,
 credentials, mappings and targets; it leaves existing Google event copies in the user's
 calendar and stops future updates. Google-side edits/cancellations do not change Hourmere
-bookings. Push notifications, shared-calendar writes and conference creation are follow-ups.
+bookings. Push notifications and shared-calendar writes are follow-ups.
+
+### Automatic Meet projection
+
+An explicitly opted-in automatic Meet booking imports the same private host copy with UID
+`<root booking id>@hourmere`, without attendees or `conferenceData.createRequest`. Conference
+creation on `events.import` was observed to remain pending indefinitely on a real Google
+account. After import, the conference worker uses the returned event ID and ETag to send
+`PATCH events/<known id>?sendUpdates=none&conferenceDataVersion=1`, with `If-Match` and a body
+containing only `conferenceData.createRequest`: the intent's persisted `request_id` and
+`conferenceSolutionKey.type=hangoutsMeet`. See Google's [events.patch reference](https://developers.google.com/workspace/calendar/api/v3/reference/events/patch).
+
+The worker records the acknowledged PATCH request ID in `conference_patch_request_id` and
+polls that event with bounded backoff until a successful Meet video entry point is ready or
+creation fails. A lost response can replay the PATCH with the same request ID; a lost import
+mapping recovers by strict root UID rather than importing again. Migration 0036 leaves the
+new marker null on existing intents: an old import-created pending request receives the
+PATCH with its original UUID first and a fresh bounded polling budget after acknowledgment.
+Already failed intents require the pinned organizer's existing explicit conference retry;
+the migration does not requeue terminal work. An existing valid Meet link is preserved. Rescheduling
+updates the same event without replacing its conference; cancellation patches
+`status=cancelled`. Every PATCH suppresses provider updates; no DELETE is used.
+
+Google [documents duplicate request IDs as ignored](https://developers.google.com/workspace/calendar/api/v3/reference/events#conferenceData.createRequest).
+Whether a same-ID PATCH unsticks an old import-created request still needs live acceptance.
+The worker never automatically rotates an indefinitely pending request: after bounded
+polling it reports failure. If that legacy request remains stuck, an operator must inspect
+the known event, stop reconciliation for that intent and ensure any old lease has ended,
+then deliberately persist a fresh `request_id`, clear `conference_patch_request_id`, and
+reset the intent to pending before resuming. Recovery must re-read the same event and
+preserve any already-ready conference before sending the new request. This is an explicit
+repair decision because an old asynchronous request may still complete; it never permits
+another import or a replacement calendar. Normal retries retain the UUID. See
+[automatic Meet](automatic-google-meet.md) for identity, notification and recovery policy.
 
 A host whose destination needs reauthorization or lacks sync permissions does not block
 other hosts' copies. Its original destination is retained even for bookings made while
