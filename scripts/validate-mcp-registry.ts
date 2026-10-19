@@ -97,12 +97,12 @@ export function validateMcpRegistry(data: unknown, mode: ValidationMode = 'draft
     remote?.type !== 'streamable-http' ||
     remote.headers?.length !== 1 ||
     header?.name.toLowerCase() !== 'authorization' ||
-    header.isRequired !== true ||
+    header.isRequired !== false ||
     header.isSecret !== true ||
     header.value !== undefined ||
     header.default !== undefined
   ) {
-    errors.push('Describe one Streamable HTTP remote with a required secret Authorization input.')
+    errors.push('Describe one Streamable HTTP remote with an optional secret Authorization input.')
   }
 
   const status =

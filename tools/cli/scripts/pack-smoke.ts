@@ -3,7 +3,12 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { assertCliOutput, assertPackage, assertPackFiles } from './pack-check.ts'
+import {
+  assertCliOutput,
+  assertPackage,
+  assertPackedScripts,
+  assertPackFiles,
+} from './pack-check.ts'
 
 const packageDirectory = fileURLToPath(new URL('..', import.meta.url))
 const root = await mkdtemp(join(tmpdir(), 'hourmere-cli-pack-'))
@@ -28,6 +33,8 @@ try {
     execFileSync('npm', args, { cwd, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
   const manifest = JSON.parse(await readFile(join(packageDirectory, 'package.json'), 'utf8'))
   assertPackage(manifest)
+  // Development scripts stay at the repository root, outside the published manifest.
+  npm(['run', 'cli:build'], fileURLToPath(new URL('../../..', import.meta.url)))
   const dryRun = JSON.parse(npm(['pack', '--dry-run', '--json'])) as {
     files: { path: string }[]
   }[]
@@ -45,6 +52,7 @@ try {
       '--prefix',
       installDirectory,
       '--ignore-scripts',
+      '--engine-strict',
       '--omit=dev',
       '--no-package-lock',
       '--offline',
@@ -55,6 +63,7 @@ try {
   const installed = join(installDirectory, 'node_modules', '@hourmere', 'cli')
   const installedManifest = JSON.parse(await readFile(join(installed, 'package.json'), 'utf8'))
   assertPackage(installedManifest)
+  assertPackedScripts(installedManifest, packed[0]?.files.map((file) => file.path) ?? [])
   const run = (flag: string) =>
     execFileSync(join(installDirectory, 'node_modules', '.bin', 'hourmere'), [flag], {
       cwd: root,
@@ -63,6 +72,11 @@ try {
       stdio: ['ignore', 'pipe', 'pipe'],
     })
   assertCliOutput(run('--help'), run('--version'), manifest.version)
+  assertCliOutput(
+    npm(['start', '--silent', '--', '--help'], installed),
+    run('--version'),
+    manifest.version,
+  )
   // Also invoke the compiled entrypoint directly with plain Node, outside the workspace.
   const plainNodeVersion = execFileSync(
     process.execPath,

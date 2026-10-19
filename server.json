@@ -22,8 +22,8 @@
       "headers": [
         {
           "name": "Authorization",
-          "description": "API-key clients: enter Bearer followed by a space and your Hourmere API key. OAuth clients use discovery instead of this static header.",
-          "isRequired": true,
+          "description": "Bearer API key; omit when the client uses OAuth",
+          "isRequired": false,
           "isSecret": true
         }
       ]

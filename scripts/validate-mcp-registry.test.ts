@@ -42,6 +42,14 @@ describe('MCP Registry launch metadata', () => {
           type: 'streamable-http',
           url: 'https://{hourmere_host}/mcp',
           variables: { hourmere_host: { isRequired: true } },
+          headers: [
+            {
+              name: 'Authorization',
+              description: 'Bearer API key; omit when the client uses OAuth',
+              isRequired: false,
+              isSecret: true,
+            },
+          ],
         },
       ],
       _meta: {
@@ -78,9 +86,24 @@ describe('MCP Registry launch metadata', () => {
     expect(validateMcpRegistry(draft)).toContain('Use the pinned MCP Registry schema.')
   })
 
+  it.each(['draft', 'concrete', 'template'] as const)(
+    'keeps the static API-key header optional for OAuth clients in %s mode',
+    (mode) => {
+      const draft = mode === 'draft' ? metadata() : approvedMetadata()
+      if (mode === 'concrete') draft.remotes[0].url = 'https://hourmere.example.invalid/mcp'
+      expect(draft.remotes[0].headers[0].isRequired).toBe(false)
+      expect(validateMcpRegistry(draft, mode)).toEqual([])
+
+      draft.remotes[0].headers[0].isRequired = true
+      expect(validateMcpRegistry(draft, mode)).toContain(
+        'Describe one Streamable HTTP remote with an optional secret Authorization input.',
+      )
+    },
+  )
+
   it.each([
     ['wrong header', { name: 'X-API-Key' }],
-    ['optional input', { isRequired: false }],
+    ['required input', { isRequired: true }],
     ['non-secret input', { isSecret: false }],
     ['embedded value', { value: 'synthetic-private-marker' }],
     ['embedded default', { default: 'synthetic-private-marker' }],
@@ -89,7 +112,7 @@ describe('MCP Registry launch metadata', () => {
     Object.assign(draft.remotes[0].headers[0], change)
     const errors = validateMcpRegistry(draft)
     expect(errors).toContain(
-      'Describe one Streamable HTTP remote with a required secret Authorization input.',
+      'Describe one Streamable HTTP remote with an optional secret Authorization input.',
     )
     expect(errors.join(' ')).not.toContain('synthetic-private-marker')
   })
@@ -109,7 +132,7 @@ describe('MCP Registry launch metadata', () => {
     const draft = metadata()
     draft.remotes[0].type = 'sse'
     expect(validateMcpRegistry(draft)).toContain(
-      'Describe one Streamable HTTP remote with a required secret Authorization input.',
+      'Describe one Streamable HTTP remote with an optional secret Authorization input.',
     )
   })
 

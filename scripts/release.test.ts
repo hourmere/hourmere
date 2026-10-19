@@ -62,6 +62,21 @@ describe('release preparation', () => {
     expect(notes).not.toContain('does not mean that a release')
     expect(notes).not.toMatch(/\]\((?!https?:\/\/)/i)
     expect(notes).not.toMatch(/(?<![\w/])#\d+\b/)
+    expect(notes).toContain('https://github.com/hourmere/hourmere/blob/v1.0.0/')
+    expect(notes).not.toContain('https://github.com/hourmere/hourmere/blob/main/')
+  })
+
+  it.each(['v1.0.0', 'v1.2.0-rc.1'])('pins repository guidance to the published tag %s', (tag) => {
+    const repository = 'https://github.com/hourmere/hourmere'
+    const otherRepository = 'https://github.com/example/other/blob/main/docs.md'
+    const repo = fixture(
+      `## [${tag.slice(1)}] - 2026-11-30\n\n[Upgrade](${repository}/blob/main/docs/releasing.md#upgrade)\n[Other](${otherRepository})\n`,
+    )
+    if (tag !== 'v1.0.0') repo.git('tag', tag)
+    expect(repo.run('prepare', tag, repo.sha).status).toBe(0)
+    expect(readFileSync(join(repo.dir, 'hourmere-release-notes.md'), 'utf8')).toBe(
+      `[Upgrade](${repository}/blob/${tag}/docs/releasing.md#upgrade)\n[Other](${otherRepository})\n`,
+    )
   })
 
   it('extracts only the candidate version notes without publishing or changing git', () => {
@@ -204,22 +219,31 @@ function stepScript(name: string) {
 }
 
 describe('release workflow boundaries', () => {
+  // Version tags were checked against these registry index digests on 2026-10-19
+  // with `docker buildx imagetools inspect`; no images were run or published.
   it.each([
     [
       'docker/setup-qemu-action',
-      /image: docker\.io\/tonistiigi\/binfmt[^\s]*@sha256:[a-f0-9]{64}(?:\s|$)/,
+      'image: docker.io/tonistiigi/binfmt:latest@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0 # qemu-v10.2.3',
     ],
     [
       'docker/setup-buildx-action',
-      /driver-opts: image=docker\.io\/moby\/buildkit[^\s]*@sha256:[a-f0-9]{64}(?:\s|$)/,
+      'driver-opts: image=docker.io/moby/buildkit:buildx-stable-1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea # v0.33.1',
     ],
     [
       'docker/build-push-action',
-      /sbom: generator=docker\.io\/docker\/buildkit-syft-scanner[^\s]*@sha256:[a-f0-9]{64}(?:\s|$)/,
+      'sbom: generator=docker.io/docker/buildkit-syft-scanner:stable-1@sha256:ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9 # 1.12.0',
     ],
-  ])('pins the supporting image for %s', (action, image) => {
+  ])('pins and names the verified supporting image for %s', (action, image) => {
     const step = workflow().split(`uses: ${action}@`)[1]?.split('\n      - ')[0] ?? ''
-    expect(step).toMatch(image)
+    expect(step.split('\n').map((line) => line.trim())).toContain(image)
+  })
+
+  it('builds and verifies the standalone CLI before the disabled publisher can publish', () => {
+    const cli = workflow().split('  publish-cli:\n')[1] ?? ''
+    const smoke = cli.indexOf('      - run: npm run cli:pack-smoke\n')
+    expect(smoke).toBeGreaterThan(-1)
+    expect(smoke).toBeLessThan(cli.indexOf('        run: npm publish --provenance --access public'))
   })
 
   it('permits only version tag pushes and requires reusable CI and protected approval', () => {
@@ -347,4 +371,41 @@ describe('release workflow boundaries', () => {
       ])
     },
   )
+})
+
+describe('release publication checklist', () => {
+  const docs = () =>
+    readFileSync(
+      process.env.HOURMERE_RELEASE_DOCS ??
+        fileURLToPath(new URL('../docs/releasing.md', import.meta.url)),
+      'utf8',
+    ).replace(/\s+/g, ' ')
+
+  it('updates the README introduction only after the first public image is published', () => {
+    const checklist =
+      docs().split(
+        'Make the documentation changes in a separate follow-up after verifying public access:',
+      )[1] ?? ''
+    expect(checklist).toContain(
+      'Update `README.md` line 2 (`Self-host from source`) to describe the published image.',
+    )
+  })
+
+  it('checks automatic GHCR repository write access after the first token push', () => {
+    const [before, publication = ''] = docs().split('## Verify publication and handle failures')
+    expect(before).not.toContain('Manage Actions access')
+    expect(publication).toContain(
+      "After the first authorized `GITHUB_TOKEN` push, check the GHCR package's **Manage Actions access** settings: that first push normally grants this repository **Write** access automatically.",
+    )
+    expect(publication).toContain('Grant **Write** if it is missing')
+  })
+
+  it('uses the root CLI build before inspecting and publishing the standalone artifact', () => {
+    const source = docs()
+    expect(source).toContain('npm run cli:build npm pack --dry-run --workspace @hourmere/cli')
+    expect(source).toContain(
+      'The smoke command builds the compiled files through `npm run cli:build`',
+    )
+    expect(source).not.toContain('builds through `prepack`')
+  })
 })
