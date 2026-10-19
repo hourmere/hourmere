@@ -45,9 +45,16 @@ exchanges, refreshes and failed token requests share the token endpoint budget. 
 | Variable | Default | Meaning |
 |---|---|---|
 | `SMTP_URL` | Unset | `smtps://user:password@host:465` or `smtp://…:587`; special credential characters must be percent-encoded. Remote SMTP requires TLS/STARTTLS. Without SMTP, emails go to logs. |
-| `MAIL_FROM` | Unset | Required with SMTP, for example `Hourmere <bookings@example.com>`. Use a sender your SMTP provider accepts. |
+| `MAIL_FROM` | Unset | Required with SMTP, for example `Hourmere <bookings@example.com>`. Use a sender your SMTP provider accepts that can also receive calendar replies; see the requirements below. |
 | `SIGNUP` | `first-user` | `first-user`, `closed` or `open`; existing users can always sign in. |
 | `SIGNUP_ALLOWED_DOMAINS` | Unset | Comma-separated exact email domains, without `@` or wildcards. These domains may register even with `closed`. List subdomains separately. Invalid with `open`. |
+
+`MAIL_FROM` is the organizer for new calendar invitations. It must not be a Gmail or
+Google Workspace address, or any other address registered as a Google account: Gmail treats
+it as a Google organizer. The mailbox must receive mail because calendar RSVP replies go to
+it, independently of the email's Reply-To; a no-reply address that rejects mail bounces
+those replies. Monitor or forward the mailbox. Declining in a calendar does not cancel an
+Hourmere booking; use the confirmation email's cancellation link.
 
 With `first-user`, the first person who signs in can register; after that the domain allowlist
 applies. In either restricted mode, a pending, unexpired team invitation also permits its

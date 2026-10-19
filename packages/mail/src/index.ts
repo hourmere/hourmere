@@ -232,8 +232,9 @@ export function createSmtpMailer({ url, from }: SmtpMailerOptions): Mailer {
     senderEmail,
     async send({ to, replyTo, subject, text, html, attachments }, { signal } = {}) {
       signal?.throwIfAborted()
-      if (replyTo && !isMailbox(replyTo.email))
-        throw new Error('Reply-To must be one valid mailbox')
+      // Reply-To is optional user input. A booking may accept an address SMTP cannot
+      // represent here; omit it rather than preventing every recipient's notification.
+      const safeReplyTo = replyTo && isMailbox(replyTo.email) ? replyTo : undefined
       const calendar = attachments?.find((a) =>
         /^text\/calendar; method=(REQUEST|CANCEL); charset=UTF-8$/.test(a.contentType),
       )
@@ -242,7 +243,9 @@ export function createSmtpMailer({ url, from }: SmtpMailerOptions): Mailer {
       const sending = transport.sendMail({
         // An address object is taken as one address; a string would be parsed as a list.
         to: { name: '', address: to },
-        ...(replyTo && { replyTo: { name: singleLine(replyTo.name), address: replyTo.email } }),
+        ...(safeReplyTo && {
+          replyTo: { name: singleLine(safeReplyTo.name), address: safeReplyTo.email },
+        }),
         // nodemailer folds long headers but would keep a line break; a subject is one line.
         subject: subject.replace(/[\r\n]+/g, ' '),
         text,

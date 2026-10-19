@@ -41,6 +41,13 @@ bundled proxy setup. Use a sender your SMTP provider accepts, for example
 from the start. Percent-encode special characters in SMTP credentials. Setup hides SMTP
 input on a terminal, and quotes values for Compose.
 
+`MAIL_FROM` becomes the organizer for new calendar invitations. Do not use a Gmail or
+Google Workspace address, or any address registered as a Google account: Gmail treats it as
+a Google organizer. Use a mailbox that can receive mail, and monitor or forward it:
+calendar RSVP replies go there regardless of Reply-To, and a no-reply address that rejects
+mail bounces them. Declining in a calendar does not cancel an Hourmere booking; use the
+cancellation link in the confirmation email.
+
 The script copies `.env.example`, generates independent `POSTGRES_PASSWORD` and
 `BETTER_AUTH_SECRET` values with `openssl rand -base64 32`, and writes `.env` with mode
 `600`. It never prints the secrets or overwrites an existing `.env`. Keep this file private
@@ -350,6 +357,13 @@ preserve its `.env` and Caddy state. Enable separate workers through `COMPOSE_FI
 block `git pull --ff-only`. The persisted file selection also rebuilds/recreates the
 worker during upgrades. In the deployment checkout, a branch following `main` can be
 updated with the commands below.
+
+**Migration 0038 requires stopping all old processes; do not use a rolling deployment.**
+Before any new process applies `0038_booking_ical_identity.sql`, stop every old `web`, `all`
+and `worker` process, including any on other hosts. With Compose, run
+`docker compose stop app` and, if the separate worker is configured, `docker compose stop worker`. Leave
+PostgreSQL running, then apply the migration and start every role with the new code. With
+`AUTO_MIGRATE=true`, the first new process applies the migration on startup.
 
 **If you uncommented the old worker block in `docker-compose.yml`, migrate it before
 pulling.** Those tracked edits make `git pull --ff-only` refuse the upgrade. First append

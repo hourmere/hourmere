@@ -243,9 +243,16 @@ interface NotificationData {
     cancelReason: string | null
     rescheduledFromId: string | null
   }
-  hosts: { id: string; name: string; email: string; timeZone: string }[]
+  hosts: { id: string; name: string; email: string; timeZone: string; locale: string | null }[]
   /** The invitee first, then guests. */
-  attendees: { id: string; name: string; email: string; timeZone: string; isBooker: boolean }[]
+  attendees: {
+    id: string
+    name: string
+    email: string
+    timeZone: string
+    locale: string | null
+    isBooker: boolean
+  }[]
   /** The booking this chain of reschedules began with, and how many reschedules ago. */
   root: {
     id: string
@@ -310,6 +317,7 @@ function loadNotificationData(db: Db, bookingId: string): Promise<NotificationDa
         'u.email',
         'p.handle as profile_handle',
         'p.time_zone as profile_zone',
+        'p.locale as profile_locale',
         's.time_zone as schedule_zone',
       ])
       .where('bh.booking_id', '=', bookingId)
@@ -320,7 +328,7 @@ function loadNotificationData(db: Db, bookingId: string): Promise<NotificationDa
       .execute()
     const attendees = await conn
       .selectFrom('booking_attendees')
-      .select(['id', 'name', 'email', 'time_zone', 'is_booker'])
+      .select(['id', 'name', 'email', 'time_zone', 'locale', 'is_booker'])
       .where('booking_id', '=', bookingId)
       .orderBy('is_booker', 'desc')
       .orderBy('id')
@@ -395,12 +403,14 @@ function loadNotificationData(db: Db, bookingId: string): Promise<NotificationDa
         name: h.name.trim() || h.profile_handle || h.email,
         email: h.email,
         timeZone: timeZone(h.profile_zone) ?? timeZone(h.schedule_zone) ?? 'UTC',
+        locale: h.profile_locale,
       })),
       attendees: attendees.map((a) => ({
         id: a.id,
         name: a.name,
         email: a.email,
         timeZone: timeZone(a.time_zone) ?? 'UTC',
+        locale: a.locale,
         isBooker: a.is_booker,
       })),
       root,
@@ -704,8 +714,8 @@ async function deliverBookingNotification(
           stamp: now,
           start: booking.start,
           end: booking.end,
-          // A UID describes one event, so every recipient gets the same modern summary.
-          summary: modern ? `${booking.eventName} with ${calendarOrganizer.name}` : summary,
+          // Each recipient sees the other person, while UID/SEQUENCE retain event identity.
+          summary,
           description: modern ? `Booked with ${calendarOrganizer.name} using Hourmere.` : undefined,
           location: booking.location ? meetingLocationText(booking.location) : undefined,
           organizer: {
@@ -753,6 +763,7 @@ async function deliverBookingNotification(
           role: 'attendee',
           email: attendee.email,
           timeZone: attendee.timeZone,
+          locale: attendee.locale,
           manageLinks: token === undefined ? undefined : inviteeManageLinks(deps.publicUrl, token),
         },
         {
@@ -774,7 +785,13 @@ async function deliverBookingNotification(
         email(
           kind,
           meeting,
-          { role: 'host', email: host.email, timeZone: host.timeZone, answers: booking.answers },
+          {
+            role: 'host',
+            email: host.email,
+            timeZone: host.timeZone,
+            locale: host.locale,
+            answers: booking.answers,
+          },
           { attachment: invitation(`${booking.eventName} with ${invitee.name}`, host.id) },
         ),
     })),

@@ -99,6 +99,8 @@ describe('bookingEmail', () => {
         `Reschedule: ${links.reschedule}`,
         `Cancel: ${links.cancel}`,
         '',
+        'Declining in your calendar does not cancel this booking. Cancel in Hourmere.',
+        '',
       ].join('\n'),
     )
     expect(m.html).toContain(
@@ -179,6 +181,47 @@ describe('bookingEmail', () => {
     expect(m.text).not.toContain('Need to make a change?')
     expect(m.html).not.toContain('Reschedule')
   })
+
+  it.each([
+    { locale: 'en', language: 'en' },
+    { locale: 'en-GB', language: 'en' },
+    { locale: 'zh-CN', language: 'zh-CN' },
+    { locale: 'zh-Hans-SG', language: 'zh-CN' },
+    { locale: 'zh', language: 'zh-CN' },
+    { locale: 'zh-TW', language: 'en' },
+    { locale: 'fr-FR', language: 'en' },
+    { locale: 'not_a_locale', language: 'en' },
+    { locale: undefined, language: 'en' },
+    { locale: null, language: 'en' },
+  ])('explains calendar declines in $language for locale $locale', ({ locale, language }) => {
+    const sentence =
+      language === 'zh-CN'
+        ? '在日历中拒绝邀请不会取消预约，请在 Hourmere 中取消。'
+        : 'Declining in your calendar does not cancel this booking. Cancel in Hourmere.'
+    // The footer also reaches hosts and guests, who receive no private manage links.
+    for (const recipient of [host, { ...invitee, manageLinks: undefined }]) {
+      const m = bookingEmail('confirmed', meeting, { ...recipient, locale })
+      expect(m.text).toMatch(/\n\n[^\n]+\n$/)
+      expect(m.text.endsWith(`\n\n${sentence}\n`)).toBe(true)
+      expect(m.html).toContain(`<p lang="${language}"`)
+      expect(m.html).toContain(`>${sentence}</p>`)
+      expect(m.text).not.toContain('token=')
+      expect(m.html).not.toContain('token=')
+    }
+  })
+
+  it.each(['rescheduled', 'cancelled', 'reminder', 'conference_failed'] as const)(
+    'leaves the calendar-decline footer out of %s emails',
+    (kind) => {
+      for (const recipient of [host, invitee]) {
+        const m = bookingEmail(kind, meeting, { ...recipient, locale: 'zh-CN' })
+        expect(m.text).not.toContain('在日历中拒绝邀请')
+        expect(m.html).not.toContain('在日历中拒绝邀请')
+        expect(m.text).not.toContain('Declining in your calendar')
+        expect(m.html).not.toContain('Declining in your calendar')
+      }
+    },
+  )
 
   it('shows each kind of location', () => {
     const where = (location: BookingEmailMeeting['location']) =>

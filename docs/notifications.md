@@ -290,7 +290,8 @@ an event; CANCEL retains the identity and sets `STATUS:CANCELLED`.
 Migration0038 marks every existing booking as protocol v1; new booking roots default to v2.
 The **root's** version and organizer snapshot govern the entire reschedule chain, even when
 a successor has the new default. Stop all old web/all/worker processes before migration,
-then restart every role with the new code; mixed-version workers cannot pin the same policy.
+including processes on other hosts, then restart every role with the new code. Migration
+0038 does not support rolling deployment; mixed-version workers cannot pin the same policy.
 
 | Recipient | New root (v2, SMTP configured) | Legacy root (v1) |
 |---|---|---|
@@ -302,8 +303,14 @@ then restart every role with the new code; mixed-version workers cannot pin the 
 New invitations use the single mailbox from `MAIL_FROM` as ORGANIZER, with the verified
 primary host's name as CN. Hosts also appear as attendees; duplicate addresses are collapsed,
 including when the booker is a host or the sending mailbox is the host's own address.
-Every recipient sees the same summary and a neutral DESCRIPTION naming the host and Hourmere.
+Invitee/guest summaries name the host; host summaries name the invitee. Every recipient gets
+a neutral DESCRIPTION naming the host and Hourmere.
 No booking answers, private management links or tokens enter calendar data.
+
+`MAIL_FROM` must not be a Gmail or Google Workspace address, or any other address registered
+as a Google account: Gmail treats that address as a Google organizer. Use a separate mailbox
+that can receive mail, because calendar RSVP replies go to ORGANIZER; a no-reply address
+that rejects incoming mail bounces those replies.
 
 The worker atomically pins the organizer email/name on the root before SMTP. Retries,
 reschedules and cancellations reuse it after host/profile or `MAIL_FROM` changes. Keep the
@@ -329,13 +336,16 @@ From always remains the authenticated, operator-configured `MAIL_FROM`; Hourmere
 impersonate a host's mailbox. No redundant Sender header is added. Ordinary email Reply-To
 is the verified primary host for invitee/guest mail, and the booker for host mail. This does
 not route calendar status replies: iTIP clients send those to ORGANIZER, even with SENT-BY.
+An invalid Reply-To is omitted without blocking notification delivery.
 
 `NEEDS-ACTION` leaves adding/accepting the invitation to the recipient's calendar. The
 booking itself is already confirmed in Hourmere. `RSVP=FALSE` deliberately does not solicit
 REPLY messages: Hourmere has no inbound calendar-response processor, and a calendar decline
 never cancels a booking. Use the original confirmation's manage links for rescheduling or
 cancellation. Operators should monitor or deliberately forward the `MAIL_FROM` mailbox for
-unsolicited calendar replies; Reply-To is not a guarantee that those reach the host.
+unsolicited calendar replies and keep it able to receive mail; Reply-To is not a guarantee
+that those reach the host. Confirmation email footers also explain that declining in a
+calendar does not cancel the booking.
 
 SMTP uses Nodemailer's `icalEvent`: a `text/calendar; method=REQUEST` (or CANCEL) alternative
 with UTF-8 plus an identical downloadable `application/ics` attachment (`invite.ics` or
@@ -350,7 +360,7 @@ This policy follows [RFC5545](https://www.rfc-editor.org/rfc/rfc5545.html),
 [RFC6047](https://www.rfc-editor.org/rfc/rfc6047.html#section-2.4).
 It improves identity alignment and calendar MIME recognition; it does not guarantee Inbox
 placement, response buttons or automatic addition. Gmail's known-sender/invitation settings
-still apply, and the proposed Google-organizer UID lookup explanation remains unconfirmed.
+still apply.
 Real Gmail external-invitee and Outlook.com checks, including update/cancel, are required.
 
 ## How the booking services queue them

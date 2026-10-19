@@ -53,7 +53,7 @@ must approve publication through the [release workflow](https://github.com/hourm
   mailbox, distinguish calendar acceptance from booking confirmation, and use calendar MIME
   alternatives with downloadable ICS copies. Hosts with pinned provider copies receive
   ordinary notifications; legacy meeting identities remain stable through updates/cancels.
-
+  Host calendar summaries name the invitee, and an invalid Reply-To no longer blocks delivery.
 - Automatic Google Meet now imports the private calendar copy first and requests its
   conference through a separate conditional PATCH. Retries preserve the event and request
   identity, including recovery of legacy import-created pending requests.
@@ -70,7 +70,8 @@ Hourmere requires PostgreSQL 18+ because migrations use `uuidv7()`; the provided
 stack includes PostgreSQL 18.
 
 - **Coordinate the calendar-email upgrade.** Stop all old web/all/worker processes before
-  applying `0038_booking_ical_identity.sql`, then restart every role with the new code.
+  applying `0038_booking_ical_identity.sql`, including processes on other hosts, then restart
+  every role with the new code. This upgrade does not support rolling deployment.
   Existing roots retain their original host/conference organizer and UID; new roots pin
   the sending mailbox from `MAIL_FROM`. Previously changed/deleted organizer identities
   without a saved snapshot cannot be recovered. Keep `MAIL_FROM` stable for future updates;
@@ -78,6 +79,9 @@ stack includes PostgreSQL 18.
   one bare mailbox or `Display name <mailbox>` (quote names containing commas); lists,
   groups, comments, quoted local parts and address-literal domains are unsupported and now
   fail startup with a value-free error. Arbitrary ordinary domains and IDN domains work.
+  Do not use a Gmail or Google Workspace address, or any address registered as a Google
+  account: Gmail treats it as a Google organizer. The sending mailbox must receive mail,
+  because calendar RSVP replies go to it; a no-reply address that rejects mail bounces them.
   Invitee calendar replies are not requested or processed; monitor/forward the sending
   mailbox for unsolicited responses. Human email replies reach the host via Reply-To.
   Calendar declines do not cancel bookings. Some clients show only the calendar card;

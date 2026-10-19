@@ -1,11 +1,12 @@
 import { readFileSync } from 'node:fs'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
-import type { Mailer, MailMessage } from '@hourmere/mail'
+import { createSmtpMailer, type Mailer, type MailMessage } from '@hourmere/mail'
 import { createFixtures, type Fixtures } from '@hourmere/scheduling/testing'
 import ICAL from 'ical.js'
 import type { KyselyPlugin } from 'kysely'
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
+import { fakeSmtpServer } from '../../mail/src/smtp-testing.ts'
 import { sendBookingNotification } from './index.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -152,6 +153,9 @@ describe.skipIf(!serverUrl)('iMIP interoperability', () => {
           const component = event(message)
           expect(component.getFirstPropertyValue('uid')).toBe(`${info.booking}@hourmere`)
           expect(component.getFirstPropertyValue('sequence')).toBe(revision)
+          expect(component.getFirstPropertyValue('summary')).toBe(
+            `Fixture booking with ${role === 'host' ? 'Ada Lovelace' : 'Grace Hopper'}`,
+          )
           expect(component.getFirstProperty('organizer')?.getFirstValue()).toBe(
             `mailto:${senderEmail}`,
           )
@@ -172,8 +176,89 @@ describe.skipIf(!serverUrl)('iMIP interoperability', () => {
           )
           expect(content).not.toMatch(/token|manage|responses|answers/i)
         }
-        // A shared event must have identical contents even in different recipient mailboxes.
-        expect(new Set(messages.map((m) => m.attachments?.[0]?.content)).size).toBe(1)
+        for (const message of messages) {
+          expect(event(message).getFirstPropertyValue('summary')).toBe(
+            `Fixture booking with ${message.to === 'ada@outlook.com' ? 'Grace Hopper' : 'Ada Lovelace'}`,
+          )
+        }
+      }
+    },
+  )
+
+  it('delivers host and invitee mail for an accepted 65-character local part', async () => {
+    const info = await setup()
+    const inviteeEmail = `${'a'.repeat(65)}@example.com`
+    await db
+      .updateTable('booking_attendees')
+      .set({ email: inviteeEmail })
+      .where('booking_id', '=', info.booking)
+      .execute()
+    const { server, received, sockets } = fakeSmtpServer()
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+    const port = (server.address() as { port: number }).port
+    const mailer = createSmtpMailer({ url: `smtp://127.0.0.1:${port}`, from: senderEmail })
+    const messages: { to: string; raw: string }[] = []
+    try {
+      await sendBookingNotification(
+        {
+          db,
+          publicUrl: 'https://scheduler.example.org',
+          now: () => now,
+          mailer: {
+            senderEmail: mailer.senderEmail,
+            async send(message, options) {
+              await mailer.send(message, options)
+              messages.push({ to: message.to, raw: received.data ?? '' })
+            },
+          },
+        },
+        info.booking,
+        'confirmed',
+      )
+      expect(messages.map((m) => m.to)).toEqual([hostEmail, inviteeEmail])
+      expect(received.to).toEqual([`RCPT TO:<${hostEmail}>`, `RCPT TO:<${inviteeEmail}>`])
+      expect(/^Reply-To:/im.test(messages[0]?.raw ?? '')).toBe(false)
+      expect(/^Reply-To: Grace Hopper <grace@gmail.com>/im.test(messages[1]?.raw ?? '')).toBe(true)
+      expect(
+        await db
+          .selectFrom('booking_notifications')
+          .select('outcome')
+          .where('booking_id', '=', info.booking)
+          .execute(),
+      ).toEqual([{ outcome: 'sent' }, { outcome: 'sent' }])
+    } finally {
+      for (const socket of sockets) socket.destroy()
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      )
+    }
+  })
+
+  it.each(['en', 'zh-CN'])(
+    'uses each recipient locale for the decline footer (host %s)',
+    async (locale) => {
+      const info = await setup()
+      const attendeeLocale = locale === 'en' ? 'zh-CN' : 'en'
+      await db
+        .updateTable('profiles')
+        .set({ locale })
+        .where('user_id', '=', info.host.userId)
+        .execute()
+      await db
+        .updateTable('booking_attendees')
+        .set({ locale: attendeeLocale })
+        .where('booking_id', '=', info.booking)
+        .execute()
+      const mail = capture()
+      await mail.send(info.booking, 'confirmed')
+      for (const message of mail.sent) {
+        const chinese = (message.to === hostEmail ? locale : attendeeLocale) === 'zh-CN'
+        const expected = chinese
+          ? '在日历中拒绝邀请不会取消预约，请在 Hourmere 中取消。'
+          : 'Declining in your calendar does not cancel this booking. Cancel in Hourmere.'
+        expect(message.text.includes(expected)).toBe(true)
+        expect(message.html?.includes(expected)).toBe(true)
+        expect(message.html?.includes(`lang="${chinese ? 'zh-CN' : 'en'}"`)).toBe(true)
       }
     },
   )

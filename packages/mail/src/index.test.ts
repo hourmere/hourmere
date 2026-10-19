@@ -1,4 +1,4 @@
-import { createServer, type Server, type Socket } from 'node:net'
+import type { Server } from 'node:net'
 import addressparser from 'nodemailer/lib/addressparser'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
@@ -9,6 +9,7 @@ import {
   magicLinkEmail,
   smtpTransportOptions,
 } from './index.ts'
+import { fakeSmtpServer } from './smtp-testing.ts'
 
 /** Parse MIME structure independently of Nodemailer's options to verify the delivered message. */
 function mimePart(raw: string): {
@@ -151,70 +152,6 @@ describe('smtpTransportOptions', () => {
     })
   })
 })
-
-/**
- * Just enough of an SMTP server to accept one message with AUTH PLAIN. `rcptReplies` answers
- * RCPT TO for an address with something other than 250; with `hangOnData` it never answers
- * DATA, like a server that stalls.
- */
-function fakeSmtpServer() {
-  const received: {
-    auth?: string
-    from?: string
-    to: string[]
-    data?: string
-    rcptReplies: Map<string, string>
-    hangOnData: boolean
-    dataReply?: string
-  } = { to: [], rcptReplies: new Map(), hangOnData: false }
-  const sockets = new Set<Socket>()
-  const server = createServer((socket) => {
-    sockets.add(socket)
-    socket.on('close', () => sockets.delete(socket))
-    let buffer = ''
-    let inData = false
-    socket.write('220 localhost ESMTP\r\n')
-    socket.on('data', (chunk) => {
-      buffer += chunk.toString('utf8')
-      while (true) {
-        if (inData) {
-          const end = buffer.indexOf('\r\n.\r\n')
-          if (end === -1) return
-          received.data = buffer.slice(0, end)
-          buffer = buffer.slice(end + 5)
-          inData = false
-          socket.write(`${received.dataReply ?? '250 queued'}\r\n`)
-          continue
-        }
-        const eol = buffer.indexOf('\r\n')
-        if (eol === -1) return
-        const line = buffer.slice(0, eol)
-        buffer = buffer.slice(eol + 2)
-        const verb = line.split(' ')[0]?.toUpperCase()
-        if (verb === 'EHLO') socket.write('250-localhost\r\n250 AUTH PLAIN\r\n')
-        else if (verb === 'AUTH') {
-          received.auth = Buffer.from(line.split(' ')[2] ?? '', 'base64').toString('utf8')
-          socket.write('235 ok\r\n')
-        } else if (verb === 'MAIL') {
-          received.from = line
-          socket.write('250 ok\r\n')
-        } else if (verb === 'RCPT') {
-          received.to.push(line)
-          const address = line.match(/<([^>]*)>/)?.[1] ?? ''
-          socket.write(`${received.rcptReplies.get(address) ?? '250 ok'}\r\n`)
-        } else if (verb === 'DATA') {
-          if (received.hangOnData) continue
-          inData = true
-          socket.write('354 go\r\n')
-        } else if (verb === 'QUIT') socket.end('221 bye\r\n')
-        // Like a server without TLS support.
-        else if (verb === 'STARTTLS') socket.write('502 5.5.1 STARTTLS not supported\r\n')
-        else socket.write('250 ok\r\n')
-      }
-    })
-  })
-  return { server, received, sockets }
-}
 
 describe('MailRejectedError', () => {
   it('is permanent only when the address itself is refused', () => {
@@ -412,7 +349,8 @@ describe('createSmtpMailer', () => {
     'grace@exa\r\nmple.com',
     'grace@example.com/path',
     'Grace <grace@example.com>',
-  ])('rejects a Reply-To list or header injection as one unsafe mailbox', async (email) => {
+    `${'a'.repeat(65)}@example.com`,
+  ])('drops an unsafe Reply-To without preventing delivery (%s)', async (email) => {
     const mailer = createSmtpMailer({
       url: `smtp://127.0.0.1:${port}`,
       from: 'calendar@selfhosted.example',
@@ -425,8 +363,10 @@ describe('createSmtpMailer', () => {
         subject: 'x',
         text: 'x',
       }),
-    ).rejects.toThrow('Reply-To must be one valid mailbox')
-    expect(received.to).toEqual([])
+    ).resolves.toBeUndefined()
+    expect(received.to).toEqual(['RCPT TO:<ada@example.com>'])
+    expect(mailboxHeader(received.data ?? '', 'Reply-To')).toEqual([])
+    expect(received.data).not.toMatch(/^Bcc:/im)
   })
 
   it('keeps the subject on one line and the recipient a single address', async () => {
