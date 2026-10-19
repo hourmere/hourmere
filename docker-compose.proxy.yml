@@ -1,0 +1,44 @@
+# Optional automatic HTTPS. setup.sh selects both files through COMPOSE_FILE in .env.
+# Requires Docker Compose >= 2.24.4 for !reset; the app has NO host port in this mode.
+services:
+  app:
+    ports: !reset []
+    environment:
+      # Trust this one controlled proxy, never every container/private address.
+      TRUSTED_PROXIES: ${PROXY_IP:-172.30.62.2}
+    networks:
+      default:
+      ingress:
+
+  proxy:
+    image: caddy:2.11-alpine
+    environment:
+      PUBLIC_URL: ${PUBLIC_URL:?set an https PUBLIC_URL in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      ingress:
+        ipv4_address: ${PROXY_IP:-172.30.62.2}
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: unless-stopped
+
+networks:
+  ingress:
+    ipam:
+      config:
+        - subnet: ${PROXY_SUBNET:-172.30.62.0/28}
+          # Dynamic app addresses must never claim the proxy's static .2.
+          # Leave room for app and documented one-off app Compose commands.
+          ip_range: ${PROXY_DYNAMIC_RANGE:-172.30.62.8/29}
+
+volumes:
+  caddy-data:
+  caddy-config:
