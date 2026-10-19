@@ -89,7 +89,12 @@ export {
   updateEventType,
 } from './event-types.ts'
 export { validTimeZone } from './internal.ts'
-export { getManagedBookingDetails, listManagedSlots, type ManagedBooking } from './manage.ts'
+export {
+  getManagedBookingDetails,
+  listHostBookingSlots,
+  listManagedSlots,
+  type ManagedBooking,
+} from './manage.ts'
 export {
   getProfile,
   HANDLE_MAX_LENGTH,

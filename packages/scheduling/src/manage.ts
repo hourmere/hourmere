@@ -1,9 +1,9 @@
-// What the invitee's manage page needs beyond the booking itself: who hosts it and what the
-// event is (to show it), and the times it can move to (to reschedule it). Both go through
-// getManagedBooking, so they accept exactly the tokens that open the booking.
+// Booking details for invitee links and reschedule slots shared by invitees and hosts.
+// Invitee reads go through getManagedBooking, while host slots use getHostBooking so the
+// same availability rules retain each caller's authorization boundary.
 import { checkSlotRange, hasBookablePart, intersectSlots, type SlotView } from './availability.ts'
-import { type Booking, getManagedBooking } from './bookings.ts'
-import type { PublicContext } from './context.ts'
+import { type Booking, getHostBooking, getManagedBooking } from './bookings.ts'
+import type { PublicContext, ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { bookingHostIds } from './hosts.ts'
 
@@ -62,6 +62,25 @@ export async function listManagedSlots(
 ): Promise<SlotView[]> {
   checkSlotRange(start, end)
   const booking = await getManagedBooking(ctx, token)
+  return listBookingSlots(ctx, booking, { start, end })
+}
+
+/** The same reschedule slots, scoped to a booking the caller hosts in their organization. */
+export async function listHostBookingSlots(
+  ctx: ServiceContext,
+  id: string,
+  { start, end }: { start: Temporal.Instant; end: Temporal.Instant },
+): Promise<SlotView[]> {
+  checkSlotRange(start, end)
+  const booking = await getHostBooking(ctx, id)
+  return listBookingSlots(ctx, booking, { start, end })
+}
+
+async function listBookingSlots(
+  ctx: PublicContext,
+  booking: Booking,
+  { start, end }: { start: Temporal.Instant; end: Temporal.Instant },
+): Promise<SlotView[]> {
   const now = ctx.now()
   if (booking.status === 'cancelled') {
     throw new DomainError('conflict', 'booking_cancelled', 'This booking is already cancelled')

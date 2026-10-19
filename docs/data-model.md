@@ -98,9 +98,11 @@ other account data. Sign-in access and refresh tokens remain encrypted by Better
   its SHA-256 is stored: `bookings.manage_token_hash` for the one the booking API returns,
   `booking_notifications.manage_token_hash` for the one each invitee email carries (minted
   when the email is sent, so no raw secret ever sits in the job queue; an email refused for
-  good keeps none). Each stays valid as long as the booking exists. One statement looks a
-  token up in both, each through its unique index. The API's token stays with its booking;
-  an email's follows `rescheduled_from_id` forward to the latest booking of the chain. See
+  good keeps none). One statement looks a token up in both, each through its unique index.
+  An invitee reschedule leaves the API's token with its cancelled booking. A host
+  reschedule clears the predecessor's hash and transfers it to the successor in the same
+  transaction, returning no raw token; the invitee's existing link keeps working. An
+  email's token follows `rescheduled_from_id` forward to the latest booking of the chain. See
   [notifications.md](notifications.md#which-booking-a-token-opens).
 - **An email is sent once, with a narrow duplicate window.** A notification job inserts its `booking_notifications` row
   (primary key: booking, kind, recipient) and keeps that transaction open while the mail
@@ -269,6 +271,15 @@ before that migration cannot be recovered; these legacy bookings retain only the
 identities. A historical booking with no snapshot and no hosts cannot be rescheduled.
 
 See [collective scheduling](collective-scheduling.md) for assignment, availability and locking.
+
+## Host reschedule tokens
+
+Migration 0029 makes `bookings.manage_token_hash` nullable so a host move can transfer the
+invitee's existing hash to its successor without minting or returning a new secret. The
+unique constraint remains in place. Existing bookings and email-token hashes are unchanged
+by the migration. Host moves lock the personal owner (where applicable), organization and
+booking before host locks, matching deletion order; cancellation or invitee rescheduling
+that waited for a host transfer resolves the moved hash again under the booking lock.
 
 ## Booking webhooks
 

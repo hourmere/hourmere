@@ -114,7 +114,8 @@ the CLI never prints management capabilities. Other returned information, such a
 email addresses, remains private booking data: redirect it only to destinations you trust.
 
 Use `reschedule --input move-request.json --output moved-result.json` to retain the new
-booking's token. Its input is `{"bookingId":"...","start":"..."}` for a host move, or
+booking's result. Host moves return `manageToken: null` and preserve the invitee's existing
+links; invitee moves return a new token. Input is `{"bookingId":"...","start":"..."}` for a host move, or
 the same object with `manageToken` instead of `bookingId` for an invitee move. Cancellation
 uses `{"bookingId":"...","reason":"..."}` or a private `manageToken` input. There is no
 interactive confirmation: running a mutation command is the instruction to perform it.
@@ -137,9 +138,9 @@ successful booking, and retain the original request. Inspect the server before r
   filename for each attempt. A different request with the same key gets
   `idempotency_key_reused`.
 - **Rescheduling is not idempotent.** Never retry automatically. Inspect `list` and
-  `rescheduledFromId` first. The previous booking ID or booking-specific token then points
-  to a cancelled booking; an email token follows the chain and retrying it can move the
-  meeting again.
+  `rescheduledFromId` first. The previous booking ID points to a cancelled booking. A
+  booking-specific token stays there after an invitee move, but follows host moves;
+  an email token always follows the chain and retrying it can move the meeting again.
 - Cancellation cannot be undone. Repeating it returns `booking_cancelled`.
 
 All local integration tests use synthetic identities, real HTTP and helper-owned temporary

@@ -90,8 +90,8 @@ curl --fail-with-body "$HOURMERE_URL/api/v1/bookings/manage/cancel" \
   -d '{"reason":"Test cleanup"}'
 ```
 
-An API response token stays with its booking; the token in a booking email follows the
-reschedule chain. Treat both as credentials. The public management page carries email tokens
+An API response token stays with the cancelled booking after an invitee move and follows
+host moves. The token in a booking email always follows the reschedule chain. Treat both as credentials. The public management page carries email tokens
 in a fragment (`/booking#token=…`); API calls use headers, never query parameters. Set `HOURMERE_MANAGE_TOKEN` privately to the
 current returned token before running either management example.
 
@@ -100,3 +100,11 @@ to arbitrary hosts' private bookings. Results default to ascending start time an
 `order=desc` for newest first. Pass `nextCursor` as `cursor` and keep the time filters and
 order unchanged for every page. Rate limits return `429` and `Retry-After`; slot races
 return `slot_taken` or `slot_unavailable`. Recheck availability before retrying with a new key.
+
+To move a booking you host, read `GET /api/v1/bookings/{id}/slots?start=…&end=…`, then
+send `POST /api/v1/bookings/{id}/reschedule` with JSON `{ "start": "<chosen slot start>" }`.
+Both require a session or API key in the booking's organization. Slots ignore the current
+booking, so the new time may overlap it. A host move returns the successor booking with
+`manageToken: null` and preserves existing invitee links. The web booking detail page uses
+these same public APIs. Do not retry a move automatically; inspect your booking list if
+the answer is lost.

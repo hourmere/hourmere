@@ -186,7 +186,7 @@ parts of its link, `https://<host>/<handle>/<slug>`.
 | `list_conference_connections` | Your Zoom connection IDs, modes and status; no credentials or browser authorization attempts | read-only |
 | `find_available_slots` | The event type (title, duration, questions, host's time zone when applicable) and its free slots between two dates | read-only |
 | `create_booking` | Books a slot for an invitee; returns the booking and its `manageToken` | open world |
-| `reschedule_booking` | Moves a booking you host (`bookingId`) or one you made (`manageToken`); returns the new booking and a new token | destructive, open world |
+| `reschedule_booking` | Moves a booking you host (`bookingId`, token is null) or one you made (`manageToken`, returns a new token) | destructive, open world |
 | `cancel_booking` | Cancels a booking you host (`bookingId`) or one you made (`manageToken`) | destructive, idempotent, open world |
 | `list_bookings` | Bookings you host in the key's organization, by start time, a page at a time | read-only |
 
@@ -250,15 +250,19 @@ fields are those of the REST API (`/api/v1/openapi.json`). Results come as
 - **Manage tokens** are the invitee's secret. Only a hash is stored, so a token is returned
   once: keep it to reschedule or cancel later. The tools also take the token from a link in
   one of the invitee's booking emails (`https://<host>/booking#token=<token>`); each email
-  has its own. A token a tool returned stays with its booking (after a reschedule it belongs
-  to the cancelled one), while an email's token follows the meeting to the booking that
+  has its own. A response token follows host moves, but after an invitee move stays on
+  the cancelled booking. An email's token follows the meeting to the booking that
   replaced it ([api-conventions.md](api-conventions.md#public-endpoints)).
 - **Host moves:** pass `bookingId` from `list_bookings` and a new `start` to
   `reschedule_booking`. You must host the booking in the key's current organization.
   Give exactly one of `bookingId` or `manageToken`. All hosts' current availability is
   checked with the old booking ignored, so the new time may overlap it. A move creates a
-  successor; retrying the old ID fails with `booking_cancelled`. After a lost response,
+  successor and returns `manageToken: null`: manage tokens are the invitee's secret.
+  The existing response-token hash moves atomically to the successor, and all earlier
+  email links keep following the chain. Retrying the old ID fails with `booking_cancelled`. After a lost response,
   inspect `list_bookings` and `rescheduledFromId` before deciding what to do next.
+  People and REST clients use the same service through `POST /api/v1/bookings/{id}/reschedule`
+  (`{ start }`); the admin booking detail page offers the same action and authorized slots.
 - **Emails:** bookings made, moved or cancelled through MCP send the same emails as the
   booking page (hosts, invitee, guests; [notifications.md](notifications.md)).
 - **Retries:** give `create_booking` an `idempotencyKey` (a new random value per booking,

@@ -494,6 +494,47 @@ describe.skipIf(!serverUrl)('booking notifications over REST and MCP', () => {
     })
   })
 
+  it('emails both sides when the host reschedules over REST and keeps invitee links private', async () => {
+    const created = await book('2026-11-04T08:00:00Z')
+    expect(created.status).toBe(201)
+    const { booking: original, manageToken } = created.body as unknown as Booked
+    const confirmations = await drain()
+    const [emailed] = tokensIn(confirmations.find(to('ada@example.com')))
+    expect(emailed !== undefined).toBe(true)
+
+    const moved = await rest('POST', `/api/v1/bookings/${original.id}/reschedule`, {
+      headers: { authorization: `Bearer ${hostKey}` },
+      body: { start: '2026-11-04T09:00:00Z' },
+    })
+    expect(moved.status).toBe(200)
+    const result = moved.body as unknown as Booked
+    expect(result.manageToken === null).toBe(true)
+    expect(result.booking).toMatchObject({ rescheduledFromId: original.id, source: 'api' })
+    expect(
+      (await jobsFor(result.booking.id)).map((j) => (j.data as { kind: string }).kind),
+    ).toEqual(['reminder', 'rescheduled'])
+    const emails = await drain()
+    expect(emails.map((m) => m.to)).toEqual([hostEmail, 'ada@example.com'])
+    for (const message of emails) {
+      expect(message.subject).toMatch(/^Rescheduled: /)
+      expect(invitation(message)).toMatchObject({
+        method: 'REQUEST',
+        uid: `${original.id}@hourmere`,
+        sequence: 1,
+      })
+    }
+    expect(tokensIn(emails[0])).toEqual([])
+    expect(await manage(manageToken as string)).toMatchObject({
+      status: 200,
+      body: { id: result.booking.id, status: 'confirmed' },
+    })
+    expect(await manage(emailed as string)).toMatchObject({
+      status: 200,
+      body: { id: result.booking.id, status: 'confirmed' },
+    })
+    expect(await drain((p) => p.bookingId === original.id && p.kind === 'reminder')).toEqual([])
+  })
+
   it('emails both sides when the host cancels, over REST and MCP', async () => {
     const asHost = { authorization: `Bearer ${hostKey}` }
     const first = (await book('2026-11-03T11:00:00Z')).body as unknown as Booked

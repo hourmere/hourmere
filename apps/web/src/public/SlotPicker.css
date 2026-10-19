@@ -1,0 +1,290 @@
+.picker .picker-title {
+  margin: 0 0 var(--space-4);
+  font-size: 1.2rem;
+}
+
+/* Slot picker: calendar and the chosen day's times side by side from 640px */
+
+.picker .picker-body {
+  display: grid;
+  gap: var(--space-5);
+}
+
+@media (min-width: 640px) {
+  .picker .picker-body {
+    grid-template-columns: minmax(0, 1fr) 200px;
+  }
+}
+
+.picker .calendar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+.picker .calendar-month {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.picker .calendar-nav {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.picker .icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.picker .icon-button:hover:not(:disabled) {
+  background: var(--surface-muted);
+}
+
+.picker .icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.picker .calendar-grid {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 2px;
+  table-layout: fixed;
+}
+
+.picker .calendar-grid th {
+  padding: var(--space-1) 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-align: center;
+}
+
+.picker .calendar-grid td {
+  padding: 0;
+  text-align: center;
+}
+
+.picker .day {
+  position: relative;
+  width: 100%;
+  max-width: 48px;
+  aspect-ratio: 1;
+  min-height: 40px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  cursor: default;
+}
+
+.picker .day-available {
+  background: var(--accent-soft);
+  color: var(--accent-soft-text);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.picker .day-available:hover {
+  outline: 2px solid var(--accent);
+}
+
+.picker .day-selected,
+.picker .day-selected:hover {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.picker .day[aria-current="date"]::after {
+  position: absolute;
+  bottom: 5px;
+  left: 50%;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentcolor;
+  transform: translateX(-50%);
+  content: "";
+}
+
+.picker .calendar-grid[aria-busy="true"] .day {
+  opacity: 0.55;
+}
+
+.picker .picker-status {
+  min-height: 1.55em;
+  margin: var(--space-2) 0 var(--space-3);
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.picker .picker-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.picker .picker-error p {
+  margin: 0;
+}
+
+.picker .picker-slots {
+  min-height: 120px;
+}
+
+@media (min-width: 640px) {
+  .picker .picker-slots {
+    min-height: 0;
+  }
+
+  .picker .slots {
+    max-height: 420px;
+    overflow-y: auto;
+    padding-right: var(--space-1);
+  }
+}
+
+.picker .slots-day {
+  margin: 0 0 var(--space-3);
+  font-size: 1rem;
+}
+
+.picker .slots {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.picker .slot {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-small);
+  background: var(--surface);
+  color: var(--link);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.picker .slot:hover {
+  background: var(--accent-soft);
+}
+
+.picker .slot-selected,
+.picker .slot-selected:hover {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.picker .slots-placeholder {
+  margin: 0;
+}
+
+/* Time zone */
+
+:is(.public, .picker) .tz-picker {
+  margin-top: var(--space-3);
+}
+
+:is(.public, .picker) .tz-toggle {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0 var(--space-3);
+  align-items: center;
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+:is(.public, .picker) .tz-toggle:hover {
+  background: var(--surface-muted);
+}
+
+:is(.public, .picker) .tz-caption {
+  grid-column: 1;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+:is(.public, .picker) .tz-current {
+  grid-column: 1;
+}
+
+:is(.public, .picker) .tz-name {
+  font-weight: 600;
+}
+
+:is(.public, .picker) .tz-offset {
+  color: var(--muted);
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+:is(.public, .picker) .tz-change {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  color: var(--link);
+  font-weight: 600;
+}
+
+:is(.public, .picker) .tz-panel {
+  margin-top: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-small);
+  background: var(--surface);
+}
+
+:is(.public, .picker) .tz-options {
+  max-height: 260px;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+:is(.public, .picker) .tz-option {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-small);
+  cursor: pointer;
+}
+
+:is(.public, .picker) .tz-option[data-active="true"] {
+  background: var(--accent-soft);
+  color: var(--accent-soft-text);
+}
+
+:is(.public, .picker) .tz-option[aria-selected="true"] {
+  font-weight: 700;
+}
+
+:is(.public, .picker) .tz-empty {
+  margin: var(--space-2) var(--space-3);
+}
