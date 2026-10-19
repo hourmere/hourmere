@@ -240,8 +240,17 @@ ${footer}
 
 const field = (label: string, text: string) => ({ label, text, html: htmlLines(text) })
 const calendarDecline = {
-  en: 'Declining in your calendar does not cancel this booking. Cancel in Hourmere.',
-  'zh-CN': '在日历中拒绝邀请不会取消预约，请在 Hourmere 中取消。',
+  en: {
+    invitee:
+      "Declining this invitation in your calendar won't cancel the booking. To cancel, use the Cancel link in this email.",
+    host: "Declining this invitation in your calendar won't cancel the booking. To cancel, open the booking in Hourmere.",
+    guest: "Declining this invitation in your calendar won't cancel the booking.",
+  },
+  'zh-CN': {
+    invitee: '在日历中拒绝此邀请不会取消预约。如需取消，请使用此邮件中的“取消”链接。',
+    host: '在日历中拒绝此邀请不会取消预约。如需取消，请在 Hourmere 中打开此预约。',
+    guest: '在日历中拒绝此邀请不会取消预约。',
+  },
 }
 
 /**
@@ -328,7 +337,9 @@ export function bookingEmail(
   const manageLinks =
     recipient.role === 'attendee' && kind !== 'cancelled' ? recipient.manageLinks : undefined
   const language = interfaceLanguage(recipient.locale) ?? 'en'
-  const footer = kind === 'confirmed' ? { language, text: calendarDecline[language] } : undefined
+  const footerRole = isHost ? 'host' : manageLinks ? 'invitee' : 'guest'
+  const footer =
+    kind === 'confirmed' ? { language, text: calendarDecline[language][footerRole] } : undefined
 
   return render(
     recipient.email,

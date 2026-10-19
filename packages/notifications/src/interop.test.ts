@@ -235,7 +235,7 @@ describe.skipIf(!serverUrl)('iMIP interoperability', () => {
   })
 
   it.each(['en', 'zh-CN'])(
-    'uses each recipient locale for the decline footer (host %s)',
+    'uses each recipient role and locale for the decline footer (host %s)',
     async (locale) => {
       const info = await setup()
       const attendeeLocale = locale === 'en' ? 'zh-CN' : 'en'
@@ -249,16 +249,48 @@ describe.skipIf(!serverUrl)('iMIP interoperability', () => {
         .set({ locale: attendeeLocale })
         .where('booking_id', '=', info.booking)
         .execute()
+      const guestEmail = 'charles@example.net'
+      await db
+        .insertInto('booking_attendees')
+        .values({
+          booking_id: info.booking,
+          name: 'Charles Babbage',
+          email: guestEmail,
+          time_zone: 'UTC',
+          locale: attendeeLocale,
+          is_booker: false,
+        })
+        .execute()
       const mail = capture()
       await mail.send(info.booking, 'confirmed')
+      expect(mail.sent.map((message) => message.to)).toEqual([
+        hostEmail,
+        'ada@outlook.com',
+        guestEmail,
+      ])
       for (const message of mail.sent) {
-        const chinese = (message.to === hostEmail ? locale : attendeeLocale) === 'zh-CN'
+        const isHost = message.to === hostEmail
+        const isGuest = message.to === guestEmail
+        const chinese = (isHost ? locale : attendeeLocale) === 'zh-CN'
+        const instruction = chinese
+          ? isHost
+            ? '如需取消，请在 Hourmere 中打开此预约。'
+            : isGuest
+              ? ''
+              : '如需取消，请使用此邮件中的“取消”链接。'
+          : isHost
+            ? ' To cancel, open the booking in Hourmere.'
+            : isGuest
+              ? ''
+              : ' To cancel, use the Cancel link in this email.'
         const expected = chinese
-          ? '在日历中拒绝邀请不会取消预约，请在 Hourmere 中取消。'
-          : 'Declining in your calendar does not cancel this booking. Cancel in Hourmere.'
-        expect(message.text.includes(expected)).toBe(true)
-        expect(message.html?.includes(expected)).toBe(true)
+          ? `在日历中拒绝此邀请不会取消预约。${instruction}`
+          : `Declining this invitation in your calendar won't cancel the booking.${instruction}`
+        expect(message.text.endsWith(`\n\n${expected}\n`)).toBe(true)
+        expect(message.html?.includes(`>${expected.replaceAll("'", '&#39;')}</p>`)).toBe(true)
         expect(message.html?.includes(`lang="${chinese ? 'zh-CN' : 'en'}"`)).toBe(true)
+        expect(message.text.includes('token=')).toBe(!isHost && !isGuest)
+        expect(message.html?.includes('token=')).toBe(!isHost && !isGuest)
       }
     },
   )

@@ -307,10 +307,10 @@ Invitee/guest summaries name the host; host summaries name the invitee. Every re
 a neutral DESCRIPTION naming the host and Hourmere.
 No booking answers, private management links or tokens enter calendar data.
 
-`MAIL_FROM` must not be a Gmail or Google Workspace address, or any other address registered
-as a Google account: Gmail treats that address as a Google organizer. Use a separate mailbox
-that can receive mail, because calendar RSVP replies go to ORGANIZER; a no-reply address
-that rejects incoming mail bounces those replies.
+Avoid a Gmail or Google Workspace address, or any other address registered as a Google
+account, for `MAIL_FROM`: Gmail may treat that address as a Google organizer (unconfirmed).
+Use a separate mailbox that can receive mail, because calendar RSVP replies go to ORGANIZER;
+a no-reply address that rejects incoming mail bounces those replies.
 
 The worker atomically pins the organizer email/name on the root before SMTP. Retries,
 reschedules and cancellations reuse it after host/profile or `MAIL_FROM` changes. Keep the

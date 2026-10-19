@@ -42,11 +42,11 @@ from the start. Percent-encode special characters in SMTP credentials. Setup hid
 input on a terminal, and quotes values for Compose.
 
 `MAIL_FROM` becomes the organizer for new calendar invitations. Do not use a Gmail or
-Google Workspace address, or any address registered as a Google account: Gmail treats it as
-a Google organizer. Use a mailbox that can receive mail, and monitor or forward it:
-calendar RSVP replies go there regardless of Reply-To, and a no-reply address that rejects
-mail bounces them. Declining in a calendar does not cancel an Hourmere booking; use the
-cancellation link in the confirmation email.
+Google Workspace address, or any address registered as a Google account: Gmail may treat it
+as a Google organizer (unconfirmed). Use a mailbox that can receive mail, and monitor or
+forward it: calendar RSVP replies go there regardless of Reply-To, and a no-reply address
+that rejects mail bounces them. Declining in a calendar does not cancel an Hourmere booking;
+use the cancellation link in the confirmation email.
 
 The script copies `.env.example`, generates independent `POSTGRES_PASSWORD` and
 `BETTER_AUTH_SECRET` values with `openssl rand -base64 32`, and writes `.env` with mode

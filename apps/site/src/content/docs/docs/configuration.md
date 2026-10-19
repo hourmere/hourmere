@@ -114,12 +114,12 @@ and repository `docs/webhooks.md` for configuration and delivery behavior.
 | `SIGNUP` | `first-user` | `first-user`, `closed` or `open`; existing users can always sign in. |
 | `SIGNUP_ALLOWED_DOMAINS` | Unset | Comma-separated exact email domains, without `@` or wildcards. These domains may register even with `closed`. List subdomains separately. Invalid with `open`. |
 
-`MAIL_FROM` is the organizer for new calendar invitations. It must not be a Gmail or
-Google Workspace address, or any other address registered as a Google account: Gmail treats
-it as a Google organizer. The mailbox must receive mail because calendar RSVP replies go to
-it, independently of the email's Reply-To; a no-reply address that rejects mail bounces
-those replies. Monitor or forward the mailbox. Declining in a calendar does not cancel an
-Hourmere booking; use the confirmation email's cancellation link.
+`MAIL_FROM` is the organizer for new calendar invitations. Avoid a Gmail or Google Workspace
+address, or any other address registered as a Google account: Gmail may treat it as a Google
+organizer (unconfirmed). The mailbox must receive mail because calendar RSVP replies go to
+it, independently of the email's Reply-To; a no-reply address that rejects mail bounces those
+replies. Monitor or forward the mailbox. Declining in a calendar does not cancel an Hourmere
+booking; use the confirmation email's cancellation link.
 
 With `first-user`, the first person who signs in can register; after that the domain allowlist
 applies. In either restricted mode, a pending, unexpired team invitation also permits its

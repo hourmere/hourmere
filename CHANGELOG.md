@@ -88,8 +88,9 @@ stack includes PostgreSQL 18.
   groups, comments, quoted local parts and address-literal domains are unsupported and now
   fail startup with a value-free error. Arbitrary ordinary domains and IDN domains work.
   Do not use a Gmail or Google Workspace address, or any address registered as a Google
-  account: Gmail treats it as a Google organizer. The sending mailbox must receive mail,
-  because calendar RSVP replies go to it; a no-reply address that rejects mail bounces them.
+  account: Gmail may treat it as a Google organizer (unconfirmed). The sending mailbox must
+  receive mail, because calendar RSVP replies go to it; a no-reply address that rejects mail
+  bounces them.
   Invitee calendar replies are not requested or processed; monitor/forward the sending
   mailbox for unsolicited responses. Human email replies reach the host via Reply-To.
   Calendar declines do not cancel bookings. Some clients show only the calendar card;

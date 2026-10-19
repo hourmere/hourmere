@@ -99,7 +99,7 @@ describe('bookingEmail', () => {
         `Reschedule: ${links.reschedule}`,
         `Cancel: ${links.cancel}`,
         '',
-        'Declining in your calendar does not cancel this booking. Cancel in Hourmere.',
+        "Declining this invitation in your calendar won't cancel the booking. To cancel, use the Cancel link in this email.",
         '',
       ].join('\n'),
     )
@@ -194,19 +194,35 @@ describe('bookingEmail', () => {
     { locale: undefined, language: 'en' },
     { locale: null, language: 'en' },
   ])('explains calendar declines in $language for locale $locale', ({ locale, language }) => {
-    const sentence =
+    const expected =
       language === 'zh-CN'
-        ? '在日历中拒绝邀请不会取消预约，请在 Hourmere 中取消。'
-        : 'Declining in your calendar does not cancel this booking. Cancel in Hourmere.'
-    // The footer also reaches hosts and guests, who receive no private manage links.
-    for (const recipient of [host, { ...invitee, manageLinks: undefined }]) {
+        ? {
+            invitee: '在日历中拒绝此邀请不会取消预约。如需取消，请使用此邮件中的“取消”链接。',
+            host: '在日历中拒绝此邀请不会取消预约。如需取消，请在 Hourmere 中打开此预约。',
+            guest: '在日历中拒绝此邀请不会取消预约。',
+          }
+        : {
+            invitee:
+              "Declining this invitation in your calendar won't cancel the booking. To cancel, use the Cancel link in this email.",
+            host: "Declining this invitation in your calendar won't cancel the booking. To cancel, open the booking in Hourmere.",
+            guest: "Declining this invitation in your calendar won't cancel the booking.",
+          }
+    for (const [recipient, sentence] of [
+      [invitee, expected.invitee],
+      [host, expected.host],
+      [{ ...invitee, email: 'cb@example.com', manageLinks: undefined }, expected.guest],
+    ] as const) {
       const m = bookingEmail('confirmed', meeting, { ...recipient, locale })
       expect(m.text).toMatch(/\n\n[^\n]+\n$/)
       expect(m.text.endsWith(`\n\n${sentence}\n`)).toBe(true)
       expect(m.html).toContain(`<p lang="${language}"`)
-      expect(m.html).toContain(`>${sentence}</p>`)
-      expect(m.text).not.toContain('token=')
-      expect(m.html).not.toContain('token=')
+      expect(m.html).toContain(`>${sentence.replaceAll("'", '&#39;')}</p>`)
+      if (recipient !== invitee) {
+        expect(m.text).not.toContain('token=')
+        expect(m.html).not.toContain('token=')
+        expect(m.text).not.toContain('Cancel link')
+        expect(m.html).not.toContain('Cancel link')
+      }
     }
   })
 
@@ -215,10 +231,10 @@ describe('bookingEmail', () => {
     (kind) => {
       for (const recipient of [host, invitee]) {
         const m = bookingEmail(kind, meeting, { ...recipient, locale: 'zh-CN' })
-        expect(m.text).not.toContain('在日历中拒绝邀请')
-        expect(m.html).not.toContain('在日历中拒绝邀请')
-        expect(m.text).not.toContain('Declining in your calendar')
-        expect(m.html).not.toContain('Declining in your calendar')
+        expect(m.text).not.toContain('在日历中拒绝')
+        expect(m.html).not.toContain('在日历中拒绝')
+        expect(m.text).not.toContain('Declining this invitation')
+        expect(m.html).not.toContain('Declining this invitation')
       }
     },
   )
