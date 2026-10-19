@@ -15,6 +15,12 @@ npm run --silent cli -- catalog
 npm run --silent cli -- --help
 ```
 
+The standalone **`@hourmere/cli`** package is prepared for an owner-approved first release.
+After publication, install it with `npm install --global @hourmere/cli` and use
+`hourmere whoami`, `hourmere --help` and `hourmere --version`. See the
+[npm README](../tools/cli/README.md) and [release procedure](releasing.md) for the tarball
+checks and owner approval requirements.
+
 Create an API key on `/app/api-keys` in the intended organization. The CLI reads only
 `HOURMERE_URL` and `HOURMERE_API_KEY`; it does not load `.env`, browser sessions or stored
 credentials. Do not put a key into shell history. `--url ORIGIN` overrides `HOURMERE_URL`.

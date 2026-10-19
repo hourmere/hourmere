@@ -10,6 +10,10 @@ agent gets exactly the behavior, validation, error codes and permissions a perso
 `POST <PUBLIC_URL>/mcp`, e.g. `https://hourmere.example.com/mcp`, on the same server as the
 REST API.
 
+For owner-prepared Registry metadata and directory submission requirements, see
+[MCP directories](mcp-directories.md). The checked-in metadata is a draft; it does not
+assert a live public instance or a published listing.
+
 - **Transport:** Streamable HTTP, built on the official TypeScript SDK
   (`@modelcontextprotocol/server` 2.x).
 - **Protocol versions:** `2026-07-28`, and the earlier revisions that start with

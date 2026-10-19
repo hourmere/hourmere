@@ -1,0 +1,48 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.hourmere/hourmere",
+  "title": "Hourmere",
+  "description": "Discover availability and create, reschedule, or cancel bookings on your Hourmere instance.",
+  "version": "1.0.0",
+  "repository": {
+    "url": "https://github.com/hourmere/hourmere",
+    "source": "github"
+  },
+  "websiteUrl": "https://hourmere.com/docs/mcp/",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://{hourmere_host}/mcp",
+      "variables": {
+        "hourmere_host": {
+          "description": "Your publicly reachable Hourmere instance hostname, without a scheme or path. Each user supplies their own self-hosted instance.",
+          "isRequired": true
+        }
+      },
+      "headers": [
+        {
+          "name": "Authorization",
+          "description": "API-key clients: enter Bearer followed by a space and your Hourmere API key. OAuth clients use discovery instead of this static header.",
+          "isRequired": true,
+          "isSecret": true
+        }
+      ]
+    }
+  ],
+  "_meta": {
+    "io.modelcontextprotocol.registry/publisher-provided": {
+      "com.hourmere": {
+        "publicationStatus": "draft",
+        "notice": "Preparation only. No public MCP deployment, directory listing, or owner approval is asserted by this file.",
+        "oauth": {
+          "version": "2.1",
+          "enabledByDefault": false,
+          "configuration": "MCP_OAUTH_ENABLED=true",
+          "resourceMetadataPath": "/.well-known/oauth-protected-resource/mcp",
+          "authorizationServerMetadataPath": "/.well-known/oauth-authorization-server/api/auth",
+          "scopes": ["mcp:tools", "offline_access"]
+        }
+      }
+    }
+  }
+}
