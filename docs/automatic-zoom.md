@@ -169,12 +169,18 @@ or checked-out database connections, between short owner/session/connection tran
 Token-changing operations share a durable owner-scoped lease in
 `conference_token_operations`: OAuth cannot know its connection until Zoom returns its
 identity. Callbacks acquire the lease before consuming their OAuth state and sample
-connection versions under that lease. An occupied lease returns `busy` immediately,
-leaving state and code unconsumed. The browser returns to Conference accounts, where
-the user can start Connect/Reconnect again after the other operation finishes. The original
-callback can also be retried while the attempt and provider code remain valid.
-Explicit refresh returns `zoom_refresh_in_progress` with a neutral busy/retry message
-while another token operation is in flight; workers return a retryable provider failure.
+connection versions under that lease. An occupied lease returns `busy` immediately before
+inspecting state, without consuming state or exchanging a code. The browser returns to
+Conference accounts, where the user can start Connect/Reconnect again after the other
+operation finishes. An untouched callback can also be retried while its attempt and provider
+code remain valid. A replay of an already claimed or completed attempt also returns `busy`
+while the owner lease is occupied; that result does not prove the state is reusable. Once
+the lease is released, such a replay returns `invalid_state` without another exchange.
+See [Zoom connections](zoom-connections.md#callback-replay-and-busy).
+Explicit refresh adds `errorAlias: "zoom_operation_busy"` alongside the existing
+`error: "zoom_refresh_in_progress"` and a neutral busy/retry message while another token
+operation is in flight; workers return a retryable provider failure. The legacy code is
+deprecated for one release and retained for v1 compatibility.
 Token-changing provider calls have a hard deadline (15 seconds by default). Leases last
 at least one minute, using database time, and finishing transactions check lease ID and expiry
 before consuming provider results. Expired operations cannot overwrite or release a

@@ -12,6 +12,22 @@ for (const kind of ['personal', 'team'] as const)
     )
     await page.goto(app.url + (kind === 'team' ? app.teamPath : app.personalPath))
     await slots
+    // The language control stays in a compact top-right header at both project widths.
+    const header = page.locator('.public-language')
+    const language = header.getByRole('combobox', { name: 'Interface language' })
+    await expect(language).toBeVisible()
+    const headerBox = await header.boundingBox()
+    const languageBox = await language.boundingBox()
+    const cardBox = await page.locator('.booking-layout').boundingBox()
+    const mainBox = await page.locator('.public-main').boundingBox()
+    expect(Boolean(headerBox && languageBox && cardBox && mainBox)).toBe(true)
+    if (headerBox && languageBox && cardBox && mainBox) {
+      expect(headerBox.y).toBeLessThan(20)
+      expect(headerBox.height).toBeLessThan(80)
+      expect(languageBox.x + languageBox.width).toBeGreaterThan(mainBox.x + mainBox.width - 50)
+      expect(cardBox.y).toBeGreaterThanOrEqual(headerBox.y + headerBox.height)
+      expect(cardBox.y).toBeLessThan(160)
+    }
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,

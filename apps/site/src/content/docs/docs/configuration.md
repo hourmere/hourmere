@@ -21,6 +21,8 @@ plain Compose file or the optional automatic HTTPS override; see
 | `PORT` | `3000` | Direct-server TCP port (`0`–`65535`). `0` lets the OS choose a port and requires an explicit `PUBLIC_URL`; links always use that configured external origin. In plain Compose, `.env` `PORT` changes the loopback host port; the container still listens on `3000`. The HTTPS override removes that host mapping, so `PORT` has no effect there. |
 | `PUBLIC_URL` | `http://localhost:<PORT>` | External HTTP(S) origin, with no path/query. Use HTTPS publicly. Plain Compose defaults to `http://localhost:3000` independently of its host port setting. Bundled Caddy requires an HTTPS hostname origin; setup does not accept a public port or path. |
 | `HOSTED_SIGNUP_URL` | `https://hourmere.com` | Hosted service destination for public attribution and confirmation links. Set the hosted sign-up page URL when available; HTTP(S), no credentials, query or fragment. Independent of this instance’s `PUBLIC_URL`; attribution cannot be disabled. |
+| `PRIVACY_POLICY_URL` | Unset | This instance operator's privacy policy. Absolute HTTP(S) URL, at most 2048 characters, without credentials, whitespace or control characters. Empty hides the privacy link. |
+| `TERMS_URL` | Unset | This instance operator's terms. Same URL rules as `PRIVACY_POLICY_URL`. Empty hides the terms link. |
 | `BETTER_AUTH_SECRET` | Required | At least 32 non-whitespace random characters. Signs sessions and protects sign-in tokens. Changing it signs people out. |
 | `AUTO_MIGRATE` | `true` | Apply SQL/job migrations on startup. `false` requires manual migrations first; startup still needs database access. Forwarded by the default Compose file with a default of `true`. |
 | `WEB_DIST` | Unset | Built SPA directory. Not forwarded by the default Compose file: Docker sets `/app/apps/web/dist`; development uses Vite instead. |
@@ -30,6 +32,22 @@ plain Compose file or the optional automatic HTTPS override; see
 | `WEBHOOK_PRIVATE_TARGETS` | Unset | Self-hosting only: up to 32 comma-separated exact `hostname:port`, `IPv4[/CIDR]:port[-port]` or `[IPv6[/CIDR]]:port[-port]` entries permitting private HTTP(S) webhook destinations. Empty preserves public HTTPS-only delivery. Set identically on web and worker. |
 | `MCP_OAUTH_ENABLED` | `false` | Enable MCP OAuth connectors alongside API keys. Requires HTTPS except on loopback; explicit organization approval and revocation at `/app/connected-apps`. No calendar/provider client credentials needed. Set identically on web and worker. |
 | `HOURMERE_ROLE` | `all` | `all`: API and workers; `web`: API/queues only; `worker`: jobs and health endpoint only. The separate-worker Compose overlay fixes the app to `web` and the worker to `worker`, independently of this `.env` setting. |
+
+Policy links belong to the instance's operator and are independent of `PUBLIC_URL` and
+`HOSTED_SIGNUP_URL`. Self-hosted instances have no policy URL defaults: configure your own
+legal pages before inviting users. Setup preserves the empty example values; Compose forwards
+both variables to the app and its inherited worker. The app's public instance endpoint exposes
+each configured URL so signed-out, signed-in, booking and MCP consent pages can link to it.
+
+For the Hourmere hosted instance, set these values in its deployment environment and recreate
+the app after deployment:
+
+```dotenv
+PRIVACY_POLICY_URL=https://hourmere.com/privacy
+TERMS_URL=https://hourmere.com/terms
+```
+
+These values are explicit deployment settings; the server does not infer policies from a hostname.
 
 `npm run dev` points the application at Vite (`http://localhost:5173`) and defaults signup to
 open only when neither signup setting was supplied. Node 26 runs TypeScript sources
@@ -172,12 +190,35 @@ keeps the plain path.
 | Variable | Default | Meaning |
 |---|---|---|
 | `POSTGRES_PASSWORD` | Required | Initializes the PostgreSQL role and becomes the app's `PGPASSWORD`. Changing `.env` does not change an already initialized database role's password. |
-| `COMPOSE_FILE` | `docker-compose.yml` | Not forwarded by the default Compose file: consumed by the Compose CLI. Setup writes `docker-compose.yml:docker-compose.proxy.yml` for bundled HTTPS, or `docker-compose.yml` for plain mode. After setup, append `:docker-compose.worker.yml` to run a separate worker; the overlay automatically switches the app to `web`. The saved `.env` preserves this choice for backups and upgrades without editing tracked Compose files. |
+| `COMPOSE_FILE` | `docker-compose.yml` | Not forwarded by the default Compose file: consumed by the Compose CLI. Setup writes `docker-compose.yml:docker-compose.proxy.yml` for bundled HTTPS, or `docker-compose.yml` for plain mode. After setup, run `./scripts/enable-worker.sh` to select the separate-worker overlay safely; it preserves the proxy selection and automatically switches the app to `web`. The saved `.env` preserves this choice for backups and upgrades without editing tracked Compose files. |
 | `COMPOSE_PROJECT_NAME` | `hourmere` | Not forwarded by the default Compose file: consumed by the Compose CLI to select containers, networks and volumes. Setup persists this name; set it in setup's environment to choose an independent deployment. Keep the original name when migrating an existing installation; persist the new name when restoring to a separate project. |
 | `APP_IMAGE` | `hourmere:local` | Local image tag built from this checkout; `pull_policy: never` remains in force. Use a distinct tag for independent deployments on one Docker host. No prebuilt public image is published yet. |
 | `PROXY_SUBNET` | `172.30.62.0/28` | Not forwarded by the default Compose file: the HTTPS override uses this dedicated IPv4 ingress subnet. Change it together with `PROXY_IP` and `PROXY_DYNAMIC_RANGE` before starting if it overlaps another network or another deployment. |
 | `PROXY_IP` | `172.30.62.2` | Not forwarded by the default Compose file: the HTTPS override assigns Caddy this address and forwards it as the app's `TRUSTED_PROXIES`. Must be a free usable address in `PROXY_SUBNET`, outside `PROXY_DYNAMIC_RANGE`. |
 | `PROXY_DYNAMIC_RANGE` | `172.30.62.8/29` | Not forwarded by the default Compose file: the HTTPS override allocates app and one-off app container addresses from this range inside `PROXY_SUBNET`, keeping Caddy's `PROXY_IP` outside it. Workers use only the default network. Change all three network settings together for another subnet/deployment. |
+
+Enable a separate worker from the deployment checkout, then verify that Compose selects it
+before recreating the stack:
+
+```sh
+unset COMPOSE_FILE
+./scripts/enable-worker.sh
+docker compose config --services | grep -qx worker
+docker compose up -d --build --wait
+```
+
+Continue only if verification succeeds. The helper rewrites only `COMPOSE_FILE` in `.env`,
+handles quoted/unquoted and `export COMPOSE_FILE=` assignments, keeps mode `600` and
+refuses symlinks. Run `./scripts/disable-worker.sh` to deselect it, after removing the
+worker container as described in [self-hosting](/docs/self-hosting#switch-back-to-a-single-container).
+If editing manually, replace the whole quoted line, for example:
+
+```dotenv
+COMPOSE_FILE='docker-compose.yml:docker-compose.proxy.yml:docker-compose.worker.yml'
+```
+
+Keep custom overlays inside the quotes. A shell-exported `COMPOSE_FILE` overrides `.env`;
+unset it before using the helper and Compose commands.
 
 Plain mode publishes `127.0.0.1:<PORT>:3000` for your own host proxy or a private local
 trial. The HTTPS override removes all app host mappings, publishes TCP 80/443 and UDP 443 on

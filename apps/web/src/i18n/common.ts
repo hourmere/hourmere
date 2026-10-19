@@ -1,5 +1,14 @@
 // Public/shared UI messages. Admin messages live in a lazy catalog.
 export const common = {
+  'Privacy policy': '隐私政策',
+  'Terms of service': '服务条款',
+  // Google's official Simplified Chinese branding guidelines approve this wording.
+  'Continue with Google': '继续使用 Google',
+  'Sign in with Microsoft': '使用 Microsoft 登录',
+  'Use a personal Microsoft account or a work or school account.':
+    '使用个人 Microsoft 账号或工作或学校账号。',
+  'Google sign-in shares your name, email and profile picture with Hourmere. Calendar access is a separate, optional step in Calendars.':
+    '通过 Google 登录会向 Hourmere 提供你的姓名、邮箱和头像。日历访问是独立的可选步骤，可在“日历”页面连接。',
   'The original organizer’s verified invitation identity is unavailable. This booking will not switch organizers. Contact the host or cancel the booking.':
     '原组织者已验证的邀请身份不可用。此预约不会更换组织者。请联系主持人或取消预约。',
 
@@ -171,6 +180,9 @@ export const common = {
   'Remove guest': '移除来宾',
   Reschedule: '改期',
   Rescheduling: '正在改期',
+  'Rescheduling {title} with {hosts}, now on {date}, {time}':
+    '正在改期 {title} 与 {hosts}，当前时间：{date}，{time}',
+  'Rescheduling {title}, now on {date}, {time}': '正在改期 {title}，当前时间：{date}，{time}',
   'Save your link to change or cancel': '保存用于更改或取消的链接',
   'Search by city or offset': '按城市或时差搜索',
   'Search time zones': '搜索时区',

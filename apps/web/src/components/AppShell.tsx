@@ -6,6 +6,7 @@ import { msg, type UiText } from '../i18n/translate.ts'
 import { PATHS } from '../paths.ts'
 import { useMe, useSession } from '../session.tsx'
 import { leavesPage, UnsavedChangesProvider, useConfirmLeave } from '../unsaved-changes.tsx'
+import { InstanceLegalLinks } from './LegalLinks.tsx'
 import { Logo } from './Logo.tsx'
 
 export const NAV_ITEMS = [
@@ -136,6 +137,7 @@ function Shell() {
           <Outlet />
         </main>
       </div>
+      <InstanceLegalLinks />
     </div>
   )
 }

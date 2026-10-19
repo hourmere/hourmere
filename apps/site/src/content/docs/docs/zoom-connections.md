@@ -76,7 +76,9 @@ challenge to the browser.
   invalid grant or a successful scope/identity mismatch requires reconnection.
   A crashed or uncommittable rotation remains incomplete until the next worker or explicit
   refresh acquires a valid operation lease and marks it as requiring reconnection. An
-  operation busy with another Zoom identity reports a neutral retry message.
+  incomplete connection still offers **Refresh Zoom account**. If refresh reports that
+  reconnection is required, choose **Reconnect Zoom**. An operation busy with another Zoom
+  identity reports a neutral retry message.
   A confirmed rotation followed only by a
   transient identity lookup error retains the **new** token and reports the metadata error.
 - **Reconnect Zoom** replaces existing local access and requires the same Zoom identity. Its saved identity/meeting permission mode and
@@ -97,8 +99,12 @@ challenge to the browser.
   that identity association, so a later grant creates a new connection. Reconnecting a disconnected record also checks capacity. Pending authorization attempts are
   limited to five per user, expire after ten minutes, and are single-use and session-bound.
   If another token operation is busy, the callback returns to Conference accounts with a
-  retry message before consuming the attempt or exchanging the code. Start Connect/Reconnect
-  again after that operation finishes.
+  retry message before inspecting or consuming state or exchanging the code. Start
+  Connect/Reconnect again after that operation finishes. A replay of an already claimed
+  or completed attempt also reports `busy` while the owner's lease is occupied; this does
+  not prove that the attempt is reusable. After the operation finishes, that replay reports
+  `invalid_state` without another exchange. Only an untouched, unexpired attempt with a
+  still-valid provider code can be retried successfully.
 - Deleting the Hourmere user removes credentials, pending attempts, Zoom ID, display name and
   email from the retained record. A new Hourmere user, including one with the same email,
   cannot inherit the old connection ID. A future explicit authorization creates a new ID.
@@ -130,6 +136,12 @@ All writes require an empty JSON object and a live owner browser session:
 
 Callback redirects use a fixed allowlist of outcomes under `/app/conferences`. Responses use
 `Cache-Control: no-store` and `Referrer-Policy: no-referrer`.
+
+A refresh conflict returns HTTP 409 with `error: "zoom_refresh_in_progress"` and the neutral
+`errorAlias: "zoom_operation_busy"`. Prefer the alias in new clients and accept the old code
+for older servers. The old code is deprecated for one release and retained for v1
+compatibility. The conflict covers any token operation owned by the same Hourmere user,
+including another connection's authorization or refresh; wait briefly and try again.
 
 Protocol references, checked 19 October 2026:
 [Zoom OAuth](https://developers.zoom.us/docs/integrations/oauth/),

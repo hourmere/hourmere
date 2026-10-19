@@ -1,5 +1,6 @@
 import { createContext, type ReactNode, useContext, useEffect, useRef, useState } from 'react'
 import { api } from '../api/client.ts'
+import { LegalLinks } from '../components/LegalLinks.tsx'
 import { Logo } from '../components/Logo.tsx'
 import { usePageTitle } from '../hooks.ts'
 import { LanguageSwitcher, useI18n } from '../i18n/runtime.tsx'
@@ -29,12 +30,18 @@ export function PublicLayout({ children, wide = false }: { children: ReactNode; 
   const { t } = useI18n()
   const [beforeBrand, afterBrand] = t('Powered by {0}').split('{0}')
   const [hostedSignupUrl, setHostedSignupUrl] = useState('https://hourmere.com')
+  const [policyUrls, setPolicyUrls] = useState<{
+    privacyPolicyUrl?: string
+    termsUrl?: string
+  }>({})
   useEffect(() => {
     const controller = new AbortController()
     api.GET('/api/v1/instance', { signal: controller.signal }).then(
       ({ data }) => {
-        if (!controller.signal.aborted && data?.hostedSignupUrl)
-          setHostedSignupUrl(data.hostedSignupUrl)
+        if (!controller.signal.aborted && data) {
+          if (data.hostedSignupUrl) setHostedSignupUrl(data.hostedSignupUrl)
+          setPolicyUrls({ privacyPolicyUrl: data.privacyPolicyUrl, termsUrl: data.termsUrl })
+        }
       },
       () => {}, // Attribution remains usable when instance discovery is unavailable.
     )
@@ -45,9 +52,9 @@ export function PublicLayout({ children, wide = false }: { children: ReactNode; 
   return (
     <HostedSignupUrl value={hostedSignupUrl}>
       <div className={`public${embedded ? ' public-embedded' : ''}`}>
-        <div className="public-language">
+        <header className="public-language">
           <LanguageSwitcher />
-        </div>
+        </header>
         <main id="main" className={`public-main${wide ? ' public-main-wide' : ''}`}>
           {children}
         </main>
@@ -57,6 +64,7 @@ export function PublicLayout({ children, wide = false }: { children: ReactNode; 
             <Logo size={18} />
             {afterBrand}
           </a>
+          <LegalLinks {...policyUrls} />
         </footer>
       </div>
     </HostedSignupUrl>
