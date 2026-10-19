@@ -412,7 +412,7 @@ describe.skipIf(!databaseUrl)('independent Zoom connections (real Postgres)', ()
     }
     const a = await start(),
       b = await start(),
-      bothIdentities = deferred<void>(),
+      firstIdentity = deferred<void>(),
       releaseIdentities = deferred<void>()
     let identitiesRead = 0
     const providers = new Map(
@@ -438,7 +438,7 @@ describe.skipIf(!databaseUrl)('independent Zoom connections (real Postgres)', ()
             const fake = providers.get(accessToken)
             if (!fake) throw new Error('Unexpected synthetic access token')
             const identity = await fake.client.identity(accessToken, signal)
-            if (++identitiesRead === 2) bothIdentities.resolve()
+            if (++identitiesRead === 1) firstIdentity.resolve()
             await releaseIdentities.promise
             return identity
           },
@@ -450,20 +450,14 @@ describe.skipIf(!databaseUrl)('independent Zoom connections (real Postgres)', ()
       finishZoomConnection(deps, owner, query(b.state, { code: 'new-identity-b' })),
     ]
     const settledCallbacks = Promise.allSettled(callbacks)
-    let timeout: ReturnType<typeof setTimeout> | undefined
     try {
-      const bothReachedIdentity = await Promise.race([
-        bothIdentities.promise.then(() => true),
-        new Promise<boolean>((resolve) => {
-          timeout = setTimeout(() => resolve(false), 1500)
-        }),
-      ])
-      expect(bothReachedIdentity).toBe(true)
+      await firstIdentity.promise
+      expect(identitiesRead).toBe(1)
     } finally {
-      clearTimeout(timeout)
       releaseIdentities.resolve()
       await settledCallbacks
     }
+    expect(identitiesRead).toBe(2)
     const outcomes = await Promise.all(callbacks)
     expect(outcomes.sort()).toEqual(['connected', 'connection_limit'])
     expect((await listConferenceConnections(deps, owner)).data).toHaveLength(5)
@@ -733,7 +727,7 @@ describe.skipIf(!databaseUrl)('independent Zoom connections (real Postgres)', ()
       code: 'zoom_connection_not_found',
     })
   })
-  async function pauseFirstCommit() {
+  async function pauseFirstCommit(connectionId?: string) {
     const pool = createPool(database.url),
       reached = deferred<void>(),
       resume = deferred<void>()
@@ -753,7 +747,11 @@ describe.skipIf(!databaseUrl)('independent Zoom connections (real Postgres)', ()
                     ])
                     const text =
                       typeof input === 'string' ? input : (input as { text?: string })?.text
-                    if (armed && text?.trim().toLowerCase() === 'commit') {
+                    if (
+                      armed &&
+                      text?.trim().toLowerCase() === 'commit' &&
+                      (!connectionId || (await row(connectionId)).status === 'refreshing')
+                    ) {
                       armed = false
                       reached.resolve()
                       await resume.promise
@@ -805,7 +803,7 @@ describe.skipIf(!databaseUrl)('independent Zoom connections (real Postgres)', ()
   })
   it('disconnect between durable token retirement and refresh prevents provider I/O and resurrection', async () => {
     const first = await connect(),
-      paused = await pauseFirstCommit(),
+      paused = await pauseFirstCommit(first.id),
       count = provider.calls.length
     try {
       const refreshing = refreshConference({ ...deps, db: paused.db }, owner, first.id)
@@ -831,7 +829,7 @@ describe.skipIf(!databaseUrl)('independent Zoom connections (real Postgres)', ()
     async (change) => {
       const disposable = await conferenceTestSession(db),
         first = await connect(disposable),
-        paused = await pauseFirstCommit(),
+        paused = await pauseFirstCommit(first.id),
         count = provider.calls.length
       const refreshing = refreshConference({ ...deps, db: paused.db }, disposable, first.id)
       const outcome = refreshing.catch((error: unknown) => error)

@@ -164,15 +164,34 @@ rate limits and other rejected requests use bounded provider backoff. A subseque
 may POST because the rejected operation did not create a meeting. This policy does not
 apply to unknown transport outcomes or server failures.
 
-Browser OAuth and explicit refresh perform bounded provider I/O without row locks, between
-short owner/session/claim transactions. Completion rechecks the live session and claim;
-OAuth also rejects changed connection row versions. A disconnect, logout or newer grant
-cannot be overwritten by an in-flight response. Meeting workers retain owner key-share and
-connection protection, compatible with public booking host share locks. No booking, host,
-fairness or root-intent lock spans the network. Results apply after credential I/O
-commits, under booking then intent/mirror locks with revision and lease checks. Expired
-credentials are durably removed from the row before the rotating refresh request. Refresh
-transport failures (5xx, rate limit, timeout or network failure) receive at most three
+Browser OAuth, explicit refresh and meeting-worker provider I/O run without database locks
+or checked-out database connections, between short owner/session/connection transactions.
+Token-changing operations share a durable owner-scoped lease in
+`conference_token_operations`: OAuth cannot know its connection until Zoom returns its
+identity. Callbacks wait for an earlier token operation and sample connection versions
+after acquiring the lease. Explicit refresh returns `zoom_refresh_in_progress` while
+another token operation is in flight; workers return a retryable provider failure.
+Token-changing provider calls have a hard deadline (15 seconds by default). Leases last
+at least one minute, using database time, and finishing transactions check lease ID and expiry
+before consuming provider results. Expired operations cannot overwrite or release a
+replacement's lease. Success and failure release only the owned lease; a crashed operation
+becomes recoverable after expiry. Disconnect, logout and user deletion remain immediate.
+This prevents concurrent rotation from discarding a successful newer OAuth grant.
+
+Callback expiry is checked atomically with its single-use claim before exchange; finishing
+a successful exchange after that expiry is allowed. Claimed attempts are excluded from
+expiry cleanup. Current membership in the acting organization is required before exchange
+and before storing credentials, with the same any-member rule as connection listing.
+A conflicting identity-only exchange proactively retires an existing meetings grant even
+when unrelated connection metadata changed. State/session invalidation still wins.
+
+Workers compare their pinned identity, credential revision and refresh lease before and
+after I/O. A stale rejection cannot retire a newer grant or mutate credentials during
+another token operation. Late meeting results retain the validated meeting ID for cleanup
+while withholding readiness after access was withdrawn.
+No booking, host, fairness or root-intent lock spans the network. Results apply under
+booking then intent/mirror locks with revision and lease checks. Expired credentials are
+durably removed before rotating refresh requests. Refresh transport failures (5xx, rate limit, timeout or network failure) receive at most three
 attempts with 100 ms then 200 ms backoff inside the operation deadline. Exhausted transient
 failures restore the original encrypted credentials and keep the connection active so a
 later worker/action can recover; they do not request reconnection. Other token rejections

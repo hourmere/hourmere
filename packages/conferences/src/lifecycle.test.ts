@@ -17,8 +17,7 @@ import {
 } from '@hourmere/scheduling'
 import { prepareBookingConference } from '@hourmere/scheduling/conferences'
 import { createFixtures, createTestUser } from '@hourmere/scheduling/testing'
-import { sql } from 'kysely'
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { writeBookingCalendar } from '../../calendars/src/booking-events.ts'
 import { retryBookingConference, writeBookingConference } from '../../calendars/src/conferences.ts'
 import { GOOGLE_CALENDAR_SYNC_SCOPES } from '../../calendars/src/google.ts'
@@ -1173,7 +1172,7 @@ describe.skipIf(!serverUrl)('automatic Zoom durable booking lifecycle (real Post
     expect(refreshCalls).toHaveLength(1)
     expect(posts()).toHaveLength(0)
   })
-  it('preserves the discovered meeting ID when the provider transaction cannot commit', async () => {
+  it('preserves the discovered meeting ID when final provider validation cannot commit', async () => {
     const b = await book()
     let fail = true
     const dbWithFailure = new Proxy(db, {
@@ -1183,7 +1182,7 @@ describe.skipIf(!serverUrl)('automatic Zoom durable booking lifecycle (real Post
             execute: async (body: (trx: Db) => Promise<unknown>) =>
               target.transaction().execute(async (trx) => {
                 const result = await body(trx)
-                if (fail) {
+                if (fail && posts().length > 0) {
                   fail = false
                   throw new Error('synthetic provider transaction commit failure')
                 }
@@ -1223,7 +1222,7 @@ describe.skipIf(!serverUrl)('automatic Zoom durable booking lifecycle (real Post
           return () => ({
             execute: async (body: (trx: Db) => Promise<unknown>) => {
               const result = await target.transaction().execute(body)
-              if (pause) {
+              if (pause && posts().length > 0) {
                 pause = false
                 committed.resolve()
                 await release.promise
@@ -1240,7 +1239,7 @@ describe.skipIf(!serverUrl)('automatic Zoom durable booking lifecycle (real Post
     )
     const original = writeBookingConference(deps, b.booking.id)
     await committed.promise
-    // HTTP POST and credential commit have completed, but the root has not learned the ID.
+    // HTTP POST and final validation have completed, but the root has not learned the ID.
     await db
       .updateTable('booking_conferences')
       .set({ lease_until: new Date(NOW.epochMilliseconds - 1) })
@@ -1274,7 +1273,7 @@ describe.skipIf(!serverUrl)('automatic Zoom durable booking lifecycle (real Post
           return () => ({
             execute: async (body: (trx: Db) => Promise<unknown>) => {
               const result = await target.transaction().execute(body)
-              const ownPhase = ++phase
+              const ownPhase = posts().length > 0 ? ++phase : 0
               if (ownPhase === 1) {
                 firstCommit.resolve()
                 await allowFirst.promise
@@ -1425,7 +1424,7 @@ describe.skipIf(!serverUrl)('automatic Zoom durable booking lifecycle (real Post
       }),
     ).rejects.toMatchObject({ code: 'zoom_host_session_required' })
   })
-  it('serializes disconnect after an in-flight provider transaction without losing its validated meeting identity', async () => {
+  it('lets disconnect finish during provider I/O while retaining its late validated meeting identity', async () => {
     const b = await book(),
       entered = barrier(),
       release = barrier<Response>()
@@ -1435,15 +1434,14 @@ describe.skipIf(!serverUrl)('automatic Zoom durable booking lifecycle (real Post
     }
     const running = writeBookingConference(deps, b.booking.id)
     await entered.promise
-    const disconnect = disconnectConference(conference, owner, connectionId)
-    await vi.waitFor(async () => {
-      const result = await sql<{
-        blocked: boolean
-      }>`SELECT exists(SELECT 1 FROM pg_stat_activity a WHERE a.datname=current_database() AND cardinality(pg_blocking_pids(a.pid))>0) AS blocked`.execute(
-        db,
-      )
-      expect(result.rows[0]?.blocked).toBe(true)
-    })
+    await disconnectConference(conference, owner, connectionId)
+    expect(
+      await db
+        .selectFrom('conference_connections')
+        .select(['status', 'credentials'])
+        .where('id', '=', connectionId)
+        .executeTakeFirstOrThrow(),
+    ).toEqual({ status: 'disconnected', credentials: null })
     release.resolve(
       Response.json({
         id: 81234567890,
@@ -1454,7 +1452,7 @@ describe.skipIf(!serverUrl)('automatic Zoom durable booking lifecycle (real Post
         duration: 30,
       }),
     )
-    await Promise.all([running, disconnect])
+    await running
     expect((await row()).zoom_meeting_id).toBe('81234567890')
     expect(
       await db

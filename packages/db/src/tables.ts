@@ -467,6 +467,12 @@ export interface ConferenceOauthStates {
   verifier: Buffer | null;
 }
 
+export interface ConferenceTokenOperations {
+  expires_at: Timestamp;
+  operation_id: string;
+  user_id: string;
+}
+
 export interface EventTypeHosts {
   destination_calendar_id: string | null;
   event_type_id: string;
@@ -635,6 +641,7 @@ export interface DB {
   calendars: Calendars;
   conference_connections: ConferenceConnections;
   conference_oauth_states: ConferenceOauthStates;
+  conference_token_operations: ConferenceTokenOperations;
   event_type_hosts: EventTypeHosts;
   event_types: EventTypes;
   mcp_oauth_client_activity: McpOauthClientActivity;
