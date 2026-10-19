@@ -5,6 +5,7 @@ import { createRoute, type Hook, OpenAPIHono, z } from '@hono/zod-openapi'
 import {
   type CallerResolver,
   escapeControlCharacters,
+  InvalidApiKeyError,
   MCP_OAUTH_SCOPE,
   MCP_OAUTH_SCOPES,
 } from '@hourmere/auth'
@@ -295,6 +296,10 @@ export function createApp({
       if (err.res) return err.getResponse()
       const error = httpErrorCodes[err.status] ?? 'invalid_request'
       return c.json(err.message ? { error, message: err.message } : { error }, err.status)
+    }
+    if (err instanceof InvalidApiKeyError) {
+      c.header('WWW-Authenticate', 'Bearer')
+      return c.json({ error: 'unauthorized' }, 401)
     }
     // Failures the caller can act on, thrown by the service layer. An unknown kind (only
     // possible by bypassing the type) is a bug and falls through to the 500 below.

@@ -996,6 +996,42 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
     expect(error.access_token === undefined && error.refresh_token === undefined).toBe(true)
     expect((await refreshState()) === before).toBe(true)
   })
+  it('returns invalid_grant when the grant is deleted between approval and code exchange', async () => {
+    const s = await session(),
+      a = await begin(s),
+      url = await approved(s, a)
+    const consent = await db
+      .selectFrom('auth.oauthConsent')
+      .select('referenceId')
+      .where('userId', '=', s.user.id)
+      .executeTakeFirstOrThrow()
+    expect(typeof consent.referenceId === 'string').toBe(true)
+    // Keep the approved code and native consent so exchange reaches the missing-grant guard.
+    const deleted = await db
+      .deleteFrom('mcp_oauth_grants')
+      .where('id', '=', consent.referenceId as string)
+      .returning('id')
+      .execute()
+    expect(deleted).toHaveLength(1)
+    const denied = await exchange(a, url.searchParams.get('code') as string)
+    expect(denied.status).toBe(400)
+    const error = (await denied.json()) as {
+      error: string
+      code?: string
+      access_token?: string
+      refresh_token?: string
+    }
+    expect(error.error).toBe('invalid_grant')
+    expect(error.code).toBeUndefined()
+    expect(error.access_token === undefined && error.refresh_token === undefined).toBe(true)
+    expect(
+      await db
+        .selectFrom('auth.oauthRefreshToken')
+        .select('id')
+        .where('userId', '=', s.user.id)
+        .execute(),
+    ).toEqual([])
+  })
   it('returns invalid_grant when membership ends between approval and code exchange', async () => {
     const s = await session(),
       team = await createTestTeam(db, [{ user: s.user, role: 'owner' }]),
