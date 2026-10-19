@@ -21,7 +21,8 @@ requires a new API version too.
 planned launch date appears in the introduction above the first `##` heading, outside
 the extracted release body. The owner reviews the exact candidate at the publication
 approval. Use absolute HTTPS links in release sections so they work on GitHub Release
-pages. Subsequent releases use a matching dated
+pages. Release preparation points this repository's `blob/main` links at the release tag,
+so published guidance stays with that version. Subsequent releases use a matching dated
 heading such as `## [1.0.1] - 2026-12-07`, with `### Added`, `### Changed`, `### Fixed`,
 `### Security` and `### Upgrade notes` as applicable. The workflow extracts only the
 matching section and refuses missing or ambiguous notes. Keep upgrade instructions with
@@ -52,10 +53,9 @@ An absent environment or empty reviewer list fails the workflow before publicati
 
 The release job uses the repository's `GITHUB_TOKEN` with only the needed release/package
 and attestation permissions; no long-lived registry credential is required. Allow Actions
-to create packages; in the GHCR package's **Manage Actions access** settings, grant this
-repository **Write** access. After the first authorized push, set the package visibility
-to **Public** and verify unauthenticated access. A new package may initially be private;
-retain this as a first-release check, not a claim that a public image exists already.
+to create packages. Check package visibility and repository access after the first
+authorized push, as described in the publication checklist below. A new package may
+initially be private; this does not claim that a public image exists already.
 
 ## Prepare the reviewed commit
 
@@ -124,11 +124,16 @@ gh attestation verify oci://ghcr.io/hourmere/hourmere:1.0.0 -R hourmere/hourmere
 ```
 
 Smoke-test the intended deployment and check the upgrade notes before announcing
-availability. After the first successful public publish, complete this documentation
-checklist in a separate follow-up:
+availability. After the first successful image push, complete this publication checklist.
+Make the documentation changes in a separate follow-up after verifying public access:
 
+- After the first authorized `GITHUB_TOKEN` push, check the GHCR package's **Manage Actions
+  access** settings: that first push normally grants this repository **Write** access
+  automatically. Grant **Write** if it is missing, set visibility to **Public**, and verify
+  unauthenticated access. Check this after the push, when the package exists.
 - Rename the changelog heading to `## [1.0.0] - 2026-11-30` and remove the introductory
   candidate note above the first `##` heading.
+- Update `README.md` line 2 (`Self-host from source`) to describe the published image.
 - Replace the no-stable-release/public-image sentences in `README.md`, `SECURITY.md`,
   the site's self-hosting, comparison and index guides, homepage, site description and
   legal pages. Update `apps/site/src/legal-content.test.ts` (currently line 79, asserting
@@ -178,7 +183,7 @@ Do not publish the preparation version or change the version only on the CI runn
 From the repository root, with Node 26 and the lockfile dependencies installed:
 
 ```sh
-npm run build --workspace @hourmere/cli
+npm run cli:build
 npm pack --dry-run --workspace @hourmere/cli
 npm run cli:pack-smoke
 ```
@@ -238,8 +243,9 @@ The preferred command, from `tools/cli` in that protected GitHub-hosted release 
 npm publish --provenance --access public
 ```
 
-The job builds through `prepack`, checks that the committed CLI version matches the
-approved product tag and verifies the standalone tarball. After an authorized publish,
+The smoke command builds the compiled files through `npm run cli:build`; the job checks
+that the committed CLI version matches the approved product tag and verifies the standalone
+tarball before publishing. After an authorized publish,
 the owner verifies npm's version, tarball, public access and provenance link. A local
 publish does not provide the protected job's OIDC provenance.
 

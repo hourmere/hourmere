@@ -24,7 +24,7 @@ and [remote ownership rules](https://github.com/modelcontextprotocol/registry/bl
 The draft uses the latest released official
 [2025-12-11 JSON schema](https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json),
 vendored with its upstream license in [`scripts/schemas/mcp-registry`](../scripts/schemas/mcp-registry).
-Its `remotes[].headers` entry requests a **secret user input** containing the complete
+Its optional `remotes[].headers` entry requests a **secret user input** containing the complete
 `Bearer <API key>` value of the `Authorization` header; no credential or default is embedded. Optional
 OAuth 2.1 is documented under the official publisher-provided `_meta` extension because
 this schema has no standard OAuth configuration field. That extension is informational;
@@ -129,8 +129,8 @@ metadata as the factual source.
 ## mcp.so — owner submission and payment decision
 
 The [Remote Server form](https://mcp.so/submit?type=remote-server) currently requires a
-remote endpoint URL and name. Its paid submission flow shows a US$39 one-time fee and
-immediate publication; the owner must decide whether to pay and recheck the actual form
+remote endpoint URL and name. Its paid submission flow shows a one-time fee of 39 (currency
+not stated) and immediate publication; the owner must decide whether to pay and recheck the actual form
 before proceeding. The [MCP Server form](https://mcp.so/submit?type=server) instead requests
 a repository URL and optional name. Prepare the public repository, documentation, short
 description, concrete HTTPS `/mcp` URL and API-key/OAuth setup instructions for whichever
@@ -148,9 +148,11 @@ populated reviewer account. A paid Claude plan can submit through the developer 
 account/organization permissions, terms and all portal questions. Screenshots are needed
 for MCP Apps with UI; Hourmere currently exposes tools, so do not claim an MCP App UI.
 
-For the self-hosted launch, choose **Users connect to different URLs → URL pattern** in
-the Connection step. Each user supplies their own HTTPS `/mcp` URL, which must match the
-owner's anchored regular expression. This route supports independent self-hosted instances.
+For the self-hosted launch, **Users connect to different URLs → URL pattern** in
+the Connection step may fit independent self-hosted instances. Each user supplies their own
+HTTPS `/mcp` URL, which must match the owner's anchored regular expression. Before relying on
+this route, confirm with the directory whether reviewers accept a pattern covering arbitrary
+customer hosts.
 Enable OAuth with CIMD or DCR on each instance; Anthropic-held client credentials do not
 support URL patterns. These listings take longer to review, so allow time for that review.
 See Claude's [per-customer URL and authentication guidance](https://claude.com/docs/connectors/building/authentication#servers-with-per-customer-urls).

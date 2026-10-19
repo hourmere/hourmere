@@ -1,7 +1,8 @@
 # Command-line client
 
-The repository includes a Node.js 26 CLI for API-key users. It calls the existing stateless
-MCP tools at `/mcp`, using Node's built-in HTTP client with no additional dependencies.
+The standalone CLI supports Node.js 22 or later; repository development still uses Node.js 26.
+It calls the existing stateless MCP tools at `/mcp` for API-key users, using Node's built-in
+HTTP client with no additional dependencies.
 This preserves the key's organization, permissions, idempotency scope and `mcp` audit source,
 including host rescheduling, without introducing another booking API.
 
