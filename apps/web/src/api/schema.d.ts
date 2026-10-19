@@ -4797,7 +4797,10 @@ export interface paths {
         /** List the current organization’s webhooks (owner/admin) */
         get: operations["listWebhooks"];
         put?: never;
-        /** Create an HTTPS webhook and reveal its signing secret once */
+        /**
+         * Create a webhook and reveal its signing secret once
+         * @description Public HTTPS destinations by default. Operators may allow exact private HTTP(S) targets. URL checks do not resolve DNS; every delivery revalidates all resolved addresses. Destinations are immutable.
+         */
         post: operations["createWebhook"];
         delete?: never;
         options?: never;

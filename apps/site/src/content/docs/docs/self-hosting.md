@@ -216,6 +216,72 @@ job processing.
 Compose allows 35 seconds to stop a process, leaving margin around the server's 10-second
 HTTP drain and 20-second job drain. Preserve that grace period in deployment overrides.
 
+## Private webhook receivers
+
+The default webhook policy accepts only public HTTPS receivers. Self-hosted operators may
+set `WEBHOOK_PRIVATE_TARGETS` to exact trusted private destinations; see the
+[configuration reference](/docs/configuration#private-webhook-receivers) for syntax and
+restrictions. **Hourmere Cloud MUST NEVER set this setting.** It is empty by default, and
+nonempty configurations print a startup warning without listing destinations.
+
+For an n8n receiver on the same Compose network, keep the tracked files unchanged and
+create your own `docker-compose.webhooks.yml` override. This example adds a dedicated
+receiver network to both the web process and job runner, while retaining their database
+network and the proxy's existing ingress network:
+
+```yaml
+services:
+  app:
+    networks:
+      default:
+      webhook-receivers:
+  worker:
+    networks:
+      default:
+      webhook-receivers:
+  n8n:
+    image: ${N8N_IMAGE:?set a pinned n8n image in .env}
+    networks:
+      webhook-receivers:
+    volumes:
+      - n8n-data:/home/node/.n8n
+    restart: unless-stopped
+
+networks:
+  webhook-receivers:
+
+volumes:
+  n8n-data:
+```
+
+Set these entries in your private `.env`, retaining the proxy overlay only when you use
+the bundled HTTPS proxy. Keep the custom override after the worker overlay:
+
+```dotenv
+COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml:docker-compose.worker.yml:docker-compose.webhooks.yml
+WEBHOOKS_ENABLED=true
+WEBHOOK_PRIVATE_TARGETS=n8n:5678
+```
+
+Also set the independent `WEBHOOK_ENCRYPTION_KEY` as described in the configuration
+reference, and set `N8N_IMAGE` to the pinned n8n image you operate. Configure n8n's own
+authentication, backups and private editor access separately; this example publishes no
+n8n port. Run `docker compose up -d --build --wait` to recreate both app and worker. Create
+a webhook endpoint using `http://n8n:5678/webhook/<your-workflow-path>` through the REST API.
+The service name resolves inside that network, and the worker sends the event with the
+usual HMAC headers. Require signature verification in the receiving workflow. HTTP is
+unencrypted within the selected network; use HTTPS where transport confidentiality is
+required. The allowlist trusts a host and port, not a single URL path.
+
+For an existing LAN receiver, list its exact private IP and port, for example
+`192.168.1.10:8080`, and use `http://192.168.1.10:8080/hook`. A narrow CIDR and port can
+cover a controlled receiver network. `localhost` or `127.0.0.1` refers to the delivering
+container itself, rather than the Docker host or another service. Keep operator-selected
+destinations narrow: organization owners/admins can configure any path at an allowed
+destination. Configure the same setting on every web and worker process and recreate them
+together when changing it. Saving an endpoint performs no DNS lookup or network probe;
+delivery re-resolves and revalidates every DNS answer on every attempt.
+
 ## Back up and restore
 
 Back up the full database (`auth`, `public` and `pgboss` schemas), `.env`, the checked-out

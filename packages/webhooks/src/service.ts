@@ -4,6 +4,7 @@ import type { ServiceContext } from '@hourmere/scheduling'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { z } from 'zod'
 import { encryptWebhookSecret, newWebhookSecret } from './crypto.ts'
+import type { WebhookPrivateTarget } from './private-targets.ts'
 import { webhookUrl } from './transport.ts'
 
 export const WEBHOOK_EVENTS = [
@@ -24,6 +25,7 @@ export const WebhookUpdateInput = z.strictObject({
 export interface WebhookSettings {
   enabled: boolean
   encryptionKey?: string | undefined
+  privateTargets?: readonly WebhookPrivateTarget[] | undefined
 }
 export interface WebhookView {
   id: string
@@ -38,6 +40,12 @@ const uuid = (value: unknown): value is string =>
   typeof value === 'string' && z.uuid().safeParse(value).success
 const missing = () => new DomainError('not_found', 'webhook_not_found')
 const invalid = () => new DomainError('invalid', 'invalid_webhook', 'Invalid webhook configuration')
+const destinationNotAllowed = () =>
+  new DomainError(
+    'invalid',
+    'invalid_webhook',
+    'Webhook destination is not allowed on this instance',
+  )
 const insufficientRole = () =>
   new DomainError(
     'forbidden',
@@ -148,9 +156,9 @@ export async function createWebhook(
 ) {
   const parsed = WebhookCreateInput.safeParse(input)
   if (!parsed.success) throw invalid()
-  const url = webhookUrl(parsed.data.url)
+  const url = webhookUrl(parsed.data.url, settings.privateTargets)
   const events = eventsOf(parsed.data.events)
-  if (!url) throw invalid()
+  if (!url) throw destinationNotAllowed()
   const encryptionKey = requireEnabled(settings)
   return ctx.db.transaction().execute(async (trx) => {
     await requireAdmin(trx, ctx)
@@ -209,12 +217,20 @@ async function lockedWebhook(trx: Db, ctx: ServiceContext, id: unknown) {
 }
 
 /** URL is immutable: changing destinations means creating a new endpoint and deleting the old. */
-export async function updateWebhook(ctx: ServiceContext, id: unknown, input: unknown) {
+export async function updateWebhook(
+  ctx: ServiceContext,
+  id: unknown,
+  input: unknown,
+  settings: Pick<WebhookSettings, 'privateTargets'> = {},
+) {
   const parsed = WebhookUpdateInput.safeParse(input)
   if (!parsed.success || Object.keys(parsed.data).length === 0) throw invalid()
   const events = parsed.data.events === undefined ? undefined : eventsOf(parsed.data.events)
   return ctx.db.transaction().execute(async (trx) => {
     const row = await lockedWebhook(trx, ctx, id)
+    // The operator may have revoked a destination since creation. This is syntax/policy
+    // only: resolving here would expose an internal-host existence oracle to callers.
+    if (!webhookUrl(row.url, settings.privateTargets)) throw destinationNotAllowed()
     const updated = await trx
       .updateTable('webhooks')
       .set({

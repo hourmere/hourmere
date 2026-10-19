@@ -1,6 +1,6 @@
 # Booking webhooks
 
-Webhooks are optional outbound HTTPS notifications for booking creation, rescheduling and
+Webhooks are optional outbound signed notifications for booking creation, rescheduling and
 cancellation. They use the same booking services for public pages, REST and MCP. They do
 not depend on Google, Microsoft, mail or a billing account. This first version is API-only;
 there is no webhook settings page or third-party integration template.
@@ -31,11 +31,14 @@ the service; possession of another organization's endpoint ID grants no access.
 
 `events` must be a nonempty, duplicate-free subset of `booking.created`,
 `booking.rescheduled`, `booking.cancelled`. There are at most ten endpoints per organization.
-The URL is immutable: create a replacement endpoint to change the destination. URLs require
-HTTPS on port 443, a fully qualified public DNS hostname, no user information or fragment,
-and at most 2048 characters. Private, loopback and special-purpose destinations are refused;
-there is no development bypass for local/private receivers. Syntax is checked when saving;
-DNS is checked on every actual delivery. Registration does not send a verification request.
+The URL is immutable: create a replacement endpoint to change the destination. By default,
+URLs require HTTPS on port 443, a fully qualified public DNS hostname, no user information
+or fragment, and at most 2048 characters. Private, loopback and special-purpose destinations
+are refused unless the operator explicitly allows an eligible private destination below.
+Syntax and the current operator policy are checked when creating an endpoint and updating
+its subscription/active settings. DNS is checked on every actual delivery. Registration does no DNS
+lookup or verification request: accepted configuration does not prove availability, and
+rejected creation/update errors do not disclose whether an internal hostname exists.
 Treat any credential in your destination's query as sensitive, even though Hourmere never
 includes it in delivery errors or logs.
 
@@ -44,6 +47,46 @@ into the receiver's secret store when creating or rotating; list/detail operatio
 recover it. Only authenticated AES-256-GCM ciphertext is stored, bound to the endpoint and
 organization. Changing the environment encryption key makes existing secrets unreadable;
 restore it or rotate every endpoint's signing secret using the new environment key.
+
+### Operator-trusted private destinations
+
+Self-hosters may set `WEBHOOK_PRIVATE_TARGETS`, empty by default, to at most 32
+comma-separated entries. **Hourmere Cloud MUST NEVER set this setting.** The codebase has
+no hosted execution-mode flag; `HOSTED_SIGNUP_URL` is attribution only. Every process with
+a nonempty allowlist emits a startup warning without its values.
+
+Entries use exact `hostname:port` (one port), `IPv4[/CIDR]:port[-port]`, or
+`[IPv6[/CIDR]]:port[-port]`, for example
+`n8n:5678,192.168.1.0/24:8080,[fd12:3456::/64]:8443-8444`. Hostnames are ASCII DNS labels,
+case-insensitive, with no trailing dot or wildcard. Ports are explicit decimal values
+1–65535 without leading zeros; ranges are inclusive and ascending. CIDRs must use their
+network base. Only RFC1918 IPv4, IPv4 loopback, IPv6 unique-local and IPv6 loopback addresses
+are eligible. Public addresses, unspecified/broad ranges such as `0.0.0.0/0` or `[::/0]`,
+link-local/metadata addresses (including `169.254.0.0/16`, `100.100.100.200` and
+`fd00:ec2::254`) and CIDRs containing metadata addresses are forbidden even if listed.
+Invalid settings prevent startup, including when event capture is disabled.
+
+Matching destinations may use HTTP or HTTPS, explicit nonstandard ports, dotless hostnames
+and IP literals. The effective URL port must match: omitted HTTP/HTTPS ports are 80/443,
+which still need explicit entries. At delivery every DNS answer must satisfy the same
+entry: a hostname entry matches only that exact hostname and port and requires all answers
+to be eligible private/loopback addresses; an IP/CIDR entry requires all answers inside
+that IP/network at an allowed port. A hostname may be saved under a CIDR's matching port
+without resolving it, but delivery remains blocked until all its addresses fit the CIDR.
+Answers mixing eligible and ineligible addresses are refused. Every retry resolves again;
+private exceptions require the current answers to fit one entry, never a union of entries.
+An exact hostname entry binds that host and port to private addresses, so a later change
+to public DNS is refused even for an otherwise public-style HTTPS URL. Unrelated ordinary
+public HTTPS URLs retain the public-only delivery path alongside the private allowlist.
+HTTP uses the same HMAC headers, without transport encryption.
+Credentials, fragments, redirects, proxy environment variables, timeouts and response-body
+handling retain the restrictions below.
+
+Set the allowlist identically on all web and worker processes and recreate both after
+changes. The current policy is checked again before each actual send, including queued
+events captured under an older policy. Trust entries narrowly: organization administrators
+can choose any URL path on an allowed host and port. See the
+[same-network n8n Compose example](../apps/site/src/content/docs/docs/self-hosting.md#private-webhook-receivers).
 
 ## Payload and signatures
 
@@ -127,8 +170,9 @@ There is no manual replay endpoint.
 
 Two delivery jobs run concurrently per worker. Each attempt has one ten-second deadline
 covering DNS, TCP/TLS and response headers, and a 16 KiB response-header limit. The transport
-validates **all** DNS candidates and refuses the whole answer if any is private or
-special-purpose. It pins a validated IP to the socket while preserving the original
+validates **all** DNS candidates against the public-only default or one matching private
+allowlist entry and refuses the whole answer if any candidate is outside that policy.
+It pins a validated IP to the socket while preserving the original
 hostname for TLS certificate verification, SNI and Host. Connections are not reused;
 redirects, proxy environment variables and cookies are not followed. Response bodies,
 signature values, destination queries and network error text are never recorded in

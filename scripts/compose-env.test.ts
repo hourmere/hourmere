@@ -115,6 +115,20 @@ describe('documented Compose configuration', () => {
     expect(row).toContain('| Unset |')
   })
 
+  it('keeps private webhook destinations empty by default in both web and worker', () => {
+    expect(composeAppEnvironment(compose).get('WEBHOOK_PRIVATE_TARGETS') ?? '').toMatch(
+      /^\$\{WEBHOOK_PRIVATE_TARGETS:-\}$/,
+    )
+    const worker = readFileSync(new URL('../docker-compose.worker.yml', import.meta.url), 'utf8')
+    expect(worker).toMatch(/^ {6}WEBHOOK_PRIVATE_TARGETS: \$\{WEBHOOK_PRIVATE_TARGETS:-\}$/m)
+    expect(example).toMatch(/^WEBHOOK_PRIVATE_TARGETS=$/m)
+    const row = reference
+      .split('\n')
+      .find((line) => line.startsWith('| `WEBHOOK_PRIVATE_TARGETS` |'))
+    expect(row).toContain('| Unset |')
+    expect(reference).toContain('Hourmere Cloud MUST NEVER set')
+  })
+
   it('forwards automatic migrations with the documented true default', () => {
     expect(composeAppEnvironment(compose).get('AUTO_MIGRATE')).toMatch(/^\$\{AUTO_MIGRATE:-true\}$/)
     const row = reference.split('\n').find((line) => line.startsWith('| `AUTO_MIGRATE` |'))

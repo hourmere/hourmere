@@ -3,6 +3,7 @@ import { calendarEncryptionKey } from '@hourmere/calendars'
 import { conferenceEncryptionKey } from '@hourmere/conferences'
 import { embedOrigin } from '@hourmere/core/embed'
 import { isSingleLineText } from '@hourmere/scheduling/text'
+import { parseWebhookPrivateTargets } from '@hourmere/webhooks'
 import { z } from 'zod'
 import { isTrustedProxyEntry } from './client-ip.ts'
 import { DEFAULT_HTTP_TIMEOUTS, type HttpTimeouts } from './http-timeouts.ts'
@@ -59,6 +60,18 @@ const schema = z
     ZOOM_MEETINGS_ENABLED: optional(z.enum(['true', 'false'])).transform((v) => v === 'true'),
     GOOGLE_MEET_ENABLED: optional(z.enum(['true', 'false'])).transform((v) => v === 'true'),
     WEBHOOKS_ENABLED: optional(z.enum(['true', 'false'])).transform((v) => v === 'true'),
+    WEBHOOK_PRIVATE_TARGETS: optional(z.string()).transform((value, ctx) => {
+      try {
+        return parseWebhookPrivateTargets(value)
+      } catch {
+        ctx.addIssue({
+          code: 'custom',
+          message:
+            'WEBHOOK_PRIVATE_TARGETS must contain at most 32 exact private host:port or IP/CIDR:port[-port] entries; IPv6 requires brackets; public, metadata and link-local addresses are forbidden',
+        })
+        return z.NEVER
+      }
+    }),
     WEBHOOK_ENCRYPTION_KEY: optional(
       z.string().refine(
         (value) => {
