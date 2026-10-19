@@ -234,6 +234,14 @@ apart from consumption. These correlation records deliberately avoid cascading f
 keys: browser approval locks its intent while Better Auth uses a separate connection.
 Current sessions, verified email and membership are checked explicitly before approval.
 
+Migration 0030 adds `mcp_oauth_client_activity`: a client-keyed consent completion and last-use
+record that survives grant revocation and cascades on client deletion. Existing consent and
+retained token timestamps seed the record. It separates DCR clients that never completed
+consent (24-hour retention) from previously approved clients (at least 90 days without use,
+with one day of grace for coalesced writes). Token issuance and MCP use update activity at most daily; approval records completion immediately.
+The absolute offline-access deadline remains the original native consent creation time plus
+30 days, independent of this client activity record and browser session lifetime.
+
 Bookings retain `oauth_consent_id` and `cancelled_oauth_consent_id` as historical attribution,
 without cascading on credential deletion. OAuth origins require `source=mcp` and no API
 key ID. The idempotency index includes both nullable credential columns, preserving existing

@@ -15,6 +15,7 @@ import type { MiddlewareHandler } from 'hono'
 import { createMiddleware } from 'hono/factory'
 import { sql } from 'kysely'
 import type { CallerEnv } from '../caller.ts'
+import { withClientIpHeader } from '../client-ip.ts'
 import { type CallerMiddleware, errorResponses, json, type RouteModule } from '../openapi.ts'
 import { createRateLimiter, rateLimit } from '../rate-limit.ts'
 
@@ -63,10 +64,19 @@ const lock = (db: Db, userId: string, organizationId: string, clientId: string) 
     db,
   )
 
+async function recordConsent(db: Db, clientId: string) {
+  const now = new Date()
+  await db
+    .insertInto('mcp_oauth_client_activity')
+    .values({ client_id: clientId, consented_at: now, last_used_at: now })
+    .onConflict((oc) => oc.column('client_id').doUpdateSet({ last_used_at: now }))
+    .execute()
+}
+
 export function mcpOAuthBroker({ auth, db, publicUrl }: Deps) {
   const origin = new URL(publicUrl).origin
   const { resource } = mcpOAuthUrls(publicUrl)
-  async function native(path: string, body: object, headers: Headers) {
+  async function native(path: string, body: object, headers: Headers, clientIp?: string) {
     // The provider requires a real Request, and checks the signed query itself. Never pass
     // bearer credentials, caller-supplied Origin/Host, or a caller-supplied endpoint URL.
     const h = new Headers({
@@ -80,7 +90,7 @@ export function mcpOAuthBroker({ auth, db, publicUrl }: Deps) {
     const response = await auth.handler(
       new Request(`${origin}/api/auth/oauth2/${path}`, {
         method: 'POST',
-        headers: h,
+        headers: withClientIpHeader(h, clientIp),
         body: JSON.stringify(body),
       }),
     )
@@ -91,7 +101,7 @@ export function mcpOAuthBroker({ auth, db, publicUrl }: Deps) {
       cookies: response.headers.getSetCookie(),
     }
   }
-  async function validated(oauthQuery: string, headers: Headers) {
+  async function validated(oauthQuery: string, headers: Headers, clientIp?: string) {
     const q = new URLSearchParams(oauthQuery)
     for (const key of new Set(q.keys()))
       if (key !== 'ba_param' && q.getAll(key).length !== 1) throw invalid()
@@ -115,6 +125,7 @@ export function mcpOAuthBroker({ auth, db, publicUrl }: Deps) {
       'public-client-prelogin',
       { client_id: clientId, oauth_query: oauthQuery },
       headers,
+      clientIp,
     )
     if (value.client_id !== clientId) throw invalid()
     return {
@@ -189,9 +200,15 @@ export function mcpOAuthBroker({ auth, db, publicUrl }: Deps) {
     return { redirectUrl: url.href, consent }
   }
   return {
-    async info(principal: Principal, oauthQuery: string, headers: Headers, intentId?: string) {
+    async info(
+      principal: Principal,
+      oauthQuery: string,
+      headers: Headers,
+      intentId?: string,
+      clientIp?: string,
+    ) {
       const p = session(principal),
-        v = await validated(oauthQuery, headers)
+        v = await validated(oauthQuery, headers, clientIp)
       await current(p)
       const orgs = await organizations(p)
       const selected = intentId
@@ -214,13 +231,43 @@ export function mcpOAuthBroker({ auth, db, publicUrl }: Deps) {
       oauthQuery: string,
       organizationId: string,
       headers: Headers,
+      clientIp?: string,
     ) {
       const p = session(principal),
-        v = await validated(oauthQuery, headers)
+        v = await validated(oauthQuery, headers, clientIp)
       return db.transaction().execute(async (trx) => {
         await lock(trx, p.user.id, organizationId, v.clientId)
         await current(p)
         if (!(await organizations(p)).some((o) => o.id === organizationId)) throw forbidden()
+        const previous = await trx
+          .selectFrom('mcp_oauth_grants as g')
+          .innerJoin('auth.oauthConsent as c', (j) =>
+            j.on(sql<boolean>`c."referenceId" = g.id::text`),
+          )
+          .select('g.id')
+          .where('g.user_id', '=', p.user.id)
+          .where('g.organization_id', '=', organizationId)
+          .where('g.client_id', '=', v.clientId)
+          .where('c.createdAt', '<=', new Date(Date.now() - 30 * 86400000))
+          .executeTakeFirst()
+        // A new explicit approval starts a new lifetime and grant generation. Keeping the
+        // old reference would reuse expired consent and leave every new token unusable.
+        if (previous) {
+          await trx
+            .updateTable('auth.oauthRefreshToken')
+            .set({ revoked: new Date(), rotationReplayResponse: null })
+            .where('userId', '=', p.user.id)
+            .where('clientId', '=', v.clientId)
+            .where('referenceId', '=', previous.id)
+            .execute()
+          await trx
+            .deleteFrom('auth.oauthConsent')
+            .where('userId', '=', p.user.id)
+            .where('clientId', '=', v.clientId)
+            .where('referenceId', '=', previous.id)
+            .execute()
+          await trx.deleteFrom('mcp_oauth_grants').where('id', '=', previous.id).execute()
+        }
         const grant = await trx
           .insertInto('mcp_oauth_grants')
           .values({ user_id: p.user.id, organization_id: organizationId, client_id: v.clientId })
@@ -251,15 +298,17 @@ export function mcpOAuthBroker({ auth, db, publicUrl }: Deps) {
             organizationId,
             grantId: grant.id,
           },
-          () => native('continue', { postLogin: true, oauth_query: oauthQuery }, headers),
+          () => native('continue', { postLogin: true, oauth_query: oauthQuery }, headers, clientIp),
         )
         const result = redirect(nativeResult.value, intent.id)
-        if (!result.consent)
+        if (!result.consent) {
           await trx
             .updateTable('mcp_oauth_intents')
             .set({ used_at: new Date() })
             .where('id', '=', intent.id)
             .execute()
+          await recordConsent(trx, v.clientId)
+        }
         return { redirectUrl: result.redirectUrl, cookies: nativeResult.cookies }
       })
     },
@@ -269,9 +318,10 @@ export function mcpOAuthBroker({ auth, db, publicUrl }: Deps) {
       intentId: string,
       accept: boolean,
       headers: Headers,
+      clientIp?: string,
     ) {
       const p = session(principal),
-        v = await validated(oauthQuery, headers)
+        v = await validated(oauthQuery, headers, clientIp)
       return db.transaction().execute(async (trx) => {
         const row = await bound(trx, p, intentId, v.q)
         const nativeResult = await withMcpOAuthIntent(
@@ -282,7 +332,7 @@ export function mcpOAuthBroker({ auth, db, publicUrl }: Deps) {
             organizationId: row.organization_id,
             grantId: row.grant_id,
           },
-          () => native('consent', { accept, oauth_query: oauthQuery }, headers),
+          () => native('consent', { accept, oauth_query: oauthQuery }, headers, clientIp),
         )
         const result = redirect(nativeResult.value, intentId)
         if (result.consent) throw invalid()
@@ -291,6 +341,7 @@ export function mcpOAuthBroker({ auth, db, publicUrl }: Deps) {
           .set({ used_at: new Date() })
           .where('id', '=', intentId)
           .execute()
+        if (accept) await recordConsent(trx, v.clientId)
         return { redirectUrl: result.redirectUrl, cookies: nativeResult.cookies }
       })
     },
@@ -395,7 +446,13 @@ export function mcpOAuthRoutes(deps: Deps): RouteModule {
       async (c) => {
         const b = c.req.valid('json')
         return c.json(
-          await broker.info(c.var.principal, b.oauthQuery, c.req.raw.headers, b.intentId),
+          await broker.info(
+            c.var.principal,
+            b.oauthQuery,
+            c.req.raw.headers,
+            b.intentId,
+            c.var.clientIp,
+          ),
           200,
         )
       },
@@ -417,6 +474,7 @@ export function mcpOAuthRoutes(deps: Deps): RouteModule {
           b.oauthQuery,
           b.organizationId,
           c.req.raw.headers,
+          c.var.clientIp,
         )
         for (const cookie of r.cookies) c.header('Set-Cookie', cookie, { append: true })
         return c.json({ redirectUrl: r.redirectUrl }, 200)
@@ -440,6 +498,7 @@ export function mcpOAuthRoutes(deps: Deps): RouteModule {
           b.intentId,
           b.accept,
           c.req.raw.headers,
+          c.var.clientIp,
         )
         for (const cookie of r.cookies) c.header('Set-Cookie', cookie, { append: true })
         return c.json({ redirectUrl: r.redirectUrl }, 200)
@@ -486,6 +545,43 @@ export function mcpOAuthCleanupJob(db: Db) {
     payload: z.strictObject({}),
     schedule: { cron: '*/15 * * * *', payload: {} },
     handler: async () => {
+      // DCR remains available to older connectors. Only retire dynamically registered,
+      // unowned clients; discovered/managed clients have a separate lifecycle. A durable
+      // completion record survives revocation so those clients get the 90-day window.
+      // Daily activity writes need one day of grace to guarantee 90 full idle days.
+      await db
+        .deleteFrom('auth.oauthClient as a')
+        .where('a.clientDiscoveryId', 'is', null)
+        .where('a.userId', 'is', null)
+        .where((eb) =>
+          eb.or([
+            eb.and([
+              eb('a.createdAt', '<', new Date(Date.now() - 86400000)),
+              eb.not(
+                eb.exists(
+                  eb
+                    .selectFrom('mcp_oauth_client_activity as activity')
+                    .select('activity.client_id')
+                    .whereRef('activity.client_id', '=', 'a.clientId'),
+                ),
+              ),
+              eb.not(
+                eb.exists(
+                  eb
+                    .selectFrom('auth.oauthConsent as c')
+                    .select('c.id')
+                    .whereRef('c.clientId', '=', 'a.clientId'),
+                ),
+              ),
+            ]),
+            sql<boolean>`greatest(a."createdAt",
+              (select activity.last_used_at from mcp_oauth_client_activity as activity
+                where activity.client_id = a."clientId"),
+              (select max(c."updatedAt") from auth."oauthConsent" as c
+                where c."clientId" = a."clientId")) < ${new Date(Date.now() - 91 * 86400000)}`,
+          ]),
+        )
+        .execute()
       await db.deleteFrom('mcp_oauth_intents').where('expires_at', '<', new Date()).execute()
       await db.deleteFrom('auth.oauthClientAssertion').where('expiresAt', '<', new Date()).execute()
       await db

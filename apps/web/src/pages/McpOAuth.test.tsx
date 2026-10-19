@@ -31,6 +31,11 @@ describe('MCP connection approval', () => {
     renderApp(`/oauth/authorize?${query}`)
     await screen.findByText('Synthetic AI app')
     expect(screen.getByText(/attendee information and answers/)).toBeDefined()
+    expect(
+      screen.getByText(/after you sign out, for up to 30 days from its original approval/),
+    ).toBeDefined()
+    expect(screen.getByText(/Refreshing does not extend that time/)).toBeDefined()
+    expect(screen.getByText(/Leaving the organization or revoking access/)).toBeDefined()
     expect(screen.getByRole<HTMLButtonElement>('button', { name: 'Continue' }).disabled).toBe(true)
     await user.selectOptions(
       screen.getByLabelText('Organization to connect'),
@@ -86,7 +91,9 @@ describe('MCP connection approval', () => {
     expect(screen.getByLabelText('要连接的组织')).toBe(organization)
     expect(organization.value).toBe(info.organizations[1]?.id)
     expect(screen.getByText(/包括参会人信息和回答。它无法管理你的账号或 API 密钥/)).toBeDefined()
-    expect(screen.getByText(/持续连接最多 30 天/)).toBeDefined()
+    expect(screen.getByText(/退出登录后继续连接，最长为首次批准起的 30 天/)).toBeDefined()
+    expect(screen.getByText(/刷新令牌不会延长此期限/)).toBeDefined()
+    expect(screen.getByText(/离开组织或在“已连接的应用”中撤销访问会立即终止连接/)).toBeDefined()
     expect(screen.getByText(/应用名称和返回地址均由该应用提供/)).toBeDefined()
     expect(screen.getByText(`客户端： ${info.clientId}`)).toBeDefined()
     expect(screen.getByText(`返回地址： ${info.redirectUri}`)).toBeDefined()

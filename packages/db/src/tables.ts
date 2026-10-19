@@ -503,6 +503,12 @@ export interface EventTypes {
   zoom_connection_id: string | null;
 }
 
+export interface McpOauthClientActivity {
+  client_id: string;
+  consented_at: Timestamp;
+  last_used_at: Timestamp;
+}
+
 export interface McpOauthGrants {
   client_id: string;
   created_at: Generated<Timestamp>;
@@ -630,6 +636,7 @@ export interface DB {
   conference_oauth_states: ConferenceOauthStates;
   event_type_hosts: EventTypeHosts;
   event_types: EventTypes;
+  mcp_oauth_client_activity: McpOauthClientActivity;
   mcp_oauth_grants: McpOauthGrants;
   mcp_oauth_intents: McpOauthIntents;
   personal_organizations: PersonalOrganizations;
