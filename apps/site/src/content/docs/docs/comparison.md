@@ -4,9 +4,9 @@ description: Compare Hourmere, Calendly, Cal.com and Cal.diy by deployment, agen
 lastVerified: '2026-10-18'
 ---
 
-Hourmere is [in development and not yet ready to use](/#faq). Its
-[self-hosting guide](/docs/self-hosting) requires a source build;
-no prebuilt public image is published. [Hourmere Cloud has not launched](/privacy).
+Hourmere Cloud is in an [invitation-only preview](/#faq) with sign-ups closed, and the
+open-source release for self-hosting is planned for November 30, 2026. Its
+[self-hosting guide](/docs/self-hosting) requires a source build; no prebuilt public image is published.
 This page describes the documented implementation and its current limitations.
 
 The verification date above applies to the linked sources on this page. Follow them for

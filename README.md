@@ -53,13 +53,16 @@ Other commands: `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`
 
 The website runs on its own: `npm run dev --workspace @hourmere/site` (http://localhost:4321). `npm run build` writes it to `apps/site/dist`. `npm run deploy --workspace @hourmere/site` builds it and publishes it as Cloudflare Workers static assets on hourmere.com and www.hourmere.com (config in `apps/site/wrangler.jsonc`); it needs `wrangler login` to the Cobaltmere Cloudflare account.
 
-The privacy policy's effective and last-updated dates must be its publication day. The
-project lead supplies that date through `PRIVACY_PUBLICATION_DATE` in `YYYY-MM-DD` format
-when building or deploying the website, for example
-`PRIVACY_PUBLICATION_DATE="$(date +%F)" npm run deploy --workspace @hourmere/site` on the
-publication day. A missing, placeholder or invalid date stops the site build. Use the same
-variable for a local site build or to view the privacy page in development. CI uses a
-nonpublishing fixture date scoped to its build step; never deploy that output or reuse its date.
+The privacy policy's effective and last-updated dates and the terms' effective date share
+`LEGAL_PUBLICATION_DATE` in `apps/site/src/data/legal.ts`. The project lead replaces
+`SET_ON_PUBLICATION_DAY` with the actual publication day in `YYYY-MM-DD` format in the
+publication deploy commit, then runs `npm run deploy --workspace @hourmere/site`. A placeholder
+or invalid date stops the site build. Environment variables cannot override the source date.
+Keep the committed date on later deployments, including documentation and homepage changes;
+change it only when publishing revised legal text. For a local nonpublishing build, temporarily
+substitute a fixture date and restore the source afterward. CI does that substitution in its
+build step, restores the source with an exit trap, and deletes the generated site output;
+never deploy fixture output or commit a fixture date.
 
 ## Self-hosting
 

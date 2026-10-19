@@ -1,13 +1,11 @@
-// PUBLICATION PLACEHOLDER: the project lead supplies PRIVACY_PUBLICATION_DATE on the
-// publication day. Never replace it with a scheduled release date or a CI fixture date.
-export const PRIVACY_PUBLICATION_DATE_PLACEHOLDER = 'SET_ON_PUBLICATION_DAY'
+import { LEGAL_PUBLICATION_DATE } from './data/legal.ts'
 
-export function resolvePrivacyPublicationDate(value: string | undefined): string {
-  const date = value ?? PRIVACY_PUBLICATION_DATE_PLACEHOLDER
+export function resolveLegalPublicationDate(): string {
+  const date = LEGAL_PUBLICATION_DATE
   const error =
-    'Set PRIVACY_PUBLICATION_DATE to the privacy policy publication day (YYYY-MM-DD) before building the site.'
+    'Set LEGAL_PUBLICATION_DATE in apps/site/src/data/legal.ts to the publication day (YYYY-MM-DD) before building the site.'
 
-  if (date === PRIVACY_PUBLICATION_DATE_PLACEHOLDER || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     throw new Error(error)
   }
 
