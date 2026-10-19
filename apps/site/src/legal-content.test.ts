@@ -340,11 +340,11 @@ describe('privacy data-flow disclosures', () => {
   it.each([
     [
       'information-we-collect',
-      /Hourmere Cloud has not launched and takes no payments\. Before it does, we will update this policy to describe billing and payment processing\./,
+      /Hourmere Cloud has not launched and takes no payments yet; the billing description above applies once paid plans are available\./,
     ],
     [
       'sharing',
-      /Hourmere Cloud has not launched and takes no payments\. Before it does, we will update this policy to describe billing and payment processing\./,
+      /Hourmere Cloud has not launched and takes no payments yet; the payment-provider description above applies once paid plans are available\./,
     ],
     [
       'international-transfers',
@@ -363,8 +363,24 @@ describe('privacy data-flow disclosures', () => {
     )
   })
 
-  it('names no payment processor while Hourmere Cloud takes no payments', () => {
-    expect(plainText(privacy)).not.toMatch(/Stripe|Link, LLC|merchant-of-record/)
+  it('describes Stripe and Link payment processing conditionally in privacy and terms', () => {
+    const conditional =
+      /[Ww]hen you buy a paid plan, payments are processed by Stripe[.;] [Ff]or purchases made through Stripe's merchant-of-record service, your order is sold through Link, LLC, an affiliate of Stripe, which handles payment processing and applicable sales tax, VAT or GST\./
+    const billing = block('li', 'Billing information')
+    expect(billing).toMatch(/your plan, number of seats, billing country and transaction records/)
+    expect(billing).toMatch(conditional)
+    expect(billing).toMatch(/we do not store full card numbers/)
+    const providers = block('li', 'Payment providers:')
+    expect(providers).toMatch(conditional)
+    expect(providers).toMatch(/independent controllers for their own purposes/)
+    const terms = plainText(read('./pages/terms.astro'))
+    expect(terms).toMatch(/Hourmere Cloud has not launched and paid plans are not yet available\./)
+    expect(terms).toMatch(conditional)
+    for (const page of [plainText(privacy), terms]) {
+      expect(page).not.toMatch(
+        /Payments are processed by Stripe|Stripe and Link, LLC, an affiliate of Stripe, process payments/,
+      )
+    }
   })
 
   it('discloses widget submission and excludes booking details from parent messages', () => {
