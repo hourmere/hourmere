@@ -85,6 +85,14 @@ their services and registered by `createApp`; `apps/server/src/app.test.ts` has 
 
 ## Authentication
 
+The unused Better Auth endpoints `/api/auth/account-info`, `/api/auth/get-access-token`,
+`/api/auth/refresh-token`, `/api/auth/link-social` and `/api/auth/list-accounts` are disabled
+with `disabledPaths`: they return HTTP 404 with the body `Not Found`, including for signed-in
+sessions, whether MCP OAuth is enabled or disabled. Social sign-in still uses
+`/api/auth/sign-in/social` and its callbacks. Calendar and conference connections use their
+own OAuth flows and encrypted credentials, separate from Better Auth's sign-in accounts.
+MCP OAuth uses `/api/auth/oauth2/*`; its existing consent-management restrictions still apply.
+
 A request is authenticated by one of:
 
 - **API key** (agents, scripts): `Authorization: Bearer hm_…`. Keys belong to a user and act
