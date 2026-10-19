@@ -87,6 +87,21 @@ const cases = [
     'Reconnect Microsoft Calendar and allow the requested permissions.',
     '请重新连接 Microsoft 日历并允许请求的权限。',
   ],
+  [
+    'zoom_operation_busy',
+    'Zoom account operations are busy. Try again shortly.',
+    'Zoom 账号操作繁忙。请稍后重试。',
+  ],
+  [
+    'zoom_refresh_in_progress',
+    'Zoom account operations are busy. Try again shortly.',
+    'Zoom 账号操作繁忙。请稍后重试。',
+  ],
+  [
+    'zoom_needs_reauth',
+    'Reconnect this Zoom account before refreshing it.',
+    '请先重新连接此 Zoom 账号，再刷新。',
+  ],
 ] as const
 
 it.each(cases)(
@@ -100,3 +115,32 @@ it.each(cases)(
     }
   },
 )
+
+it('recognizes the neutral Zoom busy alias while retaining the original error code', () => {
+  const error = requestError(409, {
+    error: 'zoom_refresh_in_progress',
+    errorAlias: 'zoom_operation_busy',
+    message: 'Unrelated server detail.',
+  })
+  expect(error.code).toBe('zoom_refresh_in_progress')
+  expect(error.codeAlias).toBe('zoom_operation_busy')
+  expect(translateMessage('en', errorMessage(error))).toBe(
+    'Zoom account operations are busy. Try again shortly.',
+  )
+  expect(translateMessage('zh-CN', errorMessage(error))).toBe('Zoom 账号操作繁忙。请稍后重试。')
+})
+
+it.each([
+  { error: 'zoom_refresh_in_progress', errorAlias: 'unknown_alias' },
+  { error: 'zoom_refresh_in_progress', errorAlias: { error: 'zoom_operation_busy' } },
+  { error: 'unknown_code', errorAlias: 'zoom_operation_busy' },
+])('ignores unsupported error alias combinations %j', (body) => {
+  const error = requestError(409, { ...body, message: 'Unrelated server detail.' })
+  expect(error.code).toBe(body.error)
+  expect(error.codeAlias).toBeUndefined()
+  expect(translateMessage('zh-CN', errorMessage(error))).toBe(
+    body.error === 'zoom_refresh_in_progress'
+      ? 'Zoom 账号操作繁忙。请稍后重试。'
+      : 'Unrelated server detail.',
+  )
+})
