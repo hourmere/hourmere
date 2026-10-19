@@ -205,42 +205,139 @@ describe('separate conference accounts page', () => {
     expect(screen.getByRole('alert').textContent).toContain('无法确认此次 Zoom 刷新结果')
     expect(await screen.findByText('正在刷新连接')).toBeDefined()
     expect(screen.getByRole('button', { name: '刷新 Zoom 账号' }).hasAttribute('disabled')).toBe(
-      true,
+      false,
     )
     expect(
       requests.to(`POST /api/v1/conference-connections/${account.id}/refresh`)[0]?.body,
     ).toEqual({})
     expect(screen.queryByText('synthetic provider prose')).toBeNull()
   })
-  it('explains busy account operations in both languages and prevents another attempt after reloading', async () => {
+  it.each([
+    { error: 'zoom_refresh_in_progress' },
+    { error: 'zoom_operation_busy' },
+    { error: 'zoom_refresh_in_progress', errorAlias: 'zoom_operation_busy' },
+  ])(
+    'explains busy account operations for %j and allows an explicit retry after reloading',
+    async (body) => {
+      const user = userEvent.setup()
+      let current = account
+      const requests = fakeApi({
+        ...signedIn,
+        'GET /api/v1/conference-connections': () => json(200, list([current])),
+        [`POST /api/v1/conference-connections/${account.id}/refresh`]: () => {
+          current = { ...account, status: 'refreshing' }
+          return json(409, { ...body, message: 'synthetic provider prose' })
+        },
+      })
+      renderApp('/app/conferences')
+      await user.click(await screen.findByRole('button', { name: 'Refresh Zoom account' }))
+      expect((await screen.findByRole('alert')).textContent).toBe(
+        'Zoom account operations are busy. Try again shortly.',
+      )
+      await screen.findByText('Refreshing connection')
+      const refresh = screen.getByRole('button', { name: 'Refresh Zoom account' })
+      expect(refresh.hasAttribute('disabled')).toBe(false)
+      await user.click(refresh)
+      expect(requests.to(`POST /api/v1/conference-connections/${account.id}/refresh`)).toHaveLength(
+        2,
+      )
+      expect(requests.to('GET /api/v1/conference-connections')).toHaveLength(3)
+      expect(screen.queryByText('synthetic provider prose')).toBeNull()
+      await user.selectOptions(
+        screen.getByRole('combobox', { name: 'Interface language' }),
+        'zh-CN',
+      )
+      expect(screen.getByRole('alert').textContent).toBe('Zoom 账号操作繁忙。请稍后重试。')
+      expect(screen.getByText('正在刷新连接')).toBeDefined()
+      expect(screen.getByRole('button', { name: '刷新 Zoom 账号' }).hasAttribute('disabled')).toBe(
+        false,
+      )
+    },
+  )
+  it('recovers an abandoned identity refresh and offers localized reconnection guidance', async () => {
     const user = userEvent.setup()
-    let current = account
+    let current: Schemas['ConferenceConnection'] = { ...account, status: 'refreshing' }
     const requests = fakeApi({
       ...signedIn,
       'GET /api/v1/conference-connections': () => json(200, list([current])),
       [`POST /api/v1/conference-connections/${account.id}/refresh`]: () => {
-        current = { ...account, status: 'refreshing' }
-        return json(409, { error: 'zoom_refresh_in_progress', message: 'synthetic provider prose' })
+        current = { ...account, status: 'needs_reauth', lastError: 'needs_reauth' }
+        return json(409, { error: 'zoom_needs_reauth', message: 'synthetic provider prose' })
       },
+      [`POST /api/v1/conference-connections/${account.id}/reconnect`]: () =>
+        json(200, { authorizationUrl: authUrl }),
     })
     renderApp('/app/conferences')
-    await user.click(await screen.findByRole('button', { name: 'Refresh Zoom account' }))
-    expect((await screen.findByRole('alert')).textContent).toBe(
-      'Zoom account operations are busy. Try again shortly.',
-    )
     await screen.findByText('Refreshing connection')
+    expect(screen.getByText('Identity only')).toBeDefined()
     const refresh = screen.getByRole('button', { name: 'Refresh Zoom account' })
-    expect(refresh.hasAttribute('disabled')).toBe(true)
+    expect(refresh.hasAttribute('disabled')).toBe(false)
     await user.click(refresh)
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      'Reconnect this Zoom account before refreshing it.',
+    )
+    await screen.findByText('Reconnection required')
+    expect(
+      screen.getByRole('button', { name: 'Refresh Zoom account' }).hasAttribute('disabled'),
+    ).toBe(true)
+    expect(screen.getByRole('button', { name: 'Reconnect Zoom' }).hasAttribute('disabled')).toBe(
+      false,
+    )
     expect(requests.to(`POST /api/v1/conference-connections/${account.id}/refresh`)).toHaveLength(1)
+    expect(
+      requests.to(`POST /api/v1/conference-connections/${account.id}/refresh`)[0]?.body,
+    ).toEqual({})
     expect(requests.to('GET /api/v1/conference-connections')).toHaveLength(2)
     expect(screen.queryByText('synthetic provider prose')).toBeNull()
     await user.selectOptions(screen.getByRole('combobox', { name: 'Interface language' }), 'zh-CN')
-    expect(screen.getByRole('alert').textContent).toBe('Zoom 账号操作繁忙。请稍后重试。')
-    expect(screen.getByText('正在刷新连接')).toBeDefined()
+    expect(screen.getByRole('alert').textContent).toBe('请先重新连接此 Zoom 账号，再刷新。')
+    expect(screen.getByText('需要重新连接')).toBeDefined()
     expect(screen.getByRole('button', { name: '刷新 Zoom 账号' }).hasAttribute('disabled')).toBe(
       true,
     )
+    const reconnect = screen.getByRole('button', { name: '重新连接 Zoom' })
+    expect(reconnect.hasAttribute('disabled')).toBe(false)
+    await user.click(reconnect)
+    expect(
+      requests.to(`POST /api/v1/conference-connections/${account.id}/reconnect`)[0]?.body,
+    ).toEqual({})
+    expect(goTo).toHaveBeenCalledWith(authUrl)
+  })
+  it('keeps refreshing connections disabled while Zoom is unavailable', async () => {
+    const user = userEvent.setup()
+    const requests = fakeApi({
+      ...signedIn,
+      'GET /api/v1/conference-connections': () =>
+        json(200, list([{ ...account, status: 'refreshing' }], false)),
+    })
+    renderApp('/app/conferences')
+    const refresh = await screen.findByRole('button', { name: 'Refresh Zoom account' })
+    expect(refresh.hasAttribute('disabled')).toBe(true)
+    await user.click(refresh)
+    expect(requests.to(`POST /api/v1/conference-connections/${account.id}/refresh`)).toHaveLength(0)
+  })
+  it('prevents duplicate refreshes while an explicit recovery request is pending', async () => {
+    const user = userEvent.setup(),
+      response = later()
+    let current: Schemas['ConferenceConnection'] = { ...account, status: 'refreshing' }
+    const requests = fakeApi({
+      ...signedIn,
+      'GET /api/v1/conference-connections': () => json(200, list([current])),
+      [`POST /api/v1/conference-connections/${account.id}/refresh`]: () => response.response,
+    })
+    renderApp('/app/conferences')
+    const refresh = await screen.findByRole('button', { name: 'Refresh Zoom account' })
+    await user.click(refresh)
+    expect(refresh.hasAttribute('disabled')).toBe(true)
+    await user.click(refresh)
+    expect(requests.to(`POST /api/v1/conference-connections/${account.id}/refresh`)).toHaveLength(1)
+    current = account
+    await response.answer(new Response(null, { status: 204 }))
+    await screen.findByText('Zoom account refreshed.')
+    await screen.findByText('Connected')
+    expect(
+      screen.getByRole('button', { name: 'Refresh Zoom account' }).hasAttribute('disabled'),
+    ).toBe(false)
   })
   it('requires a focused in-place disconnect confirmation and removes the disconnected identity from the active list', async () => {
     const user = userEvent.setup()

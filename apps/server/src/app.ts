@@ -306,7 +306,11 @@ export function createApp({
     if (err instanceof DomainError && Object.hasOwn(domainStatus, err.kind)) {
       // The lower-level error a service wrapped is for us, not the client.
       if (err.cause !== undefined) logError(c, `${err.code} caused by `, err.cause)
-      const body = err.detail ? { error: err.code, message: err.detail } : { error: err.code }
+      const body = {
+        error: err.code,
+        ...(err.code === 'zoom_refresh_in_progress' && { errorAlias: 'zoom_operation_busy' }),
+        ...(err.detail && { message: err.detail }),
+      }
       return c.json(body, domainStatus[err.kind])
     }
     logError(c, '', err)
