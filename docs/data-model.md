@@ -323,6 +323,17 @@ usable. New OAuth attempts bind mode and expected connection under v2; retained 
 require a restart without code exchange. See the Zoom setup guide for the
 explicit local-disconnect versus provider-wide revocation distinction.
 
+The optional signed Zoom event endpoint handles `app_deauthorized` using the globally
+unique stored Zoom `external_user_id`. The notification's `account_id` is validated but
+is not persisted or used to widen deletion to other users in that Zoom account. Cleanup
+shares local disconnect's credential, scope, operation and pending-attempt retirement, and
+additionally clears the connection's external ID, email and display name. The secret-free
+disconnected row remains for existing references. Affected active automatic Zoom event
+types become inactive while retaining their selected configuration for host attention.
+Existing booking and conference records follow their existing retention policy; cleanup
+does not contact Zoom or store the event payload. Repeated notifications and unknown users
+make no change. See [automatic Zoom](automatic-zoom.md#app-removal-and-event-endpoint).
+
 ## Automatic conferences
 
 `booking_conferences` retains one provider intent per opted-in root booking, pinned organizer/destination IDs, desired/applied revision, request identity, create ambiguity, bounded state/error and recoverable operation lease. It intentionally survives calendar/connection deletion. `booking_conference_notifications` is the durable release outbox for final linked messages and no-ICS failure notices; recipient deduplication remains in `booking_notifications`. `calendars.supports_google_meet` is cached capability, default false. `provider` defaults to `google_meet` for old roots. New Zoom roots have independent immutable

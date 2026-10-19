@@ -60,6 +60,7 @@ import { profileRoutes } from './routes/profile.ts'
 import { publicRoutes } from './routes/public.ts'
 import { scheduleRoutes } from './routes/schedules.ts'
 import { webhookRoutes } from './routes/webhooks.ts'
+import { zoomEventRoutes } from './routes/zoom-events.ts'
 import { closeConnectionsWhen, closeServer } from './shutdown.ts'
 import { createWorkerHealthApp } from './worker-health.ts'
 
@@ -75,6 +76,7 @@ export function productRoutes({
   googleCalendar,
   microsoftCalendar,
   zoomConference,
+  zoomWebhookSecretToken,
   enqueueCalendarSync,
   enqueueCalendarWritebackRecovery,
   mcpAuth,
@@ -97,6 +99,7 @@ export function productRoutes({
   googleCalendar?: CalendarDeps['google']
   microsoftCalendar?: CalendarDeps['microsoft']
   zoomConference?: ConferenceDeps['zoom']
+  zoomWebhookSecretToken?: string | undefined
   enqueueCalendarSync?: CalendarDeps['enqueueSync']
   enqueueCalendarWritebackRecovery?: CalendarDeps['enqueueWritebackRecovery']
 }): RouteModule[] {
@@ -111,6 +114,7 @@ export function productRoutes({
       enqueueWritebackRecovery: enqueueCalendarWritebackRecovery,
     }),
     conferenceRoutes({ db, zoom: zoomConference }),
+    zoomEventRoutes({ db, secretToken: zoomWebhookSecretToken }),
     profileRoutes({ db }),
     scheduleRoutes({ db }),
     webhookRoutes({ db, ...webhooks }),
@@ -398,6 +402,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
         googleCalendar,
         microsoftCalendar,
         zoomConference,
+        zoomWebhookSecretToken: config.ZOOM_WEBHOOK_SECRET_TOKEN,
         enqueueCalendarSync: (id, trx) =>
           jobs.enqueue('calendar-sync', { calendarId: id }, { singletonKey: id, transaction: trx }),
         enqueueCalendarWritebackRecovery: (connectionId, trx) =>

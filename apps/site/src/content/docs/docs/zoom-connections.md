@@ -41,7 +41,14 @@ the automated tests use synthetic provider responses only.
    encoding of exactly 32 random bytes, independent of the authentication, calendar and
    webhook keys. Keep it stable and back it up securely with the database. Key loss or
    replacement requires reconnection. `.env.example` contains empty placeholders only.
-5. Sign in, open **Conference accounts**, and explicitly choose **Connect Zoom**. Do not use a
+5. Before inviting real Zoom users, set `ZOOM_WEBHOOK_SECRET_TOKEN` to the app's webhook
+   **Secret Token** and configure both its **Event notification endpoint URL** and
+   **Deauthorization Notification Endpoint URL** as
+   `{PUBLIC_URL}/api/conference/zoom/events`. Validate and save the publicly reachable HTTPS
+   endpoint; see `docs/automatic-zoom.md` for setup. This endpoint remains enabled independently
+   of OAuth and automatic meeting flags. Zoom documents deauthorization delivery for public
+   apps; private/development apps do not trigger it.
+6. Sign in, open **Conference accounts**, and explicitly choose **Connect Zoom**. Do not use a
    provider email address as evidence of a verified Hourmere sign-in identity.
 
 Hourmere uses the official fixed authorize/token/users-me hosts. The advanced authorization
@@ -76,10 +83,15 @@ challenge to the browser.
 - **Disconnect Zoom** removes local credentials and all that user's pending connection
   attempts. It retains the identity record for future references and does **not** revoke the
   entire Marketplace app grant. Remove the app separately in Zoom to revoke that grant.
+- **Remove the app in Zoom** also clears local Zoom connection credentials and identity
+  metadata when the operator configured the signed event endpoint and Zoom delivers the
+  deauthorization notification. Affected automatic event settings require host attention;
+  other Zoom users are unchanged. This does not delete existing bookings or provider meetings.
 - At most five identities can be connected per Hourmere user at once, including accounts
   requiring reconnection or with an incomplete refresh. Disconnecting releases capacity. The
-  default metadata list excludes disconnected records; a later explicit grant for the same
-  Zoom identity reuses its stable ID. Reconnecting a disconnected record also checks capacity. Pending authorization attempts are
+  default metadata list excludes disconnected records; after a local disconnect, a later
+  explicit grant for the same Zoom identity reuses its stable ID. App deauthorization erases
+  that identity association, so a later grant creates a new connection. Reconnecting a disconnected record also checks capacity. Pending authorization attempts are
   limited to five per user, expire after ten minutes, and are single-use and session-bound.
 - Deleting the Hourmere user removes credentials, pending attempts, Zoom ID, display name and
   email from the retained record. A new Hourmere user, including one with the same email,
@@ -87,8 +99,8 @@ challenge to the browser.
 
 User operations and deletion use the same owner-first row-lock order. Durable claims prevent
 callback replay and rotating-token reuse after failed commits. Provider calls have a bounded
-deadline and response size. The retained connection foundation intentionally does not yet
-implement Zoom Marketplace production deauthorization/compliance webhooks. Automatic personal and individual single-host team events require an explicit meeting-mode
+deadline and response size. The optional signed event endpoint handles URL validation and
+app deauthorization without calling Zoom or storing event payloads. Automatic personal and individual single-host team events require an explicit meeting-mode
 connection, a default-off instance flag and the actual host's session or own API-key selection.
 They reconcile one pinned meeting through reschedule/cancellation, hold final mail/ICS until
 ready and can pin one optional ordinary Google copy. Collective/round-robin automatic Zoom
@@ -113,8 +125,10 @@ All writes require an empty JSON object and a live owner browser session:
 Callback redirects use a fixed allowlist of outcomes under `/app/conferences`. Responses use
 `Cache-Control: no-store` and `Referrer-Policy: no-referrer`.
 
-Protocol references, checked 17 October 2026:
+Protocol references, checked 19 October 2026:
 [Zoom OAuth](https://developers.zoom.us/docs/integrations/oauth/),
 [Zoom PKCE](https://developers.zoom.us/blog/public-pkce/),
 [advanced scope query](https://godevelopers.zoom.us/docs/integrations/oauth-scopes-overview/),
-[granular scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-granular/).
+[granular scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-granular/),
+[webhook verification](https://developers.zoom.us/docs/api/webhooks/),
+[app deauthorization](https://developers.zoom.us/docs/integrations/end-user-auth/).

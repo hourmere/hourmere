@@ -62,6 +62,52 @@ may rotate or invalidate the provider grant, local credentials are retired and `
 requires reconnecting with the saved meeting permissions. A deliberate identity downgrade
 requires disconnecting locally first. Provider-side grant effects need real-client acceptance.
 
+## App removal and event endpoint
+
+Before a multi-user deployment lets real Zoom users connect, configure
+`ZOOM_WEBHOOK_SECRET_TOKEN` with the **Secret Token** shown in that Zoom app's webhook/event
+configuration. This is separate from the OAuth client secret. Restart the server after setting
+it; Compose forwards it to the app and inherited worker. An empty value leaves
+`POST /api/conference/zoom/events` disabled with 404. The endpoint is enabled independently
+of the OAuth credentials and `ZOOM_MEETINGS_ENABLED`, so keep the token configured when
+turning off new connections or meeting authorization.
+
+1. Use a publicly reachable HTTPS `PUBLIC_URL` with a valid certificate and TLS 1.2 or later.
+   In the Zoom app's **Features → Access**, enable **Event Subscriptions** and set its
+   **Event notification endpoint URL** (Event Subscription URL) to
+   `{PUBLIC_URL}/api/conference/zoom/events`.
+2. Set the app's **Deauthorization Notification Endpoint URL** on its App Listing to the
+   same URL. App removal uses this field; an ordinary event subscription alone does not
+   replace it. No meeting, recording or unrelated event subscription is needed by Hourmere.
+3. Ensure the Secret Token configured in Hourmere matches that app, then click **Validate**
+   for the Event notification endpoint URL and save the app configuration. Hourmere answers
+   signed `endpoint.url_validation` challenges with the plain token and its HMAC-SHA256 hex
+   digest. Zoom also revalidates the endpoint periodically; keep it publicly reachable.
+
+The endpoint authenticates `x-zm-signature` using HMAC-SHA256 over
+`v0:{x-zm-request-timestamp}:{raw request body}` with the webhook Secret Token, compares the
+signature in constant time, and requires the request timestamp to be within five minutes of
+the server clock in either direction. Keep server time synchronized; `event_ts` does not
+replace the signed header's freshness check. Requests are limited to 16 KiB and 120 per
+minute per client address per server process (`TRUSTED_PROXIES` controls proxy addresses);
+it never logs payloads, user identifiers or secrets and does not store the incoming event.
+The payload's legacy `signature` field is not authentication.
+
+A verified `app_deauthorized` event removes the matching stored Zoom user's local connection
+credentials and identity metadata, clears pending connection attempts and marks affected
+automatic event settings inactive for host attention. The stored Zoom user ID selects the
+connection; the account ID never widens deletion to other users' connections in that account.
+Repeated notifications and unknown users succeed without creating records.
+Local **Disconnect Zoom** continues to retain its stable identity metadata; removing the app
+in Zoom additionally removes that metadata when this configured endpoint receives the event.
+Existing booking and conference records remain subject to their normal retention policy;
+the endpoint does not delete provider meetings or call Zoom.
+
+Zoom documents these deauthorization notifications for publicly published apps. Private apps
+and apps in development do not trigger them, so a local or development installation cannot
+establish production notification delivery. Tests use signed synthetic events only; verify
+the public app's endpoint configuration before deployment.
+
 ## One meeting and safe reconciliation
 
 A booking commits a durable root intent with its provider, actual organizer, Zoom connection
@@ -191,12 +237,15 @@ wrong-mode reconsent effects, regional join formats, account-specific duration/s
 policy, real calendar effects or inbox delivery. No real Zoom client, grant or meeting was
 used. Populated actual 0024→0025 preservation/no-op, generated API/DB parity, all gates,
 Chrome/privacy and non-author review remain required before this branch can be merged.
-Production Marketplace deauthorization/compliance webhooks remain a separate requirement.
+Production Marketplace app review and actual deauthorization notification delivery still
+require operator acceptance of the configured public app and endpoint.
 
-Primary references checked 18 October 2026:
+Primary references checked 19 October 2026:
 [OAuth](https://developers.zoom.us/docs/integrations/oauth/),
 [PKCE](https://developers.zoom.us/blog/public-pkce/),
 [advanced scope query](https://godevelopers.zoom.us/docs/integrations/oauth-scopes-overview/),
 [granular scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-granular/),
 [Meetings API](https://developers.zoom.us/docs/api/meetings/),
-[documented commercial web hosts](https://support.zoom.com/hc/en/article?id=zm_kb&sysparm_article=KB0078410).
+[documented commercial web hosts](https://support.zoom.com/hc/en/article?id=zm_kb&sysparm_article=KB0078410),
+[webhook signatures and endpoint validation](https://developers.zoom.us/docs/api/webhooks/),
+[app deauthorization](https://developers.zoom.us/docs/integrations/end-user-auth/).
