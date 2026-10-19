@@ -131,6 +131,9 @@ A request is authenticated by one of:
 anyone signs in, such as which sign-in methods are enabled (`signIn.google`, …).
 `hostedSignupUrl` is the public destination for attribution and confirmation links, configured
 with `HOSTED_SIGNUP_URL` and defaulting to `https://hourmere.com`.
+Optional `privacyPolicyUrl` and `termsUrl` are this instance operator's legal-page URLs,
+configured with `PRIVACY_POLICY_URL` and `TERMS_URL`. Each field is omitted when unset or
+empty, including on self-hosted instances; clients hide the corresponding link.
 
 `GET /api/v1/me` returns the caller, the organization they act in and whether they used a
 session or an API key. The MCP server at `/mcp` ([mcp.md](mcp.md)) accepts API keys and,

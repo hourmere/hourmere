@@ -4,7 +4,9 @@ import { type SocialProvider, sendSignInLink, startSocialSignIn } from '../api/a
 import { api, unwrap } from '../api/client.ts'
 import { errorMessage } from '../api/errors.ts'
 import { goTo } from '../browser.ts'
+import { LegalLinks } from '../components/LegalLinks.tsx'
 import { Logo } from '../components/Logo.tsx'
+import { SocialSignInButton } from '../components/SocialSignInButton.tsx'
 import { useLoad, usePageTitle } from '../hooks.ts'
 import { LanguageSwitcher, useI18n } from '../i18n/runtime.tsx'
 import { msg, type UiText } from '../i18n/translate.ts'
@@ -12,10 +14,7 @@ import { safeNextPath, signInPath } from '../next-path.ts'
 import { emailError } from '../public/validation.ts'
 import { PageStatus, useSession } from '../session.tsx'
 
-const PROVIDERS: { id: SocialProvider; label: string }[] = [
-  { id: 'google', label: 'Google' },
-  { id: 'microsoft', label: 'Microsoft' },
-]
+const PROVIDERS: SocialProvider[] = ['google', 'microsoft']
 
 const loadInstance = (signal: AbortSignal) => unwrap(api.GET('/api/v1/instance', { signal }))
 
@@ -136,7 +135,7 @@ function SignInForm({ next, expired }: { next: string; expired: boolean }) {
   // Better Auth comes back here (keeping `next`) when the link or the provider fails.
   const redirects = { callbackURL: next, errorCallbackURL: signInPath(next) }
   const providers =
-    instance.status === 'ready' ? PROVIDERS.filter((p) => instance.data.signIn[p.id] === true) : []
+    instance.status === 'ready' ? PROVIDERS.filter((p) => instance.data.signIn[p] === true) : []
 
   async function requestLink(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -193,6 +192,7 @@ function SignInForm({ next, expired }: { next: string; expired: boolean }) {
           >
             {t('Use a different email')}
           </button>
+          <LegalLinks {...(instance.status === 'ready' ? instance.data : {})} />
         </div>
       </main>
     )
@@ -239,24 +239,33 @@ function SignInForm({ next, expired }: { next: string; expired: boolean }) {
             </p>
             <div className="stack">
               {providers.map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  className="button button-block"
+                <SocialSignInButton
+                  key={p}
+                  provider={p}
                   disabled={busy}
-                  onClick={() => continueWith(p.id)}
-                >
-                  {redirecting === p.id
-                    ? t('Opening {0}…', { '0': p.label })
-                    : t('Continue with {0}', { '0': p.label })}
-                </button>
+                  opening={redirecting === p}
+                  onClick={() => continueWith(p)}
+                />
               ))}
             </div>
+            {providers.includes('google') && (
+              <p className="fine-print" id="google-sign-in-explanation">
+                {t(
+                  'Google sign-in shares your name, email and profile picture with Hourmere. Calendar access is a separate, optional step in Calendars.',
+                )}
+              </p>
+            )}
+            {providers.includes('microsoft') && (
+              <p className="fine-print" id="microsoft-sign-in-explanation">
+                {t('Use a personal Microsoft account or a work or school account.')}
+              </p>
+            )}
           </>
         )}
         <p className="fine-print">
           {t('No password needed. New here? Signing in creates your account.')}
         </p>
+        <LegalLinks {...(instance.status === 'ready' ? instance.data : {})} />
       </div>
     </main>
   )

@@ -95,6 +95,8 @@ describe('first-run deployment setup', { timeout: 20_000 }, () => {
       true,
     )
     expect(text.includes('CALENDAR_ENCRYPTION_KEY=\n')).toBe(true)
+    expect(text.includes('PRIVACY_POLICY_URL=\n')).toBe(true)
+    expect(text.includes('TERMS_URL=\n')).toBe(true)
     expect(text.match(/^BETTER_AUTH_SECRET=/gm)?.length).toBe(1)
     expect(setup.noStaging()).toBe(true)
   })
