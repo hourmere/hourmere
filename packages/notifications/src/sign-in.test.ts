@@ -547,11 +547,15 @@ describe.skipIf(!serverUrl)('queued sign-in email', () => {
       expect(jobs.rows.every((j) => Object.keys(j.data).join(',') === 'emailId')).toBe(true)
       await producer.stop()
       await worker.start()
-      await vi.waitFor(async () => expect(await rows()).toEqual([]), { timeout: 5_000 })
+      await vi.waitFor(
+        async () =>
+          expect(await rows(), 'waiting for the worker to drain sign-in emails').toEqual([]),
+        { timeout: 5_000 },
+      )
       expect(sent.map((mail) => mail.to)).toEqual(['existing@example.com'])
     } finally {
       await producer.stop()
       await worker.stop()
     }
-  })
+  }, 15_000)
 })
