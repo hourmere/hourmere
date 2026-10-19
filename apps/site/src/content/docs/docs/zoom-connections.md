@@ -74,7 +74,9 @@ challenge to the browser.
   Other token rejections and malformed successful responses also preserve the previous grant
   for later recovery; an unknown rotation may later resolve to `invalid_grant`. That explicit
   invalid grant or a successful scope/identity mismatch requires reconnection.
-  A crashed or uncommittable rotation remains incomplete.
+  A crashed or uncommittable rotation remains incomplete until the next worker or explicit
+  refresh acquires a valid operation lease and marks it as requiring reconnection. An
+  operation busy with another Zoom identity reports a neutral retry message.
   A confirmed rotation followed only by a
   transient identity lookup error retains the **new** token and reports the metadata error.
 - **Reconnect Zoom** replaces existing local access and requires the same Zoom identity. Its saved identity/meeting permission mode and
@@ -94,6 +96,9 @@ challenge to the browser.
   explicit grant for the same Zoom identity reuses its stable ID. App deauthorization erases
   that identity association, so a later grant creates a new connection. Reconnecting a disconnected record also checks capacity. Pending authorization attempts are
   limited to five per user, expire after ten minutes, and are single-use and session-bound.
+  If another token operation is busy, the callback returns to Conference accounts with a
+  retry message before consuming the attempt or exchanging the code. Start Connect/Reconnect
+  again after that operation finishes.
 - Deleting the Hourmere user removes credentials, pending attempts, Zoom ID, display name and
   email from the retained record. A new Hourmere user, including one with the same email,
   cannot inherit the old connection ID. A future explicit authorization creates a new ID.

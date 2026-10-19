@@ -13,6 +13,7 @@ type Connection = Schemas['ConferenceConnection']
 const load = (signal: AbortSignal) => unwrap(api.GET('/api/v1/conference-connections', { signal }))
 const outcomes = {
   connected: 'Zoom account connected.',
+  busy: 'Zoom account operations are busy. Try again shortly.',
   denied: 'Zoom was not connected because you cancelled authorization.',
   invalid_state: 'This Zoom connection attempt expired or was already used. Start again.',
   disabled: 'Zoom connections are not configured on this instance.',

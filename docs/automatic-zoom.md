@@ -168,9 +168,13 @@ Browser OAuth, explicit refresh and meeting-worker provider I/O run without data
 or checked-out database connections, between short owner/session/connection transactions.
 Token-changing operations share a durable owner-scoped lease in
 `conference_token_operations`: OAuth cannot know its connection until Zoom returns its
-identity. Callbacks wait for an earlier token operation and sample connection versions
-after acquiring the lease. Explicit refresh returns `zoom_refresh_in_progress` while
-another token operation is in flight; workers return a retryable provider failure.
+identity. Callbacks acquire the lease before consuming their OAuth state and sample
+connection versions under that lease. An occupied lease returns `busy` immediately,
+leaving state and code unconsumed. The browser returns to Conference accounts, where
+the user can start Connect/Reconnect again after the other operation finishes. The original
+callback can also be retried while the attempt and provider code remain valid.
+Explicit refresh returns `zoom_refresh_in_progress` with a neutral busy/retry message
+while another token operation is in flight; workers return a retryable provider failure.
 Token-changing provider calls have a hard deadline (15 seconds by default). Leases last
 at least one minute, using database time, and finishing transactions check lease ID and expiry
 before consuming provider results. Expired operations cannot overwrite or release a
@@ -180,10 +184,17 @@ This prevents concurrent rotation from discarding a successful newer OAuth grant
 
 Callback expiry is checked atomically with its single-use claim before exchange; finishing
 a successful exchange after that expiry is allowed. Claimed attempts are excluded from
-expiry cleanup. Current membership in the acting organization is required before exchange
-and before storing credentials, with the same any-member rule as connection listing.
+expiry cleanup. Current membership in the acting organization is required at connection
+start, before exchange and before storing credentials, with the same any-member rule as
+connection listing.
 A conflicting identity-only exchange proactively retires an existing meetings grant even
 when unrelated connection metadata changed. State/session invalidation still wins.
+
+Rejected successful code exchanges discard the returned credentials locally. There is no
+provider revoke helper: disconnect and signed deauthorization only retire local access.
+Adding a Marketplace grant revocation would require a separate provider contract and policy,
+since a discarded exchange can concern an identity with an existing grant. Remove the app
+in Zoom to revoke provider access; these rejection paths do not revoke it automatically.
 
 Workers compare their pinned identity, credential revision and refresh lease before and
 after I/O. A stale rejection cannot retire a newer grant or mutate credentials during
@@ -198,8 +209,10 @@ later worker/action can recover; they do not request reconnection. Other token r
 (including `invalid_client`) and malformed successful responses also preserve the old grant;
 an unknown rotation may later resolve to `invalid_grant`, which retires it. A successful
 noncanonical scope grant or an identity mismatch fails closed as an authorization failure.
-A crash or uncommittable rotation stays `refreshing`
-without reusable credentials and still requires explicit recovery. Public slots and new
+A crash or uncommittable rotation leaves `refreshing` without reusable credentials.
+The next worker or explicit refresh that acquires a valid token-operation lease retires
+that abandoned claim to `needs_reauth`; the user reconnects instead of waiting indefinitely.
+An occupied lease preserves the current holder's refresh. Public slots and new
 bookings accept an otherwise eligible meeting connection while it is refreshing;
 configuration selection requires active status. The worker rechecks its pinned identity
 before any meeting operation, including after refresh.

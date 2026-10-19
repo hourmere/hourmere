@@ -93,6 +93,67 @@ describe('protected meeting link status', () => {
     expect(api.calls[0]?.headers.has('x-manage-token')).toBe(false)
     expect(screen.getByText(/Your time is reserved. The Google Meet link/)).toBeDefined()
   })
+  it('explains exhausted Google polling in both languages and only rechecks after a host action', async () => {
+    vi.useFakeTimers()
+    const api = fakeApi({
+      [`POST /api/v1/bookings/${pending().id}/conference/retry`]: () =>
+        new Response(null, { status: 204 }),
+      [`GET /api/v1/bookings/${pending().id}`]: () => json(200, pending()),
+    })
+    render(
+      <>
+        <LanguageSwitcher />
+        <ConferenceNotice
+          booking={{
+            ...failed(),
+            conference: { ...failed().conference, errorCode: 'conference_pending_timeout' },
+          }}
+          host
+        />
+      </>,
+    )
+    expect(
+      screen.getByText(
+        'Google is still preparing the Meet link after repeated checks. The host can recheck the existing request; a retry does not create a replacement meeting.',
+      ),
+    ).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Recheck existing meeting' })).toBeDefined()
+    await advance(60_000)
+    expect(api.calls).toHaveLength(0)
+    fireEvent.change(screen.getByLabelText('Interface language'), { target: { value: 'zh-CN' } })
+    expect(
+      screen.getByText(
+        '多次检查后，Google 仍在准备 Meet 链接。主持人可重新检查现有请求；重试不会创建替代会议。',
+      ),
+    ).toBeDefined()
+    fireEvent.click(screen.getByRole('button', { name: '重新查找现有会议' }))
+    await advance(1)
+    expect(api.calls.filter((call) => call.method === 'POST')).toHaveLength(1)
+    expect(api.calls[0]?.body).toEqual({})
+    expect(screen.queryByText(/多次检查后/)).toBeNull()
+    expect(screen.getByText(/时段已为你保留，正在准备 Google Meet/)).toBeDefined()
+  })
+  it.each([
+    ['google_meet', 'confirmed', 'provider_unavailable'],
+    ['google_meet', 'cancelled', 'conference_pending_timeout'],
+    ['zoom', 'confirmed', 'conference_pending_timeout'],
+  ] as const)(
+    'does not describe %s %s %s as pending Google creation',
+    (provider, status, errorCode) => {
+      fakeApi({})
+      render(
+        <ConferenceNotice
+          booking={{
+            ...failed(),
+            status,
+            conference: { provider, status: 'failed', errorCode },
+          }}
+          host
+        />,
+      )
+      expect(screen.queryByText(/Google is still preparing/)).toBeNull()
+    },
+  )
   it('never retries a host write whose response is lost', async () => {
     vi.useFakeTimers()
     const api = fakeApi({
