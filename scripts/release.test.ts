@@ -48,6 +48,22 @@ function refused(repo: ReturnType<typeof fixture>, ...args: string[]) {
 }
 
 describe('release preparation', () => {
+  it('extracts publishable notes from the real changelog', () => {
+    const changelog = readFileSync(
+      process.env.HOURMERE_RELEASE_CHANGELOG ??
+        fileURLToPath(new URL('../CHANGELOG.md', import.meta.url)),
+      'utf8',
+    )
+    const repo = fixture(changelog)
+    expect(repo.run('prepare', 'v1.0.0', repo.sha).status).toBe(0)
+    const notes = readFileSync(join(repo.dir, 'hourmere-release-notes.md'), 'utf8')
+    expect(notes).toContain('### Upgrade notes')
+    expect(notes).not.toContain('Release candidate notes')
+    expect(notes).not.toContain('does not mean that a release')
+    expect(notes).not.toMatch(/\]\((?!https?:\/\/)/i)
+    expect(notes).not.toMatch(/(?<![\w/])#\d+\b/)
+  })
+
   it('extracts only the candidate version notes without publishing or changing git', () => {
     const repo = fixture(
       '# Changelog\n\n## [Unreleased → 1.0.0]\n\n### Added\n\n- Scheduling.\n\n## [0.9.0] - 2026-10-01\n\n- Older.\n',
@@ -188,6 +204,24 @@ function stepScript(name: string) {
 }
 
 describe('release workflow boundaries', () => {
+  it.each([
+    [
+      'docker/setup-qemu-action',
+      /image: docker\.io\/tonistiigi\/binfmt[^\s]*@sha256:[a-f0-9]{64}(?:\s|$)/,
+    ],
+    [
+      'docker/setup-buildx-action',
+      /driver-opts: image=docker\.io\/moby\/buildkit[^\s]*@sha256:[a-f0-9]{64}(?:\s|$)/,
+    ],
+    [
+      'docker/build-push-action',
+      /sbom: generator=docker\.io\/docker\/buildkit-syft-scanner[^\s]*@sha256:[a-f0-9]{64}(?:\s|$)/,
+    ],
+  ])('pins the supporting image for %s', (action, image) => {
+    const step = workflow().split(`uses: ${action}@`)[1]?.split('\n      - ')[0] ?? ''
+    expect(step).toMatch(image)
+  })
+
   it('permits only version tag pushes and requires reusable CI and protected approval', () => {
     const source = workflow()
     expect(source).toMatch(/on:\n {2}push:\n {4}tags: \['v\*\.\*\.\*'\]\n\npermissions: \{\}/)
@@ -221,7 +255,7 @@ describe('release workflow boundaries', () => {
     }
     expect(source).toContain('platforms: linux/amd64,linux/arm64')
     expect(source).toContain('provenance: mode=max')
-    expect(source).toContain('sbom: true')
+    expect(source).toMatch(/sbom: generator=\S+@sha256:[a-f0-9]{64}/)
     expect(source).toContain('create-storage-record: false')
     expect(source).not.toContain('artifact-metadata: write')
     const prepare = source.split('  prepare:\n')[1]?.split('  ci:\n')[0] ?? ''

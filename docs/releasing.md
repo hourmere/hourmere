@@ -17,9 +17,11 @@ versioned REST contract remains additive within `/api/v1`; an incompatible API c
 requires a new API version too.
 
 [CHANGELOG.md](../CHANGELOG.md) is the source of GitHub Release notes. The prepared
-`## [Unreleased → 1.0.0]` section is the matching candidate for `v1.0.0`; its date is a
-planned launch date, not an assertion that publication happened. The owner reviews this
-exact candidate at the publication approval. Subsequent releases use a matching dated
+`## [Unreleased → 1.0.0]` section is the matching, undated candidate for `v1.0.0`; the
+planned launch date appears in the introduction above the first `##` heading, outside
+the extracted release body. The owner reviews the exact candidate at the publication
+approval. Use absolute HTTPS links in release sections so they work on GitHub Release
+pages. Subsequent releases use a matching dated
 heading such as `## [1.0.1] - 2026-12-07`, with `### Added`, `### Changed`, `### Fixed`,
 `### Security` and `### Upgrade notes` as applicable. The workflow extracts only the
 matching section and refuses missing or ambiguous notes. Keep upgrade instructions with
@@ -27,24 +29,33 @@ their release, including migrations, changed defaults and secrets that must stay
 
 ## One-time owner setup
 
-Before the first tag, configure a GitHub Actions environment named **`release`** with only
-the release owner(s) as required reviewers, and disable administrator bypass. Select the
-release tag pattern `v*.*.*` in its deployment policy; a protected-branches-only policy
-would reject these tag deployments. Protect creation/update of release tags with a
-repository ruleset. Keep normal protection and required checks on `main`. A sole owner who
-pushes the tag must be allowed to review their deployment; enable **prevent self-review**
-only when another designated owner will approve. Environment protection is a repository
-setting: the workflow checks that required reviewers exist but cannot configure the owner
-list or inspect the administrator-bypass setting. Without this setup the owner-approval
-gate is incomplete, so do not push a release tag. An absent environment or empty reviewer
-list fails the workflow before publication.
+The real publishing boundary is the combination of a **tag ruleset** restricting
+creation, update and deletion of `v*` tags and the **`release` environment** with required
+owner review (see GitHub's [ruleset rules](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets)
+and [environment configuration](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments)).
+Tag-triggered runs execute the workflow from the tagged commit: the checks
+inside that file cannot replace repository-level protection against unauthorized tags
+or a changed workflow. Configure both before the first tag:
+
+- **Environment `release`:** required reviewer = the release owner; disable administrator
+  bypass; select deployment **tags** matching `v*.*.*`. A protected-branches-only policy
+  would reject these tag deployments. A sole owner who pushes the tag must be allowed to
+  review their deployment; enable **prevent self-review** only when another designated
+  owner will approve.
+- **Active tag ruleset:** target `v*`; restrict creations, updates and deletions; block
+  force pushes; bypass = owner only. Keep normal protection and required checks on `main`.
+
+These are repository settings: the workflow checks that required reviewers exist but
+cannot configure the owner list, tag ruleset or administrator-bypass setting. Without
+both protections the publishing boundary is incomplete, so do not push a release tag.
+An absent environment or empty reviewer list fails the workflow before publication.
 
 The release job uses the repository's `GITHUB_TOKEN` with only the needed release/package
-and attestation permissions; no long-lived registry credential is required. Confirm
-Actions can create packages and that `ghcr.io/hourmere/hourmere` will be public. A newly
-created GHCR package may need its visibility changed to public by the owner after the
-first push; retain this as a first-release check, not a claim that a public image exists
-already.
+and attestation permissions; no long-lived registry credential is required. Allow Actions
+to create packages; in the GHCR package's **Manage Actions access** settings, grant this
+repository **Write** access. After the first authorized push, set the package visibility
+to **Public** and verify unauthenticated access. A new package may initially be private;
+retain this as a first-release check, not a claim that a public image exists already.
 
 ## Prepare the reviewed commit
 
@@ -103,13 +114,28 @@ marked as such. It does not publish npm workspaces.
 ## Verify publication and handle failures
 
 Confirm the GitHub Release, image digest, both architecture manifests, labels,
-attestations and public unauthenticated GHCR access after publication. Smoke-test the
-intended deployment and check the upgrade notes before announcing availability. Only
-after the first successful public publish should the separate documentation follow-up
-replace statements that no stable release/public image exists. Source-build Compose
-instructions remain valid until explicitly revised. Releasing the self-hosted software
-does not establish that Hourmere Cloud has launched or that real provider integrations
-have passed live acceptance.
+attestations and public unauthenticated GHCR access after publication. For v1.0.0, run the
+pull while logged out of GHCR (or with an empty Docker credential configuration):
+
+```sh
+docker pull ghcr.io/hourmere/hourmere:1.0.0
+gh attestation verify oci://ghcr.io/hourmere/hourmere:1.0.0 -R hourmere/hourmere
+```
+
+Smoke-test the intended deployment and check the upgrade notes before announcing
+availability. After the first successful public publish, complete this documentation
+checklist in a separate follow-up:
+
+- Rename the changelog heading to `## [1.0.0] - 2026-11-30` and remove the introductory
+  candidate note above the first `##` heading.
+- Replace the no-stable-release/public-image sentences in `README.md`, `SECURITY.md`,
+  the site's self-hosting, comparison and index guides, homepage, site description and
+  legal pages. Update `apps/site/src/legal-content.test.ts` (currently line 79, asserting
+  `no prebuilt public image is published`) together with the corresponding docs sentences.
+  Keep source-build Compose instructions until explicitly revised.
+- Retain Cloud nonavailability and its separate legal timing until Cloud launch is
+  approved. Releasing the self-hosted software does not establish that Hourmere Cloud has
+  launched or that real provider integrations have passed live acceptance.
 
 Image pushes and GitHub Release creation are separate external operations. A failed run
 can leave an image published without a release, or some moving aliases updated. Inspect

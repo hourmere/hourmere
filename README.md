@@ -1,5 +1,5 @@
 # Hourmere
-Open-source scheduling for people and AI agents. Self-host or use the cloud.
+Open-source scheduling for people and AI agents. Self-host from source; Hourmere Cloud is coming.
 
 > Early development. Nothing here is ready to use yet.
 
