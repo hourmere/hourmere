@@ -103,33 +103,42 @@ export function rateLimitKey(ip: string | undefined): string {
 }
 
 const LIMITER = Symbol('rate limiter')
+interface RouteRateLimit {
+  limiter: RateLimiter
+  refusalStatus: 429 | 503
+}
 /** The limiters routeRateLimits already counted each request against. */
 const counted = new WeakMap<Context, Set<RateLimiter>>()
 
-/** Counts the request against `limiter`; a 429 response when the client is over it. */
-function check(c: Context, limiter: RateLimiter): Response | undefined {
+/** Counts the request and returns the route's rejection status when over its limit. */
+function check(c: Context, { limiter, refusalStatus }: RouteRateLimit): Response | undefined {
   const retryAfter = limiter.hit(rateLimitKey(c.var.clientIp))
   if (retryAfter === undefined) return undefined
   c.header('Retry-After', String(retryAfter))
-  return c.json({ error: 'rate_limited' }, 429)
+  return c.json({ error: 'rate_limited' }, refusalStatus)
 }
 
 /**
- * Answers 429 `rate_limited` with Retry-After once the client (c.var.clientIp, which honors
+ * Answers `rate_limited` with Retry-After once the client (c.var.clientIp, which honors
  * TRUSTED_PROXIES; IPv6 by /64, see rateLimitKey) is over the limiter's limit. For routes'
  * `middleware`. createApp counts it earlier, in routeRateLimits, before the body is read;
  * the route middleware then lets the request through, and counts it itself whenever
  * routeRateLimits did not (no routeRateLimits in the app, or it could not see this limiter).
+ * The default status is 429; provider callbacks can choose 503 when only 5xx is retried.
  */
-export function rateLimit(limiter: RateLimiter): MiddlewareHandler {
+export function rateLimit(
+  limiter: RateLimiter,
+  { refusalStatus = 429 }: { refusalStatus?: 429 | 503 } = {},
+): MiddlewareHandler {
+  const declaration = { limiter, refusalStatus }
   const middleware = createMiddleware(async (c, next) => {
     if (!counted.get(c)?.has(limiter)) {
-      const refused = check(c, limiter)
+      const refused = check(c, declaration)
       if (refused) return refused
     }
     await next()
   })
-  return Object.assign(middleware, { [LIMITER]: limiter })
+  return Object.assign(middleware, { [LIMITER]: declaration })
 }
 
 /**
@@ -138,16 +147,16 @@ export function rateLimit(limiter: RateLimiter): MiddlewareHandler {
  */
 export function routeRateLimits(): MiddlewareHandler {
   return createMiddleware(async (c, next) => {
-    const limiters = new Set<RateLimiter>()
+    const declarations = new Map<RateLimiter, RouteRateLimit>()
     for (const { handler } of matchedRoutes(c)) {
-      const limiter = (handler as { [LIMITER]?: RateLimiter })[LIMITER]
-      if (limiter) limiters.add(limiter)
+      const declaration = (handler as { [LIMITER]?: RouteRateLimit })[LIMITER]
+      if (declaration) declarations.set(declaration.limiter, declaration)
     }
-    for (const limiter of limiters) {
-      const refused = check(c, limiter)
+    for (const declaration of declarations.values()) {
+      const refused = check(c, declaration)
       if (refused) return refused
     }
-    counted.set(c, limiters)
+    counted.set(c, new Set(declarations.keys()))
     await next()
   })
 }

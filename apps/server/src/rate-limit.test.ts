@@ -93,4 +93,21 @@ describe('createRateLimiter', () => {
       manage: { limit: 30, windowSeconds: 60 },
     })
   })
+  it.each([true, false])(
+    'preserves a provider callback retry status with early counting=%s',
+    async (early) => {
+      const app = new Hono()
+      if (early) app.use('*', routeRateLimits())
+      app.post(
+        '/callback',
+        rateLimit(createRateLimiter({ limit: 1, windowSeconds: 60 }), { refusalStatus: 503 }),
+        (c) => c.text('ok'),
+      )
+      expect((await app.request('/callback', { method: 'POST' })).status).toBe(200)
+      const response = await app.request('/callback', { method: 'POST' })
+      expect(response.status).toBe(503)
+      expect(Number(response.headers.get('retry-after'))).toBeGreaterThan(0)
+      expect(await response.json()).toEqual({ error: 'rate_limited' })
+    },
+  )
 })

@@ -11,6 +11,7 @@ import {
   decryptConferenceCredential,
   encryptConferenceCredential,
 } from './credentials.ts'
+import { clearConferenceConnection } from './disconnect.ts'
 import { credentials, readTokens } from './tokens.ts'
 import {
   matchingZoomScopes,
@@ -23,6 +24,7 @@ import {
 } from './zoom.ts'
 
 export { conferenceEncryptionKey } from './credentials.ts'
+export { deauthorizeZoomConnections } from './deauthorization.ts'
 export { createZoomClient, ZOOM_CALLBACK, ZOOM_SCOPE, ZoomError } from './zoom.ts'
 export const MAX_ZOOM_CONNECTIONS = 5
 const STATE_LIFETIME = 10 * 60_000
@@ -467,6 +469,7 @@ export async function finishZoomConnection(
         return 'connection_limit'
       const id = previous?.id ?? randomUUID(),
         value = {
+          authorized_at: new Date(clock(deps)),
           account_email: identity.email,
           display_name: identity.name,
           credentials: credentials(key, session.user.id, id, identity.id, tokens, mode),
@@ -515,18 +518,7 @@ export async function disconnectConference(deps: ConferenceDeps, principal: Prin
       .forUpdate()
       .executeTakeFirst()
     if (!row) throw missing()
-    await db
-      .updateTable('conference_connections')
-      .set({
-        credentials: null,
-        operation_id: null,
-        scopes: [],
-        status: 'disconnected',
-        last_error: null,
-      })
-      .where('id', '=', id)
-      .execute()
-    await db.deleteFrom('conference_oauth_states').where('user_id', '=', session.user.id).execute()
+    await clearConferenceConnection(db, session.user.id, id)
   })
 }
 /** Clear old credentials in a committed claim before contacting a rotating-token endpoint.

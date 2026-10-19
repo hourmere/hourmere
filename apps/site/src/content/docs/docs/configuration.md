@@ -163,14 +163,21 @@ mailer still prints delivered links, and anyone reading them can sign in.
 | `ZOOM_CLIENT_SECRET` | Unset | Matching confidential client secret; never expose it to the browser. |
 | `CONFERENCE_ENCRYPTION_KEY` | Unset | Independent canonical 32-byte base64 key for conference credentials and OAuth verifiers. Keep stable and back up privately. |
 | `ZOOM_MEETINGS_ENABLED` | `false` | Explicit meeting authorization and automatic Zoom for personal/individual single-host events; requires all three settings above. |
+| `ZOOM_WEBHOOK_SECRET_TOKEN` | Unset | Secret Token from the Zoom app's webhook configuration; independently enables signed `POST {PUBLIC_URL}/api/conference/zoom/events` for endpoint validation and app deauthorization. Empty leaves this endpoint at 404; a configured token must have at least 16 characters. Configured `ZOOM_CLIENT_ID` must match the signed deauthorization payload or the event is ignored, including old-app events after switching apps. Use the same URL for Event Subscriptions and the Deauthorization Notification Endpoint URL; see repository `docs/automatic-zoom.md`. Forwarded by Compose with an empty default. |
 
-All three are required together when either Zoom client field is configured. A key alone
+The OAuth client ID, client secret and encryption key are required together when either Zoom client field is configured. A key alone
 does not enable Zoom. These settings do not enable sign-in, calendar access or meeting
 creation by themselves. Automatic creation also requires the flag, explicit meeting permissions
 and the actual host's session or own API-key account selection on each opted-in event. Existing passive
 Zoom labels remain inert. Collective/round-robin automatic Zoom is unsupported. Existing
 committed meeting intents reconcile after disabling the flag. See [Zoom account connections](/docs/zoom-connections/) for the conservative
 returned-scope policy, actual-client prerequisites and local-disconnect semantics.
+
+Before inviting real Zoom users, configure the app's public HTTPS event endpoint and matching
+Secret Token. This secret is separate from `ZOOM_CLIENT_SECRET` and does not require
+`ZOOM_MEETINGS_ENABLED` or OAuth configuration to remain enabled: keep receiving removals
+after disabling new connections. Zoom sends production app deauthorization notifications
+for public apps; its private/development apps do not trigger those notifications.
 
 ## Automatic Google Meet
 

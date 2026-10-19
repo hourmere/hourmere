@@ -104,6 +104,17 @@ describe('documented Compose configuration', () => {
     expect(compose).toMatch(/^ {6}ZOOM_MEETINGS_ENABLED: \$\{ZOOM_MEETINGS_ENABLED:-false\}$/m)
   })
 
+  it('forwards the optional Zoom webhook token without enabling it by default', () => {
+    expect(composeAppEnvironment(compose).get('ZOOM_WEBHOOK_SECRET_TOKEN') ?? '').toMatch(
+      /^\$\{ZOOM_WEBHOOK_SECRET_TOKEN:-\}$/,
+    )
+    expect(example).toMatch(/^ZOOM_WEBHOOK_SECRET_TOKEN=$/m)
+    const row = reference
+      .split('\n')
+      .find((line) => line.startsWith('| `ZOOM_WEBHOOK_SECRET_TOKEN` |'))
+    expect(row).toContain('| Unset |')
+  })
+
   it('forwards automatic migrations with the documented true default', () => {
     expect(composeAppEnvironment(compose).get('AUTO_MIGRATE')).toMatch(/^\$\{AUTO_MIGRATE:-true\}$/)
     const row = reference.split('\n').find((line) => line.startsWith('| `AUTO_MIGRATE` |'))

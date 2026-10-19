@@ -146,6 +146,15 @@ const schema = z
           error: 'ZOOM_CLIENT_SECRET must be a nonempty single-line value',
         }),
     ),
+    ZOOM_WEBHOOK_SECRET_TOKEN: optional(
+      z
+        .string()
+        .min(16, 'ZOOM_WEBHOOK_SECRET_TOKEN must have at least 16 characters')
+        .max(1024)
+        .refine((value) => isSingleLineText(value) && !/\s/u.test(value), {
+          error: 'ZOOM_WEBHOOK_SECRET_TOKEN must be a nonempty single-line value',
+        }),
+    ),
     CONFERENCE_ENCRYPTION_KEY: optional(
       z.string().refine(
         (value) => {
