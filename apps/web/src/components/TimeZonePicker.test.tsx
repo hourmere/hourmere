@@ -20,6 +20,21 @@ const box = () => screen.getByRole<HTMLInputElement>('combobox', { name: 'Time z
 const value = () => screen.getByTestId('value').textContent
 
 describe('the time zone picker', () => {
+  it('refreshes offsets and offset search for the reference date, including aliases', async () => {
+    const user = userEvent.setup()
+    const props = { value: 'US/Eastern', onChange: vi.fn(), now: Date.parse('2026-10-19T12:00Z') }
+    const { rerender } = render(<TimeZonePicker {...props} referenceDate="2026-10-27" />)
+    const toggle = screen.getByRole('button', { name: /Time zone/ })
+    expect(toggle.textContent).toContain('GMT-04:00')
+    rerender(<TimeZonePicker {...props} referenceDate="2026-11-03" />)
+    expect(toggle.textContent).toContain('GMT-05:00')
+    await user.click(toggle)
+    await user.type(screen.getByRole('combobox'), 'US/Eastern GMT-05:00')
+    expect(screen.getByRole('option').textContent).toBe('US/EasternGMT-05:00')
+    rerender(<TimeZonePicker {...props} referenceDate="2026-10-27" />)
+    expect(screen.queryAllByRole('option')).toHaveLength(0)
+  })
+
   it('reuses zone offsets while typing a search', async () => {
     const offsets = vi.spyOn(time, 'offsetLabel')
     const user = userEvent.setup()

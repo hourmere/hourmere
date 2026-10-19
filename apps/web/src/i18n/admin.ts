@@ -533,6 +533,7 @@ export const admin = {
   'The response was lost. The booking may have moved. Check your bookings before trying again.':
     '未收到响应。预约可能已改期。再次尝试前请先查看预约列表。',
   Rescheduled: '已改期',
+  'View rescheduled booking': '查看改期后的预约',
   'Return address:': '返回地址：',
   Revoke: '撤销',
   'Revoke “': '撤销“',

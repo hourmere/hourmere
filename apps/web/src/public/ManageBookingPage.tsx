@@ -1,6 +1,7 @@
 import { type FormEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import { ConferenceNotice } from '../components/ConferenceNotice.tsx'
+import { isKnownTimeZone } from '../format.ts'
 import { usePageTitle } from '../hooks.ts'
 import { useI18n } from '../i18n/runtime.tsx'
 import { msg, type UiText } from '../i18n/translate.ts'
@@ -220,7 +221,10 @@ function ManageView({
 
   const browserFormatLocale = useMemo(preferredLocale, [])
   const locale = explicit ?? browserFormatLocale
-  const [timeZone, setTimeZone] = useState(detectTimeZone)
+  const [timeZone, setTimeZone] = useState(() => {
+    const stored = booking.attendees.find((attendee) => attendee.isBooker)?.timeZone
+    return stored && isKnownTimeZone(stored) ? stored : detectTimeZone()
+  })
   const [now, setNow] = useState(currentTime)
   const [version, setVersion] = useState(0)
   const started = Date.parse(booking.start) <= now
@@ -325,14 +329,21 @@ function ManageView({
         <div className="reschedule">
           <div className="reschedule-header">
             <p className="muted">
-              {t('Rescheduling')} {title}
-              {hosts && t('with {0}', { '0': hosts })}
-              {t(', now on')} {formatDate(Date.parse(booking.start), timeZone, locale)},{' '}
-              {formatTimeRange(
-                Date.parse(booking.start),
-                Date.parse(booking.end),
-                timeZone,
-                locale,
+              {t(
+                hosts
+                  ? 'Rescheduling {title} with {hosts}, now on {date}, {time}'
+                  : 'Rescheduling {title}, now on {date}, {time}',
+                {
+                  title,
+                  hosts,
+                  date: formatDate(Date.parse(booking.start), timeZone, locale),
+                  time: formatTimeRange(
+                    Date.parse(booking.start),
+                    Date.parse(booking.end),
+                    timeZone,
+                    locale,
+                  ),
+                },
               )}
             </p>
             <button

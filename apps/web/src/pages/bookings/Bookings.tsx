@@ -236,7 +236,15 @@ function BookingList({
                     )}
                   </td>
                   <td data-label={t('Status')}>
-                    {b.status === 'cancelled' ? (
+                    {b.status === 'cancelled' && b.rescheduledToId ? (
+                      <>
+                        <span className="badge">{t('Rescheduled')}</span>
+                        <br />
+                        <Link to={bookingPath(b.rescheduledToId)}>
+                          {t('View rescheduled booking')}
+                        </Link>
+                      </>
+                    ) : b.status === 'cancelled' ? (
                       <span className="badge badge-danger">{t('Cancelled')}</span>
                     ) : (
                       <span className="badge badge-success">{t('Confirmed')}</span>

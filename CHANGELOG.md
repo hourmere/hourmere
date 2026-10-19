@@ -58,6 +58,10 @@ must approve publication through the [release workflow](https://github.com/hourm
   alternatives with downloadable ICS copies. Hosts with pinned provider copies receive
   ordinary notifications; legacy meeting identities remain stable through updates/cancels.
   Host calendar summaries name the invitee, and an invalid Reply-To no longer blocks delivery.
+- Separate-worker setup now uses `scripts/enable-worker.sh` (and
+  `scripts/disable-worker.sh` to deselect it), preserving quoted `COMPOSE_FILE` values and
+  the proxy overlay. Verify `docker compose config --services | grep -qx worker` before
+  recreating a separate-worker stack to catch a lost overlay before the app runs web-only.
 - Automatic Google Meet now imports the private calendar copy first and requests its
   conference through a separate conditional PATCH. Retries preserve the event and request
   identity, including recovery of legacy import-created pending requests.
@@ -117,12 +121,24 @@ stack includes PostgreSQL 18.
   or serializable isolation for first-user registration.
 - **Move old worker edits to the tracked overlay before pulling.** If you uncommented the
   old worker block, `git pull --ff-only` refuses to overwrite the edited
-  `docker-compose.yml`. First append `:docker-compose.worker.yml` to `COMPOSE_FILE` in
-  `.env` (or add `COMPOSE_FILE=docker-compose.yml:docker-compose.worker.yml`), preserving
-  any proxy overlay. Then run `git restore docker-compose.yml`, pull, and recreate the
+  `docker-compose.yml`. Run `./scripts/enable-worker.sh` if available. On an older checkout,
+  first replace or add the entire `.env` line with
+  `COMPOSE_FILE='docker-compose.yml:docker-compose.worker.yml'`, or
+  `COMPOSE_FILE='docker-compose.yml:docker-compose.proxy.yml:docker-compose.worker.yml'`
+  for bundled HTTPS; keep custom overlays inside the quotes. Then restore the tracked
+  Compose file and pull. Run `./scripts/enable-worker.sh` and verify
+  `docker compose config --services | grep -qx worker` succeeds before recreating the
   stack. Restoring without selecting the overlay leaves the old worker container orphaned
   on the old image and the app possibly web-only. See the
   [worker upgrade steps](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/self-hosting.md#upgrade-and-roll-back).
+- **Stop every old role before a column drop.** Migration 0037 is the first column drop;
+  old app and worker binaries still write its removed `retry_conference` flag. Stop all
+  old web/all/worker processes before the new app or a manual migration runs, including
+  separately managed workers. Single-container `docker compose up -d --build` already
+  stops the old app before starting its replacement; separate workers need an explicit
+  stop. Restart every role on the upgraded code. Future removals use two phases: release N
+  stops writing the column, and release N+1 drops it. Column-drop migrations require an
+  upgrade-note sidecar, checked by the migration policy test.
 - **Sign-in ID tokens are discarded.** Migration `0031_discard_sign_in_id_tokens.sql`
   clears existing `auth.account."idToken"` values, and account create/update hooks keep
   them NULL. Other account data is preserved; sign-in access/refresh tokens remain

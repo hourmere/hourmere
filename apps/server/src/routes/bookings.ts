@@ -111,6 +111,10 @@ export const Booking = z
     rescheduledFromId: z.uuid().nullable().openapi({
       description: 'The booking this one replaced when it was rescheduled',
     }),
+    rescheduledToId: z.uuid().nullable().optional().openapi({
+      description:
+        'Authenticated host reads only: the immediate successor booking in the same organization that this caller also hosts, or null. A rescheduled predecessor keeps status cancelled.',
+    }),
     cancelledAt: Instant.nullable(),
     cancelReason: z.string().nullable(),
     source: z.enum(['web', 'embed', 'api', 'mcp']).openapi({

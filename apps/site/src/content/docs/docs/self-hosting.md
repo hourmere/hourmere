@@ -56,7 +56,7 @@ existing deployment, edit its `.env` rather than rerunning setup. The developmen
 `DATABASE_URL` is omitted: Compose supplies its own container database URL and password.
 
 Setup selects both Compose files using
-`COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml`, persists
+`COMPOSE_FILE='docker-compose.yml:docker-compose.proxy.yml'`, persists
 `COMPOSE_PROJECT_NAME=hourmere`, and sets `SIGNUP=first-user`
 and `AUTO_MIGRATE=true`. `docker compose up` then builds the checked-out application,
 starts PostgreSQL 18, and applies application and job migrations before serving requests.
@@ -197,16 +197,36 @@ start again; Docker cannot resize an existing network. Keep database volumes int
 ## Run workers separately
 
 The default `HOURMERE_ROLE=all` runs the API, booking email jobs and calendar synchronization
-in one container. After setup, append `docker-compose.worker.yml` to the existing
-`COMPOSE_FILE` value in your private `.env`. For bundled HTTPS, use:
+in one container. After setup, run these commands from the deployment checkout:
 
-```dotenv
-COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml:docker-compose.worker.yml
+```sh
+unset COMPOSE_FILE
+./scripts/enable-worker.sh
+docker compose config --services | grep -qx worker
+docker compose up -d --build --wait
 ```
 
-For plain mode, use `COMPOSE_FILE=docker-compose.yml:docker-compose.worker.yml`. Then run
-`docker compose up -d --build --wait`. The tracked overlay automatically sets the app to
-`HOURMERE_ROLE=web` and the worker to `HOURMERE_ROLE=worker`, so exactly one service runs
+Continue to `up` only if the verification command succeeds. The helper rewrites only
+`COMPOSE_FILE` in your private `.env`, keeps its mode `600`, and preserves the existing
+proxy selection. It accepts quoted, unquoted and `export COMPOSE_FILE=` assignments, adds
+the setting if missing, and can be run again safely. It refuses a symlink `.env`.
+A shell-exported `COMPOSE_FILE` overrides `.env`; unset it before these commands.
+
+For a manual edit, replace the **whole line**, including its quotes. Bundled HTTPS uses:
+
+```dotenv
+COMPOSE_FILE='docker-compose.yml:docker-compose.proxy.yml:docker-compose.worker.yml'
+```
+
+Plain mode uses:
+
+```dotenv
+COMPOSE_FILE='docker-compose.yml:docker-compose.worker.yml'
+```
+
+Run the verification command above after any manual edit. The tracked overlay
+automatically sets the app to `HOURMERE_ROLE=web` and the worker to
+`HOURMERE_ROLE=worker`, so exactly one service runs
 jobs; no separate role edit or change to `docker-compose.yml` is needed. The worker uses
 the same image, environment and secrets as the base app, and its port stays unpublished.
 A web-only deployment needs a running worker for queued sign-in email, booking email and
@@ -225,10 +245,16 @@ Remove the worker container while the overlay is still selected:
 docker compose rm -sf worker
 ```
 
-Then remove the worker overlay from `COMPOSE_FILE`, remove any old `HOURMERE_ROLE=web`
-setting from `.env`, and run `docker compose up -d --build --wait`. Its default `all` role
-resumes job processing. Removing the container prevents an orphaned worker from continuing
-to process jobs after the overlay is deselected.
+Then deselect the overlay with the helper:
+
+```sh
+./scripts/disable-worker.sh
+```
+
+Remove any old `HOURMERE_ROLE=web` setting from `.env`, then run
+`docker compose up -d --build --wait`. Its default `all` role resumes job processing.
+Removing the container before deselecting the overlay prevents an orphaned worker from
+continuing to process jobs.
 
 Compose allows 35 seconds to stop a process, leaving margin around the server's 10-second
 HTTP drain and 20-second job drain. Preserve that grace period in deployment overrides.
@@ -275,7 +301,7 @@ Set these entries in your private `.env`, retaining the proxy overlay only when 
 the bundled HTTPS proxy. Keep the custom override after the worker overlay:
 
 ```dotenv
-COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml:docker-compose.worker.yml:docker-compose.webhooks.yml
+COMPOSE_FILE='docker-compose.yml:docker-compose.proxy.yml:docker-compose.worker.yml:docker-compose.webhooks.yml'
 WEBHOOKS_ENABLED=true
 WEBHOOK_PRIVATE_TARGETS=n8n:5678
 ```
@@ -283,8 +309,15 @@ WEBHOOK_PRIVATE_TARGETS=n8n:5678
 Also set the independent `WEBHOOK_ENCRYPTION_KEY` as described in the configuration
 reference, and set `N8N_IMAGE` to the pinned n8n image you operate. Configure n8n's own
 authentication, backups and private editor access separately; this example publishes no
-n8n port. Run `docker compose up -d --build --wait` to recreate both app and worker. Create
-a webhook endpoint using `http://n8n:5678/webhook/<your-workflow-path>` through the REST API.
+n8n port. Verify the worker selection and recreate both app and worker:
+
+```sh
+docker compose config --services | grep -qx worker
+docker compose up -d --build --wait
+```
+
+Continue only if verification succeeds. Create a webhook endpoint using
+`http://n8n:5678/webhook/<your-workflow-path>` through the REST API.
 The service name resolves inside that network, and the worker sends the event with the
 usual HMAC headers. Require signature verification in the receiving workflow. HTTP is
 unencrypted within the selected network; use HTTPS where transport confidentiality is
@@ -392,12 +425,20 @@ instead of that old commit before using the HTTPS commands; startup will apply i
 migrations, so retain the original dump for rollback. The rewrite preserves only the exact
 `docker-compose.worker.yml` filename in a `COMPOSE_FILE=` assignment, including setup's
 quoted values. It does not recognise `./docker-compose.worker.yml` or
-`export COMPOSE_FILE=` forms. Normalize those forms in the saved `.env` before running the
-rewrite, and verify the rewritten `COMPOSE_FILE` still selects the worker overlay before
-starting any app or worker. Plain-mode restores remove only `:docker-compose.proxy.yml` from the
-rewritten `COMPOSE_FILE` and omit the Caddy steps; keep `:docker-compose.worker.yml` if it
-was selected. Do not start the
-restored app or workers for a drill until SMTP, provider credentials and outbound webhooks
+`export COMPOSE_FILE=` forms. Before running the rewrite, replace those forms with the
+complete quoted line for your deployment shown under [Run workers separately](#run-workers-separately).
+For backups with a separate worker, verify the rewritten selection before starting any app
+or worker:
+
+```sh
+docker compose config --services | grep -qx worker
+```
+
+Continue only if verification succeeds. For a plain-mode restore, replace the whole line
+with `COMPOSE_FILE='docker-compose.yml:docker-compose.worker.yml'` when a separate worker
+was selected, or `COMPOSE_FILE='docker-compose.yml'` otherwise, and omit the Caddy steps.
+Keep any additional custom overlays within the quotes. Do not start the restored app or
+workers for a drill until SMTP, provider credentials and outbound webhooks
 have been isolated: restored queued jobs can otherwise send duplicate messages or modify
 real calendars. Never restore over a running app, and never delete a production `db-data`
 volume as an upgrade or troubleshooting step.
@@ -423,11 +464,11 @@ reopening traffic. Keep the old volumes and backup until recovery is accepted.
 ## Upgrade and roll back
 
 Read the intended release's changes and take the backup above first. Record its commit and
-preserve its `.env` and Caddy state. Enable separate workers through `COMPOSE_FILE` in
-`.env`, keeping the tracked Compose files unchanged so local deployment choices do not
-block `git pull --ff-only`. The persisted file selection also rebuilds/recreates the
-worker during upgrades. In the deployment checkout, a branch following `main` can be
-updated with the commands below.
+preserve its `.env` and Caddy state. Enable separate workers with
+`./scripts/enable-worker.sh`, keeping the tracked Compose files unchanged so local
+deployment choices do not block `git pull --ff-only`. The persisted file selection also
+rebuilds/recreates the worker during upgrades. In the deployment checkout, a branch
+following `main` can be updated with the commands below.
 
 **Migration 0038 requires stopping all old processes; do not use a rolling deployment.**
 Before any new process applies `0038_booking_ical_identity.sql`, stop every old `web`, `all`
@@ -437,24 +478,40 @@ PostgreSQL running, then apply the migration and start every role with the new c
 `AUTO_MIGRATE=true`, the first new process applies the migration on startup.
 
 **If you uncommented the old worker block in `docker-compose.yml`, migrate it before
-pulling.** Those tracked edits make `git pull --ff-only` refuse the upgrade. First append
-`:docker-compose.worker.yml` to the existing `COMPOSE_FILE` in `.env` (preserve any proxy
-overlay); if the setting is absent, add
-`COMPOSE_FILE=docker-compose.yml:docker-compose.worker.yml`. Then restore the tracked
-Compose file before pulling:
+pulling.** Those tracked edits make `git pull --ff-only` refuse the upgrade. If your
+checkout already has `scripts/enable-worker.sh`, run it first. Otherwise replace or add the
+complete `COMPOSE_FILE` line in `.env` before restoring the tracked file. For bundled HTTPS:
+
+```dotenv
+COMPOSE_FILE='docker-compose.yml:docker-compose.proxy.yml:docker-compose.worker.yml'
+```
+
+For plain mode:
+
+```dotenv
+COMPOSE_FILE='docker-compose.yml:docker-compose.worker.yml'
+```
+
+Keep any additional custom overlays within the quotes. Then restore the tracked Compose
+file before pulling:
 
 ```sh
 git restore docker-compose.yml
 git pull --ff-only
+unset COMPOSE_FILE
+./scripts/enable-worker.sh
+docker compose config --services | grep -qx worker
 docker compose pull proxy db
+docker compose stop app worker
 docker compose up -d --build --wait
 curl --retry 20 --retry-delay 3 --retry-all-errors --fail https://app.hourmere.com/api/health
 ```
 
 For installations already using the tracked overlay, skip `git restore docker-compose.yml`.
-Restoring the Compose file without selecting the worker overlay leaves the old worker
-container orphaned on the old image, and the app may remain web-only if `.env` still sets
-`HOURMERE_ROLE=web`. Select the overlay before restoring so the upgrade recreates both
+Continue only if worker verification succeeds. For a single-container installation, omit
+`enable-worker.sh` and its verification, and stop only `app`. Restoring the Compose file
+without selecting the worker overlay leaves the old worker container orphaned on the old
+image, and the app may remain web-only if `.env` still sets `HOURMERE_ROLE=web`. Select the overlay before restoring so the upgrade recreates both
 services on the new image.
 
 For a pinned release, fetch and check out the reviewed tag/commit instead of pulling the
@@ -465,10 +522,25 @@ updates, then `up` recreates affected containers. Review Caddy releases and deli
 test newer minor versions before updating that pin; review PostgreSQL release notes before
 patch updates, and plan a separate database migration for a future major upgrade. Container
 image updates are separate from host apt updates. Rebuild any separate worker too.
-`AUTO_MIGRATE=true` applies pending application and job
-migrations on startup; applied migrations have checksums and must not be edited. Keep the
-same secrets across upgrades. PostgreSQL password changes in `.env` do not change an
-already-initialized database role's password.
+
+**Before starting a version whose migrations drop columns, stop every old app and worker
+process.** Migration `0037_conference_pending_timeout.sql` is the project's first column
+drop: old versions still write the removed `booking_conferences.retry_conference` column.
+The `stop app worker` step above stops both Compose roles before new startup migrations.
+For a single-container deployment, `docker compose up -d --build` already stops the old app
+container before starting its replacement. Separately managed workers, including processes
+outside this Compose project, must be stopped explicitly before the new app or a manual
+migration runs. Restart every role with the same upgraded code after migration; do not run
+old and new versions together across a column drop.
+
+Future column removals use two phases: release N stops writing the column, and release N+1
+drops it. Review each release's migration and upgrade notes even with this policy; schema
+downgrade remains unsupported.
+
+`AUTO_MIGRATE=true` applies pending application and job migrations on startup; applied
+migrations have checksums and must not be edited. Keep the same secrets across upgrades.
+PostgreSQL password changes in `.env` do not change an already-initialized database role's
+password.
 
 Schema downgrade is not automatic. An old application image may not work against the new
 schema. To roll back safely, stop all app/worker processes, restore the pre-upgrade database
