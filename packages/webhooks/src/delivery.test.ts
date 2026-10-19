@@ -600,25 +600,76 @@ describe.skipIf(!serverUrl)('durable organization booking webhooks', () => {
     await deliverWebhook(d, old.delivery.id, signal())
   })
 
-  it('counts a shutdown attempt and retries after decryption failure without leaking keys', async () => {
+  it.each([200, 204, 299])(
+    'records a late %i acknowledgement after shutdown as delivered',
+    async (status) => {
+      const { delivery } = await captured()
+      const abort = new AbortController()
+      const started = Promise.withResolvers<void>()
+      const response = Promise.withResolvers<number>()
+      let sends = 0
+      const d = deps(async () => {
+        sends++
+        started.resolve()
+        return response.promise
+      })
+      const running = deliverWebhook(d, delivery.id, abort.signal, 13)
+      await started.promise
+      abort.abort()
+      response.resolve(status)
+      await expect(running).resolves.toBeUndefined()
+      expect(
+        await db
+          .selectFrom('webhook_deliveries')
+          .selectAll()
+          .where('id', '=', delivery.id)
+          .executeTakeFirstOrThrow(),
+      ).toMatchObject({
+        attempts: 13,
+        status: 'delivered',
+        http_status: status,
+        last_error: null,
+        delivered_at: new Date(NOW.epochMilliseconds),
+      })
+      await deliverWebhook(d, delivery.id, signal())
+      expect(sends).toBe(1)
+    },
+  )
+
+  it.each([199, 300, 503, null])(
+    'counts shutdown without a successful acknowledgement (%s)',
+    async (status) => {
+      const { delivery } = await captured()
+      const abort = new AbortController()
+      await expect(
+        deliverWebhook(
+          deps(async () => {
+            abort.abort()
+            if (status === null) throw new Error('synthetic aborted transport')
+            return status
+          }),
+          delivery.id,
+          abort.signal,
+        ),
+      ).rejects.toThrow(/^Webhook delivery interrupted$/)
+      expect(
+        await db
+          .selectFrom('webhook_deliveries')
+          .selectAll()
+          .where('id', '=', delivery.id)
+          .executeTakeFirstOrThrow(),
+      ).toMatchObject({
+        attempts: 1,
+        status: 'pending',
+        http_status: null,
+        last_error: 'interrupted',
+        delivered_at: null,
+      })
+    },
+  )
+
+  it('retries after decryption failure without leaking keys', async () => {
     const { delivery } = await captured()
-    const abort = new AbortController()
-    await expect(
-      deliverWebhook(
-        deps(async () => {
-          abort.abort()
-          return 204
-        }),
-        delivery.id,
-        abort.signal,
-      ),
-    ).rejects.toThrow()
-    let row = await db
-      .selectFrom('webhook_deliveries')
-      .selectAll()
-      .where('id', '=', delivery.id)
-      .executeTakeFirstOrThrow()
-    expect(row).toMatchObject({ attempts: 1, status: 'pending', last_error: 'interrupted' })
     await expect(
       deliverWebhook(
         { ...deps(async () => 204), encryptionKey: Buffer.alloc(32, 8).toString('base64') },
@@ -626,12 +677,12 @@ describe.skipIf(!serverUrl)('durable organization booking webhooks', () => {
         signal(),
       ),
     ).rejects.toThrow(/^Webhook delivery failed$/)
-    row = await db
+    const row = await db
       .selectFrom('webhook_deliveries')
       .selectAll()
       .where('id', '=', delivery.id)
       .executeTakeFirstOrThrow()
-    expect(row).toMatchObject({ attempts: 2, status: 'pending', last_error: 'secret_unavailable' })
+    expect(row).toMatchObject({ attempts: 1, status: 'pending', last_error: 'secret_unavailable' })
   })
 
   it('includes killed runs in the pg-boss attempt budget and fails the last retry', async () => {

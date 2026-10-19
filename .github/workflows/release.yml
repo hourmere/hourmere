@@ -1,0 +1,138 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions: {}
+
+concurrency:
+  # Serialize publication so two versions cannot race to move the stable aliases.
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    if: github.repository == 'hourmere/hourmere'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read # Read the release environment's required-reviewer protection.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+      - name: Validate the version, main ancestry and changelog
+        run: |
+          git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
+          node scripts/release.ts prepare "$GITHUB_REF_NAME" "$GITHUB_SHA"
+      - name: Require a configured owner approval gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/environments/release" > "$RUNNER_TEMP/release-environment.json"
+          node scripts/release.ts check-environment "$RUNNER_TEMP/release-environment.json"
+
+  ci:
+    needs: prepare
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    needs: [prepare, ci]
+    runs-on: ubuntu-latest
+    # Configure required reviewers before the first tag; see docs/releasing.md.
+    environment: release
+    permissions:
+      actions: read # Recheck protection after waiting for owner approval.
+      contents: write # Create the GitHub Release.
+      packages: write # Publish the image and registry attestations.
+      id-token: write # Sign provenance with GitHub's OIDC identity.
+      attestations: write # Record the image's build provenance on GitHub.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+      - name: Revalidate the approved release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
+          node scripts/release.ts prepare "$GITHUB_REF_NAME" "$GITHUB_SHA"
+          gh api "repos/$GITHUB_REPOSITORY/environments/release" > "$RUNNER_TEMP/release-environment.json"
+          node scripts/release.ts check-environment "$RUNNER_TEMP/release-environment.json"
+      - name: Select image tags
+        id: image
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          MAJOR_MINOR: ${{ steps.release.outputs.major_minor }}
+          PRERELEASE: ${{ steps.release.outputs.prerelease }}
+        run: |
+          {
+            echo 'tags<<IMAGE_TAGS'
+            echo "ghcr.io/hourmere/hourmere:$VERSION"
+            if [ "$PRERELEASE" = false ]; then
+              echo "ghcr.io/hourmere/hourmere:$MAJOR_MINOR"
+              echo 'ghcr.io/hourmere/hourmere:latest'
+            fi
+            echo IMAGE_TAGS
+          } >> "$GITHUB_OUTPUT"
+      - name: Enable arm64 emulation
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+        with:
+          image: docker.io/tonistiigi/binfmt:latest@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
+          platforms: arm64
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+        with:
+          driver-opts: image=docker.io/moby/buildkit:buildx-stable-1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
+      - name: Sign in to GHCR
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Build and publish both architectures
+        id: build
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.image.outputs.tags }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/hourmere/hourmere
+            org.opencontainers.image.licenses=AGPL-3.0-only
+            org.opencontainers.image.version=${{ steps.release.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          provenance: mode=max
+          sbom: generator=docker.io/docker/buildkit-syft-scanner:stable-1@sha256:ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9
+      - name: Attest the published image digest
+        uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
+        with:
+          subject-name: ghcr.io/hourmere/hourmere
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
+      - name: Create the GitHub Release from the changelog
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NOTES_FILE: ${{ steps.release.outputs.notes_file }}
+          PRERELEASE: ${{ steps.release.outputs.prerelease }}
+        run: |
+          flags=(--latest)
+          if [ "$PRERELEASE" = true ]; then
+            flags=(--prerelease --latest=false)
+          fi
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            --verify-tag --title "$GITHUB_REF_NAME" --notes-file "$NOTES_FILE" "${flags[@]}"

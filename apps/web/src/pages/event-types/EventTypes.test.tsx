@@ -190,6 +190,17 @@ describe('the event types list', () => {
 })
 
 describe('creating an event type', () => {
+  it('separates the English minimum notice description, range and day equivalent with spaces', async () => {
+    const user = userEvent.setup()
+    eventTypeServer([])
+    await openNew()
+    const hint = document.getElementById('minimumNoticeMinutes-hint')
+    expect(hint?.textContent).toBe('How far ahead a meeting must be booked. 0–525,600.')
+    await user.clear(field('Minimum notice (minutes)'))
+    await user.type(field('Minimum notice (minutes)'), '1440')
+    expect(hint?.textContent).toBe('How far ahead a meeting must be booked. 0–525,600. = 1 day.')
+  })
+
   it('translates the minimum notice and buffer hints in Simplified Chinese', async () => {
     chooseLanguage('zh-CN')
     eventTypeServer([])

@@ -20,6 +20,7 @@ import {
   type ServiceContext,
 } from '@hourmere/scheduling'
 import type { MiddlewareHandler } from 'hono'
+import { createMiddleware } from 'hono/factory'
 import type { CallerEnv } from '../caller.ts'
 import { authenticated, ErrorBody, json, type RouteModule } from '../openapi.ts'
 import { createRateLimiter, PUBLIC_RATE_LIMITS, type RateLimit, rateLimit } from '../rate-limit.ts'
@@ -196,6 +197,9 @@ const unauthorized = error('No valid session or API key')
 const keyRateLimited = error(
   "The API key's rate limit is used up (`rate_limited`); see Retry-After",
 )
+const hostRateLimited = error(
+  "The caller's per-user limit or the API key's rate limit is used up (`rate_limited`); see Retry-After",
+)
 const crossOrigin = error(
   'A cookie-authenticated write that does not come from the app itself (`forbidden`)',
 )
@@ -213,6 +217,8 @@ export interface BookingRoutesDeps {
   notify?: BookingNotifier | undefined
   /** Replaces PUBLIC_RATE_LIMITS.manage (and .slots for the reschedule slots), e.g. in tests. */
   rateLimits?: Partial<Record<keyof typeof PUBLIC_RATE_LIMITS, RateLimit>>
+  /** Per-user host limits, separate from invitee IP counters; defaults are 30/120 per minute. */
+  hostRateLimits?: Partial<Record<'manage' | 'slots', RateLimit>>
 }
 
 /**
@@ -227,6 +233,7 @@ export function bookingRoutes({
   automaticMeet,
   automaticZoom,
   rateLimits = {},
+  hostRateLimits = {},
 }: BookingRoutesDeps): RouteModule {
   const publicContext: PublicContext = { db, now, notify, automaticMeet, automaticZoom }
   const manageLimit = rateLimit(createRateLimiter(rateLimits.manage ?? PUBLIC_RATE_LIMITS.manage))
@@ -234,11 +241,26 @@ export function bookingRoutes({
   const manageSlotsLimit = rateLimit(
     createRateLimiter(rateLimits.slots ?? PUBLIC_RATE_LIMITS.slots),
   )
+  // Authentication must run first: these counters follow the user across sessions, keys,
+  // organizations and IPs, without consuming the anonymous invitee's address budget.
+  const hostLimit = (limit: RateLimit) => {
+    const limiter = createRateLimiter(limit)
+    return createMiddleware<CallerEnv>(async (c, next) => {
+      const retryAfter = limiter.hit(c.var.principal.user.id)
+      if (retryAfter !== undefined) {
+        c.header('Retry-After', String(retryAfter))
+        return c.json({ error: 'rate_limited' }, 429)
+      }
+      await next()
+    })
+  }
+  const hostManageLimit = hostLimit(hostRateLimits.manage ?? PUBLIC_RATE_LIMITS.manage)
+  const hostSlotsLimit = hostLimit(hostRateLimits.slots ?? PUBLIC_RATE_LIMITS.slots)
 
   return ({ app, caller }) => {
     // Tuples preserve caller's principal type through createRoute's middleware inference.
-    const hostManage: [typeof caller, MiddlewareHandler<CallerEnv>] = [caller, manageLimit]
-    const hostSlots: [typeof caller, MiddlewareHandler<CallerEnv>] = [caller, manageSlotsLimit]
+    const hostManage: [typeof caller, MiddlewareHandler<CallerEnv>] = [caller, hostManageLimit]
+    const hostSlots: [typeof caller, MiddlewareHandler<CallerEnv>] = [caller, hostSlotsLimit]
     const context = (principal: ServiceContext['principal']): ServiceContext => ({
       db,
       principal,
@@ -468,7 +490,7 @@ export function bookingRoutes({
           409: error(
             'Already cancelled (`booking_cancelled`), already started (`booking_in_past`), the event type no longer takes bookings (`event_type_unavailable`), or required hosts are unavailable (`booking_has_no_host`, `booking_hosts_unavailable`)',
           ),
-          429: rateLimited,
+          429: hostRateLimited,
         },
       }),
       async (c) => {
@@ -510,7 +532,7 @@ export function bookingRoutes({
           409: error(
             'Already cancelled (`booking_cancelled`), already started (`booking_in_past`), the event type no longer takes bookings (`event_type_unavailable`), required hosts are unavailable (`booking_has_no_host`, `booking_hosts_unavailable`), or the time is not offered (`slot_unavailable`, `slot_taken`)',
           ),
-          429: rateLimited,
+          429: hostRateLimited,
         },
       }),
       async (c) => {
