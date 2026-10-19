@@ -31,7 +31,7 @@ const sections = [
   title="Terms of Service"
   description="The terms for using the Hourmere website and Hourmere Cloud, provided by Cobaltmere, LLC."
   path="/terms"
-  effective="2026-10-16"
+  effective="2026-11-30"
   sections={sections}
 >
   <Fragment slot="intro">
@@ -83,15 +83,19 @@ const sections = [
   <ul>
     <li>
       You can authorize AI assistants and other applications to use your account through the API or
-      the remote MCP server with an API key that you create. OAuth authorization for AI connectors is
-      planned. Actions that applications take with your API key, such as booking, rescheduling or
-      cancelling meetings, are treated as actions taken by you.
+      the remote MCP server with an API key that you create or, for MCP clients when we enable it,
+      an OAuth 2.1 connection that you approve. Actions that applications take with your API key or
+      an OAuth connection you approve, such as booking, rescheduling or cancelling meetings, are
+      treated as actions taken by you.
     </li>
-    <li>Keep your API keys secret. If you think a key has been misused, revoke it right away.</li>
     <li>
-      AI assistants can make mistakes. Check important bookings, and do not give API keys to
-      applications you do not trust. AI assistants are provided by third parties, and we are not
-      responsible for their actions or output.
+      Keep your API keys secret. If you think a key has been misused, revoke it right away. You can
+      revoke a connected application's OAuth access at any time in Connected apps.
+    </li>
+    <li>
+      AI assistants can make mistakes. Check important bookings, and do not give API keys to, or
+      approve OAuth connections for, applications you do not trust. AI assistants are provided by
+      third parties, and we are not responsible for their actions or output.
     </li>
     <li>
       We may apply rate limits and usage limits to the API and the MCP server to keep the Service
@@ -135,13 +139,14 @@ const sections = [
   <h2 id="plans-and-payment">7. Plans and payment</h2>
   <ul>
     <li>
-      Hourmere Cloud will offer a Free plan and paid plans. Paid plans are billed per seat, in advance
-      for each billing period, at the prices shown when you buy.
+      Hourmere Cloud has not launched and paid plans are not yet available. Hourmere Cloud will
+      offer a Free plan and paid plans. Paid plans are billed per seat, in advance for each billing
+      period, at the prices shown when you buy.
     </li>
     <li>
-      Payments are processed by Stripe. For purchases made through Stripe's merchant-of-record
-      service, your order is sold through Link, LLC, an affiliate of Stripe, which handles payment
-      processing and applicable sales tax, VAT or GST.
+      When you buy a paid plan, payments are processed by Stripe. For purchases made through
+      Stripe's merchant-of-record service, your order is sold through Link, LLC, an affiliate of
+      Stripe, which handles payment processing and applicable sales tax, VAT or GST.
     </li>
     <li>
       Subscriptions renew automatically at the end of each billing period unless you cancel before

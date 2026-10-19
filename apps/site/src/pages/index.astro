@@ -144,8 +144,8 @@ const plans = [
           API from your own tools.
         </p>
         <p class="agents-note">
-          Agents can access your account only with an API key that you create. OAuth for AI
-          connectors is planned.
+          Agents can access your account only with an API key that you create or, for MCP clients
+          when the instance operator enables it, an OAuth 2.1 connection that you approve.
         </p>
       </div>
       <div class="card agent-card">
@@ -181,7 +181,10 @@ const plans = [
           descriptions or attendees.
         </li>
         <li>Invitees see the times you are available, not the details of your calendar events.</li>
-        <li>AI assistants get access to your account only when you give them an API key.</li>
+        <li>
+          AI assistants get access to your account only when you give them an API key or approve an
+          OAuth connection.
+        </li>
         <li>
           You can disconnect a calendar at any time. Hourmere then stops reading it and deletes the
           calendar data it stored, as described in the Privacy Policy.
@@ -284,7 +287,8 @@ const plans = [
           <p>
             With an API key that you create, an assistant can list your event types, check your
             availability, and book, reschedule or cancel meetings, through the API or the remote MCP
-            server. OAuth for AI connectors is planned.
+            server. MCP clients can also connect with OAuth 2.1 when the instance operator
+            enables it.
           </p>
         </details>
         <details>

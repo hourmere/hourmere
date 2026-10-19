@@ -22,10 +22,11 @@ header on every request:
 ```
 
 This shows the connection values; client-specific configuration keys may differ. Store the
-real key privately. API keys keep working with or without the optional OAuth 2.1 connector
-flow described below. Session cookies never authenticate MCP.
-A browser request from a different origin is refused; non-browser clients normally send
-no `Origin` header.
+real key privately. Hourmere's MCP server accepts API keys and, when the instance operator
+enables it, organization-bound [OAuth 2.1 connections](#connect-with-oauth); API keys keep
+working with or without the optional OAuth 2.1 connector flow described below. Session
+cookies never authenticate MCP. A browser request from a different origin is refused;
+non-browser clients normally send no `Origin` header.
 
 Ask the client to list tools, then call `whoami` to verify the user and organization before
 changing bookings. The endpoint is stateless: it does not issue a session ID or maintain a
@@ -43,8 +44,8 @@ app or through REST.
 | `get_event_type` | An `id` from the list; full configuration, including questions, location and rules. |
 | `list_schedules` | Optional `limit` and `after`; summaries of your schedules. Schedules belong to your user across organizations. |
 | `get_schedule` | An `id` from the list; weekly working hours in the schedule's IANA time zone. Date overrides are separate. |
-| `list_calendar_connections` | No arguments; your calendar IDs, safe connection status, conflict settings and write destination. |
-| `list_conference_connections` | No arguments; your Zoom connection IDs, identity/meetings mode and safe status. |
+| `list_calendar_connections` | No arguments; your connected account emails, calendar names and IDs, safe connection status, conflict settings and write destination. |
+| `list_conference_connections` | No arguments; your Zoom connection IDs, account email and display name, identity/meetings mode and safe status. |
 
 Catalog lists return `{ data, nextAfter }`, sorted by ID, with 20 summaries by default and at
 most 100 (`limit: 1`–`100`). Pass `after: nextAfter` with the same key and organization until
