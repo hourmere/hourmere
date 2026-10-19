@@ -46,6 +46,10 @@ jobs:
       - name: Generated API types match the server's OpenAPI document
         run: npm run api:types && git diff --exit-code -- apps/web/src/api/schema.d.ts
       - run: npm run build
+      - name: Inspect and smoke test the standalone npm CLI tarball
+        run: npm run cli:pack-smoke
+      - name: Validate the draft MCP Registry metadata against the official schema
+        run: npm run mcp:registry:validate
 
   docker:
     runs-on: ubuntu-latest

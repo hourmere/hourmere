@@ -1,4 +1,4 @@
-import { constants } from 'node:fs'
+import { constants, readFileSync } from 'node:fs'
 import { open } from 'node:fs/promises'
 import { CliError, callTool, endpoint, isObject, MAX_INPUT_BYTES } from './client.ts'
 
@@ -18,7 +18,14 @@ const COMMANDS = {
   'retry-calendar-copy': 'retry_calendar_copy',
 } as const
 
-export const HELP = `Usage: npm run --silent cli -- COMMAND [--input FILE|-] [--output FILE] [--url ORIGIN]
+const { version } = JSON.parse(
+  readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
+) as {
+  version: string
+}
+
+export const HELP = `Usage: hourmere COMMAND [--input FILE|-] [--output FILE] [--url ORIGIN]
+       hourmere --help | --version
 
 Commands: whoami, profile, catalog, event, schedules, schedule, slots,
           book, list, reschedule, cancel, retry-meeting, retry-calendar-copy
@@ -28,7 +35,7 @@ Secrets are never accepted as command-line flags. No .env or credential store is
 stdout is JSON with management capabilities redacted. --output creates a new 0600 JSON
 file including returned management tokens; keep it private. Existing files are refused.
 book requires an explicit random idempotencyKey in its input. Calls are never retried.
-See docs/cli.md for arguments, pagination, exit codes and lost-response recovery.
+See https://github.com/hourmere/hourmere/blob/main/docs/cli.md for complete usage.
 `
 
 interface Options {
@@ -120,6 +127,10 @@ export async function runCli(options: {
   stderr: (text: string) => void
   fetch?: typeof fetch
 }): Promise<number> {
+  if (options.argv.length === 1 && options.argv[0] === '--version') {
+    options.stdout(`${version}\n`)
+    return 0
+  }
   if (options.argv.length === 0 || (options.argv.length === 1 && options.argv[0] === '--help')) {
     options.stdout(HELP)
     return 0
