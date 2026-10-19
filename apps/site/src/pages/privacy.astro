@@ -41,10 +41,9 @@ const privacyMail = `mailto:${contact.privacy}`
     </p>
     <p class="callout">
       Hourmere is in development and Hourmere Cloud has not launched yet. This policy describes how
-      we will handle personal data once it does. Until then, the only personal data we receive
-      through Hourmere is the website request data described in
-      <a href="#this-website">section 14</a> and any messages you choose to send us, such as a
-      request for launch updates.
+      we will handle personal data once it does. Until then, the personal data we receive
+      through Hourmere is the website request data and Cloud waitlist information described in
+      <a href="#this-website">section 14</a>, and any messages you choose to send us.
     </p>
     <section class="summary" aria-labelledby="summary-title">
       <h2 id="summary-title">The short version</h2>
@@ -176,6 +175,11 @@ const privacyMail = `mailto:${contact.privacy}`
       reports.
     </li>
     <li>
+      <strong>Website and Cloud waitlist:</strong> if you join the Hourmere Cloud waitlist,
+      {company.shortName} stores your email address, the time you joined, the page language and
+      source, and the consent text version. See <a href="#this-website">section 14</a>.
+    </li>
+    <li>
       <strong>Communications:</strong> messages you send to us, for example to our support address
       or to ask for launch updates.
     </li>
@@ -214,8 +218,9 @@ const privacyMail = `mailto:${contact.privacy}`
     including billing for paid plans;
     our legitimate interests in operating a secure and reliable service, which cover security,
     fraud and abuse prevention, and service improvement; compliance with legal obligations, which
-    covers tax and accounting records; and your consent, which covers marketing emails and any
-    other processing for which we ask your permission. You can withdraw consent at any time; see
+    covers tax and accounting records; and your consent, which covers marketing emails, the
+    Hourmere Cloud waitlist and any other processing for which we ask your permission. You can
+    withdraw consent at any time; see
     <a href="#your-rights">section 13</a>.
   </p>
 
@@ -590,8 +595,8 @@ const privacyMail = `mailto:${contact.privacy}`
       section 5 (Microsoft).
     </li>
     <li>
-      <strong>Requests for launch updates</strong> are kept until you ask us to stop or we have sent
-      the launch announcement.
+      <strong>Cloud waitlist entries and requests for launch updates</strong> are kept until you
+      ask us to stop or we have sent the launch announcement.
     </li>
   </ul>
   <p>
@@ -642,12 +647,20 @@ const privacyMail = `mailto:${contact.privacy}`
 
   <h2 id="this-website">14. This website, cookies and local storage</h2>
   <p>
-    hourmere.com is a static website. It does not set cookies itself; our hosting provider may set
-    strictly necessary security cookies. The website does not use analytics or third-party trackers,
+    hourmere.com serves static pages and a Cloud waitlist form. It does not set cookies itself;
+    our hosting provider may set strictly necessary security cookies. The website does not use analytics or third-party trackers,
     and its fonts are served from hourmere.com. Our website hosting provider processes standard
     request data, such as IP address, browser type and the page requested, to deliver the site and
     protect it from abuse. The documentation pages save small preferences, such as your light or
     dark theme choice, in your browser's local storage; this stays on your device.
+  </p>
+  <p>
+    If you join the Hourmere Cloud waitlist, Cobaltmere stores your email address, the time you
+    joined and the page language and source to tell you when Hourmere Cloud launches. We also record
+    the consent text version. The list is stored in Cloudflare D1. We do not use it for other
+    purposes or share it except with service providers that host it. The legal basis is your
+    consent, which you can withdraw at any time. You can ask for deletion by emailing
+    <a href={privacyMail}>{contact.privacy}</a>, and each email includes a way to opt out.
   </p>
   <p>
     When Hourmere Cloud launches, it will use only cookies that are strictly necessary for it to

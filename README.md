@@ -51,7 +51,7 @@ The web app only uses the public API (`/api/v1/*` and Better Auth's `/api/auth/*
 
 Other commands: `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`, `npm run db:migrate`, `npm run db:down`, `npm run api:types`.
 
-The website runs on its own: `npm run dev --workspace @hourmere/site` (http://localhost:4321). `npm run build` writes it to `apps/site/dist`. `npm run deploy --workspace @hourmere/site` builds it and publishes it as Cloudflare Workers static assets on hourmere.com and www.hourmere.com (config in `apps/site/wrangler.jsonc`); it needs `wrangler login` to the Cobaltmere Cloudflare account.
+The website runs on its own: `npm run dev --workspace @hourmere/site` (http://localhost:4321). `npm run build` writes it to `apps/site/dist`. A small Cloudflare Worker handles the Hourmere Cloud waitlist and serves the static assets on hourmere.com and www.hourmere.com (config in `apps/site/wrangler.jsonc`). See [website operations](docs/website.md) for local D1/form testing and the resources the lead must configure before running `npm run deploy --workspace @hourmere/site` in the Cobaltmere Cloudflare account.
 
 ## Self-hosting
 

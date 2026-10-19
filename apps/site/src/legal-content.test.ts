@@ -168,6 +168,29 @@ describe('privacy data-flow disclosures', () => {
       /compliance with legal obligations, which covers tax and accounting records/,
     )
     expect(uses).toMatch(/your consent, which covers marketing emails/)
+    expect(uses).toMatch(/your consent, which covers marketing emails, the Hourmere Cloud waitlist/)
+    expect(uses).toMatch(/You can withdraw consent at any time/)
+  })
+
+  it('describes the Cloud waitlist data, storage, narrow purpose and consent choices', () => {
+    expect(block('li', 'Website and Cloud waitlist:')).toMatch(
+      /stores your email address, the time you joined, the page language and source, and the consent text version/,
+    )
+    const waitlist = block('p', 'If you join the Hourmere Cloud waitlist,')
+    expect(waitlist).toMatch(
+      /Cobaltmere stores your email address, the time you joined and the page language and source to tell you when Hourmere Cloud launches/,
+    )
+    expect(waitlist).toMatch(/The list is stored in Cloudflare D1/)
+    expect(waitlist).toMatch(
+      /do not use it for other purposes or share it except with service providers that host it/,
+    )
+    expect(waitlist).toMatch(/legal basis is your consent, which you can withdraw at any time/)
+    expect(waitlist).toMatch(/ask for deletion by emailing \{contact\.privacy\}/)
+    expect(waitlist).toMatch(/each email includes a way to opt out/)
+    expect(read('./site.ts')).toMatch(/privacy: 'privacy@cobaltmere\.com'/)
+    expect(block('li', 'Cloud waitlist entries and requests for launch updates')).toMatch(
+      /until you ask us to stop or we have sent the launch announcement/,
+    )
   })
 
   it('distinguishes the hosted operator from the self-hosted operator', () => {

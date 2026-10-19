@@ -1,5 +1,6 @@
 ---
 import BookingPreview from '../components/BookingPreview.astro'
+import WaitlistForm from '../components/WaitlistForm.astro'
 import Base from '../layouts/Base.astro'
 import { company, contact, launchUpdatesHref, site } from '../site'
 
@@ -81,12 +82,11 @@ const plans = [
           service.
         </p>
         <div class="cta-row">
-          <a class="btn btn-primary" href={launchUpdatesHref}>Get launch updates</a>
+          <a class="btn btn-primary" href="#cloud-waitlist">Join the Cloud waitlist</a>
           <a class="btn" href={site.github}>Follow on GitHub</a>
         </div>
         <p class="note">
-          Hourmere is not available yet, so there is no sign-up today. Email us and we will let you
-          know when it launches.
+          Hourmere Cloud has not launched. Join the waitlist to hear when it becomes available.
         </p>
       </div>
       <BookingPreview />
@@ -224,11 +224,13 @@ const plans = [
           <h3>Hourmere Cloud</h3>
           <p>
             We will host, update and operate Hourmere for you, so you can share your booking link
-            without running a server. Hourmere Cloud is in development.
+            without running a server. Hourmere Cloud has not launched. Join the waitlist to hear
+            when it is available.
           </p>
           <p class="small">
             Operated by <a href={company.url}>{company.name}</a>.
           </p>
+          <WaitlistForm source="cloud" />
         </div>
       </div>
     </div>
@@ -240,7 +242,8 @@ const plans = [
       <h2 id="pricing-title">Free to self-host. Simple cloud plans.</h2>
       <p class="section-intro">
         These are the planned prices for Hourmere Cloud. Final plan details will be published at
-        launch.
+        launch. Hourmere Cloud has not launched; joining the waitlist does not create an account
+        or start a paid plan.
       </p>
       <div class="grid plans">
         {
@@ -256,6 +259,7 @@ const plans = [
           ))
         }
       </div>
+      <WaitlistForm source="pricing" />
     </div>
   </section>
 
@@ -270,6 +274,15 @@ const plans = [
             Not yet. Hourmere is in development.
             Email <a href={launchUpdatesHref}>{contact.hello}</a> to hear when it launches.
           </p>
+        </details>
+        <details>
+          <summary>When will Hourmere Cloud be available?</summary>
+          <p>
+            Hourmere Cloud has not launched. You can join the waitlist and we will email you when
+            it launches. The source code is on
+            <a href={site.github}>GitHub</a>.
+          </p>
+          <WaitlistForm source="faq" />
         </details>
         <details>
           <summary>Is Hourmere really open source?</summary>
@@ -306,7 +319,7 @@ const plans = [
     <div class="container closing-inner">
       <h2 id="closing-title">Hourmere is in development.</h2>
       <div class="cta-row">
-        <a class="btn btn-light" href={launchUpdatesHref}>Get launch updates</a>
+        <a class="btn btn-light" href="#cloud-waitlist">Join the Cloud waitlist</a>
         <a class="btn btn-outline-light" href={site.github}>Follow on GitHub</a>
       </div>
     </div>
