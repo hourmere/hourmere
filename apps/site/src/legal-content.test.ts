@@ -61,7 +61,9 @@ describe('comparison review information', () => {
 
     it(`${page} uses public site documentation for Hourmere claims`, () => {
       const source = read(`./content/docs/docs/${page}`)
-      expect(source).not.toMatch(/https?:\/\/github\.com\/cobaltmere\/hourmere(?:\/|\b)/)
+      for (const [url] of source.matchAll(/https?:\/\/github\.com\/[^\s)]+/g)) {
+        expect(url).toMatch(/^https:\/\/github\.com\/(?:hourmere\/hourmere|calcom\/)/)
+      }
       const links = [...source.matchAll(/\]\((\/docs\/[^)#]+)(?:#[^)]*)?\)/g)]
       expect(links.length).toBeGreaterThan(0)
       for (const [, path] of links) {
@@ -147,8 +149,25 @@ describe('MCP quickstart authentication', () => {
 })
 
 describe('privacy data-flow disclosures', () => {
-  it('marks the wording as a draft requiring owner approval', () => {
-    expect(plainText(privacy)).toMatch(/Draft for owner review:.*approval before.*published/)
+  it('is publishable: effective date set, no draft banner and no owner TODO markers', () => {
+    const terms = read('./pages/terms.astro')
+    expect(privacy).toMatch(/effective="2026-11-30"/)
+    expect(terms).toMatch(/effective="2026-11-30"/)
+    for (const page of [privacy, terms, read('./content/docs/docs/comparison.md')]) {
+      expect(plainText(page)).not.toMatch(/Draft for owner review|TODO|owner review|owner decision/)
+    }
+  })
+
+  it('maps each processing purpose to a legal basis', () => {
+    const uses = section('how-we-use-information')
+    expect(uses).toMatch(/performance of our contract with you, which covers providing the Service/)
+    expect(uses).toMatch(
+      /legitimate interests in operating a secure and reliable service, which cover security, fraud and abuse prevention, and service improvement/,
+    )
+    expect(uses).toMatch(
+      /compliance with legal obligations, which covers tax and accounting records/,
+    )
+    expect(uses).toMatch(/your consent, which covers marketing emails/)
   })
 
   it('distinguishes the hosted operator from the self-hosted operator', () => {
@@ -266,12 +285,12 @@ describe('privacy data-flow disclosures', () => {
     )
   })
 
-  it('discloses encrypted sign-in access and refresh tokens and the stored ID token', () => {
+  it('discloses encrypted sign-in access and refresh tokens and that the ID token is not stored', () => {
     const collected = section('information-we-collect')
     expect(collected).toMatch(
-      /Google or Microsoft:.*sign-in access and refresh tokens are stored encrypted; the ID token returned at sign-in, which contains your name, email address and account identifier, is stored as received/,
+      /Google or Microsoft:.*sign-in access and refresh tokens are stored encrypted; the ID token returned at sign-in is not stored\./,
     )
-    expect(collected).not.toMatch(/sign-in OAuth tokens/)
+    expect(collected).not.toMatch(/sign-in OAuth tokens|stored as received/)
     const security = section('security')
     expect(security).toMatch(
       /encrypted storage of Google and Microsoft sign-in access and refresh tokens, calendar and Zoom connection tokens/,
@@ -316,19 +335,26 @@ describe('privacy data-flow disclosures', () => {
   })
 
   it.each([
-    ['information-we-collect', /TODO for owner before publication:.*Stripe.*Link/],
-    ['sharing', /TODO for owner before publication:.*Stripe.*Link/],
-    ['how-we-use-information', /TODO for owner before publication:.*legal bases/],
+    [
+      'information-we-collect',
+      /Hourmere Cloud has not launched and takes no payments\. Before it does, we will update this policy to describe billing and payment processing\./,
+    ],
+    [
+      'sharing',
+      /Hourmere Cloud has not launched and takes no payments\. Before it does, we will update this policy to describe billing and payment processing\./,
+    ],
     [
       'international-transfers',
-      /TODO for owner before publication:.*hosting.*Standard Contractual Clauses/,
+      /Hourmere Cloud has not launched\. Before it does, we will update this policy to state where Hourmere Cloud data is hosted and any mechanism we use for international transfers of personal data\. The hourmere\.com website is published as static files on Cloudflare Workers/,
     ],
-  ] as const)('marks unconfirmed policy choices visibly in %s', (id, disclosure) => {
-    const start = privacy.indexOf(`<h2 id="${id}">`)
-    const end = privacy.indexOf('<h2 id=', start + 1)
-    const source = privacy.slice(start, end === -1 ? undefined : end)
-    const callouts = [...source.matchAll(/<p class="callout">([\s\S]*?)<\/p>/g)]
-    expect(callouts.some((match) => disclosure.test(plainText(match[1] ?? '')))).toBe(true)
+  ] as const)('states the pre-launch position in %s', (id, disclosure) => {
+    expect(section(id)).toMatch(disclosure)
+  })
+
+  it('does not promise a hosting region or transfer safeguards before Cloud launches', () => {
+    expect(section('international-transfers')).not.toMatch(
+      /Standard Contractual Clauses|intended to be hosted|European Union/,
+    )
   })
 
   it('discloses widget submission and excludes booking details from parent messages', () => {
@@ -340,14 +366,15 @@ describe('privacy data-flow disclosures', () => {
     )
   })
 
-  it('leaves undecided retention schedules as owner TODOs', () => {
+  it('describes current cleanup and one-month deletion responses without other retention promises', () => {
     const retention = section('retention')
+    expect(retention).toMatch(/does not currently run other automatic deletion schedules/)
     expect(retention).toMatch(
-      /TODO for owner before publication:.*retention periods.*backup copies/,
+      /ask about or request deletion of the data \{company\.shortName\} holds about you by emailing .*we respond within one month/,
     )
-    expect(retention).toMatch(
-      /does not establish those undecided periods or promise a backup-deletion deadline/,
+    expect(retention).not.toMatch(/(?:\d+|thirty) days|\d+ years|owner/)
+    expect(section('google-user-data')).toMatch(
+      /Deletion requests: you can ask about or request deletion of the Google sign-in data and other account data we hold by emailing .*we respond within one month/,
     )
-    expect(retention).not.toMatch(/(?:\d+|thirty) days|\d+ years/)
   })
 })

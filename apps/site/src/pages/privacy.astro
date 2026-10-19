@@ -29,14 +29,10 @@ const privacyMail = `mailto:${contact.privacy}`
   title="Privacy Policy"
   description="How Hourmere, operated by Cobaltmere, LLC, collects, uses, stores, shares and deletes personal data, including data from Google and Microsoft."
   path="/privacy"
-  effective="2026-10-16"
+  effective="2026-11-30"
   sections={sections}
 >
   <Fragment slot="intro">
-    <p class="callout">
-      <strong>Draft for owner review:</strong> the feature descriptions and TODOs below need the
-      owner's approval before this draft is published or takes effect.
-    </p>
     <p>
       This Privacy Policy explains how {company.name} ("{company.shortName}", "we", "us") collects,
       uses, stores, shares and deletes personal data in connection with Hourmere: the website at
@@ -114,8 +110,8 @@ const privacyMail = `mailto:${contact.privacy}`
       picture. We use them to create your account and sign you in, and as your account profile:
       your name (and picture, if shown) appears in Hourmere, on your booking pages and in booking
       emails, and we send account and booking emails to your email address. Google and Microsoft
-      sign-in access and refresh tokens are stored encrypted; the ID token returned at sign-in,
-      which contains your name, email address and account identifier, is stored as received.
+      sign-in access and refresh tokens are stored encrypted; the ID token returned at sign-in is
+      not stored.
     </li>
     <li>
       <strong>Calendar connection information:</strong> when you connect a Google or Microsoft
@@ -178,8 +174,8 @@ const privacyMail = `mailto:${contact.privacy}`
     </li>
   </ul>
   <p class="callout">
-    <strong>TODO for owner before publication:</strong> confirm the proposed Stripe and Link
-    billing arrangements and the billing information described above before paid plans launch.
+    Hourmere Cloud has not launched and takes no payments. Before it does, we will update this
+    policy to describe billing and payment processing.
   </p>
 
   <h2 id="how-we-use-information">3. How we use information</h2>
@@ -207,13 +203,12 @@ const privacyMail = `mailto:${contact.privacy}`
   </p>
   <p>
     If you are in the European Economic Area, the United Kingdom or Switzerland, our legal bases
-    for processing are: performance of our contract with you; our legitimate interests in
-    operating, securing and improving the Service; compliance with legal obligations; and your
-    consent where we ask for it.
-  </p>
-  <p class="callout">
-    <strong>TODO for owner before publication:</strong> confirm the legal bases above and which
-    processing activities rely on each basis.
+    for processing are: performance of our contract with you, which covers providing the Service;
+    our legitimate interests in operating a secure and reliable service, which cover security,
+    fraud and abuse prevention, and service improvement; compliance with legal obligations, which
+    covers tax and accounting records; and your consent, which covers marketing emails and any
+    other processing for which we ask your permission. You can withdraw consent at any time; see
+    <a href="#your-rights">section 13</a>.
   </p>
 
   <h2 id="google-user-data">4. Google user data</h2>
@@ -346,18 +341,18 @@ const privacyMail = `mailto:${contact.privacy}`
     </li>
     <li>
       <strong>Your Hourmere booking records and automatic conference records</strong> are separate
-      from the connection. Disconnecting does not delete them or an existing join link. The
-      retention and deletion decisions still requiring owner review are listed in
-      <a href="#retention">section 10</a>.
+      from the connection. Disconnecting does not delete them or an existing join link. Retention
+      and deletion requests are described in <a href="#retention">section 10</a>.
     </li>
     <li>
       <strong>Events that Hourmere created in your Google Calendar</strong> remain at Google until
       you delete them there.
     </li>
     <li>
-      <strong>TODO for owner before publication:</strong> confirm the procedure and timing for
-      deleting Google sign-in data and other account data, including backup copies, as described
-      in <a href="#retention">section 10</a>.
+      <strong>Deletion requests:</strong> you can ask about or request deletion of the Google
+      sign-in data and other account data we hold by emailing
+      <a href={privacyMail}>{contact.privacy}</a>; we respond within one month. See
+      <a href="#retention">section 10</a>.
     </li>
   </ul>
   <p>
@@ -404,7 +399,7 @@ const privacyMail = `mailto:${contact.privacy}`
     local connection, encrypted credentials, calendar metadata and outstanding connection attempts
     from the active database. It does not automatically revoke the provider-side grant. Remove
     that grant separately in your Microsoft account's app permissions, or ask your organization's
-    administrator. Account-data and backup retention require the owner decisions in
+    administrator. Retention and deletion requests are described in
     <a href="#retention">section 10</a>.
   </p>
 
@@ -478,8 +473,8 @@ const privacyMail = `mailto:${contact.privacy}`
     </li>
   </ul>
   <p class="callout">
-    <strong>TODO for owner before publication:</strong> confirm Stripe and Link as payment
-    providers, their controller roles and the proposed payment and tax processing described above.
+    Hourmere Cloud has not launched and takes no payments. Before it does, we will update this
+    policy to describe billing and payment processing.
   </p>
 
   <h3 id="automatic-conferences">Automatic Google Meet and Zoom</h3>
@@ -518,8 +513,8 @@ const privacyMail = `mailto:${contact.privacy}`
     connection identity metadata and existing booking and conference records. It does not
     automatically revoke Zoom's provider-side grant or delete existing provider meetings. A
     disconnected provider can prevent later updates or remote cancellation; manage the grant and
-    any remaining meetings with the provider. Retention of remaining Hourmere records is an owner
-    TODO in <a href="#retention">section 10</a>.
+    any remaining meetings with the provider. Retention of remaining Hourmere records is
+    described in <a href="#retention">section 10</a>.
   </p>
 
   <h3 id="booking-webhooks">Organization booking webhooks</h3>
@@ -577,8 +572,8 @@ const privacyMail = `mailto:${contact.privacy}`
   <ul>
     <li>
       <strong>Account, scheduling and booking information</strong> is kept while your account
-      exists, subject to the owner decisions below. Disconnecting a calendar removes its local
-      connection data; cancelling a booking keeps its booking record and is not a deletion request.
+      exists. Disconnecting a calendar removes its local connection data; cancelling a booking
+      keeps its booking record and is not a deletion request.
     </li>
     <li>
       <strong>Calendar data</strong> is retained and deleted as described in section 4 (Google) and
@@ -589,14 +584,14 @@ const privacyMail = `mailto:${contact.privacy}`
       the launch announcement.
     </li>
   </ul>
-  <p class="callout">
-    <strong>TODO for owner before publication:</strong> confirm the account and booking deletion
-    procedure and retention periods for account data, conference identity and meeting records,
-    remaining OAuth and notification metadata, server and API logs, support correspondence and
-    backup copies, beyond the implemented cleanup described in sections 2 and 7. Confirm any legal,
-    tax or accounting exceptions and the treatment of data already sent to providers, webhook
-    recipients, agents or email recipients. This draft does not establish those undecided periods
-    or promise a backup-deletion deadline.
+  <p>
+    Beyond the cleanup described in sections 2 and 7, Hourmere does not currently run other
+    automatic deletion schedules for account data, conference identity and meeting records,
+    remaining OAuth and notification metadata, server and API logs, support correspondence or
+    backup copies. You can ask about or request deletion of the data {company.shortName} holds
+    about you by emailing <a href={privacyMail}>{contact.privacy}</a>; we respond within one
+    month. Data already sent to calendar, conference and email providers, webhook recipients or
+    applications you authorized is handled under their own policies.
   </p>
 
   <h2 id="security">11. Security</h2>
@@ -613,16 +608,11 @@ const privacyMail = `mailto:${contact.privacy}`
 
   <h2 id="international-transfers">12. Where data is processed</h2>
   <p>
-    We are based in the United States. Hourmere Cloud is intended to be hosted in the United States
-    and/or the European Union. Some service providers, such as those for payments and email
-    delivery, may process data in other countries. Where the law requires it, we protect
-    international transfers of personal data with appropriate safeguards, such as the European
-    Commission's Standard Contractual Clauses.
-  </p>
-  <p class="callout">
-    <strong>TODO for owner before publication:</strong> confirm the hosting region, the countries
-    where service providers process data and the transfer safeguards actually in place, including
-    whether Standard Contractual Clauses apply.
+    We are based in the United States. Hourmere Cloud has not launched. Before it does, we will
+    update this policy to state where Hourmere Cloud data is hosted and any mechanism we use for
+    international transfers of personal data. The hourmere.com website is published as static
+    files on Cloudflare Workers; the request data its hosting processes is described in
+    <a href="#this-website">section 14</a>.
   </p>
 
   <h2 id="your-rights">13. Your rights and choices</h2>
