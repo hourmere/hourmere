@@ -1,0 +1,18 @@
+.legal-links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-2) var(--space-4);
+  margin-top: var(--space-4);
+  font-size: 0.875rem;
+}
+
+.legal-links a {
+  color: var(--muted);
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+.shell > .legal-links {
+  padding: 0 var(--space-4) var(--space-4);
+}

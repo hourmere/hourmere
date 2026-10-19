@@ -11,6 +11,10 @@ import type { CallerEnv, requireCaller } from './caller.ts'
 export const ErrorBody = z
   .object({
     error: z.string().openapi({ description: 'Machine-readable code, e.g. unauthorized' }),
+    errorAlias: z.literal('zoom_operation_busy').optional().openapi({
+      description:
+        'Preferred neutral code for a busy Zoom account operation. Accompanies error=zoom_refresh_in_progress, whose legacy name is deprecated for one release.',
+    }),
     message: z.string().optional().openapi({ description: 'Human-readable detail' }),
   })
   .openapi('Error')

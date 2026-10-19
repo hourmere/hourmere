@@ -64,6 +64,14 @@ for the generic cases in the table below (services cannot use them): `invalid_re
 `payload_too_large`, `unsupported_media_type`, `rate_limited`, `internal_error`. Codes are never
 renamed within `/api/v1`.
 
+Zoom refresh conflicts add the neutral `errorAlias: "zoom_operation_busy"` alongside the
+existing `error: "zoom_refresh_in_progress"`. The legacy code is deprecated for one release;
+it remains in `/api/v1` for compatibility with existing clients. New clients should prefer
+`errorAlias` when present and accept the legacy code when talking to older servers. This
+409 means another token operation for the same Hourmere owner is in progress, possibly for
+a different Zoom identity; it does not mean the selected connection is refreshing. Retry
+shortly. See [Zoom connections](zoom-connections.md) for callback replay and recovery semantics.
+
 | Status | Meaning |
 |---|---|
 | 400 `invalid_request` | The request is malformed (e.g. invalid JSON) or fails schema validation; `message` names the offending fields. Service-level validation uses specific codes |
@@ -123,6 +131,9 @@ A request is authenticated by one of:
 anyone signs in, such as which sign-in methods are enabled (`signIn.google`, …).
 `hostedSignupUrl` is the public destination for attribution and confirmation links, configured
 with `HOSTED_SIGNUP_URL` and defaulting to `https://hourmere.com`.
+Optional `privacyPolicyUrl` and `termsUrl` are this instance operator's legal-page URLs,
+configured with `PRIVACY_POLICY_URL` and `TERMS_URL`. Each field is omitted when unset or
+empty, including on self-hosted instances; clients hide the corresponding link.
 
 `GET /api/v1/me` returns the caller, the organization they act in and whether they used a
 session or an API key. The MCP server at `/mcp` ([mcp.md](mcp.md)) accepts API keys and,

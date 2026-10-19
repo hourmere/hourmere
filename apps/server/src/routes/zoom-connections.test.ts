@@ -108,6 +108,19 @@ describe.skipIf(!databaseUrl)('Zoom HTTP integration settings (real Postgres)', 
     ).toBe('/app/conferences?zoom=connected')
     return db.selectFrom('conference_connections').select('id').executeTakeFirstOrThrow()
   }
+  it('documents the preferred busy alias and one-release deprecation of the legacy code', async () => {
+    const response = await req('/api/v1/openapi.json')
+    expect(response.status).toBe(200)
+    const doc = (await response.json()) as {
+      paths: Record<string, { post: { responses: Record<string, { description: string }> } }>
+    }
+    const conflict =
+      doc.paths['/api/v1/conference-connections/{id}/refresh']?.post.responses['409']?.description
+    expect(conflict).toContain('errorAlias=zoom_operation_busy')
+    expect(conflict).toContain('error=zoom_refresh_in_progress')
+    expect(conflict).toContain('deprecated for one release')
+    expect(conflict).toContain('retry shortly')
+  })
   it('lists private metadata without credentials and supports explicit refresh/disconnect', async () => {
     const { id } = await connect(),
       response = await req('/api/v1/conference-connections')
@@ -148,6 +161,7 @@ describe.skipIf(!databaseUrl)('Zoom HTTP integration settings (real Postgres)', 
       expect(second.status).toBe(409)
       expect(await second.json()).toEqual({
         error: 'zoom_refresh_in_progress',
+        errorAlias: 'zoom_operation_busy',
         message: 'Zoom account operations are busy. Try again shortly.',
       })
       const busy = await req(callback)

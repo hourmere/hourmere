@@ -5,13 +5,22 @@ export class RequestError extends Error {
   readonly status: number
   /** The machine-readable code: `error` for /api/v1, `code` for Better Auth's /api/auth. */
   readonly code: string | undefined
+  /** A recognized additive alias; `code` retains the original API error. */
+  readonly codeAlias: string | undefined
 
-  constructor(status: number, code: string | undefined, message: string, displayMessage?: UiText) {
+  constructor(
+    status: number,
+    code: string | undefined,
+    message: string,
+    displayMessage?: UiText,
+    codeAlias?: string,
+  ) {
     super(message)
     this.name = 'RequestError'
     this.displayMessage = displayMessage
     this.status = status
     this.code = code
+    this.codeAlias = codeAlias
   }
 }
 
@@ -55,7 +64,11 @@ export function requestError(status: number, body: unknown): RequestError {
     (typeof record.message === 'string' && record.message.trim()
       ? record.message
       : messageForStatus(status))
-  return new RequestError(status, code, message)
+  const codeAlias =
+    code === 'zoom_refresh_in_progress' && record.errorAlias === 'zoom_operation_busy'
+      ? record.errorAlias
+      : undefined
+  return new RequestError(status, code, message, undefined, codeAlias)
 }
 
 export async function errorFromResponse(response: Response): Promise<RequestError> {
@@ -108,6 +121,7 @@ export function errorMessage(err: unknown): UiText {
     zoom_connection_not_found: 'This Zoom connection is not available.',
     zoom_connection_limit: 'This account has reached its limit of five connected Zoom identities.',
     zoom_needs_reauth: 'Reconnect this Zoom account before refreshing it.',
+    zoom_operation_busy: 'Zoom account operations are busy. Try again shortly.',
     zoom_refresh_in_progress: 'Zoom account operations are busy. Try again shortly.',
     zoom_permissions_missing:
       'Zoom did not return exactly the requested permissions. Check the app configuration and reconnect.',
@@ -145,7 +159,8 @@ export function errorMessage(err: unknown): UiText {
     booking_hosts_unavailable:
       'This booking can no longer be moved to another time. You can still cancel it, or contact your host.',
   }
-  const key = err.code && Object.hasOwn(known, err.code) ? known[err.code] : undefined
+  const code = err.codeAlias ?? err.code
+  const key = code && Object.hasOwn(known, code) ? known[code] : undefined
   if (key) return msg(key)
   if (
     err.status === 401 ||

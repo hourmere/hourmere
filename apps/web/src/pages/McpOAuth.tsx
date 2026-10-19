@@ -3,6 +3,7 @@ import { Navigate, useLocation, useNavigate } from 'react-router'
 import { api, unwrap } from '../api/client.ts'
 import { errorMessage, RequestError } from '../api/errors.ts'
 import { goTo } from '../browser.ts'
+import { InstanceLegalLinks } from '../components/LegalLinks.tsx'
 import { Logo } from '../components/Logo.tsx'
 import { useLoad, useMounted, usePageTitle } from '../hooks.ts'
 import { LanguageSwitcher, useI18n } from '../i18n/runtime.tsx'
@@ -168,6 +169,7 @@ function Authorization({ email }: { email: string }) {
             )}
           </>
         )}
+        <InstanceLegalLinks />
       </section>
     </main>
   )

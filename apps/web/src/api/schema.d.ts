@@ -2181,7 +2181,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description zoom_disabled, zoom_needs_reauth, zoom_refresh_in_progress, zoom_refresh_incomplete, zoom_identity_mismatch or a safe provider failure */
+                /** @description zoom_disabled, zoom_needs_reauth, zoom_refresh_incomplete, zoom_identity_mismatch or a safe provider failure. Busy account operations return errorAlias=zoom_operation_busy alongside error=zoom_refresh_in_progress (legacy code deprecated for one release); retry shortly. */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -5075,6 +5075,11 @@ export interface components {
         Error: {
             /** @description Machine-readable code, e.g. unauthorized */
             error: string;
+            /**
+             * @description Preferred neutral code for a busy Zoom account operation. Accompanies error=zoom_refresh_in_progress, whose legacy name is deprecated for one release.
+             * @enum {string}
+             */
+            errorAlias?: "zoom_operation_busy";
             /** @description Human-readable detail */
             message?: string;
         };
@@ -5374,6 +5379,11 @@ export interface components {
              * @description Hosted service destination for public attribution and sign-up links
              */
             hostedSignupUrl: string;
+            /**
+             * Format: uri
+             * @description This instance operator's privacy policy; absent when not configured
+             */
+            privacyPolicyUrl?: string;
             /** @description The sign-in methods people can use on this instance */
             signIn: {
                 /** @description Sign-in links sent by email */
@@ -5381,6 +5391,11 @@ export interface components {
                 google: boolean;
                 microsoft: boolean;
             };
+            /**
+             * Format: uri
+             * @description This instance operator's terms; absent when not configured
+             */
+            termsUrl?: string;
         };
         ManagedBooking: components["schemas"]["Booking"] & {
             /** @description The event type as it is now; null once it is deleted */
