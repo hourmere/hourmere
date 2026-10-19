@@ -56,6 +56,62 @@ async function chooseSlot(user: ReturnType<typeof userEvent.setup>, dayName: Reg
 }
 
 describe('the booking page', () => {
+  it('updates every zone offset for the selected date across DST while preserving slot instants', async () => {
+    const user = userEvent.setup()
+    env.zone = 'Europe/London'
+    env.now = Date.parse('2026-10-19T08:00:00Z')
+    const api = fakeApi({
+      ...eventRoutes(EVENT, ['2026-10-20T09:00:00Z', '2026-10-27T09:00:00Z']),
+      'POST /api/v1/public/ada/intro/bookings': () =>
+        json(201, { booking: booking(), manageToken: TOKEN }),
+    })
+    renderApp('/ada/intro')
+    const toggle = await screen.findByRole('button', { name: /Time zone/ })
+    expect(toggle.textContent).toContain('GMT+01:00')
+    await user.click(await day(/October 27, available/))
+    expect(toggle.textContent).toContain('GMT+00:00')
+    expect(slotButtons()).toEqual(['9:00 AM'])
+    await user.click(toggle)
+    const search = screen.getByRole('combobox', { name: 'Search time zones' })
+    await user.type(search, 'london')
+    const zones = within(screen.getByRole('listbox', { name: 'Time zones' }))
+    expect(zones.getByRole('option').textContent).toBe('Europe/LondonGMT+00:00')
+    await user.clear(search)
+    await user.type(search, 'berlin')
+    expect(zones.getByRole('option').textContent).toBe('Europe/BerlinGMT+01:00')
+    await user.click(zones.getByRole('option'))
+    expect(slotButtons()).toEqual(['10:00 AM'])
+    await user.click(await day(/October 20, available/))
+    expect(toggle.textContent).toContain('GMT+02:00')
+    await user.click(await day(/October 27, available/))
+    expect(toggle.textContent).toContain('GMT+01:00')
+    expect(api.to('GET /api/v1/public/ada/intro/slots')).toHaveLength(1)
+    await user.click(screen.getByRole('button', { name: '10:00 AM' }))
+    await user.type(screen.getByLabelText('Your name'), 'Grace Hopper')
+    await user.type(screen.getByLabelText('Email'), 'grace@example.com')
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+    await screen.findByRole('heading', { name: 'You’re booked' })
+    expect(api.to('POST /api/v1/public/ada/intro/bookings')[0]?.body).toMatchObject({
+      start: '2026-10-27T09:00:00.000Z',
+      invitee: { timeZone: 'Europe/Berlin' },
+    })
+  })
+
+  it('uses the visible month when paging without a selected day', async () => {
+    const user = userEvent.setup()
+    env.zone = 'Europe/London'
+    env.now = Date.parse('2026-10-19T08:00:00Z')
+    fakeApi(eventRoutes(EVENT, ['2026-10-20T09:00:00Z', '2026-11-02T09:00:00Z']))
+    renderApp('/ada/intro')
+    const toggle = await screen.findByRole('button', { name: /Time zone/ })
+    expect(toggle.textContent).toContain('GMT+01:00')
+    await user.click(screen.getByRole('button', { name: 'Next month' }))
+    await screen.findByRole('heading', { name: 'November 2026' })
+    expect(toggle.textContent).toContain('GMT+00:00')
+    await user.click(screen.getByRole('button', { name: 'Previous month' }))
+    expect(toggle.textContent).toContain('GMT+01:00')
+  })
+
   it('keeps unobtrusive attribution on ordinary booking pages, pointing to the hosted service', async () => {
     fakeApi(eventRoutes(EVENT, DST_SLOTS))
     renderApp('/ada/intro')

@@ -1957,6 +1957,85 @@ describe.skipIf(!serverUrl)('bookings', () => {
       expect((await listHostBookings(as(bob, bob.organizationId))).data).toHaveLength(1)
     })
 
+    it('includes a rescheduled successor outside the host page and preserves cancelled status', async () => {
+      const h = await setup()
+      const caller = as(h, h.organizationId)
+      const { booking: old, manageToken } = await h.book('2026-11-02T09:00Z')
+      const { booking: successor } = await rescheduleManagedBooking(ctx, manageToken as string, {
+        start: instant('2026-11-03T10:00Z'),
+      })
+      // Restrict the page to the predecessor, so a client cannot infer this from its rows.
+      const page = await listHostBookings(caller, {
+        status: 'cancelled',
+        to: instant('2026-11-03T00:00Z'),
+        limit: 1,
+      })
+      expect(page.data).toHaveLength(1)
+      expect(page.data[0]).toMatchObject({
+        id: old.id,
+        status: 'cancelled',
+        rescheduledToId: successor.id,
+      })
+      expect(await getHostBooking(caller, old.id)).toMatchObject({
+        status: 'cancelled',
+        rescheduledToId: successor.id,
+      })
+      expect(await getManagedBooking(ctx, manageToken as string)).not.toHaveProperty(
+        'rescheduledToId',
+      )
+      await cancelHostBooking(caller, successor.id)
+      expect(await getHostBooking(caller, old.id)).toMatchObject({
+        status: 'cancelled',
+        rescheduledToId: successor.id,
+      })
+      expect(await getHostBooking(caller, successor.id)).toMatchObject({
+        status: 'cancelled',
+        rescheduledToId: null,
+      })
+    })
+
+    it('never exposes a rescheduled successor the caller does not host', async () => {
+      const h = await setup()
+      const caller = as(h, h.organizationId)
+      const { booking: old } = await h.book('2026-11-02T09:00Z')
+      const { booking: successor } = await rescheduleHostBooking(caller, old.id, {
+        start: instant('2026-11-03T10:00Z'),
+      })
+      await db
+        .deleteFrom('booking_hosts')
+        .where('booking_id', '=', successor.id)
+        .where('user_id', '=', h.userId)
+        .execute()
+      const otherHost = await f.host()
+      await f.member(otherHost.userId, h.organizationId)
+      await db
+        .insertInto('booking_hosts')
+        .values({ booking_id: successor.id, user_id: otherHost.userId })
+        .execute()
+      expect(await getHostBooking(caller, old.id)).toMatchObject({ rescheduledToId: null })
+    })
+
+    it('never exposes a rescheduled successor from another organization', async () => {
+      const h = await setup()
+      const caller = as(h, h.organizationId)
+      const { booking: old } = await h.book('2026-11-02T09:00Z')
+      const otherOrganization = await f.organization()
+      await f.member(h.userId, otherOrganization)
+      const unrelated = await f.booking(
+        otherOrganization,
+        [h.userId],
+        '2026-11-03T09:00Z',
+        '2026-11-03T09:30Z',
+      )
+      // The self-reference alone is not authorization, even for malformed retained data.
+      await db
+        .updateTable('bookings')
+        .set({ rescheduled_from_id: old.id })
+        .where('id', '=', unrelated)
+        .execute()
+      expect(await getHostBooking(caller, old.id)).toMatchObject({ rescheduledToId: null })
+    })
+
     it('filters by ending time with an exclusive Upcoming and inclusive Past boundary', async () => {
       const caller = as(alice, alice.organizationId)
       const starts = async (input: Parameters<typeof listHostBookings>[1]) =>
