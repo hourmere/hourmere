@@ -245,10 +245,10 @@ describe('privacy data-flow disclosures', () => {
       /calendar\.calendarlist\.readonly , to list your calendars.*primary-calendar status.*whether Google Meet is available/,
     )
     expect(google).toMatch(
-      /https:\/\/www.googleapis.com\/auth\/calendar.events.readonly , used only to read event identifiers, start and end times/,
+      /https:\/\/www\.googleapis\.com\/auth\/calendar\.events\.readonly , used only to read event identifiers, start and end times/,
     )
     expect(google).toMatch(
-      /https:\/\/www.googleapis.com\/auth\/calendar.events.owned , used only to create, update and cancel.*calendar you own and select.*Google Meet.*read those booking events back/,
+      /https:\/\/www\.googleapis\.com\/auth\/calendar\.events\.owned , used only to create, update and cancel.*calendar you own and select.*Google Meet.*read those booking events back/,
     )
   })
 
