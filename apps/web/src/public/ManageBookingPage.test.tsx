@@ -371,17 +371,22 @@ describe('the invitee’s manage page', () => {
     })
     openLink(`/booking#token=${TOKEN}`)
     expect(await screen.findByText('Intro call')).toBeDefined()
-    const open = (url: string) => {
-      window.history.pushState(null, '', url)
-      window.dispatchEvent(new PopStateEvent('popstate'))
+    const open = async (url: string) => {
+      // Flush both the link navigation and the router's fragment-clearing update before
+      // opening another link. Booking text can appear while that update is still pending.
+      await act(async () => {
+        window.history.pushState(null, '', url)
+        window.dispatchEvent(new PopStateEvent('popstate'))
+      })
+      expect(window.location.hash).toBe('')
     }
-    open(`/booking#token=${NEW_TOKEN}`)
+    await open(`/booking#token=${NEW_TOKEN}`)
     expect(await screen.findByText('Deep dive')).toBeDefined()
-    expect(window.location.hash).toBe('')
-    open(`/booking#token=${TOKEN}`)
+    await open(`/booking#token=${TOKEN}`)
     expect(await screen.findByText('Intro call')).toBeDefined()
-    open(`/booking#token=${TOKEN}`)
+    await open(`/booking#token=${TOKEN}`)
     await waitFor(() => expect(api.to('GET /api/v1/bookings/manage')).toHaveLength(4))
+    expect(await screen.findByText('Intro call')).toBeDefined()
     expect(
       api.to('GET /api/v1/bookings/manage').map((c) => c.headers.get('x-manage-token')),
     ).toEqual([TOKEN, NEW_TOKEN, TOKEN, TOKEN])
