@@ -389,9 +389,12 @@ location. See [automatic-google-meet.md](automatic-google-meet.md) and
 
 Protected booking reads hydrate every booking's status, cancellation time/reason, resolved
 location and optional conference state from one booking-driven LEFT JOIN snapshot, including
-the pinned organizer's availability. If a concurrent reschedule moves the conference pointer
-to a successor after the initial lookup, the predecessor still hydrates as cancelled without
-a conference or join link. The same applies when the successor has already been cancelled.
+the pinned organizer's availability. Authenticated host reads join only that caller's ordinary
+calendar copy and derive conference retry ownership from the same snapshot; public/manage
+reads neither join copies nor expose host retry controls. If a concurrent reschedule moves
+the conference pointer to a successor after the initial lookup, the predecessor still
+hydrates as cancelled without a conference or join link. The same applies when the successor
+has already been cancelled.
 This reuses the existing hydration query without extra round trips, a transaction-held
 connection or booking row locks. Manage-token resolution and list membership still precede
 hydration; a later read follows a moved token according to the existing token rules.

@@ -868,6 +868,37 @@ input[type="radio"] {
   margin-top: 0;
 }
 
+.calendar-list {
+  display: grid;
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.calendar-item {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.calendar-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: start;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+
+.calendar-controls .button {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  text-align: start;
+}
+
+.calendar-controls p {
+  margin: 0;
+}
+
 .override-fields {
   display: grid;
   gap: var(--space-3);

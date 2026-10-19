@@ -205,7 +205,41 @@ export const admin = {
   'Cancel booking…': '取消预约…',
   'Cancel this booking': '取消此预约',
   Cancelled: '已取消',
-  'Check conflicts in': '检查以下日历的冲突',
+  'Check this calendar for conflicts': '检查此日历的冲突',
+  'Write new bookings here': '将新预约写入此日历',
+  'Stop writing bookings here': '停止向此日历写入预约',
+  'Sync now': '立即同步',
+  '{0} Calendar connected. Your calendar list is ready.': '{0} 日历已连接。日历列表已就绪。',
+  '{0} Calendar was not connected because you cancelled authorization.':
+    '你已取消授权，因此未连接 {0} 日历。',
+  '{0} did not grant the requested access. Connect again and allow the requested permissions.':
+    '{0} 未授予所需权限。请重新连接并允许请求的权限。',
+  '{0} did not provide continuing access. Connect again to try again.':
+    '{0} 未提供持续访问权限。请重新连接后重试。',
+  '{0} Calendar could not be reached. Try connecting again shortly.':
+    '暂时无法连接 {0} 日历。请稍后重新连接。',
+  '{0} Calendar disconnected. Stored credentials and local calendar data were deleted.':
+    '{0} 日历已断开连接。保存的凭据和本地日历数据已删除。',
+  'Create a profile before choosing where new bookings are written.':
+    '请先创建个人资料，再选择用于写入新预约的日历。',
+  'Create your profile in Settings first.': '请先在“设置”中创建个人资料。',
+  'Check your calendar settings and try again.': '请检查日历设置后重试。',
+  'Choose calendar-list access or calendar synchronization.': '请选择日历列表访问或日历同步权限。',
+  'This calendar connection no longer exists.': '此日历连接已不存在。',
+  'This calendar is no longer available. Refresh the calendar list.':
+    '此日历已不可用。请刷新日历列表。',
+  'Select at most 20 conflict calendars.': '最多可选择 20 个用于检查冲突的日历。',
+  'This calendar does not allow event synchronization.': '此日历不允许同步事件。',
+  'Select this calendar for conflict checks before synchronizing it.':
+    '请先选择此日历用于检查冲突，再进行同步。',
+  'Choose an owned Google calendar and enable synchronization first.':
+    '请先选择你拥有的 Google 日历并启用同步。',
+  'Google Calendar could not be reached. Try again shortly.': '无法连接 Google 日历。请稍后重试。',
+  'Microsoft Calendar could not be reached. Try again shortly.':
+    '无法连接 Microsoft 日历。请稍后重试。',
+  'Reconnect Microsoft Calendar to restore access.': '请重新连接 Microsoft 日历以恢复访问。',
+  'Reconnect Microsoft Calendar and allow the requested permissions.':
+    '请重新连接 Microsoft 日历并允许请求的权限。',
   'Check that it works:': '检查是否可用：',
   'Check these hours: each must end after it starts.':
     '请检查这些时间段：每段的结束时间必须晚于开始时间。',

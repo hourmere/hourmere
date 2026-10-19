@@ -68,6 +68,29 @@ export function errorMessage(err: unknown): UiText {
   if (!(err instanceof RequestError)) return msg(UNREACHABLE)
   if (err.displayMessage) return err.displayMessage
   const known: Readonly<Record<string, MessageKey>> = {
+    invalid_request: 'Check the form and try again.',
+    invalid_calendar_settings: 'Check your calendar settings and try again.',
+    invalid_calendar_access: 'Choose calendar-list access or calendar synchronization.',
+    profile_not_found: 'Create your profile in Settings first.',
+    session_required: 'Sign in again, then start a new calendar connection.',
+    invalid_oauth_state: 'This connection attempt expired or was already used. Start again.',
+    calendar_connection_not_found: 'This calendar connection no longer exists.',
+    calendar_not_found: 'This calendar is no longer available. Refresh the calendar list.',
+    calendar_selection_limit: 'Select at most 20 conflict calendars.',
+    calendar_events_unreadable: 'This calendar does not allow event synchronization.',
+    calendar_sync_disabled: 'Select this calendar for conflict checks before synchronizing it.',
+    calendar_not_writable: 'Choose an owned Google calendar and enable synchronization first.',
+    google_calendar_disabled:
+      'Google Calendar is not configured on this Hourmere instance. Contact its administrator to enable it.',
+    google_calendar_provider_unavailable:
+      'Google Calendar could not be reached. Try again shortly.',
+    microsoft_calendar_disabled:
+      'Microsoft Calendar is not configured on this Hourmere instance. Contact its administrator to enable it.',
+    microsoft_calendar_provider_unavailable:
+      'Microsoft Calendar could not be reached. Try again shortly.',
+    microsoft_calendar_needs_reauth: 'Reconnect Microsoft Calendar to restore access.',
+    microsoft_calendar_permissions_missing:
+      'Reconnect Microsoft Calendar and allow the requested permissions.',
     automatic_zoom_disabled: 'Automatic Zoom meetings are disabled on this instance.',
     automatic_zoom_unavailable:
       'Automatic Zoom meetings are unavailable. Contact the host or choose another meeting type.',

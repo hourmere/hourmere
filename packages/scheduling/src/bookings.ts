@@ -22,7 +22,6 @@ import {
   type ConferenceStatus,
   cancelBookingConference,
   eligibleMeetHosts,
-  ownCalendarCopyStates,
   prepareBookingConference,
   unresolvedLocation,
 } from './conferences.ts'
@@ -402,7 +401,11 @@ interface BookingRow {
 }
 
 /** Adds the attendees (one query for all rows) and maps rows to the API shape. */
-async function toBookings(db: Db, rows: readonly BookingRow[]): Promise<Booking[]> {
+async function toBookings(
+  db: Db,
+  rows: readonly BookingRow[],
+  host?: { userId: string; now: () => Temporal.Instant },
+): Promise<Booking[]> {
   if (!rows.length) return []
   const attendees = await db
     .selectFrom('booking_attendees')
@@ -430,6 +433,7 @@ async function toBookings(db: Db, rows: readonly BookingRow[]): Promise<Booking[
   const conferences = await bookingConferenceViews(
     db,
     rows.map((r) => r.id),
+    host?.userId,
   )
   const assigned = new Map<string, { name: string; timeZone: string }>()
   const assignedIds = rows
@@ -457,6 +461,7 @@ async function toBookings(db: Db, rows: readonly BookingRow[]): Promise<Booking[
         timeZone: host.time_zone,
       })
   }
+  const now = host?.now()
   return rows.map((row) => {
     const view = conferences.get(row.id)
     // Cancellation/rescheduling may commit after the first booking read, even moving
@@ -486,6 +491,20 @@ async function toBookings(db: Db, rows: readonly BookingRow[]): Promise<Booking[
           : location,
       ),
       ...(view?.conference ? { conference: view.conference } : {}),
+      ...(now && view?.calendarCopy
+        ? {
+            calendarCopy: {
+              ...view.calendarCopy,
+              canRetry:
+                view.calendarCopy.canRetry &&
+                (r.status === 'cancelled' ||
+                  Temporal.Instant.compare(toInstant(r.start_at), now) > 0),
+            },
+          }
+        : {}),
+      ...(host && view?.conferenceCanRetry !== undefined
+        ? { conferenceCanRetry: view.conferenceCanRetry }
+        : {}),
       responses: (isRecord(r.responses) ? r.responses : {}) as Responses,
       attendees: byBooking.get(r.id) ?? [],
       rescheduledFromId: r.rescheduled_from_id,
@@ -1218,7 +1237,7 @@ export async function listHostBookings(
   const page = rows.slice(0, limit)
   const last = page.at(-1)
   return {
-    data: await withOwnCalendarCopies(ctx, await toBookings(ctx.db, page)),
+    data: await toBookings(ctx.db, page, { userId: ctx.principal.user.id, now: ctx.now }),
     nextCursor: rows.length > limit && last ? encodeCursor(last) : null,
   }
 }
@@ -1235,8 +1254,11 @@ export async function getHostBooking(ctx: ServiceContext, id: string): Promise<B
     .where('b.organization_id', '=', ctx.principal.organization.id)
     .executeTakeFirst()
   if (!row) throw bookingNotFound()
-  const [booking] = await toBookings(ctx.db, [row])
-  return (await withOwnCalendarCopies(ctx, [booking as Booking]))[0] as Booking
+  const [booking] = await toBookings(ctx.db, [row], {
+    userId: ctx.principal.user.id,
+    now: ctx.now,
+  })
+  return booking as Booking
 }
 
 /**
@@ -1318,51 +1340,5 @@ export async function cancelHostBooking(
         oauthConsentId: ctx.principal.kind === 'oauth' ? ctx.principal.oauthConsentId : null,
       },
     )
-  })
-}
-
-async function withOwnCalendarCopies(ctx: ServiceContext, bookings: Booking[]) {
-  const states = await ownCalendarCopyStates(
-    ctx.db,
-    bookings.map((b) => b.id),
-    ctx.principal.user.id,
-  )
-  const conferences = bookings.length
-    ? await ctx.db
-        .selectFrom('booking_conferences')
-        .select(['booking_id', 'organizer_user_id'])
-        .where(
-          'booking_id',
-          'in',
-          bookings.map((b) => b.id),
-        )
-        .execute()
-    : []
-  const now = ctx.now()
-  return bookings.map((b) => {
-    const copy = states.get(b.id)
-    return {
-      ...b,
-      ...(copy
-        ? {
-            calendarCopy: {
-              ...copy,
-              canRetry:
-                copy.canRetry &&
-                (b.status === 'cancelled' ||
-                  Temporal.Instant.compare(Temporal.Instant.from(b.start), now) > 0),
-            },
-          }
-        : {}),
-      ...(b.conference
-        ? {
-            conferenceCanRetry:
-              b.conference.errorCode !== 'organizer_unavailable' &&
-              conferences.some(
-                (c) => c.booking_id === b.id && c.organizer_user_id === ctx.principal.user.id,
-              ),
-          }
-        : {}),
-    }
   })
 }
