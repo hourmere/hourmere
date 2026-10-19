@@ -174,7 +174,15 @@ function senderMailbox(from: string): string {
   const entry = entries[0]
   // Only a bare address or one optional display name followed by <address> is supported.
   // A quoted display name can contain commas; unquoted separators and comments are refused.
-  const angle = from.trim().match(/^(?:"(?:[^"\\]|\\.)*"|[^"<>@,;:()[\]\\]*)\s*<([^<>]+)>$/u)
+  const value = from.trim()
+  const opening = value.lastIndexOf('<')
+  const displayName = value.slice(0, opening).trimEnd()
+  // Split before validating either segment so whitespace cannot be redistributed between
+  // overlapping regex repetitions during a failed match.
+  const validName =
+    /^"(?:[^"\\]|\\.)*"$/u.test(displayName) || !/["<>@,;:()[\]\\]/u.test(displayName)
+  const angleAddress =
+    opening !== -1 && value.endsWith('>') && validName ? value.slice(opening + 1, -1) : undefined
   // biome-ignore lint/suspicious/noControlCharactersInRegex: reject header and display controls
   const controls = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/u
   if (
@@ -183,7 +191,7 @@ function senderMailbox(from: string): string {
     !entry?.address ||
     entry.group ||
     !isMailbox(entry.address) ||
-    (from.trim() !== entry.address && angle?.[1] !== entry.address)
+    (value !== entry.address && angleAddress !== entry.address)
   ) {
     throw new Error('MAIL_FROM must contain one valid mailbox')
   }

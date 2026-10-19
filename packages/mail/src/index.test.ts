@@ -374,6 +374,15 @@ describe('createSmtpMailer', () => {
     )
   })
 
+  it('rejects a long malformed sender without backtracking over display-name spaces', () => {
+    const from = `Calendar${' '.repeat(100_000)}not-a-mailbox`
+    const start = performance.now()
+    expect(() => createSmtpMailer({ url: `smtp://127.0.0.1:${port}`, from })).toThrow(
+      /^MAIL_FROM must contain one valid mailbox$/,
+    )
+    expect(performance.now() - start).toBeLessThan(750)
+  }, 30_000)
+
   it('retains the configured From and routes human replies to one sanitized host mailbox', async () => {
     const mailer = createSmtpMailer({
       url: `smtp://127.0.0.1:${port}`,
