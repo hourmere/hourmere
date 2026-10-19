@@ -3,6 +3,7 @@ import { calendarEncryptionKey } from '@hourmere/calendars'
 import { conferenceEncryptionKey } from '@hourmere/conferences'
 import { embedOrigin } from '@hourmere/core/embed'
 import { isSingleLineText } from '@hourmere/scheduling/text'
+import { parseWebhookPrivateTargets } from '@hourmere/webhooks'
 import { z } from 'zod'
 import { isTrustedProxyEntry } from './client-ip.ts'
 import { DEFAULT_HTTP_TIMEOUTS, type HttpTimeouts } from './http-timeouts.ts'
@@ -30,6 +31,22 @@ const HSTS_MAX_AGE_FORMAT = 'HSTS_MAX_AGE must be a whole number of seconds (0 o
 
 const SMTP_URL_FORMAT =
   'SMTP_URL must look like smtps://user:password@host:465 or smtp://user:password@host:587, with no path (percent-encode special characters in the password)'
+
+// Policy links describe this instance's operator, so self-hosted installations have no default.
+const policyUrl = (name: string) =>
+  optional(
+    z
+      .string()
+      .max(2048, `${name} must be at most 2048 characters`)
+      .refine((value) => isSingleLineText(value) && !/\s/u.test(value), {
+        error: `${name} must not contain whitespace or control characters`,
+      })
+      .pipe(z.url({ protocol: /^https?$/, error: `${name} must be an HTTP(S) URL` }))
+      .refine(
+        (value) => URL.canParse(value) && !new URL(value).username && !new URL(value).password,
+        { error: `${name} must not contain credentials` },
+      ),
+  )
 
 const schema = z
   .object({
@@ -59,6 +76,18 @@ const schema = z
     ZOOM_MEETINGS_ENABLED: optional(z.enum(['true', 'false'])).transform((v) => v === 'true'),
     GOOGLE_MEET_ENABLED: optional(z.enum(['true', 'false'])).transform((v) => v === 'true'),
     WEBHOOKS_ENABLED: optional(z.enum(['true', 'false'])).transform((v) => v === 'true'),
+    WEBHOOK_PRIVATE_TARGETS: optional(z.string()).transform((value, ctx) => {
+      try {
+        return parseWebhookPrivateTargets(value)
+      } catch {
+        ctx.addIssue({
+          code: 'custom',
+          message:
+            'WEBHOOK_PRIVATE_TARGETS must contain at most 32 exact private host:port or IP/CIDR:port[-port] entries; IPv6 requires brackets; public, metadata and link-local addresses are forbidden',
+        })
+        return z.NEVER
+      }
+    }),
     WEBHOOK_ENCRYPTION_KEY: optional(
       z.string().refine(
         (value) => {
@@ -93,6 +122,8 @@ const schema = z
         },
       ),
     ).transform((value) => value ?? 'https://hourmere.com'),
+    PRIVACY_POLICY_URL: policyUrl('PRIVACY_POLICY_URL'),
+    TERMS_URL: policyUrl('TERMS_URL'),
     BETTER_AUTH_SECRET: z
       .string({
         error:

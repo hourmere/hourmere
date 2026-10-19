@@ -1,3 +1,4 @@
+import { parseWebhookPrivateTargets } from '@hourmere/webhooks'
 import { describe, expect, it } from 'vitest'
 import { loadConfig } from './config.ts'
 
@@ -7,6 +8,80 @@ const base = {
 }
 
 describe('loadConfig', () => {
+  describe.each(['PRIVACY_POLICY_URL', 'TERMS_URL'] as const)('%s', (name) => {
+    it('has no default for any instance and treats an empty value as unset', () => {
+      for (const PUBLIC_URL of ['https://self.example', 'https://app.hourmere.com']) {
+        expect(loadConfig({ ...base, PUBLIC_URL })[name]).toBeUndefined()
+        expect(loadConfig({ ...base, PUBLIC_URL, [name]: '' })[name]).toBeUndefined()
+      }
+    })
+
+    it('accepts an operator-supplied HTTP(S) policy URL independently of the instance', () => {
+      for (const value of [
+        'https://operator.example/legal/privacy?lang=zh-CN#data',
+        'http://localhost:4321/terms',
+        `https://operator.example/${'a'.repeat(2023)}`,
+      ])
+        expect(loadConfig({ ...base, [name]: value })[name]).toBe(value)
+    })
+
+    it('rejects non-HTTP(S), malformed, credential-bearing and oversized URLs', () => {
+      for (const value of [
+        'javascript:alert(1)',
+        'data:text/html,test',
+        'ftp://operator.example/privacy',
+        '/privacy',
+        'not a url',
+        'https://user@operator.example/privacy',
+        'https://:secret@operator.example/privacy',
+        `https://operator.example/${'a'.repeat(2024)}`,
+      ])
+        expect(() => loadConfig({ ...base, [name]: value })).toThrow(new RegExp(name))
+    })
+
+    it('rejects whitespace, control characters and malformed Unicode instead of normalizing them', () => {
+      for (const value of [
+        ' https://operator.example/privacy',
+        'https://operator.example/privacy ',
+        'https://operator.example/my policy',
+        'https://operator.example/pri\nvacy',
+        'https://operator.example/pri\tvacy',
+        'https://operator.example/pri\u0000vacy',
+        'https://operator.example/pri\u0085vacy',
+        'https://operator.example/pri\u2028vacy',
+        'https://operator.example/pri\ud800vacy',
+      ])
+        expect(() => loadConfig({ ...base, [name]: value })).toThrow(new RegExp(name))
+    })
+  })
+
+  it('keeps private webhook targets opt-in and validates them before startup in every role', () => {
+    expect(loadConfig(base).WEBHOOK_PRIVATE_TARGETS).toEqual([])
+    expect(loadConfig({ ...base, WEBHOOK_PRIVATE_TARGETS: '' }).WEBHOOK_PRIVATE_TARGETS).toEqual([])
+    const value = 'n8n:5678,192.168.1.0/24:8080-8081,[fd12:3456::/64]:8443'
+    for (const HOURMERE_ROLE of ['all', 'web', 'worker']) {
+      expect(
+        loadConfig({ ...base, HOURMERE_ROLE, WEBHOOK_PRIVATE_TARGETS: value })
+          .WEBHOOK_PRIVATE_TARGETS,
+      ).toEqual(parseWebhookPrivateTargets(value))
+      for (const WEBHOOK_PRIVATE_TARGETS of [
+        'n8n',
+        '0.0.0.0/0:80',
+        '[::/0]:443',
+        '8.8.8.8:443',
+        '169.254.169.254:80',
+        '100.100.100.200:80',
+        '[fd00:ec2::254]:80',
+        Array.from({ length: 33 }, (_, i) => `synthetic${i}:5678`).join(','),
+      ])
+        expect(() => loadConfig({ ...base, HOURMERE_ROLE, WEBHOOK_PRIVATE_TARGETS })).toThrow(
+          /WEBHOOK_PRIVATE_TARGETS/,
+        )
+    }
+    expect(() =>
+      loadConfig({ ...base, WEBHOOK_PRIVATE_TARGETS: 'untrusted-private-value' }),
+    ).not.toThrow(/untrusted-private-value/)
+  })
   it('requires calendar encryption to be independent of authentication and webhook keys', () => {
     const key = Buffer.alloc(32, 'k').toString('base64')
     for (const reused of [

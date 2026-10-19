@@ -12,6 +12,10 @@ must approve publication through the [release workflow](https://github.com/hourm
 
 ### Added
 
+- Self-hosted operators can allow exact private webhook hosts or IP/CIDR and port ranges
+  with `WEBHOOK_PRIVATE_TARGETS`, including signed HTTP delivery to same-network n8n/LAN
+  receivers. The default remains public HTTPS only; metadata addresses remain forbidden.
+  Web and worker must share the setting; Hourmere Cloud must never set it.
 - Personal booking pages and direct-link unlisted event types, with configurable duration,
   booking questions, locations, buffers, minimum notice, booking windows and daily limits.
   Working-hours schedules, date overrides and IANA time zones account for daylight saving.

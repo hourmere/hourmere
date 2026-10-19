@@ -271,8 +271,48 @@ describe('the invitee’s manage page', () => {
 
     expect(await screen.findByText(message)).toBeDefined()
     expect(api.to('POST /api/v1/bookings/manage/reschedule')).toHaveLength(1)
-    expect(api.to('GET /api/v1/bookings/manage')).toHaveLength(2)
+    expect(api.to('GET /api/v1/bookings/manage')).toHaveLength(
+      after().status === 'cancelled' ? 3 : 2,
+    )
     expect(screen.queryByRole('button', { name: 'Confirm new time' })).toBeNull()
+  })
+
+  it('follows a raced predecessor after a lost reschedule response without submitting again', async () => {
+    const user = userEvent.setup()
+    const moved = managed({
+      id: '01900000-0000-7000-8000-0000000000b2',
+      start: '2026-11-03T16:00:00.000Z',
+      end: '2026-11-03T16:30:00.000Z',
+      rescheduledFromId: managed().id,
+    })
+    let posted = false
+    let afterReads = 0
+    const api = manageServer(managed(), {
+      more: {
+        'GET /api/v1/bookings/manage': () =>
+          json(
+            200,
+            !posted
+              ? managed()
+              : afterReads++ === 0
+                ? managed({ status: 'cancelled', cancelledAt: '2026-11-01T04:31:00.000Z' })
+                : moved,
+          ),
+        'POST /api/v1/bookings/manage/reschedule': () => {
+          posted = true
+          throw new TypeError('Failed to fetch')
+        },
+      },
+    })
+    renderApp(`/booking#token=${TOKEN}&action=reschedule`)
+    await user.click(await screen.findByRole('button', { name: 'Tuesday, November 3, available' }))
+    await user.click(screen.getByRole('button', { name: '11:00 AM' }))
+    await user.click(await screen.findByRole('button', { name: 'Confirm new time' }))
+    expect(await screen.findByText('Your booking is moved to the new time.')).toBeDefined()
+    expect(screen.getByRole('heading', { name: 'Your booking' })).toBeDefined()
+    expect(document.querySelector('time')?.dateTime).toBe(moved.start)
+    expect(api.to('POST /api/v1/bookings/manage/reschedule')).toHaveLength(1)
+    expect(api.to('GET /api/v1/bookings/manage')).toHaveLength(3)
   })
 
   it.each([

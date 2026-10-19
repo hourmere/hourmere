@@ -20,7 +20,7 @@ export interface WebhookQueue {
 export interface WebhookDeps extends WebhookSettings {
   db: Db
   now?: (() => Temporal.Instant) | undefined
-  /** Only isolated fixtures replace the built-in HTTPS/DNS transport. */
+  /** Only isolated fixtures replace the built-in HTTP(S)/DNS transport. */
   transport?: WebhookTransport | undefined
 }
 
@@ -193,6 +193,7 @@ export async function deliverWebhook(
       try {
         status = await (deps.transport ?? sendWebhook)({
           url: endpoint.url,
+          privateTargets: deps.privateTargets,
           body: delivery.payload,
           signal,
           headers: {

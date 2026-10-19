@@ -4800,7 +4800,10 @@ export interface paths {
         /** List the current organization’s webhooks (owner/admin) */
         get: operations["listWebhooks"];
         put?: never;
-        /** Create an HTTPS webhook and reveal its signing secret once */
+        /**
+         * Create a webhook and reveal its signing secret once
+         * @description Public HTTPS destinations by default. Operators may allow exact private HTTP(S) targets. URL checks do not resolve DNS; every delivery revalidates all resolved addresses. Destinations are immutable.
+         */
         post: operations["createWebhook"];
         delete?: never;
         options?: never;
@@ -5366,6 +5369,11 @@ export interface components {
              * @description Hosted service destination for public attribution and sign-up links
              */
             hostedSignupUrl: string;
+            /**
+             * Format: uri
+             * @description This instance operator's privacy policy; absent when not configured
+             */
+            privacyPolicyUrl?: string;
             /** @description The sign-in methods people can use on this instance */
             signIn: {
                 /** @description Sign-in links sent by email */
@@ -5373,6 +5381,11 @@ export interface components {
                 google: boolean;
                 microsoft: boolean;
             };
+            /**
+             * Format: uri
+             * @description This instance operator's terms; absent when not configured
+             */
+            termsUrl?: string;
         };
         ManagedBooking: components["schemas"]["Booking"] & {
             /** @description The event type as it is now; null once it is deleted */
