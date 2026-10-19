@@ -52,6 +52,8 @@ must approve publication through the [release workflow](https://github.com/hourm
 - Automatic Google Meet now imports the private calendar copy first and requests its
   conference through a separate conditional PATCH. Retries preserve the event and request
   identity, including recovery of legacy import-created pending requests.
+- Exhausted automatic Meet polling reports `conference_pending_timeout`, distinct from
+  transport/provider failures, and explains the safe host retry in both interface languages.
 
 ### Upgrade notes
 
@@ -146,6 +148,24 @@ stack includes PostgreSQL 18.
   authorization attempts without redeeming their codes: restart those attempts. Existing
   pre-0023 Meet roots retain their documented legacy organizer behavior; new roots pin
   invitation identity and ordinary calendar-copy targets at creation.
+- **Review legacy Meet requests and terminal PATCH errors.** Migration 0036 leaves existing
+  conference PATCH markers empty: pending import-created requests receive one automatic
+  same-UUID PATCH and a fresh bounded polling budget; failed rows need the pinned host's
+  explicit retry. Google may ignore the duplicate UUID. Exhausted pending requests now
+  report `conference_pending_timeout`; host retry retains the UUID and polls the known
+  event again, without repeating an acknowledged PATCH. A request that stays pending needs
+  the [quiesced operator repair](https://github.com/hourmere/hourmere/blob/main/docs/google-calendar.md#automatic-meet-projection)
+  before deliberate UUID rotation; no host/CLI force-create path is added. Migration 0037
+  adds the timeout classification and drops the unused database `retry_conference` flag;
+  the public retry endpoint, MCP tool and CLI command remain available. Existing error
+  codes and terminal rows are preserved, not reclassified or requeued.
+  Stop old web/all/worker processes before applying 0037: old binaries still write the
+  removed column. Resume every role with the upgraded code.
+  A Google HTTP 400 from PATCH on a known event, including conference creation, rescheduling
+  and cancellation, intentionally becomes terminal `invalid_response` rather than retryable
+  `provider_unavailable`: Google's [error guidance](https://developers.google.com/workspace/calendar/api/guides/errors#400_bad_request)
+  identifies 400 as a permanent request error. Fix the request/integration before explicit
+  retry; the known event is retained and a replacement import is never authorized.
 - **Optional integrations and attribution need explicit configuration.** Embedding stays
   disabled until `EMBED_ALLOWED_ORIGINS` lists exact allowed origins. Booking webhooks
   default off (`WEBHOOKS_ENABLED=false`) and do not backfill past booking changes when

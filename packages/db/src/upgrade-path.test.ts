@@ -20,7 +20,7 @@ interface Table {
 }
 
 async function tables(pool: pg.Pool): Promise<Table[]> {
-  return (
+  const inventory = (
     await pool.query<Table>(`
       SELECT table_schema AS schema, table_name AS name,
         array_agg(column_name::text ORDER BY ordinal_position) AS columns
@@ -32,6 +32,12 @@ async function tables(pool: pg.Pool): Promise<Table[]> {
       GROUP BY table_schema,table_name ORDER BY table_schema,table_name
     `)
   ).rows
+  // 0037 deliberately drops the unused write-only flag. All other historical
+  // columns and values still must survive; the focused 0037 test checks removal.
+  for (const table of inventory)
+    if (table.schema === 'public' && table.name === 'booking_conferences')
+      table.columns = table.columns.filter((column) => column !== 'retry_conference')
+  return inventory
 }
 
 // Keep the predecessor's explicit column list: to_jsonb(current_row) alone could

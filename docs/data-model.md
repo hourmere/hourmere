@@ -424,6 +424,17 @@ Existing rows remain null and keep their original event/request identity, enabli
 same-ID PATCH for old import-created pending requests. A lost PATCH response reuses the
 same persisted request ID; acknowledged pending requests only poll.
 
+Migration 0037 extends `booking_conferences.error_code`'s CHECK constraint with
+`conference_pending_timeout` for an exhausted pending-conference polling budget. Existing
+error codes and terminal state are preserved without reclassification or requeueing. It
+also drops the unused `retry_conference` column: no reader used that write-only flag, and
+durable `request_id`/`conference_patch_request_id` already distinguish a new conference
+request from safe polling. The public retry endpoint and MCP `retry_conference` tool are
+unaffected. A host timeout retry keeps those identities; a known provider
+`conference_failed` can rotate the UUID on the same event.
+Old web/all/worker processes must stop before applying this migration because they still
+write the removed flag; restart every role with the upgraded code.
+
 ## Round-robin assignment state
 
 Migration 0020 adds `round_robin_state` (event primary key, monotonic `bigint` sequence,

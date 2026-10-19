@@ -69,13 +69,15 @@ export function fakeGoogle() {
     storedEvents: new Map<string, Record<string, unknown>>(),
     conferencePollsBeforeReady: 1,
     conferenceOutcome: 'success' as 'success' | 'failure',
+    importedConferenceRequestMode: 'ignore_duplicate' as 'ignore_duplicate' | 'process_duplicate',
+    conferencePatchEtagRaceOnce: false,
     conferenceRequests: new Map<
       string,
       { eventId: string; polls: number; patched: boolean; outcome?: 'success' | 'failure' }
     >(),
   }
-  // Google accepts createRequest on import but never processes it. Only a PATCH
-  // starts conference creation; replaying its request ID does not restart progress.
+  // Import-created requests stay pending. Google may ignore a later same-ID PATCH;
+  // tests must opt into the alternative where that PATCH starts creation.
   const conferenceFor = (value: Record<string, unknown>, poll = false) => {
     const data = value.conferenceData as { createRequest?: { requestId?: string } } | undefined
     const requestId = data?.createRequest?.requestId
@@ -99,6 +101,10 @@ export function fakeGoogle() {
           : {}),
       },
     }
+  }
+  const nextEtag = (value: Record<string, unknown>) => {
+    const version = /^"v(\d+)"$/.exec(String(value.etag))
+    return `"v${Number(version?.[1] ?? 0) + 1}"`
   }
   const calls: { url: URL; init: RequestInit }[] = []
   const request: typeof fetch = async (input, init = {}) => {
@@ -145,17 +151,27 @@ export function fakeGoogle() {
         if (controls.eventPatchStatus !== 200)
           return Response.json({}, { status: controls.eventPatchStatus })
         const id = decodeURIComponent(url.pathname.split('/').at(-1) ?? '')
-        const prior = controls.storedEvents.get(id)
+        let prior = controls.storedEvents.get(id)
         if (!prior) return Response.json({}, { status: 404 })
         const patch = JSON.parse(String(init.body))
         const requestId = patch.conferenceData?.createRequest?.requestId
+        if (requestId && controls.conferencePatchEtagRaceOnce) {
+          controls.conferencePatchEtagRaceOnce = false
+          prior = { ...prior, etag: nextEtag(prior) }
+          controls.storedEvents.set(id, prior)
+        }
+        const ifMatch = new Headers(init.headers).get('if-match')
+        if (ifMatch && ifMatch !== prior.etag) return Response.json({}, { status: 412 })
         if (requestId) {
           const request = controls.conferenceRequests.get(requestId)
           if (request && request.eventId !== id) return Response.json({}, { status: 409 })
-          if (request) request.patched = true
-          else controls.conferenceRequests.set(requestId, { eventId: id, polls: 0, patched: true })
+          if (request) {
+            if (controls.importedConferenceRequestMode === 'process_duplicate')
+              request.patched = true
+          } else
+            controls.conferenceRequests.set(requestId, { eventId: id, polls: 0, patched: true })
         }
-        const stored = conferenceFor({ ...prior, ...patch, etag: '"v2"' })
+        const stored = conferenceFor({ ...prior, ...patch, etag: nextEtag(prior) })
         controls.storedEvents.set(id, stored)
         return Response.json(stored)
       }
