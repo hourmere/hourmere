@@ -344,6 +344,16 @@ one such optional copy. The join URL is stored only in the current ready protect
 location. See [automatic-google-meet.md](automatic-google-meet.md) and
 [automatic-zoom.md](automatic-zoom.md).
 
+Protected booking reads hydrate the booking status, cancellation time/reason, resolved
+location and conference state from the same joined snapshot. A cancellation committed
+after the initial booking lookup therefore cannot leave a confirmed booking paired with
+the cancelled conference's cleared link. These reads take no booking row locks.
+
+Migration 0032 indexes the mutable `booking_conferences.booking_id` pointer used by
+booking reads and cancellation. The index is non-unique: the existing schema guarantees
+one intent per `root_booking_id`, but does not constrain distinct roots' current pointers
+to be unique. The migration preserves those existing rows without adding a new invariant.
+
 Migration 0024 adds a persisted attempt count, random bounded lease, safe error class and
 exhausted timestamp to each conference notification. Existing due times and delivery flags
 are preserved. Attempt claims commit before SMTP; lease/attempt comparison protects completion
