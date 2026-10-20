@@ -37,6 +37,16 @@ async function chooseZone(name: string) {
 }
 
 describe('the profile settings', () => {
+  it('keeps the Chinese personal suffix beside the organization without an extra space', async () => {
+    const user = userEvent.setup()
+    profileServer(PROFILE)
+    renderApp('/app/settings')
+    await screen.findByDisplayValue('ada')
+    await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+    const suffix = screen.getByText('（个人）')
+    expect(suffix.parentElement?.textContent).toBe(`${ME.organization.name}（个人）`)
+  })
+
   it('suggests a profile to people without one, and creates it', async () => {
     const user = userEvent.setup()
     const api = profileServer(null, ({ body }) => json(201, { ...PROFILE, ...(body as object) }))

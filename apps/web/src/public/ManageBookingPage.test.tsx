@@ -135,6 +135,54 @@ describe('the invitee’s manage page', () => {
     expect(api.to('POST /api/v1/bookings/manage/reschedule')).toHaveLength(0)
   })
 
+  it.each([
+    ['en', 'Intro call, Monday, November 2, 2026, 9:00 – 9:30 AM'],
+    ['zh-CN', 'Intro call，2026年11月2日星期一，09:00–09:30'],
+  ])('uses %s separators throughout the cancel summary', async (language, expected) => {
+    localStorage.setItem('hourmere-language', language)
+    manageServer()
+    renderApp(`/booking#token=${TOKEN}&action=cancel`)
+    const heading = await screen.findByRole('heading', {
+      name: language === 'en' ? 'Cancel this booking?' : '取消此预约？',
+    })
+    const form = heading.closest('form')
+    const [note, summary] = [...(form?.querySelectorAll('p') ?? [])]
+    expect(plain(summary?.textContent)).toBe(expected)
+    // The calendar note's quoted “Cancel booking” gets quote markup only in Chinese.
+    expect(
+      [...(note?.querySelectorAll('.cjk-quote') ?? [])].map((span) => span.textContent),
+    ).toEqual(language === 'zh-CN' ? ['“', '”'] : [])
+  })
+
+  it('formats Chinese host and guest lists and booker brackets', async () => {
+    localStorage.setItem('hourmere-language', 'zh-CN')
+    const data = managed()
+    manageServer({
+      ...data,
+      hosts: [{ name: '王小明' }, { name: '李小红' }],
+      attendees: [
+        ...data.attendees,
+        {
+          ...{ timeZone: 'America/New_York', locale: 'en-US' },
+          name: '周小刚',
+          email: 'guest1@example.invalid',
+          isBooker: false,
+        },
+        {
+          ...{ timeZone: 'America/New_York', locale: 'en-US' },
+          name: '赵小华',
+          email: 'guest2@example.invalid',
+          isBooker: false,
+        },
+      ],
+    })
+    renderApp(`/booking#token=${TOKEN}`)
+    await screen.findByRole('heading', { name: '你的预约' })
+    expect(screen.getByText('王小明、李小红')).toBeDefined()
+    expect(screen.getByText('周小刚、赵小华')).toBeDefined()
+    expect(screen.getByText('Grace Hopper（grace@example.com）')).toBeDefined()
+  })
+
   it.each(['pending', 'failed'] as const)(
     'withholds delivery advice while a rescheduled invitation is %s',
     async (status) => {
@@ -231,22 +279,38 @@ describe('the invitee’s manage page', () => {
     expect(call?.headers.get('x-manage-token')).toBe(TOKEN)
   })
 
-  it.each(['en', 'zh-CN'] as const)(
-    'localizes the structured current booking summary in %s',
-    async (language) => {
+  it.each([
+    ['en', 'Test Host', 'ICS test', 'Monday, November 2, 2026', '9:00 – 9:30 AM'],
+    ['en', null, 'ICS test', 'Monday, November 2, 2026', '9:00 – 9:30 AM'],
+    ['zh-CN', 'Test Host', 'ICS test', '2026年11月2日星期一', '09:00–09:30'],
+    ['zh-CN', '王小明', 'Ada’s review', '2026年11月2日星期一', '09:00–09:30'],
+    ['zh-CN', null, '初次通话', '2026年11月2日星期一', '09:00–09:30'],
+  ] as const)(
+    'localizes the structured current booking summary in %s (host: %s, title: %s)',
+    async (language, host, title, date, time) => {
       localStorage.setItem('hourmere-language', language)
       manageServer({
         ...managed(),
-        eventType: { title: 'ICS test', durationMinutes: 30 },
-        hosts: [{ name: 'Test Host' }],
+        eventType: { title, durationMinutes: 30 },
+        hosts: host ? [{ name: host }] : [],
       })
       renderApp(`/booking#token=${TOKEN}&action=reschedule`)
       const summary = await screen.findByRole('complementary', {
         name: language === 'en' ? 'Current booking' : '当前预约',
       })
-      expect(within(summary).getByRole('heading', { name: 'ICS test' })).toBeDefined()
-      expect(within(summary).getByText('Test Host')).toBeDefined()
-      expect(within(summary).getByText(language === 'en' ? 'When' : '时间')).toBeDefined()
+      // The title is a heading rather than prose, so it carries no quote glyphs or markup.
+      expect(within(summary).getByRole('heading', { name: title }).textContent).toBe(title)
+      expect(summary.querySelectorAll('.cjk-quote')).toHaveLength(0)
+      if (host) expect(within(summary).getByText(host)).toBeDefined()
+      const when = within(summary).getByText(language === 'en' ? 'When' : '时间')
+      // Date, time and zone use the locale's own punctuation: 24-hour HH:mm and full-width
+      // brackets and comma in Chinese.
+      const zone =
+        language === 'en' ? ' (America/New York, GMT-05:00)' : '（America/New York，GMT-05:00）'
+      expect(plain(when.nextElementSibling?.textContent)).toBe(`${date}${time}${zone}`)
+      expect(when.nextElementSibling?.querySelector('.time-offset')?.textContent).toBe(
+        zone.slice(zone.indexOf('GMT')),
+      )
     },
   )
 

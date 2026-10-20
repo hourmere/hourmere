@@ -1,5 +1,5 @@
 // One searchable IANA picker for public slot selection and editable admin fields.
-import { type KeyboardEvent, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { Fragment, type KeyboardEvent, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { isKnownTimeZone } from '../format.ts'
 import { useI18n } from '../i18n/runtime.tsx'
 import type { UiText } from '../i18n/translate.ts'
@@ -32,6 +32,25 @@ const COMMON_ZONES = [
   'Australia/Sydney',
 ]
 const normalize = (text: string) => text.toLowerCase().replaceAll('_', ' ')
+
+function TimeZoneName({ name, className }: { name: string; className?: string }) {
+  return (
+    <span className={className} style={{ overflowWrap: 'normal' }}>
+      {name.split('/').map((part, index, parts) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: fixed components of a display name
+        <Fragment key={index}>
+          {part}
+          {index < parts.length - 1 && (
+            <>
+              {'/'}
+              <wbr />
+            </>
+          )}
+        </Fragment>
+      ))}
+    </span>
+  )
+}
 
 export function timeZoneNames(): string[] {
   try {
@@ -79,7 +98,7 @@ export function TimeZonePicker({
   referenceDate,
   error,
 }: TimeZonePickerProps) {
-  const { t, ui } = useI18n()
+  const { t, ui, text: translatedText } = useI18n()
 
   const editable = control !== undefined
   const id = useId()
@@ -190,7 +209,7 @@ export function TimeZonePicker({
         onClick={() => pick(zone.id)}
         onMouseMove={() => index !== active && setActive(index)}
       >
-        <span>{zone.name}</span>
+        <TimeZoneName name={zone.name} />
         <span className={editable ? 'muted' : 'tz-offset'}>{zone.offset}</span>
       </div>
     )
@@ -221,7 +240,7 @@ export function TimeZonePicker({
         >
           <span className="tz-caption">{t('Time zone')}</span>
           <span className="tz-current">
-            <span className="tz-name">{current?.name ?? zoneName(value)}</span>{' '}
+            <TimeZoneName className="tz-name" name={current?.name ?? zoneName(value)} />{' '}
             <span className="tz-offset">{current?.offset}</span>
           </span>
           <span className="tz-change">{open ? t('Close') : t('Change')}</span>
@@ -311,7 +330,7 @@ export function TimeZonePicker({
           )}
           {open && shown.length === 0 && (
             <div className={editable ? 'combobox-list combobox-empty' : 'muted tz-empty'}>
-              {t('No time zone matches “{query}”.', { query: text })}
+              {translatedText('No time zone matches “{query}”.', { query: text })}
             </div>
           )}
           {editable && open && shown.length < matches.length && (

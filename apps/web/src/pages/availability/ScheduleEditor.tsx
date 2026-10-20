@@ -47,7 +47,7 @@ export function ScheduleEditorPage() {
 }
 
 function ScheduleEditor({ id }: { id: string | undefined }) {
-  const { t, ui } = useI18n()
+  const { t, uiText: ui } = useI18n()
 
   const load = useCallback(
     async (signal: AbortSignal): Promise<Loaded | 'missing'> => {
@@ -106,7 +106,7 @@ function ScheduleEditor({ id }: { id: string | undefined }) {
 }
 
 function ScheduleForm({ schedule, schedules, defaultTimeZone }: Loaded) {
-  const { t, ui } = useI18n()
+  const { t, text, ui, uiText } = useI18n()
 
   const navigate = useNavigate()
   const message = useFlash()
@@ -210,7 +210,7 @@ function ScheduleForm({ schedule, schedules, defaultTimeZone }: Loaded) {
       <p className="breadcrumb">
         <Link to={PATHS.availability}>{t('Availability')}</Link>
       </p>
-      <h1>{saved ? t('Edit “{0}”', { '0': saved.name }) : t('New schedule')}</h1>
+      <h1>{saved ? text('Edit “{0}”', { '0': saved.name }) : t('New schedule')}</h1>
       {saved && (
         <DefaultStatus
           schedule={saved}
@@ -236,7 +236,7 @@ function ScheduleForm({ schedule, schedules, defaultTimeZone }: Loaded) {
                 id="name"
                 label={t('Name')}
                 error={errors.name}
-                hint={t('For you only, e.g. “Working hours”.')}
+                hint={text('For you only, e.g. “Working hours”.')}
               >
                 {(props) => (
                   <input
@@ -251,7 +251,7 @@ function ScheduleForm({ schedule, schedules, defaultTimeZone }: Loaded) {
                 id="timeZone"
                 label={t('Time zone')}
                 error={errors.timeZone}
-                hint={t('The hours below are in this zone. Type to search, e.g. “Berlin”.')}
+                hint={text('The hours below are in this zone. Type to search, e.g. “Berlin”.')}
               >
                 {(props) => (
                   <TimeZonePicker
@@ -331,7 +331,7 @@ function ScheduleForm({ schedule, schedules, defaultTimeZone }: Loaded) {
             {saved ? t('Back to availability') : t('Cancel')}
           </Link>
           <p className="form-status" role="status" tabIndex={-1} ref={statusRef}>
-            {ui(status || (dirty && saved ? 'Unsaved changes' : ''))}
+            {uiText(status || (dirty && saved ? 'Unsaved changes' : ''))}
           </p>
         </div>
       </form>
@@ -362,7 +362,7 @@ function DefaultStatus({
   schedule: Schedule
   onChanged: (schedule: Schedule) => void
 }) {
-  const { t, ui } = useI18n()
+  const { t, uiText: ui } = useI18n()
 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<UiText | null>(null)

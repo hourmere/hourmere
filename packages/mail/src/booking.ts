@@ -5,6 +5,7 @@ import { type InterfaceLanguage, interfaceLanguage } from '@hourmere/core/langua
 import type { MailAttachment, MailMessage } from './index.ts'
 import { emailButton, emailLayout, emailLinkStyle, emailWrapStyle } from './layout.ts'
 import {
+  emailText,
   escapeHtml,
   formatChineseTemplate,
   linkableUrl,
@@ -191,7 +192,8 @@ function joinLabel(
 
 // --- Layout -------------------------------------------------------------------------------
 
-const htmlLines = (text: string) => escapeHtml(text).replaceAll('\n', '<br>')
+const htmlLines = (text: string, language: InterfaceLanguage) =>
+  emailText(text, language).replaceAll('\n', '<br>')
 
 /** `Label: value`, with further lines of the value indented. */
 const textField = (label: string, value: string, language: InterfaceLanguage) =>
@@ -201,8 +203,8 @@ interface Content {
   language: InterfaceLanguage
   subject: string
   intro: string
-  /** Label and value (already cleaned); the HTML value is escaped markup. */
-  fields: { label: string; text: string; html: string; muted?: boolean }[]
+  /** Label and value, already cleaned. */
+  fields: { label: string; text: string; muted?: boolean }[]
   answers: readonly { question: string; answer: string }[]
   join?: { label: string; url: string } | undefined
   bookingUrl?: string | undefined
@@ -214,6 +216,7 @@ interface Content {
 function render(to: string, c: Content, attachment?: MailAttachment): MailMessage {
   const subject = subjectLine(c.subject)
   const t = (key: keyof typeof chinese) => message(c.language, key)
+  const htmlText = (text: string) => emailText(text, c.language)
   const actionText = c.manageLinks
     ? [
         '',
@@ -249,34 +252,34 @@ function render(to: string, c: Content, attachment?: MailAttachment): MailMessag
   const rows = c.fields
     .map(
       (f) =>
-        `<tr><td style="${cell} color: #555; white-space: nowrap; width: 1%;">${escapeHtml(f.label)}</td><td style="${cell} ${emailWrapStyle}${f.muted ? ' color: #777; text-decoration: line-through;' : ''}">${f.html}</td></tr>`,
+        `<tr><td style="${cell} color: #555; white-space: nowrap; width: 1%;">${htmlText(f.label)}</td><td style="${cell} ${emailWrapStyle}${f.muted ? ' color: #777; text-decoration: line-through;' : ''}">${htmlLines(f.text, c.language)}</td></tr>`,
     )
     .join('\n')
   const answers = c.answers.length
-    ? `<p style="margin: 24px 0 4px; font-weight: 600;">${t('Answers')}</p>\n${c.answers
+    ? `<p style="margin: 24px 0 4px; font-weight: 600;">${htmlText(t('Answers'))}</p>\n${c.answers
         .map(
           (a) =>
-            `<p style="margin: 0 0 12px; ${emailWrapStyle}"><span style="color: #555;">${htmlLines(a.question)}</span><br>${htmlLines(a.answer)}</p>`,
+            `<p style="margin: 0 0 12px; ${emailWrapStyle}"><span style="color: #555;">${htmlLines(a.question, c.language)}</span><br>${htmlLines(a.answer, c.language)}</p>`,
         )
         .join('\n')}`
     : ''
   const footer = c.footer
-    ? `<p lang="${c.footer.language}" style="margin: ${c.manageLinks ? '0 0 8px' : '24px 0 0'}; color: #555; font-size: 13px; ${emailWrapStyle}">${escapeHtml(c.footer.text)}</p>`
+    ? `<p lang="${c.footer.language}" style="margin: ${c.manageLinks ? '0 0 8px' : '24px 0 0'}; color: #555; font-size: 13px; ${emailWrapStyle}">${emailText(c.footer.text, c.footer.language)}</p>`
     : ''
   const links = c.manageLinks
-    ? `<p style="margin: 24px 0 8px;">${t('Need to make a change?')}</p>
-${emailButton(t('Reschedule'), c.manageLinks.reschedule)}
-${emailButton(t('Cancel'), c.manageLinks.cancel, true)}
-${footer}${footer ? '\n' : ''}<p style="margin: 8px 0 0; color: #555; font-size: 13px; ${emailWrapStyle}">${t('If the buttons do not work, copy a link into your browser:')}<br>${escapeHtml(textField(t('Reschedule'), c.manageLinks.reschedule, c.language))}<br>${escapeHtml(textField(t('Cancel'), c.manageLinks.cancel, c.language))}</p>`
+    ? `<p style="margin: 24px 0 8px;">${htmlText(t('Need to make a change?'))}</p>
+${emailButton(t('Reschedule'), c.manageLinks.reschedule, false, c.language)}
+${emailButton(t('Cancel'), c.manageLinks.cancel, true, c.language)}
+${footer}${footer ? '\n' : ''}<p style="margin: 8px 0 0; color: #555; font-size: 13px; ${emailWrapStyle}">${htmlText(t('If the buttons do not work, copy a link into your browser:'))}<br>${htmlText(textField(t('Reschedule'), c.manageLinks.reschedule, c.language))}<br>${htmlText(textField(t('Cancel'), c.manageLinks.cancel, c.language))}</p>`
     : ''
   const join = c.join
     ? `<div style="margin: 24px 0 0;">
-${emailButton(c.join.label, c.join.url)}
-<p style="margin: 4px 0 0; font-size: 13px; ${emailWrapStyle}"><a href="${escapeHtml(c.join.url)}" style="${emailLinkStyle}">${escapeHtml(c.join.url)}</a></p>
+${emailButton(c.join.label, c.join.url, false, c.language)}
+<p style="margin: 4px 0 0; font-size: 13px; ${emailWrapStyle}"><a href="${escapeHtml(c.join.url)}" style="${emailLinkStyle}">${htmlText(c.join.url)}</a></p>
 </div>`
     : ''
   const bookingLink = c.bookingUrl
-    ? `<div style="margin: 24px 0 0;">${emailButton(t('Open in Hourmere'), c.bookingUrl)}</div>`
+    ? `<div style="margin: 24px 0 0;">${emailButton(t('Open in Hourmere'), c.bookingUrl, false, c.language)}</div>`
     : ''
   const afterDetails = [
     answers,
@@ -284,14 +287,14 @@ ${emailButton(c.join.label, c.join.url)}
     bookingLink,
     links,
     ...(!c.manageLinks ? [footer] : []),
-    `<p style="margin: 24px 0 0; color: #555; font-size: 13px; ${emailWrapStyle}">${escapeHtml(c.receivedWhy)}</p>`,
+    `<p style="margin: 24px 0 0; color: #555; font-size: 13px; ${emailWrapStyle}">${htmlText(c.receivedWhy)}</p>`,
   ]
     .filter(Boolean)
     .join('\n')
   const html = emailLayout(
     c.language,
     subject,
-    `<p style="margin: 0 0 16px; ${emailWrapStyle}">${escapeHtml(c.intro)}</p>
+    `<p style="margin: 0 0 16px; ${emailWrapStyle}">${htmlText(c.intro)}</p>
 <table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
 ${rows}
 </table>${afterDetails ? `\n${afterDetails}` : ''}`,
@@ -363,7 +366,7 @@ function message(
   return key.replace(/\{(\w+)\}/g, (placeholder, name: string) => values[name] ?? placeholder)
 }
 
-const field = (label: string, text: string) => ({ label, text, html: htmlLines(text) })
+const field = (label: string, text: string) => ({ label, text })
 const calendarDecline = {
   en: {
     invitee:

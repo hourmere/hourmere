@@ -58,6 +58,93 @@ async function chooseSlot(user: ReturnType<typeof userEvent.setup>, dayName: Reg
 }
 
 describe('the booking page', () => {
+  it.each([
+    {
+      host: '主持人（王小明）',
+      title: 'Intro call',
+      lede: '你与主持人（王小明）的“Intro call”预约已确认。',
+      calendar: '与主持人（王小明）的 Intro call',
+    },
+    {
+      host: 'Ada Lovelace',
+      title: 'Intro call',
+      lede: '你与 Ada Lovelace 的“Intro call”预约已确认。',
+      calendar: '与 Ada Lovelace 的 Intro call',
+    },
+    {
+      host: 'O’Brien',
+      title: 'Ada’s review',
+      lede: '你与 O’Brien 的“Ada’s review”预约已确认。',
+      calendar: '与 O’Brien 的 Ada’s review',
+    },
+  ])(
+    'localizes confirmation names and lists for $host and $title',
+    async ({ host, title, lede, calendar }) => {
+      const user = userEvent.setup()
+      const data = booking()
+      const event = {
+        ...EVENT,
+        title,
+        host: { ...EVENT.host, name: host },
+        hosts: [
+          { name: '王小明', timeZone: 'Europe/Berlin' },
+          { name: '李小红', timeZone: 'Asia/Shanghai' },
+        ],
+      }
+      fakeApi({
+        ...eventRoutes(event, DST_SLOTS),
+        'POST /api/v1/public/ada/intro/bookings': () =>
+          json(201, {
+            booking: {
+              ...data,
+              attendees: [
+                ...data.attendees,
+                {
+                  ...{ timeZone: 'America/New_York', locale: 'en-US' },
+                  name: '周小刚',
+                  email: 'guest1@example.invalid',
+                  isBooker: false,
+                },
+                {
+                  ...{ timeZone: 'America/New_York', locale: 'en-US' },
+                  name: '赵小华',
+                  email: 'guest2@example.invalid',
+                  isBooker: false,
+                },
+              ],
+            },
+            manageToken: TOKEN,
+          }),
+      })
+      renderApp('/ada/intro')
+      await chooseSlot(user, /November 2, available/, '9:00 AM')
+      await user.type(screen.getByLabelText('Your name'), 'Grace Hopper')
+      await user.type(screen.getByLabelText('Email'), 'grace@example.com')
+      await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+      expect(
+        screen.getByText('必选主持人：王小明（Europe/Berlin）、李小红（Asia/Shanghai）'),
+      ).toBeDefined()
+      await user.click(screen.getByRole('button', { name: '确认预约' }))
+      await screen.findByRole('heading', { name: '预约成功' })
+      expect(document.querySelector('.confirmation .lede')?.textContent).toBe(lede)
+      // Only the Chinese double quotes get quote markup; apostrophes in Latin text do not.
+      expect(
+        [
+          ...(document.querySelector('.confirmation .lede')?.querySelectorAll('.cjk-quote') ?? []),
+        ].map((span) => span.textContent),
+      ).toEqual(['“', '”'])
+      expect(screen.getByText('周小刚、赵小华')).toBeDefined()
+      expect(screen.getByText('Grace Hopper（grace@example.com）')).toBeDefined()
+      const calendarUrl = new URL(
+        screen.getByRole<HTMLAnchorElement>('link', { name: 'Google 日历' }).href,
+      )
+      expect(calendarUrl.searchParams.get('text')).toBe(calendar)
+      expect(document.querySelector('.manage-link p')?.textContent).toBe(
+        '使用此链接改期或取消。此链接仅在此页面显示一次；持有链接的任何人都可更改你的预约，请妥善保管。',
+      )
+    },
+  )
+
   it('explains calendar responses and opens cancellation with the existing private capability', async () => {
     const user = userEvent.setup()
     const api = fakeApi({
@@ -92,7 +179,12 @@ describe('the booking page', () => {
     }
     await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
     expect(
-      screen.getByText('在日历中接受或拒绝邀请不会取消预约。如需取消，请使用此处的“取消预约”。'),
+      screen.getByText(
+        (_, element) =>
+          element?.tagName === 'P' &&
+          element.textContent ===
+            '在日历中接受或拒绝邀请不会取消预约。如需取消，请使用此处的“取消预约”。',
+      ),
     ).toBeDefined()
     await user.click(screen.getByRole('link', { name: '取消预约' }))
     expect(await screen.findByRole('heading', { name: '取消此预约？' })).toBeDefined()
@@ -172,7 +264,12 @@ describe('the booking page', () => {
       expect(screen.queryByText(/^Booking confirmed\./)).toBeNull()
       await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
       expect(
-        screen.getByText('在日历中接受或拒绝邀请不会取消预约。如需取消，请使用此处的“取消预约”。'),
+        screen.getByText(
+          (_, element) =>
+            element?.tagName === 'P' &&
+            element.textContent ===
+              '在日历中接受或拒绝邀请不会取消预约。如需取消，请使用此处的“取消预约”。',
+        ),
       ).toBeDefined()
       expect(screen.queryByText(/^预约已确认。/)).toBeNull()
     },

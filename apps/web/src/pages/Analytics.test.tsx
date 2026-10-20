@@ -1,6 +1,8 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
+import { chooseLanguage } from '../i18n/store.ts'
+import styles from '../styles.css?raw'
 import { fakeApi, json, later, profile, renderApp, signedIn } from '../test/fake-api.tsx'
 import { initialActivityFilters } from './Analytics.tsx'
 
@@ -45,6 +47,22 @@ describe('booking activity page', () => {
     expect(query(api.to('GET /api/v1/analytics/bookings')[0]?.path ?? '').timeZone).toBe(
       'Europe/Berlin',
     )
+  })
+  it('keeps each Chinese report date together when the heading wraps on narrow screens', async () => {
+    chooseLanguage('zh-CN')
+    fakeApi({
+      ...signedIn,
+      ...profile(),
+      'GET /api/v1/analytics/bookings': () =>
+        json(200, { ...result, startDate: '2026-09-21', endDate: '2026-10-20' }),
+    })
+    renderApp('/app/analytics')
+    const heading = await screen.findByRole('heading', { name: '2026-09-21 至 2026-10-20' })
+    expect([...heading.querySelectorAll('.nowrap')].map((date) => date.textContent)).toEqual([
+      '2026-09-21',
+      '2026-10-20',
+    ])
+    expect(styles).toMatch(/\.nowrap\s*\{\s*white-space: nowrap;/)
   })
   it('uses UTC before onboarding, displays zero activity and submits explicit valid filters', async () => {
     const user = userEvent.setup()

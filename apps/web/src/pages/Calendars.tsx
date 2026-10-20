@@ -49,7 +49,7 @@ const noticeFor = (search: URLSearchParams): UiText | null => {
 }
 
 export function CalendarsPage() {
-  const { t, ui, formatLocale: displayLocale } = useI18n()
+  const { t, text, ui, formatLocale: displayLocale } = useI18n()
 
   usePageTitle('Calendars')
   const [state, reload] = useLoad(load)
@@ -281,7 +281,7 @@ export function CalendarsPage() {
                   )}
                 </p>
                 <p>
-                  {t(
+                  {text(
                     'Disconnect below deletes stored credentials and local calendar data, but leaves existing event copies in Google Calendar and does not revoke your Google grant. You can revoke access in your Google Account:',
                   )}{' '}
                   <a

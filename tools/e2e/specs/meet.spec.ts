@@ -43,6 +43,7 @@ for (const selected of ['en', 'zh-CN'] as const) {
     pending: chinese ? '时段已保留，会议链接待生成' : 'Time reserved; meeting link pending',
     join: chinese ? '加入 Google Meet' : 'Join Google Meet',
     ics: chinese ? '下载 .ics 文件' : 'Download .ics file',
+    location: chinese ? `Google Meet：${join}` : `Google Meet: ${join}`,
     move: chinese ? '改期' : 'Reschedule',
     confirmMove: chinese ? '确认新时间' : 'Confirm new time',
     moved: chinese ? '你的预约已改至新时间。' : 'Your booking is moved to the new time.',
@@ -104,7 +105,7 @@ for (const selected of ['en', 'zh-CN'] as const) {
     const dataPrefix = 'data:text/calendar;charset=utf-8,'
     expect(download.startsWith(dataPrefix)).toBe(true)
     expect(
-      icsHasLocation(decodeURIComponent(download.slice(dataPrefix.length)), `Google Meet: ${join}`),
+      icsHasLocation(decodeURIComponent(download.slice(dataPrefix.length)), text.location),
     ).toBe(true)
     expect((await app.meetState()).requests).toBe(2)
     expect((await app.meetState()).linkedRequests).toBe(true)

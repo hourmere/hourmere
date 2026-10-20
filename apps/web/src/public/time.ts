@@ -101,7 +101,8 @@ export function formatTime(
 ): string {
   return formatter(locale, {
     timeZone,
-    hour: 'numeric',
+    hour: locale.startsWith('zh') ? '2-digit' : 'numeric',
+    ...(locale.startsWith('zh') && { hourCycle: 'h23' }),
     minute: '2-digit',
     ...(withZone && { timeZoneName: 'short' }),
   }).format(ms)
@@ -109,7 +110,13 @@ export function formatTime(
 
 /** `9:30 – 10:00 AM`: a start and end on one day, as the locale writes such ranges. */
 export function formatTimeRange(start: number, end: number, timeZone: string, locale: string) {
-  const format = formatter(locale, { timeZone, hour: 'numeric', minute: '2-digit' })
+  // Chinese reads 24-hour HH:mm, as formatTime writes single times.
+  const format = formatter(locale, {
+    timeZone,
+    hour: locale.startsWith('zh') ? '2-digit' : 'numeric',
+    minute: '2-digit',
+    ...(locale.startsWith('zh') && { hourCycle: 'h23' }),
+  })
   // Intl range patterns may pad a 24-hour hour even when a single time does not. Retain
   // the locale's range punctuation/day-period sharing, using the same hours as the slots.
   const hour = (instant: number) =>

@@ -11,7 +11,7 @@ import { PATHS, schedulePath } from '../../paths.ts'
 import { summarize } from './weekly-hours.ts'
 
 export function AvailabilityPage() {
-  const { t, ui } = useI18n()
+  const { t, uiText } = useI18n()
 
   usePageTitle('Availability')
   const [state, reload] = useLoad(loadSchedules)
@@ -32,14 +32,14 @@ export function AvailabilityPage() {
         )}
       </p>
       <p className="flash" role="status">
-        {ui(status || message)}
+        {uiText(status || message)}
       </p>
 
       {state.status === 'loading' && <p role="status">{t('Loading schedules…')}</p>}
       {state.status === 'error' && (
         <div className="alert alert-error" role="alert">
           <p>
-            {t('Could not load your schedules.')} {ui(state.message)}
+            {t('Could not load your schedules.')} {uiText(state.message)}
           </p>
           <button type="button" className="button button-small" onClick={reload}>
             {t('Try again')}

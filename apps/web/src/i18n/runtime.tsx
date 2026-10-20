@@ -14,6 +14,7 @@ import {
 } from 'react'
 import { ScopedRouteErrorBoundary } from '../components/route-error-scope.tsx'
 import { browserLanguage, chooseLanguage, languageChoice, subscribeLanguage } from './store.ts'
+import { renderUiText } from './text.tsx'
 import {
   type MessageKey,
   translate,
@@ -81,7 +82,15 @@ export function useI18n() {
       translateMessage(locale, message, { dateLocale: selected }),
     [locale, selected],
   )
-  return { locale, explicit: selected, formatLocale: selected, setLanguage, t, ui }
+  const text = useCallback(
+    (key: MessageKey, values?: UiMessage['values']) => renderUiText(locale, t(key, values)),
+    [locale, t],
+  )
+  const uiText = useCallback(
+    (message: UiText | null | undefined) => renderUiText(locale, ui(message)),
+    [locale, ui],
+  )
+  return { locale, explicit: selected, formatLocale: selected, setLanguage, t, ui, text, uiText }
 }
 /** Changing this control updates text in place; router keys and form state do not change. */
 export function LanguageSwitcher({ compact = false }: { compact?: boolean }) {

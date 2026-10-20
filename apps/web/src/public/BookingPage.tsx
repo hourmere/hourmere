@@ -4,6 +4,7 @@ import { Link, Navigate, useLocation, useParams } from 'react-router'
 import { ConferenceNotice } from '../components/ConferenceNotice.tsx'
 import { EmailDeliveryHint } from '../components/EmailDeliveryHint.tsx'
 import { usePageTitle } from '../hooks.ts'
+import { formatList } from '../i18n/formatting.ts'
 import { useI18n } from '../i18n/runtime.tsx'
 import { literal, msg, type UiText } from '../i18n/translate.ts'
 import { AddToCalendar, ManageLink } from './AddToCalendar.tsx'
@@ -273,8 +274,14 @@ function BookingFlow({
           )}
           {event.hosts && (
             <p className="event-description">
-              {t('Required hosts:')}{' '}
-              {event.hosts.map((host) => `${host.name} (${host.timeZone})`).join(', ')}
+              {t('Required hosts: {hosts}', {
+                hosts: formatList(
+                  event.hosts.map((host) =>
+                    t('{name} ({detail})', { name: host.name, detail: host.timeZone }),
+                  ),
+                  displayLocale,
+                ),
+              })}
             </p>
           )}
           <ul className="event-facts">
@@ -352,7 +359,7 @@ function Confirmation({
   confirmed: Confirmed
   locale: string
 }) {
-  const { t, ui } = useI18n()
+  const { t, text, ui, locale: language } = useI18n()
 
   usePageTitle('Booking confirmed')
   const embedded = useEmbedded()
@@ -376,7 +383,7 @@ function Confirmation({
         ? booking.assignedHost.name.trim() || t('Host')
         : event.host.name
   const hostDetail = booking.assignedHost
-    ? `${hostName} (${booking.assignedHost.timeZone})`
+    ? t('{name} ({detail})', { name: hostName, detail: booking.assignedHost.timeZone })
     : hostName
   const title = t('{event} with {host}', { event: event.title, host: hostName })
   return (
@@ -401,7 +408,7 @@ function Confirmation({
           )}
         </FocusHeading>
         <p className="lede">
-          {t(
+          {text(
             booking.status === 'cancelled'
               ? 'This booking was already cancelled.'
               : ended
@@ -431,10 +438,20 @@ function Confirmation({
             ['Where', <LocationDetails key="where" location={booking.location} />],
             ['Host', hostDetail],
             ...(invitee
-              ? ([['You', `${invitee.name} (${invitee.email})`]] as [string, string][])
+              ? ([
+                  ['You', t('{name} ({detail})', { name: invitee.name, detail: invitee.email })],
+                ] as [string, string][])
               : []),
             ...(guests.length
-              ? ([['Guests', guests.map((g) => g.name).join(', ')]] as [string, string][])
+              ? ([
+                  [
+                    'Guests',
+                    formatList(
+                      guests.map((g) => g.name),
+                      language,
+                    ),
+                  ],
+                ] as [string, string][])
               : []),
           ]}
         />
@@ -454,7 +471,7 @@ function Confirmation({
                   start: Date.parse(booking.start),
                   end: Date.parse(booking.end),
                   description: event.description ?? undefined,
-                  location: locationText(booking.location, ui),
+                  location: locationText(booking.location, ui, t(': ')),
                 }}
               />
             )}
@@ -471,7 +488,7 @@ function Confirmation({
               )}
               {canCancel && (
                 <p>
-                  {t(
+                  {text(
                     manageToken
                       ? 'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use “Cancel booking” here.'
                       : 'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use the booking link in your Hourmere confirmation email.',

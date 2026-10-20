@@ -99,7 +99,7 @@ export function SlotPicker({
   focusTitle = false,
   notice,
 }: SlotPickerProps) {
-  const { t, ui } = useI18n()
+  const { t, uiText } = useI18n()
 
   const headingId = useId()
   const heading = useRef<HTMLHeadingElement>(null)
@@ -261,12 +261,12 @@ export function SlotPicker({
   return (
     <section className="picker" aria-labelledby={headingId}>
       <h2 id={headingId} className="picker-title" ref={heading} tabIndex={-1}>
-        {ui(title)}
+        {uiText(title)}
       </h2>
       {afterTitle}
       {notice && (
         <div className="alert alert-info">
-          <p role="alert">{ui(notice)}</p>
+          <p role="alert">{uiText(notice)}</p>
         </div>
       )}
       <div className="picker-body">
@@ -292,11 +292,11 @@ export function SlotPicker({
             busy={state.status === 'loading'}
           />
           <p className="picker-status" role="status">
-            {ui(status)}
+            {uiText(status)}
           </p>
           {state.status === 'error' && (
             <div className="alert alert-error picker-error">
-              <p role="alert">{ui(state.message)}</p>
+              <p role="alert">{uiText(state.message)}</p>
               <button
                 type="button"
                 className="button button-small"

@@ -2,6 +2,7 @@ import { fireEvent, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { Schedule } from '../../api/resources.ts'
+import { chooseLanguage } from '../../i18n/store.ts'
 import { browserLocale } from '../../test/browser-locale.ts'
 import {
   fakeApi,
@@ -705,5 +706,17 @@ describe('answers that arrive after leaving or editing on', () => {
     await user.click(button)
     await save.answer(json(201, { date: '2030-12-24', intervals: [] }))
     expect(within(section).getByLabelText('Date').matches(':disabled')).toBe(false)
+  })
+})
+
+describe('Chinese schedule names', () => {
+  it('uses resource-name wording and wrapped quotes on the schedule editor', async () => {
+    chooseLanguage('zh-CN')
+    scheduleServer()
+    renderApp(`/app/availability/${SCHEDULE_ID}`)
+    const heading = await screen.findByRole('heading', { name: '编辑“Working hours”', level: 1 })
+    expect(screen.getByRole('heading', { name: '名称和时区' })).toBeDefined()
+    expect(screen.getByLabelText('名称')).toBeDefined()
+    expect(heading.querySelectorAll('.cjk-quote')).toHaveLength(2)
   })
 })

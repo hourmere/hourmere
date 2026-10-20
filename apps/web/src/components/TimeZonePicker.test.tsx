@@ -52,6 +52,25 @@ describe('the time zone picker', () => {
     }
   })
 
+  it('offers breaks after each slash without changing the displayed or selected zone', async () => {
+    const user = userEvent.setup()
+    const id = 'America/Argentina/La_Rioja'
+    const { container } = render(<TimeZonePicker value={id} onChange={vi.fn()} />)
+    const current = container.querySelector<HTMLElement>('.tz-name')
+    expect(current?.textContent).toBe('America/Argentina/La Rioja')
+    expect(current?.style.overflowWrap).toBe('normal')
+    expect(current?.querySelectorAll('wbr')).toHaveLength(2)
+    for (const br of current?.querySelectorAll('wbr') ?? [])
+      expect(br.previousSibling?.textContent?.endsWith('/')).toBe(true)
+    await user.click(screen.getByRole('button', { name: /Time zone/ }))
+    await user.type(screen.getByRole('combobox'), 'Argentina La Rioja')
+    const option = screen.getByRole('option')
+    const name = option.firstElementChild as HTMLElement
+    expect(name.textContent).toBe('America/Argentina/La Rioja')
+    expect(name.style.overflowWrap).toBe('normal')
+    expect(name.querySelectorAll('wbr')).toHaveLength(2)
+  })
+
   it('refreshes offsets and offset search for the reference date, including aliases', async () => {
     const user = userEvent.setup()
     const props = { value: 'US/Eastern', onChange: vi.fn(), now: Date.parse('2026-10-19T12:00Z') }

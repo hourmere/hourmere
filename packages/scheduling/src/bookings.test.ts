@@ -1481,6 +1481,53 @@ describe.skipIf(!serverUrl)('bookings', () => {
       principal: principal(user, organizationId),
     })
 
+    it('returns current event title metadata only to hosts without rewriting historical titles', async () => {
+      const h = await setup({ title: '初次通话' })
+      const caller = as(h, h.organizationId)
+      const { booking: original, manageToken } = await h.book('2026-11-02T09:00Z')
+      expect(original).not.toHaveProperty('eventTypeTitle')
+      expect(await getManagedBooking(ctx, manageToken as string)).not.toHaveProperty(
+        'eventTypeTitle',
+      )
+      for (const current of [
+        await getHostBooking(caller, original.id),
+        (await listHostBookings(caller)).data[0],
+      ]) {
+        expect(current).toMatchObject({
+          eventTypeTitle: '初次通话',
+          title: '初次通话 with Grace Hopper',
+        })
+      }
+      await db
+        .updateTable('event_types')
+        .set({ title: 'New title' })
+        .where('id', '=', h.eventTypeId)
+        .execute()
+      for (const current of [
+        await getHostBooking(caller, original.id),
+        (await listHostBookings(caller)).data[0],
+      ]) {
+        expect(current).toMatchObject({
+          eventTypeTitle: 'New title',
+          title: '初次通话 with Grace Hopper',
+        })
+      }
+      await db
+        .updateTable('event_types')
+        .set({ deleted_at: new Date() })
+        .where('id', '=', h.eventTypeId)
+        .execute()
+      for (const current of [
+        await getHostBooking(caller, original.id),
+        (await listHostBookings(caller)).data[0],
+      ]) {
+        expect(current).toMatchObject({
+          eventTypeTitle: null,
+          title: '初次通话 with Grace Hopper',
+        })
+      }
+    })
+
     beforeAll(async () => {
       alice = await setup()
       bob = await setup()

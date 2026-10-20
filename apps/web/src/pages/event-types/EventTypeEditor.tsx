@@ -130,7 +130,7 @@ function EventTypeForm({
   automaticGoogleMeet,
   automaticZoom,
 }: Loaded) {
-  const { t, ui, locale: displayLocale } = useI18n()
+  const { t, text, ui, uiText, locale: displayLocale } = useI18n()
 
   const me = useMe()
   const navigate = useNavigate()
@@ -300,7 +300,7 @@ function EventTypeForm({
       <p className="breadcrumb">
         <Link to={PATHS.eventTypes}>{t('Event types')}</Link>
       </p>
-      <h1>{ui(title)}</h1>
+      <h1>{uiText(title)}</h1>
       <form className="editor" onSubmit={submit} noValidate>
         <ErrorSummary
           errors={errors}
@@ -317,7 +317,7 @@ function EventTypeForm({
                 id="title"
                 label={t('Title')}
                 error={errors.title}
-                hint={t('For example “Intro call”.')}
+                hint={text('For example “Intro call”.')}
               >
                 {(props) => (
                   <input
@@ -606,7 +606,9 @@ function EventTypeForm({
                     >
                       <option value="">
                         {t('Your default schedule')}
-                        {defaultName(schedules) ? ` (${defaultName(schedules)})` : ''}
+                        {defaultName(schedules)
+                          ? t(' ({detail})', { detail: defaultName(schedules) ?? '' })
+                          : ''}
                       </option>
                       {schedules.map((s) => (
                         <option key={s.id} value={s.id}>
@@ -717,7 +719,7 @@ function EventTypeForm({
             {editing ? t('Back to event types') : t('Cancel')}
           </Link>
           <p className="form-status" role="status" tabIndex={-1} ref={statusRef}>
-            {ui(status || (dirty && editing ? 'Unsaved changes' : ''))}
+            {uiText(status || (dirty && editing ? 'Unsaved changes' : ''))}
           </p>
         </div>
       </form>

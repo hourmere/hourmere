@@ -109,6 +109,12 @@
   cursor: default;
 }
 
+/* Chinese labels carry the 日 suffix: smaller, column-bound and never broken over two lines. */
+.picker .day:lang(zh) {
+  font-size: min(0.875rem, 5cqw);
+  white-space: nowrap;
+}
+
 .picker .day-available {
   border-color: var(--border-strong);
   background: var(--accent-soft);

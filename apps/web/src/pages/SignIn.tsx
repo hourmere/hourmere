@@ -107,7 +107,7 @@ export function SignInPage() {
  * `expired`: the session ended while the app was open (not on a first visit).
  */
 function SignInForm({ next, expired }: { next: string; expired: boolean }) {
-  const { t, ui } = useI18n()
+  const { t, text, ui } = useI18n()
 
   const [params, setParams] = useSearchParams()
   const [phase, setPhase] = useState<Phase>(() => ({
@@ -255,7 +255,7 @@ function SignInForm({ next, expired }: { next: string; expired: boolean }) {
             </div>
             {providers.includes('google') && (
               <p className="fine-print" id="google-sign-in-explanation">
-                {t(
+                {text(
                   'Google sign-in shares your name, email and profile picture with Hourmere. Calendar access is a separate, optional step in Calendars.',
                 )}
               </p>

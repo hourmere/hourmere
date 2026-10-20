@@ -51,6 +51,8 @@ export interface Booking {
   start: string
   end: string
   title: string
+  /** Authenticated host reads only: the event type's current title, or null if deleted. */
+  eventTypeTitle?: string | null
   /** Where the meeting happens, with its details (number, address, link). */
   location: Location | null
   conference?: ConferenceStatus
@@ -391,6 +393,7 @@ interface BookingRow {
   start_at: Date
   end_at: Date
   title: string
+  event_type_title?: string | null
   location: Json | null
   responses: Json
   rescheduled_from_id: string | null
@@ -504,6 +507,7 @@ async function toBookings(
       start: toIso(toInstant(r.start_at)),
       end: toIso(toInstant(r.end_at)),
       title: r.title,
+      ...(host ? { eventTypeTitle: r.event_type_title ?? null } : {}),
       location: parseLocation(
         (automaticZoom(location) || automaticMeet(location)) &&
           (r.status !== 'confirmed' ||
@@ -1215,7 +1219,11 @@ export async function listHostBookings(
   const rows = await ctx.db
     .selectFrom('bookings as b')
     .innerJoin('booking_hosts as bh', 'bh.booking_id', 'b.id')
+    .leftJoin('event_types as et', (join) =>
+      join.onRef('et.id', '=', 'b.event_type_id').on('et.deleted_at', 'is', null),
+    )
     .select(BOOKING_COLUMNS)
+    .select('et.title as event_type_title')
     // start_at with its microseconds, for the cursor (node-postgres Dates have milliseconds).
     .select((eb) =>
       eb
@@ -1271,7 +1279,11 @@ export async function getHostBooking(ctx: ServiceContext, id: string): Promise<B
   const row = await ctx.db
     .selectFrom('bookings as b')
     .innerJoin('booking_hosts as bh', 'bh.booking_id', 'b.id')
+    .leftJoin('event_types as et', (join) =>
+      join.onRef('et.id', '=', 'b.event_type_id').on('et.deleted_at', 'is', null),
+    )
     .select(BOOKING_COLUMNS)
+    .select('et.title as event_type_title')
     .where('b.id', '=', id)
     .where('bh.user_id', '=', ctx.principal.user.id)
     .where('b.organization_id', '=', ctx.principal.organization.id)

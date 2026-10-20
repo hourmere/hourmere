@@ -5,7 +5,7 @@ import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createFixtures } from '@hourmere/scheduling/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createApp } from '../app.ts'
-import { bookingRoutes } from './bookings.ts'
+import { Booking, bookingRoutes } from './bookings.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const NOW = Temporal.Instant.from('2026-11-01T12:00:00Z')
@@ -102,6 +102,32 @@ describe.skipIf(!serverUrl)('host booking routes', () => {
     ]) {
       expect(res.status).toBe(401)
       expect(await res.json()).toEqual({ error: 'unauthorized' })
+    }
+  })
+
+  it('exposes current title metadata through the host list/detail schema without changing the title', async () => {
+    const f = createFixtures(db)
+    const host = await f.host()
+    const principal = principals.get('alice') as Principal
+    principals.set('title-host', {
+      ...principal,
+      user: { ...principal.user, id: host.userId },
+      organization: { ...principal.organization, id: host.organizationId },
+    })
+    const eventTypeId = await f.eventType(host.organizationId, host.userId, { title: '初次通话' })
+    const id = await f.booking(
+      host.organizationId,
+      [host.userId],
+      '2026-11-09T09:00Z',
+      '2026-11-09T09:30Z',
+      { eventTypeId },
+    )
+    for (const path of ['/api/v1/bookings?from=2026-11-09T00:00:00Z', `/api/v1/bookings/${id}`]) {
+      const response = await get(path, 'title-host')
+      expect(response.status).toBe(200)
+      const body = (await response.json()) as Record<string, unknown>
+      const parsed = Booking.parse(Array.isArray(body.data) ? body.data[0] : body)
+      expect(parsed).toMatchObject({ eventTypeTitle: '初次通话', title: 'Fixture booking' })
     }
   })
 

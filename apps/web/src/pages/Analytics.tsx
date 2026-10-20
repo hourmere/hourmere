@@ -183,7 +183,8 @@ function ActivityReport({ filters }: { filters: Filters }) {
   return (
     <section className="panel" aria-labelledby="activity-summary">
       <h2 id="activity-summary">
-        {data.startDate} {t('to')} {data.endDate}
+        <span className="nowrap">{data.startDate}</span> {t('to')}{' '}
+        <span className="nowrap">{data.endDate}</span>
       </h2>
       <p>
         {t('Reporting time zone:')} {data.timeZone}
