@@ -39,7 +39,7 @@ for (const viewport of layoutViewports) {
             try {
               await openAuditPage(page, app, state.id, { locale })
               phase = 'layout'
-              report.findings.push(...(await page.evaluate(measureLayout)))
+              report.findings.push(...(await page.evaluate(measureLayout, viewport)))
               phase = 'keyboard'
               report.findings.push(...(await measureKeyboard(page)))
             } catch {

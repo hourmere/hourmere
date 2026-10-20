@@ -22,11 +22,14 @@ export const layoutViewports = [
 
 // This function is self-contained so Playwright can run it in the page. Its
 // output intentionally excludes every DOM string except native element tags.
-export function measureLayout(): AuditFinding[] {
+export function measureLayout(viewport?: { width: number; height: number }): AuditFinding[] {
   const findings: AuditFinding[] = []
   const elements = [...document.querySelectorAll('*')]
-  const mobileViewport =
-    window.innerWidth <= 480 || (window.innerWidth <= 960 && window.innerHeight <= 430)
+  // Mobile engines can expand innerWidth/innerHeight to fit overflowing content.
+  // Keep checks tied to the requested CSS viewport even in that case.
+  const width = viewport?.width ?? window.innerWidth
+  const height = viewport?.height ?? window.innerHeight
+  const mobileViewport = width <= 480 || (width <= 960 && height <= 430)
   const visible = (element: Element) => {
     const rect = element.getBoundingClientRect(),
       style = getComputedStyle(element)
@@ -75,12 +78,12 @@ export function measureLayout(): AuditFinding[] {
         actual: element.scrollWidth,
         expected: element.clientWidth,
       })
-    if (['sticky', 'fixed'].includes(style.position) && rect.height > window.innerHeight * 0.25)
+    if (['sticky', 'fixed'].includes(style.position) && rect.height > height * 0.25)
       findings.push({
         code: 'oversized-fixed',
         element: target(element),
         actual: rect.height,
-        expected: window.innerHeight * 0.25,
+        expected: height * 0.25,
       })
     if (
       mobileViewport &&

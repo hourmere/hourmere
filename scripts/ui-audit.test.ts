@@ -108,6 +108,10 @@ const verifySticky = (measure = measureLayout) => {
   const fixed = box('aside', 0, 0, 30, 200)
   fixed.style.position = 'fixed'
   expect(measure().filter((finding) => finding.code === 'oversized-fixed')).toHaveLength(2)
+  vi.stubGlobal('innerHeight', 1000)
+  expect(
+    measure({ width: 320, height: 256 }).filter((finding) => finding.code === 'oversized-fixed'),
+  ).toHaveLength(2)
 }
 const verifyFonts = (measure = measureLayout) => {
   setup()
@@ -121,6 +125,9 @@ const verifyFonts = (measure = measureLayout) => {
   vi.stubGlobal('innerWidth', 1024)
   vi.stubGlobal('innerHeight', 768)
   expect(measure().filter((finding) => finding.code === 'small-input-font')).toHaveLength(0)
+  expect(
+    measure({ width: 320, height: 256 }).filter((finding) => finding.code === 'small-input-font'),
+  ).toHaveLength(2)
 }
 const verifyTargets = (measure = measureLayout) => {
   setup()
@@ -334,14 +341,20 @@ describe('source-copy mutation controls', () => {
       verifyOverflow,
     ],
     ['scroll allowlist', ["['auto', 'scroll'].includes(style.overflowX)", 'true'], verifyOverflow],
-    ['sticky height', ['rect.height > window.innerHeight * 0.25', 'false'], verifySticky],
+    ['sticky height', ['rect.height > height * 0.25', 'false'], verifySticky],
     ['mobile font size', ['if (fontSize < 16)', 'if (false)'], verifyFonts],
+    ['landscape mobile font size', ['width <= 960 && height <= 430', 'false'], verifyFonts],
+    ['target spacing', ['if (!spaced)', 'if (false)'], verifyTargets],
     [
-      'landscape mobile font size',
-      ['window.innerWidth <= 960 && window.innerHeight <= 430', 'false'],
+      'requested mobile width',
+      ['viewport?.width ?? window.innerWidth', 'window.innerWidth'],
       verifyFonts,
     ],
-    ['target spacing', ['if (!spaced)', 'if (false)'], verifyTargets],
+    [
+      'requested short height',
+      ['viewport?.height ?? window.innerHeight', 'window.innerHeight'],
+      verifySticky,
+    ],
   ]
   it.each(layoutMutations)(
     'detects removal of %s protection with real behavior assertions',
