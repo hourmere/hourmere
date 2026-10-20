@@ -1,11 +1,13 @@
 // Explicit local-only benchmark; all fixture/query operations use a disposable database.
 // DATABASE_URL is used only by createTestDatabase to create/drop that database.
-// Example: DATABASE_URL=postgres://hourmere:hourmere@localhost:5432/hourmere \
+// Example: DATABASE_URL=postgres://hourmere:hourmere@localhost:5432/postgres \
 //   node scripts/webhook-reconciliation-benchmark.ts --output=/tmp/webhook-reconciliation.json
-// Defaults: 300k and 1M jobs, mixed queues and an all-webhook stress case, three samples.
+// Defaults: 300k and 1M jobs, 5k pending deliveries, mixed queues and an all-webhook stress case.
+// Use --pending=1000,50000,200000 for the scale matrix; three measured samples per variant.
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { writeFile } from 'node:fs/promises'
+import { performance } from 'node:perf_hooks'
 import { createDb, type Database } from '@hourmere/db'
 import { createTestDatabase } from '@hourmere/db/testing'
 import { createJobs } from '@hourmere/jobs'
@@ -48,17 +50,30 @@ const args = new Map<string, string>(
   }),
 )
 for (const key of args.keys()) {
-  if (!['jobs', 'layouts', 'samples', 'mode', 'output'].includes(key))
+  if (!['jobs', 'pending', 'layouts', 'samples', 'mode', 'output'].includes(key))
     throw new Error(`Unknown argument: ${key}`)
 }
 const serverUrl = process.env.DATABASE_URL
 if (!serverUrl) throw new Error('DATABASE_URL must name an admin URL for disposable databases')
 const mode = args.get('mode') ?? 'compare'
-if (!['baseline', 'current', 'compare'].includes(mode))
-  throw new Error('mode must be baseline, current or compare')
+if (!['baseline', 'current', 'inline', 'compare'].includes(mode))
+  throw new Error('mode must be baseline, current, inline or compare')
 const jobCounts = (args.get('jobs') ?? '300000,1000000').split(',').map(Number)
 if (jobCounts.some((count) => !Number.isSafeInteger(count) || count < 10_000 || count > 1_000_000))
   throw new Error('jobs must be integers between 10000 and 1000000')
+const pendingCounts = (args.get('pending') ?? '5000').split(',').map(Number)
+const smallestJobsCount = Math.min(...jobCounts)
+if (
+  pendingCounts.some(
+    (count) => !Number.isSafeInteger(count) || count < 1 || count > smallestJobsCount,
+  )
+)
+  throw new Error(
+    `pending must be integers between 1 and the smallest jobs count (${smallestJobsCount})`,
+  )
+// A partial group ending in kinds 4–7 has an extra history job before its missing kind 0.
+if (pendingCounts.some((count) => count + Number(count % 8 >= 4) > smallestJobsCount))
+  throw new Error('jobs must also accommodate the extra history row in a partial pending group')
 const layouts = (args.get('layouts') ?? 'mixed,webhook').split(',')
 if (layouts.some((layout) => !['mixed', 'webhook'].includes(layout)))
   throw new Error('layouts must be mixed or webhook')
@@ -67,7 +82,6 @@ if (!Number.isSafeInteger(samples) || samples < 1 || samples > 10)
   throw new Error('samples must be an integer between 1 and 10')
 const output = args.get('output')
 const now = Temporal.Instant.from('2026-11-01T12:00:00Z')
-const pendingCount = 5000
 const otherQueues = [
   'booking-notification',
   'calendar-sync',
@@ -110,9 +124,10 @@ interface Query {
 function planNodes(node: PlanNode): PlanNode[] {
   return [node, ...(node.Plans ?? []).flatMap(planNodes)]
 }
-function summarize(plan: ExplainResult) {
+function summarize(plan: ExplainResult, wallMs: number) {
   const nodes = planNodes(plan.Plan)
   return {
+    wallMs,
     executionMs: plan['Execution Time'],
     planningMs: plan['Planning Time'],
     sharedHitBlocks: plan.Plan['Shared Hit Blocks'] ?? 0,
@@ -148,7 +163,7 @@ function median(values: number[]) {
     ? (sorted[middle] as number)
     : ((sorted[middle - 1] as number) + (sorted[middle] as number)) / 2
 }
-function expectedRows(): DeliveryResult[] {
+function expectedRows(pendingCount: number): DeliveryResult[] {
   let failed = 0
   return Array.from({ length: pendingCount }, (_, index) => {
     const n = index + 1
@@ -165,23 +180,39 @@ function expectedRows(): DeliveryResult[] {
   })
 }
 
-for (const jobsCount of jobCounts) {
+const scales = jobCounts.flatMap((jobsCount) =>
+  pendingCounts.map((pendingCount) => ({ jobsCount, pendingCount })),
+)
+for (const { jobsCount, pendingCount } of scales) {
   for (const layout of layouts) {
     const testDb = await createTestDatabase(serverUrl)
-    const db = createDb(testDb.pool)
-    const deliveryDefinition = webhookDeliveryJob({ db, enabled: false })
-    const jobs = createJobs({
-      connectionString: testDb.url,
-      definitions: [
-        deliveryDefinition,
-        ...otherQueues.map((name) => ({ ...deliveryDefinition, name })),
-      ],
-      work: false,
-      migrate: true,
-      maxConnections: 1,
-      log: () => {},
-    })
+    const databaseName = new URL(testDb.url).pathname.slice(1)
+    let jobs: ReturnType<typeof createJobs> | undefined
     try {
+      const db = createDb(testDb.pool)
+      const deliveryDefinition = webhookDeliveryJob({ db, enabled: false })
+      jobs = createJobs({
+        connectionString: testDb.url,
+        definitions: [
+          deliveryDefinition,
+          ...otherQueues.map((name) => ({ ...deliveryDefinition, name })),
+        ],
+        work: false,
+        migrate: true,
+        maxConnections: 1,
+        log: () => {},
+      })
+      const environment = (
+        await testDb.pool.query(`SELECT version() AS postgres,
+          current_setting('server_version_num')::integer AS server_version_num,
+          current_setting('work_mem') AS work_mem,
+          current_setting('max_connections') AS max_connections`)
+      ).rows[0]
+      assert.equal(
+        Math.floor(environment.server_version_num / 10_000),
+        18,
+        'benchmark fixtures require PostgreSQL 18',
+      )
       await jobs.start()
       const organization = await db
         .insertInto('auth.organization')
@@ -241,8 +272,11 @@ for (const jobsCount of jobCounts) {
         WHERE n % 8 = 4`,
         [WEBHOOK_DELIVERY_JOB, now.toString()],
       )
-      // The matching fixture has exactly pendingCount jobs (one extra history row offsets
-      // every missing job). The rest is deterministic retained history unrelated to pending IDs.
+      // Complete groups have pendingCount matching jobs: an extra terminal history row
+      // offsets each missing job. Count partial groups too before adding unrelated history.
+      const matchingJobsCount = Number(
+        (await testDb.pool.query('SELECT count(*) AS count FROM pgboss.job')).rows[0].count,
+      )
       await testDb.pool.query(
         `INSERT INTO pgboss.job
           (id, name, singleton_key, data, state, policy, retry_count,
@@ -261,14 +295,10 @@ for (const jobsCount of jobCounts) {
             ELSE $5::timestamptz - (n % 7) * interval '1 day' - interval '1 hour' END,
           $5::timestamptz + CASE WHEN n % 101 = 1 THEN interval '1 day' ELSE interval '0' END
         FROM generate_series(1, $2::integer) n`,
-        [WEBHOOK_DELIVERY_JOB, jobsCount - pendingCount, layout, otherQueues, now.toString()],
+        [WEBHOOK_DELIVERY_JOB, jobsCount - matchingJobsCount, layout, otherQueues, now.toString()],
       )
       await testDb.pool.query('ANALYZE webhook_deliveries')
       await testDb.pool.query('ANALYZE pgboss.job')
-      const environment = (
-        await testDb.pool.query(`SELECT version() AS postgres, current_setting('work_mem') AS work_mem,
-          current_setting('max_connections') AS max_connections`)
-      ).rows[0]
       const distribution = (
         await testDb.pool.query(`SELECT name, state, count(*)::integer AS count FROM pgboss.job
           GROUP BY name, state ORDER BY name, state`)
@@ -286,6 +316,8 @@ for (const jobsCount of jobCounts) {
             queries.push({ sql: event.query.sql, parameters: event.query.parameters })
         },
       })
+      const expected = expectedRows(pendingCount)
+      const processedRows = expected.filter((row) => row.status === 'failed').length
       await webhookCleanupJob(measuredDb, () => now).handler(
         {},
         { id: randomUUID(), attempt: 1, signal: new AbortController().signal },
@@ -296,7 +328,7 @@ for (const jobsCount of jobCounts) {
             'SELECT id, status, attempts, last_error FROM webhook_deliveries ORDER BY id',
           )
         ).rows,
-        expectedRows(),
+        expected,
       )
       const current = queries.find((query) => /UPDATE\s+webhook_deliveries/i.test(query.sql))
       assert.ok(current, 'production handler must issue reconciliation SQL')
@@ -306,33 +338,48 @@ for (const jobsCount of jobCounts) {
       )
       await testDb.pool.query('ANALYZE webhook_deliveries')
       const baseline = baselineReconciliation.compile(db)
-      const variants = mode === 'compare' ? ['baseline', 'current'] : [mode]
-      const plans: Record<string, ExplainResult[]> = { baseline: [], current: [] }
+      const materializedHistory = /WITH\s+job_history\s+AS\s+MATERIALIZED/i
+      assert.match(current.sql, materializedHistory)
+      // Second and final alternative shape: permit the same job-history CTE to inline.
+      const inline: Query = {
+        sql: current.sql.replace(materializedHistory, 'WITH job_history AS NOT MATERIALIZED'),
+        parameters: current.parameters,
+      }
+      const variants = mode === 'compare' ? ['baseline', 'current', 'inline'] : [mode]
+      const variantQueries: Record<string, Query> = { baseline, current, inline }
+      const plans: Record<string, ExplainResult[]> = { baseline: [], current: [], inline: [] }
+      const wallTimes: Record<string, number[]> = { baseline: [], current: [], inline: [] }
       const client = await testDb.pool.connect()
       try {
         // One warmup per variant; alternate sample ordering to reduce cache/order bias.
         for (let sample = -1; sample < samples; sample++) {
           for (const variant of sample % 2 === 0 ? [...variants].reverse() : variants) {
-            const query: Query = variant === 'baseline' ? baseline : current
+            const query = variantQueries[variant]
+            assert.ok(query)
             await client.query('BEGIN')
             try {
               await client.query("SET LOCAL work_mem = '4MB'")
               await client.query("SET LOCAL statement_timeout = '30s'")
+              const started = performance.now()
               const explained = await client.query(
                 `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${query.sql}`,
                 [...query.parameters],
               )
+              const wallMs = performance.now() - started
               assert.deepEqual(
                 (
                   await client.query(
                     'SELECT id, status, attempts, last_error FROM webhook_deliveries ORDER BY id',
                   )
                 ).rows,
-                expectedRows(),
+                expected,
               )
               const plan = (explained.rows[0]?.['QUERY PLAN'] as ExplainResult[] | undefined)?.[0]
               assert.ok(plan)
-              if (sample >= 0) plans[variant]?.push(plan)
+              if (sample >= 0) {
+                plans[variant]?.push(plan)
+                wallTimes[variant]?.push(wallMs)
+              }
             } finally {
               // EXPLAIN ANALYZE executes the UPDATE. Always restore the same input fixture.
               await client.query('ROLLBACK')
@@ -347,26 +394,33 @@ for (const jobsCount of jobCounts) {
         return {
           variant,
           medianExecutionMs: median(variantPlans.map((plan) => plan['Execution Time'])),
-          samples: variantPlans.map(summarize),
+          medianWallMs: median(wallTimes[variant] ?? []),
+          samples: variantPlans.map((plan, index) =>
+            summarize(plan, (wallTimes[variant] ?? [])[index] as number),
+          ),
         }
       })
       results.push({
         jobsCount,
         layout,
         pendingCount,
+        processedRows,
+        database: databaseName,
         environment: { ...environment, benchmark_work_mem: '4MB' },
         distribution,
         comparisons,
-        queries: { baseline, current },
+        queries: variantQueries,
         plans,
+        wallTimes,
       })
-      console.log(JSON.stringify({ jobsCount, layout, pendingCount, comparisons }))
+      console.log(JSON.stringify({ jobsCount, layout, pendingCount, processedRows, comparisons }))
       if (output) await writeFile(output, `${JSON.stringify(results, null, 2)}\n`)
     } finally {
       try {
-        await jobs.stop()
+        await jobs?.stop()
       } finally {
         await testDb.drop()
+        console.log(JSON.stringify({ droppedDatabase: databaseName }))
       }
     }
   }
