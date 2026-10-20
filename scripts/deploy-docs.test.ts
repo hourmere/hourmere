@@ -125,19 +125,21 @@ esac
       [...drill.matchAll(/^docker compose (?:up|start|run).*$/gm)].map(([line]) => line),
     ).toEqual(['docker compose up -d --wait db'])
     expect(drill).toMatch(
-      /Do not start the\s+restored app or workers for a drill until SMTP, provider credentials and outbound webhooks\s+have been isolated/,
+      /Do not start the\s+restored app or\s+workers for a drill until SMTP, provider credentials and outbound webhooks\s+have been isolated/,
     )
-    expect(drill).toContain(
-      'Plain-mode restores remove only `:docker-compose.proxy.yml` from the\nrewritten `COMPOSE_FILE`',
+    expect(drill).toMatch(
+      /For a plain-mode restore, replace the whole line\s+with `COMPOSE_FILE='docker-compose\.yml:docker-compose\.worker\.yml'`/,
     )
-    expect(drill).toContain('keep `:docker-compose.worker.yml` if it\nwas selected')
+    expect(drill).toContain("`COMPOSE_FILE='docker-compose.yml'` otherwise")
     expect(drill).toContain('preserves only the exact\n`docker-compose.worker.yml` filename')
     expect(drill).toContain(
       'does not recognise `./docker-compose.worker.yml` or\n`export COMPOSE_FILE=` forms',
     )
-    expect(drill).toMatch(/Normalize those forms[\s\S]*?before running the\nrewrite/)
     expect(drill).toMatch(
-      /verify the rewritten `COMPOSE_FILE`[\s\S]*?before\nstarting any app or worker/,
+      /Before running the rewrite, replace those forms with the\s+complete quoted line/,
+    )
+    expect(drill).toMatch(
+      /verify the rewritten selection before starting any app\s+or worker:[\s\S]*?docker compose config --services \| grep -qx worker/,
     )
   })
 
@@ -151,41 +153,103 @@ docker compose up -d --wait`)
     expect(guide).not.toMatch(/docker compose --project-name hourmere-restore/)
   })
 
-  it('refreshes dependency images before recreating the upgraded stack', () => {
+  it('verifies the worker and stops old roles before recreating the upgraded stack', () => {
     expect(guide).toContain(`git pull --ff-only
+unset COMPOSE_FILE
+./scripts/enable-worker.sh
+docker compose config --services | grep -qx worker
 docker compose pull proxy db
+docker compose stop app worker
 docker compose up -d --build --wait`)
   })
+
+  it.each([false, true])(
+    'unsets a shell override and verifies the worker before starting it (worker: %s)',
+    (enabled) => {
+      const separate = guide.split('## Run workers separately\n')[1]?.split('\n### ')[0]
+      const commands = separate?.match(/```sh\n([\s\S]*?)\n```/)?.[1]
+      expect(commands, 'separate-worker instructions must include runnable commands').toBeDefined()
+      const directory = mkdtempSync(join(tmpdir(), 'hourmere-worker-docs-'))
+      try {
+        const scripts = join(directory, 'scripts')
+        const bin = join(directory, 'bin')
+        mkdirSync(scripts)
+        mkdirSync(bin)
+        const rejectShellOverride = `if [ "\${COMPOSE_FILE+x}" = x ]; then exit 9; fi\n`
+        writeFileSync(
+          join(scripts, 'enable-worker.sh'),
+          `#!/bin/sh
+${rejectShellOverride}printf '%s\\n' enable-worker >> "$CALL_LOG"
+`,
+          { mode: 0o755 },
+        )
+        writeFileSync(
+          join(bin, 'docker'),
+          `#!/bin/sh
+${rejectShellOverride}printf '%s\\n' "$*" >> "$CALL_LOG"
+case "$*" in
+  'compose config --services') printf '%s\\n' app db proxy${enabled ? ' worker' : ''} ;;
+  'compose up -d --build --wait') ;;
+  *) exit 1 ;;
+esac
+`,
+          { mode: 0o755 },
+        )
+        const callLog = join(directory, 'calls')
+        const result = spawnSync('sh', ['-eu', '-c', commands ?? 'exit 1'], {
+          cwd: directory,
+          encoding: 'utf8',
+          env: {
+            PATH: `${bin}:${process.env.PATH}`,
+            CALL_LOG: callLog,
+            COMPOSE_FILE: 'conflicting-shell-selection.yml',
+          },
+        })
+        expect(result.status).toBe(enabled ? 0 : 1)
+        expect(readFileSync(callLog, 'utf8').trim().split('\n')).toEqual([
+          'enable-worker',
+          'compose config --services',
+          ...(enabled ? ['compose up -d --build --wait'] : []),
+        ])
+      } finally {
+        rmSync(directory, { recursive: true, force: true })
+      }
+    },
+  )
 
   it('migrates tracked worker edits before pulling and explains orphaned old images', () => {
     const upgrade = guide.split('## Upgrade and roll back\n')[1]?.split('\n## ')[0]
     if (!upgrade) throw new Error('Upgrade instructions must exist')
     expect(upgrade).toContain('tracked edits make `git pull --ff-only` refuse the upgrade')
     expect(upgrade).toMatch(
-      /First append\n`:docker-compose\.worker\.yml`[\s\S]*?`COMPOSE_FILE` in `\.env`[\s\S]*?git restore docker-compose\.yml\ngit pull --ff-only/,
+      /replace or add the\s+complete `COMPOSE_FILE` line in `\.env` before restoring the tracked file[\s\S]*?git restore docker-compose\.yml\ngit pull --ff-only/,
     )
     for (const source of [upgrade, changelog]) {
-      expect(source).toMatch(
-        /First append\s+`:docker-compose\.worker\.yml`[\s\S]*?`COMPOSE_FILE`[\s\S]*?git restore docker-compose\.yml/,
+      expect(source).toContain('./scripts/enable-worker.sh')
+      expect(source).toContain("COMPOSE_FILE='docker-compose.yml:docker-compose.worker.yml'")
+      expect(source).toContain(
+        "COMPOSE_FILE='docker-compose.yml:docker-compose.proxy.yml:docker-compose.worker.yml'",
       )
-      expect(source).toMatch(/COMPOSE_FILE=docker-compose\.yml:docker-compose\.worker\.yml/)
-      expect(source).toMatch(/preserv(?:e|ing)\s+any proxy[\s\S]*?overlay/)
       expect(source).toMatch(
-        /Restoring (?:the Compose file )?without selecting (?:the (?:worker )?)?overlay/,
+        /(?:Keep|keep) (?:any additional )?custom overlays (?:within|inside) the quotes/,
       )
-      expect(source).toMatch(/old worker\s+container orphaned\s+on the old image/)
+      expect(source).toContain('docker compose config --services | grep -qx worker')
+      expect(source).toMatch(
+        /Restoring\s+(?:the Compose file\s+)?without selecting (?:the (?:worker )?)?overlay/,
+      )
+      expect(source).toMatch(/old worker\s+container orphaned\s+on the old\s+image/)
       expect(source).toMatch(/app (?:may remain|possibly) web-only/)
     }
-    expect(changelog).toMatch(/git restore docker-compose\.yml`[\s\S]*?pull,[\s\S]*?recreate/)
+    expect(changelog).toMatch(/restore the tracked\s+Compose file and pull/)
   })
 
   it('removes the worker container before deselecting its overlay', () => {
     const single = guide.split('### Switch back to a single container\n')[1]?.split('\n## ')[0]
     if (!single) throw new Error('Single-container switch instructions must exist')
     expect(single).toMatch(
-      /while the overlay is still selected:[\s\S]*?docker compose rm -sf worker[\s\S]*?Then remove the worker overlay from `COMPOSE_FILE`/,
+      /while the overlay is still selected:[\s\S]*?docker compose rm -sf worker[\s\S]*?Then deselect the overlay with the helper:[\s\S]*?\.\/scripts\/disable-worker\.sh/,
     )
-    expect(single).toContain('remove any old `HOURMERE_ROLE=web`')
+    expect(single).toContain('Remove any old `HOURMERE_ROLE=web`')
     expect(single).toContain('docker compose up -d --build --wait')
     expect(single).toContain('default `all` role')
     const command = single.match(/^docker compose rm .+$/m)?.[0]

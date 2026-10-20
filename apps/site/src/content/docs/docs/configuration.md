@@ -110,9 +110,16 @@ and repository `docs/webhooks.md` for configuration and delivery behavior.
 | Variable | Default | Meaning |
 |---|---|---|
 | `SMTP_URL` | Unset | `smtps://user:password@host:465` or `smtp://…:587`; special credential characters must be percent-encoded. Remote SMTP requires TLS/STARTTLS. Without SMTP, emails go to logs. |
-| `MAIL_FROM` | Unset | Required with SMTP, for example `Hourmere <bookings@example.com>`. Use a sender your SMTP provider accepts. |
+| `MAIL_FROM` | Unset | Required with SMTP, for example `Hourmere <bookings@example.com>`. Use a sender your SMTP provider accepts that can also receive calendar replies; see the requirements below. |
 | `SIGNUP` | `first-user` | `first-user`, `closed` or `open`; existing users can always sign in. |
 | `SIGNUP_ALLOWED_DOMAINS` | Unset | Comma-separated exact email domains, without `@` or wildcards. These domains may register even with `closed`. List subdomains separately. Invalid with `open`. |
+
+`MAIL_FROM` is the organizer for new calendar invitations. Avoid a Gmail or Google Workspace
+address, or any other address registered as a Google account: Gmail may treat it as a Google
+organizer (unconfirmed). The mailbox must receive mail because calendar RSVP replies go to
+it, independently of the email's Reply-To; a no-reply address that rejects mail bounces those
+replies. Monitor or forward the mailbox. Declining in a calendar does not cancel an Hourmere
+booking; use the confirmation email's cancellation link.
 
 With `first-user`, the first person who signs in can register; after that the domain allowlist
 applies. In either restricted mode, a pending, unexpired team invitation also permits its
@@ -190,12 +197,35 @@ keeps the plain path.
 | Variable | Default | Meaning |
 |---|---|---|
 | `POSTGRES_PASSWORD` | Required | Initializes the PostgreSQL role and becomes the app's `PGPASSWORD`. Changing `.env` does not change an already initialized database role's password. |
-| `COMPOSE_FILE` | `docker-compose.yml` | Not forwarded by the default Compose file: consumed by the Compose CLI. Setup writes `docker-compose.yml:docker-compose.proxy.yml` for bundled HTTPS, or `docker-compose.yml` for plain mode. After setup, append `:docker-compose.worker.yml` to run a separate worker; the overlay automatically switches the app to `web`. The saved `.env` preserves this choice for backups and upgrades without editing tracked Compose files. |
+| `COMPOSE_FILE` | `docker-compose.yml` | Not forwarded by the default Compose file: consumed by the Compose CLI. Setup writes `docker-compose.yml:docker-compose.proxy.yml` for bundled HTTPS, or `docker-compose.yml` for plain mode. After setup, run `./scripts/enable-worker.sh` to select the separate-worker overlay safely; it preserves the proxy selection and automatically switches the app to `web`. The saved `.env` preserves this choice for backups and upgrades without editing tracked Compose files. |
 | `COMPOSE_PROJECT_NAME` | `hourmere` | Not forwarded by the default Compose file: consumed by the Compose CLI to select containers, networks and volumes. Setup persists this name; set it in setup's environment to choose an independent deployment. Keep the original name when migrating an existing installation; persist the new name when restoring to a separate project. |
 | `APP_IMAGE` | `hourmere:local` | Local image tag built from this checkout; `pull_policy: never` remains in force. Use a distinct tag for independent deployments on one Docker host. No prebuilt public image is published yet. |
 | `PROXY_SUBNET` | `172.30.62.0/28` | Not forwarded by the default Compose file: the HTTPS override uses this dedicated IPv4 ingress subnet. Change it together with `PROXY_IP` and `PROXY_DYNAMIC_RANGE` before starting if it overlaps another network or another deployment. |
 | `PROXY_IP` | `172.30.62.2` | Not forwarded by the default Compose file: the HTTPS override assigns Caddy this address and forwards it as the app's `TRUSTED_PROXIES`. Must be a free usable address in `PROXY_SUBNET`, outside `PROXY_DYNAMIC_RANGE`. |
 | `PROXY_DYNAMIC_RANGE` | `172.30.62.8/29` | Not forwarded by the default Compose file: the HTTPS override allocates app and one-off app container addresses from this range inside `PROXY_SUBNET`, keeping Caddy's `PROXY_IP` outside it. Workers use only the default network. Change all three network settings together for another subnet/deployment. |
+
+Enable a separate worker from the deployment checkout, then verify that Compose selects it
+before recreating the stack:
+
+```sh
+unset COMPOSE_FILE
+./scripts/enable-worker.sh
+docker compose config --services | grep -qx worker
+docker compose up -d --build --wait
+```
+
+Continue only if verification succeeds. The helper rewrites only `COMPOSE_FILE` in `.env`,
+handles quoted/unquoted and `export COMPOSE_FILE=` assignments, keeps mode `600` and
+refuses symlinks. Run `./scripts/disable-worker.sh` to deselect it, after removing the
+worker container as described in [self-hosting](/docs/self-hosting#switch-back-to-a-single-container).
+If editing manually, replace the whole quoted line, for example:
+
+```dotenv
+COMPOSE_FILE='docker-compose.yml:docker-compose.proxy.yml:docker-compose.worker.yml'
+```
+
+Keep custom overlays inside the quotes. A shell-exported `COMPOSE_FILE` overrides `.env`;
+unset it before using the helper and Compose commands.
 
 Plain mode publishes `127.0.0.1:<PORT>:3000` for your own host proxy or a private local
 trial. The HTTPS override removes all app host mappings, publishes TCP 80/443 and UDP 443 on

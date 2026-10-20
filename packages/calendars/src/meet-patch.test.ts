@@ -386,6 +386,145 @@ describe.skipIf(!serverUrl)('Meet import then conference PATCH recovery (real Po
     expect(provider.controls.conferenceRequests.size).toBe(1)
   })
 
+  it.each([false, true])(
+    'repairs an exhausted import UUID on the same event, preserving late success=%s',
+    async (lateSuccess) => {
+      provider.controls.importedConferenceRequestMode = 'ignore_duplicate'
+      provider.controls.conferencePollsBeforeReady = 2
+      const { b, initial, old } = await legacyPending()
+      for (let attempt = 0; attempt < 12; attempt++) await work(b.booking.id)
+      const exhausted = await intent()
+      expect(exhausted).toMatchObject({
+        state: 'failed',
+        error_code: 'conference_pending_timeout',
+        attempts: 12,
+        request_id: initial.request_id,
+        conference_patch_request_id: initial.request_id,
+        external_event_id: old.id,
+        lease_id: null,
+        lease_until: null,
+      })
+
+      // Follow docs/google-calendar.md's maintenance procedure with reconciliation stopped.
+      const inspected = await provider.client.getConferenceEvent(
+        'fake-access',
+        'owned@example.com',
+        old.id,
+        AbortSignal.timeout(1000),
+      )
+      expect(inspected).toMatchObject({
+        id: old.id,
+        iCalUID: `${b.booking.id}@hourmere`,
+        conferenceData: {
+          createRequest: { requestId: initial.request_id, status: { statusCode: 'pending' } },
+        },
+      })
+      expect(inspected.conferenceData?.entryPoints).toBeUndefined()
+      const replacement = crypto.randomUUID()
+      await db.transaction().execute(async (trx) => {
+        const booking = await trx
+          .selectFrom('bookings')
+          .select(['id', 'status'])
+          .where('id', '=', exhausted.booking_id)
+          .forUpdate()
+          .executeTakeFirstOrThrow()
+        const locked = await trx
+          .selectFrom('booking_conferences')
+          .selectAll()
+          .where('root_booking_id', '=', exhausted.root_booking_id)
+          .forUpdate()
+          .executeTakeFirstOrThrow()
+        expect(booking).toEqual({ id: b.booking.id, status: 'confirmed' })
+        expect(locked).toEqual(exhausted)
+        await trx
+          .updateTable('booking_conferences')
+          .set({
+            request_id: replacement,
+            conference_patch_request_id: null,
+            error_code: null,
+            lease_id: null,
+            lease_until: null,
+            attempts: 0,
+            state: 'pending',
+            next_attempt_at: new Date(NOW.epochMilliseconds),
+          })
+          .where('root_booking_id', '=', exhausted.root_booking_id)
+          .execute()
+      })
+      expect(await intent()).toEqual({
+        ...exhausted,
+        request_id: replacement,
+        conference_patch_request_id: null,
+        error_code: null,
+        attempts: 0,
+        state: 'pending',
+        next_attempt_at: new Date(NOW.epochMilliseconds),
+      })
+
+      if (lateSuccess) {
+        const oldRequest = provider.controls.conferenceRequests.get(initial.request_id)
+        if (!oldRequest) throw Error('Synthetic import request missing')
+        oldRequest.outcome = 'success'
+      }
+      const beforePatch: {
+        eventId: string
+        sentId: string
+        durableId: string | undefined
+        marker: string | null | undefined
+      }[] = []
+      const create = provider.client.createConferenceEvent
+      vi.spyOn(provider.client, 'createConferenceEvent').mockImplementation(async (...args) => {
+        // This independent pool read must see the committed UUID before the provider PATCH.
+        const { rows } = await owned.pool.query<{
+          request_id: string
+          conference_patch_request_id: string | null
+        }>(
+          'SELECT request_id, conference_patch_request_id FROM booking_conferences WHERE root_booking_id = $1',
+          [b.booking.id],
+        )
+        beforePatch.push({
+          eventId: args[2],
+          sentId: args[4],
+          durableId: rows[0]?.request_id,
+          marker: rows[0]?.conference_patch_request_id,
+        })
+        return create(...args)
+      })
+      const resumedAt = provider.calls.length
+      await writeBookingConference(deps, b.booking.id)
+      expect(beforePatch).toEqual(
+        lateSuccess
+          ? []
+          : [{ eventId: old.id, sentId: replacement, durableId: replacement, marker: null }],
+      )
+      expect(provider.calls[resumedAt]?.init.method ?? 'GET').toBe('GET')
+      expect(provider.calls[resumedAt]?.url.pathname).toBe(
+        `/calendar/v3/calendars/owned%40example.com/events/${old.id}`,
+      )
+      if (!lateSuccess) await work(b.booking.id)
+      await work(b.booking.id)
+      expect(await intent()).toMatchObject({
+        state: 'ready',
+        error_code: null,
+        request_id: replacement,
+        conference_patch_request_id: lateSuccess ? null : replacement,
+        external_event_id: old.id,
+        applied_revision: exhausted.revision,
+        organizer_user_id: exhausted.organizer_user_id,
+        connection_id: exhausted.connection_id,
+        calendar_id: exhausted.calendar_id,
+      })
+      expect((await getManagedBooking(ctx, b.manageToken as string)).location?.url).toBe(JOIN)
+      expect(imports()).toHaveLength(1)
+      expect(conferencePatches().map((call) => JSON.parse(String(call.init.body)))).toEqual([
+        request(initial.request_id),
+        ...(lateSuccess ? [] : [request(replacement)]),
+      ])
+      expect(provider.controls.storedEvents.size).toBe(1)
+      expect(provider.controls.conferenceRequests.size).toBe(lateSuccess ? 1 : 2)
+    },
+  )
+
   it('re-GETs after a conference PATCH 412 and converges with the same durable UUID', async () => {
     provider.controls.conferencePatchEtagRaceOnce = true
     const b = await book()

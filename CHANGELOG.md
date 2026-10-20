@@ -53,6 +53,15 @@ must approve publication through the [release workflow](https://github.com/hourm
 
 ### Fixed
 
+- Booking email invitations align new calendar organizers with the configured sending
+  mailbox, distinguish calendar acceptance from booking confirmation, and use calendar MIME
+  alternatives with downloadable ICS copies. Hosts with pinned provider copies receive
+  ordinary notifications; legacy meeting identities remain stable through updates/cancels.
+  Host calendar summaries name the invitee, and an invalid Reply-To no longer blocks delivery.
+- Separate-worker setup now uses `scripts/enable-worker.sh` (and
+  `scripts/disable-worker.sh` to deselect it), preserving quoted `COMPOSE_FILE` values and
+  the proxy overlay. Verify `docker compose config --services | grep -qx worker` before
+  recreating a separate-worker stack to catch a lost overlay before the app runs web-only.
 - Automatic Google Meet now imports the private calendar copy first and requests its
   conference through a separate conditional PATCH. Retries preserve the event and request
   identity, including recovery of legacy import-created pending requests.
@@ -68,6 +77,25 @@ schema downgrade is not automatic. Direct source deployments require Node.js 26.
 Hourmere requires PostgreSQL 18+ because migrations use `uuidv7()`; the provided Compose
 stack includes PostgreSQL 18.
 
+- **Coordinate the calendar-email upgrade.** Stop all old web/all/worker processes before
+  applying `0038_booking_ical_identity.sql`, including processes on other hosts, then restart
+  every role with the new code. This upgrade does not support rolling deployment.
+  Existing roots retain their original host/conference organizer and UID; new roots pin
+  the sending mailbox from `MAIL_FROM`. Previously changed/deleted organizer identities
+  without a saved snapshot cannot be recovered. Keep `MAIL_FROM` stable for future updates;
+  a changed sender is declared with SENT-BY, which some clients ignore. `MAIL_FROM` must be
+  one bare mailbox or `Display name <mailbox>` (quote names containing commas); lists,
+  groups, comments, quoted local parts and address-literal domains are unsupported and now
+  fail startup with a value-free error. Arbitrary ordinary domains and IDN domains work.
+  Do not use a Gmail or Google Workspace address, or any address registered as a Google
+  account: Gmail may treat it as a Google organizer (unconfirmed). The sending mailbox must
+  receive mail, because calendar RSVP replies go to it; a no-reply address that rejects mail
+  bounces them.
+  Invitee calendar replies are not requested or processed; monitor/forward the sending
+  mailbox for unsolicited responses. Human email replies reach the host via Reply-To.
+  Calendar declines do not cancel bookings. Some clients show only the calendar card;
+  open the original confirmation body to access management links. See
+  [calendar invitations](https://github.com/hourmere/hourmere/blob/main/docs/notifications.md#calendar-invitations).
 - **Guests require renewed host opt-in.** Migration
   `0015_guest_email_controls.sql` adds `allow_guests=false` to **all existing event types**
   as well as defaulting new types to false. Hosts must re-enable **Allow invitees to add
@@ -94,12 +122,24 @@ stack includes PostgreSQL 18.
   or serializable isolation for first-user registration.
 - **Move old worker edits to the tracked overlay before pulling.** If you uncommented the
   old worker block, `git pull --ff-only` refuses to overwrite the edited
-  `docker-compose.yml`. First append `:docker-compose.worker.yml` to `COMPOSE_FILE` in
-  `.env` (or add `COMPOSE_FILE=docker-compose.yml:docker-compose.worker.yml`), preserving
-  any proxy overlay. Then run `git restore docker-compose.yml`, pull, and recreate the
+  `docker-compose.yml`. Run `./scripts/enable-worker.sh` if available. On an older checkout,
+  first replace or add the entire `.env` line with
+  `COMPOSE_FILE='docker-compose.yml:docker-compose.worker.yml'`, or
+  `COMPOSE_FILE='docker-compose.yml:docker-compose.proxy.yml:docker-compose.worker.yml'`
+  for bundled HTTPS; keep custom overlays inside the quotes. Then restore the tracked
+  Compose file and pull. Run `./scripts/enable-worker.sh` and verify
+  `docker compose config --services | grep -qx worker` succeeds before recreating the
   stack. Restoring without selecting the overlay leaves the old worker container orphaned
   on the old image and the app possibly web-only. See the
   [worker upgrade steps](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/self-hosting.md#upgrade-and-roll-back).
+- **Stop every old role before a column drop.** Migration 0037 is the first column drop;
+  old app and worker binaries still write its removed `retry_conference` flag. Stop all
+  old web/all/worker processes before the new app or a manual migration runs, including
+  separately managed workers. Single-container `docker compose up -d --build` already
+  stops the old app before starting its replacement; separate workers need an explicit
+  stop. Restart every role on the upgraded code. Future removals use two phases: release N
+  stops writing the column, and release N+1 drops it. Column-drop migrations require an
+  upgrade-note sidecar, checked by the migration policy test.
 - **Sign-in ID tokens are discarded.** Migration `0031_discard_sign_in_id_tokens.sql`
   clears existing `auth.account."idToken"` values, and account create/update hooks keep
   them NULL. Other account data is preserved; sign-in access/refresh tokens remain

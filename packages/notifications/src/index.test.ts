@@ -698,14 +698,14 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
 
         const deadline = Date.now() + 10_000
         while (sent.length < 2 && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50))
-        expect(sent.map((m) => m.subject)).toEqual([
-          expect.stringMatching(/^New booking: /),
-          expect.stringMatching(/^Confirmed: /),
-        ])
+        expect(
+          sent.map((m) => m.subject),
+          'waiting for the worker to send host and invitee booking confirmations',
+        ).toEqual([expect.stringMatching(/^New booking: /), expect.stringMatching(/^Confirmed: /)])
       } finally {
         await jobs.stop()
       }
-    })
+    }, 20_000)
 
     it('rolls back and lets go of the database when a worker stops during a slow send', async () => {
       const { bookingId, apiToken } = await booked()

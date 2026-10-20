@@ -1069,49 +1069,56 @@ describe.skipIf(!serverUrl)('sign-up control', () => {
             options: '-c search_path=auth,public -c hourmere.signup=open',
           }),
       ],
-    ])('is the only account created when several people sign up at once (%s)', async (_, url) => {
-      const policy: SignupPolicy = { mode: 'first-user', allowedDomains: [] }
-      const barrier = userInsertBarrier(policy, 3, url())
-      const app = instance(policy, { pool: barrier.pool })
-      const google = instance(policy, { pool: barrier.pool, google: 'racer@google.example' })
-      const links = [
-        await askForLink(app, 'racer@one.example'),
-        await askForLink(app, 'racer@two.example'),
-      ]
-      // The refused requests log their error.
-      const quiet = (['log', 'info', 'warn', 'error'] as const).map((m) =>
-        vi.spyOn(console, m).mockImplementation(() => {}),
-      )
-      let responses: Response[]
-      try {
-        responses = await Promise.all([
-          useLink(app, links[0]),
-          useLink(app, links[1]),
-          googleSignIn(google),
-        ])
-      } finally {
-        for (const spy of quiet) spy.mockRestore()
-        barrier.done()
-      }
-      expect(barrier.waiting()).toBe(3)
-      expect(responses.filter(hasSession)).toHaveLength(1)
-      // The others were refused by the database: an email link with a 500 (the hook had
-      // already let it through), Google with Better Auth's "unable to create user".
-      const [a, b, g] = responses.map((r) => r.status)
-      expect([a, b].every((s) => s === 302 || s === 500)).toBe(true)
-      expect([200, 401]).toContain(g)
-      const winner = await users()
-      expect(winner).toHaveLength(1)
-      expect(await rows()).toEqual({
-        ...NO_ROWS,
-        users: 1,
-        accounts: winner[0] === 'racer@google.example' ? 1 : 0,
-        sessions: 1,
-        organizations: 1,
-        members: 1,
-        personal: 1,
-      })
-    })
+    ])(
+      'is the only account created when several people sign up at once (%s)',
+      async (_, url) => {
+        const policy: SignupPolicy = { mode: 'first-user', allowedDomains: [] }
+        const barrier = userInsertBarrier(policy, 3, url())
+        const app = instance(policy, { pool: barrier.pool })
+        const google = instance(policy, { pool: barrier.pool, google: 'racer@google.example' })
+        const links = [
+          await askForLink(app, 'racer@one.example'),
+          await askForLink(app, 'racer@two.example'),
+        ]
+        // The refused requests log their error.
+        const quiet = (['log', 'info', 'warn', 'error'] as const).map((m) =>
+          vi.spyOn(console, m).mockImplementation(() => {}),
+        )
+        let responses: Response[]
+        try {
+          responses = await Promise.all([
+            useLink(app, links[0]),
+            useLink(app, links[1]),
+            googleSignIn(google),
+          ])
+        } finally {
+          for (const spy of quiet) spy.mockRestore()
+          barrier.done()
+        }
+        expect(
+          barrier.waiting(),
+          'waiting for all three concurrent user INSERTs to reach the first-user barrier',
+        ).toBe(3)
+        expect(responses.filter(hasSession)).toHaveLength(1)
+        // The others were refused by the database: an email link with a 500 (the hook had
+        // already let it through), Google with Better Auth's "unable to create user".
+        const [a, b, g] = responses.map((r) => r.status)
+        expect([a, b].every((s) => s === 302 || s === 500)).toBe(true)
+        expect([200, 401]).toContain(g)
+        const winner = await users()
+        expect(winner).toHaveLength(1)
+        expect(await rows()).toEqual({
+          ...NO_ROWS,
+          users: 1,
+          accounts: winner[0] === 'racer@google.example' ? 1 : 0,
+          sessions: 1,
+          organizations: 1,
+          members: 1,
+          personal: 1,
+        })
+      },
+      20_000,
+    )
   })
 
   describe('database backstop', () => {

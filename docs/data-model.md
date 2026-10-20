@@ -244,6 +244,23 @@ application foreign keys reference its tables.
    `packages/auth/auth-schema.generated.sql`; prefix it with
    `SET LOCAL search_path TO auth, public;` and save it as the next migration.
 
+Column removals use two releases: release N stops writing the column, and release N+1
+removes it. Stop all old app (`all` or `web`) and worker processes before applying a version
+whose migrations drop columns; this includes workers managed outside the app's Compose
+project. A single-container `docker compose up -d --build` stops the old app before
+starting its replacement, but a separate worker must be stopped explicitly before the new
+app or a manual migration applies the drop. Restart every role with the upgraded code.
+See the [operator upgrade procedure](../apps/site/src/content/docs/docs/self-hosting.md#upgrade-and-roll-back).
+
+Migration `0037_conference_pending_timeout.sql` is the first column drop and a historical
+exception to the two-release policy: it removes the write-only
+`booking_conferences.retry_conference` flag while old binaries still write it. All old
+roles must stop before 0037 runs. For every migration containing `DROP COLUMN`, add a
+same-basename Markdown sidecar in `packages/db/migrations` with a nonempty
+`Column-drop upgrade:` note describing the retired writes, release sequence and required
+operator steps. The migration policy test flags missing notes; never edit published SQL
+to add one.
+
 ## Sign-in email outbox
 
 `sign_in_emails` is instance-wide authentication delivery state. Every link request writes
@@ -475,3 +492,13 @@ explicit enabled flag), retained host `last_assigned_sequence`, and immutable bo
 `hosts_use_default_schedule`. Activation and mode changes preserve sequence history;
 new successful bookings update fairness with the booking/outbox transaction. No legacy
 configuration is activated by migration. See [round-robin scheduling](round-robin-scheduling.md).
+
+## Booking calendar email identity
+
+Migration0038 adds `bookings.ical_version` and nullable organizer-name/email snapshots.
+Predecessor rows are v1, with the best surviving host/conference organizer backfilled while
+preserving existing timestamps; newly inserted rows default to v2. Notification workers
+always read the reschedule-chain root's fields. A new root atomically pins its configured
+sending mailbox before its first SMTP invitation; later versions reuse that identity.
+See [calendar invitations](notifications.md#calendar-invitations) for the coordinated upgrade,
+legacy compatibility, recipient policy and reply limitations.

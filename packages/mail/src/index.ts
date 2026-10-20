@@ -1,5 +1,7 @@
+import { domainToASCII } from 'node:url'
 import nodemailer from 'nodemailer'
-import { escapeHtml } from './text.ts'
+import addressparser from 'nodemailer/lib/addressparser'
+import { escapeHtml, singleLine } from './text.ts'
 
 export * from './booking.ts'
 export * from './ics.ts'
@@ -18,6 +20,8 @@ export interface MailMessage {
   sensitive?: boolean | undefined
   /** One address. It is never parsed as a list, so a comma in it cannot add recipients. */
   to: string
+  /** The person a human email reply should reach; never overrides the configured From. */
+  replyTo?: { name: string; email: string } | undefined
   subject: string
   text: string
   html?: string
@@ -38,6 +42,8 @@ export interface SendOptions {
  * MailRejectedError.
  */
 export interface Mailer {
+  /** One configured SMTP sender mailbox, used to align iMIP's organizer and email From. */
+  readonly senderEmail?: string | undefined
   send(message: MailMessage, options?: SendOptions): Promise<void>
 }
 
@@ -138,8 +144,58 @@ export interface SmtpMailerOptions {
    * Special characters in the user or password must be percent-encoded.
    */
   url: string
-  /** Sender, e.g. `Hourmere <hourmere@example.com>`. */
+  /** One sender mailbox, e.g. `Hourmere <hourmere@example.com>`. */
   from: string
+}
+
+/** An unquoted mailbox safe in both a structured email header and a calendar mailto URI. */
+function isMailbox(address: string): boolean {
+  const parts = address.split('@')
+  const [local, domain] = parts
+  if (parts.length !== 2 || !local || !domain || address.length > 254 || local.length > 64) {
+    return false
+  }
+  if (!/^[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*$/.test(local)) {
+    return false
+  }
+  // domainToASCII uses URL host parsing, which can silently discard a path or controls.
+  if (!/^[\p{L}\p{N}\p{M}.-]+$/u.test(domain)) return false
+  const ascii = domainToASCII(domain)
+  return (
+    ascii.length > 0 &&
+    ascii.length <= 253 &&
+    ascii.split('.').every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label))
+  )
+}
+
+/** Reject addressparser's recovery of malformed lists: MAIL_FROM must mean exactly one mailbox. */
+function senderMailbox(from: string): string {
+  const entries = addressparser(from)
+  const entry = entries[0]
+  // Only a bare address or one optional display name followed by <address> is supported.
+  // A quoted display name can contain commas; unquoted separators and comments are refused.
+  const value = from.trim()
+  const opening = value.lastIndexOf('<')
+  const displayName = value.slice(0, opening).trimEnd()
+  // Split before validating either segment so whitespace cannot be redistributed between
+  // overlapping regex repetitions during a failed match.
+  const validName =
+    /^"(?:[^"\\]|\\.)*"$/u.test(displayName) || !/["<>@,;:()[\]\\]/u.test(displayName)
+  const angleAddress =
+    opening !== -1 && value.endsWith('>') && validName ? value.slice(opening + 1, -1) : undefined
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: reject header and display controls
+  const controls = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/u
+  if (
+    controls.test(from) ||
+    entries.length !== 1 ||
+    !entry?.address ||
+    entry.group ||
+    !isMailbox(entry.address) ||
+    (value !== entry.address && angleAddress !== entry.address)
+  ) {
+    throw new Error('MAIL_FROM must contain one valid mailbox')
+  }
+  return entry.address
 }
 
 const isLoopback = (hostname: string) => {
@@ -170,19 +226,41 @@ export function smtpTransportOptions(url: string) {
 
 /** Works with any SMTP provider, including Resend, Postmark and Amazon SES SMTP endpoints. */
 export function createSmtpMailer({ url, from }: SmtpMailerOptions): Mailer {
+  const senderEmail = senderMailbox(from)
   const transport = nodemailer.createTransport(smtpTransportOptions(url), { from })
   return {
-    async send({ to, subject, text, html, attachments }, { signal } = {}) {
+    senderEmail,
+    async send({ to, replyTo, subject, text, html, attachments }, { signal } = {}) {
       signal?.throwIfAborted()
+      // Reply-To is optional user input. A booking may accept an address SMTP cannot
+      // represent here; omit it rather than preventing every recipient's notification.
+      const safeReplyTo = replyTo && isMailbox(replyTo.email) ? replyTo : undefined
+      const calendar = attachments?.find((a) =>
+        /^text\/calendar; method=(REQUEST|CANCEL); charset=UTF-8$/.test(a.contentType),
+      )
+      const calendarMethod = calendar?.contentType.match(/method=(REQUEST|CANCEL);/)?.[1]
+      const files = attachments?.filter((a) => a !== calendar)
       const sending = transport.sendMail({
         // An address object is taken as one address; a string would be parsed as a list.
         to: { name: '', address: to },
+        ...(safeReplyTo && {
+          replyTo: { name: singleLine(safeReplyTo.name), address: safeReplyTo.email },
+        }),
         // nodemailer folds long headers but would keep a line break; a subject is one line.
         subject: subject.replace(/[\r\n]+/g, ' '),
         text,
         ...(html !== undefined && { html }),
-        ...(attachments?.length && {
-          attachments: attachments.map(({ filename, contentType, content }) => ({
+        // iMIP clients need the calendar alternative. Nodemailer also emits an application/ics
+        // attachment for clients that import files, while retaining our text and HTML bodies.
+        ...(calendar && {
+          icalEvent: {
+            filename: calendar.filename,
+            content: calendar.content,
+            method: calendarMethod,
+          },
+        }),
+        ...(files?.length && {
+          attachments: files.map(({ filename, contentType, content }) => ({
             filename,
             contentType,
             content,

@@ -1,6 +1,7 @@
 // Emails about a booking, to its attendees and its hosts: confirmed, rescheduled, cancelled
 // and reminder. Plain text plus simple HTML with inline styles: no images, no external
 // assets, no tracking. Everything from the booking is someone's input and is treated so.
+import { type InterfaceLanguage, interfaceLanguage } from '@hourmere/core/language'
 import type { MailAttachment, MailMessage } from './index.ts'
 import { escapeHtml, linkableUrl, multiLine, singleLine, subjectLine } from './text.ts'
 
@@ -47,6 +48,7 @@ export interface AttendeeRecipient {
   email: string
   /** IANA time zone the times are shown in. */
   timeZone: string
+  locale?: string | null | undefined
   manageLinks?: ManageLinks | undefined
 }
 
@@ -55,6 +57,7 @@ export interface HostRecipient {
   email: string
   /** IANA time zone the times are shown in. */
   timeZone: string
+  locale?: string | null | undefined
   /** The invitee's answers to the booking questions. */
   answers: readonly { question: string; answer: string }[]
 }
@@ -158,6 +161,7 @@ interface Content {
   fields: { label: string; text: string; html: string }[]
   answers: readonly { question: string; answer: string }[]
   manageLinks?: ManageLinks | undefined
+  footer?: { language: InterfaceLanguage; text: string } | undefined
 }
 
 function render(to: string, c: Content, attachment?: MailAttachment): MailMessage {
@@ -181,6 +185,7 @@ function render(to: string, c: Content, attachment?: MailAttachment): MailMessag
           `Cancel: ${c.manageLinks.cancel}`,
         ]
       : []),
+    ...(c.footer ? ['', c.footer.text] : []),
   ].join('\n')
 
   const cell = 'padding: 2px 16px 2px 0; vertical-align: top;'
@@ -205,6 +210,9 @@ function render(to: string, c: Content, attachment?: MailAttachment): MailMessag
 <p style="margin: 0 0 8px;"><a href="${escapeHtml(c.manageLinks.reschedule)}" style="${button}">Reschedule</a><a href="${escapeHtml(c.manageLinks.cancel)}" style="${button}">Cancel</a></p>
 <p style="margin: 0; color: #555; font-size: 13px;">If the buttons do not work, copy a link into your browser:<br>Reschedule: ${escapeHtml(c.manageLinks.reschedule)}<br>Cancel: ${escapeHtml(c.manageLinks.cancel)}</p>`
     : ''
+  const footer = c.footer
+    ? `<p lang="${c.footer.language}" style="margin: 24px 0 0; color: #555; font-size: 13px;">${escapeHtml(c.footer.text)}</p>`
+    : ''
   const html = `<!doctype html>
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(subject)}</title></head>
@@ -215,6 +223,7 @@ ${rows}
 </table>
 ${answers}
 ${links}
+${footer}
 </body>
 </html>
 `
@@ -230,6 +239,19 @@ ${links}
 // --- Emails -------------------------------------------------------------------------------
 
 const field = (label: string, text: string) => ({ label, text, html: htmlLines(text) })
+const calendarDecline = {
+  en: {
+    invitee:
+      "Declining this invitation in your calendar won't cancel the booking. To cancel, use the Cancel link in this email.",
+    host: "Declining this invitation in your calendar won't cancel the booking. To cancel, open the booking in Hourmere.",
+    guest: "Declining this invitation in your calendar won't cancel the booking.",
+  },
+  'zh-CN': {
+    invitee: '在日历中拒绝此邀请不会取消预约。如需取消，请使用此邮件中的“取消”链接。',
+    host: '在日历中拒绝此邀请不会取消预约。如需取消，请在 Hourmere 中打开此预约。',
+    guest: '在日历中拒绝此邀请不会取消预约。',
+  },
+}
 
 /**
  * The email about a booking event for one recipient, with times in the recipient's zone.
@@ -314,10 +336,14 @@ export function bookingEmail(
     : []
   const manageLinks =
     recipient.role === 'attendee' && kind !== 'cancelled' ? recipient.manageLinks : undefined
+  const language = interfaceLanguage(recipient.locale) ?? 'en'
+  const footerRole = isHost ? 'host' : manageLinks ? 'invitee' : 'guest'
+  const footer =
+    kind === 'confirmed' ? { language, text: calendarDecline[language][footerRole] } : undefined
 
   return render(
     recipient.email,
-    { subject, intro, fields, answers, manageLinks },
+    { subject, intro, fields, answers, manageLinks, footer },
     options.attachment,
   )
 }
