@@ -1,5 +1,5 @@
 # Optional separate worker. Run ./scripts/enable-worker.sh after setup.sh, then verify:
-# docker compose config --services | grep -qx worker
+# docker compose config --services | grep -qx worker && docker compose up -d --build --wait
 # Manual example: COMPOSE_FILE='docker-compose.yml:docker-compose.proxy.yml:docker-compose.worker.yml'
 # The overlay selects both roles so only the worker runs background jobs.
 services:

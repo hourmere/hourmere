@@ -1,5 +1,13 @@
-import { spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { spawn, spawnSync } from 'node:child_process'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -33,6 +41,180 @@ const selections = [
   { name: 'different worker file', file: `${base}:${worker}.disabled`, worker: false },
   { name: 'relative worker path', file: `${base}:./${worker}`, worker: false },
 ]
+
+type InteractiveResult = { status: number | null; stdout: string; stderr: string }
+
+// No errexit and no bracketed paste: each physical line reaches the nested interactive
+// shell only after its next primary/continuation prompt. An unscoped exit would return
+// subsequent pasted lines to the outer shell, just as sudo -i / su - would.
+async function pasteIntoNestedShell(
+  commands: string,
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+): Promise<InteractiveResult> {
+  const shell = spawn('sh', ['-i'], {
+    cwd,
+    env: { ...env, PS1: 'HOURMERE_PRIMARY> ', PS2: 'HOURMERE_CONTINUE> ' },
+    stdio: ['pipe', 'pipe', 'pipe'],
+    detached: true,
+  })
+  let stdout = ''
+  let stderr = ''
+  let prompts = 0
+  let consumedPrompts = 0
+  let closed = false
+  let wake: (() => void) | undefined
+  shell.stdout.on('data', (chunk: Buffer) => {
+    stdout += chunk.toString()
+  })
+  shell.stderr.on('data', (chunk: Buffer) => {
+    stderr += chunk.toString()
+    prompts = [...stderr.matchAll(/HOURMERE_(?:PRIMARY|CONTINUE)> /g)].length
+    wake?.()
+  })
+  shell.stdin.on('error', () => {})
+  const completion = new Promise<InteractiveResult>((resolve, reject) => {
+    shell.on('error', reject)
+    shell.on('close', (status) => {
+      closed = true
+      wake?.()
+      resolve({ status, stdout, stderr })
+    })
+  })
+  const stopOwnedShells = () => {
+    shell.stdin.destroy()
+    if (shell.pid && !closed) {
+      try {
+        process.kill(-shell.pid, 'SIGKILL')
+      } catch {}
+    }
+  }
+  const timeout = setTimeout(stopOwnedShells, 5000)
+  try {
+    const lines = [
+      'operator_shell=outer',
+      'sh -i',
+      'operator_shell=nested',
+      ...commands.split('\n'),
+      'block_status=$?',
+      `printf 'BLOCK_RESULT:%s:%s\\n' "$operator_shell" "$block_status"`,
+      'exit 0',
+      `printf 'OUTER_RESULT:%s\\n' "$operator_shell"`,
+      'exit 0',
+    ]
+    for (const line of lines) {
+      while (prompts === consumedPrompts && !closed)
+        await new Promise<void>((resolve) => {
+          wake = resolve
+        })
+      if (closed) break
+      consumedPrompts += 1
+      shell.stdin.write(`${line}\n`)
+    }
+    shell.stdin.end()
+    return await completion
+  } finally {
+    clearTimeout(timeout)
+    stopOwnedShells()
+  }
+}
+
+function expectInteractiveShells(result: InteractiveResult, status: number) {
+  expect(result.status, result.stderr).toBe(0)
+  expect(result.stdout).toContain(`BLOCK_RESULT:nested:${status}\n`)
+  expect(result.stdout).toContain('OUTER_RESULT:outer\n')
+}
+
+async function executePastedCommands(
+  commands: string | undefined,
+  {
+    worker: enabled,
+    proxy: hasProxy,
+    failCommand = '',
+  }: {
+    worker: boolean
+    proxy: boolean
+    failCommand?: string
+  },
+) {
+  if (!commands) throw new Error('Labelled instructions must include runnable commands')
+  const directory = mkdtempSync(join(tmpdir(), 'hourmere-pasted-docs-'))
+  try {
+    const scripts = join(directory, 'scripts')
+    const bin = join(directory, 'bin')
+    const backupDirectory = join(directory, 'backup')
+    mkdirSync(scripts)
+    mkdirSync(bin)
+    writeFileSync(join(directory, '.env'), 'synthetic-backup-settings\n')
+    const log = `printf '%s\\n' "$command" >> "$CALL_LOG"
+`
+    const rejectShellOverride = `if [ "\${COMPOSE_FILE+x}" = x ]; then exit 9; fi\n`
+    const fail = '[ "$command" != "$FAIL_COMMAND" ] || exit 7\n'
+    for (const mode of ['enable', 'disable']) {
+      writeFileSync(
+        join(scripts, `${mode}-worker.sh`),
+        `#!/bin/sh\ncommand=${mode}-worker\n${rejectShellOverride}${log}${fail}`,
+        { mode: 0o755 },
+      )
+    }
+    writeFileSync(
+      join(bin, 'docker'),
+      `#!/bin/sh
+command="$*"
+case "$command" in
+  'compose cp proxy:/data '*) command='compose cp proxy:/data' ;;
+  'compose cp proxy:/config '*) command='compose cp proxy:/config' ;;
+esac
+${rejectShellOverride}${log}case "$command" in
+  'compose config --services') printf '%s\\n' app db${hasProxy ? ' proxy' : ''}${enabled ? ' worker' : ''} ;;
+  'compose exec -T db pg_dump -U hourmere -d hourmere -Fc') printf '%s\\n' synthetic-dump ;;
+  'compose pull proxy db'|'compose stop app'|'compose stop app worker'|'compose stop worker'|'compose stop app proxy'|'compose up -d --build --wait'|'compose up -d --wait'|'compose cp proxy:/data'|'compose cp proxy:/config') ;;
+  *) exit 1 ;;
+esac
+${fail}`,
+      { mode: 0o755 },
+    )
+    writeFileSync(
+      join(bin, 'git'),
+      `#!/bin/sh
+command="git $*"
+${log}${fail}
+if [ "$*" = 'rev-parse HEAD' ]; then printf '%s\\n' synthetic-commit; fi
+`,
+      { mode: 0o755 },
+    )
+    writeFileSync(join(bin, 'curl'), `#!/bin/sh\ncommand=health\n${log}${fail}`, { mode: 0o755 })
+    writeFileSync(
+      join(bin, 'install'),
+      `#!/bin/sh
+command='install .env'
+${log}${fail}exec /usr/bin/install "$@"
+`,
+      { mode: 0o755 },
+    )
+    const callLog = join(directory, 'calls')
+    const result = await pasteIntoNestedShell(
+      // Keep the documented destination inside the owned test directory.
+      commands.replace(/^ {2}backup_dir=.*$/m, '  backup_dir="$BACKUP_DIRECTORY" &&'),
+      directory,
+      {
+        PATH: `${bin}:${process.env.PATH}`,
+        CALL_LOG: callLog,
+        BACKUP_DIRECTORY: backupDirectory,
+        COMPOSE_FILE: 'conflicting-shell-selection.yml',
+        FAIL_COMMAND: failCommand,
+      },
+    )
+    const dump = join(backupDirectory, 'hourmere.dump')
+    return {
+      result,
+      calls: existsSync(callLog) ? readFileSync(callLog, 'utf8').trim().split('\n') : [],
+      dump: existsSync(dump) ? readFileSync(dump, 'utf8') : undefined,
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+}
 
 describe('documented deployment operations', () => {
   it.each(selections)(
@@ -73,51 +255,6 @@ describe('documented deployment operations', () => {
     },
   )
 
-  it.each([false, true])('stops an enabled worker before backing up (worker: %s)', (enabled) => {
-    const backup = guide.match(
-      /if docker compose config --services[\s\S]*?pg_dump[^\n]+> "\$backup_dir\/hourmere\.dump"/,
-    )?.[0]
-    expect(backup, 'backup commands must stop the optional worker').toBeDefined()
-    const directory = mkdtempSync(join(tmpdir(), 'hourmere-backup-docs-'))
-    try {
-      const bin = join(directory, 'bin')
-      mkdirSync(bin)
-      writeFileSync(
-        join(bin, 'docker'),
-        `#!/bin/sh
-printf '%s\\n' "$*" >> "$CALL_LOG"
-case "$*" in
-  'compose config --services') printf '%s\\n' app db proxy${enabled ? ' worker' : ''} ;;
-  'compose stop worker'|'compose stop app proxy') ;;
-  'compose exec -T db pg_dump -U hourmere -d hourmere -Fc') printf '%s\\n' synthetic-dump ;;
-  *) exit 1 ;;
-esac
-`,
-        { mode: 0o755 },
-      )
-      const callLog = join(directory, 'calls')
-      const result = spawnSync('sh', ['-eu', '-c', backup ?? 'exit 1'], {
-        cwd: directory,
-        encoding: 'utf8',
-        env: {
-          PATH: `${bin}:${process.env.PATH}`,
-          CALL_LOG: callLog,
-          backup_dir: directory,
-        },
-      })
-      expect(result.status).toBe(0)
-      expect(readFileSync(callLog, 'utf8').trim().split('\n')).toEqual([
-        'compose config --services',
-        ...(enabled ? ['compose stop worker'] : []),
-        'compose stop app proxy',
-        'compose exec -T db pg_dump -U hourmere -d hourmere -Fc',
-      ])
-      expect(readFileSync(join(directory, 'hourmere.dump'), 'utf8')).toBe('synthetic-dump\n')
-    } finally {
-      rmSync(directory, { recursive: true, force: true })
-    }
-  })
-
   it('starts only the database before requiring restore-drill isolation', () => {
     const drill = guide.split('To test restoration,')[1]?.split('For actual recovery,')[0]
     if (!drill) throw new Error('Restore drill instructions must exist')
@@ -139,7 +276,7 @@ esac
       /Before running the rewrite, replace those forms with the\s+complete quoted line/,
     )
     expect(drill).toMatch(
-      /verify the rewritten selection before starting any app\s+or worker:[\s\S]*?docker compose config --services \| grep -qx worker/,
+      /verify the rewritten selection before starting any app\s+or worker:[\s\S]*?compose_services=\$\(docker compose config --services\)[\s\S]*?grep -qx worker/,
     )
   })
 
@@ -165,8 +302,7 @@ docker compose up -d --wait`)
       ),
     'utf8',
   )
-  const enableCommands = (source: string | undefined) =>
-    source?.match(/```sh\n(unset COMPOSE_FILE[\s\S]*?)\n```/)?.[1]
+  const enableCommands = (source: string | undefined) => verificationCommands(source)
   const upgradeCommands = (title: string) =>
     guide.split(`### ${title} upgrade\n`)[1]?.match(/```sh\n([\s\S]*?)\n```/)?.[1]
 
@@ -231,104 +367,155 @@ docker compose up -d --wait`)
     },
   ]
 
-  it('executes every documented service-verification block', () => {
+  const backupCommands = verificationCommands(
+    guide.split('## Back up and restore\n')[1]?.split('To test restoration,')[0],
+  )
+  const guardedProcedures = [...procedures, { name: 'backup', commands: backupCommands }]
+
+  it('executes every guarded shell block as a single subshell', () => {
     const blocks = [readme, configuration, guide].flatMap((source) =>
       [...source.matchAll(/```sh\n([\s\S]*?)\n```/g)]
         .map((match) => match[1])
-        .filter((block) => block?.includes('grep -qx') && !block.includes('if docker compose')),
+        .filter((block) => block?.includes('grep -qx') || block?.includes('exit 1')),
     )
-    expect(blocks).toHaveLength(procedures.length)
-    expect(procedures.map(({ commands }) => commands).sort()).toEqual(blocks.sort())
+    expect(blocks).toHaveLength(guardedProcedures.length)
+    expect(guardedProcedures.map(({ commands }) => commands).sort()).toEqual(blocks.sort())
+    for (const { name, commands } of guardedProcedures) {
+      expect(commands, name).toMatch(/^\(\n(?: {2}[^\n]*\n)+\)$/)
+      expect(spawnSync('sh', ['-n', '-c', commands ?? '']).status, name).toBe(0)
+      expect(commands?.match(/docker compose config --services/g), name).toHaveLength(1)
+    }
   })
 
   describe.each(procedures)(
     '$name commands',
     ({ commands, upgrade, worker: needsWorker, helper, verificationOnly }) => {
+      const prefix = [
+        ...(upgrade ? ['git pull --ff-only'] : []),
+        ...(helper ? [`${helper}-worker`] : []),
+      ]
+      const startup = [
+        ...(upgrade
+          ? ['compose pull proxy db', `compose stop app${needsWorker ? ' worker' : ''}`]
+          : []),
+        ...(verificationOnly ? [] : ['compose up -d --build --wait']),
+        ...(upgrade ? ['health'] : []),
+      ]
       it.each([
         { worker: true, proxy: true },
         { worker: true, proxy: false },
         { worker: false, proxy: true },
         { worker: false, proxy: false },
-      ])('stops before startup when a verification fails (%j)', ({ worker, proxy }) => {
-        expect(commands, 'labelled instructions must include runnable commands').toBeDefined()
-        const directory = mkdtempSync(join(tmpdir(), 'hourmere-worker-docs-'))
-        try {
-          const scripts = join(directory, 'scripts')
-          const bin = join(directory, 'bin')
-          mkdirSync(scripts)
-          mkdirSync(bin)
-          const rejectShellOverride = `if [ "\${COMPOSE_FILE+x}" = x ]; then exit 9; fi\n`
-          for (const mode of ['enable', 'disable']) {
-            writeFileSync(
-              join(scripts, `${mode}-worker.sh`),
-              `#!/bin/sh
-${rejectShellOverride}printf '%s\\n' ${mode}-worker >> "$CALL_LOG"
-`,
-              { mode: 0o755 },
-            )
-          }
-          writeFileSync(
-            join(bin, 'docker'),
-            `#!/bin/sh
-${rejectShellOverride}printf '%s\\n' "$*" >> "$CALL_LOG"
-case "$*" in
-  'compose config --services') printf '%s\\n' app db${proxy ? ' proxy' : ''}${worker ? ' worker' : ''} ;;
-  'compose pull proxy db'|'compose stop app'|'compose stop app worker'|'compose up -d --build --wait') ;;
-  *) exit 1 ;;
-esac
-`,
-            { mode: 0o755 },
+      ])('stops before startup when a verification fails (%j)', async ({ worker, proxy }) => {
+        const verified = proxy && worker === needsWorker
+        const { result, calls } = await executePastedCommands(commands, { worker, proxy })
+        expectInteractiveShells(result, verified ? 0 : 1)
+        expect(calls).toEqual([
+          ...prefix,
+          'compose config --services',
+          ...(verified ? startup : []),
+        ])
+        if (!verified)
+          expect(result.stdout).toMatch(
+            /(?:service|deployment).*?(?:missing|enabled|separate worker)/i,
           )
-          writeFileSync(join(bin, 'git'), '#!/bin/sh\nprintf "%s\\n" "git $*" >> "$CALL_LOG"\n', {
-            mode: 0o755,
-          })
-          writeFileSync(join(bin, 'curl'), '#!/bin/sh\nprintf "%s\\n" health >> "$CALL_LOG"\n', {
-            mode: 0o755,
-          })
-          const callLog = join(directory, 'calls')
-          // A pasted block runs without errexit. Adding -e here would hide the regression.
-          // For a restore drill, simulate pasting a later startup block in the same shell.
-          const pasted = `${commands}\n${verificationOnly ? 'docker compose up -d --build --wait' : ''}`
-          const result = spawnSync('sh', ['-c', pasted], {
-            cwd: directory,
-            encoding: 'utf8',
-            env: {
-              PATH: `${bin}:${process.env.PATH}`,
-              CALL_LOG: callLog,
-              COMPOSE_FILE: 'conflicting-shell-selection.yml',
-            },
-          })
-          const verified = proxy && worker === needsWorker
-          const calls = readFileSync(callLog, 'utf8').trim().split('\n')
-          expect(calls.filter((call) => call.startsWith('compose up '))).toEqual(
-            verified ? ['compose up -d --build --wait'] : [],
-          )
-          expect(result.status).toBe(verified ? 0 : 1)
-          if (!verified)
-            expect(result.stdout).toMatch(
-              /(?:service|deployment).*?(?:missing|enabled|separate worker)/i,
-            )
-          expect(calls).toEqual([
-            ...(upgrade ? ['git pull --ff-only'] : []),
-            ...(helper ? [`${helper}-worker`] : []),
-            'compose config --services',
-            ...(worker === needsWorker ? ['compose config --services'] : []),
-            ...(verified
-              ? [
-                  ...(upgrade
-                    ? ['compose pull proxy db', `compose stop app${needsWorker ? ' worker' : ''}`]
-                    : []),
-                  'compose up -d --build --wait',
-                  ...(upgrade ? ['health'] : []),
-                ]
-              : []),
-          ])
-        } finally {
-          rmSync(directory, { recursive: true, force: true })
-        }
       })
+
+      it('rejects a Compose error even when it prints the expected services', async () => {
+        const { result, calls } = await executePastedCommands(commands, {
+          worker: needsWorker,
+          proxy: true,
+          failCommand: 'compose config --services',
+        })
+        expectInteractiveShells(result, 7)
+        expect(calls).toEqual([...prefix, 'compose config --services'])
+      })
+
+      it.each(prefix.filter((call) => !call.startsWith('compose ')))(
+        'stops when prerequisite %s fails',
+        async (failCommand) => {
+          const { result, calls } = await executePastedCommands(commands, {
+            worker: needsWorker,
+            proxy: true,
+            failCommand,
+          })
+          expectInteractiveShells(result, 7)
+          expect(calls).toEqual(prefix.slice(0, prefix.indexOf(failCommand) + 1))
+        },
+      )
+
+      it.each(upgrade ? startup.slice(0, 2) : [])(
+        'stops before startup when %s fails',
+        async (failCommand) => {
+          const { result, calls } = await executePastedCommands(commands, {
+            worker: needsWorker,
+            proxy: true,
+            failCommand,
+          })
+          expectInteractiveShells(result, 7)
+          expect(calls).toEqual([
+            ...prefix,
+            'compose config --services',
+            ...startup.slice(0, startup.indexOf(failCommand) + 1),
+          ])
+        },
+      )
     },
   )
+
+  const backupCalls = (enabled: boolean) => [
+    'compose config --services',
+    ...(enabled ? ['compose stop worker'] : []),
+    'compose stop app proxy',
+    'compose exec -T db pg_dump -U hourmere -d hourmere -Fc',
+    'install .env',
+    'git rev-parse HEAD',
+    'compose cp proxy:/data',
+    'compose cp proxy:/config',
+    'compose up -d --wait',
+  ]
+  it.each([false, true])(
+    'stops an enabled worker before backing up (worker: %s)',
+    async (enabled) => {
+      const { result, calls, dump } = await executePastedCommands(backupCommands, {
+        worker: enabled,
+        proxy: true,
+      })
+      expectInteractiveShells(result, 0)
+      expect(calls).toEqual(backupCalls(enabled))
+      expect(dump).toBe('synthetic-dump\n')
+    },
+  )
+
+  it.each(backupCalls(true).slice(0, -1))(
+    'does not resume the stack after backup prerequisite %s fails',
+    async (failCommand) => {
+      const { result, calls } = await executePastedCommands(backupCommands, {
+        worker: true,
+        proxy: true,
+        failCommand,
+      })
+      expectInteractiveShells(result, 7)
+      const expected = backupCalls(true)
+      expect(calls).toEqual(expected.slice(0, expected.indexOf(failCommand) + 1))
+    },
+  )
+
+  it.each([
+    [
+      'environment example',
+      process.env.HOURMERE_DEPLOY_ENV_EXAMPLE ?? new URL('../.env.example', import.meta.url),
+    ],
+    [
+      'worker overlay',
+      process.env.HOURMERE_DEPLOY_WORKER_COMPOSE ??
+        new URL('../docker-compose.worker.yml', import.meta.url),
+    ],
+  ])('chains the worker verification comment in the %s', (_name, path) => {
+    expect(readFileSync(path, 'utf8')).toContain(
+      '# docker compose config --services | grep -qx worker && docker compose up -d --build --wait',
+    )
+  })
 
   it('migrates tracked worker edits before pulling and explains orphaned old images', () => {
     const upgrade = guide.split('## Upgrade and roll back\n')[1]?.split('\n## ')[0]
@@ -346,7 +533,9 @@ esac
       expect(source).toMatch(
         /(?:Keep|keep) (?:any additional )?custom overlays (?:within|inside) the quotes/,
       )
-      expect(source).toContain('docker compose config --services | grep -qx worker')
+      expect(source).toMatch(
+        /(?:docker compose config --services|printf '%s\\n' "\$compose_services") \| grep -qx worker/,
+      )
       expect(source).toMatch(
         /Restoring\s+(?:the Compose file\s+)?without selecting (?:the (?:worker )?)?overlay/,
       )
