@@ -297,9 +297,9 @@ function BookingFlow({
                 {formatTimeRange(Date.parse(slot.start), Date.parse(slot.end), timeZone, locale)}
                 <br />
                 <span className="muted">
-                  {zoneName(timeZone)}{' '}
+                  {zoneName(timeZone)}
                   <span className="time-offset">
-                    ({offsetLabel(timeZone, Date.parse(slot.start))})
+                    {t(' ({offset})', { offset: offsetLabel(timeZone, Date.parse(slot.start)) })}
                   </span>
                 </span>
               </p>

@@ -135,6 +135,7 @@ function EventTypeForm({
   automaticZoom,
 }: Loaded) {
   const { t, text, ui, uiText, locale: displayLocale } = useI18n()
+  const noScheduleHint = t('You have no schedule yet, so no times are offered. {0}.').split('{0}')
 
   const me = useMe()
   const navigate = useNavigate()
@@ -602,8 +603,9 @@ function EventTypeForm({
                   hint={
                     schedules.length === 0 ? (
                       <>
-                        {t('You have no schedule yet, so no times are offered.')}{' '}
-                        <Link to={PATHS.newSchedule}>{t('Set your availability')}</Link>.
+                        {noScheduleHint[0]}
+                        <Link to={PATHS.newSchedule}>{t('Set your availability')}</Link>
+                        {noScheduleHint[1]}
                       </>
                     ) : (
                       <>

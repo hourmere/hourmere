@@ -128,6 +128,7 @@ function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loa
   const statusRef = useRef<HTMLParagraphElement>(null)
   const format = zoned(timeZone, locale === 'zh-CN' ? locale : displayLocale)
   const zoneName = format.timeZone.replaceAll('_', ' ')
+  const browserZoneHint = t('Shown in this browser’s time zone. {0}.').split('{0}')
   const [invitee, ...guests] = [...booking.attendees].sort(
     (a, b) => Number(b.isBooker) - Number(a.isBooker),
   )
@@ -175,8 +176,9 @@ function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loa
         </p>
         {!fromProfile && (
           <p className="hint">
-            {t('Shown in this browser’s time zone.')}{' '}
-            <Link to={PATHS.settings}>{t('Set your time zone')}</Link>.
+            {browserZoneHint[0]}
+            <Link to={PATHS.settings}>{t('Set your time zone')}</Link>
+            {browserZoneHint[1]}
           </p>
         )}
         <dl className="details">

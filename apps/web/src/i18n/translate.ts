@@ -67,7 +67,7 @@ export function translate(
         : typeof value === 'number'
           ? new Intl.NumberFormat(locale, { useGrouping: false }).format(value)
           : String(value)
-    // Chinese templates butt against inserted names and titles; only Latin edges get a space.
+    // Chinese templates touch inserted names and titles; only ASCII letter/digit edges space.
     return locale === 'zh-CN'
       ? spaceCjkBoundaries(
           template.slice(0, offset),

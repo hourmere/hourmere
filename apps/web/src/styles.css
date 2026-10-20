@@ -1554,6 +1554,29 @@ input[type="radio"] {
   white-space: nowrap;
 }
 
+/* Keep the distinct event slug visible when a long handle uses the remaining path width. */
+.booking-link .booking-link-path {
+  display: flex;
+  flex: 1 1 auto;
+}
+
+.booking-link-handle,
+.booking-link-slug {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.booking-link-handle {
+  flex: 0 1 auto;
+}
+
+.booking-link-slug {
+  flex: 0 0 auto;
+  max-width: 75%;
+}
+
 /* In table mode the copy button stays beside the truncated path, so rows keep one line. */
 @container data-table (min-width: 880px) {
   .table .booking-link {

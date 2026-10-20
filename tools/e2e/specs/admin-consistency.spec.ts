@@ -93,6 +93,9 @@ for (const locale of ['en-US', 'zh-CN'] as const) {
       expect(geometry.linkLines, `${width}px link lines`).toBe(1)
       expect(geometry.linkOverflow, `${width}px link clips`).toBe(true)
       expect(geometry.linkEllipsis, `${width}px ellipsis`).toBe('ellipsis')
+      expect(geometry.handleOverflow, `${width}px long handle clips`).toBe(true)
+      expect(geometry.slugStartVisible, `${width}px slug start visible`).toBe(true)
+      expect(geometry.fullUrlTitle, `${width}px full URL title`).toBe(true)
       expect(geometry.copyBeside, `${width}px copy button beside`).toBe(true)
       expect(geometry.documentOverflow, `${width}px document`).toBe(false)
     }
@@ -156,21 +159,12 @@ for (const locale of ['en-US', 'zh-CN'] as const) {
     const link = page.locator('.booking-link a').filter({ hasText: slug })
     await expect(link).toBeVisible()
     await expect(link.locator('wbr')).toHaveCount(0)
-    const geometry = await link.evaluate((node) => {
-      const style = getComputedStyle(node)
-      const range = document.createRange()
-      range.selectNode(node.firstChild as Node)
-      return {
-        overflow: node.scrollWidth > node.clientWidth,
-        ellipsis: style.textOverflow,
-        display: style.display,
-        lineCount: new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size,
-      }
-    })
-    expect(geometry.overflow).toBe(true)
-    expect(geometry.ellipsis).toBe('ellipsis')
-    expect(geometry.display).toBe('block')
-    expect(geometry.lineCount).toBe(1)
+    const geometry = await measureEventTypesTable(page, slug)
+    expect(geometry.linkOverflow).toBe(true)
+    expect(geometry.linkEllipsis).toBe('ellipsis')
+    expect(geometry.linkLines).toBe(1)
+    expect(geometry.slugStartVisible).toBe(true)
+    expect(geometry.fullUrlTitle).toBe(true)
     for (const width of [320, 360]) {
       await page.setViewportSize({ width, height: 568 })
       await expect.poll(documentFits).toBe(true)

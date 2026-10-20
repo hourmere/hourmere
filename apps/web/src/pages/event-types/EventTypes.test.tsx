@@ -164,6 +164,11 @@ describe('the event types list', () => {
     fakeApi({ ...signedIn, ...emptyAccount })
     renderApp('/app/event-types')
     expect(await screen.findByText(/You have no event types yet/)).toBeDefined()
+    expect(
+      screen
+        .getByRole('link', { name: 'Create your first event type' })
+        .classList.contains('button'),
+    ).toBe(true)
     expect(screen.getByRole('link', { name: 'Choose your handle' }).getAttribute('href')).toBe(
       '/app/settings',
     )

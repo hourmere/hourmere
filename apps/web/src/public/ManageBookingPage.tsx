@@ -717,27 +717,33 @@ function ConfirmReschedule({
           [
             'From',
             <span key="from" className="struck">
-              {formatDate(Date.parse(current.start), timeZone, locale)},{' '}
-              {formatTimeRange(
-                Date.parse(current.start),
-                Date.parse(current.end),
-                timeZone,
-                locale,
-              )}
+              {t('{date}, {time}', {
+                date: formatDate(Date.parse(current.start), timeZone, locale),
+                time: formatTimeRange(
+                  Date.parse(current.start),
+                  Date.parse(current.end),
+                  timeZone,
+                  locale,
+                ),
+              })}
             </span>,
           ],
           [
             'To',
             <strong key="to">
-              {formatDate(start, timeZone, locale)},{' '}
-              {formatTimeRange(start, Date.parse(slot.end), timeZone, locale)}
+              {t('{date}, {time}', {
+                date: formatDate(start, timeZone, locale),
+                time: formatTimeRange(start, Date.parse(slot.end), timeZone, locale),
+              })}
             </strong>,
           ],
           [
             'Time zone',
             <span key="zone">
-              {zoneName(timeZone)}{' '}
-              <span className="time-offset">({offsetLabel(timeZone, start)})</span>
+              {zoneName(timeZone)}
+              <span className="time-offset">
+                {t(' ({offset})', { offset: offsetLabel(timeZone, start) })}
+              </span>
             </span>,
           ],
         ]}

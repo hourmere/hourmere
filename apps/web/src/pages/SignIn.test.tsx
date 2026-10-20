@@ -1,4 +1,4 @@
-import { act, screen } from '@testing-library/react'
+import { act, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { goTo } from '../browser.ts'
@@ -51,7 +51,7 @@ describe('the sign-in page', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Email me a sign-in link' }))
 
     const sent = await screen.findByRole('heading', { name: 'Check your email' })
-    expect(document.activeElement).toBe(sent)
+    await waitFor(() => expect(document.activeElement).toBe(sent))
     assertHeader()
     expect(screen.getByText('ada@example.com')).toBeDefined()
     expect(

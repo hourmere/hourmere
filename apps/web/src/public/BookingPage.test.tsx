@@ -59,6 +59,23 @@ async function chooseSlot(user: ReturnType<typeof userEvent.setup>, dayName: Reg
 
 describe('the booking page', () => {
   it.each([
+    ['en', 'America/New York (GMT-05:00)', ' (GMT-05:00)'],
+    ['zh-CN', 'America/New York（GMT-05:00）', '（GMT-05:00）'],
+  ])(
+    'localizes chosen-time offset brackets in %s without breaking the offset',
+    async (language, expected, offset) => {
+      const user = userEvent.setup()
+      fakeApi(eventRoutes(EVENT, DST_SLOTS))
+      renderApp('/ada/intro')
+      await chooseSlot(user, /November 2, available/, '9:00 AM')
+      await user.selectOptions(screen.getByLabelText('Interface language'), language)
+      const zone = document.querySelector('.chosen-time .muted')
+      expect(zone?.textContent).toBe(expected)
+      expect(zone?.querySelector('.time-offset')?.textContent).toBe(offset)
+    },
+  )
+
+  it.each([
     {
       host: '主持人（王小明）',
       title: 'Intro call',

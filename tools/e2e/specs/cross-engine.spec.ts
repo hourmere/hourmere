@@ -62,15 +62,23 @@ test('embed popup booking and keyboard dismissal', async ({ page, app }) => {
 test('event-types list beside a long booking link', async ({ page, app }) => {
   await openAuditPage(page, app, 'event-types')
   await useLongBookingSlug(page, app)
-  const geometry = await measureEventTypesTable(page, LONG_BOOKING_SLUG)
-  expect(geometry.linkLines).toBe(1)
-  expect(geometry.linkOverflow).toBe(true)
-  expect(geometry.linkEllipsis).toBe('ellipsis')
-  expect(geometry.documentOverflow).toBe(false)
-  if ((page.viewportSize()?.width ?? 0) >= 1024) {
-    expect(geometry.tableMode).toBe(true)
-    expect(geometry.titleColumnWidth / geometry.tableWidth).toBeGreaterThanOrEqual(0.35)
-    expect(geometry.titleLines).toBeLessThanOrEqual(3)
-    expect(geometry.copyBeside).toBe(true)
-  } else expect(geometry.tableMode).toBe(false)
+  const initialWidth = page.viewportSize()?.width ?? 0
+  const widths = initialWidth >= 1024 ? [1280, 1440] : [initialWidth]
+  for (const width of widths) {
+    await page.setViewportSize({ width, height: 900 })
+    const geometry = await measureEventTypesTable(page, LONG_BOOKING_SLUG)
+    expect(geometry.linkLines).toBe(1)
+    expect(geometry.linkOverflow).toBe(true)
+    expect(geometry.linkEllipsis).toBe('ellipsis')
+    expect(geometry.slugStartVisible).toBe(true)
+    expect(geometry.fullUrlTitle).toBe(true)
+    expect(geometry.documentOverflow).toBe(false)
+    if (width >= 1024) {
+      expect(geometry.tableMode).toBe(true)
+      expect(geometry.titleColumnWidth / geometry.tableWidth).toBeGreaterThanOrEqual(0.35)
+      expect(geometry.titleLines).toBeLessThanOrEqual(3)
+      expect(geometry.handleOverflow).toBe(true)
+      expect(geometry.copyBeside).toBe(true)
+    } else expect(geometry.tableMode).toBe(false)
+  }
 })

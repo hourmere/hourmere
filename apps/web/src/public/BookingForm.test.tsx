@@ -212,6 +212,21 @@ describe('public booking form polish', () => {
       'Your name: Enter your name.',
     ],
     ['zh-CN', '你想讨论什么？', '你想讨论什么？此问题为必答项。', '你的姓名：请输入你的姓名。'],
+    ['zh-CN', '请补充：', '请补充：此问题为必答项。', '你的姓名：请输入你的姓名。'],
+    ['zh-CN', '请补充。', '请补充。此问题为必答项。', '你的姓名：请输入你的姓名。'],
+    [
+      'zh-CN',
+      'What would you like to discuss?',
+      'What would you like to discuss? 此问题为必答项。',
+      '你的姓名：请输入你的姓名。',
+    ],
+    ['zh-CN', 'Topic:', 'Topic: 此问题为必答项。', '你的姓名：请输入你的姓名。'],
+    [
+      'en',
+      '你想讨论什么？',
+      '你想讨论什么？ This answer is required.',
+      'Your name: Enter your name.',
+    ],
   ] as const)(
     'adds no second colon after a %s question label that already ends in punctuation',
     async (language, label, expected, plainLabel) => {

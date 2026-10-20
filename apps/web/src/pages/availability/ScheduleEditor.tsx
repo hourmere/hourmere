@@ -434,16 +434,18 @@ function DeleteSchedule({
 }) {
   const { t } = useI18n()
 
+  const defaultHint = t(
+    'This is your default schedule. To delete it, first make another schedule the default on the {0}.',
+  ).split('{0}')
   const blocked = schedule.isDefault && others.length > 0
   return (
     <section className="panel panel-danger" aria-labelledby="delete-heading">
       <h2 id="delete-heading">{t('Delete this schedule')}</h2>
       {blocked ? (
         <p>
-          {t(
-            'This is your default schedule. To delete it, first make another schedule the default on the',
-          )}{' '}
-          <Link to={PATHS.availability}>{t('availability page')}</Link>.
+          {defaultHint[0]}
+          <Link to={PATHS.availability}>{t('availability page')}</Link>
+          {defaultHint[1]}
         </p>
       ) : (
         <>

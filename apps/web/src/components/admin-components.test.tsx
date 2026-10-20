@@ -2,7 +2,16 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 import { chooseLanguage } from '../i18n/store.ts'
-import { fakeApi, json, later, ME, profile, renderApp, signedIn } from '../test/fake-api.tsx'
+import {
+  fakeApi,
+  json,
+  later,
+  ME,
+  PROFILE,
+  profile,
+  renderApp,
+  signedIn,
+} from '../test/fake-api.tsx'
 import { booking, eventType, schedule } from '../test/fixtures.ts'
 import { BreakableText } from './BreakableText.tsx'
 import { EmptyState } from './EmptyState.tsx'
@@ -74,9 +83,10 @@ describe.each(['en', 'zh-CN'] as const)('admin consistency in %s', (language) =>
     chooseLanguage(language)
     const user = userEvent.setup()
     const slug = `intro-${'long-slug-'.repeat(12)}call`
+    const handle = 'alexandria-review-very-long-booking-page-handle'
     fakeApi({
       ...signedIn,
-      ...profile(),
+      ...profile({ ...PROFILE, handle }),
       'GET /api/v1/event-types': () => json(200, { data: [eventType({ isActive: false, slug })] }),
       'GET /api/v1/schedules': () => json(200, { data: [schedule()] }),
     })
@@ -86,8 +96,12 @@ describe.each(['en', 'zh-CN'] as const)('admin consistency in %s', (language) =>
     ) as HTMLElement
     expect(row.classList.contains('event-type-inactive')).toBe(true)
     const link = row.querySelector('.booking-link a') as HTMLAnchorElement
-    expect(link.textContent).toContain(`/ada/${slug}`)
+    expect(link.textContent).toContain(`/${handle}/${slug}`)
     expect(link.textContent).not.toContain(window.location.host)
+    expect(link.title).toBe(`${window.location.origin}/${handle}/${slug}`)
+    expect(link.querySelector('.booking-link-handle')?.textContent).toBe(`/${handle}`)
+    expect(link.querySelector('.booking-link-slug')?.textContent).toBe(`/${slug}`)
+    expect(link.classList.contains('booking-link-path')).toBe(true)
     // Chromium may honor <wbr> even under nowrap, defeating single-line ellipsis.
     expect(link.querySelector('wbr')).toBeNull()
     await user.click(
@@ -95,7 +109,7 @@ describe.each(['en', 'zh-CN'] as const)('admin consistency in %s', (language) =>
         name: language === 'en' ? 'Copy link for Intro call' : '复制链接：Intro call',
       }),
     )
-    expect(await navigator.clipboard.readText()).toBe(`${window.location.origin}/ada/${slug}`)
+    expect(await navigator.clipboard.readText()).toBe(`${window.location.origin}/${handle}/${slug}`)
   })
 
   it('places meeting summary before actions, then attendee and answer details', async () => {

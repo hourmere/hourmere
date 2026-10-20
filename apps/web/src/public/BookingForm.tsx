@@ -73,7 +73,7 @@ export function BookingForm({
   submitting,
   onSubmit,
 }: BookingFormProps) {
-  const { t, ui } = useI18n()
+  const { t, ui, locale } = useI18n()
 
   const prefix = useId()
   const form = useRef<HTMLFormElement>(null)
@@ -126,9 +126,15 @@ export function BookingForm({
       summaryErrors[fieldId(id)] = error
       continue
     }
-    // A question label that already ends in punctuation (“…discuss?”, “…？”) takes no colon.
+    // Punctuated labels take no colon; only Chinese full-width punctuation drops the gap.
     const text = ui(label)
-    summaryErrors[fieldId(id)] = msg(/[?？:：。]\s*$/u.test(text) ? '{0} {1}' : '{0}: {1}', {
+    const template =
+      locale === 'zh-CN' && /[？：。]\s*$/u.test(text)
+        ? '{0}{1}'
+        : /[?？:：。]\s*$/u.test(text)
+          ? '{0} {1}'
+          : '{0}: {1}'
+    summaryErrors[fieldId(id)] = msg(template, {
       '0': text,
       '1': ui(error),
     })

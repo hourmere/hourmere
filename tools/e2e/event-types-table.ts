@@ -3,6 +3,8 @@ import type { FixtureApp } from './fixtures.ts'
 
 /** Near the 64-character slug limit: a nowrap path this long must not size its column. */
 export const LONG_BOOKING_SLUG = 'paused-very-long-slug-for-the-booking-link-truncation-check-r3'
+// A realistic long handle within the API's 40-character limit.
+export const LONG_BOOKING_HANDLE = 'alexandria-review-very-long-host-handle'
 
 /** Gives the audit event type the long slug through the API, as a signed-in host would. */
 export async function setLongBookingSlug(page: Page, app: FixtureApp): Promise<void> {
@@ -15,9 +17,17 @@ export async function setLongBookingSlug(page: Page, app: FixtureApp): Promise<v
   if (response.status() !== 200) throw new Error('Could not give the audit event type a long slug')
 }
 
-/** Sets the long slug, then reloads the open event-types list until it shows the slug. */
+/** Sets a long handle and slug, then reloads the open event-types list. */
 export async function useLongBookingSlug(page: Page, app: FixtureApp): Promise<void> {
   await setLongBookingSlug(page, app)
+  const profileResponse = await page.request.get(`${app.url}/api/v1/profile`)
+  if (profileResponse.status() !== 200) throw new Error('Could not read the audit host profile')
+  const profile = (await profileResponse.json()) as { timeZone: string; locale: string }
+  const response = await page.request.put(`${app.url}/api/v1/profile`, {
+    headers: { origin: app.url },
+    data: { handle: LONG_BOOKING_HANDLE, timeZone: profile.timeZone, locale: profile.locale },
+  })
+  if (response.status() !== 200) throw new Error('Could not give the audit host a long handle')
   await page.reload()
   await page.locator('.booking-link a').filter({ hasText: LONG_BOOKING_SLUG }).waitFor()
 }
@@ -30,11 +40,14 @@ export interface EventTypesTableGeometry {
   linkColumnWidth: number
   titleLines: number
   linkLines: number
-  /** The anchor itself clips its path; the page does not scroll sideways. */
+  /** Either path segment clips, without scrolling the page sideways. */
   linkOverflow: boolean
   /** The copy button shares the link's line (table mode) rather than wrapping under it. */
   copyBeside: boolean
   linkEllipsis: string
+  handleOverflow: boolean
+  slugStartVisible: boolean
+  fullUrlTitle: boolean
   documentOverflow: boolean
 }
 
@@ -51,8 +64,28 @@ export function measureEventTypesTable(page: Page, slug: string): Promise<EventT
     const linkCell = row?.querySelector<HTMLElement>('.link-cell')
     const link = row?.querySelector<HTMLAnchorElement>('.booking-link a')
     const copy = row?.querySelector<HTMLButtonElement>('.booking-link .copy button')
-    if (!table || !row || !thead || !title || !titleLink || !linkCell || !link || !copy)
+    const handle = link?.querySelector<HTMLElement>('.booking-link-handle')
+    const slugPart = link?.querySelector<HTMLElement>('.booking-link-slug')
+    if (
+      !table ||
+      !row ||
+      !thead ||
+      !title ||
+      !titleLink ||
+      !linkCell ||
+      !link ||
+      !copy ||
+      !handle ||
+      !slugPart?.firstChild
+    )
       throw new Error('Event-types table row missing')
+    // A visible first character alone is too weak: reserve enough width to identify the slug.
+    const slugStart = document.createRange()
+    slugStart.setStart(slugPart.firstChild, 0)
+    slugStart.setEnd(slugPart.firstChild, Math.min(7, slugPart.firstChild.textContent?.length ?? 0))
+    const startRect = slugStart.getBoundingClientRect()
+    const slugRect = slugPart.getBoundingClientRect()
+    const linkRect = link.getBoundingClientRect()
     const lines = (node: Node | null) => {
       if (!node) return 0
       const range = document.createRange()
@@ -65,10 +98,17 @@ export function measureEventTypesTable(page: Page, slug: string): Promise<EventT
       titleColumnWidth: title.getBoundingClientRect().width,
       linkColumnWidth: linkCell.getBoundingClientRect().width,
       titleLines: lines(titleLink.firstChild),
-      linkLines: lines(link.firstChild),
-      linkOverflow: link.scrollWidth > link.clientWidth,
+      linkLines: Math.max(lines(handle), lines(slugPart)),
+      linkOverflow:
+        handle.scrollWidth > handle.clientWidth || slugPart.scrollWidth > slugPart.clientWidth,
       copyBeside: copy.getBoundingClientRect().top < link.getBoundingClientRect().bottom,
-      linkEllipsis: getComputedStyle(link).textOverflow,
+      linkEllipsis: getComputedStyle(slugPart).textOverflow,
+      handleOverflow: handle.scrollWidth > handle.clientWidth,
+      slugStartVisible:
+        startRect.width > 0 &&
+        startRect.left >= Math.max(slugRect.left, linkRect.left) - 1 &&
+        startRect.right <= Math.min(slugRect.right, linkRect.right) + 1,
+      fullUrlTitle: link.title === link.href,
       documentOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
     }
   }, slug)

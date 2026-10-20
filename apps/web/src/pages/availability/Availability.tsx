@@ -52,7 +52,11 @@ export function AvailabilityPage() {
         (state.data.length === 0 ? (
           <EmptyState
             title={t('No schedules yet.')}
-            action={<Link to={PATHS.newSchedule}>{t('Set your weekly hours')}</Link>}
+            action={
+              <Link to={PATHS.newSchedule} className="button">
+                {t('Set your weekly hours')}
+              </Link>
+            }
           >
             <p>
               {t(
