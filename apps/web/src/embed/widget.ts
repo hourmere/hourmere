@@ -69,7 +69,7 @@ const popupStyles = `
   }
   button:focus-visible { outline: 2px solid Highlight; outline-offset: 2px; }
   .content { min-height: 0; overflow: auto; overscroll-behavior: contain; }
-  @media (max-width: 480px) {
+  @media (max-width: 480px), (max-height: 480px) {
     dialog {
       width: 100vw;
       max-width: 100vw;
@@ -88,7 +88,17 @@ const popupStyles = `
 `
 
 function lockBackgroundScroll() {
-  const properties = ['overflow', 'overflow-x', 'overflow-y'] as const
+  const properties = [
+    'overflow',
+    'overflow-x',
+    'overflow-y',
+    'scrollbar-gutter',
+    'padding',
+    'padding-top',
+    'padding-right',
+    'padding-bottom',
+    'padding-left',
+  ] as const
   const originals = [document.documentElement, document.body].map((element) => ({
     element,
     values: properties.map((name) => ({
@@ -97,6 +107,26 @@ function lockBackgroundScroll() {
       priority: element.style.getPropertyPriority(name),
     })),
   }))
+  const root = document.documentElement
+  const scrollbarWidth = Math.max(0, window.innerWidth - root.clientWidth)
+  if (
+    scrollbarWidth > 0 &&
+    typeof CSS !== 'undefined' &&
+    CSS.supports?.('scrollbar-gutter', 'stable')
+  ) {
+    // Retain a host's existing both-edges policy without adding padding as well.
+    const gutter = getComputedStyle(root).getPropertyValue('scrollbar-gutter')
+    root.style.setProperty(
+      'scrollbar-gutter',
+      gutter.includes('stable') ? gutter : 'stable',
+      'important',
+    )
+  } else if (scrollbarWidth > 0) {
+    // Safari before 18.2 has no stable gutter. Replace the disappearing scrollbar
+    // with padding, keeping any padding the host page already has.
+    const padding = Number.parseFloat(getComputedStyle(document.body).paddingRight) || 0
+    document.body.style.setProperty('padding-right', `${padding + scrollbarWidth}px`, 'important')
+  }
   for (const { element } of originals) element.style.setProperty('overflow', 'hidden', 'important')
   return () => {
     for (const { element, values } of originals) {

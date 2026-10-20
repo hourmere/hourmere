@@ -9,6 +9,21 @@ import { literal, msg, type UiText } from '../i18n/translate.ts'
 export type Question = Schemas['Question']
 export type Answer = string | string[] | boolean
 
+export interface BookingGuest {
+  name: string
+  email: string
+}
+
+/** An untouched optional guest row does not add an attendee. */
+export const isEmptyGuest = (guest: BookingGuest) =>
+  guest.name.trim() === '' && guest.email.trim() === ''
+
+export function guestsFor(guests: readonly BookingGuest[]): BookingGuest[] {
+  return guests
+    .filter((guest) => !isEmptyGuest(guest))
+    .map((guest) => ({ name: guest.name.trim(), email: guest.email.trim() }))
+}
+
 export const LIMITS = {
   name: 200,
   email: 254,
@@ -148,7 +163,11 @@ const questionField = (id: string) => `q-${id}`
  * What a failed booking request means for the form. `invalid_request` names fields in its
  * message ("invitee.email: …; guests.0.name: …"); the service's codes name the case.
  */
-export function bookingErrors(err: RequestError, questions: readonly Question[]): MappedErrors {
+export function bookingErrors(
+  err: RequestError,
+  questions: readonly Question[],
+  guestDraft?: readonly BookingGuest[],
+): MappedErrors {
   const fields: FieldErrors = {}
   const message = err.message
   const label = (id: string) => questions.find((q) => q.id === id)?.label
@@ -165,8 +184,13 @@ export function bookingErrors(err: RequestError, questions: readonly Question[])
         else if (path === 'guests')
           fields.guests = msg('Add at most {0} guests.', { '0': LIMITS.guests })
         else if (guest) {
-          fields[`guest-${guest[1]}-${guest[2]}`] =
-            guest[2] === 'name' ? 'Enter a name, at most 200 characters.' : EMAIL_HINT
+          // The request omits untouched rows; API indexes refer to the remaining guests.
+          const sentIndexes = guestDraft?.flatMap((row, i) => (isEmptyGuest(row) ? [] : [i]))
+          const index = sentIndexes ? sentIndexes[Number(guest[1])] : Number(guest[1])
+          if (index === undefined) unplaced = true
+          else
+            fields[`guest-${index}-${guest[2]}`] =
+              guest[2] === 'name' ? 'Enter a name, at most 200 characters.' : EMAIL_HINT
         } else if (response?.[1] && label(response[1]) !== undefined) {
           fields[questionField(response[1])] = 'Check this answer.'
         } else unplaced = true

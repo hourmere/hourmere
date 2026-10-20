@@ -75,7 +75,7 @@ describe('responsive shell and shared CSS contract', () => {
       }
     }
     // Component container queries retain their own content-driven thresholds.
-    expect(styles).toContain('@container data-table (max-width: 639.98px)')
+    expect(styles).toContain('@container data-table not (min-width: 640px)')
   })
 
   it('gates every hover selector behind actual hover capability', () => {

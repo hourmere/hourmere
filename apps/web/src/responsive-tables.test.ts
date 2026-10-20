@@ -10,7 +10,7 @@ function rule(source: string, selector: string) {
 
 // jsdom has no container-query layout engine; inspect each real query's complete body.
 function container(condition: string) {
-  const start = styles.indexOf(`@container data-table (${condition}) {`)
+  const start = styles.indexOf(`@container data-table ${condition} {`)
   expect(start, `missing container query: ${condition}`).toBeGreaterThanOrEqual(0)
   let depth = 1
   const bodyStart = styles.indexOf('{', start) + 1
@@ -66,16 +66,16 @@ describe('responsive table CSS contract', () => {
   })
 
   it('lets the activity table keep its padding budget between 400 and 480px', () => {
-    const compact = container('min-width: 400px) and (max-width: 479.98px')
+    const compact = container('(min-width: 400px) and (not (min-width: 480px))')
     expect(rule(compact, '.table-analytics th,\n  .table-analytics td')).toContain(
       'padding-inline: var(--space-2);',
     )
   })
 
   it.each([
-    ['max-width: 399.98px', '.table'],
+    ['not (min-width: 400px)', '.table'],
     [
-      'min-width: 400px) and (max-width: 879.98px',
+      '(min-width: 400px) and (not (min-width: 880px))',
       ':is(.table-bookings, .table-api-keys, .table-event-types)',
     ],
   ])('uses aligned title-first cards when %s', (condition, selector) => {
@@ -105,7 +105,7 @@ describe('responsive table CSS contract', () => {
     const base = rule(styles, '.table caption')
     expect(base).toContain('text-align: start;')
     expect(base).toContain('margin-bottom: var(--space-2);')
-    const caption = rule(container('max-width: 639.98px'), '.table caption')
+    const caption = rule(container('not (min-width: 640px)'), '.table caption')
     expect(caption).toContain('display: block;')
     expect(caption).toContain('width: 100%;')
     expect(caption).toContain('text-align: start;')
@@ -113,8 +113,8 @@ describe('responsive table CSS contract', () => {
   })
 
   it('keeps analytics in table mode from 400px while dense tables still use cards', () => {
-    const narrow = container('max-width: 399.98px')
-    const tablet = container('min-width: 400px) and (max-width: 879.98px')
+    const narrow = container('not (min-width: 400px)')
+    const tablet = container('(min-width: 400px) and (not (min-width: 880px))')
     const analytics = document.createElement('table')
     analytics.className = 'table table-analytics'
     const dense = document.createElement('table')
@@ -126,12 +126,15 @@ describe('responsive table CSS contract', () => {
     expect(blockSelectors(tablet).some((selector) => analytics.matches(selector))).toBe(false)
     expect(blockSelectors(tablet).some((selector) => dense.matches(selector))).toBe(true)
     expect(
-      blockSelectors(container('max-width: 639.98px')).some((selector) =>
+      blockSelectors(container('not (min-width: 640px)')).some((selector) =>
         analytics.matches(selector),
       ),
     ).toBe(false)
     expect(
-      rule(container('min-width: 400px) and (max-width: 639.98px'), '.table-analytics caption'),
+      rule(
+        container('(min-width: 400px) and (not (min-width: 640px))'),
+        '.table-analytics caption',
+      ),
     ).toContain('display: table-caption;')
   })
 })

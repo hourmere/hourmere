@@ -999,7 +999,8 @@ input[readonly] {
   min-width: 0;
 }
 
-@container data-table (max-width: 639.98px) {
+/* Negated min-width keeps upper bounds exclusive, including fractional CSS widths. */
+@container data-table not (min-width: 640px) {
   .table caption {
     display: block;
     width: 100%;
@@ -1008,14 +1009,14 @@ input[readonly] {
   }
 }
 
-@container data-table (min-width: 400px) and (max-width: 639.98px) {
+@container data-table (min-width: 400px) and (not (min-width: 640px)) {
   .table-analytics caption {
     display: table-caption;
   }
 }
 
 /* The activity table's four short columns need less padding to fit between 400 and 480px. */
-@container data-table (min-width: 400px) and (max-width: 479.98px) {
+@container data-table (min-width: 400px) and (not (min-width: 480px)) {
   .table-analytics th,
   .table-analytics td {
     padding-inline: var(--space-2);
@@ -1023,7 +1024,7 @@ input[readonly] {
 }
 
 /* The activity table's four short columns fit until the container is below 400px. */
-@container data-table (max-width: 399.98px) {
+@container data-table not (min-width: 400px) {
   /* Hidden headers retain semantics without overflowing their clipped box. */
   .table thead th {
     overflow: hidden;
@@ -1109,7 +1110,7 @@ input[readonly] {
 }
 
 /* Keep table mode at the current shell’s 896px maximum content width. */
-@container data-table (min-width: 400px) and (max-width: 879.98px) {
+@container data-table (min-width: 400px) and (not (min-width: 880px)) {
   /* Hidden headers retain semantics without overflowing their clipped box. */
   :is(.table-bookings, .table-api-keys, .table-event-types) thead th {
     overflow: hidden;
@@ -1411,7 +1412,7 @@ input[type="radio"] {
 }
 
 .panel-danger {
-  border-color: var(--danger-border);
+  border-color: var(--danger);
 }
 
 .field-grid {
@@ -2145,6 +2146,14 @@ input[aria-invalid="true"] {
 .table .analytics-caption {
   padding-block: var(--space-3) var(--space-2);
   font-weight: 600;
+}
+
+@media (forced-colors: active) {
+  .sidenav a[aria-current="page"] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+    text-decoration: underline;
+  }
 }
 
 /* Chinese typography: limit full-width font features to quote glyphs. */

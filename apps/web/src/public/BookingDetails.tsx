@@ -97,13 +97,25 @@ export function When({
   const { t } = useI18n()
   const s = Date.parse(start)
   const e = Date.parse(end)
+  // The locale's brackets and comma wrap the zone; the numeric offset and its closing bracket
+  // stay in one unbreakable span.
+  const offset = offsetLabel(timeZone, s)
+  const zone = t(' ({zone}, {offset})', { zone: zoneName(timeZone), offset })
+  const at = zone.lastIndexOf(offset)
   return (
     <>
       <time dateTime={start}>{formatDate(s, timeZone, locale)}</time>
       <br />
       {formatTimeRange(s, e, timeZone, locale)}
       <span className="muted">
-        {t(' ({zone}, {offset})', { zone: zoneName(timeZone), offset: offsetLabel(timeZone, s) })}
+        {at < 0 ? (
+          zone
+        ) : (
+          <>
+            {zone.slice(0, at)}
+            <span className="time-offset">{zone.slice(at)}</span>
+          </>
+        )}
       </span>
     </>
   )

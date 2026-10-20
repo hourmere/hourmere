@@ -102,7 +102,10 @@ async function verifyAuditContent(page: Page, id: AuditPageId) {
       await page.locator('.booking-details').getByText(AUDIT_TITLE, { exact: true }).waitFor()
       break
     case 'manage-reschedule':
-      await page.locator('.reschedule-header p').filter({ hasText: AUDIT_TITLE }).waitFor()
+      await page
+        .locator('.reschedule-summary .event-title')
+        .filter({ hasText: AUDIT_TITLE })
+        .waitFor()
       break
     case 'event-types':
       await page.getByText(AUDIT_TITLE, { exact: true }).waitFor()
@@ -208,7 +211,7 @@ export async function openAuditPage(
         { token: fixture.manageToken, reschedule: id === 'manage-reschedule' },
       )
       await page
-        .locator(id === 'manage-reschedule' ? '.reschedule-header' : '.booking-details')
+        .locator(id === 'manage-reschedule' ? '.reschedule-summary' : '.booking-details')
         .waitFor()
       await page.waitForFunction(() => window.location.hash === '')
     } else await page.locator('h1').waitFor()

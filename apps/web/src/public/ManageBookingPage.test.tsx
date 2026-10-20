@@ -4,7 +4,6 @@ import { BrowserRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from '../App.tsx'
 import { type Call, fakeApi, json, later, type Routes, renderApp } from '../test/fake-api.tsx'
-import { expectStackGap } from '../test/layout.ts'
 import { booking, managed, NEW_TOKEN, slotsAnswer, TOKEN } from '../test/public-fixtures.ts'
 import { parseManageFragment } from './ManageBookingPage.tsx'
 import publicStyles from './public.css?raw'
@@ -109,6 +108,33 @@ function manageServer(
 }
 
 describe('the invitee’s manage page', () => {
+  it('keeps rescheduling at the view width with a current-booking card and no cancellation action', async () => {
+    const user = userEvent.setup()
+    const api = manageServer()
+    renderApp(`/booking#token=${TOKEN}`)
+    await screen.findByRole('heading', { name: 'Your booking' })
+    expect(screen.getByRole('main').classList.contains('public-main-wide')).toBe(true)
+    await user.click(screen.getByRole('button', { name: 'Reschedule' }))
+    const heading = await screen.findByRole('heading', { name: 'Pick a new time' })
+    expect(document.activeElement).toBe(heading)
+    expect(screen.getByRole('main').classList.contains('public-main-wide')).toBe(true)
+    const summary = screen.getByRole('complementary', { name: 'Current booking' })
+    expect(summary.closest('.booking-layout')).not.toBeNull()
+    expect(within(summary).getByRole('heading', { name: 'Intro call' })).toBeDefined()
+    expect(within(summary).getByText('Ada Lovelace')).toBeDefined()
+    expect(summary.nextElementSibling?.classList.contains('booking-main')).toBe(true)
+    expect(screen.queryByRole('button', { name: 'Cancel booking' })).toBeNull()
+    await user.click(await screen.findByRole('button', { name: /November 3, available/ }))
+    await user.click(screen.getByRole('button', { name: '10:00 AM' }))
+    await screen.findByRole('heading', { name: 'Move your booking?' })
+    expect(screen.queryByRole('button', { name: 'Cancel booking' })).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Pick another time' }))
+    await user.click(screen.getByRole('button', { name: 'Keep the current time' }))
+    expect(await screen.findByRole('button', { name: 'Cancel booking' })).toBeDefined()
+    expect(api.to('POST /api/v1/bookings/manage/cancel')).toHaveLength(0)
+    expect(api.to('POST /api/v1/bookings/manage/reschedule')).toHaveLength(0)
+  })
+
   it.each([
     ['en', 'Intro call, Monday, November 2, 2026, 9:00 – 9:30 AM'],
     ['zh-CN', 'Intro call，2026年11月2日星期一，09:00–09:30'],
@@ -120,8 +146,12 @@ describe('the invitee’s manage page', () => {
       name: language === 'en' ? 'Cancel this booking?' : '取消此预约？',
     })
     const form = heading.closest('form')
-    const summary = form?.querySelectorAll('p')[1]
+    const [note, summary] = [...(form?.querySelectorAll('p') ?? [])]
     expect(plain(summary?.textContent)).toBe(expected)
+    // The calendar note's quoted “Cancel booking” gets quote markup only in Chinese.
+    expect(
+      [...(note?.querySelectorAll('.cjk-quote') ?? [])].map((span) => span.textContent),
+    ).toEqual(language === 'zh-CN' ? ['“', '”'] : [])
   })
 
   it('formats Chinese host and guest lists and booker brackets', async () => {
@@ -152,72 +182,6 @@ describe('the invitee’s manage page', () => {
     expect(screen.getByText('周小刚、赵小华')).toBeDefined()
     expect(screen.getByText('Grace Hopper（grace@example.com）')).toBeDefined()
   })
-
-  it.each(['cancel', 'reschedule'])(
-    'explains calendar responses throughout the emailed %s action without sending a cancellation',
-    async (action) => {
-      const user = userEvent.setup()
-      const api = manageServer()
-      renderApp(`/booking#token=${TOKEN}&action=${action}`)
-      const heading = await screen.findByRole('heading', {
-        name: action === 'cancel' ? 'Cancel this booking?' : 'Pick a new time',
-      })
-      const note =
-        'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use “Cancel booking” here.'
-      const chineseNote = '在日历中接受或拒绝邀请不会取消预约。如需取消，请使用此处的“取消预约”。'
-      expect(screen.getAllByText(note)).toHaveLength(1)
-      expect(document.activeElement).toBe(heading)
-      expect(
-        heading.compareDocumentPosition(screen.getByText(note)) & Node.DOCUMENT_POSITION_FOLLOWING,
-      ).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
-      if (action === 'reschedule') {
-        const cancel = screen.getByRole('button', { name: 'Cancel booking' })
-        expect(heading.compareDocumentPosition(cancel) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
-          Node.DOCUMENT_POSITION_FOLLOWING,
-        )
-        expectStackGap(cancel.parentElement as HTMLElement, cancel)
-        expectStandardMargin(cancel.parentElement as HTMLElement, 'marginBottom')
-      }
-      await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
-      expect(
-        screen.getAllByText(
-          (_, element) => element?.tagName === 'P' && element.textContent === chineseNote,
-        ),
-      ).toHaveLength(1)
-      if (action === 'reschedule') {
-        await user.selectOptions(screen.getByLabelText('界面语言'), 'en')
-        await user.click(await screen.findByRole('button', { name: /November 3, available/ }))
-        await user.click(screen.getByRole('button', { name: '10:00 AM' }))
-        const confirmHeading = await screen.findByRole('heading', { name: 'Move your booking?' })
-        expect(screen.getAllByText(note)).toHaveLength(1)
-        expect(document.activeElement).toBe(confirmHeading)
-        expect(
-          confirmHeading.compareDocumentPosition(screen.getByText(note)) &
-            Node.DOCUMENT_POSITION_FOLLOWING,
-        ).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
-        const cancel = screen.getByRole('button', { name: 'Cancel booking' })
-        expect(
-          confirmHeading.compareDocumentPosition(cancel) & Node.DOCUMENT_POSITION_FOLLOWING,
-        ).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
-        expectStackGap(cancel.parentElement as HTMLElement, cancel)
-        await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
-        expect(
-          screen.getAllByText(
-            (_, element) => element?.tagName === 'P' && element.textContent === chineseNote,
-          ),
-        ).toHaveLength(1)
-        await user.click(screen.getByRole('button', { name: '取消预约' }))
-        await screen.findByRole('heading', { name: '取消此预约？' })
-        expect(
-          screen.getAllByText(
-            (_, element) => element?.tagName === 'P' && element.textContent === chineseNote,
-          ),
-        ).toHaveLength(1)
-      }
-      expect(api.to('POST /api/v1/bookings/manage/cancel')).toHaveLength(0)
-      expect(api.to('POST /api/v1/bookings/manage/reschedule')).toHaveLength(0)
-    },
-  )
 
   it.each(['pending', 'failed'] as const)(
     'withholds delivery advice while a rescheduled invitation is %s',
@@ -316,35 +280,14 @@ describe('the invitee’s manage page', () => {
   })
 
   it.each([
-    [
-      'en',
-      'Test Host',
-      'ICS test',
-      'Rescheduling ICS test with Test Host, now on Monday, November 2, 2026, 9:00 – 9:30 AM',
-    ],
-    [
-      'en',
-      null,
-      'ICS test',
-      'Rescheduling ICS test, now on Monday, November 2, 2026, 9:00 – 9:30 AM',
-    ],
-    [
-      'zh-CN',
-      'Test Host',
-      'ICS test',
-      '正在为与 Test Host 的“ICS test”预约改期，当前时间：2026年11月2日星期一，09:00–09:30',
-    ],
-    [
-      'zh-CN',
-      '王小明',
-      'Ada’s review',
-      '正在为与王小明的“Ada’s review”预约改期，当前时间：2026年11月2日星期一，09:00–09:30',
-    ],
-    ['zh-CN', null, 'ICS test', '正在改期 ICS test，当前时间：2026年11月2日星期一，09:00–09:30'],
-    ['zh-CN', null, '初次通话', '正在改期初次通话，当前时间：2026年11月2日星期一，09:00–09:30'],
+    ['en', 'Test Host', 'ICS test', 'Monday, November 2, 2026', '9:00 – 9:30 AM'],
+    ['en', null, 'ICS test', 'Monday, November 2, 2026', '9:00 – 9:30 AM'],
+    ['zh-CN', 'Test Host', 'ICS test', '2026年11月2日星期一', '09:00–09:30'],
+    ['zh-CN', '王小明', 'Ada’s review', '2026年11月2日星期一', '09:00–09:30'],
+    ['zh-CN', null, '初次通话', '2026年11月2日星期一', '09:00–09:30'],
   ] as const)(
-    'localizes the complete reschedule description in %s (host: %s, title: %s)',
-    async (language, host, title, expected) => {
+    'localizes the structured current booking summary in %s (host: %s, title: %s)',
+    async (language, host, title, date, time) => {
       localStorage.setItem('hourmere-language', language)
       manageServer({
         ...managed(),
@@ -352,18 +295,239 @@ describe('the invitee’s manage page', () => {
         hosts: host ? [{ name: host }] : [],
       })
       renderApp(`/booking#token=${TOKEN}&action=reschedule`)
-
-      await screen.findByRole('heading', {
-        name: language === 'en' ? 'Pick a new time' : '选择新时间',
+      const summary = await screen.findByRole('complementary', {
+        name: language === 'en' ? 'Current booking' : '当前预约',
       })
-      const description = document.querySelector('.reschedule-header p')
-      expect(plain(description?.textContent)).toBe(expected)
-      // Chinese double quotes around the title get quote markup; Latin apostrophes never do.
-      expect(
-        [...(description?.querySelectorAll('.cjk-quote') ?? [])].map((span) => span.textContent),
-      ).toEqual(language === 'zh-CN' && host ? ['“', '”'] : [])
+      // The title is a heading rather than prose, so it carries no quote glyphs or markup.
+      expect(within(summary).getByRole('heading', { name: title }).textContent).toBe(title)
+      expect(summary.querySelectorAll('.cjk-quote')).toHaveLength(0)
+      if (host) expect(within(summary).getByText(host)).toBeDefined()
+      const when = within(summary).getByText(language === 'en' ? 'When' : '时间')
+      // Date, time and zone use the locale's own punctuation: 24-hour HH:mm and full-width
+      // brackets and comma in Chinese.
+      const zone =
+        language === 'en' ? ' (America/New York, GMT-05:00)' : '（America/New York，GMT-05:00）'
+      expect(plain(when.nextElementSibling?.textContent)).toBe(`${date}${time}${zone}`)
+      expect(when.nextElementSibling?.querySelector('.time-offset')?.textContent).toBe(
+        zone.slice(zone.indexOf('GMT')),
+      )
     },
   )
+
+  describe.each(['en', 'zh-CN'] as const)('past and in-progress copy in %s', (language) => {
+    it('keeps a server refusal authoritative when the local clock is before the start', async () => {
+      const user = userEvent.setup()
+      localStorage.setItem('hourmere-language', language)
+      const api = manageServer(managed(), {
+        more: {
+          'POST /api/v1/bookings/manage/cancel': () => {
+            env.now = Date.parse('2026-11-02T13:59:59Z')
+            return json(409, { error: 'booking_in_past' })
+          },
+        },
+      })
+      renderApp(`/booking#token=${TOKEN}&action=cancel`)
+      await user.click(
+        await screen.findByRole('button', {
+          name: language === 'en' ? 'Cancel booking' : '取消预约',
+        }),
+      )
+      expect(
+        await screen.findByText(
+          language === 'en'
+            ? 'This meeting has already started, so it can’t be changed.'
+            : '此会议已开始，无法更改。',
+        ),
+      ).toBeDefined()
+      expect(
+        screen.queryByRole('button', { name: language === 'en' ? 'Reschedule' : '改期' }),
+      ).toBeNull()
+      expect(
+        screen.queryByRole('button', { name: language === 'en' ? 'Cancel booking' : '取消预约' }),
+      ).toBeNull()
+      expect(api.to('POST /api/v1/bookings/manage/cancel')).toHaveLength(1)
+    })
+
+    it('updates a server-refused started message after the meeting ends and language changes', async () => {
+      const user = userEvent.setup()
+      const initialLanguage = language === 'en' ? 'zh-CN' : 'en'
+      localStorage.setItem('hourmere-language', initialLanguage)
+      const api = manageServer(managed(), {
+        more: {
+          'POST /api/v1/bookings/manage/cancel': () => {
+            env.now = Date.parse('2026-11-02T14:29:59Z')
+            return json(409, { error: 'booking_in_past' })
+          },
+        },
+      })
+      renderApp(`/booking#token=${TOKEN}&action=cancel`)
+      await user.click(
+        await screen.findByRole('button', {
+          name: initialLanguage === 'en' ? 'Cancel booking' : '取消预约',
+        }),
+      )
+      expect(
+        await screen.findByText(
+          initialLanguage === 'en'
+            ? 'This meeting has already started, so it can’t be changed.'
+            : '此会议已开始，无法更改。',
+        ),
+      ).toBeDefined()
+      env.now += 1000
+      await user.selectOptions(
+        screen.getByRole('combobox', {
+          name: initialLanguage === 'en' ? 'Interface language' : '界面语言',
+        }),
+        language,
+      )
+      expect(screen.getByText(language === 'en' ? 'Ended' : '已结束')).toBeDefined()
+      expect(
+        screen.getByText(language === 'en' ? 'This meeting has ended.' : '此会议已结束。'),
+      ).toBeDefined()
+      expect(screen.queryByText(language === 'en' ? /already started/ : /此会议已开始/)).toBeNull()
+      expect(
+        screen.queryByRole('button', { name: language === 'en' ? 'Cancel booking' : '取消预约' }),
+      ).toBeNull()
+      expect(api.to('POST /api/v1/bookings/manage/cancel')).toHaveLength(1)
+      expect(api.to('GET /api/v1/bookings/manage')).toHaveLength(2)
+    })
+
+    it.each(['start', 'end'] as const)(
+      'uses the fresh time after a language rerender crosses the meeting %s',
+      async (boundary) => {
+        const user = userEvent.setup()
+        const initialLanguage = language === 'en' ? 'zh-CN' : 'en'
+        localStorage.setItem('hourmere-language', initialLanguage)
+        env.now = Date.parse(boundary === 'start' ? '2026-11-02T13:59:59Z' : '2026-11-02T14:29:59Z')
+        const api = manageServer()
+        renderApp(`/booking#token=${TOKEN}`)
+        expect(
+          await screen.findByText(initialLanguage === 'en' ? 'Confirmed' : '已确认'),
+        ).toBeDefined()
+        env.now += 1000
+        await user.selectOptions(
+          screen.getByRole('combobox', {
+            name: initialLanguage === 'en' ? 'Interface language' : '界面语言',
+          }),
+          language,
+        )
+        const ended = boundary === 'end'
+        const message = ended
+          ? language === 'en'
+            ? 'This meeting has ended.'
+            : '此会议已结束。'
+          : language === 'en'
+            ? 'This meeting has already started, so it can’t be changed here.'
+            : '此会议已开始，无法在此更改。'
+        expect(screen.getByText(message)).toBeDefined()
+        expect(
+          screen.getByText(
+            ended
+              ? language === 'en'
+                ? 'Ended'
+                : '已结束'
+              : language === 'en'
+                ? 'Confirmed'
+                : '已确认',
+          ),
+        ).toBeDefined()
+        expect(
+          screen.queryByRole('button', { name: language === 'en' ? 'Reschedule' : '改期' }),
+        ).toBeNull()
+        expect(
+          screen.queryByRole('button', { name: language === 'en' ? 'Cancel booking' : '取消预约' }),
+        ).toBeNull()
+        expect(api.to('GET /api/v1/bookings/manage')).toHaveLength(1)
+      },
+    )
+
+    it.each(['', '&action=reschedule', '&action=cancel'])(
+      'describes an ended booking consistently for a link with %s',
+      async (action) => {
+        localStorage.setItem('hourmere-language', language)
+        env.now = Date.parse('2026-11-02T14:30:00Z')
+        manageServer()
+        renderApp(`/booking#token=${TOKEN}${action}`)
+        expect(await screen.findByText(language === 'en' ? 'Ended' : '已结束')).toBeDefined()
+        expect(
+          screen.getByText(language === 'en' ? 'This meeting has ended.' : '此会议已结束。'),
+        ).toBeDefined()
+        expect(
+          screen.queryByText(language === 'en' ? /already started/ : /此会议已开始/),
+        ).toBeNull()
+        expect(screen.queryByText(language === 'en' ? 'Confirmed' : '已确认')).toBeNull()
+        expect(screen.queryByRole('button', { name: 'Reschedule' })).toBeNull()
+      },
+    )
+
+    it.each(['', '&action=reschedule'])(
+      'keeps the started message and confirmed status until the end for %s',
+      async (action) => {
+        localStorage.setItem('hourmere-language', language)
+        env.now = Date.parse('2026-11-02T14:29:59Z')
+        manageServer()
+        renderApp(`/booking#token=${TOKEN}${action}`)
+        expect(await screen.findByText(language === 'en' ? 'Confirmed' : '已确认')).toBeDefined()
+        const message = action
+          ? language === 'en'
+            ? 'This meeting has already started, so it can’t be changed.'
+            : '此会议已开始，无法更改。'
+          : language === 'en'
+            ? 'This meeting has already started, so it can’t be changed here.'
+            : '此会议已开始，无法在此更改。'
+        expect(screen.getByText(message)).toBeDefined()
+        expect(screen.queryByText(language === 'en' ? 'Ended' : '已结束')).toBeNull()
+        expect(
+          screen.queryByText(language === 'en' ? 'This meeting has ended.' : '此会议已结束。'),
+        ).toBeNull()
+      },
+    )
+
+    it.each(['2026-11-02T14:29:59Z', '2026-11-02T14:30:00Z'])(
+      'uses the current meeting state when a pending action reaches %s',
+      async (now) => {
+        const user = userEvent.setup()
+        localStorage.setItem('hourmere-language', language)
+        const api = manageServer(managed(), {
+          more: {
+            'POST /api/v1/bookings/manage/cancel': () => {
+              env.now = Date.parse(now)
+              return json(409, { error: 'booking_in_past' })
+            },
+          },
+        })
+        renderApp(`/booking#token=${TOKEN}&action=cancel`)
+        await user.click(
+          await screen.findByRole('button', {
+            name: language === 'en' ? 'Cancel booking' : '取消预约',
+          }),
+        )
+        const ended = now === '2026-11-02T14:30:00Z'
+        const message = ended
+          ? language === 'en'
+            ? 'This meeting has ended.'
+            : '此会议已结束。'
+          : language === 'en'
+            ? 'This meeting has already started, so it can’t be changed.'
+            : '此会议已开始，无法更改。'
+        expect(await screen.findByText(message)).toBeDefined()
+        expect(
+          screen.getByText(
+            ended
+              ? language === 'en'
+                ? 'Ended'
+                : '已结束'
+              : language === 'en'
+                ? 'Confirmed'
+                : '已确认',
+          ),
+        ).toBeDefined()
+        expect(api.to('POST /api/v1/bookings/manage/cancel')).toHaveLength(1)
+        expect(api.to('GET /api/v1/bookings/manage')).toHaveLength(2)
+        expect(screen.queryByRole('button', { name: 'Reschedule' })).toBeNull()
+      },
+    )
+  })
 
   it('starts in the booker’s stored time zone and lets them change it without shifting a slot', async () => {
     const user = userEvent.setup()
@@ -408,7 +572,12 @@ describe('the invitee’s manage page', () => {
     expect(api.to('POST /api/v1/bookings/manage/reschedule')[0]?.body).toEqual({
       start: '2026-11-03T15:00:00.000Z',
     })
-    expect(screen.getByText(/Europe\/Berlin, GMT\+01:00/)).toBeDefined()
+    expect(
+      screen.getByText(
+        (_, node) =>
+          node?.className === 'muted' && /Europe\/Berlin, GMT\+01:00/.test(node.textContent ?? ''),
+      ),
+    ).toBeDefined()
   })
 
   it.each(['missing booker', 'empty zone', 'unknown zone'])(

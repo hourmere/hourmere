@@ -15,6 +15,13 @@
   min-width: 0;
 }
 
+.picker .picker-calendar {
+  /* Sized by its track, so day labels can scale with the column width (cqw) below. */
+  container-type: inline-size;
+  width: 100%;
+  max-width: 360px;
+}
+
 @media (min-width: 640px) {
   .picker .picker-body {
     grid-template-columns: minmax(0, 1fr) 200px;
@@ -92,24 +99,47 @@
   min-height: 40px;
   /* Keep localized labels such as 10日 intact inside the narrow seven-column grid. */
   padding: 0;
-  border: 0;
+  border: 2px solid transparent;
   border-radius: 999px;
   background: transparent;
   color: var(--muted);
   font: inherit;
+  /* At most 37% of a column, so bold 22日 stays on one line inside the 2px border of 36px cells. */
+  font-size: min(1rem, 5.3cqw);
   cursor: default;
 }
 
+/* Chinese labels carry the 日 suffix: smaller, column-bound and never broken over two lines. */
+.picker .day:lang(zh) {
+  font-size: min(0.875rem, 5cqw);
+  white-space: nowrap;
+}
+
 .picker .day-available {
+  border-color: var(--border-strong);
   background: var(--accent-soft);
   color: var(--accent-soft-text);
   font-weight: 700;
   cursor: pointer;
 }
 
-.picker .day:lang(zh) {
-  font-size: 0.875rem;
-  white-space: nowrap;
+.picker .day[aria-disabled="true"] {
+  opacity: 0.6;
+}
+
+/*
+ * Touch targets: the calendar fills its track (never wider), so seven 44px columns need a
+ * 308px track, which 390px phones provide. Narrower tracks share their width across the
+ * seven columns (36px at 320px, 42px at 360px), above the 24px minimum and inside the card.
+ */
+@media (pointer: coarse) {
+  .picker .calendar-grid {
+    border-spacing: 0;
+  }
+
+  .picker .day {
+    min-height: 44px;
+  }
 }
 
 @media (hover: hover) {
@@ -178,10 +208,16 @@
 .picker .slots-day {
   margin: 0 0 var(--space-3);
   font-size: 1rem;
+  scroll-margin-top: var(--space-5);
+}
+
+.picker .slots-scroll {
+  position: relative;
 }
 
 .picker .slots {
   display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
   gap: var(--space-2);
   margin: 0;
   padding: 0;
@@ -190,10 +226,22 @@
 
 @media (min-width: 640px) {
   .picker .slots {
+    grid-template-columns: minmax(0, 1fr);
     max-height: 420px;
     overflow-y: auto;
     /* The shared focus outline extends 5px beyond each slot button. */
     padding: var(--space-2);
+  }
+
+  .picker .slots-scroll[data-more="true"]::after {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    height: var(--space-6);
+    background: linear-gradient(transparent, var(--surface));
+    pointer-events: none;
+    content: "";
   }
 }
 
@@ -244,7 +292,7 @@
   align-items: center;
   width: 100%;
   padding: var(--space-2) var(--space-3);
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   border-radius: var(--radius-small);
   background: var(--surface);
   color: var(--text);
@@ -327,6 +375,38 @@
   font-weight: 700;
 }
 
+:is(.public, .picker) .tz-group-label {
+  margin: var(--space-2) var(--space-3);
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
 :is(.public, .picker) .tz-empty {
   margin: var(--space-2) var(--space-3);
+}
+
+@media (forced-colors: active) {
+  .picker .day-available {
+    border-color: ButtonText;
+  }
+
+  .picker .day-selected,
+  .picker .slot-selected {
+    outline: 2px solid Highlight;
+    outline-offset: -4px;
+  }
+
+  .picker .day[aria-current="date"]::after {
+    border: 2px solid CanvasText;
+  }
+
+  :is(.public, .picker) .tz-option[data-active="true"] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+
+  .picker .slots-scroll::after {
+    display: none;
+  }
 }

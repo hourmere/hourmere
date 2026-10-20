@@ -112,38 +112,6 @@ describe('Chinese copy and punctuation', () => {
   })
 
   it.each([
-    ['王小明', 'Ada’s review', '正在为与王小明的“Ada’s review”预约改期，当前时间：10月20日，09:00'],
-    [
-      'Grace Hopper',
-      '初次通话',
-      '正在为与 Grace Hopper 的“初次通话”预约改期，当前时间：10月20日，09:00',
-    ],
-    [
-      '王小明和Grace Hopper',
-      'Ada’s review',
-      '正在为与王小明和Grace Hopper 的“Ada’s review”预约改期，当前时间：10月20日，09:00',
-    ],
-  ])('spaces the reschedule heading around host %s', (hosts, title, expected) => {
-    const values = { hosts, title, date: '10月20日', time: '09:00' }
-    expect(
-      translate('zh-CN', 'Rescheduling {title} with {hosts}, now on {date}, {time}', values),
-    ).toBe(expected)
-  })
-
-  it.each([
-    ['Ada’s review', '正在改期 Ada’s review，当前时间：10月20日，09:00'],
-    ['初次通话', '正在改期初次通话，当前时间：10月20日，09:00'],
-  ])('spaces the hostless reschedule heading around %s', (title, expected) => {
-    expect(
-      translate('zh-CN', 'Rescheduling {title}, now on {date}, {time}', {
-        title,
-        date: '10月20日',
-        time: '09:00',
-      }),
-    ).toBe(expected)
-  })
-
-  it.each([
     ['09:00–12:00', '11:00–14:00', '09:00–12:00 与 11:00–14:00'],
     ['上午', '下午', '上午与下午'],
     ['Morning', '下午', 'Morning 与下午'],

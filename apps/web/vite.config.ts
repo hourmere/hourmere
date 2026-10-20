@@ -11,7 +11,9 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react()],
     build: {
-      // Safari 16.0–16.3 ignores media ranges. Keep min-width syntax after minification.
+      // Lightning CSS rewrites container ranges despite this target; esbuild preserves
+      // min-width queries for Safari 16.0–16.3, which ignores range syntax.
+      cssMinify: 'esbuild',
       cssTarget: 'safari16',
     },
     server: {
