@@ -4,9 +4,31 @@ import { expect, it, vi } from 'vitest'
 import { EmbedLanguage } from '../i18n/runtime.tsx'
 import { EventDescription } from './EventDescription.tsx'
 
-it('expands and collapses a measured long description with an accessible control', async () => {
+/** jsdom applies no stylesheet: report the clamp the public CSS would compute. */
+function clampAt(value: 'none' | '3') {
+  const original = window.getComputedStyle.bind(window)
+  vi.spyOn(window, 'getComputedStyle').mockImplementation((element, pseudo) => {
+    const style = original(element, pseudo)
+    return new Proxy(style, {
+      get: (target, property) =>
+        property === 'getPropertyValue'
+          ? (name: string) =>
+              name === '-webkit-line-clamp' ? value : target.getPropertyValue(name)
+          : Reflect.get(target, property),
+    })
+  })
+}
+
+function overflowing() {
   vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(180)
   vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(60)
+}
+
+const paragraphs = ['', 'First paragraph', '  \t', '', 'Second paragraph', 'Third line', '']
+
+it('expands and collapses a measured long description with an accessible control', async () => {
+  clampAt('3')
+  overflowing()
   const user = userEvent.setup()
   render(<EventDescription>{'First line\nSecond line\nThird line\nFourth line'}</EventDescription>)
   const toggle = await screen.findByRole('button', { name: 'Show more' })
@@ -23,23 +45,30 @@ it('expands and collapses a measured long description with an accessible control
 })
 
 it.each(['\n', '\r\n', '\r'])(
-  'collapses blank lines so the clamp never ends on an empty line (%j)',
+  'collapses blank lines only while clamped, restoring them when expanded (%j)',
   async (newline) => {
-    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(180)
-    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(60)
+    clampAt('3')
+    overflowing()
     const user = userEvent.setup()
-    render(
-      <EventDescription>
-        {['', 'First paragraph', '  \t', '', 'Second paragraph', 'Third line', ''].join(newline)}
-      </EventDescription>,
-    )
+    const original = paragraphs.join(newline)
+    render(<EventDescription>{original}</EventDescription>)
     const toggle = await screen.findByRole('button', { name: 'Show more' })
     const text = document.getElementById(toggle.getAttribute('aria-controls') ?? '')
     expect(text?.textContent).toBe('First paragraph\nSecond paragraph\nThird line')
     await user.click(toggle)
+    expect(text?.textContent).toBe(original)
+    await user.click(toggle)
     expect(text?.textContent).toBe('First paragraph\nSecond paragraph\nThird line')
   },
 )
+
+it('keeps the blank lines where the page container no longer clamps descriptions', () => {
+  clampAt('none')
+  const original = paragraphs.join('\n')
+  render(<EventDescription>{original}</EventDescription>)
+  expect(screen.getByText(original, { normalizer: (value) => value }).textContent).toBe(original)
+  expect(screen.queryByRole('button')).toBeNull()
+})
 
 it('omits disclosure controls for descriptions that fit', () => {
   render(<EventDescription>Short description.</EventDescription>)

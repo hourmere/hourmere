@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useId, useLayoutEffect, useRef, useState } from 'react'
 import { useI18n } from '../i18n/runtime.tsx'
 import { collapseBlankLines } from './description.ts'
 
@@ -9,10 +9,16 @@ export function EventDescription({ children }: { children: string }) {
   const text = useRef<HTMLParagraphElement>(null)
   const [expanded, setExpanded] = useState(false)
   const [overflows, setOverflows] = useState(false)
-  useEffect(() => {
+  const [clamped, setClamped] = useState(false)
+  // Before paint, so a clamped description never flashes its blank lines first.
+  useLayoutEffect(() => {
     const element = text.current
     if (!element) return
     const measure = () => {
+      // The clamp comes from container-driven CSS (none from 900px), not from this state,
+      // so reading it back cannot loop.
+      const clamp = getComputedStyle(element).getPropertyValue('-webkit-line-clamp')
+      setClamped(clamp !== '' && clamp !== 'none')
       if (!expanded) setOverflows(element.scrollHeight > element.clientHeight)
     }
     measure()
@@ -31,7 +37,8 @@ export function EventDescription({ children }: { children: string }) {
         ref={text}
         className={`event-description${expanded ? '' : ' event-description-collapsed'}`}
       >
-        {collapseBlankLines(children)}
+        {/* Blank lines are the host's paragraph breaks: drop them only while clamped. */}
+        {clamped && !expanded ? collapseBlankLines(children) : children}
       </p>
       {overflows && (
         <button

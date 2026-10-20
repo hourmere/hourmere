@@ -72,6 +72,14 @@ describe('public booking polish CSS', () => {
     expect(rule('.public .guest').gridTemplateColumns).toBe('minmax(0, 1fr) minmax(0, 1fr)')
     expect(rule('.public .guest').padding).toBe('var(--space-2)')
     expect(rule('.public .guest-remove').gridColumn).toBe('1 / -1')
+    // An error under one input must neither stretch nor push down the row's other input.
+    expect(rule('.public .guest .field').alignContent).toBe('start')
+    const wide = 'public-page (min-width: 480px)'
+    expect(rule('.public .guest', wide).alignItems).toBe('start')
+    expect(rule('.public .guest-remove', wide).alignSelf).toBe('start')
+    expect(rule('.public .guest-remove', wide).marginTop).toBe(
+      'calc(0.875rem * 1.55 + var(--space-1))',
+    )
     expect(rule('.public .booking-form .choices').gap).toBe('var(--space-2)')
     expect(styles).toMatch(/--space-2:\s*8px/)
     expect(rule('.public .choice', '(pointer: coarse)').minHeight).toBe('44px')

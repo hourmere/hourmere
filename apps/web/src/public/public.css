@@ -32,8 +32,7 @@
 .public .event-facts > *,
 .public .guest > *,
 .public .details-row > *,
-.public .choice > span,
-.public .reschedule-header > * {
+.public .choice > span {
   min-width: 0;
 }
 
@@ -341,6 +340,8 @@
 
 .public .guest .field {
   gap: var(--space-1);
+  /* A row partner's error message must not stretch this field's input to match. */
+  align-content: start;
 }
 
 .public .guest label {
@@ -350,7 +351,8 @@
 @container public-page (min-width: 480px) {
   .public .guest {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
-    align-items: end;
+    /* Labels and inputs line up; an error only extends its own field downwards. */
+    align-items: start;
   }
 
   .public .guest .field {
@@ -359,6 +361,9 @@
 
   .public .guest-remove {
     grid-column: auto;
+    /* Level with the inputs: one label line (0.875rem at the 1.55 body line height) plus the field gap. */
+    align-self: start;
+    margin-top: calc(0.875rem * 1.55 + var(--space-1));
   }
 }
 
@@ -480,19 +485,6 @@
 .public .reschedule-summary .details-row {
   grid-template-columns: minmax(0, 1fr);
   gap: var(--space-1);
-}
-
-.public .reschedule-header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  margin-bottom: var(--space-4);
-}
-
-.public .reschedule-header p {
-  margin: 0;
 }
 
 .public.public-embedded {

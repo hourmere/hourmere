@@ -122,7 +122,16 @@ export function BookingForm({
     const error = errors[id]
     if (!error) continue
     const label = labels[id]
-    summaryErrors[fieldId(id)] = label ? msg('{0}: {1}', { '0': ui(label), '1': ui(error) }) : error
+    if (!label) {
+      summaryErrors[fieldId(id)] = error
+      continue
+    }
+    // A question label that already ends in punctuation (“…discuss?”, “…？”) takes no colon.
+    const text = ui(label)
+    summaryErrors[fieldId(id)] = msg(/[?？:：。]\s*$/u.test(text) ? '{0} {1}' : '{0}: {1}', {
+      '0': text,
+      '1': ui(error),
+    })
   }
 
   const describedBy = (field: string, hint?: string) =>

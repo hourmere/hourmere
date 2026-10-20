@@ -66,7 +66,6 @@ describe('public overflow protections', () => {
         '.public .guest > *',
         '.public .details-row > *',
         '.public .choice > span',
-        '.public .reschedule-header > *',
       ]) {
         const rule = rules.find(
           (rule) =>

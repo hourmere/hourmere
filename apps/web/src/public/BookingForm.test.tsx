@@ -204,6 +204,34 @@ describe('public booking form polish', () => {
     },
   )
 
+  it.each([
+    [
+      'en',
+      'What would you like to discuss?',
+      'What would you like to discuss? This answer is required.',
+      'Your name: Enter your name.',
+    ],
+    ['zh-CN', '你想讨论什么？', '你想讨论什么？此问题为必答项。', '你的姓名：请输入你的姓名。'],
+  ] as const)(
+    'adds no second colon after a %s question label that already ends in punctuation',
+    async (language, label, expected, plainLabel) => {
+      chooseLanguage(language)
+      const user = userEvent.setup()
+      render(
+        <Form
+          initial={{ ...valid, name: '' }}
+          questions={[{ id: 'topic', label, type: 'short_text', required: true }]}
+        />,
+      )
+      await user.click(
+        screen.getByRole('button', { name: language === 'en' ? 'Confirm booking' : '确认预约' }),
+      )
+      const summary = screen.getByRole('alert')
+      expect(within(summary).getByRole('link', { name: expected })).toBeDefined()
+      expect(within(summary).getByRole('link', { name: plainLabel })).toBeDefined()
+    },
+  )
+
   it('shows form-wide failures once in the same summary and localizes public headings', () => {
     chooseLanguage('zh-CN')
     const { rerender } = render(<Form formError="Check the form and try again." />)
