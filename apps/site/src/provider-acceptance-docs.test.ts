@@ -92,7 +92,7 @@ const unapprovedProviderClaims = (text: string, allowed: readonly string[]) =>
   sentences(text).filter(
     (sentence) =>
       (/marketplace/i.test(sentence) ||
-        (/\b(?:google|oauth)\b/i.test(sentence) && /verif/i.test(sentence))) &&
+        (/\b(?:google|oauth2?)\b/i.test(sentence) && /verif/i.test(sentence))) &&
       !allowed.includes(sentence),
   )
 
@@ -170,6 +170,7 @@ describe('provider publication and verification claims throughout documentation'
       'The hosted Google OAuth app, e.g. its production configuration, passed verification.',
       'The hosted gOoGlE app has been verified.',
       'The hosted oAuTh app has passed verification.',
+      'The hosted OAuth2 app passed verification.',
     ].map((claim) => ({ ...page, claim })),
   )
 
