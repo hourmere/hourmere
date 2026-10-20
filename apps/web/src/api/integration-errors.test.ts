@@ -5,7 +5,6 @@ import { errorMessage, requestError } from './errors.ts'
 
 registerCatalog(admin)
 const cases = [
-  ['invalid_request', 'Check the form and try again.', '请检查表单后重试。'],
   [
     'invalid_calendar_settings',
     'Check your calendar settings and try again.',
@@ -17,11 +16,7 @@ const cases = [
     '请选择日历列表访问或日历同步权限。',
   ],
   ['profile_not_found', 'Create your profile in Settings first.', '请先在“设置”中创建个人资料。'],
-  [
-    'session_required',
-    'Sign in again, then start a new calendar connection.',
-    '请重新登录，然后开始新的日历连接。',
-  ],
+  ['session_required', 'Your session has ended. Sign in again.', '你的登录已过期。请重新登录。'],
   [
     'invalid_oauth_state',
     'This connection attempt expired or was already used. Start again.',
@@ -116,24 +111,56 @@ it.each(cases)(
   },
 )
 
-it('recognizes the neutral Zoom busy alias while retaining the original error code', () => {
-  const error = requestError(409, {
-    error: 'zoom_refresh_in_progress',
-    errorAlias: 'zoom_operation_busy',
-    message: 'Unrelated server detail.',
-  })
-  expect(error.code).toBe('zoom_refresh_in_progress')
-  expect(error.codeAlias).toBe('zoom_operation_busy')
-  expect(translateMessage('en', errorMessage(error))).toBe(
-    'Zoom account operations are busy. Try again shortly.',
-  )
-  expect(translateMessage('zh-CN', errorMessage(error))).toBe('Zoom 账号操作繁忙。请稍后重试。')
-})
+it.each(['en', 'zh-CN'] as const)(
+  'preserves invalid_request field details verbatim in %s',
+  (locale) => {
+    const detail = 'invitee.email: Invalid email address; start: Invalid ISO datetime'
+    expect(
+      translateMessage(
+        locale,
+        errorMessage(requestError(400, { error: 'invalid_request', message: detail })),
+      ),
+    ).toBe(detail)
+    // A server message that happens to match a local key is still server prose.
+    expect(
+      translateMessage(
+        locale,
+        errorMessage(requestError(400, { error: 'invalid_request', message: 'Settings' })),
+      ),
+    ).toBe('Settings')
+  },
+)
+
+it.each([undefined, '', '  '])(
+  'uses localized invalid_request guidance without details: %j',
+  (message) => {
+    const error = errorMessage(requestError(400, { error: 'invalid_request', message }))
+    expect(translateMessage('en', error)).toBe('Check the form and try again.')
+    expect(translateMessage('zh-CN', error)).toBe('请检查表单后重试。')
+  },
+)
+
+it.each(['zoom_refresh_in_progress', 'other_legacy_busy_code'])(
+  'recognizes a documented alias generically while retaining the original code: %s',
+  (code) => {
+    const error = requestError(409, {
+      error: code,
+      errorAlias: 'zoom_operation_busy',
+      message: 'Unrelated server detail.',
+    })
+    expect(error.code).toBe(code)
+    expect(error.codeAlias).toBe('zoom_operation_busy')
+    expect(translateMessage('en', errorMessage(error))).toBe(
+      'Zoom account operations are busy. Try again shortly.',
+    )
+    expect(translateMessage('zh-CN', errorMessage(error))).toBe('Zoom 账号操作繁忙。请稍后重试。')
+  },
+)
 
 it.each([
   { error: 'zoom_refresh_in_progress', errorAlias: 'unknown_alias' },
   { error: 'zoom_refresh_in_progress', errorAlias: { error: 'zoom_operation_busy' } },
-  { error: 'unknown_code', errorAlias: 'zoom_operation_busy' },
+  { error: 'unknown_code', errorAlias: 'unknown_alias' },
 ])('ignores unsupported error alias combinations %j', (body) => {
   const error = requestError(409, { ...body, message: 'Unrelated server detail.' })
   expect(error.code).toBe(body.error)

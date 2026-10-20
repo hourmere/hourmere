@@ -103,10 +103,12 @@ background jobs; to split them after setup, run:
 unset COMPOSE_FILE
 ./scripts/enable-worker.sh
 docker compose config --services | grep -qx worker
+# Bundled HTTPS only; omit this check in plain mode.
+docker compose config --services | grep -qx proxy
 docker compose up -d --build --wait
 ```
 
-Continue only if the worker verification succeeds. The helper safely updates `COMPOSE_FILE`
+Continue only if the applicable verification commands succeed. The helper safely updates `COMPOSE_FILE`
 in the private `.env`, preserving the proxy selection. The tracked overlay automatically
 selects `web` for the app and `worker` for the separate worker, using the same image and
 secrets.

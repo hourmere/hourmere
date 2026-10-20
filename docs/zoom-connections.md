@@ -22,9 +22,11 @@ If an operation still owns a live lease, explicit refresh returns HTTP 409:
 ```
 
 New clients should prefer the neutral `errorAlias` and accept `zoom_refresh_in_progress`
-when talking to older servers. The legacy code is deprecated for one release and remains
-in `/api/v1` for compatibility. The conflict means an owner operation is busy; it does not
-identify which connection or operation holds the lease. Wait briefly before retrying.
+when talking to older servers. The legacy code is deprecated, but its `error` value remains
+for all of `/api/v1`; the alias is additive, and removing or renaming the old code requires
+a new API version ([API conventions](api-conventions.md#errors)). The conflict means an owner
+operation is busy; it does not identify which connection or operation holds the lease.
+Wait briefly before retrying.
 
 A refresh that acquires a valid lease and still finds `refreshing` can prove that the old
 rotation was abandoned. It changes the connection to `needs_reauth`, clears the old

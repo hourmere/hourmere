@@ -255,11 +255,14 @@ See the [operator upgrade procedure](../apps/site/src/content/docs/docs/self-hos
 Migration `0037_conference_pending_timeout.sql` is the first column drop and a historical
 exception to the two-release policy: it removes the write-only
 `booking_conferences.retry_conference` flag while old binaries still write it. All old
-roles must stop before 0037 runs. For every migration containing `DROP COLUMN`, add a
-same-basename Markdown sidecar in `packages/db/migrations` with a nonempty
-`Column-drop upgrade:` note describing the retired writes, release sequence and required
-operator steps. The migration policy test flags missing notes; never edit published SQL
-to add one.
+roles must stop before 0037 runs. Every migration that drops a column (including
+`ALTER TABLE ... DROP ...` without `COLUMN`), drops a table, or renames a column must have
+a same-basename Markdown sidecar in `packages/db/migrations` with a nonempty
+`Schema-break upgrade:` note describing compatibility with old binaries, the release
+sequence and required operator steps. Historical `Column-drop upgrade:` notes remain
+accepted. The migration policy test ignores comments and quoted strings; dynamically
+executed SQL and function bodies still need manual review. It flags missing notes; never
+edit published SQL to add one.
 
 ## Sign-in email outbox
 
@@ -380,7 +383,8 @@ prove that the attempt is valid or reusable. After the lease is released, that r
 for the distinction from a still-unclaimed retry.
 Explicit refresh returns the legacy `zoom_refresh_in_progress` code with the neutral
 `errorAlias: "zoom_operation_busy"` and a busy/retry message; workers retry while the lease
-is occupied. The legacy code is deprecated for one release and retained for v1 compatibility.
+is occupied. The legacy code is deprecated but remains unchanged for all of `/api/v1`;
+the alias is additive, and removing or renaming the old code requires a new API version.
 A newly acquired valid lease that finds `refreshing`
 proves the old rotation was abandoned: worker and explicit refresh retire it to
 `needs_reauth`, clearing the old operation and credentials so the user can reconnect.

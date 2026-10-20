@@ -203,14 +203,24 @@ in one container. After setup, run these commands from the deployment checkout:
 unset COMPOSE_FILE
 ./scripts/enable-worker.sh
 docker compose config --services | grep -qx worker
+# Bundled HTTPS only; omit this check in plain mode.
+docker compose config --services | grep -qx proxy
 docker compose up -d --build --wait
 ```
 
-Continue to `up` only if the verification command succeeds. The helper rewrites only
+Continue to `up` only if all applicable verification commands succeed. The helper rewrites only
 `COMPOSE_FILE` in your private `.env`, keeps its mode `600`, and preserves the existing
 proxy selection. It accepts quoted, unquoted and `export COMPOSE_FILE=` assignments, adds
 the setting if missing, and can be run again safely. It refuses a symlink `.env`.
 A shell-exported `COMPOSE_FILE` overrides `.env`; unset it before these commands.
+
+Unsupported or ambiguous `COMPOSE_FILE` syntax, including YAML-style `COMPOSE_FILE: ...`,
+is refused without changes. A leading UTF-8 BOM is also refused: save `.env` as UTF-8
+without BOM, then rerun. The helper preserves LF or CRLF line endings when appending a
+missing setting. If old instructions left a suffix outside the quotes, such as
+`COMPOSE_FILE='docker-compose.yml:docker-compose.proxy.yml':docker-compose.worker.yml`,
+move `:docker-compose.worker.yml` inside the closing quote, retaining every existing file.
+Use the complete HTTPS or plain-mode line below and keep any custom overlays inside the quotes.
 
 For a manual edit, replace the **whole line**, including its quotes. Bundled HTTPS uses:
 
@@ -313,6 +323,8 @@ n8n port. Verify the worker selection and recreate both app and worker:
 
 ```sh
 docker compose config --services | grep -qx worker
+# Bundled HTTPS only; omit this check in plain mode.
+docker compose config --services | grep -qx proxy
 docker compose up -d --build --wait
 ```
 
@@ -432,6 +444,8 @@ or worker:
 
 ```sh
 docker compose config --services | grep -qx worker
+# Bundled HTTPS only; omit this check in plain mode.
+docker compose config --services | grep -qx proxy
 ```
 
 Continue only if verification succeeds. For a plain-mode restore, replace the whole line
@@ -464,10 +478,10 @@ reopening traffic. Keep the old volumes and backup until recovery is accepted.
 ## Upgrade and roll back
 
 Read the intended release's changes and take the backup above first. Record its commit and
-preserve its `.env` and Caddy state. Enable separate workers with
+preserve its `.env` and Caddy state. If using separate workers, select them with
 `./scripts/enable-worker.sh`, keeping the tracked Compose files unchanged so local
 deployment choices do not block `git pull --ff-only`. The persisted file selection also
-rebuilds/recreates the worker during upgrades. In the deployment checkout, a branch
+rebuilds/recreates any separate worker during upgrades. In the deployment checkout, a branch
 following `main` can be updated with the commands below.
 
 **Migration 0038 requires stopping all old processes; do not use a rolling deployment.**
@@ -497,22 +511,49 @@ file before pulling:
 
 ```sh
 git restore docker-compose.yml
+```
+
+Restoring the Compose file without selecting the worker overlay leaves the old worker
+container orphaned on the old image, and the app may remain web-only if `.env` still sets
+`HOURMERE_ROLE=web`. Select the overlay before restoring so the upgrade recreates both
+services on the new image. Installations already using the tracked overlay skip this legacy
+restoration step. Choose the upgrade sequence for your existing deployment below.
+
+### Single-container upgrade
+
+The app keeps the default `all` role. From the deployment checkout:
+
+```sh
+git pull --ff-only
+unset COMPOSE_FILE
+# Bundled HTTPS only; omit this check in plain mode.
+docker compose config --services | grep -qx proxy
+docker compose pull proxy db
+docker compose stop app
+docker compose up -d --build --wait
+curl --retry 20 --retry-delay 3 --retry-all-errors --fail https://app.hourmere.com/api/health
+```
+
+### Separate-worker upgrade
+
+From the deployment checkout, verify both the worker and the bundled HTTPS proxy before
+stopping the old app and worker:
+
+```sh
 git pull --ff-only
 unset COMPOSE_FILE
 ./scripts/enable-worker.sh
 docker compose config --services | grep -qx worker
+# Bundled HTTPS only; omit this check in plain mode.
+docker compose config --services | grep -qx proxy
 docker compose pull proxy db
 docker compose stop app worker
 docker compose up -d --build --wait
 curl --retry 20 --retry-delay 3 --retry-all-errors --fail https://app.hourmere.com/api/health
 ```
 
-For installations already using the tracked overlay, skip `git restore docker-compose.yml`.
-Continue only if worker verification succeeds. For a single-container installation, omit
-`enable-worker.sh` and its verification, and stop only `app`. Restoring the Compose file
-without selecting the worker overlay leaves the old worker container orphaned on the old
-image, and the app may remain web-only if `.env` still sets `HOURMERE_ROLE=web`. Select the overlay before restoring so the upgrade recreates both
-services on the new image.
+Continue only if all applicable verification commands succeed. For plain mode, omit the
+proxy verification, pull only `db`, and use your deployment's health URL in either sequence.
 
 For a pinned release, fetch and check out the reviewed tag/commit instead of pulling the
 branch. No public image can currently be pulled as a substitute for building the source.
@@ -526,7 +567,7 @@ image updates are separate from host apt updates. Rebuild any separate worker to
 **Before starting a version whose migrations drop columns, stop every old app and worker
 process.** Migration `0037_conference_pending_timeout.sql` is the project's first column
 drop: old versions still write the removed `booking_conferences.retry_conference` column.
-The `stop app worker` step above stops both Compose roles before new startup migrations.
+The separate-worker sequence's `stop app worker` stops both Compose roles before new startup migrations.
 For a single-container deployment, `docker compose up -d --build` already stops the old app
 container before starting its replacement. Separately managed workers, including processes
 outside this Compose project, must be stopped explicitly before the new app or a manual

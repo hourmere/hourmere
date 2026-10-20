@@ -148,10 +148,10 @@ describe('the invitee’s manage page', () => {
     [
       'en',
       true,
-      'Rescheduling ICS test with Adrian Lee, now on Monday, November 2, 2026, 9:00 – 9:30 AM',
+      'Rescheduling ICS test with Test Host, now on Monday, November 2, 2026, 9:00 – 9:30 AM',
     ],
     ['en', false, 'Rescheduling ICS test, now on Monday, November 2, 2026, 9:00 – 9:30 AM'],
-    ['zh-CN', true, '正在改期 ICS test 与 Adrian Lee，当前时间：2026年11月2日星期一，09:00–09:30'],
+    ['zh-CN', true, '正在改期 ICS test 与 Test Host，当前时间：2026年11月2日星期一，09:00–09:30'],
     ['zh-CN', false, '正在改期 ICS test，当前时间：2026年11月2日星期一，09:00–09:30'],
   ] as const)(
     'localizes the complete reschedule description in %s (host: %s)',
@@ -160,7 +160,7 @@ describe('the invitee’s manage page', () => {
       manageServer({
         ...managed(),
         eventType: { title: 'ICS test', durationMinutes: 30 },
-        hosts: hasHost ? [{ name: 'Adrian Lee' }] : [],
+        hosts: hasHost ? [{ name: 'Test Host' }] : [],
       })
       renderApp(`/booking#token=${TOKEN}&action=reschedule`)
 

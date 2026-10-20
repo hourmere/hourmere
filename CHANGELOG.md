@@ -53,6 +53,13 @@ must approve publication through the [release workflow](https://github.com/hourm
 
 ### Fixed
 
+- Calendar and conference settings now translate integration errors and provider notices in
+  English and Simplified Chinese. Calendar destinations require a profile, and a profile
+  lookup failure leaves connected calendars usable with a retry hint. Calendar controls
+  show each name once with clearer separation. Private booking links recover a concurrent
+  host reschedule with one bounded read and keep the invitee's existing management access.
+- Simplified Chinese public booking calendars keep date labels on one line and separate
+  today's marker from the date at mobile and desktop widths.
 - Booking email invitations align new calendar organizers with the configured sending
   mailbox, distinguish calendar acceptance from booking confirmation, and use calendar MIME
   alternatives with downloadable ICS copies. Hosts with pinned provider copies receive
@@ -60,13 +67,23 @@ must approve publication through the [release workflow](https://github.com/hourm
   Host calendar summaries name the invitee, and an invalid Reply-To no longer blocks delivery.
 - Separate-worker setup now uses `scripts/enable-worker.sh` (and
   `scripts/disable-worker.sh` to deselect it), preserving quoted `COMPOSE_FILE` values and
-  the proxy overlay. Verify `docker compose config --services | grep -qx worker` before
-  recreating a separate-worker stack to catch a lost overlay before the app runs web-only.
+  the proxy overlay. Verify `docker compose config --services | grep -qx worker` and, for
+  bundled HTTPS, `docker compose config --services | grep -qx proxy` before recreating a
+  separate-worker stack. Ambiguous settings, YAML-style assignments and a leading UTF-8
+  BOM are refused without changes; diagnostics explain how to repair old quoted suffixes.
+  Appended settings preserve CRLF when the existing file uses it.
 - Automatic Google Meet now imports the private calendar copy first and requests its
   conference through a separate conditional PATCH. Retries preserve the event and request
   identity, including recovery of legacy import-created pending requests.
 - Exhausted automatic Meet polling reports `conference_pending_timeout`, distinct from
   transport/provider failures, and explains the safe host retry in both interface languages.
+
+### Deprecated
+
+- The Zoom conflict code `zoom_refresh_in_progress` is deprecated in favor of the additive
+  `errorAlias: "zoom_operation_busy"`. The original `error` code remains for all of
+  `/api/v1`; it will not be renamed or removed within v1. New clients may use a documented
+  alias when present and must retain support for the original code on older servers.
 
 ### Upgrade notes
 
@@ -128,7 +145,8 @@ stack includes PostgreSQL 18.
   `COMPOSE_FILE='docker-compose.yml:docker-compose.proxy.yml:docker-compose.worker.yml'`
   for bundled HTTPS; keep custom overlays inside the quotes. Then restore the tracked
   Compose file and pull. Run `./scripts/enable-worker.sh` and verify
-  `docker compose config --services | grep -qx worker` succeeds before recreating the
+  `docker compose config --services | grep -qx worker` and, for bundled HTTPS,
+  `docker compose config --services | grep -qx proxy` succeed before recreating the
   stack. Restoring without selecting the overlay leaves the old worker container orphaned
   on the old image and the app possibly web-only. See the
   [worker upgrade steps](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/self-hosting.md#upgrade-and-roll-back).
@@ -138,8 +156,10 @@ stack includes PostgreSQL 18.
   separately managed workers. Single-container `docker compose up -d --build` already
   stops the old app before starting its replacement; separate workers need an explicit
   stop. Restart every role on the upgraded code. Future removals use two phases: release N
-  stops writing the column, and release N+1 drops it. Column-drop migrations require an
-  upgrade-note sidecar, checked by the migration policy test.
+  stops writing the column, and release N+1 drops it. Column drops (with or without the
+  `COLUMN` keyword), table drops and column renames require an upgrade-note sidecar,
+  checked by the migration policy test. See the labelled single-container and
+  separate-worker upgrade sequences in the self-hosting guide.
 - **Sign-in ID tokens are discarded.** Migration `0031_discard_sign_in_id_tokens.sql`
   clears existing `auth.account."idToken"` values, and account create/update hooks keep
   them NULL. Other account data is preserved; sign-in access/refresh tokens remain

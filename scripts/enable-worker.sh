@@ -44,9 +44,14 @@ if [ -s "$env_file" ] && [ -z "$(tail -c 1 "$env_file")" ]; then
   ends_newline=true
 fi
 
-LC_ALL=C awk -v mode="$mode" -v ends_newline="$ends_newline" '
-  BEGIN { quote = sprintf("%c", 39); worker = "docker-compose.worker.yml" }
-  function invalid() { failed = 1; exit 1 }
+if LC_ALL=C awk -v mode="$mode" -v ends_newline="$ends_newline" '
+  BEGIN {
+    quote = sprintf("%c", 39)
+    bom = sprintf("%c%c%c", 239, 187, 191)
+    worker = "docker-compose.worker.yml"
+    newline = "\n"
+  }
+  function invalid(status) { failed = status ? status : 1; exit failed }
   function quote_end(value, delimiter,    i, character, escaped) {
     for (i = 1; i <= length(value); i++) {
       character = substr(value, i, 1)
@@ -64,6 +69,7 @@ LC_ALL=C awk -v mode="$mode" -v ends_newline="$ends_newline" '
       close_at = index(value, delimiter)
       if (!close_at) invalid()
       suffix = substr(value, close_at + 1)
+      if (suffix ~ /^:docker-compose[.]worker[.]yml[ \t]*(#.*)?\r?$/) invalid(43)
       if (suffix !~ /^[ \t]*(#.*)?\r?$/) invalid()
       value = substr(value, 1, close_at - 1)
     } else {
@@ -92,6 +98,10 @@ LC_ALL=C awk -v mode="$mode" -v ends_newline="$ends_newline" '
   }
   {
     line = $0
+    # Refuse even when the BOM precedes another key: otherwise that key cannot be
+    # classified reliably and may hide a multiline value or duplicate setting.
+    if (NR == 1 && substr(line, 1, 3) == bom) invalid(42)
+    if (NR == 1 && line ~ /\r$/) newline = "\r\n"
     if (multiline != "") {
       if (quote_end(line, multiline)) multiline = ""
     } else if (line ~ /^[ \t]*(export[ \t]+)?COMPOSE_FILE[ \t]*=/) {
@@ -101,26 +111,43 @@ LC_ALL=C awk -v mode="$mode" -v ends_newline="$ends_newline" '
       line = selection(value)
       # Preserve CRLF for the changed assignment as well as unrelated records.
       if ($0 ~ /\r$/) line = line "\r"
-    } else if (line ~ /^[ \t]*(export[ \t]+)?[a-zA-Z_][a-zA-Z0-9_]*[ \t]*=/) {
+    } else if (line ~ /^[ \t]*(export[ \t]+)?[a-zA-Z_][a-zA-Z0-9_]*[ \t]*[:=]/) {
       # A key-looking line inside another quoted value is data, not a setting.
+      key = line
+      sub(/^[ \t]*(export[ \t]+)?/, "", key)
+      sub(/[ \t]*[:=].*$/, "", key)
+      if (key == "COMPOSE_FILE") invalid()
       value = line
-      sub(/^[ \t]*(export[ \t]+)?[a-zA-Z_][a-zA-Z0-9_]*[ \t]*=[ \t]*/, "", value)
+      sub(/^[ \t]*(export[ \t]+)?[a-zA-Z_][a-zA-Z0-9_]*[ \t]*[:=][ \t]*/, "", value)
       delimiter = substr(value, 1, 1)
       if ((delimiter == quote || delimiter == "\"") && !quote_end(substr(value, 2), delimiter)) multiline = delimiter
+    } else if (line !~ /^[ \t]*#/ && line ~ /(^|[^a-zA-Z0-9_])COMPOSE_FILE([^a-zA-Z0-9_]|$)/) {
+      # Compose also accepts colon assignments. Never append a second setting
+      # when an existing selection uses syntax we cannot safely rewrite.
+      invalid()
     }
     if (have_line) printf "%s\n", previous
     previous = line
     have_line = 1
   }
   END {
-    if (failed || multiline != "") exit 1
+    if (failed) exit failed
+    if (multiline != "") exit 1
     if (have_line) printf "%s", previous
     if (!found) {
-      if (have_line) printf "\n"
-      printf "%s\n", selection("docker-compose.yml")
+      if (have_line) printf "%s", (ends_newline == "true" ? "\n" : newline)
+      printf "%s%s", selection("docker-compose.yml"), newline
     } else if (ends_newline == "true") printf "\n"
   }
-' "$env_file" > "$staging/.env" || fail 'COMPOSE_FILE is ambiguous or unsupported; use one complete quoted, literal colon-separated file list. No settings were changed.'
+' "$env_file" > "$staging/.env"; then
+  :
+else
+  case "$?" in
+    42) fail 'Remove the leading UTF-8 BOM from .env (save as UTF-8 without BOM), then rerun. No settings were changed.' ;;
+    43) fail "Move :docker-compose.worker.yml inside the closing quote in .env: COMPOSE_FILE='docker-compose.yml:docker-compose.worker.yml' (plain), or COMPOSE_FILE='docker-compose.yml:docker-compose.proxy.yml:docker-compose.worker.yml' (bundled HTTPS). Preserve any other existing files, then rerun. No settings were changed." ;;
+    *) fail 'COMPOSE_FILE is ambiguous or unsupported; rewrite it as one complete COMPOSE_FILE assignment with = and a quoted, literal colon-separated file list, preserving all existing files. No settings were changed.' ;;
+  esac
+fi
 
 # Recheck before replacement. Moving into the known parent directory replaces
 # the .env entry itself rather than following a link to a directory.
@@ -131,7 +158,7 @@ mv -f -- "$staging/.env" "$repo/"
 
 printf '%s\n' 'Updated only COMPOSE_FILE in private .env (mode 600).' 'Run from this checkout:' '  unset COMPOSE_FILE'
 if [ "$mode" = on ]; then
-  printf '%s\n' '  docker compose config --services | grep -qx worker &&' '    docker compose up -d --build --wait'
+  printf '%s\n' '  # Bundled HTTPS only; omit this check in plain mode.' '  docker compose config --services | grep -qx proxy &&' '  docker compose config --services | grep -qx worker &&' '    docker compose up -d --build --wait'
 else
   printf '%s\n' '  # Remove any legacy HOURMERE_ROLE=web setting from .env before continuing.' '  docker compose up -d --build --wait --remove-orphans'
 fi

@@ -878,6 +878,11 @@ input[type="radio"] {
 
 .calendar-item {
   min-width: 0;
+  padding: var(--space-4);
+  border-width: 1px;
+  border-style: solid;
+  border-color: var(--border);
+  border-radius: var(--radius-small);
   overflow-wrap: anywhere;
 }
 
