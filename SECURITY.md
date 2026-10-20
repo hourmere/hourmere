@@ -20,9 +20,11 @@ discussion for them.
 Reports are handled in writing, in English or Chinese, by email or on GitHub. Phone and video
 calls are not available.
 
-The hosted website and application publish these channels at `/.well-known/security.txt`.
-The shared source is `apps/site/public/.well-known/security.txt`; renew its `Expires` date
-before it lapses, keeping it at most one year ahead when publishing.
+The hosted website publishes these channels at `https://hourmere.com/.well-known/security.txt`
+and `https://www.hourmere.com/.well-known/security.txt`. Its source is
+`apps/site/public/.well-known/security.txt`; renew its `Expires` date before it is within
+30 days, keeping it at most one year ahead when publishing. See
+[the renewal steps](docs/releasing.md#renew-the-hosted-security-policy).
 
 ### What to include
 

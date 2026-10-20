@@ -302,18 +302,8 @@ export function mcpEndpoint({ tools, oauth }: McpEndpointOptions): McpModule {
       )
     }
 
-    // Unknown or disabled discovery paths get JSON 404 rather than the SPA's HTML.
-    for (const path of [
-      '/.well-known/oauth-protected-resource',
-      '/.well-known/oauth-protected-resource/*',
-      '/.well-known/oauth-authorization-server',
-      '/.well-known/oauth-authorization-server/*',
-      '/.well-known/openid-configuration',
-      '/.well-known/openid-configuration/*',
-      `${MCP_PATH}/*`,
-    ]) {
-      app.all(path, (c) => c.json({ error: 'not_found' }, 404))
-    }
+    // createApp handles unknown well-known resources; MCP subpaths keep API errors.
+    app.all(`${MCP_PATH}/*`, (c) => c.json({ error: 'not_found' }, 404))
   }
   return { oauth: oauth !== undefined, mount }
 }

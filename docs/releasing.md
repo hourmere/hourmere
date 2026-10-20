@@ -28,6 +28,20 @@ heading such as `## [1.0.1] - 2026-12-07`, with `### Added`, `### Changed`, `###
 matching section and refuses missing or ambiguous notes. Keep upgrade instructions with
 their release, including migrations, changed defaults and secrets that must stay stable.
 
+## Renew the hosted security policy
+
+The website publishes `apps/site/public/.well-known/security.txt` on hourmere.com and
+www.hourmere.com. Application instances do not publish Hourmere's policy. Review its
+contacts and policy link regularly, and renew `Expires` before it is within 30 days.
+The site policy test fails at that threshold with a renewal message, or if the new date
+is more than one year ahead.
+
+Set `Expires` to a UTC timestamp more than 30 days and at most one year after publication,
+keeping both website `Canonical` URLs. Run
+`npm test -- apps/site/src/security-txt.test.ts --maxWorkers=2`, commit the reviewed
+policy and deploy the website through its normal publication process. Verify both
+public URLs serve the renewed plain-text file after deployment.
+
 ## One-time owner setup
 
 The real publishing boundary is the combination of a **tag ruleset** restricting

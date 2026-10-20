@@ -28,7 +28,6 @@ import {
   securityHeaders,
   strictTransportSecurity,
 } from './security-headers.ts'
-import { securityTxt } from './security-txt.ts'
 import { MAGIC_LINK_CONFIRM_PATH, signInConfirmPage } from './sign-in-confirm.ts'
 
 export interface AppDeps {
@@ -447,11 +446,9 @@ export function createApp({
   // Where emailed sign-in links lead; served here, ahead of the web app.
   app.get(MAGIC_LINK_CONFIRM_PATH, signInConfirmPage)
 
-  // Serve the disclosure policy before the SPA fallback, including without a web build.
-  app.get('/.well-known/security.txt', (c) => {
-    c.header('Cache-Control', 'public, max-age=3600')
-    return c.text(securityTxt)
-  })
+  // Explicit discovery routes are mounted above. Unknown well-known resources must never
+  // resolve to a static file or the SPA, including on self-hosted instances.
+  app.all('/.well-known/*', (c) => c.text('Not found', 404))
 
   if (webDist) {
     // serveStatic resolves paths against the working directory.

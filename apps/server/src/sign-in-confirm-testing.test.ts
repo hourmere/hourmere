@@ -1,8 +1,32 @@
 import { spawnSync } from 'node:child_process'
+import { globSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { inlineAsset, pressConfirmButton } from './sign-in-confirm-testing.ts'
 
 describe('sign-in confirmation test support', () => {
+  it('allows only *.test.ts files to import the confirmation test support', () => {
+    const root =
+      process.env.HOURMERE_SIGN_IN_TEST_SUPPORT_SOURCE_ROOT ??
+      fileURLToPath(new URL('../../../', import.meta.url))
+    const extensions = '{ts,tsx,js,jsx,mjs,cjs,mts,cts,astro}'
+    const files = globSync(
+      [`*.${extensions}`, `{apps,packages,scripts,tools}/**/*.${extensions}`],
+      {
+        cwd: root,
+        exclude: ['**/node_modules/**', '**/dist/**', '**/.astro/**'],
+      },
+    )
+    // Literal references also catch side-effect imports, dynamic imports and re-exports.
+    const reference = /(['"`])[^'"`\r\n]*\bsign-in-confirm-testing(?:\.ts)?\1/
+    const importers = files.filter(
+      (file) =>
+        !file.endsWith('.test.ts') && reference.test(readFileSync(join(root, file), 'utf8')),
+    )
+    expect(importers, 'Only *.test.ts files may import sign-in-confirm-testing.ts').toEqual([])
+  })
+
   it.each(['production', 'development', undefined])('refuses import in NODE_ENV=%s', (mode) => {
     const env = { ...process.env }
     if (mode === undefined) delete env.NODE_ENV

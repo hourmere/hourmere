@@ -22,7 +22,6 @@ describe('published security.txt', () => {
       'Preferred-Languages: en, zh',
       'Canonical: https://hourmere.com/.well-known/security.txt',
       'Canonical: https://www.hourmere.com/.well-known/security.txt',
-      'Canonical: https://app.hourmere.com/.well-known/security.txt',
       'Policy: https://github.com/hourmere/hourmere/blob/main/SECURITY.md',
     ])
     const expiry = fields.filter((line) => line.startsWith('Expires: '))
@@ -32,7 +31,10 @@ describe('published security.txt', () => {
     const now = new Date()
     const nextYear = new Date(now)
     nextYear.setUTCFullYear(nextYear.getUTCFullYear() + 1)
-    expect(Date.parse(value)).toBeGreaterThan(now.getTime())
+    expect(
+      Date.parse(value),
+      'Renew Expires in apps/site/public/.well-known/security.txt: it must be more than 30 days away (see docs/releasing.md).',
+    ).toBeGreaterThan(now.getTime() + 30 * 24 * 60 * 60 * 1000)
     expect(Date.parse(value)).toBeLessThanOrEqual(nextYear.getTime())
   })
 
