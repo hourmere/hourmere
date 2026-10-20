@@ -181,6 +181,18 @@ GitHub Release for the same tag using the exact matching changelog body; prerele
 marked as such. It does not publish npm workspaces. A disabled `publish-cli` job is included
 in the same workflow; enabling it requires the separate owner preparation below.
 
+## What the approver sees
+
+Before CI starts and before the publishing job waits for approval, the `prepare` job writes
+the version, tag, immutable commit SHA, prerelease flag and exact extracted release notes
+to the run's **Summary** page. Download the same Markdown from the run's **release-notes**
+artifact to review or retain it. Links in these notes point at the release tag. Review this
+summary and the successful CI jobs before approving the pending **`release`** deployment.
+
+After the image push and attestation succeed, the publishing job appends the image digest,
+every pushed image tag, and the attestation URL and ID to its job summary on the same run.
+Use these values for publication verification and reproducible deployments.
+
 ## Verify publication and handle failures
 
 Confirm the GitHub Release, image digest, both architecture manifests, labels,
