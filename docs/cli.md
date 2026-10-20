@@ -6,7 +6,7 @@ HTTP client with no additional dependencies.
 This preserves the key's organization, permissions, idempotency scope and `mcp` audit source,
 including host rescheduling, without introducing another booking API.
 
-Run it from the repository (there is no published npm package or global installation):
+Run it from a source checkout:
 
 ```sh
 export HOURMERE_URL=https://hourmere.example.com
@@ -16,8 +16,8 @@ npm run --silent cli -- catalog
 npm run --silent cli -- --help
 ```
 
-The standalone **`@hourmere/cli`** package is prepared for an owner-approved first release.
-After publication, install it with `npm install --global @hourmere/cli` and use
+Install the standalone **`@hourmere/cli`** package from npm once published; until then,
+use the source commands above. Install with `npm install --global @hourmere/cli` and use
 `hourmere whoami`, `hourmere --help` and `hourmere --version`. See the
 [npm README](../tools/cli/README.md) and [release procedure](releasing.md) for the tarball
 checks and owner approval requirements.
