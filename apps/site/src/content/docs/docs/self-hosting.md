@@ -553,7 +553,10 @@ reopening traffic. Keep the old volumes and backup until recovery is accepted.
 ## Upgrade and roll back
 
 Read the intended release's changes and take the backup above first. Record the current
-commit or tag before upgrading and preserve its `.env` and Caddy state.
+branch name or tag before upgrading, alongside the backup's saved commit, and preserve
+its `.env` and Caddy state. Use
+`git branch --show-current` for a branch, or `git describe --tags --exact-match` for a tag,
+so a checkout-only rollback can return to that named revision without relying on a bare commit.
 For 1.0 and later, check out the intended release tag
 rather than following `main`: replace `vX.Y.Z` in the commands below with the reviewed tag.
 No stable release has been published yet; these are the upgrade steps for future releases.
@@ -582,7 +585,13 @@ The app keeps the default `all` role. From the deployment checkout:
 )
 ```
 
-If a later guard fails after checkout, return with `git checkout <previous commit or tag>` using the value recorded before upgrading.
+If a guard, `docker compose pull` or `docker compose stop` fails after checkout,
+return with `git checkout <previous branch or tag>` using the recorded name **only before
+the new-version `docker compose up` command runs**. If the app or worker was already stopped,
+use the [pre-start recovery block](#checkout-only-recovery-before-startup) below.
+Once that `up` is attempted, follow [Back up and restore](#back-up-and-restore), even if
+it fails: a new app or worker may already have applied migrations; old code against the
+new schema is unsafe.
 
 ### Separate-worker upgrade
 
@@ -607,7 +616,44 @@ stopping the old app and worker:
 )
 ```
 
-If a later guard fails after checkout, return with `git checkout <previous commit or tag>` using the value recorded before upgrading.
+If a guard, `docker compose pull` or `docker compose stop` fails after checkout,
+return with `git checkout <previous branch or tag>` using the recorded name **only before
+the new-version `docker compose up` command runs**. If the app or worker was already stopped,
+use the [pre-start recovery block](#checkout-only-recovery-before-startup) below.
+Once that `up` is attempted, follow [Back up and restore](#back-up-and-restore), even if
+it fails: a new app or worker may already have applied migrations; old code against the
+new schema is unsafe.
+
+Git does not undo `enable-worker.sh`'s private `.env` edit. Before checking out the prior
+revision, restore only the pre-upgrade `COMPOSE_FILE` assignment from the saved private
+`.env` (remove the assignment if it was absent), preserving the proxy/custom overlays
+and other current settings. If a worker was already selected before the upgrade, keep
+that selection.
+
+### Checkout-only recovery before startup
+
+In the supplied Compose files, `AUTO_MIGRATE=true` runs application and pg-boss migrations
+at process startup for every role (`all`, `web` and `worker`), not during `pull` or `stop`;
+there is no separate migrate service. The separate worker uses the same server entry point
+and can migrate as soon as it starts, including before the web app during `up`. A separately
+started new-version worker, `npm run db:migrate` or a custom migration job can migrate earlier;
+if any has started, use [Back up and restore](#back-up-and-restore) even before this Compose `up`.
+
+For a pre-start failure, if the app or worker was already stopped (including a partial
+`stop` failure), bring the old version back with the block below after restoring the
+pre-upgrade `COMPOSE_FILE` selection as described above. Replace `PREVIOUS_BRANCH_OR_TAG`
+with the recorded name. If no service was stopped, only the checkout is needed. The block
+uses the existing old application image; do not add `--build` or pull an application image
+during this recovery. The subshell clears an inherited `COMPOSE_FILE` so Compose reads the
+restored selection from `.env`, and a failed checkout prevents startup.
+
+```sh
+(
+  git checkout "PREVIOUS_BRANCH_OR_TAG" &&
+  unset COMPOSE_FILE &&
+  docker compose up -d --wait
+)
+```
 
 For plain mode, remove both lines of the proxy verification before pasting either
 sequence, pull only `db`, and use your deployment's health URL.
@@ -637,7 +683,8 @@ PostgreSQL password changes in `.env` do not change an already-initialized datab
 password.
 
 Schema downgrade is not automatic. An old application image may not work against the new
-schema. To roll back safely, stop all app/worker processes, restore the pre-upgrade database
+schema. After new-version startup or an earlier migration, stop all app/worker processes
+and restore the pre-upgrade database
 into a fresh volume, restore its original revision and configuration, then verify the result
 before switching traffic back. Recovery loses writes made after that backup; decide your
 maintenance window and recovery plan before upgrading.
@@ -648,6 +695,11 @@ Before moving an early `main` checkout to a release tag, check the historical mi
 notes below. To continue tracking pre-1.0 `main` instead, replace `git fetch --tags` and
 `git checkout vX.Y.Z` in the appropriate guarded sequence with `git pull --ff-only`;
 retain the remaining verification, stop, build and health steps.
+For a failed main-tracking update, the backup's saved commit identifies the exact pre-upgrade
+revision: `git pull` advances `main`, so its branch name alone does not undo the update.
+Apply the same checkout-only limit above; otherwise use backup/restore. If rollback leaves
+this `main`-tracking checkout detached, run `git switch main` before the next upgrade so
+`git pull --ff-only` works.
 
 **Migration 0038 requires stopping all old processes; do not use a rolling deployment.**
 Before any new process applies `0038_booking_ical_identity.sql`, stop every old `web`, `all`
