@@ -1,8 +1,24 @@
 ---
 import Default from '@astrojs/starlight/components/PageTitle.astro'
+import { siteCopy } from '../ui-copy'
 
 const { lastVerified } = Astro.locals.starlightRoute.entry.data
+const verifiedLabel =
+  lastVerified &&
+  new Date(`${lastVerified}T00:00:00Z`).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    timeZone: 'UTC',
+  })
 ---
 
 <Default />
-{lastVerified && <p>Last verified: <time datetime={lastVerified}>{lastVerified}</time>.</p>}
+{lastVerified && <p class="last-verified">{siteCopy.en.lastVerified}: <time datetime={lastVerified}>{verifiedLabel}</time>.</p>}
+
+<style>
+  .last-verified {
+    color: var(--sl-color-gray-3);
+    font-size: var(--sl-text-sm);
+  }
+</style>

@@ -2,6 +2,7 @@
 import Legal from '../layouts/Legal.astro'
 import { resolveLegalPublicationDate } from '../privacy-publication.ts'
 import { company, contact, googlePolicies, site } from '../site'
+import { siteCopy } from '../ui-copy.ts'
 
 const sections = [
   { id: 'scope', title: 'Who we are and what this policy covers' },
@@ -94,6 +95,8 @@ const publicationDate = resolveLegalPublicationDate()
     their own servers (see <a href="#self-hosted">section 9</a>), or services from third parties
     that you connect to Hourmere, such as your calendar provider or your AI assistant.
   </p>
+
+  <p class="back-to-contents"><a href="#contents">{siteCopy.en.backToContents}</a></p>
 
   <h2 id="information-we-collect">2. Information we collect</h2>
   <ul>
@@ -191,6 +194,8 @@ const publicationDate = resolveLegalPublicationDate()
     applies once paid plans are available.
   </p>
 
+  <p class="back-to-contents"><a href="#contents">{siteCopy.en.backToContents}</a></p>
+
   <h2 id="how-we-use-information">3. How we use information</h2>
   <ul>
     <li>
@@ -224,6 +229,8 @@ const publicationDate = resolveLegalPublicationDate()
     other processing for which we ask your permission. You can withdraw consent at any time; see
     <a href="#your-rights">section 13</a>.
   </p>
+
+  <p class="back-to-contents"><a href="#contents">{siteCopy.en.backToContents}</a></p>
 
   <h2 id="google-user-data">4. Google user data</h2>
   <p>
@@ -445,6 +452,8 @@ const publicationDate = resolveLegalPublicationDate()
     before using it in a new way or for a different purpose.
   </p>
 
+  <p class="back-to-contents"><a href="#contents">{siteCopy.en.backToContents}</a></p>
+
   <h2 id="microsoft-calendar-data">5. Microsoft sign-in and calendar data</h2>
   <p>
     If you sign in with Microsoft, Hourmere receives your Microsoft account identifier, name and
@@ -471,6 +480,8 @@ const publicationDate = resolveLegalPublicationDate()
     administrator. Retention and deletion requests are described in
     <a href="#retention">section 10</a>.
   </p>
+
+  <p class="back-to-contents"><a href="#contents">{siteCopy.en.backToContents}</a></p>
 
   <h2 id="ai-assistants">6. AI assistants and API access</h2>
   <p>
@@ -499,6 +510,8 @@ const publicationDate = resolveLegalPublicationDate()
     Revocation stops future requests using that credential; it does not retrieve information the
     application has already received.
   </p>
+
+  <p class="back-to-contents"><a href="#contents">{siteCopy.en.backToContents}</a></p>
 
   <h2 id="sharing">7. How we share information</h2>
   <p>
@@ -625,6 +638,8 @@ const publicationDate = resolveLegalPublicationDate()
     process these messages and attachments.
   </p>
 
+  <p class="back-to-contents"><a href="#contents">{siteCopy.en.backToContents}</a></p>
+
   <h2 id="invitees">8. If you book a meeting through Hourmere</h2>
   <p>
     If you book a meeting on someone's Hourmere booking page, the person or organization you are
@@ -634,6 +649,8 @@ const publicationDate = resolveLegalPublicationDate()
     how a host uses your information, contact the host. If you contact us, we will pass your
     request on or help where we can.
   </p>
+
+  <p class="back-to-contents"><a href="#contents">{siteCopy.en.backToContents}</a></p>
 
   <h2 id="self-hosted">9. Self-hosted Hourmere</h2>
   <p>
@@ -647,6 +664,8 @@ const publicationDate = resolveLegalPublicationDate()
     add telemetry to the software, it will be optional, opt-in and anonymous, and we will document
     what it sends.
   </p>
+
+  <p class="back-to-contents"><a href="#contents">{siteCopy.en.backToContents}</a></p>
 
   <h2 id="retention">10. Retention and deletion</h2>
   <ul>
@@ -679,6 +698,8 @@ const publicationDate = resolveLegalPublicationDate()
     for up to about five weeks. Backups are not yet copied to another location.
   </p>
 
+  <p class="back-to-contents"><a href="#contents">{siteCopy.en.backToContents}</a></p>
+
   <h2 id="security">11. Security</h2>
   <p>
     We protect personal data with measures appropriate to the risk, including encryption in transit,
@@ -691,6 +712,8 @@ const publicationDate = resolveLegalPublicationDate()
     >.
   </p>
 
+  <p class="back-to-contents"><a href="#contents">{siteCopy.en.backToContents}</a></p>
+
   <h2 id="international-transfers">12. Where data is processed</h2>
   <p>
     Cobaltmere, LLC is a United States company registered as a Delaware limited liability company.
@@ -702,6 +725,8 @@ const publicationDate = resolveLegalPublicationDate()
     files on Cloudflare Workers; the request data its hosting processes is described in
     <a href="#this-website">section 14</a>.
   </p>
+
+  <p class="back-to-contents"><a href="#contents">{siteCopy.en.backToContents}</a></p>
 
   <h2 id="your-rights">13. Your rights and choices</h2>
   <p>
@@ -717,6 +742,8 @@ const publicationDate = resolveLegalPublicationDate()
     We do not sell personal information or share it for cross-context behavioral advertising, as
     those terms are defined under California law.
   </p>
+
+  <p class="back-to-contents"><a href="#contents">{siteCopy.en.backToContents}</a></p>
 
   <h2 id="this-website">14. This website, cookies and local storage</h2>
   <p>
@@ -743,6 +770,8 @@ const publicationDate = resolveLegalPublicationDate()
     an embed; this is not visitor tracking or proof of the embedding website's identity.
   </p>
 
+  <p class="back-to-contents"><a href="#contents">{siteCopy.en.backToContents}</a></p>
+
   <h2 id="children">15. Children</h2>
   <p>
     Hourmere is not directed to children. You must be at least 18 years old, or the age of majority
@@ -751,12 +780,16 @@ const publicationDate = resolveLegalPublicationDate()
     we will delete it.
   </p>
 
+  <p class="back-to-contents"><a href="#contents">{siteCopy.en.backToContents}</a></p>
+
   <h2 id="changes">16. Changes to this policy</h2>
   <p>
     We may update this policy. We will post the new version on this page with a new effective date
     and, if the changes are material, notify you by email or in the Service before they take effect.
     Changes to how we use Google user data are also subject to section 4.
   </p>
+
+  <p class="back-to-contents"><a href="#contents">{siteCopy.en.backToContents}</a></p>
 
   <h2 id="contact">17. Contact</h2>
   <p>
@@ -767,4 +800,5 @@ const publicationDate = resolveLegalPublicationDate()
     Security reports: <a href={`mailto:${contact.security}`}>{contact.security}</a><br />
     Website: <a href={site.url}>hourmere.com</a> · <a href={company.url}>cobaltmere.com</a>
   </p>
+  <p class="back-to-contents"><a href="#contents">{siteCopy.en.backToContents}</a></p>
 </Legal>

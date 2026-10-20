@@ -138,7 +138,7 @@ describe('comparison review information', () => {
     expect(read('./content.config.ts')).toMatch(/lastVerified:\s*z\.iso\.date\(\)/)
     const title = read('./components/DocsPageTitle.astro')
     expect(title).toContain('Astro.locals.starlightRoute.entry.data')
-    expect(title).toMatch(/<time datetime=\{lastVerified\}>\{lastVerified\}<\/time>/)
+    expect(title).toMatch(/<time datetime=\{lastVerified\}>\{verifiedLabel\}<\/time>/)
   })
 })
 

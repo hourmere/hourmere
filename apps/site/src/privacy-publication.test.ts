@@ -1,8 +1,7 @@
 import { spawnSync } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { cp, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
-import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { describe, expect, it } from 'vitest'
@@ -14,7 +13,9 @@ const site = fileURLToPath(new URL('../', import.meta.url))
 const dependencies = fileURLToPath(new URL('../../../node_modules', import.meta.url))
 
 async function withFixture(run: (fixture: string) => Promise<void>) {
-  const fixture = await mkdtemp(join(await realpath(tmpdir()), 'hourmere-legal-publication-'))
+  // Astro uses rename() for emitted assets; keep fixture and prerender output on one filesystem.
+  await mkdir(join(site, '.astro'), { recursive: true })
+  const fixture = await mkdtemp(join(site, '.astro/hourmere-legal-publication-'))
   try {
     await run(fixture)
   } finally {
@@ -62,6 +63,7 @@ async function copyLegalRenderFixture(fixture: string, date: string) {
     'src/privacy-publication.ts',
     'src/data',
     'src/site.ts',
+    'src/ui-copy.ts',
     'src/layouts',
     'src/components',
     'src/styles',

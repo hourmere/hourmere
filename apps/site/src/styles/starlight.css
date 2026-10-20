@@ -5,12 +5,14 @@
   --sl-font: "Manrope Variable", system-ui, sans-serif;
 }
 
-/* Dark theme */
-:root:not([data-theme="light"]) {
-  --sl-color-accent-low: #16244a;
-  --sl-color-accent: #5b82f0;
-  --sl-color-accent-high: #c3d2fb;
-  --sl-color-black: #0e1015;
+/* Keep Starlight's light print palette independent of the selected screen theme. */
+@media screen {
+  :root:not([data-theme="light"]) {
+    --sl-color-accent-low: #16244a;
+    --sl-color-accent: #5b82f0;
+    --sl-color-accent-high: #c3d2fb;
+    --sl-color-black: #0e1015;
+  }
 }
 
 /* Light theme */
@@ -18,4 +20,54 @@
   --sl-color-accent-low: #eaf0fd;
   --sl-color-accent: #1f4fd8;
   --sl-color-accent-high: #0a1e4a;
+}
+
+.site-title {
+  color: var(--sl-color-white);
+  font-weight: 800;
+}
+
+h1#_top {
+  font-weight: 800;
+}
+
+/* Let long configuration values contribute their wrapped width to table sizing. */
+.sl-markdown-content :is(th, td),
+.sl-markdown-content :is(th, td) code {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.sl-markdown-content table {
+  max-width: 100%;
+  /* Local covers hide each edge shadow when there is nothing left to scroll to. */
+  background:
+    linear-gradient(to right, var(--sl-color-bg) 30%, transparent) left center / 2rem 100% local,
+    linear-gradient(to left, var(--sl-color-bg) 30%, transparent) right center / 2rem 100% local,
+    radial-gradient(farthest-side at 0 50%, var(--sl-color-gray-5), transparent) left center /
+    0.75rem 100% scroll,
+    radial-gradient(farthest-side at 100% 50%, var(--sl-color-gray-5), transparent) right center /
+    0.75rem 100% scroll;
+  background-repeat: no-repeat;
+}
+
+@media screen and (max-height: 500px) {
+  mobile-starlight-toc nav {
+    position: static;
+  }
+
+  mobile-starlight-toc .dropdown {
+    max-height: none;
+  }
+
+  .main-frame {
+    padding-top: var(--sl-nav-height);
+  }
+
+  .right-sidebar {
+    position: static;
+    height: auto;
+    padding-top: 0;
+    overflow-y: visible;
+  }
 }

@@ -17,6 +17,8 @@
   --accent-soft: var(--mist);
   --button-bg: var(--cobalt);
   --button-text: #ffffff;
+  --button-hover-bg: var(--deep-mere);
+  --button-hover-border: var(--deep-mere);
 
   --font: "Manrope Variable", system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
@@ -38,6 +40,8 @@
     --border: #283252;
     --link: #8faeff;
     --accent-soft: #16244a;
+    --button-hover-bg: var(--cobalt);
+    --button-hover-border: #8faeff;
 
     color-scheme: dark;
   }
@@ -52,6 +56,8 @@
   --border: #283252;
   --link: #8faeff;
   --accent-soft: #16244a;
+  --button-hover-bg: var(--cobalt);
+  --button-hover-border: #8faeff;
 
   color-scheme: dark;
 }
@@ -174,8 +180,8 @@ code {
 }
 
 .btn-primary:hover {
-  border-color: var(--deep-mere);
-  background: var(--deep-mere);
+  border-color: var(--button-hover-border);
+  background: var(--button-hover-bg);
 }
 
 /* Sections */
@@ -231,4 +237,21 @@ code {
 .card p {
   margin: 0;
   color: var(--muted);
+}
+
+/* Printed pages use the light palette even when the screen theme is dark. */
+@media print {
+  :root,
+  :root[data-theme],
+  :root:not([data-theme="light"]) {
+    --bg: #ffffff;
+    --bg-soft: var(--mist);
+    --surface: #ffffff;
+    --text: var(--ink);
+    --muted: #475066;
+    --border: #d6deef;
+    --link: var(--cobalt);
+    --accent-soft: var(--mist);
+    color-scheme: light;
+  }
 }
