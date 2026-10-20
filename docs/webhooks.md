@@ -233,5 +233,82 @@ removes up to 1000 expired snapshots/metadata records per pass; a backlog needs 
 Delivery also skips snapshots older than thirty days. Existing ID-only pg-boss records
 expire separately. Deleting a booking, organization or endpoint cascades its snapshots.
 
+### Reconciliation performance at scale
+
+Reconciliation still scales with retained job history and **all pending delivery keys**,
+even though it updates at most 1000 orphans. The pending-delivery index does not guarantee
+a particular join or scan. At a large pending backlog, PostgreSQL can hash the retained job
+table in multiple batches and spill to temporary files. A zero-temp plan at a small backlog
+does not establish a zero-temp bound for production.
+
+The following local measurements used PostgreSQL **18.6**, aarch64 Alpine, `work_mem=4MB`,
+and **1,000,000 total pg-boss jobs** in each disposable database. Every group of eight
+pending deliveries covers missing, terminal, never-started, multiple-history, created,
+delayed-retry and active jobs; old live jobs and old attempts remain authoritative. All
+matching jobs belong to the webhook queue. In the mixed layout, 60% of unrelated jobs
+belong to that queue and the rest to four other queues; the webhook layout puts every job
+in it. There are 625 eligible orphans at 1000 pending, and each larger fixture processes
+exactly 1000. Every measured query verifies the exact delivery IDs, statuses and attempt
+counts, then rolls back to the same input.
+
+Times below are median **EXPLAIN query round-trip wall milliseconds**, after one warmup
+and five measured samples per variant in alternating order. They include
+`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` overhead, but exclude transaction setup, result
+verification, rollback and the separate retention phase. Temp read/write values are the
+root plan's block totals, not sums of inclusive child counters; ranges show the minimum
+and maximum across samples. These observations depend on hardware, cache, statistics and PostgreSQL
+settings, and are not timing assertions or a dispatch-latency guarantee.
+
+| Pending deliveries | Layout | Current wall ms | Current temp read/write blocks |
+| ---: | --- | ---: | ---: |
+| 1,000 | mixed | 130.683 | 0 / 0 |
+| 50,000 | mixed | 287.583 | 0 / 0 |
+| 200,000 | mixed | 733.770 | 11,433 / 14,547 |
+| 1,000 | webhook | 175.217 | 0 / 0 |
+| 50,000 | webhook | 349.443 | 0–468 / 0–468 |
+| 200,000 | webhook | 833.583 | 14,354 / 18,062 |
+
+Only two alternative query shapes were evaluated: the pre-#41 query (`NOT EXISTS` for
+live jobs, then aggregate attempts for the selected orphan batch), and the current query
+with `job_history AS NOT MATERIALIZED` so the planner may inline it. Each cell below lists
+wall milliseconds followed by temp read/write blocks.
+
+| Pending deliveries | Layout | Pre-#41 `NOT EXISTS`: ms; temp R/W | Inline history: ms; temp R/W |
+| ---: | --- | ---: | ---: |
+| 1,000 | mixed | 342.012; 4,620 / 4,620 | 132.583; 0 / 0 |
+| 50,000 | mixed | 383.949; 4,761 / 4,761 | 280.291; 0 / 0 |
+| 200,000 | mixed | 480.728; 6,050 / 6,061 | 689.387; 11,433 / 13,394 |
+| 1,000 | webhook | 456.038; 8,246 / 8,246 | 174.353; 0 / 0 |
+| 50,000 | webhook | 495.281; 8,237 / 8,237 | 342.373; 0–468 / 0–468 |
+| 200,000 | webhook | 584.691; 9,609 / 9,620 | 782.470; 14,354 / 16,909 |
+
+The production query is unchanged. The pre-#41 shape is slower at the smaller backlogs;
+inlining also increases the 1000-pending mixed median. Neither alternative meets the
+requirement to reduce temp usage without becoming slower at any of the three pending
+scales. The small inline timing difference is not evidence of a reliable improvement.
+At 200,000 pending in the mixed fixture, the current retained-job hash uses 16 batches;
+inlining retains that hash and only reduces some materialization writes. Larger backlogs
+can therefore still need temporary disk space and can reach the five-second statement
+deadline. Repeated `webhook_cleanup_deferred` warnings indicate insufficient progress;
+inspect pending count, retained queue size and the actual plan when sizing the installation.
+At 50,000 pending in the webhook layout, both current and inline plans varied between no
+temp use and 468 read/write blocks, illustrating why tests must not require one exact plan.
+
+Reproduce on disposable PostgreSQL 18 databases with the database-creation account:
+
+```sh
+DATABASE_URL=postgres://hourmere:hourmere@localhost:5432/postgres \
+  node scripts/webhook-reconciliation-benchmark.ts --mode=compare --jobs=1000000 \
+  --pending=1000,50000,200000 --layouts=mixed,webhook --samples=5 \
+  --output=/tmp/webhook-reconciliation-scale.json
+```
+
+The URL is used only by the test helper to create/drop isolated databases; fixture and
+measurement queries use those databases. The script requires PostgreSQL 18, records the
+server version/settings, row distribution, individual wall/execution timings and complete
+plans, stops its pools and logs each database drop. It adds no indexes to pg-boss. The local
+server allowed 300 connections, but the benchmark uses one reusable app pool (maximum 10)
+and one pg-boss connection; CI retains PostgreSQL's default `max_connections=100`.
+
 Local tests use synthetic identities, disposable PostgreSQL databases and isolated network
 fixtures. They do not grant access to, or deliver events to, a real external receiver.
