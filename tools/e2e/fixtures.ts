@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto'
+import { createHash, createHmac, randomBytes } from 'node:crypto'
 import { createServer as createHttpServer, type Server } from 'node:http'
 import {
   createConnection,
@@ -24,6 +24,15 @@ import {
   sendBookingNotification,
 } from '../../packages/notifications/src/index.ts'
 import { createFixtures } from '../../packages/scheduling/src/testing.ts'
+import {
+  AUDIT_BOOKING_END,
+  AUDIT_BOOKING_START,
+  AUDIT_DESCRIPTION,
+  AUDIT_EMAIL,
+  AUDIT_NOW,
+  AUDIT_TITLE,
+  type AuditFixtureState,
+} from './audit-data.ts'
 
 async function listenLoopback(server: SocketServer): Promise<number> {
   while (true) {
@@ -43,10 +52,13 @@ async function listenLoopback(server: SocketServer): Promise<number> {
   }
 }
 
-interface FixtureApp {
+export interface FixtureApp {
   url: string
   parentUrl: string
   personalPath: string
+  auditState: () => Promise<AuditFixtureState>
+  auditSignIn: (signedIn: boolean) => Promise<void>
+  auditOAuthQuery: () => Promise<string>
   teamPath: string
   collectivePath: string
   meetPath: string
@@ -89,14 +101,19 @@ interface FixtureApp {
     originalFingerprintPreserved: boolean
   }>
 }
+export interface FixtureOptions {
+  uiAudit: boolean
+}
 export const test = base.extend<{
   app: FixtureApp
   suppressFailureDom: undefined
   automaticMeet: boolean
   multiHostMeet: boolean
+  uiAudit: boolean
 }>({
   automaticMeet: [false, { option: true }],
   multiHostMeet: [false, { option: true }],
+  uiAudit: [false, { option: true }],
   suppressFailureDom: [
     async ({ context }, use, testInfo) => {
       // Depending on context runs this teardown before its artifact finalization.
@@ -111,7 +128,7 @@ export const test = base.extend<{
     },
     { auto: true },
   ],
-  app: async ({ context, automaticMeet, multiHostMeet }, use) => {
+  app: async ({ context, automaticMeet, multiHostMeet, uiAudit }, use) => {
     const bootstrap = process.env.HOURMERE_E2E_BOOTSTRAP_URL
     if (!bootstrap)
       throw new Error(
@@ -375,6 +392,17 @@ export const test = base.extend<{
         .values({ event_type_id: roundId, enabled: true })
         .execute()
       parent = createHttpServer((request, response) => {
+        if (
+          uiAudit &&
+          process.env.CI &&
+          new URL(request.url ?? '/', 'http://localhost').pathname === '/axe-canary'
+        ) {
+          response.setHeader('Content-Type', 'text/html; charset=utf-8')
+          response.end(
+            '<!doctype html><html lang="en"><head><title>Axe pipeline canary</title></head><body><main><h1>Axe pipeline canary</h1><button class="axe-canary-button"></button><img class="axe-canary-image" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="></main></body></html>',
+          )
+          return
+        }
         const language = new URL(request.url ?? '/', 'http://localhost').searchParams.get(
           'language',
         )
@@ -411,6 +439,7 @@ export const test = base.extend<{
         SIGNUP: 'closed',
         HOURMERE_ROLE: 'web',
         EMBED_ALLOWED_ORIGINS: parentUrl,
+        ...(uiAudit && { MCP_OAUTH_ENABLED: 'true' }),
         ...(automaticMeet && {
           GOOGLE_MEET_ENABLED: 'true',
           GOOGLE_CALENDAR_CLIENT_ID: 'synthetic-client',
@@ -442,10 +471,168 @@ export const test = base.extend<{
         }
       })
       const firstFingerprints = new Map<string, Buffer>()
+      let auditState: AuditFixtureState | undefined
+      let auditCookie: string | undefined
+      let auditOAuthQuery: string | undefined
       await use({
         url,
         parentUrl,
         personalPath: '/fixture-host/call',
+        auditState: async () => {
+          if (auditState) return auditState
+          const eventTypeId = await f.eventType(host.organizationId, host.userId, {
+            slug: 'layout-audit',
+            title: AUDIT_TITLE,
+            description: AUDIT_DESCRIPTION,
+            minimumNoticeMinutes: 30,
+          })
+          await f.eventType(team, null, {
+            slug: 'layout-audit',
+            title: AUDIT_TITLE,
+            description: AUDIT_DESCRIPTION,
+            minimumNoticeMinutes: 30,
+            hosts: [{ userId: host.userId }],
+          })
+          const schedule = await db
+            .selectFrom('schedules')
+            .select('id')
+            .where('user_id', '=', host.userId)
+            .where('is_default', '=', true)
+            .executeTakeFirstOrThrow()
+          await db
+            .updateTable('schedules')
+            .set({ name: 'Synthetic working hours' })
+            .where('id', '=', schedule.id)
+            .execute()
+          await db
+            .updateTable('auth.user')
+            .set({ email: 'synthetic-host@hourmere.invalid' })
+            .where('id', '=', host.userId)
+            .execute()
+          await db
+            .updateTable('auth.organization')
+            .set({ name: 'Synthetic organization' })
+            .where('id', '=', host.organizationId)
+            .execute()
+          const bookingId = await f.booking(
+            host.organizationId,
+            [host.userId],
+            AUDIT_BOOKING_START,
+            AUDIT_BOOKING_END,
+            {
+              eventTypeId,
+              attendee: { name: 'Synthetic long-email invitee', email: AUDIT_EMAIL },
+            },
+          )
+          const manageToken = randomBytes(32).toString('base64url')
+          await db
+            .updateTable('bookings')
+            .set({
+              title: AUDIT_TITLE,
+              created_at: AUDIT_NOW,
+              manage_token_hash: createHash('sha256').update(manageToken).digest(),
+            })
+            .where('id', '=', bookingId)
+            .execute()
+          auditState = {
+            organizationId: host.organizationId,
+            eventTypeId,
+            scheduleId: schedule.id,
+            bookingId,
+            manageToken,
+            bookingPath: '/fixture-host/layout-audit',
+            teamBookingPath: '/team/FixtureTeam/layout-audit',
+          }
+          return auditState
+        },
+        auditSignIn: async (signedIn) => {
+          // Audit pages exercise the same browser-session endpoints as people do.
+          // No API-key header remains when switching back to a public/sign-in state.
+          authorization = undefined
+          if (!signedIn) {
+            await context.clearCookies({ name: 'better-auth.session_token' })
+            return
+          }
+          if (!auditCookie) {
+            const token = randomBytes(24).toString('base64url')
+            await db
+              .insertInto('auth.session')
+              .values({
+                userId: host.userId,
+                activeOrganizationId: host.organizationId,
+                token,
+                updatedAt: new Date(),
+                expiresAt: new Date(
+                  Math.max(Date.now(), uiAudit ? Date.parse(AUDIT_NOW) : 0) + 86_400_000,
+                ),
+              })
+              .execute()
+            auditCookie = encodeURIComponent(
+              `${token}.${createHmac('sha256', authSecret).update(token).digest('base64')}`,
+            )
+          }
+          await context.addCookies([
+            {
+              name: 'better-auth.session_token',
+              value: auditCookie,
+              url,
+              httpOnly: true,
+              sameSite: 'Lax',
+            },
+          ])
+        },
+        auditOAuthQuery: async () => {
+          if (auditOAuthQuery) return auditOAuthQuery
+          if (!uiAudit) throw new Error('OAuth audit requires the UI audit fixture')
+          // Each test owns its database, but Better Auth's registration limiter is
+          // process-wide. Seed public client metadata rather than spending the
+          // five-per-minute DCR budget for every viewport in the same worker.
+          const clientId = 'synthetic-ui-audit-client'
+          await db
+            .insertInto('auth.oauthClient')
+            .values({
+              clientId,
+              name: 'Synthetic audit connector',
+              redirectUris: JSON.stringify(['https://hourmere.invalid/callback']),
+              grantTypes: JSON.stringify(['authorization_code', 'refresh_token']),
+              responseTypes: JSON.stringify(['code']),
+              scopes: JSON.stringify(['mcp:tools', 'offline_access']),
+              tokenEndpointAuthMethod: 'none',
+              applicationType: 'web',
+              requirePKCE: true,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            })
+            .execute()
+          await db
+            .insertInto('auth.oauthClientResource')
+            .values({ clientId, resourceId: `${url}/mcp`, createdAt: new Date() })
+            .execute()
+          const query = new URLSearchParams({
+            client_id: clientId,
+            redirect_uri: 'https://hourmere.invalid/callback',
+            response_type: 'code',
+            scope: 'mcp:tools offline_access',
+            resource: `${url}/mcp`,
+            code_challenge: 'A'.repeat(43),
+            code_challenge_method: 'S256',
+            state: 'synthetic-ui-audit',
+          })
+          const continued = await fetch(`${url}/api/auth/oauth2/authorize?${query}`, {
+            redirect: 'manual',
+          })
+          // fetch requests receive JSON; browser navigations receive a 302.
+          const continuation = continued.status === 200 ? await continued.json() : undefined
+          const location =
+            continued.headers.get('location') ?? continuation?.url ?? continuation?.redirect_uri
+          if (![200, 302].includes(continued.status) || typeof location !== 'string')
+            throw new Error('Could not prepare synthetic connector')
+          const selection = new URL(location, url)
+          if (selection.origin !== url || selection.pathname !== '/oauth/authorize')
+            throw new Error('Unexpected synthetic connector continuation')
+          auditOAuthQuery = selection.search
+          return auditOAuthQuery
+        },
         teamPath: '/team/FixtureTeam/call',
         collectivePath: '/team/FixtureTeam/collective',
         meetPath: '/fixture-host/meet',

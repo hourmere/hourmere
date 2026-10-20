@@ -117,7 +117,7 @@ function Shell() {
       )}
       <div className="layout">
         <nav className="sidenav" aria-label={t('Main')} ref={nav}>
-          <ul>
+          <ul data-layout-scroll="horizontal">
             {NAV_ITEMS.map((item) => (
               <li key={item.to}>
                 <NavLink to={item.to}>{ui(item.label)}</NavLink>
