@@ -202,14 +202,17 @@ The default `HOURMERE_ROLE=all` runs the API, booking email jobs and calendar sy
 in one container. After setup, run these commands from the deployment checkout:
 
 ```sh
-unset COMPOSE_FILE
-./scripts/enable-worker.sh
-docker compose config --services | grep -qx worker ||
-  { echo "Worker service is missing; check COMPOSE_FILE before continuing."; exit 1; }
-# Bundled HTTPS only; omit this check in plain mode.
-docker compose config --services | grep -qx proxy ||
-  { echo "Proxy service is missing; check COMPOSE_FILE before continuing."; exit 1; }
-docker compose up -d --build --wait
+(
+  unset COMPOSE_FILE &&
+  ./scripts/enable-worker.sh &&
+  compose_services=$(docker compose config --services) &&
+  { printf '%s\n' "$compose_services" | grep -qx worker ||
+    { echo "Worker service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
+  # Bundled HTTPS only; omit this check in plain mode.
+  { printf '%s\n' "$compose_services" | grep -qx proxy ||
+    { echo "Proxy service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
+  docker compose up -d --build --wait
+)
 ```
 
 Continue to `up` only if all applicable verification commands succeed. The helper rewrites only
@@ -262,14 +265,17 @@ docker compose rm -sf worker
 Remove any old `HOURMERE_ROLE=web` setting from `.env`. Then deselect the overlay with the helper:
 
 ```sh
-unset COMPOSE_FILE
-./scripts/disable-worker.sh
-! docker compose config --services | grep -qx worker ||
-  { echo "Worker service is still enabled; check COMPOSE_FILE before continuing."; exit 1; }
-# Bundled HTTPS only; omit this check in plain mode.
-docker compose config --services | grep -qx proxy ||
-  { echo "Proxy service is missing; check COMPOSE_FILE before continuing."; exit 1; }
-docker compose up -d --build --wait
+(
+  unset COMPOSE_FILE &&
+  ./scripts/disable-worker.sh &&
+  compose_services=$(docker compose config --services) &&
+  { ! printf '%s\n' "$compose_services" | grep -qx worker ||
+    { echo "Worker service is still enabled; check COMPOSE_FILE before continuing."; exit 1; }; } &&
+  # Bundled HTTPS only; omit this check in plain mode.
+  { printf '%s\n' "$compose_services" | grep -qx proxy ||
+    { echo "Proxy service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
+  docker compose up -d --build --wait
+)
 ```
 
 Its default `all` role resumes job processing.
@@ -332,13 +338,16 @@ authentication, backups and private editor access separately; this example publi
 n8n port. Verify the worker selection and recreate both app and worker:
 
 ```sh
-unset COMPOSE_FILE
-docker compose config --services | grep -qx worker ||
-  { echo "Worker service is missing; check COMPOSE_FILE before continuing."; exit 1; }
-# Bundled HTTPS only; omit this check in plain mode.
-docker compose config --services | grep -qx proxy ||
-  { echo "Proxy service is missing; check COMPOSE_FILE before continuing."; exit 1; }
-docker compose up -d --build --wait
+(
+  unset COMPOSE_FILE &&
+  compose_services=$(docker compose config --services) &&
+  { printf '%s\n' "$compose_services" | grep -qx worker ||
+    { echo "Worker service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
+  # Bundled HTTPS only; omit this check in plain mode.
+  { printf '%s\n' "$compose_services" | grep -qx proxy ||
+    { echo "Proxy service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
+  docker compose up -d --build --wait
+)
 ```
 
 Continue only if verification succeeds. Create a webhook endpoint using
@@ -376,26 +385,34 @@ Stop any separate worker too. The database stays running; these commands do not 
 volumes. Store the backup outside the checkout:
 
 ```sh
-umask 077
-backup_dir="$HOME/hourmere-backups/$(date -u +%Y%m%dT%H%M%SZ)"
-mkdir -p "$backup_dir"
-if docker compose config --services | grep -qx worker; then
-  docker compose stop worker
-fi
-docker compose stop app proxy
-docker compose exec -T db pg_dump -U hourmere -d hourmere -Fc > "$backup_dir/hourmere.dump"
-install -m 600 .env "$backup_dir/.env"
-git rev-parse HEAD > "$backup_dir/commit"
-docker compose cp proxy:/data "$backup_dir/caddy-data"
-docker compose cp proxy:/config "$backup_dir/caddy-config"
-docker compose up -d --wait
+(
+  umask 077 &&
+  unset COMPOSE_FILE &&
+  backup_dir="$HOME/hourmere-backups/$(date -u +%Y%m%dT%H%M%SZ)" &&
+  mkdir -p "$backup_dir" &&
+  compose_services=$(docker compose config --services) &&
+  if printf '%s\n' "$compose_services" | grep -qx worker; then
+    docker compose stop worker
+  fi &&
+  docker compose stop app proxy &&
+  docker compose exec -T db pg_dump -U hourmere -d hourmere -Fc > "$backup_dir/hourmere.dump" &&
+  install -m 600 .env "$backup_dir/.env" &&
+  git rev-parse HEAD > "$backup_dir/commit" &&
+  docker compose cp proxy:/data "$backup_dir/caddy-data" &&
+  docker compose cp proxy:/config "$backup_dir/caddy-config" &&
+  docker compose up -d --wait
+)
 ```
 
-Check that each command succeeds before continuing. For plain mode, stop only `app` and
+The chained commands stop on failure, and the subshell leaves your operator shell open.
+Check that the backup succeeded before continuing. For plain mode, stop only `app` and
 omit the two proxy-copy commands. A dump exports one database, not cluster roles. Keep
 successful copies encrypted off-host, set a retention schedule (for example, seven daily
 and four weekly copies), monitor backup failures and periodically test a restore. PostgreSQL
 volumes are persistent storage, not a backup.
+
+Set `backup_dir` to the chosen backup directory before running the restore commands; the
+backup block keeps its variables inside its subshell.
 
 To test restoration, clone a separate checkout, use the backed-up revision and secrets,
 and select a **new, unused** project name so Compose creates a fresh database volume;
@@ -438,8 +455,7 @@ docker compose exec -T db \
   psql -U hourmere -d hourmere -Atc 'SELECT count(*) FROM auth."user";'
 ```
 
-Set `backup_dir` to the chosen backup directory if using a new shell. The separate
-`APP_IMAGE` tag also prevents restore builds from replacing the original deployment's
+The separate `APP_IMAGE` tag also prevents restore builds from replacing the original deployment's
 local image tag. Compare the count with your expected account data, and inspect other
 expected records privately. Persisting `COMPOSE_PROJECT_NAME=hourmere-restore` ensures later
 backup, upgrade and log commands in this checkout target the restored project too. These
@@ -456,12 +472,15 @@ For backups with a separate worker, verify the rewritten selection before starti
 or worker:
 
 ```sh
-unset COMPOSE_FILE
-docker compose config --services | grep -qx worker ||
-  { echo "Worker service is missing; check COMPOSE_FILE before continuing."; exit 1; }
-# Bundled HTTPS only; omit this check in plain mode.
-docker compose config --services | grep -qx proxy ||
-  { echo "Proxy service is missing; check COMPOSE_FILE before continuing."; exit 1; }
+(
+  unset COMPOSE_FILE &&
+  compose_services=$(docker compose config --services) &&
+  { printf '%s\n' "$compose_services" | grep -qx worker ||
+    { echo "Worker service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
+  # Bundled HTTPS only; omit this check in plain mode.
+  { printf '%s\n' "$compose_services" | grep -qx proxy ||
+    { echo "Proxy service is missing; check COMPOSE_FILE before continuing."; exit 1; }; }
+)
 ```
 
 Continue only if verification succeeds. For a plain-mode restore, replace the whole line
@@ -540,17 +559,20 @@ restoration step. Choose the upgrade sequence for your existing deployment below
 The app keeps the default `all` role. From the deployment checkout:
 
 ```sh
-git pull --ff-only
-unset COMPOSE_FILE
-! docker compose config --services | grep -qx worker ||
-  { echo "This deployment runs a separate worker; use the separate-worker upgrade."; exit 1; }
-# Bundled HTTPS only; omit this check in plain mode.
-docker compose config --services | grep -qx proxy ||
-  { echo "Proxy service is missing; check COMPOSE_FILE before continuing."; exit 1; }
-docker compose pull proxy db
-docker compose stop app
-docker compose up -d --build --wait
-curl --retry 20 --retry-delay 3 --retry-all-errors --fail https://app.hourmere.com/api/health
+(
+  git pull --ff-only &&
+  unset COMPOSE_FILE &&
+  compose_services=$(docker compose config --services) &&
+  { ! printf '%s\n' "$compose_services" | grep -qx worker ||
+    { echo "This deployment runs a separate worker; use the separate-worker upgrade."; exit 1; }; } &&
+  # Bundled HTTPS only; omit this check in plain mode.
+  { printf '%s\n' "$compose_services" | grep -qx proxy ||
+    { echo "Proxy service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
+  docker compose pull proxy db &&
+  docker compose stop app &&
+  docker compose up -d --build --wait &&
+  curl --retry 20 --retry-delay 3 --retry-all-errors --fail https://app.hourmere.com/api/health
+)
 ```
 
 ### Separate-worker upgrade
@@ -559,18 +581,21 @@ From the deployment checkout, verify both the worker and the bundled HTTPS proxy
 stopping the old app and worker:
 
 ```sh
-git pull --ff-only
-unset COMPOSE_FILE
-./scripts/enable-worker.sh
-docker compose config --services | grep -qx worker ||
-  { echo "Worker service is missing; check COMPOSE_FILE before continuing."; exit 1; }
-# Bundled HTTPS only; omit this check in plain mode.
-docker compose config --services | grep -qx proxy ||
-  { echo "Proxy service is missing; check COMPOSE_FILE before continuing."; exit 1; }
-docker compose pull proxy db
-docker compose stop app worker
-docker compose up -d --build --wait
-curl --retry 20 --retry-delay 3 --retry-all-errors --fail https://app.hourmere.com/api/health
+(
+  git pull --ff-only &&
+  unset COMPOSE_FILE &&
+  ./scripts/enable-worker.sh &&
+  compose_services=$(docker compose config --services) &&
+  { printf '%s\n' "$compose_services" | grep -qx worker ||
+    { echo "Worker service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
+  # Bundled HTTPS only; omit this check in plain mode.
+  { printf '%s\n' "$compose_services" | grep -qx proxy ||
+    { echo "Proxy service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
+  docker compose pull proxy db &&
+  docker compose stop app worker &&
+  docker compose up -d --build --wait &&
+  curl --retry 20 --retry-delay 3 --retry-all-errors --fail https://app.hourmere.com/api/health
+)
 ```
 
 Continue only if all applicable verification commands succeed. For plain mode, omit the

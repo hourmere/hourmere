@@ -100,14 +100,17 @@ TLS, backup/restore, upgrade and host-hardening procedures. The default app also
 background jobs; to split them after setup, run:
 
 ```sh
-unset COMPOSE_FILE
-./scripts/enable-worker.sh
-docker compose config --services | grep -qx worker ||
-  { echo "Worker service is missing; check COMPOSE_FILE before continuing."; exit 1; }
-# Bundled HTTPS only; omit this check in plain mode.
-docker compose config --services | grep -qx proxy ||
-  { echo "Proxy service is missing; check COMPOSE_FILE before continuing."; exit 1; }
-docker compose up -d --build --wait
+(
+  unset COMPOSE_FILE &&
+  ./scripts/enable-worker.sh &&
+  compose_services=$(docker compose config --services) &&
+  { printf '%s\n' "$compose_services" | grep -qx worker ||
+    { echo "Worker service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
+  # Bundled HTTPS only; omit this check in plain mode.
+  { printf '%s\n' "$compose_services" | grep -qx proxy ||
+    { echo "Proxy service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
+  docker compose up -d --build --wait
+)
 ```
 
 Continue only if the applicable verification commands succeed. The helper safely updates `COMPOSE_FILE`
