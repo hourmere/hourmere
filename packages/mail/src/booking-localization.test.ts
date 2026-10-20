@@ -49,6 +49,20 @@ const recipients: Record<(typeof roles)[number], BookingEmailRecipient> = {
   guest: { role: 'attendee', email: 'charles@example.com', timeZone: 'Europe/Berlin' },
 }
 
+const receiptReasons = {
+  en: {
+    invitee: 'You received this email because you booked a meeting with Grace Hopper via Hourmere.',
+    host: 'You received this email because Ada Lovelace booked a meeting with you via Hourmere.',
+    guest:
+      'You received this email because Ada Lovelace added you to a booking with Grace Hopper via Hourmere.',
+  },
+  'zh-CN': {
+    invitee: '你收到此邮件，是因为你通过 Hourmere 预约了与 Grace Hopper 的会议。',
+    host: '你收到此邮件，是因为 Ada Lovelace 通过 Hourmere 预约了与你的会议。',
+    guest: '你收到此邮件，是因为 Ada Lovelace 在通过 Hourmere 与 Grace Hopper 的预约中添加了你。',
+  },
+}
+
 function invitation(method: 'REQUEST' | 'CANCEL') {
   return icsAttachment({
     method,
@@ -213,7 +227,7 @@ describe('booking email layout and action hierarchy', () => {
               expect(html.indexOf(hint)).toBeGreaterThan(html.indexOf(`>${cancelLabel}</a>`))
               expect(html.indexOf(hint)).toBeLessThan(html.indexOf(fallbackLabel))
               expect(message.text).toContain(
-                `${locale === 'en' ? 'Reschedule / Cancel' : '改期 / 取消'}\n${hint}\n${fallbackLabel}`,
+                `${hint}\n${locale === 'en' ? 'Use these links to change or cancel:' : '请使用以下链接更改或取消预约：'}`,
               )
             }
           } else {
@@ -227,10 +241,7 @@ describe('booking email layout and action hierarchy', () => {
             expect(previous?.[3]).toContain('color: #777;')
             expect(previous?.[3]).toContain('text-decoration: line-through;')
           }
-          const reason =
-            locale === 'en'
-              ? 'You received this email about a booking with Grace Hopper via Hourmere.'
-              : '你收到此邮件，是因为通过 Hourmere 与 Grace Hopper 预约了会议。'
+          const reason = receiptReasons[locale][role]
           expect(html).toContain(reason)
           expect(message.text.endsWith(`${reason}\n`)).toBe(true)
           if (attachment) expect(message.attachments?.[0]).toBe(attachment)
@@ -273,6 +284,97 @@ describe('booking email layout and action hierarchy', () => {
   })
 })
 
+describe('reason for receiving a booking email', () => {
+  for (const locale of languages) {
+    for (const role of roles) {
+      it(`${locale} ${role} keeps its receipt reason without management links`, () => {
+        const recipient = recipients[role]
+        for (const kind of [...kinds, 'reminder', 'conference_failed'] as const) {
+          const message = bookingEmail(kind, meeting, {
+            ...recipient,
+            locale,
+            ...(recipient.role === 'attendee' ? { manageLinks: undefined } : {}),
+          })
+          const reason = receiptReasons[locale][role]
+          expect(message.text.endsWith(`${reason}\n`)).toBe(true)
+          expect(message.html).toContain(`>${reason}</p>`)
+        }
+      })
+
+      it(`${locale} ${role} escapes names and preserves the formatted multi-host label`, () => {
+        const hostName = '<b>王 & "林"</b>、陈'
+        const inviteeName = '<i>李 & "杨"</i>{host}'
+        const reason =
+          locale === 'en'
+            ? {
+                invitee: `You received this email because you booked a meeting with ${hostName} via Hourmere.`,
+                host: `You received this email because ${inviteeName} booked a meeting with you via Hourmere.`,
+                guest: `You received this email because ${inviteeName} added you to a booking with ${hostName} via Hourmere.`,
+              }[role]
+            : {
+                invitee: `你收到此邮件，是因为你通过 Hourmere 预约了与${hostName}的会议。`,
+                host: `你收到此邮件，是因为${inviteeName}通过 Hourmere 预约了与你的会议。`,
+                guest: `你收到此邮件，是因为${inviteeName}在通过 Hourmere 与${hostName}的预约中添加了你。`,
+              }[role]
+        const message = bookingEmail(
+          'confirmed',
+          { ...meeting, hostName, inviteeName },
+          { ...recipients[role], locale },
+        )
+        expect(message.text.endsWith(`${reason}\n`)).toBe(true)
+        const htmlReason = message.html?.match(
+          /<p style="[^"]*">((?:You received this email|你收到此邮件)[\s\S]*?)<\/p>/,
+        )?.[1]
+        expect(htmlReason).toBe(
+          reason
+            .replaceAll('&', '&amp;')
+            .replaceAll('<', '&lt;')
+            .replaceAll('>', '&gt;')
+            .replaceAll('"', '&quot;'),
+        )
+      })
+    }
+  }
+
+  it('recognizes the invitee without links case-insensitively and respects a host role at the same address', () => {
+    const message = bookingEmail('cancelled', meeting, {
+      ...recipients.invitee,
+      email: 'ADA@EXAMPLE.COM',
+    })
+    expect(message.text.endsWith(`${receiptReasons.en.invitee}\n`)).toBe(true)
+    expect(message.html).toContain(`>${receiptReasons.en.invitee}</p>`)
+    const host = bookingEmail('cancelled', meeting, {
+      ...recipients.host,
+      email: meeting.inviteeEmail,
+    })
+    expect(host.text.endsWith(`${receiptReasons.en.host}\n`)).toBe(true)
+    expect(host.html).toContain(`>${receiptReasons.en.host}</p>`)
+  })
+})
+
+describe('plain-text management links', () => {
+  for (const locale of languages) {
+    it(`${locale} introduces real links without referring to buttons or placeholder actions`, () => {
+      const label =
+        locale === 'en' ? 'Use these links to change or cancel:' : '请使用以下链接更改或取消预约：'
+      for (const kind of ['confirmed', 'rescheduled', 'reminder', 'conference_failed'] as const) {
+        for (const attachment of [undefined, invitation('REQUEST')]) {
+          const message = bookingEmail(
+            kind,
+            meeting,
+            { ...recipients.invitee, locale },
+            { attachment },
+          )
+          expect(message.text).toContain(
+            `${label}\n${locale === 'en' ? 'Reschedule: ' : '改期：'}${recipients.invitee.role === 'attendee' ? recipients.invitee.manageLinks?.reschedule : ''}\n${locale === 'en' ? 'Cancel: ' : '取消：'}${recipients.invitee.role === 'attendee' ? recipients.invitee.manageLinks?.cancel : ''}`,
+          )
+          expect(message.text).not.toMatch(/Reschedule \/ Cancel|改期 \/ 取消|buttons|按钮/)
+        }
+      }
+    })
+  }
+})
+
 const calendarGuidance = {
   en: {
     invitee:
@@ -309,9 +411,9 @@ describe('calendar-response guidance', () => {
               expect(message.text.includes('/booking#')).toBe(false)
               expect(message.html?.includes('/booking#')).toBe(false)
             } else if (expected) {
-              // The hint stays beside the action labels, after details and before raw URLs.
+              // The hint stays beside the management links, after details and before URLs.
               expect(message.text).toContain(
-                `${locale === 'en' ? 'Reschedule / Cancel' : '改期 / 取消'}\n${sentence}\n`,
+                `${locale === 'en' ? 'Need to make a change?' : '需要更改预约吗？'}\n${sentence}\n${locale === 'en' ? 'Use these links to change or cancel:' : '请使用以下链接更改或取消预约：'}\n`,
               )
               expect(message.text.indexOf(sentence)).toBeGreaterThan(
                 message.text.indexOf(locale === 'en' ? 'What:' : '活动：'),

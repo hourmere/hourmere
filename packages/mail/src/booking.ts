@@ -218,9 +218,8 @@ function render(to: string, c: Content, attachment?: MailAttachment): MailMessag
     ? [
         '',
         t('Need to make a change?'),
-        `${t('Reschedule')} / ${t('Cancel')}`,
         ...(c.footer ? [c.footer.text] : []),
-        t('If the buttons do not work, copy a link into your browser:'),
+        t('Use these links to change or cancel:'),
         textField(t('Reschedule'), c.manageLinks.reschedule, c.language),
         textField(t('Cancel'), c.manageLinks.cancel, c.language),
       ]
@@ -329,8 +328,13 @@ const chinese = {
   'Join Teams meeting': '加入 Teams 会议',
   'Join meeting': '加入会议',
   'Open in Hourmere': '在 Hourmere 中打开',
-  'You received this email about a booking with {host} via Hourmere.':
-    '你收到此邮件，是因为通过 Hourmere 与{host}预约了会议。',
+  'You received this email because you booked a meeting with {host} via Hourmere.':
+    '你收到此邮件，是因为你通过 Hourmere 预约了与{host}的会议。',
+  'You received this email because {invitee} booked a meeting with you via Hourmere.':
+    '你收到此邮件，是因为{invitee}通过 Hourmere 预约了与你的会议。',
+  'You received this email because {invitee} added you to a booking with {host} via Hourmere.':
+    '你收到此邮件，是因为{invitee}在通过 Hourmere 与{host}的预约中添加了你。',
+  'Use these links to change or cancel:': '请使用以下链接更改或取消预约：',
   'If the buttons do not work, copy a link into your browser:':
     '如果按钮无法使用，请将链接复制到浏览器中：',
   'Meeting link needs attention: {event} on {when}': '会议链接需要处理：{event}，{when}',
@@ -490,6 +494,13 @@ export function bookingEmail(
       : undefined
   const bookingUrl =
     isHost && options.bookingUrl ? (linkableUrl(options.bookingUrl) ?? undefined) : undefined
+  // Cancellation and suppressed invitations can omit manage links; identity still
+  // distinguishes the person who booked from the guests they added.
+  const receivedWhy = isHost
+    ? 'You received this email because {invitee} booked a meeting with you via Hourmere.'
+    : recipient.email.toLowerCase() === meeting.inviteeEmail.toLowerCase()
+      ? 'You received this email because you booked a meeting with {host} via Hourmere.'
+      : 'You received this email because {invitee} added you to a booking with {host} via Hourmere.'
 
   return render(
     recipient.email,
@@ -503,7 +514,7 @@ export function bookingEmail(
       bookingUrl,
       manageLinks,
       footer,
-      receivedWhy: t('You received this email about a booking with {host} via Hourmere.', { host }),
+      receivedWhy: t(receivedWhy, { host, invitee }),
     },
     options.attachment,
   )

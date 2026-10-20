@@ -177,6 +177,18 @@ describe('email layout', () => {
     expect(html).toMatch(/<table [^>]*style="width: 100%; max-width: 600px; margin: 0 auto;/)
   })
 
+  it('constrains the complete container to 600px in Outlook desktop', () => {
+    const html = emailLayout('en', 'Subject', '<p>Message</p>')
+    const wrapper = html.match(
+      /<!--\[if mso\]>(<table[^>]*><tr><td[^>]*>)<!\[endif\]-->([\s\S]*?)<!--\[if mso\]>(<\/td><\/tr><\/table>)<!\[endif\]-->/,
+    )
+    expect(wrapper).not.toBeNull()
+    expect(wrapper?.[1]).toMatch(/<table [^>]*width="600" align="center"/)
+    expect(wrapper?.[1]).toContain('width: 600px;')
+    expect(wrapper?.[2]).toMatch(/^\n<table [^>]*width="600"[\s\S]*<\/table>\n$/)
+    expect(wrapper?.[2]).toContain('<p>Message</p>')
+  })
+
   it('declares a light color scheme and white body and container backgrounds', () => {
     const html = emailLayout('en', 'Subject', '<p>Message</p>')
     expect(html).toContain('<meta name="color-scheme" content="light">')
@@ -227,6 +239,20 @@ describe('email layout', () => {
     expect(html).toContain('href="https://example.com/?a=&quot;b&quot;&amp;c=&lt;d&gt;"')
     expect(html).toContain('>&lt;button&gt; &amp; &quot;label&quot;</a>')
     expect(html).not.toContain('<button>')
+  })
+
+  it('separates stacked buttons with cell padding when Outlook ignores margins', () => {
+    const html = [emailButton('Reschedule', url), emailButton('Cancel', url, true)].join('\n')
+    const withoutMargins = html.replace(/margin(?:-[a-z]+)?:[^;]*;/g, '')
+    const paddedButtons = Array.from(
+      withoutMargins.matchAll(
+        /<td style="padding: (\d+)px 0;[^>]*><table\b[\s\S]*?<a [^>]*>([^<]+)<\/a>[\s\S]*?<\/table><\/td>/g,
+      ),
+    )
+    expect(paddedButtons.map((match) => match[2])).toEqual(['Reschedule', 'Cancel'])
+    const gap = Number(paddedButtons[0]?.[1]) + Number(paddedButtons[1]?.[1])
+    expect(gap).toBeGreaterThanOrEqual(16)
+    expect(html).not.toMatch(/margin(?:-[a-z]+)?:/)
   })
 })
 
