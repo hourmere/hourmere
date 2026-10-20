@@ -276,8 +276,8 @@ calendar updates. The worker exposes only `/api/health` for health checks. Keep 
 worker on the same version and secrets. Development's `docker-compose.dev.yml` and
 `hourmere-dev` project remain independent of this production selection.
 
-If moving from the old commented worker block, follow the migration steps under
-[Upgrade and roll back](#upgrade-and-roll-back) before pulling the new source.
+If moving from the old commented worker block, follow
+[Upgrading from a pre-1.0 checkout](#upgrading-from-a-pre-10-checkout) before changing the source revision.
 
 ### Switch back to a single container
 
@@ -552,46 +552,12 @@ reopening traffic. Keep the old volumes and backup until recovery is accepted.
 ## Upgrade and roll back
 
 Read the intended release's changes and take the backup above first. Record its commit and
-preserve its `.env` and Caddy state. If using separate workers, select them with
-`./scripts/enable-worker.sh`, keeping the tracked Compose files unchanged so local
-deployment choices do not block `git pull --ff-only`. The persisted file selection also
-rebuilds/recreates any separate worker during upgrades. In the deployment checkout, a branch
-following `main` can be updated with the commands below.
-
-**Migration 0038 requires stopping all old processes; do not use a rolling deployment.**
-Before any new process applies `0038_booking_ical_identity.sql`, stop every old `web`, `all`
-and `worker` process, including any on other hosts. With Compose, run
-`docker compose stop app` and, if the separate worker is configured, `docker compose stop worker`. Leave
-PostgreSQL running, then apply the migration and start every role with the new code. With
-`AUTO_MIGRATE=true`, the first new process applies the migration on startup.
-
-**If you uncommented the old worker block in `docker-compose.yml`, migrate it before
-pulling.** Those tracked edits make `git pull --ff-only` refuse the upgrade. If your
-checkout already has `scripts/enable-worker.sh`, run it first. Otherwise replace or add the
-complete `COMPOSE_FILE` line in `.env` before restoring the tracked file. For bundled HTTPS:
-
-```dotenv
-COMPOSE_FILE='docker-compose.yml:docker-compose.proxy.yml:docker-compose.worker.yml'
-```
-
-For plain mode:
-
-```dotenv
-COMPOSE_FILE='docker-compose.yml:docker-compose.worker.yml'
-```
-
-Keep any additional custom overlays within the quotes. Then restore the tracked Compose
-file before pulling:
-
-```sh
-git restore docker-compose.yml
-```
-
-Restoring the Compose file without selecting the worker overlay leaves the old worker
-container orphaned on the old image, and the app may remain web-only if `.env` still sets
-`HOURMERE_ROLE=web`. Select the overlay before restoring so the upgrade recreates both
-services on the new image. Installations already using the tracked overlay skip this legacy
-restoration step. Choose the upgrade sequence for your existing deployment below.
+preserve its `.env` and Caddy state. For 1.0 and later, check out the intended release tag
+rather than following `main`: replace `vX.Y.Z` in the commands below with the reviewed tag.
+No stable release has been published yet; these are the upgrade steps for future releases.
+Keep tracked Compose files unchanged and preserve the worker selection in `.env` so the
+upgrade rebuilds/recreates any separate worker. If starting from a pre-1.0 checkout, read
+[its migration notes](#upgrading-from-a-pre-10-checkout) before either sequence.
 
 ### Single-container upgrade
 
@@ -599,7 +565,8 @@ The app keeps the default `all` role. From the deployment checkout:
 
 ```sh
 (
-  git pull --ff-only &&
+  git fetch --tags &&
+  git checkout vX.Y.Z &&
   unset COMPOSE_FILE &&
   compose_services=$(docker compose config --services) &&
   { ! printf '%s\n' "$compose_services" | grep -qx worker ||
@@ -620,7 +587,8 @@ stopping the old app and worker:
 
 ```sh
 (
-  git pull --ff-only &&
+  git fetch --tags &&
+  git checkout vX.Y.Z &&
   unset COMPOSE_FILE &&
   ./scripts/enable-worker.sh &&
   compose_services=$(docker compose config --services) &&
@@ -638,8 +606,7 @@ stopping the old app and worker:
 For plain mode, remove both lines of the proxy verification before pasting either
 sequence, pull only `db`, and use your deployment's health URL.
 
-For a pinned release, fetch and check out the reviewed tag/commit instead of pulling the
-branch. No public image can currently be pulled as a substitute for building the source.
+No public image can currently be pulled as a substitute for building the source.
 Plain mode pulls only `db`. Caddy is pinned to the `2.11` minor line (`caddy:2.11-alpine`),
 and PostgreSQL to major 18 (`postgres:18-alpine`): pulling refreshes their patch/security
 updates, then `up` recreates affected containers. Review Caddy releases and deliberately
@@ -648,14 +615,11 @@ patch updates, and plan a separate database migration for a future major upgrade
 image updates are separate from host apt updates. Rebuild any separate worker too.
 
 **Before starting a version whose migrations drop columns, stop every old app and worker
-process.** Migration `0037_conference_pending_timeout.sql` is the project's first column
-drop: old versions still write the removed `booking_conferences.retry_conference` column.
-The separate-worker sequence's `stop app worker` stops both Compose roles before new startup migrations.
-For a single-container deployment, `docker compose up -d --build` already stops the old app
-container before starting its replacement. Separately managed workers, including processes
-outside this Compose project, must be stopped explicitly before the new app or a manual
-migration runs. Restart every role with the same upgraded code after migration; do not run
-old and new versions together across a column drop.
+process**, including processes on other hosts or outside this Compose project. The sequences
+above stop the Compose roles before new startup migrations; stop separately managed
+processes explicitly before the new app or a manual migration runs. Restart every role with
+the same upgraded code after migration; do not run old and new versions together across a
+column drop.
 
 Future column removals use two phases: release N stops writing the column, and release N+1
 drops it. Review each release's migration and upgrade notes even with this policy; schema
@@ -671,6 +635,55 @@ schema. To roll back safely, stop all app/worker processes, restore the pre-upgr
 into a fresh volume, restore its original revision and configuration, then verify the result
 before switching traffic back. Recovery loses writes made after that backup; decide your
 maintenance window and recovery plan before upgrading.
+
+### Upgrading from a pre-1.0 checkout
+
+Before moving an early `main` checkout to a release tag, check the historical migration
+notes below. To continue tracking pre-1.0 `main` instead, replace `git fetch --tags` and
+`git checkout vX.Y.Z` in the appropriate guarded sequence with `git pull --ff-only`;
+retain the remaining verification, stop, build and health steps.
+
+**Migration 0038 requires stopping all old processes; do not use a rolling deployment.**
+Before any new process applies `0038_booking_ical_identity.sql`, stop every old `web`, `all`
+and `worker` process, including any on other hosts. With Compose, run
+`docker compose stop app` and, if the separate worker is configured, `docker compose stop worker`. Leave
+PostgreSQL running, then apply the migration and start every role with the new code. With
+`AUTO_MIGRATE=true`, the first new process applies the migration on startup. See the
+[calendar identity migration notes](https://github.com/hourmere/hourmere/blob/main/docs/notifications.md#identity-and-recipients).
+
+Migration `0037_conference_pending_timeout.sql` is the project's first column drop:
+old versions still write the removed `booking_conferences.retry_conference` column.
+Stop every old app and worker before it runs, then restart every role with the upgraded
+code. See the [0037 migration notes](https://github.com/hourmere/hourmere/blob/main/packages/db/migrations/0037_conference_pending_timeout.md).
+
+**If you uncommented the old worker block in `docker-compose.yml`, migrate it before
+changing revisions.** Those tracked edits make `git pull --ff-only` refuse the upgrade
+and can prevent checking out a release tag. If your checkout already has
+`scripts/enable-worker.sh`, run it first. Otherwise replace or add the
+complete `COMPOSE_FILE` line in `.env` before restoring the tracked file. For bundled HTTPS:
+
+```dotenv
+COMPOSE_FILE='docker-compose.yml:docker-compose.proxy.yml:docker-compose.worker.yml'
+```
+
+For plain mode:
+
+```dotenv
+COMPOSE_FILE='docker-compose.yml:docker-compose.worker.yml'
+```
+
+Keep any additional custom overlays within the quotes. Then restore the tracked Compose
+file before changing revisions:
+
+```sh
+git restore docker-compose.yml
+```
+
+Restoring the Compose file without selecting the worker overlay leaves the old worker
+container orphaned on the old image, and the app may remain web-only if `.env` still sets
+`HOURMERE_ROLE=web`. Select the overlay before restoring so the upgrade recreates both
+services on the new image. Installations already using the tracked overlay skip this legacy
+restoration step.
 
 ## Logs, health and host hardening
 

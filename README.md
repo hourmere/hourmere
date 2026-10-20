@@ -217,6 +217,22 @@ Organization owners can view first-party [booking activity](docs/analytics.md) a
 `/app/analytics`: daily creations, reschedules and actual cancellations, without visitor
 tracking or attendee details.
 
+## Known limitations
+
+See the [consolidated limitations](apps/site/src/content/docs/docs/index.md#known-limitations)
+and linked operating guides before deploying:
+
+- Microsoft Calendar lists calendars only; no busy-time sync or event writes. Microsoft sign-in and
+  calendar connections have not had real-account acceptance.
+- Automatic Zoom supports personal event types and individual team event types with one
+  actual host; collective and round-robin event types are unsupported.
+- Calendar RSVP replies are not processed; declining in a calendar does not cancel a booking.
+- PostgreSQL 18+ is required; PgBouncer is unsupported.
+- Bundled Caddy uses an IPv4-only ingress network, with no path prefix or nonstandard public ports.
+- Interface languages are English and Simplified Chinese only.
+- No automatic schema downgrade; some migrations require stopping all old app and worker
+  processes. Review the [migration notes](docs/data-model.md#changing-the-schema).
+
 ## Contributing
 
 Bug reports and ideas are welcome in [GitHub Issues](https://github.com/hourmere/hourmere/issues),
