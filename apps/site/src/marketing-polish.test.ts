@@ -150,12 +150,15 @@ describe('marketing navigation and layout polish', () => {
 })
 
 describe('legal navigation and print polish', () => {
-  it('offers a return to contents after each privacy section', () => {
-    const doc = document('./pages/privacy.astro')
+  it.each([
+    ['privacy', 17],
+    ['terms', 18],
+  ] as const)('offers a return to contents after each %s section', (page, sectionCount) => {
+    const doc = document(`./pages/${page}.astro`)
     const headings = [...doc.querySelectorAll('h2[id]')].filter(
       (node) => node.id !== 'summary-title',
     )
-    expect(headings).toHaveLength(17)
+    expect(headings).toHaveLength(sectionCount)
     expect(doc.querySelectorAll('.back-to-contents a[href="#contents"]')).toHaveLength(
       headings.length,
     )
@@ -163,7 +166,9 @@ describe('legal navigation and print polish', () => {
       let sibling = heading.nextElementSibling
       let hasReturnLink = false
       while (sibling && sibling.tagName !== 'H2') {
-        if (sibling.matches('.back-to-contents')) hasReturnLink = true
+        if (sibling.matches('.back-to-contents')) {
+          hasReturnLink = sibling.querySelector('a[href="#contents"]') !== null
+        }
         sibling = sibling.nextElementSibling
       }
       expect(hasReturnLink, heading.id).toBe(true)

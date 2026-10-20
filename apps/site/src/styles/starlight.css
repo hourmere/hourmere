@@ -31,14 +31,33 @@ h1#_top {
   font-weight: 800;
 }
 
-/* Let long configuration values contribute their wrapped width to table sizing. */
-.sl-markdown-content :is(th, td),
-.sl-markdown-content :is(th, td) code {
+/* Preserve readable labels and identifiers; scroll the table when they need more room. */
+.sl-markdown-content th,
+.sl-markdown-content td:first-child,
+.sl-markdown-content td:first-child code {
+  overflow-wrap: normal;
+  word-break: keep-all;
+}
+
+.sl-markdown-content th,
+.sl-markdown-content td:first-child code {
+  white-space: nowrap;
+}
+
+.sl-markdown-content td:first-child {
+  min-width: 12rem;
+}
+
+/* Long values and URLs may wrap without shrinking the identifier column. */
+.sl-markdown-content td:not(:first-child),
+.sl-markdown-content td:not(:first-child) code {
   overflow-wrap: anywhere;
   white-space: normal;
 }
 
 .sl-markdown-content table {
+  display: block;
+  overflow-x: auto;
   max-width: 100%;
   /* Local covers hide each edge shadow when there is nothing left to scroll to. */
   background:
@@ -49,6 +68,15 @@ h1#_top {
     radial-gradient(farthest-side at 100% 50%, var(--sl-color-gray-5), transparent) right center /
     0.75rem 100% scroll;
   background-repeat: no-repeat;
+}
+
+/* Touch copy controls get their own row, including for unwrapped dotenv blocks. */
+@media (max-width: 50rem), (hover: none) {
+  .expressive-code .frame > .copy {
+    position: static;
+    justify-content: flex-end;
+    padding: 0.5rem;
+  }
 }
 
 @media screen and (max-height: 500px) {

@@ -26,10 +26,25 @@ export default defineConfig({
     serviceWorkers: 'block',
   },
   projects: [
-    { name: 'desktop', use: { viewport: { width: 1280, height: 1000 } } },
+    {
+      name: 'desktop',
+      testIgnore: 'site-layout.spec.ts',
+      use: { viewport: { width: 1280, height: 1000 } },
+    },
     {
       name: 'mobile',
+      testIgnore: 'site-layout.spec.ts',
       use: { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true },
+    },
+    {
+      name: 'site-desktop',
+      testMatch: 'site-layout.spec.ts',
+      use: { viewport: { width: 1280, height: 1000 } },
+    },
+    {
+      name: 'site-mobile',
+      testMatch: 'site-layout.spec.ts',
+      use: { viewport: { width: 360, height: 844 }, isMobile: true, hasTouch: true },
     },
   ],
 })

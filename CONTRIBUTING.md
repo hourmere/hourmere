@@ -148,6 +148,14 @@ the account sign-in gate. Each scenario runs at desktop and mobile viewport size
 are genuine SPA/HTTP/PostgreSQL flows, without API response mocks. CI runs the suite in a
 separate job with its own PostgreSQL service and the runner's installed Chrome.
 
+CI also builds a disposable static-site fixture and checks documentation table geometry at
+360px and 1280px, including page overflow, identifier line counts and mid-word header wraps.
+Touch copy controls are checked at both widths. These site tests use only a local static
+server, block external requests and create no database. Rendered negative controls verify
+that the assertions detect the rejected wrapping, overflow and copy-button overlap. The site
+tests are skipped outside CI; any local browser run requires an escalated shell. CI restores
+the legal-date source and deletes the fixture output after the browser suite.
+
 Traces, videos, screenshots and automatic failure DOM snapshots are disabled to keep
 one-time management capabilities out of artifacts. Playwright's pinned
 `PLAYWRIGHT_NO_COPY_PROMPT` switch disables fallback DOM capture. Always import `test` and

@@ -6,6 +6,33 @@ import { siteCopy } from './ui-copy.ts'
 const read = (path: string) => readFileSync(new URL(path, import.meta.url))
 
 describe('brand raster exports and delivery', () => {
+  it('keeps one-off font tools outside the workspace and site tools out of production installs', () => {
+    const lock = JSON.parse(read('../../../package-lock.json').toString()) as {
+      packages: Record<string, { dev?: boolean; devOptional?: boolean }>
+    }
+    const tools = ['sharp', 'jsdom', 'parse5', 'fontkit', 'wawoff2', 'postcss']
+    for (const [path, metadata] of Object.entries(lock.packages)) {
+      if (!path.includes('node_modules')) {
+        const manifest = JSON.parse(read(`../../../${path}/package.json`).toString())
+        for (const field of ['dependencies', 'devDependencies', 'optionalDependencies']) {
+          expect(manifest[field]?.fontkit, `${path}: ${field}`).toBeUndefined()
+          expect(manifest[field]?.['@types/fontkit'], `${path}: ${field}`).toBeUndefined()
+          expect(manifest[field]?.wawoff2, `${path}: ${field}`).toBeUndefined()
+        }
+        for (const tool of tools) {
+          expect(manifest.dependencies?.[tool], `${path}: production ${tool}`).toBeUndefined()
+          expect(manifest.optionalDependencies?.[tool], `${path}: optional ${tool}`).toBeUndefined()
+        }
+      } else if (
+        tools.some(
+          (tool) => path.endsWith(`/node_modules/${tool}`) || path === `node_modules/${tool}`,
+        )
+      ) {
+        expect(metadata.dev || metadata.devOptional, `${path}: production lock entry`).toBe(true)
+      }
+    }
+  })
+
   it('ships a 1200×630 PNG sharing image', async () => {
     const metadata = await sharp(read('../public/og-image.png')).metadata()
     expect([metadata.format, metadata.width, metadata.height]).toEqual(['png', 1200, 630])

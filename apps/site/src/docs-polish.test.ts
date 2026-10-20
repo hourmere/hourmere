@@ -46,15 +46,37 @@ function objectProperty(source: string, name: string) {
 }
 
 describe('documentation layout polish', () => {
-  it.each(['.sl-markdown-content :is(th, td)', '.sl-markdown-content :is(th, td) code'])(
-    'allows long table values to wrap in %s',
+  it.each([
+    '.sl-markdown-content td:not(:first-child)',
+    '.sl-markdown-content td:not(:first-child) code',
+  ])('allows long table values to wrap in %s', (selector) => {
+    expect(declaration(selector, 'overflow-wrap')).toBe('anywhere')
+    expect(declaration(selector, 'white-space')).toBe('normal')
+  })
+
+  it.each([
+    '.sl-markdown-content th',
+    '.sl-markdown-content td:first-child',
+    '.sl-markdown-content td:first-child code',
+  ])('preserves word boundaries in %s', (selector) => {
+    expect(declaration(selector, 'overflow-wrap')).toBe('normal')
+    expect(declaration(selector, 'word-break')).toBe('keep-all')
+  })
+
+  it.each(['.sl-markdown-content th', '.sl-markdown-content td:first-child code'])(
+    'keeps %s intact within the scrollable table',
     (selector) => {
-      expect(declaration(selector, 'overflow-wrap')).toBe('anywhere')
-      expect(declaration(selector, 'white-space')).toBe('normal')
+      expect(declaration(selector, 'white-space')).toBe('nowrap')
     },
   )
 
+  it('gives the identifier column readable space', () => {
+    expect(declaration('.sl-markdown-content td:first-child', 'min-width')).toBe('12rem')
+  })
+
   it('keeps tables within the content width and hints at remaining horizontal content', () => {
+    expect(declaration('.sl-markdown-content table', 'display')).toBe('block')
+    expect(declaration('.sl-markdown-content table', 'overflow-x')).toBe('auto')
     expect(declaration('.sl-markdown-content table', 'max-width')).toBe('100%')
     const background = declaration('.sl-markdown-content table', 'background') ?? ''
     expect(background.match(/\blocal\b/g)).toHaveLength(2)
@@ -64,6 +86,20 @@ describe('documentation layout polish', () => {
     expect(background).toContain('var(--sl-color-bg)')
     expect(background).toContain('var(--sl-color-gray-5)')
     expect(declaration('.sl-markdown-content table', 'background-repeat')).toBe('no-repeat')
+  })
+
+  it('puts copy controls outside the code on narrow or touch screens', () => {
+    const selector = '.expressive-code .frame > .copy'
+    expect(declaration(selector, 'position')).toBe('static')
+    expect(declaration(selector, 'justify-content')).toBe('flex-end')
+    expect(declaration(selector, 'padding')).toBe('0.5rem')
+    for (const rule of rules(selector)) {
+      expect(rule.parent?.type).toBe('atrule')
+      if (rule.parent?.type === 'atrule') {
+        expect(rule.parent.name).toBe('media')
+        expect(rule.parent.params).toBe('(max-width: 50rem), (hover: none)')
+      }
+    }
   })
 
   it.each(['bash', 'sh', 'shell', 'shellscript', 'zsh'])(

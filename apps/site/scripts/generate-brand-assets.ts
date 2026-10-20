@@ -1,14 +1,28 @@
-// One-off, reproducible raster exports. Run with: node apps/site/scripts/generate-brand-assets.ts
+// One-off raster exports. Install pinned tools outside the workspace; see ./README.md.
 // Text is outlined from the bundled Manrope font, independent of the machine's installed fonts.
 
 import { readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
+import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { create } from 'fontkit'
-import sharp from 'sharp'
+import type sharpType from 'sharp'
+
+interface Font {
+  unitsPerEm: number
+  getVariation(axes: { wght: number }): Font
+  layout(text: string): {
+    glyphs: { path: { toSVG(): string } }[]
+    positions: { xOffset: number; yOffset: number; xAdvance: number }[]
+  }
+}
 
 const require = createRequire(import.meta.url)
-const { decompress }: { decompress: (input: Buffer) => Promise<Uint8Array> } = require('wawoff2')
+const toolDirectory = process.argv[2]
+if (!toolDirectory) throw new Error('Pass the disposable tool directory; see scripts/README.md')
+const tools = createRequire(resolve(toolDirectory, 'package.json'))
+const { create }: { create: (input: Buffer) => Font | { fonts: Font[] } } = tools('fontkit')
+const sharp: typeof sharpType = tools('sharp')
+const { decompress }: { decompress: (input: Buffer) => Promise<Uint8Array> } = tools('wawoff2')
 const fontFile = require.resolve(
   '@fontsource-variable/manrope/files/manrope-latin-wght-normal.woff2',
 )
