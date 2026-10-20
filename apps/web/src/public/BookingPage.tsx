@@ -1,3 +1,4 @@
+import { interfaceLanguage } from '@hourmere/core/language'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, useLocation, useParams } from 'react-router'
 import { ConferenceNotice } from '../components/ConferenceNotice.tsx'
@@ -133,7 +134,6 @@ function BookingFlow({
   const embedded = useEmbedded()
   const browserFormatLocale = useMemo(preferredLocale, [])
   const locale = explicit ?? browserFormatLocale
-  const [requestLocale] = useState(() => bookingLocale(explicit ?? preferredLocale()))
   const [timeZone, setTimeZone] = useState(detectTimeZone)
   const [now, setNow] = useState(currentTime)
   const [slot, setSlot] = useState<Slot | null>(null)
@@ -148,8 +148,9 @@ function BookingFlow({
   const [gone, setGone] = useState(false)
   // One Idempotency-Key per booking attempt: resending the same request (after a network
   // error or a lost answer) reuses it, so the server answers with the booking it may already
-  // have made instead of booking twice; any change to the request starts a new attempt.
-  const attempt = useRef<{ key: string; body: string } | null>(null)
+  // have made instead of booking twice. Language changes preserve that attempt; changing
+  // booking details starts a new attempt in the interface language selected at submission.
+  const attempt = useRef<{ key: string; details: string; body: CreateBooking } | null>(null)
   const loadSlots = useMemo(() => eventSlots(handle, slug, team), [handle, slug, team])
 
   if (gone) return <PublicNotFound what="event" />
@@ -168,7 +169,6 @@ function BookingFlow({
 
   async function submit() {
     if (!slot) return
-    const inviteeLocale = requestLocale
     const guests = values.guests.map((g) => ({ name: g.name.trim(), email: g.email.trim() }))
     const body: CreateBooking = {
       ...(embedded && { source: 'embed' as const }),
@@ -177,15 +177,23 @@ function BookingFlow({
         name: values.name.trim(),
         email: values.email.trim(),
         timeZone,
-        ...(inviteeLocale && { locale: inviteeLocale }),
       },
       ...(guests.length > 0 && { guests }),
       ...(event.questions.length > 0 && {
         responses: responsesFor(event.questions, values.answers),
       }),
     }
-    const json = JSON.stringify(body)
-    if (attempt.current?.body !== json) attempt.current = { key: randomKey(), body: json }
+    const details = JSON.stringify(body)
+    if (attempt.current?.details !== details) {
+      const inviteeLocale = bookingLocale(
+        explicit ??
+          (interfaceLanguage(browserFormatLocale) === displayLocale
+            ? browserFormatLocale
+            : displayLocale),
+      )
+      if (inviteeLocale) body.invitee.locale = inviteeLocale
+      attempt.current = { key: randomKey(), details, body }
+    }
     setSubmitting(true)
     setFormError(null)
     setServerErrors({})
@@ -193,7 +201,7 @@ function BookingFlow({
       const { result, replayed } = await createBooking(
         handle,
         slug,
-        body,
+        attempt.current.body,
         attempt.current.key,
         team,
       )

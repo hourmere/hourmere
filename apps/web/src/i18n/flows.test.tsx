@@ -112,7 +112,7 @@ describe('changing interface language through booking and account flows', () => 
         calls[0]?.headers.get('idempotency-key') === calls[1]?.headers.get('idempotency-key'),
       ).toBe(true)
       expect(calls[0]?.body).toEqual(calls[1]?.body)
-      expect(calls[0]?.body).toHaveProperty('invitee.locale', embed ? 'en' : 'en-US')
+      expect(calls[0]?.body).toHaveProperty('invitee.locale', 'zh-CN')
       expect(calls[0]?.body).toHaveProperty('responses.question', 'Settings')
       if (embed) expect(calls[0]?.body).toHaveProperty('source', 'embed')
       await setLanguage(user, 'zh-CN')
@@ -130,6 +130,33 @@ describe('changing interface language through booking and account flows', () => 
       }
     },
   )
+  it('captures the current interface language for a new attempt after booking details change', async () => {
+    const user = userEvent.setup()
+    let attempts = 0
+    const api = fakeApi({
+      ...eventRoutes({ ...EVENT, allowGuests: false }, ['2026-11-02T14:00:00Z']),
+      'POST /api/v1/public/ada/intro/bookings': () => {
+        if (++attempts === 1) throw new TypeError('lost response')
+        return json(201, { booking: booking(), manageToken: TOKEN })
+      },
+    })
+    renderApp('/ada/intro')
+    await pick(user)
+    await user.type(screen.getByLabelText('Your name'), 'Invitee')
+    await user.type(screen.getByLabelText('Email'), 'invitee@example.invalid')
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+    await screen.findByRole('alert')
+    await setLanguage(user, 'zh-CN')
+    await user.type(screen.getByLabelText('你的姓名'), ' changed')
+    await user.click(screen.getByRole('button', { name: '确认预约' }))
+    await screen.findByRole('heading', { name: '预约成功' })
+    const [first, second] = api.to('POST /api/v1/public/ada/intro/bookings')
+    expect(first?.body).toHaveProperty('invitee.locale', 'en-US')
+    expect(second?.body).toHaveProperty('invitee.locale', 'zh-CN')
+    expect(second?.body).toHaveProperty('invitee.name', 'Invitee changed')
+    expect(second?.headers.get('idempotency-key')).not.toBe(first?.headers.get('idempotency-key'))
+  })
+
   it('preserves the one-time confirmation capability and current booking through repeated language switches', async () => {
     const user = userEvent.setup()
     const api = fakeApi({

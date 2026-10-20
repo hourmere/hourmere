@@ -32,6 +32,20 @@ export function subjectLine(text: string, max = 200): string {
   return line.length <= max ? line : `${line.slice(0, max - 1).trimEnd()}…`
 }
 
+/** Space Han/Latin substitution boundaries without rewriting the user's text itself. */
+export function formatChineseTemplate(template: string, values: Record<string, string>): string {
+  return template.replace(/\{(\w+)\}/g, (placeholder, name: string, offset: number) => {
+    const value = values[name]
+    if (value === undefined) return placeholder
+    const before = template.slice(0, offset)
+    const after = template.slice(offset + placeholder.length)
+    const leading = /\p{Script=Han}$/u.test(before) && /^\p{Script=Latin}/u.test(value) ? ' ' : ''
+    const trailing =
+      /\p{Script=Latin}\p{M}*$/u.test(value) && /^\p{Script=Han}/u.test(after) ? ' ' : ''
+    return `${leading}${value}${trailing}`
+  })
+}
+
 export function escapeHtml(text: string): string {
   return text
     .replaceAll('&', '&amp;')

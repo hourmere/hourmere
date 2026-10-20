@@ -1,11 +1,12 @@
 import { domainToASCII } from 'node:url'
+import type { InterfaceLanguage } from '@hourmere/core/language'
 import nodemailer from 'nodemailer'
 import addressparser from 'nodemailer/lib/addressparser'
 import { escapeHtml, singleLine } from './text.ts'
 
 export * from './booking.ts'
 export * from './ics.ts'
-export { escapeHtml, multiLine, singleLine, subjectLine } from './text.ts'
+export { escapeHtml, formatChineseTemplate, multiLine, singleLine, subjectLine } from './text.ts'
 
 export interface MailAttachment {
   /** File name shown to the recipient, e.g. `invite.ics`. */
@@ -325,26 +326,47 @@ export function magicLinkEmail({
   to,
   url,
   expiresInMinutes,
+  language = 'en',
 }: {
   to: string
   url: string
   expiresInMinutes: number
+  language?: InterfaceLanguage | undefined
 }): MailMessage {
-  const expiry = `The link expires in ${expiresInMinutes} minutes and works once. If you did not ask to sign in, you can ignore this email.`
+  const words = {
+    en: {
+      subject: 'Sign in to Hourmere',
+      instruction:
+        'To sign in to Hourmere, open this link, then press "Sign in to Hourmere" on the page it opens:',
+      htmlInstruction:
+        'To sign in to Hourmere, press the button below, then "Sign in to Hourmere" on the page it opens.',
+      button: 'Sign in',
+      expiry: `The link expires in ${expiresInMinutes} minutes and works once. If you did not ask to sign in, you can ignore this email.`,
+      fallback: 'If the button does not work, copy this link into your browser:',
+    },
+    'zh-CN': {
+      subject: '登录 Hourmere',
+      instruction: '如需登录 Hourmere，请打开此链接，然后在打开的页面上点击“登录 Hourmere”：',
+      htmlInstruction: '如需登录 Hourmere，请点击下方按钮，然后在打开的页面上点击“登录 Hourmere”。',
+      button: '登录',
+      expiry: `此链接将在 ${expiresInMinutes} 分钟后过期，且仅能使用一次。如果你没有申请登录，可以忽略此邮件。`,
+      fallback: '如果按钮无法使用，请将此链接复制到浏览器中：',
+    },
+  }[language]
   const link = escapeHtml(url)
   // The link opens a page whose button signs in (so that mail scanners opening the link do
   // not use it up).
   return {
     to,
-    subject: 'Sign in to Hourmere',
-    text: `To sign in to Hourmere, open this link, then press "Sign in to Hourmere" on the page it opens:\n\n${url}\n\n${expiry}\n`,
+    subject: words.subject,
+    text: `${words.instruction}\n\n${url}\n\n${words.expiry}\n`,
     html: `<!doctype html>
-<html lang="en">
+<html lang="${language}">
 <body style="font-family: system-ui, sans-serif; line-height: 1.5; color: #111;">
-<p>To sign in to Hourmere, press the button below, then "Sign in to Hourmere" on the page it opens.</p>
-<p><a href="${link}" style="display: inline-block; padding: 10px 16px; background: #111; color: #fff; text-decoration: none; border-radius: 6px;">Sign in</a></p>
-<p style="color: #555;">${escapeHtml(expiry)}</p>
-<p style="color: #555; font-size: 13px;">If the button does not work, copy this link into your browser:<br>${link}</p>
+<p>${words.htmlInstruction}</p>
+<p><a href="${link}" style="display: inline-block; padding: 10px 16px; background: #111; color: #fff; text-decoration: none; border-radius: 6px;">${words.button}</a></p>
+<p style="color: #555;">${escapeHtml(words.expiry)}</p>
+<p style="color: #555; font-size: 13px;">${words.fallback}<br>${link}</p>
 </body>
 </html>
 `,

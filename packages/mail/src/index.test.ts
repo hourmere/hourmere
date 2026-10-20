@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
   createLogMailer,
   createSmtpMailer,
+  escapeHtml,
   icsAttachment,
   MailRejectedError,
   magicLinkEmail,
@@ -70,6 +71,28 @@ const invitation = icsAttachment({
 })
 
 describe('magicLinkEmail', () => {
+  it.each(['en', 'zh-CN'] as const)('matches the complete %s sign-in email', (language) => {
+    const message = magicLinkEmail({ to: 'ada@example.com', url, expiresInMinutes: 5, language })
+    expect(message.html).toContain(`<html lang="${language}">`)
+    if (language === 'zh-CN') {
+      // Links and markup have protocol punctuation; the translated prose must use Chinese punctuation.
+      const prose = [
+        message.subject,
+        message.text.replace(url, ''),
+        ...Array.from(message.html?.matchAll(/>([^<>]*)</g) ?? [], (match) => match[1]).filter(
+          (text) => text !== escapeHtml(url),
+        ),
+      ].join('\n')
+      expect(prose).not.toMatch(/[.,:;!?"'()]/)
+    }
+    expect(message).toMatchSnapshot()
+  })
+
+  it('defaults legacy callers to the unchanged English template', () => {
+    const input = { to: 'ada@example.com', url, expiresInMinutes: 5 }
+    expect(magicLinkEmail(input)).toEqual(magicLinkEmail({ ...input, language: 'en' }))
+  })
+
   it('puts the link in the text and, escaped, in the HTML', () => {
     const m = magicLinkEmail({ to: 'ada@example.com', url, expiresInMinutes: 5 })
     expect(m).toMatchObject({ to: 'ada@example.com', subject: 'Sign in to Hourmere' })
