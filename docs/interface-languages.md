@@ -1,7 +1,7 @@
 # Interface languages
 
 The web interface is available in English and Simplified Chinese. The language control is
-available on sign-in, account and public booking pages, including inline and popup widgets.
+available on sign-in, account and standalone public booking pages.
 Changing it updates the existing page without restarting a form, discarding a chosen time,
 reissuing a booking or replacing its private management link.
 
@@ -38,8 +38,10 @@ translation catalog.
 
 The standalone helper accepts an optional, strictly validated `language` value in
 `initInline` and `openPopup`, or `data-hourmere-language` on declarative elements. Only `en`
-and `zh-CN` are accepted. This initializes that iframe's interface; its visitor may change
-the language in place. The iframe receives only that non-sensitive allowlisted value in its
+and `zh-CN` are accepted. Without an explicit value, the helper uses the host page's supported
+`<html lang>`, then a supported browser language, then English. Embedded pages hide their
+page-level language picker; choose the page or widget language before initialization.
+The iframe receives only that non-sensitive allowlisted value in its
 `language` query parameter. Existing exact origin, source and instance checks still apply;
 completion messages contain no booking or attendee data.
 

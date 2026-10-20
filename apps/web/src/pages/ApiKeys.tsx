@@ -135,7 +135,7 @@ export function ApiKeysPage() {
           )}
         </p>
         <div className="code-block">
-          <pre>
+          <pre data-layout-scroll="horizontal">
             <code>{curlExample('hm_…')}</code>
           </pre>
           <CopyButton text={curlExample('hm_…')} label={t('Copy command')} />
@@ -293,7 +293,7 @@ function NewKey({ apiKey, onDone }: { apiKey: CreatedApiKey; onDone: () => void 
       </div>
       <p>{t('Check that it works:')}</p>
       <div className="code-block">
-        <pre>
+        <pre data-layout-scroll="horizontal">
           <code>{curlExample(apiKey.key)}</code>
         </pre>
         <CopyButton text={curlExample(apiKey.key)} label={t('Copy command')} />

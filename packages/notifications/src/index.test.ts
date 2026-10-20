@@ -144,6 +144,7 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
       bookingId: result.booking.id,
       apiToken: result.manageToken as string,
       hostId: host.userId,
+      organizationId: host.organizationId,
       hostEmail,
     }
   }
@@ -164,6 +165,77 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
       .orderBy('recipient')
       .execute()
 
+  it.each(['en', 'zh-CN'] as const)(
+    'links every host notification to its admin booking in %s without sharing invitee links',
+    async (locale) => {
+      const { bookingId, apiToken, hostId, hostEmail, organizationId } = await booked({
+        guests: true,
+      })
+      await db.updateTable('profiles').set({ locale }).where('user_id', '=', hostId).execute()
+      const { mailer, sent } = testMailer()
+      const config = {
+        ...deps(mailer),
+        publicUrl: `${PUBLIC_URL}/ignored?source=fixture#ignored`,
+      }
+      const check = (id: string) => {
+        const host = sent.find(to(hostEmail))
+        const url = `${PUBLIC_URL}/app/bookings/${id}`
+        expect(host).toBeDefined()
+        expect(host?.html?.includes(`href="${url}"`)).toBe(true)
+        expect(host?.text?.includes(url)).toBe(true)
+        expect(host?.html).toContain(locale === 'en' ? 'Open in Hourmere' : '在 Hourmere 中打开')
+        expect(/token=|\/booking#|source=fixture|#ignored/.test(`${host?.html}${host?.text}`)).toBe(
+          false,
+        )
+        const attendees = sent.filter((message) => message.to !== hostEmail)
+        expect(attendees.length).toBeGreaterThan(0)
+        expect(attendees.every((message) => !`${message.html}${message.text}`.includes(url))).toBe(
+          true,
+        )
+        sent.length = 0
+      }
+      for (const kind of ['confirmed', 'reminder'] as const) {
+        await sendBookingNotification(config, bookingId, kind)
+        check(bookingId)
+      }
+
+      // A logistical failure uses the same host destination, without a final invitation.
+      await db
+        .updateTable('bookings')
+        .set({ location: { kind: 'google_meet', autoCreate: true } })
+        .where('id', '=', bookingId)
+        .execute()
+      await db
+        .insertInto('booking_conferences')
+        .values({
+          root_booking_id: bookingId,
+          booking_id: bookingId,
+          organization_id: organizationId,
+          organizer_user_id: hostId,
+          state: 'failed',
+          error_code: 'provider_unavailable',
+        })
+        .execute()
+      await sendBookingNotification(config, bookingId, 'conference_failed')
+      check(bookingId)
+      await db.deleteFrom('booking_conferences').where('root_booking_id', '=', bookingId).execute()
+      await db
+        .updateTable('bookings')
+        .set({ location: { kind: 'link', url: 'https://meet.example.com/abc' } })
+        .where('id', '=', bookingId)
+        .execute()
+
+      const moved = await rescheduleManagedBooking(ctx, apiToken, {
+        start: instant('2026-11-03T13:00:00Z'),
+      })
+      await sendBookingNotification(config, moved.booking.id, 'rescheduled')
+      check(moved.booking.id)
+      await cancelManagedBooking(ctx, moved.manageToken as string, {})
+      await sendBookingNotification(config, moved.booking.id, 'cancelled')
+      check(moved.booking.id)
+    },
+  )
+
   it('confirms to the host, the invitee and guests, each in their own time zone', async () => {
     const { bookingId, hostEmail } = await booked({ guests: true })
     const { mailer, sent } = testMailer()
@@ -175,7 +247,8 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
     expect(toInvitee?.subject).toBe(
       'Confirmed: Intro call with Grace Hopper on Tue, Nov 3, 6:00 PM (Asia/Tokyo)',
     )
-    expect(toInvitee?.text).toContain('Where: https://meet.example.com/abc')
+    expect(toInvitee?.text.includes('Where: Online meeting')).toBe(true)
+    expect(toInvitee?.text.includes('Join meeting\nhttps://meet.example.com/abc')).toBe(true)
     expect(toInvitee?.text).toMatch(
       /Reschedule: https:\/\/cal\.example\.com\/booking#token=[A-Za-z0-9_-]{43}&action=reschedule/,
     )

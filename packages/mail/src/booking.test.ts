@@ -100,16 +100,24 @@ describe('bookingEmail', () => {
     )
     expect(m.text).toBe(
       [
+        'Hourmere',
+        '',
         'Your meeting with Grace Hopper is booked.',
         '',
         'What: Intro call',
         'When: Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin)',
-        'Where: Google Meet: https://meet.example.com/abc-defg',
+        'Where: Google Meet',
         'Host: Grace Hopper',
         '',
+        'Join Google Meet meeting',
+        'https://meet.example.com/abc-defg',
+        '',
         'Need to make a change?',
+        'Use these links to change or cancel:',
         `Reschedule: ${links.reschedule}`,
         `Cancel: ${links.cancel}`,
+        '',
+        'You received this email because you booked a meeting with Grace Hopper via Hourmere.',
         '',
       ].join('\n'),
     )
@@ -233,11 +241,12 @@ describe('bookingEmail', () => {
       )
       expect(m.text.includes(sentence)).toBe(true)
       if (recipient === invitee) {
-        expect(m.text.indexOf(sentence)).toBeLessThan(
+        expect(m.text.indexOf(sentence)).toBeGreaterThan(
           m.text.indexOf(language === 'en' ? 'What:' : '活动：'),
         )
+        expect(m.text.indexOf(sentence)).toBeLessThan(m.text.indexOf(links.reschedule))
       } else {
-        expect(m.text.endsWith(`\n\n${sentence}\n`)).toBe(true)
+        expect(m.text).toContain(`\n\n${sentence}\n\n`)
       }
       expect(m.html).toContain(`<p lang="${language}"`)
       expect(m.html).toContain(`>${sentence.replaceAll("'", '&#39;')}</p>`)
@@ -272,7 +281,7 @@ describe('bookingEmail', () => {
     )
     expect(where({ kind: 'custom', text: 'I will call you' })).toBe('Where: I will call you')
     expect(where({ kind: 'link', url: 'https://zoom.example.com/j/1' })).toBe(
-      'Where: https://zoom.example.com/j/1',
+      'Where: Online meeting',
     )
     expect(where(null)).toBeUndefined()
   })
@@ -349,7 +358,7 @@ describe('bookingEmail', () => {
 
     it('loads nothing from elsewhere', () => {
       const { html } = bookingEmail('confirmed', hostile, invitee)
-      expect(html).not.toMatch(/<(img|script|link|style|iframe)\b|src=|url\(/i)
+      expect(html).not.toMatch(/<(img|script|link|iframe)\b|src=|url\(/i)
     })
   })
 })

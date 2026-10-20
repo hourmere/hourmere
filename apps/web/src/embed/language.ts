@@ -27,6 +27,8 @@ export function widgetLanguage(value?: unknown): InterfaceLanguage {
     if (!language) throw new Error('Invalid Hourmere interface language')
     return language
   }
+  const pageLanguage = interfaceLanguage(document.documentElement.lang)
+  if (pageLanguage) return pageLanguage
   try {
     for (const candidate of navigator.languages?.length
       ? navigator.languages
