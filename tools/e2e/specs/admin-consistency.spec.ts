@@ -119,10 +119,13 @@ for (const locale of ['en-US', 'zh-CN'] as const) {
         if (!handle?.firstChild || !slug?.firstChild) throw new Error('Preview path missing')
         const range = document.createRange()
         range.selectNodeContents(slug)
-        const cells = document.createRange()
-        cells.setStart(handle.firstChild, 0)
-        cells.setEnd(handle.firstChild, 10)
+        // A Range inside WebKit's clipped text measures the ellipsis, not ten cells.
+        const cells = document.createElement('span')
+        cells.style.cssText = 'position:fixed;left:0;top:0;width:10ch;visibility:hidden'
+        cells.style.font = getComputedStyle(handle).font
+        document.body.append(cells)
         const cellWidth = cells.getBoundingClientRect().width / 10
+        cells.remove()
         const handleWidth = handle.getBoundingClientRect().width
         const start = document.createRange()
         start.setStart(slug.firstChild, 0)

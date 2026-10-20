@@ -93,12 +93,14 @@ export function measureEventTypesTable(page: Page, slug: string): Promise<EventT
     const startRect = slugStart.getBoundingClientRect()
     const slugRect = slugPart.getBoundingClientRect()
     const linkRect = link.getBoundingClientRect()
-    const handleCells = document.createRange()
-    if (!handle.firstChild) throw new Error('Booking handle text missing')
-    const cellCount = Math.min(10, handle.firstChild.textContent?.length ?? 0)
-    handleCells.setStart(handle.firstChild, 0)
-    handleCells.setEnd(handle.firstChild, cellCount)
-    const cellWidth = handleCells.getBoundingClientRect().width / cellCount
+    // WebKit clips text Range geometry at the ellipsis. Measure the same font's CSS
+    // character unit outside the clipped handle, across ten cells to reduce rounding.
+    const handleCells = document.createElement('span')
+    handleCells.style.cssText = 'position:fixed;left:0;top:0;width:10ch;visibility:hidden'
+    handleCells.style.font = getComputedStyle(handle).font
+    document.body.append(handleCells)
+    const cellWidth = handleCells.getBoundingClientRect().width / 10
+    handleCells.remove()
     const handleWidth = handle.getBoundingClientRect().width
     const lines = (node: Node | null) => {
       if (!node) return 0
