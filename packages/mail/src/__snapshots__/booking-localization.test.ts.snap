@@ -177,7 +177,7 @@ exports[`booking email language goldens > en confirmed invitee 1`] = `
 <p style="margin: 0 0 16px;">Your meeting with Grace Hopper is booked.</p>
 <p style="margin: 24px 0 8px;">Need to make a change?</p>
 <p style="margin: 0 0 8px;"><a href="https://cal.example.com/booking#token=fixture&amp;action=reschedule" style="display: inline-block; padding: 8px 14px; margin-right: 8px; background: #111; color: #fff; text-decoration: none; border-radius: 6px;">Reschedule</a><a href="https://cal.example.com/booking#token=fixture&amp;action=cancel" style="display: inline-block; padding: 8px 14px; margin-right: 8px; background: #111; color: #fff; text-decoration: none; border-radius: 6px;">Cancel</a></p>
-<p lang="en" style="margin: 0 0 8px; color: #555; font-size: 13px;">Accepting or declining this calendar invitation does not cancel the booking. To cancel, use the Cancel link in this email.</p>
+<p lang="en" style="margin: 0 0 8px; color: #555; font-size: 13px;">Accepting or declining this calendar invitation does not cancel the booking. To cancel, use the “Cancel” link in this email.</p>
 <p style="margin: 0; color: #555; font-size: 13px;">If the buttons do not work, copy a link into your browser:<br>Reschedule: https://cal.example.com/booking#token=fixture&amp;action=reschedule<br>Cancel: https://cal.example.com/booking#token=fixture&amp;action=cancel</p>
 <table role="presentation" style="border-collapse: collapse;">
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555;">What</td><td style="padding: 2px 16px 2px 0; vertical-align: top;">Intro call</td></tr>
@@ -194,7 +194,7 @@ exports[`booking email language goldens > en confirmed invitee 1`] = `
 Need to make a change?
 Reschedule: https://cal.example.com/booking#token=fixture&action=reschedule
 Cancel: https://cal.example.com/booking#token=fixture&action=cancel
-Accepting or declining this calendar invitation does not cancel the booking. To cancel, use the Cancel link in this email.
+Accepting or declining this calendar invitation does not cancel the booking. To cancel, use the “Cancel” link in this email.
 
 What: Intro call
 When: Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin)
@@ -286,7 +286,7 @@ exports[`booking email language goldens > en rescheduled invitee 1`] = `
 <p style="margin: 0 0 16px;">Your meeting with Grace Hopper has moved to a new time.</p>
 <p style="margin: 24px 0 8px;">Need to make a change?</p>
 <p style="margin: 0 0 8px;"><a href="https://cal.example.com/booking#token=fixture&amp;action=reschedule" style="display: inline-block; padding: 8px 14px; margin-right: 8px; background: #111; color: #fff; text-decoration: none; border-radius: 6px;">Reschedule</a><a href="https://cal.example.com/booking#token=fixture&amp;action=cancel" style="display: inline-block; padding: 8px 14px; margin-right: 8px; background: #111; color: #fff; text-decoration: none; border-radius: 6px;">Cancel</a></p>
-<p lang="en" style="margin: 0 0 8px; color: #555; font-size: 13px;">Accepting or declining this calendar invitation does not cancel the booking. To cancel, use the Cancel link in this email.</p>
+<p lang="en" style="margin: 0 0 8px; color: #555; font-size: 13px;">Accepting or declining this calendar invitation does not cancel the booking. To cancel, use the “Cancel” link in this email.</p>
 <p style="margin: 0; color: #555; font-size: 13px;">If the buttons do not work, copy a link into your browser:<br>Reschedule: https://cal.example.com/booking#token=fixture&amp;action=reschedule<br>Cancel: https://cal.example.com/booking#token=fixture&amp;action=cancel</p>
 <table role="presentation" style="border-collapse: collapse;">
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555;">What</td><td style="padding: 2px 16px 2px 0; vertical-align: top;">Intro call</td></tr>
@@ -304,7 +304,7 @@ exports[`booking email language goldens > en rescheduled invitee 1`] = `
 Need to make a change?
 Reschedule: https://cal.example.com/booking#token=fixture&action=reschedule
 Cancel: https://cal.example.com/booking#token=fixture&action=cancel
-Accepting or declining this calendar invitation does not cancel the booking. To cancel, use the Cancel link in this email.
+Accepting or declining this calendar invitation does not cancel the booking. To cancel, use the “Cancel” link in this email.
 
 What: Intro call
 When: Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin)

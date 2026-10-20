@@ -222,7 +222,7 @@ describe('changing interface language through booking and account flows', () => 
     await user.click(screen.getByRole('button', { name: '确认新时间' }))
     await screen.findByText('你的预约已改至新时间。')
     expect(
-      screen.getByText('在日历中接受或拒绝邀请不会取消预约。如需取消，请使用"取消预约"。'),
+      screen.getByText('在日历中接受或拒绝邀请不会取消预约。如需取消，请使用此处的“取消预约”。'),
     ).toBeDefined()
     expect(
       screen.getByText('没收到邮件？请检查垃圾邮件文件夹，并将发件人加入通讯录。'),
@@ -230,7 +230,7 @@ describe('changing interface language through booking and account flows', () => 
     await setLanguage(user, 'en')
     expect(
       screen.getByText(
-        'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use "Cancel booking" here.',
+        'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use “Cancel booking” here.',
       ),
     ).toBeDefined()
     expect(

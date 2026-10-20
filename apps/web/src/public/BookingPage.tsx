@@ -453,7 +453,7 @@ function Confirmation({
                 <p>
                   {t(
                     manageToken
-                      ? 'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use "Cancel booking" here.'
+                      ? 'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use “Cancel booking” here.'
                       : 'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use the booking link in your Hourmere confirmation email.',
                   )}
                 </p>

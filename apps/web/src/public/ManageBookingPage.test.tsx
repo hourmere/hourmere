@@ -7,6 +7,7 @@ import { type Call, fakeApi, json, later, type Routes, renderApp } from '../test
 import { expectStackGap } from '../test/layout.ts'
 import { booking, managed, NEW_TOKEN, slotsAnswer, TOKEN } from '../test/public-fixtures.ts'
 import { parseManageFragment } from './ManageBookingPage.tsx'
+import publicStyles from './public.css?raw'
 
 const env = vi.hoisted(() => ({
   zone: 'America/New_York',
@@ -30,6 +31,19 @@ afterEach(() => {
 })
 
 const plain = (text: string | null | undefined) => (text ?? '').replace(/[   ]/g, ' ')
+
+/** Check the real spacing rule because jsdom does not calculate pixel layout. */
+function expectStandardMargin(element: HTMLElement, side: 'marginTop' | 'marginBottom') {
+  const sheet = document.createElement('style')
+  sheet.textContent = publicStyles.replace(/^@import[^;]+;/m, '')
+  document.head.append(sheet)
+  try {
+    expect(getComputedStyle(element)[side]).toBe('var(--space-3)')
+  } finally {
+    sheet.remove()
+  }
+}
+
 const bookerIn = (timeZone: string) => ({
   name: 'Grace Hopper',
   email: 'grace@example.com',
@@ -105,19 +119,20 @@ describe('the invitee’s manage page', () => {
         name: action === 'cancel' ? 'Cancel this booking?' : 'Pick a new time',
       })
       const note =
-        'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use "Cancel booking" here.'
-      const chineseNote = '在日历中接受或拒绝邀请不会取消预约。如需取消，请使用"取消预约"。'
+        'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use “Cancel booking” here.'
+      const chineseNote = '在日历中接受或拒绝邀请不会取消预约。如需取消，请使用此处的“取消预约”。'
       expect(screen.getAllByText(note)).toHaveLength(1)
-      if (action === 'cancel') {
-        expect(document.activeElement).toBe(heading)
-        expect(
-          heading.compareDocumentPosition(screen.getByText(note)) &
-            Node.DOCUMENT_POSITION_FOLLOWING,
-        ).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
-      } else {
+      expect(document.activeElement).toBe(heading)
+      expect(
+        heading.compareDocumentPosition(screen.getByText(note)) & Node.DOCUMENT_POSITION_FOLLOWING,
+      ).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+      if (action === 'reschedule') {
         const cancel = screen.getByRole('button', { name: 'Cancel booking' })
-        expect(cancel.nextElementSibling?.contains(heading)).toBe(true)
+        expect(heading.compareDocumentPosition(cancel) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+          Node.DOCUMENT_POSITION_FOLLOWING,
+        )
         expectStackGap(cancel.parentElement as HTMLElement, cancel)
+        expectStandardMargin(cancel.parentElement as HTMLElement, 'marginBottom')
       }
       await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
       expect(screen.getAllByText(chineseNote)).toHaveLength(1)
@@ -187,7 +202,7 @@ describe('the invitee’s manage page', () => {
     expect(await screen.findByRole('heading', { name: 'Your booking' })).toBeDefined()
     expect(screen.queryByText(/Didn’t get the email/)).toBeNull()
     const calendarNote = screen.getByText(
-      'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use "Cancel booking" here.',
+      'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use “Cancel booking” here.',
     )
     expect(calendarNote.nextElementSibling).toBe(
       screen.getByRole('button', { name: 'Cancel booking' }).parentElement,
@@ -377,6 +392,13 @@ describe('the invitee’s manage page', () => {
     const link = screen.getByLabelText<HTMLInputElement>(/Your link to change or cancel/)
     expect(link.value).toBe(`${window.location.origin}/booking#token=${NEW_TOKEN}`)
     expect(window.location.href).not.toContain(NEW_TOKEN)
+    const calendarNote = screen.getByText(
+      'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use “Cancel booking” here.',
+    )
+    expect(calendarNote.previousElementSibling).toBe(
+      screen.getByRole('region', { name: 'Save your link to change or cancel' }),
+    )
+    expectStandardMargin(calendarNote, 'marginTop')
 
     const [slots] = api.to('GET /api/v1/bookings/manage/slots')
     expect(slots?.headers.get('x-manage-token')).toBe(TOKEN)

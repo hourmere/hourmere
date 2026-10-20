@@ -103,7 +103,7 @@ function CalendarResponseNote({ onCancel }: { onCancel?: () => void }) {
     <>
       <p className="muted">
         {t(
-          'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use "Cancel booking" here.',
+          'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use “Cancel booking” here.',
         )}
       </p>
       {onCancel && (
@@ -373,24 +373,26 @@ function ManageView({
               {t('Keep the current time')}
             </button>
           </div>
-          <div className="stack">
-            <CalendarResponseNote onCancel={() => setMode({ kind: 'cancel' })} />
-            <SlotPicker
-              load={loadSlots}
-              durationMinutes={durationMinutes}
-              timeZone={timeZone}
-              onTimeZoneChange={setTimeZone}
-              locale={locale}
-              now={now}
-              selected={null}
-              excludeStart={booking.start}
-              onSelect={(slot) => setMode({ kind: 'confirm-reschedule', slot })}
-              version={version}
-              title={t('Pick a new time')}
-              focusTitle
-              notice={mode.notice}
-            />
-          </div>
+          <SlotPicker
+            load={loadSlots}
+            durationMinutes={durationMinutes}
+            timeZone={timeZone}
+            onTimeZoneChange={setTimeZone}
+            locale={locale}
+            now={now}
+            selected={null}
+            excludeStart={booking.start}
+            onSelect={(slot) => setMode({ kind: 'confirm-reschedule', slot })}
+            version={version}
+            title={t('Pick a new time')}
+            focusTitle
+            notice={mode.notice}
+            afterTitle={
+              <div className="stack picker-note">
+                <CalendarResponseNote onCancel={() => setMode({ kind: 'cancel' })} />
+              </div>
+            }
+          />
         </div>
       ) : (
         <div className="card public-card manage">

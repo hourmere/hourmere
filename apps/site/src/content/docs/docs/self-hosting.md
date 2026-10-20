@@ -757,11 +757,15 @@ the mailbox, forward only reliably classified replies or sort them manually. Who
 forwarding is suitable only for a dedicated invitation mailbox or a host authorized to
 receive everything in that mailbox.
 
-In [Zoho Mail](https://www.zoho.com/mail/help/email-forwarding.html), open **Settings → Filters →
-New Filter**, set the tested conditions, choose **Forward to**, verify a new destination and
-save. Keep the original message; for whole-mailbox forwarding, leave **Delete original email
-copy after forwarding** unchecked. Check forwarding health regularly because repeated
-delivery failures can disable it. Test accept, tentative and decline, then a reply after
+For example, in [Zoho Mail's filter-based forwarding settings](https://www.zoho.com/mail/help/email-forwarding.html),
+open **Settings → Filters → New Filter**, set the tested conditions and select **Forward to**
+with the verified host address. Save the filter and keep the original message. For dedicated
+whole-mailbox forwarding, open **Settings → Mail Accounts → Forwards** and leave
+**Delete original email copy after forwarding** unchecked; this setting belongs to the
+whole-mailbox forwarding page.
+Monitor forwarding health; Zoho can disable forwarding after repeated delivery failures.
+
+Test accept, tentative and decline, then a reply after
 rescheduling: each should reach the host and remain archived, while Hourmere stays confirmed
 until explicitly cancelled. Subject prefixes vary by client and language, so a subject filter
 alone cannot guarantee complete calendar-reply detection or decline-only forwarding.

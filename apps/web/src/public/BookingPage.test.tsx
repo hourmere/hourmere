@@ -73,7 +73,7 @@ describe('the booking page', () => {
     await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
     await screen.findByRole('heading', { name: 'You’re booked' })
     const note = screen.getByText(
-      'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use "Cancel booking" here.',
+      'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use “Cancel booking” here.',
     )
     const cancel = within(note.parentElement as HTMLElement).getByRole('link', {
       name: 'Cancel booking',
@@ -88,7 +88,7 @@ describe('the booking page', () => {
     }
     await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
     expect(
-      screen.getByText('在日历中接受或拒绝邀请不会取消预约。如需取消，请使用"取消预约"。'),
+      screen.getByText('在日历中接受或拒绝邀请不会取消预约。如需取消，请使用此处的“取消预约”。'),
     ).toBeDefined()
     await user.click(screen.getByRole('link', { name: '取消预约' }))
     expect(await screen.findByRole('heading', { name: '取消此预约？' })).toBeDefined()
@@ -162,13 +162,13 @@ describe('the booking page', () => {
       })
       expect(
         screen.getByText(
-          'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use "Cancel booking" here.',
+          'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use “Cancel booking” here.',
         ),
       ).toBeDefined()
       expect(screen.queryByText(/^Booking confirmed\./)).toBeNull()
       await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
       expect(
-        screen.getByText('在日历中接受或拒绝邀请不会取消预约。如需取消，请使用"取消预约"。'),
+        screen.getByText('在日历中接受或拒绝邀请不会取消预约。如需取消，请使用此处的“取消预约”。'),
       ).toBeDefined()
       expect(screen.queryByText(/^预约已确认。/)).toBeNull()
     },
@@ -849,6 +849,7 @@ describe('the booking page', () => {
     expectStackGap(calendarNote.parentElement?.parentElement as HTMLElement)
     expect(screen.queryByRole('link', { name: 'Cancel booking' })).toBeNull()
     await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+    expect(screen.getByText('此前的尝试已创建此预约，因此无法再次显示预约链接。')).toBeDefined()
     expect(
       screen.getByText(
         '在日历中接受或拒绝邀请不会取消预约。如需取消，请使用 Hourmere 确认邮件中的预约链接。',

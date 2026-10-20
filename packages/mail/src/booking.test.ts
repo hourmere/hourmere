@@ -213,7 +213,7 @@ describe('bookingEmail', () => {
           }
         : {
             invitee:
-              'Accepting or declining this calendar invitation does not cancel the booking. To cancel, use the Cancel link in this email.',
+              'Accepting or declining this calendar invitation does not cancel the booking. To cancel, use the “Cancel” link in this email.',
             host: 'Declining in your calendar is not synced to Hourmere; to cancel the booking, use Hourmere.',
             guest:
               'Accepting or declining this calendar invitation does not cancel the booking. To cancel, contact the person who booked or the host.',
@@ -244,8 +244,8 @@ describe('bookingEmail', () => {
       if (recipient !== invitee) {
         expect(m.text).not.toContain('token=')
         expect(m.html).not.toContain('token=')
-        expect(m.text).not.toContain('Cancel link')
-        expect(m.html).not.toContain('Cancel link')
+        expect(m.text).not.toContain('“Cancel” link')
+        expect(m.html).not.toContain('“Cancel” link')
       }
     }
   })
