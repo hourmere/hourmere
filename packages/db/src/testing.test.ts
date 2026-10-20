@@ -23,6 +23,7 @@ describe('test database ownership', () => {
   let events: string[]
 
   beforeEach(() => {
+    vi.stubEnv('HOURMERE_TEST_DATABASE_ADMIN_TIMEOUT_MS', undefined)
     admin = fakePool()
     pool = fakePool()
     events = []
@@ -44,6 +45,7 @@ describe('test database ownership', () => {
   afterEach(async () => {
     await cleanupTestDatabases()
     vi.restoreAllMocks()
+    vi.unstubAllEnvs()
   })
 
   it('uses postgres for maintenance, embeds the pid and migrates by default', async () => {
@@ -60,6 +62,7 @@ describe('test database ownership', () => {
         max: 1,
         connectionTimeoutMillis: 5_000,
         statement_timeout: 5_000,
+        query_timeout: 6_000,
       }),
     )
     expect(migrationModule.runMigrations).toHaveBeenCalledWith(pool, '/migrations')
@@ -68,6 +71,29 @@ describe('test database ownership', () => {
     expect(events.at(-1)).toMatch(/^DROP DATABASE IF EXISTS hourmere_test_.* WITH \(FORCE\)$/)
     expect(admin.end).toHaveBeenCalledTimes(2)
   })
+
+  it('allows slower admin statements with a bounded driver timeout', async () => {
+    vi.stubEnv('HOURMERE_TEST_DATABASE_ADMIN_TIMEOUT_MS', '12000')
+    const owned = await createTestDatabase('postgres://localhost/hourmere')
+    await owned.drop()
+    expect(pg.Pool).toHaveBeenCalledTimes(2)
+    for (const [config] of vi.mocked(pg.Pool).mock.calls) {
+      expect(config).toEqual(
+        expect.objectContaining({ statement_timeout: 12_000, query_timeout: 13_000 }),
+      )
+    }
+  })
+
+  it.each(['0', '-1', '1.5', 'NaN', '10000000000000000', '2147482648'])(
+    'rejects invalid admin timeout %s before creating a pool',
+    async (value) => {
+      vi.stubEnv('HOURMERE_TEST_DATABASE_ADMIN_TIMEOUT_MS', value)
+      await expect(createTestDatabase('postgres://localhost/hourmere')).rejects.toThrow(
+        'HOURMERE_TEST_DATABASE_ADMIN_TIMEOUT_MS must be a positive integer',
+      )
+      expect(pg.Pool).not.toHaveBeenCalled()
+    },
+  )
 
   it('supports tagged raw databases without changing their cleanup', async () => {
     const owned = await createTestDatabase('postgres://localhost/hourmere', undefined, {
@@ -171,15 +197,14 @@ describe('test database ownership', () => {
   })
 
   it('installs interruption hooks only while databases are owned', async () => {
-    const counts = ['SIGINT', 'SIGTERM', 'beforeExit'].map((event) => process.listenerCount(event))
+    const lifecycleEvents = ['SIGINT', 'SIGTERM', 'beforeExit', 'disconnect']
+    const counts = lifecycleEvents.map((event) => process.listenerCount(event))
     const owned = await createTestDatabase('postgres://localhost/hourmere')
-    expect(
-      ['SIGINT', 'SIGTERM', 'beforeExit'].map((event) => process.listenerCount(event)),
-    ).toEqual(counts.map((count) => count + 1))
+    expect(lifecycleEvents.map((event) => process.listenerCount(event))).toEqual(
+      counts.map((count) => count + 1),
+    )
     await owned.drop()
-    expect(
-      ['SIGINT', 'SIGTERM', 'beforeExit'].map((event) => process.listenerCount(event)),
-    ).toEqual(counts)
+    expect(lifecycleEvents.map((event) => process.listenerCount(event))).toEqual(counts)
   })
 
   it.each(['SIGINT', 'SIGTERM'] as const)(
@@ -196,6 +221,17 @@ describe('test database ownership', () => {
       expect(pool.end).toHaveBeenCalledOnce()
     },
   )
+
+  it('drops owned databases when its parent IPC channel disconnects', async () => {
+    await createTestDatabase('postgres://localhost/hourmere')
+    const listener = process.listeners('disconnect').at(-1)
+    expect(listener).toBeTypeOf('function')
+    listener?.()
+    await vi.waitFor(() => {
+      expect(admin.query).toHaveBeenLastCalledWith(expect.stringContaining('WITH (FORCE)'))
+    })
+    expect(pool.end).toHaveBeenCalledOnce()
+  })
 
   it('waits for pending CREATE/ALTER before fallback cleanup', async () => {
     let finishCreate: (() => void) | undefined
@@ -326,4 +362,48 @@ describe.skipIf(!serverUrl)('real test database cleanup', () => {
     },
     20_000,
   )
+
+  it('finishes forced cleanup after IPC disconnect without logging to the lost parent', async () => {
+    const source = `
+      import { createTestDatabase, cleanupTestDatabases } from ${JSON.stringify(new URL('./testing.ts', import.meta.url).href)};
+      import { createPool } from ${JSON.stringify(new URL('./index.ts', import.meta.url).href)};
+      process.on('error', (error) => {
+        if (error.code === 'ERR_IPC_CHANNEL_CLOSED' || error.code === 'EPIPE') process.exit(1);
+      });
+      // Like Vitest's console interception: logging to a lost parent exits the worker.
+      console.error = () => process.send?.('pool error');
+      const owned = await createTestDatabase(process.env.DATABASE_URL, undefined, { migrate: false, tag: 'disconnect' });
+      const ownedClient = await owned.pool.connect();
+      const extraPool = createPool(owned.url);
+      const extraClient = await extraPool.connect();
+      process.on('disconnect', () => {
+        void cleanupTestDatabases().then(async () => {
+          ownedClient.release(true);
+          extraClient.release(true);
+          await extraPool.end();
+          process.exit(0);
+        }, () => process.exit(2));
+      });
+      process.stdout.write(new URL(owned.url).pathname.slice(1) + '\\n');
+      setInterval(() => {}, 1000);
+    `
+    const child = spawn(process.execPath, ['--input-type=module', '-e', source], {
+      env: { ...process.env, DATABASE_URL: serverUrl as string },
+      stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+    })
+    children.push(child)
+    const exited = once(child, 'exit')
+    const [output] = await once(child.stdout as NodeJS.ReadableStream, 'data')
+    const name = String(output).trim()
+    expect(name).toMatch(/^hourmere_test_disconnect_\d+_[a-f0-9]{16}$/)
+    try {
+      expect(await exists(name)).toBe(true)
+      child.disconnect()
+      expect(await exited).toEqual([0, null])
+      expect(await exists(name)).toBe(false)
+    } finally {
+      if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM')
+      await admin.query(`DROP DATABASE IF EXISTS ${pg.escapeIdentifier(name)} WITH (FORCE)`)
+    }
+  }, 20_000)
 })

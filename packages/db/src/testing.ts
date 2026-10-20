@@ -3,6 +3,9 @@ import { randomBytes } from 'node:crypto'
 import pg from 'pg'
 import { createPool, guardPoolErrors } from './index.ts'
 import { runMigrations } from './migrate.ts'
+import { registerTestDatabaseCleanup, withDeadline } from './test-database-registry.ts'
+
+export { cleanupTestDatabases } from './test-database-registry.ts'
 
 export interface TestDatabase {
   /** Connection string of the throwaway database. */
@@ -19,90 +22,36 @@ export interface TestDatabaseOptions {
   tag?: string
 }
 
-const activeDatabases = new Set<() => Promise<void>>()
 const POOL_CLOSE_GRACE_MS = 250
-const SHUTDOWN_TIMEOUT_MS = 15_000
-let hooksInstalled = false
-let interrupted = false
+
+function adminStatementTimeout(): number {
+  const value = process.env.HOURMERE_TEST_DATABASE_ADMIN_TIMEOUT_MS
+  if (value === undefined) return 5_000
+  const milliseconds = Number(value)
+  if (
+    !/^[1-9]\d*$/.test(value) ||
+    !Number.isSafeInteger(milliseconds) ||
+    milliseconds > 2_147_482_647
+  ) {
+    throw new Error(
+      'HOURMERE_TEST_DATABASE_ADMIN_TIMEOUT_MS must be a positive integer in milliseconds below 2147482648',
+    )
+  }
+  return milliseconds
+}
 
 function adminPool(url: string): pg.Pool {
+  const statementTimeout = adminStatementTimeout()
   // A broken server must not leave test shutdown waiting indefinitely.
   const pool = new pg.Pool({
     connectionString: url,
     max: 1,
     connectionTimeoutMillis: 5_000,
-    statement_timeout: 5_000,
-    query_timeout: 6_000,
+    statement_timeout: statementTimeout,
+    query_timeout: statementTimeout + 1_000,
   })
   guardPoolErrors(pool)
   return pool
-}
-
-async function withDeadline(operation: Promise<unknown>, milliseconds: number): Promise<void> {
-  let timer: NodeJS.Timeout | undefined
-  try {
-    await Promise.race([
-      operation,
-      new Promise<void>((resolve) => {
-        timer = setTimeout(resolve, milliseconds)
-      }),
-    ])
-  } finally {
-    clearTimeout(timer)
-  }
-}
-
-/** Fallback for a test runner's afterAll hook; callers should still use drop in finally/afterAll. */
-export async function cleanupTestDatabases(): Promise<void> {
-  const results = await Promise.allSettled([...activeDatabases].map((drop) => drop()))
-  const errors = results.flatMap((result) => (result.status === 'rejected' ? [result.reason] : []))
-  if (errors.length) throw new AggregateError(errors, 'Test database cleanup failed')
-}
-
-function removeHooks(): void {
-  if (!hooksInstalled) return
-  process.removeListener('beforeExit', beforeExit)
-  process.removeListener('SIGINT', interrupt)
-  process.removeListener('SIGTERM', interrupt)
-  hooksInstalled = false
-}
-
-function beforeExit(): void {
-  void cleanupTestDatabases().catch(() => {
-    // Do not print a driver's error: it can contain connection details.
-    console.error(
-      'Test database cleanup failed; inspect stale test databases with the cleanup script',
-    )
-    process.exitCode = 1
-  })
-}
-
-function interrupt(signal: NodeJS.Signals): void {
-  const ownsSignal = process.listenerCount(signal) === 1
-  if (interrupted) {
-    removeHooks()
-    if (ownsSignal) process.kill(process.pid, signal)
-    return
-  }
-  interrupted = true
-  void withDeadline(
-    cleanupTestDatabases().catch(() => {}),
-    SHUTDOWN_TIMEOUT_MS,
-  ).finally(() => {
-    removeHooks()
-    // Preserve standalone scripts' normal signal exit. Vitest owns its own cancellation
-    // when it has installed a listener. SIGKILL/fatal worker crashes require the sweeper.
-    if (ownsSignal) process.kill(process.pid, signal)
-  })
-}
-
-function installHooks(): void {
-  if (hooksInstalled) return
-  interrupted = false
-  process.once('beforeExit', beforeExit)
-  process.on('SIGINT', interrupt)
-  process.on('SIGTERM', interrupt)
-  hooksInstalled = true
 }
 
 /** Creates a new database on serverUrl's server, using postgres only for maintenance. */
@@ -152,8 +101,7 @@ export async function createTestDatabase(
           await admin.end()
         }
       }
-      activeDatabases.delete(drop)
-      if (activeDatabases.size === 0) removeHooks()
+      unregister()
       if (poolError) throw poolError
     })().catch((error: unknown) => {
       dropping = undefined
@@ -164,8 +112,7 @@ export async function createTestDatabase(
 
   // Register before setup: a failed ALTER, migration, later beforeAll or test assertion
   // still leaves an owner able to clean up. The runner registers cleanupTestDatabases.
-  activeDatabases.add(drop)
-  installHooks()
+  const unregister = registerTestDatabaseCleanup(drop)
   setup = (async () => {
     const admin = adminPool(maintenanceUrl)
     try {

@@ -1,4 +1,10 @@
 import { randomBytes } from 'node:crypto'
+import { guardPoolErrors } from '@hourmere/db'
+import {
+  cleanupTestDatabases,
+  registerTestDatabaseCleanup,
+  withDeadline,
+} from '@hourmere/db/test-database-registry'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import pg from 'pg'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -145,6 +151,59 @@ describe('sweeper safety', () => {
     expect(log).toHaveBeenCalledWith(expect.stringContaining('acquired connections'))
   })
 
+  it('continues after a database disappears between the recheck and DROP', async () => {
+    const next = candidate({ name: 'hourmere_test_next_2147483647_aabbccdd', oid: '5678' })
+    const { pool, query } = mockAdmin()
+    query
+      .mockResolvedValueOnce({ rows: [candidate()] })
+      .mockRejectedValueOnce(Object.assign(new Error('gone'), { code: '3D000' }))
+      .mockResolvedValueOnce({ rows: [next] })
+      .mockResolvedValueOnce({ rows: [] })
+    const log = vi.fn()
+    await expect(
+      sweepTestDatabases(pool, [candidate(), next], { ...options, yes: true, log }),
+    ).resolves.toBe(1)
+    expect(query).toHaveBeenCalledTimes(4)
+    expect(query.mock.calls[3]?.[0]).toBe(`DROP DATABASE "${next.name}"`)
+    expect(log).toHaveBeenCalledWith(`SKIP ${candidate().name}: already gone`)
+    expect(log).toHaveBeenCalledWith(`DROPPED ${next.name}`)
+  })
+
+  it.each(['42501', '42P01', 'XX000'])(
+    'reports SQLSTATE %s without credential-bearing error text',
+    async (code) => {
+      vi.spyOn(pg.Pool.prototype, 'query').mockRejectedValueOnce(
+        Object.assign(new Error('postgres://fixture:private@example.test/postgres'), { code }),
+      )
+      vi.spyOn(console, 'log').mockImplementation(() => {})
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+      expect(
+        await main([], { DATABASE_URL: 'postgres://fixture:private@localhost/postgres' }),
+      ).toBe(1)
+      expect(error).toHaveBeenCalledWith(
+        `Test database cleanup failed (SQLSTATE ${code}). Check arguments, database access and permissions.`,
+      )
+      expect(error.mock.calls.flat().join(' ')).not.toContain('private')
+    },
+  )
+
+  it.each(['postgres://fixture:private@example.test', '42501\nprivate', '42p01', 42501, null])(
+    'does not echo an invalid SQLSTATE %#',
+    async (code) => {
+      vi.spyOn(pg.Pool.prototype, 'query').mockRejectedValueOnce(
+        Object.assign(new Error('private'), { code }),
+      )
+      vi.spyOn(console, 'log').mockImplementation(() => {})
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+      expect(
+        await main([], { DATABASE_URL: 'postgres://fixture:private@localhost/postgres' }),
+      ).toBe(1)
+      expect(error).toHaveBeenCalledWith(
+        'Test database cleanup failed. Check arguments, database access and permissions.',
+      )
+    },
+  )
+
   it('validates CLI arguments without printing credential-bearing errors', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {})
     for (const args of [
@@ -166,22 +225,51 @@ describe.skipIf(!process.env.DATABASE_URL)('sweeper integration', () => {
     const owners: TestDatabase[] = []
     const renamed: string[] = []
     let busy: pg.Pool | undefined
+    let endingBusy: Promise<void> | undefined
+    const closeBusy = async (): Promise<void> => {
+      endingBusy ??= busy?.end()
+      if (endingBusy) await withDeadline(endingBusy, 250)
+    }
+    let setup: Promise<void> | undefined
+    let droppingRenamed: Promise<void> | undefined
+    let unregisterRenamed = () => {}
+    const dropRenamed = (): Promise<void> => {
+      droppingRenamed ??= (async () => {
+        // A signal during ALTER must wait until the successful rename is recorded.
+        await setup?.catch(() => {})
+        await closeBusy()
+        // Setup can have registered another owner since shutdown took its snapshot.
+        for (const owner of owners) await owner.drop()
+        for (const name of renamed)
+          await admin.query(`DROP DATABASE IF EXISTS ${pg.escapeIdentifier(name)} WITH (FORCE)`)
+        unregisterRenamed()
+      })().catch((error: unknown) => {
+        droppingRenamed = undefined
+        throw error
+      })
+      return droppingRenamed
+    }
+    // Own the final names before ALTER, including when the normal finally never runs.
+    unregisterRenamed = registerTestDatabaseCleanup(dropRenamed)
     try {
-      for (let i = 0; i < 3; i++) {
-        const owner = await createTestDatabase(process.env.DATABASE_URL as string, undefined, {
-          migrate: false,
-          tag: 'sweep',
-        })
-        owners.push(owner)
-        if (i < 2) {
-          const oldName = new URL(owner.url).pathname.slice(1)
-          const name = `hourmere_test_sweep_old_2147483647_${randomBytes(6).toString('hex')}`
-          await admin.query(
-            `ALTER DATABASE ${pg.escapeIdentifier(oldName)} RENAME TO ${pg.escapeIdentifier(name)}`,
-          )
-          renamed.push(name)
+      setup = (async () => {
+        for (let i = 0; i < 3; i++) {
+          const owner = await createTestDatabase(process.env.DATABASE_URL as string, undefined, {
+            migrate: false,
+            tag: 'sweep',
+          })
+          owners.push(owner)
+          if (i < 2) {
+            const oldName = new URL(owner.url).pathname.slice(1)
+            const name = `hourmere_test_sweep_old_2147483647_${randomBytes(6).toString('hex')}`
+            await admin.query(
+              `ALTER DATABASE ${pg.escapeIdentifier(oldName)} RENAME TO ${pg.escapeIdentifier(name)}`,
+            )
+            renamed.push(name)
+          }
         }
-      }
+      })()
+      await setup
       const ownNames = new Set([
         ...renamed,
         ...owners.map((owner) => new URL(owner.url).pathname.slice(1)),
@@ -192,6 +280,11 @@ describe.skipIf(!process.env.DATABASE_URL)('sweeper integration', () => {
       const busyUrl = new URL(owners[1]?.url as string)
       busyUrl.pathname = `/${renamed[1]}`
       busy = new pg.Pool({ connectionString: busyUrl.toString(), max: 1 })
+      // A bounded pool close can leave a client until FORCE DROP finishes.
+      guardPoolErrors(busy)
+      const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+      expect(() => busy?.emit('error', new Error('owned fixture error'))).not.toThrow()
+      errorLog.mockRestore()
       await busy.query('SELECT 1')
       const log = vi.fn()
       const fresh = await inventory()
@@ -209,13 +302,20 @@ describe.skipIf(!process.env.DATABASE_URL)('sweeper integration', () => {
       expect(remaining).toHaveLength(2)
       expect(log.mock.calls.flat().join('\n')).toContain('has connections')
       expect(log.mock.calls.flat().join('\n')).toContain('PID is live')
+      const endBusy = vi.spyOn(busy, 'end')
+      const dropQueries = vi.spyOn(admin, 'query')
+      await cleanupTestDatabases()
+      expect(endBusy).toHaveBeenCalledTimes(1)
+      expect(endBusy.mock.invocationCallOrder[0]).toBeLessThan(
+        dropQueries.mock.invocationCallOrder[0] as number,
+      )
+      expect(await inventory()).toHaveLength(0)
     } finally {
-      await busy?.end()
+      await closeBusy()
       for (const owner of owners) await owner.drop()
       // Exact renamed names belong to this test only. Never sweep the shared inventory
       // with the advanced test clock: other tasks may own any of those databases.
-      for (const name of renamed)
-        await admin.query(`DROP DATABASE IF EXISTS ${pg.escapeIdentifier(name)} WITH (FORCE)`)
+      await dropRenamed()
       await admin.end()
     }
   }, 30_000)
