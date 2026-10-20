@@ -12,6 +12,7 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react'
+import { ScopedRouteErrorBoundary } from '../components/route-error-scope.tsx'
 import { browserLanguage, chooseLanguage, languageChoice, subscribeLanguage } from './store.ts'
 import {
   type MessageKey,
@@ -35,7 +36,7 @@ export function EmbedLanguage({
   const [current, setCurrent] = useState(language)
   return (
     <EmbeddedLanguage value={{ language: current, setLanguage: setCurrent }}>
-      {children}
+      <ScopedRouteErrorBoundary>{children}</ScopedRouteErrorBoundary>
     </EmbeddedLanguage>
   )
 }
@@ -48,7 +49,11 @@ export function AccountLanguage({
   locale: string | undefined
   children: ReactNode
 }) {
-  return <AccountDefault value={interfaceLanguage(locale)}>{children}</AccountDefault>
+  return (
+    <AccountDefault value={interfaceLanguage(locale)}>
+      <ScopedRouteErrorBoundary>{children}</ScopedRouteErrorBoundary>
+    </AccountDefault>
+  )
 }
 export function useI18n() {
   const explicit = useSyncExternalStore(subscribeLanguage, languageChoice, () => undefined)

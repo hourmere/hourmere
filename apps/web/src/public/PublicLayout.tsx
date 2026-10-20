@@ -60,7 +60,7 @@ export function PublicLayout({ children, wide = false }: { children: ReactNode; 
             <LanguageSwitcher />
           </header>
         )}
-        <main id="main" className={`public-main${wide ? ' public-main-wide' : ''}`}>
+        <main id="main" className={`public-main user-content${wide ? ' public-main-wide' : ''}`}>
           {children}
         </main>
         <footer className="public-footer">

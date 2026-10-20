@@ -334,58 +334,78 @@ function KeyTable({
 
   const now = Date.now()
   return (
-    <table className="table">
-      <thead>
-        <tr>
-          <th scope="col">{t('Name')}</th>
-          <th scope="col">{t('Key')}</th>
-          <th scope="col">{t('Organization')}</th>
-          <th scope="col">{t('Created')}</th>
-          <th scope="col">{t('Last used')}</th>
-          <th scope="col">{t('Expires')}</th>
-          <th scope="col">
-            <span className="visually-hidden">{t('Actions')}</span>
-          </th>
-        </tr>
-      </thead>
-      <tbody>
-        {keys.map((key) => (
-          <tr key={key.id}>
-            <th scope="row" data-label={t('Name')}>
-              {key.name || <span className="muted">{t('Unnamed')}</span>}
-              {!key.enabled && <span className="badge">{t('Disabled')}</span>}
+    <div className="table-container">
+      <table className="table table-api-keys">
+        <thead>
+          <tr>
+            <th scope="col">{t('Name')}</th>
+            <th scope="col" className="fit nowrap">
+              {t('Key')}
             </th>
-            <td data-label={t('Key')}>
-              <code>{key.start ? `${key.start}…` : '…'}</code>
-            </td>
-            <td data-label={t('Organization')}>{organizationOf(key, organizations, t)}</td>
-            <td data-label={t('Created')}>{formatDate(key.createdAt, displayLocale)}</td>
-            <td data-label={t('Last used')}>
-              {key.lastRequest ? (
-                formatDate(key.lastRequest, displayLocale, true)
-              ) : (
-                <span className="muted">{t('Never')}</span>
-              )}
-            </td>
-            <td data-label={t('Expires')}>
-              {key.expiresAt === null ? (
-                <span className="muted">{t('Never')}</span>
-              ) : (
-                <>
-                  {new Date(key.expiresAt).getTime() <= now && (
-                    <span className="badge badge-danger">{t('Expired')}</span>
-                  )}
-                  {formatDate(key.expiresAt, displayLocale)}
-                </>
-              )}
-            </td>
-            <td className="actions">
-              <RevokeButton apiKey={key} onRevoked={onRevoked} />
-            </td>
+            <th scope="col">{t('Organization')}</th>
+            <th scope="col" className="fit nowrap">
+              {t('Created')}
+            </th>
+            <th scope="col" className="fit nowrap">
+              {t('Last used')}
+            </th>
+            <th scope="col" className="fit nowrap">
+              {t('Expires')}
+            </th>
+            <th scope="col" className="fit">
+              <span className="visually-hidden">{t('Actions')}</span>
+            </th>
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {keys.map((key) => (
+            <tr key={key.id}>
+              <th scope="row" data-label={t('Name')} className="user-content">
+                {key.name || <span className="muted">{t('Unnamed')}</span>}
+                {!key.enabled && <span className="badge">{t('Disabled')}</span>}
+              </th>
+              <td data-label={t('Key')} className="fit nowrap">
+                <div className="table-value">
+                  <code>{key.start ? `${key.start}…` : '…'}</code>
+                </div>
+              </td>
+              <td data-label={t('Organization')} className="user-content">
+                <div className="table-value">{organizationOf(key, organizations, t)}</div>
+              </td>
+              <td data-label={t('Created')} className="fit nowrap">
+                <div className="table-value">{formatDate(key.createdAt, displayLocale)}</div>
+              </td>
+              <td data-label={t('Last used')} className="fit nowrap">
+                <div className="table-value">
+                  {key.lastRequest ? (
+                    formatDate(key.lastRequest, displayLocale, true)
+                  ) : (
+                    <span className="muted">{t('Never')}</span>
+                  )}
+                </div>
+              </td>
+              <td data-label={t('Expires')} className="fit nowrap">
+                <div className="table-value">
+                  {key.expiresAt === null ? (
+                    <span className="muted">{t('Never')}</span>
+                  ) : (
+                    <>
+                      {new Date(key.expiresAt).getTime() <= now && (
+                        <span className="badge badge-danger">{t('Expired')}</span>
+                      )}
+                      {formatDate(key.expiresAt, displayLocale)}
+                    </>
+                  )}
+                </div>
+              </td>
+              <td className="actions">
+                <RevokeButton apiKey={key} onRevoked={onRevoked} />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   )
 }
 

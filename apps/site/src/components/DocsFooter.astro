@@ -2,11 +2,13 @@
 // Starlight footer with the same site links as the rest of hourmere.com.
 import Default from '@astrojs/starlight/components/Footer.astro'
 import { company, contact, site } from '../site'
+import { siteCopy } from '../ui-copy'
 ---
 
 <Default />
-<nav class="site-links" aria-label="Site">
-  <a href="/">Hourmere</a>
+<nav class="site-links" aria-label={siteCopy.en.siteNavigation}>
+  <a href="/">{siteCopy.en.home}</a>
+  <a href="/#pricing">{siteCopy.en.pricing}</a>
   <a href="/privacy">Privacy Policy</a>
   <a href="/terms">Terms of Service</a>
   <a href={site.github}>GitHub</a>
@@ -26,6 +28,9 @@ import { company, contact, site } from '../site'
   }
 
   .site-links a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 2.75rem;
     color: var(--sl-color-gray-3);
     text-decoration: none;
   }

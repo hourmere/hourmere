@@ -8,8 +8,27 @@
 
 .public {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto 1fr auto;
   min-height: 100vh;
+}
+
+/* Let long names, addresses and links contribute a shrinkable min-content size. */
+.public .user-content {
+  overflow-wrap: anywhere;
+}
+
+.public > *,
+.public .public-main > *,
+.public .event-list > *,
+.public .event-card > *,
+.public .booking-layout > *,
+.public .event-facts > *,
+.public .guest > *,
+.public .details-row > *,
+.public .choice > span,
+.public .reschedule-header > * {
+  min-width: 0;
 }
 
 .public .public-language {
@@ -135,6 +154,7 @@
 
 .public .event-list {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-3);
   margin: 0;
   padding: 0;
@@ -143,6 +163,7 @@
 
 .public .event-card {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-1);
   padding: var(--space-4) var(--space-5);
   background: var(--surface);
@@ -171,6 +192,7 @@
 
 .public .booking-layout {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-5);
   background: var(--surface);
   border: 1px solid var(--border);

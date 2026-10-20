@@ -17,9 +17,6 @@ const prose = (source: string) =>
 const repositoryDocs = globSync('**/*.md', { cwd: join(root, 'docs') }).map(
   (path) => `docs/${path}`,
 )
-const sitePages = globSync('**/*.astro', { cwd: join(root, 'apps/site/src/pages') }).map(
-  (path) => `apps/site/src/pages/${path}`,
-)
 
 // These complete lines describe Hourmere's own website, hosted attribution or legal pages.
 // Keep exceptions scoped to their file and purpose, so a new self-hosting example still fails.
@@ -72,12 +69,8 @@ describe('self-hosting documentation links', () => {
     expect(remaining).not.toMatch(/\bdocs\/[\w./-]+\.md\b/)
   })
 
-  it.each([
-    'README.md',
-    ...repositoryDocs,
-    ...pages.map(({ path }) => `${siteDocs}/${path}`),
-    ...sitePages,
-  ])('uses canonical docs links in %s', (path) => {
+  // Rendered site links and anchors are checked against actual build output in build-output.test.ts.
+  it.each(['README.md', ...repositoryDocs])('uses canonical docs links in %s', (path) => {
     const source = read(path)
     expect(source).not.toMatch(
       /(?:(?<![\w.-])hourmere\.com|[(\s"'`])\/docs(?:\/[\w-]+)*\/(?=[?#\s"'`)<>{}]|$)/i,

@@ -1,6 +1,10 @@
+import { satteri } from '@astrojs/markdown-satteri'
 import starlight from '@astrojs/starlight'
 import { defineConfig } from 'astro/config'
+import docsTablesPlugin from './src/docs-tables.ts'
 import { resolveLegalPublicationDate } from './src/privacy-publication.ts'
+import { site } from './src/site.ts'
+import { siteCopy } from './src/ui-copy.ts'
 
 // Static site for hourmere.com. The homepage and legal pages are plain Astro pages in
 // src/pages; Starlight serves documentation from src/content/docs.
@@ -14,6 +18,9 @@ export default defineConfig({
   // Astro's HTML compression drops the space at a line break next to an inline element
   // ("the\n<a>" renders as "the<a>"), which glues words together in the legal pages.
   compressHTML: false,
+  // Documentation tables are classified by cell content so the stylesheet can keep
+  // identifiers whole, wrap long code at separators and stack rows on narrow screens.
+  markdown: { processor: satteri({ hastPlugins: [docsTablesPlugin()] }) },
   integrations: [
     {
       name: 'legal-publication-date',
@@ -32,12 +39,33 @@ export default defineConfig({
         alt: '',
       },
       favicon: '/favicon.svg',
+      expressiveCode: {
+        defaultProps: {
+          overridesByLang: {
+            'bash,sh,shell,shellscript,zsh': { wrap: true, preserveIndent: true },
+          },
+        },
+      },
       head: [
         {
           tag: 'link',
           attrs: { rel: 'icon', href: '/favicon-32.png', sizes: '32x32', type: 'image/png' },
         },
         { tag: 'link', attrs: { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' } },
+        { tag: 'link', attrs: { rel: 'manifest', href: '/site.webmanifest' } },
+        { tag: 'meta', attrs: { property: 'og:image', content: site.socialImage.url } },
+        {
+          tag: 'meta',
+          attrs: { property: 'og:image:width', content: String(site.socialImage.width) },
+        },
+        {
+          tag: 'meta',
+          attrs: { property: 'og:image:height', content: String(site.socialImage.height) },
+        },
+        { tag: 'meta', attrs: { property: 'og:image:alt', content: site.socialImage.alt } },
+        { tag: 'meta', attrs: { name: 'twitter:card', content: 'summary_large_image' } },
+        { tag: 'meta', attrs: { name: 'twitter:image', content: site.socialImage.url } },
+        { tag: 'meta', attrs: { name: 'twitter:image:alt', content: site.socialImage.alt } },
       ],
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/hourmere/hourmere' }],
       sidebar: [
@@ -52,6 +80,8 @@ export default defineConfig({
         { label: 'Google Calendar', link: '/docs/google-calendar' },
         { label: 'Microsoft Calendar', link: '/docs/microsoft-calendar' },
         { label: 'Zoom accounts', link: '/docs/zoom-connections' },
+        { label: siteCopy.en.home, link: '/' },
+        { label: siteCopy.en.pricing, link: '/#pricing' },
       ],
       customCss: ['@fontsource-variable/manrope', './src/styles/starlight.css'],
       components: {

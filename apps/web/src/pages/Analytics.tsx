@@ -205,8 +205,8 @@ function ActivityReport({ filters }: { filters: Filters }) {
       {data.totals.created + data.totals.rescheduled + data.totals.cancelled === 0 && (
         <p>{t('No booking activity was recorded in this range.')}</p>
       )}
-      <div>
-        <table className="table">
+      <div className="table-container">
+        <table className="table table-analytics">
           <caption>{t('Daily booking activity')}</caption>
           <thead>
             <tr>
@@ -219,17 +219,23 @@ function ActivityReport({ filters }: { filters: Filters }) {
           <tbody>
             {data.data.map((day) => (
               <tr key={day.date}>
-                <th scope="row" data-label={t('Date')}>
+                <th scope="row" data-label={t('Date')} className="nowrap">
                   {day.date}
                 </th>
-                <td data-label={t('Bookings created')}>
-                  {new Intl.NumberFormat(displayLocale).format(day.created)}
+                <td data-label={t('Bookings created')} className="nowrap">
+                  <div className="table-value">
+                    {new Intl.NumberFormat(displayLocale).format(day.created)}
+                  </div>
                 </td>
-                <td data-label={t('Reschedules')}>
-                  {new Intl.NumberFormat(displayLocale).format(day.rescheduled)}
+                <td data-label={t('Reschedules')} className="nowrap">
+                  <div className="table-value">
+                    {new Intl.NumberFormat(displayLocale).format(day.rescheduled)}
+                  </div>
                 </td>
-                <td data-label={t('Cancellations')}>
-                  {new Intl.NumberFormat(displayLocale).format(day.cancelled)}
+                <td data-label={t('Cancellations')} className="nowrap">
+                  <div className="table-value">
+                    {new Intl.NumberFormat(displayLocale).format(day.cancelled)}
+                  </div>
                 </td>
               </tr>
             ))}
