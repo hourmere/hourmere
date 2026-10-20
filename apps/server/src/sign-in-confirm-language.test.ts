@@ -4,7 +4,7 @@ import { LANGUAGE_COOKIE } from '@hourmere/core/language'
 import { Hono } from 'hono'
 import { describe, expect, it } from 'vitest'
 import { MAGIC_LINK_CONFIRM_PATH, signInConfirmPage } from './sign-in-confirm.ts'
-import { pressConfirmButton } from './sign-in-confirm-testing.ts'
+import { inlineAsset, pressConfirmButton } from './sign-in-confirm-testing.ts'
 
 const app = new Hono().get(MAGIC_LINK_CONFIRM_PATH, signInConfirmPage)
 const content = async (headers: Record<string, string> = {}) => {
@@ -101,8 +101,7 @@ function browser(html: string, fragment: string, storageBlocked = false, protoco
       },
     },
   }
-  const script = /<script>([\s\S]*?)<\/script>/.exec(html)?.[1]
-  if (!script) throw new Error('Missing confirmation script')
+  const script = inlineAsset(html, 'script')
   runInNewContext(script, context)
   return {
     document,
@@ -149,8 +148,8 @@ describe('server-rendered sign-in confirmation languages', () => {
       const { response, html } = await content({ Cookie: `${LANGUAGE_COOKIE}=${language}` })
       const hash = (source = '') =>
         `'sha256-${createHash('sha256').update(source).digest('base64')}'`
-      const script = /<script>([\s\S]*?)<\/script>/.exec(html)?.[1]
-      const style = /<style>([\s\S]*?)<\/style>/.exec(html)?.[1]
+      const script = inlineAsset(html, 'script')
+      const style = inlineAsset(html, 'style')
       expect(response.headers.get('Content-Security-Policy')?.split('; ')).toEqual([
         "default-src 'none'",
         `script-src ${hash(script)}`,

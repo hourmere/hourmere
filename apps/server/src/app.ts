@@ -447,6 +447,10 @@ export function createApp({
   // Where emailed sign-in links lead; served here, ahead of the web app.
   app.get(MAGIC_LINK_CONFIRM_PATH, signInConfirmPage)
 
+  // Explicit discovery routes are mounted above. Unknown well-known resources must never
+  // resolve to a static file or the SPA, including on self-hosted instances.
+  app.all('/.well-known/*', (c) => c.text('Not found', 404))
+
   if (webDist) {
     // serveStatic resolves paths against the working directory.
     const root = relative(process.cwd(), webDist) || '.'

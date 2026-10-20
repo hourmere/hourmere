@@ -24,7 +24,7 @@ import { createApp } from './app.ts'
 import { requireCaller } from './caller.ts'
 import { chunkedBody } from './chunked-body.ts'
 import { profileRoutes } from './routes/profile.ts'
-import { pressConfirmButton } from './sign-in-confirm-testing.ts'
+import { inlineAsset, pressConfirmButton } from './sign-in-confirm-testing.ts'
 
 const serverUrl = process.env.DATABASE_URL
 // Sign-up control has its own tests (signup.test.ts).
@@ -767,8 +767,8 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
         expect(html).not.toMatch(/\s(src|href)=/)
         const sha256 = (source = '') =>
           `'sha256-${createHash('sha256').update(source).digest('base64')}'`
-        const script = /<script>([\s\S]*?)<\/script>/.exec(html)?.[1]
-        const style = /<style>([\s\S]*?)<\/style>/.exec(html)?.[1]
+        const script = inlineAsset(html, 'script')
+        const style = inlineAsset(html, 'style')
         expect(res.headers.get('content-security-policy')?.split('; ')).toEqual([
           "default-src 'none'",
           `script-src ${sha256(script)}`,

@@ -14,6 +14,7 @@ import {
 } from '@hourmere/scheduling'
 import { createFixtures } from '@hourmere/scheduling/testing'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { htmlHasLink, icsHasLocation, textHasUrl } from '../../mail/src/booking-link-testing.ts'
 import {
   BookingNotificationPayload,
   bookingNotificationJob,
@@ -289,9 +290,9 @@ describe.skipIf(!serverUrl)('automatic Meet durable flow (real PostgreSQL)', () 
     expect(
       sent.every(
         (m) =>
-          m.text.includes(JOIN) &&
-          Boolean(m.html?.includes(JOIN)) &&
-          Boolean(m.attachments?.[0]?.content.includes(JOIN)),
+          textHasUrl(m.text, JOIN) &&
+          htmlHasLink(m.html ?? '', JOIN) &&
+          icsHasLocation(m.attachments?.[0]?.content ?? '', JOIN),
       ),
     ).toBe(true)
     expect(
@@ -299,8 +300,7 @@ describe.skipIf(!serverUrl)('automatic Meet durable flow (real PostgreSQL)', () 
     ).toBe(true)
     const log: string[] = []
     await createLogMailer((l) => log.push(l)).send(sent[0] as MailMessage)
-    expect(log.join('').includes(JOIN)).toBe(false)
-    expect(log.join('').includes('#token=')).toBe(false)
+    expect(log).toEqual(['[mail] {"notSent":"SMTP_URL is not set","sensitive":true}'])
   })
   it('retains event/UID/Meet URL and pinned destination through reschedule, including flag off for existing roots', async () => {
     const b = await ready()
