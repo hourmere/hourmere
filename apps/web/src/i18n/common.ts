@@ -1,5 +1,11 @@
 // Public/shared UI messages. Admin messages live in a lazy catalog.
 export const common = {
+  'Didn’t get the email? Check spam or junk and add the sender to your contacts.':
+    '没收到邮件？请检查垃圾邮件文件夹，并将发件人加入通讯录。',
+  'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use "Cancel booking" here.':
+    '在日历中接受或拒绝邀请不会取消预约。如需取消，请使用"取消预约"。',
+  'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use the booking link in your Hourmere confirmation email.':
+    '在日历中接受或拒绝邀请不会取消预约。如需取消，请使用 Hourmere 确认邮件中的预约链接。',
   'Privacy policy': '隐私政策',
   'Terms of service': '服务条款',
   // Google's official Simplified Chinese branding guidelines approve this wording.
@@ -207,6 +213,8 @@ export const common = {
     '此预约刚刚发生变更。请查看最新状态后再重试。',
   'This booking page doesn’t exist': '此预约页面不存在',
   'This booking was already cancelled.': '此预约已被取消。',
+  'This booking was already made by an earlier attempt, so its link can’t be shown again.':
+    '此前的尝试已创建此预约，因此无法再次显示预约链接。',
   'This booking was already made by an earlier attempt, so its link to change or cancel can’t be shown again. Use the link in your confirmation email instead.':
     '此前的尝试已创建此预约，因此无法再次显示更改或取消链接。请使用确认邮件中的链接。',
   'This connection attempt expired or was already used. Restart it from your AI app.':

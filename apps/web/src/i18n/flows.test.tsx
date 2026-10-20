@@ -106,6 +106,11 @@ describe('changing interface language through booking and account flows', () => 
       expect(screen.getByDisplayValue<HTMLInputElement>('Settings').value).toBe('Settings')
       await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
       await screen.findByRole('heading', { name: 'You’re booked' })
+      expect(
+        screen.getByText(
+          'Didn’t get the email? Check spam or junk and add the sender to your contacts.',
+        ),
+      ).toBeDefined()
       const calls = api.to(`POST ${prefix}/bookings`)
       expect(calls).toHaveLength(2)
       expect(
@@ -117,6 +122,9 @@ describe('changing interface language through booking and account flows', () => 
       if (embed) expect(calls[0]?.body).toHaveProperty('source', 'embed')
       await setLanguage(user, 'zh-CN')
       expect(screen.getByRole('heading', { name: '预约成功' })).toBeDefined()
+      expect(
+        screen.getByText('没收到邮件？请检查垃圾邮件文件夹，并将发件人加入通讯录。'),
+      ).toBeDefined()
       expect(api.to('GET /api/v1/me')).toHaveLength(0)
       expect(api.to('GET /api/v1/profile')).toHaveLength(0)
       expect(api.calls.every((call) => !call.path.includes(TOKEN))).toBe(true)
@@ -213,6 +221,24 @@ describe('changing interface language through booking and account flows', () => 
     expect(api.to('POST /api/v1/bookings/manage/reschedule')).toHaveLength(0)
     await user.click(screen.getByRole('button', { name: '确认新时间' }))
     await screen.findByText('你的预约已改至新时间。')
+    expect(
+      screen.getByText('在日历中接受或拒绝邀请不会取消预约。如需取消，请使用"取消预约"。'),
+    ).toBeDefined()
+    expect(
+      screen.getByText('没收到邮件？请检查垃圾邮件文件夹，并将发件人加入通讯录。'),
+    ).toBeDefined()
+    await setLanguage(user, 'en')
+    expect(
+      screen.getByText(
+        'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use "Cancel booking" here.',
+      ),
+    ).toBeDefined()
+    expect(
+      screen.getByText(
+        'Didn’t get the email? Check spam or junk and add the sender to your contacts.',
+      ),
+    ).toBeDefined()
+    await setLanguage(user, 'zh-CN')
     await user.click(screen.getByRole('button', { name: '取消预约' }))
     const reason = screen.getByLabelText<HTMLTextAreaElement>(/^原因/)
     await user.type(reason, 'Custom reason stays unchanged')
@@ -221,6 +247,15 @@ describe('changing interface language through booking and account flows', () => 
     expect(reason.value).toBe('Custom reason stays unchanged')
     await user.click(screen.getByRole('button', { name: 'Cancel booking' }))
     await screen.findByRole('heading', { name: 'Cancelled booking' })
+    expect(
+      screen.getByText(
+        'Didn’t get the email? Check spam or junk and add the sender to your contacts.',
+      ),
+    ).toBeDefined()
+    await setLanguage(user, 'zh-CN')
+    expect(
+      screen.getByText('没收到邮件？请检查垃圾邮件文件夹，并将发件人加入通讯录。'),
+    ).toBeDefined()
     const cancel = api.to('POST /api/v1/bookings/manage/cancel')[0]
     expect(cancel?.headers.get('x-manage-token') === NEW_TOKEN).toBe(true)
     expect(cancel?.body).toEqual({ reason: 'Custom reason stays unchanged' })

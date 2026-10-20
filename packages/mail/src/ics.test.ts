@@ -1,6 +1,12 @@
 import ICAL from 'ical.js'
 import { describe, expect, it } from 'vitest'
-import { buildIcs, foldIcsLine, type IcsEvent, icsAttachment } from './ics.ts'
+import {
+  buildIcs,
+  calendarResponseDescription,
+  foldIcsLine,
+  type IcsEvent,
+  icsAttachment,
+} from './ics.ts'
 
 const base: IcsEvent = {
   method: 'REQUEST',
@@ -264,5 +270,54 @@ describe('icsAttachment', () => {
       filename: 'cancel.ics',
       contentType: 'text/calendar; method=CANCEL; charset=UTF-8',
     })
+  })
+})
+
+describe('calendarResponseDescription', () => {
+  it.each([
+    [
+      'invitee',
+      'en',
+      'Accepting or declining this calendar invitation does not cancel the booking. To cancel, use the link in your Hourmere confirmation email.',
+    ],
+    [
+      'host',
+      'en',
+      'Accepting or declining this calendar invitation does not cancel the booking. To cancel, open the booking in Hourmere.',
+    ],
+    [
+      'guest',
+      'en',
+      'Accepting or declining this calendar invitation does not cancel the booking. To cancel, contact the person who booked or the host.',
+    ],
+    [
+      'invitee',
+      'zh-CN',
+      '在日历中接受或拒绝邀请不会取消预约。如需取消，请使用 Hourmere 确认邮件中的取消链接。',
+    ],
+    ['host', 'zh-CN', '在日历中接受或拒绝邀请不会取消预约。如需取消，请在 Hourmere 中打开此预约。'],
+    ['guest', 'zh-CN', '在日历中接受或拒绝邀请不会取消预约。如需取消，请联系预约人或主持人。'],
+  ] as const)('provides secret-free %s calendar guidance in %s', (role, locale, expected) => {
+    const description = calendarResponseDescription(role, locale)
+    expect(description).toBe(expected)
+    expect(/https?:|token|#|\bmanage\b/i.test(description)).toBe(false)
+    const ics = buildIcs({ ...base, description })
+    expectWellFormed(ics)
+    expect(parse(ics).event.getFirstPropertyValue('description')).toBe(expected)
+  })
+
+  it('normalizes recipient locales and falls back to English', () => {
+    for (const role of ['invitee', 'host', 'guest'] as const) {
+      for (const locale of ['zh', 'zh-Hans-SG']) {
+        expect(calendarResponseDescription(role, locale)).toBe(
+          calendarResponseDescription(role, 'zh-CN'),
+        )
+      }
+      for (const locale of [undefined, null, 'en-GB', 'zh-TW', 'fr', 'invalid_locale']) {
+        expect(calendarResponseDescription(role, locale)).toBe(
+          calendarResponseDescription(role, 'en'),
+        )
+      }
+    }
   })
 })
