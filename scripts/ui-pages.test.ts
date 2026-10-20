@@ -55,6 +55,9 @@ it('covers every requested real page and limits en-GB to the booking page', () =
 it('uses a long Chinese title, unbroken synthetic URL, and long synthetic attendee email', () => {
   expect(AUDIT_TITLE).toMatch(/[\u4e00-\u9fff]{15,}/)
   expect(AUDIT_DESCRIPTION).toMatch(/https:\/\/hourmere\.invalid\/\S{200,}/)
+  expect(AUDIT_DESCRIPTION.match(/https:\/\/hourmere\.invalid\/(\S+)/)?.[1]).toMatch(
+    /^[a-z]{300,}$/,
+  )
   expect(AUDIT_EMAIL.length).toBeGreaterThan(120)
   expect(AUDIT_EMAIL).toMatch(/@hourmere\.invalid$/)
 })
@@ -147,6 +150,7 @@ const privacyAssertions = `
 import assert from 'node:assert/strict'
 import {readFileSync} from 'node:fs'
 const data = await import('./audit-data.ts')
+assert.match(data.AUDIT_DESCRIPTION.split('https://hourmere.invalid/')[1] ?? '', /^[a-z]{300,}$/, 'Long URL must have no punctuation break opportunities')
 const {openAuditPage,visualScreenshotOptions,prepareAuditLocale,verifyAuditPath} = await import('./audit-pages.ts')
 const canary = 'SYNTHETIC_PRIVATE_CANARY'
 let failure
@@ -203,6 +207,15 @@ describe('source-copy privacy mutations', () => {
     const result = sourceCopyResult(dataSource, pagesSource)
     expect(result.stderr).toBe('')
     expect(result.status).toBe(0)
+  })
+
+  it('detects punctuation making the long URL artificially wrappable', () => {
+    const mutant = dataSource.replace('unbrokenlayoutmeasurement', 'unbroken-layout-measurement-')
+    expect(mutant).not.toBe(dataSource)
+    const result = sourceCopyResult(mutant, pagesSource)
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain('Long URL must have no punctuation break opportunities')
+    expect(result.stderr).toContain('AssertionError')
   })
 
   for (const selector of requiredMasks)
