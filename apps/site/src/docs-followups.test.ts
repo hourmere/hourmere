@@ -55,6 +55,12 @@ describe('self-hosting documentation follow-ups', () => {
     )
   })
 
+  it('offers a separate-project fallback when shared-project sign-in access fails', () => {
+    expect(normalize(read('docs/google-calendar.md'))).toMatch(
+      /If users who are not on the test-user list cannot sign in[^.]*, put the sign-in OAuth client in a separate Google Cloud project\./,
+    )
+  })
+
   it.each(googleGuides)('describes verification without claiming hosted approval in %s', (path) => {
     const source = normalize(read(path))
     expect(source).toContain('Each Google Cloud project is verified separately')

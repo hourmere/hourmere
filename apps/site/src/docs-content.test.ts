@@ -41,6 +41,10 @@ const ownSiteReferences: Record<string, readonly string[]> = {
   'docs/mcp-directories.md': [
     "`com.hourmere/hourmere` requires proof of control of `hourmere.com` via the registry's",
   ],
+  'docs/releasing.md': [
+    'The website publishes `apps/site/public/.well-known/security.txt` on hourmere.com and',
+    "www.hourmere.com. Application instances do not publish Hourmere's policy. Review its",
+  ],
   [`${siteDocs}/configuration.md`]: [
     '| `HOSTED_SIGNUP_URL` | `https://hourmere.com` | Hosted service destination for public attribution and confirmation links. Set the hosted sign-up page URL when available; HTTP(S), no credentials, query or fragment. Independent of this instance’s `PUBLIC_URL`; attribution cannot be disabled. |',
     'PRIVACY_POLICY_URL=https://hourmere.com/privacy',

@@ -71,6 +71,8 @@ they belong to the same Google Cloud project. For sign-in requesting only the ba
 without being on that list, subject to Google Workspace administrator controls. Calendar
 access still requires test users in Testing. See Google's
 [OAuth app state overview](https://developers.google.com/identity/protocols/oauth2/production-readiness/overview).
+If users who are not on the test-user list cannot sign in with this shared-project setup,
+put the sign-in OAuth client in a separate Google Cloud project.
 
 For an External app whose publishing status is **Testing**, Google issues refresh tokens
 that expire after **7 days** when non-basic scopes are requested. Calendar scopes fall
