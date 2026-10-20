@@ -100,8 +100,10 @@
   opacity: 0;
 }
 
-.social-sign-in:not(:disabled):hover .social-sign-in-state {
-  opacity: 0.08;
+@media (hover: hover) {
+  .social-sign-in:not(:disabled):hover .social-sign-in-state {
+    opacity: 0.08;
+  }
 }
 
 .social-sign-in:not(:disabled):active .social-sign-in-state {

@@ -21,6 +21,22 @@ export const NAV_ITEMS = [
   { to: PATHS.settings, label: 'Settings' },
 ] as const
 
+const WIDE_PAGES: readonly string[] = NAV_ITEMS.map(({ to }) => to).filter(
+  (to) => to !== PATHS.settings,
+)
+
+function keepActiveVisible(list: HTMLUListElement) {
+  const selected = list.querySelector('[aria-current="page"]')
+  if (!selected) return
+  const style = getComputedStyle(list)
+  const edge = list.getBoundingClientRect().left + list.clientLeft
+  const left = edge + (Number.parseFloat(style.scrollPaddingInlineStart) || 0)
+  const right = edge + list.clientWidth - (Number.parseFloat(style.scrollPaddingInlineEnd) || 0)
+  const item = selected.getBoundingClientRect()
+  if (item.left < left) list.scrollLeft += item.left - left
+  else if (item.right > right) list.scrollLeft += item.right - right
+}
+
 /** The frame around signed-in pages: header, navigation and the page itself. */
 export function AppShell() {
   return (
@@ -31,11 +47,12 @@ export function AppShell() {
 }
 
 function Shell() {
-  const { t, ui } = useI18n()
+  const { locale, t, ui } = useI18n()
 
   const me = useMe()
   const { signOut, notice, setNotice } = useSession()
   const [signOutError, setSignOutError] = useState<UiText | null>(null)
+  const [navEdges, setNavEdges] = useState({ start: true, end: true })
   const main = useRef<HTMLElement>(null)
   const nav = useRef<HTMLElement>(null)
   const location = useLocation()
@@ -45,23 +62,47 @@ function Shell() {
 
   // After navigating, start keyboard and screen reader users at the new page's content,
   // as a full page load would. Not on the first page: focus starts at the top then.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: translated navigation widths change with locale
   useEffect(() => {
     // On narrow screens the navigation scrolls sideways; keep the current page's link in view.
     // scrollIntoView also changes the browser's sequential focus starting point, which
     // skips the skip link on the first Tab. Scroll only the navigation list horizontally.
     const list = nav.current?.querySelector('ul')
-    const selected = list?.querySelector('[aria-current="page"]')
-    if (list && selected) {
-      const left = list.getBoundingClientRect().left + list.clientLeft
-      const right = left + list.clientWidth
-      const item = selected.getBoundingClientRect()
-      if (item.left < left) list.scrollLeft += item.left - left
-      else if (item.right > right) list.scrollLeft += item.right - right
-    }
+    if (list) keepActiveVisible(list)
     if (shownPath.current === pathname) return
     shownPath.current = pathname
     main.current?.focus()
-  }, [pathname])
+  }, [pathname, locale])
+
+  // Fade only the edges that hide more navigation, including after zoom or a locale change.
+  useEffect(() => {
+    const list = nav.current?.querySelector('ul')
+    if (!list) return
+    function updateEdges() {
+      if (!list) return
+      const start = list.scrollLeft <= 1
+      const end = list.scrollLeft + list.clientWidth >= list.scrollWidth - 1
+      setNavEdges((previous) =>
+        previous.start === start && previous.end === end ? previous : { start, end },
+      )
+    }
+    function updateLayout() {
+      if (list) keepActiveVisible(list)
+      updateEdges()
+    }
+    updateLayout()
+    list.addEventListener('scroll', updateEdges, { passive: true })
+    window.addEventListener('resize', updateLayout)
+    const observer =
+      typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(updateLayout)
+    observer?.observe(list)
+    for (const item of list.children) observer?.observe(item)
+    return () => {
+      list.removeEventListener('scroll', updateEdges)
+      window.removeEventListener('resize', updateLayout)
+      observer?.disconnect()
+    }
+  }, [])
 
   // A notice belongs to one page: drop it once the person is elsewhere, also when it arrives
   // after they left. (Not on the page starting over in place, which is what it explains.)
@@ -97,17 +138,19 @@ function Shell() {
         {t('Skip to content')}
       </a>
       <header className="topbar">
-        <Link to={PATHS.home} className="brand" aria-label={t('Hourmere home')}>
-          <Logo />
-        </Link>
-        <div className="account">
-          <LanguageSwitcher />
-          <span className="account-email" title={me.user.email}>
-            {me.user.email}
-          </span>
-          <button type="button" className="button button-small" onClick={handleSignOut}>
-            {t('Sign out')}
-          </button>
+        <div className="topbar-inner">
+          <Link to={PATHS.home} className="brand" aria-label={t('Hourmere home')}>
+            <Logo />
+          </Link>
+          <div className="account">
+            <LanguageSwitcher compact />
+            <span className="account-email" title={me.user.email}>
+              {me.user.email}
+            </span>
+            <button type="button" className="button button-small" onClick={handleSignOut}>
+              {t('Sign out')}
+            </button>
+          </div>
         </div>
       </header>
       {signOutError && (
@@ -116,7 +159,13 @@ function Shell() {
         </p>
       )}
       <div className="layout">
-        <nav className="sidenav" aria-label={t('Main')} ref={nav}>
+        <nav
+          className="sidenav"
+          aria-label={t('Main')}
+          ref={nav}
+          data-scroll-start={navEdges.start}
+          data-scroll-end={navEdges.end}
+        >
           <ul data-layout-scroll="horizontal">
             {NAV_ITEMS.map((item) => (
               <li key={item.to}>
@@ -125,7 +174,12 @@ function Shell() {
             ))}
           </ul>
         </nav>
-        <main id="main" ref={main} tabIndex={-1}>
+        <main
+          id="main"
+          className={WIDE_PAGES.includes(pathname) ? 'main-content-wide' : 'main-content'}
+          ref={main}
+          tabIndex={-1}
+        >
           {shownNotice && (
             <div className="alert alert-info notice">
               <p role="alert">{ui(shownNotice)}</p>

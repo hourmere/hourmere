@@ -518,7 +518,7 @@ describe('source-copy coverage mutations', () => {
 })
 
 function assertIntentionalScrollers(shell: string, keys: string) {
-  expect(shell).toMatch(/<nav className="sidenav"[^>]*>\s*<ul data-layout-scroll="horizontal">/)
+  expect(shell).toMatch(/<nav\s+className="sidenav"[^>]*>\s*<ul data-layout-scroll="horizontal">/)
   expect(keys.match(/<pre data-layout-scroll="horizontal">/g)).toHaveLength(2)
 }
 

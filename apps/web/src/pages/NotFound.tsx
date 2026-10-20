@@ -12,8 +12,10 @@ export function NotFoundPage() {
   return (
     <main className="centered">
       <div className="card">
-        <Logo />
-        <LanguageSwitcher />
+        <header className="card-header">
+          <Logo />
+          <LanguageSwitcher />
+        </header>
         <h1>{t('Page not found')}</h1>
         <p>{t('There is nothing at this address.')}</p>
         <p>
