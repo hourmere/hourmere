@@ -176,8 +176,10 @@ function SignInForm({ next, expired }: { next: string; expired: boolean }) {
     return (
       <main className="centered">
         <div className="card">
-          <Logo size={32} />
-          <LanguageSwitcher />
+          <header className="card-header">
+            <Logo size={32} />
+            <LanguageSwitcher />
+          </header>
           <h1 ref={sentHeading} tabIndex={-1}>
             {t('Check your email')}
           </h1>
@@ -203,8 +205,10 @@ function SignInForm({ next, expired }: { next: string; expired: boolean }) {
   return (
     <main className="centered">
       <div className="card">
-        <Logo size={32} />
-        <LanguageSwitcher />
+        <header className="card-header">
+          <Logo size={32} />
+          <LanguageSwitcher />
+        </header>
         <h1>{t('Sign in to Hourmere')}</h1>
         {expired && (
           <p className="alert alert-info" role="status">

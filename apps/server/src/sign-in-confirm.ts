@@ -43,7 +43,7 @@ const WORDS = {
 } satisfies Record<InterfaceLanguage, ConfirmationWords>
 
 // The fragment never reaches the server. Only the explicit sign-in GET form carries its
-// existing Better Auth parameters; language buttons cannot submit or rewrite that form.
+// existing Better Auth parameters; the language select cannot submit or rewrite that form.
 const SCRIPT = `
 const params = new URLSearchParams(location.hash.slice(1));
 const form = document.getElementById('confirm');
@@ -74,16 +74,15 @@ function setLanguage(language) {
   const javascriptNote = document.getElementById('javascript-note');
   if (javascriptNote) javascriptNote.textContent = words.javascript;
   document.querySelector('#confirm button[type="submit"]').textContent = words.title;
-  document.getElementById('language-controls').setAttribute('aria-label', words.language);
-  document.getElementById('language-en').setAttribute('aria-pressed', String(language === 'en'));
-  document.getElementById('language-zh').setAttribute('aria-pressed', String(language === 'zh-CN'));
+  document.getElementById('language-label').textContent = words.language;
+  document.getElementById('language-select').setAttribute('aria-label', words.language);
+  document.getElementById('language-select').value = language;
   try { localStorage.setItem(${JSON.stringify(LANGUAGE_COOKIE)}, language); } catch {}
   try {
     document.cookie = ${JSON.stringify(`${LANGUAGE_COOKIE}=`)} + language + '; Path=/; SameSite=Lax; Max-Age=31536000' + (location.protocol === 'https:' ? '; Secure' : '');
   } catch {}
 }
-document.getElementById('language-en')?.addEventListener('click', () => setLanguage('en'));
-document.getElementById('language-zh')?.addEventListener('click', () => setLanguage('zh-CN'));
+document.getElementById('language-select')?.addEventListener('change', (event) => setLanguage(event.target.value));
 `
 
 // Minimal copies of apps/web/src/styles.css tokens: this page must load no external assets.
@@ -138,32 +137,39 @@ const STYLE = `
 }
 *, *::before, *::after { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
-body { margin: 0; background: var(--bg); color: var(--text); overflow-wrap: anywhere; }
-.centered { display: grid; place-items: center; min-height: 100vh; padding: var(--space-5) var(--space-4); }
+body { margin: 0; background: var(--bg); color: var(--text); font-size: 1rem; overflow-wrap: anywhere; }
+.centered { display: grid; place-items: center; min-height: 100vh; min-height: 100svh; min-width: 0; padding: var(--space-5) var(--space-4); }
 .card {
   width: 100%; max-width: 420px; min-width: 0; padding: var(--space-6) var(--space-5);
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
   box-shadow: var(--shadow);
 }
+.card-header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-3); }
 .logo { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--text); }
 .logo svg { display: block; flex-shrink: 0; color: var(--mark); }
 .logo-word { font-size: 1.2rem; font-weight: 800; letter-spacing: -0.02em; }
 h1 { font-size: 1.5rem; line-height: 1.25; letter-spacing: -0.01em; margin: var(--space-5) 0 var(--space-4); }
 p { margin: 0 0 var(--space-3); }
-button {
+button, select {
   display: inline-flex; align-items: center; justify-content: center;
   min-height: 42px; padding: var(--space-2) var(--space-4);
   border: 1px solid var(--border-strong); border-radius: var(--radius-small);
-  background: var(--surface); color: var(--text); font: inherit; font-weight: 600;
+  background: var(--surface); color: var(--text); font: inherit; font-size: max(16px, 1rem); font-weight: 600;
   line-height: 1.2; cursor: pointer;
 }
-button:hover { background: var(--accent-soft); }
 #confirm button[type="submit"] { width: 100%; border-color: var(--accent); background: var(--accent); color: var(--accent-text); }
-#confirm button[type="submit"]:hover { border-color: var(--accent-hover); background: var(--accent-hover); }
+@media (hover: hover) {
+  button:hover { background: var(--accent-soft); }
+  #confirm button[type="submit"]:hover { border-color: var(--accent-hover); background: var(--accent-hover); }
+}
+@media (pointer: coarse) {
+  button, select { min-height: 44px; }
+}
 :focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
 .note { color: var(--muted); font-size: 0.875rem; margin-bottom: 0; }
-.languages { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-5) 0; }
-.languages button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-soft-text); }
+.language-picker { display: inline-flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.language-picker span { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+.language-picker select { max-width: 100%; }
 [hidden] { display: none !important; }
 `
 
@@ -191,6 +197,7 @@ function page(language: InterfaceLanguage) {
 <body>
 <main class="centered">
 <div class="card">
+<header class="card-header">
 <span class="logo">
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="32" height="32" aria-hidden="true" focusable="false">
 <defs><clipPath id="hourmere-wave"><circle cx="50" cy="50" r="21"/></clipPath></defs>
@@ -201,10 +208,14 @@ function page(language: InterfaceLanguage) {
 </svg>
 <span class="logo-word">Hourmere</span>
 </span>
-<div class="languages" id="language-controls" role="group" aria-label="${words.language}">
-<button type="button" id="language-en" lang="en" aria-pressed="${language === 'en'}">English</button>
-<button type="button" id="language-zh" lang="zh-CN" aria-pressed="${language === 'zh-CN'}">简体中文</button>
-</div>
+<label class="language-picker">
+<span id="language-label">${words.language}</span>
+<select id="language-select" aria-label="${words.language}">
+<option value="en" lang="en"${language === 'en' ? ' selected' : ''}>English</option>
+<option value="zh-CN" lang="zh-CN"${language === 'zh-CN' ? ' selected' : ''}>简体中文</option>
+</select>
+</label>
+</header>
 <h1 id="page-title">${words.title}</h1>
 <form id="confirm" method="get" action="/api/auth/magic-link/verify" hidden>
 <p id="confirm-instruction">${words.instruction}</p>
