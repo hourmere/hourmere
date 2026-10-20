@@ -209,7 +209,8 @@ keeps the plain path.
 | `PROXY_DYNAMIC_RANGE` | `172.30.62.8/29` | Not forwarded by the default Compose file: the HTTPS override allocates app and one-off app container addresses from this range inside `PROXY_SUBNET`, keeping Caddy's `PROXY_IP` outside it. Workers use only the default network. Change all three network settings together for another subnet/deployment. |
 
 Enable a separate worker from the deployment checkout, then verify that Compose selects it
-before recreating the stack:
+before recreating the stack. For plain mode, remove both lines of the proxy verification
+(the `grep -qx proxy` line and its following failure-message line) before pasting:
 
 ```sh
 (
@@ -218,14 +219,13 @@ before recreating the stack:
   compose_services=$(docker compose config --services) &&
   { printf '%s\n' "$compose_services" | grep -qx worker ||
     { echo "Worker service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
-  # Bundled HTTPS only; omit this check in plain mode.
   { printf '%s\n' "$compose_services" | grep -qx proxy ||
     { echo "Proxy service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
   docker compose up -d --build --wait
 )
 ```
 
-Continue only if all applicable verification commands succeed. The helper rewrites only `COMPOSE_FILE` in `.env`,
+The helper rewrites only `COMPOSE_FILE` in `.env`,
 handles quoted/unquoted and `export COMPOSE_FILE=` assignments, keeps mode `600` and
 refuses symlinks. Run `./scripts/disable-worker.sh` to deselect it, after removing the
 worker container as described in [self-hosting](/docs/self-hosting#switch-back-to-a-single-container).
@@ -236,7 +236,8 @@ COMPOSE_FILE='docker-compose.yml:docker-compose.proxy.yml:docker-compose.worker.
 ```
 
 Keep custom overlays inside the quotes. A shell-exported `COMPOSE_FILE` overrides `.env`;
-unset it before using the helper and Compose commands.
+the block unsets it only inside its subshell. Unset it separately before standalone
+helper or Compose commands so they read `.env` too.
 
 The helper refuses a leading UTF-8 BOM, YAML-style `COMPOSE_FILE: ...`, duplicate settings
 and unsupported syntax without changing the file. Save `.env` as UTF-8 without BOM and use

@@ -106,17 +106,21 @@ background jobs; to split them after setup, run:
   compose_services=$(docker compose config --services) &&
   { printf '%s\n' "$compose_services" | grep -qx worker ||
     { echo "Worker service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
-  # Bundled HTTPS only; omit this check in plain mode.
   { printf '%s\n' "$compose_services" | grep -qx proxy ||
     { echo "Proxy service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
   docker compose up -d --build --wait
 )
 ```
 
-Continue only if the applicable verification commands succeed. The helper safely updates `COMPOSE_FILE`
+For plain mode, remove both lines of the proxy verification (the `grep -qx proxy` line
+and its following failure-message line) before pasting the block.
+
+The helper safely updates `COMPOSE_FILE`
 in the private `.env`, preserving the proxy selection. The tracked overlay automatically
 selects `web` for the app and `worker` for the separate worker, using the same image and
 secrets.
+The block unsets a shell-exported `COMPOSE_FILE` only inside its subshell; unset it
+separately before standalone Compose commands so they read `.env` too.
 The `.env` backup preserves this choice, and upgrades need no tracked Compose edits.
 Give containers at least 35 seconds to stop.
 

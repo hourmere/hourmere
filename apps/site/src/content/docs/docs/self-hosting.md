@@ -199,7 +199,10 @@ start again; Docker cannot resize an existing network. Keep database volumes int
 ## Run workers separately
 
 The default `HOURMERE_ROLE=all` runs the API, booking email jobs and calendar synchronization
-in one container. After setup, run these commands from the deployment checkout:
+in one container. After setup, run these commands from the deployment checkout.
+In every guarded block below, plain mode requires removing both lines of the proxy
+verification (the `grep -qx proxy` line and its following failure-message line) before
+pasting:
 
 ```sh
 (
@@ -208,18 +211,19 @@ in one container. After setup, run these commands from the deployment checkout:
   compose_services=$(docker compose config --services) &&
   { printf '%s\n' "$compose_services" | grep -qx worker ||
     { echo "Worker service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
-  # Bundled HTTPS only; omit this check in plain mode.
   { printf '%s\n' "$compose_services" | grep -qx proxy ||
     { echo "Proxy service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
   docker compose up -d --build --wait
 )
 ```
 
-Continue to `up` only if all applicable verification commands succeed. The helper rewrites only
+The helper rewrites only
 `COMPOSE_FILE` in your private `.env`, keeps its mode `600`, and preserves the existing
 proxy selection. It accepts quoted, unquoted and `export COMPOSE_FILE=` assignments, adds
 the setting if missing, and can be run again safely. It refuses a symlink `.env`.
-A shell-exported `COMPOSE_FILE` overrides `.env`; unset it before these commands.
+A shell-exported `COMPOSE_FILE` overrides `.env`. Each guarded block unsets it only inside
+its own subshell; standalone Compose commands need their own `unset COMPOSE_FILE` so they
+read `.env` too.
 
 Unsupported or ambiguous `COMPOSE_FILE` syntax, including YAML-style `COMPOSE_FILE: ...`,
 is refused without changes. A leading UTF-8 BOM is also refused: save `.env` as UTF-8
@@ -259,7 +263,7 @@ If moving from the old commented worker block, follow the migration steps under
 Remove the worker container while the overlay is still selected:
 
 ```sh
-docker compose rm -sf worker
+unset COMPOSE_FILE && docker compose rm -sf worker
 ```
 
 Remove any old `HOURMERE_ROLE=web` setting from `.env`. Then deselect the overlay with the helper:
@@ -271,7 +275,6 @@ Remove any old `HOURMERE_ROLE=web` setting from `.env`. Then deselect the overla
   compose_services=$(docker compose config --services) &&
   { ! printf '%s\n' "$compose_services" | grep -qx worker ||
     { echo "Worker service is still enabled; check COMPOSE_FILE before continuing."; exit 1; }; } &&
-  # Bundled HTTPS only; omit this check in plain mode.
   { printf '%s\n' "$compose_services" | grep -qx proxy ||
     { echo "Proxy service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
   docker compose up -d --build --wait
@@ -343,14 +346,13 @@ n8n port. Verify the worker selection and recreate both app and worker:
   compose_services=$(docker compose config --services) &&
   { printf '%s\n' "$compose_services" | grep -qx worker ||
     { echo "Worker service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
-  # Bundled HTTPS only; omit this check in plain mode.
   { printf '%s\n' "$compose_services" | grep -qx proxy ||
     { echo "Proxy service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
   docker compose up -d --build --wait
 )
 ```
 
-Continue only if verification succeeds. Create a webhook endpoint using
+Create a webhook endpoint using
 `http://n8n:5678/webhook/<your-workflow-path>` through the REST API.
 The service name resolves inside that network, and the worker sends the event with the
 usual HMAC headers. Require signature verification in the receiving workflow. HTTP is
@@ -400,16 +402,29 @@ volumes. Store the backup outside the checkout:
   git rev-parse HEAD > "$backup_dir/commit" &&
   docker compose cp proxy:/data "$backup_dir/caddy-data" &&
   docker compose cp proxy:/config "$backup_dir/caddy-config" &&
-  docker compose up -d --wait
+  docker compose up -d --wait &&
+  printf '%s\n' "$backup_dir"
 )
 ```
 
 The chained commands stop on failure, and the subshell leaves your operator shell open.
-Check that the backup succeeded before continuing. For plain mode, stop only `app` and
+The final line prints the backup directory after a successful restart. Check that the
+backup succeeded before continuing. For plain mode, stop only `app` and
 omit the two proxy-copy commands. A dump exports one database, not cluster roles. Keep
 successful copies encrypted off-host, set a retention schedule (for example, seven daily
 and four weekly copies), monitor backup failures and periodically test a restore. PostgreSQL
 volumes are persistent storage, not a backup.
+
+If backup fails after stopping the app, proxy or worker and before the final restart,
+those services remain stopped. A failed restart may leave some services unhealthy.
+Inspect the failed command and partial backup, fix the cause, then resume the existing
+deployment from its checkout:
+
+```sh
+unset COMPOSE_FILE && docker compose up -d --wait
+```
+
+Treat the partial backup as incomplete and take a new successful backup before continuing.
 
 Set `backup_dir` to the chosen backup directory before running the restore commands; the
 backup block keeps its variables inside its subshell.
@@ -448,6 +463,7 @@ PROXY_DYNAMIC_RANGE=172.30.63.8/29
 EOF
 chmod 600 "$env_update"
 mv "$env_update" .env
+unset COMPOSE_FILE
 docker compose up -d --wait db
 docker compose exec -T db \
   pg_restore -U hourmere -d hourmere --exit-on-error --single-transaction < "$backup_dir/hourmere.dump"
@@ -469,7 +485,9 @@ quoted values. It does not recognise `./docker-compose.worker.yml` or
 `export COMPOSE_FILE=` forms. Before running the rewrite, replace those forms with the
 complete quoted line for your deployment shown under [Run workers separately](#run-workers-separately).
 For backups with a separate worker, verify the rewritten selection before starting any app
-or worker:
+or worker. For plain mode, remove both proxy-verification lines and the trailing `&&` on
+the worker-verification failure-message line, since the worker check becomes the final
+command:
 
 ```sh
 (
@@ -477,7 +495,6 @@ or worker:
   compose_services=$(docker compose config --services) &&
   { printf '%s\n' "$compose_services" | grep -qx worker ||
     { echo "Worker service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
-  # Bundled HTTPS only; omit this check in plain mode.
   { printf '%s\n' "$compose_services" | grep -qx proxy ||
     { echo "Proxy service is missing; check COMPOSE_FILE before continuing."; exit 1; }; }
 )
@@ -498,6 +515,7 @@ do not overwrite the prepared `.env` again. Restore the database as above, then 
 proxy container and copy its saved state into the new volumes before starting it:
 
 ```sh
+unset COMPOSE_FILE
 docker compose build
 docker compose create proxy
 docker compose cp "$backup_dir/caddy-data/." proxy:/data
@@ -565,7 +583,6 @@ The app keeps the default `all` role. From the deployment checkout:
   compose_services=$(docker compose config --services) &&
   { ! printf '%s\n' "$compose_services" | grep -qx worker ||
     { echo "This deployment runs a separate worker; use the separate-worker upgrade."; exit 1; }; } &&
-  # Bundled HTTPS only; omit this check in plain mode.
   { printf '%s\n' "$compose_services" | grep -qx proxy ||
     { echo "Proxy service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
   docker compose pull proxy db &&
@@ -588,7 +605,6 @@ stopping the old app and worker:
   compose_services=$(docker compose config --services) &&
   { printf '%s\n' "$compose_services" | grep -qx worker ||
     { echo "Worker service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
-  # Bundled HTTPS only; omit this check in plain mode.
   { printf '%s\n' "$compose_services" | grep -qx proxy ||
     { echo "Proxy service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
   docker compose pull proxy db &&
@@ -598,8 +614,8 @@ stopping the old app and worker:
 )
 ```
 
-Continue only if all applicable verification commands succeed. For plain mode, omit the
-proxy verification, pull only `db`, and use your deployment's health URL in either sequence.
+For plain mode, remove both lines of the proxy verification before pasting either
+sequence, pull only `db`, and use your deployment's health URL.
 
 For a pinned release, fetch and check out the reviewed tag/commit instead of pulling the
 branch. No public image can currently be pulled as a substitute for building the source.
