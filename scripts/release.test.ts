@@ -210,6 +210,12 @@ const workflowPath =
   process.env.HOURMERE_RELEASE_WORKFLOW ??
   fileURLToPath(new URL('../.github/workflows/release.yml', import.meta.url))
 const workflow = () => readFileSync(workflowPath, 'utf8')
+const buildAction = () =>
+  readFileSync(
+    process.env.HOURMERE_RELEASE_BUILD_ACTION ??
+      fileURLToPath(new URL('../.github/actions/release-build/action.yml', import.meta.url)),
+    'utf8',
+  )
 
 function stepScript(name: string) {
   const source = workflow().split(`      - name: ${name}\n`)[1]?.split('\n      - ')[0] ?? ''
@@ -235,7 +241,7 @@ describe('release workflow boundaries', () => {
       'sbom: generator=docker.io/docker/buildkit-syft-scanner:stable-1@sha256:ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9 # 1.12.0',
     ],
   ])('pins and names the verified supporting image for %s', (action, image) => {
-    const step = workflow().split(`uses: ${action}@`)[1]?.split('\n      - ')[0] ?? ''
+    const step = buildAction().split(`uses: ${action}@`)[1]?.split('\n    - ')[0] ?? ''
     expect(step.split('\n').map((line) => line.trim())).toContain(image)
   })
 
@@ -253,9 +259,9 @@ describe('release workflow boundaries', () => {
     expect(source).toMatch(
       / {2}ci:\n {4}needs: prepare\n[\s\S]*?uses: \.\/\.github\/workflows\/ci.yml/,
     )
-    expect(source).toMatch(
-      / {2}publish:\n {4}needs: \[prepare, ci\][\s\S]*? {4}environment: release\n/,
-    )
+    const publishing = source.split('  publish:\n')[1]?.split('\n  # Enable')[0] ?? ''
+    expect(publishing).toMatch(/^ {4}needs: \[prepare, ci\]$/m)
+    expect(publishing).toMatch(/^ {4}environment: release$/m)
     expect(stepScript('Validate the version, main ancestry and changelog')).toContain(
       'node scripts/release.ts prepare "$GITHUB_REF_NAME" "$GITHUB_SHA"',
     )
@@ -273,13 +279,22 @@ describe('release workflow boundaries', () => {
     expect(source.indexOf('Revalidate the approved release')).toBeLessThan(
       source.indexOf('Sign in to GHCR'),
     )
-    for (const match of source.matchAll(/uses: ([^\n]+)/g)) {
+    for (const match of `${source}\n${buildAction()}`.matchAll(/uses: ([^\n]+)/g)) {
       if (match[1]?.startsWith('./')) continue
       expect(match[1]).toMatch(/^[\w/-]+@[a-f0-9]{40}(?: #.*)?$/)
     }
-    expect(source).toContain('platforms: linux/amd64,linux/arm64')
-    expect(source).toContain('provenance: mode=max')
-    expect(source).toMatch(/sbom: generator=\S+@sha256:[a-f0-9]{64}/)
+    expect(buildAction()).toContain('platforms: linux/amd64,linux/arm64')
+    expect(buildAction()).toContain('provenance: mode=max')
+    expect(buildAction()).toMatch(/sbom: generator=\S+@sha256:[a-f0-9]{64}/)
+    expect(source).toMatch(
+      /id: build\n {8}uses: \.\/\.github\/actions\/release-build\n {8}with:\n {10}push: true\n {10}version: \$\{\{ steps.release.outputs.version \}\}\n {10}tags: \$\{\{ steps.image.outputs.tags \}\}/,
+    )
+    expect(buildAction()).toMatch(/push: \$\{\{ inputs.push \}\}/)
+    expect(buildAction()).toMatch(/value: \$\{\{ steps.build.outputs.digest \}\}/)
+    expect(source).toMatch(/subject-digest: \$\{\{ steps.build.outputs.digest \}\}/)
+    expect(source).toContain("if: github.repository == 'hourmere/hourmere'")
+    expect(source).toContain('subject-name: ghcr.io/hourmere/hourmere')
+    expect(source).toContain('push-to-registry: true')
     expect(source).toContain('create-storage-record: false')
     expect(source).not.toContain('artifact-metadata: write')
     const prepare = source.split('  prepare:\n')[1]?.split('  ci:\n')[0] ?? ''
@@ -300,7 +315,7 @@ describe('release workflow boundaries', () => {
       'id-token:write',
       'packages:write',
     ])
-    expect(source).toContain('org.opencontainers.image.licenses=AGPL-3.0-only')
+    expect(buildAction()).toContain('org.opencontainers.image.licenses=AGPL-3.0-only')
   })
 
   it.each([
