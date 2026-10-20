@@ -53,6 +53,11 @@ must approve publication through the [release workflow](https://github.com/hourm
 
 ### Fixed
 
+- Booking emails now use English or Simplified Chinese for each recipient, including
+  subjects, bodies, dates and calendar summaries/descriptions. Guests follow the booking
+  language; hosts use their profile language. Sign-in emails follow the requesting
+  interface language. Calendar-decline footers appear on confirmations and reschedules
+  only when a REQUEST invitation is included, and never on cancellations.
 - Calendar and conference settings now translate integration errors and provider notices in
   English and Simplified Chinese. Calendar destinations require a profile, and a profile
   lookup failure leaves connected calendars usable with a retry hint. Calendar controls
@@ -94,6 +99,12 @@ schema downgrade is not automatic. Direct source deployments require Node.js 26.
 Hourmere requires PostgreSQL 18+ because migrations use `uuidv7()`; the provided Compose
 stack includes PostgreSQL 18.
 
+- **Restart web and worker processes together for localized sign-in mail.** Stop all
+  old web/all/worker processes and restart every role with the upgraded code. New sign-in
+  outbox payloads include `language`; an old worker rejects that unknown field and
+  discards the email instead of delivering it. Updated workers accept additive outbox
+  metadata and fall back to English for unsupported languages, but cannot change the
+  behavior of an old worker that is still running.
 - **Coordinate the calendar-email upgrade.** Stop all old web/all/worker processes before
   applying `0038_booking_ical_identity.sql`, including processes on other hosts, then restart
   every role with the new code. This upgrade does not support rolling deployment.

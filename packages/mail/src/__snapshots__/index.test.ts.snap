@@ -1,0 +1,47 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`magicLinkEmail > matches the complete en sign-in email 1`] = `
+{
+  "html": "<!doctype html>
+<html lang="en">
+<body style="font-family: system-ui, sans-serif; line-height: 1.5; color: #111;">
+<p>To sign in to Hourmere, press the button below, then "Sign in to Hourmere" on the page it opens.</p>
+<p><a href="https://cal.example.com/sign-in/confirm#token=abc&amp;callbackURL=%2F" style="display: inline-block; padding: 10px 16px; background: #111; color: #fff; text-decoration: none; border-radius: 6px;">Sign in</a></p>
+<p style="color: #555;">The link expires in 5 minutes and works once. If you did not ask to sign in, you can ignore this email.</p>
+<p style="color: #555; font-size: 13px;">If the button does not work, copy this link into your browser:<br>https://cal.example.com/sign-in/confirm#token=abc&amp;callbackURL=%2F</p>
+</body>
+</html>
+",
+  "subject": "Sign in to Hourmere",
+  "text": "To sign in to Hourmere, open this link, then press "Sign in to Hourmere" on the page it opens:
+
+https://cal.example.com/sign-in/confirm#token=abc&callbackURL=%2F
+
+The link expires in 5 minutes and works once. If you did not ask to sign in, you can ignore this email.
+",
+  "to": "ada@example.com",
+}
+`;
+
+exports[`magicLinkEmail > matches the complete zh-CN sign-in email 1`] = `
+{
+  "html": "<!doctype html>
+<html lang="zh-CN">
+<body style="font-family: system-ui, sans-serif; line-height: 1.5; color: #111;">
+<p>如需登录 Hourmere，请点击下方按钮，然后在打开的页面上点击“登录 Hourmere”。</p>
+<p><a href="https://cal.example.com/sign-in/confirm#token=abc&amp;callbackURL=%2F" style="display: inline-block; padding: 10px 16px; background: #111; color: #fff; text-decoration: none; border-radius: 6px;">登录</a></p>
+<p style="color: #555;">此链接将在 5 分钟后过期，且仅能使用一次。如果你没有申请登录，可以忽略此邮件。</p>
+<p style="color: #555; font-size: 13px;">如果按钮无法使用，请将此链接复制到浏览器中：<br>https://cal.example.com/sign-in/confirm#token=abc&amp;callbackURL=%2F</p>
+</body>
+</html>
+",
+  "subject": "登录 Hourmere",
+  "text": "如需登录 Hourmere，请打开此链接，然后在打开的页面上点击“登录 Hourmere”：
+
+https://cal.example.com/sign-in/confirm#token=abc&callbackURL=%2F
+
+此链接将在 5 分钟后过期，且仅能使用一次。如果你没有申请登录，可以忽略此邮件。
+",
+  "to": "ada@example.com",
+}
+`;

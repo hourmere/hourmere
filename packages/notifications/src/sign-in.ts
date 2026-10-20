@@ -17,7 +17,18 @@ import { z } from 'zod'
 export const SIGN_IN_EMAIL_JOB = 'sign-in-email'
 const CLEANUP_JOB = 'sign-in-email-cleanup'
 const MAX_CIPHERTEXT = 1_048_576
-const Request = z.strictObject({ email: z.email(), url: z.string().max(524_288) })
+const Request = z.strictObject({
+  email: z.email(),
+  url: z.string().max(524_288),
+  // Old encrypted outbox rows have no language and keep the original English template.
+  language: z.enum(['en', 'zh-CN']).optional(),
+})
+// A newer web process may enqueue additive metadata or a language this worker does
+// not support. Ignore that metadata and use English while still validating credentials.
+const StoredRequest = z.object({
+  ...Request.shape,
+  language: Request.shape.language.catch(undefined),
+})
 export const SignInEmailPayload = z.strictObject({ emailId: z.uuid() })
 
 export interface SignInEmailDeps {
@@ -62,7 +73,7 @@ function open(deps: SealDeps, id: string, value: Buffer): z.output<typeof Reques
     const text = Buffer.concat([decipher.update(value.subarray(29)), decipher.final()]).toString(
       'utf8',
     )
-    return Request.parse(JSON.parse(text))
+    return StoredRequest.parse(JSON.parse(text))
   } catch {
     return undefined
   }
@@ -121,7 +132,7 @@ export function queuedSignInEmail(
   queue: Queue,
   deps: Pick<SignInEmailDeps, 'db' | 'secret' | 'publicUrl'>,
 ) {
-  return async (input: { email: string; url: string }): Promise<void> => {
+  return async (input: z.input<typeof Request>): Promise<void> => {
     try {
       const request = Request.parse(input)
       const token = await verification(deps.db, deps, request)
@@ -225,7 +236,12 @@ export async function deliverSignInEmail(
     )
     try {
       await deps.mailer.send(
-        magicLinkEmail({ to: request.email, url: request.url, expiresInMinutes: minutes }),
+        magicLinkEmail({
+          to: request.email,
+          url: request.url,
+          expiresInMinutes: minutes,
+          language: request.language,
+        }),
         { signal },
       )
     } catch (error) {

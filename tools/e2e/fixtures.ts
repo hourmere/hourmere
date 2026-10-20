@@ -608,7 +608,9 @@ export const test = base.extend<{
               ),
             ).length,
             failures: sent.filter((message) =>
-              message.subject.startsWith('Meeting link needs attention'),
+              ['Meeting link needs attention:', '会议链接需要处理：'].some((prefix) =>
+                message.subject.startsWith(prefix),
+              ),
             ).length,
             linkedRequests: requests.every(
               (message) =>
