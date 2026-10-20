@@ -46,7 +46,7 @@ describe('release build duration summary', () => {
       JSON.stringify({ logs: [{ vertex: 'a', data: 'aWdub3JlZA==' }] }),
       events(amd64, arm64),
       events({ digest: 'a', cached: true }),
-      events(vertex('c', '[linux/amd64 build 2/2] COPY . .', 10, 12)),
+      events({ ...vertex('c', '[linux/amd64 build 2/2] COPY . .', 10, 12), cached: true }),
       events(vertex('d', '[linux/arm64/v8 build 2/2] COPY . .', 21, 23)),
       '',
     ].join('\n')
@@ -55,9 +55,40 @@ describe('release build duration summary', () => {
     const text = readFileSync(output, 'utf8')
     expect(text).toContain('| linux/amd64 | 10.0 s |\n| linux/arm64 | 20.0 s |')
     expect(text).toContain(
-      'Platforms overlap; shared work and the final OCI/SBOM/provenance export',
+      'Platforms overlap; shared work, scanner-image pulls, SBOM generation and the final OCI/provenance export',
     )
     expect(text).toContain('including cached steps')
+  })
+
+  it('excludes SBOM generation from platform spans', () => {
+    const { result, output } = run(
+      events(
+        amd64,
+        arm64,
+        vertex('sbom-amd64', '[linux/amd64] generating sbom using docker.io/scanner', 21, 58),
+        vertex('sbom-arm64', '[linux/arm64/v8] generating sbom using docker.io/scanner', 21, 59),
+      ),
+    )
+    expect(result.status, result.stderr).toBe(0)
+    expect(readFileSync(output, 'utf8')).toContain(
+      '| linux/amd64 | 6.0 s |\n| linux/arm64 | 17.0 s |',
+    )
+  })
+
+  it('excludes cold scanner-image pulls from platform spans', () => {
+    const { result, output } = run(
+      events(
+        amd64,
+        arm64,
+        vertex('pull-amd64', '[linux/amd64] docker-image://docker.io/scanner', 0, 58),
+        vertex('pull-arm64', '[linux/arm64/v8] docker-image://docker.io/scanner', 0, 59),
+        vertex('pull-shared', 'docker-image://docker.io/scanner', 0, 59),
+      ),
+    )
+    expect(result.status, result.stderr).toBe(0)
+    expect(readFileSync(output, 'utf8')).toContain(
+      '| linux/amd64 | 6.0 s |\n| linux/arm64 | 17.0 s |',
+    )
   })
 
   it.each([

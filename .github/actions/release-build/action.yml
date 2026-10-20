@@ -19,7 +19,7 @@ inputs:
 outputs:
   build-ref:
     description: Buildx history reference for platform timing logs
-    value: ${{ fromJSON(steps.build.outputs.metadata)['buildx.build.ref'] }}
+    value: ${{ steps.build.outputs.metadata && fromJSON(steps.build.outputs.metadata)['buildx.build.ref'] }}
   digest:
     description: Digest of the built multi-platform image.
     value: ${{ steps.build.outputs.digest }}

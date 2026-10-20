@@ -1,5 +1,13 @@
 import { execFileSync, spawnSync } from 'node:child_process'
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -25,7 +33,10 @@ interface Job {
 }
 
 interface Workflow {
-  on: Record<string, { inputs?: Record<string, { default?: string; type?: string }> }>
+  on: Record<
+    string,
+    { inputs?: Record<string, { default?: string; description?: string; type?: string }> }
+  >
   permissions: Record<string, string>
   concurrency?: { group: string; 'cancel-in-progress': boolean }
   jobs: Record<string, Job>
@@ -64,7 +75,10 @@ function step(job: string, id: string) {
   return found as Step
 }
 
-function fixture(changelog = '## [Unreleased → 1.0.0]\n\n- Candidate release.\n') {
+function fixture(
+  changelog = '## [Unreleased → 1.0.0]\n\n- Candidate release.\n',
+  version = '1.0.0',
+) {
   const dir = mkdtempSync(join(tmpdir(), 'hourmere-release-dry-run-'))
   scratch.push(dir)
   const env = {
@@ -80,13 +94,17 @@ function fixture(changelog = '## [Unreleased → 1.0.0]\n\n- Candidate release.\
     execFileSync('git', args, { cwd: dir, env, encoding: 'utf8' }).trim()
   git('init', '--quiet', '--initial-branch=main')
   writeFileSync(join(dir, 'CHANGELOG.md'), changelog)
-  git('add', 'CHANGELOG.md')
+  writeFileSync(join(dir, 'package.json'), `${JSON.stringify({ version })}\n`)
+  git('add', 'CHANGELOG.md', 'package.json')
   git('commit', '--quiet', '-m', 'Prepare fixture')
   // Fetching this origin never uses a network or any publication credentials.
   git('remote', 'add', 'origin', dir)
   git('update-ref', 'refs/remotes/origin/main', git('rev-parse', 'HEAD'))
   mkdirSync(join(dir, 'scripts'))
-  copyFileSync(new URL('scripts/release.ts', root), join(dir, 'scripts/release.ts'))
+  copyFileSync(
+    process.env.HOURMERE_RELEASE_PREPARE_SCRIPT ?? new URL('scripts/release.ts', root),
+    join(dir, 'scripts/release.ts'),
+  )
   const sha = git('rev-parse', 'HEAD')
   const run = (source: string, extra: Record<string, string>) =>
     spawnSync('bash', ['--noprofile', '--norc', '-euo', 'pipefail', '-c', source], {
@@ -106,13 +124,16 @@ function allSteps() {
 }
 
 describe('release dry-run workflow boundaries', () => {
-  it('runs only by manual dispatch with a version input matching the prepared changelog', () => {
+  it('runs only by manual dispatch with a version input matching the manifest and changelog', () => {
     const workflow = dryRun()
     expect(Object.keys(workflow.on)).toEqual(['workflow_dispatch'])
     expect(workflow.on.workflow_dispatch?.inputs?.version?.type).toBe('string')
+    expect(workflow.on.workflow_dispatch?.inputs?.version?.description).toContain(
+      'must equal the root package.json version',
+    )
     const version = workflow.on.workflow_dispatch?.inputs?.version?.default
     expect(version).toBeTypeOf('string')
-    const repo = fixture(readFileSync(new URL('CHANGELOG.md', root), 'utf8'))
+    const repo = fixture(readFileSync(new URL('CHANGELOG.md', root), 'utf8'), version)
     const tag = repo.run(step('prepare', 'tag').run ?? 'exit 99', { VERSION: version ?? '' })
     expect(tag.status, tag.stderr).toBe(0)
     const prepare = repo.run(step('prepare', 'release').run ?? 'exit 99', {
@@ -123,6 +144,13 @@ describe('release dry-run workflow boundaries', () => {
       '### Upgrade notes',
     )
   })
+
+  it.each(['check', 'e2e', 'docker'])(
+    'preserves the required branch-protection CI job id %s',
+    (id) => {
+      expect(Object.hasOwn(ci().jobs, id)).toBe(true)
+    },
+  )
 
   it('grants only contents read, including every caller job and reusable CI override', () => {
     const workflow = dryRun()
@@ -208,7 +236,9 @@ describe('release dry-run workflow boundaries', () => {
     const steps = buildAction().runs.steps
     expect(buildAction().inputs.push?.default).toBe('false')
     expect(buildAction().outputs['build-ref']?.value).toBe(
-      expression("fromJSON(steps.build.outputs.metadata)['buildx.build.ref']"),
+      expression(
+        "steps.build.outputs.metadata && fromJSON(steps.build.outputs.metadata)['buildx.build.ref']",
+      ),
     )
     expect(steps.some((candidate) => candidate.uses?.startsWith('docker/setup-qemu-action@'))).toBe(
       true,
@@ -231,26 +261,45 @@ describe('release dry-run workflow boundaries', () => {
     expect(config?.sbom).toMatch(/^generator=\S+@sha256:[a-f0-9]{64}$/)
   })
 
-  it('passes input as data, then prepares the local tag through the real release validator', () => {
-    const tag = step('prepare', 'tag')
-    expect(tag.name).toBe('Create a runner-local version tag')
-    expect(tag.env?.VERSION).toBe(expression('inputs.version'))
-    expect(tag.run).not.toContain('${{')
-    const prepare = step('prepare', 'release')
-    expect(prepare.env?.RELEASE_TAG).toBe(expression('steps.tag.outputs.tag'))
-    expect(prepare.run).toContain('node scripts/release.ts prepare "$RELEASE_TAG" "$GITHUB_SHA"')
-    const repo = fixture()
-    const result = repo.run(tag.run ?? 'exit 99', { VERSION: '1.0.0' })
-    expect(result.status, result.stderr).toBe(0)
-    expect(repo.git('tag', '--list')).toBe('v1.0.0')
-    expect(repo.git('rev-parse', 'v1.0.0')).toBe(repo.sha)
-    expect(repo.output()).toBe('tag=v1.0.0\n')
-    const prepared = repo.run(prepare.run ?? 'exit 99', { RELEASE_TAG: 'v1.0.0' })
-    expect(prepared.status, prepared.stderr).toBe(0)
-    expect(readFileSync(join(repo.dir, 'hourmere-release-notes.md'), 'utf8')).toBe(
-      '- Candidate release.\n',
-    )
-    expect(repo.git('tag', '--list')).toBe('v1.0.0')
+  it.each(['1.0.0', '1.0.0-rc.0'])(
+    'passes input as data, then prepares the local tag through the real release validator: %s',
+    (version) => {
+      const tag = step('prepare', 'tag')
+      expect(tag.name).toBe('Create a runner-local version tag')
+      expect(tag.env?.VERSION).toBe(expression('inputs.version'))
+      expect(tag.run).not.toContain('${{')
+      const prepare = step('prepare', 'release')
+      expect(prepare.env?.RELEASE_TAG).toBe(expression('steps.tag.outputs.tag'))
+      expect(prepare.run).toContain('node scripts/release.ts prepare "$RELEASE_TAG" "$GITHUB_SHA"')
+      const repo = fixture(`## [Unreleased → ${version}]\n\n- Candidate release.\n`, version)
+      const result = repo.run(tag.run ?? 'exit 99', { VERSION: version })
+      expect(result.status, result.stderr).toBe(0)
+      expect(repo.git('tag', '--list')).toBe(`v${version}`)
+      expect(repo.git('rev-parse', `v${version}`)).toBe(repo.sha)
+      expect(JSON.parse(repo.git('show', 'HEAD:package.json'))).toEqual({ version })
+      expect(repo.output()).toBe(`tag=v${version}\n`)
+      const prepared = repo.run(prepare.run ?? 'exit 99', { RELEASE_TAG: `v${version}` })
+      expect(prepared.status, prepared.stderr).toBe(0)
+      expect(readFileSync(join(repo.dir, 'hourmere-release-notes.md'), 'utf8')).toBe(
+        '- Candidate release.\n',
+      )
+      expect(repo.git('tag', '--list')).toBe(`v${version}`)
+    },
+  )
+
+  it('refuses a dry-run version that differs from the committed root manifest', () => {
+    const repo = fixture('## [Unreleased → 1.0.0-rc.0]\n\n- Candidate release.\n', '1.0.0')
+    const tagged = repo.run(step('prepare', 'tag').run ?? 'exit 99', {
+      VERSION: '1.0.0-rc.0',
+    })
+    expect(tagged.status, tagged.stderr).toBe(0)
+    const prepared = repo.run(step('prepare', 'release').run ?? 'exit 99', {
+      RELEASE_TAG: 'v1.0.0-rc.0',
+    })
+    expect(prepared.status).toBe(1)
+    expect(prepared.stderr).toContain('Release preparation failed')
+    expect(existsSync(join(repo.dir, 'hourmere-release-notes.md'))).toBe(false)
+    expect(repo.output()).toBe('tag=v1.0.0-rc.0\n')
   })
 
   it.each(['1.0.0; touch injected', '1.0.0\nextra', '1.0.0..1'])(

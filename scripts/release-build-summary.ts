@@ -19,8 +19,10 @@ function summary(progress: string) {
     }
   }
   const rows = ['linux/amd64', 'linux/arm64'].map((platform) => {
+    // Dockerfile vertices have a stage/step inside the brackets; scanner pulls
+    // and SBOM generation can have only a bare platform label.
     const matching = [...vertices.values()].filter((vertex) =>
-      new RegExp(`^\\[${platform}(?:/v\\d+)?(?: |\\])`).test(vertex.name ?? ''),
+      new RegExp(`^\\[${platform}(?:/v\\d+)? [^\\]]+\\] `).test(vertex.name ?? ''),
     )
     const intervals = matching
       .filter((vertex) => vertex.started)
@@ -45,8 +47,8 @@ function summary(progress: string) {
     '|---|---:|',
     ...rows,
     '',
-    'First started to last completed platform-labelled BuildKit vertex, including cached steps.',
-    'Platforms overlap; shared work and the final OCI/SBOM/provenance export are outside these spans.',
+    'First started to last completed platform-labelled Dockerfile BuildKit vertex, including cached steps.',
+    'Platforms overlap; shared work, scanner-image pulls, SBOM generation and the final OCI/provenance export are outside these spans.',
     'The multi-platform OCI image remains on the disposable runner; nothing was published.',
     '',
   ].join('\n')
