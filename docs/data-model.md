@@ -468,3 +468,13 @@ explicit enabled flag), retained host `last_assigned_sequence`, and immutable bo
 `hosts_use_default_schedule`. Activation and mode changes preserve sequence history;
 new successful bookings update fairness with the booking/outbox transaction. No legacy
 configuration is activated by migration. See [round-robin scheduling](round-robin-scheduling.md).
+
+## Booking calendar email identity
+
+Migration0038 adds `bookings.ical_version` and nullable organizer-name/email snapshots.
+Predecessor rows are v1, with the best surviving host/conference organizer backfilled while
+preserving existing timestamps; newly inserted rows default to v2. Notification workers
+always read the reschedule-chain root's fields. A new root atomically pins its configured
+sending mailbox before its first SMTP invitation; later versions reuse that identity.
+See [calendar invitations](notifications.md#calendar-invitations) for the coordinated upgrade,
+legacy compatibility, recipient policy and reply limitations.

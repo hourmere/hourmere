@@ -372,6 +372,9 @@ export interface Bookings {
   end_at: Timestamp;
   event_type_id: string | null;
   hosts_use_default_schedule: Generated<boolean>;
+  ical_organizer_email: string | null;
+  ical_organizer_name: string | null;
+  ical_version: Generated<number>;
   id: Generated<string>;
   idempotency_fingerprint: Buffer | null;
   idempotency_key: string | null;

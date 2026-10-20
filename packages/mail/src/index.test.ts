@@ -1,4 +1,5 @@
-import { createServer, type Server, type Socket } from 'node:net'
+import type { Server } from 'node:net'
+import addressparser from 'nodemailer/lib/addressparser'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
   createLogMailer,
@@ -8,6 +9,51 @@ import {
   magicLinkEmail,
   smtpTransportOptions,
 } from './index.ts'
+import { fakeSmtpServer } from './smtp-testing.ts'
+
+/** Parse MIME structure independently of Nodemailer's options to verify the delivered message. */
+function mimePart(raw: string): {
+  type: string
+  content: Buffer
+  children: ReturnType<typeof mimePart>[]
+} {
+  const separator = raw.indexOf('\r\n\r\n')
+  const headers = raw.slice(0, separator).replace(/\r\n[ \t]+/g, ' ')
+  const body = raw.slice(separator + 4)
+  const contentType = headers.match(/^Content-Type: ([^\r\n]+)/im)?.[1] ?? ''
+  const boundary = contentType.match(/boundary="([^"]+)"/i)?.[1]
+  const encoding = headers.match(/^Content-Transfer-Encoding: ([^\r\n]+)/im)?.[1]?.toLowerCase()
+  const content =
+    encoding === 'base64'
+      ? Buffer.from(body, 'base64')
+      : encoding === 'quoted-printable'
+        ? Buffer.from(
+            body
+              .replace(/=\r\n/g, '')
+              .replace(/=([a-f0-9]{2})/gi, (_, hex: string) =>
+                String.fromCharCode(Number.parseInt(hex, 16)),
+              ),
+            'latin1',
+          )
+        : Buffer.from(body, 'utf8')
+  return {
+    type: contentType,
+    content,
+    children: boundary
+      ? body
+          .split(`--${boundary}`)
+          .slice(1, -1)
+          // The CRLF preceding a MIME boundary belongs to the delimiter, not the body.
+          .map((part) => mimePart(part.replace(/^\r\n/, '').replace(/\r\n$/, '')))
+      : [],
+  }
+}
+
+function mailboxHeader(raw: string, name: string) {
+  const headers = raw.split('\r\n\r\n')[0]?.replace(/\r\n[ \t]+/g, ' ') ?? ''
+  const value = headers.match(new RegExp(`^${name}: ([^\\r\\n]+)`, 'im'))?.[1]
+  return value === undefined ? [] : addressparser(value)
+}
 
 const url = 'https://cal.example.com/sign-in/confirm#token=abc&callbackURL=%2F'
 
@@ -107,70 +153,6 @@ describe('smtpTransportOptions', () => {
   })
 })
 
-/**
- * Just enough of an SMTP server to accept one message with AUTH PLAIN. `rcptReplies` answers
- * RCPT TO for an address with something other than 250; with `hangOnData` it never answers
- * DATA, like a server that stalls.
- */
-function fakeSmtpServer() {
-  const received: {
-    auth?: string
-    from?: string
-    to: string[]
-    data?: string
-    rcptReplies: Map<string, string>
-    hangOnData: boolean
-    dataReply?: string
-  } = { to: [], rcptReplies: new Map(), hangOnData: false }
-  const sockets = new Set<Socket>()
-  const server = createServer((socket) => {
-    sockets.add(socket)
-    socket.on('close', () => sockets.delete(socket))
-    let buffer = ''
-    let inData = false
-    socket.write('220 localhost ESMTP\r\n')
-    socket.on('data', (chunk) => {
-      buffer += chunk.toString('utf8')
-      while (true) {
-        if (inData) {
-          const end = buffer.indexOf('\r\n.\r\n')
-          if (end === -1) return
-          received.data = buffer.slice(0, end)
-          buffer = buffer.slice(end + 5)
-          inData = false
-          socket.write(`${received.dataReply ?? '250 queued'}\r\n`)
-          continue
-        }
-        const eol = buffer.indexOf('\r\n')
-        if (eol === -1) return
-        const line = buffer.slice(0, eol)
-        buffer = buffer.slice(eol + 2)
-        const verb = line.split(' ')[0]?.toUpperCase()
-        if (verb === 'EHLO') socket.write('250-localhost\r\n250 AUTH PLAIN\r\n')
-        else if (verb === 'AUTH') {
-          received.auth = Buffer.from(line.split(' ')[2] ?? '', 'base64').toString('utf8')
-          socket.write('235 ok\r\n')
-        } else if (verb === 'MAIL') {
-          received.from = line
-          socket.write('250 ok\r\n')
-        } else if (verb === 'RCPT') {
-          received.to.push(line)
-          const address = line.match(/<([^>]*)>/)?.[1] ?? ''
-          socket.write(`${received.rcptReplies.get(address) ?? '250 ok'}\r\n`)
-        } else if (verb === 'DATA') {
-          if (received.hangOnData) continue
-          inData = true
-          socket.write('354 go\r\n')
-        } else if (verb === 'QUIT') socket.end('221 bye\r\n')
-        // Like a server without TLS support.
-        else if (verb === 'STARTTLS') socket.write('502 5.5.1 STARTTLS not supported\r\n')
-        else socket.write('250 ok\r\n')
-      }
-    })
-  })
-  return { server, received, sockets }
-}
-
 describe('MailRejectedError', () => {
   it('is permanent only when the address itself is refused', () => {
     const cases: [number | undefined, string | undefined, boolean, boolean, boolean][] = [
@@ -230,23 +212,161 @@ describe('createSmtpMailer', () => {
     expect(received.from).toContain('<hourmere@example.com>')
     expect(received.to).toEqual([expect.stringContaining('<ada@example.com>')])
     expect(received.data).toContain('Subject: Sign in to Hourmere')
+    expect(mailer.senderEmail).toBe('hourmere@example.com')
+    expect(mailboxHeader(received.data ?? '', 'From')).toEqual([
+      { name: 'Hourmere', address: 'hourmere@example.com' },
+    ])
+    expect(mailboxHeader(received.data ?? '', 'Reply-To')).toEqual([])
+    expect(mailboxHeader(received.data ?? '', 'Sender')).toEqual([])
   })
 
-  it('attaches a calendar invitation with its method in the content type', async () => {
-    received.data = undefined
+  it.each(['REQUEST', 'CANCEL'] as const)(
+    'delivers %s as a calendar alternative and an ICS attachment, retaining the message bodies',
+    async (method) => {
+      received.data = undefined
+      const mailer = createSmtpMailer({
+        url: `smtp://127.0.0.1:${port}`,
+        from: 'Hourmere <hourmere@example.com>',
+      })
+      const manageUrl = 'https://cal.example.com/booking#token=synthetic-manage-marker'
+      const content = invitation.content
+        .replace('METHOD:REQUEST', `METHOD:${method}`)
+        .replace('STATUS:CONFIRMED', `STATUS:${method === 'CANCEL' ? 'CANCELLED' : 'CONFIRMED'}`)
+      await mailer.send({
+        to: 'ada@example.com',
+        subject: 'Confirmed',
+        text: `Booked. Manage your booking: ${manageUrl}`,
+        html: `<p>Booked. <a href="${manageUrl}">Manage your booking</a></p>`,
+        attachments: [
+          {
+            ...invitation,
+            filename: method === 'CANCEL' ? 'cancel.ics' : 'invite.ics',
+            contentType: `text/calendar; method=${method}; charset=UTF-8`,
+            content,
+          },
+          { filename: 'notes.txt', contentType: 'text/plain', content: 'Useful meeting notes' },
+        ],
+      })
+      const data = (received.data ?? '').replace(/\r\n\s+/g, ' ')
+      const message = mimePart(received.data ?? '')
+      expect(message.type).toMatch(/^multipart\/mixed;/i)
+      expect(message.children[0]?.type).toMatch(/^multipart\/alternative;/i)
+      expect(message.children[0]?.children.map((p) => p.type.toLowerCase())).toEqual([
+        'text/plain; charset=utf-8',
+        'text/html; charset=utf-8',
+        `text/calendar; charset=utf-8; method=${method.toLowerCase()}`,
+      ])
+      expect(message.children.slice(1).map((p) => p.type.split(';')[0])).toEqual([
+        'text/plain',
+        'application/ics',
+      ])
+      const alternative = message.children[0]?.children[2]?.content ?? Buffer.alloc(0)
+      const attachment = message.children[2]?.content ?? Buffer.alloc(0)
+      expect(alternative.equals(Buffer.from(content, 'utf8'))).toBe(true)
+      expect(attachment.equals(Buffer.from(content, 'utf8'))).toBe(true)
+      expect(alternative.equals(attachment)).toBe(true)
+      for (const body of message.children[0]?.children.slice(0, 2) ?? []) {
+        expect(body.content.toString('utf8').includes(manageUrl)).toBe(true)
+      }
+      expect(alternative.toString('utf8').includes('synthetic-manage-marker')).toBe(false)
+      expect(attachment.toString('utf8').includes('synthetic-manage-marker')).toBe(false)
+      expect(data.match(/Content-Type: text\/calendar;/g)).toHaveLength(1)
+      expect(data).toContain(`METHOD:${method}`)
+      expect(data).toContain('Booked.')
+      expect(data).toMatch(
+        new RegExp(
+          `Content-Disposition: attachment; filename=${method === 'CANCEL' ? 'cancel' : 'invite'}\\.ics`,
+        ),
+      )
+    },
+  )
+
+  it.each([
+    ['"Team, Calendar" <calendar@relay.selfhosted.example>', 'calendar@relay.selfhosted.example'],
+    ['calendar+bookings@selfhosted.example', 'calendar+bookings@selfhosted.example'],
+    ['calendar#?%&/=+tag@selfhosted.example', 'calendar#?%&/=+tag@selfhosted.example'],
+    ['Calendar <calendar@bücher.example>', 'calendar@bücher.example'],
+  ])('exposes one mailbox from arbitrary MAIL_FROM %s', (from, senderEmail) => {
+    expect(createSmtpMailer({ url: `smtp://127.0.0.1:${port}`, from }).senderEmail).toBe(
+      senderEmail,
+    )
+  })
+
+  it.each([
+    '',
+    'not-an-address',
+    'one@example.com, two@example.com',
+    'one@example.com two@example.com',
+    'Calendar: one@example.com;',
+    'Calendar <one@example.com',
+    'Calendar <one@example.com> trailing',
+    'Calendar <one@@example.com>',
+    'Calendar <one..two@example.com>',
+    'Calendar <one@example..com>',
+    'Calendar <one@example.com/path>',
+    'Calendar <one@example.com>\r\nBcc: two@example.com',
+  ])('rejects ambiguous or malformed MAIL_FROM without echoing it', (from) => {
+    expect(() => createSmtpMailer({ url: `smtp://127.0.0.1:${port}`, from })).toThrow(
+      /^MAIL_FROM must contain one valid mailbox$/,
+    )
+  })
+
+  it('rejects a long malformed sender without backtracking over display-name spaces', () => {
+    const from = `Calendar${' '.repeat(100_000)}not-a-mailbox`
+    const start = performance.now()
+    expect(() => createSmtpMailer({ url: `smtp://127.0.0.1:${port}`, from })).toThrow(
+      /^MAIL_FROM must contain one valid mailbox$/,
+    )
+    expect(performance.now() - start).toBeLessThan(750)
+  }, 30_000)
+
+  it('retains the configured From and routes human replies to one sanitized host mailbox', async () => {
     const mailer = createSmtpMailer({
       url: `smtp://127.0.0.1:${port}`,
-      from: 'Hourmere <hourmere@example.com>',
+      from: '"Team, Calendar" <calendar@relay.selfhosted.example>',
     })
     await mailer.send({
       to: 'ada@example.com',
+      replyTo: { name: 'Grace\r\n\u0000\u202e Hopper', email: 'grace@gmail.example' },
       subject: 'Confirmed',
       text: 'Booked.',
-      attachments: [invitation],
     })
-    const data = (received.data ?? '').replace(/\r\n\s+/g, ' ')
-    expect(data).toMatch(/Content-Type: text\/calendar; method=REQUEST; charset=UTF-8/)
-    expect(data).toMatch(/Content-Disposition: attachment; filename=invite\.ics/)
+    const data = received.data ?? ''
+    expect(mailboxHeader(data, 'From')).toEqual([
+      { name: 'Team, Calendar', address: 'calendar@relay.selfhosted.example' },
+    ])
+    expect(received.from).toBe('MAIL FROM:<calendar@relay.selfhosted.example>')
+    expect(mailboxHeader(data, 'Reply-To')).toEqual([
+      { name: 'Grace Hopper', address: 'grace@gmail.example' },
+    ])
+    expect(mailboxHeader(data, 'Sender')).toEqual([])
+    expect(data).not.toMatch(/^Bcc:/im)
+  })
+
+  it.each([
+    'grace@example.com, victim@example.com',
+    'grace@example.com\r\nBcc: victim@example.com',
+    'grace@exa\r\nmple.com',
+    'grace@example.com/path',
+    'Grace <grace@example.com>',
+    `${'a'.repeat(65)}@example.com`,
+  ])('drops an unsafe Reply-To without preventing delivery (%s)', async (email) => {
+    const mailer = createSmtpMailer({
+      url: `smtp://127.0.0.1:${port}`,
+      from: 'calendar@selfhosted.example',
+    })
+    received.to = []
+    await expect(
+      mailer.send({
+        to: 'ada@example.com',
+        replyTo: { name: 'Grace', email },
+        subject: 'x',
+        text: 'x',
+      }),
+    ).resolves.toBeUndefined()
+    expect(received.to).toEqual(['RCPT TO:<ada@example.com>'])
+    expect(mailboxHeader(received.data ?? '', 'Reply-To')).toEqual([])
+    expect(received.data).not.toMatch(/^Bcc:/im)
   })
 
   it('keeps the subject on one line and the recipient a single address', async () => {
