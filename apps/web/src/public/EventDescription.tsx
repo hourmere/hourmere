@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { useI18n } from '../i18n/runtime.tsx'
+import { collapseBlankLines } from './description.ts'
 
 /** Keep the calendar near the event on narrow pages without losing the full description. */
 export function EventDescription({ children }: { children: string }) {
@@ -30,7 +31,7 @@ export function EventDescription({ children }: { children: string }) {
         ref={text}
         className={`event-description${expanded ? '' : ' event-description-collapsed'}`}
       >
-        {children}
+        {collapseBlankLines(children)}
       </p>
       {overflows && (
         <button

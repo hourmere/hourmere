@@ -16,6 +16,8 @@
 }
 
 .picker .picker-calendar {
+  /* Sized by its track, so day labels can scale with the column width (cqw) below. */
+  container-type: inline-size;
   width: 100%;
   max-width: 360px;
 }
@@ -102,6 +104,8 @@
   background: transparent;
   color: var(--muted);
   font: inherit;
+  /* At most 37% of a column, so bold 22日 stays on one line inside the 2px border of 36px cells. */
+  font-size: min(1rem, 5.3cqw);
   cursor: default;
 }
 
@@ -117,19 +121,17 @@
   opacity: 0.6;
 }
 
+/*
+ * Touch targets: the calendar fills its track (never wider), so seven 44px columns need a
+ * 308px track, which 390px phones provide. Narrower tracks share their width across the
+ * seven columns (36px at 320px, 42px at 360px), above the 24px minimum and inside the card.
+ */
 @media (pointer: coarse) {
-  .picker .picker-calendar {
-    /* Seven 44px targets; center within narrow tracks to share their side gutters. */
-    min-width: 308px;
-    justify-self: center;
-  }
-
   .picker .calendar-grid {
     border-spacing: 0;
   }
 
   .picker .day {
-    min-width: 44px;
     min-height: 44px;
   }
 }

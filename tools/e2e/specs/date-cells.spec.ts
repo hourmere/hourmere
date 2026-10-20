@@ -83,10 +83,41 @@ test('coarse-pointer calendars keep 44px day targets without striking unavailabl
       }),
     )
     expect(days.length).toBeGreaterThanOrEqual(28)
+    // Seven 44px columns need a 308px track, which 390px phones provide. Narrower phones
+    // share the track across the columns instead of overflowing the card (WCAG 2.5.8: 24px).
+    const minimumWidth = width >= 390 ? 44 : 24
     expect(
-      days.every((day) => day.width >= 44 && day.height >= 44),
+      days.every((day) => day.width >= minimumWidth && day.height >= 44),
       `${width}px targets`,
     ).toBe(true)
+    const edges = await page.evaluate(() => {
+      const content = document.querySelector('.booking-main') as HTMLElement
+      const calendar = document.querySelector('.picker-calendar') as HTMLElement
+      const body = document.querySelector('.picker-body') as HTMLElement
+      const box = content.getBoundingClientRect()
+      const style = getComputedStyle(content)
+      const grid = calendar.getBoundingClientRect()
+      return {
+        contentLeft:
+          box.left +
+          Number.parseFloat(style.borderLeftWidth) +
+          Number.parseFloat(style.paddingLeft),
+        contentRight:
+          box.right -
+          Number.parseFloat(style.borderRightWidth) -
+          Number.parseFloat(style.paddingRight),
+        calendarLeft: grid.left,
+        calendarRight: grid.right,
+        clipped: body.scrollWidth > body.clientWidth + 1,
+      }
+    })
+    expect(edges.calendarLeft, `${width}px calendar inside the card`).toBeGreaterThanOrEqual(
+      edges.contentLeft - 0.5,
+    )
+    expect(edges.calendarRight, `${width}px calendar inside the card`).toBeLessThanOrEqual(
+      edges.contentRight + 0.5,
+    )
+    expect(edges.clipped, `${width}px picker body overflow`).toBe(false)
     const unavailable = days.filter((day) => day.unavailable)
     expect(unavailable.length).toBeGreaterThan(0)
     expect(unavailable.every((day) => day.opacity < 1 && day.decoration === 'none')).toBe(true)

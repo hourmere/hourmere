@@ -200,15 +200,27 @@ describe('slot picker CSS contracts', () => {
     }
   })
 
-  it('fits seven 44px day targets on coarse-pointer calendars', () => {
-    const coarse = rules(styles).filter(
+  it('keeps coarse-pointer day targets 44px tall while the calendar never outgrows its track', () => {
+    const css = rules(styles)
+    const coarse = css.filter(
       (rule) => (rule.parentRule as CSSMediaRule | null)?.conditionText === '(pointer: coarse)',
     )
-    expect(declaration(coarse, '.picker .day', 'min-width')).toBe('44px')
     expect(declaration(coarse, '.picker .day', 'min-height')).toBe('44px')
     expect(declaration(coarse, '.picker .calendar-grid', 'border-spacing')).toBe('0px')
-    expect(declaration(coarse, '.picker .picker-calendar', 'min-width')).toBe('308px')
-    expect(declaration(coarse, '.picker .picker-calendar', 'justify-self')).toBe('center')
+    // Seven columns share the track width: a 44px day minimum would overflow 320px cards.
+    expect(declaration(coarse, '.picker .day', 'min-width')).toBe('')
+    expect(declaration(css, '.picker .day', 'width')).toBe('100%')
+    // The track bounds the calendar; a 308px minimum spilled over narrow cards symmetrically.
+    const calendar = css.filter((rule) => rule.selectorText === '.picker .picker-calendar')
+    expect(calendar.length).toBeGreaterThan(0)
+    for (const rule of calendar) {
+      expect(rule.style.getPropertyValue('min-width')).toBe('')
+      expect(rule.style.getPropertyValue('justify-self')).toBe('')
+    }
+    expect(declaration(css, '.picker .picker-calendar', 'width')).toBe('100%')
+    // Day labels follow the column width instead, so bold 22日 fits a 36px cell on one line.
+    expect(styles).toMatch(/\.picker \.picker-calendar \{[^}]*container-type: inline-size;/)
+    expect(styles).toMatch(/\.picker \.day \{[^}]*font-size: min\(1rem, 5\.3cqw\);/)
   })
 
   it('adds a noninteractive fade above remaining slots', () => {
