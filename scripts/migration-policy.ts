@@ -63,17 +63,22 @@ function isIdentifier(token: string | undefined) {
 }
 
 function breaksSchemaCompatibility(statement: string[]) {
-  if (statement[0] === 'DROP' && statement[1] === 'TABLE') return true
+  if (statement[0] === 'DROP' && ['TABLE', 'VIEW'].includes(statement[1] ?? '')) return true
   if (statement[0] !== 'ALTER') return false
   const table = statement[1] === 'TABLE'
-  if (!table && statement[1] !== 'VIEW') return false
-
+  const view = statement[1] === 'VIEW'
+  const foreignTable = statement[1] === 'FOREIGN' && statement[2] === 'TABLE'
+  const materializedView = statement[1] === 'MATERIALIZED' && statement[2] === 'VIEW'
+  if (!table && !view && !foreignTable && !materializedView && statement[1] !== 'SEQUENCE') {
+    return false
+  }
   let index = 2
+  if (foreignTable || materializedView) index++
   if (statement[index] === 'IF' && statement[index + 1] === 'EXISTS') index += 2
-  if (table && statement[index] === 'ONLY') index++
+  if ((table || foreignTable) && statement[index] === 'ONLY') index++
   if (!isIdentifier(statement[index++])) return false
   while (statement[index] === '.' && isIdentifier(statement[index + 1])) index += 2
-  if (table && statement[index] === '*') index++
+  if ((table || foreignTable) && statement[index] === '*') index++
 
   let depth = 0
   let actionStart = true
@@ -86,8 +91,8 @@ function breaksSchemaCompatibility(statement: string[]) {
       if (token === 'RENAME' && statement[index + 1] !== 'CONSTRAINT') {
         return true
       }
-      if (table && token === 'SET' && statement[index + 1] === 'SCHEMA') return true
-      if (table && token === 'ALTER') {
+      if ((table || view) && token === 'SET' && statement[index + 1] === 'SCHEMA') return true
+      if (table && token === 'ALTER' && statement[index + 1] !== 'CONSTRAINT') {
         let type = index + 1
         if (statement[type] === 'COLUMN') type++
         if (isIdentifier(statement[type++])) {

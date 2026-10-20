@@ -33,6 +33,9 @@ The repository is one npm workspace (`apps/*`, `packages/*` and `tools/*`) with 
 
 ## Checks
 
+The deployment documentation tests require `zsh` and Python 3 for interactive PTY paste
+checks (`sudo apt-get install zsh python3` on Debian/Ubuntu). Ensure both are on `PATH`.
+
 CI runs these on every pull request; run them before you push:
 
 ```sh
