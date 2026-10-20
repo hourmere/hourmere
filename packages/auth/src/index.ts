@@ -2,6 +2,7 @@ import { apiKey } from '@better-auth/api-key'
 import { type Db, guardPoolErrors } from '@hourmere/db'
 import { type Mailer, magicLinkEmail } from '@hourmere/mail'
 import { betterAuth } from 'better-auth'
+import type { DBTransactionAdapter } from 'better-auth/adapters'
 import { APIError } from 'better-auth/api'
 import { magicLink } from 'better-auth/plugins/magic-link'
 import { organization } from 'better-auth/plugins/organization'
@@ -191,6 +192,9 @@ export function createAuth({
         google: {
           clientId: google.clientId,
           clientSecret: google.clientSecret,
+          // Omit incremental authorization so a prior Calendar grant in the same Google
+          // project cannot widen this identity-only sign-in grant.
+          includeGrantedScopes: false,
           requireEmailVerification: true,
           ...socialProviderOptions.google,
         },
@@ -212,10 +216,29 @@ export function createAuth({
     databaseHooks: {
       account: {
         // Sign-in ID tokens contain identity claims needed only during authentication.
-        // Cover creation, linking, repeat sign-in and refresh without changing the
-        // access/refresh token encryption Better Auth has already applied.
-        create: { before: async (account) => ({ data: { ...account, idToken: null } }) },
-        update: { before: async (account) => ({ data: { ...account, idToken: null } }) },
+        // Google sign-in/linking needs no refresh token: Hourmere renews its own session.
+        // Clear even an unexpected provider token or a legacy value on repeat sign-in.
+        // Other retained OAuth tokens keep Better Auth's encryption.
+        create: {
+          before: async (account) => ({
+            data: {
+              ...account,
+              idToken: null,
+              ...(account.providerId === 'google' && {
+                refreshToken: null,
+                refreshTokenExpiresAt: null,
+              }),
+            },
+          }),
+        },
+        update: {
+          before: async (account) => ({
+            data: {
+              ...account,
+              idToken: null,
+            },
+          }),
+        },
       },
       user: {
         create: {
@@ -263,6 +286,40 @@ export function createAuth({
     },
     hooks: { before: beforeHook(db) },
     plugins: [
+      {
+        id: 'sign-in-token-updates',
+        init(ctx) {
+          // Better Auth 1.7.10 passes only the patch to update.before, without its id or
+          // selector. Refresh patches also omit providerId. Read the stored provider at
+          // the adapter boundary, where the actual selector is available, before writing.
+          const guard = (adapter: DBTransactionAdapter): DBTransactionAdapter => {
+            const update = adapter.update
+            adapter.update = async (request) => {
+              if (request.model === 'account') {
+                const account = await adapter.findOne<{ providerId: string }>({
+                  model: 'account',
+                  where: request.where,
+                  select: ['providerId'],
+                })
+                if (account?.providerId === 'google') {
+                  return update({
+                    ...request,
+                    update: { ...request.update, refreshToken: null, refreshTokenExpiresAt: null },
+                  })
+                }
+              }
+              return update(request)
+            }
+            return adapter
+          }
+          const adapter = ctx.adapter
+          guard(adapter)
+          const transaction = adapter.transaction
+          adapter.transaction = (callback) => transaction((trx) => callback(guard(trx)))
+          // The only account updateMany path is updatePassword, whose selector fixes
+          // providerId to credential; Hourmere does not enable password authentication.
+        },
+      },
       ...(mcpOAuth ? mcpOAuthPlugins(db, baseURL, mcpMetadataFetcher) : []),
       organization({
         // An invitation is accepted only by someone who proved they own the invited address.

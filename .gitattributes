@@ -1,2 +1,5 @@
 # Migrations are checksummed; keep their line endings identical on every platform.
 *.sql text eol=lf
+
+# Golden iCalendar fixtures assert the wire-format CRLF bytes on every checkout.
+packages/notifications/src/fixtures/*.ics -text whitespace=cr-at-eol

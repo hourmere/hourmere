@@ -9,6 +9,7 @@ import {
   type BookingEmailKind,
   type BookingEmailMeeting,
   bookingEmail,
+  type IcsPerson,
   icsAttachment,
   type Mailer,
   type MailMessage,
@@ -56,7 +57,7 @@ export const BookingNotificationPayload = z.strictObject({
 export interface NotificationDeps {
   db: Db
   mailer: Mailer
-  /** PUBLIC_URL: manage links and invitation UIDs are built from it. */
+  /** PUBLIC_URL: the origin used for invitee manage links. */
   publicUrl: string
   now?: (() => Temporal.Instant) | undefined
   /** Receives a line for each email the mail server refused for good. Default: console.warn. */
@@ -242,11 +243,26 @@ interface NotificationData {
     cancelReason: string | null
     rescheduledFromId: string | null
   }
-  hosts: { id: string; name: string; email: string; timeZone: string }[]
+  hosts: { id: string; name: string; email: string; timeZone: string; locale: string | null }[]
   /** The invitee first, then guests. */
-  attendees: { id: string; name: string; email: string; timeZone: string; isBooker: boolean }[]
+  attendees: {
+    id: string
+    name: string
+    email: string
+    timeZone: string
+    locale: string | null
+    isBooker: boolean
+  }[]
   /** The booking this chain of reschedules began with, and how many reschedules ago. */
-  root: { id: string; depth: number }
+  root: {
+    id: string
+    depth: number
+    ical_version: number
+    ical_organizer_name: string | null
+    ical_organizer_email: string | null
+  }
+  /** Hosts with a pinned provider calendar copy; do not email a second new invitation. */
+  calendarCopyHosts: Set<string>
   /** The booking this one replaced. */
   previous: { start: Temporal.Instant; end: Temporal.Instant; status: string } | undefined
   /** A booking that replaced this one (it was cancelled by a reschedule). */
@@ -301,6 +317,7 @@ function loadNotificationData(db: Db, bookingId: string): Promise<NotificationDa
         'u.email',
         'p.handle as profile_handle',
         'p.time_zone as profile_zone',
+        'p.locale as profile_locale',
         's.time_zone as schedule_zone',
       ])
       .where('bh.booking_id', '=', bookingId)
@@ -311,12 +328,12 @@ function loadNotificationData(db: Db, bookingId: string): Promise<NotificationDa
       .execute()
     const attendees = await conn
       .selectFrom('booking_attendees')
-      .select(['id', 'name', 'email', 'time_zone', 'is_booker'])
+      .select(['id', 'name', 'email', 'time_zone', 'locale', 'is_booker'])
       .where('booking_id', '=', bookingId)
       .orderBy('is_booker', 'desc')
       .orderBy('id')
       .execute()
-    const chain = await sql<{ id: string; depth: number }>`
+    const chain = await sql<NotificationData['root']>`
       WITH RECURSIVE chain (id, rescheduled_from_id, depth) AS (
         SELECT id, rescheduled_from_id, 0 FROM bookings WHERE id = ${bookingId}
         UNION ALL
@@ -324,7 +341,22 @@ function loadNotificationData(db: Db, bookingId: string): Promise<NotificationDa
           FROM bookings b JOIN chain c ON b.id = c.rescheduled_from_id
          WHERE c.depth < 1000
       )
-      SELECT id, depth FROM chain ORDER BY depth DESC LIMIT 1`.execute(conn)
+      SELECT c.id, c.depth, b.ical_version, b.ical_organizer_name, b.ical_organizer_email
+        FROM chain c JOIN bookings b ON b.id=c.id ORDER BY c.depth DESC LIMIT 1`.execute(conn)
+    const root = chain.rows[0]
+    if (!root) return undefined
+    const copyHosts = await conn
+      .selectFrom('booking_calendar_targets')
+      .select('user_id')
+      .where('root_booking_id', '=', root.id)
+      .union(
+        conn
+          .selectFrom('booking_conference_mirrors')
+          .select('user_id')
+          .where('root_booking_id', '=', root.id)
+          .where('calendar_id', 'is not', null),
+      )
+      .execute()
     const conference = await conn
       .selectFrom('booking_conferences')
       .selectAll()
@@ -371,15 +403,23 @@ function loadNotificationData(db: Db, bookingId: string): Promise<NotificationDa
         name: h.name.trim() || h.profile_handle || h.email,
         email: h.email,
         timeZone: timeZone(h.profile_zone) ?? timeZone(h.schedule_zone) ?? 'UTC',
+        locale: h.profile_locale,
       })),
       attendees: attendees.map((a) => ({
         id: a.id,
         name: a.name,
         email: a.email,
         timeZone: timeZone(a.time_zone) ?? 'UTC',
+        locale: a.locale,
         isBooker: a.is_booker,
       })),
-      root: chain.rows[0] ?? { id: b.id, depth: 0 },
+      root,
+      calendarCopyHosts: new Set([
+        ...copyHosts.map((h) => h.user_id),
+        ...(conference?.provider === 'google_meet' && conference.calendar_id
+          ? [conference.organizer_user_id]
+          : []),
+      ]),
       previous: previous && {
         start: instant(previous.start_at),
         end: instant(previous.end_at),
@@ -602,6 +642,12 @@ async function deliverBookingNotification(
   const email: typeof bookingEmail = (...args) => ({
     ...bookingEmail(...args),
     sensitive: data.automaticConference,
+    replyTo:
+      args[2].role === 'host'
+        ? { name: invitee.name, email: invitee.email }
+        : organizer
+          ? { name: organizer.name, email: organizer.email }
+          : undefined,
   })
 
   const meeting: BookingEmailMeeting = {
@@ -618,8 +664,46 @@ async function deliverBookingNotification(
     previous: data.previous,
     cancelReason: booking.cancelReason,
   }
-  const invitation = (summary: string) =>
-    kind === 'reminder' || kind === 'conference_failed' || !organizer
+  // Persist before any SMTP call, with a compare-and-set: concurrent jobs and a changed
+  // MAIL_FROM must never give the same UID two calendar organizers. The short UPDATE ends
+  // before sendOnce opens its delivery transaction, so it holds no booking lock over SMTP.
+  let calendarOrganizer: IcsPerson | undefined =
+    data.root.ical_organizer_name && data.root.ical_organizer_email
+      ? { name: data.root.ical_organizer_name, email: data.root.ical_organizer_email }
+      : undefined
+  const modern =
+    data.root.ical_version === 2 && Boolean(calendarOrganizer || deps.mailer.senderEmail)
+  if (
+    !calendarOrganizer &&
+    organizer &&
+    kind !== 'reminder' &&
+    kind !== 'conference_failed' &&
+    deps.mailer.senderEmail
+  ) {
+    const candidate = {
+      name: organizer.name,
+      email: modern ? deps.mailer.senderEmail : organizer.email,
+    }
+    await deps.db
+      .updateTable('bookings')
+      .set({ ical_organizer_name: candidate.name, ical_organizer_email: candidate.email })
+      .where('id', '=', data.root.id)
+      .where('ical_organizer_email', 'is', null)
+      .execute()
+    const pinned = await deps.db
+      .selectFrom('bookings')
+      .select(['ical_organizer_name', 'ical_organizer_email'])
+      .where('id', '=', data.root.id)
+      .executeTakeFirstOrThrow()
+    if (pinned.ical_organizer_name && pinned.ical_organizer_email)
+      calendarOrganizer = { name: pinned.ical_organizer_name, email: pinned.ical_organizer_email }
+  }
+  calendarOrganizer ??= organizer
+  const invitation = (summary: string, hostId?: string) =>
+    kind === 'reminder' ||
+    kind === 'conference_failed' ||
+    !calendarOrganizer ||
+    (modern && hostId !== undefined && data.calendarCopyHosts.has(hostId))
       ? undefined
       : icsAttachment({
           method: kind === 'cancelled' ? 'CANCEL' : 'REQUEST',
@@ -630,15 +714,42 @@ async function deliverBookingNotification(
           stamp: now,
           start: booking.start,
           end: booking.end,
+          // Each recipient sees the other person, while UID/SEQUENCE retain event identity.
           summary,
+          description: modern ? `Booked with ${calendarOrganizer.name} using Hourmere.` : undefined,
           location: booking.location ? meetingLocationText(booking.location) : undefined,
-          organizer: { name: organizer.name, email: organizer.email },
-          attendees: [
-            ...attendees.map(({ name, email }) => ({ name, email })),
-            ...hosts
-              .filter((h) => h.id !== organizer.id)
-              .map(({ name, email }) => ({ name, email })),
-          ],
+          organizer: {
+            ...calendarOrganizer,
+            sentBy:
+              deps.mailer.senderEmail &&
+              deps.mailer.senderEmail.toLowerCase() !== calendarOrganizer.email.toLowerCase()
+                ? deps.mailer.senderEmail
+                : undefined,
+          },
+          attendees: modern
+            ? [
+                ...hosts.map(({ id, name, email }) => ({
+                  name,
+                  email,
+                  role: id === organizer?.id ? ('CHAIR' as const) : ('REQ-PARTICIPANT' as const),
+                  partstat: 'ACCEPTED' as const,
+                })),
+                ...attendees.map(({ name, email }) => ({
+                  name,
+                  email,
+                  partstat: 'NEEDS-ACTION' as const,
+                })),
+              ].filter(
+                (a, index, people) =>
+                  people.findIndex((p) => p.email.toLowerCase() === a.email.toLowerCase()) ===
+                  index,
+              )
+            : [
+                ...attendees.map(({ name, email }) => ({ name, email })),
+                ...hosts
+                  .filter((h) => h.id !== organizer?.id)
+                  .map(({ name, email }) => ({ name, email })),
+              ],
         })
   const toAttendee = (attendee: (typeof attendees)[number]) => ({
     key: `attendee:${attendee.id}`,
@@ -652,9 +763,15 @@ async function deliverBookingNotification(
           role: 'attendee',
           email: attendee.email,
           timeZone: attendee.timeZone,
+          locale: attendee.locale,
           manageLinks: token === undefined ? undefined : inviteeManageLinks(deps.publicUrl, token),
         },
-        { attachment: invitation(`${booking.eventName} with ${meeting.hostName}`) },
+        {
+          attachment: invitation(
+            `${booking.eventName} with ${meeting.hostName}`,
+            hosts.find((h) => h.email.toLowerCase() === attendee.email.toLowerCase())?.id,
+          ),
+        },
       ),
   })
   // Hosts first (verified addresses, and they most need to know), then the invitee, then
@@ -668,8 +785,14 @@ async function deliverBookingNotification(
         email(
           kind,
           meeting,
-          { role: 'host', email: host.email, timeZone: host.timeZone, answers: booking.answers },
-          { attachment: invitation(`${booking.eventName} with ${invitee.name}`) },
+          {
+            role: 'host',
+            email: host.email,
+            timeZone: host.timeZone,
+            locale: host.locale,
+            answers: booking.answers,
+          },
+          { attachment: invitation(`${booking.eventName} with ${invitee.name}`, host.id) },
         ),
     })),
     toAttendee(invitee),
