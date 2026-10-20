@@ -44,6 +44,16 @@ describe('the sign-in page', () => {
     const sent = await screen.findByRole('heading', { name: 'Check your email' })
     expect(document.activeElement).toBe(sent)
     expect(screen.getByText('ada@example.com')).toBeDefined()
+    expect(
+      screen.getByText(
+        'Didn’t get the email? Check spam or junk and add the sender to your contacts.',
+      ),
+    ).toBeDefined()
+    await userEvent.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+    expect(
+      screen.getByText('没收到邮件？请检查垃圾邮件文件夹，并将发件人加入通讯录。'),
+    ).toBeDefined()
+    await userEvent.selectOptions(screen.getByLabelText('界面语言'), 'en')
     expect(api.to('POST /api/auth/sign-in/magic-link').map((c) => c.body)).toEqual([
       {
         email: 'ada@example.com',

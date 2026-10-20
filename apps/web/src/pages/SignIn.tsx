@@ -4,6 +4,7 @@ import { type SocialProvider, sendSignInLink, startSocialSignIn } from '../api/a
 import { api, unwrap } from '../api/client.ts'
 import { errorMessage } from '../api/errors.ts'
 import { goTo } from '../browser.ts'
+import { EmailDeliveryHint } from '../components/EmailDeliveryHint.tsx'
 import { LegalLinks } from '../components/LegalLinks.tsx'
 import { Logo } from '../components/Logo.tsx'
 import { SocialSignInButton } from '../components/SocialSignInButton.tsx'
@@ -184,7 +185,7 @@ function SignInForm({ next, expired }: { next: string; expired: boolean }) {
             {t('We sent a sign-in link to')} <strong>{phase.email}</strong>
             {t('. Open it to sign in; it works once and expires in a few minutes.')}
           </p>
-          <p className="muted">{t('Nothing there? Check your spam folder, or try again.')}</p>
+          <EmailDeliveryHint />
           <button
             type="button"
             className="button button-block"

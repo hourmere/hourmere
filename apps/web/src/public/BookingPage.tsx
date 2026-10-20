@@ -2,6 +2,7 @@ import { interfaceLanguage } from '@hourmere/core/language'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, useLocation, useParams } from 'react-router'
 import { ConferenceNotice } from '../components/ConferenceNotice.tsx'
+import { EmailDeliveryHint } from '../components/EmailDeliveryHint.tsx'
 import { usePageTitle } from '../hooks.ts'
 import { useI18n } from '../i18n/runtime.tsx'
 import { literal, msg, type UiText } from '../i18n/translate.ts'
@@ -391,6 +392,8 @@ function Confirmation({
             },
           )}
         </p>
+        {booking.status === 'confirmed' &&
+          (!booking.conference || booking.conference.status === 'ready') && <EmailDeliveryHint />}
         <DetailList
           items={[
             ['What', event.title],

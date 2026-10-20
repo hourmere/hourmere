@@ -1,5 +1,7 @@
 // Public/shared UI messages. Admin messages live in a lazy catalog.
 export const common = {
+  'Didn’t get the email? Check spam or junk and add the sender to your contacts.':
+    '没收到邮件？请检查垃圾邮件文件夹，并将发件人加入通讯录。',
   'Privacy policy': '隐私政策',
   'Terms of service': '服务条款',
   // Google's official Simplified Chinese branding guidelines approve this wording.

@@ -460,8 +460,6 @@ export const admin = {
   'No upcoming date overrides.': '没有即将到来的特定日期安排。',
   None: '无',
   'Not set': '未设置',
-  'Nothing there? Check your spam folder, or try again.':
-    '未收到邮件？请检查垃圾邮件文件夹，或重试。',
   'of question': '，所属问题',
   'Offer at most {0} options.': '最多提供 {0} 个选项。',
   'Only approve apps you trust. The app name and return address are supplied by the app.':

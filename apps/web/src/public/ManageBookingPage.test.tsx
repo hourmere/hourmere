@@ -94,12 +94,44 @@ function manageServer(
 }
 
 describe('the invitee’s manage page', () => {
+  it.each(['pending', 'failed'] as const)(
+    'withholds delivery advice while a rescheduled invitation is %s',
+    async (status) => {
+      const user = userEvent.setup()
+      manageServer(managed(), {
+        more: {
+          'POST /api/v1/bookings/manage/reschedule': () =>
+            json(200, {
+              booking: booking({
+                start: '2026-11-03T15:00:00.000Z',
+                end: '2026-11-03T15:30:00.000Z',
+                location: { kind: 'google_meet', autoCreate: true },
+                conference: {
+                  provider: 'google_meet',
+                  status,
+                  errorCode: status === 'failed' ? 'provider_unavailable' : null,
+                },
+              }),
+              manageToken: NEW_TOKEN,
+            }),
+        },
+      })
+      renderApp(`/booking#token=${TOKEN}&action=reschedule`)
+      await user.click(await screen.findByRole('button', { name: /November 3, available/ }))
+      await user.click(screen.getByRole('button', { name: '10:00 AM' }))
+      await user.click(screen.getByRole('button', { name: 'Confirm new time' }))
+      await screen.findByText('Your booking is moved to the new time.')
+      expect(screen.queryByText(/Didn’t get the email/)).toBeNull()
+    },
+  )
+
   it('reads the token from the fragment, removes it from the address bar and sends it as a header', async () => {
     const api = manageServer()
     openLink(`/booking#token=${TOKEN}`)
     const entries = window.history.length
 
     expect(await screen.findByRole('heading', { name: 'Your booking' })).toBeDefined()
+    expect(screen.queryByText(/Didn’t get the email/)).toBeNull()
     // Gone from the address bar (and so from bookmarks and any Referer), replaced rather than
     // pushed: no history entry keeps it either.
     expect(window.location.pathname).toBe('/booking')
@@ -137,6 +169,11 @@ describe('the invitee’s manage page', () => {
 
     expect(await screen.findByRole('heading', { name: 'Cancelled booking' })).toBeDefined()
     expect(screen.getByText('Your booking is cancelled.')).toBeDefined()
+    expect(
+      screen.getByText(
+        'Didn’t get the email? Check spam or junk and add the sender to your contacts.',
+      ),
+    ).toBeDefined()
     expect(screen.getByText('Something came up.')).toBeDefined()
     expect(screen.queryByRole('button', { name: 'Reschedule' })).toBeNull()
     const [call] = api.to('POST /api/v1/bookings/manage/cancel')
@@ -206,6 +243,11 @@ describe('the invitee’s manage page', () => {
     await user.click(screen.getByRole('button', { name: 'Confirm new time' }))
 
     expect(await screen.findByText('Your booking is moved to the new time.')).toBeDefined()
+    expect(
+      screen.getByText(
+        'Didn’t get the email? Check spam or junk and add the sender to your contacts.',
+      ),
+    ).toBeDefined()
     expect(api.to('POST /api/v1/bookings/manage/reschedule')[0]?.body).toEqual({
       start: '2026-11-03T15:00:00.000Z',
     })

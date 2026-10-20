@@ -60,6 +60,8 @@ must approve publication through the [release workflow](https://github.com/hourm
 
 ### Fixed
 
+- Email-sent and public booking success screens suggest checking spam or junk and adding
+  the sender to contacts, in English and Simplified Chinese.
 - Booking emails now use English or Simplified Chinese for each recipient, including
   subjects, bodies, dates and calendar summaries/descriptions. Guests follow the booking
   language; hosts use their profile language. Sign-in emails follow the requesting

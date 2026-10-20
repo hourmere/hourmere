@@ -1,6 +1,7 @@
 import { type FormEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import { ConferenceNotice } from '../components/ConferenceNotice.tsx'
+import { EmailDeliveryHint } from '../components/EmailDeliveryHint.tsx'
 import { isKnownTimeZone } from '../format.ts'
 import { usePageTitle } from '../hooks.ts'
 import { useI18n } from '../i18n/runtime.tsx'
@@ -91,7 +92,7 @@ function NoToken() {
 }
 
 type Mode =
-  | { kind: 'view'; message?: UiText | undefined }
+  | { kind: 'view'; message?: UiText | undefined; emailNotice?: boolean }
   | { kind: 'cancel' }
   | { kind: 'reschedule'; notice?: UiText | undefined }
   | { kind: 'confirm-reschedule'; slot: Slot }
@@ -381,6 +382,7 @@ function ManageView({
               locale={locale}
               started={started}
               message={mode.message ?? unavailable}
+              emailNotice={mode.emailNotice ?? false}
               newToken={newToken}
             />
           )}
@@ -407,7 +409,11 @@ function ManageView({
                 try {
                   const cancelled = await cancelManagedBooking(token, reason)
                   onCancelled({ ...booking, ...cancelled })
-                  setMode({ kind: 'view', message: 'Your booking is cancelled.' })
+                  setMode({
+                    kind: 'view',
+                    message: 'Your booking is cancelled.',
+                    emailNotice: true,
+                  })
                   return null
                 } catch (err) {
                   if (await failed(err, 'cancel')) return null
@@ -435,7 +441,11 @@ function ManageView({
                 try {
                   const result = await rescheduleManagedBooking(token, slot.start)
                   onRescheduled({ ...booking, ...result.booking }, result.manageToken)
-                  setMode({ kind: 'view', message: 'Your booking is moved to the new time.' })
+                  setMode({
+                    kind: 'view',
+                    message: 'Your booking is moved to the new time.',
+                    emailNotice: true,
+                  })
                   return null
                 } catch (err) {
                   if (await failed(err, 'reschedule')) return null
@@ -466,6 +476,7 @@ function BookingSummary({
   locale,
   started,
   message,
+  emailNotice,
   newToken,
 }: {
   booking: ManagedBooking
@@ -475,6 +486,7 @@ function BookingSummary({
   locale: string
   started: boolean
   message: UiText | undefined
+  emailNotice: boolean
   newToken: string | null
 }) {
   const { t, ui } = useI18n()
@@ -490,6 +502,10 @@ function BookingSummary({
           <p role="status">{ui(message)}</p>
         </div>
       )}
+      {emailNotice &&
+        (cancelled || !booking.conference || booking.conference.status === 'ready') && (
+          <EmailDeliveryHint />
+        )}
       {!message && cancelled && (
         <div className="alert alert-info">
           <p>

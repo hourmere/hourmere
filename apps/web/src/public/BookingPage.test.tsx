@@ -91,6 +91,11 @@ describe('the booking page', () => {
     await user.type(screen.getByLabelText('Email'), 'grace@example.com')
     await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
     await screen.findByRole('heading', { name: 'You’re booked' })
+    expect(
+      screen.getByText(
+        'Didn’t get the email? Check spam or junk and add the sender to your contacts.',
+      ),
+    ).toBeDefined()
     expect(api.to('POST /api/v1/public/ada/intro/bookings')[0]?.body).toMatchObject({
       start: '2026-10-27T09:00:00.000Z',
       invitee: { timeZone: 'Europe/Berlin' },
@@ -122,6 +127,7 @@ describe('the booking page', () => {
     expect(mark.getAttribute('target')).toBe('_blank')
     expect(mark.getAttribute('rel')).toContain('noreferrer')
     expect(screen.queryByRole('link', { name: 'Create your own booking link' })).toBeNull()
+    expect(screen.queryByText(/Didn’t get the email/)).toBeNull()
   })
 
   it('uses the configured hosted destination for attribution and the confirmation CTA without sharing booking data', async () => {
@@ -193,6 +199,7 @@ describe('the booking page', () => {
     await user.type(screen.getByLabelText('Email'), 'invitee@example.com')
     await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
     await screen.findByRole('heading', { name: 'Time reserved; meeting link pending' })
+    expect(screen.queryByText(/Didn’t get the email/)).toBeNull()
     expect(screen.queryByRole('link', { name: 'Download .ics file' })).toBeNull()
     expect(screen.queryByRole('link', { name: 'Google Calendar' })).toBeNull()
     expect(screen.queryByRole('link', { name: 'Outlook' })).toBeNull()
@@ -200,6 +207,11 @@ describe('the booking page', () => {
     // Keep the real two-second protected status poll: this exercises the page's parent
     // update, not just the isolated notice component.
     await screen.findByRole('link', { name: 'Join Google Meet' }, { timeout: 4000 })
+    expect(
+      screen.getByText(
+        'Didn’t get the email? Check spam or junk and add the sender to your contacts.',
+      ),
+    ).toBeDefined()
     const download =
       screen.getByRole('link', { name: 'Download .ics file' }).getAttribute('href') ?? ''
     expect(decodeURIComponent(download)).toContain(JOIN)
