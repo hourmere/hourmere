@@ -225,12 +225,17 @@ describe.skipIf(!serverUrl)('bounded webhook delivery reconciliation', () => {
       expect(result.find((row) => row.id === original?.id)).toEqual(original)
   })
 
-  it('bounds each dispatch to 1000 orphans and continues the backlog on the next dispatch', async () => {
-    await deliveries(1001)
+  it('takes the 1000 lowest orphan IDs and continues the backlog on the next dispatch', async () => {
+    const orderedIds = (await deliveries(1001)).map((row) => row.id).sort()
     const observed = observe()
     await run(observed.connection)
-    expect((await rows()).filter((row) => row.status === 'failed')).toHaveLength(1000)
-    expect((await rows()).filter((row) => row.status === 'pending')).toHaveLength(1)
+    const firstBatch = await rows()
+    expect(firstBatch.filter((row) => row.status === 'failed').map((row) => row.id)).toEqual(
+      orderedIds.slice(0, 1000),
+    )
+    expect(firstBatch.filter((row) => row.status === 'pending').map((row) => row.id)).toEqual(
+      orderedIds.slice(1000),
+    )
     expect(observed.mutations.map((entry) => entry.affected)).toEqual([1000n, 0n])
     // Settings and work are constant per batch, independent of delivery count.
     expect(observed.queries).toHaveLength(4)
@@ -588,60 +593,71 @@ describe.skipIf(!serverUrl)('bounded webhook delivery reconciliation', () => {
     },
   )
 
-  it('reads retained jobs once for both liveness and attempts, filtering before aggregation', async () => {
-    const orphaned = await deliveries(1000)
-    await testDb.pool.query(
-      `INSERT INTO pgboss.job(name, singleton_key, state, retry_count, started_on)
+  it.each(['default', 'hash joins disabled'] as const)(
+    'bounds retained-history reconciliation without rewriting untouched rows (%s)',
+    async (planner) => {
+      const orphaned = await deliveries(1001)
+      const [live, terminal] = await deliveries(2)
+      if (!live || !terminal) throw new Error('missing fixtures')
+      await history(live.id, 'active', 8)
+      await db
+        .updateTable('webhook_deliveries')
+        .set({ status: 'delivered', attempts: 6 })
+        .where('id', '=', terminal.id)
+        .execute()
+      await testDb.pool.query(
+        `INSERT INTO pgboss.job(name, singleton_key, state, retry_count, started_on)
        SELECT $1, d.id::text, 'failed'::pgboss.job_state, 3, now() FROM webhook_deliveries d
+       WHERE d.id=ANY($2::uuid[])
        UNION ALL
        SELECT $1, gen_random_uuid()::text, 'completed'::pgboss.job_state, 1, now() FROM generate_series(1, 5000)`,
-      [WEBHOOK_DELIVERY_JOB],
-    )
-    await testDb.pool.query('ANALYZE pgboss.job')
-    await testDb.pool.query('ANALYZE webhook_deliveries')
-    const observed = observe()
-    await run(observed.connection)
-    expect((await rows()).every((row) => row.status === 'failed' && row.attempts === 4)).toBe(true)
-    const query = observed.queries.find(isReconciliation)
-    if (!query) throw new Error('reconciliation did not issue a query')
-    await db
-      .updateTable('webhook_deliveries')
-      .set({ status: 'pending', attempts: 0, last_error: null })
-      .execute()
-    const client = await testDb.pool.connect()
-    let plan: Record<string, unknown> = {}
-    try {
-      await client.query('BEGIN')
-      const explained = await client.query(
-        `EXPLAIN (ANALYZE, BUFFERS, VERBOSE, FORMAT JSON) ${query.sql}`,
-        [...query.parameters],
+        [WEBHOOK_DELIVERY_JOB, orphaned.map((row) => row.id)],
       )
-      plan = explained.rows[0]['QUERY PLAN'][0].Plan
-    } finally {
-      await client.query('ROLLBACK')
-      client.release()
-    }
-    function nodes(node: Record<string, unknown>): Record<string, unknown>[] {
-      return [node, ...((node.Plans ?? []) as Record<string, unknown>[]).flatMap(nodes)]
-    }
-    const all = nodes(plan)
-    const historyScans = all.filter(
-      (node) =>
-        node.Schema === 'pgboss' && node['Relation Name'] && /Scan/.test(String(node['Node Type'])),
-    )
-    expect(historyScans).toHaveLength(1)
-    expect(historyScans.every((node) => Number(node['Actual Loops']) === 1)).toBe(true)
-    // The aggregate keeps matching pending keys, rather than every retained singleton.
-    const history = all.find((node) => node['Subplan Name'] === 'CTE job_history')
-    expect(history?.['Actual Rows']).toBe(1000)
-    expect(all.every((node) => Number(node['Temp Written Blocks'] ?? 0) === 0)).toBe(true)
-    expect(
-      all.filter(
-        (node) => /^SubPlan/.test(String(node['Subplan Name'])) && Number(node['Actual Loops']) > 2,
-      ),
-    ).toEqual([])
-    expect(observed.mutations.map((entry) => entry.affected)).toEqual([1000n, 0n])
-    expect((await rows()).every((row) => row.status === 'pending')).toBe(true)
-    expect(orphaned).toHaveLength(1000)
-  })
+      await testDb.pool.query('ANALYZE pgboss.job')
+      await testDb.pool.query('ANALYZE webhook_deliveries')
+      const batchIds = orphaned
+        .map((row) => row.id)
+        .sort()
+        .slice(0, 1000)
+      const batch = new Set(batchIds)
+      const before = await rows()
+      const untouched = before.filter((row) => !batch.has(row.id))
+      const deliveryVersions = () =>
+        testDb.pool.query(
+          `SELECT id, ctid::text AS tuple, xmin::text AS version
+         FROM webhook_deliveries WHERE id=ANY($1::uuid[]) ORDER BY id`,
+          [untouched.map((row) => row.id)],
+        )
+      const jobVersions = () =>
+        testDb.pool.query(`SELECT COUNT(*)::integer AS count,
+        md5(string_agg(ROW(name, id, tableoid, ctid, xmin)::text, ',' ORDER BY name, id)) AS versions
+        FROM pgboss.job`)
+      const initialDeliveryVersions = (await deliveryVersions()).rows
+      const initialJobVersions = (await jobVersions()).rows
+      await db.connection().execute(async (connection) => {
+        const setting = await sql<{ enabled: string }>`
+        SELECT current_setting('enable_hashjoin') AS enabled
+      `.execute(connection)
+        try {
+          if (planner === 'hash joins disabled')
+            await sql`SELECT set_config('enable_hashjoin', 'off', false)`.execute(connection)
+          await run(connection)
+        } finally {
+          await sql`SELECT set_config('enable_hashjoin', ${setting.rows[0]?.enabled}, false)`.execute(
+            connection,
+          )
+        }
+      })
+      const result = await rows()
+      expect(result.filter((row) => row.status === 'failed').map((row) => row.id)).toEqual(batchIds)
+      expect(
+        result.filter((row) => row.status === 'failed').every((row) => row.attempts === 4),
+      ).toBe(true)
+      expect(result.filter((row) => !batch.has(row.id))).toEqual(untouched)
+      // Compare tuple versions as well as values: a no-op update still rewrites the row.
+      // Scan counts, aggregate cardinality and temporary blocks vary with PostgreSQL's plan.
+      expect((await deliveryVersions()).rows).toEqual(initialDeliveryVersions)
+      expect((await jobVersions()).rows).toEqual(initialJobVersions)
+    },
+  )
 })
