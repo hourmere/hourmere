@@ -97,6 +97,45 @@ initially be private; this does not claim that a public image exists already.
    intended version and commit for the owner. No preparation automation should push tags,
    publish packages, create releases or approve its own deployment.
 
+## Rehearse without publishing
+
+Run [Release dry run](../.github/workflows/release-dry-run.yml) before the first release,
+after changing the Dockerfile, release tooling or build dependencies, and before starting
+an approved tag attempt. In GitHub **Actions → Release dry run → Run workflow**, select
+`main` and enter the version **without `v`**. The dry-run version input must equal the
+root `package.json` version at the chosen commit and have matching, nonempty CHANGELOG
+notes. The default `1.0.0` matches the existing root manifest and candidate notes. To
+rehearse `1.0.0-rc.0`, first run `npm version 1.0.0-rc.0 --no-git-tag-version`, follow the
+versioning procedure above, and commit the synchronized metadata and matching CHANGELOG
+section to `main`. The rehearsal does not change the manifest, synthesize notes or bypass
+version validation.
+
+The workflow fetches full history and creates a tag only in the disposable runner's local
+checkout. It uses the same `scripts/release.ts prepare` entry point as publication to check
+the version's equality with root `package.json`, tag/SHA identity, `origin/main` ancestry
+and exact CHANGELOG section. Existing tags are reused without moving them, so an existing
+tag pointing elsewhere fails validation. Selecting an unmerged branch also fails ancestry
+validation. Download the extracted Markdown
+from the **release-dry-run-notes** artifact; links are pinned to the rehearsal's local tag,
+which may not exist on GitHub yet.
+
+The reusable CI workflow must pass before the image build. A shared composite action keeps
+QEMU, Buildx, both platforms (`linux/amd64,linux/arm64`), labels, the SBOM generator and
+`mode=max` provenance identical to the publishing build. With `push: false`, the rehearsal
+exports a multi-platform OCI archive to runner-local storage so SBOM/provenance generation
+actually runs; the archive is discarded with the runner. The build job summary reports each
+platform's elapsed span from its first started to last completed platform-labelled Dockerfile
+BuildKit vertex. Spans include cached steps and overlap; shared work, scanner-image pulls,
+SBOM generation and final OCI/provenance export time are outside them. Missing platform
+timing fails the reporting step. Buildx's build record provides the complete build details,
+as described in Docker's
+[build history logs reference](https://docs.docker.com/reference/cli/docker/buildx/history/logs/).
+
+The workflow has only `contents: read`, uses no secrets and does not sign in to a registry,
+push images or tags, submit GitHub attestations, create releases or publish npm packages.
+It needs no protected release environment. Success demonstrates the checks and local
+multi-architecture build; the owner still reviews and approves the separate publishing run.
+
 ## Tag → checks → owner approval → image → release
 
 Only an explicitly authorized owner or release operator pushes the reviewed tag. For
