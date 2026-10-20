@@ -5,6 +5,7 @@ import {
   auditSummary,
   safeAuditReport,
   summarizeAuditReports,
+  summarizeFindingTypes,
 } from './reports.ts'
 
 const directory = process.argv[2] ?? process.env.HOURMERE_UI_REPORT_DIR ?? 'temp/ui-audit-reports'
@@ -54,6 +55,6 @@ if (reports.length || executions.length) {
   await writeFile(join(directory, 'summary.md'), summary)
   await writeFile(
     join(directory, 'summary.json'),
-    `${JSON.stringify({ version: 1, pages: summarizeAuditReports(reports), executions, unreadable }, null, 2)}\n`,
+    `${JSON.stringify({ version: 1, pages: summarizeAuditReports(reports), findings: summarizeFindingTypes(reports), executions, unreadable }, null, 2)}\n`,
   )
 }

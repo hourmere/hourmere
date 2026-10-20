@@ -21,7 +21,7 @@ export const layoutViewports = [
 ] as const
 
 // This function is self-contained so Playwright can run it in the page. Its
-// output intentionally excludes every DOM string except native element tags.
+// output includes only static selector tokens, never text, URLs or accessible names.
 export function measureLayout(viewport?: { width: number; height: number }): AuditFinding[] {
   const findings: AuditFinding[] = []
   const elements = [...document.querySelectorAll('*')]
@@ -37,17 +37,44 @@ export function measureLayout(viewport?: { width: number; height: number }): Aud
       rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none'
     )
   }
-  const target = (element: Element) => ({
-    tag: element.tagName
+  const target = (element: Element) => {
+    const tag = element.tagName
       .toLowerCase()
       .replace(/[^a-z0-9]/g, '')
-      .slice(0, 21),
-    index: elements.indexOf(element),
-  })
+      .slice(0, 21)
+    const tokens = [...element.classList]
+      .filter(
+        (token) =>
+          /^[a-zA-Z_][a-zA-Z0-9_-]{0,63}$/.test(token) && !/(?:token|secret|canary)/i.test(token),
+      )
+      .slice(0, 8)
+    const testId = element.getAttribute('data-testid') ?? ''
+    return {
+      tag,
+      index: elements.indexOf(element),
+      selector: `${tag}${tokens.map((token) => `.${token}`).join('')}${/^[a-zA-Z_][a-zA-Z0-9_-]{0,63}$/.test(testId) && !/(?:token|secret|canary)/i.test(testId) ? `[data-testid="${testId}"]` : ''}`,
+    }
+  }
+  const visuallyHidden = (element: Element) => {
+    const style = getComputedStyle(element)
+    return (
+      element.clientWidth <= 1 ||
+      [...element.classList].some((token) =>
+        /^(?:(?:.*[-_])?(?:visually-hidden|sr-only|screen-reader-only|screen-reader-text))(?:[-_].*)?$/.test(
+          token,
+        ),
+      ) ||
+      /^(?:rect\(0(?:px)?[, ]+0(?:px)?[, ]+0(?:px)?[, ]+0(?:px)?\)|rect\(0px, 0px, 0px, 0px\))$/.test(
+        style.clip,
+      ) ||
+      /^inset\(\s*(?:50|100)%/.test(style.clipPath)
+    )
+  }
   const documentWidth = Math.max(document.documentElement.scrollWidth, document.body.scrollWidth)
   if (documentWidth > document.documentElement.clientWidth + 1)
     findings.push({
       code: 'document-overflow',
+      element: target(document.documentElement),
       actual: documentWidth,
       expected: document.documentElement.clientWidth,
     })
@@ -59,6 +86,7 @@ export function measureLayout(viewport?: { width: number; height: number }): Aud
       !element.matches(':disabled,[aria-disabled="true"]') &&
       visible(element),
   )
+  const overflowing: Element[] = []
   for (const element of elements) {
     if (!visible(element)) continue
     const rect = element.getBoundingClientRect(),
@@ -66,24 +94,33 @@ export function measureLayout(viewport?: { width: number; height: number }): Aud
     const intendedScroll =
       ['horizontal', 'both'].includes(element.getAttribute('data-layout-scroll') ?? '') &&
       ['auto', 'scroll'].includes(style.overflowX)
+    const truncatedText =
+      style.textOverflow === 'ellipsis' &&
+      ['hidden', 'clip'].includes(style.overflowX || style.overflow)
     if (
       element !== document.body &&
       element !== document.documentElement &&
       element.scrollWidth > element.clientWidth + 1 &&
-      !intendedScroll
+      !intendedScroll &&
+      !visuallyHidden(element) &&
+      !truncatedText &&
+      !element.matches('input,select,textarea')
     )
-      findings.push({
-        code: 'element-overflow',
-        element: target(element),
-        actual: element.scrollWidth,
-        expected: element.clientWidth,
-      })
-    if (['sticky', 'fixed'].includes(style.position) && rect.height > height * 0.25)
+      overflowing.push(element)
+    const fullWidthBar =
+      rect.left <= 1 &&
+      rect.right >= width - 1 &&
+      ((rect.top <= 1 && rect.bottom > 0) || (rect.bottom >= height - 1 && rect.top < height))
+    const oversizedSticky = style.position === 'sticky' && rect.height > height
+    if (
+      oversizedSticky ||
+      (['sticky', 'fixed'].includes(style.position) && fullWidthBar && rect.height > height * 0.25)
+    )
       findings.push({
         code: 'oversized-fixed',
         element: target(element),
         actual: rect.height,
-        expected: height * 0.25,
+        expected: oversizedSticky ? height : height * 0.25,
       })
     if (
       mobileViewport &&
@@ -100,6 +137,16 @@ export function measureLayout(viewport?: { width: number; height: number }): Aud
           expected: 16,
         })
     }
+  }
+  // The deepest overflowing box explains its ancestors' propagated scrollWidth.
+  for (const element of overflowing) {
+    if (overflowing.some((other) => other !== element && element.contains(other))) continue
+    findings.push({
+      code: 'element-overflow',
+      element: target(element),
+      actual: element.scrollWidth,
+      expected: element.clientWidth,
+    })
   }
   for (const element of interactive) {
     const rect = element.getBoundingClientRect()
@@ -137,20 +184,52 @@ export function focusedMeasurement(): { index: number; finding?: AuditFinding } 
   if (!active || active === document.body || active === document.documentElement)
     return { index: -1 }
   const index = [...document.querySelectorAll('*')].indexOf(active)
-  const rect = active.getBoundingClientRect()
-  const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
+  const rects = [...active.getClientRects()].filter((rect) => rect.width > 0 && rect.height > 0)
+  const visibleRects = rects.filter(
+    (rect) =>
+      rect.right > 0 &&
+      rect.bottom > 0 &&
+      rect.left < window.innerWidth &&
+      rect.top < window.innerHeight,
+  )
+  const outside = visibleRects.length === 0
+  // Wrapped inline links can have several disjoint rects. Any exposed sample in
+  // any visible rect makes the focus visible; a bounding-box center can hit a gap.
+  const obscured =
+    visibleRects.length > 0 &&
+    visibleRects.every((rect) => {
+      const left = Math.max(0, rect.left),
+        right = Math.min(window.innerWidth, rect.right)
+      const top = Math.max(0, rect.top),
+        bottom = Math.min(window.innerHeight, rect.bottom)
+      return [0.2, 0.5, 0.8].every((x) =>
+        [0.2, 0.5, 0.8].every((y) => {
+          const hit = document.elementFromPoint(left + (right - left) * x, top + (bottom - top) * y)
+          return hit !== null && hit !== active && !active.contains(hit)
+        }),
+      )
+    })
+  const tag = active.tagName
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+    .slice(0, 21)
+  const tokens = [...active.classList]
+    .filter(
+      (token) =>
+        /^[a-zA-Z_][a-zA-Z0-9_-]{0,63}$/.test(token) && !/(?:token|secret|canary)/i.test(token),
+    )
+    .slice(0, 8)
+  const testId = active.getAttribute('data-testid') ?? ''
   return {
     index,
-    ...(!hit || (hit !== active && !active.contains(hit))
+    ...(outside || obscured
       ? {
           finding: {
-            code: 'obscured-focus' as const,
+            code: outside ? ('outside-viewport-focus' as const) : ('obscured-focus' as const),
             element: {
-              tag: active.tagName
-                .toLowerCase()
-                .replace(/[^a-z0-9]/g, '')
-                .slice(0, 21),
+              tag,
               index,
+              selector: `${tag}${tokens.map((token) => `.${token}`).join('')}${/^[a-zA-Z_][a-zA-Z0-9_-]{0,63}$/.test(testId) && !/(?:token|secret|canary)/i.test(testId) ? `[data-testid="${testId}"]` : ''}`,
             },
           },
         }

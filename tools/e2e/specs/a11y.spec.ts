@@ -1,8 +1,7 @@
 import { readFile } from 'node:fs/promises'
-import AxeBuilder from '@axe-core/playwright'
-import { a11yFindings, axeTags } from '../a11y.ts'
+import { a11yFindings, assertAxeCanary, scanA11y } from '../a11y.ts'
 import { auditLocales, auditPages, openAuditPage } from '../audit-pages.ts'
-import { test } from '../fixtures.ts'
+import { expect, test } from '../fixtures.ts'
 import {
   type AuditLocale,
   type AuditReport,
@@ -44,10 +43,11 @@ for (const theme of ['light', 'dark'] as const) {
           try {
             await openAuditPage(page, app, state.id, { locale })
             phase = 'axe'
-            const result = await new AxeBuilder({ page }).withTags(axeTags).analyze()
+            const result = await scanA11y(page)
             const scan = a11yFindings(state.id, result.violations, exemptions)
             report.findings = scan.findings
             report.exempted = scan.exempted
+            report.axe = { passes: result.passes, incomplete: result.incomplete }
           } catch {
             report.findings.push({ code: 'scan-error', phase })
           }
@@ -59,3 +59,17 @@ for (const theme of ['light', 'dark'] as const) {
     })
   }
 }
+
+test('CI canary detects known violations through the in-browser axe pipeline', async ({
+  page,
+  app,
+}) => {
+  test.skip(!process.env.CI, 'The intentionally invalid fixture is only served in CI')
+  await page.goto(`${app.parentUrl}/axe-canary`)
+  const result = await scanA11y(page)
+  const scan = a11yFindings('axe-canary', result.violations, [])
+  assertAxeCanary(scan)
+  expect(scan.findings.every((finding) => Boolean(finding.element?.selector))).toBe(true)
+  expect(result.passes).toBeGreaterThan(0)
+  expect(result.incomplete).toBeGreaterThanOrEqual(0)
+})

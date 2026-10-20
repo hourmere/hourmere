@@ -3,7 +3,7 @@ import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
-import { type AuditReport, writeAuditReport } from '../tools/e2e/reports.ts'
+import { type AuditReport, summarizeFindingTypes, writeAuditReport } from '../tools/e2e/reports.ts'
 
 const directories: string[] = []
 afterEach(async () => {
@@ -85,6 +85,17 @@ it('publishes per-page JSON and human summaries and preserves browser execution 
   expect(JSON.parse(await readFile(join(directory, 'summary.json'), 'utf8'))).toEqual({
     version: 1,
     pages: [{ page: 'booking', scans: 2, overflow: 1, axe: 2, other: 1, scanErrors: 1 }],
+    findings: summarizeFindingTypes([
+      fixture(),
+      {
+        ...fixture(),
+        kind: 'a11y',
+        findings: [
+          { code: 'axe-critical', rule: 'button-name', count: 2 },
+          { code: 'scan-error', phase: 'navigate' },
+        ],
+      },
+    ]),
     executions: [{ suite: 'layout', exitCode: 1, blocking: false }],
     unreadable: 1,
   })

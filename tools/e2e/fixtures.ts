@@ -58,6 +58,7 @@ export interface FixtureApp {
   personalPath: string
   auditState: () => Promise<AuditFixtureState>
   auditSignIn: (signedIn: boolean) => Promise<void>
+  auditOAuthQuery: () => Promise<string>
   teamPath: string
   collectivePath: string
   meetPath: string
@@ -391,6 +392,17 @@ export const test = base.extend<{
         .values({ event_type_id: roundId, enabled: true })
         .execute()
       parent = createHttpServer((request, response) => {
+        if (
+          uiAudit &&
+          process.env.CI &&
+          new URL(request.url ?? '/', 'http://localhost').pathname === '/axe-canary'
+        ) {
+          response.setHeader('Content-Type', 'text/html; charset=utf-8')
+          response.end(
+            '<!doctype html><html lang="en"><head><title>Axe pipeline canary</title></head><body><main><h1>Axe pipeline canary</h1><button class="axe-canary-button"></button><img class="axe-canary-image" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="></main></body></html>',
+          )
+          return
+        }
         const language = new URL(request.url ?? '/', 'http://localhost').searchParams.get(
           'language',
         )
@@ -461,6 +473,7 @@ export const test = base.extend<{
       const firstFingerprints = new Map<string, Buffer>()
       let auditState: AuditFixtureState | undefined
       let auditCookie: string | undefined
+      let auditOAuthQuery: string | undefined
       await use({
         url,
         parentUrl,
@@ -472,6 +485,13 @@ export const test = base.extend<{
             title: AUDIT_TITLE,
             description: AUDIT_DESCRIPTION,
             minimumNoticeMinutes: 30,
+          })
+          await f.eventType(team, null, {
+            slug: 'layout-audit',
+            title: AUDIT_TITLE,
+            description: AUDIT_DESCRIPTION,
+            minimumNoticeMinutes: 30,
+            hosts: [{ userId: host.userId }],
           })
           const schedule = await db
             .selectFrom('schedules')
@@ -515,11 +535,13 @@ export const test = base.extend<{
             .where('id', '=', bookingId)
             .execute()
           auditState = {
+            organizationId: host.organizationId,
             eventTypeId,
             scheduleId: schedule.id,
             bookingId,
             manageToken,
             bookingPath: '/fixture-host/layout-audit',
+            teamBookingPath: '/team/FixtureTeam/layout-audit',
           }
           return auditState
         },
@@ -558,6 +580,47 @@ export const test = base.extend<{
               sameSite: 'Lax',
             },
           ])
+        },
+        auditOAuthQuery: async () => {
+          if (auditOAuthQuery) return auditOAuthQuery
+          if (!uiAudit) throw new Error('OAuth audit requires the UI audit fixture')
+          const registered = await fetch(`${url}/api/auth/oauth2/register`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              client_name: 'Synthetic audit connector',
+              redirect_uris: ['https://hourmere.invalid/callback'],
+              grant_types: ['authorization_code', 'refresh_token'],
+              response_types: ['code'],
+              token_endpoint_auth_method: 'none',
+            }),
+          })
+          if (registered.status !== 201) throw new Error('Could not register synthetic connector')
+          const client = (await registered.json()) as { client_id: string }
+          const query = new URLSearchParams({
+            client_id: client.client_id,
+            redirect_uri: 'https://hourmere.invalid/callback',
+            response_type: 'code',
+            scope: 'mcp:tools offline_access',
+            resource: `${url}/mcp`,
+            code_challenge: 'A'.repeat(43),
+            code_challenge_method: 'S256',
+            state: 'synthetic-ui-audit',
+          })
+          const continued = await fetch(`${url}/api/auth/oauth2/authorize?${query}`, {
+            redirect: 'manual',
+          })
+          // fetch requests receive JSON; browser navigations receive a 302.
+          const continuation = continued.status === 200 ? await continued.json() : undefined
+          const location =
+            continued.headers.get('location') ?? continuation?.url ?? continuation?.redirect_uri
+          if (![200, 302].includes(continued.status) || typeof location !== 'string')
+            throw new Error('Could not prepare synthetic connector')
+          const selection = new URL(location, url)
+          if (selection.origin !== url || selection.pathname !== '/oauth/authorize')
+            throw new Error('Unexpected synthetic connector continuation')
+          auditOAuthQuery = selection.search
+          return auditOAuthQuery
         },
         teamPath: '/team/FixtureTeam/call',
         collectivePath: '/team/FixtureTeam/collective',

@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -9,6 +9,7 @@ import { parse } from 'yaml'
 import functionalConfig from '../tools/e2e/playwright.config.ts'
 
 interface Step {
+  id?: string
   name?: string
   run?: string
   if?: string
@@ -21,46 +22,112 @@ interface Job {
   'continue-on-error'?: boolean
   env?: Record<string, string>
   services?: { postgres: { options: string } }
+  strategy?: { 'fail-fast'?: boolean; matrix?: { shard?: number[] } }
   steps: Step[]
+}
+interface Workflow {
+  on: Record<string, unknown>
+  permissions: Record<string, string>
+  concurrency: { group: string; 'cancel-in-progress': boolean }
+  jobs: Record<string, Job>
 }
 const root = fileURLToPath(new URL('../', import.meta.url))
 const workflow = parse(
   readFileSync(
-    process.env.HOURMERE_UI_CI_WORKFLOW ?? join(root, '.github/workflows/ci.yml'),
+    process.env.HOURMERE_UI_CI_WORKFLOW ?? join(root, '.github/workflows/ui-checks.yml'),
     'utf8',
   ),
-) as { jobs: Record<string, Job> }
+) as Workflow
+const requiredSource = readFileSync(
+  process.env.HOURMERE_UI_REQUIRED_WORKFLOW ?? join(root, '.github/workflows/ci.yml'),
+  'utf8',
+)
+const requiredWorkflow = parse(requiredSource) as Workflow
+const releaseSource = readFileSync(
+  process.env.HOURMERE_UI_RELEASE_WORKFLOW ?? join(root, '.github/workflows/release.yml'),
+  'utf8',
+)
 
 describe('UI measurement CI contract', () => {
   it('keeps measurement specs out of the existing two functional projects', () => {
     expect(functionalConfig.testIgnore).toEqual(['**/{layout,a11y,visual,cross-engine}.spec.ts'])
     expect(functionalConfig.projects?.map((project) => project.name)).toEqual(['desktop', 'mobile'])
   })
-  // Canonical job definitions before board 219. Changes need explicit owner review.
+  it('runs UI measurements only for pull requests, main pushes and manual baseline review', () => {
+    expect(Object.keys(workflow.on).sort()).toEqual(['pull_request', 'push', 'workflow_dispatch'])
+    expect(workflow.on.push).toEqual({ branches: ['main'] })
+    expect(workflow.on.workflow_dispatch).toEqual({
+      inputs: {
+        visual_baselines: {
+          description:
+            'Generate masked Linux visual baselines for review / 生成供审核的脱敏 Linux 视觉基线',
+          type: 'boolean',
+          default: false,
+        },
+      },
+    })
+    expect(workflow.permissions).toEqual({ contents: 'read' })
+    expect(workflow.concurrency).toEqual({
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: GitHub Actions expression is literal.
+      group: 'ui-checks-${{ github.ref }}',
+      'cancel-in-progress': true,
+    })
+    expect(Object.keys(workflow.jobs).sort()).toEqual([
+      'e2e-a11y',
+      'e2e-cross-engine',
+      'e2e-layout',
+      'e2e-visual',
+      'visual-baseline-status',
+      'visual-baselines',
+    ])
+    expect(workflow.jobs['e2e-layout']?.strategy).toEqual({
+      'fail-fast': false,
+      matrix: { shard: [1, 2, 3, 4] },
+    })
+  })
+
+  it('isolates advisory UI jobs from reusable CI and releases', () => {
+    expect(Object.keys(requiredWorkflow.jobs).sort()).toEqual([
+      'check',
+      'cli-compatibility',
+      'docker',
+      'e2e',
+    ])
+    expect(requiredSource).not.toContain('ui-checks.yml')
+    expect(releaseSource).not.toContain('ui-checks.yml')
+    expect(releaseSource).toContain('uses: ./.github/workflows/ci.yml')
+    for (const id of Object.keys(workflow.jobs)) {
+      expect(requiredWorkflow.jobs[id]).toBeUndefined()
+      expect((parse(releaseSource) as Workflow).jobs[id]).toBeUndefined()
+    }
+  })
+
+  // Canonical required job definitions after merging main. Changes need owner review.
   it.each([
     ['check', '7454d8fe440d98ff3ae3a93a0674f4201fed921f3193225883c340296f1bd78b'],
+    ['cli-compatibility', 'e6baff5e1cbf2e5b3339c961747ed5be373cc5d0b7874200d54b903f13a3e194'],
     ['e2e', '449d779d527fd6945be1b58632afe54a16bd3ff2b046dce85141a23011ed50b4'],
     ['docker', '2594f351267b97c37981b7889ae22495076c653543f5cd8ee11825ac4ed63d9a'],
   ])('preserves required job %s and its behavior', (id, digest) => {
-    expect(workflow.jobs[id ?? '']).toBeDefined()
+    expect(requiredWorkflow.jobs[id ?? '']).toBeDefined()
     expect(
       createHash('sha256')
-        .update(JSON.stringify(workflow.jobs[id ?? '']))
+        .update(JSON.stringify(requiredWorkflow.jobs[id ?? '']))
         .digest('hex'),
     ).toBe(digest)
   })
 
-  it.each(['e2e-layout', 'e2e-a11y', 'e2e-cross-engine', 'e2e-visual', 'visual-baselines'])(
+  it.each(Object.keys(workflow.jobs))(
     'keeps %s advisory with default PostgreSQL connection limits',
     (id) => {
       const job = workflow.jobs[id]
       expect(job?.['continue-on-error']).toBe(true)
-      expect(job?.services?.postgres.options).not.toContain('max_connections')
+      expect(job?.services?.postgres.options ?? '').not.toContain('max_connections')
       expect(job?.env?.HOURMERE_UI_BLOCKING).not.toBe('1')
     },
   )
 
-  it.each(['e2e-layout', 'e2e-a11y', 'e2e-cross-engine'])(
+  it.each(['e2e-layout', 'e2e-a11y', 'e2e-cross-engine', 'e2e-visual'])(
     'publishes only sanitized reports after %s even on failures',
     (id) => {
       const steps = workflow.jobs[id]?.steps ?? []
@@ -89,13 +156,72 @@ describe('UI measurement CI contract', () => {
     ).toBe('tools/e2e/snapshots/**/*.png')
   })
 
-  it('installs and caches both cross-engine browsers', () => {
+  it('keys browser downloads by Playwright version and installs them only on cache misses', () => {
     const steps = workflow.jobs['e2e-cross-engine']?.steps ?? []
-    expect(steps.some((step) => step.uses?.startsWith('actions/cache@'))).toBe(true)
-    expect(
-      steps.some((step) => step.run === 'npx playwright install --with-deps webkit firefox'),
-    ).toBe(true)
+    const version = steps.find((step) => step.id === 'playwright-version')
+    expect(version?.run).toContain("require('@playwright/test/package.json').version")
+    expect(version?.run).toContain('$GITHUB_OUTPUT')
+    const cache = steps.find((step) => step.uses?.startsWith('actions/cache@'))
+    expect(cache?.id).toBe('playwright-cache')
+    expect(cache?.with).toEqual({
+      path: '~/.cache/ms-playwright',
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: GitHub Actions expression is literal.
+      key: 'playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright-version.outputs.version }}',
+    })
+    const install = steps.find((step) => step.run === 'npx playwright install webkit firefox')
+    expect(install?.if).toBe("steps.playwright-cache.outputs.cache-hit != 'true'")
+    expect(steps.some((step) => step.run?.includes('--with-deps'))).toBe(false)
   })
+
+  it.each([false, true])(
+    'installs host dependencies only when Playwright reports missing packages (%s)',
+    (missing) => {
+      const steps = workflow.jobs['e2e-cross-engine']?.steps ?? []
+      const dependencies = steps.find(
+        (step) => step.name === 'Install only missing browser system dependencies',
+      )
+      // Browser cache entries cannot preserve apt packages on a fresh runner.
+      expect(dependencies?.if).toBeUndefined()
+      expect(dependencies?.run).toBe(
+        'npx playwright install-deps --dry-run webkit firefox || npx playwright install-deps webkit firefox',
+      )
+      const directory = mkdtempSync(join(tmpdir(), 'hourmere-ui-dependencies-'))
+      try {
+        const command = join(directory, 'npx')
+        const calls = join(directory, 'calls.jsonl')
+        writeFileSync(
+          command,
+          `#!${process.execPath}
+import { appendFileSync } from 'node:fs'
+const args = process.argv.slice(2)
+appendFileSync(process.env.HOURMERE_DEPENDENCY_CALLS, JSON.stringify(args) + '\\n')
+process.exitCode = args.includes('--dry-run') && process.env.HOURMERE_DEPENDENCIES_MISSING === '1' ? 1 : 0
+`,
+        )
+        chmodSync(command, 0o755)
+        const result = spawnSync('bash', ['-e', '-c', dependencies?.run ?? 'exit 1'], {
+          encoding: 'utf8',
+          env: {
+            ...process.env,
+            PATH: `${directory}:${process.env.PATH}`,
+            HOURMERE_DEPENDENCY_CALLS: calls,
+            HOURMERE_DEPENDENCIES_MISSING: missing ? '1' : '0',
+          },
+        })
+        expect(result.status, result.stderr).toBe(0)
+        const expected = [['playwright', 'install-deps', '--dry-run', 'webkit', 'firefox']]
+        if (missing) expected.push(['playwright', 'install-deps', 'webkit', 'firefox'])
+        expect(
+          readFileSync(calls, 'utf8')
+            .trim()
+            .split('\n')
+            .map((line) => JSON.parse(line)),
+        ).toEqual(expected)
+      } finally {
+        rmSync(directory, { recursive: true, force: true })
+      }
+    },
+  )
 })
 
 describe('report-only browser command', () => {

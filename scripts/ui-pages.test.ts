@@ -30,9 +30,15 @@ it('covers every requested real page and limits en-GB to the booking page', () =
   expect(auditPages.map((page) => page.id)).toEqual([
     'host',
     'booking',
+    'booking-form',
+    'booking-confirmation',
+    'booking-time-zone',
+    'embedded-booking',
+    'team-booking',
     'manage',
     'manage-reschedule',
     'sign-in',
+    'oauth-consent',
     'event-types',
     'event-type-editor',
     'availability-editor',
@@ -132,6 +138,8 @@ const dataSource = readFileSync('tools/e2e/audit-data.ts', 'utf8')
 const pagesSource = readFileSync('tools/e2e/audit-pages.ts', 'utf8')
 const visualSource = readFileSync('tools/e2e/specs/visual.spec.ts', 'utf8')
 const fixtureSource = readFileSync('tools/e2e/fixtures.ts', 'utf8')
+const shellSource = readFileSync('apps/web/src/components/AppShell.tsx', 'utf8')
+const apiKeysSource = readFileSync('apps/web/src/pages/ApiKeys.tsx', 'utf8')
 const requiredMasks = [
   'input[readonly]',
   'textarea[readonly]',
@@ -190,13 +198,14 @@ function sourceCopyResult(
   pages: string,
   visual = visualSource,
   fixture = fixtureSource,
+  assertions = privacyAssertions,
 ) {
   writeFileSync(join(directory, 'audit-data.ts'), data)
   writeFileSync(join(directory, 'audit-pages.ts'), pages)
   writeFileSync(join(directory, 'visual.spec.ts'), visual)
   writeFileSync(join(directory, 'fixtures.ts'), fixture)
   const runner = join(directory, 'privacy.mjs')
-  writeFileSync(runner, privacyAssertions)
+  writeFileSync(runner, assertions)
   const result = spawnSync(process.execPath, [runner], { encoding: 'utf8' })
   if (result.error) throw result.error
   return result
@@ -312,4 +321,185 @@ describe('source-copy privacy mutations', () => {
     expect(result.status).toBe(1)
     expect(result.stderr).toContain('Authentication redirect must not be audited')
   })
+})
+
+const coverageAssertions = `
+import assert from 'node:assert/strict'
+const {auditPages,openAuditPage}=await import('./audit-pages.ts')
+const data=await import('./audit-data.ts')
+assert.notEqual(data.AUDIT_CONFIRMATION_EMAIL,data.AUDIT_EMAIL,'Confirmation email must not duplicate the admin-list fixture')
+assert.match(data.AUDIT_CONFIRMATION_EMAIL,/^[a-z.]+[a-z]@hourmere[.]invalid$/,'Confirmation email must pass real form validation')
+const expected={
+  'booking-form':{path:'/fixture-host/layout-audit',public:true,wait:'.details-step form input[type="email"]'},
+  'booking-confirmation':{path:'/fixture-host/layout-audit',public:true,wait:'.confirmation .booking-details'},
+  'booking-time-zone':{path:'/fixture-host/layout-audit',public:true,wait:'.tz-panel [role="listbox"]:visible'},
+  'embedded-booking':{path:'/embed/fixture-host/layout-audit',public:true,wait:'.public-embedded .event-title'},
+  'team-booking':{path:'/team/FixtureTeam/layout-audit',public:true,wait:'heading'},
+  'oauth-consent':{path:'/oauth/consent',public:false,wait:'Synthetic audit connector'},
+}
+for(const [id,state] of Object.entries(expected)) {
+  assert.ok(auditPages.some(page=>page.id===id),'Missing coverage state: '+id)
+  let path='',signedIn,query=''
+  const calls=[]
+  const locator=(selector)=>({
+    waitFor:async()=>calls.push(['wait',selector]),
+    first:()=>locator(selector),
+    filter:()=>locator(selector),
+    getByText:(text)=>locator(selector+' '+text),
+    getByRole:(role)=>locator(selector+' '+role),
+    click:async()=>{calls.push(['click',selector]);if(selector.includes('Continue'))path='/oauth/consent'},
+    fill:async()=>calls.push(['fill',selector]),
+    selectOption:async(value)=>calls.push(['select',selector,value]),
+  })
+  const page={
+    addInitScript:async()=>{},goto:async(url)=>{path=new URL(url).pathname;query=new URL(url).search;calls.push(['goto',path])},
+    locator,getByRole:(role,options)=>locator(role+':'+(options?.name ?? '')),
+    getByLabel:(label)=>locator('label:'+label),getByText:(text)=>locator(text),
+    waitForFunction:async()=>{},evaluate:async()=>{},url:()=> 'http://127.0.0.1:42421'+path,
+  }
+  const app={url:'http://127.0.0.1:42421',parentUrl:'http://127.0.0.1:42422',auditState:async()=>({organizationId:'synthetic-org',bookingPath:'/fixture-host/layout-audit',teamBookingPath:'/team/FixtureTeam/layout-audit'}),auditSignIn:async(value)=>{signedIn=value},auditOAuthQuery:async()=>'?signed=fixture'}
+  await assert.doesNotReject(()=>openAuditPage(page,app,id),'Could not prepare coverage state: '+id)
+  assert.equal(path,state.path,'Wrong coverage route: '+id)
+  assert.equal(signedIn,!state.public,'Wrong authentication state: '+id)
+  assert.ok(calls.some(call=>call[0]==='wait'&&call[1].includes(state.wait)),'Missing content verification: '+id)
+  if(id==='booking-form'||id==='booking-confirmation') {
+    assert.ok(calls.some(call=>call[0]==='click'&&call[1]==='button.day-available'),'Booking state must choose a day')
+    assert.ok(calls.some(call=>call[0]==='click'&&call[1]==='.slots button'),'Booking state must choose a time')
+  }
+  if(id==='booking-confirmation') {
+    assert.equal(calls.filter(call=>call[0]==='fill').length,2,'Confirmation must fill invitee fields')
+    assert.ok(calls.some(call=>call[0]==='click'&&call[1].includes('Confirm booking')),'Confirmation must submit booking')
+  }
+  if(id==='booking-time-zone')
+    assert.ok(calls.some(call=>call[0]==='click'&&call[1]==='.tz-toggle'),'Time-zone panel must open')
+  if(id==='embedded-booking') {
+    assert.equal(new URLSearchParams(query).get('parentOrigin'),app.parentUrl,'Embed must use the owned allowed parent')
+    assert.match(new URLSearchParams(query).get('embedId') ?? '',/^[a-zA-Z0-9_-]{16,64}$/,'Embed must provide a valid correlation ID')
+  }
+  if(id==='oauth-consent') {
+    assert.ok(calls.some(call=>call[0]==='select'&&call[1]==='#oauth-organization'&&call[2]==='synthetic-org'),'Consent must select the fixture organization')
+    assert.ok(calls.some(call=>call[0]==='click'&&call[1].includes('Continue')),'Consent must continue to approval')
+  }
+}
+`
+
+describe('source-copy coverage mutations', () => {
+  const run = (pages: string) =>
+    sourceCopyResult(dataSource, pages, visualSource, fixtureSource, coverageAssertions)
+
+  it('opens and verifies every requested page state through its real preparation branch', () => {
+    const result = run(pagesSource)
+    expect(result.stderr).toBe('')
+    expect(result.status).toBe(0)
+  })
+
+  for (const id of [
+    'booking-form',
+    'booking-confirmation',
+    'booking-time-zone',
+    'embedded-booking',
+    'team-booking',
+    'oauth-consent',
+  ])
+    it(`detects removal of ${id} from the shared scan list`, () => {
+      const mutant = pagesSource.replace(new RegExp(`^  \\{ id: '${id}'.*\\n`, 'm'), '')
+      expect(mutant).not.toBe(pagesSource)
+      const result = run(mutant)
+      expect(result.status).toBe(1)
+      expect(result.stderr).toContain(`Missing coverage state: ${id}`)
+    })
+
+  for (const [from, to, assertion] of [
+    [
+      "await page.locator('button.day-available').first().click()",
+      '',
+      'Booking state must choose a day',
+    ],
+    ["await page.locator('.slots button').first().click()", '', 'Booking state must choose a time'],
+    [
+      'await page.getByLabel(/^(Email|邮箱)$/, { exact: true }).fill(AUDIT_CONFIRMATION_EMAIL)',
+      '',
+      'Confirmation must fill invitee fields',
+    ],
+    [
+      "await page.getByRole('button', { name: /^(Confirm booking|确认预约)$/ }).click()",
+      '',
+      'Confirmation must submit booking',
+    ],
+    ["await page.locator('.tz-toggle').click()", '', 'Time-zone panel must open'],
+    [
+      'await organization.selectOption(fixture.organizationId)',
+      '',
+      'Consent must select the fixture organization',
+    ],
+    [
+      "await page.getByRole('button', { name: /^(Continue|继续)$/ }).click()",
+      '',
+      'Could not prepare coverage state: oauth-consent',
+    ],
+    [
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: mutate the literal source text
+      "'embedded-booking': `/embed${fixture.bookingPath}`",
+      "'embedded-booking': fixture.bookingPath",
+      'Wrong coverage route: embedded-booking',
+    ],
+    [
+      "'team-booking': fixture.teamBookingPath",
+      "'team-booking': fixture.bookingPath",
+      'Wrong coverage route: team-booking',
+    ],
+    [
+      'parentOrigin: app.parentUrl',
+      "parentOrigin: 'https://invalid.invalid'",
+      'Embed must use the owned allowed parent',
+    ],
+    [
+      "embedId: 'synthetic-layout-audit'",
+      "embedId: 'short'",
+      'Embed must provide a valid correlation ID',
+    ],
+  ])
+    it(`detects broken state preparation: ${assertion}`, () => {
+      const mutant = pagesSource.replace(from as string, to as string)
+      expect(mutant).not.toBe(pagesSource)
+      const result = run(mutant)
+      expect(result.status).toBe(1)
+      expect(result.stderr).toContain(assertion)
+      expect(result.stderr).toContain('AssertionError')
+    })
+
+  it('detects confirmation reusing the admin-list attendee email', () => {
+    const mutant = dataSource.replace(
+      /export const AUDIT_CONFIRMATION_EMAIL = .*/,
+      'export const AUDIT_CONFIRMATION_EMAIL = AUDIT_EMAIL',
+    )
+    expect(mutant).not.toBe(dataSource)
+    const result = sourceCopyResult(
+      mutant,
+      pagesSource,
+      visualSource,
+      fixtureSource,
+      coverageAssertions,
+    )
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain('Confirmation email must not duplicate the admin-list fixture')
+    expect(result.stderr).toContain('AssertionError')
+  })
+})
+
+function assertIntentionalScrollers(shell: string, keys: string) {
+  expect(shell).toMatch(/<nav className="sidenav"[^>]*>\s*<ul data-layout-scroll="horizontal">/)
+  expect(keys.match(/<pre data-layout-scroll="horizontal">/g)).toHaveLength(2)
+}
+
+it('marks the mobile navigation and code examples as intentional horizontal scrollers', () => {
+  assertIntentionalScrollers(shellSource, apiKeysSource)
+})
+
+it('detects removal of either intentional horizontal-scroller markup protection', () => {
+  for (const [shell, keys] of [
+    [shellSource.replace(' data-layout-scroll="horizontal"', ''), apiKeysSource],
+    [shellSource, apiKeysSource.replace(' data-layout-scroll="horizontal"', '')],
+  ])
+    expect(() => assertIntentionalScrollers(shell as string, keys as string)).toThrow()
 })

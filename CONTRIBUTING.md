@@ -165,16 +165,28 @@ printing the actual token strings.
 
 ### Responsive, accessibility and visual measurements / 响应式、无障碍与视觉检测
 
-The required `check`, `e2e` and `docker` jobs keep their existing behavior. Separate
-`e2e-layout`, `e2e-a11y`, `e2e-cross-engine` and `e2e-visual` jobs are advisory with
-`continue-on-error: true`. Layout covers 16 CSS viewport sizes, light/dark, English and
-Simplified Chinese, plus British English on booking. Axe checks the same page states for
-WCAG 2.0/2.1/2.2 A/AA tags and reports serious/critical violations. Cross-engine smoke
-covers booking, sign-in and the embed popup in desktop WebKit, iPhone WebKit and Firefox.
-These measurements use synthetic data and the existing disposable-database fixture.
+The reusable [CI workflow](.github/workflows/ci.yml) keeps exactly its existing `check`,
+`cli-compatibility`, `docker` and `e2e` jobs. The separate
+[UI checks workflow](.github/workflows/ui-checks.yml) runs on pull requests, pushes to main
+and manual dispatches. Its layout shards, axe, cross-engine, visual-baseline detection,
+visual comparison and baseline generation jobs are advisory with `continue-on-error: true`.
+It is not called by CI or the release workflow and does not run on release tags.
 
-现有必需的 `check`、`e2e`、`docker` 检查保持不变。新增检测暂时只报告问题，不阻断合并。
-布局检测覆盖 16 种 CSS 视口、明暗主题、中英文，预约页另测英式英语；axe 报告严重和致命问题；
+Layout covers 16 CSS viewport sizes, light/dark, English and Simplified Chinese, plus
+British English on booking. Layout and axe include the booking calendar, form, confirmation,
+time-zone panel, embedded and team booking, and OAuth consent states. Axe checks WCAG
+2.0/2.1/2.2 A/AA tags, records passes/incomplete counts and reports serious/critical violations.
+A CI-only canary with known violations verifies the in-browser scan pipeline. Cross-engine
+smoke covers booking, sign-in and the embed popup in desktop WebKit, iPhone WebKit and
+Firefox. These measurements use synthetic data and the disposable-database fixture.
+Browser downloads are cached by the pinned Playwright version. The system dependency check
+runs even on cache hits because a browser cache does not preserve runner apt packages;
+Playwright installs system packages only when its dry-run check finds packages missing.
+
+可复用 CI 保留原有四个任务。独立的 **UI checks** 工作流在拉取请求、主分支推送和手动触发时运行，
+只报告问题，不阻断合并；CI 和发布工作流都不调用它，发布标签不会运行这些检测。
+布局检测覆盖 16 种 CSS 视口、明暗主题、中英文，预约页另测英式英语；axe 记录通过和待人工确认项数，
+并报告严重和致命问题。检测涵盖预约表单、确认页、时区面板、嵌入页、团队预约和 OAuth 授权页。
 跨引擎冒烟覆盖 WebKit 桌面版、iPhone 预设和 Firefox 的预约、登录及嵌入弹窗。
 
 Build the web app as above, then run from the repository root. In Codex, **every command
@@ -193,21 +205,27 @@ node tools/e2e/run-audit.ts cross-engine
 node tools/e2e/reports-summary.ts
 ```
 
-Reports go to ignored `temp/ui-audit-reports/` (override `HOURMERE_UI_REPORT_DIR`). The summary
-includes per-page counts and browser execution status; CI appends it to the job summary and
-uploads sanitized JSON/Markdown for seven days. Findings use tag names and DOM ordinals,
-never DOM text, selectors containing content, emails, URLs or tokens. Missing scans and
-execution errors must be reviewed alongside finding counts. Intentional horizontal scroll
-containers must opt in with `data-layout-scroll="horizontal"`; this does not excuse document
-overflow. No production allowlist attributes are added by this infrastructure task.
+Reports go to ignored `temp/ui-audit-reports/` (override `HOURMERE_UI_REPORT_DIR`). Each
+**UI checks** job appends per-page finding counts and execution status to its GitHub Actions
+summary. Download the `ui-layout-*`, `ui-a11y`, `ui-cross-engine` and `ui-visual` artifacts
+from that workflow run for sanitized JSON/Markdown; artifacts are retained for seven days.
+The `ui-visual` artifact contains browser execution metadata only. Local masked expected,
+actual and diff PNGs from failed screenshot comparisons are in `temp/ui-visual-results/`;
+CI does not upload those diff images. Findings include static selector hints made from tag,
+class tokens and `data-testid`, without DOM text, emails, URLs or tokens. Review missing scans,
+incomplete axe results and execution errors alongside counts. Visually hidden and ellipsis
+content and form-control internal scrolling are excluded from element overflow, which reports
+only the innermost cause. Intentional horizontal scrollers such as the mobile admin navigation
+use `data-layout-scroll="horizontal"`; this does not excuse document overflow.
 
 报告写入忽略目录 `temp/ui-audit-reports/`，可用 `HOURMERE_UI_REPORT_DIR` 指定位置。
 CI 摘要按页面统计问题和执行状态，脱敏报告保留七天。报告不含 DOM 文本、邮箱、网址或令牌。
 评审时须同时查看未完成的扫描和运行错误。预期的横向滚动容器用上述数据属性明确标记，
-该标记不豁免文档级溢出；本任务不修改产品界面。
+该标记不豁免文档级溢出。可在 **UI checks** 运行页面下载报告；视觉任务仅上传执行状态，
+本地脱敏截图差异位于 `temp/ui-visual-results/`，CI 不上传这些差异图片。
 
 Visual comparisons are skipped until reviewed PNG baselines exist in `tools/e2e/snapshots/`.
-To generate them, dispatch the **CI** workflow on the review branch with `visual_baselines`
+To generate them, dispatch the **UI checks** workflow on the review branch with `visual_baselines`
 enabled. The Linux-only `visual-baselines` job runs `--update-snapshots` with Noto CJK,
 fixed browser time, disabled animations, hidden carets and masked private fields. Download
 `visual-baselines-linux`, inspect every image, then commit reviewed baselines with a DCO
@@ -216,15 +234,16 @@ traces, videos and failure DOM remain disabled. Continue to run `npm run test:e2
 when changing fixtures or Playwright. Real-device, screen-reader and pixel review remain
 manual; WebKit's iPhone preset does not establish real iOS compatibility.
 
-在已审核 PNG 基线提交前，CI 跳过视觉比较。在评审分支手动触发 **CI** 工作流并启用
+在已审核 PNG 基线提交前，CI 跳过视觉比较。在评审分支手动触发 **UI checks** 工作流并启用
 `visual_baselines`，即可下载 Linux 生成的脱敏基线。逐张审核后以 DCO 签署提交；不要提交
 macOS 本地基线。仍需人工检查真机、读屏和视觉效果，iPhone 预设不能替代真机验收。
 
 To promote a lane, first resolve findings and execution errors, review the dated exemptions
-in `tools/e2e/a11y-exemptions.json`, set `HOURMERE_UI_BLOCKING=1` in that job, and remove its
-job-level `continue-on-error`. Only the repository owner can add its job name to required
-checks in branch protection. Keep the existing required IDs unchanged and update the
-workflow contract tests. Exemptions require an issue/reason and an expiry date; expired
+in `tools/e2e/a11y-exemptions.json`, set `HOURMERE_UI_BLOCKING=1` in that job in
+`.github/workflows/ui-checks.yml`, and remove its job-level `continue-on-error`. Only the
+repository owner can add its job name to required checks in branch protection. Keep UI
+checks outside reusable CI so releases retain their existing gates; keep the four existing
+required IDs unchanged and update `scripts/ui-ci.test.ts`. Exemptions require an issue/reason and an expiry date; expired
 entries are reported as errors, and the initial list is empty.
 
 提升为阻断检查前，先修复问题和运行错误，审核有到期日的豁免，设置 `HOURMERE_UI_BLOCKING=1`，

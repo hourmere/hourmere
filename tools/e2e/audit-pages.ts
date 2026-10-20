@@ -1,13 +1,25 @@
 import type { Page } from '@playwright/test'
-import { AUDIT_EMAIL, AUDIT_TITLE, visualMaskSelector, visualMaskText } from './audit-data.ts'
+import {
+  AUDIT_CONFIRMATION_EMAIL,
+  AUDIT_EMAIL,
+  AUDIT_TITLE,
+  visualMaskSelector,
+  visualMaskText,
+} from './audit-data.ts'
 import type { FixtureApp } from './fixtures.ts'
 
 export const auditPages = [
   { id: 'host', title: 'Public host' },
   { id: 'booking', title: 'Public booking' },
+  { id: 'booking-form', title: 'Booking form' },
+  { id: 'booking-confirmation', title: 'Booking confirmation' },
+  { id: 'booking-time-zone', title: 'Booking time-zone panel' },
+  { id: 'embedded-booking', title: 'Embedded booking' },
+  { id: 'team-booking', title: 'Team booking' },
   { id: 'manage', title: 'Manage booking' },
   { id: 'manage-reschedule', title: 'Manage reschedule' },
   { id: 'sign-in', title: 'Sign in' },
+  { id: 'oauth-consent', title: 'OAuth consent' },
   { id: 'event-types', title: 'Event types' },
   { id: 'event-type-editor', title: 'Event-type editor' },
   { id: 'availability-editor', title: 'Availability editor' },
@@ -31,6 +43,11 @@ export function auditLocales(id: AuditPageId): readonly AuditLocale[] {
 const publicPages = new Set<AuditPageId>([
   'host',
   'booking',
+  'booking-form',
+  'booking-confirmation',
+  'booking-time-zone',
+  'embedded-booking',
+  'team-booking',
   'manage',
   'manage-reschedule',
   'sign-in',
@@ -58,8 +75,28 @@ async function verifyAuditContent(page: Page, id: AuditPageId) {
       await page.locator('.event-card-title').filter({ hasText: AUDIT_TITLE }).waitFor()
       break
     case 'booking':
+    case 'team-booking':
     case 'booking-detail':
       await page.getByRole('heading', { name: AUDIT_TITLE, exact: true }).waitFor()
+      break
+    case 'booking-form':
+      await page.locator('.details-step form input[type="email"]').waitFor()
+      break
+    case 'booking-confirmation':
+      await page
+        .locator('.confirmation .booking-details')
+        .getByText(AUDIT_TITLE, { exact: true })
+        .waitFor()
+      break
+    case 'booking-time-zone':
+      await page.locator('.tz-panel [role="listbox"]:visible').waitFor()
+      break
+    case 'embedded-booking':
+      await page.locator('.public-embedded .event-title').filter({ hasText: AUDIT_TITLE }).waitFor()
+      break
+    case 'oauth-consent':
+      await page.getByRole('button', { name: /^(Allow access|允许访问)$/ }).waitFor()
+      await page.getByText('Synthetic audit connector', { exact: true }).waitFor()
       break
     case 'manage':
       await page.locator('.booking-details').getByText(AUDIT_TITLE, { exact: true }).waitFor()
@@ -130,9 +167,15 @@ export async function openAuditPage(
     const paths: Record<AuditPageId, string> = {
       host: '/fixture-host',
       booking: fixture.bookingPath,
+      'booking-form': fixture.bookingPath,
+      'booking-confirmation': fixture.bookingPath,
+      'booking-time-zone': fixture.bookingPath,
+      'embedded-booking': `/embed${fixture.bookingPath}`,
+      'team-booking': fixture.teamBookingPath,
       manage: '/booking',
       'manage-reschedule': '/booking',
       'sign-in': '/sign-in',
+      'oauth-consent': '/oauth/consent',
       'event-types': '/app/event-types',
       'event-type-editor': `/app/event-types/${fixture.eventTypeId}`,
       'availability-editor': `/app/availability/${fixture.scheduleId}`,
@@ -146,7 +189,13 @@ export async function openAuditPage(
       settings: '/app/settings',
       'not-found': '/audit/not/a/real/page',
     }
-    await page.goto(app.url + paths[id])
+    const navigationPath =
+      id === 'oauth-consent'
+        ? `/oauth/authorize${await app.auditOAuthQuery()}`
+        : id === 'embedded-booking'
+          ? `${paths[id]}?${new URLSearchParams({ parentOrigin: app.parentUrl, embedId: 'synthetic-layout-audit' })}`
+          : paths[id]
+    await page.goto(app.url + navigationPath)
     if (id === 'manage' || id === 'manage-reschedule') {
       await page.locator('h1').waitFor()
       await page.evaluate(
@@ -163,9 +212,44 @@ export async function openAuditPage(
         .waitFor()
       await page.waitForFunction(() => window.location.hash === '')
     } else await page.locator('h1').waitFor()
-    if (id === 'booking' || id === 'manage-reschedule') {
+    if (
+      [
+        'booking',
+        'booking-form',
+        'booking-confirmation',
+        'booking-time-zone',
+        'embedded-booking',
+        'team-booking',
+        'manage-reschedule',
+      ].includes(id)
+    ) {
       await page.locator('.calendar-month').waitFor()
       await page.locator('.calendar-grid[aria-busy="true"]').waitFor({ state: 'detached' })
+    }
+    if (id === 'booking-form' || id === 'booking-confirmation') {
+      await page.locator('button.day-available').first().click()
+      await page.locator('.slots button').first().click()
+      await page.locator('.details-step form').waitFor()
+      if (id === 'booking-confirmation') {
+        await page
+          .getByLabel(/^(Your name|你的姓名)$/, { exact: true })
+          .fill('Synthetic audit invitee')
+        await page.getByLabel(/^(Email|邮箱)$/, { exact: true }).fill(AUDIT_CONFIRMATION_EMAIL)
+        await page.getByRole('button', { name: /^(Confirm booking|确认预约)$/ }).click()
+        await page.locator('.confirmation').waitFor()
+      }
+    }
+    if (id === 'booking-time-zone') {
+      await page.locator('.tz-toggle').click()
+      await page.locator('.tz-panel [role="listbox"]:visible').waitFor()
+    }
+    if (id === 'oauth-consent') {
+      const organization = page.locator('#oauth-organization')
+      await organization.waitFor()
+      await organization.selectOption(fixture.organizationId)
+      await page.getByRole('button', { name: /^(Continue|继续)$/ }).click()
+      await page.getByRole('button', { name: /^(Allow access|允许访问)$/ }).waitFor()
+      await page.waitForFunction(() => window.location.hash === '')
     }
     await page.waitForFunction(
       () =>

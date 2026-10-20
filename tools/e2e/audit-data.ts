@@ -8,13 +8,16 @@ export const AUDIT_DESCRIPTION =
   '这是一段用于测量中文长文本换行的合成活动说明。详情请见：' +
   `https://hourmere.invalid/${'unbrokenlayoutmeasurement'.repeat(16)}`
 export const AUDIT_EMAIL = `${'long.synthetic.attendee.'.repeat(6)}@hourmere.invalid`
+export const AUDIT_CONFIRMATION_EMAIL = `${'synthetic.confirmation.'.repeat(6)}attendee@hourmere.invalid`
 
 export interface AuditFixtureState {
+  organizationId: string
   eventTypeId: string
   scheduleId: string
   bookingId: string
   manageToken: string
   bookingPath: string
+  teamBookingPath: string
 }
 
 // Mask all capability presentations, including inputs whose current value is a DOM

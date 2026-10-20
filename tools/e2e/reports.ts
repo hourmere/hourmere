@@ -11,6 +11,7 @@ export type FindingCode =
   | 'small-input-font'
   | 'small-target'
   | 'obscured-focus'
+  | 'outside-viewport-focus'
   | 'keyboard-limit'
   | 'axe-serious'
   | 'axe-critical'
@@ -19,7 +20,7 @@ export type FindingCode =
   | 'scan-error'
 export interface AuditFinding {
   code: FindingCode
-  element?: { tag: string; index: number }
+  element?: { tag: string; index: number; selector?: string }
   actual?: number
   expected?: number
   rule?: string
@@ -35,6 +36,7 @@ export interface AuditReport {
   viewport: { width: number; height: number }
   findings: AuditFinding[]
   exempted?: number
+  axe?: { passes: number; incomplete: number }
 }
 
 const codes = new Set<FindingCode>([
@@ -44,6 +46,7 @@ const codes = new Set<FindingCode>([
   'small-input-font',
   'small-target',
   'obscured-focus',
+  'outside-viewport-focus',
   'keyboard-limit',
   'axe-serious',
   'axe-critical',
@@ -55,8 +58,8 @@ const phases = new Set(['navigate', 'layout', 'keyboard', 'axe', 'exemptions'])
 const finite = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value) && value >= 0
 
-// Rebuild the payload field by field. Never serialize browser errors, selectors,
-// URLs, DOM/HTML, accessible names or axe nodes (which can include capabilities).
+// Rebuild field by field. Selector hints accept only tag/class/test-id tokens;
+// never serialize browser errors, URLs, HTML, names or raw axe node targets.
 export function safeAuditReport(report: AuditReport): AuditReport {
   if (
     report.version !== 1 ||
@@ -81,8 +84,19 @@ export function safeAuditReport(report: AuditReport): AuditReport {
         finding.element &&
         /^[a-z][a-z0-9]{0,20}$/.test(finding.element.tag) &&
         finite(finding.element.index)
-      )
+      ) {
         safe.element = { tag: finding.element.tag, index: finding.element.index }
+        const selector = finding.element.selector
+        if (
+          selector &&
+          !/(?:token|secret|canary)/i.test(selector) &&
+          /^[a-z][a-z0-9]{0,20}(?:\.[a-zA-Z_][a-zA-Z0-9_-]{0,63}){0,8}(?:\[data-testid="[a-zA-Z_][a-zA-Z0-9_-]{0,63}"\])?$/.test(
+            selector,
+          ) &&
+          selector.split(/[.[]/, 1)[0] === finding.element.tag
+        )
+          safe.element.selector = selector
+      }
       if (finite(finding.actual)) safe.actual = Math.round(finding.actual * 100) / 100
       if (finite(finding.expected)) safe.expected = Math.round(finding.expected * 100) / 100
       if (finite(finding.count)) safe.count = finding.count
@@ -92,6 +106,9 @@ export function safeAuditReport(report: AuditReport): AuditReport {
       return safe
     }),
     ...(finite(report.exempted) ? { exempted: report.exempted } : {}),
+    ...(report.axe && finite(report.axe.passes) && finite(report.axe.incomplete)
+      ? { axe: { passes: report.axe.passes, incomplete: report.axe.incomplete } }
+      : {}),
   }
 }
 
@@ -140,6 +157,17 @@ export function summarizeAuditReports(reports: AuditReport[]) {
 
 export function auditSummary(reports: AuditReport[]): string {
   const rows = summarizeAuditReports(reports)
+  const findingTypes = summarizeFindingTypes(reports)
+  const axe = reports.reduce(
+    (total, report) => {
+      const safe = safeAuditReport(report)
+      return {
+        passes: total.passes + (safe.axe?.passes ?? 0),
+        incomplete: total.incomplete + (safe.axe?.incomplete ?? 0),
+      }
+    },
+    { passes: 0, incomplete: 0 },
+  )
   return [
     '## UI measurement report / 界面测量报告',
     '',
@@ -154,8 +182,33 @@ export function auditSummary(reports: AuditReport[]): string {
     '',
     `Reports / 报告：${reports.length}`,
     '',
+    '| Finding / 问题类型 | Count / 数量 | Known issue / 已知问题 |',
+    '| --- | ---: | --- |',
+    ...findingTypes.map(
+      ({ code, count, issues }) => `| ${code} | ${count} | ${issues.join(', ') || '—'} |`,
+    ),
+    '',
+    `Axe rule results / Axe 规则结果：passes ${axe.passes}, incomplete ${axe.incomplete}`,
+    '',
     'Counts are findings across all scanned states, not unique defects. / 数量为所有扫描状态的问题总数，并非独立缺陷数。',
-    'JSON contains only page identifiers, audit codes and measurements. / JSON 仅含页面标识、检查代码与测量值。',
+    'JSON contains only page identifiers, static selector hints, audit codes and measurements. / JSON 仅含页面标识、静态选择器提示、检查代码与测量值。',
     '',
   ].join('\n')
+}
+
+export function summarizeFindingTypes(reports: AuditReport[]) {
+  const counts = new Map([...codes].map((code) => [code, 0]))
+  for (const report of reports)
+    for (const finding of safeAuditReport(report).findings)
+      counts.set(finding.code, (counts.get(finding.code) ?? 0) + (finding.count ?? 1))
+  const issues: Partial<Record<FindingCode, string[]>> = {
+    'document-overflow': ['UI-01', 'UI-02', 'UI-03', 'UI-08'],
+    'element-overflow': ['UI-01', 'UI-02', 'UI-03', 'UI-08'],
+    'oversized-fixed': ['UI-05', 'UI-06'],
+    'small-input-font': ['B6'],
+    'small-target': ['UI-38'],
+  }
+  // Issue links identify related defects, not a claim that every occurrence is
+  // that defect. Page and selector hints determine the precise attribution.
+  return [...counts].map(([code, count]) => ({ code, count, issues: issues[code] ?? [] }))
 }
