@@ -20,7 +20,7 @@ function ErrorFallback() {
         <Logo />
         <h1>{t('Something went wrong')}</h1>
         <p>{t('Something went wrong with this attempt. Please try again.')}</p>
-        <div className="actions">
+        <div className="form-actions">
           <button type="button" className="button button-primary" onClick={reloadPage}>
             {t('Reload')}
           </button>

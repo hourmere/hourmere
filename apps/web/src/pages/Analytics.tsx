@@ -1,8 +1,10 @@
-import { type FormEvent, useCallback, useState } from 'react'
+import { type FormEvent, useCallback, useId, useState } from 'react'
 import { api, type Schemas, unwrap } from '../api/client.ts'
 import { RequestError } from '../api/errors.ts'
 import { loadProfile } from '../api/resources.ts'
-import { ErrorSummary, Field, type FieldErrors } from '../components/forms.tsx'
+import { describedBy, ErrorSummary, Field, type FieldErrors } from '../components/forms.tsx'
+import { PageHeader } from '../components/PageHeader.tsx'
+import { PageSkeleton } from '../components/PageSkeleton.tsx'
 import { TimeZonePicker } from '../components/TimeZonePicker.tsx'
 import { isKnownTimeZone } from '../format.ts'
 import { useLoad, usePageTitle } from '../hooks.ts'
@@ -43,13 +45,13 @@ export function AnalyticsPage() {
   const [profile, reload] = useLoad(loadProfile)
   return (
     <>
-      <h1>{t('Booking activity')}</h1>
-      <p>
-        {t(
+      <PageHeader
+        title={t('Booking activity')}
+        lede={t(
           'Booking actions by the day they were recorded, rather than the meeting date. These counts describe currently retained bookings; deleting data can change history.',
         )}
-      </p>
-      {profile.status === 'loading' && <p role="status">{t('Loading reporting preferences…')}</p>}
+      />
+      {profile.status === 'loading' && <PageSkeleton label="Loading reporting preferences…" />}
       {profile.status === 'error' && (
         <div className="alert alert-error" role="alert">
           <p>
@@ -67,6 +69,7 @@ export function AnalyticsPage() {
 
 function ActivityForm({ timeZone }: { timeZone: string }) {
   const { t } = useI18n()
+  const datesHint = useId()
 
   const [filters, setFilters] = useState(() => initialActivityFilters(timeZone))
   const [draft, setDraft] = useState(filters)
@@ -93,37 +96,39 @@ function ActivityForm({ timeZone }: { timeZone: string }) {
   }
   return (
     <>
-      <form onSubmit={submit} noValidate className="panel">
+      <form onSubmit={submit} noValidate className="panel stack analytics-filters">
         <ErrorSummary
           errors={errors}
           attempt={attempt}
           labels={{ startDate: 'Start date', endDate: 'End date', timeZone: 'Reporting time zone' }}
         />
-        <Field id="startDate" label={t('Start date')} error={errors.startDate}>
-          {(control) => (
-            <input
-              {...control}
-              type="date"
-              value={draft.startDate}
-              onChange={(event) => set('startDate', event.target.value)}
-            />
-          )}
-        </Field>
-        <Field
-          id="endDate"
-          label={t('End date')}
-          hint={t('Both dates are included, up to 90 local days.')}
-          error={errors.endDate}
-        >
-          {(control) => (
-            <input
-              {...control}
-              type="date"
-              value={draft.endDate}
-              onChange={(event) => set('endDate', event.target.value)}
-            />
-          )}
-        </Field>
+        <div className="analytics-date-range">
+          <Field id="startDate" label={t('Start date')} error={errors.startDate}>
+            {(control) => (
+              <input
+                {...control}
+                aria-describedby={describedBy(control['aria-describedby'], datesHint)}
+                type="date"
+                value={draft.startDate}
+                onChange={(event) => set('startDate', event.target.value)}
+              />
+            )}
+          </Field>
+          <Field id="endDate" label={t('End date')} error={errors.endDate}>
+            {(control) => (
+              <input
+                {...control}
+                aria-describedby={describedBy(control['aria-describedby'], datesHint)}
+                type="date"
+                value={draft.endDate}
+                onChange={(event) => set('endDate', event.target.value)}
+              />
+            )}
+          </Field>
+        </div>
+        <p id={datesHint} className="hint">
+          {t('Both dates are included, up to 90 local days.')}
+        </p>
         <Field id="timeZone" label={t('Reporting time zone')} error={errors.timeZone}>
           {(control) => (
             <TimeZonePicker
@@ -159,7 +164,7 @@ function ActivityReport({ filters }: { filters: Filters }) {
     [filters],
   )
   const [report, reload] = useLoad(load)
-  if (report.status === 'loading') return <p role="status">{t('Loading booking activity…')}</p>
+  if (report.status === 'loading') return <PageSkeleton label="Loading booking activity…" />
   if (report.status === 'error')
     return (
       <div className="alert alert-error" role="alert">
@@ -181,22 +186,29 @@ function ActivityReport({ filters }: { filters: Filters }) {
     )
   const data = report.data
   return (
-    <section className="panel" aria-labelledby="activity-summary">
+    <section className="panel stack analytics-summary" aria-labelledby="activity-summary">
       <h2 id="activity-summary">
         <span className="nowrap">{data.startDate}</span> {t('to')}{' '}
         <span className="nowrap">{data.endDate}</span>
       </h2>
       <p>
-        {t('Reporting time zone:')} {data.timeZone}
-        {t('. Days can have 23 or 25 hours when the clocks change.')}
+        {t('Reporting time zone: {0}. Days can have 23 or 25 hours when the clocks change.', {
+          '0': data.timeZone,
+        })}
       </p>
-      <dl className="details">
-        <dt>{t('Bookings created')}</dt>
-        <dd>{new Intl.NumberFormat(displayLocale).format(data.totals.created)}</dd>
-        <dt>{t('Reschedules')}</dt>
-        <dd>{new Intl.NumberFormat(displayLocale).format(data.totals.rescheduled)}</dd>
-        <dt>{t('Cancellations')}</dt>
-        <dd>{new Intl.NumberFormat(displayLocale).format(data.totals.cancelled)}</dd>
+      <dl className="metric-cards">
+        <div>
+          <dt>{t('Bookings created')}</dt>
+          <dd>{new Intl.NumberFormat(displayLocale).format(data.totals.created)}</dd>
+        </div>
+        <div>
+          <dt>{t('Reschedules')}</dt>
+          <dd>{new Intl.NumberFormat(displayLocale).format(data.totals.rescheduled)}</dd>
+        </div>
+        <div>
+          <dt>{t('Cancellations')}</dt>
+          <dd>{new Intl.NumberFormat(displayLocale).format(data.totals.cancelled)}</dd>
+        </div>
       </dl>
       <p className="hint">
         {t(
@@ -208,7 +220,7 @@ function ActivityReport({ filters }: { filters: Filters }) {
       )}
       <div className="table-container">
         <table className="table table-analytics">
-          <caption>{t('Daily booking activity')}</caption>
+          <caption className="analytics-caption">{t('Daily booking activity')}</caption>
           <thead>
             <tr>
               <th scope="col">{t('Date')}</th>

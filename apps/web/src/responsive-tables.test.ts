@@ -50,10 +50,10 @@ describe('responsive table CSS contract', () => {
     expect(rule(styles, '.table .confirm')).toContain('white-space: normal;')
     // User-content columns share the remaining width in fixed proportions.
     for (const [selector, width] of [
-      ['.table-bookings thead th:nth-child(2)', '38%'],
-      ['.table-bookings thead th:nth-child(3)', '32%'],
-      ['.table-event-types thead th:nth-child(1)', '30%'],
-      ['.table-event-types thead th:nth-child(3)', '32%'],
+      ['.table-bookings thead th:nth-child(2)', '45%'],
+      ['.table-bookings thead th:nth-child(3)', '26%'],
+      ['.table-event-types thead th:nth-child(1)', '44%'],
+      ['.table-event-types thead th:nth-child(3)', '28%'],
       ['.table-api-keys thead th:nth-child(1)', '24%'],
       ['.table-api-keys thead th:nth-child(3)', '16%'],
     ]) {
@@ -97,6 +97,8 @@ describe('responsive table CSS contract', () => {
     // A card's date and time range wrap as whole units, never inside one of them.
     expect(card).not.toMatch(/time \.nowrap \{[^}]*white-space: normal;/)
     expect(rule(card, `${selector} thead`)).toContain('clip-path: inset(50%);')
+    expect(rule(card, `${selector} thead th`)).toContain('overflow: hidden;')
+    expect(rule(card, `${selector} thead th`)).toContain('clip-path: inset(50%);')
   })
 
   it('starts captions at the same edge in table and card modes', () => {

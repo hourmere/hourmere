@@ -245,8 +245,24 @@ describe('MCP connection approval', () => {
     })
     renderApp('/app/connected-apps')
     await screen.findByText('Team Alpha')
+    expect(
+      screen
+        .getByRole('heading', { name: 'Connected apps', level: 1 })
+        .closest('.page-intro')
+        ?.querySelector('.lede'),
+    ).not.toBeNull()
+    const item = screen.getByRole('heading', { name: 'Synthetic AI app' }).closest('li')
+    expect(item?.classList.contains('panel')).toBe(true)
+    expect(item?.classList.contains('card')).toBe(false)
+    expect(item?.querySelectorAll('wbr').length).toBeGreaterThan(0)
     fireEvent.click(screen.getByRole('button', { name: 'Revoke access' }))
     expect(await screen.findByText('No connected apps.')).toBeDefined()
+    expect(screen.getByRole('link', { name: 'Manage API keys' }).getAttribute('href')).toBe(
+      '/app/api-keys',
+    )
+    expect(
+      screen.getByRole('link', { name: 'Manage API keys' }).closest('.empty-actions'),
+    ).not.toBeNull()
     expect(
       api.to('DELETE /api/v1/mcp-oauth/connections/00000000-0000-7000-8000-000000000004'),
     ).toHaveLength(1)

@@ -334,7 +334,7 @@ describe('report-only browser command', () => {
           { name: 'webkit-iphone', browserName: 'webkit' },
           { name: 'firefox-desktop', browserName: 'firefox' },
         ],
-        tests: 9,
+        tests: 12,
       })
     } finally {
       rmSync(directory, { recursive: true, force: true })

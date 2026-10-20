@@ -111,11 +111,11 @@ export function IntervalsEditor({
                   />
                   <button
                     type="button"
-                    className="button button-small"
+                    className="button button-small button-icon"
                     onClick={() => remove(index)}
                     aria-label={t('Remove {0}', { '0': name })}
                   >
-                    {t('Remove')}
+                    <span aria-hidden="true">×</span>
                   </button>
                 </div>
                 {startError && <FieldError id={`${startId}-error`}>{startError}</FieldError>}

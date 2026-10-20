@@ -1,3 +1,9 @@
+import { openAuditPage } from '../audit-pages.ts'
+import {
+  LONG_BOOKING_SLUG,
+  measureEventTypesTable,
+  useLongBookingSlug,
+} from '../event-types-table.ts'
 import { expect, fillInvitee, pickSlot, test } from '../fixtures.ts'
 
 // Kept deliberately small: each is a complete user path, shared by WebKit desktop,
@@ -49,4 +55,22 @@ test('embed popup booking and keyboard dismissal', async ({ page, app }) => {
   expect(safeMessages).toBe(true)
   await page.getByRole('button', { name: 'Close booking', exact: true }).click()
   await expect(opener).toBeFocused()
+})
+
+// Table intrinsic sizing differs most between engines: the admin list must keep its title
+// column in WebKit and Firefox too, and card mode must keep the link on one clipped line.
+test('event-types list beside a long booking link', async ({ page, app }) => {
+  await openAuditPage(page, app, 'event-types')
+  await useLongBookingSlug(page, app)
+  const geometry = await measureEventTypesTable(page, LONG_BOOKING_SLUG)
+  expect(geometry.linkLines).toBe(1)
+  expect(geometry.linkOverflow).toBe(true)
+  expect(geometry.linkEllipsis).toBe('ellipsis')
+  expect(geometry.documentOverflow).toBe(false)
+  if ((page.viewportSize()?.width ?? 0) >= 1024) {
+    expect(geometry.tableMode).toBe(true)
+    expect(geometry.titleColumnWidth / geometry.tableWidth).toBeGreaterThanOrEqual(0.35)
+    expect(geometry.titleLines).toBeLessThanOrEqual(3)
+    expect(geometry.copyBeside).toBe(true)
+  } else expect(geometry.tableMode).toBe(false)
 })

@@ -1,11 +1,11 @@
 // Date overrides of a saved schedule: other hours (or none) on single dates, such as holidays.
-// Each is saved on its own, right away, apart from the schedule's form.
+// Additions and staged removals are saved explicitly, apart from the schedule form.
 import { type FormEvent, useCallback, useRef, useState } from 'react'
 import { api, unwrap } from '../../api/client.ts'
 import { errorMessage, RequestError, requestError } from '../../api/errors.ts'
 import type { Schedule } from '../../api/resources.ts'
 import { ErrorSummary, Field, FieldError, type FieldErrors } from '../../components/forms.tsx'
-import { useLoad } from '../../hooks.ts'
+import { useLoad, useMounted } from '../../hooks.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
 import { dateMessage, msg, type UiText } from '../../i18n/translate.ts'
 import { useUnsavedChanges } from '../../unsaved-changes.tsx'
@@ -48,6 +48,61 @@ export function Overrides({ schedule }: { schedule: Schedule }) {
   const [state, reload] = useLoad(load)
   const [status, setStatus] = useState<UiText>('')
   const heading = useRef<HTMLHeadingElement>(null)
+  const [pendingRemovals, setPendingRemovals] = useState<string[]>([])
+  const [removing, setRemoving] = useState(false)
+  const [adding, setAdding] = useState(false)
+  const [removeError, setRemoveError] = useState<UiText | null>(null)
+  const mounted = useMounted()
+  useUnsavedChanges(pendingRemovals.length > 0)
+
+  function toggleRemoval(date: string) {
+    setPendingRemovals((current) =>
+      current.includes(date) ? current.filter((value) => value !== date) : [...current, date],
+    )
+    setStatus('')
+    setRemoveError(null)
+  }
+
+  async function saveRemovals() {
+    if (removing || adding) return
+    heading.current?.focus()
+    setRemoving(true)
+    setRemoveError(null)
+    setStatus('Saving…')
+    let changed = false
+    for (const date of pendingRemovals) {
+      try {
+        await unwrap(
+          api.DELETE('/api/v1/schedules/{id}/overrides/{date}', {
+            params: { path: { id: schedule.id, date } },
+          }),
+        )
+      } catch (err) {
+        // A date removed in another tab already has the requested state.
+        if (!(err instanceof RequestError && err.code === 'schedule_override_not_found')) {
+          if (!mounted.current) return
+          setRemoveError(
+            msg(
+              'Could not save all removals. Saved removals are kept; try again for the remaining dates. {0}',
+              {
+                '0': errorMessage(err),
+              },
+            ),
+          )
+          setStatus('')
+          break
+        }
+      }
+      if (!mounted.current) return
+      changed = true
+      setPendingRemovals((current) => current.filter((value) => value !== date))
+      setStatus(msg('Removed the override for {0}.', { '0': dateMessage(date) }))
+    }
+    if (!mounted.current) return
+    if (changed) reload()
+    setRemoving(false)
+    heading.current?.focus()
+  }
 
   return (
     <section className="panel" aria-labelledby="overrides-heading">
@@ -57,7 +112,7 @@ export function Overrides({ schedule }: { schedule: Schedule }) {
       <p className="hint">
         {t('Other hours on single dates, such as holidays, in')}{' '}
         {schedule.timeZone.replaceAll('_', ' ')}
-        {t('. They are saved right away.')}
+        {t('. Use Save override to save a date. Select dates to remove, then use Save removals.')}
       </p>
       <p className="flash" role="status">
         {ui(status)}
@@ -81,22 +136,42 @@ export function Overrides({ schedule }: { schedule: Schedule }) {
             {state.data.map((o) => (
               <OverrideRow
                 key={o.date}
-                scheduleId={schedule.id}
                 override={o}
-                onRemoved={() => {
-                  setStatus(msg('Removed the override for {0}.', { '0': dateMessage(o.date) }))
-                  reload()
-                  heading.current?.focus()
-                }}
+                pending={pendingRemovals.includes(o.date)}
+                disabled={removing || adding}
+                onToggle={() => toggleRemoval(o.date)}
               />
             ))}
           </ul>
         ))}
+      {removeError && (
+        <p className="alert alert-error" role="alert">
+          {ui(removeError)}
+        </p>
+      )}
+      {pendingRemovals.length > 0 && (
+        <div className="form-actions">
+          <button
+            type="button"
+            className="button button-primary"
+            disabled={removing || adding}
+            onClick={saveRemovals}
+          >
+            {removing ? t('Saving…') : t('Save removals')}
+          </button>
+          <p className="form-status" role="status">
+            {t('Unsaved date override removals')}
+          </p>
+        </div>
+      )}
       <AddOverride
         schedule={schedule}
+        disabled={removing}
+        onSaving={setAdding}
         today={today}
         existing={state.status === 'ready' ? state.data : []}
         onSaved={(o, created) => {
+          setPendingRemovals((current) => current.filter((date) => date !== o.date))
           setStatus(
             msg(
               created
@@ -116,18 +191,18 @@ export function Overrides({ schedule }: { schedule: Schedule }) {
 }
 
 function OverrideRow({
-  scheduleId,
   override,
-  onRemoved,
+  pending,
+  disabled,
+  onToggle,
 }: {
-  scheduleId: string
   override: Override
-  onRemoved: () => void
+  pending: boolean
+  disabled: boolean
+  onToggle: () => void
 }) {
   const { t, ui, formatLocale: displayLocale } = useI18n()
 
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<UiText | null>(null)
   const date = new Intl.DateTimeFormat(displayLocale, {
     calendar: 'gregory',
     timeZone: 'UTC',
@@ -137,55 +212,36 @@ function OverrideRow({
     year: 'numeric',
   }).format(new Date(`${override.date}T00:00:00Z`))
 
-  async function remove() {
-    setBusy(true)
-    setError(null)
-    try {
-      await unwrap(
-        api.DELETE('/api/v1/schedules/{id}/overrides/{date}', {
-          params: { path: { id: scheduleId, date: override.date } },
-        }),
-      )
-      onRemoved()
-    } catch (err) {
-      // Already gone (removed elsewhere): what the person wanted.
-      if (err instanceof RequestError && err.code === 'schedule_override_not_found') onRemoved()
-      else setError(msg('Could not remove it. {0}', { '0': errorMessage(err) }))
-    }
-    setBusy(false)
-  }
-
   return (
-    <li className="override">
+    <li className={`override${pending ? ' override-pending' : ''}`}>
       <span className="override-date">
         <time dateTime={override.date}>{date}</time>
       </span>
-      <span>{ui(hoursText(override))}</span>
+      <span>{pending ? t('Removal pending save') : ui(hoursText(override))}</span>
       <button
         type="button"
         className="button button-small"
-        onClick={remove}
-        disabled={busy}
-        aria-label={t('Remove override: {0}', { '0': date })}
+        onClick={onToggle}
+        disabled={disabled}
+        aria-label={t(pending ? 'Undo removal: {0}' : 'Remove override: {0}', { '0': date })}
       >
-        {busy ? t('Removing…') : t('Remove')}
+        {pending ? t('Undo removal') : t('Remove')}
       </button>
-      {error && (
-        <p className="alert alert-error" role="alert">
-          {ui(error)}
-        </p>
-      )}
     </li>
   )
 }
 
 function AddOverride({
   schedule,
+  disabled,
+  onSaving,
   today,
   existing,
   onSaved,
 }: {
   schedule: Schedule
+  disabled: boolean
+  onSaving: (saving: boolean) => void
   today: string
   existing: Override[]
   onSaved: (override: Override, created: boolean) => void
@@ -224,7 +280,7 @@ function AddOverride({
     e.preventDefault()
     setAttempt((n) => n + 1)
     setFormError(null)
-    if (saving) return
+    if (saving || disabled) return
     const problems = validate()
     setErrors(problems)
     if (Object.keys(problems).length > 0) return
@@ -232,6 +288,7 @@ function AddOverride({
     // button rather than being dropped by a disabled field.
     submitButton.current?.focus()
     setSaving(true)
+    onSaving(true)
     try {
       const { data, error, response } = await api.PUT('/api/v1/schedules/{id}/overrides/{date}', {
         params: { path: { id: schedule.id, date } },
@@ -258,6 +315,7 @@ function AddOverride({
       setAttempt((n) => n + 1)
     }
     setSaving(false)
+    onSaving(false)
   }
 
   const labels: Record<string, UiText> = { 'override-date': 'Date', [PREFIX]: 'Hours' }
@@ -270,7 +328,11 @@ function AddOverride({
     <form className="override-form" onSubmit={submit} noValidate aria-labelledby="add-override">
       <h3 id="add-override">{t('Add a date override')}</h3>
       <ErrorSummary errors={errors} labels={labels} message={formError} attempt={attempt} />
-      <fieldset className="form-fieldset override-fields" disabled={saving} role="presentation">
+      <fieldset
+        className="form-fieldset override-fields"
+        disabled={saving || disabled}
+        role="presentation"
+      >
         <Field
           id="override-date"
           label={t('Date')}
@@ -331,7 +393,7 @@ function AddOverride({
           ref={submitButton}
           type="submit"
           className="button button-primary"
-          aria-disabled={saving}
+          aria-disabled={saving || disabled}
         >
           {saving ? t('Saving…') : t('Save override')}
         </button>

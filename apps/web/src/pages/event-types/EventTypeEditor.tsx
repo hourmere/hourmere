@@ -12,7 +12,11 @@ import {
   type Schedule,
 } from '../../api/resources.ts'
 import { ConfirmAction } from '../../components/ConfirmAction.tsx'
+import { CopyButton } from '../../components/CopyButton.tsx'
 import { ErrorSummary, Field, type FieldErrors, parseWhole } from '../../components/forms.tsx'
+import { PageHeader } from '../../components/PageHeader.tsx'
+import { PageSkeleton } from '../../components/PageSkeleton.tsx'
+import { StickyFormActions } from '../../components/StickyFormActions.tsx'
 import { flash } from '../../flash.ts'
 import { formatMinutes } from '../../format.ts'
 import { useLoad, useMounted, usePageTitle } from '../../hooks.ts'
@@ -95,11 +99,11 @@ function EventTypeEditor({ id }: { id: string | undefined }) {
   const [state, reload] = useLoad(load)
   usePageTitle(id === undefined ? 'New event type' : 'Edit event type')
 
-  if (state.status === 'loading') return <p role="status">{t('Loading…')}</p>
+  if (state.status === 'loading') return <PageSkeleton />
   if (state.status === 'error') {
     return (
       <>
-        <h1>{id === undefined ? t('New event type') : t('Edit event type')}</h1>
+        <PageHeader title={id === undefined ? t('New event type') : t('Edit event type')} />
         <div className="alert alert-error" role="alert">
           <p>
             {t('Could not load the event type.')} {ui(state.message)}
@@ -290,6 +294,7 @@ function EventTypeForm({
     draft.hostUserIds.length,
     saved?.roundRobinActive ?? false,
   )
+  const previewUrl = slugPreview.startsWith(`${window.location.origin}/`) ? slugPreview : null
   const duration = parseWhole(draft.durationMinutes)
   const suggestedSlug = slugSuffix
     ? `${(slugify(draft.slug) || 'event').slice(0, EVENT_TYPE.slugMaxLength - slugSuffix.length - 1).replace(/-+$/, '')}-${slugSuffix}`
@@ -300,7 +305,10 @@ function EventTypeForm({
       <p className="breadcrumb">
         <Link to={PATHS.eventTypes}>{t('Event types')}</Link>
       </p>
-      <h1>{uiText(title)}</h1>
+      <PageHeader
+        title={uiText(title)}
+        lede={t('Set the booking details, questions and availability for this event type.')}
+      />
       <form className="editor" onSubmit={submit} noValidate>
         <ErrorSummary
           errors={errors}
@@ -343,7 +351,14 @@ function EventTypeForm({
                 hint={
                   <>
                     {t('Lowercase letters, digits and hyphens.')}{' '}
-                    <span className="mono preview">{ui(slugPreview)}</span>
+                    {previewUrl ? (
+                      <span className="booking-link">
+                        <span className="mono preview">{new URL(previewUrl).pathname}</span>
+                        <CopyButton text={previewUrl} label={t('Copy link')} />
+                      </span>
+                    ) : (
+                      <span>{ui(slugPreview)}</span>
+                    )}
                   </>
                 }
               >
@@ -712,16 +727,18 @@ function EventTypeForm({
         </fieldset>
 
         <div className="form-actions">
-          <button type="submit" className="button button-primary" disabled={saving}>
-            {saving ? t('Saving…') : editing ? t('Save changes') : t('Create event type')}
-          </button>
           <Link to={PATHS.eventTypes} className="button">
             {editing ? t('Back to event types') : t('Cancel')}
           </Link>
+        </div>
+        <StickyFormActions>
+          <button type="submit" className="button button-primary" disabled={saving}>
+            {saving ? t('Saving…') : editing ? t('Save changes') : t('Create event type')}
+          </button>
           <p className="form-status" role="status" tabIndex={-1} ref={statusRef}>
             {uiText(status || (dirty && editing ? 'Unsaved changes' : ''))}
           </p>
-        </div>
+        </StickyFormActions>
       </form>
 
       {saved && (

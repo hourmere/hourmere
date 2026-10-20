@@ -267,7 +267,9 @@ describe('creating an event type', () => {
     await user.type(field('Title'), 'Intro call')
     // The link follows the title until edited.
     expect(field('Booking link').value).toBe('intro-call')
-    expect(screen.getByText(`${window.location.origin}/ada/intro-call`)).toBeDefined()
+    expect(screen.getByText('/ada/intro-call')).toBeDefined()
+    await user.click(screen.getByRole('button', { name: 'Copy link' }))
+    expect(await navigator.clipboard.readText()).toBe(`${window.location.origin}/ada/intro-call`)
     await user.type(field(/Description/), 'Let us talk.{Enter}Bring questions.')
     await user.clear(field('Duration (minutes)'))
     await user.type(field('Duration (minutes)'), '45')
@@ -1089,7 +1091,9 @@ describe('team booking links', () => {
     expect(screen.queryByText(/Choose your handle/)).toBeNull()
     await user.click(row.getByRole('link', { name: 'Edit Intro call' }))
     await screen.findByRole('heading', { name: 'Edit “Intro call”' })
-    expect(screen.getByText(url)).toBeDefined()
+    expect(screen.getByText(new URL(url).pathname)).toBeDefined()
+    await user.click(screen.getByRole('button', { name: 'Copy link' }))
+    expect(await navigator.clipboard.readText()).toBe(url)
   })
 })
 
@@ -1476,4 +1480,80 @@ it('a different team administrator can edit saved Zoom metadata without reading 
   for (const key of ['location', 'hosts', 'zoomConnectionId', 'scheduleId'])
     expect(api.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`)[0]?.body).not.toHaveProperty(key)
   expect(api.to('GET /api/v1/conference-connections')).toHaveLength(0)
+})
+
+describe('event type editor layout', () => {
+  it('keeps only saving and its status in the sticky bar, with return navigation outside it', async () => {
+    eventTypeServer()
+    const heading = await openExisting()
+    expect(heading.closest('.page-header')).not.toBeNull()
+    const save = screen.getByRole('button', { name: 'Save changes' })
+    const bar = save.closest('.sticky-form-actions')
+    expect(bar).not.toBeNull()
+    expect(bar?.parentElement?.tagName).toBe('FORM')
+    expect(bar?.previousElementSibling?.previousElementSibling?.tagName).toBe('FIELDSET')
+    expect(
+      within(bar as HTMLElement)
+        .getByRole('status')
+        .getAttribute('tabindex'),
+    ).toBe('-1')
+    expect(within(bar as HTMLElement).queryByRole('link')).toBeNull()
+    expect(bar?.children).toHaveLength(2)
+    expect(screen.getByRole('link', { name: 'Back to event types' }).parentElement).toBe(
+      bar?.previousElementSibling,
+    )
+  })
+
+  it('uses an accessible compact icon for each question option removal', async () => {
+    const user = userEvent.setup()
+    eventTypeServer([])
+    await openNew()
+    await user.click(screen.getByRole('button', { name: 'Add a question' }))
+    await user.keyboard('Team size')
+    await user.selectOptions(screen.getByLabelText('Answer type'), 'select')
+    const remove = screen.getByRole('button', { name: 'Remove option 1, of question 1' })
+    expect(remove.classList.contains('button-icon')).toBe(true)
+    expect(remove.querySelector('[aria-hidden="true"]')?.textContent).toBe('×')
+    expect(remove.closest('.option-row')?.querySelector('input')).toBe(
+      screen.getByLabelText('Option 1 of question 1'),
+    )
+    await user.click(remove)
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Add an option' }))
+  })
+})
+
+describe('event type booking link previews', () => {
+  it('shows only the path while copying the complete ready booking URL', async () => {
+    const user = userEvent.setup()
+    eventTypeServer()
+    await openExisting()
+    const preview = screen.getByText('/ada/intro-call')
+    expect(preview.classList.contains('preview')).toBe(true)
+    expect(preview.querySelectorAll('wbr')).toHaveLength(0)
+    expect(screen.queryByText(`${window.location.origin}/ada/intro-call`)).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Copy link' }))
+    expect(await navigator.clipboard.readText()).toBe(`${window.location.origin}/ada/intro-call`)
+  })
+
+  it('keeps the localized setup explanation when a booking URL is not ready', async () => {
+    chooseLanguage('zh-CN')
+    eventTypeServer([], profile(null))
+    renderApp('/app/event-types/new')
+    await screen.findByRole('heading', { name: '新活动类型', level: 1 })
+    expect(screen.getByText('请在设置中选择用户名，以获得预约链接。')).toBeDefined()
+    expect(screen.queryByRole('button', { name: '复制链接' })).toBeNull()
+  })
+})
+
+it('keeps the event type editor inside the app shell while its skeleton loads', async () => {
+  const loading = later()
+  eventTypeServer([eventType()], {
+    [`GET /api/v1/event-types/${EVENT_TYPE_ID}`]: () => loading.response,
+  })
+  renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
+  const skeleton = await screen.findByRole('status', { name: 'Loading…' })
+  expect(skeleton.classList.contains('page-skeleton')).toBe(true)
+  expect(screen.getByRole('navigation', { name: 'Main' })).toBeDefined()
+  await loading.answer(json(200, eventType()))
+  expect(screen.getByRole('heading', { name: 'Edit “Intro call”', level: 1 })).toBeDefined()
 })

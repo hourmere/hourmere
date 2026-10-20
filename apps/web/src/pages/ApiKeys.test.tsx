@@ -78,6 +78,44 @@ const rowFor = async (name: string) =>
   (await within(await table()).findByRole('rowheader', { name: new RegExp(name) })).closest('tr')
 
 describe('the API keys page', () => {
+  it.each([
+    {
+      locale: 'en' as const,
+      name: 'Name',
+      create: 'Create key',
+      usage: 'API key usage command',
+      newKey: 'New API key test command',
+    },
+    {
+      locale: 'zh-CN' as const,
+      name: '名称',
+      create: '创建密钥',
+      usage: 'API 密钥使用命令',
+      newKey: '新 API 密钥测试命令',
+    },
+  ])('makes both scrollable command regions keyboard reachable in $locale', async (labels) => {
+    chooseLanguage(labels.locale)
+    const user = userEvent.setup()
+    keyServer()
+    renderApp('/app/api-keys')
+    const usage = await screen.findByRole('region', { name: labels.usage })
+    await user.type(screen.getByLabelText(labels.name), 'Keyboard test')
+    await user.click(screen.getByRole('button', { name: labels.create }))
+    const newKey = await screen.findByRole('region', { name: labels.newKey })
+
+    for (const command of [usage, newKey]) {
+      expect(command.tagName).toBe('PRE')
+      expect(command.getAttribute('data-layout-scroll')).toBe('horizontal')
+      expect(command.getAttribute('tabindex')).toBe('0')
+      command.focus()
+      expect(document.activeElement).toBe(command)
+      await user.tab()
+      expect(document.activeElement).toBe(command.parentElement?.querySelector('button'))
+      await user.tab({ shift: true })
+      expect(document.activeElement).toBe(command)
+    }
+  })
+
   it('distinguishes Chinese resource names, unused keys and nonexpiring keys', async () => {
     chooseLanguage('zh-CN')
     keyServer([{ ...existing, lastRequest: null }])
@@ -126,12 +164,17 @@ describe('the API keys page', () => {
           timeStyle: 'short',
         }).format(new Date(iso))
         expect(time?.getAttribute('title')).toBe(full)
-        expect(time?.textContent).toBe(
-          iso === existing.lastRequest
-            ? full
-            : new Intl.DateTimeFormat(locale, { calendar: 'gregory', dateStyle: 'medium' }).format(
-                new Date(iso),
-              ),
+        expect(time?.classList.contains('date-time')).toBe(true)
+        expect(time?.closest('td')?.classList.contains('nowrap')).toBe(false)
+        expect([...(time?.querySelectorAll('span') ?? [])].map((part) => part.textContent)).toEqual(
+          [
+            new Intl.DateTimeFormat(locale, { calendar: 'gregory', dateStyle: 'medium' }).format(
+              new Date(iso),
+            ),
+            new Intl.DateTimeFormat(locale, { calendar: 'gregory', timeStyle: 'short' }).format(
+              new Date(iso),
+            ),
+          ],
         )
       }
     },
@@ -155,6 +198,20 @@ describe('the API keys page', () => {
     keyServer([])
     renderApp('/app/api-keys')
     expect(await screen.findByText('You have no API keys yet.')).toBeDefined()
+    expect(
+      screen
+        .getByRole('heading', { name: 'API keys', level: 1 })
+        .closest('.page-intro')
+        ?.querySelector('.lede'),
+    ).not.toBeNull()
+    const action = screen.getByRole('link', { name: 'Create your first key' })
+    expect(action.closest('.empty-actions')).not.toBeNull()
+    expect(action.getAttribute('href')).toBe('#key-name')
+    expect(document.querySelector(action.getAttribute('href') as string)).toBe(
+      screen.getByLabelText('Name'),
+    )
+    const command = screen.getByRole('button', { name: 'Copy command' }).closest('.code-block')
+    expect(command?.querySelector('pre')?.getAttribute('data-layout-scroll')).toBe('horizontal')
   })
 
   it('creates a key and shows its secret exactly once', async () => {

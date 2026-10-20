@@ -1,15 +1,20 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Navigate, useLocation, useNavigate } from 'react-router'
+import { Link, Navigate, useLocation, useNavigate } from 'react-router'
 import { api, unwrap } from '../api/client.ts'
 import { errorMessage, RequestError } from '../api/errors.ts'
 import { goTo } from '../browser.ts'
+import { BreakableText } from '../components/BreakableText.tsx'
+import { EmptyState } from '../components/EmptyState.tsx'
 import { InstanceLegalLinks } from '../components/LegalLinks.tsx'
 import { Logo } from '../components/Logo.tsx'
+import { PageHeader } from '../components/PageHeader.tsx'
+import { PageSkeleton } from '../components/PageSkeleton.tsx'
 import { useLoad, useMounted, usePageTitle } from '../hooks.ts'
 import { LanguageSwitcher, useI18n } from '../i18n/runtime.tsx'
 import type { UiText } from '../i18n/translate.ts'
 import { msg } from '../i18n/translate.ts'
 import { signInPath } from '../next-path.ts'
+import { PATHS } from '../paths.ts'
 import { PageStatus, useSession } from '../session.tsx'
 
 // The authorization URL comes from the connecting app; schema details are not useful
@@ -109,7 +114,11 @@ function Authorization({ email }: { email: string }) {
         </header>
         <h1>{consent ? t('Approve connection') : t('Connect an AI app')}</h1>
         <p>
-          {t('Signed in as')} <strong>{email}</strong>.
+          {t('Signed in as')}{' '}
+          <strong>
+            <BreakableText>{email}</BreakableText>
+          </strong>
+          {t('.')}
         </p>
         {info.status === 'loading' && <p role="status">{t('Checking the connection request…')}</p>}
         {info.status === 'error' && (
@@ -125,12 +134,12 @@ function Authorization({ email }: { email: string }) {
             <p className="muted">
               {t('Client:')}
               {locale === 'en' ? ' ' : ''}
-              {info.data.clientId}
+              <BreakableText>{info.data.clientId}</BreakableText>
             </p>
             <p className="muted">
               {t('Return address:')}
               {locale === 'en' ? ' ' : ''}
-              {info.data.redirectUri}
+              <BreakableText>{info.data.redirectUri}</BreakableText>
             </p>
             {consent ? (
               <p>
@@ -230,23 +239,36 @@ export function ConnectedAppsPage() {
   }
   return (
     <>
-      <h1>{t('Connected apps')}</h1>
-      <p>
-        {t(
+      <PageHeader
+        title={t('Connected apps')}
+        lede={t(
           'AI apps connected through MCP OAuth. Revoking access stops new requests immediately; completed bookings remain.',
         )}
-      </p>
-      {error && <p role="alert">{ui(error)}</p>}
-      {connections.status === 'loading' && <p role="status">{t('Loading…')}</p>}
-      {connections.status === 'error' && <p role="alert">{ui(connections.message)}</p>}
+      />
+      {error && (
+        <p className="alert alert-error" role="alert">
+          {ui(error)}
+        </p>
+      )}
+      {connections.status === 'loading' && <PageSkeleton label="Loading…" />}
+      {connections.status === 'error' && (
+        <div className="alert alert-error" role="alert">
+          <p>{ui(connections.message)}</p>
+          <button type="button" className="button" onClick={reload}>
+            {t('Try again')}
+          </button>
+        </div>
+      )}
       {connections.status === 'ready' &&
         (connections.data.data.length ? (
-          <ul className="stack">
+          <ul className="card-list">
             {connections.data.data.map((c) => (
-              <li key={c.id} className="card">
+              <li key={c.id} className="panel stack">
                 <h2>{c.clientName}</h2>
                 <p>{c.organizationName}</p>
-                <p className="muted">{c.clientId}</p>
+                <p className="muted">
+                  <BreakableText>{c.clientId}</BreakableText>
+                </p>
                 <button
                   type="button"
                   className="button"
@@ -259,7 +281,16 @@ export function ConnectedAppsPage() {
             ))}
           </ul>
         ) : (
-          <p>{t('No connected apps.')}</p>
+          <EmptyState
+            title={t('No connected apps.')}
+            action={
+              <Link className="button" to={PATHS.apiKeys}>
+                {t('Manage API keys')}
+              </Link>
+            }
+          >
+            <p>{t('Connect an AI app from its MCP settings, or use an API key.')}</p>
+          </EmptyState>
         ))}
     </>
   )

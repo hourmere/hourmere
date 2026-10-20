@@ -1,10 +1,14 @@
+import { interfaceLanguage } from '@hourmere/core/language'
 import { type FormEvent, useRef, useState } from 'react'
 import { api, unwrap } from '../api/client.ts'
 import { errorMessage, RequestError } from '../api/errors.ts'
 import { loadProfile, type Profile, updateDisplayName } from '../api/resources.ts'
+import { BreakableText } from '../components/BreakableText.tsx'
 import { ErrorSummary, Field, type FieldErrors } from '../components/forms.tsx'
+import { PageHeader } from '../components/PageHeader.tsx'
+import { PageSkeleton } from '../components/PageSkeleton.tsx'
 import { TimeZonePicker } from '../components/TimeZonePicker.tsx'
-import { browserLocale, browserTimeZone, isKnownTimeZone } from '../format.ts'
+import { browserTimeZone, isKnownTimeZone } from '../format.ts'
 import { useLoad, useMounted, usePageTitle } from '../hooks.ts'
 import { useI18n } from '../i18n/runtime.tsx'
 import { msg, type UiText } from '../i18n/translate.ts'
@@ -21,10 +25,10 @@ export function SettingsPage() {
 
   return (
     <>
-      <h1>{t('Settings')}</h1>
+      <PageHeader title={t('Settings')} lede={t('Manage your profile and booking defaults.')} />
       <section className="panel" aria-labelledby="profile-heading">
         <h2 id="profile-heading">{t('Profile')}</h2>
-        {profile.status === 'loading' && <p role="status">{t('Loading your profile…')}</p>}
+        {profile.status === 'loading' && <PageSkeleton label="Loading your profile…" />}
         {profile.status === 'error' && (
           <div className="alert alert-error" role="alert">
             <p>
@@ -43,7 +47,9 @@ export function SettingsPage() {
         <DisplayNameForm name={me.user.name} />
         <dl className="details">
           <dt>{t('Email')}</dt>
-          <dd>{me.user.email}</dd>
+          <dd className="user-content">
+            <BreakableText>{me.user.email}</BreakableText>
+          </dd>
           <dt>{t('Organization')}</dt>
           <dd>
             {me.organization.name}
@@ -168,26 +174,6 @@ export function suggestHandle(email: string): string {
     .replace(/-+$/g, '')
 }
 
-function canonicalLocale(value: string): string | null {
-  if (!value.trim() || value.length > PROFILE.localeMaxLength) return null
-  try {
-    return Intl.getCanonicalLocales(value.trim())[0] ?? null
-  } catch {
-    return null
-  }
-}
-
-/** "English (United Kingdom)" for "en-GB", in the browser's language. */
-function localeName(locale: string, displayLocale?: string): string | null {
-  const canonical = canonicalLocale(locale)
-  if (!canonical) return null
-  try {
-    return new Intl.DisplayNames(displayLocale, { type: 'language' }).of(canonical) ?? null
-  } catch {
-    return null
-  }
-}
-
 function validateProfile(draft: ProfileDraft): FieldErrors {
   const errors: FieldErrors = {}
   const handle = draft.handle.trim()
@@ -202,8 +188,8 @@ function validateProfile(draft: ProfileDraft): FieldErrors {
   else if (!isKnownTimeZone(draft.timeZone.trim())) {
     errors.timeZone = 'Choose a time zone from the list, e.g. Europe/Berlin.'
   }
-  if (!canonicalLocale(draft.locale)) {
-    errors.locale = 'Enter a language tag such as en, en-GB or pt-BR.'
+  if (!['en', 'zh-CN'].includes(draft.locale)) {
+    errors.locale = 'Choose a supported notification language.'
   }
   return errors
 }
@@ -224,25 +210,29 @@ function profileServerErrors(err: unknown): FieldErrors | null {
     case 'invalid_time_zone':
       return { timeZone: 'This is not a time zone the server knows. Choose one from the list.' }
     case 'invalid_locale':
-      return { locale: 'Enter a language tag such as en, en-GB or pt-BR.' }
+      return { locale: 'Choose a supported notification language.' }
     default:
       return null
   }
 }
 
-const LABELS = { handle: 'Handle', timeZone: 'Time zone', locale: 'Language' }
+const LABELS = { handle: 'Handle', timeZone: 'Time zone', locale: 'Notification language' }
 
 function ProfileForm({ profile, me }: { profile: Profile | null; me: Me }) {
-  const { t, ui, locale: displayLocale } = useI18n()
+  const { t, ui, locale } = useI18n()
 
   const [saved, setSaved] = useState(profile)
   const [baseline, setBaseline] = useState<ProfileDraft>(() =>
     profile
-      ? { handle: profile.handle, timeZone: profile.timeZone, locale: profile.locale }
+      ? {
+          handle: profile.handle,
+          timeZone: profile.timeZone,
+          locale: interfaceLanguage(profile.locale) ?? 'en',
+        }
       : {
           handle: suggestHandle(me.user.email),
           timeZone: browserTimeZone(),
-          locale: browserLocale(),
+          locale,
         },
   )
   const [draft, setDraft] = useState(baseline)
@@ -284,12 +274,16 @@ function ProfileForm({ profile, me }: { profile: Profile | null; me: Me }) {
           body: {
             handle: draft.handle.trim(),
             timeZone: draft.timeZone.trim(),
-            locale: canonicalLocale(draft.locale) ?? draft.locale.trim(),
+            locale: draft.locale,
           },
         }),
       )
       if (!mounted.current) return
-      const next = { handle: result.handle, timeZone: result.timeZone, locale: result.locale }
+      const next = {
+        handle: result.handle,
+        timeZone: result.timeZone,
+        locale: interfaceLanguage(result.locale) ?? 'en',
+      }
       setStatus(saved ? 'Saved.' : 'Profile created. Your booking links are ready.')
       setSaved(result)
       setBaseline(next)
@@ -308,10 +302,8 @@ function ProfileForm({ profile, me }: { profile: Profile | null; me: Me }) {
     setSaving(false)
   }
 
-  const origin = window.location.origin
   const handle = draft.handle.trim()
   const changingHandle = saved !== null && handle !== saved.handle
-  const language = localeName(draft.locale, displayLocale)
 
   return (
     <form className="stack" onSubmit={submit} noValidate>
@@ -330,9 +322,10 @@ function ProfileForm({ profile, me }: { profile: Profile | null; me: Me }) {
             <>
               {t('Your booking links start with')}{' '}
               <span className="mono preview">
-                {origin}/{handle || t('your-handle')}/
+                <BreakableText>{`/${handle || t('your-handle')}/`}</BreakableText>
               </span>
-              {t('. Lowercase letters, digits and hyphens, up to')} {PROFILE.handleMaxLength}.
+              {t('. Lowercase letters, digits and hyphens, up to')} {PROFILE.handleMaxLength}
+              {t('.')}
               {changingHandle && (
                 <strong className="warning">
                   {' '}
@@ -370,24 +363,21 @@ function ProfileForm({ profile, me }: { profile: Profile | null; me: Me }) {
         </Field>
         <Field
           id="locale"
-          label={t('Language')}
+          label={t('Notification language')}
           error={errors.locale}
-          hint={
-            <>
-              {t('A language tag such as en, en-GB or pt-BR')}
-              {language && !errors.locale ? <>: {language}</> : ''}.
-            </>
-          }
+          hint={t(
+            'Language of your own notification emails and calendar invitations. Booking pages and invitee emails use the visitor’s language. Change the interface language separately in the top bar.',
+          )}
         >
           {(props) => (
-            <input
-              {...props}
-              value={draft.locale}
-              autoComplete="off"
-              autoCapitalize="none"
-              spellCheck={false}
-              onChange={(e) => set('locale', e.target.value)}
-            />
+            <select {...props} value={draft.locale} onChange={(e) => set('locale', e.target.value)}>
+              <option value="en" lang="en">
+                English
+              </option>
+              <option value="zh-CN" lang="zh-CN">
+                简体中文
+              </option>
+            </select>
           )}
         </Field>
       </fieldset>

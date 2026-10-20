@@ -148,7 +148,7 @@ describe.each(['en', 'zh-CN'] as const)('table card markup in %s', (language) =>
     // Key prefix, dates and the revoke button shrink; the name and organization may break.
     expectCellKinds(screen.getByRole('table'), {
       userContent: [0, 2],
-      nowrap: [1, 3, 4, 5],
+      nowrap: [1],
       fit: [1, 3, 4, 5, 6],
     })
     expect(screen.getByRole('button', { name: new RegExp(zh ? '撤销' : 'Revoke') })).toBeDefined()

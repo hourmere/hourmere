@@ -12,6 +12,15 @@ import { registerCatalog, translate } from './translate.ts'
 registerCatalog(admin)
 
 describe('Chinese copy and punctuation', () => {
+  it('uses the same account term for calendar and Zoom connection guidance', () => {
+    expect(translate('zh-CN', 'Connect a calendar account to get started.')).toBe(
+      '连接日历账号以开始使用。',
+    )
+    expect(translate('zh-CN', 'Connect a Zoom account to get started.')).toBe(
+      '连接 Zoom 账号以开始使用。',
+    )
+  })
+
   it('uses resource names, personal names and last-use wording in their own contexts', () => {
     expect(translate('zh-CN', 'Name')).toBe('名称')
     expect(translate('zh-CN', 'Name and time zone')).toBe('名称和时区')
@@ -116,12 +125,55 @@ describe('Chinese copy and punctuation', () => {
   it.each([
     ['Edit {0}', '初次通话', '编辑初次通话'],
     ['Edit {0}', 'Intro call', '编辑 Intro call'],
-    ['Copy link for {0}', '初次通话', '复制初次通话的链接'],
-    ['Copy link for {0}', 'Intro call', '复制 Intro call 的链接'],
+    ['Copy link for {0}', '初次通话', '复制链接：初次通话'],
+    ['Copy link for {0}', 'Intro call', '复制链接：Intro call'],
+    ['Add hours on {0}', '星期一', '添加时间段（星期一）'],
+    ['Disconnect {0}', 'ada@example.com', '断开连接：ada@example.com'],
     ['Revoke {0}', 'CI', '撤销 CI'],
     ['Revoke {0}', '持续集成', '撤销持续集成'],
   ] as const)('spaces %s only around Latin values', (key, value, expected) => {
     expect(translate('zh-CN', key, { '0': value })).toBe(expected)
+  })
+
+  it('keeps full-width punctuation unspaced around inserted link text and time zones', () => {
+    expect(translate('zh-CN', 'Share the links of your {0} so people can book you.')).toBe(
+      '分享你的{0}，以便他人预约你。',
+    )
+    expect(
+      translate(
+        'zh-CN',
+        'Reporting time zone: {0}. Days can have 23 or 25 hours when the clocks change.',
+        { '0': 'Europe/London' },
+      ),
+    ).toBe('统计时区：Europe/London。夏令时切换时，一天可能有 23 或 25 小时。')
+    expect(
+      translate(
+        'en',
+        'Reporting time zone: {0}. Days can have 23 or 25 hours when the clocks change.',
+        { '0': 'Europe/London' },
+      ),
+    ).toBe(
+      'Reporting time zone: Europe/London. Days can have 23 or 25 hours when the clocks change.',
+    )
+  })
+
+  // WCAG 2.5.3 Label in Name: a fuller accessible name must contain the button's visible text.
+  it.each([
+    ['Copy link', 'Copy link for {0}'],
+    ['Disconnect', 'Disconnect {0}'],
+    ['Add hours', 'Add hours on {0}'],
+    ['Edit', 'Edit {0}'],
+    ['Revoke', 'Revoke {0}'],
+    ['Move up', 'Move up: {0}'],
+    ['Move down', 'Move down: {0}'],
+    ['Remove question', 'Remove question: {0}'],
+    ['Make default', 'Make default: {0}'],
+    ['Undo removal', 'Undo removal: {0}'],
+    ['Remove', 'Remove override: {0}'],
+  ] as const)('keeps the visible label %s inside its accessible name', (label, template) => {
+    for (const locale of ['en', 'zh-CN'] as const)
+      for (const value of ['Intro call', '初次通话', 'ada@example.com'])
+        expect(translate(locale, template, { '0': value })).toContain(translate(locale, label))
   })
 
   it('composes the cancel summary as a sentence rather than a list', () => {

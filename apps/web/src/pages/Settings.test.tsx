@@ -1,4 +1,4 @@
-import { fireEvent, screen, within } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { Schemas } from '../api/client.ts'
@@ -47,6 +47,71 @@ describe('the profile settings', () => {
     expect(suffix.parentElement?.textContent).toBe(`${ME.organization.name}（个人）`)
   })
 
+  it('offers only supported notification languages and keeps the interface choice separate', async () => {
+    const user = userEvent.setup()
+    const api = profileServer(PROFILE)
+    renderApp('/app/settings')
+    const bookingLanguage = await screen.findByRole<HTMLSelectElement>('combobox', {
+      name: 'Notification language',
+    })
+    expect(bookingLanguage.tagName).toBe('SELECT')
+    expect([...bookingLanguage.options].map((option) => option.value)).toEqual(['en', 'zh-CN'])
+    const explanation = document.getElementById(
+      bookingLanguage.getAttribute('aria-describedby') ?? '',
+    )
+    expect(explanation?.textContent).toBe(
+      'Language of your own notification emails and calendar invitations. Booking pages and invitee emails use the visitor’s language. Change the interface language separately in the top bar.',
+    )
+    await user.selectOptions(bookingLanguage, 'zh-CN')
+    expect(screen.getByLabelText<HTMLSelectElement>('Interface language').value).toBe('en')
+    expect(screen.getByText('Unsaved changes')).toBeDefined()
+    expect(api.to('PUT /api/v1/profile')).toHaveLength(0)
+    await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+    expect(screen.getByLabelText<HTMLSelectElement>('通知语言').value).toBe('zh-CN')
+    expect(explanation?.textContent).toBe(
+      '你收到的通知邮件和日历邀请所用的语言。预约页面和受邀者邮件使用访客的语言。界面语言请在顶栏单独切换。',
+    )
+    await user.click(screen.getByRole('button', { name: '保存个人资料' }))
+    await screen.findByText('已保存。')
+    expect(api.to('PUT /api/v1/profile')[0]?.body).toMatchObject({ locale: 'zh-CN' })
+  })
+
+  it('ends the Chinese handle hint with a full-width sentence mark', async () => {
+    const user = userEvent.setup()
+    profileServer(PROFILE)
+    renderApp('/app/settings')
+    const handle = await screen.findByLabelText('Handle')
+    await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+    const hint = document.getElementById(handle.getAttribute('aria-describedby') ?? '')
+    expect(hint?.textContent).toBe(
+      '你的预约链接以此开头 /ada/。使用小写字母、数字和连字符，最多 40。',
+    )
+  })
+
+  it.each([false, true])(
+    'normalizes a legacy stored locale on any explicit save (handle edited: %s)',
+    async (editHandle) => {
+      const user = userEvent.setup()
+      const requests = profileServer({ ...PROFILE, locale: 'en-GB' })
+      renderApp('/app/settings')
+      const language = await screen.findByRole<HTMLSelectElement>('combobox', {
+        name: 'Notification language',
+      })
+      expect(language.value).toBe('en')
+      expect(screen.queryByText('Unsaved changes')).toBeNull()
+      if (editHandle) await user.type(input('Handle'), '-new')
+      await user.click(screen.getByRole('button', { name: 'Save profile' }))
+      await waitFor(() => expect(requests.to('PUT /api/v1/profile')).toHaveLength(1))
+      await screen.findByText('Saved.')
+      expect(requests.to('PUT /api/v1/profile')[0]?.body).toEqual({
+        handle: editHandle ? 'ada-new' : 'ada',
+        timeZone: PROFILE.timeZone,
+        locale: 'en',
+      })
+      expect(language.value).toBe('en')
+    },
+  )
+
   it('suggests a profile to people without one, and creates it', async () => {
     const user = userEvent.setup()
     const api = profileServer(null, ({ body }) => json(201, { ...PROFILE, ...(body as object) }))
@@ -54,17 +119,15 @@ describe('the profile settings', () => {
     expect(await screen.findByText(/Choose a handle to get booking links/)).toBeDefined()
     // From the email address ada@example.com.
     expect(input('Handle').value).toBe('ada')
-    expect(screen.getByText(`${window.location.origin}/ada/`)).toBeDefined()
+    expect(screen.getByText('/ada/')).toBeDefined()
     await chooseZone('lisbon')
-    await user.clear(input('Language'))
-    await user.type(input('Language'), 'pt-br')
-    expect(screen.getByText(/: Brazilian Portuguese|: Portuguese \(Brazil\)/)).toBeDefined()
+    await user.selectOptions(screen.getByLabelText('Notification language'), 'zh-CN')
     await user.click(screen.getByRole('button', { name: 'Create profile' }))
 
     const status = await screen.findByText('Profile created. Your booking links are ready.')
     expect(document.activeElement).toBe(status)
     expect(api.to('PUT /api/v1/profile').map((c) => c.body)).toEqual([
-      { handle: 'ada', timeZone: 'Europe/Lisbon', locale: 'pt-BR' },
+      { handle: 'ada', timeZone: 'Europe/Lisbon', locale: 'zh-CN' },
     ])
     expect(screen.getByRole('button', { name: 'Save profile' })).toBeDefined()
   })
@@ -113,8 +176,8 @@ describe('the profile settings', () => {
     ],
     [
       json(400, { error: 'invalid_locale', message: 'locale must be a BCP 47 language tag' }),
-      'Language',
-      'Enter a language tag such as en, en-GB or pt-BR.',
+      'Notification language',
+      'Choose a supported notification language.',
     ],
   ])('shows the server refusing it at the field (%#)', async (response, label, message) => {
     const user = userEvent.setup()
@@ -139,8 +202,7 @@ describe('the profile settings', () => {
     await user.clear(input('Handle'))
     await user.type(input('Handle'), 'Ada Lovelace')
     await chooseZone('Nowhere/Land')
-    await user.clear(input('Language'))
-    await user.type(input('Language'), 'not a language')
+    fireEvent.change(screen.getByLabelText('Notification language'), { target: { value: '' } })
     await user.click(screen.getByRole('button', { name: 'Save profile' }))
     const summary = await screen.findByRole('alert')
     expect(
@@ -150,7 +212,7 @@ describe('the profile settings', () => {
     ).toEqual([
       'Handle: Use lowercase letters, digits and hyphens, starting and ending with a letter or digit.',
       'Time zone: Choose a time zone from the list, e.g. Europe/Berlin.',
-      'Language: Enter a language tag such as en, en-GB or pt-BR.',
+      'Notification language: Choose a supported notification language.',
     ])
     expect(api.to('PUT /api/v1/profile')).toHaveLength(0)
   })

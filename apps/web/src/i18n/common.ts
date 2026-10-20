@@ -1,5 +1,6 @@
 // Public/shared UI messages. Admin messages live in a lazy catalog.
 export const common = {
+  'Skip to content': '跳至内容',
   '{0}: {1}': '{0}：{1}',
   '{0} {1}': '{0}{1}',
   'Show more': '展开',

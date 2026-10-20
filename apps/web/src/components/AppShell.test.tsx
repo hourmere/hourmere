@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
+import { lazy, Suspense } from 'react'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
 import { chooseLanguage } from '../i18n/store.ts'
@@ -22,6 +23,25 @@ function shell(path = '/app/event-types') {
 }
 
 describe('admin shell layout', () => {
+  it('keeps navigation and the header mounted while a route chunk suspends', () => {
+    const Pending = lazy(() => new Promise<{ default: () => null }>(() => {}))
+    render(
+      <MemoryRouter initialEntries={['/app/settings']}>
+        <Suspense fallback={<p>Outer loading</p>}>
+          <Routes>
+            <Route element={<AppShell />}>
+              <Route path="*" element={<Pending />} />
+            </Route>
+          </Routes>
+        </Suspense>
+      </MemoryRouter>,
+    )
+    expect(screen.queryByRole('banner')).not.toBeNull()
+    expect(screen.queryByRole('navigation', { name: 'Main' })).not.toBeNull()
+    expect(screen.getByRole('main').querySelector('.page-skeleton')).not.toBeNull()
+    expect(screen.queryByText('Outer loading')).toBeNull()
+  })
+
   it.each(['en', 'zh-CN'] as const)('groups the compact topbar controls in %s', (language) => {
     chooseLanguage(language)
     shell()

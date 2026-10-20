@@ -4,7 +4,11 @@ import { api, type Schemas, unwrap } from '../api/client.ts'
 import { errorMessage } from '../api/errors.ts'
 import { loadProfile } from '../api/resources.ts'
 import { goTo } from '../browser.ts'
+import { BreakableText } from '../components/BreakableText.tsx'
 import { ConfirmAction } from '../components/ConfirmAction.tsx'
+import { EmptyState } from '../components/EmptyState.tsx'
+import { PageHeader } from '../components/PageHeader.tsx'
+import { PageSkeleton } from '../components/PageSkeleton.tsx'
 import { useLoad, useMounted, usePageTitle } from '../hooks.ts'
 import { useI18n } from '../i18n/runtime.tsx'
 import { msg, type UiText } from '../i18n/translate.ts'
@@ -222,12 +226,12 @@ export function CalendarsPage() {
 
   return (
     <div className="page stack">
-      <h1>{t('Calendars')}</h1>
-      <p>
-        {t(
+      <PageHeader
+        title={t('Calendars')}
+        lede={t(
           'Choose calendars whose busy times block bookings, and an owned calendar for new booking events. Existing meetings keep their original calendar when you change the destination.',
         )}
-      </p>
+      />
       {notice && (
         <div className="alert alert-info">
           <p role="status">{ui(notice)}</p>
@@ -241,7 +245,7 @@ export function CalendarsPage() {
           {ui(error)}
         </p>
       )}
-      {state.status === 'loading' && <p role="status">{t('Loading calendars…')}</p>}
+      {state.status === 'loading' && <PageSkeleton label="Loading calendars…" />}
       {state.status === 'error' && (
         <div className="alert alert-error">
           <p role="alert">{ui(state.message)}</p>
@@ -273,7 +277,12 @@ export function CalendarsPage() {
               </p>
             )}
           {state.data.googleEnabled ? (
-            <section className="stack" aria-label={t('Connect Google Calendar')}>
+            <section
+              id="calendar-connection-options"
+              tabIndex={-1}
+              className="stack"
+              aria-label={t('Connect Google Calendar')}
+            >
               <div id="google-calendar-permissions" className="stack">
                 <p>
                   {t(
@@ -330,7 +339,7 @@ export function CalendarsPage() {
               </div>
             </section>
           ) : (
-            <p className="alert alert-info">
+            <p id="calendar-connection-options" tabIndex={-1} className="alert alert-info">
               {t(
                 'Google Calendar is not configured on this Hourmere instance. Contact its administrator to enable it.',
               )}
@@ -367,11 +376,34 @@ export function CalendarsPage() {
             <h2 ref={accountsHeading} tabIndex={-1}>
               {t('Connected accounts')}
             </h2>
-            {state.data.data.length === 0 && <p>{t('No calendar accounts connected yet.')}</p>}
+            {state.data.data.length === 0 && (
+              <EmptyState
+                title={t('No calendar accounts connected yet.')}
+                action={
+                  (state.data.googleEnabled || state.data.microsoftEnabled) && (
+                    <a className="button" href="#calendar-connection-options">
+                      {t('Review calendar connection options')}
+                    </a>
+                  )
+                }
+              >
+                <p>
+                  {t(
+                    state.data.googleEnabled || state.data.microsoftEnabled
+                      ? 'Connect a calendar account to get started.'
+                      : 'Ask your administrator to enable calendar connections.',
+                  )}
+                </p>
+              </EmptyState>
+            )}
             {state.data.data.map((connection) => (
               <article className="panel stack" key={connection.id}>
                 <h3>
-                  {connection.accountEmail ?? t('{0} account', { '0': providerName(connection) })}
+                  {connection.accountEmail ? (
+                    <BreakableText>{connection.accountEmail}</BreakableText>
+                  ) : (
+                    t('{0} account', { '0': providerName(connection) })
+                  )}
                 </h3>
                 <p>
                   {providerName(connection)} {t('Calendar')}

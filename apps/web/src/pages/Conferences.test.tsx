@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { Schemas } from '../api/client.ts'
 import { goTo } from '../browser.ts'
+import { admin } from '../i18n/admin.ts'
 import { fakeApi, json, later, renderApp, signedIn } from '../test/fake-api.tsx'
 
 vi.mock('../browser.ts', () => ({ goTo: vi.fn() }))
@@ -26,6 +27,74 @@ const list = (data = [account], zoomEnabled = true) => ({
 })
 const authUrl = 'https://zoom.us/oauth/authorize?state=synthetic-state'
 describe('separate conference accounts page', () => {
+  it.each([
+    ['en', false, false],
+    ['zh-CN', false, false],
+    ['en', false, true],
+    ['zh-CN', false, true],
+    ['en', true, false],
+    ['zh-CN', true, false],
+    ['en', true, true],
+    ['zh-CN', true, true],
+  ] as const)(
+    'describes only available Zoom authorization actions in %s (identity=%s, meetings=%s)',
+    async (locale, zoomEnabled, zoomMeetingsEnabled) => {
+      const user = userEvent.setup()
+      fakeApi({
+        ...signedIn,
+        'GET /api/v1/conference-connections': () =>
+          json(200, { ...list([], zoomEnabled), zoomMeetingsEnabled }),
+      })
+      renderApp('/app/conferences')
+      await screen.findByText('No Zoom accounts connected.')
+      if (locale === 'zh-CN')
+        await user.selectOptions(screen.getByLabelText('Interface language'), locale)
+      const identityText =
+        locale === 'en'
+          ? 'Connect Zoom requests only basic account identity.'
+          : '“连接 Zoom”仅请求基本账号身份。'
+      const meetingsText =
+        locale === 'en'
+          ? 'Authorize Zoom meetings also requests create, read, update and delete meeting access.'
+          : '“授权 Zoom 会议”还会请求创建、读取、更新和删除会议的权限。'
+      const content = screen.getByRole('main').textContent ?? ''
+      expect(content.includes(identityText)).toBe(zoomEnabled)
+      expect(content.includes(meetingsText)).toBe(zoomEnabled && zoomMeetingsEnabled)
+      // Connection limits, reconnection and disconnection only apply to a configured Zoom.
+      const say = (key: keyof typeof admin) => (locale === 'en' ? key : admin[key])
+      expect(
+        content.includes(
+          say(
+            'Connect up to five Zoom identities at once. Disconnecting frees a place and keeps the connection ID for a future reconnection.',
+          ),
+        ),
+      ).toBe(zoomEnabled)
+      expect(
+        content.includes(
+          say(
+            'New automatic Zoom authorization is disabled on this instance. Existing connections reconnect with their saved permissions.',
+          ),
+        ),
+      ).toBe(zoomEnabled && !zoomMeetingsEnabled)
+      expect(
+        content.includes(
+          say(
+            'Disconnecting removes local credentials. The retained account record keeps its identity and does not revoke the app in Zoom. Deleting your Hourmere account also removes the stored identity details.',
+          ),
+        ),
+      ).toBe(zoomEnabled)
+      expect(
+        screen.queryByRole('button', { name: locale === 'en' ? 'Connect Zoom' : '连接 Zoom' }) !==
+          null,
+      ).toBe(zoomEnabled)
+      expect(
+        screen.queryByRole('button', {
+          name: locale === 'en' ? 'Authorize Zoom meetings' : '授权 Zoom 会议',
+        }) !== null,
+      ).toBe(zoomEnabled && zoomMeetingsEnabled)
+    },
+  )
+
   it('keeps identity literal in both languages, preserves the mounted UI and consumes only known callback outcomes', async () => {
     const user = userEvent.setup()
     const requests = fakeApi({
@@ -35,6 +104,18 @@ describe('separate conference accounts page', () => {
     renderApp('/app/conferences?zoom=connected')
     const heading = await screen.findByRole('heading', { name: 'Settings', level: 2 })
     expect(screen.getByText('Zoom account connected.').getAttribute('role')).toBe('status')
+    expect(screen.getByText('Zoom account connected.').classList.contains('alert-success')).toBe(
+      true,
+    )
+    expect(
+      screen
+        .getByRole('heading', { name: 'Conference accounts', level: 1 })
+        .closest('.page-intro')
+        ?.querySelector('.lede'),
+    ).not.toBeNull()
+    expect(heading.closest('article')?.classList.contains('panel')).toBe(true)
+    expect(heading.closest('article')?.classList.contains('card')).toBe(false)
+    expect(screen.getByText('zoom@example.com').querySelectorAll('wbr')).toHaveLength(2)
     await user.selectOptions(screen.getByRole('combobox', { name: 'Interface language' }), 'zh-CN')
     expect(await screen.findByRole('heading', { name: '会议账号', level: 1 })).toBeDefined()
     expect(screen.getByRole('heading', { name: 'Settings', level: 2 })).toBe(heading)
@@ -62,18 +143,21 @@ describe('separate conference accounts page', () => {
     )
   })
   it('shows disabled, pending and capacity states truthfully without provider actions', async () => {
-    const user = userEvent.setup()
     const requests = fakeApi({
       ...signedIn,
       'GET /api/v1/conference-connections': () =>
         json(200, { ...list([], false), pendingAttempts: 1 }),
     })
     renderApp('/app/conferences?zoom=synthetic-private-provider-message')
-    const button = await screen.findByRole('button', { name: 'Connect Zoom' })
-    expect(button.hasAttribute('disabled')).toBe(true)
+    const notice = await screen.findByText('Zoom connections are not configured on this instance.')
+    expect(notice.classList.contains('alert-info')).toBe(true)
+    expect(screen.queryByRole('button', { name: 'Connect Zoom' })).toBeNull()
+    expect(screen.getByText('No Zoom accounts connected.').closest('.empty')).not.toBeNull()
     expect(screen.getByText(/authorization attempt is pending/)).toBeDefined()
+    expect(screen.queryByText(/Connect up to five Zoom identities/)).toBeNull()
+    expect(screen.queryByText(/New automatic Zoom authorization is disabled/)).toBeNull()
+    expect(screen.queryByText(/Disconnecting removes local credentials/)).toBeNull()
     expect(screen.queryByText('synthetic-private-provider-message')).toBeNull()
-    await user.click(button)
     expect(requests.to('POST /api/v1/conference-connections/zoom/authorize')).toHaveLength(0)
   })
   it('authorizes independently with an empty body and reconnects the expected ID', async () => {
@@ -361,6 +445,9 @@ describe('separate conference accounts page', () => {
       within(screen.getByRole('group')).getByRole('button', { name: 'Disconnect Zoom' }),
     )
     expect(await screen.findByText('No Zoom accounts connected.')).toBeDefined()
+    expect(
+      screen.queryByRole('button', { name: 'Connect Zoom' })?.closest('.empty-actions'),
+    ).toBeTruthy()
     expect(screen.queryByRole('heading', { name: 'Settings', level: 2 })).toBeNull()
     expect(requests.to(`DELETE /api/v1/conference-connections/${account.id}`)[0]?.body).toEqual({})
   })

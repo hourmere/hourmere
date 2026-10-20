@@ -1,5 +1,42 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  'API key usage command': 'API 密钥使用命令',
+  'New API key test command': '新 API 密钥测试命令',
+  'No schedules yet.': '尚无日程。',
+  'Ask your administrator to enable calendar connections.': '请联系管理员启用日历连接。',
+  'Ask your administrator to enable Zoom connections.': '请联系管理员启用 Zoom 连接。',
+  'Set the booking details, questions and availability for this event type.':
+    '设置此活动类型的预约信息、问题和可预约时段。',
+  'Set your weekly hours in the time zone people can book you in.':
+    '设置每周可预约时段及其所在时区。',
+
+  'Manage your profile and booking defaults.': '管理个人资料和预约默认设置。',
+  'Review and manage the meetings you host.': '查看和管理你主持的会议。',
+  'Review meeting details and manage this booking.': '查看会议详情并管理此预约。',
+  'Notification language': '通知语言',
+  'Choose a supported notification language.': '请选择支持的通知语言。',
+  'Language of your own notification emails and calendar invitations. Booking pages and invitee emails use the visitor’s language. Change the interface language separately in the top bar.':
+    '你收到的通知邮件和日历邀请所用的语言。预约页面和受邀者邮件使用访客的语言。界面语言请在顶栏单独切换。',
+  'Connect a calendar account to get started.': '连接日历账号以开始使用。',
+  'Connect an AI app from its MCP settings, or use an API key.':
+    '在 AI 应用的 MCP 设置中连接，或使用 API 密钥。',
+  'Manage API keys': '管理 API 密钥',
+  'Create your first key': '创建第一个密钥',
+  'Give the key a name above, then choose Create key.': '在上方为密钥命名，然后选择“创建密钥”。',
+  'Connect a Zoom account to get started.': '连接 Zoom 账号以开始使用。',
+  'Review calendar connection options': '查看日历连接选项',
+  'Save schedule details and weekly hours here. Save date overrides in their section below.':
+    '在此保存日程信息和每周时段。特定日期安排请在下方对应区域保存。',
+  '. Use Save override to save a date. Select dates to remove, then use Save removals.':
+    '。点击“保存日期安排”保存单个日期；选择要移除的日期后，点击“保存移除”。',
+  'Save removals': '保存移除',
+  'Unsaved date override removals': '日期安排移除尚未保存',
+  'Removal pending save': '移除待保存',
+  'Undo removal: {0}': '撤销移除：{0}',
+  'Undo removal': '撤销移除',
+  'Could not save all removals. Saved removals are kept; try again for the remaining dates. {0}':
+    '未能保存所有移除操作。已保存的移除仍然有效，请重试剩余日期。{0}',
+
   '.': '。',
   '{0}–{1}.': '{0}–{1}。',
   '= {0}.': '= {0}。',
@@ -12,6 +49,7 @@ export const admin = {
     '单独连接你自己的 Zoom 账号，与登录和日历互相独立。身份访问与自动创建会议权限需要分别选择。',
   'Connect Zoom requests only basic account identity. Authorize Zoom meetings also requests create, read, update and delete meeting access. You choose your own connection when configuring automatic meetings.':
     '“连接 Zoom”仅请求基本账号身份。“授权 Zoom 会议”还会请求创建、读取、更新和删除会议的权限。配置自动会议时，由你选择自己的连接。',
+  'Connect Zoom requests only basic account identity.': '“连接 Zoom”仅请求基本账号身份。',
   'Authorize Zoom meetings': '授权 Zoom 会议',
   'Meeting permissions': '会议权限',
   'Identity only': '仅身份访问',
@@ -148,7 +186,7 @@ export const admin = {
   'Add an option': '添加选项',
   'Add at least one option.': '请至少添加一个选项。',
   'Add hours': '添加时间段',
-  'Add hours on {0}': '添加{0}的时间段',
+  'Add hours on {0}': '添加时间段（{0}）',
   'Add hours, or choose unavailable all day.': '请添加时间段，或选择全天不可用。',
   Added: '已添加',
   Address: '地址',
@@ -260,7 +298,7 @@ export const admin = {
   'Continuing…': '正在继续…',
   'Copy command': '复制命令',
   'Copy key': '复制密钥',
-  'Copy link for {0}': '复制{0}的链接',
+  'Copy link for {0}': '复制链接：{0}',
   'Copy your new key “{name}”': '复制新密钥“{name}”',
   'Could not cancel the booking. {0}': '无法取消预约。{0}',
   'Could not check your session. Please reload.': '无法检查登录状态。请刷新页面。',
@@ -319,7 +357,7 @@ export const admin = {
   Description: '描述',
   Disabled: '已禁用',
   Disconnect: '断开连接',
-  'Disconnect {0}': '断开 {0}',
+  'Disconnect {0}': '断开连接：{0}',
   'Disconnect {0}? This deletes stored credentials and local calendar data. You can also remove Hourmere’s access in {1} account settings.':
     '断开 {0}？此操作将删除已保存的凭据和本地日历数据。你也可以在 {1} 账号设置中移除 Hourmere 的访问权限。',
   'Disconnect account': '断开账号连接',
@@ -537,7 +575,7 @@ export const admin = {
   'Set your availability': '设置可预约时间',
   'Set your time zone': '设置时区',
   'Set your weekly hours': '设置每周时间段',
-  'Share the links of your': '分享你的',
+  'Share the links of your {0} so people can book you.': '分享你的{0}，以便他人预约你。',
   'Short text': '短文本',
   'Show more bookings': '显示更多预约',
   'Showing {0} bookings.': '共显示 {0} 个预约。',
@@ -551,7 +589,6 @@ export const admin = {
   'Sign-in did not work{0}. Please try again.': '登录失败{0}。请重试。',
   'Sign-in was cancelled.': '已取消登录。',
   'Signed in as': '当前登录账号',
-  'so people can book you.': '，以便他人预约你。',
   'Start times every': '开始时间间隔',
   'Store it somewhere safe, such as a password manager or your agent’s secret settings. If you lose it, revoke it and create a new one.':
     '请将密钥保存在安全的地方，例如密码管理器或代理的密钥设置中。若密钥丢失，请撤销并创建新密钥。',
@@ -725,7 +762,6 @@ export const admin = {
   'Please check the form': '请检查表单',
   Settings: '设置',
   'Sign out': '退出登录',
-  'Skip to content': '跳至内容',
   'Use at most {0} characters (now {1}).': '最多 {0} 个字符（当前 {1} 个）。',
   'Use one line of text without special control characters.':
     '请使用单行文字，且不含特殊控制字符。',
@@ -752,9 +788,8 @@ export const admin = {
   'Booking activity is available to personal account owners and team owners or admins. Your current team role does not permit this report.':
     '个人账号所有者，以及团队所有者或管理员可查看预约统计。你当前的团队角色无权查看此统计。',
   to: '至',
-  'Reporting time zone:': '统计时区：',
-  '. Days can have 23 or 25 hours when the clocks change.':
-    '。夏令时切换时，一天可能有 23 或 25 小时。',
+  'Reporting time zone: {0}. Days can have 23 or 25 hours when the clocks change.':
+    '统计时区：{0}。夏令时切换时，一天可能有 23 或 25 小时。',
   'Bookings created': '新建预约',
   Reschedules: '改期',
   Cancellations: '取消',
