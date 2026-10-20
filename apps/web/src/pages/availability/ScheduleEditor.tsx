@@ -5,6 +5,8 @@ import { errorMessage } from '../../api/errors.ts'
 import { isNotFound, loadProfile, loadSchedules, type Schedule } from '../../api/resources.ts'
 import { ConfirmAction } from '../../components/ConfirmAction.tsx'
 import { ErrorSummary, Field, type FieldErrors } from '../../components/forms.tsx'
+import { PageHeader } from '../../components/PageHeader.tsx'
+import { PageSkeleton } from '../../components/PageSkeleton.tsx'
 import { TimeZonePicker } from '../../components/TimeZonePicker.tsx'
 import { flash, useFlash } from '../../flash.ts'
 import { browserTimeZone } from '../../format.ts'
@@ -77,11 +79,11 @@ function ScheduleEditor({ id }: { id: string | undefined }) {
   const [state, reload] = useLoad(load)
   usePageTitle(id === undefined ? 'New schedule' : 'Edit schedule')
 
-  if (state.status === 'loading') return <p role="status">{t('Loading…')}</p>
+  if (state.status === 'loading') return <PageSkeleton />
   if (state.status === 'error') {
     return (
       <>
-        <h1>{id === undefined ? t('New schedule') : t('Edit schedule')}</h1>
+        <PageHeader title={id === undefined ? t('New schedule') : t('Edit schedule')} />
         <div className="alert alert-error" role="alert">
           <p>
             {t('Could not load the schedule.')} {ui(state.message)}
@@ -210,7 +212,16 @@ function ScheduleForm({ schedule, schedules, defaultTimeZone }: Loaded) {
       <p className="breadcrumb">
         <Link to={PATHS.availability}>{t('Availability')}</Link>
       </p>
-      <h1>{saved ? text('Edit “{0}”', { '0': saved.name }) : t('New schedule')}</h1>
+      <PageHeader
+        title={saved ? text('Edit “{0}”', { '0': saved.name }) : t('New schedule')}
+        lede={
+          saved
+            ? t(
+                'Save schedule details and weekly hours here. Save date overrides in their section below.',
+              )
+            : t('Set your weekly hours in the time zone people can book you in.')
+        }
+      />
       {saved && (
         <DefaultStatus
           schedule={saved}

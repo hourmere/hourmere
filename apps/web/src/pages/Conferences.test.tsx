@@ -35,6 +35,18 @@ describe('separate conference accounts page', () => {
     renderApp('/app/conferences?zoom=connected')
     const heading = await screen.findByRole('heading', { name: 'Settings', level: 2 })
     expect(screen.getByText('Zoom account connected.').getAttribute('role')).toBe('status')
+    expect(screen.getByText('Zoom account connected.').classList.contains('alert-success')).toBe(
+      true,
+    )
+    expect(
+      screen
+        .getByRole('heading', { name: 'Conference accounts', level: 1 })
+        .closest('.page-intro')
+        ?.querySelector('.lede'),
+    ).not.toBeNull()
+    expect(heading.closest('article')?.classList.contains('panel')).toBe(true)
+    expect(heading.closest('article')?.classList.contains('card')).toBe(false)
+    expect(screen.getByText('zoom@example.com').querySelectorAll('wbr')).toHaveLength(2)
     await user.selectOptions(screen.getByRole('combobox', { name: 'Interface language' }), 'zh-CN')
     expect(await screen.findByRole('heading', { name: '会议账号', level: 1 })).toBeDefined()
     expect(screen.getByRole('heading', { name: 'Settings', level: 2 })).toBe(heading)
@@ -62,18 +74,18 @@ describe('separate conference accounts page', () => {
     )
   })
   it('shows disabled, pending and capacity states truthfully without provider actions', async () => {
-    const user = userEvent.setup()
     const requests = fakeApi({
       ...signedIn,
       'GET /api/v1/conference-connections': () =>
         json(200, { ...list([], false), pendingAttempts: 1 }),
     })
     renderApp('/app/conferences?zoom=synthetic-private-provider-message')
-    const button = await screen.findByRole('button', { name: 'Connect Zoom' })
-    expect(button.hasAttribute('disabled')).toBe(true)
+    const notice = await screen.findByText('Zoom connections are not configured on this instance.')
+    expect(notice.classList.contains('alert-info')).toBe(true)
+    expect(screen.queryByRole('button', { name: 'Connect Zoom' })).toBeNull()
+    expect(screen.getByText('No Zoom accounts connected.').closest('.empty')).not.toBeNull()
     expect(screen.getByText(/authorization attempt is pending/)).toBeDefined()
     expect(screen.queryByText('synthetic-private-provider-message')).toBeNull()
-    await user.click(button)
     expect(requests.to('POST /api/v1/conference-connections/zoom/authorize')).toHaveLength(0)
   })
   it('authorizes independently with an empty body and reconnects the expected ID', async () => {
@@ -361,6 +373,9 @@ describe('separate conference accounts page', () => {
       within(screen.getByRole('group')).getByRole('button', { name: 'Disconnect Zoom' }),
     )
     expect(await screen.findByText('No Zoom accounts connected.')).toBeDefined()
+    expect(
+      screen.queryByRole('button', { name: 'Connect Zoom' })?.closest('.empty-actions'),
+    ).toBeTruthy()
     expect(screen.queryByRole('heading', { name: 'Settings', level: 2 })).toBeNull()
     expect(requests.to(`DELETE /api/v1/conference-connections/${account.id}`)[0]?.body).toEqual({})
   })

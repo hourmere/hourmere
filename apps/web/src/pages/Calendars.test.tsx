@@ -34,6 +34,33 @@ const list = (data = [connection], googleEnabled = true, microsoftEnabled = fals
 const authorizationUrl = 'https://accounts.google.com/o/oauth2/v2/auth?state=fake-state'
 
 describe('the calendars page', () => {
+  it('uses a shared introduction and an empty state leading to available connection options', async () => {
+    fakeApi({ ...signedIn, ...profile(), ...list([]) })
+    renderApp('/app/calendars')
+    await screen.findByText('No calendar accounts connected yet.')
+    expect(
+      screen
+        .getByRole('heading', { name: 'Calendars', level: 1 })
+        .closest('.page-intro')
+        ?.querySelector('.lede'),
+    ).not.toBeNull()
+    const action = screen.getByRole('link', { name: 'Review calendar connection options' })
+    expect(action.closest('.empty-actions')).not.toBeNull()
+    expect(action.getAttribute('href')).toBe('#calendar-connection-options')
+    expect(
+      document
+        .querySelector('#calendar-connection-options')
+        ?.contains(screen.getByRole('button', { name: 'Connect Google Calendar' })),
+    ).toBe(true)
+  })
+  it('wraps account emails at address separators while preserving the visible address', async () => {
+    fakeApi({ ...signedIn, ...profile(), ...list() })
+    renderApp('/app/calendars')
+    const heading = await screen.findByRole('heading', { name: 'calendar@example.com' })
+    expect(heading.textContent).toBe('calendar@example.com')
+    expect(heading.querySelectorAll('wbr')).toHaveLength(2)
+  })
+
   it.each([404, 503, 'network'] as const)(
     'keeps calendar controls available after an unrelated profile failure: %s',
     async (failure) => {

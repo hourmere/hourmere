@@ -75,7 +75,7 @@ describe('responsive shell and shared CSS contract', () => {
       }
     }
     // Component container queries retain their own content-driven thresholds.
-    expect(styles).toContain('@container data-table (width < 640px)')
+    expect(styles).toContain('@container data-table (max-width: 639.98px)')
   })
 
   it('gates every hover selector behind actual hover capability', () => {
@@ -114,7 +114,9 @@ describe('responsive shell and shared CSS contract', () => {
     expect(rule('.topbar')).toContain('position: static;')
     expect(rule('.topbar', '@media (min-width: 640px)')).toContain('position: sticky;')
     expect(rule('.topbar', '@media (max-height: 500px)')).toContain('position: static;')
-    expect(rule('html')).toContain('scroll-padding-top: var(--topbar-height);')
+    expect(rule('html')).toContain(
+      'scroll-padding-top: calc(var(--topbar-height) + 1px + var(--space-2));',
+    )
     expect(rule('.topbar-inner')).toContain('display: flex;')
     expect(rule('.topbar-inner')).not.toContain('flex-wrap: wrap;')
     expect(rule('.account-email')).toContain('display: none;')
@@ -167,20 +169,23 @@ describe('responsive shell and shared CSS contract', () => {
   })
 
   it('respects the body text preference and keeps every editable field at least 16px', () => {
-    expect(rule('body')).toContain('font-size: 1rem;')
+    expect(rule('body')).toContain('font-size: var(--text-md);')
     for (const selector of [
       'input,\nselect,\ntextarea',
       'input.mono,\nselect.mono,\ntextarea.mono',
       '.language-picker select',
     ]) {
-      expect(rule(selector)).toContain('font-size: max(16px, 1rem);')
+      expect(rule(selector)).toContain('font-size: max(16px, var(--text-md));')
     }
     expect(rule('input,\nselect,\ntextarea')).toContain('min-width: 0;')
   })
 
   it('gives compact buttons, checkbox labels and small links 44px touch targets', () => {
     const coarse = '@media (pointer: coarse)'
-    const controls = rule('.button-small,\n  .checkbox,\n  label.choice', coarse)
+    const controls = rule(
+      '.button,\n  .button-small,\n  input:not([type="checkbox"]):not([type="radio"]),\n  select,\n  .sidenav a,\n  .tabs a,\n  .topbar .brand,\n  .checkbox,\n  label.choice',
+      coarse,
+    )
     expect(controls).toContain('min-height: 44px;')
     expect(controls).toContain('min-width: 44px;')
     const links = rule(

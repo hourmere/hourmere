@@ -126,12 +126,17 @@ describe('the API keys page', () => {
           timeStyle: 'short',
         }).format(new Date(iso))
         expect(time?.getAttribute('title')).toBe(full)
-        expect(time?.textContent).toBe(
-          iso === existing.lastRequest
-            ? full
-            : new Intl.DateTimeFormat(locale, { calendar: 'gregory', dateStyle: 'medium' }).format(
-                new Date(iso),
-              ),
+        expect(time?.classList.contains('date-time')).toBe(true)
+        expect(time?.closest('td')?.classList.contains('nowrap')).toBe(false)
+        expect([...(time?.querySelectorAll('span') ?? [])].map((part) => part.textContent)).toEqual(
+          [
+            new Intl.DateTimeFormat(locale, { calendar: 'gregory', dateStyle: 'medium' }).format(
+              new Date(iso),
+            ),
+            new Intl.DateTimeFormat(locale, { calendar: 'gregory', timeStyle: 'short' }).format(
+              new Date(iso),
+            ),
+          ],
         )
       }
     },
@@ -155,6 +160,20 @@ describe('the API keys page', () => {
     keyServer([])
     renderApp('/app/api-keys')
     expect(await screen.findByText('You have no API keys yet.')).toBeDefined()
+    expect(
+      screen
+        .getByRole('heading', { name: 'API keys', level: 1 })
+        .closest('.page-intro')
+        ?.querySelector('.lede'),
+    ).not.toBeNull()
+    const action = screen.getByRole('link', { name: 'Create your first key' })
+    expect(action.closest('.empty-actions')).not.toBeNull()
+    expect(action.getAttribute('href')).toBe('#key-name')
+    expect(document.querySelector(action.getAttribute('href') as string)).toBe(
+      screen.getByLabelText('Name'),
+    )
+    const command = screen.getByRole('button', { name: 'Copy command' }).closest('.code-block')
+    expect(command?.querySelector('pre')?.getAttribute('data-layout-scroll')).toBe('horizontal')
   })
 
   it('creates a key and shows its secret exactly once', async () => {

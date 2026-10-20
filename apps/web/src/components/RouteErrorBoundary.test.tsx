@@ -36,6 +36,9 @@ describe('route error recovery', () => {
       )
       const alert = screen.getByRole('alert')
       expect(document.documentElement.lang).toBe(locale)
+      expect(screen.getByRole('button', { name: label }).parentElement?.className).toBe(
+        'form-actions',
+      )
       expect(alert.querySelector('.logo img')).not.toBeNull()
       expect(screen.getByText(explanation).tagName).toBe('P')
       expect(screen.getByRole('link', { name: home }).getAttribute('href')).toBe('/app')

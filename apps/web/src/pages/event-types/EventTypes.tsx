@@ -7,7 +7,11 @@ import {
   loadSchedules,
   type Profile,
 } from '../../api/resources.ts'
+import { BreakableText } from '../../components/BreakableText.tsx'
 import { CopyButton } from '../../components/CopyButton.tsx'
+import { EmptyState } from '../../components/EmptyState.tsx'
+import { PageHeader } from '../../components/PageHeader.tsx'
+import { PageSkeleton } from '../../components/PageSkeleton.tsx'
 import { useFlash } from '../../flash.ts'
 import { formatMinutes } from '../../format.ts'
 import { useLoad, usePageTitle } from '../../hooks.ts'
@@ -40,20 +44,19 @@ export function EventTypesPage() {
 
   return (
     <>
-      <div className="page-header">
-        <h1>{t('Event types')}</h1>
+      <PageHeader
+        title={t('Event types')}
+        lede={t('The kinds of meetings people can book with you, each with its own link.')}
+      >
         <Link to={PATHS.newEventType} className="button button-primary">
           {t('New event type')}
         </Link>
-      </div>
-      <p className="lede">
-        {t('The kinds of meetings people can book with you, each with its own link.')}
-      </p>
+      </PageHeader>
       <p className="flash" role="status">
         {uiText(message)}
       </p>
 
-      {state.status === 'loading' && <p role="status">{t('Loading event types…')}</p>}
+      {state.status === 'loading' && <PageSkeleton label="Loading event types…" />}
       {state.status === 'error' && (
         <div className="alert alert-error" role="alert">
           <p>
@@ -68,12 +71,10 @@ export function EventTypesPage() {
         <>
           <SetupHints me={me} profile={state.data.profile} hasSchedule={state.data.hasSchedule} />
           {state.data.eventTypes.length === 0 ? (
-            <div className="empty">
-              <p>{t('You have no event types yet. Create one to start taking bookings.')}</p>
-              <p>
-                <Link to={PATHS.newEventType}>{t('Create your first event type')}</Link>
-              </p>
-            </div>
+            <EmptyState
+              title={t('You have no event types yet. Create one to start taking bookings.')}
+              action={<Link to={PATHS.newEventType}>{t('Create your first event type')}</Link>}
+            />
           ) : (
             <EventTypeTable
               eventTypes={state.data.eventTypes}
@@ -166,7 +167,7 @@ function EventTypeTable({
                   ? publicPageUrl(profile.handle, e.slug)
                   : null
             return (
-              <tr key={e.id}>
+              <tr key={e.id} className={!e.isActive ? 'event-type-inactive' : undefined}>
                 <th scope="row" data-label={t('Title')} className="user-content">
                   <Link to={eventTypePath(e.id)}>{e.title}</Link>
                 </th>
@@ -180,7 +181,7 @@ function EventTypeTable({
                     {url ? (
                       <span className="booking-link">
                         <a href={url} target="_blank" rel="noreferrer" className="mono">
-                          {url.replace(/^https?:\/\//, '')}
+                          <BreakableText>{new URL(url).pathname}</BreakableText>
                           <span className="visually-hidden"> {t('(opens in a new tab)')}</span>
                         </a>
                         <CopyButton

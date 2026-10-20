@@ -13,6 +13,7 @@ import { Navigate, Outlet, useLocation } from 'react-router'
 import { signOut as endSession } from './api/auth.ts'
 import { api, onUnauthorized, type Schemas } from './api/client.ts'
 import { errorMessage, requestError } from './api/errors.ts'
+import { AdminLoading } from './components/AdminLoading.tsx'
 import { admin } from './i18n/admin.ts'
 import { AccountLanguage, useI18n } from './i18n/runtime.tsx'
 import type { UiText } from './i18n/translate.ts'
@@ -257,7 +258,7 @@ export function RequireSession() {
 
   const { state, reload } = useSession()
   const location = useLocation()
-  if (state.status === 'loading') return <PageStatus>{t('Loading…')}</PageStatus>
+  if (state.status === 'loading') return <AdminLoading />
   if (state.status === 'error') {
     return (
       <div className="page-status">

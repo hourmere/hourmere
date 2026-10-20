@@ -277,7 +277,7 @@ function QuestionCard({
                     />
                     <button
                       type="button"
-                      className="button button-small"
+                      className="button button-small button-icon"
                       onClick={() => removeOption(optionIndex)}
                       aria-label={t('Remove option {0}{1}, of question {2}', {
                         '0': optionIndex + 1,
@@ -285,7 +285,7 @@ function QuestionCard({
                         '2': number,
                       })}
                     >
-                      {t('Remove')}
+                      <span aria-hidden="true">×</span>
                     </button>
                   </div>
                 </li>

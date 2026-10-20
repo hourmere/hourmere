@@ -1,5 +1,6 @@
 // Public/shared UI messages. Admin messages live in a lazy catalog.
 export const common = {
+  'Skip to content': '跳至内容',
   'Something went wrong': '出错了',
   Reload: '重新加载',
   'Scheduling page powered by Hourmere — pick a time that works.':

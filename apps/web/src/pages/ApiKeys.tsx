@@ -11,6 +11,9 @@ import {
 } from '../api/auth.ts'
 import { errorMessage, RequestError } from '../api/errors.ts'
 import { CopyButton } from '../components/CopyButton.tsx'
+import { EmptyState } from '../components/EmptyState.tsx'
+import { PageHeader } from '../components/PageHeader.tsx'
+import { PageSkeleton } from '../components/PageSkeleton.tsx'
 import { useLoad, usePageTitle } from '../hooks.ts'
 import { useI18n } from '../i18n/runtime.tsx'
 import { msg, type UiText } from '../i18n/translate.ts'
@@ -26,19 +29,21 @@ const EXPIRY_OPTIONS = [
   { value: String(365 * DAY), label: 'In 1 year' },
 ] as const
 
-function formatDate(iso: string, locale: string | undefined, withTime = false) {
+function formatDate(iso: string, locale: string | undefined) {
   const date = new Date(iso)
   const full = new Intl.DateTimeFormat(locale, {
     calendar: 'gregory',
     dateStyle: 'medium',
     timeStyle: 'short',
   })
-  const format = withTime
-    ? full
-    : new Intl.DateTimeFormat(locale, { calendar: 'gregory', dateStyle: 'medium' })
   return (
-    <time dateTime={iso} title={full.format(date)}>
-      {format.format(date)}
+    <time className="date-time" dateTime={iso} title={full.format(date)}>
+      <span>
+        {new Intl.DateTimeFormat(locale, { calendar: 'gregory', dateStyle: 'medium' }).format(date)}
+      </span>{' '}
+      <span>
+        {new Intl.DateTimeFormat(locale, { calendar: 'gregory', timeStyle: 'short' }).format(date)}
+      </span>
     </time>
   )
 }
@@ -65,12 +70,12 @@ export function ApiKeysPage() {
 
   return (
     <>
-      <h1>{t('API keys')}</h1>
-      <p className="lede">
-        {t(
+      <PageHeader
+        title={t('API keys')}
+        lede={t(
           'API keys let AI agents and scripts use Hourmere for you, through the same API as this app. Each key acts in one organization and can do anything you can do there, so treat it like a password.',
         )}
-      </p>
+      />
 
       {created ? (
         <NewKey
@@ -99,7 +104,7 @@ export function ApiKeysPage() {
         <p className="copy-status" role="status">
           {ui(status)}
         </p>
-        {keys.status === 'loading' && <p role="status">{t('Loading keys…')}</p>}
+        {keys.status === 'loading' && <PageSkeleton label="Loading keys…" />}
         {keys.status === 'error' && (
           <div className="alert alert-error" role="alert">
             <p>
@@ -112,7 +117,16 @@ export function ApiKeysPage() {
         )}
         {keys.status === 'ready' &&
           (keys.data.keys.length === 0 ? (
-            <p className="muted">{t('You have no API keys yet.')}</p>
+            <EmptyState
+              title={t('You have no API keys yet.')}
+              action={
+                <a className="button" href="#key-name">
+                  {t('Create your first key')}
+                </a>
+              }
+            >
+              <p>{t('Give the key a name above, then choose Create key.')}</p>
+            </EmptyState>
           ) : (
             <KeyTable
               keys={keys.data.keys}
@@ -371,19 +385,19 @@ function KeyTable({
               <td data-label={t('Organization')} className="user-content">
                 <div className="table-value">{organizationOf(key, organizations, t)}</div>
               </td>
-              <td data-label={t('Created')} className="fit nowrap">
+              <td data-label={t('Created')} className="fit">
                 <div className="table-value">{formatDate(key.createdAt, displayLocale)}</div>
               </td>
-              <td data-label={t('Last used')} className="fit nowrap">
+              <td data-label={t('Last used')} className="fit">
                 <div className="table-value">
                   {key.lastRequest ? (
-                    formatDate(key.lastRequest, displayLocale, true)
+                    formatDate(key.lastRequest, displayLocale)
                   ) : (
                     <span className="muted">{t('Never used')}</span>
                   )}
                 </div>
               </td>
-              <td data-label={t('Expires')} className="fit nowrap">
+              <td data-label={t('Expires')} className="fit">
                 <div className="table-value">
                   {key.expiresAt === null ? (
                     <span className="muted">{t('Never')}</span>

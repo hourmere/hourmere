@@ -3,8 +3,11 @@ import { Link, useParams } from 'react-router'
 import { api, type Schemas, unwrap } from '../../api/client.ts'
 import { errorMessage, RequestError } from '../../api/errors.ts'
 import { type Booking, isNotFound, loadProfile } from '../../api/resources.ts'
+import { BreakableText } from '../../components/BreakableText.tsx'
 import { ConferenceNotice } from '../../components/ConferenceNotice.tsx'
 import { Field } from '../../components/forms.tsx'
+import { PageHeader } from '../../components/PageHeader.tsx'
+import { PageSkeleton } from '../../components/PageSkeleton.tsx'
 import { useFlash } from '../../flash.ts'
 import { zoned } from '../../format.ts'
 import { useLoad, usePageTitle } from '../../hooks.ts'
@@ -85,11 +88,11 @@ function BookingDetail({ id }: { id: string }) {
   const [state, reload] = useLoad(load)
   usePageTitle('Booking')
 
-  if (state.status === 'loading') return <p role="status">{t('Loading the booking…')}</p>
+  if (state.status === 'loading') return <PageSkeleton label="Loading the booking…" />
   if (state.status === 'error') {
     return (
       <>
-        <h1>{t('Booking')}</h1>
+        <PageHeader title={t('Booking')} />
         <div className="alert alert-error" role="alert">
           <p>
             {t('Could not load the booking.')} {ui(state.message)}
@@ -145,21 +148,43 @@ function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loa
       <p className="breadcrumb">
         <Link to={PATHS.bookings}>{t('Bookings')}</Link>
       </p>
-      <h1>
-        {ui(bookingTitle(booking))}
-        {cancelled && (
-          <span className={`badge heading-badge${rescheduled ? '' : ' badge-danger'}`}>
-            {rescheduled ? t('Rescheduled') : t('Cancelled')}
-          </span>
-        )}
-      </h1>
+      <PageHeader
+        title={
+          <>
+            {ui(bookingTitle(booking))}
+            {cancelled && (
+              <span className={`badge heading-badge${rescheduled ? '' : ' badge-danger'}`}>
+                {rescheduled ? t('Rescheduled') : t('Cancelled')}
+              </span>
+            )}
+          </>
+        }
+        lede={t('Review meeting details and manage this booking.')}
+      />
       <p className="flash" role="status" tabIndex={-1} ref={statusRef}>
         {ui(status)}
       </p>
 
+      {!cancelled && !started && <RescheduleBooking booking={booking} timeZone={timeZone} />}
+
+      {!cancelled && !started && (
+        <CancelBooking
+          booking={booking}
+          onCancelled={(updated) => {
+            updateBooking(updated)
+            setStatus('The booking is cancelled.')
+            statusRef.current?.focus()
+          }}
+          onAlreadyCancelled={(message) => {
+            setStatus(message)
+            statusRef.current?.focus()
+          }}
+        />
+      )}
+
       <ConferenceNotice key={booking.id} booking={booking} host onChange={updateBooking} />
       <CalendarCopyNotice key={`copy:${booking.id}`} booking={booking} onChange={updateBooking} />
-      <section className="panel" aria-labelledby="when-heading">
+      <section className="panel user-content" aria-labelledby="when-heading">
         <h2 id="when-heading">{t('When')}</h2>
         <p className="when">
           <time dateTime={booking.start}>{format.longDate(booking.start)}</time>
@@ -184,7 +209,7 @@ function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loa
                     {t(': ')}
                     {location.href ? (
                       <a href={location.href} target="_blank" rel="noreferrer">
-                        {location.detail}
+                        <BreakableText>{location.detail}</BreakableText>
                       </a>
                     ) : (
                       location.detail
@@ -239,7 +264,7 @@ function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loa
         </dl>
       </section>
 
-      <section className="panel" aria-labelledby="people-heading">
+      <section className="panel user-content" aria-labelledby="people-heading">
         <h2 id="people-heading">{t('People')}</h2>
         <dl className="details">
           <dt>{t('Invitee')}</dt>
@@ -248,7 +273,9 @@ function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loa
               <>
                 {invitee.name}
                 <br />
-                <a href={`mailto:${invitee.email}`}>{invitee.email}</a>
+                <a href={`mailto:${invitee.email}`}>
+                  <BreakableText>{invitee.email}</BreakableText>
+                </a>
                 <br />
                 <span className="muted">
                   {t('Time zone: {zone}', { zone: invitee.timeZone.replaceAll('_', ' ') })}
@@ -304,23 +331,6 @@ function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loa
           </dl>
         )}
       </section>
-
-      {!cancelled && !started && <RescheduleBooking booking={booking} timeZone={timeZone} />}
-
-      {!cancelled && !started && (
-        <CancelBooking
-          booking={booking}
-          onCancelled={(updated) => {
-            updateBooking(updated)
-            setStatus('The booking is cancelled.')
-            statusRef.current?.focus()
-          }}
-          onAlreadyCancelled={(message) => {
-            setStatus(message)
-            statusRef.current?.focus()
-          }}
-        />
-      )}
     </>
   )
 }

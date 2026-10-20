@@ -1,5 +1,38 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  'Ask your administrator to enable Zoom connections.': '请联系管理员启用 Zoom 连接。',
+  'Set the booking details, questions and availability for this event type.':
+    '设置此活动类型的预约信息、问题和可预约时段。',
+  'Set your weekly hours in the time zone people can book you in.':
+    '设置每周可预约时段及其所在时区。',
+
+  'Manage your profile and booking defaults.': '管理个人资料和预约默认设置。',
+  'Review and manage the meetings you host.': '查看和管理你主持的会议。',
+  'Review meeting details and manage this booking.': '查看会议详情并管理此预约。',
+  'Booking language': '预约语言',
+  'Choose a supported booking language.': '请选择支持的预约语言。',
+  'Default language for your booking pages and emails. Change the interface language separately in the top bar.':
+    '预约页面和邮件的默认语言。界面语言请在顶栏单独切换。',
+  'Connect a calendar account to get started.': '连接日历账户以开始使用。',
+  'Connect an AI app from its MCP settings, or use an API key.':
+    '在 AI 应用的 MCP 设置中连接，或使用 API 密钥。',
+  'Manage API keys': '管理 API 密钥',
+  'Create your first key': '创建第一个密钥',
+  'Give the key a name above, then choose Create key.': '在上方为密钥命名，然后选择“创建密钥”。',
+  'Connect a Zoom account to get started.': '连接 Zoom 账户以开始使用。',
+  'Review calendar connection options': '查看日历连接选项',
+  'Save schedule details and weekly hours here. Save date overrides in their section below.':
+    '在此保存日程信息和每周时段。特定日期安排请在下方对应区域保存。',
+  '. Use Save override to save a date. Select dates to remove, then use Save removals.':
+    '。点击“保存日期安排”保存单个日期；选择要移除的日期后，点击“保存移除”。',
+  'Save removals': '保存移除',
+  'Unsaved date override removals': '日期安排移除尚未保存',
+  'Removal pending save': '移除待保存',
+  'Undo removal: {0}': '撤销移除：{0}',
+  'Undo removal': '撤销移除',
+  'Could not save all removals. Saved removals are kept; try again for the remaining dates. {0}':
+    '未能保存所有移除操作。已保存的移除仍然有效，请重试剩余日期。{0}',
+
   '.': '。',
   '{0}–{1}.': '{0}–{1}。',
   '= {0}.': '= {0}。',
@@ -725,7 +758,6 @@ export const admin = {
   'Please check the form': '请检查表单',
   Settings: '设置',
   'Sign out': '退出登录',
-  'Skip to content': '跳至内容',
   'Use at most {0} characters (now {1}).': '最多 {0} 个字符（当前 {1} 个）。',
   'Use one line of text without special control characters.':
     '请使用单行文字，且不含特殊控制字符。',

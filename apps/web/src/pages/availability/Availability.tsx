@@ -3,6 +3,8 @@ import { Link } from 'react-router'
 import { api, unwrap } from '../../api/client.ts'
 import { errorMessage } from '../../api/errors.ts'
 import { loadSchedules, type Schedule } from '../../api/resources.ts'
+import { PageHeader } from '../../components/PageHeader.tsx'
+import { PageSkeleton } from '../../components/PageSkeleton.tsx'
 import { useFlash } from '../../flash.ts'
 import { useLoad, usePageTitle } from '../../hooks.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
@@ -20,22 +22,21 @@ export function AvailabilityPage() {
 
   return (
     <>
-      <div className="page-header">
-        <h1>{t('Availability')}</h1>
+      <PageHeader
+        title={t('Availability')}
+        lede={t(
+          'Schedules are the weekly hours people can book you in. Event types use your default schedule unless you choose another one for them.',
+        )}
+      >
         <Link to={PATHS.newSchedule} className="button button-primary">
           {t('New schedule')}
         </Link>
-      </div>
-      <p className="lede">
-        {t(
-          'Schedules are the weekly hours people can book you in. Event types use your default schedule unless you choose another one for them.',
-        )}
-      </p>
+      </PageHeader>
       <p className="flash" role="status">
         {uiText(status || message)}
       </p>
 
-      {state.status === 'loading' && <p role="status">{t('Loading schedules…')}</p>}
+      {state.status === 'loading' && <PageSkeleton label="Loading schedules…" />}
       {state.status === 'error' && (
         <div className="alert alert-error" role="alert">
           <p>

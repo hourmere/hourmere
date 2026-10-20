@@ -50,10 +50,10 @@ describe('responsive table CSS contract', () => {
     expect(rule(styles, '.table .confirm')).toContain('white-space: normal;')
     // User-content columns share the remaining width in fixed proportions.
     for (const [selector, width] of [
-      ['.table-bookings thead th:nth-child(2)', '38%'],
-      ['.table-bookings thead th:nth-child(3)', '32%'],
-      ['.table-event-types thead th:nth-child(1)', '30%'],
-      ['.table-event-types thead th:nth-child(3)', '32%'],
+      ['.table-bookings thead th:nth-child(2)', '45%'],
+      ['.table-bookings thead th:nth-child(3)', '26%'],
+      ['.table-event-types thead th:nth-child(1)', '44%'],
+      ['.table-event-types thead th:nth-child(3)', '28%'],
       ['.table-api-keys thead th:nth-child(1)', '24%'],
       ['.table-api-keys thead th:nth-child(3)', '16%'],
     ]) {
@@ -66,15 +66,18 @@ describe('responsive table CSS contract', () => {
   })
 
   it('lets the activity table keep its padding budget between 400 and 480px', () => {
-    const compact = container('400px <= width < 480px')
+    const compact = container('min-width: 400px) and (max-width: 479.98px')
     expect(rule(compact, '.table-analytics th,\n  .table-analytics td')).toContain(
       'padding-inline: var(--space-2);',
     )
   })
 
   it.each([
-    ['width < 400px', '.table'],
-    ['400px <= width < 880px', ':is(.table-bookings, .table-api-keys, .table-event-types)'],
+    ['max-width: 399.98px', '.table'],
+    [
+      'min-width: 400px) and (max-width: 879.98px',
+      ':is(.table-bookings, .table-api-keys, .table-event-types)',
+    ],
   ])('uses aligned title-first cards when %s', (condition, selector) => {
     const card = container(condition)
     expect(rule(card, `${selector} tbody tr`)).toContain('display: flex;')
@@ -94,13 +97,15 @@ describe('responsive table CSS contract', () => {
     // A card's date and time range wrap as whole units, never inside one of them.
     expect(card).not.toMatch(/time \.nowrap \{[^}]*white-space: normal;/)
     expect(rule(card, `${selector} thead`)).toContain('clip-path: inset(50%);')
+    expect(rule(card, `${selector} thead th`)).toContain('overflow: hidden;')
+    expect(rule(card, `${selector} thead th`)).toContain('clip-path: inset(50%);')
   })
 
   it('starts captions at the same edge in table and card modes', () => {
     const base = rule(styles, '.table caption')
     expect(base).toContain('text-align: start;')
     expect(base).toContain('margin-bottom: var(--space-2);')
-    const caption = rule(container('width < 640px'), '.table caption')
+    const caption = rule(container('max-width: 639.98px'), '.table caption')
     expect(caption).toContain('display: block;')
     expect(caption).toContain('width: 100%;')
     expect(caption).toContain('text-align: start;')
@@ -108,8 +113,8 @@ describe('responsive table CSS contract', () => {
   })
 
   it('keeps analytics in table mode from 400px while dense tables still use cards', () => {
-    const narrow = container('width < 400px')
-    const tablet = container('400px <= width < 880px')
+    const narrow = container('max-width: 399.98px')
+    const tablet = container('min-width: 400px) and (max-width: 879.98px')
     const analytics = document.createElement('table')
     analytics.className = 'table table-analytics'
     const dense = document.createElement('table')
@@ -121,10 +126,12 @@ describe('responsive table CSS contract', () => {
     expect(blockSelectors(tablet).some((selector) => analytics.matches(selector))).toBe(false)
     expect(blockSelectors(tablet).some((selector) => dense.matches(selector))).toBe(true)
     expect(
-      blockSelectors(container('width < 640px')).some((selector) => analytics.matches(selector)),
+      blockSelectors(container('max-width: 639.98px')).some((selector) =>
+        analytics.matches(selector),
+      ),
     ).toBe(false)
-    expect(rule(container('400px <= width < 640px'), '.table-analytics caption')).toContain(
-      'display: table-caption;',
-    )
+    expect(
+      rule(container('min-width: 400px) and (max-width: 639.98px'), '.table-analytics caption'),
+    ).toContain('display: table-caption;')
   })
 })

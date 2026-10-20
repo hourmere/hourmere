@@ -314,7 +314,7 @@ describe('changing interface language through booking and account flows', () => 
     expect(title.isConnected).toBe(true)
     expect(api.to('POST /api/v1/event-types')).toHaveLength(0)
   })
-  it('takes an authenticated account default without changing its BCP47 profile field or implicitly saving', async () => {
+  it('maps an authenticated account default to a supported booking language without implicitly saving', async () => {
     const api = fakeApi({
       ...signedIn,
       ...profile({
@@ -327,10 +327,10 @@ describe('changing interface language through booking and account flows', () => 
     })
     renderApp('/app/settings')
     await screen.findByRole('heading', { name: '设置', level: 1 })
-    expect(screen.getByLabelText<HTMLInputElement>('语言').value).toBe('zh-Hans-CN')
+    expect((await screen.findByLabelText<HTMLSelectElement>('预约语言')).value).toBe('zh-CN')
     const user = userEvent.setup()
     await setLanguage(user, 'en')
-    expect(screen.getByLabelText<HTMLInputElement>('Language').value).toBe('zh-Hans-CN')
+    expect(screen.getByLabelText<HTMLSelectElement>('Booking language').value).toBe('zh-CN')
     expect(api.to('PUT /api/v1/profile')).toHaveLength(0)
   })
   it('uses localized client validation for the sign-in email without relying on browser-native language', async () => {

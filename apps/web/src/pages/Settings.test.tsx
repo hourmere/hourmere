@@ -47,6 +47,33 @@ describe('the profile settings', () => {
     expect(suffix.parentElement?.textContent).toBe(`${ME.organization.name}（个人）`)
   })
 
+  it('offers only supported booking languages and keeps the interface choice separate', async () => {
+    const user = userEvent.setup()
+    const api = profileServer(PROFILE)
+    renderApp('/app/settings')
+    const bookingLanguage = await screen.findByRole<HTMLSelectElement>('combobox', {
+      name: 'Booking language',
+    })
+    expect(bookingLanguage.tagName).toBe('SELECT')
+    expect([...bookingLanguage.options].map((option) => option.value)).toEqual(['en', 'zh-CN'])
+    const explanation = document.getElementById(
+      bookingLanguage.getAttribute('aria-describedby') ?? '',
+    )
+    expect(explanation?.textContent).toBe(
+      'Default language for your booking pages and emails. Change the interface language separately in the top bar.',
+    )
+    await user.selectOptions(bookingLanguage, 'zh-CN')
+    expect(screen.getByLabelText<HTMLSelectElement>('Interface language').value).toBe('en')
+    expect(screen.getByText('Unsaved changes')).toBeDefined()
+    expect(api.to('PUT /api/v1/profile')).toHaveLength(0)
+    await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+    expect(screen.getByLabelText<HTMLSelectElement>('预约语言').value).toBe('zh-CN')
+    expect(screen.getByText('预约页面和邮件的默认语言。界面语言请在顶栏单独切换。')).toBeDefined()
+    await user.click(screen.getByRole('button', { name: '保存个人资料' }))
+    await screen.findByText('已保存。')
+    expect(api.to('PUT /api/v1/profile')[0]?.body).toMatchObject({ locale: 'zh-CN' })
+  })
+
   it('suggests a profile to people without one, and creates it', async () => {
     const user = userEvent.setup()
     const api = profileServer(null, ({ body }) => json(201, { ...PROFILE, ...(body as object) }))
@@ -54,17 +81,15 @@ describe('the profile settings', () => {
     expect(await screen.findByText(/Choose a handle to get booking links/)).toBeDefined()
     // From the email address ada@example.com.
     expect(input('Handle').value).toBe('ada')
-    expect(screen.getByText(`${window.location.origin}/ada/`)).toBeDefined()
+    expect(screen.getByText('/ada/')).toBeDefined()
     await chooseZone('lisbon')
-    await user.clear(input('Language'))
-    await user.type(input('Language'), 'pt-br')
-    expect(screen.getByText(/: Brazilian Portuguese|: Portuguese \(Brazil\)/)).toBeDefined()
+    await user.selectOptions(screen.getByLabelText('Booking language'), 'zh-CN')
     await user.click(screen.getByRole('button', { name: 'Create profile' }))
 
     const status = await screen.findByText('Profile created. Your booking links are ready.')
     expect(document.activeElement).toBe(status)
     expect(api.to('PUT /api/v1/profile').map((c) => c.body)).toEqual([
-      { handle: 'ada', timeZone: 'Europe/Lisbon', locale: 'pt-BR' },
+      { handle: 'ada', timeZone: 'Europe/Lisbon', locale: 'zh-CN' },
     ])
     expect(screen.getByRole('button', { name: 'Save profile' })).toBeDefined()
   })
@@ -113,8 +138,8 @@ describe('the profile settings', () => {
     ],
     [
       json(400, { error: 'invalid_locale', message: 'locale must be a BCP 47 language tag' }),
-      'Language',
-      'Enter a language tag such as en, en-GB or pt-BR.',
+      'Booking language',
+      'Choose a supported booking language.',
     ],
   ])('shows the server refusing it at the field (%#)', async (response, label, message) => {
     const user = userEvent.setup()
@@ -139,8 +164,7 @@ describe('the profile settings', () => {
     await user.clear(input('Handle'))
     await user.type(input('Handle'), 'Ada Lovelace')
     await chooseZone('Nowhere/Land')
-    await user.clear(input('Language'))
-    await user.type(input('Language'), 'not a language')
+    fireEvent.change(screen.getByLabelText('Booking language'), { target: { value: '' } })
     await user.click(screen.getByRole('button', { name: 'Save profile' }))
     const summary = await screen.findByRole('alert')
     expect(
@@ -150,7 +174,7 @@ describe('the profile settings', () => {
     ).toEqual([
       'Handle: Use lowercase letters, digits and hyphens, starting and ending with a letter or digit.',
       'Time zone: Choose a time zone from the list, e.g. Europe/Berlin.',
-      'Language: Enter a language tag such as en, en-GB or pt-BR.',
+      'Booking language: Choose a supported booking language.',
     ])
     expect(api.to('PUT /api/v1/profile')).toHaveLength(0)
   })

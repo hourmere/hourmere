@@ -3,6 +3,9 @@ import { Link, useSearchParams } from 'react-router'
 import { api, unwrap } from '../../api/client.ts'
 import { errorMessage } from '../../api/errors.ts'
 import { type Booking, loadProfile } from '../../api/resources.ts'
+import { BreakableText } from '../../components/BreakableText.tsx'
+import { PageHeader } from '../../components/PageHeader.tsx'
+import { PageSkeleton } from '../../components/PageSkeleton.tsx'
 import { zoned } from '../../format.ts'
 import { useLoad, usePageTitle } from '../../hooks.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
@@ -30,7 +33,7 @@ export function BookingsPage() {
 
   return (
     <>
-      <h1>{t('Bookings')}</h1>
+      <PageHeader title={t('Bookings')} lede={t('Review and manage the meetings you host.')} />
       <nav className="tabs" aria-label={t('Bookings')}>
         <ul>
           {TABS.map((t) => (
@@ -46,7 +49,7 @@ export function BookingsPage() {
           ))}
         </ul>
       </nav>
-      {profile.status === 'loading' && <p role="status">{t('Loading bookings…')}</p>}
+      {profile.status === 'loading' && <PageSkeleton label="Loading bookings…" />}
       {profile.status === 'error' && (
         <div className="alert alert-error" role="alert">
           <p>
@@ -117,7 +120,7 @@ function BookingList({
     setFocusId(null)
   }, [focusId])
 
-  if (first.status === 'loading') return <p role="status">{t('Loading bookings…')}</p>
+  if (first.status === 'loading') return <PageSkeleton label="Loading bookings…" />
   if (first.status === 'error') {
     return (
       <div className="alert alert-error" role="alert">
@@ -231,7 +234,9 @@ function BookingList({
                           <>
                             {invitee.name}
                             <br />
-                            <span className="muted">{invitee.email}</span>
+                            <span className="muted">
+                              <BreakableText>{invitee.email}</BreakableText>
+                            </span>
                             {guests > 0 && (
                               <span className="muted">
                                 {' '}

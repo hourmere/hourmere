@@ -33,6 +33,26 @@ describe('booking activity page', () => {
     })
     renderApp('/app/analytics')
     const table = await screen.findByRole('table', { name: 'Daily booking activity' })
+    const heading = screen.getByRole('heading', { name: 'Booking activity', level: 1 })
+    expect(heading.closest('.page-intro')?.querySelector('.lede')).not.toBeNull()
+    const form = screen.getByRole('button', { name: 'Update report' }).closest('form')
+    expect(form?.classList.contains('stack')).toBe(true)
+    const start = screen.getByLabelText('Start date').closest('.field')
+    const end = screen.getByLabelText('End date').closest('.field')
+    expect(start?.parentElement).toBe(end?.parentElement)
+    expect(start?.parentElement?.classList.contains('analytics-date-range')).toBe(true)
+    const metrics = [...document.querySelectorAll('.metric-cards > div')]
+    expect(
+      metrics.map((card) => [
+        card.querySelector('dt')?.textContent,
+        card.querySelector('dd')?.textContent,
+      ]),
+    ).toEqual([
+      ['Bookings created', '4'],
+      ['Reschedules', '2'],
+      ['Cancellations', '1'],
+    ])
+    expect(table.querySelector('caption')?.classList.contains('analytics-caption')).toBe(true)
     expect(
       within(table)
         .getAllByRole('rowheader')
@@ -133,6 +153,7 @@ describe('booking activity page', () => {
     })
     renderApp('/app/analytics')
     await screen.findByText('Loading booking activity…')
+    expect(screen.getByText('Loading booking activity…').closest('.page-skeleton')).not.toBeNull()
     await delayed.answer(json(500, { error: 'internal_error' }))
     await screen.findByRole('alert')
     await user.click(screen.getByRole('button', { name: 'Try again' }))

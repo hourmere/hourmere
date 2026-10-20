@@ -1,4 +1,4 @@
-import { type MouseEvent, useEffect, useRef, useState } from 'react'
+import { type MouseEvent, Suspense, useEffect, useRef, useState } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router'
 import { errorMessage } from '../api/errors.ts'
 import { LanguageSwitcher, useI18n } from '../i18n/runtime.tsx'
@@ -8,6 +8,7 @@ import { useMe, useSession } from '../session.tsx'
 import { leavesPage, UnsavedChangesProvider, useConfirmLeave } from '../unsaved-changes.tsx'
 import { InstanceLegalLinks } from './LegalLinks.tsx'
 import { Logo } from './Logo.tsx'
+import { PageSkeleton } from './PageSkeleton.tsx'
 
 export const NAV_ITEMS = [
   { to: PATHS.eventTypes, label: 'Event types' },
@@ -188,7 +189,9 @@ function Shell() {
               </button>
             </div>
           )}
-          <Outlet />
+          <Suspense fallback={<PageSkeleton />}>
+            <Outlet />
+          </Suspense>
         </main>
       </div>
       <InstanceLegalLinks />

@@ -1,5 +1,6 @@
 import { Suspense, useEffect } from 'react'
-import { Navigate, Route, Routes } from 'react-router'
+import { Navigate, Route, Routes, useLocation } from 'react-router'
+import { AdminLoading } from './components/AdminLoading.tsx'
 import { RouteErrorBoundary } from './components/RouteErrorBoundary.tsx'
 import { useI18n } from './i18n/runtime.tsx'
 import {
@@ -41,6 +42,7 @@ import { PATHS } from './paths.ts'
  */
 export function App() {
   const { t } = useI18n()
+  const { pathname } = useLocation()
   useEffect(() => {
     const description = t('Scheduling page powered by Hourmere — pick a time that works.')
     for (const selector of ['meta[name="description"]', 'meta[property="og:description"]'])
@@ -51,13 +53,25 @@ export function App() {
     <RouteErrorBoundary>
       <Suspense
         fallback={
-          <div className="page-status" role="status">
-            {t('Loading…')}
-          </div>
+          pathname === '/' || pathname === '/app' || pathname.startsWith('/app/') ? (
+            <AdminLoading />
+          ) : (
+            <div className="page-status" role="status">
+              {t('Loading…')}
+            </div>
+          )
         }
       >
         <Routes>
-          <Route path="/" element={<Navigate to={PATHS.home} replace />} />
+          <Route
+            path="/"
+            element={
+              <>
+                <Navigate to={PATHS.home} replace />
+                <AdminLoading />
+              </>
+            }
+          />
           <Route element={<SessionLayout />}>
             <Route path="/oauth/authorize" element={<McpAuthorizePage />} />
             <Route path="/oauth/consent" element={<McpAuthorizePage />} />
