@@ -1,0 +1,52 @@
+import { expect, fillInvitee, pickSlot, test } from '../fixtures.ts'
+
+// Kept deliberately small: each is a complete user path, shared by WebKit desktop,
+// the iPhone preset, and Firefox desktop in the independent report-only CI job.
+test('booking happy path', async ({ page, app }) => {
+  await page.goto(app.url + app.personalPath)
+  await pickSlot(page, page)
+  await fillInvitee(page)
+  await page.getByRole('button', { name: 'Confirm booking', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'You’re booked', exact: true })).toBeVisible()
+  expect(await app.rows()).toEqual([{ source: 'web', status: 'confirmed' }])
+})
+
+test('sign-in page and protected-page redirect', async ({ page, app }) => {
+  await page.goto(`${app.url}/app/settings`)
+  await expect(page.getByRole('heading', { name: 'Sign in to Hourmere' })).toBeVisible()
+  expect(new URL(page.url()).pathname).toBe('/sign-in')
+  const email = page.getByRole('textbox', { name: 'Email', exact: true })
+  await email.fill('synthetic-sign-in@hourmere.invalid')
+  await expect(email).toHaveValue('synthetic-sign-in@hourmere.invalid')
+  await expect(
+    page.getByRole('button', { name: 'Email me a sign-in link', exact: true }),
+  ).toBeEnabled()
+})
+
+test('embed popup booking and keyboard dismissal', async ({ page, app }) => {
+  await page.goto(app.parentUrl)
+  const opener = page.getByRole('button', { name: 'Book a meeting', exact: true })
+  await opener.click()
+  const dialog = page.getByRole('dialog')
+  const frame = dialog.locator('iframe').contentFrame()
+  await expect(frame.getByRole('heading', { name: 'Fixture call' })).toBeVisible()
+  await frame.getByRole('button', { name: 'Next month' }).focus()
+  await page.keyboard.press('Escape')
+  await expect(dialog).toHaveCount(0)
+  await expect(opener).toBeFocused()
+  await opener.click()
+  const scope = dialog.locator('iframe').contentFrame().locator('body')
+  await pickSlot(scope, page)
+  await fillInvitee(scope)
+  await scope.getByRole('button', { name: 'Confirm booking', exact: true }).click()
+  await expect(scope.getByRole('heading', { name: 'You’re booked', exact: true })).toBeVisible()
+  expect(await app.rows()).toEqual([{ source: 'embed', status: 'confirmed' }])
+  const safeMessages = await page.evaluate(() =>
+    (window as unknown as { fixtureMessages: Record<string, unknown>[] }).fixtureMessages.every(
+      (message) => Object.keys(message).every((key) => ['type', 'id', 'height'].includes(key)),
+    ),
+  )
+  expect(safeMessages).toBe(true)
+  await page.getByRole('button', { name: 'Close booking', exact: true }).click()
+  await expect(opener).toBeFocused()
+})
