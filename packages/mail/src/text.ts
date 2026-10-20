@@ -1,5 +1,6 @@
 // Making text from bookings (names, answers, reasons: all typed by someone else) safe to put
 // into an email header, a plain-text body or HTML.
+import type { InterfaceLanguage } from '@hourmere/core/language'
 
 // C0 and C1 control characters, line and paragraph separators, and bidi embedding, override
 // and isolate characters, which can make text read differently from what it contains.
@@ -53,6 +54,17 @@ export function escapeHtml(text: string): string {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#39;')
+}
+
+/** Escape visible email text, widening only Chinese curly quote glyphs, never Latin text. */
+export function emailText(text: string, language: InterfaceLanguage): string {
+  const escaped = escapeHtml(text)
+  if (language !== 'zh-CN') return escaped
+  return escaped.replace(
+    /[“”‘’]/g,
+    (quote) =>
+      `<span class="cjk-quote" style="font-variant-east-asian: full-width; font-feature-settings: 'fwid';">${quote}</span>`,
+  )
 }
 
 /** A URL that may be linked: absolute http(s) only, so no `javascript:` or `data:` links. */

@@ -31,7 +31,7 @@ export function ConfirmAction({
   onConfirm: () => Promise<void>
   className?: string
 }) {
-  const { t, ui } = useI18n()
+  const { t, ui, uiText } = useI18n()
 
   const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -76,7 +76,7 @@ export function ConfirmAction({
         onClick={() => setConfirming(true)}
         {...(accessibleLabel && { 'aria-label': ui(accessibleLabel) })}
       >
-        {ui(label)}
+        {uiText(label)}
       </button>
     )
   }
@@ -93,7 +93,7 @@ export function ConfirmAction({
         }
       }}
     >
-      <p id={promptId}>{ui(prompt)}</p>
+      <p id={promptId}>{uiText(prompt)}</p>
       <div className="confirm-buttons">
         <button
           type="button"
@@ -101,7 +101,7 @@ export function ConfirmAction({
           onClick={confirm}
           disabled={busy}
         >
-          {ui(busy ? busyLabel : confirmLabel)}
+          {uiText(busy ? busyLabel : confirmLabel)}
         </button>
         <button
           ref={cancel}
@@ -115,7 +115,7 @@ export function ConfirmAction({
       </div>
       {error && (
         <p className="alert alert-error" role="alert">
-          {ui(failure)} {ui(error)}
+          {uiText(failure)} {uiText(error)}
         </p>
       )}
     </div>

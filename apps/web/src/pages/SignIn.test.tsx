@@ -122,11 +122,11 @@ describe('the sign-in page', () => {
     expect(screen.getByRole('button', { name: '继续使用 Google' })).toBeDefined()
     expect(screen.getByRole('button', { name: '使用 Microsoft 登录' })).toBeDefined()
     expect(screen.getByText('使用个人 Microsoft 账号或工作或学校账号。')).toBeDefined()
-    expect(
-      screen.getByText(
-        '通过 Google 登录会向 Hourmere 提供你的姓名、邮箱和头像。日历访问是独立的可选步骤，可在“日历”页面连接。',
-      ),
-    ).toBeDefined()
+    const explanation = document.getElementById('google-sign-in-explanation')
+    expect(explanation?.textContent).toBe(
+      '通过 Google 登录会向 Hourmere 提供你的姓名、邮箱和头像。日历访问是独立的可选步骤，可在“日历”页面连接。',
+    )
+    expect(explanation?.querySelectorAll('.cjk-quote')).toHaveLength(2)
   })
 
   it('does not guess the providers when the instance cannot say', async () => {

@@ -54,7 +54,7 @@ const curlExample = (key: string) =>
   `curl -H "Authorization: Bearer ${key}" ${window.location.origin}/api/v1/me`
 
 export function ApiKeysPage() {
-  const { t, ui } = useI18n()
+  const { t, uiText: ui } = useI18n()
 
   usePageTitle('API keys')
   const me = useMe()
@@ -158,7 +158,7 @@ function CreateKeyForm({
   organization: Me['organization']
   onCreated: (key: CreatedApiKey) => void
 }) {
-  const { t, ui } = useI18n()
+  const { t, text, uiText: ui } = useI18n()
 
   const [name, setName] = useState('')
   const [expiresIn, setExpiresIn] = useState('')
@@ -232,7 +232,7 @@ function CreateKeyForm({
             autoComplete="off"
           />
           <p id={nameHint} className="hint">
-            {t('Where the key will be used, e.g. “Claude Desktop”.')}
+            {text('Where the key will be used, e.g. “Claude Desktop”.')}
           </p>
         </div>
         <div className="field">
@@ -260,7 +260,7 @@ function CreateKeyForm({
 
 /** The new key's secret, shown this once: Better Auth stores only a hash of it. */
 function NewKey({ apiKey, onDone }: { apiKey: CreatedApiKey; onDone: () => void }) {
-  const { t } = useI18n()
+  const { t, text } = useI18n()
 
   const heading = useRef<HTMLHeadingElement>(null)
   useEffect(() => heading.current?.focus(), [])
@@ -268,8 +268,7 @@ function NewKey({ apiKey, onDone }: { apiKey: CreatedApiKey; onDone: () => void 
   return (
     <section aria-labelledby="new-key-heading" className="panel panel-success">
       <h2 id="new-key-heading" ref={heading} tabIndex={-1}>
-        {t('Copy your new key “')}
-        {apiKey.name}”
+        {text('Copy your new key “{name}”', { name: apiKey.name ?? '' })}
       </h2>
       <p>
         <strong>{t('You won’t be able to see this key again.')}</strong>{' '}
@@ -380,7 +379,7 @@ function KeyTable({
                   {key.lastRequest ? (
                     formatDate(key.lastRequest, displayLocale, true)
                   ) : (
-                    <span className="muted">{t('Never')}</span>
+                    <span className="muted">{t('Never used')}</span>
                   )}
                 </div>
               </td>
@@ -411,7 +410,7 @@ function KeyTable({
 
 /** Revoking asks for confirmation in place: the button turns into Revoke / Cancel. */
 function RevokeButton({ apiKey, onRevoked }: { apiKey: ApiKey; onRevoked: (key: ApiKey) => void }) {
-  const { t, ui } = useI18n()
+  const { t, text, uiText: ui } = useI18n()
 
   const [confirming, setConfirming] = useState(false)
   const [revoking, setRevoking] = useState(false)
@@ -468,9 +467,9 @@ function RevokeButton({ apiKey, onRevoked }: { apiKey: ApiKey; onRevoked: (key: 
       }}
     >
       <p id={promptId}>
-        {t('Revoke “')}
+        {text('Revoke “')}
         {label}
-        {t('”? Anything using it stops working at once. This cannot be undone.')}
+        {text('”? Anything using it stops working at once. This cannot be undone.')}
       </p>
       <div className="confirm-buttons">
         <button

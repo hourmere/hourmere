@@ -360,6 +360,25 @@ describe('the bookings list', () => {
 })
 
 describe('a booking', () => {
+  it('localizes Chinese location, time zone, guest and multi-select punctuation', async () => {
+    chooseLanguage('zh-CN')
+    bookingServer(withAnswers)
+    renderApp(`/app/bookings/${BOOKING_ID}`)
+    const when = await screen.findByRole('region', { name: '时间' })
+    expect(when.textContent).toContain('电话会议：+14155550123')
+    const people = screen.getByRole('region', { name: '人员' })
+    expect(people.textContent).toContain('时区：America/New York（')
+    expect(people.textContent).toContain('，当地时间）')
+    expect(people.textContent).toContain('Alan Turing（alan@example.com）')
+    const answers = within(screen.getByRole('region', { name: '回答' }))
+    expect(answers.getAllByRole('definition').map((dd) => dd.textContent)).toEqual([
+      'Acme',
+      'Pro、Team',
+      '是',
+      'Old answer',
+    ])
+  })
+
   const withAnswers = booking({
     responses: { plan: ['Pro', 'Team'], company: 'Acme', agree: true, retired: 'Old answer' },
   })

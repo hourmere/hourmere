@@ -107,7 +107,7 @@ function BookingDetail({ id }: { id: string }) {
 }
 
 function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loaded) {
-  const { t, ui, formatLocale: displayLocale } = useI18n()
+  const { t, ui, locale, formatLocale: displayLocale } = useI18n()
   const flash = useFlash()
 
   const [booking, setBooking] = useState(initial)
@@ -154,7 +154,8 @@ function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loa
         <p className="when">
           <time dateTime={booking.start}>{format.longDate(booking.start)}</time>
           <br />
-          {format.timeRange(booking.start, booking.end)} <span className="muted">({zoneName})</span>
+          {format.timeRange(booking.start, booking.end)}
+          <span className="muted">{t(' ({detail})', { detail: zoneName })}</span>
         </p>
         {!fromProfile && (
           <p className="hint">
@@ -170,7 +171,7 @@ function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loa
                 {ui(location.label)}
                 {location.detail && (
                   <>
-                    :{' '}
+                    {t(': ')}
                     {location.href ? (
                       <a href={location.href} target="_blank" rel="noreferrer">
                         {location.detail}
@@ -216,7 +217,9 @@ function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loa
                   <>
                     <br />
                     <span className="multiline">
-                      {t('Reason:')} {booking.cancelReason}
+                      {t('Reason')}
+                      {t(': ')}
+                      {booking.cancelReason}
                     </span>
                   </>
                 )}
@@ -238,18 +241,14 @@ function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loa
                 <a href={`mailto:${invitee.email}`}>{invitee.email}</a>
                 <br />
                 <span className="muted">
-                  {t('Time zone:')} {invitee.timeZone.replaceAll('_', ' ')}
-                  {invitee.timeZone !== format.timeZone && (
-                    <>
-                      {' '}
-                      (
-                      {zoned(invitee.timeZone, displayLocale).dateTimeRange(
+                  {t('Time zone: {zone}', { zone: invitee.timeZone.replaceAll('_', ' ') })}
+                  {invitee.timeZone !== format.timeZone &&
+                    t(' ({time} there)', {
+                      time: zoned(invitee.timeZone, displayLocale).dateTimeRange(
                         booking.start,
                         booking.end,
-                      )}{' '}
-                      {t('there)')}
-                    </>
-                  )}
+                      ),
+                    })}
                 </span>
               </>
             ) : (
@@ -264,7 +263,8 @@ function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loa
               <ul className="plain-list">
                 {guests.map((g) => (
                   <li key={g.email}>
-                    {g.name} <span className="muted">({g.email})</span>
+                    {g.name}
+                    <span className="muted">{t(' ({detail})', { detail: g.email })}</span>
                   </li>
                 ))}
               </ul>
@@ -285,7 +285,7 @@ function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loa
                 <dd className="multiline">
                   {(typeof booking.responses[qid] === 'boolean'
                     ? t(booking.responses[qid] ? 'Yes' : 'No')
-                    : answerText(booking.responses[qid])) ?? (
+                    : answerText(booking.responses[qid], locale)) ?? (
                     <span className="muted">{t('No answer')}</span>
                   )}
                 </dd>

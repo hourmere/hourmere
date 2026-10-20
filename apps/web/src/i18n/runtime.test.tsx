@@ -215,7 +215,7 @@ describe('typed interface messages and language state', () => {
       await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
       expect(fieldError?.textContent?.endsWith(detail)).toBe(true)
       expect(screen.getByRole('alert').querySelector('p')?.textContent).toBe(detail)
-      expect(screen.getByRole('alert').querySelector('a')?.textContent).toBe(`Email: ${detail}`)
+      expect(screen.getByRole('alert').querySelector('a')?.textContent).toBe(`Email：${detail}`)
       await user.selectOptions(screen.getByLabelText('界面语言'), 'en')
       expect(fieldError?.textContent?.endsWith(detail)).toBe(true)
       expect(screen.getByRole('alert').querySelector('p')?.textContent).toBe(detail)

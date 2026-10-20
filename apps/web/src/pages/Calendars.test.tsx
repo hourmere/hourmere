@@ -323,7 +323,7 @@ describe('the calendars page', () => {
             language,
           )
         const group = screen.getByRole('group', {
-          name: `${name}${language === 'en' ? ' (primary)' : ' （主日历）'}`,
+          name: `${name}${language === 'en' ? ' (primary)' : '（主日历）'}`,
         })
         const label = within(group).getByRole('checkbox').closest('label') as HTMLLabelElement
         expect(label.textContent).toBe(conflictLabel)
@@ -509,9 +509,11 @@ describe('the calendars page', () => {
     expect(disclosure.textContent).toContain('只有启用自动 Google Meet 时才会添加会议链接')
     expect(disclosure.textContent).toContain('不保存事件标题或描述')
     expect(disclosure.textContent).toContain('与登录相互独立')
-    expect(within(section).getByText(/使用下方的“断开连接”/).textContent).toContain(
-      '删除已存储的凭证和本地日历数据',
-    )
+    expect(
+      within(section).getByText(
+        (_, node) => node?.tagName === 'P' && /使用下方的“断开连接”/.test(node.textContent ?? ''),
+      ).textContent,
+    ).toContain('删除已存储的凭证和本地日历数据')
     expect(
       within(section).getByRole('link', { name: 'Google 账号连接' }).getAttribute('href'),
     ).toBe('https://myaccount.google.com/connections')

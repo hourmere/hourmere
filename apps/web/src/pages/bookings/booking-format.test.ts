@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { describeLocation } from './booking-format.ts'
+import { answerText, describeLocation } from './booking-format.ts'
 
 describe('booking location links', () => {
   it.each([
@@ -22,4 +22,17 @@ describe('booking location links', () => {
       expect(describeLocation({ kind: 'link', url })?.href).toBe(url)
     },
   )
+})
+
+describe('booking answer text', () => {
+  it.each([
+    ['zh-CN', 'Pro、Team'],
+    ['en', 'Pro, Team'],
+  ])('formats selected options in %s', (locale, expected) => {
+    expect(answerText(['Pro', 'Team'], locale)).toBe(expected)
+    expect(answerText([], locale)).toBeNull()
+    expect(answerText(undefined, locale)).toBeNull()
+    expect(answerText('Settings', locale)).toBe('Settings')
+    expect(answerText(true, locale)).toBe('Yes')
+  })
 })

@@ -249,7 +249,14 @@ describe('bookingEmail', () => {
         expect(m.text).toContain(`\n\n${sentence}\n\n`)
       }
       expect(m.html).toContain(`<p lang="${language}"`)
-      expect(m.html).toContain(`>${sentence.replaceAll("'", '&#39;')}</p>`)
+      const htmlSentence = sentence
+        .replaceAll("'", '&#39;')
+        .replace(/[“”]/g, (quote) =>
+          language === 'zh-CN'
+            ? `<span class="cjk-quote" style="font-variant-east-asian: full-width; font-feature-settings: 'fwid';">${quote}</span>`
+            : quote,
+        )
+      expect(m.html).toContain(`>${htmlSentence}</p>`)
       if (recipient !== invitee) {
         expect(m.text).not.toContain('token=')
         expect(m.html).not.toContain('token=')

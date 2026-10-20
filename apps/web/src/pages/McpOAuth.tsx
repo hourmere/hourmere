@@ -32,7 +32,7 @@ export function McpAuthorizePage() {
 }
 
 function Authorization({ email }: { email: string }) {
-  const { t, ui } = useI18n()
+  const { t, text, ui, locale } = useI18n()
 
   const location = useLocation(),
     navigate = useNavigate()
@@ -101,14 +101,20 @@ function Authorization({ email }: { email: string }) {
               <strong>{info.data.clientName}</strong> {t('wants to connect to Hourmere.')}
             </p>
             <p className="muted">
-              {t('Client:')} {info.data.clientId}
+              {t('Client:')}
+              {locale === 'en' ? ' ' : ''}
+              {info.data.clientId}
             </p>
             <p className="muted">
-              {t('Return address:')} {info.data.redirectUri}
+              {t('Return address:')}
+              {locale === 'en' ? ' ' : ''}
+              {info.data.redirectUri}
             </p>
             {consent ? (
               <p>
-                {t('Organization:')} <strong>{info.data.selectedOrganization?.name}</strong>
+                {t('Organization:')}
+                {locale === 'en' ? ' ' : ''}
+                <strong>{info.data.selectedOrganization?.name}</strong>
               </p>
             ) : (
               <div className="field">
@@ -134,7 +140,7 @@ function Authorization({ email }: { email: string }) {
             </p>
             {info.data.scopes.includes('offline_access') && (
               <p>
-                {t(
+                {text(
                   'It can stay connected after you sign out, for up to 30 days from its original approval. Refreshing does not extend that time. Leaving the organization or revoking access in Connected apps stops the connection immediately.',
                 )}
               </p>

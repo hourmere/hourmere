@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  emailText,
   escapeHtml,
   formatChineseTemplate,
   linkableUrl,
@@ -7,6 +8,25 @@ import {
   singleLine,
   subjectLine,
 } from './text.ts'
+
+describe('emailText', () => {
+  it.each(['“', '”', '‘', '’'])('widens only the Chinese %s glyph', (quote) => {
+    expect(emailText(`中${quote}Latin${quote}文`, 'zh-CN')).toBe(
+      `中<span class="cjk-quote" style="font-variant-east-asian: full-width; font-feature-settings: 'fwid';">${quote}</span>Latin<span class="cjk-quote" style="font-variant-east-asian: full-width; font-feature-settings: 'fwid';">${quote}</span>文`,
+    )
+  })
+
+  it('leaves English curly quotes and unquoted Chinese text untouched', () => {
+    expect(emailText('“Latin” ‘words’ 中文', 'en')).toBe('“Latin” ‘words’ 中文')
+    expect(emailText('中文 Latin', 'zh-CN')).toBe('中文 Latin')
+  })
+
+  it('escapes untrusted HTML before wrapping Chinese quotes', () => {
+    expect(emailText('<img src="x"> & “字”', 'zh-CN')).toBe(
+      '&lt;img src=&quot;x&quot;&gt; &amp; <span class="cjk-quote" style="font-variant-east-asian: full-width; font-feature-settings: \'fwid\';">“</span>字<span class="cjk-quote" style="font-variant-east-asian: full-width; font-feature-settings: \'fwid\';">”</span>',
+    )
+  })
+})
 
 describe('formatChineseTemplate', () => {
   it.each([

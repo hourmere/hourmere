@@ -1610,3 +1610,31 @@ input[aria-invalid="true"] {
   max-width: none;
   overflow-wrap: anywhere;
 }
+
+/* Chinese typography: limit full-width font features to quote glyphs. */
+.cjk-quote:lang(zh) {
+  font-feature-settings: "fwid";
+  font-variant-east-asian: full-width;
+}
+
+h1:lang(zh),
+h2:lang(zh),
+h3:lang(zh) {
+  text-wrap: wrap;
+}
+
+@supports (text-wrap: pretty) {
+  h1:lang(zh),
+  h2:lang(zh),
+  h3:lang(zh) {
+    text-wrap: pretty;
+  }
+}
+
+@supports (word-break: auto-phrase) {
+  h1:lang(zh),
+  h2:lang(zh),
+  h3:lang(zh) {
+    word-break: auto-phrase;
+  }
+}

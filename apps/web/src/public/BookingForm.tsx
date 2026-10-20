@@ -140,7 +140,7 @@ export function BookingForm({
     <div className="field">
       <label htmlFor={fieldId(field)}>
         {ui(label)}
-        {options.required === false && <span className="optional"> {t('(optional)')}</span>}
+        {options.required === false && <span className="optional">{t(' (optional)')}</span>}
       </label>
       <input
         id={fieldId(field)}
@@ -187,9 +187,9 @@ export function BookingForm({
           aria-describedby={describedBy('guests')}
         >
           <legend>
-            {t('Guests')}{' '}
+            {t('Guests')}
             <span className="optional">
-              {t('(optional, up to')} {LIMITS.guests})
+              {t(' (optional, up to {count})', { count: LIMITS.guests })}
             </span>
           </legend>
           {errorText('guests')}
@@ -284,7 +284,7 @@ function QuestionField({ question: q, id, field, value, onChange, error }: Quest
   const label = (
     <>
       {q.label}
-      {!q.required && <span className="optional"> {t('(optional)')}</span>}
+      {!q.required && <span className="optional">{t(' (optional)')}</span>}
     </>
   )
 

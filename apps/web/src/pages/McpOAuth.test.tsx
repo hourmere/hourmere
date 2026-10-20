@@ -93,10 +93,16 @@ describe('MCP connection approval', () => {
     expect(screen.getByText(/包括参会人信息和回答。它无法管理你的账号或 API 密钥/)).toBeDefined()
     expect(screen.getByText(/退出登录后继续连接，最长为首次批准起的 30 天/)).toBeDefined()
     expect(screen.getByText(/刷新令牌不会延长此期限/)).toBeDefined()
-    expect(screen.getByText(/离开组织或在“已连接的应用”中撤销访问会立即终止连接/)).toBeDefined()
+    expect(
+      screen.getByText(
+        (_, node) =>
+          node?.tagName === 'P' &&
+          /离开组织或在“已连接的应用”中撤销访问会立即终止连接/.test(node.textContent ?? ''),
+      ),
+    ).toBeDefined()
     expect(screen.getByText(/应用名称和返回地址均由该应用提供/)).toBeDefined()
-    expect(screen.getByText(`客户端： ${info.clientId}`)).toBeDefined()
-    expect(screen.getByText(`返回地址： ${info.redirectUri}`)).toBeDefined()
+    expect(screen.getByText(`客户端：${info.clientId}`)).toBeDefined()
+    expect(screen.getByText(`返回地址：${info.redirectUri}`)).toBeDefined()
     expect(api.to('POST /api/v1/mcp-oauth/request')).toHaveLength(1)
     expect(api.to('POST /api/v1/mcp-oauth/select')).toHaveLength(0)
     await user.click(screen.getByRole('button', { name: '继续' }))

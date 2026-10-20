@@ -47,7 +47,7 @@ export function SettingsPage() {
           <dt>{t('Organization')}</dt>
           <dd>
             {me.organization.name}
-            {me.organization.personal && <span className="muted"> {t('(personal)')}</span>}
+            {me.organization.personal && <span className="muted">{t(' (personal)')}</span>}
           </dd>
         </dl>
         <p className="hint">{t('Your email comes from how you sign in.')}</p>

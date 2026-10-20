@@ -14,6 +14,9 @@ const languages = ['en', 'zh-CN'] as const
 const kinds = ['confirmed', 'rescheduled', 'cancelled'] as const
 const roles = ['invitee', 'host', 'guest'] as const
 const bookingUrl = 'https://cal.example.com/app/bookings/019a1234-5678-7000-8000-000000000001'
+// Semantic copy/order assertions remain independent of the quote-only typography markup.
+const withoutQuoteSpans = (html: string | undefined) =>
+  (html ?? '').replaceAll(/<span class="cjk-quote"[^>]*>([“”‘’])<\/span>/g, '$1')
 
 const meeting: BookingEmailMeeting = {
   eventName: 'Intro call',
@@ -127,7 +130,7 @@ describe('booking email layout and action hierarchy', () => {
             { ...recipients[role], locale },
             { attachment, bookingUrl },
           )
-          const html = message.html ?? ''
+          const html = withoutQuoteSpans(message.html)
           expect(html).toContain('<meta charset="utf-8">')
           expect(html).toContain('name="viewport" content="width=device-width, initial-scale=1"')
           expect(html).toContain('name="color-scheme" content="light"')
@@ -404,7 +407,9 @@ describe('calendar-response guidance', () => {
               kind !== 'conference_failed' &&
               attachment?.contentType.includes('method=REQUEST') === true
             expect(message.text.includes(sentence)).toBe(expected)
-            expect(message.html?.includes(sentence.replaceAll("'", '&#39;'))).toBe(expected)
+            expect(
+              withoutQuoteSpans(message.html).includes(sentence.replaceAll("'", '&#39;')),
+            ).toBe(expected)
             if (role !== 'invitee') {
               expect(message.text.includes('token=')).toBe(false)
               expect(message.html?.includes('token=')).toBe(false)
@@ -418,9 +423,9 @@ describe('calendar-response guidance', () => {
               expect(message.text.indexOf(sentence)).toBeGreaterThan(
                 message.text.indexOf(locale === 'en' ? 'What:' : '活动：'),
               )
-              expect(message.html?.indexOf(sentence.replaceAll("'", '&#39;'))).toBeGreaterThan(
-                message.html?.indexOf('width="100%"') ?? -1,
-              )
+              expect(
+                withoutQuoteSpans(message.html).indexOf(sentence.replaceAll("'", '&#39;')),
+              ).toBeGreaterThan(withoutQuoteSpans(message.html).indexOf('width="100%"'))
               expect(message.html).toContain(`</table>\n<p lang="${locale}"`)
             }
           }
@@ -459,6 +464,35 @@ describe('calendar-response guidance', () => {
 })
 
 describe('localized dates and generated copy', () => {
+  it('widens Chinese booking quotes only in visible HTML text', () => {
+    const quotedMeeting = { ...meeting, eventName: '“初次”与‘交流’', hostName: '“王”' }
+    for (const locale of languages) {
+      const message = bookingEmail('confirmed', quotedMeeting, {
+        ...recipients.invitee,
+        locale,
+      })
+      expect(message.text).toContain('“初次”与‘交流’')
+      expect(message.text).toContain('“王”')
+      expect(message.text).not.toContain('<span')
+      expect(message.subject).toContain('“初次”与‘交流’')
+      expect(message.html).toContain(`<title>${message.subject}</title>`)
+      if (locale === 'zh-CN') {
+        for (const quote of ['“', '”', '‘', '’']) {
+          expect(message.html).toContain(
+            `<span class="cjk-quote" style="font-variant-east-asian: full-width; font-feature-settings: 'fwid';">${quote}</span>`,
+          )
+        }
+        const body = message.html?.split('<body')[1] ?? ''
+        const spans = /<span class="cjk-quote"[^>]*>([^<]*)<\/span>/g
+        for (const match of body.matchAll(spans)) expect(match[1]).toMatch(/^[“”‘’]$/)
+        expect(body.replaceAll(spans, '')).not.toMatch(/[“”‘’]/)
+      } else {
+        expect(message.html).not.toContain('cjk-quote')
+        expect(message.html).toContain('“初次”与‘交流’')
+      }
+    }
+  })
+
   it('uses Intl month names in Chinese subjects with the recipient local date and time', () => {
     const overnight = {
       ...meeting,

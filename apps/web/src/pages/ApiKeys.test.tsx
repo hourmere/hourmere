@@ -78,6 +78,21 @@ const rowFor = async (name: string) =>
   (await within(await table()).findByRole('rowheader', { name: new RegExp(name) })).closest('tr')
 
 describe('the API keys page', () => {
+  it('distinguishes Chinese resource names, unused keys and nonexpiring keys', async () => {
+    chooseLanguage('zh-CN')
+    keyServer([{ ...existing, lastRequest: null }])
+    renderApp('/app/api-keys')
+    await screen.findByRole('heading', { name: 'API 密钥', level: 1 })
+    expect(screen.getByLabelText('名称')).toBeDefined()
+    const row = await rowFor(existing.name as string)
+    expect(row?.querySelector('[data-label="上次使用"]')?.textContent).toBe('从未使用')
+    expect(row?.querySelector('[data-label="到期时间"]')?.textContent).toBe('永不到期')
+    const hint = document.getElementById(
+      screen.getByLabelText('名称').getAttribute('aria-describedby') ?? '',
+    )
+    expect(hint?.querySelectorAll('.cjk-quote')).toHaveLength(2)
+  })
+
   it('uses Chinese sentence punctuation in the usage and organization hints', async () => {
     chooseLanguage('zh-CN')
     keyServer()
