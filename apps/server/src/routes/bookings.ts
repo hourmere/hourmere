@@ -81,6 +81,10 @@ export const Booking = z
     start: Instant,
     end: Instant,
     title: z.string(),
+    eventTypeTitle: z.string().nullable().optional().openapi({
+      description:
+        "Authenticated host reads only: the event type's current title, or null when deleted. The stored booking title remains historical; clients must verify its exact composition before localizing it.",
+    }),
     location: BookingLocation.nullable(),
     conference: z
       .object({

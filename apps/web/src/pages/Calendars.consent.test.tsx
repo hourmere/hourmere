@@ -49,7 +49,10 @@ describe('Google Calendar pre-consent consequences', () => {
     for (const detail of [copy.singleCopy, copy.destination, copy.existingCopies])
       expect(permissions.textContent).toContain(detail)
 
-    const disconnect = within(section).getByText(copy.disconnect)
+    const disconnect = within(section).getByText(
+      (_, node) => node?.tagName === 'P' && copy.disconnect.test(node.textContent ?? ''),
+    )
+    expect(disconnect.querySelectorAll('.cjk-quote')).toHaveLength(copy.locale === 'zh-CN' ? 2 : 0)
     expect(disconnect.textContent).toContain(copy.retainedEvents)
     expect(disconnect.textContent).toContain(copy.retainedGrant)
     const revoke = within(disconnect).getByRole('link', { name: copy.revoke })

@@ -109,6 +109,50 @@ function manageServer(
 }
 
 describe('the invitee’s manage page', () => {
+  it.each([
+    ['en', 'Intro call, Monday, November 2, 2026, 9:00 – 9:30 AM'],
+    ['zh-CN', 'Intro call，2026年11月2日星期一，09:00–09:30'],
+  ])('uses %s separators throughout the cancel summary', async (language, expected) => {
+    localStorage.setItem('hourmere-language', language)
+    manageServer()
+    renderApp(`/booking#token=${TOKEN}&action=cancel`)
+    const heading = await screen.findByRole('heading', {
+      name: language === 'en' ? 'Cancel this booking?' : '取消此预约？',
+    })
+    const form = heading.closest('form')
+    const summary = form?.querySelectorAll('p')[1]
+    expect(plain(summary?.textContent)).toBe(expected)
+  })
+
+  it('formats Chinese host and guest lists and booker brackets', async () => {
+    localStorage.setItem('hourmere-language', 'zh-CN')
+    const data = managed()
+    manageServer({
+      ...data,
+      hosts: [{ name: '王小明' }, { name: '李小红' }],
+      attendees: [
+        ...data.attendees,
+        {
+          ...{ timeZone: 'America/New_York', locale: 'en-US' },
+          name: '周小刚',
+          email: 'guest1@example.invalid',
+          isBooker: false,
+        },
+        {
+          ...{ timeZone: 'America/New_York', locale: 'en-US' },
+          name: '赵小华',
+          email: 'guest2@example.invalid',
+          isBooker: false,
+        },
+      ],
+    })
+    renderApp(`/booking#token=${TOKEN}`)
+    await screen.findByRole('heading', { name: '你的预约' })
+    expect(screen.getByText('王小明、李小红')).toBeDefined()
+    expect(screen.getByText('周小刚、赵小华')).toBeDefined()
+    expect(screen.getByText('Grace Hopper（grace@example.com）')).toBeDefined()
+  })
+
   it.each(['cancel', 'reschedule'])(
     'explains calendar responses throughout the emailed %s action without sending a cancellation',
     async (action) => {
@@ -135,7 +179,11 @@ describe('the invitee’s manage page', () => {
         expectStandardMargin(cancel.parentElement as HTMLElement, 'marginBottom')
       }
       await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
-      expect(screen.getAllByText(chineseNote)).toHaveLength(1)
+      expect(
+        screen.getAllByText(
+          (_, element) => element?.tagName === 'P' && element.textContent === chineseNote,
+        ),
+      ).toHaveLength(1)
       if (action === 'reschedule') {
         await user.selectOptions(screen.getByLabelText('界面语言'), 'en')
         await user.click(await screen.findByRole('button', { name: /November 3, available/ }))
@@ -153,10 +201,18 @@ describe('the invitee’s manage page', () => {
         ).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
         expectStackGap(cancel.parentElement as HTMLElement, cancel)
         await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
-        expect(screen.getAllByText(chineseNote)).toHaveLength(1)
+        expect(
+          screen.getAllByText(
+            (_, element) => element?.tagName === 'P' && element.textContent === chineseNote,
+          ),
+        ).toHaveLength(1)
         await user.click(screen.getByRole('button', { name: '取消预约' }))
         await screen.findByRole('heading', { name: '取消此预约？' })
-        expect(screen.getAllByText(chineseNote)).toHaveLength(1)
+        expect(
+          screen.getAllByText(
+            (_, element) => element?.tagName === 'P' && element.textContent === chineseNote,
+          ),
+        ).toHaveLength(1)
       }
       expect(api.to('POST /api/v1/bookings/manage/cancel')).toHaveLength(0)
       expect(api.to('POST /api/v1/bookings/manage/reschedule')).toHaveLength(0)
@@ -262,27 +318,50 @@ describe('the invitee’s manage page', () => {
   it.each([
     [
       'en',
-      true,
+      'Test Host',
+      'ICS test',
       'Rescheduling ICS test with Test Host, now on Monday, November 2, 2026, 9:00 – 9:30 AM',
     ],
-    ['en', false, 'Rescheduling ICS test, now on Monday, November 2, 2026, 9:00 – 9:30 AM'],
-    ['zh-CN', true, '正在改期 ICS test 与 Test Host，当前时间：2026年11月2日星期一，09:00–09:30'],
-    ['zh-CN', false, '正在改期 ICS test，当前时间：2026年11月2日星期一，09:00–09:30'],
+    [
+      'en',
+      null,
+      'ICS test',
+      'Rescheduling ICS test, now on Monday, November 2, 2026, 9:00 – 9:30 AM',
+    ],
+    [
+      'zh-CN',
+      'Test Host',
+      'ICS test',
+      '正在为与 Test Host 的“ICS test”预约改期，当前时间：2026年11月2日星期一，09:00–09:30',
+    ],
+    [
+      'zh-CN',
+      '王小明',
+      'Ada’s review',
+      '正在为与王小明的“Ada’s review”预约改期，当前时间：2026年11月2日星期一，09:00–09:30',
+    ],
+    ['zh-CN', null, 'ICS test', '正在改期 ICS test，当前时间：2026年11月2日星期一，09:00–09:30'],
+    ['zh-CN', null, '初次通话', '正在改期初次通话，当前时间：2026年11月2日星期一，09:00–09:30'],
   ] as const)(
-    'localizes the complete reschedule description in %s (host: %s)',
-    async (language, hasHost, expected) => {
+    'localizes the complete reschedule description in %s (host: %s, title: %s)',
+    async (language, host, title, expected) => {
       localStorage.setItem('hourmere-language', language)
       manageServer({
         ...managed(),
-        eventType: { title: 'ICS test', durationMinutes: 30 },
-        hosts: hasHost ? [{ name: 'Test Host' }] : [],
+        eventType: { title, durationMinutes: 30 },
+        hosts: host ? [{ name: host }] : [],
       })
       renderApp(`/booking#token=${TOKEN}&action=reschedule`)
 
       await screen.findByRole('heading', {
         name: language === 'en' ? 'Pick a new time' : '选择新时间',
       })
-      expect(plain(document.querySelector('.reschedule-header p')?.textContent)).toBe(expected)
+      const description = document.querySelector('.reschedule-header p')
+      expect(plain(description?.textContent)).toBe(expected)
+      // Chinese double quotes around the title get quote markup; Latin apostrophes never do.
+      expect(
+        [...(description?.querySelectorAll('.cjk-quote') ?? [])].map((span) => span.textContent),
+      ).toEqual(language === 'zh-CN' && host ? ['“', '”'] : [])
     },
   )
 

@@ -299,7 +299,12 @@ describe.skipIf(!serverUrl)('iMIP interoperability', () => {
               ? '在日历中接受或拒绝邀请不会取消预约。如需取消，请使用此邮件中的“取消”链接。'
               : 'Accepting or declining this calendar invitation does not cancel the booking. To cancel, use the “Cancel” link in this email.'
         expect(message.text.includes(expected)).toBe(true)
-        expect(message.html?.includes(`>${expected.replaceAll("'", '&#39;')}</p>`)).toBe(true)
+        // Quote-only typography spans preserve the recipient's complete footer sentence.
+        const html = message.html?.replaceAll(
+          /<span class="cjk-quote"[^>]*>([“”‘’])<\/span>/g,
+          '$1',
+        )
+        expect(html?.includes(`>${expected.replaceAll("'", '&#39;')}</p>`)).toBe(true)
         expect(message.html?.includes(`lang="${chinese ? 'zh-CN' : 'en'}"`)).toBe(true)
         expect(message.text.includes('token=')).toBe(!isHost && !isGuest)
         expect(message.html?.includes('token=')).toBe(!isHost && !isGuest)

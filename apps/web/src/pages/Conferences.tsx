@@ -44,7 +44,7 @@ function outcome(search: URLSearchParams): UiText | null {
 }
 
 export function ConferencesPage() {
-  const { t, ui, formatLocale } = useI18n()
+  const { t, text, ui, formatLocale } = useI18n()
   usePageTitle('Conference accounts')
   const [state, reload] = useLoad(load),
     [search, setSearch] = useSearchParams()
@@ -181,7 +181,7 @@ export function ConferencesPage() {
         )}
       </p>
       <p className="muted">
-        {t(
+        {text(
           'Connect Zoom requests only basic account identity. Authorize Zoom meetings also requests create, read, update and delete meeting access. You choose your own connection when configuring automatic meetings.',
         )}
       </p>

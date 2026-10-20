@@ -8,7 +8,7 @@ import { useLoad, usePageTitle } from '../../hooks.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
 import { msg, type UiText } from '../../i18n/translate.ts'
 import { bookingPath, PATHS } from '../../paths.ts'
-import { hostZone } from './booking-format.ts'
+import { bookingTitle, hostZone } from './booking-format.ts'
 
 type Tab = 'upcoming' | 'past'
 
@@ -79,7 +79,7 @@ function BookingList({
   timeZone: string
   fromProfile: boolean
 }) {
-  const { t, ui, formatLocale: displayLocale } = useI18n()
+  const { t, ui, locale, formatLocale: displayLocale } = useI18n()
 
   // Every page of a list uses the same moment, as the API's cursors require the same filters.
   const [now] = useState(() => new Date().toISOString())
@@ -109,7 +109,7 @@ function BookingList({
   const [status, setStatus] = useState<UiText>('')
   const [focusId, setFocusId] = useState<string | null>(null)
   const list = useRef<HTMLTableSectionElement>(null)
-  const format = zoned(timeZone, displayLocale)
+  const format = zoned(timeZone, locale === 'zh-CN' ? locale : displayLocale)
 
   useEffect(() => {
     if (!focusId) return
@@ -222,7 +222,7 @@ function BookingList({
                     </td>
                     <th scope="row" data-label={t('Event')} className="user-content">
                       <Link to={bookingPath(b.id)} data-booking={b.id}>
-                        {b.title}
+                        {ui(bookingTitle(b))}
                       </Link>
                     </th>
                     <td data-label={t('Invitee')} className="user-content">

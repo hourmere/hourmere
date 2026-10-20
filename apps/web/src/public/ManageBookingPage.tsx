@@ -4,6 +4,7 @@ import { ConferenceNotice } from '../components/ConferenceNotice.tsx'
 import { EmailDeliveryHint } from '../components/EmailDeliveryHint.tsx'
 import { isKnownTimeZone } from '../format.ts'
 import { usePageTitle } from '../hooks.ts'
+import { formatList } from '../i18n/formatting.ts'
 import { useI18n } from '../i18n/runtime.tsx'
 import { msg, type UiText } from '../i18n/translate.ts'
 import { ManageLink } from './AddToCalendar.tsx'
@@ -98,11 +99,11 @@ type Mode =
   | { kind: 'confirm-reschedule'; slot: Slot }
 
 function CalendarResponseNote({ onCancel }: { onCancel?: () => void }) {
-  const { t } = useI18n()
+  const { t, text } = useI18n()
   return (
     <>
       <p className="muted">
-        {t(
+        {text(
           'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use “Cancel booking” here.',
         )}
       </p>
@@ -236,7 +237,7 @@ function ManageView({
   /** Loads the booking again; null when that fails too. */
   onStale: () => Promise<ManagedBooking | null>
 }) {
-  const { t, explicit } = useI18n()
+  const { t, text, explicit, locale: language } = useI18n()
 
   const browserFormatLocale = useMemo(preferredLocale, [])
   const locale = explicit ?? browserFormatLocale
@@ -253,10 +254,7 @@ function ManageView({
   )
   const loadSlots = useMemo(() => rescheduleSlots(token), [token])
   const title = booking.eventType?.title ?? booking.title
-  const hosts = booking.hosts
-    .map((h) => h.name)
-    .filter(Boolean)
-    .join(', ')
+  const hosts = formatList(booking.hosts.map((h) => h.name).filter(Boolean), language)
   const durationMinutes =
     booking.eventType?.durationMinutes ??
     Math.round((Date.parse(booking.end) - Date.parse(booking.start)) / 60_000)
@@ -348,7 +346,7 @@ function ManageView({
         <div className="reschedule">
           <div className="reschedule-header">
             <p className="muted">
-              {t(
+              {text(
                 hosts
                   ? 'Rescheduling {title} with {hosts}, now on {date}, {time}'
                   : 'Rescheduling {title}, now on {date}, {time}',
@@ -433,7 +431,13 @@ function ManageView({
           {mode.kind === 'cancel' && (
             <CancelForm
               title={title}
-              when={`${formatDate(Date.parse(booking.start), timeZone, locale)}, ${formatTimeRange(Date.parse(booking.start), Date.parse(booking.end), timeZone, locale)}`}
+              date={formatDate(Date.parse(booking.start), timeZone, locale)}
+              time={formatTimeRange(
+                Date.parse(booking.start),
+                Date.parse(booking.end),
+                timeZone,
+                locale,
+              )}
               onBack={() => setMode({ kind: 'view' })}
               onCancel={async (reason) => {
                 try {
@@ -520,7 +524,7 @@ function BookingSummary({
   emailNotice: boolean
   newToken: string | null
 }) {
-  const { t, ui } = useI18n()
+  const { t, ui, locale: language } = useI18n()
 
   const invitee = booking.attendees.find((a) => a.isBooker)
   const guests = booking.attendees.filter((a) => !a.isBooker)
@@ -566,10 +570,23 @@ function BookingSummary({
           ['Where', <LocationDetails key="where" location={booking.location} />],
           ...(hosts ? ([['Host', hosts]] as [string, string][]) : []),
           ...(invitee
-            ? ([['Booked by', `${invitee.name} (${invitee.email})`]] as [string, string][])
+            ? ([
+                [
+                  'Booked by',
+                  t('{name} ({detail})', { name: invitee.name, detail: invitee.email }),
+                ],
+              ] as [string, string][])
             : []),
           ...(guests.length
-            ? ([['Guests', guests.map((g) => g.name).join(', ')]] as [string, string][])
+            ? ([
+                [
+                  'Guests',
+                  formatList(
+                    guests.map((g) => g.name),
+                    language,
+                  ),
+                ],
+              ] as [string, string][])
             : []),
           ...(cancelled && booking.cancelReason
             ? ([['Reason', booking.cancelReason]] as [string, string][])
@@ -590,12 +607,14 @@ function BookingSummary({
 
 function CancelForm({
   title,
-  when,
+  date,
+  time,
   onBack,
   onCancel,
 }: {
   title: string
-  when: string
+  date: string
+  time: string
   onBack: () => void
   onCancel: (reason: string) => Promise<{ field?: UiText; form?: UiText } | null>
 }) {
@@ -625,12 +644,12 @@ function CancelForm({
     <form className="stack" onSubmit={submit} noValidate>
       <FocusHeading>{t('Cancel this booking?')}</FocusHeading>
       <CalendarResponseNote />
-      <p>
-        {title}, {when}
-      </p>
+      {/* One booking's title, date and time: a sentence, not a list, so no list separators. */}
+      <p>{t('{title}, {date}, {time}', { title, date, time })}</p>
       <div className="field">
         <label htmlFor={`${id}-reason`}>
-          {t('Reason')} <span className="optional">{t('(optional, shared with your host)')}</span>
+          {t('Reason')}
+          <span className="optional">{t(' (optional, shared with your host)')}</span>
         </label>
         <textarea
           id={`${id}-reason`}

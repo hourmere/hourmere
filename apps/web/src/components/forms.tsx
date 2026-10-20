@@ -3,6 +3,7 @@
 // field).
 import { type ReactNode, useEffect, useId, useRef } from 'react'
 import { useI18n } from '../i18n/runtime.tsx'
+import { renderUiText } from '../i18n/text.tsx'
 import { msg, type UiText } from '../i18n/translate.ts'
 
 /** Error messages by field id; a field without an entry is fine. */
@@ -32,13 +33,16 @@ export function controlProps(id: string, hint: boolean, error: UiText | undefine
 
 /** The message under a field (or a group of fields) that failed. */
 export function FieldError({ id, children }: { id: string; children: UiText }) {
-  const { t, ui } = useI18n()
+  const { t, uiText, locale } = useI18n()
 
   return (
     // Focusable, so the error summary can lead to errors that belong to a group of fields.
     <p id={id} className="field-error" tabIndex={-1}>
-      <span className="visually-hidden">{t('Error:')} </span>
-      {ui(children)}
+      <span className="visually-hidden">
+        {t('Error:')}
+        {locale === 'en' ? ' ' : ''}
+      </span>
+      {uiText(children)}
     </p>
   )
 }
@@ -65,17 +69,17 @@ export function Field({
   className?: string
   children: (props: ControlProps) => ReactNode
 }) {
-  const { t } = useI18n()
+  const { t, locale } = useI18n()
 
   return (
     <div className={`field${error ? ' field-invalid' : ''} ${className}`.trim()}>
       <label htmlFor={id}>
         {label}
-        {optional && <span className="optional"> {t('(optional)')}</span>}
+        {optional && <span className="optional">{t(' (optional)')}</span>}
       </label>
       {hint && (
         <p id={`${id}-hint`} className="hint">
-          {hint}
+          {typeof hint === 'string' ? renderUiText(locale, hint) : hint}
         </p>
       )}
       {error && <FieldError id={`${id}-error`}>{error}</FieldError>}
@@ -103,7 +107,7 @@ export function ErrorSummary({
   /** Changes with every submit, so the summary takes focus again. */
   attempt: number
 }) {
-  const { t, ui } = useI18n()
+  const { t, uiText } = useI18n()
 
   const box = useRef<HTMLDivElement>(null)
   const titleId = useId()
@@ -125,7 +129,7 @@ export function ErrorSummary({
       aria-labelledby={titleId}
     >
       <h2 id={titleId}>{entries.length > 0 ? t('Please check the form') : t('Could not save')}</h2>
-      {message && <p>{ui(message)}</p>}
+      {message && <p>{uiText(message)}</p>}
       {entries.length > 0 && (
         <ul>
           {entries.map(([id, error]) => (
@@ -141,8 +145,13 @@ export function ErrorSummary({
                   field?.scrollIntoView?.({ block: 'center' })
                 }}
               >
-                {labels?.[id] ? `${ui(labels[id])}: ` : ''}
-                {ui(error)}
+                {labels?.[id] && (
+                  <>
+                    {uiText(labels[id])}
+                    {t(': ')}
+                  </>
+                )}
+                {uiText(error)}
               </a>
             </li>
           ))}

@@ -4,7 +4,15 @@ import { describe, expect, it, vi } from 'vitest'
 import type { Booking } from '../../api/resources.ts'
 import { chooseLanguage } from '../../i18n/store.ts'
 import { browserLocale } from '../../test/browser-locale.ts'
-import { fakeApi, json, profile, type Routes, renderApp, signedIn } from '../../test/fake-api.tsx'
+import {
+  fakeApi,
+  json,
+  PROFILE,
+  profile,
+  type Routes,
+  renderApp,
+  signedIn,
+} from '../../test/fake-api.tsx'
 import { BOOKING_ID, booking, EVENT_TYPE_ID, eventType } from '../../test/fixtures.ts'
 import { PAGE_SIZE } from './Bookings.tsx'
 
@@ -25,6 +33,75 @@ const numbered = (from: number, count: number): Booking[] =>
   })
 
 describe('the bookings list', () => {
+  it('uses the account Chinese locale for 24-hour list and detail ranges', async () => {
+    browserLocale('en-US')
+    const current = booking({ start: '2030-03-04T00:00:00Z', end: '2030-03-04T00:30:00Z' })
+    fakeApi({
+      ...signedIn,
+      ...profile({ ...PROFILE, locale: 'zh-CN', timeZone: 'UTC' }),
+      'GET /api/v1/bookings': () =>
+        json(200, {
+          data: [
+            current,
+            booking({
+              id: 'later',
+              title: 'Later',
+              start: '2030-03-04T04:00:00Z',
+              end: '2030-03-04T04:30:00Z',
+            }),
+          ],
+          nextCursor: null,
+        }),
+      [`GET /api/v1/bookings/${BOOKING_ID}`]: () => json(200, current),
+      [`GET /api/v1/event-types/${EVENT_TYPE_ID}`]: () => json(200, eventType()),
+    })
+    renderApp('/app/bookings')
+    const title = await screen.findByRole('rowheader', { name: 'Intro call' })
+    expect(title.closest('tr')?.textContent).toContain('00:00–00:30')
+    expect(screen.getByRole('rowheader', { name: 'Later' }).closest('tr')?.textContent).toContain(
+      '04:00–04:30',
+    )
+    await userEvent.setup().click(within(title).getByRole('link', { name: 'Intro call' }))
+    const when = await screen.findByRole('region', { name: '时间' })
+    expect(when.textContent).toContain('00:00–00:30')
+    expect(when.textContent).not.toMatch(/\s–|–\s|AM|PM/)
+  })
+
+  it.each([
+    ['en', '初次通话', 'Grace Hopper', '初次通话 with Grace Hopper'],
+    ['zh-CN', '初次通话', 'Grace Hopper', '与 Grace Hopper 的初次通话'],
+    ['zh-CN', 'Ada’s review', 'Grace Hopper', '与 Grace Hopper 的 Ada’s review'],
+    ['zh-CN', 'Ada’s review', '王小明', '与王小明的 Ada’s review'],
+  ] as const)(
+    'localizes verified generated titles in the %s list: %s with %s',
+    async (locale, event, name, expected) => {
+      chooseLanguage(locale)
+      const generated = booking({ eventTypeTitle: event, title: `${event} with ${name}` })
+      generated.attendees = generated.attendees.map((a) => (a.isBooker ? { ...a, name } : a))
+      fakeApi({
+        ...signedIn,
+        ...profile(),
+        'GET /api/v1/bookings': () =>
+          json(200, {
+            data: [
+              generated,
+              booking({ id: 'custom', eventTypeTitle: 'Design', title: 'Design with my team' }),
+              booking({ id: 'historical', eventTypeTitle: 'New', title: 'Old with Grace Hopper' }),
+            ],
+            nextCursor: null,
+          }),
+      })
+      renderApp('/app/bookings')
+      const title = await screen.findByRole('rowheader', { name: expected })
+      const link = within(title).getByRole('link', { name: expected })
+      expect(link.textContent).toBe(expected)
+      // Apostrophes in Latin titles are never widened as Chinese quotes.
+      expect(link.querySelector('.cjk-quote')).toBeNull()
+      expect(screen.getByRole('rowheader', { name: 'Design with my team' })).toBeDefined()
+      expect(screen.getByRole('rowheader', { name: 'Old with Grace Hopper' })).toBeDefined()
+    },
+  )
+
   it('keeps a meeting in progress Upcoming and moves ended meetings to Past', async () => {
     const user = userEvent.setup()
     const now = new Date()
@@ -360,6 +437,72 @@ describe('the bookings list', () => {
 })
 
 describe('a booking', () => {
+  it('retains the localized title after a Chinese cancellation omits host metadata', async () => {
+    chooseLanguage('zh-CN')
+    const current = booking({ eventTypeTitle: '初次通话', title: '初次通话 with Grace Hopper' })
+    const { eventTypeTitle: _eventTypeTitle, ...cancelled } = { ...current, status: 'cancelled' }
+    bookingServer(current, {
+      [`POST /api/v1/bookings/${BOOKING_ID}/cancel`]: () => json(200, cancelled),
+    })
+    renderApp(`/app/bookings/${BOOKING_ID}`)
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: '取消预约…' }))
+    await user.click(screen.getByRole('button', { name: '取消预约' }))
+    await screen.findByText('预约已取消。')
+    expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(
+      '与 Grace Hopper 的初次通话已取消',
+    )
+  })
+
+  it.each([
+    ['en', '初次通话', 'Grace Hopper', '初次通话 with Grace Hopper'],
+    ['zh-CN', '初次通话', 'Grace Hopper', '与 Grace Hopper 的初次通话'],
+    ['zh-CN', 'Ada’s review', 'Grace Hopper', '与 Grace Hopper 的 Ada’s review'],
+    ['zh-CN', 'Ada’s review', '王小明', '与王小明的 Ada’s review'],
+  ] as const)(
+    'localizes verified generated titles in the %s detail: %s with %s',
+    async (locale, event, name, expected) => {
+      chooseLanguage(locale)
+      const generated = booking({ eventTypeTitle: event, title: `${event} with ${name}` })
+      generated.attendees = generated.attendees.map((a) => (a.isBooker ? { ...a, name } : a))
+      bookingServer(generated)
+      renderApp(`/app/bookings/${BOOKING_ID}`)
+      const heading = await screen.findByRole('heading', { level: 1, name: expected })
+      expect(heading.textContent).toBe(expected)
+      expect(heading.querySelector('.cjk-quote')).toBeNull()
+    },
+  )
+
+  it.each([
+    { title: 'Design with my team', eventTypeTitle: 'Design' },
+    { title: 'Old with Grace Hopper', eventTypeTitle: 'New' },
+    { title: 'Settings', eventTypeTitle: null },
+  ])('preserves custom or historical detail title $title', async (overrides) => {
+    chooseLanguage('zh-CN')
+    bookingServer(booking(overrides))
+    renderApp(`/app/bookings/${BOOKING_ID}`)
+    expect(await screen.findByRole('heading', { level: 1, name: overrides.title })).toBeDefined()
+  })
+
+  it('localizes Chinese location, time zone, guest and multi-select punctuation', async () => {
+    chooseLanguage('zh-CN')
+    bookingServer(withAnswers)
+    renderApp(`/app/bookings/${BOOKING_ID}`)
+    const when = await screen.findByRole('region', { name: '时间' })
+    expect(when.textContent).toContain('电话会议：+14155550123')
+    const people = screen.getByRole('region', { name: '人员' })
+    expect(people.textContent).toContain('时区：America/New York（')
+    expect(people.textContent).toContain('，当地时间）')
+    expect(people.textContent).toContain('Alan Turing（alan@example.com）')
+    const answers = within(screen.getByRole('region', { name: '回答' }))
+    expect(answers.getAllByRole('definition').map((dd) => dd.textContent)).toEqual([
+      'Acme',
+      'Pro、Team',
+      '是',
+      'Old answer',
+    ])
+  })
+
   const withAnswers = booking({
     responses: { plan: ['Pro', 'Team'], company: 'Acme', agree: true, retired: 'Old answer' },
   })
@@ -421,10 +564,11 @@ describe('a booking', () => {
   )
 
   it.each([
-    ['web', 'the booking page', '预约页面'],
-    ['embed', 'an embedded booking page', '嵌入的预约页面'],
-    ['api', 'an agent or script (API)', '代理或脚本（API）'],
-    ['mcp', 'an AI agent (MCP)', 'AI 代理（MCP）'],
+    ['web', 'the booking page', '，通过预约页面'],
+    ['embed', 'an embedded booking page', '，通过嵌入的预约页面'],
+    ['api', 'an agent or script (API)', '，通过代理或脚本（API）'],
+    // A Latin-initial label gets the Han/Latin space that Chinese prose puts around it.
+    ['mcp', 'an AI agent (MCP)', '，通过 AI 代理（MCP）'],
   ] as const)('localizes the %s source clause on a rescheduled booking', async (source, en, zh) => {
     const user = userEvent.setup()
     chooseLanguage('en')
@@ -435,7 +579,7 @@ describe('a booking', () => {
     expect(booked?.textContent?.endsWith(`, through ${en}`)).toBe(true)
     await user.selectOptions(screen.getByRole('combobox', { name: 'Interface language' }), 'zh-CN')
     expect(within(when).getByText('已预约').nextElementSibling).toBe(booked)
-    expect(booked?.textContent?.endsWith(`，通过${zh}`)).toBe(true)
+    expect(booked?.textContent?.endsWith(zh)).toBe(true)
   })
 
   it.each(['fa-IR', 'th-TH'])(

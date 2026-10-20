@@ -2,10 +2,12 @@ import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Schemas } from '../../api/client.ts'
+import { browserLocale } from '../../test/browser-locale.ts'
 import {
   fakeApi,
   json,
   later,
+  PROFILE,
   profile,
   type Routes,
   renderApp,
@@ -54,6 +56,21 @@ beforeEach(() => {
 })
 
 describe('host rescheduling in the booking detail', () => {
+  it('uses the account Chinese locale for both reschedule summary ranges', async () => {
+    browserLocale('en-US')
+    const user = userEvent.setup()
+    hostApi({ ...profile({ ...PROFILE, locale: 'zh-CN' }) })
+    renderApp(detail)
+    await user.click(await screen.findByRole('button', { name: '改期' }))
+    await user.click(await screen.findByRole('button', { name: '11月3日星期二，可预约' }))
+    await user.click(screen.getByRole('button', { name: '17:00' }))
+    const section = screen.getByRole('region', { name: '为此预约改期' })
+    const summary = section.querySelector('dl')
+    const values = [...(summary?.querySelectorAll('dd') ?? [])].map((node) => node.textContent)
+    expect(values[0]).toBe('2026年11月2日 15:00–2026年11月2日 15:30')
+    expect(values[1]).toBe('2026年11月3日 17:00–2026年11月3日 17:30')
+  })
+
   it('uses the shared slot picker and public host APIs, then opens the successor without an invitee token', async () => {
     const user = userEvent.setup()
     const api = hostApi()

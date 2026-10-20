@@ -101,7 +101,8 @@ export function formatTime(
 ): string {
   return formatter(locale, {
     timeZone,
-    hour: 'numeric',
+    hour: locale.startsWith('zh') ? '2-digit' : 'numeric',
+    ...(locale.startsWith('zh') && { hourCycle: 'h23' }),
     minute: '2-digit',
     ...(withZone && { timeZoneName: 'short' }),
   }).format(ms)
@@ -109,7 +110,12 @@ export function formatTime(
 
 /** `9:30 – 10:00 AM`: a start and end on one day, as the locale writes such ranges. */
 export function formatTimeRange(start: number, end: number, timeZone: string, locale: string) {
-  return formatter(locale, { timeZone, hour: 'numeric', minute: '2-digit' }).formatRange(start, end)
+  return formatter(locale, {
+    timeZone,
+    hour: locale.startsWith('zh') ? '2-digit' : 'numeric',
+    minute: '2-digit',
+    ...(locale.startsWith('zh') && { hourCycle: 'h23' }),
+  }).formatRange(start, end)
 }
 
 /** `Tuesday, November 3, 2026`: the date an instant falls on in `timeZone`. */

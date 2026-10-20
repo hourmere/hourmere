@@ -31,7 +31,7 @@ async function loadPage(signal: AbortSignal) {
 }
 
 export function EventTypesPage() {
-  const { t, ui } = useI18n()
+  const { t, uiText } = useI18n()
 
   usePageTitle('Event types')
   const me = useMe()
@@ -50,14 +50,14 @@ export function EventTypesPage() {
         {t('The kinds of meetings people can book with you, each with its own link.')}
       </p>
       <p className="flash" role="status">
-        {ui(message)}
+        {uiText(message)}
       </p>
 
       {state.status === 'loading' && <p role="status">{t('Loading event types…')}</p>}
       {state.status === 'error' && (
         <div className="alert alert-error" role="alert">
           <p>
-            {t('Could not load your event types.')} {ui(state.message)}
+            {t('Could not load your event types.')} {uiText(state.message)}
           </p>
           <button type="button" className="button button-small" onClick={reload}>
             {t('Try again')}

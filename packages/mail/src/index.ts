@@ -3,7 +3,7 @@ import type { InterfaceLanguage } from '@hourmere/core/language'
 import nodemailer from 'nodemailer'
 import addressparser from 'nodemailer/lib/addressparser'
 import { emailButton, emailLayout, emailLinkStyle, emailWrapStyle } from './layout.ts'
-import { escapeHtml, singleLine } from './text.ts'
+import { emailText, escapeHtml, singleLine } from './text.ts'
 
 export * from './booking.ts'
 export * from './ics.ts'
@@ -367,11 +367,11 @@ export function magicLinkEmail({
     html: emailLayout(
       language,
       words.subject,
-      `<p>${escapeHtml(words.htmlInstruction)}</p>
-${emailButton(words.button, url)}
-<p style="color: #555;">${escapeHtml(words.expiry)}</p>
-<p style="color: #555; font-size: 13px; ${emailWrapStyle}">${words.fallback}<br><a href="${link}" style="${emailLinkStyle}">${link}</a></p>
-<p style="margin-top: 24px; border-top: 1px solid #ddd; padding-top: 16px; color: #555; font-size: 13px;">${escapeHtml(words.footer)}</p>`,
+      `<p>${emailText(words.htmlInstruction, language)}</p>
+${emailButton(words.button, url, false, language)}
+<p style="color: #555;">${emailText(words.expiry, language)}</p>
+<p style="color: #555; font-size: 13px; ${emailWrapStyle}">${emailText(words.fallback, language)}<br><a href="${link}" style="${emailLinkStyle}">${emailText(url, language)}</a></p>
+<p style="margin-top: 24px; border-top: 1px solid #ddd; padding-top: 16px; color: #555; font-size: 13px;">${emailText(words.footer, language)}</p>`,
     ),
   }
 }

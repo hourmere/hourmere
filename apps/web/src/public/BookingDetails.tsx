@@ -41,14 +41,19 @@ export function LocationDetails({ location }: { location: Booking['location'] })
       {ui(locationLabel(location.kind))}
       {number && (
         <>
-          {': '}
+          {t(': ')}
           <a href={`tel:${number.replace(/[^+\d]/g, '')}`}>{number}</a>
         </>
       )}
-      {address && <>: {address}</>}
+      {address && (
+        <>
+          {t(': ')}
+          {address}
+        </>
+      )}
       {url && (
         <>
-          {': '}
+          {t(': ')}
           <a href={url} target="_blank" rel="noopener noreferrer">
             {url}
           </a>
@@ -62,6 +67,7 @@ export function LocationDetails({ location }: { location: Booking['location'] })
 export function locationText(
   location: Booking['location'],
   labelText: (label: string) => string = (label) => label,
+  separator = ': ',
 ): string | undefined {
   if (!location) return undefined
   const link =
@@ -72,7 +78,7 @@ export function locationText(
     (v): v is string => typeof v === 'string' && v !== '',
   )
   return detail
-    ? `${labelText(locationLabel(location.kind))}: ${detail}`
+    ? `${labelText(locationLabel(location.kind))}${separator}${detail}`
     : labelText(locationLabel(location.kind))
 }
 
@@ -88,15 +94,16 @@ export function When({
   timeZone: string
   locale: string
 }) {
+  const { t } = useI18n()
   const s = Date.parse(start)
   const e = Date.parse(end)
   return (
     <>
       <time dateTime={start}>{formatDate(s, timeZone, locale)}</time>
       <br />
-      {formatTimeRange(s, e, timeZone, locale)}{' '}
+      {formatTimeRange(s, e, timeZone, locale)}
       <span className="muted">
-        ({zoneName(timeZone)}, {offsetLabel(timeZone, s)})
+        {t(' ({zone}, {offset})', { zone: zoneName(timeZone), offset: offsetLabel(timeZone, s) })}
       </span>
     </>
   )

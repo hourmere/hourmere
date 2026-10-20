@@ -72,6 +72,30 @@ const invitation = icsAttachment({
 })
 
 describe('magicLinkEmail', () => {
+  it('widens Chinese instruction quotes without changing plain text or link attributes', () => {
+    const link = 'https://cal.example.com/sign-in/confirm#label=“引用”&token=fixture'
+    const message = magicLinkEmail({
+      to: 'ada@example.com',
+      url: link,
+      expiresInMinutes: 5,
+      language: 'zh-CN',
+    })
+    expect(message.html).toContain(
+      '点击<span class="cjk-quote" style="font-family: &quot;PingFang SC&quot;,&quot;Hiragino Sans GB&quot;,&quot;Microsoft YaHei&quot;,&quot;Noto Sans CJK SC&quot;,&quot;Source Han Sans SC&quot;,sans-serif; font-variant-east-asian: full-width; font-feature-settings: \'fwid\';">“</span>登录 Hourmere<span class="cjk-quote" style="font-family: &quot;PingFang SC&quot;,&quot;Hiragino Sans GB&quot;,&quot;Microsoft YaHei&quot;,&quot;Noto Sans CJK SC&quot;,&quot;Source Han Sans SC&quot;,sans-serif; font-variant-east-asian: full-width; font-feature-settings: \'fwid\';">”</span>。',
+    )
+    expect(message.html).toContain(
+      'href="https://cal.example.com/sign-in/confirm#label=“引用”&amp;token=fixture"',
+    )
+    expect(message.text).toContain(
+      '如需登录 Hourmere，请打开此链接，然后在打开的页面上点击“登录 Hourmere”：',
+    )
+    expect(message.text).toContain(link)
+    expect(message.text).not.toContain('<span')
+    expect(magicLinkEmail({ to: 'ada@example.com', url, expiresInMinutes: 5 }).html).not.toContain(
+      'cjk-quote',
+    )
+  })
+
   it.each(['en', 'zh-CN'] as const)('matches the complete %s sign-in email', (language) => {
     const message = magicLinkEmail({ to: 'ada@example.com', url, expiresInMinutes: 5, language })
     expect(message.html).toContain(`<html lang="${language}">`)
@@ -239,6 +263,17 @@ describe('email layout', () => {
     expect(html).toContain('href="https://example.com/?a=&quot;b&quot;&amp;c=&lt;d&gt;"')
     expect(html).toContain('>&lt;button&gt; &amp; &quot;label&quot;</a>')
     expect(html).not.toContain('<button>')
+  })
+
+  it('widens Chinese button quote glyphs without changing their URL', () => {
+    const link = 'https://cal.example.com/?label=“引用”'
+    const html = emailButton('“操作”', link, false, 'zh-CN')
+    expect(html).toContain(`href="${link}"`)
+    expect(html).toContain(
+      '<span class="cjk-quote" style="font-family: &quot;PingFang SC&quot;,&quot;Hiragino Sans GB&quot;,&quot;Microsoft YaHei&quot;,&quot;Noto Sans CJK SC&quot;,&quot;Source Han Sans SC&quot;,sans-serif; font-variant-east-asian: full-width; font-feature-settings: \'fwid\';">“</span>操作<span class="cjk-quote" style="font-family: &quot;PingFang SC&quot;,&quot;Hiragino Sans GB&quot;,&quot;Microsoft YaHei&quot;,&quot;Noto Sans CJK SC&quot;,&quot;Source Han Sans SC&quot;,sans-serif; font-variant-east-asian: full-width; font-feature-settings: \'fwid\';">”</span>',
+    )
+    expect(emailButton('“Action”', link)).toContain('>“Action”</a>')
+    expect(emailButton('“Action”', link)).not.toContain('cjk-quote')
   })
 
   it('separates stacked buttons with cell padding when Outlook ignores margins', () => {

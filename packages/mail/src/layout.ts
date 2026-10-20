@@ -1,5 +1,5 @@
 import type { InterfaceLanguage } from '@hourmere/core/language'
-import { escapeHtml } from './text.ts'
+import { emailText, escapeHtml } from './text.ts'
 
 export const emailWrapStyle = 'overflow-wrap: anywhere; word-break: break-word;'
 export const emailLinkStyle = `color: #1f4fd8; ${emailWrapStyle}`
@@ -35,8 +35,13 @@ ${content}
 }
 
 /** Cell padding keeps button spacing and tap areas intact in Outlook. */
-export function emailButton(label: string, url: string, secondary = false): string {
+export function emailButton(
+  label: string,
+  url: string,
+  secondary = false,
+  language: InterfaceLanguage = 'en',
+): string {
   const background = secondary ? '#ffffff' : '#1f4fd8'
   const color = secondary ? '#1f4fd8' : '#ffffff'
-  return `<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; ${fontStyle}"><tr><td style="padding: 16px 0; ${fontStyle}"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; ${fontStyle}"><tr><td bgcolor="${background}" style="padding: 0; mso-padding-alt: 12px 18px; background-color: ${background}; border: 1px solid #1f4fd8; border-radius: 6px; text-align: center; ${fontStyle}"><a href="${escapeHtml(url)}" style="display: block; padding: 12px 18px; line-height: 20px; min-height: 20px; color: ${color}; text-decoration: none; ${emailWrapStyle}">${escapeHtml(label)}</a></td></tr></table></td></tr></table>`
+  return `<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; ${fontStyle}"><tr><td style="padding: 16px 0; ${fontStyle}"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; ${fontStyle}"><tr><td bgcolor="${background}" style="padding: 0; mso-padding-alt: 12px 18px; background-color: ${background}; border: 1px solid #1f4fd8; border-radius: 6px; text-align: center; ${fontStyle}"><a href="${escapeHtml(url)}" style="display: block; padding: 12px 18px; line-height: 20px; min-height: 20px; color: ${color}; text-decoration: none; ${emailWrapStyle}">${emailText(label, language)}</a></td></tr></table></td></tr></table>`
 }

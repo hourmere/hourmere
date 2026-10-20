@@ -1,4 +1,6 @@
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { zoned } from '../format.ts'
 import { addMonths, firstDayOfWeek, monthGrid, sameDayIn } from './calendar.ts'
 import { monthRequestRange } from './SlotPicker.tsx'
 import {
@@ -8,6 +10,7 @@ import {
   formatDuration,
   formatMonth,
   formatTime,
+  formatTimeRange,
   instantOf,
   offsetLabel,
   wallTime,
@@ -76,6 +79,34 @@ describe('wall-clock time in a zone', () => {
 })
 
 describe('formatting', () => {
+  it('keeps Chinese calendar day labels small enough and unbroken in seven columns', () => {
+    const css = readFileSync('apps/web/src/public/SlotPicker.css', 'utf8')
+    const day = css.match(/\.picker \.day:lang\(zh\)\s*\{([^}]+)\}/)?.[1]
+    expect(day).toContain('white-space: nowrap;')
+    expect(day).toContain('font-size: 0.875rem;')
+  })
+
+  it.each(['00:00', '04:00', '16:00'])(
+    'uses the same Chinese 24-hour range and dash in public and admin at %s',
+    (time) => {
+      const start = `2026-11-02T${time}:00Z`
+      const end = new Date(Date.parse(start) + 30 * 60_000).toISOString()
+      const expected = `${time}–${time.slice(0, 3)}30`
+      expect(formatTimeRange(Date.parse(start), Date.parse(end), 'UTC', 'zh-CN')).toBe(expected)
+      expect(zoned('UTC', 'zh-CN').timeRange(start, end)).toBe(expected)
+      expect(formatTime(Date.parse(start), 'UTC', 'zh-CN')).toBe(time)
+      expect(zoned('UTC', 'zh-CN').time(start)).toBe(time)
+    },
+  )
+
+  it('keeps dates for overnight Chinese ranges and uses an unspaced dash', () => {
+    const format = zoned('UTC', 'zh-CN')
+    const start = '2026-11-02T23:45:00Z'
+    const end = '2026-11-03T00:15:00Z'
+    expect(format.timeRange(start, end)).toBe('23:45–2026年11月3日 00:15')
+    expect(format.dateTimeRange(start, end)).toBe('2026年11月2日 23:45–2026年11月3日 00:15')
+  })
+
   it('labels dates in the Gregorian calendar, with the locale’s language and digits', () => {
     const nov1 = at('2026-11-01T12:00:00Z')
     // fa-IR defaults to the Persian calendar (1 November 2026 is 10 Aban 1405).
