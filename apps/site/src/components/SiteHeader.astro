@@ -1,12 +1,12 @@
 ---
 import { site } from '../site'
+import { siteCopy } from '../ui-copy.ts'
 import Logo from './Logo.astro'
 
 const links = [
   { href: '/#features', label: 'Features' },
   { href: '/#agents', label: 'AI agents' },
   { href: '/#self-host', label: 'Self-host' },
-  { href: '/#pricing', label: 'Pricing' },
 ]
 ---
 
@@ -22,8 +22,10 @@ const links = [
             </li>
           ))
         }
+        <li><a href="/docs">{siteCopy.en.docs}</a></li>
+        <li><a href="/#pricing">{siteCopy.en.pricing}</a></li>
         <li>
-          <a class="github" href={site.github}>
+          <a class="github" href={site.github} aria-label="GitHub">
             <svg viewBox="0 0 16 16" width="20" height="20" aria-hidden="true" focusable="false">
               <path
                 fill="currentColor"
@@ -88,8 +90,22 @@ const links = [
     color: var(--text);
   }
 
-  /* On narrow screens the section links collapse; the page itself is short to scroll. */
+  /* Keep the documentation and pricing within reach on narrow screens. */
   @media (max-width: 760px) {
+    .bar {
+      flex-wrap: wrap;
+      gap: 0 12px;
+      padding-block: 8px;
+    }
+
+    nav {
+      margin-left: auto;
+    }
+
+    .github span {
+      display: none;
+    }
+
     .section-link {
       display: none;
     }

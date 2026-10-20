@@ -334,7 +334,7 @@ const plans = [
 
   @media (min-width: 960px) {
     .hero-grid {
-      grid-template-columns: 1.25fr 1fr;
+      grid-template-columns: 1.4fr 1fr;
       gap: 64px;
     }
   }
@@ -361,7 +361,7 @@ const plans = [
 
   h1 {
     margin: 0 0 20px;
-    font-size: clamp(36px, 6vw, 58px);
+    font-size: clamp(36px, 6vw, 52px);
     font-weight: 800;
     line-height: 1.08;
     letter-spacing: -0.03em;
@@ -479,7 +479,24 @@ const plans = [
   }
 
   .grid.plans {
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .plan {
+    min-width: 0;
+    padding: 16px;
+  }
+
+  @media (min-width: 960px) {
+    .grid.plans {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 20px;
+    }
+
+    .plan {
+      padding: 24px;
+    }
   }
 
   .card .price {

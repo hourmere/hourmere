@@ -49,9 +49,79 @@ const releaseSource = readFileSync(
 )
 
 describe('UI measurement CI contract', () => {
-  it('keeps measurement specs out of the existing two functional projects', () => {
-    expect(functionalConfig.testIgnore).toEqual(['**/{layout,a11y,visual,cross-engine}.spec.ts'])
-    expect(functionalConfig.projects?.map((project) => project.name)).toEqual(['desktop', 'mobile'])
+  it('keeps measurement specs out of every functional project', () => {
+    const measurementSpecs = '**/{layout,a11y,visual,cross-engine}.spec.ts'
+    expect(functionalConfig.testIgnore).toEqual([measurementSpecs])
+    const projects = functionalConfig.projects ?? []
+    // The two application projects plus the documentation-site layout projects from PR #58.
+    expect(projects.map((project) => project.name)).toEqual([
+      'desktop',
+      'mobile',
+      'site-desktop',
+      'site-mobile',
+    ])
+    // A project-level testIgnore replaces the top-level list, so each project repeats it.
+    for (const project of projects) {
+      const ignore =
+        project.testIgnore === undefined ? functionalConfig.testIgnore : project.testIgnore
+      expect([ignore].flat(), project.name).toContain(measurementSpecs)
+    }
+    const names = (predicate: (project: (typeof projects)[number]) => boolean) =>
+      projects.filter(predicate).map((project) => project.name)
+    expect(names((project) => project.testMatch === 'site-layout.spec.ts')).toEqual([
+      'site-desktop',
+      'site-mobile',
+    ])
+    expect(
+      names((project) => [project.testIgnore].flat().includes('**/site-layout.spec.ts')),
+    ).toEqual(['desktop', 'mobile'])
+  })
+
+  it('lists measurement specs in no functional project and the site spec only in its own', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'hourmere-ui-functional-'))
+    try {
+      const reporter = join(directory, 'tests.mjs')
+      writeFileSync(
+        reporter,
+        `export default class {
+          onBegin(config, suite) {
+            console.log(JSON.stringify(suite.allTests().map((test) => [test.parent.project().name, test.location.file.split('/').pop()])))
+          }
+        }`,
+      )
+      const result = spawnSync(
+        process.execPath,
+        [
+          fileURLToPath(import.meta.resolve('@playwright/test/cli')),
+          'test',
+          '--config',
+          'tools/e2e/playwright.config.ts',
+          '--list',
+          '--reporter',
+          reporter,
+        ],
+        { cwd: root, encoding: 'utf8', timeout: 60_000 },
+      )
+      expect(result.status, result.stderr).toBe(0)
+      const tests = JSON.parse(result.stdout.trim()) as [string, string][]
+      expect(tests.length).toBeGreaterThan(0)
+      const files = (project: string) =>
+        new Set(tests.filter(([p]) => p === project).map(([, f]) => f))
+      for (const project of ['desktop', 'mobile', 'site-desktop', 'site-mobile']) {
+        expect(
+          [...files(project)].filter((file) =>
+            /^(layout|a11y|visual|cross-engine)\.spec\.ts$/.test(file),
+          ),
+          project,
+        ).toEqual([])
+      }
+      expect(files('desktop').has('site-layout.spec.ts')).toBe(false)
+      expect(files('mobile').has('site-layout.spec.ts')).toBe(false)
+      expect([...files('site-desktop')]).toEqual(['site-layout.spec.ts'])
+      expect([...files('site-mobile')]).toEqual(['site-layout.spec.ts'])
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
   })
   it('runs UI measurements only for pull requests, main pushes and manual baseline review', () => {
     expect(Object.keys(workflow.on).sort()).toEqual(['pull_request', 'push', 'workflow_dispatch'])
@@ -106,7 +176,8 @@ describe('UI measurement CI contract', () => {
   it.each([
     ['check', '7454d8fe440d98ff3ae3a93a0674f4201fed921f3193225883c340296f1bd78b'],
     ['cli-compatibility', 'e6baff5e1cbf2e5b3339c961747ed5be373cc5d0b7874200d54b903f13a3e194'],
-    ['e2e', '449d779d527fd6945be1b58632afe54a16bd3ff2b046dce85141a23011ed50b4'],
+    // PR #58 builds a disposable documentation-site fixture before the browser regressions.
+    ['e2e', 'd0836cdc67e3046164fa3bab90d93f240f1dc543773582734b8eb62d94aa1d09'],
     ['docker', '2594f351267b97c37981b7889ae22495076c653543f5cd8ee11825ac4ed63d9a'],
   ])('preserves required job %s and its behavior', (id, digest) => {
     expect(requiredWorkflow.jobs[id ?? '']).toBeDefined()

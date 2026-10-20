@@ -29,6 +29,7 @@ const canonical = path === undefined ? undefined : new URL(path, site.url).href
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
     <link rel="sitemap" href="/sitemap-index.xml" />
     <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#0e1015" media="(prefers-color-scheme: dark)" />
@@ -36,6 +37,13 @@ const canonical = path === undefined ? undefined : new URL(path, site.url).href
     <meta property="og:site_name" content={site.name} />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
+    <meta property="og:image" content={site.socialImage.url} />
+    <meta property="og:image:width" content={String(site.socialImage.width)} />
+    <meta property="og:image:height" content={String(site.socialImage.height)} />
+    <meta property="og:image:alt" content={site.socialImage.alt} />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content={site.socialImage.url} />
+    <meta name="twitter:image:alt" content={site.socialImage.alt} />
     {canonical && <meta property="og:url" content={canonical} />}
     <!-- Respect a light/dark choice made with the theme picker on the docs pages. -->
     <script is:inline>
