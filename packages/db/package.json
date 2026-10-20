@@ -4,7 +4,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./testing": "./src/testing.ts"
+    "./testing": "./src/testing.ts",
+    "./test-database-registry": "./src/test-database-registry.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json"

@@ -79,8 +79,17 @@ It uses `hourmere_test_<tag>_<pid>_<hex>` names, connects to `postgres` for admi
 and drops a failed setup before returning. Close additional pools before calling the
 owner's `drop()` in `finally` or `afterAll`; the helper force-drops lingering connections.
 Vitest also registers a final cleanup hook for databases whose normal teardown failed.
-Signal cleanup is best effort: forced termination, worker crashes and unavailable
-PostgreSQL can still leave databases behind.
+That hook uses a lightweight registry, so files can mock database dependencies before
+loading them. Fork workers also attempt cleanup when their parent's IPC channel disconnects,
+including when only the Vitest parent receives SIGINT or SIGTERM. Signal and disconnect
+cleanup are best effort, bounded to 15 seconds: forced termination, worker crashes and
+unavailable PostgreSQL can still leave databases behind.
+
+On slow machines, set `HOURMERE_TEST_DATABASE_ADMIN_TIMEOUT_MS` to a positive integer
+number of milliseconds (at most 2147482647). It changes the helper's CREATE/ALTER/DROP
+statement timeout from the default 5000 ms; the client query timeout is that value plus
+1000 ms (default 6000 ms). The connection timeout remains 5000 ms and shutdown cleanup
+still has its independent 15-second deadline.
 
 Inspect those leftovers manually (the default is **dry run**):
 
@@ -101,6 +110,9 @@ time, which can be newer after maintenance and delay cleanup. The account needs 
 to inspect that file metadata. Before dropping, the script rechecks age, connections, PID
 and database OID, and uses ordinary DROP so an arriving connection prevents deletion.
 Cleanup is manual; test startup never sweeps other runs' databases.
+If another cleanup removes a candidate after its final recheck, the script reports
+`SKIP <name>: already gone` and continues. Other database failures report only a safe
+SQLSTATE code when available, without the driver's connection details.
 
 When adding tables or columns, extend the seed at a checkpoint whose schema contains them.
 The early checkpoint ends at migration 0012; use a later checkpoint for newer tables, or

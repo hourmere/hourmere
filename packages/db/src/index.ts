@@ -23,9 +23,18 @@ pg.types.setTypeParser(pg.types.builtins.DATE, (v) => v)
  * its caller handles. Each error is logged once; `label` names the pool.
  */
 export function guardPoolErrors(pool: pg.Pool, label = ''): void {
-  pool.on('error', (err) => console.error(`idle Postgres client error${label}: ${err.message}`))
-  const inUse = (err: Error) =>
-    console.error(`Postgres client error while in use${label}: ${err.message}`)
+  // Vitest forwards console output over IPC. After its parent has gone, logging
+  // can exit an orphan on EPIPE before DROP DATABASE WITH (FORCE) finishes.
+  pool.on('error', (err) => {
+    if (process.connected !== false) {
+      console.error(`idle Postgres client error${label}: ${err.message}`)
+    }
+  })
+  const inUse = (err: Error) => {
+    if (process.connected !== false) {
+      console.error(`Postgres client error while in use${label}: ${err.message}`)
+    }
+  }
   pool.on('acquire', (client) => client.on('error', inUse))
   pool.on('release', (_err, client) => client.removeListener('error', inUse))
 }

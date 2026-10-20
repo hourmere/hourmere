@@ -125,8 +125,10 @@ export async function sweepTestDatabases(
       dropped++
       log(`DROPPED ${database.name}`)
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== '55006') throw error
-      log(`SKIP ${database.name}: acquired connections`)
+      const code = (error as NodeJS.ErrnoException).code
+      if (code === '3D000') log(`SKIP ${database.name}: already gone`)
+      else if (code === '55006') log(`SKIP ${database.name}: acquired connections`)
+      else throw error
     }
   }
   return dropped
@@ -161,9 +163,14 @@ export async function main(argv: string[], env = process.env): Promise<number> {
       minAgeHours,
     })
     return 0
-  } catch {
+  } catch (error) {
     // Connection errors and argument errors may include an admin URL/password.
-    console.error('Test database cleanup failed. Check arguments, database access and permissions.')
+    const code = (error as NodeJS.ErrnoException | null)?.code
+    const state =
+      typeof code === 'string' && /^[0-9A-Z]{5}$/.test(code) ? ` (SQLSTATE ${code})` : ''
+    console.error(
+      `Test database cleanup failed${state}. Check arguments, database access and permissions.`,
+    )
     return 1
   } finally {
     await admin?.end()
