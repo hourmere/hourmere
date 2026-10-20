@@ -266,13 +266,13 @@ export function webhookCleanupJob(db: Db, now = () => Temporal.Now.instant()) {
             await run(trx)
           })
         } catch (error) {
-          // A timed-out batch rolls back completely. Retry it next pass rather than
+          // A canceled or lock-unavailable batch rolls back completely. Retry next pass rather than
           // overrunning the lease; unrelated SQL failures must still fail the job.
           const code = (error as { code?: string } | null)?.code
           if (code !== '57014' && code !== '55P03') throw error
           // SQL error text can contain private data. Log only fixed metadata and the
           // recognized SQLSTATE so a repeatedly deferred phase stays observable.
-          console.warn(JSON.stringify({ event: 'webhook_cleanup_timeout', phase, code }))
+          console.warn(JSON.stringify({ event: 'webhook_cleanup_deferred', phase, code }))
         }
       }
       // Capture and enqueue are atomic. A visible pending row with no created/retry/active
@@ -281,25 +281,29 @@ export function webhookCleanupJob(db: Db, now = () => Temporal.Now.instant()) {
       // pg-boss is pinned; its schema belongs to pg-boss and is never migrated here.
       await batch('reconciliation', (trx) =>
         sql`
-        WITH orphaned AS MATERIALIZED (
-          SELECT d.id FROM webhook_deliveries d
-          WHERE d.status = 'pending' AND NOT EXISTS (
-            SELECT 1 FROM pgboss.job j
-            WHERE j.name = ${WEBHOOK_DELIVERY_JOB} AND j.singleton_key = d.id::text
-              AND j.state IN ('created', 'retry', 'active')
-          )
-          ORDER BY d.id LIMIT 1000 FOR UPDATE OF d SKIP LOCKED
-        ), job_attempts AS MATERIALIZED (
-          -- Join the whole batch before grouping: never scan retained jobs per delivery.
+        WITH job_history AS MATERIALIZED (
+          -- Keep only pending keys before aggregating. Reuse one retained-job scan for
+          -- liveness and attempts; hashing all retained jobs can spill as history grows.
+          -- No time/policy cutoff: even an old or differently configured live job protects
+          -- its delivery, and every retained attempt contributes to the maximum.
           SELECT j.singleton_key,
+            BOOL_OR(j.state IN ('created', 'retry', 'active')) AS live,
             MAX(CASE WHEN j.started_on IS NULL THEN 0 ELSE j.retry_count + 1 END) AS attempts
-          FROM pgboss.job j JOIN orphaned o ON j.singleton_key = o.id::text
+          FROM pgboss.job j
           WHERE j.name = ${WEBHOOK_DELIVERY_JOB}
+            AND j.singleton_key IN (
+              SELECT p.id::text FROM webhook_deliveries p WHERE p.status = 'pending'
+            )
           GROUP BY j.singleton_key
+        ), orphaned AS MATERIALIZED (
+          SELECT d.id, h.attempts FROM webhook_deliveries d
+          LEFT JOIN job_history h ON h.singleton_key = d.id::text
+          WHERE d.status = 'pending' AND NOT COALESCE(h.live, false)
+          ORDER BY d.id LIMIT 1000 FOR UPDATE OF d SKIP LOCKED
         )
         UPDATE webhook_deliveries d SET status = 'failed', last_error = 'job_missing',
-          attempts = LEAST(13, GREATEST(d.attempts, COALESCE(a.attempts, 0)))
-        FROM orphaned o LEFT JOIN job_attempts a ON a.singleton_key = o.id::text
+          attempts = LEAST(13, GREATEST(d.attempts, COALESCE(o.attempts, 0)))
+        FROM orphaned o
         WHERE d.id = o.id AND d.status = 'pending'
       `.execute(trx),
       )

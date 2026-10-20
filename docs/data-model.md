@@ -349,9 +349,13 @@ Migration 0028 adds safe `interrupted`/`job_missing` error classifications for f
 accounting and orphan reconciliation, preserving existing webhook delivery data.
 
 Migration 0034 adds a partial `webhook_deliveries(id)` index for `status = 'pending'`.
-Reconciliation reads pending deliveries in ID order, so terminal history is excluded from
-its bounded locking scan. Retention has no status filter and uses the existing `created_at`
-index; delivery metadata pages use the existing `(webhook_id,id)` index in reverse order.
+It excludes terminal delivery rows from the index and can supply pending IDs in order.
+It does not guarantee an index scan or a reconciliation plan without `Sort`, and does not
+index pg-boss's retained job history. The migration uses ordinary `CREATE INDEX`, not
+`CREATE INDEX CONCURRENTLY`: creation can wait for writers and blocks writes to
+`webhook_deliveries` while it runs. Allow for that lock when upgrading a busy installation.
+Retention has no status filter and uses the existing `created_at` index; delivery metadata
+pages use the existing `(webhook_id,id)` index in reverse order.
 
 ## Independent conference identities
 

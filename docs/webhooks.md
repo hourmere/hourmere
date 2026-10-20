@@ -169,15 +169,24 @@ pending deliveries without a created, retrying or active
 pg-boss job as failed with
 `job_missing`; retained job metadata supplies any missing attempt count. If the job was
 already deleted, only known attempts can be reported. Active jobs remain pending until
-pg-boss expires/retries or terminates them. Cleanup groups retained attempt history for the
-whole batch rather than looking it up once per delivery. Each dispatch has a ten-second
+pg-boss expires/retries or terminates them. Cleanup reads retained `webhook-delivery` jobs
+once, keeps only singleton keys belonging to pending deliveries, and groups their live
+state and maximum attempt count together. It reuses that materialized history when
+selecting and locking up to 1000 orphaned deliveries. There is no job-age or queue-policy
+cutoff: an old live job still protects its delivery, and all retained attempts for that
+delivery count. The scan still grows with retained jobs; filtering pending keys bounds the
+history aggregation, not the number of retained rows PostgreSQL may need to read. No
+application indexes are added to pg-boss's schema. Each dispatch has a ten-second
 database-work budget within its thirty-second job lease; each reconciliation/retention
-statement is limited to five seconds, with at most one second waiting for locks. A timed-out
-batch rolls back and stays eligible for the next scheduled run. Each swallowed PostgreSQL
-statement (`57014`) or lock (`55P03`) timeout emits one structured warning with
-`event: "webhook_cleanup_timeout"`, `phase: "reconciliation"` or `"retention"`, and `code`.
-The warning contains no query, error text, delivery payload or credentials. Repeated
-warnings indicate cleanup is making insufficient progress and needs investigation.
+statement is limited to five seconds, with at most one second waiting for locks. A canceled
+or lock-unavailable batch rolls back and stays eligible for the next scheduled run.
+PostgreSQL `57014` means query cancellation, including statement timeout and manual
+cancellation; `55P03` means lock unavailable, including lock timeout. Each deferred batch
+with either code emits one structured warning with `event: "webhook_cleanup_deferred"`,
+`phase: "reconciliation"` or `"retention"`, and `code`. Only those fixed phase values and
+recognized SQLSTATE codes are logged; the warning contains no query, error text, delivery
+payload or credentials. Other database errors fail the cleanup job. Repeated warnings
+indicate cleanup is making insufficient progress and needs investigation.
 Row locks skip deliveries already being acknowledged or reconciled by another worker.
 There is no manual replay endpoint.
 
