@@ -36,6 +36,25 @@ describe('provider real-account acceptance documentation', () => {
   })
 
   it.each(guides)(
+    'limits acceptance to the real meeting lifecycle in $path',
+    ({ path, environment }) => {
+      expect(read(path)).toContain(
+        `Real-account acceptance was performed on 2026-10-19 against ${environment}. Its scope was creating, rescheduling and cancelling a real meeting.`,
+      )
+    },
+  )
+
+  it.each(
+    guides.flatMap(({ path }) =>
+      ['published on the Zoom App Marketplace', 'verified by Google', 'fully verified'].map(
+        (overclaim) => ({ path, overclaim }),
+      ),
+    ),
+  )('rejects the overclaim "$overclaim" in $path', ({ path, overclaim }) => {
+    expect(read(path).toLowerCase()).not.toContain(overclaim.toLowerCase())
+  })
+
+  it.each(guides)(
     'distinguishes the hosted production step in $path',
     ({ path, productionStep }) => {
       expect(read(path)).toContain(`${productionStep} is a separate step for the hosted service`)

@@ -141,5 +141,6 @@ their values and are not automatically retried. Automated validation uses fake G
 transports and helper-owned PostgreSQL.
 
 Real-account acceptance was performed on 2026-10-19 against a Google Cloud test project.
+Its scope was creating, rescheduling and cancelling a real meeting.
 Google OAuth verification is a separate step for the hosted service; self-hosters use their
 own Google Cloud projects.

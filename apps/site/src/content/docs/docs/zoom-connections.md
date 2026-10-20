@@ -23,6 +23,7 @@ real client, accepting terms and granting real-account access require their own 
 the automated tests use synthetic provider responses only.
 
 Real-account acceptance was performed on 2026-10-19 against a Zoom development-mode app.
+Its scope was creating, rescheduling and cancelling a real meeting.
 Production Zoom Marketplace publication is a separate step for the hosted service;
 self-hosters use their own Zoom apps.
 

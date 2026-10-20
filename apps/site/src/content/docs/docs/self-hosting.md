@@ -553,7 +553,10 @@ reopening traffic. Keep the old volumes and backup until recovery is accepted.
 ## Upgrade and roll back
 
 Read the intended release's changes and take the backup above first. Record the current
-commit or tag before upgrading and preserve its `.env` and Caddy state.
+branch name or tag before upgrading, alongside the backup's saved commit, and preserve
+its `.env` and Caddy state. Use
+`git branch --show-current` for a branch, or `git describe --tags --exact-match` for a tag,
+so a checkout-only rollback can return to that named revision without relying on a bare commit.
 For 1.0 and later, check out the intended release tag
 rather than following `main`: replace `vX.Y.Z` in the commands below with the reviewed tag.
 No stable release has been published yet; these are the upgrade steps for future releases.
@@ -582,7 +585,11 @@ The app keeps the default `all` role. From the deployment checkout:
 )
 ```
 
-If a later guard fails after checkout, return with `git checkout <previous commit or tag>` using the value recorded before upgrading.
+If a later guard fails after checkout, return with `git checkout <previous branch or tag>`
+using the recorded name **only before any `docker compose pull`, `docker compose stop`
+or `docker compose up` in this upgrade has run**. If any has run, follow
+[Back up and restore](#back-up-and-restore) instead. After `stop`/`up`, migrations may
+already have run; old code against the new schema is unsafe.
 
 ### Separate-worker upgrade
 
@@ -607,7 +614,17 @@ stopping the old app and worker:
 )
 ```
 
-If a later guard fails after checkout, return with `git checkout <previous commit or tag>` using the value recorded before upgrading.
+If a later guard fails after checkout, return with `git checkout <previous branch or tag>`
+using the recorded name **only before any `docker compose pull`, `docker compose stop`
+or `docker compose up` in this upgrade has run**. If any has run, follow
+[Back up and restore](#back-up-and-restore) instead. After `stop`/`up`, migrations may
+already have run; old code against the new schema is unsafe.
+
+Git does not undo `enable-worker.sh`'s private `.env` edit. Before checking out the prior
+revision, restore only the pre-upgrade `COMPOSE_FILE` assignment from the saved private
+`.env` (remove the assignment if it was absent), preserving the proxy/custom overlays
+and other current settings. If a worker was already selected before the upgrade, keep
+that selection.
 
 For plain mode, remove both lines of the proxy verification before pasting either
 sequence, pull only `db`, and use your deployment's health URL.
@@ -648,6 +665,11 @@ Before moving an early `main` checkout to a release tag, check the historical mi
 notes below. To continue tracking pre-1.0 `main` instead, replace `git fetch --tags` and
 `git checkout vX.Y.Z` in the appropriate guarded sequence with `git pull --ff-only`;
 retain the remaining verification, stop, build and health steps.
+For a failed main-tracking update, the backup's saved commit identifies the exact pre-upgrade
+revision: `git pull` advances `main`, so its branch name alone does not undo the update.
+Apply the same checkout-only limit above; otherwise use backup/restore. If rollback leaves
+this `main`-tracking checkout detached, run `git switch main` before the next upgrade so
+`git pull --ff-only` works.
 
 **Migration 0038 requires stopping all old processes; do not use a rolling deployment.**
 Before any new process applies `0038_booking_ical_identity.sql`, stop every old `web`, `all`
