@@ -19,6 +19,7 @@
     "dev": "node scripts/dev.ts",
     "db:up": "docker compose -p hourmere-dev -f docker-compose.dev.yml up -d --wait",
     "db:down": "docker compose -p hourmere-dev -f docker-compose.dev.yml down",
+    "db:cleanup-tests": "node --env-file-if-exists=.env scripts/cleanup-test-databases.ts",
     "db:migrate": "node --env-file-if-exists=.env packages/db/src/migrate-cli.ts && node --env-file-if-exists=.env packages/jobs/src/migrate-cli.ts",
     "lint": "biome check .",
     "format": "biome check --write .",
