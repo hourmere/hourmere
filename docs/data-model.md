@@ -255,11 +255,14 @@ See the [operator upgrade procedure](../apps/site/src/content/docs/docs/self-hos
 Migration `0037_conference_pending_timeout.sql` is the first column drop and a historical
 exception to the two-release policy: it removes the write-only
 `booking_conferences.retry_conference` flag while old binaries still write it. All old
-roles must stop before 0037 runs. For every migration containing `DROP COLUMN`, add a
-same-basename Markdown sidecar in `packages/db/migrations` with a nonempty
-`Column-drop upgrade:` note describing the retired writes, release sequence and required
-operator steps. The migration policy test flags missing notes; never edit published SQL
-to add one.
+roles must stop before 0037 runs. Every migration that drops a column (including
+`ALTER TABLE ... DROP ...` without `COLUMN`), drops a table, or renames a column must have
+a same-basename Markdown sidecar in `packages/db/migrations` with a nonempty
+`Schema-break upgrade:` note describing compatibility with old binaries, the release
+sequence and required operator steps. Historical `Column-drop upgrade:` notes remain
+accepted. The migration policy test ignores comments and quoted strings; dynamically
+executed SQL and function bodies still need manual review. It flags missing notes; never
+edit published SQL to add one.
 
 ## Sign-in email outbox
 
@@ -346,9 +349,13 @@ Migration 0028 adds safe `interrupted`/`job_missing` error classifications for f
 accounting and orphan reconciliation, preserving existing webhook delivery data.
 
 Migration 0034 adds a partial `webhook_deliveries(id)` index for `status = 'pending'`.
-Reconciliation reads pending deliveries in ID order, so terminal history is excluded from
-its bounded locking scan. Retention has no status filter and uses the existing `created_at`
-index; delivery metadata pages use the existing `(webhook_id,id)` index in reverse order.
+It excludes terminal delivery rows from the index and can supply pending IDs in order.
+It does not guarantee an index scan or a reconciliation plan without `Sort`, and does not
+index pg-boss's retained job history. The migration uses ordinary `CREATE INDEX`, not
+`CREATE INDEX CONCURRENTLY`: creation can wait for writers and blocks writes to
+`webhook_deliveries` while it runs. Allow for that lock when upgrading a busy installation.
+Retention has no status filter and uses the existing `created_at` index; delivery metadata
+pages use the existing `(webhook_id,id)` index in reverse order.
 
 ## Independent conference identities
 

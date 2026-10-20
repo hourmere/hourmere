@@ -242,6 +242,48 @@ describe.skipIf(!serverUrl)('bounded webhook delivery reconciliation', () => {
     expect(observed.mutations.map((entry) => entry.affected)).toEqual([1000n, 0n, 1n, 0n])
   })
 
+  it('keeps old, future-dated and differently configured job history authoritative', async () => {
+    const protectedIds = []
+    for (const state of ['created', 'retry', 'active']) {
+      for (const policy of ['standard', 'exclusive', 'stately', 'singleton', 'short']) {
+        const [delivery] = await deliveries()
+        if (!delivery) throw new Error('missing fixture')
+        await history(delivery.id, state)
+        await testDb.pool.query(
+          `UPDATE pgboss.job SET policy=$2, created_on=now()-interval '29 days',
+             start_after=now()+interval '1 year'
+           WHERE singleton_key=$1`,
+          [delivery.id, policy],
+        )
+        protectedIds.push(delivery.id)
+      }
+    }
+    const [old, future] = await deliveries(2)
+    if (!old || !future) throw new Error('missing fixtures')
+    await history(old.id, 'completed', 7)
+    await history(future.id, 'failed', 5)
+    await testDb.pool.query(
+      `UPDATE pgboss.job SET created_on=now()-interval '29 days',
+         completed_on=now()-interval '28 days' WHERE singleton_key=$1`,
+      [old.id],
+    )
+    await testDb.pool.query(
+      `UPDATE pgboss.job SET created_on=now()+interval '1 day', completed_on=NULL
+       WHERE singleton_key=$1`,
+      [future.id],
+    )
+    await run()
+    const result = await rows()
+    expect(result.filter((row) => row.status === 'pending').map((row) => row.id)).toEqual(
+      protectedIds,
+    )
+    expect(result.find((row) => row.id === old.id)).toMatchObject({ status: 'failed', attempts: 8 })
+    expect(result.find((row) => row.id === future.id)).toMatchObject({
+      status: 'failed',
+      attempts: 6,
+    })
+  })
+
   it('bounds retention separately and preserves the inclusive thirty-day boundary', async () => {
     await deliveries(1001, OLD)
     await db.updateTable('webhook_deliveries').set({ status: 'delivered' }).execute()
@@ -429,7 +471,7 @@ describe.skipIf(!serverUrl)('bounded webhook delivery reconciliation', () => {
       ['57014', '55P03', '23514'].map((code) => ({ phase, code })),
     ),
   )(
-    '$phase defers only recognized timeout SQLSTATE $code and warns once when swallowed',
+    '$phase defers only recognized cancellation/lock SQLSTATE $code and warns once when swallowed',
     async ({ phase, code }) => {
       await deliveries()
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -446,7 +488,7 @@ describe.skipIf(!serverUrl)('bounded webhook delivery reconciliation', () => {
       expect(warn).toHaveBeenCalledTimes(code === '23514' ? 0 : 1)
       if (code !== '23514')
         expect(warn).toHaveBeenCalledWith(
-          JSON.stringify({ event: 'webhook_cleanup_timeout', phase, code }),
+          JSON.stringify({ event: 'webhook_cleanup_deferred', phase, code }),
         )
       expect((await rows())[0]?.status).toBe(phase === 'reconciliation' ? 'pending' : 'failed')
       await run()
@@ -455,7 +497,7 @@ describe.skipIf(!serverUrl)('bounded webhook delivery reconciliation', () => {
     },
   )
 
-  it('warns once for each phase when both batches time out in the same dispatch', async () => {
+  it('warns once for each phase when both batches are deferred in the same dispatch', async () => {
     await deliveries()
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const observed = observe(undefined, (query) => {
@@ -468,12 +510,12 @@ describe.skipIf(!serverUrl)('bounded webhook delivery reconciliation', () => {
     expect(warn.mock.calls).toEqual([
       [
         JSON.stringify({
-          event: 'webhook_cleanup_timeout',
+          event: 'webhook_cleanup_deferred',
           phase: 'reconciliation',
           code: '57014',
         }),
       ],
-      [JSON.stringify({ event: 'webhook_cleanup_timeout', phase: 'retention', code: '55P03' })],
+      [JSON.stringify({ event: 'webhook_cleanup_deferred', phase: 'retention', code: '55P03' })],
     ])
     expect((await rows())[0]?.status).toBe('pending')
   })
@@ -531,7 +573,7 @@ describe.skipIf(!serverUrl)('bounded webhook delivery reconciliation', () => {
           (await rows()).every((row) => row.status === 'pending' && row.last_error === null),
         ).toBe(true)
         expect(warn).toHaveBeenCalledExactlyOnceWith(
-          JSON.stringify({ event: 'webhook_cleanup_timeout', phase: 'reconciliation', code }),
+          JSON.stringify({ event: 'webhook_cleanup_deferred', phase: 'reconciliation', code }),
         )
       } finally {
         await testDb.pool.query(`
@@ -546,7 +588,7 @@ describe.skipIf(!serverUrl)('bounded webhook delivery reconciliation', () => {
     },
   )
 
-  it('scans retained pg-boss history once per batch rather than once per orphan', async () => {
+  it('reads retained jobs once for both liveness and attempts, filtering before aggregation', async () => {
     const orphaned = await deliveries(1000)
     await testDb.pool.query(
       `INSERT INTO pgboss.job(name, singleton_key, state, retry_count, started_on)
@@ -559,6 +601,7 @@ describe.skipIf(!serverUrl)('bounded webhook delivery reconciliation', () => {
     await testDb.pool.query('ANALYZE webhook_deliveries')
     const observed = observe()
     await run(observed.connection)
+    expect((await rows()).every((row) => row.status === 'failed' && row.attempts === 4)).toBe(true)
     const query = observed.queries.find(isReconciliation)
     if (!query) throw new Error('reconciliation did not issue a query')
     await db
@@ -569,9 +612,10 @@ describe.skipIf(!serverUrl)('bounded webhook delivery reconciliation', () => {
     let plan: Record<string, unknown> = {}
     try {
       await client.query('BEGIN')
-      const explained = await client.query(`EXPLAIN (ANALYZE, VERBOSE, FORMAT JSON) ${query.sql}`, [
-        ...query.parameters,
-      ])
+      const explained = await client.query(
+        `EXPLAIN (ANALYZE, BUFFERS, VERBOSE, FORMAT JSON) ${query.sql}`,
+        [...query.parameters],
+      )
       plan = explained.rows[0]['QUERY PLAN'][0].Plan
     } finally {
       await client.query('ROLLBACK')
@@ -582,14 +626,15 @@ describe.skipIf(!serverUrl)('bounded webhook delivery reconciliation', () => {
     }
     const all = nodes(plan)
     const historyScans = all.filter(
-      (node) => node.Schema === 'pgboss' && /Scan/.test(String(node['Node Type'])),
+      (node) =>
+        node.Schema === 'pgboss' && node['Relation Name'] && /Scan/.test(String(node['Node Type'])),
     )
-    expect(historyScans.length).toBeGreaterThan(0)
-    expect(
-      historyScans
-        .filter((node) => /Seq Scan/.test(String(node['Node Type'])))
-        .every((node) => Number(node['Actual Loops']) <= 2),
-    ).toBe(true)
+    expect(historyScans).toHaveLength(1)
+    expect(historyScans.every((node) => Number(node['Actual Loops']) === 1)).toBe(true)
+    // The aggregate keeps matching pending keys, rather than every retained singleton.
+    const history = all.find((node) => node['Subplan Name'] === 'CTE job_history')
+    expect(history?.['Actual Rows']).toBe(1000)
+    expect(all.every((node) => Number(node['Temp Written Blocks'] ?? 0) === 0)).toBe(true)
     expect(
       all.filter(
         (node) => /^SubPlan/.test(String(node['Subplan Name'])) && Number(node['Actual Loops']) > 2,

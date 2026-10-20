@@ -30,6 +30,13 @@ const prefix =
   "# Keep these exact bytes, including quoting and whitespace.\nBETTER_AUTH_SECRET='synthetic-$literal-value'\nSMTP_URL='smtps://synthetic:pass@smtp.example.test'\n  OTHER_KEY = value # comment\n# COMPOSE_FILE=ignored.yml\n"
 const suffix = '\nCOMPOSE_FILE_EXTRA=unrelated\nFINAL_KEY=unterminated'
 const hasCompose = spawnSync('docker', ['compose', 'version'], { encoding: 'utf8' }).status === 0
+const systemShell = { name: 'system sh', command: '/bin/sh', args: [] as string[] }
+const shells = [
+  systemShell,
+  { name: 'bash POSIX', command: 'bash', args: ['--posix'] },
+  { name: 'dash', command: 'dash', args: [] },
+  { name: 'BusyBox sh', command: 'busybox', args: ['sh'] },
+].filter(({ command, args }) => spawnSync(command, [...args, '-c', 'exit 0']).status === 0)
 
 afterAll(() => {
   for (const directory of directories) rmSync(directory, { recursive: true, force: true })
@@ -47,10 +54,16 @@ function fixture(contents?: string) {
   return {
     directory,
     envFile,
-    run(mode: 'on' | 'off' = 'on', env: NodeJS.ProcessEnv = {}, trace = false) {
+    run(
+      mode: 'on' | 'off' = 'on',
+      env: NodeJS.ProcessEnv = {},
+      trace = false,
+      shell = systemShell,
+    ) {
       return spawnSync(
-        '/bin/sh',
+        shell.command,
         [
+          ...shell.args,
           ...(trace ? ['-x'] : []),
           join(scripts, `${mode === 'on' ? 'enable' : 'disable'}-worker.sh`),
         ],
@@ -151,6 +164,87 @@ describe('private worker overlay configuration', () => {
     )
   })
 
+  it.each(['on', 'off'] as const)('appends with CRLF when switching %s', (mode) => {
+    for (const contents of ['FIRST=yes\r\nLAST=yes\r\n', 'FIRST=yes\r\nLAST=unterminated']) {
+      const setup = fixture(contents)
+      const selected = `${base}${mode === 'on' ? `:${worker}` : ''}`
+      expect(setup.run(mode).status).toBe(0)
+      expect(setup.text()).toBe(
+        `${contents}${contents.endsWith('\n') ? '' : '\r\n'}COMPOSE_FILE='${selected}'\r\n`,
+      )
+      expect(setup.run(mode).status).toBe(0)
+      expect(setup.text().match(/^COMPOSE_FILE=/gm)).toHaveLength(1)
+      expect(setup.noStaging()).toBe(true)
+    }
+  })
+
+  it.each(['on', 'off'] as const)('refuses a leading UTF-8 BOM when switching %s', (mode) => {
+    for (const first of ['OTHER=preserved', `COMPOSE_FILE='${base}:${proxy}'`, '# comment']) {
+      const contents = `\uFEFF${first}\n${first.startsWith('COMPOSE_FILE=') ? '' : `COMPOSE_FILE='${base}:${proxy}'\n`}`
+      const setup = fixture(contents)
+      const result = setup.run(mode)
+      expect(result.status).toBe(1)
+      expect(result.stderr).toContain('Remove the leading UTF-8 BOM from .env')
+      expect(result.stderr).toContain('save as UTF-8 without BOM')
+      expect(setup.text() === contents).toBe(true)
+      expect(statSync(setup.envFile).mode & 0o777).toBe(0o644)
+      expect(setup.noStaging()).toBe(true)
+    }
+  })
+
+  it.each(
+    [
+      `COMPOSE_FILE: ${base}:${proxy}`,
+      `COMPOSE_FILE: '${base}:${proxy}'`,
+      ` \texport COMPOSE_FILE : "${base}:${proxy}"`,
+      `COMPOSE_FILE += ${base}:${proxy}`,
+      `env COMPOSE_FILE=${base}:${proxy}`,
+      'COMPOSE_FILE',
+      `COMPOSE_FILE: ${base}:${proxy}\nCOMPOSE_FILE='${base}'`,
+      `COMPOSE_FILE='${base}'\nCOMPOSE_FILE: ${base}:${proxy}`,
+    ].flatMap((line) => (['on', 'off'] as const).map((mode) => ({ line, mode }))),
+  )('refuses unsupported COMPOSE_FILE lines when switching $mode ($line)', ({ line, mode }) => {
+    const contents = `${prefix}${line}${suffix}`
+    const setup = fixture(contents)
+    const result = setup.run(mode)
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain('COMPOSE_FILE is ambiguous or unsupported')
+    expect(result.stderr).toContain('assignment with =')
+    expect(result.stderr).toContain('preserving all existing files')
+    expect(setup.text() === contents).toBe(true)
+    expect(statSync(setup.envFile).mode & 0o777).toBe(0o644)
+    expect(setup.noStaging()).toBe(true)
+  })
+
+  it('preserves COMPOSE_FILE mentions in comments, other values and longer keys', () => {
+    const contents =
+      "# COMPOSE_FILE: ignored.yml\nOTHER='COMPOSE_FILE: literal.yml'\nTEXT=COMPOSE_FILE\nCOMPOSE_FILE_EXTRA=unrelated\n"
+    const setup = fixture(contents)
+    expect(setup.run().status).toBe(0)
+    expect(setup.text()).toBe(`${contents}COMPOSE_FILE='${base}:${worker}'\n`)
+    expect(setup.run('off').status).toBe(0)
+    expect(setup.text()).toBe(`${contents}COMPOSE_FILE='${base}'\n`)
+  })
+
+  it.each(['on', 'off'] as const)(
+    'gives exact repair instructions for a worker suffix outside quotes when switching %s',
+    (mode) => {
+      for (const value of [`'${base}':${worker}`, `"${base}:${proxy}":${worker}`]) {
+        const contents = `${prefix}COMPOSE_FILE=${value}${suffix}`
+        const setup = fixture(contents)
+        const result = setup.run(mode)
+        expect(result.status).toBe(1)
+        expect(result.stderr).toContain(`Move :${worker} inside the closing quote in .env`)
+        expect(result.stderr).toContain(`COMPOSE_FILE='${base}:${worker}' (plain)`)
+        expect(result.stderr).toContain(`COMPOSE_FILE='${base}:${proxy}:${worker}' (bundled HTTPS)`)
+        expect(result.stderr).toContain('Preserve any other existing files')
+        expect(result.stderr.includes('synthetic-$literal-value')).toBe(false)
+        expect(setup.text() === contents).toBe(true)
+        expect(setup.noStaging()).toBe(true)
+      }
+    },
+  )
+
   it('never evaluates values or exposes unrelated settings even with inherited tracing', () => {
     const setup = fixture()
     const marker = join(setup.directory, 'must-not-exist')
@@ -171,14 +265,22 @@ describe('private worker overlay configuration', () => {
     expect((result.stdout + result.stderr).includes('Q')).toBe(false)
   })
 
-  it.each(["'", '"'])('preserves assignment-looking lines inside multiline %s values', (quote) => {
-    const contents = `OTHER=${quote}first\nCOMPOSE_FILE=${base}\nexport COMPOSE_FILE=${worker}\nlast${quote}\n`
-    const setup = fixture(contents)
-    expect(setup.run().status).toBe(0)
-    expect(setup.text()).toBe(`${contents}COMPOSE_FILE='${base}:${worker}'\n`)
-    expect(setup.run('off').status).toBe(0)
-    expect(setup.text()).toBe(`${contents}COMPOSE_FILE='${base}'\n`)
-  })
+  it.each([
+    { quote: "'", separator: '=' },
+    { quote: '"', separator: '=' },
+    { quote: "'", separator: ':' },
+    { quote: '"', separator: ':' },
+  ])(
+    'preserves assignment-looking lines inside multiline $separator $quote values',
+    ({ quote, separator }) => {
+      const contents = `OTHER${separator}${quote}first\nCOMPOSE_FILE=${base}:${proxy}\nexport COMPOSE_FILE=${worker}\nlast${quote}\n`
+      const setup = fixture(contents)
+      expect(setup.run().status).toBe(0)
+      expect(setup.text()).toBe(`${contents}COMPOSE_FILE='${base}:${worker}'\n`)
+      expect(setup.run('off').status).toBe(0)
+      expect(setup.text()).toBe(`${contents}COMPOSE_FILE='${base}'\n`)
+    },
+  )
 
   it.each(['file', 'directory', 'dangling'])('refuses a %s symlink without changing it', (kind) => {
     const setup = fixture()
@@ -262,12 +364,87 @@ describe('private worker overlay configuration', () => {
     expect(enabled.status).toBe(0)
     expect(enabled.stdout).toContain('unset COMPOSE_FILE')
     expect(enabled.stdout).toContain(
+      '# Bundled HTTPS only; omit this check in plain mode.\n  docker compose config --services | grep -qx proxy &&\n  docker compose config --services | grep -qx worker',
+    )
+    expect(enabled.stdout).toContain(
       'docker compose config --services | grep -qx worker &&\n    docker compose up -d --build --wait',
     )
     const disabled = setup.run('off')
     expect(disabled.status).toBe(0)
     expect(disabled.stdout).toContain('Remove any legacy HOURMERE_ROLE=web setting from .env')
     expect(disabled.stdout).toContain('docker compose up -d --build --wait --remove-orphans')
+  })
+
+  it.each([false, true])(
+    'starts only after printed worker and proxy checks succeed (proxy present: %s)',
+    (hasProxy) => {
+      const setup = fixture(`COMPOSE_FILE='${base}:${proxy}'\n`)
+      const enabled = setup.run()
+      expect(enabled.status).toBe(0)
+      const commands = enabled.stdout.split('Run from this checkout:\n')[1]
+      expect(commands).toBeDefined()
+      const bin = join(setup.directory, 'bin')
+      const started = join(setup.directory, 'started')
+      mkdirSync(bin)
+      writeFileSync(
+        join(bin, 'docker'),
+        '#!/bin/sh\ncase "$*" in\n  "compose config --services") printf "%s\\n" app db worker; [ "$HAS_PROXY" != true ] || printf "%s\\n" proxy ;;\n  "compose up -d --build --wait") : > "$STARTED_FILE" ;;\n  *) exit 99 ;;\nesac\n',
+        { mode: 0o755 },
+      )
+      const run = spawnSync('/bin/sh', ['-c', commands ?? 'exit 99'], {
+        encoding: 'utf8',
+        env: {
+          PATH: `${bin}:${process.env.PATH}`,
+          HAS_PROXY: String(hasProxy),
+          STARTED_FILE: started,
+        },
+      })
+      expect(run.status).toBe(hasProxy ? 0 : 1)
+      expect(existsSync(started)).toBe(hasProxy)
+    },
+  )
+})
+
+describe.each(shells)('worker script portability under $name', (shell) => {
+  it('preserves the proxy selection and CRLF through enable and disable', () => {
+    const setup = fixture(`OTHER=preserved\r\nCOMPOSE_FILE='${base}:${proxy}'\r\n`)
+    expect(setup.run('on', {}, false, shell).status).toBe(0)
+    expect(setup.text()).toBe(`OTHER=preserved\r\nCOMPOSE_FILE='${base}:${proxy}:${worker}'\r\n`)
+    expect(setup.run('off', {}, false, shell).status).toBe(0)
+    expect(setup.text()).toBe(`OTHER=preserved\r\nCOMPOSE_FILE='${base}:${proxy}'\r\n`)
+  })
+
+  it('uses CRLF when appending a missing selection', () => {
+    const setup = fixture('OTHER=preserved\r\nLAST=unterminated')
+    expect(setup.run('on', {}, false, shell).status).toBe(0)
+    expect(setup.text()).toBe(
+      `OTHER=preserved\r\nLAST=unterminated\r\nCOMPOSE_FILE='${base}:${worker}'\r\n`,
+    )
+  })
+
+  it('preserves assignment-looking lines inside other colon multiline values', () => {
+    for (const quote of ["'", '"']) {
+      const contents = `OTHER: ${quote}first\nCOMPOSE_FILE=${base}:${proxy}\nlast${quote}\n`
+      const setup = fixture(contents)
+      expect(setup.run('on', {}, false, shell).status).toBe(0)
+      expect(setup.text()).toBe(`${contents}COMPOSE_FILE='${base}:${worker}'\n`)
+      expect(setup.run('off', {}, false, shell).status).toBe(0)
+      expect(setup.text()).toBe(`${contents}COMPOSE_FILE='${base}'\n`)
+    }
+  })
+
+  it.each([
+    `\uFEFFCOMPOSE_FILE='${base}:${proxy}'\n`,
+    `\uFEFFOTHER=yes\nCOMPOSE_FILE='${base}:${proxy}'\n`,
+    `COMPOSE_FILE: '${base}:${proxy}'\r\n`,
+    `COMPOSE_FILE='${base}:${proxy}':${worker}\n`,
+  ])('refuses BOM, colon syntax and broken quoted suffixes without changes (%j)', (contents) => {
+    for (const mode of ['on', 'off'] as const) {
+      const setup = fixture(contents)
+      expect(setup.run(mode, {}, false, shell).status).toBe(1)
+      expect(setup.text() === contents).toBe(true)
+      expect(setup.noStaging()).toBe(true)
+    }
   })
 })
 
