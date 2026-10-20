@@ -189,12 +189,16 @@ describe('responsive shell and shared CSS contract', () => {
     expect(controls).toContain('min-height: 44px;')
     expect(controls).toContain('min-width: 44px;')
     const links = rule(
-      '.breadcrumb a,\n  .booking-link a,\n  .fine-print a,\n  .public-footer a,\n  .public-signup a,\n  .legal-links a',
+      '.breadcrumb a,\n  .fine-print a,\n  .public-footer a,\n  .public-signup a,\n  .legal-links a',
       coarse,
     )
     expect(links).toContain('min-height: 44px;')
     expect(links).toContain('min-width: 44px;')
     expect(links).toContain('display: inline-flex;')
+    const bookingLinks = rule('.booking-link a', coarse)
+    expect(bookingLinks).toContain('min-height: 44px;')
+    expect(bookingLinks).toContain('min-width: 44px;')
+    expect(bookingLinks).not.toMatch(/display:\s*(inline-)?flex/)
   })
 
   it('retains viewport fallbacks while preferring the small viewport height', () => {
