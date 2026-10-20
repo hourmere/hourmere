@@ -97,6 +97,22 @@ type Mode =
   | { kind: 'reschedule'; notice?: UiText | undefined }
   | { kind: 'confirm-reschedule'; slot: Slot }
 
+function CalendarResponseNote({ onCancel }: { onCancel?: () => void }) {
+  const { t } = useI18n()
+  return (
+    <>
+      <p className="muted">
+        {t('Booking confirmed. Calendar responses do not cancel it. Use Cancel booking here.')}
+      </p>
+      {onCancel && (
+        <button type="button" className="button button-small" onClick={onCancel}>
+          {t('Cancel booking')}
+        </button>
+      )}
+    </>
+  )
+}
+
 async function followReschedule(
   booking: ManagedBooking,
   token: string,
@@ -355,6 +371,7 @@ function ManageView({
               {t('Keep the current time')}
             </button>
           </div>
+          <CalendarResponseNote onCancel={() => setMode({ kind: 'cancel' })} />
           <SlotPicker
             load={loadSlots}
             durationMinutes={durationMinutes}
@@ -387,18 +404,32 @@ function ManageView({
             />
           )}
           {mode.kind === 'view' && changeable && (
-            <div className="manage-actions">
-              <button
-                type="button"
-                className="button button-primary"
-                onClick={() => setMode({ kind: 'reschedule' })}
-              >
-                {t('Reschedule')}
-              </button>
-              <button type="button" className="button" onClick={() => setMode({ kind: 'cancel' })}>
-                {t('Cancel booking')}
-              </button>
-            </div>
+            <>
+              <CalendarResponseNote />
+              <div className="manage-actions">
+                <button
+                  type="button"
+                  className="button button-primary"
+                  onClick={() => setMode({ kind: 'reschedule' })}
+                >
+                  {t('Reschedule')}
+                </button>
+                <button
+                  type="button"
+                  className="button"
+                  onClick={() => setMode({ kind: 'cancel' })}
+                >
+                  {t('Cancel booking')}
+                </button>
+              </div>
+            </>
+          )}
+          {mode.kind !== 'view' && changeable && (
+            <CalendarResponseNote
+              {...(mode.kind === 'confirm-reschedule'
+                ? { onCancel: () => setMode({ kind: 'cancel' }) }
+                : {})}
+            />
           )}
           {mode.kind === 'cancel' && (
             <CancelForm

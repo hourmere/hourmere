@@ -10,6 +10,7 @@ import {
   type BookingEmailKind,
   type BookingEmailMeeting,
   bookingEmail,
+  calendarResponseDescription,
   formatChineseTemplate,
   type IcsPerson,
   icsAttachment,
@@ -727,13 +728,19 @@ async function deliverBookingNotification(
             language === 'zh-CN'
               ? formatChineseTemplate('{event}（与{other}）', { event: booking.eventName, other })
               : `${booking.eventName} with ${other}`,
-          description: modern
-            ? language === 'zh-CN'
-              ? formatChineseTemplate('通过 Hourmere 与{name}预约。', {
-                  name: calendarOrganizer.name,
-                })
-              : `Booked with ${calendarOrganizer.name} using Hourmere.`
-            : undefined,
+          description:
+            [
+              modern
+                ? language === 'zh-CN'
+                  ? formatChineseTemplate('通过 Hourmere 与{name}预约。', {
+                      name: calendarOrganizer.name,
+                    })
+                  : `Booked with ${calendarOrganizer.name} using Hourmere.`
+                : undefined,
+              kind !== 'cancelled' ? calendarResponseDescription(language) : undefined,
+            ]
+              .filter(Boolean)
+              .join('\n\n') || undefined,
           location: booking.location ? meetingLocationText(booking.location) : undefined,
           organizer: {
             ...calendarOrganizer,

@@ -62,6 +62,12 @@ must approve publication through the [release workflow](https://github.com/hourm
 
 - Email-sent and public booking success screens suggest checking spam or junk and adding
   the sender to contacts, in English and Simplified Chinese.
+- Booking confirmations, management pages and calendar invitations explain that calendar
+  responses do not cancel a booking. REQUEST emails put invitee guidance beside the
+  cancellation links, direct guests to the booker or host, and give hosts a clear Hourmere
+  cancellation instruction. Calendar descriptions contain no management secrets; existing
+  RSVP and calendar identity fields stay unchanged. Operator docs cover monitored replies
+  and forwarding for one fixed host; declines still do not automatically notify hosts.
 - Booking emails now use English or Simplified Chinese for each recipient, including
   subjects, bodies, dates and calendar summaries/descriptions. Guests follow the booking
   language; hosts use their profile language. Sign-in emails follow the requesting

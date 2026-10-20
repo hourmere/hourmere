@@ -1,6 +1,14 @@
 // Calendar invitations (iCalendar, RFC 5545; methods from iTIP, RFC 5546) attached to booking
 // emails, so the meeting lands in the recipient's calendar and later updates replace it.
+import { interfaceLanguage } from '@hourmere/core/language'
 import type { MailAttachment } from './index.ts'
+
+/** Public guidance only: calendar entries may be shared, so they never get manage links. */
+export function calendarResponseDescription(locale?: string | null): string {
+  return interfaceLanguage(locale) === 'zh-CN'
+    ? '日历回应不会取消此预约。如需取消，请使用 Hourmere 原邮件中的取消链接。'
+    : 'Calendar responses do not cancel this booking. Use the cancellation link in the original Hourmere email.'
+}
 
 export interface IcsPerson {
   name: string

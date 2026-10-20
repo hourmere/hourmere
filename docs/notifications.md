@@ -321,7 +321,9 @@ New invitations use the single mailbox from `MAIL_FROM` as ORGANIZER, with the v
 primary host's name as CN. Hosts also appear as attendees; duplicate addresses are collapsed,
 including when the booker is a host or the sending mailbox is the host's own address.
 Invitee/guest summaries name the host; host summaries name the invitee. Every recipient gets
-a neutral DESCRIPTION naming the host and Hourmere.
+a neutral DESCRIPTION naming the host and Hourmere. REQUEST descriptions also explain that
+calendar responses do not cancel the booking and refer to the original email's cancellation
+link, in the recipient's language. That explanation contains no URL or secret.
 No booking answers, private management links or tokens enter calendar data.
 
 Avoid a Gmail or Google Workspace address, or any other address registered as a Google
@@ -357,15 +359,21 @@ An invalid Reply-To is omitted without blocking notification delivery.
 
 `NEEDS-ACTION` leaves adding/accepting the invitation to the recipient's calendar. The
 booking itself is already confirmed in Hourmere. `RSVP=FALSE` deliberately does not solicit
-REPLY messages: Hourmere has no inbound calendar-response processor, and a calendar decline
-never cancels a booking. Use the original confirmation's manage links for rescheduling or
-cancellation. Operators should monitor or deliberately forward the `MAIL_FROM` mailbox for
-unsolicited calendar replies and keep it able to receive mail; Reply-To is not a guarantee
-that those reach the host. Confirmation and reschedule email footers explain that declining
-in a calendar does not cancel the booking, using the recipient's language and role. This
-footer appears only when the email carries a REQUEST invitation. Suppressed invitations
+REPLY messages, but it does **not** stop Gmail from offering Yes/No/Maybe or sending calendar
+replies to the pinned ORGANIZER (`MAIL_FROM` for new roots). Legacy roots may still send
+replies directly to their original host organizer. Hourmere has no inbound calendar-response
+processor or automatic two-way calendar sync: a calendar decline neither cancels a booking
+nor automatically notifies its host. Ordinary email Reply-To does not change that routing.
+Use Cancel booking on the private management page or the original email's cancellation link.
+The public confirmation and management pages explain this distinction.
+
+Every email carrying a REQUEST explains the limitation in the recipient's language and
+role. The invitee's hint sits next to Cancel / Reschedule near the top of the body; hosts
+are directed to cancel in Hourmere, and guests are directed to contact the booker or host.
+Guests never receive the invitee's management link or token. Suppressed invitations
 (including hosts with provider copies and invitees using the same address), cancellations,
-reminders and conference-failure notices have no decline footer.
+reminders and conference-failure notices have no calendar-response hint. Reminders carry no
+ICS; their invitee management links still work.
 
 SMTP uses Nodemailer's `icalEvent`: a `text/calendar; method=REQUEST` (or CANCEL) alternative
 with UTF-8 plus an identical downloadable `application/ics` attachment (`invite.ics` or
@@ -382,6 +390,41 @@ It improves identity alignment and calendar MIME recognition; it does not guaran
 placement, response buttons or automatic addition. Gmail's known-sender/invitation settings
 still apply.
 Real Gmail external-invitee and Outlook.com checks, including update/cancel, are required.
+
+### Operator runbook for calendar replies
+
+Keep `MAIL_FROM` able to receive mail and assign someone to monitor it. Archive calendar
+replies, identify the booking and contact its actual host manually, including for declines.
+No automatic host notification or handling deadline is provided. Do not treat an incoming
+calendar reply as authorization to cancel: cancellation remains an explicit Hourmere action.
+
+An instance with **one fixed host** may use its mail provider's filter to forward calendar
+replies to that host:
+
+1. Verify the fixed host's forwarding destination with the mail provider.
+2. Inspect representative calendar replies and select conditions supported by that provider.
+   Subject prefixes and language vary; a subject filter alone cannot reliably identify every
+   calendar reply or only declines. If the mailbox also receives support or other private
+   mail, forward only reliably classified replies; otherwise sort them manually.
+3. Forward a copy and retain the original in the monitored mailbox. Whole-mailbox forwarding
+   is appropriate only for a dedicated invitation mailbox or when its sole host is also
+   authorized to receive all other mail there.
+4. Test accept, tentative and decline replies, plus a reply after rescheduling. Verify that
+   the host receives each original reply, the mailbox retains its copy, and the Hourmere
+   booking stays confirmed until someone explicitly cancels it. Check the rule and delivery
+   failures regularly.
+
+For example, in [Zoho Mail's filter-based forwarding settings](https://www.zoho.com/mail/help/email-forwarding.html),
+open **Settings → Filters → New Filter**, set the tested conditions and select **Forward to**
+with the verified host address. Save the filter and keep the original message. For dedicated
+whole-mailbox forwarding, leave **Delete original email copy after forwarding** unchecked.
+Monitor forwarding health; Zoho can disable forwarding after repeated delivery failures.
+
+This is a fixed single-host workaround. Shared multi-host instances need the booking's UID
+mapped to its actual host(s); ordinary mailbox rules have no access to that mapping. Names,
+subjects and sender addresses cannot route replies reliably, and forwarding every reply to
+all hosts exposes other bookings. Forwarding also does not update calendar attendance or
+make the host the organizer. Multi-host operators should use monitored manual handling.
 
 ## How the booking services queue them
 

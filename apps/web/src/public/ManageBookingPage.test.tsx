@@ -94,6 +94,38 @@ function manageServer(
 }
 
 describe('the invitee’s manage page', () => {
+  it.each(['cancel', 'reschedule'])(
+    'explains calendar responses throughout the emailed %s action without sending a cancellation',
+    async (action) => {
+      const user = userEvent.setup()
+      const api = manageServer()
+      renderApp(`/booking#token=${TOKEN}&action=${action}`)
+      await screen.findByRole('heading', {
+        name: action === 'cancel' ? 'Cancel this booking?' : 'Pick a new time',
+      })
+      const note =
+        'Booking confirmed. Calendar responses do not cancel it. Use Cancel booking here.'
+      const chineseNote = '预约已确认。日历回应不会取消预约。如需取消，请在此使用“取消预约”。'
+      expect(screen.getAllByText(note)).toHaveLength(1)
+      await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+      expect(screen.getAllByText(chineseNote)).toHaveLength(1)
+      if (action === 'reschedule') {
+        await user.selectOptions(screen.getByLabelText('界面语言'), 'en')
+        await user.click(await screen.findByRole('button', { name: /November 3, available/ }))
+        await user.click(screen.getByRole('button', { name: '10:00 AM' }))
+        await screen.findByRole('heading', { name: 'Move your booking?' })
+        expect(screen.getAllByText(note)).toHaveLength(1)
+        await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+        expect(screen.getAllByText(chineseNote)).toHaveLength(1)
+        await user.click(screen.getByRole('button', { name: '取消预约' }))
+        await screen.findByRole('heading', { name: '取消此预约？' })
+        expect(screen.getAllByText(chineseNote)).toHaveLength(1)
+      }
+      expect(api.to('POST /api/v1/bookings/manage/cancel')).toHaveLength(0)
+      expect(api.to('POST /api/v1/bookings/manage/reschedule')).toHaveLength(0)
+    },
+  )
+
   it.each(['pending', 'failed'] as const)(
     'withholds delivery advice while a rescheduled invitation is %s',
     async (status) => {
@@ -132,6 +164,12 @@ describe('the invitee’s manage page', () => {
 
     expect(await screen.findByRole('heading', { name: 'Your booking' })).toBeDefined()
     expect(screen.queryByText(/Didn’t get the email/)).toBeNull()
+    const calendarNote = screen.getByText(
+      'Booking confirmed. Calendar responses do not cancel it. Use Cancel booking here.',
+    )
+    expect(calendarNote.nextElementSibling).toBe(
+      screen.getByRole('button', { name: 'Cancel booking' }).parentElement,
+    )
     // Gone from the address bar (and so from bookmarks and any Referer), replaced rather than
     // pushed: no history entry keeps it either.
     expect(window.location.pathname).toBe('/booking')
@@ -176,6 +214,7 @@ describe('the invitee’s manage page', () => {
     ).toBeDefined()
     expect(screen.getByText('Something came up.')).toBeDefined()
     expect(screen.queryByRole('button', { name: 'Reschedule' })).toBeNull()
+    expect(screen.queryByText(/Calendar responses do not cancel/)).toBeNull()
     const [call] = api.to('POST /api/v1/bookings/manage/cancel')
     expect(call?.body).toEqual({ reason: 'Something came up.' })
     expect(call?.headers.get('x-manage-token')).toBe(TOKEN)
@@ -650,6 +689,7 @@ describe('the invitee’s manage page', () => {
     openLink(`/booking#token=${TOKEN}&action=reschedule`)
     expect(await screen.findByRole('heading', { name: 'Cancelled booking' })).toBeDefined()
     expect(screen.getByText('This booking is cancelled, so it can’t be changed.')).toBeDefined()
+    expect(screen.queryByText(/Calendar responses do not cancel/)).toBeNull()
     expect(screen.queryByRole('button', { name: 'Reschedule' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Cancel booking' })).toBeNull()
   })
@@ -661,6 +701,7 @@ describe('the invitee’s manage page', () => {
     expect(
       await screen.findByText('This meeting has already started, so it can’t be changed here.'),
     ).toBeDefined()
+    expect(screen.queryByText(/Calendar responses do not cancel/)).toBeNull()
     expect(screen.queryByRole('button', { name: 'Reschedule' })).toBeNull()
   })
 

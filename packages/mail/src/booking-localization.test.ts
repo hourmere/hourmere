@@ -89,28 +89,58 @@ describe('booking email language goldens', () => {
   }
 })
 
-describe('calendar-decline footer', () => {
+const calendarGuidance = {
+  en: {
+    invitee:
+      "Declining this invitation in your calendar won't cancel the booking. To cancel, use the Cancel link in this email.",
+    host: 'Calendar declines are not synced to Hourmere yet; cancel the booking in Hourmere.',
+    guest: 'Calendar responses do not cancel this booking. To cancel, contact the booker or host.',
+  },
+  'zh-CN': {
+    invitee: '在日历中拒绝此邀请不会取消预约。如需取消，请使用此邮件中的“取消”链接。',
+    host: '日历中的拒绝尚未同步到 Hourmere；如需取消，请在 Hourmere 中操作。',
+    guest: '日历回应不会取消此预约。如需取消，请联系预约人或主持人。',
+  },
+}
+
+describe('calendar-response guidance', () => {
   for (const locale of languages) {
     for (const role of roles) {
-      it(`${locale} ${role} only explains declines with an actual REQUEST`, () => {
-        const recipient = { ...recipients[role], locale }
-        for (const kind of [...kinds, 'reminder', 'conference_failed'] as const) {
+      for (const kind of [...kinds, 'reminder', 'conference_failed'] as const) {
+        it(`${locale} ${kind} ${role} explains only an actual REQUEST invitation`, () => {
+          const recipient = { ...recipients[role], locale }
+          const sentence = calendarGuidance[locale][role]
           for (const attachment of [undefined, invitation('REQUEST'), invitation('CANCEL')]) {
             const message = bookingEmail(kind, meeting, recipient, { attachment })
             const expected =
-              (kind === 'confirmed' || kind === 'rescheduled') &&
+              kind !== 'cancelled' &&
+              kind !== 'conference_failed' &&
               attachment?.contentType.includes('method=REQUEST') === true
-            expect(message.text.includes('Declining this invitation')).toBe(
-              expected && locale === 'en',
-            )
-            expect(message.html?.includes('Declining this invitation')).toBe(
-              expected && locale === 'en',
-            )
-            expect(message.text.includes('在日历中拒绝')).toBe(expected && locale === 'zh-CN')
-            expect(message.html?.includes('在日历中拒绝')).toBe(expected && locale === 'zh-CN')
+            expect(message.text.includes(sentence)).toBe(expected)
+            expect(message.html?.includes(sentence.replaceAll("'", '&#39;'))).toBe(expected)
+            if (role !== 'invitee') {
+              expect(message.text.includes('token=')).toBe(false)
+              expect(message.html?.includes('token=')).toBe(false)
+              expect(message.text.includes('/booking#')).toBe(false)
+              expect(message.html?.includes('/booking#')).toBe(false)
+            } else if (expected) {
+              // The note is beside the actions near the top, before meeting details.
+              expect(
+                message.text.includes(
+                  `${recipients.invitee.role === 'attendee' ? recipients.invitee.manageLinks?.cancel : ''}\n${sentence}\n\n`,
+                ),
+              ).toBe(true)
+              expect(message.text.indexOf(sentence)).toBeLessThan(
+                message.text.indexOf(locale === 'en' ? 'What:' : '活动：'),
+              )
+              expect(message.html?.indexOf(sentence.replaceAll("'", '&#39;'))).toBeLessThan(
+                message.html?.indexOf('<table') ?? -1,
+              )
+              expect(message.html).toContain(`</a></p>\n<p lang="${locale}"`)
+            }
           }
-        }
-      })
+        })
+      }
     }
   }
 
@@ -121,8 +151,8 @@ describe('calendar-decline footer', () => {
       { ...invitation('REQUEST'), content: 'This is not an invitation.' },
     ]) {
       const message = bookingEmail('confirmed', meeting, recipients.invitee, { attachment })
-      expect(message.text).not.toContain('Declining this invitation')
-      expect(message.html).not.toContain('Declining this invitation')
+      expect(message.text).not.toContain(calendarGuidance.en.invitee)
+      expect(message.html).not.toContain(calendarGuidance.en.invitee)
     }
   })
 })

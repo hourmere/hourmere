@@ -208,14 +208,15 @@ describe('bookingEmail', () => {
       language === 'zh-CN'
         ? {
             invitee: '在日历中拒绝此邀请不会取消预约。如需取消，请使用此邮件中的“取消”链接。',
-            host: '在日历中拒绝此邀请不会取消预约。如需取消，请在 Hourmere 中打开此预约。',
-            guest: '在日历中拒绝此邀请不会取消预约。',
+            host: '日历中的拒绝尚未同步到 Hourmere；如需取消，请在 Hourmere 中操作。',
+            guest: '日历回应不会取消此预约。如需取消，请联系预约人或主持人。',
           }
         : {
             invitee:
               "Declining this invitation in your calendar won't cancel the booking. To cancel, use the Cancel link in this email.",
-            host: "Declining this invitation in your calendar won't cancel the booking. To cancel, open the booking in Hourmere.",
-            guest: "Declining this invitation in your calendar won't cancel the booking.",
+            host: 'Calendar declines are not synced to Hourmere yet; cancel the booking in Hourmere.',
+            guest:
+              'Calendar responses do not cancel this booking. To cancel, contact the booker or host.',
           }
     for (const [recipient, sentence] of [
       [invitee, expected.invitee],
@@ -230,8 +231,14 @@ describe('bookingEmail', () => {
           attachment: requestAttachment,
         },
       )
-      expect(m.text).toMatch(/\n\n[^\n]+\n$/)
-      expect(m.text.endsWith(`\n\n${sentence}\n`)).toBe(true)
+      expect(m.text.includes(sentence)).toBe(true)
+      if (recipient === invitee) {
+        expect(m.text.indexOf(sentence)).toBeLessThan(
+          m.text.indexOf(language === 'en' ? 'What:' : '活动：'),
+        )
+      } else {
+        expect(m.text.endsWith(`\n\n${sentence}\n`)).toBe(true)
+      }
       expect(m.html).toContain(`<p lang="${language}"`)
       expect(m.html).toContain(`>${sentence.replaceAll("'", '&#39;')}</p>`)
       if (recipient !== invitee) {

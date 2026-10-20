@@ -1,6 +1,12 @@
 import ICAL from 'ical.js'
 import { describe, expect, it } from 'vitest'
-import { buildIcs, foldIcsLine, type IcsEvent, icsAttachment } from './ics.ts'
+import {
+  buildIcs,
+  calendarResponseDescription,
+  foldIcsLine,
+  type IcsEvent,
+  icsAttachment,
+} from './ics.ts'
 
 const base: IcsEvent = {
   method: 'REQUEST',
@@ -264,5 +270,31 @@ describe('icsAttachment', () => {
       filename: 'cancel.ics',
       contentType: 'text/calendar; method=CANCEL; charset=UTF-8',
     })
+  })
+})
+
+describe('calendarResponseDescription', () => {
+  it.each([
+    [
+      'en',
+      'Calendar responses do not cancel this booking. Use the cancellation link in the original Hourmere email.',
+    ],
+    ['zh-CN', '日历回应不会取消此预约。如需取消，请使用 Hourmere 原邮件中的取消链接。'],
+  ])('provides secret-free calendar guidance in %s', (locale, expected) => {
+    const description = calendarResponseDescription(locale)
+    expect(description).toBe(expected)
+    expect(/https?:|token|#|\bmanage\b/i.test(description)).toBe(false)
+    const ics = buildIcs({ ...base, description })
+    expectWellFormed(ics)
+    expect(parse(ics).event.getFirstPropertyValue('description')).toBe(expected)
+  })
+
+  it('normalizes recipient locales and falls back to English', () => {
+    for (const locale of ['zh', 'zh-Hans-SG']) {
+      expect(calendarResponseDescription(locale)).toBe(calendarResponseDescription('zh-CN'))
+    }
+    for (const locale of [undefined, null, 'en-GB', 'zh-TW', 'fr', 'invalid_locale']) {
+      expect(calendarResponseDescription(locale)).toBe(calendarResponseDescription('en'))
+    }
   })
 })

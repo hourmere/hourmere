@@ -2,6 +2,10 @@
 export const common = {
   'Didn’t get the email? Check spam or junk and add the sender to your contacts.':
     '没收到邮件？请检查垃圾邮件文件夹，并将发件人加入通讯录。',
+  'Booking confirmed. Calendar responses do not cancel it. Use Cancel booking here.':
+    '预约已确认。日历回应不会取消预约。如需取消，请在此使用“取消预约”。',
+  'Booking confirmed. Calendar responses do not cancel it. To cancel, use the booking link in your Hourmere email.':
+    '预约已确认。日历回应不会取消预约。如需取消，请使用 Hourmere 邮件中的预约链接。',
   'Privacy policy': '隐私政策',
   'Terms of service': '服务条款',
   // Google's official Simplified Chinese branding guidelines approve this wording.

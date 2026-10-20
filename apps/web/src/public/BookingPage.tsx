@@ -1,6 +1,6 @@
 import { interfaceLanguage } from '@hourmere/core/language'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Navigate, useLocation, useParams } from 'react-router'
+import { Link, Navigate, useLocation, useParams } from 'react-router'
 import { ConferenceNotice } from '../components/ConferenceNotice.tsx'
 import { EmailDeliveryHint } from '../components/EmailDeliveryHint.tsx'
 import { usePageTitle } from '../hooks.ts'
@@ -436,6 +436,27 @@ function Confirmation({
               }}
             />
           )}
+        {booking.status === 'confirmed' && Date.parse(booking.start) > currentTime() && (
+          <div className="alert alert-info">
+            <p>
+              {t(
+                manageToken
+                  ? 'Booking confirmed. Calendar responses do not cancel it. Use Cancel booking here.'
+                  : 'Booking confirmed. Calendar responses do not cancel it. To cancel, use the booking link in your Hourmere email.',
+              )}
+            </p>
+            {manageToken && (
+              <Link
+                className="button button-small"
+                to={`/booking#token=${encodeURIComponent(manageToken)}&action=cancel`}
+                target={embedded ? '_blank' : undefined}
+                rel={embedded ? 'noopener noreferrer' : undefined}
+              >
+                {t('Cancel booking')}
+              </Link>
+            )}
+          </div>
+        )}
         {manageToken ? (
           <ManageLink token={manageToken} intro={t('Use this link to reschedule or cancel.')} />
         ) : replayed ? (

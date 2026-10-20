@@ -10,7 +10,9 @@ DTSTAMP:20261019T120000Z
 DTSTART:20261027T080000Z
 DTEND:20261027T083000Z
 SUMMARY:Fixture booking with Grace Hopper
-DESCRIPTION:Booked with Grace Hopper using Hourmere.
+DESCRIPTION:Booked with Grace Hopper using Hourmere.\n\nCalendar responses 
+ do not cancel this booking. Use the cancellation link in the original Hour
+ mere email.
 ORGANIZER;CN="Grace Hopper":mailto:calendar@scheduler.example.org
 ATTENDEE;CN="Grace Hopper";ROLE=CHAIR;PARTSTAT=ACCEPTED;RSVP=FALSE:mailto:g
  race@gmail.com
