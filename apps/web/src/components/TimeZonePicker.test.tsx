@@ -58,7 +58,9 @@ describe('the time zone picker', () => {
     const { container } = render(<TimeZonePicker value={id} onChange={vi.fn()} />)
     const current = container.querySelector<HTMLElement>('.tz-name')
     expect(current?.textContent).toBe('America/Argentina/La Rioja')
-    expect(current?.style.overflowWrap).toBe('normal')
+    // No inline override: the stylesheet's overflow-wrap fallback keeps wide segments inside
+    // 320px options, while the <wbr> breaks are preferred wherever they fit.
+    expect(current?.style.overflowWrap).toBe('')
     expect(current?.querySelectorAll('wbr')).toHaveLength(2)
     for (const br of current?.querySelectorAll('wbr') ?? [])
       expect(br.previousSibling?.textContent?.endsWith('/')).toBe(true)
@@ -67,7 +69,7 @@ describe('the time zone picker', () => {
     const option = screen.getByRole('option')
     const name = option.firstElementChild as HTMLElement
     expect(name.textContent).toBe('America/Argentina/La Rioja')
-    expect(name.style.overflowWrap).toBe('normal')
+    expect(name.style.overflowWrap).toBe('')
     expect(name.querySelectorAll('wbr')).toHaveLength(2)
   })
 

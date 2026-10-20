@@ -33,9 +33,13 @@ const COMMON_ZONES = [
 ]
 const normalize = (text: string) => text.toLowerCase().replaceAll('_', ' ')
 
+/**
+ * Break opportunities after each slash; the stylesheet's `overflow-wrap: anywhere` still
+ * splits a segment that is wider than a 320px option on its own, instead of overflowing.
+ */
 function TimeZoneName({ name, className }: { name: string; className?: string }) {
   return (
-    <span className={className} style={{ overflowWrap: 'normal' }}>
+    <span className={className}>
       {name.split('/').map((part, index, parts) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: fixed components of a display name
         <Fragment key={index}>
