@@ -29,6 +29,7 @@ import {
   strictTransportSecurity,
 } from './security-headers.ts'
 import { MAGIC_LINK_CONFIRM_PATH, signInConfirmPage } from './sign-in-confirm.ts'
+import { VERSION } from './version.ts'
 
 export interface AppDeps {
   /** Resolves when the database answers; rejects otherwise. */
@@ -438,7 +439,7 @@ export function createApp({
   // nullable fields as `type: [..., "null"]` (3.1 has no `nullable` keyword).
   app.doc31('/api/v1/openapi.json', {
     openapi: '3.1.0',
-    info: { title: 'Hourmere API', version: '0.0.0' },
+    info: { title: 'Hourmere API', version: VERSION },
   })
 
   app.all('/api/*', (c) => c.json({ error: 'not_found' }, 404))

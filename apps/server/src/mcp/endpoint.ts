@@ -14,6 +14,7 @@ import { routeBodyLimit } from '../body-limit.ts'
 import { withClientIpHeader } from '../client-ip.ts'
 import { createRateLimiter } from '../rate-limit.ts'
 import { BOOKING_BODY_LIMIT } from '../routes/public.ts'
+import { VERSION } from '../version.ts'
 import { clip, type McpCaller, prepareTools, registerTools, type Tool } from './tools.ts'
 
 export const MCP_PATH = '/mcp'
@@ -25,7 +26,7 @@ export const MCP_PATH = '/mcp'
  */
 export const MCP_BODY_LIMIT = BOOKING_BODY_LIMIT
 
-const SERVER_INFO = { name: 'hourmere', title: 'Hourmere', version: '0.0.0' }
+const SERVER_INFO = { name: 'hourmere', title: 'Hourmere', version: VERSION }
 
 const INSTRUCTIONS = `Hourmere schedules meetings. You act as the user in the organization bound to your API key or OAuth grant (whoami tells you who that is).
 To book time with someone, call find_available_slots for their event type (handle and slug come from their booking link https://<host>/<handle>/<slug>), then create_booking with the exact start of one of the returned slots.
