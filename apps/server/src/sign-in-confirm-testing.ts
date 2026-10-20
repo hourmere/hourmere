@@ -1,5 +1,31 @@
 // Test support: what a browser does with an emailed sign-in link.
 import { runInNewContext } from 'node:vm'
+import { type DefaultTreeAdapterTypes, parse } from 'parse5'
+
+// This helper evaluates a page's JavaScript and must never become a production utility.
+if (process.env.NODE_ENV !== 'test') {
+  throw new Error('Sign-in confirmation test support requires NODE_ENV=test')
+}
+
+function parsedElements(html: string): DefaultTreeAdapterTypes.Element[] {
+  const found: DefaultTreeAdapterTypes.Element[] = []
+  const visit = (node: DefaultTreeAdapterTypes.Node) => {
+    if ('tagName' in node) found.push(node)
+    if ('childNodes' in node) for (const child of node.childNodes) visit(child)
+  }
+  visit(parse(html))
+  return found
+}
+
+/** Extract generated inline source for assertions/execution, never sanitize untrusted HTML. */
+export function inlineAsset(html: string, tagName: 'script' | 'style'): string {
+  const matches = parsedElements(html).filter((element) => element.tagName === tagName)
+  const element = matches[0]
+  if (matches.length !== 1 || !element || element.attrs.length > 0) {
+    throw new Error(`confirm page must have exactly one inline ${tagName}`)
+  }
+  return element.childNodes.map((child) => ('value' in child ? child.value : '')).join('')
+}
 
 interface App {
   request(input: string): Response | Promise<Response>
@@ -14,9 +40,18 @@ export async function pressConfirmButton(app: App, link: URL): Promise<URL> {
   const res = await app.request(`${link.origin}${link.pathname}`)
   if (res.status !== 200) throw new Error(`confirm page answered ${res.status}`)
   const html = await res.text()
-  const script = /<script>([\s\S]*?)<\/script>/.exec(html)?.[1]
-  const form = /<form id="confirm" method="get" action="([^"]+)"/.exec(html)?.[1]
-  if (!script || !form) throw new Error('confirm page has no script or no GET form')
+  const script = inlineAsset(html, 'script')
+  const forms = parsedElements(html).filter(
+    (element) =>
+      element.tagName === 'form' &&
+      element.attrs.some(({ name, value }) => name === 'id' && value === 'confirm'),
+  )
+  const form = forms[0]
+  const attribute = (name: string) => form?.attrs.find((attr) => attr.name === name)?.value
+  const action = attribute('action')
+  if (forms.length !== 1 || attribute('method')?.toLowerCase() !== 'get' || !action) {
+    throw new Error('confirm page must have exactly one confirmation GET form')
+  }
 
   const inputs: { type?: string; name?: string; value?: string }[] = []
   const elements: Record<string, { hidden: boolean } & Record<string, unknown>> = {
@@ -76,7 +111,7 @@ export async function pressConfirmButton(app: App, link: URL): Promise<URL> {
   if (elements.confirm?.hidden) throw new Error('the confirm page shows no button for this link')
 
   // A GET form submission: the form's fields become the action's query string.
-  const url = new URL(form, link.origin)
+  const url = new URL(action, link.origin)
   for (const { type, name, value } of inputs) {
     if (type !== 'hidden' || !name || value === undefined) throw new Error('unexpected input')
     url.searchParams.append(name, value)

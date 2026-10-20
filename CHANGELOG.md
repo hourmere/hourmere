@@ -12,6 +12,8 @@ must approve publication through the [release workflow](https://github.com/hourm
 
 ### Added
 
+- `security.txt` on hourmere.com and www.hourmere.com lists Hourmere's private vulnerability
+  reporting channels.
 - Self-hosted operators can allow exact private webhook hosts or IP/CIDR and port ranges
   with `WEBHOOK_PRIVATE_TARGETS`, including signed HTTP delivery to same-network n8n/LAN
   receivers. The default remains public HTTPS only; metadata addresses remain forbidden.
@@ -60,6 +62,8 @@ must approve publication through the [release workflow](https://github.com/hourm
 
 ### Fixed
 
+- Unknown `/.well-known/*` paths on application instances return a plain-text 404 instead
+  of the web app.
 - Email-sent and public booking success screens suggest checking spam or junk and adding
   the sender to contacts, in English and Simplified Chinese.
 - Booking confirmations, management pages and calendar invitations explain that calendar

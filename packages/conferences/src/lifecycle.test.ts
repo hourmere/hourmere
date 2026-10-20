@@ -25,6 +25,7 @@ import type { CalendarDeps } from '../../calendars/src/index.ts'
 import { beginGoogleConnection, finishGoogleConnection } from '../../calendars/src/index.ts'
 import { setCalendarDestination } from '../../calendars/src/sync.ts'
 import { fakeGoogle, TEST_CALENDAR_KEY } from '../../calendars/src/testing.ts'
+import { textHasUrl } from '../../mail/src/booking-link-testing.ts'
 import {
   dispatchConferenceNotifications,
   sendBookingNotification,
@@ -301,7 +302,7 @@ describe.skipIf(!serverUrl)('automatic Zoom durable booking lifecycle (real Post
       sent.every(
         (m) =>
           m.sensitive &&
-          m.text.includes('https://us02web.zoom.us/j/') &&
+          textHasUrl(m.text, 'https://us02web.zoom.us/j/81234567890?pwd=synthetic-only.1') &&
           m.attachments?.[0]?.content.includes(`${b.booking.id}@hourmere`),
       ),
     ).toBe(true)

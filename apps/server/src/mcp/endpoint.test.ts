@@ -416,7 +416,10 @@ describe('MCP transport', () => {
       ]) {
         const res = await withWeb.request(path)
         expect(res.status, path).toBe(404)
-        expect(await res.json()).toEqual({ error: 'not_found' })
+        if (path.startsWith('/.well-known/')) {
+          expect(res.headers.get('content-type')?.toLowerCase()).toBe('text/plain; charset=utf-8')
+          expect(await res.text()).toBe('Not found')
+        } else expect(await res.json()).toEqual({ error: 'not_found' })
         expect(res.headers.get('cache-control')).toBe(path.startsWith('/mcp') ? 'no-store' : null)
       }
       for (const path of ['/mcp', '/mcp/']) {
