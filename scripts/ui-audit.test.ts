@@ -252,7 +252,7 @@ const verifyExpiry = (scan = a11yFindings) => {
 }
 const verifyPrivacy = (safe = safeAuditReport) => {
   const unsafe = report() as AuditReport & { html: string }
-  unsafe.html = 'DOM_PRIVACY_CANARY_NONSECRET'
+  unsafe.html = 'REPORT_PRIVACY_CANARY_NONSECRET'
   Object.assign(unsafe.findings[0] ?? {}, {
     html: unsafe.html,
     target: `#token=${unsafe.html}`,

@@ -31,8 +31,8 @@ function fixture(): AuditReport {
 it('writes isolated JSON report files with only the public measurement schema', async () => {
   const directory = await temporaryDirectory()
   const report = fixture()
-  Object.assign(report, { url: '#token=DOM_PRIVACY_CANARY_NONSECRET' })
-  Object.assign(report.findings[0] ?? {}, { html: 'DOM_PRIVACY_CANARY_NONSECRET' })
+  Object.assign(report, { url: '#token=REPORT_PRIVACY_CANARY_NONSECRET' })
+  Object.assign(report.findings[0] ?? {}, { html: 'REPORT_PRIVACY_CANARY_NONSECRET' })
   await writeAuditReport(report, directory)
   await writeAuditReport(report, directory)
   const files = await readdir(directory)
@@ -41,7 +41,7 @@ it('writes isolated JSON report files with only the public measurement schema', 
   for (const file of files) {
     expect(file).toMatch(/^layout-booking-dark-zh-CN-320x568-[\da-f-]+\.json$/)
     const content = await readFile(join(directory, file), 'utf8')
-    expect(content).not.toContain('DOM_PRIVACY_CANARY_NONSECRET')
+    expect(content).not.toContain('REPORT_PRIVACY_CANARY_NONSECRET')
     expect(JSON.parse(content)).toEqual(fixture())
   }
 })
@@ -70,13 +70,13 @@ it('publishes per-page JSON and human summaries and preserves browser execution 
       blocking: false,
     }),
   )
-  await writeFile(join(directory, 'invalid.json'), 'DOM_PRIVACY_CANARY_NONSECRET')
+  await writeFile(join(directory, 'invalid.json'), 'REPORT_PRIVACY_CANARY_NONSECRET')
   const result = spawnSync(process.execPath, ['tools/e2e/reports-summary.ts', directory], {
     encoding: 'utf8',
     env: { ...process.env, GITHUB_STEP_SUMMARY: summary, HOURMERE_UI_BLOCKING: '0' },
   })
   expect(result.status, result.stderr).toBe(0)
-  expect(result.stdout).not.toContain('DOM_PRIVACY_CANARY_NONSECRET')
+  expect(result.stdout).not.toContain('REPORT_PRIVACY_CANARY_NONSECRET')
   expect(result.stdout).toContain('| booking | 2 | 1 | 2 | 1 | 1 |')
   expect(result.stdout).toContain('layout — exit / 退出码 1')
   expect(result.stdout).toContain('Unreadable reports / 无法读取的报告：1')
