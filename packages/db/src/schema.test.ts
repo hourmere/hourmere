@@ -4,28 +4,22 @@ import type pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createPool } from './index.ts'
 import { runMigrations } from './migrate.ts'
+import { createTestDatabase, type TestDatabase } from './testing.ts'
 
 const url = process.env.DATABASE_URL
 
 describe.skipIf(!url)('schema', () => {
-  const dbName = `hourmere_test_${process.pid}_${Date.now()}`
-  let admin: pg.Pool
+  let owned: TestDatabase
   let pool: pg.Pool
   let seq = 0
 
   beforeAll(async () => {
-    admin = createPool(url as string)
-    await admin.query(`CREATE DATABASE ${dbName}`)
-    const testUrl = new URL(url as string)
-    testUrl.pathname = `/${dbName}`
-    pool = createPool(testUrl.toString())
-    await runMigrations(pool)
+    owned = await createTestDatabase(url as string, undefined, { tag: 'schema' })
+    pool = owned.pool
   })
 
   afterAll(async () => {
-    await pool?.end()
-    await admin?.query(`DROP DATABASE IF EXISTS ${dbName} WITH (FORCE)`)
-    await admin?.end()
+    await owned?.drop()
   })
 
   const one = async <T extends pg.QueryResultRow>(sql: string, params: unknown[] = []) =>
@@ -395,9 +389,9 @@ describe.skipIf(!url)('schema', () => {
       )
 
       // Through a connection that sees only the auth schema, as Better Auth's pool does.
-      const authUrl = new URL(url as string)
-      authUrl.pathname = `/${dbName}`
-      const betterAuthLike = createPool(`${authUrl}?options=-c%20search_path%3Dauth`)
+      const authUrl = new URL(owned.url)
+      authUrl.searchParams.set('options', '-c search_path=auth')
+      const betterAuthLike = createPool(authUrl.toString())
       try {
         await betterAuthLike.query(`DELETE FROM "user" WHERE id = $1`, [u])
       } finally {

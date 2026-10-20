@@ -1,26 +1,23 @@
-import { randomUUID } from 'node:crypto'
 import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { createPool } from './index.ts'
 import { migrationsDir, runMigrations } from './migrate.ts'
-import { createTestDatabase } from './testing.ts'
+import { createTestDatabase, type TestDatabase } from './testing.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const migration = '0030_mcp_oauth_client_activity.sql'
 
 describe.skipIf(!serverUrl)('MCP OAuth activity migration', () => {
   it('preserves predecessor credentials and backfills consent and token activity, then reruns without changes', async () => {
-    const name = `hourmere_test_activity_${process.pid}_${randomUUID().replaceAll('-', '')}`
-    const admin = createPool(serverUrl as string)
     const prior = await mkdtemp(join(tmpdir(), 'hourmere-oauth-predecessor-'))
-    let pool: ReturnType<typeof createPool> | undefined
+    let owned: TestDatabase | undefined
     try {
-      await admin.query(`CREATE DATABASE ${name}`)
-      const url = new URL(serverUrl as string)
-      url.pathname = `/${name}`
-      pool = createPool(url.href)
+      owned = await createTestDatabase(serverUrl as string, undefined, {
+        migrate: false,
+        tag: 'activity',
+      })
+      const pool = owned.pool
       for (const file of await readdir(migrationsDir))
         if (file.endsWith('.sql') && file < migration)
           await copyFile(join(migrationsDir, file), join(prior, file))
@@ -47,10 +44,10 @@ describe.skipIf(!serverUrl)('MCP OAuth activity migration', () => {
       )
       const snapshot = async () =>
         (
-          await pool?.query(
+          await pool.query(
             `SELECT "clientId",token,"expiresAt",revoked FROM auth."oauthRefreshToken" ORDER BY "clientId"`,
           )
-        )?.rows
+        ).rows
       const before = await snapshot()
       // Only this migration joins the predecessor set, so later migrations cannot change
       // what this test applies or observes.
@@ -81,10 +78,11 @@ describe.skipIf(!serverUrl)('MCP OAuth activity migration', () => {
         { client_id: 'revoked' },
       ])
     } finally {
-      await pool?.end()
-      await admin.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`)
-      await admin.end()
-      await rm(prior, { recursive: true, force: true })
+      try {
+        await owned?.drop()
+      } finally {
+        await rm(prior, { recursive: true, force: true })
+      }
     }
   })
   it('installs an empty activity table on a fresh database and is a no-op on rerun', async () => {

@@ -1,31 +1,25 @@
-import { randomBytes } from 'node:crypto'
 import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type pg from 'pg'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { createPool } from './index.ts'
 import { migrationsDir, runMigrations } from './migrate.ts'
-import { createTestDatabase } from './testing.ts'
+import { createTestDatabase, type TestDatabase } from './testing.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const migration = '0027_nontransitive_invited_signup.sql'
 
 describe.skipIf(!serverUrl)('non-transitive invitation migration', () => {
-  const name = `hourmere_test_${process.pid}_${randomBytes(4).toString('hex')}`
+  let owned: TestDatabase
   let pool: pg.Pool
   let predecessor: string
 
   beforeAll(async () => {
-    const admin = createPool(serverUrl as string)
-    try {
-      await admin.query(`CREATE DATABASE ${name}`)
-    } finally {
-      await admin.end()
-    }
-    const url = new URL(serverUrl as string)
-    url.pathname = `/${name}`
-    pool = createPool(url.toString())
+    owned = await createTestDatabase(serverUrl as string, undefined, {
+      migrate: false,
+      tag: 'signup',
+    })
+    pool = owned.pool
     predecessor = await mkdtemp(join(tmpdir(), 'hourmere-signup-predecessor-'))
     for (const file of await readdir(migrationsDir)) {
       if (file.endsWith('.sql') && file < migration) {
@@ -36,12 +30,9 @@ describe.skipIf(!serverUrl)('non-transitive invitation migration', () => {
   })
 
   afterAll(async () => {
-    await pool?.end()
-    const admin = createPool(serverUrl as string)
     try {
-      await admin.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`)
+      await owned?.drop()
     } finally {
-      await admin.end()
       if (predecessor) await rm(predecessor, { recursive: true, force: true })
     }
   })

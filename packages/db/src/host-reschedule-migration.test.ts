@@ -4,27 +4,22 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type pg from 'pg'
 import { describe, expect, it } from 'vitest'
-import { createPool } from './index.ts'
 import { migrationsDir, runMigrations } from './migrate.ts'
+import { createTestDatabase } from './testing.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const migration = '0029_host_reschedule_tokens.sql'
 
 /** The bootstrap connection only creates and drops this test's disposable database. */
 async function withDatabase(check: (pool: pg.Pool) => Promise<void>) {
-  const name = `hourmere_test_host_tokens_${randomUUID().replaceAll('-', '')}`
-  const admin = createPool(serverUrl as string)
-  let pool: pg.Pool | undefined
+  const owned = await createTestDatabase(serverUrl as string, undefined, {
+    migrate: false,
+    tag: 'host_tokens',
+  })
   try {
-    await admin.query(`CREATE DATABASE ${name}`)
-    const url = new URL(serverUrl as string)
-    url.pathname = `/${name}`
-    pool = createPool(url.toString())
-    await check(pool)
+    await check(owned.pool)
   } finally {
-    await pool?.end()
-    await admin.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`)
-    await admin.end()
+    await owned.drop()
   }
 }
 
