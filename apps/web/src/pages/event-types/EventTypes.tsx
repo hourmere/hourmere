@@ -132,87 +132,99 @@ function EventTypeTable({
   const { t, locale: displayLocale } = useI18n()
 
   return (
-    <table className="table">
-      <thead>
-        <tr>
-          <th scope="col">{t('Title')}</th>
-          <th scope="col">{t('Duration')}</th>
-          <th scope="col">{t('Booking link')}</th>
-          <th scope="col">{t('Status')}</th>
-          <th scope="col">
-            <span className="visually-hidden">{t('Actions')}</span>
-          </th>
-        </tr>
-      </thead>
-      <tbody>
-        {eventTypes.map((e) => {
-          const url =
-            e.ownerUserId === null &&
-            !me.organization.personal &&
-            ((e.schedulingType === 'individual' && e.hosts.length === 1) ||
-              (e.schedulingType === 'collective' && e.hosts.length >= 2 && e.hosts.length <= 8) ||
-              (e.schedulingType === 'round_robin' &&
-                e.roundRobinActive &&
-                e.hosts.length >= 1 &&
-                e.hosts.length <= 8)) &&
-            isPublicTeamSlug(me.organization.slug)
-              ? publicTeamPageUrl(me.organization.slug, e.slug)
-              : profile && e.ownerUserId === me.user.id
-                ? publicPageUrl(profile.handle, e.slug)
-                : null
-          return (
-            <tr key={e.id}>
-              <th scope="row" data-label={t('Title')}>
-                <Link to={eventTypePath(e.id)}>{e.title}</Link>
-              </th>
-              <td data-label={t('Duration')}>{formatMinutes(e.durationMinutes, displayLocale)}</td>
-              <td data-label={t('Booking link')} className="link-cell">
-                {url ? (
-                  <span className="booking-link">
-                    <a href={url} target="_blank" rel="noreferrer" className="mono">
-                      {url.replace(/^https?:\/\//, '')}
-                      <span className="visually-hidden"> {t('(opens in a new tab)')}</span>
-                    </a>
-                    <CopyButton
-                      text={url}
-                      label={t('Copy link')}
-                      accessibleLabel={t('Copy link for {0}', { '0': e.title })}
-                    />
-                  </span>
-                ) : (
-                  <span className="muted">
-                    {e.ownerUserId === null
-                      ? e.schedulingType !== 'round_robin' &&
-                        !isPublicTeamSlug(me.organization.slug)
-                        ? TEAM_LINK_SLUG_HINT
-                        : t('No public booking link')
-                      : `/${e.slug}`}
-                  </span>
-                )}
-              </td>
-              <td data-label={t('Status')}>
-                {e.isHidden && <span className="badge">{t('Unlisted')}</span>}
-                {e.schedulingType === 'round_robin' && !e.roundRobinActive ? (
-                  <span className="badge">{t('Needs activation')}</span>
-                ) : e.isActive ? (
-                  <span className="badge badge-success">{t('Active')}</span>
-                ) : (
-                  <span className="badge">{t('Inactive')}</span>
-                )}
-              </td>
-              <td className="actions">
-                <Link
-                  to={eventTypePath(e.id)}
-                  className="button button-small"
-                  aria-label={t('Edit {0}', { '0': e.title })}
-                >
-                  {t('Edit')}
-                </Link>
-              </td>
-            </tr>
-          )
-        })}
-      </tbody>
-    </table>
+    <div className="table-container">
+      <table className="table table-event-types">
+        <thead>
+          <tr>
+            <th scope="col">{t('Title')}</th>
+            <th scope="col" className="nowrap">
+              {t('Duration')}
+            </th>
+            <th scope="col">{t('Booking link')}</th>
+            <th scope="col">{t('Status')}</th>
+            <th scope="col">
+              <span className="visually-hidden">{t('Actions')}</span>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {eventTypes.map((e) => {
+            const url =
+              e.ownerUserId === null &&
+              !me.organization.personal &&
+              ((e.schedulingType === 'individual' && e.hosts.length === 1) ||
+                (e.schedulingType === 'collective' && e.hosts.length >= 2 && e.hosts.length <= 8) ||
+                (e.schedulingType === 'round_robin' &&
+                  e.roundRobinActive &&
+                  e.hosts.length >= 1 &&
+                  e.hosts.length <= 8)) &&
+              isPublicTeamSlug(me.organization.slug)
+                ? publicTeamPageUrl(me.organization.slug, e.slug)
+                : profile && e.ownerUserId === me.user.id
+                  ? publicPageUrl(profile.handle, e.slug)
+                  : null
+            return (
+              <tr key={e.id}>
+                <th scope="row" data-label={t('Title')}>
+                  <Link to={eventTypePath(e.id)}>{e.title}</Link>
+                </th>
+                <td data-label={t('Duration')} className="nowrap">
+                  <div className="table-value">
+                    {formatMinutes(e.durationMinutes, displayLocale)}
+                  </div>
+                </td>
+                <td data-label={t('Booking link')} className="link-cell">
+                  <div className="table-value">
+                    {url ? (
+                      <span className="booking-link">
+                        <a href={url} target="_blank" rel="noreferrer" className="mono">
+                          {url.replace(/^https?:\/\//, '')}
+                          <span className="visually-hidden"> {t('(opens in a new tab)')}</span>
+                        </a>
+                        <CopyButton
+                          text={url}
+                          label={t('Copy link')}
+                          accessibleLabel={t('Copy link for {0}', { '0': e.title })}
+                        />
+                      </span>
+                    ) : (
+                      <span className="muted">
+                        {e.ownerUserId === null
+                          ? e.schedulingType !== 'round_robin' &&
+                            !isPublicTeamSlug(me.organization.slug)
+                            ? TEAM_LINK_SLUG_HINT
+                            : t('No public booking link')
+                          : `/${e.slug}`}
+                      </span>
+                    )}
+                  </div>
+                </td>
+                <td data-label={t('Status')}>
+                  <div className="table-value">
+                    {e.isHidden && <span className="badge">{t('Unlisted')}</span>}
+                    {e.schedulingType === 'round_robin' && !e.roundRobinActive ? (
+                      <span className="badge">{t('Needs activation')}</span>
+                    ) : e.isActive ? (
+                      <span className="badge badge-success">{t('Active')}</span>
+                    ) : (
+                      <span className="badge">{t('Inactive')}</span>
+                    )}
+                  </div>
+                </td>
+                <td className="actions">
+                  <Link
+                    to={eventTypePath(e.id)}
+                    className="button button-small"
+                    aria-label={t('Edit {0}', { '0': e.title })}
+                  >
+                    {t('Edit')}
+                  </Link>
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
   )
 }

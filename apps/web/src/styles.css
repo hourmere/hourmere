@@ -152,6 +152,11 @@ pre,
   outline: none;
 }
 
+.user-content {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .muted {
   color: var(--muted);
 }
@@ -443,6 +448,7 @@ input[readonly] {
 /* Buttons */
 
 .button {
+  white-space: nowrap;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -590,6 +596,7 @@ input[readonly] {
 }
 
 .badge {
+  white-space: nowrap;
   display: inline-block;
   margin: 0 var(--space-2);
   padding: 0 var(--space-2);
@@ -651,10 +658,16 @@ input[readonly] {
   font-size: 0.875rem;
 }
 
-/* Tables: rows become cards on narrow screens */
+/* Tables respond to the space left by the sidebar, rather than the viewport. */
+
+.table-container {
+  container: data-table / inline-size;
+  min-width: 0;
+}
 
 .table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   background: var(--surface);
   border: 1px solid var(--border);
@@ -667,6 +680,7 @@ input[readonly] {
   border-bottom: 1px solid var(--border);
   text-align: left;
   vertical-align: top;
+  overflow-wrap: anywhere;
 }
 
 .table thead th {
@@ -705,7 +719,49 @@ input[readonly] {
   gap: var(--space-2);
 }
 
-@media (max-width: 720px) {
+/* Reserve space for short labels and actions; long names, links and emails wrap. */
+.table-bookings thead th:nth-child(1) {
+  width: 12.5rem;
+}
+
+.table-bookings thead th:nth-child(3) {
+  width: 26%;
+}
+
+.table-bookings thead th:nth-child(4) {
+  width: 12rem;
+}
+
+.table-event-types thead th:nth-child(1) {
+  width: 26%;
+}
+
+.table-event-types thead th:nth-child(2) {
+  width: 9rem;
+}
+
+.table-event-types thead th:nth-child(4) {
+  width: 10.5rem;
+}
+
+.table-event-types thead th:nth-child(5) {
+  width: 5.5rem;
+}
+
+.table-api-keys thead th:nth-child(1),
+.table-api-keys thead th:nth-child(3) {
+  width: 16%;
+}
+
+.table-api-keys thead th:nth-child(7) {
+  width: 15rem;
+}
+
+.table-value {
+  min-width: 0;
+}
+
+@container data-table (width < 640px) {
   .table thead {
     position: absolute;
     width: 1px;
@@ -722,7 +778,9 @@ input[readonly] {
     display: block;
   }
 
-  .table tr {
+  .table tbody tr {
+    display: flex;
+    flex-direction: column;
     padding: var(--space-3) 0;
     border-bottom: 1px solid var(--border);
   }
@@ -737,14 +795,19 @@ input[readonly] {
     border: 0;
   }
 
+  .table td[data-label] {
+    display: grid;
+    grid-template-columns: 6.5rem minmax(0, 1fr);
+    gap: var(--space-3);
+  }
+
   .table td[data-label]::before {
-    display: inline-block;
-    min-width: 6.5rem;
     color: var(--muted);
     content: attr(data-label);
   }
 
   .table th[scope="row"] {
+    order: -1;
     font-size: 1.05rem;
   }
 
@@ -759,6 +822,97 @@ input[readonly] {
 
   .table .actions {
     padding-top: var(--space-2);
+  }
+
+  .table .badge {
+    margin: 0;
+  }
+
+  .table time .nowrap {
+    white-space: normal;
+  }
+
+  .table .confirm {
+    min-width: 0;
+    max-width: 100%;
+  }
+}
+
+/* Keep table mode at the current shell’s 896px maximum content width. */
+@container data-table (640px <= width < 880px) {
+  :is(.table-bookings, .table-api-keys, .table-event-types) thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  :is(.table-bookings, .table-api-keys, .table-event-types),
+  :is(.table-bookings, .table-api-keys, .table-event-types) tbody,
+  :is(.table-bookings, .table-api-keys, .table-event-types) tr,
+  :is(.table-bookings, .table-api-keys, .table-event-types) th,
+  :is(.table-bookings, .table-api-keys, .table-event-types) td {
+    display: block;
+  }
+
+  :is(.table-bookings, .table-api-keys, .table-event-types) tbody tr {
+    display: flex;
+    flex-direction: column;
+    padding: var(--space-3) 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  :is(.table-bookings, .table-api-keys, .table-event-types) tbody tr:last-child {
+    border-bottom: 0;
+  }
+
+  :is(.table-bookings, .table-api-keys, .table-event-types) th,
+  :is(.table-bookings, .table-api-keys, .table-event-types) td {
+    padding: var(--space-1) var(--space-4);
+    border: 0;
+  }
+
+  :is(.table-bookings, .table-api-keys, .table-event-types) td[data-label] {
+    display: grid;
+    grid-template-columns: 6.5rem minmax(0, 1fr);
+    gap: var(--space-3);
+  }
+
+  :is(.table-bookings, .table-api-keys, .table-event-types) td[data-label]::before {
+    color: var(--muted);
+    content: attr(data-label);
+  }
+
+  :is(.table-bookings, .table-api-keys, .table-event-types) th[scope="row"] {
+    order: -1;
+    font-size: 1.05rem;
+  }
+
+  :is(.table-bookings, .table-api-keys, .table-event-types) .actions,
+  :is(.table-bookings, .table-api-keys, .table-event-types) .confirm,
+  :is(.table-bookings, .table-api-keys, .table-event-types) .confirm-buttons {
+    justify-content: flex-start;
+    justify-items: start;
+    margin-left: 0;
+    text-align: left;
+  }
+
+  :is(.table-bookings, .table-api-keys, .table-event-types) .actions {
+    padding-top: var(--space-2);
+  }
+
+  :is(.table-bookings, .table-api-keys, .table-event-types) .badge {
+    margin: 0;
+  }
+
+  :is(.table-bookings, .table-api-keys, .table-event-types) time .nowrap {
+    white-space: normal;
+  }
+
+  :is(.table-bookings, .table-api-keys, .table-event-types) .confirm {
+    min-width: 0;
+    max-width: 100%;
   }
 }
 
