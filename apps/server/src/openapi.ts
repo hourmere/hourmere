@@ -6,15 +6,18 @@ import { QuestionSchema, type ServiceContext } from '@hourmere/scheduling'
 import type { MiddlewareHandler } from 'hono'
 import { routeBodyLimit } from './body-limit.ts'
 import type { CallerEnv, requireCaller } from './caller.ts'
+import { errorAliases } from './error-aliases.ts'
+
+export const ErrorAlias = z.enum(Object.values(errorAliases)).openapi('ErrorAlias', {
+  description:
+    'Optional additive alias from the documented error-code set. The original error code remains unchanged throughout /api/v1. New aliases may be added; fall back to error when an alias is absent or unknown. See docs/api-conventions.md for code meanings.',
+})
 
 // See docs/api-conventions.md.
 export const ErrorBody = z
   .object({
     error: z.string().openapi({ description: 'Machine-readable code, e.g. unauthorized' }),
-    errorAlias: z.literal('zoom_operation_busy').optional().openapi({
-      description:
-        'Preferred neutral code for a busy Zoom account operation. Accompanies error=zoom_refresh_in_progress, whose legacy name is deprecated for one release.',
-    }),
+    errorAlias: ErrorAlias.optional(),
     message: z.string().optional().openapi({ description: 'Human-readable detail' }),
   })
   .openapi('Error')

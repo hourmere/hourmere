@@ -8,6 +8,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { type AppDeps, createApp, hasUnsafeJsonText } from './app.ts'
 import { DEFAULT_BODY_LIMIT as MAX_BODY_BYTES } from './body-limit.ts'
 import { CHUNK_SIZE, chunkedBody } from './chunked-body.ts'
+import { errorAliases } from './error-aliases.ts'
 import { authenticated, callerWithBodyLimit, json, type RouteModule } from './openapi.ts'
 
 // Sign-in is covered by auth.test.ts against a real database.
@@ -66,17 +67,25 @@ describe('API surface', () => {
     expect(Object.keys(doc.paths)).toEqual(expect.arrayContaining(['/api/health', '/api/v1/me']))
   })
 
-  it('documents the optional neutral Zoom alias without requiring it for other errors', async () => {
+  it('documents a shared alias code set without requiring an alias for other errors', async () => {
     const response = await app.request('/api/v1/openapi.json')
     const doc = (await response.json()) as {
       components: {
-        schemas: { Error: { properties: Record<string, unknown>; required: string[] } }
+        schemas: {
+          Error: { properties: Record<string, unknown>; required: string[] }
+          ErrorAlias: { type: string; enum: string[]; description: string }
+        }
       }
     }
-    expect(doc.components.schemas.Error.properties.errorAlias).toMatchObject({
+    expect(doc.components.schemas.Error.properties.errorAlias).toEqual({
+      $ref: '#/components/schemas/ErrorAlias',
+    })
+    expect(doc.components.schemas.ErrorAlias).toMatchObject({
       type: 'string',
-      enum: ['zoom_operation_busy'],
-      description: expect.stringContaining('zoom_refresh_in_progress'),
+      enum: Object.values(errorAliases),
+      description: expect.stringContaining(
+        'original error code remains unchanged throughout /api/v1',
+      ),
     })
     expect(doc.components.schemas.Error.required).toEqual(['error'])
   })
@@ -179,6 +188,7 @@ describe('route modules and errors', () => {
         if (fail === 'conflict')
           throw new DomainError('conflict', 'slot_taken', 'Someone booked this time first')
         if (fail === 'empty') throw new DomainError('invalid', 'bad_thing', '')
+        if (fail?.startsWith('alias:')) throw new DomainError('conflict', fail.slice(6))
         if (fail === 'zoom_busy' || fail === 'zoom_busy_without_detail')
           throw new DomainError(
             'conflict',
@@ -273,6 +283,15 @@ describe('route modules and errors', () => {
           message: 'Zoom account operations are busy. Try again shortly.',
         }),
       })
+    },
+  )
+
+  it.each(Object.entries(errorAliases))(
+    'adds the registered alias for %s without changing the original code',
+    async (error, errorAlias) => {
+      const response = await post(`?fail=alias:${error}`, valid)
+      expect(response.status).toBe(409)
+      expect(await response.json()).toEqual({ error, errorAlias })
     },
   )
 

@@ -18,6 +18,7 @@ import { logger } from 'hono/logger'
 import { apiBodyLimit, checkBodyAsRead } from './body-limit.ts'
 import { requireCaller } from './caller.ts'
 import { clientIp, withClientIp } from './client-ip.ts'
+import { errorAliasFor } from './error-aliases.ts'
 import type { McpModule } from './mcp/endpoint.ts'
 import { describeCaller, Me } from './me.ts'
 import { authenticated, ErrorBody, json, type RouteModule } from './openapi.ts'
@@ -306,9 +307,10 @@ export function createApp({
     if (err instanceof DomainError && Object.hasOwn(domainStatus, err.kind)) {
       // The lower-level error a service wrapped is for us, not the client.
       if (err.cause !== undefined) logError(c, `${err.code} caused by `, err.cause)
+      const errorAlias = errorAliasFor(err.code)
       const body = {
         error: err.code,
-        ...(err.code === 'zoom_refresh_in_progress' && { errorAlias: 'zoom_operation_busy' }),
+        ...(errorAlias !== undefined && { errorAlias }),
         ...(err.detail && { message: err.detail }),
       }
       return c.json(body, domainStatus[err.kind])

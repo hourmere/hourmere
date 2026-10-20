@@ -379,7 +379,8 @@ prove that the attempt is valid or reusable. After the lease is released, that r
 for the distinction from a still-unclaimed retry.
 Explicit refresh returns the legacy `zoom_refresh_in_progress` code with the neutral
 `errorAlias: "zoom_operation_busy"` and a busy/retry message; workers retry while the lease
-is occupied. The legacy code is deprecated for one release and retained for v1 compatibility.
+is occupied. The legacy code is deprecated but remains unchanged for all of `/api/v1`;
+the alias is additive, and removing or renaming the old code requires a new API version.
 A newly acquired valid lease that finds `refreshing`
 proves the old rotation was abandoned: worker and explicit refresh retire it to
 `needs_reauth`, clearing the old operation and credentials so the user can reconnect.

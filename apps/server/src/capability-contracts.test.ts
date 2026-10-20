@@ -102,6 +102,24 @@ describe('REST and MCP capability contract', () => {
 })
 
 describe('repository and website capability documentation', () => {
+  it.each(['docs/mcp.md', 'docs/cli.md', 'tools/cli/README.md'])(
+    '%s explains host reschedule links and their visibility boundary',
+    async (path) => {
+      const doc = (await rootFile(path)).replace(/\s+/g, ' ')
+      for (const statement of [
+        /optional `rescheduledToId`.*immediate successor/,
+        /same organization that the caller also hosts/,
+        /null when none is available/,
+        /outside the current page or filters/,
+        /Public\/manage responses omit it/,
+        /predecessor's `status` remains `cancelled`/,
+        /`rescheduledFromId`/,
+      ]) {
+        expect(statement.test(doc), `${path} must describe ${statement}`).toBe(true)
+      }
+    },
+  )
+
   it.each(['docs/mcp.md', 'apps/site/src/content/docs/docs/mcp.md'])(
     '%s describes optional MCP OAuth without contradicting API-key or cookie authentication',
     async (path) => {
