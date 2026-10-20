@@ -347,7 +347,8 @@ for(const [id,state] of Object.entries(expected)) {
     filter:()=>locator(selector),
     getByText:(text)=>locator(selector+' '+text),
     getByRole:(role)=>locator(selector+' '+role),
-    click:async()=>{calls.push(['click',selector]);if(selector.includes('Continue'))path='/oauth/consent'},
+    click:async()=>{if(['button.day-available','.slots button'].includes(selector))throw new Error('Synthetic clipped pointer target');calls.push(['click',selector]);if(selector.includes('Continue'))path='/oauth/consent'},
+    press:async(key)=>{calls.push(['press',selector,key]);if(selector.includes('Continue'))path='/oauth/consent'},
     fill:async()=>calls.push(['fill',selector]),
     selectOption:async(value)=>calls.push(['select',selector,value]),
   })
@@ -363,22 +364,22 @@ for(const [id,state] of Object.entries(expected)) {
   assert.equal(signedIn,!state.public,'Wrong authentication state: '+id)
   assert.ok(calls.some(call=>call[0]==='wait'&&call[1].includes(state.wait)),'Missing content verification: '+id)
   if(id==='booking-form'||id==='booking-confirmation') {
-    assert.ok(calls.some(call=>call[0]==='click'&&call[1]==='button.day-available'),'Booking state must choose a day')
-    assert.ok(calls.some(call=>call[0]==='click'&&call[1]==='.slots button'),'Booking state must choose a time')
+    assert.ok(calls.some(call=>call[0]==='press'&&call[1]==='button.day-available'&&call[2]==='Enter'),'Booking state must choose a day')
+    assert.ok(calls.some(call=>call[0]==='press'&&call[1]==='.slots button'&&call[2]==='Enter'),'Booking state must choose a time')
   }
   if(id==='booking-confirmation') {
     assert.equal(calls.filter(call=>call[0]==='fill').length,2,'Confirmation must fill invitee fields')
-    assert.ok(calls.some(call=>call[0]==='click'&&call[1].includes('Confirm booking')),'Confirmation must submit booking')
+    assert.ok(calls.some(call=>call[0]==='press'&&call[1].includes('Confirm booking')&&call[2]==='Enter'),'Confirmation must submit booking')
   }
   if(id==='booking-time-zone')
-    assert.ok(calls.some(call=>call[0]==='click'&&call[1]==='.tz-toggle'),'Time-zone panel must open')
+    assert.ok(calls.some(call=>call[0]==='press'&&call[1]==='.tz-toggle'&&call[2]==='Enter'),'Time-zone panel must open')
   if(id==='embedded-booking') {
     assert.equal(new URLSearchParams(query).get('parentOrigin'),app.parentUrl,'Embed must use the owned allowed parent')
     assert.match(new URLSearchParams(query).get('embedId') ?? '',/^[a-zA-Z0-9_-]{16,64}$/,'Embed must provide a valid correlation ID')
   }
   if(id==='oauth-consent') {
     assert.ok(calls.some(call=>call[0]==='select'&&call[1]==='#oauth-organization'&&call[2]==='synthetic-org'),'Consent must select the fixture organization')
-    assert.ok(calls.some(call=>call[0]==='click'&&call[1].includes('Continue')),'Consent must continue to approval')
+    assert.ok(calls.some(call=>call[0]==='press'&&call[1].includes('Continue')&&call[2]==='Enter'),'Consent must continue to approval')
   }
 }
 `
@@ -411,31 +412,60 @@ describe('source-copy coverage mutations', () => {
 
   for (const [from, to, assertion] of [
     [
-      "await page.locator('button.day-available').first().click()",
+      "await page.locator('button.day-available').first().press('Enter')",
       '',
       'Booking state must choose a day',
     ],
-    ["await page.locator('.slots button').first().click()", '', 'Booking state must choose a time'],
+    [
+      "await page.locator('.slots button').first().press('Enter')",
+      '',
+      'Booking state must choose a time',
+    ],
+    [
+      "await page.locator('button.day-available').first().press('Enter')",
+      "await page.locator('button.day-available').first().click()",
+      'Could not prepare coverage state: booking-form',
+    ],
+    [
+      "await page.locator('.slots button').first().press('Enter')",
+      "await page.locator('.slots button').first().click()",
+      'Could not prepare coverage state: booking-form',
+    ],
     [
       'await page.getByLabel(/^(Email|邮箱)$/, { exact: true }).fill(AUDIT_CONFIRMATION_EMAIL)',
       '',
       'Confirmation must fill invitee fields',
     ],
     [
-      "await page.getByRole('button', { name: /^(Confirm booking|确认预约)$/ }).click()",
+      "await page.getByRole('button', { name: /^(Confirm booking|确认预约)$/ }).press('Enter')",
       '',
       'Confirmation must submit booking',
     ],
-    ["await page.locator('.tz-toggle').click()", '', 'Time-zone panel must open'],
+    [
+      "await page.getByRole('button', { name: /^(Confirm booking|确认预约)$/ }).press('Enter')",
+      "await page.getByRole('button', { name: /^(Confirm booking|确认预约)$/ }).click()",
+      'Confirmation must submit booking',
+    ],
+    ["await page.locator('.tz-toggle').press('Enter')", '', 'Time-zone panel must open'],
+    [
+      "await page.locator('.tz-toggle').press('Enter')",
+      "await page.locator('.tz-toggle').click()",
+      'Time-zone panel must open',
+    ],
     [
       'await organization.selectOption(fixture.organizationId)',
       '',
       'Consent must select the fixture organization',
     ],
     [
-      "await page.getByRole('button', { name: /^(Continue|继续)$/ }).click()",
+      "await page.getByRole('button', { name: /^(Continue|继续)$/ }).press('Enter')",
       '',
       'Could not prepare coverage state: oauth-consent',
+    ],
+    [
+      "await page.getByRole('button', { name: /^(Continue|继续)$/ }).press('Enter')",
+      "await page.getByRole('button', { name: /^(Continue|继续)$/ }).click()",
+      'Consent must continue to approval',
     ],
     [
       // biome-ignore lint/suspicious/noTemplateCurlyInString: mutate the literal source text

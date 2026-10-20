@@ -227,27 +227,29 @@ export async function openAuditPage(
       await page.locator('.calendar-grid[aria-busy="true"]').waitFor({ state: 'detached' })
     }
     if (id === 'booking-form' || id === 'booking-confirmation') {
-      await page.locator('button.day-available').first().click()
-      await page.locator('.slots button').first().click()
+      // Native keyboard activation also reaches controls pushed outside narrow
+      // pointer bounds by the long-content fixture, preserving those layout defects.
+      await page.locator('button.day-available').first().press('Enter')
+      await page.locator('.slots button').first().press('Enter')
       await page.locator('.details-step form').waitFor()
       if (id === 'booking-confirmation') {
         await page
           .getByLabel(/^(Your name|你的姓名)$/, { exact: true })
           .fill('Synthetic audit invitee')
         await page.getByLabel(/^(Email|邮箱)$/, { exact: true }).fill(AUDIT_CONFIRMATION_EMAIL)
-        await page.getByRole('button', { name: /^(Confirm booking|确认预约)$/ }).click()
+        await page.getByRole('button', { name: /^(Confirm booking|确认预约)$/ }).press('Enter')
         await page.locator('.confirmation').waitFor()
       }
     }
     if (id === 'booking-time-zone') {
-      await page.locator('.tz-toggle').click()
+      await page.locator('.tz-toggle').press('Enter')
       await page.locator('.tz-panel [role="listbox"]:visible').waitFor()
     }
     if (id === 'oauth-consent') {
       const organization = page.locator('#oauth-organization')
       await organization.waitFor()
       await organization.selectOption(fixture.organizationId)
-      await page.getByRole('button', { name: /^(Continue|继续)$/ }).click()
+      await page.getByRole('button', { name: /^(Continue|继续)$/ }).press('Enter')
       await page.getByRole('button', { name: /^(Allow access|允许访问)$/ }).waitFor()
       await page.waitForFunction(() => window.location.hash === '')
     }

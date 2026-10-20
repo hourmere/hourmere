@@ -584,21 +584,32 @@ export const test = base.extend<{
         auditOAuthQuery: async () => {
           if (auditOAuthQuery) return auditOAuthQuery
           if (!uiAudit) throw new Error('OAuth audit requires the UI audit fixture')
-          const registered = await fetch(`${url}/api/auth/oauth2/register`, {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({
-              client_name: 'Synthetic audit connector',
-              redirect_uris: ['https://hourmere.invalid/callback'],
-              grant_types: ['authorization_code', 'refresh_token'],
-              response_types: ['code'],
-              token_endpoint_auth_method: 'none',
-            }),
-          })
-          if (registered.status !== 201) throw new Error('Could not register synthetic connector')
-          const client = (await registered.json()) as { client_id: string }
+          // Each test owns its database, but Better Auth's registration limiter is
+          // process-wide. Seed public client metadata rather than spending the
+          // five-per-minute DCR budget for every viewport in the same worker.
+          const clientId = 'synthetic-ui-audit-client'
+          await db
+            .insertInto('auth.oauthClient')
+            .values({
+              clientId,
+              name: 'Synthetic audit connector',
+              redirectUris: JSON.stringify(['https://hourmere.invalid/callback']),
+              grantTypes: JSON.stringify(['authorization_code', 'refresh_token']),
+              responseTypes: JSON.stringify(['code']),
+              scopes: JSON.stringify(['mcp:tools', 'offline_access']),
+              tokenEndpointAuthMethod: 'none',
+              applicationType: 'web',
+              requirePKCE: true,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            })
+            .execute()
+          await db
+            .insertInto('auth.oauthClientResource')
+            .values({ clientId, resourceId: `${url}/mcp`, createdAt: new Date() })
+            .execute()
           const query = new URLSearchParams({
-            client_id: client.client_id,
+            client_id: clientId,
             redirect_uri: 'https://hourmere.invalid/callback',
             response_type: 'code',
             scope: 'mcp:tools offline_access',
