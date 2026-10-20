@@ -86,17 +86,84 @@ document.getElementById('language-en')?.addEventListener('click', () => setLangu
 document.getElementById('language-zh')?.addEventListener('click', () => setLanguage('zh-CN'));
 `
 
+// Minimal copies of apps/web/src/styles.css tokens: this page must load no external assets.
 const STYLE = `
-:root { color-scheme: light dark; font-family: system-ui, sans-serif; line-height: 1.5; }
-body { margin: 0; padding: 48px 16px; }
-main { max-width: 420px; margin: 0 auto; }
-h1 { font-size: 1.5rem; margin: 0 0 16px; }
-button { font: inherit; font-weight: 600; padding: 10px 20px; border: 0; border-radius: 6px;
-  background: CanvasText; color: Canvas; cursor: pointer; }
-.note { color: GrayText; font-size: 0.875rem; }
-.languages { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 24px; }
-.languages button { padding: 6px 10px; background: Canvas; color: CanvasText; border: 1px solid GrayText; }
-.languages button[aria-pressed="true"] { outline: 2px solid CanvasText; outline-offset: 2px; }
+:root {
+  --cobalt: #1f4fd8;
+  --bg: #f7f9fe;
+  --surface: #ffffff;
+  --text: #0e1015;
+  --muted: #475066;
+  --border: #d6deef;
+  --border-strong: #7a8ab0;
+  --accent: var(--cobalt);
+  --accent-hover: #1a43b8;
+  --accent-text: #ffffff;
+  --accent-soft: #eaf0fd;
+  --accent-soft-text: #0a1e4a;
+  --focus: var(--cobalt);
+  --mark: var(--cobalt);
+  --radius: 10px;
+  --radius-small: 6px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --shadow: 0 1px 2px rgb(14 16 21 / 6%), 0 2px 8px rgb(14 16 21 / 6%);
+  color-scheme: light;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  line-height: 1.55;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1015;
+    --surface: #151c2e;
+    --text: #e9edf7;
+    --muted: #a9b3c9;
+    --border: #283252;
+    --border-strong: #64719a;
+    --accent: #3d68e6;
+    --accent-hover: #3360e0;
+    --accent-soft: #16244a;
+    --accent-soft-text: #dbe5ff;
+    --focus: #8faeff;
+    --mark: #ffffff;
+    --shadow: none;
+    color-scheme: dark;
+  }
+}
+:lang(zh) {
+  font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+}
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); overflow-wrap: anywhere; }
+.centered { display: grid; place-items: center; min-height: 100vh; padding: var(--space-5) var(--space-4); }
+.card {
+  width: 100%; max-width: 420px; min-width: 0; padding: var(--space-6) var(--space-5);
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.logo { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--text); }
+.logo svg { display: block; flex-shrink: 0; color: var(--mark); }
+.logo-word { font-size: 1.2rem; font-weight: 800; letter-spacing: -0.02em; }
+h1 { font-size: 1.5rem; line-height: 1.25; letter-spacing: -0.01em; margin: var(--space-5) 0 var(--space-4); }
+p { margin: 0 0 var(--space-3); }
+button {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 42px; padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--border-strong); border-radius: var(--radius-small);
+  background: var(--surface); color: var(--text); font: inherit; font-weight: 600;
+  line-height: 1.2; cursor: pointer;
+}
+button:hover { background: var(--accent-soft); }
+#confirm button[type="submit"] { width: 100%; border-color: var(--accent); background: var(--accent); color: var(--accent-text); }
+#confirm button[type="submit"]:hover { border-color: var(--accent-hover); background: var(--accent-hover); }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.note { color: var(--muted); font-size: 0.875rem; margin-bottom: 0; }
+.languages { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-5) 0; }
+.languages button[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-soft-text); }
 [hidden] { display: none !important; }
 `
 
@@ -122,7 +189,18 @@ function page(language: InterfaceLanguage) {
 <style>${STYLE}</style>
 </head>
 <body>
-<main>
+<main class="centered">
+<div class="card">
+<span class="logo">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="32" height="32" aria-hidden="true" focusable="false">
+<defs><clipPath id="hourmere-wave"><circle cx="50" cy="50" r="21"/></clipPath></defs>
+<circle cx="50" cy="50" r="32" fill="none" stroke="currentColor" stroke-width="12"/>
+<path clip-path="url(#hourmere-wave)" fill="currentColor" d="M18 60 C30 53, 40 53, 50 60 S70 67, 82 60 L82 90 L18 90 Z"/>
+<path d="M50 46 L50 31" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/>
+<path d="M50 46 L62 39" fill="none" stroke="#f2a33a" stroke-width="6" stroke-linecap="round"/>
+</svg>
+<span class="logo-word">Hourmere</span>
+</span>
 <div class="languages" id="language-controls" role="group" aria-label="${words.language}">
 <button type="button" id="language-en" lang="en" aria-pressed="${language === 'en'}">English</button>
 <button type="button" id="language-zh" lang="zh-CN" aria-pressed="${language === 'zh-CN'}">简体中文</button>
@@ -135,6 +213,7 @@ function page(language: InterfaceLanguage) {
 </form>
 <p id="incomplete" hidden>${words.incomplete}</p>
 <noscript><p id="javascript-note">${words.javascript}</p></noscript>
+</div>
 </main>
 <script>${SCRIPT}</script>
 </body>
