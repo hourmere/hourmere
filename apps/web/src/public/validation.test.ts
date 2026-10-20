@@ -6,6 +6,8 @@ import {
   bookingErrors,
   bookingLocale,
   emailError,
+  guestsFor,
+  isEmptyGuest,
   nameError,
   type Question,
   reasonError,
@@ -36,6 +38,23 @@ const reasonErrorText = (...args: Parameters<typeof reasonError>) => {
   return result === null ? null : translateMessage('en', result)
 }
 describe('the booking form’s rules mirror the API’s', () => {
+  it('omits only fully empty guest rows and trims attendees without mutating the draft', () => {
+    const guests = [
+      { name: '', email: '' },
+      { name: ' \t ', email: ' \n ' },
+      { name: ' Ada ', email: ' ada@example.com ' },
+      { name: 'Incomplete', email: '' },
+      { name: '', email: 'guest@example.com' },
+    ]
+    expect(isEmptyGuest({ name: ' \t ', email: ' \n ' })).toBe(true)
+    expect(guestsFor(guests)).toEqual([
+      { name: 'Ada', email: 'ada@example.com' },
+      { name: 'Incomplete', email: '' },
+      { name: '', email: 'guest@example.com' },
+    ])
+    expect(guests[2]).toEqual({ name: ' Ada ', email: ' ada@example.com ' })
+  })
+
   it('checks names and emails', () => {
     expect(nameErrorText('  ')).toBe('Enter your name.')
     expect(nameErrorText('a'.repeat(200))).toBeNull()
@@ -116,6 +135,35 @@ describe('server errors on the form', () => {
     expect(bookingErrors(error('invalid_request', 'start: Invalid'), questions).form).toBe(
       'Check the form and try again.',
     )
+  })
+
+  it('maps filtered server guest indexes back to the original draft rows', () => {
+    const guestDraft = [
+      { name: '', email: '' },
+      { name: 'Guest', email: 'guest@example.com' },
+      { name: ' ', email: '\t' },
+      { name: 'Other', email: 'other@example.com' },
+    ]
+    expect(
+      bookingErrors(
+        error('invalid_request', 'guests.0.name: Too big; guests.1.email: Invalid email address'),
+        questions,
+        guestDraft,
+      ),
+    ).toEqual({
+      fields: {
+        'guest-1-name': 'Enter a name, at most 200 characters.',
+        'guest-3-email': 'Enter a valid email address, like name@example.com.',
+      },
+      form: null,
+    })
+    expect(
+      bookingErrors(
+        error('invalid_request', 'guests.2.email: Invalid email address'),
+        questions,
+        guestDraft,
+      ),
+    ).toEqual({ fields: {}, form: 'Check the form and try again.' })
   })
 
   it('places a localized known response error on the identified question', () => {

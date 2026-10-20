@@ -1,6 +1,18 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import { LocationDetails, locationText } from './BookingDetails.tsx'
+import { LocationDetails, locationText, When } from './BookingDetails.tsx'
+
+it('keeps the numeric offset in an unbroken span', () => {
+  const { container } = render(
+    <When
+      start="2026-07-01T14:00:00Z"
+      end="2026-07-01T14:30:00Z"
+      timeZone="America/Los_Angeles"
+      locale="en-US"
+    />,
+  )
+  expect(container.querySelector('.time-offset')?.textContent).toBe('GMT-07:00)')
+})
 
 describe('pure conference location presentation', () => {
   it('shows a trusted participant link and preserves its capability only in the protected display', () => {

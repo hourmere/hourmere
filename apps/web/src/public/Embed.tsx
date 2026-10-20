@@ -1,17 +1,12 @@
-import { explicitLanguage } from '@hourmere/core/language'
 import { type ReactNode, useEffect, useRef, useState } from 'react'
+import { embedQueryLanguage } from '../embed/language.ts'
 import { EmbedLanguage } from '../i18n/runtime.tsx'
 import { BookingPage } from './BookingPage.tsx'
 import { EmbeddedContext, embedMessageContext } from './embed-context.ts'
 import './embed.css'
 
 function EmbedFrame({ children }: { children: ReactNode }) {
-  const [language] = useState(() => {
-    const query = new URLSearchParams(window.location.search)
-    return query.getAll('language').length === 1
-      ? explicitLanguage(query.get('language'))
-      : undefined
-  })
+  const [language] = useState(() => embedQueryLanguage(window.location.search))
   const root = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const target = embedMessageContext(),

@@ -97,21 +97,14 @@ type Mode =
   | { kind: 'reschedule'; notice?: UiText | undefined }
   | { kind: 'confirm-reschedule'; slot: Slot }
 
-function CalendarResponseNote({ onCancel }: { onCancel?: () => void }) {
+function CalendarResponseNote() {
   const { t } = useI18n()
   return (
-    <>
-      <p className="muted">
-        {t(
-          'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use “Cancel booking” here.',
-        )}
-      </p>
-      {onCancel && (
-        <button type="button" className="button button-small calendar-cancel" onClick={onCancel}>
-          {t('Cancel booking')}
-        </button>
+    <p className="muted">
+      {t(
+        'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use “Cancel booking” here.',
       )}
-    </>
+    </p>
   )
 }
 
@@ -332,7 +325,7 @@ function ManageView({
   }
 
   return (
-    <PublicLayout wide={mode.kind === 'reschedule'}>
+    <PublicLayout wide>
       <ConferenceNotice
         key={booking.id}
         booking={booking}
@@ -345,26 +338,25 @@ function ManageView({
         }}
       />
       {mode.kind === 'reschedule' ? (
-        <div className="reschedule">
-          <div className="reschedule-header">
-            <p className="muted">
-              {t(
-                hosts
-                  ? 'Rescheduling {title} with {hosts}, now on {date}, {time}'
-                  : 'Rescheduling {title}, now on {date}, {time}',
-                {
-                  title,
-                  hosts,
-                  date: formatDate(Date.parse(booking.start), timeZone, locale),
-                  time: formatTimeRange(
-                    Date.parse(booking.start),
-                    Date.parse(booking.end),
-                    timeZone,
-                    locale,
-                  ),
-                },
-              )}
-            </p>
+        <div className="booking-layout reschedule">
+          <aside className="event-info reschedule-summary" aria-label={t('Current booking')}>
+            <p className="event-host">{t('Current booking')}</p>
+            <h1 className="event-title">{title}</h1>
+            <DetailList
+              items={[
+                [
+                  'When',
+                  <When
+                    key="current"
+                    start={booking.start}
+                    end={booking.end}
+                    timeZone={timeZone}
+                    locale={locale}
+                  />,
+                ],
+                ...(hosts ? [['Host', hosts] as [string, string]] : []),
+              ]}
+            />
             <button
               type="button"
               className="button button-small"
@@ -372,27 +364,24 @@ function ManageView({
             >
               {t('Keep the current time')}
             </button>
+          </aside>
+          <div className="booking-main">
+            <SlotPicker
+              load={loadSlots}
+              durationMinutes={durationMinutes}
+              timeZone={timeZone}
+              onTimeZoneChange={setTimeZone}
+              locale={locale}
+              now={now}
+              selected={null}
+              excludeStart={booking.start}
+              onSelect={(slot) => setMode({ kind: 'confirm-reschedule', slot })}
+              version={version}
+              title={t('Pick a new time')}
+              focusTitle
+              notice={mode.notice}
+            />
           </div>
-          <SlotPicker
-            load={loadSlots}
-            durationMinutes={durationMinutes}
-            timeZone={timeZone}
-            onTimeZoneChange={setTimeZone}
-            locale={locale}
-            now={now}
-            selected={null}
-            excludeStart={booking.start}
-            onSelect={(slot) => setMode({ kind: 'confirm-reschedule', slot })}
-            version={version}
-            title={t('Pick a new time')}
-            focusTitle
-            notice={mode.notice}
-            afterTitle={
-              <div className="stack picker-note">
-                <CalendarResponseNote onCancel={() => setMode({ kind: 'cancel' })} />
-              </div>
-            }
-          />
         </div>
       ) : (
         <div className="card public-card manage">
@@ -465,7 +454,6 @@ function ManageView({
               current={booking}
               timeZone={timeZone}
               locale={locale}
-              onCancel={() => setMode({ kind: 'cancel' })}
               onBack={() => setMode({ kind: 'reschedule' })}
               onConfirm={async () => {
                 const { slot } = mode
@@ -557,6 +545,14 @@ function BookingSummary({
       <DetailList
         items={[
           ['What', title],
+          [
+            'Status',
+            cancelled
+              ? t('Cancelled booking')
+              : Date.parse(booking.end) <= currentTime()
+                ? t('Ended')
+                : t('Confirmed'),
+          ],
           [
             'When',
             <span key="when" className={cancelled ? 'struck' : undefined}>
@@ -668,7 +664,6 @@ function ConfirmReschedule({
   current,
   timeZone,
   locale,
-  onCancel,
   onBack,
   onConfirm,
 }: {
@@ -676,7 +671,6 @@ function ConfirmReschedule({
   current: ManagedBooking
   timeZone: string
   locale: string
-  onCancel: () => void
   onBack: () => void
   onConfirm: () => Promise<UiText | null>
 }) {
@@ -690,7 +684,7 @@ function ConfirmReschedule({
   return (
     <div className="stack">
       <FocusHeading>{t('Move your booking?')}</FocusHeading>
-      <CalendarResponseNote onCancel={onCancel} />
+
       <DetailList
         items={[
           [
@@ -712,7 +706,13 @@ function ConfirmReschedule({
               {formatTimeRange(start, Date.parse(slot.end), timeZone, locale)}
             </strong>,
           ],
-          ['Time zone', `${zoneName(timeZone)} (${offsetLabel(timeZone, start)})`],
+          [
+            'Time zone',
+            <span key="zone">
+              {zoneName(timeZone)}{' '}
+              <span className="time-offset">({offsetLabel(timeZone, start)})</span>
+            </span>,
+          ],
         ]}
       />
       {error && (

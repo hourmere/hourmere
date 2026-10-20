@@ -96,7 +96,7 @@ export function When({
       <br />
       {formatTimeRange(s, e, timeZone, locale)}{' '}
       <span className="muted">
-        ({zoneName(timeZone)}, {offsetLabel(timeZone, s)})
+        ({zoneName(timeZone)}, <span className="time-offset">{offsetLabel(timeZone, s)})</span>
       </span>
     </>
   )

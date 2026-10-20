@@ -21,6 +21,16 @@ interface TimeZonePickerProps {
 }
 
 const MAX_SHOWN = 100
+const COMMON_ZONES = [
+  'UTC',
+  'America/Los_Angeles',
+  'America/New_York',
+  'Europe/London',
+  'Europe/Paris',
+  'Asia/Shanghai',
+  'Asia/Tokyo',
+  'Australia/Sydney',
+]
 const normalize = (text: string) => text.toLowerCase().replaceAll('_', ' ')
 
 export function timeZoneNames(): string[] {
@@ -87,6 +97,20 @@ export function TimeZonePicker({
       a.id.localeCompare(b.id),
     )
   }, [listed, value, at, referenceDate])
+  // The public picker starts with the current choice and a short set of common zones.
+  // Keep the editable settings combobox alphabetical for its existing keyboard navigation.
+  const common = useMemo(() => {
+    if (editable) return []
+    const ids = new Set([value, ...COMMON_ZONES])
+    return [...ids].flatMap((id) => {
+      const zone = zones.find((zone) => zone.id === id)
+      return zone ? [zone] : []
+    })
+  }, [editable, value, zones])
+  const ordered = useMemo(() => {
+    const ids = new Set(common.map((zone) => zone.id))
+    return [...common, ...zones.filter((zone) => !ids.has(zone.id))]
+  }, [common, zones])
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [filtering, setFiltering] = useState(false)
@@ -100,8 +124,8 @@ export function TimeZonePicker({
     .filter(Boolean)
   const matches =
     !editable || filtering
-      ? zones.filter((zone) => words.every((word) => zone.haystack.includes(word)))
-      : zones
+      ? ordered.filter((zone) => words.every((word) => zone.haystack.includes(word)))
+      : ordered
   const shown = editable && filtering ? matches.slice(0, MAX_SHOWN) : matches
   const optionId = (index: number) => `${id}-option-${index}`
   const current = zones.find((zone) => zone.id === value)
@@ -133,7 +157,7 @@ export function TimeZonePicker({
         setActive(
           Math.max(
             0,
-            zones.findIndex((zone) => zone.id === value),
+            ordered.findIndex((zone) => zone.id === value),
           ),
         )
       } else if (open) {
@@ -151,6 +175,27 @@ export function TimeZonePicker({
     }
   }
 
+  function renderOption(zone: Zone, index: number) {
+    return (
+      // biome-ignore lint/a11y/useKeyWithClickEvents: the combobox input handles keys
+      <div
+        key={zone.id}
+        id={optionId(index)}
+        role="option"
+        aria-selected={editable ? index === active : zone.id === value}
+        data-active={index === active}
+        tabIndex={-1}
+        className={editable ? 'combobox-option' : 'tz-option'}
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() => pick(zone.id)}
+        onMouseMove={() => index !== active && setActive(index)}
+      >
+        <span>{zone.name}</span>
+        <span className={editable ? 'muted' : 'tz-offset'}>{zone.offset}</span>
+      </div>
+    )
+  }
+
   return (
     <div className={editable ? 'combobox' : 'tz-picker'}>
       {!editable && (
@@ -164,7 +209,12 @@ export function TimeZonePicker({
           onClick={() => {
             if (open) close()
             else {
-              setActive(0)
+              setActive(
+                Math.max(
+                  0,
+                  ordered.findIndex((zone) => zone.id === value),
+                ),
+              )
               setOpen(true)
             }
           }}
@@ -229,23 +279,27 @@ export function TimeZonePicker({
             hidden={!open || shown.length === 0}
           >
             {open &&
-              shown.map((zone, index) => (
-                // biome-ignore lint/a11y/useKeyWithClickEvents: the combobox input handles keys
-                <div
-                  key={zone.id}
-                  id={optionId(index)}
-                  role="option"
-                  aria-selected={editable ? index === active : zone.id === value}
-                  data-active={index === active}
-                  tabIndex={-1}
-                  className={editable ? 'combobox-option' : 'tz-option'}
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => pick(zone.id)}
-                  onMouseMove={() => index !== active && setActive(index)}
-                >
-                  <span>{zone.name}</span>
-                  <span className={editable ? 'muted' : 'tz-offset'}>{zone.offset}</span>
-                </div>
+              (!editable && !query ? (
+                <>
+                  {/* biome-ignore lint/a11y/useSemanticElements: APG listbox option groups use a labelled group, not form fields */}
+                  <div role="group" aria-labelledby={`${id}-common`}>
+                    <div className="tz-group-label" id={`${id}-common`}>
+                      {t('Current and common time zones')}
+                    </div>
+                    {shown.slice(0, common.length).map(renderOption)}
+                  </div>
+                  {/* biome-ignore lint/a11y/useSemanticElements: APG listbox option groups use a labelled group, not form fields */}
+                  <div role="group" aria-labelledby={`${id}-all`}>
+                    <div className="tz-group-label" id={`${id}-all`}>
+                      {t('All time zones')}
+                    </div>
+                    {shown
+                      .slice(common.length)
+                      .map((zone, index) => renderOption(zone, index + common.length))}
+                  </div>
+                </>
+              ) : (
+                shown.map(renderOption)
               ))}
           </div>
           {!editable && (

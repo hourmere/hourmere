@@ -72,6 +72,10 @@ describe('the booking page', () => {
     await user.type(screen.getByLabelText('Email'), 'grace@example.com')
     await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
     await screen.findByRole('heading', { name: 'You’re booked' })
+    expect(document.querySelector('.confirmation-indicator')?.textContent).toBe('✓')
+    expect(document.querySelector('.confirmation-indicator')?.getAttribute('aria-hidden')).toBe(
+      'true',
+    )
     const note = screen.getByText(
       'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use “Cancel booking” here.',
     )
@@ -120,7 +124,7 @@ describe('the booking page', () => {
       await user.type(screen.getByLabelText('Email'), 'grace@example.com')
       await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
       await screen.findByRole('heading', {
-        name: state === 'cancelled' ? 'Cancelled booking' : 'You’re booked',
+        name: state === 'cancelled' ? 'Cancelled booking' : 'Ended',
       })
       expect(
         screen.queryByText(/Accepting or declining the calendar invitation does not cancel/),
@@ -743,7 +747,7 @@ describe('the booking page', () => {
     await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
     expect(api.to('POST /api/v1/public/ada/intro/bookings')).toHaveLength(0)
     const name = screen.getByLabelText('Your name')
-    expect(document.activeElement).toBe(name)
+    expect(document.activeElement?.classList.contains('error-summary')).toBe(true)
     expect(name.getAttribute('aria-invalid')).toBe('true')
     expect(screen.getByText('Enter your name.')).toBeDefined()
     expect(screen.getByText('Enter an email address.')).toBeDefined()
@@ -755,11 +759,15 @@ describe('the booking page', () => {
     await user.type(name, 'Grace Hopper')
     expect(screen.queryByText('Enter your name.')).toBeNull()
     await user.type(screen.getByLabelText('Email'), 'grace@example')
-    expect(screen.getByText(/Enter a valid email address/)).toBeDefined()
+    expect(
+      screen.getByText(/Enter a valid email address/, { selector: '.field-error' }),
+    ).toBeDefined()
     await user.type(screen.getByLabelText(/Phone/), 'call me')
-    expect(screen.getByText(/Enter a phone number/)).toBeDefined()
+    expect(screen.getByText(/Enter a phone number/, { selector: '.field-error' })).toBeDefined()
     fireEvent.change(screen.getByLabelText('Topic'), { target: { value: 'x'.repeat(501) } })
-    expect(screen.getByText('Use at most 500 characters.')).toBeDefined()
+    expect(
+      screen.getByText('Use at most 500 characters.', { selector: '.field-error' }),
+    ).toBeDefined()
 
     // Up to ten guests.
     for (let i = 0; i < 10; i++)
@@ -769,7 +777,7 @@ describe('the booking page', () => {
     expect(screen.getAllByRole('button', { name: /^Remove guest/ })).toHaveLength(10)
     await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
     expect(api.to('POST /api/v1/public/ada/intro/bookings')).toHaveLength(0)
-    expect(document.activeElement).toBe(screen.getByLabelText('Email'))
+    expect(document.activeElement?.classList.contains('error-summary')).toBe(true)
   })
 
   it('books with one Idempotency-Key per attempt and shows the confirmation', async () => {
@@ -987,6 +995,38 @@ describe('the booking page', () => {
     )
   })
 
+  it('omits fully empty guests and maps server errors back to the submitted guest row', async () => {
+    const user = userEvent.setup()
+    const api = fakeApi({
+      ...eventRoutes(EVENT, DST_SLOTS),
+      'POST /api/v1/public/ada/intro/bookings': () =>
+        json(400, { error: 'invalid_request', message: 'guests.0.email: Invalid email' }),
+    })
+    renderApp('/ada/intro')
+    await chooseSlot(user, /November 2, available/, '9:00 AM')
+    await user.type(screen.getByLabelText('Your name'), 'Grace Hopper')
+    await user.type(screen.getByLabelText('Email'), 'grace@example.com')
+    await user.click(screen.getByRole('button', { name: 'Add a guest' }))
+    await user.click(screen.getByRole('button', { name: 'Add a guest' }))
+    const names = [screen.getByLabelText('Guest 1 name'), screen.getByLabelText('Guest 2 name')]
+    const emails = [
+      screen.getByLabelText('Email'),
+      screen.getByLabelText('Guest 1 email'),
+      screen.getByLabelText('Guest 2 email'),
+    ]
+    await user.type(names[1] as HTMLElement, 'Guest')
+    await user.type(emails[2] as HTMLElement, 'guest@example.com')
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+    const summary = await screen.findByRole('alert', { name: 'Please check the form' })
+    expect(api.to('POST /api/v1/public/ada/intro/bookings')[0]?.body).toMatchObject({
+      guests: [{ name: 'Guest', email: 'guest@example.com' }],
+    })
+    expect(emails[1]?.getAttribute('aria-invalid')).toBeNull()
+    expect(emails[2]?.getAttribute('aria-invalid')).toBe('true')
+    await user.click(within(summary).getByRole('link'))
+    expect(document.activeElement).toBe(emails[2])
+  })
+
   it('puts the server’s objections on the fields they are about', async () => {
     const user = userEvent.setup()
     const answers = [
@@ -1012,12 +1052,18 @@ describe('the booking page', () => {
     await confirm()
     const email = screen.getByLabelText('Email')
     await waitFor(() => expect(email.getAttribute('aria-invalid')).toBe('true'))
-    await waitFor(() => expect(document.activeElement).toBe(email))
-    expect(screen.getByText(/Enter a valid email address/)).toBeDefined()
+    await waitFor(() =>
+      expect(document.activeElement?.classList.contains('error-summary')).toBe(true),
+    )
+    expect(
+      screen.getByText(/Enter a valid email address/, { selector: '.field-error' }),
+    ).toBeDefined()
 
     await confirm()
     expect(await screen.findByText('Check this answer.')).toBeDefined()
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Topic')))
+    await waitFor(() =>
+      expect(document.activeElement?.classList.contains('error-summary')).toBe(true),
+    )
 
     await confirm()
     expect(await screen.findByText(/Try again in 30 seconds/)).toBeDefined()

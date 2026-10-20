@@ -1259,7 +1259,7 @@ input[type="radio"] {
 }
 
 .panel-danger {
-  border-color: var(--danger-border);
+  border-color: var(--danger);
 }
 
 .field-grid {
@@ -1816,4 +1816,12 @@ input[aria-invalid="true"] {
 .conference-account {
   max-width: none;
   overflow-wrap: anywhere;
+}
+
+@media (forced-colors: active) {
+  .sidenav a[aria-current="page"] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+    text-decoration: underline;
+  }
 }

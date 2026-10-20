@@ -44,6 +44,7 @@
 }
 
 .public .public-main {
+  container: public-page / inline-size;
   width: 100%;
   max-width: 720px;
   margin: 0 auto;
@@ -198,6 +199,14 @@
   color: var(--muted);
 }
 
+.public .event-card-description {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  white-space: pre-line;
+}
+
 /* Booking page: the event beside (wide) or above (narrow) the picker or the form */
 
 .public .booking-layout {
@@ -211,7 +220,7 @@
 }
 
 .public .event-info {
-  padding: var(--space-5) var(--space-5) 0;
+  padding: var(--space-5) var(--space-4) 0;
 }
 
 .public .booking-main {
@@ -219,7 +228,7 @@
   padding: 0 var(--space-4) var(--space-5);
 }
 
-@media (min-width: 960px) {
+@container public-page (min-width: 900px) {
   .public .booking-layout {
     grid-template-columns: 300px minmax(0, 1fr);
     gap: 0;
@@ -260,6 +269,29 @@
   white-space: pre-line;
 }
 
+.public .event-description-collapsed {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+
+@container public-page (min-width: 900px) {
+  .public .event-description-collapsed {
+    display: block;
+    -webkit-line-clamp: unset;
+    overflow: visible;
+  }
+
+  .public .description-toggle {
+    display: none;
+  }
+}
+
+.public .time-offset {
+  white-space: nowrap;
+}
+
 .public .chosen-time {
   margin-top: var(--space-4);
   padding: var(--space-3) var(--space-4);
@@ -294,15 +326,52 @@
 
 .public .guest {
   display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: var(--space-2);
   margin-bottom: var(--space-3);
-  padding: var(--space-3);
+  padding: var(--space-2);
   border: 1px solid var(--border);
   border-radius: var(--radius-small);
 }
 
 .public .guest-remove {
   justify-self: start;
+  grid-column: 1 / -1;
+}
+
+.public .guest .field {
+  gap: var(--space-1);
+}
+
+.public .guest label {
+  font-size: 0.875rem;
+}
+
+@container public-page (min-width: 480px) {
+  .public .guest {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+    align-items: end;
+  }
+
+  .public .guest .field {
+    margin: 0;
+  }
+
+  .public .guest-remove {
+    grid-column: auto;
+  }
+}
+
+.public .booking-form .choices {
+  display: grid;
+  gap: var(--space-2);
+}
+
+@media (pointer: coarse) {
+  .public .choice {
+    min-height: 44px;
+    align-items: center;
+  }
 }
 
 .public .choice {
@@ -357,6 +426,23 @@
 
 .public .manage-link {
   margin-bottom: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.public .confirmation-indicator {
+  display: inline-grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin-bottom: var(--space-3);
+  border: 2px solid currentcolor;
+  border-radius: 50%;
+  background: var(--success-soft);
+  color: var(--success-text);
+  font-size: 1.5rem;
 }
 
 .public .calendar-links {
@@ -391,11 +477,9 @@
   justify-self: start;
 }
 
-.public .reschedule {
-  padding: var(--space-5) var(--space-4);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
+.public .reschedule-summary .details-row {
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-1);
 }
 
 .public .reschedule-header {
@@ -423,4 +507,65 @@
   gap: 0.4rem;
   text-decoration: none;
   color: inherit;
+}
+
+@media print {
+  .public {
+    --bg: #ffffff;
+    --surface: #ffffff;
+    --surface-muted: #ffffff;
+    --text: #0e1015;
+    --muted: #475066;
+    --border: #7a8ab0;
+    --accent-soft: #ffffff;
+    --accent-soft-text: #0e1015;
+    --link: #0e1015;
+    --border-strong: #7a8ab0;
+    --accent: #1f4fd8;
+    --accent-text: #ffffff;
+    --danger: #b42318;
+    --danger-soft: #fef0ee;
+    --danger-border: #b42318;
+    --success-border: #11603a;
+    --success-soft: #ffffff;
+    --success-text: #11603a;
+    --error-text: #b42318;
+    color-scheme: light;
+    min-height: 0;
+    background: var(--bg);
+    color: var(--text);
+  }
+
+  .public .public-language,
+  .public .public-footer,
+  .public .public-signup,
+  .public button,
+  .public .button,
+  .public .add-to-calendar,
+  .public .manage-link,
+  .public a[href*="#token="],
+  .public .manage-actions {
+    /* biome-ignore lint/complexity/noImportantStyles: never print private capability controls, regardless of component display rules. */
+    display: none !important;
+  }
+
+  .public .public-main {
+    max-width: none;
+    padding: 0;
+    container-type: normal;
+  }
+
+  .public .public-card,
+  .public .booking-layout {
+    padding: 0;
+    border: 0;
+    box-shadow: none;
+  }
+
+  .public .event-description-collapsed,
+  .public .event-card-description {
+    display: block;
+    -webkit-line-clamp: unset;
+    overflow: visible;
+  }
 }

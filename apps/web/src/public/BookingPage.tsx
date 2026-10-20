@@ -28,6 +28,7 @@ import {
   When,
 } from './BookingDetails.tsx'
 import { BookingForm, type BookingFormValues } from './BookingForm.tsx'
+import { EventDescription } from './EventDescription.tsx'
 import { notifyEmbedBooked, useEmbedded } from './embed-context.ts'
 import { now as currentTime, detectTimeZone, preferredLocale } from './env.ts'
 import {
@@ -40,7 +41,13 @@ import {
 import { normalizedHandle, normalizedSlug, teamSlug, useRequest } from './paths.ts'
 import { SlotPicker } from './SlotPicker.tsx'
 import { formatDate, formatDuration, formatTimeRange, offsetLabel, zoneName } from './time.ts'
-import { bookingErrors, bookingLocale, type FieldErrors, responsesFor } from './validation.ts'
+import {
+  bookingErrors,
+  bookingLocale,
+  type FieldErrors,
+  guestsFor,
+  responsesFor,
+} from './validation.ts'
 
 /** /{handle}/{slug}: pick a time, fill in the form, get the confirmation. */
 export function TeamBookingPage() {
@@ -170,7 +177,7 @@ function BookingFlow({
 
   async function submit() {
     if (!slot) return
-    const guests = values.guests.map((g) => ({ name: g.name.trim(), email: g.email.trim() }))
+    const guests = guestsFor(values.guests)
     const body: CreateBooking = {
       ...(embedded && { source: 'embed' as const }),
       start: slot.start,
@@ -235,7 +242,7 @@ function BookingFlow({
       } else if (err.status === 429 || err.status >= 500) {
         setFormError(failureMessage(err))
       } else {
-        const mapped = bookingErrors(err, event.questions)
+        const mapped = bookingErrors(err, event.questions, values.guests)
         const { timeZone: zoneError, ...fields } = mapped.fields
         setServerErrors(fields)
         setFormError(
@@ -274,7 +281,7 @@ function BookingFlow({
             <li>{formatDuration(event.durationMinutes, displayLocale)}</li>
             {event.location && <li>{ui(locationLabel(event.location.kind))}</li>}
           </ul>
-          {event.description && <p className="event-description">{event.description}</p>}
+          {event.description && <EventDescription>{event.description}</EventDescription>}
           {slot && (
             <div className="chosen-time">
               <p>
@@ -283,7 +290,10 @@ function BookingFlow({
                 {formatTimeRange(Date.parse(slot.start), Date.parse(slot.end), timeZone, locale)}
                 <br />
                 <span className="muted">
-                  {zoneName(timeZone)} ({offsetLabel(timeZone, Date.parse(slot.start))})
+                  {zoneName(timeZone)}{' '}
+                  <span className="time-offset">
+                    ({offsetLabel(timeZone, Date.parse(slot.start))})
+                  </span>
                 </span>
               </p>
               <button type="button" className="button button-small" onClick={changeTime}>
@@ -355,6 +365,7 @@ function Confirmation({
   }, [embedded])
   const { booking: initialBooking, manageToken, replayed, timeZone } = confirmed
   const [booking, setBooking] = useState(initialBooking)
+  const ended = Date.parse(booking.end) <= currentTime()
   const canCancel = booking.status === 'confirmed' && Date.parse(booking.start) > currentTime()
   const invitee = booking.attendees.find((a) => a.isBooker)
   const guests = booking.attendees.filter((a) => !a.isBooker)
@@ -371,22 +382,31 @@ function Confirmation({
   return (
     <PublicLayout>
       <div className="card public-card confirmation">
+        {booking.status === 'confirmed' && !ended && booking.conference?.status !== 'failed' && (
+          <span className="confirmation-indicator" aria-hidden="true">
+            ✓
+          </span>
+        )}
         <FocusHeading>
           {t(
             booking.status === 'cancelled'
               ? 'Cancelled booking'
-              : booking.conference?.status === 'failed'
-                ? 'Time reserved; meeting link needs attention'
-                : booking.conference?.status === 'pending'
-                  ? 'Time reserved; meeting link pending'
-                  : 'You’re booked',
+              : ended
+                ? 'Ended'
+                : booking.conference?.status === 'failed'
+                  ? 'Time reserved; meeting link needs attention'
+                  : booking.conference?.status === 'pending'
+                    ? 'Time reserved; meeting link pending'
+                    : 'You’re booked',
           )}
         </FocusHeading>
         <p className="lede">
           {t(
             booking.status === 'cancelled'
               ? 'This booking was already cancelled.'
-              : 'Your {event} with {host} is confirmed.',
+              : ended
+                ? 'This meeting has ended.'
+                : 'Your {event} with {host} is confirmed.',
             {
               event: event.title,
               host: hostName,

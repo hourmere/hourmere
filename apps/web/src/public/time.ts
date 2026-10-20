@@ -109,7 +109,19 @@ export function formatTime(
 
 /** `9:30 – 10:00 AM`: a start and end on one day, as the locale writes such ranges. */
 export function formatTimeRange(start: number, end: number, timeZone: string, locale: string) {
-  return formatter(locale, { timeZone, hour: 'numeric', minute: '2-digit' }).formatRange(start, end)
+  const format = formatter(locale, { timeZone, hour: 'numeric', minute: '2-digit' })
+  // Intl range patterns may pad a 24-hour hour even when a single time does not. Retain
+  // the locale's range punctuation/day-period sharing, using the same hours as the slots.
+  const hour = (instant: number) =>
+    format.formatToParts(instant).find((p) => p.type === 'hour')?.value
+  return format
+    .formatRangeToParts(start, end)
+    .map((part) =>
+      part.type === 'hour'
+        ? (hour(part.source === 'endRange' ? end : start) ?? part.value)
+        : part.value,
+    )
+    .join('')
 }
 
 /** `Tuesday, November 3, 2026`: the date an instant falls on in `timeZone`. */

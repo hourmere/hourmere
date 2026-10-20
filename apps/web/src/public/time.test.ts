@@ -8,6 +8,7 @@ import {
   formatDuration,
   formatMonth,
   formatTime,
+  formatTimeRange,
   instantOf,
   offsetLabel,
   wallTime,
@@ -76,6 +77,15 @@ describe('wall-clock time in a zone', () => {
 })
 
 describe('formatting', () => {
+  it.each(['en-GB', 'zh-CN', 'en-US'])(
+    'uses identical clock-hour formatting in slots and selected ranges for %s',
+    (locale) => {
+      const start = at('2026-11-02T00:00:00Z')
+      const end = at('2026-11-02T00:30:00Z')
+      const clock = formatTime(start, 'UTC', locale).replace(/\s*[AP]M$/, '')
+      expect(formatTimeRange(start, end, 'UTC', locale).startsWith(clock)).toBe(true)
+    },
+  )
   it('labels dates in the Gregorian calendar, with the locale’s language and digits', () => {
     const nov1 = at('2026-11-01T12:00:00Z')
     // fa-IR defaults to the Persian calendar (1 November 2026 is 10 Aban 1405).

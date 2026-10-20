@@ -1,7 +1,9 @@
 import { Suspense, useEffect } from 'react'
-import { Navigate, Route, Routes } from 'react-router'
+import { Navigate, Route, Routes, useLocation } from 'react-router'
 import { RouteErrorBoundary } from './components/RouteErrorBoundary.tsx'
+import { embedQueryLanguage } from './embed/language.ts'
 import { useI18n } from './i18n/runtime.tsx'
+import { translate } from './i18n/translate.ts'
 import {
   AnalyticsPage,
   ApiKeysPage,
@@ -30,6 +32,17 @@ import {
 import { AppNotFoundPage, NotFoundPage } from './pages/NotFound.tsx'
 import { PATHS } from './paths.ts'
 
+function RouteLoadingStatus() {
+  const { t } = useI18n()
+  const { pathname, search } = useLocation()
+  const language = pathname.startsWith('/embed/') ? embedQueryLanguage(search) : undefined
+  return (
+    <div className="page-status" role="status" lang={language}>
+      {language ? translate(language, 'Loading…') : t('Loading…')}
+    </div>
+  )
+}
+
 /**
  * The web app: one client of the public API (/api/v1 and Better Auth's /api/auth), with no
  * endpoints of its own. The router comes from the caller (BrowserRouter in main.tsx,
@@ -49,13 +62,7 @@ export function App() {
 
   return (
     <RouteErrorBoundary>
-      <Suspense
-        fallback={
-          <div className="page-status" role="status">
-            {t('Loading…')}
-          </div>
-        }
-      >
+      <Suspense fallback={<RouteLoadingStatus />}>
         <Routes>
           <Route path="/" element={<Navigate to={PATHS.home} replace />} />
           <Route element={<SessionLayout />}>

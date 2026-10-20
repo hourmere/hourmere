@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
@@ -20,6 +20,38 @@ const box = () => screen.getByRole<HTMLInputElement>('combobox', { name: 'Time z
 const value = () => screen.getByTestId('value').textContent
 
 describe('the time zone picker', () => {
+  it('opens the public list at the selected zone in a current/common group', async () => {
+    const scroll = vi.fn()
+    const original = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollIntoView')
+    Object.defineProperty(Element.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: scroll,
+    })
+    try {
+      const user = userEvent.setup()
+      render(<TimeZonePicker value="Pacific/Honolulu" onChange={vi.fn()} />)
+      await user.click(screen.getByRole('button', { name: /Time zone/ }))
+      const common = screen.getByRole('group', { name: 'Current and common time zones' })
+      const current = within(common).getByRole('option', { name: /Pacific\/Honolulu/ })
+      expect(within(common).getAllByRole('option')[0]).toBe(current)
+      expect(within(common).getByRole('option', { name: /Asia\/Tokyo/ })).toBeDefined()
+      expect(screen.getByRole('group', { name: 'All time zones' })).toBeDefined()
+      expect(current.getAttribute('aria-selected')).toBe('true')
+      expect(current.getAttribute('data-active')).toBe('true')
+      expect(screen.getByRole('combobox').getAttribute('aria-activedescendant')).toBe(current.id)
+      expect(document.activeElement).toBe(screen.getByRole('combobox'))
+      expect(scroll.mock.instances.at(-1)).toBe(current)
+      expect(scroll).toHaveBeenLastCalledWith({ block: 'nearest' })
+      await user.type(screen.getByRole('combobox'), 'tokyo')
+      expect(screen.queryAllByRole('group')).toHaveLength(0)
+      expect(screen.getAllByRole('option')).toHaveLength(1)
+      expect(screen.getByRole('option').textContent).toMatch(/^Asia\/Tokyo/)
+    } finally {
+      if (original) Object.defineProperty(Element.prototype, 'scrollIntoView', original)
+      else Reflect.deleteProperty(Element.prototype, 'scrollIntoView')
+    }
+  })
+
   it('refreshes offsets and offset search for the reference date, including aliases', async () => {
     const user = userEvent.setup()
     const props = { value: 'US/Eastern', onChange: vi.fn(), now: Date.parse('2026-10-19T12:00Z') }

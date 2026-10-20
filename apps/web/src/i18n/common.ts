@@ -1,5 +1,16 @@
 // Public/shared UI messages. Admin messages live in a lazy catalog.
 export const common = {
+  '{0}: {1}': '{0}：{1}',
+  'Show more': '展开',
+  'Show less': '收起',
+  'Current booking': '当前预约',
+  'Current and common time zones': '当前和常用时区',
+  'All time zones': '所有时区',
+  'Please check the form': '请检查表单',
+  'Could not save': '无法保存',
+  Confirmed: '已确认',
+  Ended: '已结束',
+  'This meeting has ended.': '此会议已结束。',
   'Something went wrong': '出错了',
   Reload: '重新加载',
   'Scheduling page powered by Hourmere — pick a time that works.':
