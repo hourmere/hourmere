@@ -324,6 +324,19 @@ docker compose up -d --wait`)
       ),
     'utf8',
   )
+
+  it.each([
+    ['README', readme],
+    ['self-hosting guide', guide],
+  ])('uses the operator example hostname in the %s', (_name, source) => {
+    expect(source).not.toMatch(/\bapp\.hourmere\.com\b/)
+    const healthCommands = source.match(/curl[^\n]+https:\/\/[^\s]+\/api\/health/g) ?? []
+    expect(healthCommands.length).toBeGreaterThan(0)
+    for (const command of healthCommands) {
+      expect(command).toContain('https://hourmere.example.com/api/health')
+    }
+  })
+
   const enableCommands = (source: string | undefined) => verificationCommands(source)
   const upgradeCommands = (title: string) =>
     guide.split(`### ${title} upgrade\n`)[1]?.match(/```sh\n([\s\S]*?)\n```/)?.[1]

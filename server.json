@@ -8,7 +8,7 @@
     "url": "https://github.com/hourmere/hourmere",
     "source": "github"
   },
-  "websiteUrl": "https://hourmere.com/docs/mcp/",
+  "websiteUrl": "https://hourmere.com/docs/mcp",
   "remotes": [
     {
       "type": "streamable-http",

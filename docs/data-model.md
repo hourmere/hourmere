@@ -88,7 +88,7 @@ calendar-list access.
 
 | Table | Owner | Purpose |
 |---|---|---|
-| `profiles` | user | Public handle (`hourmere.com/{handle}/{event}`), time zone, locale, default destination calendar |
+| `profiles` | user | Public handle (`hourmere.example.com/{handle}/{event}`), time zone, locale, default destination calendar |
 | `personal_organizations` | user | Marks the organization created for each user; deleting the user deletes it, and it cannot be deleted on its own |
 | `schedules` | user | Named working hours: time zone + weekly intervals (JSON); one default per user |
 | `schedule_overrides` | user | Per-date exceptions: unavailable, or replacement intervals |
