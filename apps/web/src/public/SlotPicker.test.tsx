@@ -182,9 +182,8 @@ describe('slot picker CSS contracts', () => {
 
   it('marks unavailable days with a noncolour cue and uses 3:1 day and toggle borders in both themes', () => {
     const css = rules(styles)
-    expect(declaration(css, '.picker .day[aria-disabled="true"]', 'text-decoration')).toBe(
-      'line-through',
-    )
+    expect(declaration(css, '.picker .day[aria-disabled="true"]', 'opacity')).toBe('0.6')
+    expect(declaration(css, '.picker .day[aria-disabled="true"]', 'text-decoration')).toBe('')
     expect(declaration(css, '.picker .day-available', 'border-color')).toBe('var(--border-strong)')
     expect(declaration(css, ':is(.public, .picker) .tz-toggle', 'border')).toBe(
       '1px solid var(--border-strong)',
@@ -199,6 +198,17 @@ describe('slot picker CSS contracts', () => {
         ),
       ).toBeGreaterThanOrEqual(3)
     }
+  })
+
+  it('fits seven 44px day targets on coarse-pointer calendars', () => {
+    const coarse = rules(styles).filter(
+      (rule) => (rule.parentRule as CSSMediaRule | null)?.conditionText === '(pointer: coarse)',
+    )
+    expect(declaration(coarse, '.picker .day', 'min-width')).toBe('44px')
+    expect(declaration(coarse, '.picker .day', 'min-height')).toBe('44px')
+    expect(declaration(coarse, '.picker .calendar-grid', 'border-spacing')).toBe('0px')
+    expect(declaration(coarse, '.picker .picker-calendar', 'min-width')).toBe('308px')
+    expect(declaration(coarse, '.picker .picker-calendar', 'justify-self')).toBe('center')
   })
 
   it('adds a noninteractive fade above remaining slots', () => {

@@ -150,6 +150,60 @@ describe('public booking form polish', () => {
     expect(screen.getAllByRole('checkbox').every((box) => box.closest('.choice'))).toBe(true)
   })
 
+  it.each(['client', 'server'] as const)(
+    'lists %s errors in the rendered field order with questions before guests',
+    async (source) => {
+      const user = userEvent.setup()
+      render(
+        <Form
+          initial={{
+            ...valid,
+            name: '',
+            email: '',
+            guests: [{ name: 'Guest', email: '' }],
+          }}
+          questions={[
+            topics,
+            { id: 'company', label: 'Company', type: 'short_text', required: true },
+          ]}
+          serverErrors={
+            source === 'server'
+              ? {
+                  'guest-0-email': 'Enter an email address.',
+                  'q-company': 'Enter an answer.',
+                  guests: 'The host no longer allows guests. Remove the guests to continue.',
+                  email: 'Enter an email address.',
+                  'q-topics': 'Choose at least one option.',
+                  name: 'Enter your name.',
+                }
+              : {}
+          }
+        />,
+      )
+      if (source === 'client') {
+        await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+      }
+      const links = within(screen.getByRole('alert')).getAllByRole('link')
+      const fields = links.map((link) =>
+        document.getElementById(link.getAttribute('href')?.slice(1) ?? ''),
+      )
+      expect(fields.map((field) => field?.getAttribute('data-field'))).toEqual([
+        'name',
+        'email',
+        'q-topics',
+        'q-company',
+        ...(source === 'server' ? ['guests'] : []),
+        'guest-0-email',
+      ])
+      for (let i = 1; i < fields.length; i++) {
+        expect(
+          (fields[i - 1]?.compareDocumentPosition(fields[i] as HTMLElement) ?? 0) &
+            Node.DOCUMENT_POSITION_FOLLOWING,
+        ).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+      }
+    },
+  )
+
   it('shows form-wide failures once in the same summary and localizes public headings', () => {
     chooseLanguage('zh-CN')
     const { rerender } = render(<Form formError="Check the form and try again." />)

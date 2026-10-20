@@ -92,7 +92,7 @@ function NoToken() {
 }
 
 type Mode =
-  | { kind: 'view'; message?: UiText | undefined; emailNotice?: boolean }
+  | { kind: 'view'; message?: UiText | undefined; emailNotice?: boolean; meetingStarted?: boolean }
   | { kind: 'cancel' }
   | { kind: 'reschedule'; notice?: UiText | undefined }
   | { kind: 'confirm-reschedule'; slot: Slot }
@@ -239,7 +239,9 @@ function ManageView({
   })
   const [now, setNow] = useState(currentTime)
   const [version, setVersion] = useState(0)
-  const started = Date.parse(booking.start) <= now
+  const observedNow = currentTime()
+  const started = Date.parse(booking.start) <= observedNow
+  const ended = Date.parse(booking.end) <= observedNow
   const changeable = booking.status === 'confirmed' && !started
   const [mode, setMode] = useState<Mode>(() =>
     initialAction && changeable ? { kind: initialAction } : { kind: 'view' },
@@ -259,7 +261,9 @@ function ManageView({
     initialAction && !changeable
       ? booking.status === 'cancelled'
         ? 'This booking is cancelled, so it can’t be changed.'
-        : 'This meeting has already started, so it can’t be changed.'
+        : ended
+          ? 'This meeting has ended.'
+          : 'This meeting has already started, so it can’t be changed.'
       : undefined
 
   /** What to say after a reschedule whose answer never arrived, from the booking as it is now. */
@@ -292,13 +296,11 @@ function ManageView({
     }
     if (code === 'booking_cancelled' || code === 'booking_in_past') {
       await onStale()
-      setMode({
-        kind: 'view',
-        message:
-          code === 'booking_cancelled'
-            ? 'This booking was already cancelled.'
-            : 'This meeting has already started, so it can’t be changed.',
-      })
+      setMode(
+        code === 'booking_cancelled'
+          ? { kind: 'view', message: 'This booking was already cancelled.' }
+          : { kind: 'view', meetingStarted: true },
+      )
       return true
     }
     if (during === 'reschedule' && (code === 'slot_taken' || code === 'slot_unavailable')) {
@@ -393,12 +395,19 @@ function ManageView({
               timeZone={timeZone}
               locale={locale}
               started={started}
-              message={mode.message ?? unavailable}
+              ended={ended}
+              message={
+                mode.meetingStarted
+                  ? ended
+                    ? 'This meeting has ended.'
+                    : 'This meeting has already started, so it can’t be changed.'
+                  : (mode.message ?? unavailable)
+              }
               emailNotice={mode.emailNotice ?? false}
               newToken={newToken}
             />
           )}
-          {mode.kind === 'view' && changeable && (
+          {mode.kind === 'view' && changeable && !mode.meetingStarted && (
             <>
               <CalendarResponseNote />
               <div className="manage-actions">
@@ -494,6 +503,7 @@ function BookingSummary({
   timeZone,
   locale,
   started,
+  ended,
   message,
   emailNotice,
   newToken,
@@ -504,6 +514,7 @@ function BookingSummary({
   timeZone: string
   locale: string
   started: boolean
+  ended: boolean
   message: UiText | undefined
   emailNotice: boolean
   newToken: string | null
@@ -539,20 +550,17 @@ function BookingSummary({
       )}
       {!message && !cancelled && started && (
         <div className="alert alert-info">
-          <p>{t('This meeting has already started, so it can’t be changed here.')}</p>
+          <p>
+            {ended
+              ? t('This meeting has ended.')
+              : t('This meeting has already started, so it can’t be changed here.')}
+          </p>
         </div>
       )}
       <DetailList
         items={[
           ['What', title],
-          [
-            'Status',
-            cancelled
-              ? t('Cancelled booking')
-              : Date.parse(booking.end) <= currentTime()
-                ? t('Ended')
-                : t('Confirmed'),
-          ],
+          ['Status', cancelled ? t('Cancelled booking') : ended ? t('Ended') : t('Confirmed')],
           [
             'When',
             <span key="when" className={cancelled ? 'struck' : undefined}>

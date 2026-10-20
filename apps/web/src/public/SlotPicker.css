@@ -115,7 +115,23 @@
 
 .picker .day[aria-disabled="true"] {
   opacity: 0.6;
-  text-decoration: line-through;
+}
+
+@media (pointer: coarse) {
+  .picker .picker-calendar {
+    /* Seven 44px targets; center within narrow tracks to share their side gutters. */
+    min-width: 308px;
+    justify-self: center;
+  }
+
+  .picker .calendar-grid {
+    border-spacing: 0;
+  }
+
+  .picker .day {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }
 
 @media (hover: hover) {

@@ -929,7 +929,8 @@ input[readonly] {
   min-width: 0;
 }
 
-@container data-table (width < 640px) {
+/* Negated min-width keeps upper bounds exclusive, including fractional CSS widths. */
+@container data-table not (min-width: 640px) {
   .table caption {
     display: block;
     width: 100%;
@@ -938,14 +939,14 @@ input[readonly] {
   }
 }
 
-@container data-table (400px <= width < 640px) {
+@container data-table (min-width: 400px) and (not (min-width: 640px)) {
   .table-analytics caption {
     display: table-caption;
   }
 }
 
 /* The activity table's four short columns need less padding to fit between 400 and 480px. */
-@container data-table (400px <= width < 480px) {
+@container data-table (min-width: 400px) and (not (min-width: 480px)) {
   .table-analytics th,
   .table-analytics td {
     padding-inline: var(--space-2);
@@ -953,7 +954,7 @@ input[readonly] {
 }
 
 /* The activity table's four short columns fit until the container is below 400px. */
-@container data-table (width < 400px) {
+@container data-table not (min-width: 400px) {
   .table thead {
     position: absolute;
     width: 1px;
@@ -1033,7 +1034,7 @@ input[readonly] {
 }
 
 /* Keep table mode at the current shell’s 896px maximum content width. */
-@container data-table (400px <= width < 880px) {
+@container data-table (min-width: 400px) and (not (min-width: 880px)) {
   :is(.table-bookings, .table-api-keys, .table-event-types) thead {
     position: absolute;
     width: 1px;

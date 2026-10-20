@@ -59,3 +59,42 @@ test('Chinese public calendar days stay on one line and clear the today marker',
     ),
   ).toBe(true)
 })
+
+test('coarse-pointer calendars keep 44px day targets without striking unavailable dates', async ({
+  page,
+  app,
+}) => {
+  test.skip(!(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)), 'Touch only')
+  for (const width of [320, 360, 390]) {
+    await page.setViewportSize({ width, height: 844 })
+    await page.goto(app.url + app.personalPath)
+    await expect(page.locator('.calendar-grid')).toHaveAttribute('aria-busy', 'false')
+    const days = await page.locator('.calendar-grid .day').evaluateAll((buttons) =>
+      buttons.map((button) => {
+        const box = button.getBoundingClientRect()
+        const style = getComputedStyle(button)
+        return {
+          width: box.width,
+          height: box.height,
+          unavailable: button.getAttribute('aria-disabled') === 'true',
+          opacity: Number(style.opacity),
+          decoration: style.textDecorationLine,
+        }
+      }),
+    )
+    expect(days.length).toBeGreaterThanOrEqual(28)
+    expect(
+      days.every((day) => day.width >= 44 && day.height >= 44),
+      `${width}px targets`,
+    ).toBe(true)
+    const unavailable = days.filter((day) => day.unavailable)
+    expect(unavailable.length).toBeGreaterThan(0)
+    expect(unavailable.every((day) => day.opacity < 1 && day.decoration === 'none')).toBe(true)
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+      `${width}px page fits`,
+    ).toBe(true)
+  }
+})

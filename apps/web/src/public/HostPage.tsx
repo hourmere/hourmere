@@ -65,7 +65,14 @@ function HostPageContent({ handle }: { handle: string }) {
                   {formatDuration(et.durationMinutes, displayLocale)}
                   {et.location && ` · ${ui(locationLabel(et.location.kind))}`}
                 </span>
-                {et.description && <span className="event-card-description">{et.description}</span>}
+                {et.description && (
+                  <span className="event-card-description">
+                    {et.description
+                      .split(/\r\n?|\n/)
+                      .filter((line) => line.trim().length > 0)
+                      .join('\n')}
+                  </span>
+                )}
               </Link>
             </li>
           ))}

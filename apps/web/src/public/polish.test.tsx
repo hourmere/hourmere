@@ -160,3 +160,29 @@ it('renders host card descriptions with the preserved-line clamp hook', async ()
       .classList.contains('event-card-description'),
   ).toBe(true)
 })
+
+it.each(['\n', '\r\n', '\r'])(
+  'collapses blank host description lines before the three-line clamp (%j)',
+  async (newline) => {
+    const description = [
+      '',
+      'First line',
+      '  \t',
+      '',
+      'Second line',
+      '',
+      'Third line',
+      'Fourth line',
+      '',
+    ].join(newline)
+    fakeApi({
+      'GET /api/v1/public/ada': () =>
+        json(200, { handle: 'ada', host: EVENT.host, eventTypes: [{ ...EVENT, description }] }),
+    })
+    renderApp('/ada')
+    const card = await screen.findByRole('link', { name: /Intro call/ })
+    expect(card.querySelector('.event-card-description')?.textContent).toBe(
+      'First line\nSecond line\nThird line\nFourth line',
+    )
+  },
+)

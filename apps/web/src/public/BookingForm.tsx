@@ -105,16 +105,24 @@ export function BookingForm({
   }
 
   const labels: Record<string, UiText> = {
-    [fieldId('name')]: 'Your name',
-    [fieldId('email')]: 'Email',
-    [fieldId('guests')]: 'Guests',
-    ...Object.fromEntries(questions.map((q) => [fieldId(`q-${q.id}`), literal(q.label)])),
+    name: 'Your name',
+    email: 'Email',
+    ...Object.fromEntries(questions.map((q) => [`q-${q.id}`, literal(q.label)])),
+    guests: 'Guests',
     ...Object.fromEntries(
       values.guests.flatMap((_, i) => [
-        [fieldId(`guest-${i}-name`), msg('Guest {0} name', { '0': i + 1 })],
-        [fieldId(`guest-${i}-email`), msg('Guest {0} email', { '0': i + 1 })],
+        [`guest-${i}-name`, msg('Guest {0} name', { '0': i + 1 })],
+        [`guest-${i}-email`, msg('Guest {0} email', { '0': i + 1 })],
       ]),
     ),
+  }
+  // Follow the rendered fields even when server errors arrive in a different order.
+  const summaryErrors: FieldErrors = {}
+  for (const id of new Set([...Object.keys(labels), ...Object.keys(errors)])) {
+    const error = errors[id]
+    if (!error) continue
+    const label = labels[id]
+    summaryErrors[fieldId(id)] = label ? msg('{0}: {1}', { '0': ui(label), '1': ui(error) }) : error
   }
 
   const describedBy = (field: string, hint?: string) =>
@@ -156,19 +164,7 @@ export function BookingForm({
 
   return (
     <form ref={form} className="stack booking-form" noValidate onSubmit={submit}>
-      <ErrorSummary
-        errors={Object.fromEntries(
-          Object.entries(errors).map(([id, error]) => {
-            const label = labels[fieldId(id)]
-            return [
-              fieldId(id),
-              label ? msg('{0}: {1}', { '0': ui(label), '1': ui(error) }) : error,
-            ]
-          }),
-        )}
-        message={formError}
-        attempt={attempt}
-      />
+      <ErrorSummary errors={summaryErrors} message={formError} attempt={attempt} />
       {textInput('name', 'Your name', values.name, (name) => update({ name }), {
         autoComplete: 'name',
       })}
