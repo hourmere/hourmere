@@ -74,6 +74,34 @@ the test never reads or writes application data in the named development databas
 pool counts bounded and close every pool in teardown; CI uses PostgreSQL's default
 `max_connections=100`.
 
+All test database creation goes through `createTestDatabase` from `@hourmere/db/testing`.
+It uses `hourmere_test_<tag>_<pid>_<hex>` names, connects to `postgres` for administration,
+and drops a failed setup before returning. Close additional pools before calling the
+owner's `drop()` in `finally` or `afterAll`; the helper force-drops lingering connections.
+Vitest also registers a final cleanup hook for databases whose normal teardown failed.
+Signal cleanup is best effort: forced termination, worker crashes and unavailable
+PostgreSQL can still leave databases behind.
+
+Inspect those leftovers manually (the default is **dry run**):
+
+```sh
+DATABASE_URL=postgres://hourmere:hourmere@localhost:5432/hourmere npm run db:cleanup-tests
+# After reviewing the output:
+DATABASE_URL=postgres://hourmere:hourmere@localhost:5432/hourmere npm run db:cleanup-tests -- --yes
+```
+
+`--admin-url <url>` overrides `DATABASE_URL`; administration always connects to `postgres`,
+never `hourmere`. `--older-than-hours <hours>` changes the default 24-hour threshold (must
+be positive). The script lists test databases only and skips unknown ages, databases with
+connections, and names carrying a PID that is still live on this machine. Legacy names
+without a PID rely on age and connection checks. Run it on the machine that created the
+databases: local PID checks cannot identify processes on other hosts, and PID reuse can
+conservatively retain an old database. Age uses the server's `PG_VERSION` modification
+time, which can be newer after maintenance and delay cleanup. The account needs permission
+to inspect that file metadata. Before dropping, the script rechecks age, connections, PID
+and database OID, and uses ordinary DROP so an arriving connection prevents deletion.
+Cleanup is manual; test startup never sweeps other runs' databases.
+
 When adding tables or columns, extend the seed at a checkpoint whose schema contains them.
 The early checkpoint ends at migration 0012; use a later checkpoint for newer tables, or
 add a later checkpoint when needed. Seed realistic related rows through that historical

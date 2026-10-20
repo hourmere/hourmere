@@ -10,7 +10,9 @@ DTSTAMP:20261019T120000Z
 DTSTART:20261027T080000Z
 DTEND:20261027T083000Z
 SUMMARY:Fixture booking with Ada Lovelace
-DESCRIPTION:Booked with Grace Hopper using Hourmere.
+DESCRIPTION:Booked with Grace Hopper using Hourmere.\n\nAccepting or declin
+ ing this calendar invitation does not cancel the booking. To cancel\, open
+  the booking in Hourmere.
 ORGANIZER;CN="Grace Hopper":mailto:calendar@scheduler.example.org
 ATTENDEE;CN="Grace Hopper";ROLE=CHAIR;PARTSTAT=ACCEPTED;RSVP=FALSE:mailto:g
  race@gmail.com

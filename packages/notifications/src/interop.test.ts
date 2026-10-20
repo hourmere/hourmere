@@ -13,6 +13,20 @@ const serverUrl = process.env.DATABASE_URL
 const now = Temporal.Instant.from('2026-10-19T12:00:00Z')
 const senderEmail = 'calendar@scheduler.example.org'
 const hostEmail = 'grace@gmail.com'
+const responseDescriptions = {
+  en: {
+    invitee:
+      'Accepting or declining this calendar invitation does not cancel the booking. To cancel, use the link in your Hourmere confirmation email.',
+    host: 'Accepting or declining this calendar invitation does not cancel the booking. To cancel, open the booking in Hourmere.',
+    guest:
+      'Accepting or declining this calendar invitation does not cancel the booking. To cancel, contact the person who booked or the host.',
+  },
+  'zh-CN': {
+    invitee: '在日历中接受或拒绝邀请不会取消预约。如需取消，请使用 Hourmere 确认邮件中的取消链接。',
+    host: '在日历中接受或拒绝邀请不会取消预约。如需取消，请在 Hourmere 中打开此预约。',
+    guest: '在日历中接受或拒绝邀请不会取消预约。如需取消，请联系预约人或主持人。',
+  },
+}
 
 function event(message: MailMessage) {
   const content = message.attachments?.[0]?.content
@@ -174,7 +188,7 @@ describe.skipIf(!serverUrl)('iMIP interoperability', () => {
               'utf8',
             ),
           )
-          expect(content).not.toMatch(/token|manage|responses|answers/i)
+          expect(content).not.toMatch(/token|manage|answers/i)
         }
         for (const message of messages) {
           expect(event(message).getFirstPropertyValue('summary')).toBe(
@@ -273,21 +287,18 @@ describe.skipIf(!serverUrl)('iMIP interoperability', () => {
         const isHost = message.to === hostEmail
         const isGuest = message.to === guestEmail
         const chinese = (isHost ? locale : attendeeLocale) === 'zh-CN'
-        const instruction = chinese
-          ? isHost
-            ? '如需取消，请在 Hourmere 中打开此预约。'
-            : isGuest
-              ? ''
-              : '如需取消，请使用此邮件中的“取消”链接。'
-          : isHost
-            ? ' To cancel, open the booking in Hourmere.'
-            : isGuest
-              ? ''
-              : ' To cancel, use the Cancel link in this email.'
-        const expected = chinese
-          ? `在日历中拒绝此邀请不会取消预约。${instruction}`
-          : `Declining this invitation in your calendar won't cancel the booking.${instruction}`
-        expect(message.text.endsWith(`\n\n${expected}\n`)).toBe(true)
+        const expected = isHost
+          ? chinese
+            ? '在日历中拒绝邀请不会同步到 Hourmere；如需取消预约，请在 Hourmere 中操作。'
+            : 'Declining in your calendar is not synced to Hourmere; to cancel the booking, use Hourmere.'
+          : isGuest
+            ? chinese
+              ? '在日历中接受或拒绝邀请不会取消预约。如需取消，请联系预约人或主持人。'
+              : 'Accepting or declining this calendar invitation does not cancel the booking. To cancel, contact the person who booked or the host.'
+            : chinese
+              ? '在日历中接受或拒绝邀请不会取消预约。如需取消，请使用此邮件中的“取消”链接。'
+              : 'Accepting or declining this calendar invitation does not cancel the booking. To cancel, use the Cancel link in this email.'
+        expect(message.text.includes(expected)).toBe(true)
         expect(message.html?.includes(`>${expected.replaceAll("'", '&#39;')}</p>`)).toBe(true)
         expect(message.html?.includes(`lang="${chinese ? 'zh-CN' : 'en'}"`)).toBe(true)
         expect(message.text.includes('token=')).toBe(!isHost && !isGuest)
@@ -296,10 +307,26 @@ describe.skipIf(!serverUrl)('iMIP interoperability', () => {
     },
   )
 
-  it.each(['en', 'zh-CN'] as const)(
-    'localizes every lifecycle invitation per recipient and preserves identity (%s booking)',
-    async (language) => {
+  it.each([
+    [1, 'en'],
+    [1, 'zh-CN'],
+    [2, 'en'],
+    [2, 'zh-CN'],
+  ] as const)(
+    'localizes every lifecycle invitation per recipient and preserves v%s identity (%s booking)',
+    async (version, language) => {
       const info = await setup()
+      if (version === 1) {
+        await db
+          .updateTable('bookings')
+          .set({
+            ical_version: 1,
+            ical_organizer_name: 'Grace Hopper',
+            ical_organizer_email: hostEmail,
+          })
+          .where('id', '=', info.booking)
+          .execute()
+      }
       const hostLanguage = language === 'en' ? 'zh-CN' : 'en'
       await db
         .updateTable('profiles')
@@ -340,18 +367,51 @@ describe.skipIf(!serverUrl)('iMIP interoperability', () => {
       for (const [revision, message] of mail.sent.entries()) {
         const stage = Math.floor(revision / 3)
         const isHost = message.to === hostEmail
+        const role = isHost ? 'host' : message.to === 'ada@outlook.com' ? 'invitee' : 'guest'
         const locale = isHost ? hostLanguage : language
         const chinese = locale === 'zh-CN'
         const other = isHost ? 'Ada Lovelace' : 'Grace Hopper'
         const component = event(message)
         const summary = chinese ? `Fixture booking（与 ${other}）` : `Fixture booking with ${other}`
-        const description = chinese
-          ? '通过 Hourmere 与 Grace Hopper 预约。'
-          : 'Booked with Grace Hopper using Hourmere.'
+        const context =
+          version === 2
+            ? chinese
+              ? '通过 Hourmere 与 Grace Hopper 预约。'
+              : 'Booked with Grace Hopper using Hourmere.'
+            : undefined
+        const description =
+          [context, stage !== 2 ? responseDescriptions[locale][role] : undefined]
+            .filter(Boolean)
+            .join('\n\n') || null
         expect(component.getFirstPropertyValue('summary')).toBe(summary)
         expect(component.getFirstPropertyValue('description')).toBe(description)
-        expect(component.getFirstPropertyValue('uid')).toBe(`${info.booking}@hourmere`)
-        expect(component.getFirstPropertyValue('sequence')).toBe(stage)
+        const content = message.attachments?.[0]?.content ?? ''
+        // Freeze the original v1/v2 iTIP fields, including every attendee's status/RSVP.
+        // A locale-specific DESCRIPTION must not change the identity or response policy.
+        expect(
+          content
+            .replaceAll('\r\n ', '')
+            .split('\r\n')
+            .filter((line) => /^(UID|SEQUENCE|ORGANIZER|ATTENDEE)[;:]/.test(line)),
+        ).toEqual([
+          `UID:${info.booking}@hourmere`,
+          `SEQUENCE:${stage}`,
+          version === 2
+            ? `ORGANIZER;CN="Grace Hopper":mailto:${senderEmail}`
+            : `ORGANIZER;CN="Grace Hopper";SENT-BY="mailto:${senderEmail}":mailto:${hostEmail}`,
+          ...(version === 2
+            ? [
+                `ATTENDEE;CN="Grace Hopper";ROLE=CHAIR;PARTSTAT=ACCEPTED;RSVP=FALSE:mailto:${hostEmail}`,
+              ]
+            : []),
+          `ATTENDEE;CN="Ada Lovelace";ROLE=REQ-PARTICIPANT;PARTSTAT=${version === 2 ? 'NEEDS-ACTION' : 'ACCEPTED'};RSVP=FALSE:mailto:ada@outlook.com`,
+          `ATTENDEE;CN="Charles Babbage";ROLE=REQ-PARTICIPANT;PARTSTAT=${version === 2 ? 'NEEDS-ACTION' : 'ACCEPTED'};RSVP=FALSE:mailto:charles@example.net`,
+        ])
+        expect(/token|#|\/booking[/?]/i.test(content)).toBe(false)
+        if (message.to !== 'ada@outlook.com') {
+          expect(/token=|\/booking#/.test(message.text)).toBe(false)
+          expect(/token=|\/booking#/.test(message.html ?? '')).toBe(false)
+        }
         expect(component.getFirstPropertyValue('status')).toBe(
           stage === 2 ? 'CANCELLED' : 'CONFIRMED',
         )
@@ -379,13 +439,20 @@ describe.skipIf(!serverUrl)('iMIP interoperability', () => {
             ? 'Asia/Tokyo'
             : 'America/Los_Angeles'
         expect(message.text).toContain(zone)
-        expect(
-          message.text.includes(
-            chinese ? '在日历中拒绝此邀请不会取消预约。' : 'Declining this invitation',
-          ),
-        ).toBe(stage !== 2)
-        if (chinese) expect(`${summary}\n${description}`).not.toMatch(/[,:;.!?()]/)
-        expect(message.attachments?.[0]?.content).not.toMatch(/token|answers|responses/i)
+        const roleHint = isHost
+          ? chinese
+            ? '在日历中拒绝邀请不会同步到 Hourmere'
+            : 'Declining in your calendar is not synced to Hourmere'
+          : message.to === 'ada@outlook.com'
+            ? chinese
+              ? '在日历中接受或拒绝邀请不会取消预约。'
+              : 'Accepting or declining this calendar invitation'
+            : chinese
+              ? '请联系预约人或主持人。'
+              : 'contact the person who booked or the host.'
+        expect(message.text.includes(roleHint)).toBe(stage !== 2)
+        expect(message.html?.includes(roleHint)).toBe(stage !== 2)
+        if (chinese) expect(`${summary}\n${description ?? ''}`).not.toMatch(/[,:;.!?()]/)
       }
     },
   )
@@ -419,9 +486,11 @@ describe.skipIf(!serverUrl)('iMIP interoperability', () => {
       await mail.send(info.booking, 'confirmed')
       expect(mail.sent).toHaveLength(3)
       for (const message of mail.sent) {
+        const role =
+          message.to === hostEmail ? 'host' : message.to === 'ada@outlook.com' ? 'invitee' : 'guest'
         expect(message.html).toContain('<html lang="en">')
         expect(event(message).getFirstPropertyValue('description')).toBe(
-          'Booked with Grace Hopper using Hourmere.',
+          `Booked with Grace Hopper using Hourmere.\n\n${responseDescriptions.en[role]}`,
         )
       }
     },
@@ -497,10 +566,13 @@ describe.skipIf(!serverUrl)('iMIP interoperability', () => {
       expect(mail.sent).toHaveLength(6)
       for (const [index, message] of mail.sent.entries()) {
         const component = event(message)
+        const role = message.to === hostEmail ? 'host' : 'invitee'
         expect(component.getFirstPropertyValue('summary')).toBe(
           message.to === hostEmail ? hostSummary : attendeeSummary,
         )
-        expect(component.getFirstPropertyValue('description')).toBe(description)
+        expect(component.getFirstPropertyValue('description')).toBe(
+          index < 4 ? `${description}\n\n${responseDescriptions['zh-CN'][role]}` : description,
+        )
         expect(component.getFirstPropertyValue('uid')).toBe(`${info.booking}@hourmere`)
         expect(component.getFirstPropertyValue('sequence')).toBe(Math.floor(index / 2))
       }
@@ -722,7 +794,7 @@ describe.skipIf(!serverUrl)('iMIP interoperability', () => {
     expect(
       mail.sent
         .filter((m) => m.to === hostEmail)
-        .every((m) => !m.text.includes('Declining this invitation')),
+        .every((m) => !m.text.includes('Declining in your calendar')),
     ).toBe(true)
     expect(
       mail.sent.filter((m) => m.to === 'ada@outlook.com').every((m) => m.attachments?.length === 1),
@@ -812,6 +884,8 @@ describe.skipIf(!serverUrl)('iMIP interoperability', () => {
     await mail.send(info.booking, 'confirmed')
     expect(mail.sent).toHaveLength(2)
     expect(mail.sent.every((m) => !m.attachments)).toBe(true)
-    expect(mail.sent.every((m) => !m.text.includes('Declining this invitation'))).toBe(true)
+    expect(
+      mail.sent.every((m) => !/Accepting or declining|Declining in your calendar/.test(m.text)),
+    ).toBe(true)
   })
 })

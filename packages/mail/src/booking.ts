@@ -205,8 +205,21 @@ interface Content {
 function render(to: string, c: Content, attachment?: MailAttachment): MailMessage {
   const subject = subjectLine(c.subject)
   const t = (key: keyof typeof chinese) => message(c.language, key)
+  // Put invitation guidance beside the invitee's actions before the meeting details.
+  // Other messages retain their existing layout, and hosts/guests get no manage links.
+  const invitationActions = Boolean(c.manageLinks && c.footer)
+  const actionText = c.manageLinks
+    ? [
+        '',
+        t('Need to make a change?'),
+        textField(t('Reschedule'), c.manageLinks.reschedule, c.language),
+        textField(t('Cancel'), c.manageLinks.cancel, c.language),
+        ...(invitationActions && c.footer ? [c.footer.text] : []),
+      ]
+    : []
   const text = [
     c.intro,
+    ...(invitationActions ? actionText : []),
     '',
     ...c.fields.map((f) => textField(f.label, f.text, c.language)),
     ...(c.answers.length
@@ -216,15 +229,8 @@ function render(to: string, c: Content, attachment?: MailAttachment): MailMessag
           ...c.answers.map((a) => `${a.question}\n  ${a.answer.replaceAll('\n', '\n  ')}`),
         ]
       : []),
-    ...(c.manageLinks
-      ? [
-          '',
-          t('Need to make a change?'),
-          textField(t('Reschedule'), c.manageLinks.reschedule, c.language),
-          textField(t('Cancel'), c.manageLinks.cancel, c.language),
-        ]
-      : []),
-    ...(c.footer ? ['', c.footer.text] : []),
+    ...(!invitationActions ? actionText : []),
+    ...(c.footer && !invitationActions ? ['', c.footer.text] : []),
   ].join('\n')
 
   const cell = 'padding: 2px 16px 2px 0; vertical-align: top;'
@@ -244,25 +250,25 @@ function render(to: string, c: Content, attachment?: MailAttachment): MailMessag
     : ''
   const button =
     'display: inline-block; padding: 8px 14px; margin-right: 8px; background: #111; color: #fff; text-decoration: none; border-radius: 6px;'
+  const footer = c.footer
+    ? `<p lang="${c.footer.language}" style="margin: ${invitationActions ? '0 0 8px' : '24px 0 0'}; color: #555; font-size: 13px;">${escapeHtml(c.footer.text)}</p>`
+    : ''
   const links = c.manageLinks
     ? `<p style="margin: 24px 0 8px;">${t('Need to make a change?')}</p>
 <p style="margin: 0 0 8px;"><a href="${escapeHtml(c.manageLinks.reschedule)}" style="${button}">${t('Reschedule')}</a><a href="${escapeHtml(c.manageLinks.cancel)}" style="${button}">${t('Cancel')}</a></p>
-<p style="margin: 0; color: #555; font-size: 13px;">${t('If the buttons do not work, copy a link into your browser:')}<br>${escapeHtml(textField(t('Reschedule'), c.manageLinks.reschedule, c.language))}<br>${escapeHtml(textField(t('Cancel'), c.manageLinks.cancel, c.language))}</p>`
+${invitationActions ? `${footer}\n` : ''}<p style="margin: 0; color: #555; font-size: 13px;">${t('If the buttons do not work, copy a link into your browser:')}<br>${escapeHtml(textField(t('Reschedule'), c.manageLinks.reschedule, c.language))}<br>${escapeHtml(textField(t('Cancel'), c.manageLinks.cancel, c.language))}</p>`
     : ''
-  const footer = c.footer
-    ? `<p lang="${c.footer.language}" style="margin: 24px 0 0; color: #555; font-size: 13px;">${escapeHtml(c.footer.text)}</p>`
-    : ''
+  const afterDetails = [answers, ...(invitationActions ? [] : [links, footer])]
+    .filter(Boolean)
+    .join('\n')
   const html = `<!doctype html>
 <html lang="${c.language}">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(subject)}</title></head>
 <body style="font-family: system-ui, sans-serif; line-height: 1.5; color: #111;">
 <p style="margin: 0 0 16px;">${escapeHtml(c.intro)}</p>
-<table role="presentation" style="border-collapse: collapse;">
+${invitationActions ? `${links}\n` : ''}<table role="presentation" style="border-collapse: collapse;">
 ${rows}
-</table>
-${answers}
-${links}
-${footer}
+</table>${afterDetails ? `\n${afterDetails}` : ''}
 </body>
 </html>
 `
@@ -324,14 +330,15 @@ const field = (label: string, text: string) => ({ label, text, html: htmlLines(t
 const calendarDecline = {
   en: {
     invitee:
-      "Declining this invitation in your calendar won't cancel the booking. To cancel, use the Cancel link in this email.",
-    host: "Declining this invitation in your calendar won't cancel the booking. To cancel, open the booking in Hourmere.",
-    guest: "Declining this invitation in your calendar won't cancel the booking.",
+      'Accepting or declining this calendar invitation does not cancel the booking. To cancel, use the Cancel link in this email.',
+    host: 'Declining in your calendar is not synced to Hourmere; to cancel the booking, use Hourmere.',
+    guest:
+      'Accepting or declining this calendar invitation does not cancel the booking. To cancel, contact the person who booked or the host.',
   },
   'zh-CN': {
-    invitee: '在日历中拒绝此邀请不会取消预约。如需取消，请使用此邮件中的“取消”链接。',
-    host: '在日历中拒绝此邀请不会取消预约。如需取消，请在 Hourmere 中打开此预约。',
-    guest: '在日历中拒绝此邀请不会取消预约。',
+    invitee: '在日历中接受或拒绝邀请不会取消预约。如需取消，请使用此邮件中的“取消”链接。',
+    host: '在日历中拒绝邀请不会同步到 Hourmere；如需取消预约，请在 Hourmere 中操作。',
+    guest: '在日历中接受或拒绝邀请不会取消预约。如需取消，请联系预约人或主持人。',
   },
 }
 
@@ -434,7 +441,7 @@ export function bookingEmail(
     options.attachment?.contentType === 'text/calendar; method=REQUEST; charset=UTF-8' &&
     /^METHOD:REQUEST\r?$/m.test(options.attachment.content)
   const footer =
-    (kind === 'confirmed' || kind === 'rescheduled') && invitation
+    kind !== 'cancelled' && kind !== 'conference_failed' && invitation
       ? { language, text: calendarDecline[language][footerRole] }
       : undefined
 

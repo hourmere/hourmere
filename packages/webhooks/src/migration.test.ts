@@ -1,9 +1,9 @@
-import { randomBytes } from 'node:crypto'
 import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
-import { createDb, createPool, runMigrations } from '@hourmere/db'
+import { createDb, runMigrations } from '@hourmere/db'
+import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createFixtures, createTestUser, testContext } from '@hourmere/scheduling/testing'
 import { expect, it } from 'vitest'
 import { createWebhook } from './service.ts'
@@ -14,14 +14,14 @@ const migration = '0028_webhook_interrupted_deliveries.sql'
 it.skipIf(!serverUrl)(
   'preserves predecessor webhook data, supports fresh installs and reruns safely',
   async () => {
-    const name = `hourmere_test_webhook_upgrade_${process.pid}_${randomBytes(4).toString('hex')}`
-    const admin = createPool(serverUrl as string)
     const dir = await mkdtemp(join(tmpdir(), 'hourmere-webhook-predecessor-'))
-    const url = new URL(serverUrl as string)
-    url.pathname = `/${name}`
-    const pool = createPool(url.toString())
+    let owned: TestDatabase | undefined
     try {
-      await admin.query(`CREATE DATABASE ${name}`)
+      owned = await createTestDatabase(serverUrl as string, undefined, {
+        migrate: false,
+        tag: 'webhook_upgrade',
+      })
+      const pool = owned.pool
       const source = new URL('../../db/migrations/', import.meta.url)
       const predecessors = (await readdir(source))
         .filter((file) => file.endsWith('.sql') && file < migration)
@@ -107,10 +107,11 @@ it.skipIf(!serverUrl)(
         (await pool.query('SELECT count(*)::int AS n FROM webhook_deliveries')).rows[0].n,
       ).toBe(0)
     } finally {
-      await pool.end()
-      await admin.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`)
-      await admin.end()
-      await rm(dir, { recursive: true, force: true })
+      try {
+        await owned?.drop()
+      } finally {
+        await rm(dir, { recursive: true, force: true })
+      }
     }
   },
 )

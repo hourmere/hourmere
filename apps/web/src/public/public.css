@@ -347,6 +347,10 @@
   margin-top: var(--space-4);
 }
 
+.public .calendar-cancel {
+  justify-self: start;
+}
+
 .public .reschedule {
   padding: var(--space-5) var(--space-4);
   background: var(--surface);

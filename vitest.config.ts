@@ -10,6 +10,7 @@ export default defineConfig({
       {
         test: {
           name: 'node',
+          setupFiles: ['scripts/test-database-setup.ts'],
           include: [
             'apps/*/src/**/*.test.{ts,tsx}',
             'packages/*/src/**/*.test.ts',

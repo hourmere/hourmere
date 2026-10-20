@@ -45,8 +45,10 @@ input on a terminal, and quotes values for Compose.
 Google Workspace address, or any address registered as a Google account: Gmail may treat it
 as a Google organizer (unconfirmed). Use a mailbox that can receive mail, and monitor or
 forward it: calendar RSVP replies go there regardless of Reply-To, and a no-reply address
-that rejects mail bounces them. Declining in a calendar does not cancel an Hourmere booking;
-use the cancellation link in the confirmation email.
+that rejects mail bounces them. `RSVP=FALSE` does not stop Gmail from sending calendar
+responses. A calendar decline does not cancel an Hourmere booking or automatically notify
+its host; use Cancel booking in Hourmere or the original email's cancellation link. See
+[Handle calendar replies](#handle-calendar-replies) for the operator procedure.
 
 The script copies `.env.example`, generates independent `POSTGRES_PASSWORD` and
 `BETTER_AUTH_SECRET` values with `openssl rand -base64 32`, and writes `.env` with mode
@@ -735,6 +737,40 @@ including access to container secrets; grant it only to trusted administrators. 
 mode `600` and maintain tested off-host backups. Before admitting public traffic, configure
 real SMTP, claim the first account, review signup policy and check health, sign-in and a
 booking through the HTTPS hostname.
+
+## Handle calendar replies
+
+Hourmere sends invitations with `RSVP=FALSE` and has no automatic two-way calendar sync.
+Gmail can still offer Yes/No/Maybe and send replies to the pinned calendar organizer,
+`MAIL_FROM` for new bookings. Older bookings keep their original organizer, which may be
+the host's mailbox. Reply-To controls ordinary email replies, not calendar responses.
+Declining in a calendar neither cancels the booking nor automatically notifies its host.
+
+Keep `MAIL_FROM` monitored. Archive incoming calendar replies, identify the booking and
+contact the actual host manually. Cancel only through an explicit action in Hourmere;
+receiving a calendar reply does not change booking status.
+
+For an instance with **one fixed host**, a mail-provider filter may forward a copy of calendar
+replies to that host. Verify the destination, choose conditions tested against real replies,
+retain the original and monitor forwarding failures. If other private or support mail shares
+the mailbox, forward only reliably classified replies or sort them manually. Whole-mailbox
+forwarding is suitable only for a dedicated invitation mailbox or a host authorized to
+receive everything in that mailbox.
+
+In [Zoho Mail](https://www.zoho.com/mail/help/email-forwarding.html), open **Settings → Filters →
+New Filter**, set the tested conditions, choose **Forward to**, verify a new destination and
+save. Keep the original message; for whole-mailbox forwarding, leave **Delete original email
+copy after forwarding** unchecked. Check forwarding health regularly because repeated
+delivery failures can disable it. Test accept, tentative and decline, then a reply after
+rescheduling: each should reach the host and remain archived, while Hourmere stays confirmed
+until explicitly cancelled. Subject prefixes vary by client and language, so a subject filter
+alone cannot guarantee complete calendar-reply detection or decline-only forwarding.
+
+This does not work as general routing for multi-host instances: mailbox rules cannot map a
+calendar UID to the booking's actual host(s). Names, subjects and senders are unreliable;
+forwarding everything to every host exposes other bookings. Use monitored manual handling
+instead. Forwarding lets a person read the reply; it does not sync attendance into their
+calendar or make them the organizer.
 
 ## Public attribution
 

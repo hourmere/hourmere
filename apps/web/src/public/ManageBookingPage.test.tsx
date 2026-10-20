@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { App } from '../App.tsx'
 import { type Call, fakeApi, json, later, type Routes, renderApp } from '../test/fake-api.tsx'
+import { expectStackGap } from '../test/layout.ts'
 import { booking, managed, NEW_TOKEN, slotsAnswer, TOKEN } from '../test/public-fixtures.ts'
 import { parseManageFragment } from './ManageBookingPage.tsx'
 
@@ -94,12 +95,103 @@ function manageServer(
 }
 
 describe('the invitee’s manage page', () => {
+  it.each(['cancel', 'reschedule'])(
+    'explains calendar responses throughout the emailed %s action without sending a cancellation',
+    async (action) => {
+      const user = userEvent.setup()
+      const api = manageServer()
+      renderApp(`/booking#token=${TOKEN}&action=${action}`)
+      const heading = await screen.findByRole('heading', {
+        name: action === 'cancel' ? 'Cancel this booking?' : 'Pick a new time',
+      })
+      const note =
+        'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use "Cancel booking" here.'
+      const chineseNote = '在日历中接受或拒绝邀请不会取消预约。如需取消，请使用"取消预约"。'
+      expect(screen.getAllByText(note)).toHaveLength(1)
+      if (action === 'cancel') {
+        expect(document.activeElement).toBe(heading)
+        expect(
+          heading.compareDocumentPosition(screen.getByText(note)) &
+            Node.DOCUMENT_POSITION_FOLLOWING,
+        ).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+      } else {
+        const cancel = screen.getByRole('button', { name: 'Cancel booking' })
+        expect(cancel.nextElementSibling?.contains(heading)).toBe(true)
+        expectStackGap(cancel.parentElement as HTMLElement, cancel)
+      }
+      await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+      expect(screen.getAllByText(chineseNote)).toHaveLength(1)
+      if (action === 'reschedule') {
+        await user.selectOptions(screen.getByLabelText('界面语言'), 'en')
+        await user.click(await screen.findByRole('button', { name: /November 3, available/ }))
+        await user.click(screen.getByRole('button', { name: '10:00 AM' }))
+        const confirmHeading = await screen.findByRole('heading', { name: 'Move your booking?' })
+        expect(screen.getAllByText(note)).toHaveLength(1)
+        expect(document.activeElement).toBe(confirmHeading)
+        expect(
+          confirmHeading.compareDocumentPosition(screen.getByText(note)) &
+            Node.DOCUMENT_POSITION_FOLLOWING,
+        ).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+        const cancel = screen.getByRole('button', { name: 'Cancel booking' })
+        expect(
+          confirmHeading.compareDocumentPosition(cancel) & Node.DOCUMENT_POSITION_FOLLOWING,
+        ).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+        expectStackGap(cancel.parentElement as HTMLElement, cancel)
+        await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+        expect(screen.getAllByText(chineseNote)).toHaveLength(1)
+        await user.click(screen.getByRole('button', { name: '取消预约' }))
+        await screen.findByRole('heading', { name: '取消此预约？' })
+        expect(screen.getAllByText(chineseNote)).toHaveLength(1)
+      }
+      expect(api.to('POST /api/v1/bookings/manage/cancel')).toHaveLength(0)
+      expect(api.to('POST /api/v1/bookings/manage/reschedule')).toHaveLength(0)
+    },
+  )
+
+  it.each(['pending', 'failed'] as const)(
+    'withholds delivery advice while a rescheduled invitation is %s',
+    async (status) => {
+      const user = userEvent.setup()
+      manageServer(managed(), {
+        more: {
+          'POST /api/v1/bookings/manage/reschedule': () =>
+            json(200, {
+              booking: booking({
+                start: '2026-11-03T15:00:00.000Z',
+                end: '2026-11-03T15:30:00.000Z',
+                location: { kind: 'google_meet', autoCreate: true },
+                conference: {
+                  provider: 'google_meet',
+                  status,
+                  errorCode: status === 'failed' ? 'provider_unavailable' : null,
+                },
+              }),
+              manageToken: NEW_TOKEN,
+            }),
+        },
+      })
+      renderApp(`/booking#token=${TOKEN}&action=reschedule`)
+      await user.click(await screen.findByRole('button', { name: /November 3, available/ }))
+      await user.click(screen.getByRole('button', { name: '10:00 AM' }))
+      await user.click(screen.getByRole('button', { name: 'Confirm new time' }))
+      await screen.findByText('Your booking is moved to the new time.')
+      expect(screen.queryByText(/Didn’t get the email/)).toBeNull()
+    },
+  )
+
   it('reads the token from the fragment, removes it from the address bar and sends it as a header', async () => {
     const api = manageServer()
     openLink(`/booking#token=${TOKEN}`)
     const entries = window.history.length
 
     expect(await screen.findByRole('heading', { name: 'Your booking' })).toBeDefined()
+    expect(screen.queryByText(/Didn’t get the email/)).toBeNull()
+    const calendarNote = screen.getByText(
+      'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use "Cancel booking" here.',
+    )
+    expect(calendarNote.nextElementSibling).toBe(
+      screen.getByRole('button', { name: 'Cancel booking' }).parentElement,
+    )
     // Gone from the address bar (and so from bookmarks and any Referer), replaced rather than
     // pushed: no history entry keeps it either.
     expect(window.location.pathname).toBe('/booking')
@@ -137,8 +229,16 @@ describe('the invitee’s manage page', () => {
 
     expect(await screen.findByRole('heading', { name: 'Cancelled booking' })).toBeDefined()
     expect(screen.getByText('Your booking is cancelled.')).toBeDefined()
+    expect(
+      screen.getByText(
+        'Didn’t get the email? Check spam or junk and add the sender to your contacts.',
+      ),
+    ).toBeDefined()
     expect(screen.getByText('Something came up.')).toBeDefined()
     expect(screen.queryByRole('button', { name: 'Reschedule' })).toBeNull()
+    expect(
+      screen.queryByText(/Accepting or declining the calendar invitation does not cancel/),
+    ).toBeNull()
     const [call] = api.to('POST /api/v1/bookings/manage/cancel')
     expect(call?.body).toEqual({ reason: 'Something came up.' })
     expect(call?.headers.get('x-manage-token')).toBe(TOKEN)
@@ -206,6 +306,11 @@ describe('the invitee’s manage page', () => {
     await user.click(screen.getByRole('button', { name: 'Confirm new time' }))
 
     expect(await screen.findByText('Your booking is moved to the new time.')).toBeDefined()
+    expect(
+      screen.getByText(
+        'Didn’t get the email? Check spam or junk and add the sender to your contacts.',
+      ),
+    ).toBeDefined()
     expect(api.to('POST /api/v1/bookings/manage/reschedule')[0]?.body).toEqual({
       start: '2026-11-03T15:00:00.000Z',
     })
@@ -608,6 +713,9 @@ describe('the invitee’s manage page', () => {
     openLink(`/booking#token=${TOKEN}&action=reschedule`)
     expect(await screen.findByRole('heading', { name: 'Cancelled booking' })).toBeDefined()
     expect(screen.getByText('This booking is cancelled, so it can’t be changed.')).toBeDefined()
+    expect(
+      screen.queryByText(/Accepting or declining the calendar invitation does not cancel/),
+    ).toBeNull()
     expect(screen.queryByRole('button', { name: 'Reschedule' })).toBeNull()
     expect(screen.queryByRole('button', { name: 'Cancel booking' })).toBeNull()
   })
@@ -619,6 +727,9 @@ describe('the invitee’s manage page', () => {
     expect(
       await screen.findByText('This meeting has already started, so it can’t be changed here.'),
     ).toBeDefined()
+    expect(
+      screen.queryByText(/Accepting or declining the calendar invitation does not cancel/),
+    ).toBeNull()
     expect(screen.queryByRole('button', { name: 'Reschedule' })).toBeNull()
   })
 

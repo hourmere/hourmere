@@ -118,8 +118,12 @@ and repository `docs/webhooks.md` for configuration and delivery behavior.
 address, or any other address registered as a Google account: Gmail may treat it as a Google
 organizer (unconfirmed). The mailbox must receive mail because calendar RSVP replies go to
 it, independently of the email's Reply-To; a no-reply address that rejects mail bounces those
-replies. Monitor or forward the mailbox. Declining in a calendar does not cancel an Hourmere
-booking; use the confirmation email's cancellation link.
+replies. `RSVP=FALSE` does not stop Gmail from sending Yes/No/Maybe replies there. Hourmere
+has no automatic two-way calendar sync: a calendar decline does not cancel the booking or
+automatically notify its host. Use Cancel booking in Hourmere or the original email's
+cancellation link. Keep the mailbox monitored and archive replies for manual host contact;
+see the [calendar-reply runbook](/docs/self-hosting#handle-calendar-replies) for a fixed
+single-host forwarding option and its multi-host limitation.
 
 With `first-user`, the first person who signs in can register; after that the domain allowlist
 applies. In either restricted mode, a pending, unexpired team invitation also permits its

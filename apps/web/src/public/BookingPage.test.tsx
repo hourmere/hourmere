@@ -2,11 +2,13 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fakeApi, json, renderApp } from '../test/fake-api.tsx'
+import { expectStackGap } from '../test/layout.ts'
 import {
   ALL_QUESTIONS,
   booking,
   EVENT,
   eventRoutes,
+  managed,
   slot,
   slotsAnswer,
   TOKEN,
@@ -56,6 +58,122 @@ async function chooseSlot(user: ReturnType<typeof userEvent.setup>, dayName: Reg
 }
 
 describe('the booking page', () => {
+  it('explains calendar responses and opens cancellation with the existing private capability', async () => {
+    const user = userEvent.setup()
+    const api = fakeApi({
+      ...eventRoutes(EVENT, DST_SLOTS),
+      'POST /api/v1/public/ada/intro/bookings': () =>
+        json(201, { booking: booking(), manageToken: TOKEN }),
+      'GET /api/v1/bookings/manage': () => json(200, managed()),
+    })
+    renderApp('/ada/intro')
+    await chooseSlot(user, /November 2, available/, '9:00 AM')
+    await user.type(screen.getByLabelText('Your name'), 'Grace Hopper')
+    await user.type(screen.getByLabelText('Email'), 'grace@example.com')
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+    await screen.findByRole('heading', { name: 'You’re booked' })
+    const note = screen.getByText(
+      'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use "Cancel booking" here.',
+    )
+    const cancel = within(note.parentElement as HTMLElement).getByRole('link', {
+      name: 'Cancel booking',
+    })
+    const calendar = screen.getByRole('heading', { name: 'Add to your calendar' }).parentElement
+    expect(calendar?.nextElementSibling).toBe(note.parentElement)
+    expectStackGap(note.parentElement?.parentElement as HTMLElement)
+    expect(cancel.getAttribute('href')).toBe(`/booking#token=${TOKEN}&action=cancel`)
+    expect(cancel.getAttribute('target')).toBeNull()
+    for (const link of document.querySelectorAll('.calendar-links a')) {
+      expect(decodeURIComponent(link.getAttribute('href') ?? '')).not.toContain(TOKEN)
+    }
+    await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+    expect(
+      screen.getByText('在日历中接受或拒绝邀请不会取消预约。如需取消，请使用"取消预约"。'),
+    ).toBeDefined()
+    await user.click(screen.getByRole('link', { name: '取消预约' }))
+    expect(await screen.findByRole('heading', { name: '取消此预约？' })).toBeDefined()
+    expect(api.to('GET /api/v1/bookings/manage')[0]?.headers.get('x-manage-token')).toBe(TOKEN)
+    expect(api.to('POST /api/v1/bookings/manage/cancel')).toHaveLength(0)
+    expect(api.calls.every((call) => !call.path.includes(TOKEN))).toBe(true)
+    expect(screen.getByTestId('location').textContent).toBe('/booking')
+  })
+
+  it.each(['cancelled', 'started'] as const)(
+    'does not offer calendar cancellation advice for a %s booking',
+    async (state) => {
+      const user = userEvent.setup()
+      fakeApi({
+        ...eventRoutes(EVENT, DST_SLOTS),
+        'POST /api/v1/public/ada/intro/bookings': () =>
+          json(200, {
+            booking: booking(
+              state === 'cancelled'
+                ? { status: 'cancelled' }
+                : { start: '2026-10-01T14:00:00Z', end: '2026-10-01T14:30:00Z' },
+            ),
+            manageToken: null,
+          }),
+      })
+      renderApp('/ada/intro')
+      await chooseSlot(user, /November 2, available/, '9:00 AM')
+      await user.type(screen.getByLabelText('Your name'), 'Grace Hopper')
+      await user.type(screen.getByLabelText('Email'), 'grace@example.com')
+      await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+      await screen.findByRole('heading', {
+        name: state === 'cancelled' ? 'Cancelled booking' : 'You’re booked',
+      })
+      expect(
+        screen.queryByText(/Accepting or declining the calendar invitation does not cancel/),
+      ).toBeNull()
+      expect(screen.queryByRole('link', { name: 'Cancel booking' })).toBeNull()
+      expect(screen.getByText(/Use the link in your confirmation email instead/)).toBeDefined()
+      expect(document.querySelectorAll('.confirmation .alert-info')).toHaveLength(1)
+    },
+  )
+
+  it.each(['pending', 'failed'] as const)(
+    'keeps calendar cancellation advice consistent with a %s meeting-link heading',
+    async (status) => {
+      const user = userEvent.setup()
+      const reserved = booking({
+        location: { kind: 'google_meet', autoCreate: true },
+        conference: {
+          provider: 'google_meet',
+          status,
+          errorCode: status === 'failed' ? 'provider_unavailable' : null,
+        },
+      })
+      fakeApi({
+        ...eventRoutes(EVENT, DST_SLOTS),
+        'POST /api/v1/public/ada/intro/bookings': () =>
+          json(201, { booking: reserved, manageToken: TOKEN }),
+        'GET /api/v1/bookings/manage': () => json(200, reserved),
+      })
+      renderApp('/ada/intro')
+      await chooseSlot(user, /November 2, available/, '9:00 AM')
+      await user.type(screen.getByLabelText('Your name'), 'Grace Hopper')
+      await user.type(screen.getByLabelText('Email'), 'grace@example.com')
+      await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+      await screen.findByRole('heading', {
+        name:
+          status === 'pending'
+            ? 'Time reserved; meeting link pending'
+            : 'Time reserved; meeting link needs attention',
+      })
+      expect(
+        screen.getByText(
+          'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use "Cancel booking" here.',
+        ),
+      ).toBeDefined()
+      expect(screen.queryByText(/^Booking confirmed\./)).toBeNull()
+      await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+      expect(
+        screen.getByText('在日历中接受或拒绝邀请不会取消预约。如需取消，请使用"取消预约"。'),
+      ).toBeDefined()
+      expect(screen.queryByText(/^预约已确认。/)).toBeNull()
+    },
+  )
+
   it('updates every zone offset for the selected date across DST while preserving slot instants', async () => {
     const user = userEvent.setup()
     env.zone = 'Europe/London'
@@ -91,6 +209,11 @@ describe('the booking page', () => {
     await user.type(screen.getByLabelText('Email'), 'grace@example.com')
     await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
     await screen.findByRole('heading', { name: 'You’re booked' })
+    expect(
+      screen.getByText(
+        'Didn’t get the email? Check spam or junk and add the sender to your contacts.',
+      ),
+    ).toBeDefined()
     expect(api.to('POST /api/v1/public/ada/intro/bookings')[0]?.body).toMatchObject({
       start: '2026-10-27T09:00:00.000Z',
       invitee: { timeZone: 'Europe/Berlin' },
@@ -122,6 +245,7 @@ describe('the booking page', () => {
     expect(mark.getAttribute('target')).toBe('_blank')
     expect(mark.getAttribute('rel')).toContain('noreferrer')
     expect(screen.queryByRole('link', { name: 'Create your own booking link' })).toBeNull()
+    expect(screen.queryByText(/Didn’t get the email/)).toBeNull()
   })
 
   it('uses the configured hosted destination for attribution and the confirmation CTA without sharing booking data', async () => {
@@ -193,6 +317,7 @@ describe('the booking page', () => {
     await user.type(screen.getByLabelText('Email'), 'invitee@example.com')
     await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
     await screen.findByRole('heading', { name: 'Time reserved; meeting link pending' })
+    expect(screen.queryByText(/Didn’t get the email/)).toBeNull()
     expect(screen.queryByRole('link', { name: 'Download .ics file' })).toBeNull()
     expect(screen.queryByRole('link', { name: 'Google Calendar' })).toBeNull()
     expect(screen.queryByRole('link', { name: 'Outlook' })).toBeNull()
@@ -200,6 +325,11 @@ describe('the booking page', () => {
     // Keep the real two-second protected status poll: this exercises the page's parent
     // update, not just the isolated notice component.
     await screen.findByRole('link', { name: 'Join Google Meet' }, { timeout: 4000 })
+    expect(
+      screen.getByText(
+        'Didn’t get the email? Check spam or junk and add the sender to your contacts.',
+      ),
+    ).toBeDefined()
     const download =
       screen.getByRole('link', { name: 'Download .ics file' }).getAttribute('href') ?? ''
     expect(decodeURIComponent(download)).toContain(JOIN)
@@ -240,6 +370,10 @@ describe('the booking page', () => {
       await user.type(screen.getByLabelText('Email'), 'invitee@example.com')
       await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
       await screen.findByRole('heading', { name: 'You’re booked' })
+      const cancel = screen.getByRole('link', { name: 'Cancel booking' })
+      expect(cancel.getAttribute('href')).toBe(`/booking#token=${TOKEN}&action=cancel`)
+      expect(cancel.getAttribute('target')).toBe('_blank')
+      expect(cancel.getAttribute('rel')).toBe('noopener noreferrer')
       expect(api.to(`POST ${prefix}/bookings`)[0]?.body).toHaveProperty('source', 'embed')
       const messages = postMessage.mock.calls.filter(([data]) => data.type === 'hourmere:booked')
       expect(messages).toEqual([
@@ -705,8 +839,21 @@ describe('the booking page', () => {
     expect(posts[1]?.headers.get('idempotency-key')).toBe(key)
     expect(posts[1]?.body).toEqual(posts[0]?.body)
     // A replay has no manage token to show.
-    expect(screen.getByText(/already made by an earlier attempt/)).toBeDefined()
+    const replayNote = screen.getByText(/already made by an earlier attempt/)
     expect(screen.queryByLabelText(/Your link to change or cancel/)).toBeNull()
+    const calendarNote = screen.getByText(
+      'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use the booking link in your Hourmere confirmation email.',
+    )
+    expect(replayNote.parentElement).toBe(calendarNote.parentElement)
+    expect(document.querySelectorAll('.confirmation .alert-info')).toHaveLength(1)
+    expectStackGap(calendarNote.parentElement?.parentElement as HTMLElement)
+    expect(screen.queryByRole('link', { name: 'Cancel booking' })).toBeNull()
+    await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+    expect(
+      screen.getByText(
+        '在日历中接受或拒绝邀请不会取消预约。如需取消，请使用 Hourmere 确认邮件中的预约链接。',
+      ),
+    ).toBeDefined()
   })
 
   it.each([
