@@ -305,6 +305,7 @@ immutable; new checks belong in 0025.
 
 Automated validation uses synthetic providers/mail and helper-owned PostgreSQL.
 Real-account acceptance was performed on 2026-10-19 against a Zoom development-mode app.
+Its scope was creating, rescheduling and cancelling a real meeting.
 Production Zoom Marketplace publication is a separate step for the hosted service;
 self-hosters use their own Zoom apps. Production deauthorization notification delivery still
 requires operator acceptance of the configured public app and endpoint.

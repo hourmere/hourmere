@@ -638,15 +638,150 @@ docker compose up -d --wait`)
     expect(releases).not.toContain('0038_booking_ical_identity.sql')
   })
 
-  it('records the previous revision and explains returning after each checkout guard fails', () => {
+  it('records a named rollback target alongside the exact deployed commit', () => {
     const upgrade = guide.split('## Upgrade and roll back\n')[1]?.split('\n## ')[0]
-    expect(upgrade).toMatch(/Record the current\s+commit or tag before upgrading/)
+    expect(upgrade).toMatch(/Record the current\s+branch name or tag before upgrading/)
+    expect(upgrade).toContain("alongside the backup's saved commit")
+    expect(upgrade).toContain('`git branch --show-current`')
+    expect(upgrade).toContain('`git describe --tags --exact-match`')
+    expect(readme).toContain('record the current branch name or tag')
+    expect(upgrade).not.toContain('<previous commit or tag>')
+    expect(upgrade).not.toMatch(/Record the current\s+commit or tag/)
     for (const title of ['Single-container', 'Separate-worker']) {
       const section = upgrade?.split(`### ${title} upgrade\n`)[1]?.split('\n### ')[0]
       expect(section, title).toMatch(
-        /git checkout vX\.Y\.Z &&[\s\S]*?\n```\n\nIf a later guard fails after checkout, return with `git checkout <previous commit or tag>` using the value recorded before upgrading\./,
+        /git checkout vX\.Y\.Z &&[\s\S]*?\n```\n\nIf a guard, `docker compose pull` or `docker compose stop` fails after checkout,\nreturn with `git checkout <previous branch or tag>`/,
       )
     }
+  })
+
+  it.each([
+    {
+      name: 'README',
+      source: readme,
+      restoreLink: 'apps/site/src/content/docs/docs/self-hosting.md#back-up-and-restore',
+    },
+    ...['Single-container', 'Separate-worker'].map((title) => ({
+      name: `${title} upgrade`,
+      source: guide.split(`### ${title} upgrade\n`)[1]?.split('\n### ')[0],
+      restoreLink: '#back-up-and-restore',
+    })),
+  ])(
+    'limits the $name checkout rollback to before new-version startup',
+    ({ source, restoreLink }) => {
+      const note = source
+        ?.match(/(?:A checkout-only rollback|If a guard)[\s\S]*?schema is unsafe\./)?.[0]
+        .replaceAll('**', '')
+        .replace(/\s+/g, ' ')
+      expect(note).toContain('`git checkout <previous branch or tag>`')
+      expect(note).toMatch(/a guard, `docker compose pull` or `docker compose stop`.*fails/i)
+      expect(note).toMatch(/before (?:the new-version `docker compose up` command runs)/)
+      expect(note).toContain(
+        `Once that \`up\` is attempted, follow [Back up and restore](${restoreLink}), even if it fails:`,
+      )
+      expect(note).toContain(
+        'a new app or worker may already have applied migrations; old code against the new schema is unsafe.',
+      )
+    },
+  )
+
+  it.each([
+    ['README', readme],
+    ['self-hosting guide', guide],
+  ])('explains startup migrations and earlier migration paths in the %s', (_name, source) => {
+    const text = source.replace(/\s+/g, ' ')
+    expect(text).toMatch(
+      /`AUTO_MIGRATE=true` runs application and pg-boss migrations at process startup for every role \(`all`, `web` and `worker`\), not during `pull` or `stop`/,
+    )
+    expect(text).toContain('there is no separate migrate service.')
+    expect(text).toMatch(
+      /separately started new-version worker, `npm run db:migrate` or a custom migration job can migrate earlier; if any has started, use/,
+    )
+    expect(text).toMatch(/even before this Compose `up`/)
+    expect(text).toMatch(/including a partial `stop` failure/)
+    expect(text).toMatch(/If no service was stopped, only the checkout is needed/)
+    expect(text).toMatch(/do not add `--build` or pull an application image during this recovery/)
+  })
+
+  const rollbackProcedures = [
+    { name: 'README', source: readme },
+    { name: 'self-hosting guide', source: guide },
+  ].map(({ name, source }) => ({
+    name,
+    commands: [...source.matchAll(/```sh\n([\s\S]*?)\n```/g)]
+      .map((match) => match[1])
+      .find((block) => block?.includes('git checkout "PREVIOUS_BRANCH_OR_TAG"')),
+  }))
+
+  describe.each(rollbackProcedures)('$name pre-start recovery', ({ commands }) => {
+    it('chains checkout, Compose selection reset and old-image startup in one subshell', () => {
+      expect(commands).toBe(`(
+  git checkout "PREVIOUS_BRANCH_OR_TAG" &&
+  unset COMPOSE_FILE &&
+  docker compose up -d --wait
+)`)
+    })
+
+    it.for([false, true])(
+      'restarts the old stack after checkout (zsh PTY: %s)',
+      async (zshPty, context) => {
+        if (zshPty && zshPtySkipReason) context.skip(zshPtySkipReason)
+        const { result, calls } = await executePastedCommands(commands, {
+          worker: true,
+          proxy: true,
+          zshPty,
+        })
+        expectInteractiveShells(result, 0)
+        expect(calls).toEqual(['git checkout PREVIOUS_BRANCH_OR_TAG', 'compose up -d --wait'])
+      },
+    )
+
+    it.for([false, true])(
+      'contains a failed checkout without startup (zsh PTY: %s)',
+      async (zshPty, context) => {
+        if (zshPty && zshPtySkipReason) context.skip(zshPtySkipReason)
+        const { result, calls } = await executePastedCommands(commands, {
+          worker: true,
+          proxy: true,
+          failCommand: 'git checkout PREVIOUS_BRANCH_OR_TAG',
+          zshPty,
+        })
+        expectInteractiveShells(result, 7)
+        expect(calls).toEqual(['git checkout PREVIOUS_BRANCH_OR_TAG'])
+      },
+    )
+  })
+
+  it('returns detached pre-1.0 main-tracking rollbacks to main before a later pull', () => {
+    const legacy = guide.split('### Upgrading from a pre-1.0 checkout\n')[1]
+    expect(legacy).toMatch(
+      /backup's saved commit identifies the exact pre-upgrade\s+revision: `git pull` advances `main`, so its branch name alone does not undo the update/,
+    )
+    expect(legacy).toContain(
+      'Apply the same checkout-only limit above; otherwise use backup/restore.',
+    )
+    expect(readme).toMatch(
+      /backup's saved commit identifies\s+the exact pre-upgrade revision: `git pull` advances `main`, so its branch name alone does\s+not undo the update/,
+    )
+    expect(legacy).toMatch(
+      /If rollback leaves\s+this `main`-tracking checkout detached, run `git switch main` before the next upgrade so\s+`git pull --ff-only` works/,
+    )
+    expect(readme).toMatch(
+      /If rollback leaves a pre-1\.0 `main`-tracking checkout detached, run\s+`git switch main` before the next upgrade so `git pull --ff-only` works/,
+    )
+  })
+
+  it.each([
+    ['README', readme],
+    [
+      'separate-worker upgrade',
+      guide.split('### Separate-worker upgrade\n')[1]?.split('\n### ')[0],
+    ],
+  ])('explains how to revert the private worker selection in the %s', (_name, source) => {
+    expect(source).toContain("Git does not undo `enable-worker.sh`'s private `.env` edit.")
+    expect(source).toMatch(
+      /Before checking out the prior\s+revision, restore only the pre-upgrade `COMPOSE_FILE` assignment from the saved private\s+`\.env` \(remove the assignment if it was absent\), preserving the proxy\/custom overlays\s+and other current settings/,
+    )
   })
 
   it('migrates tracked worker edits before changing revisions and explains orphaned old images', () => {
