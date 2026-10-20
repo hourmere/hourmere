@@ -1,0 +1,16 @@
+/* Embedded booking pages keep their form spacing and branding without a second outer card. */
+.public.public-embedded {
+  grid-template-rows: 1fr auto;
+}
+
+.public.public-embedded > .public-main {
+  padding: 0;
+}
+
+.public.public-embedded > .public-main > .booking-layout,
+.public.public-embedded > .public-main > .public-card {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
