@@ -157,10 +157,79 @@ Recheck both protections when upgrading the dependency. `npm run test:e2e:privac
 non-secret DOM marker and a removed-guard control to verify actual locator assertion
 failures. CI runs it after the browser suite; intentional failures are checked internally
 and all probe files are deleted. Per-test artifacts under ignored `temp/` are not retained;
-runner status metadata can remain. No browser artifacts are uploaded by CI. Do not enable
+runner status metadata can remain. The required functional job uploads no browser artifacts;
+the visual measurement lane below uploads only explicitly masked baselines. Do not enable
 debugging artifacts or log request headers, management fragments or response bodies
 containing capabilities. Assert capability handling as booleans rather than comparing or
 printing the actual token strings.
+
+### Responsive, accessibility and visual measurements / 响应式、无障碍与视觉检测
+
+The required `check`, `e2e` and `docker` jobs keep their existing behavior. Separate
+`e2e-layout`, `e2e-a11y`, `e2e-cross-engine` and `e2e-visual` jobs are advisory with
+`continue-on-error: true`. Layout covers 16 CSS viewport sizes, light/dark, English and
+Simplified Chinese, plus British English on booking. Axe checks the same page states for
+WCAG 2.0/2.1/2.2 A/AA tags and reports serious/critical violations. Cross-engine smoke
+covers booking, sign-in and the embed popup in desktop WebKit, iPhone WebKit and Firefox.
+These measurements use synthetic data and the existing disposable-database fixture.
+
+现有必需的 `check`、`e2e`、`docker` 检查保持不变。新增检测暂时只报告问题，不阻断合并。
+布局检测覆盖 16 种 CSS 视口、明暗主题、中英文，预约页另测英式英语；axe 报告严重和致命问题；
+跨引擎冒烟覆盖 WebKit 桌面版、iPhone 预设和 Firefox 的预约、登录及嵌入弹窗。
+
+Build the web app as above, then run from the repository root. In Codex, **every command
+that launches a browser requires `sandbox_permissions: "require_escalated"`**; never run
+these in its default sandbox. If escalation is denied, use CI and record the local skip.
+
+先构建网页，再从仓库根目录运行以下命令。在 Codex 中，启动浏览器的命令必须申请提升权限；
+禁止在默认沙箱运行。若提升权限被拒绝，请使用 CI，并注明本地未运行。
+
+```sh
+export HOURMERE_E2E_BOOTSTRAP_URL=postgres://hourmere:hourmere@localhost:5432/hourmere
+node tools/e2e/run-audit.ts layout --shard=1/4 # repeat 2/4, 3/4, 4/4 / 依次运行其余分片
+node tools/e2e/run-audit.ts a11y
+npx playwright install --with-deps webkit firefox
+node tools/e2e/run-audit.ts cross-engine
+node tools/e2e/reports-summary.ts
+```
+
+Reports go to ignored `temp/ui-audit-reports/` (override `HOURMERE_UI_REPORT_DIR`). The summary
+includes per-page counts and browser execution status; CI appends it to the job summary and
+uploads sanitized JSON/Markdown for seven days. Findings use tag names and DOM ordinals,
+never DOM text, selectors containing content, emails, URLs or tokens. Missing scans and
+execution errors must be reviewed alongside finding counts. Intentional horizontal scroll
+containers must opt in with `data-layout-scroll="horizontal"`; this does not excuse document
+overflow. No production allowlist attributes are added by this infrastructure task.
+
+报告写入忽略目录 `temp/ui-audit-reports/`，可用 `HOURMERE_UI_REPORT_DIR` 指定位置。
+CI 摘要按页面统计问题和执行状态，脱敏报告保留七天。报告不含 DOM 文本、邮箱、网址或令牌。
+评审时须同时查看未完成的扫描和运行错误。预期的横向滚动容器用上述数据属性明确标记，
+该标记不豁免文档级溢出；本任务不修改产品界面。
+
+Visual comparisons are skipped until reviewed PNG baselines exist in `tools/e2e/snapshots/`.
+To generate them, dispatch the **CI** workflow on the review branch with `visual_baselines`
+enabled. The Linux-only `visual-baselines` job runs `--update-snapshots` with Noto CJK,
+fixed browser time, disabled animations, hidden carets and masked private fields. Download
+`visual-baselines-linux`, inspect every image, then commit reviewed baselines with a DCO
+sign-off. Do not commit local macOS baselines. Only masked PNG baselines are uploaded;
+traces, videos and failure DOM remain disabled. Continue to run `npm run test:e2e:privacy`
+when changing fixtures or Playwright. Real-device, screen-reader and pixel review remain
+manual; WebKit's iPhone preset does not establish real iOS compatibility.
+
+在已审核 PNG 基线提交前，CI 跳过视觉比较。在评审分支手动触发 **CI** 工作流并启用
+`visual_baselines`，即可下载 Linux 生成的脱敏基线。逐张审核后以 DCO 签署提交；不要提交
+macOS 本地基线。仍需人工检查真机、读屏和视觉效果，iPhone 预设不能替代真机验收。
+
+To promote a lane, first resolve findings and execution errors, review the dated exemptions
+in `tools/e2e/a11y-exemptions.json`, set `HOURMERE_UI_BLOCKING=1` in that job, and remove its
+job-level `continue-on-error`. Only the repository owner can add its job name to required
+checks in branch protection. Keep the existing required IDs unchanged and update the
+workflow contract tests. Exemptions require an issue/reason and an expiry date; expired
+entries are reported as errors, and the initial list is empty.
+
+提升为阻断检查前，先修复问题和运行错误，审核有到期日的豁免，设置 `HOURMERE_UI_BLOCKING=1`，
+再移除相应任务的 `continue-on-error`。只有仓库所有者可以在分支保护中将新任务设为必需检查。
+现有必需任务 ID 不变，并须更新工作流契约测试。豁免须注明原因、问题链接和到期日；初始清单为空。
 
 ## Conventions
 

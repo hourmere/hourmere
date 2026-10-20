@@ -5,6 +5,12 @@ on:
     branches: [main]
   pull_request:
   workflow_call:
+  workflow_dispatch:
+    inputs:
+      visual_baselines:
+        description: Generate masked Linux visual baselines for review / 生成供审核的脱敏 Linux 视觉基线
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -163,3 +169,251 @@ jobs:
       - run: npm run build --workspace @hourmere/web
       - run: npm run test:e2e
       - run: npm run test:e2e:privacy
+
+  e2e-layout:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: hourmere
+          POSTGRES_PASSWORD: hourmere
+          POSTGRES_DB: hourmere
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U hourmere -d hourmere"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      HOURMERE_E2E_BOOTSTRAP_URL: postgres://hourmere:hourmere@localhost:5432/hourmere
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+      HOURMERE_UI_REPORT_DIR: temp/ui-audit-reports
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci --ignore-scripts --audit=false --fund=false
+      - run: npm run build --workspace @hourmere/web
+      - name: Verify the existing Chrome installation
+        run: google-chrome --version
+      - name: Run report-only layout measurement
+        run: node tools/e2e/run-audit.ts layout --shard=${{ matrix.shard }}/4
+      - name: Summarize measurements
+        if: always()
+        run: node tools/e2e/reports-summary.ts
+      - name: Upload sanitized measurements
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: ui-layout-${{ matrix.shard }}
+          path: temp/ui-audit-reports/
+          retention-days: 7
+          if-no-files-found: warn
+
+  e2e-a11y:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: hourmere
+          POSTGRES_PASSWORD: hourmere
+          POSTGRES_DB: hourmere
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U hourmere -d hourmere"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      HOURMERE_E2E_BOOTSTRAP_URL: postgres://hourmere:hourmere@localhost:5432/hourmere
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+      HOURMERE_UI_REPORT_DIR: temp/ui-audit-reports
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci --ignore-scripts --audit=false --fund=false
+      - run: npm run build --workspace @hourmere/web
+      - name: Verify the existing Chrome installation
+        run: google-chrome --version
+      - name: Run report-only a11y measurement
+        run: node tools/e2e/run-audit.ts a11y
+      - name: Summarize measurements
+        if: always()
+        run: node tools/e2e/reports-summary.ts
+      - name: Upload sanitized measurements
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: ui-a11y
+          path: temp/ui-audit-reports/
+          retention-days: 7
+          if-no-files-found: warn
+
+  e2e-cross-engine:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: hourmere
+          POSTGRES_PASSWORD: hourmere
+          POSTGRES_DB: hourmere
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U hourmere -d hourmere"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      HOURMERE_E2E_BOOTSTRAP_URL: postgres://hourmere:hourmere@localhost:5432/hourmere
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+      HOURMERE_UI_REPORT_DIR: temp/ui-audit-reports
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci --ignore-scripts --audit=false --fund=false
+      - run: npm run build --workspace @hourmere/web
+      - name: Cache pinned cross-engine browsers
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+      - name: Install WebKit and Firefox with system dependencies
+        run: npx playwright install --with-deps webkit firefox
+      - name: Run report-only cross-engine measurement
+        run: node tools/e2e/run-audit.ts cross-engine
+      - name: Summarize measurements
+        if: always()
+        run: node tools/e2e/reports-summary.ts
+      - name: Upload sanitized measurements
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: ui-cross-engine
+          path: temp/ui-audit-reports/
+          retention-days: 7
+          if-no-files-found: warn
+
+  visual-baseline-status:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    outputs:
+      present: ${{ steps.baselines.outputs.present }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Detect reviewed baselines
+        id: baselines
+        shell: bash
+        run: |
+          if [ -d tools/e2e/snapshots ] && find tools/e2e/snapshots -name '*.png' -print -quit | grep -q .; then
+            echo 'present=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'present=false' >> "$GITHUB_OUTPUT"
+            echo 'Visual comparison skipped: no reviewed baselines / 暂无已审核基线，跳过视觉比较。' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  e2e-visual:
+    needs: visual-baseline-status
+    if: needs.visual-baseline-status.outputs.present == 'true'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: hourmere
+          POSTGRES_PASSWORD: hourmere
+          POSTGRES_DB: hourmere
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U hourmere -d hourmere"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      HOURMERE_E2E_BOOTSTRAP_URL: postgres://hourmere:hourmere@localhost:5432/hourmere
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+      HOURMERE_UI_REPORT_DIR: temp/ui-audit-reports
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci --ignore-scripts --audit=false --fund=false
+      - run: npm run build --workspace @hourmere/web
+      - name: Install Chinese fonts
+        run: sudo apt-get -o Acquire::Retries=3 update && sudo apt-get -o Acquire::Retries=3 install --no-install-recommends -y fonts-noto-cjk
+      - name: Compare reviewed baselines
+        run: node tools/e2e/run-audit.ts visual
+      - name: Summarize measurements
+        if: always()
+        run: node tools/e2e/reports-summary.ts
+      - name: Upload sanitized measurements
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: ui-visual
+          path: temp/ui-audit-reports/
+          retention-days: 7
+
+  visual-baselines:
+    if: github.event_name == 'workflow_dispatch' && inputs.visual_baselines
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: hourmere
+          POSTGRES_PASSWORD: hourmere
+          POSTGRES_DB: hourmere
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U hourmere -d hourmere"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      HOURMERE_E2E_BOOTSTRAP_URL: postgres://hourmere:hourmere@localhost:5432/hourmere
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+      HOURMERE_UI_REPORT_DIR: temp/ui-audit-reports
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci --ignore-scripts --audit=false --fund=false
+      - run: npm run build --workspace @hourmere/web
+      - name: Install Chinese fonts
+        run: sudo apt-get -o Acquire::Retries=3 update && sudo apt-get -o Acquire::Retries=3 install --no-install-recommends -y fonts-noto-cjk
+      - name: Verify artifact privacy protection
+        run: npm run test:e2e:privacy
+      - name: Generate masked Linux baselines
+        env:
+          HOURMERE_UI_BLOCKING: '1'
+        run: node tools/e2e/run-audit.ts visual --update-snapshots
+      - name: Summarize measurements
+        if: always()
+        run: node tools/e2e/reports-summary.ts
+      - name: Upload only masked baselines for review
+        if: success()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: visual-baselines-linux
+          path: tools/e2e/snapshots/**/*.png
+          retention-days: 7
+          if-no-files-found: error

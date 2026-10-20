@@ -6,6 +6,8 @@ process.env.PLAYWRIGHT_NO_COPY_PROMPT = '1'
 
 export default defineConfig({
   testDir: './specs',
+  // Measurement lanes are opt-in and must never change the required functional suite.
+  testIgnore: ['**/{layout,a11y,visual,cross-engine}.spec.ts'],
   fullyParallel: true,
   workers: 2,
   retries: 0,
