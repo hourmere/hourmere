@@ -74,6 +74,67 @@ describe('the calendars page', () => {
     },
   )
 
+  it.each([404, 503, 'network'] as const)(
+    'allows clearing the existing booking destination after a profile failure: %s',
+    async (failure) => {
+      const user = userEvent.setup()
+      const calendar = connection.calendars[0] as NonNullable<(typeof connection.calendars)[0]>
+      let destination: string | null = calendar.id
+      const requests = fakeApi({
+        ...signedIn,
+        'GET /api/v1/profile': () => {
+          if (failure === 'network') throw new TypeError('Failed to fetch')
+          return json(failure, { error: 'unexpected_profile_error' })
+        },
+        'GET /api/v1/calendar-connections': () =>
+          json(200, {
+            googleEnabled: true,
+            microsoftEnabled: false,
+            destinationCalendarId: destination,
+            data: [
+              {
+                ...connection,
+                syncAuthorized: true,
+                calendars: [
+                  calendar,
+                  {
+                    ...calendar,
+                    id: 'c0000000-0000-7000-8000-000000000002',
+                    name: 'Other calendar',
+                    isPrimary: false,
+                  },
+                ],
+              },
+            ],
+          }),
+        'PUT /api/v1/calendar-destination': () => {
+          destination = null
+          return new Response(null, { status: 204 })
+        },
+      })
+      renderApp('/app/calendars')
+      await screen.findByRole('heading', { name: 'calendar@example.com' })
+      const stop = screen.getByRole('button', { name: 'Stop writing bookings here' })
+      expect(stop.matches(':disabled')).toBe(false)
+      expect(stop.getAttribute('aria-describedby')).toBeNull()
+      const write = screen.getByRole('button', { name: 'Write new bookings here' })
+      expect(write.matches(':disabled')).toBe(true)
+      expect(write.getAttribute('aria-describedby')).toBe('calendar-profile-hint')
+      await user.click(write)
+      expect(requests.to('PUT /api/v1/calendar-destination')).toHaveLength(0)
+      await user.click(stop)
+      await vi.waitFor(() =>
+        expect(screen.queryByRole('button', { name: 'Stop writing bookings here' })).toBeNull(),
+      )
+      expect(requests.to('PUT /api/v1/calendar-destination')).toHaveLength(1)
+      expect(requests.to('PUT /api/v1/calendar-destination')[0]?.body).toEqual({ calendarId: null })
+      for (const button of screen.getAllByRole('button', { name: 'Write new bookings here' }))
+        expect(button.matches(':disabled')).toBe(true)
+      expect(screen.getByText(/Could not load your profile/)).toBeDefined()
+      expect(screen.queryByRole('link', { name: 'Create profile' })).toBeNull()
+    },
+  )
+
   it.each([404, 503] as const)(
     'hides profile setup and availability hints before any calendar is connected: %s',
     async (status) => {
