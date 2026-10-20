@@ -126,11 +126,16 @@ Give containers at least 35 seconds to stop.
 
 Before upgrading, take a full backup and record the current branch name or tag alongside
 the backup's saved commit. A checkout-only rollback with
-`git checkout <previous branch or tag>` is safe only before
-any `docker compose pull`, `docker compose stop` or `docker compose up` in the upgrade
-has run. If any has run, follow [Back up and restore](apps/site/src/content/docs/docs/self-hosting.md#back-up-and-restore)
-instead. After `stop`/`up`, migrations may already have run; old code against the new
-schema is unsafe. For a failed main-tracking pull, the backup's saved commit identifies
+`git checkout <previous branch or tag>` is safe if a guard, `docker compose pull` or
+`docker compose stop` fails before the new-version `docker compose up` command runs.
+Once that `up` is attempted, follow [Back up and restore](apps/site/src/content/docs/docs/self-hosting.md#back-up-and-restore),
+even if it fails: a new app or worker may already have applied migrations; old code against
+the new schema is unsafe. In the supplied Compose files, `AUTO_MIGRATE=true` runs application
+and pg-boss migrations at process startup for every role (`all`, `web` and `worker`),
+not during `pull` or `stop`; there is no separate migrate service. A separately started
+new-version worker, `npm run db:migrate` or a custom migration job can migrate earlier;
+if any has started, use backup/restore even before this Compose `up`.
+For a failed main-tracking pull, the backup's saved commit identifies
 the exact pre-upgrade revision: `git pull` advances `main`, so its branch name alone does
 not undo the update. If rollback leaves a pre-1.0 `main`-tracking checkout detached, run
 `git switch main` before the next upgrade so `git pull --ff-only` works.
@@ -139,6 +144,20 @@ Git does not undo `enable-worker.sh`'s private `.env` edit. Before checking out 
 revision, restore only the pre-upgrade `COMPOSE_FILE` assignment from the saved private
 `.env` (remove the assignment if it was absent), preserving the proxy/custom overlays
 and other current settings. See the [guarded upgrade procedures](apps/site/src/content/docs/docs/self-hosting.md#upgrade-and-roll-back).
+
+For a pre-start failure, if the app or worker was already stopped (including a partial
+`stop` failure), bring the old version back with the block below after restoring that
+selection. Replace `PREVIOUS_BRANCH_OR_TAG` with the recorded name. If no service was
+stopped, only the checkout is needed. The block uses the existing old application image;
+do not add `--build` or pull an application image during this recovery.
+
+```sh
+(
+  git checkout "PREVIOUS_BRANCH_OR_TAG" &&
+  unset COMPOSE_FILE &&
+  docker compose up -d --wait
+)
+```
 
 The application image retains small public attribution and booking-confirmation links to the
 hosted service. `HOSTED_SIGNUP_URL` sets their destination (default `https://hourmere.com`);

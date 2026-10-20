@@ -585,11 +585,13 @@ The app keeps the default `all` role. From the deployment checkout:
 )
 ```
 
-If a later guard fails after checkout, return with `git checkout <previous branch or tag>`
-using the recorded name **only before any `docker compose pull`, `docker compose stop`
-or `docker compose up` in this upgrade has run**. If any has run, follow
-[Back up and restore](#back-up-and-restore) instead. After `stop`/`up`, migrations may
-already have run; old code against the new schema is unsafe.
+If a guard, `docker compose pull` or `docker compose stop` fails after checkout,
+return with `git checkout <previous branch or tag>` using the recorded name **only before
+the new-version `docker compose up` command runs**. If the app or worker was already stopped,
+use the [pre-start recovery block](#checkout-only-recovery-before-startup) below.
+Once that `up` is attempted, follow [Back up and restore](#back-up-and-restore), even if
+it fails: a new app or worker may already have applied migrations; old code against the
+new schema is unsafe.
 
 ### Separate-worker upgrade
 
@@ -614,17 +616,44 @@ stopping the old app and worker:
 )
 ```
 
-If a later guard fails after checkout, return with `git checkout <previous branch or tag>`
-using the recorded name **only before any `docker compose pull`, `docker compose stop`
-or `docker compose up` in this upgrade has run**. If any has run, follow
-[Back up and restore](#back-up-and-restore) instead. After `stop`/`up`, migrations may
-already have run; old code against the new schema is unsafe.
+If a guard, `docker compose pull` or `docker compose stop` fails after checkout,
+return with `git checkout <previous branch or tag>` using the recorded name **only before
+the new-version `docker compose up` command runs**. If the app or worker was already stopped,
+use the [pre-start recovery block](#checkout-only-recovery-before-startup) below.
+Once that `up` is attempted, follow [Back up and restore](#back-up-and-restore), even if
+it fails: a new app or worker may already have applied migrations; old code against the
+new schema is unsafe.
 
 Git does not undo `enable-worker.sh`'s private `.env` edit. Before checking out the prior
 revision, restore only the pre-upgrade `COMPOSE_FILE` assignment from the saved private
 `.env` (remove the assignment if it was absent), preserving the proxy/custom overlays
 and other current settings. If a worker was already selected before the upgrade, keep
 that selection.
+
+### Checkout-only recovery before startup
+
+In the supplied Compose files, `AUTO_MIGRATE=true` runs application and pg-boss migrations
+at process startup for every role (`all`, `web` and `worker`), not during `pull` or `stop`;
+there is no separate migrate service. The separate worker uses the same server entry point
+and can migrate as soon as it starts, including before the web app during `up`. A separately
+started new-version worker, `npm run db:migrate` or a custom migration job can migrate earlier;
+if any has started, use [Back up and restore](#back-up-and-restore) even before this Compose `up`.
+
+For a pre-start failure, if the app or worker was already stopped (including a partial
+`stop` failure), bring the old version back with the block below after restoring the
+pre-upgrade `COMPOSE_FILE` selection as described above. Replace `PREVIOUS_BRANCH_OR_TAG`
+with the recorded name. If no service was stopped, only the checkout is needed. The block
+uses the existing old application image; do not add `--build` or pull an application image
+during this recovery. The subshell clears an inherited `COMPOSE_FILE` so Compose reads the
+restored selection from `.env`, and a failed checkout prevents startup.
+
+```sh
+(
+  git checkout "PREVIOUS_BRANCH_OR_TAG" &&
+  unset COMPOSE_FILE &&
+  docker compose up -d --wait
+)
+```
 
 For plain mode, remove both lines of the proxy verification before pasting either
 sequence, pull only `db`, and use your deployment's health URL.
@@ -654,7 +683,8 @@ PostgreSQL password changes in `.env` do not change an already-initialized datab
 password.
 
 Schema downgrade is not automatic. An old application image may not work against the new
-schema. To roll back safely, stop all app/worker processes, restore the pre-upgrade database
+schema. After new-version startup or an earlier migration, stop all app/worker processes
+and restore the pre-upgrade database
 into a fresh volume, restore its original revision and configuration, then verify the result
 before switching traffic back. Recovery loses writes made after that backup; decide your
 maintenance window and recovery plan before upgrading.

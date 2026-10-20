@@ -650,7 +650,7 @@ docker compose up -d --wait`)
     for (const title of ['Single-container', 'Separate-worker']) {
       const section = upgrade?.split(`### ${title} upgrade\n`)[1]?.split('\n### ')[0]
       expect(section, title).toMatch(
-        /git checkout vX\.Y\.Z &&[\s\S]*?\n```\n\nIf a later guard fails after checkout, return with `git checkout <previous branch or tag>`/,
+        /git checkout vX\.Y\.Z &&[\s\S]*?\n```\n\nIf a guard, `docker compose pull` or `docker compose stop` fails after checkout,\nreturn with `git checkout <previous branch or tag>`/,
       )
     }
   })
@@ -666,20 +666,89 @@ docker compose up -d --wait`)
       source: guide.split(`### ${title} upgrade\n`)[1]?.split('\n### ')[0],
       restoreLink: '#back-up-and-restore',
     })),
-  ])('limits the $name checkout rollback to before Compose changes', ({ source, restoreLink }) => {
-    const note = source
-      ?.match(
-        /(?:A\s+checkout-only rollback|If a later guard fails after checkout)[\s\S]*?schema is unsafe\./,
-      )?.[0]
-      .replaceAll('**', '')
-      .replace(/\s+/g, ' ')
-    expect(note).toContain('`git checkout <previous branch or tag>`')
-    expect(note).toMatch(
-      /only before any `docker compose pull`, `docker compose stop` or `docker compose up` in (?:this|the) upgrade has run/,
+  ])(
+    'limits the $name checkout rollback to before new-version startup',
+    ({ source, restoreLink }) => {
+      const note = source
+        ?.match(/(?:A checkout-only rollback|If a guard)[\s\S]*?schema is unsafe\./)?.[0]
+        .replaceAll('**', '')
+        .replace(/\s+/g, ' ')
+      expect(note).toContain('`git checkout <previous branch or tag>`')
+      expect(note).toMatch(/a guard, `docker compose pull` or `docker compose stop`.*fails/i)
+      expect(note).toMatch(/before (?:the new-version `docker compose up` command runs)/)
+      expect(note).toContain(
+        `Once that \`up\` is attempted, follow [Back up and restore](${restoreLink}), even if it fails:`,
+      )
+      expect(note).toContain(
+        'a new app or worker may already have applied migrations; old code against the new schema is unsafe.',
+      )
+    },
+  )
+
+  it.each([
+    ['README', readme],
+    ['self-hosting guide', guide],
+  ])('explains startup migrations and earlier migration paths in the %s', (_name, source) => {
+    const text = source.replace(/\s+/g, ' ')
+    expect(text).toMatch(
+      /`AUTO_MIGRATE=true` runs application and pg-boss migrations at process startup for every role \(`all`, `web` and `worker`\), not during `pull` or `stop`/,
     )
-    expect(note).toContain(`If any has run, follow [Back up and restore](${restoreLink}) instead.`)
-    expect(note).toContain(
-      'After `stop`/`up`, migrations may already have run; old code against the new schema is unsafe.',
+    expect(text).toContain('there is no separate migrate service.')
+    expect(text).toMatch(
+      /separately started new-version worker, `npm run db:migrate` or a custom migration job can migrate earlier; if any has started, use/,
+    )
+    expect(text).toMatch(/even before this Compose `up`/)
+    expect(text).toMatch(/including a partial `stop` failure/)
+    expect(text).toMatch(/If no service was stopped, only the checkout is needed/)
+    expect(text).toMatch(/do not add `--build` or pull an application image during this recovery/)
+  })
+
+  const rollbackProcedures = [
+    { name: 'README', source: readme },
+    { name: 'self-hosting guide', source: guide },
+  ].map(({ name, source }) => ({
+    name,
+    commands: [...source.matchAll(/```sh\n([\s\S]*?)\n```/g)]
+      .map((match) => match[1])
+      .find((block) => block?.includes('git checkout "PREVIOUS_BRANCH_OR_TAG"')),
+  }))
+
+  describe.each(rollbackProcedures)('$name pre-start recovery', ({ commands }) => {
+    it('chains checkout, Compose selection reset and old-image startup in one subshell', () => {
+      expect(commands).toBe(`(
+  git checkout "PREVIOUS_BRANCH_OR_TAG" &&
+  unset COMPOSE_FILE &&
+  docker compose up -d --wait
+)`)
+    })
+
+    it.for([false, true])(
+      'restarts the old stack after checkout (zsh PTY: %s)',
+      async (zshPty, context) => {
+        if (zshPty && zshPtySkipReason) context.skip(zshPtySkipReason)
+        const { result, calls } = await executePastedCommands(commands, {
+          worker: true,
+          proxy: true,
+          zshPty,
+        })
+        expectInteractiveShells(result, 0)
+        expect(calls).toEqual(['git checkout PREVIOUS_BRANCH_OR_TAG', 'compose up -d --wait'])
+      },
+    )
+
+    it.for([false, true])(
+      'contains a failed checkout without startup (zsh PTY: %s)',
+      async (zshPty, context) => {
+        if (zshPty && zshPtySkipReason) context.skip(zshPtySkipReason)
+        const { result, calls } = await executePastedCommands(commands, {
+          worker: true,
+          proxy: true,
+          failCommand: 'git checkout PREVIOUS_BRANCH_OR_TAG',
+          zshPty,
+        })
+        expectInteractiveShells(result, 7)
+        expect(calls).toEqual(['git checkout PREVIOUS_BRANCH_OR_TAG'])
+      },
     )
   })
 

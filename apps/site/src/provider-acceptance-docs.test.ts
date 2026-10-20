@@ -4,25 +4,33 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 const root = process.env.HOURMERE_DOCS_ROOT ?? fileURLToPath(new URL('../../../', import.meta.url))
-const read = (path: string) => readFileSync(join(root, path), 'utf8').replace(/\s+/g, ' ')
+const source = (path: string) => readFileSync(join(root, path), 'utf8')
+const normalize = (text: string) => text.replace(/\s+/g, ' ').trim()
+const read = (path: string) => normalize(source(path))
+const zoomAcceptance =
+  'Real-account acceptance was performed on 2026-10-19 against a Zoom development-mode app. Its scope was creating, rescheduling and cancelling a real meeting. Production Zoom Marketplace publication is a separate step for the hosted service; self-hosters use their own Zoom apps.'
 const guides = [
   {
     path: 'docs/automatic-zoom.md',
     environment: 'a Zoom development-mode app',
     productionStep: 'Production Zoom Marketplace publication',
     ownApps: 'Zoom apps',
+    acceptanceParagraph: `Automated validation uses synthetic providers/mail and helper-owned PostgreSQL. ${zoomAcceptance} Production deauthorization notification delivery still requires operator acceptance of the configured public app and endpoint.`,
   },
   {
     path: 'apps/site/src/content/docs/docs/zoom-connections.md',
     environment: 'a Zoom development-mode app',
     productionStep: 'Production Zoom Marketplace publication',
     ownApps: 'Zoom apps',
+    acceptanceParagraph: zoomAcceptance,
   },
   {
     path: 'docs/automatic-google-meet.md',
     environment: 'a Google Cloud test project',
     productionStep: 'Google OAuth verification',
     ownApps: 'Google Cloud projects',
+    acceptanceParagraph:
+      'Real-account acceptance was performed on 2026-10-19 against a Google Cloud test project. Its scope was creating, rescheduling and cancelling a real meeting. Google OAuth verification is a separate step for the hosted service; self-hosters use their own Google Cloud projects.',
   },
 ]
 
@@ -44,15 +52,16 @@ describe('provider real-account acceptance documentation', () => {
     },
   )
 
-  it.each(
-    guides.flatMap(({ path }) =>
-      ['published on the Zoom App Marketplace', 'verified by Google', 'fully verified'].map(
-        (overclaim) => ({ path, overclaim }),
-      ),
-    ),
-  )('rejects the overclaim "$overclaim" in $path', ({ path, overclaim }) => {
-    expect(read(path).toLowerCase()).not.toContain(overclaim.toLowerCase())
-  })
+  it.each(guides)(
+    'keeps the complete acceptance paragraph bounded in $path',
+    ({ path, acceptanceParagraph }) => {
+      const acceptanceParagraphs = source(path)
+        .split(/\r?\n\s*\r?\n/)
+        .map(normalize)
+        .filter((paragraph) => paragraph.includes('Real-account acceptance'))
+      expect(acceptanceParagraphs).toEqual([acceptanceParagraph])
+    },
+  )
 
   it.each(guides)(
     'distinguishes the hosted production step in $path',
