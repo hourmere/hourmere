@@ -19,6 +19,15 @@ it('retains block ellipsis on booking links for coarse pointers', () => {
   expect(coarse).toMatch(/\.booking-link a\s*\{[^{}]*min-height: 44px;/)
 })
 
+it('keeps long booking paths from sizing table columns or the editor field grid', () => {
+  // Without containment the nowrap path sets the column's minimum width (the title column
+  // collapses to single characters) and widens the slug hint past narrow viewports.
+  expect(styles).toMatch(/\n\.booking-link\s*\{[^{}]*contain: inline-size;/)
+  expect(styles).toMatch(
+    /@container data-table \(min-width: 880px\)\s*\{\s*\.table \.booking-link\s*\{\s*flex-wrap: nowrap;/,
+  )
+})
+
 it('contains the absolute hidden new-tab hint within its clipped booking link', () => {
   expect(styles).toMatch(
     /\.booking-link a,\s*\.booking-link \.preview\s*\{[^{}]*position: relative;/,

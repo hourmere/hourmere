@@ -1,4 +1,10 @@
 import { openAuditPage } from '../audit-pages.ts'
+import {
+  LONG_BOOKING_SLUG,
+  measureEventTypesTable,
+  setLongBookingSlug,
+  useLongBookingSlug,
+} from '../event-types-table.ts'
 import { expect, test } from '../fixtures.ts'
 
 test.use({ uiAudit: true })
@@ -65,6 +71,60 @@ for (const locale of ['en-US', 'zh-CN'] as const) {
     })
     await expect(bar).toHaveAttribute('data-sticky', 'false')
     await expect(bar).toHaveCSS('position', 'static')
+  })
+
+  test(`desktop event-types table keeps its title column beside a long slug ${locale}`, async ({
+    page,
+    app,
+  }) => {
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await openAuditPage(page, app, 'event-types', { locale })
+    await useLongBookingSlug(page, app)
+    for (const width of [1280, 1440]) {
+      await page.setViewportSize({ width, height: 900 })
+      const geometry = await measureEventTypesTable(page, LONG_BOOKING_SLUG)
+      expect(geometry.tableMode, `${width}px table mode`).toBe(true)
+      // The link column follows its percentage width instead of the whole nowrap path.
+      expect(
+        geometry.titleColumnWidth / geometry.tableWidth,
+        `${width}px title share`,
+      ).toBeGreaterThanOrEqual(0.35)
+      expect(geometry.titleLines, `${width}px title lines`).toBeLessThanOrEqual(3)
+      expect(geometry.linkLines, `${width}px link lines`).toBe(1)
+      expect(geometry.linkOverflow, `${width}px link clips`).toBe(true)
+      expect(geometry.linkEllipsis, `${width}px ellipsis`).toBe('ellipsis')
+      expect(geometry.copyBeside, `${width}px copy button beside`).toBe(true)
+      expect(geometry.documentOverflow, `${width}px document`).toBe(false)
+    }
+  })
+
+  test(`editor booking-link preview truncates a long slug on narrow screens ${locale}`, async ({
+    page,
+    app,
+  }) => {
+    await page.setViewportSize({ width: 320, height: 568 })
+    await setLongBookingSlug(page, app)
+    await openAuditPage(page, app, 'event-type-editor', { locale })
+    const preview = page.locator('.booking-link .preview').filter({ hasText: LONG_BOOKING_SLUG })
+    await expect(preview).toBeVisible()
+    for (const width of [320, 360]) {
+      await page.setViewportSize({ width, height: 568 })
+      const geometry = await preview.evaluate((node) => {
+        const range = document.createRange()
+        range.selectNodeContents(node)
+        return {
+          lines: new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size,
+          overflow: node.scrollWidth > node.clientWidth,
+          ellipsis: getComputedStyle(node).textOverflow,
+          documentFits:
+            document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+        }
+      })
+      expect(geometry.lines, `${width}px lines`).toBe(1)
+      expect(geometry.overflow, `${width}px clips`).toBe(true)
+      expect(geometry.ellipsis, `${width}px ellipsis`).toBe('ellipsis')
+      expect(geometry.documentFits, `${width}px document`).toBe(true)
+    }
   })
 
   test(`long booking links retain one line and ellipsis with touch ${locale}`, async ({

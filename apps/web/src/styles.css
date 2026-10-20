@@ -1528,11 +1528,19 @@ input[type="radio"] {
 
 /* Event types */
 
+/*
+ * The nowrap path must never size its surroundings: in auto table layout it would widen
+ * its column to the whole path and squeeze the title column to single characters, and in
+ * the editor's field grid it would push the hint past the viewport. Inline-size containment
+ * keeps the link's intrinsic width out of those calculations, so the column follows its
+ * percentage width, the hint keeps its track, and the path truncates with an ellipsis.
+ */
 .booking-link {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-2);
+  contain: inline-size;
 }
 
 .booking-link a,
@@ -1544,6 +1552,13 @@ input[type="radio"] {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* In table mode the copy button stays beside the truncated path, so rows keep one line. */
+@container data-table (min-width: 880px) {
+  .table .booking-link {
+    flex-wrap: nowrap;
+  }
 }
 
 .event-type-inactive th[scope="row"] a {

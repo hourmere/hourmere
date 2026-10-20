@@ -189,7 +189,7 @@ function validateProfile(draft: ProfileDraft): FieldErrors {
     errors.timeZone = 'Choose a time zone from the list, e.g. Europe/Berlin.'
   }
   if (!['en', 'zh-CN'].includes(draft.locale)) {
-    errors.locale = 'Choose a supported booking language.'
+    errors.locale = 'Choose a supported notification language.'
   }
   return errors
 }
@@ -210,13 +210,13 @@ function profileServerErrors(err: unknown): FieldErrors | null {
     case 'invalid_time_zone':
       return { timeZone: 'This is not a time zone the server knows. Choose one from the list.' }
     case 'invalid_locale':
-      return { locale: 'Choose a supported booking language.' }
+      return { locale: 'Choose a supported notification language.' }
     default:
       return null
   }
 }
 
-const LABELS = { handle: 'Handle', timeZone: 'Time zone', locale: 'Booking language' }
+const LABELS = { handle: 'Handle', timeZone: 'Time zone', locale: 'Notification language' }
 
 function ProfileForm({ profile, me }: { profile: Profile | null; me: Me }) {
   const { t, ui, locale } = useI18n()
@@ -363,7 +363,7 @@ function ProfileForm({ profile, me }: { profile: Profile | null; me: Me }) {
         </Field>
         <Field
           id="locale"
-          label={t('Booking language')}
+          label={t('Notification language')}
           error={errors.locale}
           hint={t(
             'Language of your own notification emails and calendar invitations. Booking pages and invitee emails use the visitor’s language. Change the interface language separately in the top bar.',

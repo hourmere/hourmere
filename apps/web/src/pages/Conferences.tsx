@@ -241,18 +241,20 @@ export function ConferencesPage() {
             </p>
           )}
           {state.data.data.length > 0 && connectActions}
-          {!state.data.zoomMeetingsEnabled && (
+          {state.data.zoomEnabled && !state.data.zoomMeetingsEnabled && (
             <p className="muted">
               {t(
                 'New automatic Zoom authorization is disabled on this instance. Existing connections reconnect with their saved permissions.',
               )}
             </p>
           )}
-          <p className="muted">
-            {t(
-              'Connect up to five Zoom identities at once. Disconnecting frees a place and keeps the connection ID for a future reconnection.',
-            )}
-          </p>
+          {state.data.zoomEnabled && (
+            <p className="muted">
+              {t(
+                'Connect up to five Zoom identities at once. Disconnecting frees a place and keeps the connection ID for a future reconnection.',
+              )}
+            </p>
+          )}
           {state.data.pendingAttempts > 0 && (
             <p role="status">
               {t(
@@ -355,11 +357,13 @@ export function ConferencesPage() {
               </article>
             ))}
           </div>
-          <p className="muted">
-            {t(
-              'Disconnecting removes local credentials. The retained account record keeps its identity and does not revoke the app in Zoom. Deleting your Hourmere account also removes the stored identity details.',
-            )}
-          </p>
+          {(state.data.zoomEnabled || state.data.data.length > 0) && (
+            <p className="muted">
+              {t(
+                'Disconnecting removes local credentials. The retained account record keeps its identity and does not revoke the app in Zoom. Deleting your Hourmere account also removes the stored identity details.',
+              )}
+            </p>
+          )}
         </>
       )}
     </>

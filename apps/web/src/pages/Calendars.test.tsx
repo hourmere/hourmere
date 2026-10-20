@@ -423,7 +423,7 @@ describe('the calendars page', () => {
     expect(within(screen.getByRole('main')).getByRole('status').textContent).toBe(
       'Microsoft 日历已连接。日历列表已就绪。',
     )
-    await user.click(screen.getByRole('button', { name: '断开 calendar@example.com' }))
+    await user.click(screen.getByRole('button', { name: '断开连接：calendar@example.com' }))
     const group = screen.getByRole('group', { name: /断开 calendar@example.com？/ })
     await user.click(within(group).getByRole('button', { name: '断开账号连接' }))
     await vi.waitFor(() =>

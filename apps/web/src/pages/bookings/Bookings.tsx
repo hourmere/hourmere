@@ -164,6 +164,8 @@ function BookingList({
     setLoadingMore(false)
   }
 
+  // One sentence per language around the link, so Chinese keeps its punctuation unspaced.
+  const share = t('Share the links of your {0} so people can book you.').split('{0}')
   return (
     <section aria-labelledby="list-heading">
       <h2 id="list-heading" className="visually-hidden">
@@ -187,8 +189,9 @@ function BookingList({
           action={
             tab === 'upcoming' && (
               <p>
-                {t('Share the links of your')} <Link to={PATHS.eventTypes}>{t('event types')}</Link>{' '}
-                {t('so people can book you.')}
+                {share[0]}
+                <Link to={PATHS.eventTypes}>{t('event types')}</Link>
+                {share[1]}
               </p>
             )
           }

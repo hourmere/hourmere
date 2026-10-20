@@ -47,12 +47,12 @@ describe('the profile settings', () => {
     expect(suffix.parentElement?.textContent).toBe(`${ME.organization.name}（个人）`)
   })
 
-  it('offers only supported booking languages and keeps the interface choice separate', async () => {
+  it('offers only supported notification languages and keeps the interface choice separate', async () => {
     const user = userEvent.setup()
     const api = profileServer(PROFILE)
     renderApp('/app/settings')
     const bookingLanguage = await screen.findByRole<HTMLSelectElement>('combobox', {
-      name: 'Booking language',
+      name: 'Notification language',
     })
     expect(bookingLanguage.tagName).toBe('SELECT')
     expect([...bookingLanguage.options].map((option) => option.value)).toEqual(['en', 'zh-CN'])
@@ -67,7 +67,7 @@ describe('the profile settings', () => {
     expect(screen.getByText('Unsaved changes')).toBeDefined()
     expect(api.to('PUT /api/v1/profile')).toHaveLength(0)
     await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
-    expect(screen.getByLabelText<HTMLSelectElement>('预约语言').value).toBe('zh-CN')
+    expect(screen.getByLabelText<HTMLSelectElement>('通知语言').value).toBe('zh-CN')
     expect(explanation?.textContent).toBe(
       '你收到的通知邮件和日历邀请所用的语言。预约页面和受邀者邮件使用访客的语言。界面语言请在顶栏单独切换。',
     )
@@ -95,7 +95,7 @@ describe('the profile settings', () => {
       const requests = profileServer({ ...PROFILE, locale: 'en-GB' })
       renderApp('/app/settings')
       const language = await screen.findByRole<HTMLSelectElement>('combobox', {
-        name: 'Booking language',
+        name: 'Notification language',
       })
       expect(language.value).toBe('en')
       expect(screen.queryByText('Unsaved changes')).toBeNull()
@@ -121,7 +121,7 @@ describe('the profile settings', () => {
     expect(input('Handle').value).toBe('ada')
     expect(screen.getByText('/ada/')).toBeDefined()
     await chooseZone('lisbon')
-    await user.selectOptions(screen.getByLabelText('Booking language'), 'zh-CN')
+    await user.selectOptions(screen.getByLabelText('Notification language'), 'zh-CN')
     await user.click(screen.getByRole('button', { name: 'Create profile' }))
 
     const status = await screen.findByText('Profile created. Your booking links are ready.')
@@ -176,8 +176,8 @@ describe('the profile settings', () => {
     ],
     [
       json(400, { error: 'invalid_locale', message: 'locale must be a BCP 47 language tag' }),
-      'Booking language',
-      'Choose a supported booking language.',
+      'Notification language',
+      'Choose a supported notification language.',
     ],
   ])('shows the server refusing it at the field (%#)', async (response, label, message) => {
     const user = userEvent.setup()
@@ -202,7 +202,7 @@ describe('the profile settings', () => {
     await user.clear(input('Handle'))
     await user.type(input('Handle'), 'Ada Lovelace')
     await chooseZone('Nowhere/Land')
-    fireEvent.change(screen.getByLabelText('Booking language'), { target: { value: '' } })
+    fireEvent.change(screen.getByLabelText('Notification language'), { target: { value: '' } })
     await user.click(screen.getByRole('button', { name: 'Save profile' }))
     const summary = await screen.findByRole('alert')
     expect(
@@ -212,7 +212,7 @@ describe('the profile settings', () => {
     ).toEqual([
       'Handle: Use lowercase letters, digits and hyphens, starting and ending with a letter or digit.',
       'Time zone: Choose a time zone from the list, e.g. Europe/Berlin.',
-      'Booking language: Choose a supported booking language.',
+      'Notification language: Choose a supported notification language.',
     ])
     expect(api.to('PUT /api/v1/profile')).toHaveLength(0)
   })

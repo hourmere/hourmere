@@ -192,8 +192,9 @@ function ActivityReport({ filters }: { filters: Filters }) {
         <span className="nowrap">{data.endDate}</span>
       </h2>
       <p>
-        {t('Reporting time zone:')} {data.timeZone}
-        {t('. Days can have 23 or 25 hours when the clocks change.')}
+        {t('Reporting time zone: {0}. Days can have 23 or 25 hours when the clocks change.', {
+          '0': data.timeZone,
+        })}
       </p>
       <dl className="metric-cards">
         <div>

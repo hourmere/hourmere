@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { Schemas } from '../api/client.ts'
 import { goTo } from '../browser.ts'
+import { admin } from '../i18n/admin.ts'
 import { fakeApi, json, later, renderApp, signedIn } from '../test/fake-api.tsx'
 
 vi.mock('../browser.ts', () => ({ goTo: vi.fn() }))
@@ -59,6 +60,29 @@ describe('separate conference accounts page', () => {
       const content = screen.getByRole('main').textContent ?? ''
       expect(content.includes(identityText)).toBe(zoomEnabled)
       expect(content.includes(meetingsText)).toBe(zoomEnabled && zoomMeetingsEnabled)
+      // Connection limits, reconnection and disconnection only apply to a configured Zoom.
+      const say = (key: keyof typeof admin) => (locale === 'en' ? key : admin[key])
+      expect(
+        content.includes(
+          say(
+            'Connect up to five Zoom identities at once. Disconnecting frees a place and keeps the connection ID for a future reconnection.',
+          ),
+        ),
+      ).toBe(zoomEnabled)
+      expect(
+        content.includes(
+          say(
+            'New automatic Zoom authorization is disabled on this instance. Existing connections reconnect with their saved permissions.',
+          ),
+        ),
+      ).toBe(zoomEnabled && !zoomMeetingsEnabled)
+      expect(
+        content.includes(
+          say(
+            'Disconnecting removes local credentials. The retained account record keeps its identity and does not revoke the app in Zoom. Deleting your Hourmere account also removes the stored identity details.',
+          ),
+        ),
+      ).toBe(zoomEnabled)
       expect(
         screen.queryByRole('button', { name: locale === 'en' ? 'Connect Zoom' : '连接 Zoom' }) !==
           null,
@@ -130,6 +154,9 @@ describe('separate conference accounts page', () => {
     expect(screen.queryByRole('button', { name: 'Connect Zoom' })).toBeNull()
     expect(screen.getByText('No Zoom accounts connected.').closest('.empty')).not.toBeNull()
     expect(screen.getByText(/authorization attempt is pending/)).toBeDefined()
+    expect(screen.queryByText(/Connect up to five Zoom identities/)).toBeNull()
+    expect(screen.queryByText(/New automatic Zoom authorization is disabled/)).toBeNull()
+    expect(screen.queryByText(/Disconnecting removes local credentials/)).toBeNull()
     expect(screen.queryByText('synthetic-private-provider-message')).toBeNull()
     expect(requests.to('POST /api/v1/conference-connections/zoom/authorize')).toHaveLength(0)
   })

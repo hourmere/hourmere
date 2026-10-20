@@ -13,8 +13,8 @@ export const admin = {
   'Manage your profile and booking defaults.': '管理个人资料和预约默认设置。',
   'Review and manage the meetings you host.': '查看和管理你主持的会议。',
   'Review meeting details and manage this booking.': '查看会议详情并管理此预约。',
-  'Booking language': '预约语言',
-  'Choose a supported booking language.': '请选择支持的预约语言。',
+  'Notification language': '通知语言',
+  'Choose a supported notification language.': '请选择支持的通知语言。',
   'Language of your own notification emails and calendar invitations. Booking pages and invitee emails use the visitor’s language. Change the interface language separately in the top bar.':
     '你收到的通知邮件和日历邀请所用的语言。预约页面和受邀者邮件使用访客的语言。界面语言请在顶栏单独切换。',
   'Connect a calendar account to get started.': '连接日历账号以开始使用。',
@@ -186,7 +186,7 @@ export const admin = {
   'Add an option': '添加选项',
   'Add at least one option.': '请至少添加一个选项。',
   'Add hours': '添加时间段',
-  'Add hours on {0}': '添加{0}的时间段',
+  'Add hours on {0}': '添加时间段（{0}）',
   'Add hours, or choose unavailable all day.': '请添加时间段，或选择全天不可用。',
   Added: '已添加',
   Address: '地址',
@@ -298,7 +298,7 @@ export const admin = {
   'Continuing…': '正在继续…',
   'Copy command': '复制命令',
   'Copy key': '复制密钥',
-  'Copy link for {0}': '复制{0}的链接',
+  'Copy link for {0}': '复制链接：{0}',
   'Copy your new key “{name}”': '复制新密钥“{name}”',
   'Could not cancel the booking. {0}': '无法取消预约。{0}',
   'Could not check your session. Please reload.': '无法检查登录状态。请刷新页面。',
@@ -357,7 +357,7 @@ export const admin = {
   Description: '描述',
   Disabled: '已禁用',
   Disconnect: '断开连接',
-  'Disconnect {0}': '断开 {0}',
+  'Disconnect {0}': '断开连接：{0}',
   'Disconnect {0}? This deletes stored credentials and local calendar data. You can also remove Hourmere’s access in {1} account settings.':
     '断开 {0}？此操作将删除已保存的凭据和本地日历数据。你也可以在 {1} 账号设置中移除 Hourmere 的访问权限。',
   'Disconnect account': '断开账号连接',
@@ -575,7 +575,7 @@ export const admin = {
   'Set your availability': '设置可预约时间',
   'Set your time zone': '设置时区',
   'Set your weekly hours': '设置每周时间段',
-  'Share the links of your': '分享你的',
+  'Share the links of your {0} so people can book you.': '分享你的{0}，以便他人预约你。',
   'Short text': '短文本',
   'Show more bookings': '显示更多预约',
   'Showing {0} bookings.': '共显示 {0} 个预约。',
@@ -589,7 +589,6 @@ export const admin = {
   'Sign-in did not work{0}. Please try again.': '登录失败{0}。请重试。',
   'Sign-in was cancelled.': '已取消登录。',
   'Signed in as': '当前登录账号',
-  'so people can book you.': '，以便他人预约你。',
   'Start times every': '开始时间间隔',
   'Store it somewhere safe, such as a password manager or your agent’s secret settings. If you lose it, revoke it and create a new one.':
     '请将密钥保存在安全的地方，例如密码管理器或代理的密钥设置中。若密钥丢失，请撤销并创建新密钥。',
@@ -789,9 +788,8 @@ export const admin = {
   'Booking activity is available to personal account owners and team owners or admins. Your current team role does not permit this report.':
     '个人账号所有者，以及团队所有者或管理员可查看预约统计。你当前的团队角色无权查看此统计。',
   to: '至',
-  'Reporting time zone:': '统计时区：',
-  '. Days can have 23 or 25 hours when the clocks change.':
-    '。夏令时切换时，一天可能有 23 或 25 小时。',
+  'Reporting time zone: {0}. Days can have 23 or 25 hours when the clocks change.':
+    '统计时区：{0}。夏令时切换时，一天可能有 23 或 25 小时。',
   'Bookings created': '新建预约',
   Reschedules: '改期',
   Cancellations: '取消',

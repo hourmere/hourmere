@@ -92,7 +92,7 @@ describe.each(['en', 'zh-CN'] as const)('admin consistency in %s', (language) =>
     expect(link.querySelector('wbr')).toBeNull()
     await user.click(
       within(row).getByRole('button', {
-        name: language === 'en' ? 'Copy link for Intro call' : '复制 Intro call 的链接',
+        name: language === 'en' ? 'Copy link for Intro call' : '复制链接：Intro call',
       }),
     )
     expect(await navigator.clipboard.readText()).toBe(`${window.location.origin}/ada/${slug}`)
@@ -149,6 +149,13 @@ describe.each(['en', 'zh-CN'] as const)('admin consistency in %s', (language) =>
       if (tab === 'upcoming') {
         const action = title.closest('.empty')?.querySelector('.empty-actions a')
         expect(action?.getAttribute('href')).toBe('/app/event-types')
+        // The link sits inside one sentence; Chinese keeps its full-width comma unspaced.
+        expect(action?.parentElement?.textContent).toBe(
+          language === 'en'
+            ? 'Share the links of your event types so people can book you.'
+            : '分享你的活动类型，以便他人预约你。',
+        )
+        expect(action?.textContent).toBe(language === 'en' ? 'event types' : '活动类型')
       }
     },
   )
