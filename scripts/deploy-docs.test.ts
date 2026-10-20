@@ -153,22 +153,73 @@ docker compose up -d --wait`)
     expect(guide).not.toMatch(/docker compose --project-name hourmere-restore/)
   })
 
-  it('verifies the worker and stops old roles before recreating the upgraded stack', () => {
-    expect(guide).toContain(`git pull --ff-only
-unset COMPOSE_FILE
-./scripts/enable-worker.sh
-docker compose config --services | grep -qx worker
-docker compose pull proxy db
-docker compose stop app worker
-docker compose up -d --build --wait`)
+  const separate = guide.split('## Run workers separately\n')[1]?.split('\n### ')[0]
+  const readme = readFileSync(
+    process.env.HOURMERE_DEPLOY_README ?? fileURLToPath(new URL('../README.md', import.meta.url)),
+    'utf8',
+  )
+  const configuration = readFileSync(
+    process.env.HOURMERE_DEPLOY_CONFIGURATION ??
+      fileURLToPath(
+        new URL('../apps/site/src/content/docs/docs/configuration.md', import.meta.url),
+      ),
+    'utf8',
+  )
+  const enableCommands = (source: string | undefined) =>
+    source?.match(/```sh\n(unset COMPOSE_FILE[\s\S]*?)\n```/)?.[1]
+  const upgradeCommands = (title: string) =>
+    guide.split(`### ${title} upgrade\n`)[1]?.match(/```sh\n([\s\S]*?)\n```/)?.[1]
+
+  it('checks the HTTPS proxy beside every standalone worker verification', () => {
+    for (const source of [readme, configuration, guide]) {
+      const blocks = [...source.matchAll(/```sh\n([\s\S]*?)\n```/g)]
+        .map((match) => match[1] ?? '')
+        .filter((block) => /^docker compose config --services \| grep -qx worker$/m.test(block))
+      expect(blocks.length).toBeGreaterThan(0)
+      for (const block of blocks) {
+        expect(block).toMatch(
+          /docker compose config --services \| grep -qx worker\n# Bundled HTTPS only; omit this check in plain mode\.\ndocker compose config --services \| grep -qx proxy/,
+        )
+      }
+    }
   })
 
-  it.each([false, true])(
-    'unsets a shell override and verifies the worker before starting it (worker: %s)',
-    (enabled) => {
-      const separate = guide.split('## Run workers separately\n')[1]?.split('\n### ')[0]
-      const commands = separate?.match(/```sh\n([\s\S]*?)\n```/)?.[1]
-      expect(commands, 'separate-worker instructions must include runnable commands').toBeDefined()
+  const procedures = [
+    { name: 'README worker setup', commands: enableCommands(readme), upgrade: false, worker: true },
+    {
+      name: 'configuration worker setup',
+      commands: enableCommands(configuration),
+      upgrade: false,
+      worker: true,
+    },
+    {
+      name: 'self-hosting worker setup',
+      commands: enableCommands(separate),
+      upgrade: false,
+      worker: true,
+    },
+    {
+      name: 'Single-container',
+      commands: upgradeCommands('Single-container'),
+      upgrade: true,
+      worker: false,
+    },
+    {
+      name: 'Separate-worker',
+      commands: upgradeCommands('Separate-worker'),
+      upgrade: true,
+      worker: true,
+    },
+  ]
+
+  describe.each(procedures)('$name commands', ({ commands, upgrade, worker: needsWorker }) => {
+    it.each([
+      { worker: true, proxy: true },
+      { worker: true, proxy: false },
+      { worker: false, proxy: true },
+      { worker: false, proxy: false },
+    ])('checks HTTPS proxy and required roles before startup (%j)', ({ worker, proxy }) => {
+      expect(commands, 'labelled instructions must include runnable commands').toBeDefined()
       const directory = mkdtempSync(join(tmpdir(), 'hourmere-worker-docs-'))
       try {
         const scripts = join(directory, 'scripts')
@@ -188,13 +239,19 @@ ${rejectShellOverride}printf '%s\\n' enable-worker >> "$CALL_LOG"
           `#!/bin/sh
 ${rejectShellOverride}printf '%s\\n' "$*" >> "$CALL_LOG"
 case "$*" in
-  'compose config --services') printf '%s\\n' app db proxy${enabled ? ' worker' : ''} ;;
-  'compose up -d --build --wait') ;;
+  'compose config --services') printf '%s\\n' app db${proxy ? ' proxy' : ''}${worker ? ' worker' : ''} ;;
+  'compose pull proxy db'|'compose stop app'|'compose stop app worker'|'compose up -d --build --wait') ;;
   *) exit 1 ;;
 esac
 `,
           { mode: 0o755 },
         )
+        writeFileSync(join(bin, 'git'), '#!/bin/sh\nprintf "%s\\n" "git $*" >> "$CALL_LOG"\n', {
+          mode: 0o755,
+        })
+        writeFileSync(join(bin, 'curl'), '#!/bin/sh\nprintf "%s\\n" health >> "$CALL_LOG"\n', {
+          mode: 0o755,
+        })
         const callLog = join(directory, 'calls')
         const result = spawnSync('sh', ['-eu', '-c', commands ?? 'exit 1'], {
           cwd: directory,
@@ -205,24 +262,34 @@ esac
             COMPOSE_FILE: 'conflicting-shell-selection.yml',
           },
         })
-        expect(result.status).toBe(enabled ? 0 : 1)
+        const verified = proxy && (!needsWorker || worker)
+        expect(result.status).toBe(verified ? 0 : 1)
         expect(readFileSync(callLog, 'utf8').trim().split('\n')).toEqual([
-          'enable-worker',
-          'compose config --services',
-          ...(enabled ? ['compose up -d --build --wait'] : []),
+          ...(upgrade ? ['git pull --ff-only'] : []),
+          ...(needsWorker ? ['enable-worker', 'compose config --services'] : []),
+          ...(!needsWorker || worker ? ['compose config --services'] : []),
+          ...(verified
+            ? [
+                ...(upgrade
+                  ? ['compose pull proxy db', `compose stop app${needsWorker ? ' worker' : ''}`]
+                  : []),
+                'compose up -d --build --wait',
+                ...(upgrade ? ['health'] : []),
+              ]
+            : []),
         ])
       } finally {
         rmSync(directory, { recursive: true, force: true })
       }
-    },
-  )
+    })
+  })
 
   it('migrates tracked worker edits before pulling and explains orphaned old images', () => {
     const upgrade = guide.split('## Upgrade and roll back\n')[1]?.split('\n## ')[0]
     if (!upgrade) throw new Error('Upgrade instructions must exist')
     expect(upgrade).toContain('tracked edits make `git pull --ff-only` refuse the upgrade')
     expect(upgrade).toMatch(
-      /replace or add the\s+complete `COMPOSE_FILE` line in `\.env` before restoring the tracked file[\s\S]*?git restore docker-compose\.yml\ngit pull --ff-only/,
+      /replace or add the\s+complete `COMPOSE_FILE` line in `\.env` before restoring the tracked file[\s\S]*?git restore docker-compose\.yml/,
     )
     for (const source of [upgrade, changelog]) {
       expect(source).toContain('./scripts/enable-worker.sh')
