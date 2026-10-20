@@ -83,24 +83,31 @@ describe('changing interface language through booking and account flows', () => 
       await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
       expect(screen.getByText('Enter your name.')).toBeDefined()
       const name = screen.getByLabelText<HTMLInputElement>('Your name')
-      await setLanguage(user, 'zh-CN')
+      if (embed) expect(screen.queryByRole('combobox', { name: 'Interface language' })).toBeNull()
+      else await setLanguage(user, 'zh-CN')
       const attribution = screen.getByRole('contentinfo').querySelector('a')
-      expect(attribution?.textContent).toBe('由 Hourmere 提供支持')
+      expect(attribution?.textContent).toBe(embed ? 'Powered by Hourmere' : '由 Hourmere 提供支持')
       expect(attribution?.getAttribute('href')).toBe('https://hourmere.com')
       expect(attribution?.querySelector('.logo-word')?.textContent).toBe('Hourmere')
-      expect(screen.getByText('请输入你的姓名。')).toBeDefined()
-      expect(screen.getByLabelText('你的姓名')).toBe(name)
+      expect(screen.getByText(embed ? 'Enter your name.' : '请输入你的姓名。')).toBeDefined()
+      expect(screen.getByLabelText(embed ? 'Your name' : '你的姓名')).toBe(name)
       expect(screen.getByRole('heading', { name: 'Settings', level: 1 })).toBeDefined()
       await user.type(name, 'Synthetic invitee')
-      await user.type(screen.getByLabelText('邮箱'), 'invitee@example.invalid')
+      await user.type(
+        screen.getByLabelText(embed ? 'Email' : '邮箱', { selector: 'input[type="email"]' }),
+        'invitee@example.invalid',
+      )
       // A host-defined question that matches a built-in translation key stays unchanged.
-      await user.type(screen.getByLabelText('Email'), 'Settings')
-      await user.click(screen.getByRole('button', { name: '确认预约' }))
+      await user.type(
+        screen.getByLabelText('Email', { selector: 'input[type="text"]' }),
+        'Settings',
+      )
+      await user.click(screen.getByRole('button', { name: embed ? 'Confirm booking' : '确认预约' }))
       expect(await screen.findByRole('alert')).toHaveProperty(
         'textContent',
-        expect.stringContaining('你的预约尚未确认'),
+        expect.stringContaining(embed ? 'Your booking is not confirmed yet.' : '你的预约尚未确认'),
       )
-      await setLanguage(user, 'en')
+      if (!embed) await setLanguage(user, 'en')
       expect(screen.getByRole('alert').textContent).toContain('Your booking is not confirmed yet.')
       expect(name.value).toBe('Synthetic invitee')
       expect(screen.getByDisplayValue<HTMLInputElement>('Settings').value).toBe('Settings')
@@ -117,14 +124,16 @@ describe('changing interface language through booking and account flows', () => 
         calls[0]?.headers.get('idempotency-key') === calls[1]?.headers.get('idempotency-key'),
       ).toBe(true)
       expect(calls[0]?.body).toEqual(calls[1]?.body)
-      expect(calls[0]?.body).toHaveProperty('invitee.locale', 'zh-CN')
+      expect(calls[0]?.body).toHaveProperty('invitee.locale', embed ? 'en' : 'zh-CN')
       expect(calls[0]?.body).toHaveProperty('responses.question', 'Settings')
       if (embed) expect(calls[0]?.body).toHaveProperty('source', 'embed')
-      await setLanguage(user, 'zh-CN')
-      expect(screen.getByRole('heading', { name: '预约成功' })).toBeDefined()
-      expect(
-        screen.getByText('没收到邮件？请检查垃圾邮件文件夹，并将发件人加入通讯录。'),
-      ).toBeDefined()
+      if (!embed) {
+        await setLanguage(user, 'zh-CN')
+        expect(screen.getByRole('heading', { name: '预约成功' })).toBeDefined()
+        expect(
+          screen.getByText('没收到邮件？请检查垃圾邮件文件夹，并将发件人加入通讯录。'),
+        ).toBeDefined()
+      }
       expect(api.to('GET /api/v1/me')).toHaveLength(0)
       expect(api.to('GET /api/v1/profile')).toHaveLength(0)
       expect(api.calls.every((call) => !call.path.includes(TOKEN))).toBe(true)

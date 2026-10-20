@@ -2,6 +2,7 @@ import { domainToASCII } from 'node:url'
 import type { InterfaceLanguage } from '@hourmere/core/language'
 import nodemailer from 'nodemailer'
 import addressparser from 'nodemailer/lib/addressparser'
+import { emailButton, emailLayout, emailLinkStyle, emailWrapStyle } from './layout.ts'
 import { escapeHtml, singleLine } from './text.ts'
 
 export * from './booking.ts'
@@ -343,6 +344,8 @@ export function magicLinkEmail({
       button: 'Sign in',
       expiry: `The link expires in ${expiresInMinutes} minutes and works once. If you did not ask to sign in, you can ignore this email.`,
       fallback: 'If the button does not work, copy this link into your browser:',
+      footer:
+        'You received this email because a sign-in link was requested for your Hourmere account.',
     },
     'zh-CN': {
       subject: '登录 Hourmere',
@@ -351,6 +354,7 @@ export function magicLinkEmail({
       button: '登录',
       expiry: `此链接将在 ${expiresInMinutes} 分钟后过期，且仅能使用一次。如果你没有申请登录，可以忽略此邮件。`,
       fallback: '如果按钮无法使用，请将此链接复制到浏览器中：',
+      footer: '你收到此邮件是因为有人为你的 Hourmere 账号申请了登录链接。',
     },
   }[language]
   const link = escapeHtml(url)
@@ -359,16 +363,15 @@ export function magicLinkEmail({
   return {
     to,
     subject: words.subject,
-    text: `${words.instruction}\n\n${url}\n\n${words.expiry}\n`,
-    html: `<!doctype html>
-<html lang="${language}">
-<body style="font-family: system-ui, sans-serif; line-height: 1.5; color: #111;">
-<p>${words.htmlInstruction}</p>
-<p><a href="${link}" style="display: inline-block; padding: 10px 16px; background: #111; color: #fff; text-decoration: none; border-radius: 6px;">${words.button}</a></p>
+    text: `Hourmere\n\n${words.instruction}\n\n${url}\n\n${words.expiry}\n\n${words.footer}\n`,
+    html: emailLayout(
+      language,
+      words.subject,
+      `<p>${escapeHtml(words.htmlInstruction)}</p>
+${emailButton(words.button, url)}
 <p style="color: #555;">${escapeHtml(words.expiry)}</p>
-<p style="color: #555; font-size: 13px;">${words.fallback}<br>${link}</p>
-</body>
-</html>
-`,
+<p style="color: #555; font-size: 13px; ${emailWrapStyle}">${words.fallback}<br><a href="${link}" style="${emailLinkStyle}">${link}</a></p>
+<p style="margin-top: 24px; border-top: 1px solid #ddd; padding-top: 16px; color: #555; font-size: 13px;">${escapeHtml(words.footer)}</p>`,
+    ),
   }
 }

@@ -10,6 +10,7 @@ import {
   magicLinkEmail,
   smtpTransportOptions,
 } from './index.ts'
+import { emailButton, emailLayout } from './layout.ts'
 import { fakeSmtpServer } from './smtp-testing.ts'
 
 /** Parse MIME structure independently of Nodemailer's options to verify the delivered message. */
@@ -79,16 +80,17 @@ describe('magicLinkEmail', () => {
       const prose = [
         message.subject,
         message.text.replace(url, ''),
-        ...Array.from(message.html?.matchAll(/>([^<>]*)</g) ?? [], (match) => match[1]).filter(
-          (text) => text !== escapeHtml(url),
-        ),
+        ...Array.from(
+          message.html?.split('<body')[1]?.matchAll(/>([^<>]*)</g) ?? [],
+          (match) => match[1],
+        ).filter((text) => text !== escapeHtml(url)),
       ].join('\n')
       expect(prose).not.toMatch(/[.,:;!?"'()]/)
     }
     expect(message).toMatchSnapshot()
   })
 
-  it('defaults legacy callers to the unchanged English template', () => {
+  it('defaults legacy callers to the English template', () => {
     const input = { to: 'ada@example.com', url, expiresInMinutes: 5 }
     expect(magicLinkEmail(input)).toEqual(magicLinkEmail({ ...input, language: 'en' }))
   })
@@ -100,7 +102,7 @@ describe('magicLinkEmail', () => {
     expect(m.text).toContain('5 minutes')
     // The link opens a page; its button signs in.
     expect(m.text).toContain('then press "Sign in to Hourmere" on the page it opens')
-    expect(m.html).toContain('then "Sign in to Hourmere" on the page it opens')
+    expect(m.html).toContain('then &quot;Sign in to Hourmere&quot; on the page it opens')
     // Explicit expected markup keeps this assertion independent of the escaping function.
     expect(m.html).toContain(
       'href="https://cal.example.com/sign-in/confirm#token=abc&amp;callbackURL=%2F"',
@@ -116,6 +118,141 @@ describe('magicLinkEmail', () => {
     expect(message.html).toContain(
       'href="https://cal.example.com/sign-in/confirm#token=abc&amp;callbackURL=%2F&amp;errorCallbackURL=%2Fsign-in"',
     )
+  })
+
+  it.each(['en', 'zh-CN'] as const)('includes a complete localized %s head', (language) => {
+    const message = magicLinkEmail({ to: 'ada@example.com', url, expiresInMinutes: 5, language })
+    expect(message.html).toMatch(/^<!doctype html>\n<html lang="[^"]+">\n<head>/)
+    const head = message.html?.match(/<head>([\s\S]*?)<\/head>/)?.[1]
+    expect(head).toContain('<meta charset="utf-8">')
+    expect(head).toContain('<meta name="viewport" content="width=device-width, initial-scale=1">')
+    expect(head).toContain(`<title>${message.subject}</title>`)
+  })
+
+  it.each(['en', 'zh-CN'] as const)(
+    'keeps long fallback links breakable and brand blue in %s',
+    (language) => {
+      const longUrl = `https://cal.example.com/sign-in/confirm#token=${'a'.repeat(512)}&callbackURL=%2F`
+      const message = magicLinkEmail({
+        to: 'ada@example.com',
+        url: longUrl,
+        expiresInMinutes: 5,
+        language,
+      })
+      const fallback = message.html?.match(
+        /<p style="[^"]*font-size: 13px;[^>]*>[^<]*<br>[\s\S]*?<\/p>/,
+      )?.[0]
+      expect(fallback).toMatch(/<p style="[^"]*overflow-wrap: anywhere; word-break: break-word;/)
+      expect(fallback).toContain(`>${escapeHtml(longUrl)}</a>`)
+      expect(fallback).toMatch(
+        /<a [^>]*style="color: #1f4fd8; overflow-wrap: anywhere; word-break: break-word;/,
+      )
+      expect(message.text).toContain(longUrl)
+    },
+  )
+
+  it.each([
+    [
+      'en',
+      'You received this email because a sign-in link was requested for your Hourmere account.',
+    ],
+    ['zh-CN', '你收到此邮件是因为有人为你的 Hourmere 账号申请了登录链接。'],
+  ] as const)(
+    'explains the sign-in email in %s with an image-free wordmark',
+    (language, footer) => {
+      const message = magicLinkEmail({ to: 'ada@example.com', url, expiresInMinutes: 5, language })
+      expect(message.text.startsWith('Hourmere\n\n')).toBe(true)
+      expect(message.html).toMatch(/<p [^>]*>Hourmere<\/p>/)
+      expect(message.html).toContain(footer)
+      expect(message.text).toContain(footer)
+      expect(message.html).not.toMatch(/<img\b/i)
+    },
+  )
+})
+
+describe('email layout', () => {
+  it('centers a responsive 600px container', () => {
+    const html = emailLayout('en', 'Subject', '<p>Message</p>')
+    expect(html).toMatch(/<table [^>]*width="600" align="center"/)
+    expect(html).toMatch(/<table [^>]*style="width: 100%; max-width: 600px; margin: 0 auto;/)
+  })
+
+  it('constrains the complete container to 600px in Outlook desktop', () => {
+    const html = emailLayout('en', 'Subject', '<p>Message</p>')
+    const wrapper = html.match(
+      /<!--\[if mso\]>(<table[^>]*><tr><td[^>]*>)<!\[endif\]-->([\s\S]*?)<!--\[if mso\]>(<\/td><\/tr><\/table>)<!\[endif\]-->/,
+    )
+    expect(wrapper).not.toBeNull()
+    expect(wrapper?.[1]).toMatch(/<table [^>]*width="600" align="center"/)
+    expect(wrapper?.[1]).toContain('width: 600px;')
+    expect(wrapper?.[2]).toMatch(/^\n<table [^>]*width="600"[\s\S]*<\/table>\n$/)
+    expect(wrapper?.[2]).toContain('<p>Message</p>')
+  })
+
+  it('declares a light color scheme and white body and container backgrounds', () => {
+    const html = emailLayout('en', 'Subject', '<p>Message</p>')
+    expect(html).toContain('<meta name="color-scheme" content="light">')
+    expect(html).toContain('<meta name="supported-color-schemes" content="light">')
+    expect(html).toContain(':root { color-scheme: light; supported-color-schemes: light; }')
+    expect(html).toMatch(/<body bgcolor="#ffffff" [^>]*background-color: #ffffff;/)
+    expect(html).toMatch(/<table [^>]*bgcolor="#ffffff" [^>]*background-color: #ffffff;/)
+  })
+
+  it('sets the Outlook-compatible font on body, table and cell elements', () => {
+    const html = emailLayout('en', 'Subject', '<p>Message</p>')
+    expect(html).toContain(
+      'body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; }',
+    )
+    for (const tag of ['body', 'table', 'td']) {
+      expect(html).toMatch(
+        new RegExp(
+          `<${tag} [^>]*style="[^"]*font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;`,
+        ),
+      )
+    }
+  })
+
+  it('escapes titles while retaining the prepared body markup', () => {
+    const html = emailLayout('en', 'A <script> & "title"', '<p>Message</p>')
+    expect(html).toContain('<title>A &lt;script&gt; &amp; &quot;title&quot;</title>')
+    expect(html).toContain('<p>Message</p>')
+    expect(html).not.toContain('<script>')
+  })
+
+  it.each([false, true])('uses a table button with a 44px tap area (secondary=%s)', (secondary) => {
+    const html = emailButton('Action', url, secondary)
+    expect(html).toMatch(/^<table role="presentation"[^>]*><tr><td/)
+    expect(html).toContain(`bgcolor="${secondary ? '#ffffff' : '#1f4fd8'}"`)
+    expect(html).toMatch(/<td [^>]*mso-padding-alt: 12px 18px;/)
+    expect(html).toMatch(/<td [^>]*font-family:[^>]*Arial,sans-serif;/)
+    expect(html).toContain('border: 1px solid #1f4fd8;')
+    const anchorStyle = html.match(/<a [^>]*style="([^"]*)"/)?.[1] ?? ''
+    expect(anchorStyle).toContain(`color: ${secondary ? '#1f4fd8' : '#ffffff'};`)
+    expect(anchorStyle).toContain('display: block;')
+    const padding = Number(anchorStyle.match(/padding: (\d+)px/)?.[1])
+    const lineHeight = Number(anchorStyle.match(/line-height: (\d+)px/)?.[1])
+    expect(padding * 2 + lineHeight).toBeGreaterThanOrEqual(44)
+  })
+
+  it('escapes button labels and link attributes', () => {
+    const html = emailButton('<button> & "label"', 'https://example.com/?a="b"&c=<d>')
+    expect(html).toContain('href="https://example.com/?a=&quot;b&quot;&amp;c=&lt;d&gt;"')
+    expect(html).toContain('>&lt;button&gt; &amp; &quot;label&quot;</a>')
+    expect(html).not.toContain('<button>')
+  })
+
+  it('separates stacked buttons with cell padding when Outlook ignores margins', () => {
+    const html = [emailButton('Reschedule', url), emailButton('Cancel', url, true)].join('\n')
+    const withoutMargins = html.replace(/margin(?:-[a-z]+)?:[^;]*;/g, '')
+    const paddedButtons = Array.from(
+      withoutMargins.matchAll(
+        /<td style="padding: (\d+)px 0;[^>]*><table\b[\s\S]*?<a [^>]*>([^<]+)<\/a>[\s\S]*?<\/table><\/td>/g,
+      ),
+    )
+    expect(paddedButtons.map((match) => match[2])).toEqual(['Reschedule', 'Cancel'])
+    const gap = Number(paddedButtons[0]?.[1]) + Number(paddedButtons[1]?.[1])
+    expect(gap).toBeGreaterThanOrEqual(16)
+    expect(html).not.toMatch(/margin(?:-[a-z]+)?:/)
   })
 })
 

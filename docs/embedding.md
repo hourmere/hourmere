@@ -2,8 +2,10 @@
 
 Embed a public personal or single-host team booking page in a website, inline or in a popup.
 Widgets reuse the public booking API and do not require a visitor account or third-party
-cookies. The iframe isolates the booking page's styles. Both variants retain **Powered by
-Hourmere** branding.
+cookies. The iframe isolates the booking page's styles; a Shadow DOM isolates the popup's
+title and close control from the parent website's styles. Both variants retain **Powered by
+Hourmere** branding. Embedded pages omit the page-level language picker and outer card frame,
+while keeping the booking form's panels and spacing.
 
 ## Enable the parent website
 
@@ -25,13 +27,20 @@ Content Security Policy. The widget makes no changes to the parent site's policy
 with a restrictive Permissions Policy may also prevent clipboard copying; the private
 manage-link input can still be selected and copied manually.
 
+The popup uses a constructable stylesheet in browsers that support `CSSStyleSheet` and
+`adoptedStyleSheets`, so its styles work with a strict `style-src` policy. Older browsers
+fall back to a style element inside the shadow root; that fallback needs the parent policy
+to permit those inline styles. Prefer a browser with constructable stylesheet support when
+the parent uses a strict policy.
+
 ## Inline
 
 Use your full public booking URL; a team URL works in the same place.
 
 ```html
 <div data-hourmere-inline
-     data-hourmere-url="https://calendar.example.com/ada/intro"></div>
+     data-hourmere-url="https://calendar.example.com/ada/intro"
+     data-hourmere-height="720"></div>
 <script src="https://calendar.example.com/hourmere-embed.js" defer></script>
 ```
 
@@ -41,9 +50,12 @@ the separate `/embed/…` route with its parent origin and a random correlation 
 Those values contain no visitor or booking data. A manual iframe must follow the same
 route, parent origin and identifier contract; using the script is recommended.
 
-The iframe starts at 720px high and resizes between 240px and 2000px. Larger booking forms
-scroll within the iframe. Its width follows the container; allow enough width for the form
-(320px or more is recommended).
+The iframe starts at 720px high and resizes between 240px and 2000px. Set
+`data-hourmere-height` to an integer from 240 to 2000 to reserve a different initial height
+and reduce layout shifts; `height` in the JavaScript API accepts the same range. Invalid
+declarative heights show a load error. JavaScript calls reject invalid heights before
+replacing an existing frame. Larger booking forms scroll within the iframe. Its width
+follows the container; allow enough width for the form (320px or more is recommended).
 
 ## Popup
 
@@ -55,9 +67,17 @@ scroll within the iframe. Its width follows the container; allow enough width fo
 <script src="https://calendar.example.com/hourmere-embed.js" defer></script>
 ```
 
-The popup uses the browser's modal dialog: the rest of the page is inert, Close or Escape
-removes it, and focus returns to the opener. Only one Hourmere popup is open at a time.
-Use a browser supporting `HTMLDialogElement.showModal()`.
+The popup uses the browser's modal dialog with a visible dimmed backdrop: the rest of the
+page is inert and background scrolling is locked until it closes. The top-right 44×44 close
+button, Escape (including inside the iframe), or a click outside the dialog closes it and
+returns focus to the opener. Clicking inside the dialog's padding keeps the form open.
+Only one Hourmere popup is open at a time. Use a browser supporting
+`HTMLDialogElement.showModal()`.
+
+The popup frame follows the visitor's system light or dark color scheme. On viewports
+480px wide or narrower it fills the screen without outer padding (`100vw` by `100dvh`).
+Larger viewports cap its height at `90dvh`; older browsers use the corresponding `vh`
+fallback. Scrolling stays contained within the popup and its booking frame.
 
 ## JavaScript and single-page apps
 
@@ -82,6 +102,8 @@ window.Hourmere.destroyInline(document.querySelector('#booking'));
 Repeated initialization of a declarative inline placeholder creates one iframe. Calling
 `initInline` on an existing container replaces its previous frame. Disposal removes the
 frame and message listener; it leaves other container content alone.
+Repeated loading failures reuse one alert for each declarative element instead of adding
+duplicate messages.
 
 An inline container receives `hourmere:booking-completed` when its iframe shows confirmation,
 including a successful idempotent retry. A popup dispatches the same event on the focused
@@ -145,7 +167,9 @@ separate loopback origin for the parent test page and include its exact origin i
 Set `data-hourmere-language="zh-CN"` on a declarative inline or popup element, or pass
 `language: 'zh-CN'` to `initInline` / `openPopup`, to initialize its Simplified Chinese
 interface. Use `en` for English. These are the only accepted explicit values; an invalid
-value fails before replacing a working widget. Without the option, the helper uses a
-supported browser language or English. Visitors can change the iframe language without
-losing a selected time, form answers or a completed booking. See
+value fails before replacing a working widget. Without the option, the helper first uses a
+supported language from the parent page's `<html lang>`, then a supported browser language,
+then English. The popup title and accessible close-button label use that same language.
+Embedded pages hide their page-level language picker; set the language on the parent page
+or widget before initialization. See
 [interface languages](interface-languages.md) for preference and formatting behavior.
