@@ -12,6 +12,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { deploymentPasteSkipReason, pasteIntoZshPty } from './deploy-docs-pty.ts'
+
+const zshPtySkipReason = deploymentPasteSkipReason(process.env)
 
 const guide = readFileSync(
   process.env.HOURMERE_DEPLOY_GUIDE ??
@@ -67,29 +70,7 @@ async function pasteIntoNestedShell(
     `printf 'OUTER_RESULT:%s\\n' "$operator_shell"`,
     'exit 0',
   ]
-  if (zshPty) {
-    // Standard-library pty keeps stdin a terminal on macOS and Linux. Send literal
-    // newlines without bracketed-paste framing, leaving zsh's options at defaults.
-    const result = spawnSync(
-      'python3',
-      [
-        '-c',
-        'import os, pty, sys\nsys.exit(os.waitstatus_to_exitcode(pty.spawn(["/bin/sh", "-i"])))',
-      ],
-      {
-        cwd,
-        env: { ...env, TERM: 'dumb', ZDOTDIR: cwd },
-        input: `${lines.join('\n')}\n`,
-        encoding: 'utf8',
-        timeout: 4000,
-      },
-    )
-    return {
-      status: result.status,
-      stdout: result.stdout?.replaceAll('\r', '') ?? '',
-      stderr: result.stderr || result.error?.message || '',
-    }
-  }
+  if (zshPty) return pasteIntoZshPty(`${lines.join('\n')}\n`, cwd, env)
   const shell = spawn('sh', ['-i'], {
     cwd,
     env: { ...env, PS1: 'HOURMERE_PRIMARY> ', PS2: 'HOURMERE_CONTINUE> ' },
@@ -148,8 +129,8 @@ async function pasteIntoNestedShell(
 
 function expectInteractiveShells(result: InteractiveResult, status: number) {
   expect(result.status, result.stderr).toBe(0)
-  expect(result.stdout).toContain(`BLOCK_RESULT:nested:${status}\n`)
-  expect(result.stdout).toContain('OUTER_RESULT:outer\n')
+  expect(result.stdout, result.stderr).toContain(`BLOCK_RESULT:nested:${status}\n`)
+  expect(result.stdout, result.stderr).toContain('OUTER_RESULT:outer\n')
 }
 
 async function executePastedCommands(
@@ -433,7 +414,7 @@ docker compose up -d --wait`)
         ...(verificationOnly ? [] : ['compose up -d --build --wait']),
         ...(upgrade ? ['health'] : []),
       ]
-      it.each([
+      it.for([
         { name: 'missing proxy', proxy: false, failCommand: '', status: 1 },
         {
           name: 'Compose error with expected services',
@@ -443,22 +424,24 @@ docker compose up -d --wait`)
         },
       ])(
         'keeps $name contained during a non-bracketed zsh PTY paste',
-        async ({ proxy, failCommand, status }) => {
+        async ({ proxy, failCommand, status }, context) => {
+          if (zshPtySkipReason) context.skip(zshPtySkipReason)
           const { result, calls } = await executePastedCommands(commands, {
             worker: needsWorker,
             proxy,
             failCommand,
             zshPty: true,
           })
-          expect(result.stdout).toContain('ZSH_PTY_READY\n')
+          expect(result.stdout, result.stderr).toContain('ZSH_PTY_READY\n')
           expectInteractiveShells(result, status)
           expect(calls).toEqual([...prefix, 'compose config --services'])
         },
       )
 
-      it.each(upgrade ? [false, true] : [])(
+      it.for(upgrade ? [false, true] : [])(
         'pastes a plain-mode upgrade with the proxy check deleted (guard passes: %s)',
-        async (verified) => {
+        async (verified, context) => {
+          if (zshPtySkipReason) context.skip(zshPtySkipReason)
           const plain = commands
             ?.replace(
               /^ {2}\{ printf .*grep -qx proxy \|\|\n {4}\{ echo "Proxy service is missing;[^\n]*\n/m,
@@ -472,7 +455,7 @@ docker compose up -d --wait`)
             failCommand: verified ? '' : 'compose config --services',
             zshPty: true,
           })
-          expect(result.stdout).toContain('ZSH_PTY_READY\n')
+          expect(result.stdout, result.stderr).toContain('ZSH_PTY_READY\n')
           expectInteractiveShells(result, verified ? 0 : 7)
           expect(calls).toEqual([
             ...prefix,

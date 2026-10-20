@@ -99,9 +99,6 @@ see the [self-hosting guide](apps/site/src/content/docs/docs/self-hosting.md) fo
 TLS, backup/restore, upgrade and host-hardening procedures. The default app also runs
 background jobs; to split them after setup, run:
 
-For plain mode, remove both lines of the proxy verification (the `grep -qx proxy` line
-and its following failure-message line) before pasting the block.
-
 ```sh
 (
   unset COMPOSE_FILE &&
@@ -114,6 +111,9 @@ and its following failure-message line) before pasting the block.
   docker compose up -d --build --wait
 )
 ```
+
+For plain mode, remove both lines of the proxy verification (the `grep -qx proxy` line
+and its following failure-message line) before pasting the block.
 
 The helper safely updates `COMPOSE_FILE`
 in the private `.env`, preserving the proxy selection. The tracked overlay automatically

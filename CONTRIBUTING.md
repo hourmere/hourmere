@@ -33,8 +33,10 @@ The repository is one npm workspace (`apps/*`, `packages/*` and `tools/*`) with 
 
 ## Checks
 
-The deployment documentation tests require `zsh` and Python 3 for interactive PTY paste
-checks (`sudo apt-get install zsh python3` on Debian/Ubuntu). Ensure both are on `PATH`.
+The deployment documentation's interactive PTY paste checks are skipped locally when
+`zsh` or `python3` is missing from `PATH`, with a skip reason naming the missing tool.
+Both are required in CI (`sudo apt-get install zsh python3` on Debian/Ubuntu); a missing
+tool makes CI fail immediately.
 
 CI runs these on every pull request; run them before you push:
 
