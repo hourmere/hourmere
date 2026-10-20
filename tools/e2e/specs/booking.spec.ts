@@ -231,15 +231,32 @@ test('popup booking keeps completion data private and supports cross-frame Escap
   app,
 }) => {
   await page.goto(app.parentUrl)
+  await page.addStyleTag({
+    content:
+      'div { text-transform: uppercase; } h2 { color: red !important; text-transform: uppercase !important; } button { all: unset !important; } dialog { display: none !important; }',
+  })
+  await page.evaluate(() => {
+    const policy = document.createElement('meta')
+    policy.httpEquiv = 'Content-Security-Policy'
+    policy.content = "style-src 'none'"
+    document.head.append(policy)
+  })
   const opener = page.getByRole('button', { name: 'Book a meeting', exact: true })
   await opener.click()
   const dialog = page.getByRole('dialog'),
     frame = dialog.locator('iframe').contentFrame()
+  await expect(dialog).toHaveCSS('color-scheme', 'light dark')
+  await expect(dialog.getByRole('heading', { name: 'Book a meeting' })).toHaveCSS(
+    'text-transform',
+    'none',
+  )
+  await expect(dialog.getByRole('button', { name: 'Close booking' })).toHaveCSS('width', '44px')
+  await expect(dialog.getByRole('button', { name: 'Close booking' })).toHaveCSS('height', '44px')
   await expect(frame.getByRole('heading', { name: 'Fixture call' })).toBeVisible()
   expect(
-    await page.evaluate(() => {
-      const bounds = document.querySelector('dialog')?.getBoundingClientRect()
-      return Boolean(bounds && bounds.left >= 0 && bounds.right <= innerWidth)
+    await dialog.evaluate((element) => {
+      const bounds = element.getBoundingClientRect()
+      return bounds.left >= 0 && bounds.right <= innerWidth
     }),
   ).toBe(true)
   expect(
@@ -252,13 +269,13 @@ test('popup booking keeps completion data private and supports cross-frame Escap
   await expect(dialog).toHaveCount(0)
   await expect(opener).toBeFocused()
   await opener.click()
-  await page.evaluate((url) => {
+  await dialog.evaluate((element, url) => {
     const state = window as unknown as {
       Hourmere: { openPopup: (options: { url: string }) => unknown }
       retiredCloseCount: number
     }
     state.retiredCloseCount = 0
-    document.querySelector('dialog')?.addEventListener('close', () => state.retiredCloseCount++)
+    element.addEventListener('close', () => state.retiredCloseCount++)
     state.Hourmere.openPopup({ url })
   }, app.url + app.personalPath)
   await expect
@@ -267,8 +284,8 @@ test('popup booking keeps completion data private and supports cross-frame Escap
     )
     .toBe(1)
   await expect(dialog).toHaveCount(1)
-  const rejected = await page.evaluate(() => {
-    const current = document.querySelector('dialog'),
+  const rejected = await dialog.evaluate((element) => {
+    const current = element as HTMLDialogElement,
       widget = (
         window as unknown as { Hourmere: { openPopup: (options: { url: string }) => unknown } }
       ).Hourmere
@@ -286,7 +303,7 @@ test('popup booking keeps completion data private and supports cross-frame Escap
         widget.openPopup({ url: `${origin}/fixture-host/call` })
         return false
       } catch {
-        return document.querySelector('dialog') === current && Boolean(current?.open)
+        return current.isConnected && current.open
       }
     })
   })

@@ -237,8 +237,10 @@ for (const selected of ['en', 'zh-CN'] as const) {
     expect(new URL((await inline.getAttribute('src')) ?? '').searchParams.get('language')).toBe(
       selected,
     )
-    await language(inlineBody, other(selected))
-    await expect(inline.contentFrame().locator('html')).toHaveAttribute('lang', other(selected))
+    await expect(
+      inlineBody.getByRole('combobox', { name: /^(Interface language|界面语言)$/ }),
+    ).toHaveCount(0)
+    await expect(inline.contentFrame().locator('html')).toHaveAttribute('lang', selected)
     await expect
       .poll(async () =>
         Number.parseInt(await inline.evaluate((element) => element.style.height), 10),
@@ -352,22 +354,31 @@ for (const selected of ['en', 'zh-CN'] as const) {
       frame.setAttribute('src', url)
     }, popupUrl)
     await expect(popupBody.getByRole('heading', { name: 'Fixture call' })).toBeVisible()
-    await language(popupBody, other(selected))
+    await expect(
+      popupBody.getByRole('combobox', { name: /^(Interface language|界面语言)$/ }),
+    ).toHaveCount(0)
+    await popupBody.evaluate(
+      (_, saved) => localStorage.setItem('hourmere-language', saved),
+      other(selected),
+    )
     await popupBody.getByRole('button', { name: /^(Next month|下个月)$/ }).focus()
     await page.keyboard.press('Escape')
     await expect(dialog).toHaveCount(0)
     await expect(opener).toBeFocused()
     await opener.click()
     const body = page.locator('dialog iframe').contentFrame().locator('body')
-    // The declared embed option wins over the previous iframe's stored choice.
+    // The declared embed option wins over the stored standalone-page preference.
     await expect(
       body.getByRole('combobox', { name: /^(Interface language|界面语言)$/ }),
-    ).toHaveValue(selected)
+    ).toHaveCount(0)
+    await expect(dialog.locator('iframe').contentFrame().locator('html')).toHaveAttribute(
+      'lang',
+      selected,
+    )
     await pickSlot(body, page)
     await fillInvitee(body)
-    await language(body, other(selected))
-    await body.getByRole('button', { name: text[other(selected)].confirm, exact: true }).click()
-    await expect(body.getByRole('heading', { name: text[other(selected)].booked })).toBeVisible()
+    await body.getByRole('button', { name: text[selected].confirm, exact: true }).click()
+    await expect(body.getByRole('heading', { name: text[selected].booked })).toBeVisible()
     await expect
       .poll(() =>
         page.evaluate(
@@ -551,7 +562,8 @@ test('zh-CN collective popup keeps language and capability-free completion for b
   await expect(
     frame.getByRole('heading', { name: 'Collective fixture call', exact: true }),
   ).toBeVisible()
-  await expect(frame.getByLabel('界面语言')).toHaveValue('zh-CN')
+  await expect(frame.getByLabel('界面语言')).toHaveCount(0)
+  await expect(frame.locator('html')).toHaveAttribute('lang', 'zh-CN')
   await expect(frame.getByText(/必选主持人：/)).toContainText('Second Required Host')
   await pickSlot(frame.locator('body'), page)
   await fillInvitee(frame.locator('body'))
