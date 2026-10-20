@@ -18,3 +18,9 @@ it('retains block ellipsis on booking links for coarse pointers', () => {
   }
   expect(coarse).toMatch(/\.booking-link a\s*\{[^{}]*min-height: 44px;/)
 })
+
+it('contains the absolute hidden new-tab hint within its clipped booking link', () => {
+  expect(styles).toMatch(
+    /\.booking-link a,\s*\.booking-link \.preview\s*\{[^{}]*position: relative;/,
+  )
+})

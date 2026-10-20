@@ -1536,6 +1536,7 @@ input[type="radio"] {
 
 .booking-link a,
 .booking-link .preview {
+  position: relative;
   display: block;
   min-width: 0;
   max-width: 100%;

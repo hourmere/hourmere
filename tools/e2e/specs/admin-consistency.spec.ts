@@ -73,6 +73,15 @@ for (const locale of ['en-US', 'zh-CN'] as const) {
   }) => {
     await page.setViewportSize({ width: 320, height: 568 })
     await openAuditPage(page, app, 'event-types', { locale })
+    const documentFits = () =>
+      page.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      )
+    for (const width of [320, 360]) {
+      await page.setViewportSize({ width, height: 568 })
+      await expect.poll(documentFits).toBe(true)
+    }
+    await page.setViewportSize({ width: 320, height: 568 })
     const state = await app.auditState()
     const slug = `long-${'booking-'.repeat(6)}link`
     const response = await page.request.patch(
@@ -102,5 +111,9 @@ for (const locale of ['en-US', 'zh-CN'] as const) {
     expect(geometry.ellipsis).toBe('ellipsis')
     expect(geometry.display).toBe('block')
     expect(geometry.lineCount).toBe(1)
+    for (const width of [320, 360]) {
+      await page.setViewportSize({ width, height: 568 })
+      await expect.poll(documentFits).toBe(true)
+    }
   })
 }
