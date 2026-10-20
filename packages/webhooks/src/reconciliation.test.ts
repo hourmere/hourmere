@@ -14,6 +14,16 @@ const OLD = new Date(NOW.subtract({ hours: 24 * 31 }).epochMilliseconds)
 const isReconciliation = (query: CompiledQuery) => /UPDATE\s+webhook_deliveries/i.test(query.sql)
 const isRetention = (query: CompiledQuery) => /DELETE\s+FROM\s+webhook_deliveries/i.test(query.sql)
 
+interface PlanNode {
+  'Subplan Name'?: string
+  'Actual Rows': number
+  Plans?: PlanNode[]
+}
+
+function planNodes(node: PlanNode): PlanNode[] {
+  return [node, ...(node.Plans ?? []).flatMap(planNodes)]
+}
+
 describe.skipIf(!serverUrl)('bounded webhook delivery reconciliation', () => {
   let testDb: TestDatabase
   let db: Db
@@ -62,7 +72,7 @@ describe.skipIf(!serverUrl)('bounded webhook delivery reconciliation', () => {
     await testDb?.drop()
   })
 
-  async function deliveries(count = 1, createdAt = RECENT) {
+  async function deliveries(count = 1, createdAt = RECENT, idForIndex?: (index: number) => string) {
     const bookings = await db
       .insertInto('bookings')
       .values(
@@ -79,7 +89,8 @@ describe.skipIf(!serverUrl)('bounded webhook delivery reconciliation', () => {
     return db
       .insertInto('webhook_deliveries')
       .values(
-        bookings.map((booking) => ({
+        bookings.map((booking, index) => ({
+          ...(idForIndex ? { id: idForIndex(index) } : {}),
           webhook_id: webhookId,
           organization_id: organizationId,
           booking_id: booking.id,
@@ -226,7 +237,13 @@ describe.skipIf(!serverUrl)('bounded webhook delivery reconciliation', () => {
   })
 
   it('takes the 1000 lowest orphan IDs and continues the backlog on the next dispatch', async () => {
-    const orderedIds = (await deliveries(1001)).map((row) => row.id).sort()
+    // Descending explicit IDs keep heap insertion order different from ID order.
+    const inserted = await deliveries(
+      1001,
+      RECENT,
+      (index) => `00000000-0000-7000-8000-${String(1001 - index).padStart(12, '0')}`,
+    )
+    const orderedIds = inserted.map((row) => row.id).sort()
     const observed = observe()
     await run(observed.connection)
     const firstBatch = await rows()
@@ -634,6 +651,14 @@ describe.skipIf(!serverUrl)('bounded webhook delivery reconciliation', () => {
         FROM pgboss.job`)
       const initialDeliveryVersions = (await deliveryVersions()).rows
       const initialJobVersions = (await jobVersions()).rows
+      // Capture the production query before executing it, preserving the pending fixture.
+      const capture = new Error('capture reconciliation SQL')
+      const observed = observe(undefined, (query) => {
+        if (isReconciliation(query)) throw capture
+      })
+      await expect(run(observed.connection)).rejects.toBe(capture)
+      const reconciliation = observed.queries.find(isReconciliation)
+      if (!reconciliation) throw new Error('missing reconciliation SQL')
       await db.connection().execute(async (connection) => {
         const setting = await sql<{ enabled: string }>`
         SELECT current_setting('enable_hashjoin') AS enabled
@@ -641,6 +666,27 @@ describe.skipIf(!serverUrl)('bounded webhook delivery reconciliation', () => {
         try {
           if (planner === 'hash joins disabled')
             await sql`SELECT set_config('enable_hashjoin', 'off', false)`.execute(connection)
+          await sql`BEGIN`.execute(connection)
+          try {
+            const explained = await connection.executeQuery<{ 'QUERY PLAN': { Plan: PlanNode }[] }>(
+              {
+                ...reconciliation,
+                sql: `EXPLAIN (ANALYZE, FORMAT JSON) ${reconciliation.sql}`,
+              },
+            )
+            const plan = explained.rows[0]?.['QUERY PLAN'][0]?.Plan
+            if (!plan) throw new Error('missing reconciliation plan')
+            const history = planNodes(plan).filter(
+              (node) => node['Subplan Name'] === 'CTE job_history',
+            )
+            expect(history).toHaveLength(1)
+            // This MATERIALIZED CTE is fully consumed: its cardinality follows pending
+            // history keys (1001 orphans + one live key), regardless of join/scan choice.
+            expect(history[0]?.['Actual Rows']).toBe(1002)
+          } finally {
+            // EXPLAIN ANALYZE executes the UPDATE; restore the fixture before the handler.
+            await sql`ROLLBACK`.execute(connection)
+          }
           await run(connection)
         } finally {
           await sql`SELECT set_config('enable_hashjoin', ${setting.rows[0]?.enabled}, false)`.execute(
@@ -655,7 +701,7 @@ describe.skipIf(!serverUrl)('bounded webhook delivery reconciliation', () => {
       ).toBe(true)
       expect(result.filter((row) => !batch.has(row.id))).toEqual(untouched)
       // Compare tuple versions as well as values: a no-op update still rewrites the row.
-      // Scan counts, aggregate cardinality and temporary blocks vary with PostgreSQL's plan.
+      // Scan counts, temporary blocks and SubPlan loops vary with PostgreSQL's plan.
       expect((await deliveryVersions()).rows).toEqual(initialDeliveryVersions)
       expect((await jobVersions()).rows).toEqual(initialJobVersions)
     },

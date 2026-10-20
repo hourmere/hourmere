@@ -1,6 +1,6 @@
 // Explicit local-only benchmark; all fixture/query operations use a disposable database.
 // DATABASE_URL is used only by createTestDatabase to create/drop that database.
-// Example: DATABASE_URL=postgres://hourmere:hourmere@localhost:5432/hourmere \
+// Example: DATABASE_URL=postgres://hourmere:hourmere@localhost:5432/postgres \
 //   node scripts/webhook-reconciliation-benchmark.ts --output=/tmp/webhook-reconciliation.json
 // Defaults: 300k and 1M jobs, 5k pending deliveries, mixed queues and an all-webhook stress case.
 // Use --pending=1000,50000,200000 for the scale matrix; three measured samples per variant.
@@ -187,20 +187,21 @@ for (const { jobsCount, pendingCount } of scales) {
   for (const layout of layouts) {
     const testDb = await createTestDatabase(serverUrl)
     const databaseName = new URL(testDb.url).pathname.slice(1)
-    const db = createDb(testDb.pool)
-    const deliveryDefinition = webhookDeliveryJob({ db, enabled: false })
-    const jobs = createJobs({
-      connectionString: testDb.url,
-      definitions: [
-        deliveryDefinition,
-        ...otherQueues.map((name) => ({ ...deliveryDefinition, name })),
-      ],
-      work: false,
-      migrate: true,
-      maxConnections: 1,
-      log: () => {},
-    })
+    let jobs: ReturnType<typeof createJobs> | undefined
     try {
+      const db = createDb(testDb.pool)
+      const deliveryDefinition = webhookDeliveryJob({ db, enabled: false })
+      jobs = createJobs({
+        connectionString: testDb.url,
+        definitions: [
+          deliveryDefinition,
+          ...otherQueues.map((name) => ({ ...deliveryDefinition, name })),
+        ],
+        work: false,
+        migrate: true,
+        maxConnections: 1,
+        log: () => {},
+      })
       const environment = (
         await testDb.pool.query(`SELECT version() AS postgres,
           current_setting('server_version_num')::integer AS server_version_num,
@@ -416,7 +417,7 @@ for (const { jobsCount, pendingCount } of scales) {
       if (output) await writeFile(output, `${JSON.stringify(results, null, 2)}\n`)
     } finally {
       try {
-        await jobs.stop()
+        await jobs?.stop()
       } finally {
         await testDb.drop()
         console.log(JSON.stringify({ droppedDatabase: databaseName }))

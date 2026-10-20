@@ -297,7 +297,7 @@ temp use and 468 read/write blocks, illustrating why tests must not require one 
 Reproduce on disposable PostgreSQL 18 databases with the database-creation account:
 
 ```sh
-DATABASE_URL=postgres://hourmere:hourmere@localhost:5432/hourmere \
+DATABASE_URL=postgres://hourmere:hourmere@localhost:5432/postgres \
   node scripts/webhook-reconciliation-benchmark.ts --mode=compare --jobs=1000000 \
   --pending=1000,50000,200000 --layouts=mixed,webhook --samples=5 \
   --output=/tmp/webhook-reconciliation-scale.json
