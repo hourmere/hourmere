@@ -336,6 +336,7 @@ const expected={
   'embedded-booking':{path:'/embed/fixture-host/layout-audit',public:true,wait:'.public-embedded .event-title'},
   'team-booking':{path:'/team/FixtureTeam/layout-audit',public:true,wait:'heading'},
   'oauth-consent':{path:'/oauth/consent',public:false,wait:'Synthetic audit connector'},
+  'manage-reschedule':{path:'/booking',public:true,wait:'.reschedule-summary .event-title'},
 }
 for(const [id,state] of Object.entries(expected)) {
   assert.ok(auditPages.some(page=>page.id===id),'Missing coverage state: '+id)
@@ -361,6 +362,7 @@ for(const [id,state] of Object.entries(expected)) {
   const app={url:'http://127.0.0.1:42421',parentUrl:'http://127.0.0.1:42422',auditState:async()=>({organizationId:'synthetic-org',bookingPath:'/fixture-host/layout-audit',teamBookingPath:'/team/FixtureTeam/layout-audit'}),auditSignIn:async(value)=>{signedIn=value},auditOAuthQuery:async()=>'?signed=fixture'}
   await assert.doesNotReject(()=>openAuditPage(page,app,id),'Could not prepare coverage state: '+id)
   assert.equal(path,state.path,'Wrong coverage route: '+id)
+  if(id==='manage-reschedule')assert.ok(calls.some(call=>call[0]==='wait'&&call[1]==='.reschedule-summary'),'Missing current booking summary readiness')
   assert.equal(signedIn,!state.public,'Wrong authentication state: '+id)
   assert.ok(calls.some(call=>call[0]==='wait'&&call[1].includes(state.wait)),'Missing content verification: '+id)
   if(id==='booking-form'||id==='booking-confirmation') {
@@ -401,6 +403,7 @@ describe('source-copy coverage mutations', () => {
     'embedded-booking',
     'team-booking',
     'oauth-consent',
+    'manage-reschedule',
   ])
     it(`detects removal of ${id} from the shared scan list`, () => {
       const mutant = pagesSource.replace(new RegExp(`^  \\{ id: '${id}'.*\\n`, 'm'), '')
@@ -411,6 +414,16 @@ describe('source-copy coverage mutations', () => {
     })
 
   for (const [from, to, assertion] of [
+    [
+      '.reschedule-summary .event-title',
+      '.reschedule-header p',
+      'Missing content verification: manage-reschedule',
+    ],
+    [
+      "? '.reschedule-summary' : '.booking-details'",
+      "? '.reschedule-header' : '.booking-details'",
+      'Missing current booking summary readiness',
+    ],
     [
       "await page.locator('button.day-available').first().press('Enter')",
       '',
