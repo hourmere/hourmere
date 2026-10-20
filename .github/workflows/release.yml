@@ -27,6 +27,7 @@ jobs:
         with:
           node-version-file: .node-version
       - name: Validate the version, main ancestry and changelog
+        id: release
         run: |
           git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
           node scripts/release.ts prepare "$GITHUB_REF_NAME" "$GITHUB_SHA"
@@ -36,6 +37,24 @@ jobs:
         run: |
           gh api "repos/$GITHUB_REPOSITORY/environments/release" > "$RUNNER_TEMP/release-environment.json"
           node scripts/release.ts check-environment "$RUNNER_TEMP/release-environment.json"
+      - name: Summarize the release notes for approval
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          NOTES_FILE: ${{ steps.release.outputs.notes_file }}
+          PRERELEASE: ${{ steps.release.outputs.prerelease }}
+        run: |
+          {
+            printf '%s\n' '## Release notes for approval' '' \
+              "- Version: $VERSION" "- Tag: $GITHUB_REF_NAME" \
+              "- Commit SHA: $GITHUB_SHA" "- Prerelease: $PRERELEASE" ''
+            cat "$NOTES_FILE"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload the extracted release notes
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: release-notes
+          path: ${{ steps.release.outputs.notes_file }}
+          if-no-files-found: error
 
   ci:
     needs: prepare
@@ -101,12 +120,26 @@ jobs:
           version: ${{ steps.release.outputs.version }}
           tags: ${{ steps.image.outputs.tags }}
       - name: Attest the published image digest
+        id: attest
         uses: actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4.2.1
         with:
           subject-name: ghcr.io/hourmere/hourmere
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
           create-storage-record: false
+      - name: Summarize the published image
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+          IMAGE_TAGS: ${{ steps.image.outputs.tags }}
+          ATTESTATION_URL: ${{ steps.attest.outputs.attestation-url }}
+          ATTESTATION_ID: ${{ steps.attest.outputs.attestation-id }}
+        run: |
+          {
+            printf '%s\n' '## Published image' '' \
+              "- Digest: $IMAGE_DIGEST" "- Attestation URL: $ATTESTATION_URL" \
+              "- Attestation ID: $ATTESTATION_ID" '' '### Pushed tags' '' \
+              '```text' "$IMAGE_TAGS" '```'
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Create the GitHub Release from the changelog
         env:
           GH_TOKEN: ${{ github.token }}
