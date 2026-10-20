@@ -192,69 +192,81 @@ function BookingList({
           )}
         </div>
       ) : (
-        <table className="table">
-          <thead>
-            <tr>
-              <th scope="col">{t('When')}</th>
-              <th scope="col">{t('Event')}</th>
-              <th scope="col">{t('Invitee')}</th>
-              <th scope="col">{t('Status')}</th>
-            </tr>
-          </thead>
-          <tbody ref={list}>
-            {shown.bookings.map((b) => {
-              const invitee = b.attendees.find((a) => a.isBooker) ?? b.attendees[0]
-              const guests = b.attendees.length - 1
-              return (
-                <tr key={b.id}>
-                  <td data-label={t('When')}>
-                    <time dateTime={b.start}>
-                      <span className="nowrap">{format.date(b.start)}</span>{' '}
-                      <span className="nowrap">{format.timeRange(b.start, b.end)}</span>
-                    </time>
-                  </td>
-                  <th scope="row" data-label={t('Event')}>
-                    <Link to={bookingPath(b.id)} data-booking={b.id}>
-                      {b.title}
-                    </Link>
-                  </th>
-                  <td data-label={t('Invitee')}>
-                    {invitee ? (
-                      <>
-                        {invitee.name}
-                        <br />
-                        <span className="muted">{invitee.email}</span>
-                        {guests > 0 && (
-                          <span className="muted">
-                            {' '}
-                            + {guests} {guests === 1 ? t('guest') : t('guests')}
-                          </span>
+        <div className="table-container">
+          <table className="table table-bookings">
+            <thead>
+              <tr>
+                <th scope="col" className="fit">
+                  {t('When')}
+                </th>
+                <th scope="col">{t('Event')}</th>
+                <th scope="col">{t('Invitee')}</th>
+                <th scope="col" className="fit nowrap">
+                  {t('Status')}
+                </th>
+              </tr>
+            </thead>
+            <tbody ref={list}>
+              {shown.bookings.map((b) => {
+                const invitee = b.attendees.find((a) => a.isBooker) ?? b.attendees[0]
+                const guests = b.attendees.length - 1
+                return (
+                  <tr key={b.id}>
+                    <td data-label={t('When')} className="fit">
+                      <div className="table-value">
+                        <time dateTime={b.start}>
+                          <span className="nowrap">{format.date(b.start)}</span>{' '}
+                          <span className="nowrap">{format.timeRange(b.start, b.end)}</span>
+                        </time>
+                      </div>
+                    </td>
+                    <th scope="row" data-label={t('Event')} className="user-content">
+                      <Link to={bookingPath(b.id)} data-booking={b.id}>
+                        {b.title}
+                      </Link>
+                    </th>
+                    <td data-label={t('Invitee')} className="user-content">
+                      <div className="table-value">
+                        {invitee ? (
+                          <>
+                            {invitee.name}
+                            <br />
+                            <span className="muted">{invitee.email}</span>
+                            {guests > 0 && (
+                              <span className="muted">
+                                {' '}
+                                + {guests} {guests === 1 ? t('guest') : t('guests')}
+                              </span>
+                            )}
+                          </>
+                        ) : (
+                          <span className="muted">{t('Unknown')}</span>
                         )}
-                      </>
-                    ) : (
-                      <span className="muted">{t('Unknown')}</span>
-                    )}
-                  </td>
-                  <td data-label={t('Status')}>
-                    {b.status === 'cancelled' && b.rescheduledToId ? (
-                      <>
-                        <span className="badge">{t('Rescheduled')}</span>
-                        <br />
-                        <Link to={bookingPath(b.rescheduledToId)}>
-                          {t('View rescheduled booking')}
-                        </Link>
-                      </>
-                    ) : b.status === 'cancelled' ? (
-                      <span className="badge badge-danger">{t('Cancelled')}</span>
-                    ) : (
-                      <span className="badge badge-success">{t('Confirmed')}</span>
-                    )}
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
+                      </div>
+                    </td>
+                    <td data-label={t('Status')} className="fit">
+                      <div className="table-value">
+                        {b.status === 'cancelled' && b.rescheduledToId ? (
+                          <>
+                            <span className="badge">{t('Rescheduled')}</span>
+                            <br />
+                            <Link to={bookingPath(b.rescheduledToId)}>
+                              {t('View rescheduled booking')}
+                            </Link>
+                          </>
+                        ) : b.status === 'cancelled' ? (
+                          <span className="badge badge-danger">{t('Cancelled')}</span>
+                        ) : (
+                          <span className="badge badge-success">{t('Confirmed')}</span>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
       <p className="visually-hidden" role="status">
         {ui(status)}
