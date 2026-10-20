@@ -3,7 +3,14 @@
 // assets, no tracking. Everything from the booking is someone's input and is treated so.
 import { type InterfaceLanguage, interfaceLanguage } from '@hourmere/core/language'
 import type { MailAttachment, MailMessage } from './index.ts'
-import { escapeHtml, linkableUrl, multiLine, singleLine, subjectLine } from './text.ts'
+import {
+  escapeHtml,
+  formatChineseTemplate,
+  linkableUrl,
+  multiLine,
+  singleLine,
+  subjectLine,
+} from './text.ts'
 
 export type BookingEmailKind =
   | 'confirmed'
@@ -96,11 +103,11 @@ const format = (
   options: Intl.DateTimeFormatOptions,
   language: InterfaceLanguage,
 ) =>
-  time
-    .toLocaleString(
-      language === 'en' ? 'en-US' : language,
-      language === 'zh-CN' && options === TIME ? CHINESE_TIME : options,
-    )
+  new Intl.DateTimeFormat(language === 'en' ? 'en-US' : language, {
+    ...(language === 'zh-CN' && options === TIME ? CHINESE_TIME : options),
+    timeZone: time.timeZoneId,
+  })
+    .format(time.epochMilliseconds)
     .replace(/[\u00a0\u202f]/g, ' ')
 
 /** `Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin)` */
@@ -288,20 +295,20 @@ const chinese = {
   'If the buttons do not work, copy a link into your browser:':
     '如果按钮无法使用，请将链接复制到浏览器中：',
   'Meeting link needs attention: {event} on {when}': '会议链接需要处理：{event}，{when}',
-  'New booking: {event} with {invitee} on {when}': '新预约：与 {invitee} 的{event}，{when}',
-  'Confirmed: {event} with {host} on {when}': '已确认：与 {host} 的{event}，{when}',
-  'Rescheduled: {event} with {other}, now {when}': '已改期：与 {other} 的{event}，现为 {when}',
-  'Cancelled: {event} with {other} on {when}': '已取消：与 {other} 的{event}，{when}',
-  'Reminder: {event} with {other} on {when}': '提醒：与 {other} 的{event}，{when}',
+  'New booking: {event} with {invitee} on {when}': '新预约：与{invitee}的{event}，{when}',
+  'Confirmed: {event} with {host} on {when}': '已确认：与{host}的{event}，{when}',
+  'Rescheduled: {event} with {other}, now {when}': '已改期：与{other}的{event}，现为 {when}',
+  'Cancelled: {event} with {other} on {when}': '已取消：与{other}的{event}，{when}',
+  'Reminder: {event} with {other} on {when}': '提醒：与{other}的{event}，{when}',
   'The time is reserved, but Google Meet could not be prepared. Open this booking in Hourmere to review the problem, retry safe reconciliation or cancel. No final calendar invitation has been sent.':
-    '时段已保留，但无法准备 Google Meet 链接。请在 Hourmere 中打开此预约，查看问题、重试安全核对或取消预约。最终日历邀请尚未发送。',
+    '时段已保留，但无法准备 Google Meet 链接。请在 Hourmere 中打开此预约，查看问题、重试同步或取消预约。最终日历邀请尚未发送。',
   'Your time is reserved, but the host needs to fix the Google Meet link. No final calendar invitation has been sent. You can use the links below to manage or cancel the booking.':
     '时段已为你保留，但主持人需要修复 Google Meet 链接。最终日历邀请尚未发送。你可以使用以下链接管理或取消预约。',
-  '{invitee} booked a meeting with you.': '{invitee} 预约了与你的会议。',
-  'Your meeting with {host} is booked.': '你与 {host} 的会议已预约。',
-  'Your meeting with {other} has moved to a new time.': '你与 {other} 的会议已改期。',
-  'Your meeting with {other} has been cancelled.': '你与 {other} 的会议已取消。',
-  'Your meeting with {other} is coming up.': '你与 {other} 的会议即将开始。',
+  '{invitee} booked a meeting with you.': '{invitee}预约了与你的会议。',
+  'Your meeting with {host} is booked.': '你与{host}的会议已预约。',
+  'Your meeting with {other} has moved to a new time.': '你与{other}的会议已改期。',
+  'Your meeting with {other} has been cancelled.': '你与{other}的会议已取消。',
+  'Your meeting with {other} is coming up.': '你与{other}的会议即将开始。',
 } as const
 
 function message(
@@ -309,10 +316,8 @@ function message(
   key: keyof typeof chinese,
   values: Record<string, string> = {},
 ): string {
-  return (language === 'zh-CN' ? chinese[key] : key).replace(
-    /\{(\w+)\}/g,
-    (placeholder, name: string) => values[name] ?? placeholder,
-  )
+  if (language === 'zh-CN') return formatChineseTemplate(chinese[key], values)
+  return key.replace(/\{(\w+)\}/g, (placeholder, name: string) => values[name] ?? placeholder)
 }
 
 const field = (label: string, text: string) => ({ label, text, html: htmlLines(text) })

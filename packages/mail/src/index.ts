@@ -6,7 +6,7 @@ import { escapeHtml, singleLine } from './text.ts'
 
 export * from './booking.ts'
 export * from './ics.ts'
-export { escapeHtml, multiLine, singleLine, subjectLine } from './text.ts'
+export { escapeHtml, formatChineseTemplate, multiLine, singleLine, subjectLine } from './text.ts'
 
 export interface MailAttachment {
   /** File name shown to the recipient, e.g. `invite.ics`. */

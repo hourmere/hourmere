@@ -337,7 +337,7 @@ exports[`booking email language goldens > zh-CN cancelled guest 1`] = `
 {
   "html": "<!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>已取消：与 Grace Hopper 的Intro call，10/20周二，10:00（Europe/Berlin）</title></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>已取消：与 Grace Hopper 的 Intro call，10月20日周二，10:00（Europe/Berlin）</title></head>
 <body style="font-family: system-ui, sans-serif; line-height: 1.5; color: #111;">
 <p style="margin: 0 0 16px;">你与 Grace Hopper 的会议已取消。</p>
 <table role="presentation" style="border-collapse: collapse;">
@@ -353,7 +353,7 @@ exports[`booking email language goldens > zh-CN cancelled guest 1`] = `
 </body>
 </html>
 ",
-  "subject": "已取消：与 Grace Hopper 的Intro call，10/20周二，10:00（Europe/Berlin）",
+  "subject": "已取消：与 Grace Hopper 的 Intro call，10月20日周二，10:00（Europe/Berlin）",
   "text": "你与 Grace Hopper 的会议已取消。
 
 活动：Intro call
@@ -370,7 +370,7 @@ exports[`booking email language goldens > zh-CN cancelled host 1`] = `
 {
   "html": "<!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>已取消：与 Ada Lovelace 的Intro call，10/20周二，04:00（America/New_York）</title></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>已取消：与 Ada Lovelace 的 Intro call，10月20日周二，04:00（America/New_York）</title></head>
 <body style="font-family: system-ui, sans-serif; line-height: 1.5; color: #111;">
 <p style="margin: 0 0 16px;">你与 Ada Lovelace 的会议已取消。</p>
 <table role="presentation" style="border-collapse: collapse;">
@@ -388,7 +388,7 @@ exports[`booking email language goldens > zh-CN cancelled host 1`] = `
 </body>
 </html>
 ",
-  "subject": "已取消：与 Ada Lovelace 的Intro call，10/20周二，04:00（America/New_York）",
+  "subject": "已取消：与 Ada Lovelace 的 Intro call，10月20日周二，04:00（America/New_York）",
   "text": "你与 Ada Lovelace 的会议已取消。
 
 活动：Intro call
@@ -411,7 +411,7 @@ exports[`booking email language goldens > zh-CN cancelled invitee 1`] = `
 {
   "html": "<!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>已取消：与 Grace Hopper 的Intro call，10/20周二，10:00（Europe/Berlin）</title></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>已取消：与 Grace Hopper 的 Intro call，10月20日周二，10:00（Europe/Berlin）</title></head>
 <body style="font-family: system-ui, sans-serif; line-height: 1.5; color: #111;">
 <p style="margin: 0 0 16px;">你与 Grace Hopper 的会议已取消。</p>
 <table role="presentation" style="border-collapse: collapse;">
@@ -427,7 +427,7 @@ exports[`booking email language goldens > zh-CN cancelled invitee 1`] = `
 </body>
 </html>
 ",
-  "subject": "已取消：与 Grace Hopper 的Intro call，10/20周二，10:00（Europe/Berlin）",
+  "subject": "已取消：与 Grace Hopper 的 Intro call，10月20日周二，10:00（Europe/Berlin）",
   "text": "你与 Grace Hopper 的会议已取消。
 
 活动：Intro call
@@ -444,7 +444,7 @@ exports[`booking email language goldens > zh-CN confirmed guest 1`] = `
 {
   "html": "<!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>已确认：与 Grace Hopper 的Intro call，10/20周二，10:00（Europe/Berlin）</title></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>已确认：与 Grace Hopper 的 Intro call，10月20日周二，10:00（Europe/Berlin）</title></head>
 <body style="font-family: system-ui, sans-serif; line-height: 1.5; color: #111;">
 <p style="margin: 0 0 16px;">你与 Grace Hopper 的会议已预约。</p>
 <table role="presentation" style="border-collapse: collapse;">
@@ -459,7 +459,7 @@ exports[`booking email language goldens > zh-CN confirmed guest 1`] = `
 </body>
 </html>
 ",
-  "subject": "已确认：与 Grace Hopper 的Intro call，10/20周二，10:00（Europe/Berlin）",
+  "subject": "已确认：与 Grace Hopper 的 Intro call，10月20日周二，10:00（Europe/Berlin）",
   "text": "你与 Grace Hopper 的会议已预约。
 
 活动：Intro call
@@ -476,7 +476,7 @@ exports[`booking email language goldens > zh-CN confirmed host 1`] = `
 {
   "html": "<!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>新预约：与 Ada Lovelace 的Intro call，10/20周二，04:00（America/New_York）</title></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>新预约：与 Ada Lovelace 的 Intro call，10月20日周二，04:00（America/New_York）</title></head>
 <body style="font-family: system-ui, sans-serif; line-height: 1.5; color: #111;">
 <p style="margin: 0 0 16px;">Ada Lovelace 预约了与你的会议。</p>
 <table role="presentation" style="border-collapse: collapse;">
@@ -493,7 +493,7 @@ exports[`booking email language goldens > zh-CN confirmed host 1`] = `
 </body>
 </html>
 ",
-  "subject": "新预约：与 Ada Lovelace 的Intro call，10/20周二，04:00（America/New_York）",
+  "subject": "新预约：与 Ada Lovelace 的 Intro call，10月20日周二，04:00（America/New_York）",
   "text": "Ada Lovelace 预约了与你的会议。
 
 活动：Intro call
@@ -516,7 +516,7 @@ exports[`booking email language goldens > zh-CN confirmed invitee 1`] = `
 {
   "html": "<!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>已确认：与 Grace Hopper 的Intro call，10/20周二，10:00（Europe/Berlin）</title></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>已确认：与 Grace Hopper 的 Intro call，10月20日周二，10:00（Europe/Berlin）</title></head>
 <body style="font-family: system-ui, sans-serif; line-height: 1.5; color: #111;">
 <p style="margin: 0 0 16px;">你与 Grace Hopper 的会议已预约。</p>
 <table role="presentation" style="border-collapse: collapse;">
@@ -533,7 +533,7 @@ exports[`booking email language goldens > zh-CN confirmed invitee 1`] = `
 </body>
 </html>
 ",
-  "subject": "已确认：与 Grace Hopper 的Intro call，10/20周二，10:00（Europe/Berlin）",
+  "subject": "已确认：与 Grace Hopper 的 Intro call，10月20日周二，10:00（Europe/Berlin）",
   "text": "你与 Grace Hopper 的会议已预约。
 
 活动：Intro call
@@ -554,7 +554,7 @@ exports[`booking email language goldens > zh-CN rescheduled guest 1`] = `
 {
   "html": "<!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>已改期：与 Grace Hopper 的Intro call，现为 10/20周二，10:00（Europe/Berlin）</title></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>已改期：与 Grace Hopper 的 Intro call，现为 10月20日周二，10:00（Europe/Berlin）</title></head>
 <body style="font-family: system-ui, sans-serif; line-height: 1.5; color: #111;">
 <p style="margin: 0 0 16px;">你与 Grace Hopper 的会议已改期。</p>
 <table role="presentation" style="border-collapse: collapse;">
@@ -570,7 +570,7 @@ exports[`booking email language goldens > zh-CN rescheduled guest 1`] = `
 </body>
 </html>
 ",
-  "subject": "已改期：与 Grace Hopper 的Intro call，现为 10/20周二，10:00（Europe/Berlin）",
+  "subject": "已改期：与 Grace Hopper 的 Intro call，现为 10月20日周二，10:00（Europe/Berlin）",
   "text": "你与 Grace Hopper 的会议已改期。
 
 活动：Intro call
@@ -588,7 +588,7 @@ exports[`booking email language goldens > zh-CN rescheduled host 1`] = `
 {
   "html": "<!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>已改期：与 Ada Lovelace 的Intro call，现为 10/20周二，04:00（America/New_York）</title></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>已改期：与 Ada Lovelace 的 Intro call，现为 10月20日周二，04:00（America/New_York）</title></head>
 <body style="font-family: system-ui, sans-serif; line-height: 1.5; color: #111;">
 <p style="margin: 0 0 16px;">你与 Ada Lovelace 的会议已改期。</p>
 <table role="presentation" style="border-collapse: collapse;">
@@ -606,7 +606,7 @@ exports[`booking email language goldens > zh-CN rescheduled host 1`] = `
 </body>
 </html>
 ",
-  "subject": "已改期：与 Ada Lovelace 的Intro call，现为 10/20周二，04:00（America/New_York）",
+  "subject": "已改期：与 Ada Lovelace 的 Intro call，现为 10月20日周二，04:00（America/New_York）",
   "text": "你与 Ada Lovelace 的会议已改期。
 
 活动：Intro call
@@ -630,7 +630,7 @@ exports[`booking email language goldens > zh-CN rescheduled invitee 1`] = `
 {
   "html": "<!doctype html>
 <html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>已改期：与 Grace Hopper 的Intro call，现为 10/20周二，10:00（Europe/Berlin）</title></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>已改期：与 Grace Hopper 的 Intro call，现为 10月20日周二，10:00（Europe/Berlin）</title></head>
 <body style="font-family: system-ui, sans-serif; line-height: 1.5; color: #111;">
 <p style="margin: 0 0 16px;">你与 Grace Hopper 的会议已改期。</p>
 <table role="presentation" style="border-collapse: collapse;">
@@ -648,7 +648,7 @@ exports[`booking email language goldens > zh-CN rescheduled invitee 1`] = `
 </body>
 </html>
 ",
-  "subject": "已改期：与 Grace Hopper 的Intro call，现为 10/20周二，10:00（Europe/Berlin）",
+  "subject": "已改期：与 Grace Hopper 的 Intro call，现为 10月20日周二，10:00（Europe/Berlin）",
   "text": "你与 Grace Hopper 的会议已改期。
 
 活动：Intro call

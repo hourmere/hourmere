@@ -427,6 +427,86 @@ describe.skipIf(!serverUrl)('iMIP interoperability', () => {
     },
   )
 
+  it.each([
+    {
+      hostName: 'Grace Hopper',
+      inviteeName: 'Ada Lovelace',
+      title: 'Fixture booking',
+      hostSummary: 'Fixture booking（与 Ada Lovelace）',
+      attendeeSummary: 'Fixture booking（与 Grace Hopper）',
+      description: '通过 Hourmere 与 Grace Hopper 预约。',
+    },
+    {
+      hostName: '王小明',
+      inviteeName: '李雷',
+      title: '项目预约',
+      hostSummary: '项目预约（与李雷）',
+      attendeeSummary: '项目预约（与王小明）',
+      description: '通过 Hourmere 与王小明预约。',
+    },
+    {
+      hostName: 'Élodie王',
+      inviteeName: '王Ada',
+      title: 'Alpha项目',
+      hostSummary: 'Alpha项目（与王Ada）',
+      attendeeSummary: 'Alpha项目（与 Élodie王）',
+      description: '通过 Hourmere 与 Élodie王预约。',
+    },
+    {
+      hostName: '王Élodie',
+      inviteeName: 'Ada王',
+      title: '项目Alpha',
+      hostSummary: '项目Alpha（与 Ada王）',
+      attendeeSummary: '项目Alpha（与王Élodie）',
+      description: '通过 Hourmere 与王Élodie 预约。',
+    },
+  ])(
+    'spaces only generated Chinese/Latin invitation boundaries ($hostName / $inviteeName)',
+    async ({ hostName, inviteeName, title, hostSummary, attendeeSummary, description }) => {
+      const info = await setup()
+      await db
+        .updateTable('auth.user')
+        .set({ name: hostName })
+        .where('id', '=', info.host.userId)
+        .execute()
+      await db
+        .updateTable('profiles')
+        .set({ locale: 'zh-CN' })
+        .where('user_id', '=', info.host.userId)
+        .execute()
+      const prepare = async (bookingId: string) => {
+        await db.updateTable('bookings').set({ title }).where('id', '=', bookingId).execute()
+        await db
+          .updateTable('booking_attendees')
+          .set({ name: inviteeName, locale: 'zh-CN' })
+          .where('booking_id', '=', bookingId)
+          .execute()
+      }
+      await prepare(info.booking)
+      const mail = capture()
+      await mail.send(info.booking, 'confirmed')
+      const next = await move(info)
+      await prepare(next)
+      await mail.send(next, 'rescheduled')
+      await db
+        .updateTable('bookings')
+        .set({ status: 'cancelled', cancelled_at: '2026-10-19T12:00Z' })
+        .where('id', '=', next)
+        .execute()
+      await mail.send(next, 'cancelled')
+      expect(mail.sent).toHaveLength(6)
+      for (const [index, message] of mail.sent.entries()) {
+        const component = event(message)
+        expect(component.getFirstPropertyValue('summary')).toBe(
+          message.to === hostEmail ? hostSummary : attendeeSummary,
+        )
+        expect(component.getFirstPropertyValue('description')).toBe(description)
+        expect(component.getFirstPropertyValue('uid')).toBe(`${info.booking}@hourmere`)
+        expect(component.getFirstPropertyValue('sequence')).toBe(Math.floor(index / 2))
+      }
+    },
+  )
+
   it.each(['en', 'zh-CN'])(
     'localizes generated answers using the host language and preserves user text (%s)',
     async (locale) => {
@@ -489,7 +569,7 @@ describe.skipIf(!serverUrl)('iMIP interoperability', () => {
     expect(mail.sent[0]?.text).toContain('主持人')
     expect(mail.sent[0]?.text).not.toContain('Host')
     expect(event(mail.sent[0] as MailMessage).getFirstPropertyValue('summary')).toBe(
-      'Fixture booking（与 主持人）',
+      'Fixture booking（与主持人）',
     )
   })
 

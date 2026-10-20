@@ -432,8 +432,11 @@ processes need a worker for sign-in mail, just as they do for booking notificati
 Sign-in emails use the requester's interface-language cookie (`hourmere-language`), then
 the request's `Accept-Language`, then English. That choice is stored inside the encrypted
 outbox payload so a worker and its retries use the same language; older queued payloads
-without a language remain English. Direct delivery uses the same selection. Subjects,
-plain text, HTML and HTML `lang` are localized together.
+without a language remain English. Workers ignore unknown additive outbox fields and
+fall back to English for unsupported languages while still validating the recipient and
+sign-in URL. Restart web and worker processes together when upgrading: older workers
+strictly reject the new `language` field and discard the email. Direct delivery uses the
+same selection. Subjects, plain text, HTML and HTML `lang` are localized together.
 
 ## Guest email controls
 

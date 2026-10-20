@@ -23,6 +23,12 @@ const Request = z.strictObject({
   // Old encrypted outbox rows have no language and keep the original English template.
   language: z.enum(['en', 'zh-CN']).optional(),
 })
+// A newer web process may enqueue additive metadata or a language this worker does
+// not support. Ignore that metadata and use English while still validating credentials.
+const StoredRequest = z.object({
+  ...Request.shape,
+  language: Request.shape.language.catch(undefined),
+})
 export const SignInEmailPayload = z.strictObject({ emailId: z.uuid() })
 
 export interface SignInEmailDeps {
@@ -67,7 +73,7 @@ function open(deps: SealDeps, id: string, value: Buffer): z.output<typeof Reques
     const text = Buffer.concat([decipher.update(value.subarray(29)), decipher.final()]).toString(
       'utf8',
     )
-    return Request.parse(JSON.parse(text))
+    return StoredRequest.parse(JSON.parse(text))
   } catch {
     return undefined
   }

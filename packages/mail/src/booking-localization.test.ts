@@ -128,6 +128,29 @@ describe('calendar-decline footer', () => {
 })
 
 describe('localized dates and generated copy', () => {
+  it('uses Intl month names in Chinese subjects with the recipient local date and time', () => {
+    const overnight = {
+      ...meeting,
+      start: at('2026-10-27T00:30:00Z'),
+      end: at('2026-10-27T01:00:00Z'),
+    }
+    for (const [timeZone, short, long] of [
+      ['Europe/Berlin', '10月27日周二，01:30', '2026年10月27日星期二，01:30 至 02:00'],
+      ['America/New_York', '10月26日周一，20:30', '2026年10月26日星期一，20:30 至 21:00'],
+      ['invalid/zone', '10月27日周二，00:30', '2026年10月27日星期二，00:30 至 01:00'],
+    ] as const) {
+      const zone = timeZone === 'invalid/zone' ? 'UTC' : timeZone
+      const message = bookingEmail('confirmed', overnight, {
+        ...recipients.invitee,
+        locale: 'zh-CN',
+        timeZone,
+      })
+      expect(message.subject).toBe(`已确认：与 Grace Hopper 的 Intro call，${short}（${zone}）`)
+      expect(message.text).toContain(`时间：${long}（${zone}）`)
+      expect(message.html).toContain(`${long}（${zone}）`)
+    }
+  })
+
   it('uses Chinese dates and 24-hour time in the recipient zone, including overnight and DST', () => {
     expect(formatMeetingTime(meeting.start, meeting.end, 'Europe/Berlin', 'zh-CN')).toBe(
       '2026年10月20日星期二，10:00 至 10:30（Europe/Berlin）',
@@ -154,6 +177,65 @@ describe('localized dates and generated copy', () => {
     expect(formatMeetingTime(meeting.start, meeting.end, 'invalid/zone', 'zh-CN')).toBe(
       '2026年10月20日星期二，08:00 至 08:30（UTC）',
     )
+  })
+
+  it.each([
+    {
+      name: 'Ada Lovelace',
+      event: 'Intro call',
+      phrase: '与 Ada Lovelace 的 Intro call',
+      attendeeIntro: '你与 Ada Lovelace 的会议',
+      hostIntro: 'Ada Lovelace 预约了与你的会议。',
+    },
+    {
+      name: '张三',
+      event: '初次交流',
+      phrase: '与张三的初次交流',
+      attendeeIntro: '你与张三的会议',
+      hostIntro: '张三预约了与你的会议。',
+    },
+    {
+      name: 'Zoë',
+      event: 'Échange',
+      phrase: '与 Zoë 的 Échange',
+      attendeeIntro: '你与 Zoë 的会议',
+      hostIntro: 'Zoë 预约了与你的会议。',
+    },
+    {
+      name: '李Ada',
+      event: '初次Intro交流',
+      phrase: '与李Ada 的初次Intro交流',
+      attendeeIntro: '你与李Ada 的会议',
+      hostIntro: '李Ada 预约了与你的会议。',
+    },
+  ])(
+    'spaces Chinese email substitutions by script for $name and $event',
+    ({ name, event, phrase, attendeeIntro, hostIntro }) => {
+      for (const kind of [...kinds, 'reminder'] as const) {
+        for (const role of roles) {
+          const message = bookingEmail(
+            kind,
+            { ...meeting, hostName: name, inviteeName: name, eventName: event },
+            { ...recipients[role], locale: 'zh-CN' },
+          )
+          expect(message.subject).toContain(phrase)
+          expect(message.text).toContain(`活动：${event}`)
+          expect(message.html).toContain(event)
+          expect(message.text).toContain(
+            role === 'host' && kind === 'confirmed' ? hostIntro : attendeeIntro,
+          )
+        }
+      }
+    },
+  )
+
+  it('describes retrying a failed meeting link as synchronizing again', () => {
+    const message = bookingEmail('conference_failed', meeting, {
+      ...recipients.host,
+      locale: 'zh-CN',
+    })
+    expect(message.text).toContain('查看问题、重试同步或取消预约。')
+    expect(message.html).toContain('查看问题、重试同步或取消预约。')
   })
 
   it('falls back to the complete English email for unsupported preferences', () => {

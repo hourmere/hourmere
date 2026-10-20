@@ -96,6 +96,12 @@ schema downgrade is not automatic. Direct source deployments require Node.js 26.
 Hourmere requires PostgreSQL 18+ because migrations use `uuidv7()`; the provided Compose
 stack includes PostgreSQL 18.
 
+- **Restart web and worker processes together for localized sign-in mail.** Stop all
+  old web/all/worker processes and restart every role with the upgraded code. New sign-in
+  outbox payloads include `language`; an old worker rejects that unknown field and
+  discards the email instead of delivering it. Updated workers accept additive outbox
+  metadata and fall back to English for unsupported languages, but cannot change the
+  behavior of an old worker that is still running.
 - **Coordinate the calendar-email upgrade.** Stop all old web/all/worker processes before
   applying `0038_booking_ical_identity.sql`, including processes on other hosts, then restart
   every role with the new code. This upgrade does not support rolling deployment.

@@ -1,5 +1,32 @@
 import { describe, expect, it } from 'vitest'
-import { escapeHtml, linkableUrl, multiLine, singleLine, subjectLine } from './text.ts'
+import {
+  escapeHtml,
+  formatChineseTemplate,
+  linkableUrl,
+  multiLine,
+  singleLine,
+  subjectLine,
+} from './text.ts'
+
+describe('formatChineseTemplate', () => {
+  it.each([
+    { name: 'Ada Lovelace', event: 'Intro call', expected: '与 Ada Lovelace 的 Intro call' },
+    { name: '张三', event: '初次交流', expected: '与张三的初次交流' },
+    { name: 'Zoë', event: 'Échange', expected: '与 Zoë 的 Échange' },
+    { name: 'Andre\u0301', event: 'Intro call', expected: '与 Andre\u0301 的 Intro call' },
+    { name: 'Ada李', event: '初次Intro交流', expected: '与 Ada李的初次Intro交流' },
+    { name: '李Ada', event: 'Intro初次交流', expected: '与李Ada 的 Intro初次交流' },
+    { name: 'Δημήτρης', event: '初次交流', expected: '与Δημήτρης的初次交流' },
+  ])('spaces only Han/Latin boundaries for $name and $event', ({ name, event, expected }) => {
+    expect(formatChineseTemplate('与{name}的{event}', { name, event })).toBe(expected)
+  })
+
+  it('preserves internal user text, punctuation and unrecognized placeholders', () => {
+    expect(formatChineseTemplate('活动：{event}，{unknown}', { event: 'Intro中文{host}' })).toBe(
+      '活动：Intro中文{host}，{unknown}',
+    )
+  })
+})
 
 describe('subjectLine', () => {
   it('keeps a subject on one line, so it cannot end the header and start another', () => {

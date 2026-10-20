@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from 'node:crypto'
+import { createCipheriv, hkdfSync, randomBytes, randomUUID } from 'node:crypto'
 import { createAuth, createAuthPool, type SignupPolicy } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
@@ -130,6 +130,36 @@ describe.skipIf(!serverUrl)('queued sign-in email', () => {
     expect(row).toBeDefined()
     return row as NonNullable<typeof row>
   }
+  async function enqueueStoredPayload(overrides: Record<string, unknown>) {
+    await existing()
+    const send = queuedSignInEmail(queue, deps())
+    let payload: Record<string, unknown> = {}
+    const auth = authWith({
+      sender: async (input) => {
+        payload = { ...input, ...overrides }
+        await send(input)
+      },
+    })
+    expect((await request(auth)).status).toBe(200)
+    const row = (await rows())[0] as Awaited<ReturnType<typeof enqueueExisting>>
+    // Seal a newer producer's private payload without weakening the current producer.
+    const iv = randomBytes(12)
+    const key = Buffer.from(hkdfSync('sha256', secret, 'Hourmere sign-in email', 'outbox-v1', 32))
+    const cipher = createCipheriv('aes-256-gcm', key, iv)
+    cipher.setAAD(Buffer.from(`hourmere:sign-in-email:v1:${publicUrl}:${row.id}`))
+    const encrypted = Buffer.concat([
+      cipher.update(JSON.stringify(payload), 'utf8'),
+      cipher.final(),
+    ])
+    await db
+      .updateTable('sign_in_emails')
+      .set({
+        encrypted_payload: Buffer.concat([Buffer.from([1]), iv, cipher.getAuthTag(), encrypted]),
+      })
+      .where('id', '=', row.id)
+      .execute()
+    return row
+  }
 
   it.each([
     [
@@ -198,6 +228,56 @@ describe.skipIf(!serverUrl)('queued sign-in email', () => {
     expect(sent[0]?.subject).toBe('Sign in to Hourmere')
     expect(sent[0]?.html).toContain('<html lang="en">')
   })
+
+  it('delivers a newer encrypted payload with unknown optional metadata', async () => {
+    const row = await enqueueStoredPayload({ language: 'zh-CN', futureMetadata: true })
+    const log = vi.fn()
+    await deliverSignInEmail(deps({ log }), row.id)
+    expect(sent).toHaveLength(1)
+    expect(sent[0]?.subject).toBe('登录 Hourmere')
+    expect(sent[0]?.html).toContain('<html lang="zh-CN">')
+    expect(await rows()).toEqual([])
+    expect(log).not.toHaveBeenCalled()
+  })
+
+  it.each(['fr-FR', null, { tag: 'zh-CN' }])(
+    'falls back to English for an unrecognized optional stored language: %j',
+    async (language) => {
+      const row = await enqueueStoredPayload({ language })
+      await deliverSignInEmail(deps(), row.id)
+      expect(sent).toHaveLength(1)
+      expect(sent[0]?.subject).toBe('Sign in to Hourmere')
+      expect(sent[0]?.html).toContain('<html lang="en">')
+      expect(await rows()).toEqual([])
+    },
+  )
+
+  it.each([{ email: 'invalid' }, { email: null }, { url: null }])(
+    'still discards invalid required credentials in a newer stored payload: %j',
+    async (invalid) => {
+      const row = await enqueueStoredPayload({ futureMetadata: true, ...invalid })
+      const log = vi.fn()
+      await deliverSignInEmail(deps({ log }), row.id)
+      expect(sent).toEqual([])
+      expect(await rows()).toEqual([])
+      expect(log.mock.calls).toEqual([['[auth] discarded an unavailable queued sign-in email']])
+    },
+  )
+
+  it.each([{ futureMetadata: true }, { language: 'fr-FR' }])(
+    'refuses noncanonical input in the current producer: %j',
+    async (invalid) => {
+      await existing()
+      const send = queuedSignInEmail(queue, deps())
+      const auth = authWith({
+        sender: (input) => send({ ...input, ...invalid } as Parameters<typeof send>[0]),
+      })
+      await expect(request(auth)).rejects.toThrow('Sign-in email could not be queued')
+      expect(queued).toEqual([])
+      expect(await rows()).toEqual([])
+      expect(sent).toEqual([])
+    },
+  )
 
   it('queues every address with no request-time eligibility lookup, no SMTP, and no plaintext in jobs/outbox', async () => {
     const tables: string[] = []

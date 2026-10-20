@@ -10,6 +10,7 @@ import {
   type BookingEmailKind,
   type BookingEmailMeeting,
   bookingEmail,
+  formatChineseTemplate,
   type IcsPerson,
   icsAttachment,
   type Mailer,
@@ -724,11 +725,13 @@ async function deliverBookingNotification(
           // Each recipient sees the other person, while UID/SEQUENCE retain event identity.
           summary:
             language === 'zh-CN'
-              ? `${booking.eventName}（与 ${other}）`
+              ? formatChineseTemplate('{event}（与{other}）', { event: booking.eventName, other })
               : `${booking.eventName} with ${other}`,
           description: modern
             ? language === 'zh-CN'
-              ? `通过 Hourmere 与 ${calendarOrganizer.name} 预约。`
+              ? formatChineseTemplate('通过 Hourmere 与{name}预约。', {
+                  name: calendarOrganizer.name,
+                })
               : `Booked with ${calendarOrganizer.name} using Hourmere.`
             : undefined,
           location: booking.location ? meetingLocationText(booking.location) : undefined,
