@@ -53,7 +53,8 @@ for (const selected of ['en', 'zh-CN'] as const) {
     const first = await app.roundRobinState('rotating-introduction')
     expect(first.sequence).toBe('1')
     expect(first.assignedNames).toHaveLength(1)
-    await expect(page.getByText(`${first.assignedNames[0]} (UTC)`, { exact: true })).toBeVisible()
+    const hostDetail = zh ? `${first.assignedNames[0]}（UTC）` : `${first.assignedNames[0]} (UTC)`
+    await expect(page.getByText(hostDetail, { exact: true })).toBeVisible()
     const manage = await page
       .getByLabel(
         zh ? '用于更改或取消此预约的链接' : 'Your link to change or cancel this booking',
