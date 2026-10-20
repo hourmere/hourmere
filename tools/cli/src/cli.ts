@@ -1,6 +1,6 @@
-import { constants, readFileSync } from 'node:fs'
+import { constants } from 'node:fs'
 import { open } from 'node:fs/promises'
-import { CliError, callTool, endpoint, isObject, MAX_INPUT_BYTES } from './client.ts'
+import { CliError, callTool, endpoint, isObject, MAX_INPUT_BYTES, version } from './client.ts'
 
 const COMMANDS = {
   whoami: 'whoami',
@@ -17,12 +17,6 @@ const COMMANDS = {
   'retry-meeting': 'retry_conference',
   'retry-calendar-copy': 'retry_calendar_copy',
 } as const
-
-const { version } = JSON.parse(
-  readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
-) as {
-  version: string
-}
 
 export const HELP = `Usage: hourmere COMMAND [--input FILE|-] [--output FILE] [--url ORIGIN]
        hourmere --help | --version

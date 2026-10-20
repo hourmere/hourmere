@@ -1,5 +1,6 @@
 {
   "name": "hourmere",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "license": "AGPL-3.0-only",
@@ -12,6 +13,7 @@
     "tools/*"
   ],
   "scripts": {
+    "version": "node scripts/sync-version.ts && biome format --write server.json",
     "cli": "node tools/cli/src/index.ts",
     "cli:build": "tsc -p tools/cli/tsconfig.build.json",
     "cli:pack-smoke": "node tools/cli/scripts/pack-smoke.ts",
