@@ -83,6 +83,8 @@
   max-width: 48px;
   aspect-ratio: 1;
   min-height: 40px;
+  /* Keep localized labels such as 10日 intact inside the narrow seven-column grid. */
+  padding: 0;
   border: 0;
   border-radius: 999px;
   background: transparent;

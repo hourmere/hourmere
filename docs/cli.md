@@ -84,6 +84,12 @@ pass it as `after` until null. Booking lists return `nextCursor`; pass it as `cu
 null. The CLI makes one bounded request per invocation, rather than silently fetching an
 unlimited list. Availability can change between pages and before booking.
 
+Host booking fields from `list` include optional `rescheduledToId`: the immediate successor
+in the same organization that the caller also hosts, or null when none is available. It is
+returned even when the successor falls outside the current page or filters. Public/manage
+responses omit it. The predecessor's `status` remains `cancelled`; `rescheduledToId`
+distinguishes a reschedule, while `rescheduledFromId` points back to the predecessor.
+
 ## Booking and private results
 
 Choose a slot's UTC `start` unchanged. A booking input could contain:
@@ -145,7 +151,7 @@ successful booking, and retain the original request. Inspect the server before r
   filename for each attempt. A different request with the same key gets
   `idempotency_key_reused`.
 - **Rescheduling is not idempotent.** Never retry automatically. Inspect `list` and
-  `rescheduledFromId` first. The previous booking ID points to a cancelled booking. A
+  `rescheduledToId` and `rescheduledFromId` first. The previous booking ID points to a cancelled booking. A
   booking-specific token stays there after an invitee move, but follows host moves;
   an email token always follows the chain and retrying it can move the meeting again.
 - Cancellation cannot be undone. Repeating it returns `booking_cancelled`.

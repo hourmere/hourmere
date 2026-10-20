@@ -58,6 +58,13 @@ must approve publication through the [release workflow](https://github.com/hourm
   language; hosts use their profile language. Sign-in emails follow the requesting
   interface language. Calendar-decline footers appear on confirmations and reschedules
   only when a REQUEST invitation is included, and never on cancellations.
+- Calendar and conference settings now translate integration errors and provider notices in
+  English and Simplified Chinese. Calendar destinations require a profile, and a profile
+  lookup failure leaves connected calendars usable with a retry hint. Calendar controls
+  show each name once with clearer separation. Private booking links recover a concurrent
+  host reschedule with one bounded read and keep the invitee's existing management access.
+- Simplified Chinese public booking calendars keep date labels on one line and separate
+  today's marker from the date at mobile and desktop widths.
 - Booking email invitations align new calendar organizers with the configured sending
   mailbox, distinguish calendar acceptance from booking confirmation, and use calendar MIME
   alternatives with downloadable ICS copies. Hosts with pinned provider copies receive
@@ -72,6 +79,13 @@ must approve publication through the [release workflow](https://github.com/hourm
   identity, including recovery of legacy import-created pending requests.
 - Exhausted automatic Meet polling reports `conference_pending_timeout`, distinct from
   transport/provider failures, and explains the safe host retry in both interface languages.
+
+### Deprecated
+
+- The Zoom conflict code `zoom_refresh_in_progress` is deprecated in favor of the additive
+  `errorAlias: "zoom_operation_busy"`. The original `error` code remains for all of
+  `/api/v1`; it will not be renamed or removed within v1. New clients may use a documented
+  alias when present and must retain support for the original code on older servers.
 
 ### Upgrade notes
 

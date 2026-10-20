@@ -235,6 +235,12 @@ uses descending order for the complete paginated history. Optional `endAfter` (s
 after) and `endTo` (at or before) filter by booking end time; Upcoming includes in-progress
 meetings. Keep filters unchanged while paginating.
 
+Host booking fields include optional `rescheduledToId`: the immediate successor in the same
+organization that the caller also hosts, or null when none is available. It is returned even
+when the successor falls outside the current page or filters. Public/manage responses omit
+it. The predecessor's `status` remains `cancelled`; use `rescheduledToId` to distinguish a
+reschedule from a cancellation, and `rescheduledFromId` to trace back to its predecessor.
+
 Each tool's description and JSON Schemas (`tools/list`) say what it needs and returns; the
 fields are those of the REST API (`/api/v1/openapi.json`). Results come as
 `structuredContent` and, for older clients, as the same JSON in a text block.
@@ -264,7 +270,7 @@ fields are those of the REST API (`/api/v1/openapi.json`). Results come as
   successor and returns `manageToken: null`: manage tokens are the invitee's secret.
   The existing response-token hash moves atomically to the successor, and all earlier
   email links keep following the chain. Retrying the old ID fails with `booking_cancelled`. After a lost response,
-  inspect `list_bookings` and `rescheduledFromId` before deciding what to do next.
+  inspect `list_bookings`, `rescheduledToId` and `rescheduledFromId` before deciding what to do next.
   People and REST clients use the same service through `POST /api/v1/bookings/{id}/reschedule`
   (`{ start }`); the admin booking detail page offers the same action and authorized slots.
 - **Emails:** bookings made, moved or cancelled through MCP send the same emails as the

@@ -78,6 +78,12 @@ Discovery results use bounded pages: pass `nextAfter` as `after`, or a booking l
 `nextCursor` as `cursor`, keeping all filters unchanged. Errors are JSON on stderr.
 Exit codes: `0` success, `1` usage/input/domain/protocol error, `3` transport failure.
 
+Host booking fields from `list` include optional `rescheduledToId`: the immediate successor
+in the same organization that the caller also hosts, or null when none is available, even
+outside the current page or filters. Public/manage responses omit it. The predecessor's
+`status` remains `cancelled`; follow `rescheduledToId` forward and `rescheduledFromId` back
+when inspecting a move after a lost response.
+
 See the [complete CLI guide](https://github.com/hourmere/hourmere/blob/main/docs/cli.md)
 for argument tables, private results, pagination and recovery, and the
 [MCP guide](https://github.com/hourmere/hourmere/blob/main/docs/mcp.md) for tool semantics.
