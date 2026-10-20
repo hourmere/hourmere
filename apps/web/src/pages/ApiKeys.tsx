@@ -339,12 +339,20 @@ function KeyTable({
         <thead>
           <tr>
             <th scope="col">{t('Name')}</th>
-            <th scope="col">{t('Key')}</th>
+            <th scope="col" className="fit nowrap">
+              {t('Key')}
+            </th>
             <th scope="col">{t('Organization')}</th>
-            <th scope="col">{t('Created')}</th>
-            <th scope="col">{t('Last used')}</th>
-            <th scope="col">{t('Expires')}</th>
-            <th scope="col">
+            <th scope="col" className="fit nowrap">
+              {t('Created')}
+            </th>
+            <th scope="col" className="fit nowrap">
+              {t('Last used')}
+            </th>
+            <th scope="col" className="fit nowrap">
+              {t('Expires')}
+            </th>
+            <th scope="col" className="fit">
               <span className="visually-hidden">{t('Actions')}</span>
             </th>
           </tr>
@@ -352,22 +360,22 @@ function KeyTable({
         <tbody>
           {keys.map((key) => (
             <tr key={key.id}>
-              <th scope="row" data-label={t('Name')}>
+              <th scope="row" data-label={t('Name')} className="user-content">
                 {key.name || <span className="muted">{t('Unnamed')}</span>}
                 {!key.enabled && <span className="badge">{t('Disabled')}</span>}
               </th>
-              <td data-label={t('Key')}>
+              <td data-label={t('Key')} className="fit nowrap">
                 <div className="table-value">
                   <code>{key.start ? `${key.start}…` : '…'}</code>
                 </div>
               </td>
-              <td data-label={t('Organization')}>
+              <td data-label={t('Organization')} className="user-content">
                 <div className="table-value">{organizationOf(key, organizations, t)}</div>
               </td>
-              <td data-label={t('Created')}>
+              <td data-label={t('Created')} className="fit nowrap">
                 <div className="table-value">{formatDate(key.createdAt, displayLocale)}</div>
               </td>
-              <td data-label={t('Last used')}>
+              <td data-label={t('Last used')} className="fit nowrap">
                 <div className="table-value">
                   {key.lastRequest ? (
                     formatDate(key.lastRequest, displayLocale, true)
@@ -376,7 +384,7 @@ function KeyTable({
                   )}
                 </div>
               </td>
-              <td data-label={t('Expires')}>
+              <td data-label={t('Expires')} className="fit nowrap">
                 <div className="table-value">
                   {key.expiresAt === null ? (
                     <span className="muted">{t('Never')}</span>

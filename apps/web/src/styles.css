@@ -665,13 +665,24 @@ input[readonly] {
   min-width: 0;
 }
 
+/*
+ * Columns are sized by their content (auto layout). Cells that can hold long user content
+ * (names, emails, links) carry `user-content` and may break anywhere; short values (dates,
+ * times, numbers, durations, badges) carry `nowrap` and stay on one line, and `fit` columns
+ * shrink to them. Headers break only between words.
+ */
 .table {
   width: 100%;
-  table-layout: fixed;
+  table-layout: auto;
   border-collapse: collapse;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
+}
+
+.table caption {
+  margin-bottom: var(--space-2);
+  text-align: start;
 }
 
 .table th,
@@ -680,7 +691,6 @@ input[readonly] {
   border-bottom: 1px solid var(--border);
   text-align: left;
   vertical-align: top;
-  overflow-wrap: anywhere;
 }
 
 .table thead th {
@@ -693,7 +703,14 @@ input[readonly] {
   border-bottom: 0;
 }
 
+/* A 1% width in auto layout is "as narrow as the content allows". */
+.table .fit {
+  width: 1%;
+}
+
 .table .actions {
+  width: 1%;
+  white-space: nowrap;
   text-align: right;
 }
 
@@ -719,42 +736,37 @@ input[readonly] {
   gap: var(--space-2);
 }
 
-/* Reserve space for short labels and actions; long names, links and emails wrap. */
-.table-bookings thead th:nth-child(1) {
-  width: 12.5rem;
+/* Inside a one-line action cell, the confirmation sentence still wraps. */
+.table .confirm {
+  white-space: normal;
+}
+
+/*
+ * User-content columns share the width the `fit` columns leave, in these proportions; a
+ * single long email cannot squeeze a title column to nothing.
+ */
+.table-bookings thead th:nth-child(2) {
+  width: 38%;
 }
 
 .table-bookings thead th:nth-child(3) {
-  width: 26%;
-}
-
-.table-bookings thead th:nth-child(4) {
-  width: 12rem;
+  width: 32%;
 }
 
 .table-event-types thead th:nth-child(1) {
-  width: 26%;
+  width: 30%;
 }
 
-.table-event-types thead th:nth-child(2) {
-  width: 9rem;
+.table-event-types thead th:nth-child(3) {
+  width: 32%;
 }
 
-.table-event-types thead th:nth-child(4) {
-  width: 10.5rem;
+.table-api-keys thead th:nth-child(1) {
+  width: 24%;
 }
 
-.table-event-types thead th:nth-child(5) {
-  width: 5.5rem;
-}
-
-.table-api-keys thead th:nth-child(1),
 .table-api-keys thead th:nth-child(3) {
   width: 16%;
-}
-
-.table-api-keys thead th:nth-child(7) {
-  width: 15rem;
 }
 
 .table-value {
@@ -773,6 +785,14 @@ input[readonly] {
 @container data-table (400px <= width < 640px) {
   .table-analytics caption {
     display: table-caption;
+  }
+}
+
+/* The activity table's four short columns need less padding to fit between 400 and 480px. */
+@container data-table (400px <= width < 480px) {
+  .table-analytics th,
+  .table-analytics td {
+    padding-inline: var(--space-2);
   }
 }
 
@@ -817,9 +837,15 @@ input[readonly] {
     gap: var(--space-3);
   }
 
+  /* Labels wrap between words even beside a one-line value. */
   .table td[data-label]::before {
     color: var(--muted);
+    white-space: normal;
     content: attr(data-label);
+  }
+
+  .table :is(.fit, .actions) {
+    width: auto;
   }
 
   .table th[scope="row"] {
@@ -842,10 +868,6 @@ input[readonly] {
 
   .table .badge {
     margin: 0;
-  }
-
-  .table time .nowrap {
-    white-space: normal;
   }
 
   .table .confirm {
@@ -897,7 +919,12 @@ input[readonly] {
 
   :is(.table-bookings, .table-api-keys, .table-event-types) td[data-label]::before {
     color: var(--muted);
+    white-space: normal;
     content: attr(data-label);
+  }
+
+  :is(.table-bookings, .table-api-keys, .table-event-types) :is(.fit, .actions) {
+    width: auto;
   }
 
   :is(.table-bookings, .table-api-keys, .table-event-types) th[scope="row"] {
@@ -920,10 +947,6 @@ input[readonly] {
 
   :is(.table-bookings, .table-api-keys, .table-event-types) .badge {
     margin: 0;
-  }
-
-  :is(.table-bookings, .table-api-keys, .table-event-types) time .nowrap {
-    white-space: normal;
   }
 
   :is(.table-bookings, .table-api-keys, .table-event-types) .confirm {

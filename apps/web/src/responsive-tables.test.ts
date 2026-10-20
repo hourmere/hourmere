@@ -23,35 +23,53 @@ function container(condition: string) {
 }
 
 describe('responsive table CSS contract', () => {
-  it('keeps unbroken user content within its available width', () => {
+  it('breaks long user content anywhere, but only in cells that opt in', () => {
     expect(rule(styles, '.user-content')).toContain('overflow-wrap: anywhere;')
     expect(rule(styles, '.user-content')).toContain('min-width: 0;')
-    expect(rule(styles, '.table th,\n.table td')).toContain('overflow-wrap: anywhere;')
+    // Dates, numbers and headers must never split mid-word: no blanket rule on cells.
+    expect(rule(styles, '.table th,\n.table td')).not.toContain('overflow-wrap')
+    expect(rule(styles, '.table thead th')).not.toContain('overflow-wrap')
     expect(rule(styles, '.table-value')).toContain('min-width: 0;')
   })
 
-  it.each(['.button', '.badge', '.nowrap'])('keeps short CJK %s labels together', (selector) => {
-    expect(rule(styles, selector)).toContain('white-space: nowrap;')
-  })
+  it.each(['.button', '.badge', '.nowrap', '.table .actions'])(
+    'keeps short %s labels together',
+    (selector) => {
+      expect(rule(styles, selector)).toContain('white-space: nowrap;')
+    },
+  )
 
-  it('sizes tables to their wrapper with fixed columns', () => {
+  it('sizes columns by content, shrinking short and action columns to fit', () => {
     expect(rule(styles, '.table-container')).toContain('container: data-table / inline-size;')
     expect(rule(styles, '.table-container')).toContain('min-width: 0;')
-    expect(rule(styles, '.table')).toContain('table-layout: fixed;')
+    expect(rule(styles, '.table')).toContain('table-layout: auto;')
     expect(rule(styles, '.table')).toContain('width: 100%;')
+    expect(rule(styles, '.table .fit')).toContain('width: 1%;')
+    expect(rule(styles, '.table .actions')).toContain('width: 1%;')
+    // The revoke confirmation inside an action cell still wraps its sentence.
+    expect(rule(styles, '.table .confirm')).toContain('white-space: normal;')
+    // User-content columns share the remaining width in fixed proportions.
     for (const [selector, width] of [
-      ['.table-bookings thead th:nth-child(1)', '12.5rem'],
-      ['.table-bookings thead th:nth-child(3)', '26%'],
-      ['.table-bookings thead th:nth-child(4)', '12rem'],
-      ['.table-event-types thead th:nth-child(1)', '26%'],
-      ['.table-event-types thead th:nth-child(2)', '9rem'],
-      ['.table-event-types thead th:nth-child(4)', '10.5rem'],
-      ['.table-event-types thead th:nth-child(5)', '5.5rem'],
-      ['.table-api-keys thead th:nth-child(1),\n.table-api-keys thead th:nth-child(3)', '16%'],
-      ['.table-api-keys thead th:nth-child(7)', '15rem'],
+      ['.table-bookings thead th:nth-child(2)', '38%'],
+      ['.table-bookings thead th:nth-child(3)', '32%'],
+      ['.table-event-types thead th:nth-child(1)', '30%'],
+      ['.table-event-types thead th:nth-child(3)', '32%'],
+      ['.table-api-keys thead th:nth-child(1)', '24%'],
+      ['.table-api-keys thead th:nth-child(3)', '16%'],
     ]) {
       expect(rule(styles, selector ?? '')).toContain(`width: ${width};`)
     }
+    // No column of a short kind is given a fixed width that could squeeze a date.
+    expect(styles).not.toMatch(
+      /\.table-[a-z-]+ thead th:nth-child\(\d\) \{\n {2}width: \d+(\.\d+)?rem;/,
+    )
+  })
+
+  it('lets the activity table keep its padding budget between 400 and 480px', () => {
+    const compact = container('400px <= width < 480px')
+    expect(rule(compact, '.table-analytics th,\n  .table-analytics td')).toContain(
+      'padding-inline: var(--space-2);',
+    )
   })
 
   it.each([
@@ -67,14 +85,21 @@ describe('responsive table CSS contract', () => {
       'grid-template-columns: 6.5rem minmax(0, 1fr);',
     )
     expect(rule(card, `${selector} td[data-label]::before`)).toContain('content: attr(data-label);')
+    // A one-line value's label still wraps between words, and fit columns fill the card.
+    expect(rule(card, `${selector} td[data-label]::before`)).toContain('white-space: normal;')
+    expect(rule(card, `${selector} :is(.fit, .actions)`)).toContain('width: auto;')
     expect(rule(card, `${selector} .badge`)).toContain('margin: 0;')
     expect(rule(card, `${selector} .confirm`)).toContain('min-width: 0;')
     expect(rule(card, `${selector} .confirm`)).toContain('max-width: 100%;')
-    expect(rule(card, `${selector} time .nowrap`)).toContain('white-space: normal;')
+    // A card's date and time range wrap as whole units, never inside one of them.
+    expect(card).not.toMatch(/time \.nowrap \{[^}]*white-space: normal;/)
     expect(rule(card, `${selector} thead`)).toContain('clip-path: inset(50%);')
   })
 
-  it('gives card captions their full width, start alignment and row spacing', () => {
+  it('starts captions at the same edge in table and card modes', () => {
+    const base = rule(styles, '.table caption')
+    expect(base).toContain('text-align: start;')
+    expect(base).toContain('margin-bottom: var(--space-2);')
     const caption = rule(container('width < 640px'), '.table caption')
     expect(caption).toContain('display: block;')
     expect(caption).toContain('width: 100%;')

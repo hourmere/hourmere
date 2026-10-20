@@ -196,10 +196,14 @@ function BookingList({
           <table className="table table-bookings">
             <thead>
               <tr>
-                <th scope="col">{t('When')}</th>
+                <th scope="col" className="fit">
+                  {t('When')}
+                </th>
                 <th scope="col">{t('Event')}</th>
                 <th scope="col">{t('Invitee')}</th>
-                <th scope="col">{t('Status')}</th>
+                <th scope="col" className="fit nowrap">
+                  {t('Status')}
+                </th>
               </tr>
             </thead>
             <tbody ref={list}>
@@ -208,7 +212,7 @@ function BookingList({
                 const guests = b.attendees.length - 1
                 return (
                   <tr key={b.id}>
-                    <td data-label={t('When')}>
+                    <td data-label={t('When')} className="fit">
                       <div className="table-value">
                         <time dateTime={b.start}>
                           <span className="nowrap">{format.date(b.start)}</span>{' '}
@@ -216,12 +220,12 @@ function BookingList({
                         </time>
                       </div>
                     </td>
-                    <th scope="row" data-label={t('Event')}>
+                    <th scope="row" data-label={t('Event')} className="user-content">
                       <Link to={bookingPath(b.id)} data-booking={b.id}>
                         {b.title}
                       </Link>
                     </th>
-                    <td data-label={t('Invitee')}>
+                    <td data-label={t('Invitee')} className="user-content">
                       <div className="table-value">
                         {invitee ? (
                           <>
@@ -240,7 +244,7 @@ function BookingList({
                         )}
                       </div>
                     </td>
-                    <td data-label={t('Status')}>
+                    <td data-label={t('Status')} className="fit">
                       <div className="table-value">
                         {b.status === 'cancelled' && b.rescheduledToId ? (
                           <>

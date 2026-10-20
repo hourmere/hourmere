@@ -219,20 +219,20 @@ function ActivityReport({ filters }: { filters: Filters }) {
           <tbody>
             {data.data.map((day) => (
               <tr key={day.date}>
-                <th scope="row" data-label={t('Date')}>
+                <th scope="row" data-label={t('Date')} className="nowrap">
                   {day.date}
                 </th>
-                <td data-label={t('Bookings created')}>
+                <td data-label={t('Bookings created')} className="nowrap">
                   <div className="table-value">
                     {new Intl.NumberFormat(displayLocale).format(day.created)}
                   </div>
                 </td>
-                <td data-label={t('Reschedules')}>
+                <td data-label={t('Reschedules')} className="nowrap">
                   <div className="table-value">
                     {new Intl.NumberFormat(displayLocale).format(day.rescheduled)}
                   </div>
                 </td>
-                <td data-label={t('Cancellations')}>
+                <td data-label={t('Cancellations')} className="nowrap">
                   <div className="table-value">
                     {new Intl.NumberFormat(displayLocale).format(day.cancelled)}
                   </div>

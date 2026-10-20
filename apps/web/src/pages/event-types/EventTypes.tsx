@@ -137,12 +137,14 @@ function EventTypeTable({
         <thead>
           <tr>
             <th scope="col">{t('Title')}</th>
-            <th scope="col" className="nowrap">
+            <th scope="col" className="fit nowrap">
               {t('Duration')}
             </th>
             <th scope="col">{t('Booking link')}</th>
-            <th scope="col">{t('Status')}</th>
-            <th scope="col">
+            <th scope="col" className="fit nowrap">
+              {t('Status')}
+            </th>
+            <th scope="col" className="fit">
               <span className="visually-hidden">{t('Actions')}</span>
             </th>
           </tr>
@@ -165,15 +167,15 @@ function EventTypeTable({
                   : null
             return (
               <tr key={e.id}>
-                <th scope="row" data-label={t('Title')}>
+                <th scope="row" data-label={t('Title')} className="user-content">
                   <Link to={eventTypePath(e.id)}>{e.title}</Link>
                 </th>
-                <td data-label={t('Duration')} className="nowrap">
+                <td data-label={t('Duration')} className="fit nowrap">
                   <div className="table-value">
                     {formatMinutes(e.durationMinutes, displayLocale)}
                   </div>
                 </td>
-                <td data-label={t('Booking link')} className="link-cell">
+                <td data-label={t('Booking link')} className="link-cell user-content">
                   <div className="table-value">
                     {url ? (
                       <span className="booking-link">
@@ -199,7 +201,7 @@ function EventTypeTable({
                     )}
                   </div>
                 </td>
-                <td data-label={t('Status')}>
+                <td data-label={t('Status')} className="fit">
                   <div className="table-value">
                     {e.isHidden && <span className="badge">{t('Unlisted')}</span>}
                     {e.schedulingType === 'round_robin' && !e.roundRobinActive ? (

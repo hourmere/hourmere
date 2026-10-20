@@ -20,6 +20,34 @@ function expectCardMarkup(table: HTMLElement, variant: string, labels: string[])
   }
 }
 
+/**
+ * Which cells of a row (by position) may break long user content anywhere, which keep a short
+ * value on one line, and which columns shrink to that value. Action cells always shrink.
+ */
+function expectCellKinds(
+  table: HTMLElement,
+  kinds: { userContent: number[]; nowrap: number[]; fit: number[] },
+) {
+  const cells = Array.from(table.querySelectorAll('tbody tr:first-child > *'))
+  const headers = Array.from(table.querySelectorAll('thead th'))
+  const indexes = (test: (cell: Element) => boolean) =>
+    cells.map((cell, index) => (test(cell) ? index : -1)).filter((index) => index >= 0)
+  expect(indexes((cell) => cell.classList.contains('user-content'))).toEqual(kinds.userContent)
+  expect(indexes((cell) => cell.classList.contains('nowrap'))).toEqual(kinds.nowrap)
+  expect(
+    indexes((cell) => cell.classList.contains('fit') || cell.classList.contains('actions')),
+  ).toEqual(kinds.fit)
+  for (const cell of cells) {
+    // Breaking anywhere and never breaking contradict each other.
+    expect(cell.classList.contains('user-content') && cell.classList.contains('nowrap')).toBe(false)
+  }
+  for (const [index, header] of headers.entries()) {
+    // Headers break only between words, and a shrunk column's header shrinks with it.
+    expect(header.classList.contains('user-content')).toBe(false)
+    expect(header.classList.contains('fit')).toBe(kinds.fit.includes(index))
+  }
+}
+
 const longName = '会议'.repeat(100)
 const longEmail = `${'invitee'.repeat(20)}@example.test`
 
@@ -52,6 +80,8 @@ describe.each(['en', 'zh-CN'] as const)('table card markup in %s', (language) =>
       'bookings',
       zh ? ['时间', '受邀人', '状态'] : ['When', 'Invitee', 'Status'],
     )
+    // When and status shrink to their one-line values; title and invitee take the rest.
+    expectCellKinds(screen.getByRole('table'), { userContent: [1, 2], nowrap: [], fit: [0, 3] })
     expect(screen.getByText(longEmail)).toBeDefined()
     expect(
       screen.getByRole('link', { name: zh ? '查看改期后的预约' : 'View rescheduled booking' }),
@@ -75,6 +105,8 @@ describe.each(['en', 'zh-CN'] as const)('table card markup in %s', (language) =>
       'event-types',
       zh ? ['时长', '预约链接', '状态'] : ['Duration', 'Booking link', 'Status'],
     )
+    // Duration, status and the edit button shrink; the title and link may break anywhere.
+    expectCellKinds(table, { userContent: [0, 2], nowrap: [1], fit: [1, 3, 4] })
     expect(table.querySelector('td[data-label]')?.classList.contains('nowrap')).toBe(true)
     expect(table.querySelector('td[data-label]')?.textContent).toBe(
       zh ? '23 小时 59 分钟' : '23 h 59 min',
@@ -113,6 +145,12 @@ describe.each(['en', 'zh-CN'] as const)('table card markup in %s', (language) =>
         ? ['密钥', '组织', '创建时间', '上次使用', '到期时间']
         : ['Key', 'Organization', 'Created', 'Last used', 'Expires'],
     )
+    // Key prefix, dates and the revoke button shrink; the name and organization may break.
+    expectCellKinds(screen.getByRole('table'), {
+      userContent: [0, 2],
+      nowrap: [1, 3, 4, 5],
+      fit: [1, 3, 4, 5, 6],
+    })
     expect(screen.getByRole('button', { name: new RegExp(zh ? '撤销' : 'Revoke') })).toBeDefined()
   })
 
@@ -137,5 +175,7 @@ describe.each(['en', 'zh-CN'] as const)('table card markup in %s', (language) =>
       'analytics',
       zh ? ['新建预约', '改期', '取消'] : ['Bookings created', 'Reschedules', 'Cancellations'],
     )
+    // Four short columns: every value stays on one line and auto layout spaces them.
+    expectCellKinds(table, { userContent: [], nowrap: [0, 1, 2, 3], fit: [] })
   })
 })
