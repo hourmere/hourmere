@@ -1,4 +1,5 @@
 import { expect, it } from 'vitest'
+import { errorAliases } from '../../../server/src/error-aliases.ts'
 import { admin } from '../i18n/admin.ts'
 import { registerCatalog, translateMessage } from '../i18n/translate.ts'
 import { errorMessage, requestError } from './errors.ts'
@@ -154,6 +155,15 @@ it.each(['zoom_refresh_in_progress', 'other_legacy_busy_code'])(
       'Zoom account operations are busy. Try again shortly.',
     )
     expect(translateMessage('zh-CN', errorMessage(error))).toBe('Zoom 账号操作繁忙。请稍后重试。')
+  },
+)
+
+it.each(Object.entries(errorAliases))(
+  'recognizes the server-registered alias for %s: %s',
+  (code, alias) => {
+    const error = requestError(409, { error: code, errorAlias: alias })
+    expect(error.code).toBe(code)
+    expect(error.codeAlias).toBe(alias)
   },
 )
 

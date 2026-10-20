@@ -483,14 +483,17 @@ export function CalendarsPage() {
                               type="button"
                               className="button button-small"
                               aria-describedby={
-                                state.data.hasProfile ? undefined : 'calendar-profile-hint'
+                                state.data.hasProfile ||
+                                state.data.destinationCalendarId === calendar.id
+                                  ? undefined
+                                  : 'calendar-profile-hint'
                               }
                               disabled={
-                                !state.data.hasProfile ||
-                                (state.data.destinationCalendarId !== calendar.id &&
-                                  (connection.status !== 'active' ||
-                                    !state.data.googleEnabled ||
-                                    !connection.syncAuthorized))
+                                state.data.destinationCalendarId !== calendar.id &&
+                                (!state.data.hasProfile ||
+                                  connection.status !== 'active' ||
+                                  !state.data.googleEnabled ||
+                                  !connection.syncAuthorized)
                               }
                               onClick={() =>
                                 calendarAction(
