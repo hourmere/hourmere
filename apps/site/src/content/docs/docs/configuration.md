@@ -211,10 +211,12 @@ before recreating the stack:
 unset COMPOSE_FILE
 ./scripts/enable-worker.sh
 docker compose config --services | grep -qx worker
+# Bundled HTTPS only; omit this check in plain mode.
+docker compose config --services | grep -qx proxy
 docker compose up -d --build --wait
 ```
 
-Continue only if verification succeeds. The helper rewrites only `COMPOSE_FILE` in `.env`,
+Continue only if all applicable verification commands succeed. The helper rewrites only `COMPOSE_FILE` in `.env`,
 handles quoted/unquoted and `export COMPOSE_FILE=` assignments, keeps mode `600` and
 refuses symlinks. Run `./scripts/disable-worker.sh` to deselect it, after removing the
 worker container as described in [self-hosting](/docs/self-hosting#switch-back-to-a-single-container).
@@ -226,6 +228,13 @@ COMPOSE_FILE='docker-compose.yml:docker-compose.proxy.yml:docker-compose.worker.
 
 Keep custom overlays inside the quotes. A shell-exported `COMPOSE_FILE` overrides `.env`;
 unset it before using the helper and Compose commands.
+
+The helper refuses a leading UTF-8 BOM, YAML-style `COMPOSE_FILE: ...`, duplicate settings
+and unsupported syntax without changing the file. Save `.env` as UTF-8 without BOM and use
+one complete `COMPOSE_FILE='...'` assignment. If old instructions produced
+`COMPOSE_FILE='docker-compose.yml:docker-compose.proxy.yml':docker-compose.worker.yml`,
+move the worker suffix inside the closing quote, as in the complete example above; retain
+every existing overlay. Existing line endings, including CRLF, are preserved.
 
 Plain mode publishes `127.0.0.1:<PORT>:3000` for your own host proxy or a private local
 trial. The HTTPS override removes all app host mappings, publishes TCP 80/443 and UDP 443 on
