@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs'
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
 import { App } from './App.tsx'
@@ -35,9 +35,9 @@ describe('application recovery and sharing metadata', () => {
     expect(screen.queryByRole('status')).toBeNull()
   })
 
-  it('includes generic search and social sharing metadata in the app document', () => {
+  it('includes neutral search and sharing metadata before app JavaScript runs', () => {
     const doc = new DOMParser().parseFromString(html, 'text/html')
-    const description = 'Book a time to meet with Hourmere, the open-source scheduling app.'
+    const description = 'Scheduling page powered by Hourmere — pick a time that works.'
     for (const [selector, content] of [
       ['meta[name="description"]', description],
       ['meta[property="og:title"]', 'Hourmere'],
@@ -103,7 +103,7 @@ describe('application recovery and sharing metadata', () => {
     expect(await screen.findByRole('heading', { name: 'Something went wrong' })).toBeDefined()
   })
 
-  it('localizes the generic description when the app uses Chinese', () => {
+  it('keeps neutral descriptions consistent when switching English and Chinese', () => {
     const metas = ['description', 'og:description'].map((name) => {
       const meta = document.createElement('meta')
       meta.setAttribute(name.startsWith('og:') ? 'property' : 'name', name)
@@ -111,14 +111,20 @@ describe('application recovery and sharing metadata', () => {
       return meta
     })
     try {
-      chooseLanguage('zh-CN')
+      chooseLanguage('en')
       render(
         <MemoryRouter initialEntries={['/not/a/real/route']}>
           <App />
         </MemoryRouter>,
       )
-      for (const meta of metas)
-        expect(meta.getAttribute('content')).toBe('使用开源预约应用 Hourmere，轻松预约会面时间。')
+      for (const [locale, description] of [
+        ['en', 'Scheduling page powered by Hourmere — pick a time that works.'],
+        ['zh-CN', '由 Hourmere 提供支持的预约页面，选择适合你的时间。'],
+        ['en', 'Scheduling page powered by Hourmere — pick a time that works.'],
+      ] as const) {
+        act(() => chooseLanguage(locale))
+        for (const meta of metas) expect(meta.getAttribute('content')).toBe(description)
+      }
     } finally {
       for (const meta of metas) meta.remove()
     }

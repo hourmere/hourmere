@@ -2,8 +2,8 @@
 export const common = {
   'Something went wrong': '出错了',
   Reload: '重新加载',
-  'Book a time to meet with Hourmere, the open-source scheduling app.':
-    '使用开源预约应用 Hourmere，轻松预约会面时间。',
+  'Scheduling page powered by Hourmere — pick a time that works.':
+    '由 Hourmere 提供支持的预约页面，选择适合你的时间。',
   'Didn’t get the email? Check spam or junk and add the sender to your contacts.':
     '没收到邮件？请检查垃圾邮件文件夹，并将发件人加入通讯录。',
   'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use “Cancel booking” here.':

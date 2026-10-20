@@ -55,8 +55,8 @@ describe('responsive table CSS contract', () => {
   })
 
   it.each([
-    ['width < 640px', '.table'],
-    ['640px <= width < 880px', ':is(.table-bookings, .table-api-keys, .table-event-types)'],
+    ['width < 400px', '.table'],
+    ['400px <= width < 880px', ':is(.table-bookings, .table-api-keys, .table-event-types)'],
   ])('uses aligned title-first cards when %s', (condition, selector) => {
     const card = container(condition)
     expect(rule(card, `${selector} tbody tr`)).toContain('display: flex;')
@@ -72,5 +72,34 @@ describe('responsive table CSS contract', () => {
     expect(rule(card, `${selector} .confirm`)).toContain('max-width: 100%;')
     expect(rule(card, `${selector} time .nowrap`)).toContain('white-space: normal;')
     expect(rule(card, `${selector} thead`)).toContain('clip-path: inset(50%);')
+  })
+
+  it('gives card captions their full width, start alignment and row spacing', () => {
+    const caption = rule(container('width < 640px'), '.table caption')
+    expect(caption).toContain('display: block;')
+    expect(caption).toContain('width: 100%;')
+    expect(caption).toContain('text-align: start;')
+    expect(caption).toContain('margin-bottom: var(--space-2);')
+  })
+
+  it('keeps analytics in table mode from 400px while dense tables still use cards', () => {
+    const narrow = container('width < 400px')
+    const tablet = container('400px <= width < 880px')
+    const analytics = document.createElement('table')
+    analytics.className = 'table table-analytics'
+    const dense = document.createElement('table')
+    dense.className = 'table table-bookings'
+    // Test the selectors that actually switch tables to block layout in each range.
+    const blockSelectors = (source: string) =>
+      [...source.matchAll(/([^{}]+)\{\s*display: block;/g)].map((match) => match[1]?.trim() ?? '')
+    expect(blockSelectors(narrow).some((selector) => analytics.matches(selector))).toBe(true)
+    expect(blockSelectors(tablet).some((selector) => analytics.matches(selector))).toBe(false)
+    expect(blockSelectors(tablet).some((selector) => dense.matches(selector))).toBe(true)
+    expect(
+      blockSelectors(container('width < 640px')).some((selector) => analytics.matches(selector)),
+    ).toBe(false)
+    expect(rule(container('400px <= width < 640px'), '.table-analytics caption')).toContain(
+      'display: table-caption;',
+    )
   })
 })

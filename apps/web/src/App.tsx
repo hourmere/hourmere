@@ -42,7 +42,7 @@ import { PATHS } from './paths.ts'
 export function App() {
   const { t } = useI18n()
   useEffect(() => {
-    const description = t('Book a time to meet with Hourmere, the open-source scheduling app.')
+    const description = t('Scheduling page powered by Hourmere — pick a time that works.')
     for (const selector of ['meta[name="description"]', 'meta[property="og:description"]'])
       document.querySelector(selector)?.setAttribute('content', description)
   }, [t])
