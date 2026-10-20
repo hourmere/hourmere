@@ -52,6 +52,7 @@ describe.skipIf(!serverUrl)('unused Better Auth endpoints in the production app'
 
   describe.each([false, true])('with MCP OAuth enabled: %s', (mcpOAuth) => {
     let app: ReturnType<typeof createApp>
+    let auth: ReturnType<typeof createAuth>
     let cookie: string
     let organizationId: string
     let accountId: string
@@ -68,9 +69,10 @@ describe.skipIf(!serverUrl)('unused Better Auth endpoints in the production app'
     const me = (headers: Record<string, string>) => app.request('/api/v1/me', { headers })
 
     async function socialSignIn(provider: 'google' | 'microsoft') {
-      const response = await post(
-        '/sign-in/social',
-        {
+      // Direct ID tokens are reserved for trusted server calls. The public HTTP
+      // redirect flow is exercised separately by the sign-in authorization tests.
+      const response = await auth.api.signInSocial({
+        body: {
           provider,
           idToken: {
             token: 'synthetic.header.signature',
@@ -78,8 +80,8 @@ describe.skipIf(!serverUrl)('unused Better Auth endpoints in the production app'
             refreshToken: 'synthetic-provider-refresh',
           },
         },
-        '',
-      )
+        asResponse: true,
+      })
       expect(response.status).toBe(200)
       const session = sessionCookie(response)
       expect(session.includes('better-auth.session_token=')).toBe(true)
@@ -104,7 +106,7 @@ describe.skipIf(!serverUrl)('unused Better Auth endpoints in the production app'
           }),
         }
       }
-      const auth = createAuth({
+      auth = createAuth({
         pool: authPool,
         db,
         baseURL: origin,
@@ -121,7 +123,7 @@ describe.skipIf(!serverUrl)('unused Better Auth endpoints in the production app'
         resolveCaller: createCallerResolver({ auth, db }),
         publicUrl: origin,
       })
-      cookie = await socialSignIn('google')
+      cookie = await socialSignIn('microsoft')
       const response = await me({ cookie })
       expect(response.status).toBe(200)
       const body = (await response.json()) as {
@@ -129,16 +131,17 @@ describe.skipIf(!serverUrl)('unused Better Auth endpoints in the production app'
         organization: { id: string; personal: boolean }
         principal: { kind: string }
       }
-      expect(body.user.email).toBe(email('google'))
+      expect(body.user.email).toBe(email('microsoft'))
       expect(body.organization.personal).toBe(true)
       expect(body.principal.kind).toBe('session')
       organizationId = body.organization.id
-      // Direct ID-token sign-in does not persist a refresh token. Seed one through the
-      // trusted server API so restored HTTP token routes would complete successfully.
+      // Direct ID-token sign-in does not persist a refresh token. Microsoft linking
+      // retains an encrypted one, so restored HTTP token routes can reach the fake
+      // provider successfully; Google deliberately discards it even on linking.
       await auth.api.linkSocialAccount({
         headers: new Headers({ cookie, origin }),
         body: {
-          provider: 'google',
+          provider: 'microsoft',
           idToken: {
             token: 'synthetic.header.signature',
             accessToken: 'synthetic-provider-access',
@@ -148,11 +151,13 @@ describe.skipIf(!serverUrl)('unused Better Auth endpoints in the production app'
       })
       const account = await db
         .selectFrom('auth.account')
-        .select('id')
+        .select(['id', 'refreshToken'])
         .where('userId', '=', body.user.id)
-        .where('providerId', '=', 'google')
+        .where('providerId', '=', 'microsoft')
         .executeTakeFirstOrThrow()
       accountId = account.id
+      expect(Boolean(account.refreshToken)).toBe(true)
+      expect(account.refreshToken === 'synthetic-provider-refresh').toBe(false)
     })
 
     it.each(disabledRequests)('returns the exact disabled response for $path', async (request) => {
@@ -192,7 +197,7 @@ describe.skipIf(!serverUrl)('unused Better Auth endpoints in the production app'
     })
 
     it.each(['google', 'microsoft'] as const)(
-      'still signs in with the fake %s provider',
+      'still authenticates sessions from trusted fake %s provider sign-in',
       async (provider) => {
         const current = await me({ cookie: await socialSignIn(provider) })
         expect(current.status).toBe(200)
@@ -211,7 +216,7 @@ describe.skipIf(!serverUrl)('unused Better Auth endpoints in the production app'
       const current = await me(bearer)
       expect(current.status).toBe(200)
       expect(await current.json()).toMatchObject({
-        user: { email: email('google') },
+        user: { email: email('microsoft') },
         principal: { kind: 'api_key', apiKeyId: key.id },
       })
       const listed = await app.request('/api/auth/api-key/list', { headers: { cookie } })

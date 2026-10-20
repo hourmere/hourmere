@@ -47,11 +47,35 @@ types in `packages/db/src/tables.ts` are generated from the migrated database.
 Google and Microsoft sign-in ID tokens are used during authentication and are not stored:
 `account."idToken"` remains NULL on account creation and every update, including linking,
 repeat sign-in and token refresh. Migration 0031 clears existing values without changing
-other account data. Sign-in access and refresh tokens remain encrypted by Better Auth's
+other account data. Retained sign-in OAuth tokens remain encrypted by Better Auth's
 `encryptOAuthTokens` option. Calendar credentials and MCP OAuth grants are independent.
+
+Google sign-in requests only `email`, `profile` and `openid`. Better Auth 1.7.10's
+`includeGrantedScopes: false` omits `include_granted_scopes`; Google's
+[OIDC authorization endpoint](https://developers.google.com/identity/openid-connect/openid-connect#authenticationuriparameters)
+includes previous grants only when that parameter is supplied as `true`. This matters even
+with separate sign-in/calendar clients: Google's
+[combined authorization](https://developers.google.com/identity/protocols/oauth2/web-server#incrementalAuth)
+can include grants to other clients in the same project. `accessType` remains unset, so
+`access_type` is omitted and Google's default online access applies; no offline access or
+forced consent is requested. Hourmere's session renewal needs no Google refresh token.
+Google account creation and every account update therefore discard any returned refresh
+token and its expiry, and clear legacy refresh credentials on the next successful sign-in,
+relink or partial update, even when Google omits a replacement. Updates look up the stored
+account's provider, including internal refresh updates that omit `providerId`.
+The account's provider/subject/user binding
+is retained so automatic account linking and repeat sign-in continue to work. Existing
+credentials are not bulk-rewritten or revoked. Calendar connections still explicitly send
+`include_granted_scopes=false`, `access_type=offline` and `prompt=consent` for their own
+calendar scopes and encrypted refresh credentials.
 
 Microsoft sign-in requests only `openid`, `profile` and `email`: it needs identity once to
 create an Hourmere session, whose lifetime and renewal do not depend on Microsoft tokens.
+Better Auth's default scopes are disabled, and its Graph profile-photo request is disabled
+to avoid `User.Read`. Microsoft's v2 endpoint requires an explicit
+[`offline_access` scope](https://learn.microsoft.com/en-us/entra/identity-platform/scopes-oidc#the-offline_access-scope)
+to issue refresh tokens; this sign-in flow does not request it. Unexpected Microsoft tokens
+retain the existing encrypted-storage behavior.
 No application feature reads or refreshes the stored sign-in access token, and the unused
 Better Auth token retrieval/refresh HTTP endpoints are disabled. A Microsoft sign-in
 refresh token is therefore unnecessary; `offline_access` is intentionally omitted.

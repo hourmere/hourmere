@@ -115,6 +115,23 @@ sessions, whether MCP OAuth is enabled or disabled. Social sign-in still uses
 own OAuth flows and encrypted credentials, separate from Better Auth's sign-in accounts.
 MCP OAuth uses `/api/auth/oauth2/*`; its existing consent-management restrictions still apply.
 
+Social authorization accepts only `provider`, `callbackURL`, `errorCallbackURL`,
+`newUserCallbackURL` and `disableRedirect`. Any other body field (including `scopes`,
+`additionalParams`, `loginHint` and direct `idToken`) or any query field returns 400
+`UNSUPPORTED_SOCIAL_AUTHORIZATION_PARAMETERS`, without echoing caller values. This before
+hook applies to both Google and Microsoft and also protects `/link-social` if it is enabled
+in future. Trusted server-side `auth.api.*` calls retain direct ID-token authentication;
+they cannot override authorization parameters. No other installed provider authorization
+entrance is enabled: the callback's IdP-initiated branch is unavailable for these providers,
+and the generic OAuth and OAuth popup plugins are not installed.
+
+HTTP social authorization requires an `Origin` equal to `PUBLIC_URL`'s origin, even without
+cookies. Missing/null origins return 403 `MISSING_OR_NULL_ORIGIN`; other origins return 403
+`INVALID_ORIGIN`. The web app's same-origin POST fetch supplies this automatically.
+Nonbrowser HTTP clients must send the same Origin. This intentionally tightens Better Auth
+1.7.10's default, which skips its origin check when a request has no cookie. Provider
+callbacks and trusted server-side calls do not acquire this Origin requirement.
+
 A request is authenticated by one of:
 
 - **API key** (agents, scripts): `Authorization: Bearer hm_…`. Keys belong to a user and act
