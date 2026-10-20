@@ -102,7 +102,7 @@ through [Google Calendar](/docs/google-calendar), then use the [REST](/docs/rest
 
 ## Google sign-in and calendar publishing
 
-To add **Sign in with Google**, follow the
+To add the **Continue with Google** button, follow the
 [step-by-step client setup](/docs/configuration#sign-in-with-google). Sign-in requests only
 `openid`, `email` and `profile`; connecting Google Calendar requires its own OAuth client
 and consent.

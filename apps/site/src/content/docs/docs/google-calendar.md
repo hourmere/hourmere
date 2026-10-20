@@ -9,8 +9,15 @@ Google sign-in and Google Calendar use separate OAuth clients. Signing in does n
 calendar access. In your Google Cloud project enable Calendar API and configure branding,
 an External audience and the intended test users. Keep the app in Testing for development;
 review the publishing requirements below before ongoing use. To enable the separate
-**Sign in with Google** button, follow the
+**Continue with Google** button, follow the
 [sign-in setup](/docs/configuration#sign-in-with-google).
+
+The sign-in and calendar OAuth clients share one publishing status and test-user list when
+they belong to the same Google Cloud project. Sign-in requests only basic identity scopes
+(`openid`, `email`, `profile`), so an External app in Testing allows any Google account to
+sign in without being on that list, subject to Google Workspace administrator controls.
+Calendar access still requires test users in Testing. See Google's
+[OAuth app state overview](https://developers.google.com/identity/protocols/oauth2/production-readiness/overview).
 
 Create a Web application OAuth client for calendar connections. Register exactly
 `{PUBLIC_URL}/api/calendar/google/callback`, for example
@@ -47,8 +54,8 @@ explains those states.
 You, the self-hoster, are responsible for your Google project's branding, domains, privacy
 policy and any required
 [sensitive-scope verification](https://developers.google.com/identity/protocols/oauth2/production-readiness/sensitive-scope-verification).
-Hourmere's hosted verification does not cover your OAuth client. Review Google's personal
-and internal-use exceptions if applicable.
+Each Google Cloud project is verified separately; a self-hosted instance uses your own
+project. Review Google's personal and internal-use exceptions if applicable.
 
 ## Select calendars
 

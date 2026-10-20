@@ -12,6 +12,48 @@ const pages = globSync('**/*.md', { cwd: join(root, siteDocs) }).map((path) => (
 }))
 const githubDocs = 'https://github.com/hourmere/hourmere/blob/main/docs/'
 const normalize = (source: string) => source.replace(/\s+/g, ' ')
+const repositoryDocs = globSync('**/*.md', { cwd: join(root, 'docs') }).map(
+  (path) => `docs/${path}`,
+)
+const sitePages = globSync('**/*.astro', { cwd: join(root, 'apps/site/src/pages') }).map(
+  (path) => `apps/site/src/pages/${path}`,
+)
+
+// These complete lines describe Hourmere's own website, hosted attribution or legal pages.
+// Keep exceptions scoped to their file and purpose, so a new self-hosting example still fails.
+const ownSiteReferences: Record<string, readonly string[]> = {
+  'README.md': [
+    '| `apps/site` | Website for hourmere.com (Astro + Starlight): homepage, legal pages, docs. Static; not part of the Docker image. |',
+    'The website runs on its own: `npm run dev --workspace @hourmere/site` (http://localhost:4321). `npm run build` writes it to `apps/site/dist`. `npm run deploy --workspace @hourmere/site` builds it and publishes it as Cloudflare Workers static assets on hourmere.com and www.hourmere.com (config in `apps/site/wrangler.jsonc`); it needs `wrangler login` to the Cobaltmere Cloudflare account.',
+    'hosted service. `HOSTED_SIGNUP_URL` sets their destination (default `https://hourmere.com`);',
+    'instance must explicitly set `https://hourmere.com/privacy` and `https://hourmere.com/terms`.',
+    '[security@hourmere.com](mailto:security@hourmere.com), not in a public issue. See [SECURITY.md](SECURITY.md).',
+  ],
+  '.env.example': [
+    'HOSTED_SIGNUP_URL=https://hourmere.com',
+    '# For the hosted instance, set https://hourmere.com/privacy and https://hourmere.com/terms.',
+  ],
+  'docker-compose.yml': [`HOSTED_SIGNUP_URL: \${HOSTED_SIGNUP_URL:-https://hourmere.com}`],
+  'tools/cli/README.md': [
+    'Command-line scheduling for [Hourmere](https://hourmere.com), an open-source scheduling',
+  ],
+  'docs/api-conventions.md': ['with `HOSTED_SIGNUP_URL` and defaulting to `https://hourmere.com`.'],
+  'docs/mcp-directories.md': [
+    "`com.hourmere/hourmere` requires proof of control of `hourmere.com` via the registry's",
+  ],
+  [`${siteDocs}/configuration.md`]: [
+    '| `HOSTED_SIGNUP_URL` | `https://hourmere.com` | Hosted service destination for public attribution and confirmation links. Set the hosted sign-up page URL when available; HTTP(S), no credentials, query or fragment. Independent of this instance’s `PUBLIC_URL`; attribution cannot be disabled. |',
+    'PRIVACY_POLICY_URL=https://hourmere.com/privacy',
+    'TERMS_URL=https://hourmere.com/terms',
+  ],
+  [`${siteDocs}/index.md`]: [
+    'no stable release or hosted booking service yet. The website at hourmere.com is separate',
+    "to [security@hourmere.com](mailto:security@hourmere.com) or through the repository's",
+  ],
+  [`${siteDocs}/self-hosting.md`]: [
+    "and defaults to `https://hourmere.com`, independently of your instance's `PUBLIC_URL`. Set",
+  ],
+}
 
 describe('self-hosting documentation links', () => {
   it.each(pages)('uses clickable repository documentation links in $path', ({ source }) => {
@@ -24,9 +66,15 @@ describe('self-hosting documentation links', () => {
     expect(remaining).not.toMatch(/\bdocs\/[\w./-]+\.md\b/)
   })
 
-  it.each(pages)('uses canonical docs links in $path', ({ source }) => {
+  it.each([
+    'README.md',
+    ...repositoryDocs,
+    ...pages.map(({ path }) => `${siteDocs}/${path}`),
+    ...sitePages,
+  ])('uses canonical docs links in %s', (path) => {
+    const source = read(path)
     expect(source).not.toMatch(
-      /\((?:https:\/\/hourmere\.com)?\/docs(?:\/[\w-]+)*\/(?:[?#][^)]*)?\)/,
+      /(?:(?<![\w.-])hourmere\.com|[(\s"'`])\/docs(?:\/[\w-]+)*\/(?=[?#\s"'`)<>{}]|$)/i,
     )
   })
 
@@ -37,15 +85,19 @@ describe('self-hosting documentation links', () => {
   it.each([
     'README.md',
     'Caddyfile',
-    ...globSync('**/*.md', { cwd: join(root, 'docs') }).map((path) => `docs/${path}`),
+    '.env.example',
+    'scripts/setup.sh',
+    'tools/cli/README.md',
+    ...globSync('docker-compose*.yml', { cwd: root }),
+    ...repositoryDocs,
     ...pages.map(({ path }) => `${siteDocs}/${path}`),
   ])('keeps production application hosts out of examples in %s', (path) => {
+    const allowed = ownSiteReferences[path] ?? []
     const source = read(path)
-    expect(source).not.toMatch(/\bapp\.hourmere\.com\b/)
-    expect(source).not.toMatch(
-      /https?:\/\/(?:[\w-]+\.)*hourmere\.com\/(?:api|mcp|sign-in|app|booking|team)(?:\b|\/)/,
-    )
-    expect(source).not.toMatch(/\bhourmere\.com\/\{/)
+      .split('\n')
+      .filter((line) => !allowed.includes(line.trim()))
+      .join('\n')
+    expect(source).not.toMatch(/(?<![\w.-])(?:[\w-]+\.)*hourmere\.com(?![\w-]|\.[\w-])/i)
   })
 
   it.each([

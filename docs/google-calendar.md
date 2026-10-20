@@ -65,6 +65,13 @@ Booking email/ICS continues through the existing notification worker.
 
 ### Publishing status and verification
 
+The sign-in and calendar OAuth clients share one publishing status and test-user list when
+they belong to the same Google Cloud project. For sign-in requesting only the basic
+`openid`, `email` and `profile` scopes, an External app in Testing allows any Google account
+without being on that list, subject to Google Workspace administrator controls. Calendar
+access still requires test users in Testing. See Google's
+[OAuth app state overview](https://developers.google.com/identity/protocols/oauth2/production-readiness/overview).
+
 For an External app whose publishing status is **Testing**, Google issues refresh tokens
 that expire after **7 days** when non-basic scopes are requested. Calendar scopes fall
 outside the basic `openid`, `email` and `profile` exception, so calendar connections drop
@@ -81,9 +88,9 @@ this from Testing's 100-test-user limit in its
 As the self-hoster, you own the Google Cloud project and are responsible for its branding,
 domains, privacy policy and any required
 [sensitive-scope verification](https://developers.google.com/identity/protocols/oauth2/production-readiness/sensitive-scope-verification).
-Hourmere's hosted credentials or verification do not cover your deployment. Review Google's
-documented exceptions for personal or internal use before deciding whether verification
-is required.
+Each Google Cloud project is verified separately; a self-hosted instance uses your own
+project. Review Google's documented exceptions for personal or internal use before deciding
+whether verification is required.
 
 A revoked/expired grant changes the connection to `needs_reauth`; reconnect through the
 same separate consent flow. Temporary provider failures preserve the connection for retry.
