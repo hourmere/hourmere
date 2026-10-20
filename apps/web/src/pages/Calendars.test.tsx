@@ -34,6 +34,97 @@ const list = (data = [connection], googleEnabled = true, microsoftEnabled = fals
 const authorizationUrl = 'https://accounts.google.com/o/oauth2/v2/auth?state=fake-state'
 
 describe('the calendars page', () => {
+  it.each([404, 503, 'network'] as const)(
+    'keeps calendar controls available after an unrelated profile failure: %s',
+    async (failure) => {
+      const user = userEvent.setup()
+      let recovered = false
+      const calendar = connection.calendars[0] as NonNullable<(typeof connection.calendars)[0]>
+      const requests = fakeApi({
+        ...signedIn,
+        ...list([{ ...connection, syncAuthorized: true }]),
+        'GET /api/v1/profile': () => {
+          if (recovered) return json(200, PROFILE)
+          if (failure === 'network') throw new TypeError('Failed to fetch')
+          return json(failure, { error: 'unexpected_profile_error' })
+        },
+        [`PATCH /api/v1/calendars/${calendar.id}`]: () => new Response(null, { status: 204 }),
+      })
+      renderApp('/app/calendars')
+      await screen.findByRole('heading', { name: 'calendar@example.com' })
+      const hint = screen.getByText(
+        'Could not load your profile. Try again before choosing where new bookings are written.',
+      ).parentElement as HTMLElement
+      expect(screen.queryByRole('alert')).toBeNull()
+      expect(screen.queryByRole('link', { name: 'Create profile' })).toBeNull()
+      const write = screen.getByRole('button', { name: 'Write new bookings here' })
+      expect(write.matches(':disabled')).toBe(true)
+      expect(write.getAttribute('aria-describedby')).toBe(hint.id)
+      await user.click(write)
+      expect(requests.to('PUT /api/v1/calendar-destination')).toHaveLength(0)
+      const conflict = screen.getByRole('checkbox', { name: 'Check this calendar for conflicts' })
+      expect(conflict.matches(':disabled')).toBe(false)
+      await user.click(conflict)
+      expect(requests.to(`PATCH /api/v1/calendars/${calendar.id}`)).toHaveLength(1)
+      recovered = true
+      await user.click(within(hint).getByRole('button', { name: 'Try again' }))
+      await vi.waitFor(() => expect(write.matches(':disabled')).toBe(false))
+      expect(screen.queryByText(/Could not load your profile/)).toBeNull()
+      expect(write.getAttribute('aria-describedby')).toBeNull()
+    },
+  )
+
+  it.each([404, 503] as const)(
+    'hides profile setup and availability hints before any calendar is connected: %s',
+    async (status) => {
+      fakeApi({
+        ...signedIn,
+        ...list([]),
+        'GET /api/v1/profile': () =>
+          json(status, { error: status === 404 ? 'profile_not_found' : 'internal_error' }),
+      })
+      renderApp('/app/calendars')
+      await screen.findByText('No calendar accounts connected yet.')
+      expect(document.getElementById('calendar-profile-hint')).toBeNull()
+      expect(screen.queryByRole('link', { name: 'Create profile' })).toBeNull()
+      expect(screen.getByRole('button', { name: 'Connect Google Calendar' })).toBeDefined()
+    },
+  )
+
+  it('localizes the unavailable-profile hint without claiming a profile is missing', async () => {
+    const user = userEvent.setup()
+    fakeApi({
+      ...signedIn,
+      ...list([{ ...connection, syncAuthorized: true }]),
+      'GET /api/v1/profile': () => json(503, { error: 'internal_error' }),
+    })
+    renderApp('/app/calendars')
+    await screen.findByRole('heading', { name: 'calendar@example.com' })
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Interface language' }), 'zh-CN')
+    expect(screen.getByText('无法加载个人资料。请重试后再选择用于写入新预约的日历。')).toBeDefined()
+    expect(screen.queryByRole('link', { name: '创建个人资料' })).toBeNull()
+    expect(screen.getByRole('button', { name: '重试' })).toBeDefined()
+  })
+
+  it.each([
+    ['en', 'Sign in again, then start a new calendar connection.'],
+    ['zh-CN', '请重新登录，然后开始新的日历连接。'],
+  ] as const)(
+    'keeps calendar session callback guidance contextual in %s',
+    async (locale, message) => {
+      const user = userEvent.setup()
+      fakeApi({ ...signedIn, ...list([]) })
+      renderApp('/app/calendars?connection=session_required')
+      await screen.findByText('No calendar accounts connected yet.')
+      if (locale === 'zh-CN')
+        await user.selectOptions(
+          screen.getByRole('combobox', { name: 'Interface language' }),
+          locale,
+        )
+      expect(within(screen.getByRole('main')).getByRole('status').textContent).toBe(message)
+    },
+  )
+
   it.each([
     ['en', 'Create profile', 'Create a profile before choosing where new bookings are written.'],
     ['zh-CN', '创建个人资料', '请先创建个人资料，再选择用于写入新预约的日历。'],
@@ -67,6 +158,40 @@ describe('the calendars page', () => {
       expect(screen.getByTestId('location').textContent).toBe('/app/settings')
     },
   )
+
+  it('separates calendars within one connected account with individual borders', async () => {
+    const first = connection.calendars[0] as NonNullable<(typeof connection.calendars)[0]>
+    fakeApi({
+      ...signedIn,
+      ...profile(),
+      ...list([
+        {
+          ...connection,
+          syncAuthorized: true,
+          calendars: [
+            first,
+            { ...first, id: 'c0000000-0000-7000-8000-000000000002', name: 'Other calendar' },
+          ],
+        },
+      ]),
+    })
+    const sheet = document.createElement('style')
+    sheet.textContent = styles
+    document.head.append(sheet)
+    try {
+      renderApp('/app/calendars')
+      await screen.findByRole('heading', { name: 'calendar@example.com' })
+      const items = screen.getByText('Work calendar (primary)').closest('ul') as HTMLUListElement
+      expect(within(items).getAllByRole('listitem')).toHaveLength(2)
+      for (const item of within(items).getAllByRole('listitem')) {
+        const style = getComputedStyle(item)
+        expect(style.borderTopStyle).toBe('solid')
+        expect(style.borderTopWidth).toBe('1px')
+      }
+    } finally {
+      sheet.remove()
+    }
+  })
 
   it.each([
     ['en', 'Create your profile in Settings first.'],

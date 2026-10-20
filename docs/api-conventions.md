@@ -64,13 +64,19 @@ for the generic cases in the table below (services cannot use them): `invalid_re
 `payload_too_large`, `unsupported_media_type`, `rate_limited`, `internal_error`. Codes are never
 renamed within `/api/v1`.
 
-Zoom refresh conflicts add the neutral `errorAlias: "zoom_operation_busy"` alongside the
-existing `error: "zoom_refresh_in_progress"`. The legacy code is deprecated for one release;
-it remains in `/api/v1` for compatibility with existing clients. New clients should prefer
-`errorAlias` when present and accept the legacy code when talking to older servers. This
-409 means another token operation for the same Hourmere owner is in progress, possibly for
-a different Zoom identity; it does not mean the selected connection is refreshing. Retry
-shortly. See [Zoom connections](zoom-connections.md) for callback replay and recovery semantics.
+An optional `errorAlias` provides an additive, preferred code without renaming `error`.
+The OpenAPI `ErrorAlias` schema lists the documented alias code set, generated from the
+same registry as the server's response mapping. That set may grow within `/api/v1`.
+Clients may prefer a recognized alias and must fall back to `error` when the alias is
+absent or unknown, including when talking to older servers. Deprecating an error code
+does not schedule its removal from v1: its original `error` value remains for **all of
+`/api/v1`**. Renaming or removing it requires a new API version.
+
+| `errorAlias` | Preserved `error` | Meaning |
+|---|---|---|
+| `zoom_operation_busy` | `zoom_refresh_in_progress` (deprecated) | HTTP 409: another token operation for the same Hourmere owner is in progress, possibly for a different Zoom identity. It does not mean the selected connection is refreshing; retry shortly. |
+
+See [Zoom connections](zoom-connections.md) for callback replay and recovery semantics.
 
 | Status | Meaning |
 |---|---|

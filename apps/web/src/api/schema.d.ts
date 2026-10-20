@@ -2181,7 +2181,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description zoom_disabled, zoom_needs_reauth, zoom_refresh_incomplete, zoom_identity_mismatch or a safe provider failure. Busy account operations return errorAlias=zoom_operation_busy alongside error=zoom_refresh_in_progress (legacy code deprecated for one release); retry shortly. */
+                /** @description zoom_disabled, zoom_needs_reauth, zoom_refresh_incomplete, zoom_identity_mismatch or a safe provider failure. Busy account operations add errorAlias=zoom_operation_busy alongside error=zoom_refresh_in_progress (deprecated but retained for all of /api/v1; removal or renaming requires a new API version); retry shortly. */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -5075,14 +5075,15 @@ export interface components {
         Error: {
             /** @description Machine-readable code, e.g. unauthorized */
             error: string;
-            /**
-             * @description Preferred neutral code for a busy Zoom account operation. Accompanies error=zoom_refresh_in_progress, whose legacy name is deprecated for one release.
-             * @enum {string}
-             */
-            errorAlias?: "zoom_operation_busy";
+            errorAlias?: components["schemas"]["ErrorAlias"];
             /** @description Human-readable detail */
             message?: string;
         };
+        /**
+         * @description Optional additive alias from the documented error-code set. The original error code remains unchanged throughout /api/v1. New aliases may be added; fall back to error when an alias is absent or unknown. See docs/api-conventions.md for code meanings.
+         * @enum {string}
+         */
+        ErrorAlias: "zoom_operation_busy";
         EventType: {
             /** @description Whether new bookings may add up to ten guest email recipients; existing booking attendees are preserved */
             allowGuests: boolean;

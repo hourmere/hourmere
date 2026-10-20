@@ -15,9 +15,16 @@ type Connection = Schemas['CalendarConnection']
 const load = async (signal: AbortSignal) => {
   const [connections, profile] = await Promise.all([
     unwrap(api.GET('/api/v1/calendar-connections', { signal })),
-    loadProfile(signal),
+    loadProfile(signal).catch((err: unknown) => {
+      if (signal.aborted) throw err
+      return undefined
+    }),
   ])
-  return { ...connections, hasProfile: profile !== null }
+  return {
+    ...connections,
+    hasProfile: profile !== null && profile !== undefined,
+    profileUnavailable: profile === undefined,
+  }
 }
 const loadInstance = (signal: AbortSignal) => unwrap(api.GET('/api/v1/instance', { signal }))
 const outcomes = {
@@ -245,12 +252,26 @@ export function CalendarsPage() {
       )}
       {state.status === 'ready' && (
         <>
-          {!state.data.hasProfile && (
-            <p className="alert alert-info" id="calendar-profile-hint">
-              {t('Create a profile before choosing where new bookings are written.')}{' '}
-              <Link to={`${PATHS.settings}#profile-heading`}>{t('Create profile')}</Link>
-            </p>
+          {state.data.data.length > 0 && state.data.profileUnavailable && (
+            <div className="alert alert-info" id="calendar-profile-hint">
+              <p>
+                {t(
+                  'Could not load your profile. Try again before choosing where new bookings are written.',
+                )}
+              </p>
+              <button type="button" className="button button-small" onClick={reload}>
+                {t('Try again')}
+              </button>
+            </div>
           )}
+          {state.data.data.length > 0 &&
+            !state.data.hasProfile &&
+            !state.data.profileUnavailable && (
+              <p className="alert alert-info" id="calendar-profile-hint">
+                {t('Create a profile before choosing where new bookings are written.')}{' '}
+                <Link to={`${PATHS.settings}#profile-heading`}>{t('Create profile')}</Link>
+              </p>
+            )}
           {state.data.googleEnabled ? (
             <section className="stack" aria-label={t('Connect Google Calendar')}>
               <div id="google-calendar-permissions" className="stack">

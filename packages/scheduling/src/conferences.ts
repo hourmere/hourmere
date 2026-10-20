@@ -416,15 +416,15 @@ export async function bookingConferenceViews(
     ])
     .$if(callerUserId !== undefined, (q) =>
       q
-        .leftJoin('booking_conference_mirrors as m', (join) =>
+        .leftJoin('booking_conference_mirrors as mirror', (join) =>
           join
-            .onRef('m.root_booking_id', '=', 'c.root_booking_id')
-            .on('m.user_id', '=', callerUserId as string),
+            .onRef('mirror.root_booking_id', '=', 'c.root_booking_id')
+            .on('mirror.user_id', '=', callerUserId as string),
         )
         .select([
-          'm.state as copy_state',
-          'm.error_code as copy_error_code',
-          'm.calendar_id as copy_calendar_id',
+          'mirror.state as copy_state',
+          'mirror.error_code as copy_error_code',
+          'mirror.calendar_id as copy_calendar_id',
         ]),
     )
     .select((eb) =>

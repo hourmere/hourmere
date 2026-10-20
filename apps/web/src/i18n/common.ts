@@ -52,8 +52,6 @@ export const common = {
   'Time reserved; meeting link needs attention': '时段已保留，会议链接需要处理',
   'Automatic Google Meet': '自动创建 Google Meet',
   'Create a unique Google Meet link for each booking': '为每次预约创建独立的 Google Meet 链接',
-  'The assigned individual host must connect an owned, Meet-capable Google calendar. Final invitations wait for the link.':
-    '指定的单人主持人须连接支持 Meet 的自有 Google 日历，链接生成后才会发送最终邀请。',
   'Automatic creation is unavailable on this instance or meeting mode. You can keep the provider label or use your own meeting link.':
     '此实例或会议模式不支持自动创建。你可以保留服务名称，或使用自己的会议链接。',
   'Google Meet (provider label only)': 'Google Meet（仅显示服务名称）',
@@ -76,7 +74,6 @@ export const common = {
   Unknown: '未知',
   ' (primary)': ' （主日历）',
   'Interface language': '界面语言',
-  ', now on': '，当前时间：',
   '. If it was moved to another time, the new booking has its own link.':
     '。如果已改期，新预约有单独的链接。',
   '(optional, shared with your host)': '（可选，将与主持人共享）',
@@ -269,7 +266,6 @@ export const common = {
     '时区（{0}）未被接受。请更改时间、选择其他时区后重试。',
   '1 time zone': '1 个时区',
   '{0} time zones': '{0} 个时区',
-  'with {0}': '与 {0}',
   '(since {0})': '（自 {0} 起）',
   'Enter your name.': '请输入你的姓名。',
   'Enter a name.': '请输入姓名。',
@@ -288,7 +284,6 @@ export const common = {
   '{count} day has available times this month.': '本月有 {count} 天可预约。',
   '{count} days have available times this month.': '本月有 {count} 天可预约。',
   'No time zone matches “{query}”.': '没有匹配“{query}”的时区。',
-  'Type to narrow down the {count} time zones.': '输入文字以缩小 {count} 个时区的搜索范围。',
   'Your {event} with {host} is confirmed.': '你与 {host} 的“{event}”预约已确认。',
   'an AI agent (MCP)': 'AI 代理（MCP）',
   '{event} with {host}': '与 {host} 的{event}',

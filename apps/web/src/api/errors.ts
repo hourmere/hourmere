@@ -1,4 +1,10 @@
 import { literal, type MessageKey, msg, type UiText } from '../i18n/translate.ts'
+import type { components } from './schema.d.ts'
+
+/** Documented aliases this client understands; unknown aliases fall back to `error`. */
+const errorAliases: ReadonlySet<string> = new Set<components['schemas']['ErrorAlias']>([
+  'zoom_operation_busy',
+])
 /** A request the server answered with an error status. `message` is safe to show. */
 export class RequestError extends Error {
   readonly displayMessage: UiText | undefined
@@ -65,10 +71,16 @@ export function requestError(status: number, body: unknown): RequestError {
       ? record.message
       : messageForStatus(status))
   const codeAlias =
-    code === 'zoom_refresh_in_progress' && record.errorAlias === 'zoom_operation_busy'
+    typeof record.errorAlias === 'string' && errorAliases.has(record.errorAlias)
       ? record.errorAlias
       : undefined
-  return new RequestError(status, code, message, undefined, codeAlias)
+  // Schema validation names the offending fields in server prose. Keep those details
+  // literal instead of replacing them with the generic localized form guidance.
+  const displayMessage =
+    code === 'invalid_request' && typeof record.message === 'string' && record.message.trim()
+      ? literal(record.message)
+      : undefined
+  return new RequestError(status, code, message, displayMessage, codeAlias)
 }
 
 export async function errorFromResponse(response: Response): Promise<RequestError> {
@@ -85,7 +97,7 @@ export function errorMessage(err: unknown): UiText {
     invalid_calendar_settings: 'Check your calendar settings and try again.',
     invalid_calendar_access: 'Choose calendar-list access or calendar synchronization.',
     profile_not_found: 'Create your profile in Settings first.',
-    session_required: 'Sign in again, then start a new calendar connection.',
+    session_required: 'Your session has ended. Sign in again.',
     invalid_oauth_state: 'This connection attempt expired or was already used. Start again.',
     calendar_connection_not_found: 'This calendar connection no longer exists.',
     calendar_not_found: 'This calendar is no longer available. Refresh the calendar list.',

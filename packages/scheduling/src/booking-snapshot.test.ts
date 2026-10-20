@@ -677,6 +677,55 @@ describe.skipIf(!serverUrl)('booking hydration snapshot', () => {
     ).toBe(false)
   })
 
+  it.each(['host detail', 'host list'] as const)(
+    '%s hydrates the caller calendar copy independently of organizer membership',
+    async (reader) => {
+      const b = await setup('google_meet', true)
+      const otherUser = await f.user()
+      await db
+        .insertInto('booking_conference_mirrors')
+        .values([
+          {
+            root_booking_id: b.booking.id,
+            user_id: b.host.userId,
+            calendar_id: randomUUID(),
+            connection_id: randomUUID(),
+            state: 'failed',
+            error_code: 'permissions_missing',
+          },
+          {
+            root_booking_id: b.booking.id,
+            user_id: otherUser,
+            calendar_id: randomUUID(),
+            connection_id: randomUUID(),
+            state: 'ready',
+            applied_revision: 0,
+          },
+        ])
+        .execute()
+      const ownCopy = { status: 'failed', errorCode: 'permissions_missing', canRetry: true }
+      const current = await b.read(reader)
+      expect(current.calendarCopy).toEqual(ownCopy)
+      expect(current.conference).toEqual({
+        provider: 'google_meet',
+        status: 'ready',
+        errorCode: null,
+      })
+      await db
+        .deleteFrom('auth.member')
+        .where('organizationId', '=', b.host.organizationId)
+        .where('userId', '=', b.host.userId)
+        .execute()
+      const unavailable = await b.read(reader)
+      expect(unavailable.calendarCopy).toEqual(ownCopy)
+      expect(unavailable.conference).toEqual({
+        provider: 'google_meet',
+        status: 'failed',
+        errorCode: 'organizer_unavailable',
+      })
+    },
+  )
+
   it('keeps conference retry ownership and calendar copies private to their caller', async () => {
     const b = await setup('google_meet')
     const organizer = await f.user()
