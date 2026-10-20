@@ -170,33 +170,51 @@ docker compose up -d --wait`)
   const upgradeCommands = (title: string) =>
     guide.split(`### ${title} upgrade\n`)[1]?.match(/```sh\n([\s\S]*?)\n```/)?.[1]
 
-  it('checks the HTTPS proxy beside every standalone worker verification', () => {
-    for (const source of [readme, configuration, guide]) {
-      const blocks = [...source.matchAll(/```sh\n([\s\S]*?)\n```/g)]
-        .map((match) => match[1] ?? '')
-        .filter((block) => /^docker compose config --services \| grep -qx worker$/m.test(block))
-      expect(blocks.length).toBeGreaterThan(0)
-      for (const block of blocks) {
-        expect(block).toMatch(
-          /docker compose config --services \| grep -qx worker\n# Bundled HTTPS only; omit this check in plain mode\.\ndocker compose config --services \| grep -qx proxy/,
-        )
-      }
-    }
-  })
-
+  const verificationCommands = (section: string | undefined) =>
+    [...(section ?? '').matchAll(/```sh\n([\s\S]*?)\n```/g)]
+      .map((match) => match[1])
+      .find((block) => block?.includes('docker compose config --services'))
   const procedures = [
-    { name: 'README worker setup', commands: enableCommands(readme), upgrade: false, worker: true },
+    {
+      name: 'README worker setup',
+      commands: enableCommands(readme),
+      worker: true,
+      helper: 'enable',
+    },
     {
       name: 'configuration worker setup',
       commands: enableCommands(configuration),
-      upgrade: false,
       worker: true,
+      helper: 'enable',
     },
     {
       name: 'self-hosting worker setup',
       commands: enableCommands(separate),
-      upgrade: false,
       worker: true,
+      helper: 'enable',
+    },
+    {
+      name: 'single-container switch',
+      commands: verificationCommands(
+        guide.split('### Switch back to a single container\n')[1]?.split('\n## ')[0],
+      ),
+      worker: false,
+      helper: 'disable',
+    },
+    {
+      name: 'webhook n8n setup',
+      commands: verificationCommands(
+        guide.split('## Private webhook receivers\n')[1]?.split('\n## ')[0],
+      ),
+      worker: true,
+    },
+    {
+      name: 'restore drill',
+      commands: verificationCommands(
+        guide.split('To test restoration,')[1]?.split('For actual recovery,')[0],
+      ),
+      worker: true,
+      verificationOnly: true,
     },
     {
       name: 'Single-container',
@@ -209,34 +227,49 @@ docker compose up -d --wait`)
       commands: upgradeCommands('Separate-worker'),
       upgrade: true,
       worker: true,
+      helper: 'enable',
     },
   ]
 
-  describe.each(procedures)('$name commands', ({ commands, upgrade, worker: needsWorker }) => {
-    it.each([
-      { worker: true, proxy: true },
-      { worker: true, proxy: false },
-      { worker: false, proxy: true },
-      { worker: false, proxy: false },
-    ])('checks HTTPS proxy and required roles before startup (%j)', ({ worker, proxy }) => {
-      expect(commands, 'labelled instructions must include runnable commands').toBeDefined()
-      const directory = mkdtempSync(join(tmpdir(), 'hourmere-worker-docs-'))
-      try {
-        const scripts = join(directory, 'scripts')
-        const bin = join(directory, 'bin')
-        mkdirSync(scripts)
-        mkdirSync(bin)
-        const rejectShellOverride = `if [ "\${COMPOSE_FILE+x}" = x ]; then exit 9; fi\n`
-        writeFileSync(
-          join(scripts, 'enable-worker.sh'),
-          `#!/bin/sh
-${rejectShellOverride}printf '%s\\n' enable-worker >> "$CALL_LOG"
+  it('executes every documented service-verification block', () => {
+    const blocks = [readme, configuration, guide].flatMap((source) =>
+      [...source.matchAll(/```sh\n([\s\S]*?)\n```/g)]
+        .map((match) => match[1])
+        .filter((block) => block?.includes('grep -qx') && !block.includes('if docker compose')),
+    )
+    expect(blocks).toHaveLength(procedures.length)
+    expect(procedures.map(({ commands }) => commands).sort()).toEqual(blocks.sort())
+  })
+
+  describe.each(procedures)(
+    '$name commands',
+    ({ commands, upgrade, worker: needsWorker, helper, verificationOnly }) => {
+      it.each([
+        { worker: true, proxy: true },
+        { worker: true, proxy: false },
+        { worker: false, proxy: true },
+        { worker: false, proxy: false },
+      ])('stops before startup when a verification fails (%j)', ({ worker, proxy }) => {
+        expect(commands, 'labelled instructions must include runnable commands').toBeDefined()
+        const directory = mkdtempSync(join(tmpdir(), 'hourmere-worker-docs-'))
+        try {
+          const scripts = join(directory, 'scripts')
+          const bin = join(directory, 'bin')
+          mkdirSync(scripts)
+          mkdirSync(bin)
+          const rejectShellOverride = `if [ "\${COMPOSE_FILE+x}" = x ]; then exit 9; fi\n`
+          for (const mode of ['enable', 'disable']) {
+            writeFileSync(
+              join(scripts, `${mode}-worker.sh`),
+              `#!/bin/sh
+${rejectShellOverride}printf '%s\\n' ${mode}-worker >> "$CALL_LOG"
 `,
-          { mode: 0o755 },
-        )
-        writeFileSync(
-          join(bin, 'docker'),
-          `#!/bin/sh
+              { mode: 0o755 },
+            )
+          }
+          writeFileSync(
+            join(bin, 'docker'),
+            `#!/bin/sh
 ${rejectShellOverride}printf '%s\\n' "$*" >> "$CALL_LOG"
 case "$*" in
   'compose config --services') printf '%s\\n' app db${proxy ? ' proxy' : ''}${worker ? ' worker' : ''} ;;
@@ -244,45 +277,58 @@ case "$*" in
   *) exit 1 ;;
 esac
 `,
-          { mode: 0o755 },
-        )
-        writeFileSync(join(bin, 'git'), '#!/bin/sh\nprintf "%s\\n" "git $*" >> "$CALL_LOG"\n', {
-          mode: 0o755,
-        })
-        writeFileSync(join(bin, 'curl'), '#!/bin/sh\nprintf "%s\\n" health >> "$CALL_LOG"\n', {
-          mode: 0o755,
-        })
-        const callLog = join(directory, 'calls')
-        const result = spawnSync('sh', ['-eu', '-c', commands ?? 'exit 1'], {
-          cwd: directory,
-          encoding: 'utf8',
-          env: {
-            PATH: `${bin}:${process.env.PATH}`,
-            CALL_LOG: callLog,
-            COMPOSE_FILE: 'conflicting-shell-selection.yml',
-          },
-        })
-        const verified = proxy && (!needsWorker || worker)
-        expect(result.status).toBe(verified ? 0 : 1)
-        expect(readFileSync(callLog, 'utf8').trim().split('\n')).toEqual([
-          ...(upgrade ? ['git pull --ff-only'] : []),
-          ...(needsWorker ? ['enable-worker', 'compose config --services'] : []),
-          ...(!needsWorker || worker ? ['compose config --services'] : []),
-          ...(verified
-            ? [
-                ...(upgrade
-                  ? ['compose pull proxy db', `compose stop app${needsWorker ? ' worker' : ''}`]
-                  : []),
-                'compose up -d --build --wait',
-                ...(upgrade ? ['health'] : []),
-              ]
-            : []),
-        ])
-      } finally {
-        rmSync(directory, { recursive: true, force: true })
-      }
-    })
-  })
+            { mode: 0o755 },
+          )
+          writeFileSync(join(bin, 'git'), '#!/bin/sh\nprintf "%s\\n" "git $*" >> "$CALL_LOG"\n', {
+            mode: 0o755,
+          })
+          writeFileSync(join(bin, 'curl'), '#!/bin/sh\nprintf "%s\\n" health >> "$CALL_LOG"\n', {
+            mode: 0o755,
+          })
+          const callLog = join(directory, 'calls')
+          // A pasted block runs without errexit. Adding -e here would hide the regression.
+          // For a restore drill, simulate pasting a later startup block in the same shell.
+          const pasted = `${commands}\n${verificationOnly ? 'docker compose up -d --build --wait' : ''}`
+          const result = spawnSync('sh', ['-c', pasted], {
+            cwd: directory,
+            encoding: 'utf8',
+            env: {
+              PATH: `${bin}:${process.env.PATH}`,
+              CALL_LOG: callLog,
+              COMPOSE_FILE: 'conflicting-shell-selection.yml',
+            },
+          })
+          const verified = proxy && worker === needsWorker
+          const calls = readFileSync(callLog, 'utf8').trim().split('\n')
+          expect(calls.filter((call) => call.startsWith('compose up '))).toEqual(
+            verified ? ['compose up -d --build --wait'] : [],
+          )
+          expect(result.status).toBe(verified ? 0 : 1)
+          if (!verified)
+            expect(result.stdout).toMatch(
+              /(?:service|deployment).*?(?:missing|enabled|separate worker)/i,
+            )
+          expect(calls).toEqual([
+            ...(upgrade ? ['git pull --ff-only'] : []),
+            ...(helper ? [`${helper}-worker`] : []),
+            'compose config --services',
+            ...(worker === needsWorker ? ['compose config --services'] : []),
+            ...(verified
+              ? [
+                  ...(upgrade
+                    ? ['compose pull proxy db', `compose stop app${needsWorker ? ' worker' : ''}`]
+                    : []),
+                  'compose up -d --build --wait',
+                  ...(upgrade ? ['health'] : []),
+                ]
+              : []),
+          ])
+        } finally {
+          rmSync(directory, { recursive: true, force: true })
+        }
+      })
+    },
+  )
 
   it('migrates tracked worker edits before pulling and explains orphaned old images', () => {
     const upgrade = guide.split('## Upgrade and roll back\n')[1]?.split('\n## ')[0]

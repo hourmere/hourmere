@@ -78,14 +78,10 @@ function breaksTableCompatibility(statement: string[]) {
   for (; index < statement.length; index++) {
     const token = statement[index]
     if (actionStart) {
-      // DROP CONSTRAINT and ALTER ... DROP DEFAULT/NOT NULL/IDENTITY/EXPRESSION
-      // preserve the column. Inspect only the beginning of each table action.
+      // DROP/RENAME CONSTRAINT and ALTER ... DROP DEFAULT/NOT NULL/IDENTITY/EXPRESSION
+      // preserve table and column names. Inspect only the beginning of each action.
       if (token === 'DROP' && statement[index + 1] !== 'CONSTRAINT') return true
-      if (
-        token === 'RENAME' &&
-        statement[index + 1] !== 'CONSTRAINT' &&
-        statement[index + 1] !== 'TO'
-      ) {
+      if (token === 'RENAME' && statement[index + 1] !== 'CONSTRAINT') {
         return true
       }
       actionStart = false

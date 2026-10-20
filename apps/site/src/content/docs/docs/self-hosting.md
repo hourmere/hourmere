@@ -202,9 +202,11 @@ in one container. After setup, run these commands from the deployment checkout:
 ```sh
 unset COMPOSE_FILE
 ./scripts/enable-worker.sh
-docker compose config --services | grep -qx worker
+docker compose config --services | grep -qx worker ||
+  { echo "Worker service is missing; check COMPOSE_FILE before continuing."; exit 1; }
 # Bundled HTTPS only; omit this check in plain mode.
-docker compose config --services | grep -qx proxy
+docker compose config --services | grep -qx proxy ||
+  { echo "Proxy service is missing; check COMPOSE_FILE before continuing."; exit 1; }
 docker compose up -d --build --wait
 ```
 
@@ -255,14 +257,20 @@ Remove the worker container while the overlay is still selected:
 docker compose rm -sf worker
 ```
 
-Then deselect the overlay with the helper:
+Remove any old `HOURMERE_ROLE=web` setting from `.env`. Then deselect the overlay with the helper:
 
 ```sh
+unset COMPOSE_FILE
 ./scripts/disable-worker.sh
+! docker compose config --services | grep -qx worker ||
+  { echo "Worker service is still enabled; check COMPOSE_FILE before continuing."; exit 1; }
+# Bundled HTTPS only; omit this check in plain mode.
+docker compose config --services | grep -qx proxy ||
+  { echo "Proxy service is missing; check COMPOSE_FILE before continuing."; exit 1; }
+docker compose up -d --build --wait
 ```
 
-Remove any old `HOURMERE_ROLE=web` setting from `.env`, then run
-`docker compose up -d --build --wait`. Its default `all` role resumes job processing.
+Its default `all` role resumes job processing.
 Removing the container before deselecting the overlay prevents an orphaned worker from
 continuing to process jobs.
 
@@ -322,9 +330,12 @@ authentication, backups and private editor access separately; this example publi
 n8n port. Verify the worker selection and recreate both app and worker:
 
 ```sh
-docker compose config --services | grep -qx worker
+unset COMPOSE_FILE
+docker compose config --services | grep -qx worker ||
+  { echo "Worker service is missing; check COMPOSE_FILE before continuing."; exit 1; }
 # Bundled HTTPS only; omit this check in plain mode.
-docker compose config --services | grep -qx proxy
+docker compose config --services | grep -qx proxy ||
+  { echo "Proxy service is missing; check COMPOSE_FILE before continuing."; exit 1; }
 docker compose up -d --build --wait
 ```
 
@@ -443,9 +454,12 @@ For backups with a separate worker, verify the rewritten selection before starti
 or worker:
 
 ```sh
-docker compose config --services | grep -qx worker
+unset COMPOSE_FILE
+docker compose config --services | grep -qx worker ||
+  { echo "Worker service is missing; check COMPOSE_FILE before continuing."; exit 1; }
 # Bundled HTTPS only; omit this check in plain mode.
-docker compose config --services | grep -qx proxy
+docker compose config --services | grep -qx proxy ||
+  { echo "Proxy service is missing; check COMPOSE_FILE before continuing."; exit 1; }
 ```
 
 Continue only if verification succeeds. For a plain-mode restore, replace the whole line
@@ -526,8 +540,11 @@ The app keeps the default `all` role. From the deployment checkout:
 ```sh
 git pull --ff-only
 unset COMPOSE_FILE
+! docker compose config --services | grep -qx worker ||
+  { echo "This deployment runs a separate worker; use the separate-worker upgrade."; exit 1; }
 # Bundled HTTPS only; omit this check in plain mode.
-docker compose config --services | grep -qx proxy
+docker compose config --services | grep -qx proxy ||
+  { echo "Proxy service is missing; check COMPOSE_FILE before continuing."; exit 1; }
 docker compose pull proxy db
 docker compose stop app
 docker compose up -d --build --wait
@@ -543,9 +560,11 @@ stopping the old app and worker:
 git pull --ff-only
 unset COMPOSE_FILE
 ./scripts/enable-worker.sh
-docker compose config --services | grep -qx worker
+docker compose config --services | grep -qx worker ||
+  { echo "Worker service is missing; check COMPOSE_FILE before continuing."; exit 1; }
 # Bundled HTTPS only; omit this check in plain mode.
-docker compose config --services | grep -qx proxy
+docker compose config --services | grep -qx proxy ||
+  { echo "Proxy service is missing; check COMPOSE_FILE before continuing."; exit 1; }
 docker compose pull proxy db
 docker compose stop app worker
 docker compose up -d --build --wait

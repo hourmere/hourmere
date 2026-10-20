@@ -26,6 +26,7 @@ const directories: string[] = []
 const base = 'docker-compose.yml'
 const proxy = 'docker-compose.proxy.yml'
 const worker = 'docker-compose.worker.yml'
+const composeKeys = ['COMPOSE_FILE-EXTRA', 'COMPOSE_FILE.EXTRA', '9OTHER', 'OTHER[0]', '变量']
 const prefix =
   "# Keep these exact bytes, including quoting and whitespace.\nBETTER_AUTH_SECRET='synthetic-$literal-value'\nSMTP_URL='smtps://synthetic:pass@smtp.example.test'\n  OTHER_KEY = value # comment\n# COMPOSE_FILE=ignored.yml\n"
 const suffix = '\nCOMPOSE_FILE_EXTRA=unrelated\nFINAL_KEY=unterminated'
@@ -198,6 +199,7 @@ describe('private worker overlay configuration', () => {
       `COMPOSE_FILE: '${base}:${proxy}'`,
       ` \texport COMPOSE_FILE : "${base}:${proxy}"`,
       `COMPOSE_FILE += ${base}:${proxy}`,
+      `COMPOSE_FILE+=${base}:${proxy}`,
       `env COMPOSE_FILE=${base}:${proxy}`,
       'COMPOSE_FILE',
       `COMPOSE_FILE: ${base}:${proxy}\nCOMPOSE_FILE='${base}'`,
@@ -433,6 +435,28 @@ describe.each(shells)('worker script portability under $name', (shell) => {
     }
   })
 
+  it.each(
+    composeKeys.flatMap((key) =>
+      [
+        { separator: '=', quote: "'", exported: '' },
+        { separator: '=', quote: '"', exported: 'export ' },
+        { separator: ':', quote: "'", exported: 'export ' },
+        { separator: ':', quote: '"', exported: '' },
+      ].map((form) => ({ key, ...form })),
+    ),
+  )(
+    'preserves assignment-looking lines in multiline Compose key $key ($separator $quote, export: $exported)',
+    ({ key, separator, quote, exported }) => {
+      const contents = `#${key}='unclosed comment\n${exported}${key} ${separator} ${quote}first\nCOMPOSE_FILE=${base}:${proxy}\nexport COMPOSE_FILE=${worker}\nlast${quote}\n`
+      const setup = fixture(contents)
+      expect(setup.run('on', {}, false, shell).status).toBe(0)
+      expect(setup.text()).toBe(`${contents}COMPOSE_FILE='${base}:${worker}'\n`)
+      expect(setup.run('off', {}, false, shell).status).toBe(0)
+      expect(setup.text()).toBe(`${contents}COMPOSE_FILE='${base}'\n`)
+      expect(setup.noStaging()).toBe(true)
+    },
+  )
+
   it.each([
     `\uFEFFCOMPOSE_FILE='${base}:${proxy}'\n`,
     `\uFEFFOTHER=yes\nCOMPOSE_FILE='${base}:${proxy}'\n`,
@@ -451,7 +475,7 @@ describe.each(shells)('worker script portability under $name', (shell) => {
 describe.skipIf(!hasCompose)('worker script with real Compose config (no daemon)', () => {
   it.each([false, true])('renders a worker for setup quoting (proxy: %s)', (proxied) => {
     const setup = fixture(
-      `COMPOSE_FILE='${base}${proxied ? `:${proxy}` : ''}'\nPOSTGRES_PASSWORD='synthetic-password'\nBETTER_AUTH_SECRET='synthetic-auth-value'\nPUBLIC_URL='https://meet.example.test'\n`,
+      `COMPOSE_FILE='${base}${proxied ? `:${proxy}` : ''}'\nPOSTGRES_PASSWORD='synthetic-password'\nBETTER_AUTH_SECRET='synthetic-auth-value'\nPUBLIC_URL='https://meet.example.test'\n${composeKeys.map((key) => `${key}='first\nCOMPOSE_FILE=ignored.yml\nlast'\n`).join('')}`,
     )
     for (const file of [base, proxy, worker]) {
       copyFileSync(new URL(file, root), join(setup.directory, file))

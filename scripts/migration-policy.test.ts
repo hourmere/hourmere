@@ -23,7 +23,7 @@ function fixture(sql: string, note?: string) {
   return directory
 }
 
-it('requires an upgrade note beside every migration that drops a table/column or renames a column', () => {
+it('requires an upgrade note beside every migration that drops or renames a table/column', () => {
   expect(
     undocumentedMigrations(migrations),
     'Add a matching .md sidecar with a nonempty Schema-break upgrade: note',
@@ -48,6 +48,10 @@ const breaking = [
   'alter table t rename x to y;',
   'ALTER TABLE IF EXISTS ONLY public.t * RENAME "old x" TO "new x";',
   'ALTER TABLE t RENAME/* reason */COLUMN x TO y;',
+  'ALTER TABLE t RENAME TO new_t;',
+  'alter table public.t rename to new_t;',
+  'ALTER TABLE IF EXISTS ONLY "public"."old table" * RENAME TO "new table";',
+  'ALTER TABLE t RENAME/* reason */TO new_t;',
   "SELECT 'not a change'; ALTER TABLE t DROP x;",
   "SELECT '-- not a comment'; DROP TABLE t;",
   "SELECT '/* not a comment */'; ALTER TABLE t RENAME x TO y;",
@@ -119,7 +123,8 @@ describe('nonbreaking SQL and quoted examples', () => {
     'ALTER TABLE t ALTER x DROP IDENTITY IF EXISTS;',
     'ALTER TABLE t DROP CONSTRAINT IF EXISTS old_check;',
     'ALTER TABLE t RENAME CONSTRAINT old_check TO new_check;',
-    'ALTER TABLE t RENAME TO new_t;',
+    'DO $$ BEGIN ALTER TABLE t RENAME TO new_t; END $$;',
+    "DO $body$ BEGIN EXECUTE 'ALTER TABLE t RENAME TO new_t'; END $body$;",
     'ALTER TYPE t DROP ATTRIBUTE x;',
     'DROP INDEX old_index;',
     'CREATE TABLE t (x text) ON COMMIT DROP;',
