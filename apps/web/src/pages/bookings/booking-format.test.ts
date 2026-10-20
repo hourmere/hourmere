@@ -26,16 +26,22 @@ describe('booking title metadata on updates', () => {
 
 describe('booking title composition', () => {
   it.each([
-    ['en', 'Grace Hopper', '初次通话 with Grace Hopper'],
-    ['zh-CN', 'Grace Hopper', '与 Grace Hopper 的初次通话'],
-    ['zh-CN', '王小明', '与王小明的初次通话'],
-    ['zh-CN', 'O’Brien', '与 O’Brien 的初次通话'],
-    ['zh-CN', 'Ada’s team', '与 Ada’s team 的初次通话'],
-  ] as const)('composes a verified generated title in %s for %s', (locale, name, expected) => {
-    const current = booking({ eventTypeTitle: '初次通话', title: `初次通话 with ${name}` })
-    current.attendees = current.attendees.map((a) => (a.isBooker ? { ...a, name } : a)).reverse()
-    expect(translateMessage(locale, bookingTitle(current, locale))).toBe(expected)
-  })
+    ['en', 'Grace Hopper', '初次通话', '初次通话 with Grace Hopper'],
+    ['en', 'Grace Hopper', 'Ada’s review', 'Ada’s review with Grace Hopper'],
+    ['zh-CN', 'Grace Hopper', '初次通话', '与 Grace Hopper 的初次通话'],
+    ['zh-CN', 'Grace Hopper', 'Ada’s review', '与 Grace Hopper 的 Ada’s review'],
+    ['zh-CN', '王小明', '初次通话', '与王小明的初次通话'],
+    ['zh-CN', '王小明', 'Ada’s review', '与王小明的 Ada’s review'],
+    ['zh-CN', 'O’Brien', '初次通话', '与 O’Brien 的初次通话'],
+    ['zh-CN', 'Ada’s team', '初次通话', '与 Ada’s team 的初次通话'],
+  ] as const)(
+    'composes a verified generated title in %s for %s and %s',
+    (locale, name, event, expected) => {
+      const current = booking({ eventTypeTitle: event, title: `${event} with ${name}` })
+      current.attendees = current.attendees.map((a) => (a.isBooker ? { ...a, name } : a)).reverse()
+      expect(translateMessage(locale, bookingTitle(current))).toBe(expected)
+    },
+  )
 
   it.each([
     { title: 'Design with Grace Hopper and friends', eventTypeTitle: 'Design' },
@@ -48,7 +54,7 @@ describe('booking title composition', () => {
     { title: 'Intro call with Grace Hopper', eventTypeTitle: 'Intro call', attendees: [] },
   ])('preserves an unverified, custom or historical title: $title', (overrides) => {
     const current = booking(overrides)
-    expect(translateMessage('zh-CN', bookingTitle(current, 'zh-CN'))).toBe(current.title)
+    expect(translateMessage('zh-CN', bookingTitle(current))).toBe(current.title)
   })
 })
 

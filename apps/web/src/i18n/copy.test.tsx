@@ -5,7 +5,7 @@ import { QuestionsEditor } from '../pages/event-types/QuestionsEditor.tsx'
 import { BookingForm } from '../public/BookingForm.tsx'
 import { admin } from './admin.ts'
 import { common } from './common.ts'
-import { formatCjkName, formatList } from './formatting.ts'
+import { formatList, spaceCjkBoundaries } from './formatting.ts'
 import { chooseLanguage } from './store.ts'
 import { registerCatalog, translate } from './translate.ts'
 
@@ -61,25 +61,109 @@ describe('Chinese copy and punctuation', () => {
   })
 
   it.each([
-    ['王小明', '王小明'],
-    ['Ada Lovelace', ' Ada Lovelace '],
-    ['O’Brien', ' O’Brien '],
-    ['Ada’s plan', ' Ada’s plan '],
-  ])('spaces the edges of %s consistently in Chinese booking prose', (name, spaced) => {
-    expect(formatCjkName(name, 'zh-CN')).toBe(spaced)
-    expect(formatCjkName(name, 'en')).toBe(name)
+    { name: 'Ada Lovelace', event: 'Intro call', expected: '与 Ada Lovelace 的 Intro call' },
+    { name: '王小明', event: '初次通话', expected: '与王小明的初次通话' },
+    { name: '王小明', event: 'Ada’s review', expected: '与王小明的 Ada’s review' },
+    { name: 'Grace Hopper', event: 'Ada’s review', expected: '与 Grace Hopper 的 Ada’s review' },
+    { name: 'O’Brien', event: '初次通话', expected: '与 O’Brien 的初次通话' },
+    { name: 'Zoë', event: 'Échange', expected: '与 Zoë 的 Échange' },
+    { name: 'André', event: 'Intro call', expected: '与 André 的 Intro call' },
+    { name: 'Ada李', event: '初次Intro交流', expected: '与 Ada李的初次Intro交流' },
+    { name: '李Ada', event: 'Intro初次交流', expected: '与李Ada 的 Intro初次交流' },
+    { name: '3M', event: '初次通话', expected: '与 3M 的初次通话' },
+    { name: 'Δημήτρης', event: '初次交流', expected: '与Δημήτρης的初次交流' },
+  ])('spaces only Han/Latin boundaries for $name and $event', ({ name, event, expected }) => {
+    expect(translate('zh-CN', '{event} with {host}', { event, host: name })).toBe(expected)
+    expect(translate('en', '{event} with {host}', { event, host: name })).toBe(
+      `${event} with ${name}`,
+    )
+  })
+
+  it('spaces inserted text only where a Latin or numeric edge meets Han prose', () => {
+    expect(spaceCjkBoundaries('与', 'Ada', '的')).toBe(' Ada ')
+    expect(spaceCjkBoundaries('与', '王小明', '的')).toBe('王小明')
+    expect(spaceCjkBoundaries('“', 'Ada', '”')).toBe('Ada')
+    expect(spaceCjkBoundaries('', 'Ada', '')).toBe('Ada')
+    expect(spaceCjkBoundaries('与 ', 'Ada', ' 的')).toBe('Ada')
+  })
+
+  it('leaves quoted, punctuated and already spaced insertions alone', () => {
     expect(
       translate('zh-CN', 'Your {event} with {host} is confirmed.', {
-        event: '初次通话',
-        host: formatCjkName(name, 'zh-CN'),
+        event: 'Ada’s review',
+        host: 'O’Brien',
       }),
-    ).toBe(`你与${spaced}的“初次通话”预约已确认。`)
+    ).toBe('你与 O’Brien 的“Ada’s review”预约已确认。')
+    expect(translate('zh-CN', 'Edit “{0}”', { '0': 'Intro' })).toBe('编辑“Intro”')
+    expect(translate('zh-CN', '{name} ({detail})', { name: 'Ada', detail: 'UTC' })).toBe(
+      'Ada（UTC）',
+    )
+    expect(translate('zh-CN', 'Powered by {0}', { '0': 'Hourmere' })).toBe('由 Hourmere 提供支持')
+    expect(translate('zh-CN', 'Guest {0} name', { '0': 2 })).toBe('来宾 2 的姓名')
+  })
+
+  it.each([
+    ['王小明', 'Ada’s review', '正在为与王小明的“Ada’s review”预约改期，当前时间：10月20日，09:00'],
+    [
+      'Grace Hopper',
+      '初次通话',
+      '正在为与 Grace Hopper 的“初次通话”预约改期，当前时间：10月20日，09:00',
+    ],
+    [
+      '王小明和Grace Hopper',
+      'Ada’s review',
+      '正在为与王小明和Grace Hopper 的“Ada’s review”预约改期，当前时间：10月20日，09:00',
+    ],
+  ])('spaces the reschedule heading around host %s', (hosts, title, expected) => {
+    const values = { hosts, title, date: '10月20日', time: '09:00' }
     expect(
-      translate('zh-CN', '{event} with {host}', {
-        event: '初次通话',
-        host: formatCjkName(name, 'zh-CN'),
+      translate('zh-CN', 'Rescheduling {title} with {hosts}, now on {date}, {time}', values),
+    ).toBe(expected)
+  })
+
+  it.each([
+    ['Ada’s review', '正在改期 Ada’s review，当前时间：10月20日，09:00'],
+    ['初次通话', '正在改期初次通话，当前时间：10月20日，09:00'],
+  ])('spaces the hostless reschedule heading around %s', (title, expected) => {
+    expect(
+      translate('zh-CN', 'Rescheduling {title}, now on {date}, {time}', {
+        title,
+        date: '10月20日',
+        time: '09:00',
       }),
-    ).toBe(`与${spaced}的初次通话`)
+    ).toBe(expected)
+  })
+
+  it.each([
+    ['09:00–12:00', '11:00–14:00', '09:00–12:00 与 11:00–14:00'],
+    ['上午', '下午', '上午与下午'],
+    ['Morning', '下午', 'Morning 与下午'],
+  ])('joins the overlapping pair %s and %s without fixed spaces', (first, second, expected) => {
+    expect(translate('zh-CN', '{first} and {second}', { first, second })).toBe(expected)
+    expect(translate('en', '{first} and {second}', { first, second })).toBe(
+      `${first} and ${second}`,
+    )
+  })
+
+  it.each([
+    ['Edit {0}', '初次通话', '编辑初次通话'],
+    ['Edit {0}', 'Intro call', '编辑 Intro call'],
+    ['Copy link for {0}', '初次通话', '复制初次通话的链接'],
+    ['Copy link for {0}', 'Intro call', '复制 Intro call 的链接'],
+    ['Revoke {0}', 'CI', '撤销 CI'],
+    ['Revoke {0}', '持续集成', '撤销持续集成'],
+  ] as const)('spaces %s only around Latin values', (key, value, expected) => {
+    expect(translate('zh-CN', key, { '0': value })).toBe(expected)
+  })
+
+  it('composes the cancel summary as a sentence rather than a list', () => {
+    const values = { title: 'Intro call', date: '2026年11月2日星期一', time: '09:00–09:30' }
+    expect(translate('zh-CN', '{title}, {date}, {time}', values)).toBe(
+      'Intro call，2026年11月2日星期一，09:00–09:30',
+    )
+    expect(translate('en', '{title}, {date}, {time}', values)).toBe(
+      'Intro call, 2026年11月2日星期一, 09:00–09:30',
+    )
   })
 
   it.each([
@@ -98,7 +182,7 @@ describe('Chinese copy and punctuation', () => {
       'Option 1 of question 3',
       'Remove option 1, “Pro”, of question 3',
     ],
-    ['zh-CN', '问题 3 的选项', '选项 1，所属问题 3', '移除问题 3 的选项 1“Pro”'],
+    ['zh-CN', '问题 3 的选项', '问题 3 的选项 1', '移除问题 3 的选项 1“Pro”'],
   ] as const)(
     'formats whole option group and screen-reader labels in %s',
     (locale, group, option, remove) => {

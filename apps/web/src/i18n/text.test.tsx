@@ -34,6 +34,16 @@ describe('Chinese quote typography', () => {
     ])
   })
 
+  it.each(['O’Brien', 'Ada’s plan', '‘Latin words’'])(
+    'preserves %s in Chinese text without quote markup',
+    (latin) => {
+      const content = `中文${latin}预约`
+      const { container } = render(<p>{renderUiText('zh-CN', content)}</p>)
+      expect(container.textContent).toBe(content)
+      expect(container.querySelector('span')).toBeNull()
+    },
+  )
+
   it('leaves English text untouched', () => {
     const content = '“Intro” and ‘Working hours’'
     const { container } = render(<p>{renderUiText('en', content)}</p>)

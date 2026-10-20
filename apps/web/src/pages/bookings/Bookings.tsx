@@ -222,7 +222,7 @@ function BookingList({
                     </td>
                     <th scope="row" data-label={t('Event')} className="user-content">
                       <Link to={bookingPath(b.id)} data-booking={b.id}>
-                        {ui(bookingTitle(b, locale))}
+                        {ui(bookingTitle(b))}
                       </Link>
                     </th>
                     <td data-label={t('Invitee')} className="user-content">

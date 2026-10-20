@@ -4,7 +4,7 @@ import { Link, Navigate, useLocation, useParams } from 'react-router'
 import { ConferenceNotice } from '../components/ConferenceNotice.tsx'
 import { EmailDeliveryHint } from '../components/EmailDeliveryHint.tsx'
 import { usePageTitle } from '../hooks.ts'
-import { formatCjkName, formatList } from '../i18n/formatting.ts'
+import { formatList } from '../i18n/formatting.ts'
 import { useI18n } from '../i18n/runtime.tsx'
 import { literal, msg, type UiText } from '../i18n/translate.ts'
 import { AddToCalendar, ManageLink } from './AddToCalendar.tsx'
@@ -374,10 +374,7 @@ function Confirmation({
   const hostDetail = booking.assignedHost
     ? t('{name} ({detail})', { name: hostName, detail: booking.assignedHost.timeZone })
     : hostName
-  const title = t('{event} with {host}', {
-    event: event.title,
-    host: formatCjkName(hostName, language),
-  })
+  const title = t('{event} with {host}', { event: event.title, host: hostName })
   return (
     <PublicLayout>
       <div className="card public-card confirmation">
@@ -397,10 +394,7 @@ function Confirmation({
             booking.status === 'cancelled'
               ? 'This booking was already cancelled.'
               : 'Your {event} with {host} is confirmed.',
-            {
-              event: event.title,
-              host: formatCjkName(hostName, language),
-            },
+            { event: event.title, host: hostName },
           )}
         </p>
         {booking.status === 'confirmed' &&

@@ -2,19 +2,16 @@ import { displayConferenceUrl } from '@hourmere/core/conference-url'
 // How bookings read: their location and answers, and the host's time zone they are shown in.
 import type { Booking, Profile } from '../../api/resources.ts'
 import { browserTimeZone } from '../../format.ts'
-import { formatCjkName, formatList } from '../../i18n/formatting.ts'
+import { formatList } from '../../i18n/formatting.ts'
 import { literal, msg, type UiText } from '../../i18n/translate.ts'
 
 /** Localize only a verified generated title; retain custom and historical titles verbatim. */
-export function bookingTitle(booking: Booking, locale: string): UiText {
+export function bookingTitle(booking: Booking): UiText {
   const invitee = booking.attendees.find((attendee) => attendee.isBooker)
   const event = booking.eventTypeTitle
   if (!invitee || !event || booking.title !== `${event} with ${invitee.name}`)
     return literal(booking.title)
-  return msg('{event} with {host}', {
-    event,
-    host: formatCjkName(invitee.name, locale),
-  })
+  return msg('{event} with {host}', { event, host: invitee.name })
 }
 
 /** Mutation responses omit host-read metadata; keep it only for the same booking. */

@@ -68,29 +68,39 @@ describe('the bookings list', () => {
   })
 
   it.each([
-    ['en', '初次通话 with Grace Hopper'],
-    ['zh-CN', '与 Grace Hopper 的初次通话'],
-  ] as const)('localizes verified generated titles in the %s list', async (locale, expected) => {
-    chooseLanguage(locale)
-    fakeApi({
-      ...signedIn,
-      ...profile(),
-      'GET /api/v1/bookings': () =>
-        json(200, {
-          data: [
-            booking({ eventTypeTitle: '初次通话', title: '初次通话 with Grace Hopper' }),
-            booking({ id: 'custom', eventTypeTitle: 'Design', title: 'Design with my team' }),
-            booking({ id: 'historical', eventTypeTitle: 'New', title: 'Old with Grace Hopper' }),
-          ],
-          nextCursor: null,
-        }),
-    })
-    renderApp('/app/bookings')
-    const title = await screen.findByRole('rowheader', { name: expected })
-    expect(within(title).getByRole('link', { name: expected })).toBeDefined()
-    expect(screen.getByRole('rowheader', { name: 'Design with my team' })).toBeDefined()
-    expect(screen.getByRole('rowheader', { name: 'Old with Grace Hopper' })).toBeDefined()
-  })
+    ['en', '初次通话', 'Grace Hopper', '初次通话 with Grace Hopper'],
+    ['zh-CN', '初次通话', 'Grace Hopper', '与 Grace Hopper 的初次通话'],
+    ['zh-CN', 'Ada’s review', 'Grace Hopper', '与 Grace Hopper 的 Ada’s review'],
+    ['zh-CN', 'Ada’s review', '王小明', '与王小明的 Ada’s review'],
+  ] as const)(
+    'localizes verified generated titles in the %s list: %s with %s',
+    async (locale, event, name, expected) => {
+      chooseLanguage(locale)
+      const generated = booking({ eventTypeTitle: event, title: `${event} with ${name}` })
+      generated.attendees = generated.attendees.map((a) => (a.isBooker ? { ...a, name } : a))
+      fakeApi({
+        ...signedIn,
+        ...profile(),
+        'GET /api/v1/bookings': () =>
+          json(200, {
+            data: [
+              generated,
+              booking({ id: 'custom', eventTypeTitle: 'Design', title: 'Design with my team' }),
+              booking({ id: 'historical', eventTypeTitle: 'New', title: 'Old with Grace Hopper' }),
+            ],
+            nextCursor: null,
+          }),
+      })
+      renderApp('/app/bookings')
+      const title = await screen.findByRole('rowheader', { name: expected })
+      const link = within(title).getByRole('link', { name: expected })
+      expect(link.textContent).toBe(expected)
+      // Apostrophes in Latin titles are never widened as Chinese quotes.
+      expect(link.querySelector('.cjk-quote')).toBeNull()
+      expect(screen.getByRole('rowheader', { name: 'Design with my team' })).toBeDefined()
+      expect(screen.getByRole('rowheader', { name: 'Old with Grace Hopper' })).toBeDefined()
+    },
+  )
 
   it('keeps a meeting in progress Upcoming and moves ended meetings to Past', async () => {
     const user = userEvent.setup()
@@ -445,14 +455,23 @@ describe('a booking', () => {
   })
 
   it.each([
-    ['en', '初次通话 with Grace Hopper'],
-    ['zh-CN', '与 Grace Hopper 的初次通话'],
-  ] as const)('localizes verified generated titles in the %s detail', async (locale, expected) => {
-    chooseLanguage(locale)
-    bookingServer(booking({ eventTypeTitle: '初次通话', title: '初次通话 with Grace Hopper' }))
-    renderApp(`/app/bookings/${BOOKING_ID}`)
-    expect(await screen.findByRole('heading', { level: 1, name: expected })).toBeDefined()
-  })
+    ['en', '初次通话', 'Grace Hopper', '初次通话 with Grace Hopper'],
+    ['zh-CN', '初次通话', 'Grace Hopper', '与 Grace Hopper 的初次通话'],
+    ['zh-CN', 'Ada’s review', 'Grace Hopper', '与 Grace Hopper 的 Ada’s review'],
+    ['zh-CN', 'Ada’s review', '王小明', '与王小明的 Ada’s review'],
+  ] as const)(
+    'localizes verified generated titles in the %s detail: %s with %s',
+    async (locale, event, name, expected) => {
+      chooseLanguage(locale)
+      const generated = booking({ eventTypeTitle: event, title: `${event} with ${name}` })
+      generated.attendees = generated.attendees.map((a) => (a.isBooker ? { ...a, name } : a))
+      bookingServer(generated)
+      renderApp(`/app/bookings/${BOOKING_ID}`)
+      const heading = await screen.findByRole('heading', { level: 1, name: expected })
+      expect(heading.textContent).toBe(expected)
+      expect(heading.querySelector('.cjk-quote')).toBeNull()
+    },
+  )
 
   it.each([
     { title: 'Design with my team', eventTypeTitle: 'Design' },
@@ -545,10 +564,11 @@ describe('a booking', () => {
   )
 
   it.each([
-    ['web', 'the booking page', '预约页面'],
-    ['embed', 'an embedded booking page', '嵌入的预约页面'],
-    ['api', 'an agent or script (API)', '代理或脚本（API）'],
-    ['mcp', 'an AI agent (MCP)', 'AI 代理（MCP）'],
+    ['web', 'the booking page', '，通过预约页面'],
+    ['embed', 'an embedded booking page', '，通过嵌入的预约页面'],
+    ['api', 'an agent or script (API)', '，通过代理或脚本（API）'],
+    // A Latin-initial label gets the Han/Latin space that Chinese prose puts around it.
+    ['mcp', 'an AI agent (MCP)', '，通过 AI 代理（MCP）'],
   ] as const)('localizes the %s source clause on a rescheduled booking', async (source, en, zh) => {
     const user = userEvent.setup()
     chooseLanguage('en')
@@ -559,7 +579,7 @@ describe('a booking', () => {
     expect(booked?.textContent?.endsWith(`, through ${en}`)).toBe(true)
     await user.selectOptions(screen.getByRole('combobox', { name: 'Interface language' }), 'zh-CN')
     expect(within(when).getByText('已预约').nextElementSibling).toBe(booked)
-    expect(booked?.textContent?.endsWith(`，通过${zh}`)).toBe(true)
+    expect(booked?.textContent?.endsWith(zh)).toBe(true)
   })
 
   it.each(['fa-IR', 'th-TH'])(

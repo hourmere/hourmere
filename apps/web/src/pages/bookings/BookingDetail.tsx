@@ -146,7 +146,7 @@ function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loa
         <Link to={PATHS.bookings}>{t('Bookings')}</Link>
       </p>
       <h1>
-        {ui(bookingTitle(booking, locale))}
+        {ui(bookingTitle(booking))}
         {cancelled && (
           <span className={`badge heading-badge${rescheduled ? '' : ' badge-danger'}`}>
             {rescheduled ? t('Rescheduled') : t('Cancelled')}
