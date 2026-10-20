@@ -112,6 +112,9 @@ describe('release version synchronization', () => {
     )
     mkdirSync(join(repo.dir, 'scripts'))
     copyFileSync(script, join(repo.dir, 'scripts/sync-version.ts'))
+    // A same-filesystem TMPDIR may live under the checkout's ignored temp/ tree.
+    // Keep the fixture's formatter independent of ancestor repository ignores.
+    writeFileSync(join(repo.dir, 'biome.json'), JSON.stringify({ vcs: { enabled: false } }))
     writeFileSync(join(repo.dir, '.npmrc'), '')
     writeFileSync(join(repo.dir, 'global.npmrc'), '')
     const version = '3.0.0-rc.1'
