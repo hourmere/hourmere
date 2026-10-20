@@ -136,6 +136,7 @@ function EventTypeForm({
 }: Loaded) {
   const { t, text, ui, uiText, locale: displayLocale } = useI18n()
   const noScheduleHint = t('You have no schedule yet, so no times are offered. {0}.').split('{0}')
+  const scheduleHint = t('The weekly hours times are offered in. {0}').split('{0}')
 
   const me = useMe()
   const navigate = useNavigate()
@@ -296,6 +297,8 @@ function EventTypeForm({
     saved?.roundRobinActive ?? false,
   )
   const previewUrl = slugPreview.startsWith(`${window.location.origin}/`) ? slugPreview : null
+  const previewPath = previewUrl ? new URL(previewUrl).pathname : ''
+  const bookingLinkHint = t('Lowercase letters, digits and hyphens. {0}').split('{0}')
   const duration = parseWhole(draft.durationMinutes)
   const suggestedSlug = slugSuffix
     ? `${(slugify(draft.slug) || 'event').slice(0, EVENT_TYPE.slugMaxLength - slugSuffix.length - 1).replace(/-+$/, '')}-${slugSuffix}`
@@ -351,15 +354,23 @@ function EventTypeForm({
                 error={errors.slug}
                 hint={
                   <>
-                    {t('Lowercase letters, digits and hyphens.')}{' '}
+                    {bookingLinkHint[0]}
                     {previewUrl ? (
                       <span className="booking-link">
-                        <span className="mono preview">{new URL(previewUrl).pathname}</span>
+                        <span className="mono preview booking-link-path" title={previewUrl}>
+                          <span className="booking-link-handle">
+                            {previewPath.slice(0, previewPath.lastIndexOf('/'))}
+                          </span>
+                          <span className="booking-link-slug">
+                            {previewPath.slice(previewPath.lastIndexOf('/'))}
+                          </span>
+                        </span>
                         <CopyButton text={previewUrl} label={t('Copy link')} />
                       </span>
                     ) : (
                       <span>{ui(slugPreview)}</span>
                     )}
+                    {bookingLinkHint[1]}
                   </>
                 }
               >
@@ -609,8 +620,9 @@ function EventTypeForm({
                       </>
                     ) : (
                       <>
-                        {t('The weekly hours times are offered in.')}{' '}
+                        {scheduleHint[0]}
                         <Link to={PATHS.availability}>{t('Manage schedules')}</Link>
+                        {scheduleHint[1]}
                       </>
                     )
                   }

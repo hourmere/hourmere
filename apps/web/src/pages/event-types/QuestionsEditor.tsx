@@ -101,9 +101,9 @@ export function QuestionsEditor({
     <div className="questions">
       <p className="hint">
         {t(
-          'Invitees always give their name and email. Add questions for anything else you need to know, up to',
-        )}{' '}
-        {QUESTIONS.maxQuestions}.
+          'Invitees always give their name and email. Add questions for anything else you need to know, up to {count}.',
+          { count: QUESTIONS.maxQuestions },
+        )}
       </p>
       {listError && <FieldError id="questions-error">{listError}</FieldError>}
       {questions.length === 0 ? (

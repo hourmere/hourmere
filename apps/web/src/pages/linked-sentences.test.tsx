@@ -59,6 +59,45 @@ describe.each(['en', 'zh-CN'] as const)('linked admin sentences in %s', (languag
     expect(link.getAttribute('href')).toBe('/app/settings')
   })
 
+  it('joins the past ordering note directly to Chinese time-zone guidance', async () => {
+    chooseLanguage(language)
+    pageApi({ hasProfile: false })
+    renderApp('/app/bookings?tab=past')
+    const link = await screen.findByRole('link', {
+      name: language === 'en' ? 'Set your time zone' : '设置时区',
+    })
+    expect(link.closest('p')?.textContent).toBe(
+      language === 'en'
+        ? `Newest first. Times are in ${browserZone()}, this browser’s time zone. Set your time zone.`
+        : `最新的排在前面。时间使用以下时区：${browserZone()}（此浏览器的时区）。设置时区。`,
+    )
+  })
+
+  it('keeps editor helper sentences beside their URL, link and question limit', async () => {
+    chooseLanguage(language)
+    pageApi()
+    renderApp('/app/event-types/new')
+    const schedules = await screen.findByRole('link', {
+      name: language === 'en' ? 'Manage schedules' : '管理日程',
+    })
+    expect(schedules.parentElement?.textContent).toBe(
+      language === 'en'
+        ? 'The weekly hours times are offered in. Manage schedules'
+        : '用于提供每周时间段的时区。管理日程',
+    )
+    const hint = document.getElementById('slug-hint')
+    expect(hint?.textContent).toMatch(
+      language === 'en'
+        ? /^Lowercase letters, digits and hyphens\. \/ada\//
+        : /^使用小写字母、数字和连字符。\/ada\//,
+    )
+    expect(document.querySelector('.questions > .hint')?.textContent).toBe(
+      language === 'en'
+        ? 'Invitees always give their name and email. Add questions for anything else you need to know, up to 20.'
+        : '受邀人始终需要提供姓名和邮箱。可添加其他问题，最多 20。',
+    )
+  })
+
   it('keeps the missing-schedule hint punctuation beside its link', async () => {
     chooseLanguage(language)
     pageApi({ schedules: [] })

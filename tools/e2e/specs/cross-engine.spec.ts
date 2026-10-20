@@ -78,6 +78,7 @@ test('event-types list beside a long booking link', async ({ page, app }) => {
       expect(geometry.titleColumnWidth / geometry.tableWidth).toBeGreaterThanOrEqual(0.35)
       expect(geometry.titleLines).toBeLessThanOrEqual(3)
       expect(geometry.handleOverflow).toBe(true)
+      expect(geometry.handleCellRemainder).toBeLessThan(0.15)
       expect(geometry.copyBeside).toBe(true)
     } else expect(geometry.tableMode).toBe(false)
   }

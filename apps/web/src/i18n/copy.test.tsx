@@ -69,17 +69,24 @@ describe('Chinese copy and punctuation', () => {
     }
   })
 
+  // Keep these boundary cases parallel with packages/mail/src/text.test.ts.
   it.each([
     { name: 'Ada Lovelace', event: 'Intro call', expected: '与 Ada Lovelace 的 Intro call' },
     { name: '王小明', event: '初次通话', expected: '与王小明的初次通话' },
+    { name: '张三', event: '初次交流', expected: '与张三的初次交流' },
     { name: '王小明', event: 'Ada’s review', expected: '与王小明的 Ada’s review' },
     { name: 'Grace Hopper', event: 'Ada’s review', expected: '与 Grace Hopper 的 Ada’s review' },
     { name: 'O’Brien', event: '初次通话', expected: '与 O’Brien 的初次通话' },
-    { name: 'Zoë', event: 'Échange', expected: '与 Zoë的Échange' },
-    { name: 'André', event: 'Intro call', expected: '与 André的 Intro call' },
+    { name: 'Zoë', event: 'Échange', expected: '与 Zoë 的 Échange' },
+    { name: 'André', event: 'Intro call', expected: '与 André 的 Intro call' },
+    { name: 'Andre\u0301', event: 'Intro call', expected: '与 Andre\u0301 的 Intro call' },
+    { name: 'José', event: '初次通话', expected: '与 José 的初次通话' },
+    { name: 'Rene\u0301', event: 'Échange', expected: '与 Rene\u0301 的 Échange' },
+    { name: 'Échange', event: '初次交流', expected: '与 Échange 的初次交流' },
     { name: 'Ada李', event: '初次Intro交流', expected: '与 Ada李的初次Intro交流' },
     { name: '李Ada', event: 'Intro初次交流', expected: '与李Ada 的 Intro初次交流' },
     { name: '3M', event: '初次通话', expected: '与 3M 的初次通话' },
+    { name: '123', event: '初次通话', expected: '与 123 的初次通话' },
     { name: 'Δημήτρης', event: '初次交流', expected: '与Δημήτρης的初次交流' },
     { name: 'α测试', event: '初次交流', expected: '与α测试的初次交流' },
     { name: 'Zoom.', event: '初次交流', expected: '与 Zoom.的初次交流' },
@@ -87,14 +94,14 @@ describe('Chinese copy and punctuation', () => {
     { name: 'ＡＢＣ', event: '初次交流', expected: '与ＡＢＣ的初次交流' },
     { name: 'ａｂｃ', event: '初次交流', expected: '与ａｂｃ的初次交流' },
     { name: '０１２', event: '初次交流', expected: '与０１２的初次交流' },
-  ])('spaces only Han/ASCII boundaries for $name and $event', ({ name, event, expected }) => {
+  ])('spaces Han/Latin or digit boundaries for $name and $event', ({ name, event, expected }) => {
     expect(translate('zh-CN', '{event} with {host}', { event, host: name })).toBe(expected)
     expect(translate('en', '{event} with {host}', { event, host: name })).toBe(
       `${event} with ${name}`,
     )
   })
 
-  it('spaces inserted text only where an ASCII letter or digit directly meets Han prose', () => {
+  it('spaces inserted text where Latin letters or digits meet Han prose', () => {
     expect(spaceCjkBoundaries('与', 'Ada', '的')).toBe(' Ada ')
     expect(spaceCjkBoundaries('与', '王小明', '的')).toBe('王小明')
     expect(spaceCjkBoundaries('“', 'Ada', '”')).toBe('Ada')

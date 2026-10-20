@@ -1569,7 +1569,15 @@ input[type="radio"] {
 }
 
 .booking-link-handle {
-  flex: 0 1 auto;
+  flex: 0 0 auto;
+  max-width: 25%;
+}
+
+/* Whole monospace cells put the ellipsis directly beside the slug's slash. */
+@supports (max-width: round(down, 25%, 1ch)) {
+  .booking-link-handle {
+    max-width: round(down, 25%, 1ch);
+  }
 }
 
 .booking-link-slug {

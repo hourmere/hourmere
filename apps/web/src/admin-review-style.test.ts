@@ -41,6 +41,12 @@ it('reserves visible slug width while long booking handles can shrink', () => {
   expect(styles).toMatch(
     /\.booking-link-handle,\s*\.booking-link-slug\s*\{[^{}]*min-width: 0;[^{}]*overflow: hidden;[^{}]*text-overflow: ellipsis;/,
   )
-  expect(styles).toMatch(/\.booking-link-handle\s*\{\s*flex: 0 1 auto;/)
+  expect(styles).toMatch(/\.booking-link-handle\s*\{\s*flex: 0 0 auto;\s*max-width: 25%;/)
   expect(styles).toMatch(/\.booking-link-slug\s*\{\s*flex: 0 0 auto;\s*max-width: 75%;/)
+})
+
+it('aligns a truncated handle to complete monospace cells beside the slug', () => {
+  // Old engines keep the bounded percentage fallback; round removes the unused cell
+  // fraction that otherwise looks like a space between the ellipsis and the slash.
+  expect(styles).toMatch(/\.booking-link-handle\s*\{[^{}]*max-width: round\(down, 25%, 1ch\);/)
 })

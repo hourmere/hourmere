@@ -2,7 +2,7 @@ import { openAuditPage } from '../audit-pages.ts'
 import {
   LONG_BOOKING_SLUG,
   measureEventTypesTable,
-  setLongBookingSlug,
+  setLongBookingPath,
   useLongBookingSlug,
 } from '../event-types-table.ts'
 import { expect, test } from '../fixtures.ts'
@@ -94,6 +94,7 @@ for (const locale of ['en-US', 'zh-CN'] as const) {
       expect(geometry.linkOverflow, `${width}px link clips`).toBe(true)
       expect(geometry.linkEllipsis, `${width}px ellipsis`).toBe('ellipsis')
       expect(geometry.handleOverflow, `${width}px long handle clips`).toBe(true)
+      expect(geometry.handleCellRemainder, `${width}px ellipsis touches slug`).toBeLessThan(0.15)
       expect(geometry.slugStartVisible, `${width}px slug start visible`).toBe(true)
       expect(geometry.fullUrlTitle, `${width}px full URL title`).toBe(true)
       expect(geometry.copyBeside, `${width}px copy button beside`).toBe(true)
@@ -101,30 +102,53 @@ for (const locale of ['en-US', 'zh-CN'] as const) {
     }
   })
 
-  test(`editor booking-link preview truncates a long slug on narrow screens ${locale}`, async ({
+  test(`editor booking-link preview keeps the slug beside a long handle on narrow screens ${locale}`, async ({
     page,
     app,
   }) => {
     await page.setViewportSize({ width: 320, height: 568 })
-    await setLongBookingSlug(page, app)
+    await setLongBookingPath(page, app)
     await openAuditPage(page, app, 'event-type-editor', { locale })
     const preview = page.locator('.booking-link .preview').filter({ hasText: LONG_BOOKING_SLUG })
     await expect(preview).toBeVisible()
     for (const width of [320, 360]) {
       await page.setViewportSize({ width, height: 568 })
       const geometry = await preview.evaluate((node) => {
+        const handle = node.querySelector<HTMLElement>('.booking-link-handle')
+        const slug = node.querySelector<HTMLElement>('.booking-link-slug')
+        if (!handle?.firstChild || !slug?.firstChild) throw new Error('Preview path missing')
         const range = document.createRange()
-        range.selectNodeContents(node)
+        range.selectNodeContents(slug)
+        const cells = document.createRange()
+        cells.setStart(handle.firstChild, 0)
+        cells.setEnd(handle.firstChild, 10)
+        const cellWidth = cells.getBoundingClientRect().width / 10
+        const handleWidth = handle.getBoundingClientRect().width
+        const start = document.createRange()
+        start.setStart(slug.firstChild, 0)
+        start.setEnd(slug.firstChild, 7)
         return {
           lines: new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size,
-          overflow: node.scrollWidth > node.clientWidth,
-          ellipsis: getComputedStyle(node).textOverflow,
+          overflow: slug.scrollWidth > slug.clientWidth,
+          handleOverflow: handle.scrollWidth > handle.clientWidth,
+          handleCellRemainder: Math.abs(
+            handleWidth - Math.round(handleWidth / cellWidth) * cellWidth,
+          ),
+          slugStartVisible:
+            start.getBoundingClientRect().right <= slug.getBoundingClientRect().right + 1,
+          ellipsis: getComputedStyle(slug).textOverflow,
+          fullUrlTitle:
+            node.getAttribute('title') === `${window.location.origin}${node.textContent}`,
           documentFits:
             document.documentElement.scrollWidth <= document.documentElement.clientWidth,
         }
       })
       expect(geometry.lines, `${width}px lines`).toBe(1)
       expect(geometry.overflow, `${width}px clips`).toBe(true)
+      expect(geometry.handleOverflow, `${width}px long handle clips`).toBe(true)
+      expect(geometry.handleCellRemainder, `${width}px ellipsis touches slug`).toBeLessThan(0.15)
+      expect(geometry.slugStartVisible, `${width}px slug start visible`).toBe(true)
+      expect(geometry.fullUrlTitle, `${width}px full URL title`).toBe(true)
       expect(geometry.ellipsis, `${width}px ellipsis`).toBe('ellipsis')
       expect(geometry.documentFits, `${width}px document`).toBe(true)
     }

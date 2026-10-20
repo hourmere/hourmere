@@ -1,6 +1,25 @@
 /** The two interface languages. Account locale remains an independent BCP 47 setting. */
 export type InterfaceLanguage = 'en' | 'zh-CN'
 export const LANGUAGE_COOKIE = 'hourmere-language'
+
+/**
+ * Space Han substitution boundaries next to Latin-script letters or ASCII digits, excluding
+ * U+FF00–U+FFEF (Halfwidth and Fullwidth Forms). Trailing combining marks stay with their
+ * letter or digit; other scripts and punctuation stay unspaced. Inserted text is unchanged.
+ */
+export function spaceCjkBoundaries(before: string, value: string, after: string): string {
+  // Use Unicode-mode lookahead instead of v-mode set subtraction for older browsers.
+  const leading =
+    /\p{Script=Han}$/u.test(before) && /^(?![\uFF00-\uFFEF])[\p{Script=Latin}0-9]/u.test(value)
+      ? ' '
+      : ''
+  const trailing =
+    /(?![\uFF00-\uFFEF])[\p{Script=Latin}0-9]\p{M}*$/u.test(value) && /^\p{Script=Han}/u.test(after)
+      ? ' '
+      : ''
+  return `${leading}${value}${trailing}`
+}
+
 export function explicitLanguage(value: unknown): InterfaceLanguage | undefined {
   return value === 'en' || value === 'zh-CN' ? value : undefined
 }

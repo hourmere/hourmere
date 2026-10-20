@@ -432,8 +432,8 @@ export const admin = {
     '使用国际格式，例如 +14155550123。受邀人在预约后可见。',
   Inactive: '未启用',
   Invitee: '受邀人',
-  'Invitees always give their name and email. Add questions for anything else you need to know, up to':
-    '受邀人始终需要提供姓名和邮箱。可添加其他问题，最多',
+  'Invitees always give their name and email. Add questions for anything else you need to know, up to {count}.':
+    '受邀人始终需要提供姓名和邮箱。可添加其他问题，最多{count}。',
   'It can stay connected after you sign out, for up to 30 days from its original approval. Refreshing does not extend that time. Leaving the organization or revoking access in Connected apps stops the connection immediately.':
     '此应用可在你退出登录后继续连接，最长为首次批准起的 30 天。刷新令牌不会延长此期限。离开组织或在“已连接的应用”中撤销访问会立即终止连接。',
   'Its booking link stops working at once. Bookings already made are kept, and you can still see them under Bookings.':
@@ -454,7 +454,7 @@ export const admin = {
   Location: '地点',
   'Long text': '长文本',
   'Lower numbers come first on your booking page.': '数值较小的活动在预约主页中排在前面。',
-  'Lowercase letters, digits and hyphens.': '使用小写字母、数字和连字符。',
+  'Lowercase letters, digits and hyphens. {0}': '使用小写字母、数字和连字符。{0}',
   'Make default': '设为默认',
   'Make default: {0}': '设为默认：{0}',
   'Make this my default schedule': '设为我的默认日程',
@@ -614,7 +614,7 @@ export const admin = {
     '可供他人预约的会议类型，每种类型有独立链接。',
   'The time becomes free again. The invitee can see that it is cancelled, and why if you give a reason, with their booking.':
     '该时间将恢复空闲。受邀人可在预约中看到取消状态，以及你填写的取消原因。',
-  'The weekly hours times are offered in.': '用于提供每周时间段的时区。',
+  'The weekly hours times are offered in. {0}': '用于提供每周时间段的时区。{0}',
   'These hours overlap: {0}.': '以下时间段重叠：{0}。',
   'This app can use MCP tools with your permissions in this organization: view event types and availability, and create, view, reschedule or cancel bookings. It receives booking details, including attendee information and answers. It cannot manage your account or API keys.':
     '此应用可在该组织中以你的权限使用 MCP 工具：查看活动类型和可用时间，以及创建、查看、改期或取消预约。应用将收到预约详情，包括参会人信息和回答。它无法管理你的账号或 API 密钥。',
@@ -730,7 +730,7 @@ export const admin = {
   'Question {0} type': '问题{0}的类型',
   'Question {0} options': '问题{0}的选项',
   'Question {0}, option {1}': '问题{0}，选项{1}',
-  'Newest first. ': '最新的排在前面。 ',
+  'Newest first. ': '最新的排在前面。',
   'a title': '标题',
   'an address': '地址',
   'an option': '选项',

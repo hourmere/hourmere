@@ -163,7 +163,8 @@ describe('the invitee’s manage page', () => {
       to: 'Tuesday, November 3, 2026, 10:00 – 10:30 AM',
       zoneLabel: 'Time zone',
       zone: 'America/New York (GMT-05:00)',
-      offset: ' (GMT-05:00)',
+      offset: 'GMT-05:00)',
+      prefix: ' (',
     },
     {
       language: 'zh-CN',
@@ -173,7 +174,8 @@ describe('the invitee’s manage page', () => {
       to: '2026年11月3日星期二，10:00–10:30',
       zoneLabel: '时区',
       zone: 'America/New York（GMT-05:00）',
-      offset: '（GMT-05:00）',
+      offset: 'GMT-05:00）',
+      prefix: '（',
     },
   ])('localizes the reschedule confirmation punctuation in $language', async (expected) => {
     const user = userEvent.setup()
@@ -188,7 +190,10 @@ describe('the invitee’s manage page', () => {
     expect(plain(value(expected.toLabel)?.textContent)).toBe(expected.to)
     const zone = value(expected.zoneLabel)
     expect(zone?.textContent).toBe(expected.zone)
-    expect(zone?.querySelector('.time-offset')?.textContent).toBe(expected.offset)
+    const offsetSpan = zone?.querySelector('.time-offset')
+    expect(offsetSpan?.textContent).toBe(expected.offset)
+    // Keep the English ASCII space breakable and the opening bracket outside the span.
+    expect(offsetSpan?.previousSibling?.textContent?.endsWith(expected.prefix)).toBe(true)
   })
 
   it('formats Chinese host and guest lists and booker brackets', async () => {

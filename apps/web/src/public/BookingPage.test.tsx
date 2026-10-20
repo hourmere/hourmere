@@ -59,11 +59,11 @@ async function chooseSlot(user: ReturnType<typeof userEvent.setup>, dayName: Reg
 
 describe('the booking page', () => {
   it.each([
-    ['en', 'America/New York (GMT-05:00)', ' (GMT-05:00)'],
-    ['zh-CN', 'America/New York（GMT-05:00）', '（GMT-05:00）'],
+    ['en', 'America/New York (GMT-05:00)', 'GMT-05:00)', ' ('],
+    ['zh-CN', 'America/New York（GMT-05:00）', 'GMT-05:00）', '（'],
   ])(
     'localizes chosen-time offset brackets in %s without breaking the offset',
-    async (language, expected, offset) => {
+    async (language, expected, offset, prefix) => {
       const user = userEvent.setup()
       fakeApi(eventRoutes(EVENT, DST_SLOTS))
       renderApp('/ada/intro')
@@ -71,7 +71,10 @@ describe('the booking page', () => {
       await user.selectOptions(screen.getByLabelText('Interface language'), language)
       const zone = document.querySelector('.chosen-time .muted')
       expect(zone?.textContent).toBe(expected)
-      expect(zone?.querySelector('.time-offset')?.textContent).toBe(offset)
+      const offsetSpan = zone?.querySelector('.time-offset')
+      expect(offsetSpan?.textContent).toBe(offset)
+      // Keep the English ASCII space breakable and the opening bracket outside the span.
+      expect(offsetSpan?.previousSibling?.textContent?.endsWith(prefix)).toBe(true)
     },
   )
 

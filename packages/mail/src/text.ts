@@ -1,6 +1,6 @@
 // Making text from bookings (names, answers, reasons: all typed by someone else) safe to put
 // into an email header, a plain-text body or HTML.
-import type { InterfaceLanguage } from '@hourmere/core/language'
+import { type InterfaceLanguage, spaceCjkBoundaries } from '@hourmere/core/language'
 
 // C0 and C1 control characters, line and paragraph separators, and bidi embedding, override
 // and isolate characters, which can make text read differently from what it contains.
@@ -38,12 +38,11 @@ export function formatChineseTemplate(template: string, values: Record<string, s
   return template.replace(/\{(\w+)\}/g, (placeholder, name: string, offset: number) => {
     const value = values[name]
     if (value === undefined) return placeholder
-    const before = template.slice(0, offset)
-    const after = template.slice(offset + placeholder.length)
-    const leading = /\p{Script=Han}$/u.test(before) && /^\p{Script=Latin}/u.test(value) ? ' ' : ''
-    const trailing =
-      /\p{Script=Latin}\p{M}*$/u.test(value) && /^\p{Script=Han}/u.test(after) ? ' ' : ''
-    return `${leading}${value}${trailing}`
+    return spaceCjkBoundaries(
+      template.slice(0, offset),
+      value,
+      template.slice(offset + placeholder.length),
+    )
   })
 }
 

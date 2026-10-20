@@ -17,8 +17,8 @@ export async function setLongBookingSlug(page: Page, app: FixtureApp): Promise<v
   if (response.status() !== 200) throw new Error('Could not give the audit event type a long slug')
 }
 
-/** Sets a long handle and slug, then reloads the open event-types list. */
-export async function useLongBookingSlug(page: Page, app: FixtureApp): Promise<void> {
+/** Gives both list and editor previews a realistic long handle and slug. */
+export async function setLongBookingPath(page: Page, app: FixtureApp): Promise<void> {
   await setLongBookingSlug(page, app)
   const profileResponse = await page.request.get(`${app.url}/api/v1/profile`)
   if (profileResponse.status() !== 200) throw new Error('Could not read the audit host profile')
@@ -28,6 +28,11 @@ export async function useLongBookingSlug(page: Page, app: FixtureApp): Promise<v
     data: { handle: LONG_BOOKING_HANDLE, timeZone: profile.timeZone, locale: profile.locale },
   })
   if (response.status() !== 200) throw new Error('Could not give the audit host a long handle')
+}
+
+/** Sets a long handle and slug, then reloads the open event-types list. */
+export async function useLongBookingSlug(page: Page, app: FixtureApp): Promise<void> {
+  await setLongBookingPath(page, app)
   await page.reload()
   await page.locator('.booking-link a').filter({ hasText: LONG_BOOKING_SLUG }).waitFor()
 }
@@ -46,6 +51,8 @@ export interface EventTypesTableGeometry {
   copyBeside: boolean
   linkEllipsis: string
   handleOverflow: boolean
+  /** Subpixel remainder after whole monospace cells: a partial cell looks like a URL space. */
+  handleCellRemainder: number
   slugStartVisible: boolean
   fullUrlTitle: boolean
   documentOverflow: boolean
@@ -86,6 +93,13 @@ export function measureEventTypesTable(page: Page, slug: string): Promise<EventT
     const startRect = slugStart.getBoundingClientRect()
     const slugRect = slugPart.getBoundingClientRect()
     const linkRect = link.getBoundingClientRect()
+    const handleCells = document.createRange()
+    if (!handle.firstChild) throw new Error('Booking handle text missing')
+    const cellCount = Math.min(10, handle.firstChild.textContent?.length ?? 0)
+    handleCells.setStart(handle.firstChild, 0)
+    handleCells.setEnd(handle.firstChild, cellCount)
+    const cellWidth = handleCells.getBoundingClientRect().width / cellCount
+    const handleWidth = handle.getBoundingClientRect().width
     const lines = (node: Node | null) => {
       if (!node) return 0
       const range = document.createRange()
@@ -104,6 +118,7 @@ export function measureEventTypesTable(page: Page, slug: string): Promise<EventT
       copyBeside: copy.getBoundingClientRect().top < link.getBoundingClientRect().bottom,
       linkEllipsis: getComputedStyle(slugPart).textOverflow,
       handleOverflow: handle.scrollWidth > handle.clientWidth,
+      handleCellRemainder: Math.abs(handleWidth - Math.round(handleWidth / cellWidth) * cellWidth),
       slugStartVisible:
         startRect.width > 0 &&
         startRect.left >= Math.max(slugRect.left, linkRect.left) - 1 &&

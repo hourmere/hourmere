@@ -708,6 +708,10 @@ function ConfirmReschedule({
   // A reschedule is not idempotent: one request at a time, and only when people press.
   const inFlight = useRef(false)
   const start = Date.parse(slot.start)
+  // Keep the breakable space and opening bracket outside the no-wrap numeric offset.
+  const offset = offsetLabel(timeZone, start)
+  const zoneLabel = t(' ({offset})', { offset })
+  const offsetAt = zoneLabel.lastIndexOf(offset)
   return (
     <div className="stack">
       <FocusHeading>{t('Move your booking?')}</FocusHeading>
@@ -741,9 +745,8 @@ function ConfirmReschedule({
             'Time zone',
             <span key="zone">
               {zoneName(timeZone)}
-              <span className="time-offset">
-                {t(' ({offset})', { offset: offsetLabel(timeZone, start) })}
-              </span>
+              {zoneLabel.slice(0, offsetAt)}
+              <span className="time-offset">{zoneLabel.slice(offsetAt)}</span>
             </span>,
           ],
         ]}
