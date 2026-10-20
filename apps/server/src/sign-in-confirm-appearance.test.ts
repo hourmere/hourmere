@@ -56,6 +56,20 @@ function declarations(style: string, selector: string): Record<string, string> {
   )
 }
 
+function mediaBlock(style: string, condition: string): string {
+  const start = style.indexOf(`@media (${condition})`)
+  expect(start, `Missing CSS media condition: ${condition}`).toBeGreaterThanOrEqual(0)
+  const open = style.indexOf('{', start)
+  let depth = 1
+  let end = open + 1
+  while (depth && end < style.length) {
+    if (style[end] === '{') depth++
+    if (style[end] === '}') depth--
+    end++
+  }
+  return style.slice(open + 1, end - 1)
+}
+
 function theme(style: string, dark: boolean): Record<string, string> {
   const light = declarations(style, ':root')
   if (!dark) return light
@@ -89,26 +103,32 @@ describe('branded sign-in confirmation appearance', () => {
       const logo = nodes.find((element) => hasClass(element, 'logo'))
       const word = nodes.find((element) => hasClass(element, 'logo-word'))
       const heading = nodes.find((element) => attribute(element, 'id') === 'page-title')
-      const controls = nodes.find((element) => attribute(element, 'id') === 'language-controls')
+      const header = nodes.find((element) => hasClass(element, 'card-header'))
+      const picker = nodes.find((element) => hasClass(element, 'language-picker'))
+      const controls = nodes.find((element) => attribute(element, 'id') === 'language-select')
       const form = nodes.find((element) => attribute(element, 'id') === 'confirm')
       expect(main && hasClass(main, 'centered')).toBe(true)
       expect(card?.parentNode).toBe(main)
-      expect(logo?.parentNode).toBe(card)
+      expect(header?.tagName).toBe('header')
+      expect(header?.parentNode).toBe(card)
+      expect(logo?.parentNode).toBe(header)
       expect(text(word)).toBe('Hourmere')
       expect(word?.parentNode).toBe(logo)
       expect(heading?.parentNode).toBe(card)
       expect(text(heading)).toBe(title)
-      expect(controls?.parentNode).toBe(card)
-      expect(attribute(controls, 'role')).toBe('group')
+      expect(picker?.parentNode).toBe(header)
+      expect(picker?.tagName).toBe('label')
+      expect(controls?.parentNode).toBe(picker)
+      expect(controls?.tagName).toBe('select')
       expect(attribute(controls, 'aria-label')).toBe(label)
-      const buttons = nodes.filter(
-        (element) => element.tagName === 'button' && element.parentNode === controls,
+      const options = nodes.filter(
+        (element) => element.tagName === 'option' && element.parentNode === controls,
       )
-      expect(buttons).toHaveLength(2)
-      for (const button of buttons) {
-        expect(attribute(button, 'type')).toBe('button')
-        expect(attribute(button, 'aria-pressed')).toBe(
-          String(attribute(button, 'lang') === language),
+      expect(options).toHaveLength(2)
+      for (const option of options) {
+        expect(attribute(option, 'value')).toBe(attribute(option, 'lang'))
+        expect(attribute(option, 'selected')).toBe(
+          attribute(option, 'lang') === language ? '' : undefined,
         )
       }
       expect(attribute(form, 'method')).toBe('get')
@@ -130,16 +150,17 @@ describe('branded sign-in confirmation appearance', () => {
       expect(declarations(style, '.centered')).toMatchObject({
         display: 'grid',
         'place-items': 'center',
-        'min-height': '100vh',
+        'min-height': '100svh',
       })
       expect(resolve(declarations(style, '.centered').padding, tokens)).toBe('24px 16px')
       const card = declarations(style, '.card')
       expect(card).toMatchObject({ width: '100%', 'max-width': '420px' })
       expect(resolve(card.padding, tokens)).toBe('32px 24px')
       expect(resolve(card['border-radius'], tokens)).toBe('10px')
-      expect(declarations(style, 'button')).toMatchObject({
+      expect(declarations(style, 'button, select')).toMatchObject({
         'min-height': '42px',
         font: 'inherit',
+        'font-size': 'max(16px, 1rem)',
       })
       const submit = declarations(style, '#confirm button[type="submit"]')
       expect(submit.width).toBe('100%')
@@ -148,15 +169,40 @@ describe('branded sign-in confirmation appearance', () => {
       expect(
         resolve(declarations(style, '#confirm button[type="submit"]:hover').background, tokens),
       ).toBe(resolve(tokens['--accent-hover'], tokens))
-      const active = declarations(style, '.languages button[aria-pressed="true"]')
-      expect(resolve(active.background, tokens)).toBe(resolve(tokens['--accent-soft'], tokens))
-      expect(resolve(active.color, tokens)).toBe(resolve(tokens['--accent-soft-text'], tokens))
       const focus = declarations(style, ':focus-visible')
       expect(resolve(focus.outline, tokens)).toBe(`3px solid ${resolve(tokens['--focus'], tokens)}`)
       expect(focus['outline-offset']).toBe('2px')
       expect(declarations(style, '[hidden]').display).toBe('none !important')
     },
   )
+
+  it('keeps a compact wrapping header and mobile controls without sticky touch hover', async () => {
+    const { style } = await content('en')
+    expect(declarations(style, '.card-header')).toMatchObject({
+      display: 'flex',
+      'align-items': 'center',
+      'justify-content': 'space-between',
+      'flex-wrap': 'wrap',
+      gap: 'var(--space-3)',
+    })
+    expect(declarations(style, '.card')['min-width']).toBe('0')
+    expect(declarations(style, '.centered')['min-width']).toBe('0')
+    expect(style).toMatch(/min-height:\s*100vh;\s*min-height:\s*100svh;/)
+    expect(declarations(style, 'body')['font-size']).toBe('1rem')
+    expect(declarations(style, '.language-picker span')).toMatchObject({
+      position: 'absolute',
+      'clip-path': 'inset(50%)',
+    })
+    expect(declarations(mediaBlock(style, 'pointer: coarse'), 'button, select')).toMatchObject({
+      'min-height': '44px',
+    })
+    const hover = mediaBlock(style, 'hover: hover')
+    expect(declarations(hover, 'button:hover').background).toBe('var(--accent-soft)')
+    expect(declarations(hover, '#confirm button[type="submit"]:hover').background).toBe(
+      'var(--accent-hover)',
+    )
+    expect(style.replace(hover, '')).not.toContain(':hover')
+  })
 
   it.each(languages)('matches app light and dark design tokens in %s', async (language) => {
     const { style } = await content(language)

@@ -138,7 +138,9 @@ describe('official social sign-in branding', () => {
         padding: '0 11px',
         gap: '11px',
       })
-      const dark = rules.find((r) => r instanceof CSSMediaRule) as CSSMediaRule
+      const dark = rules.find(
+        (r) => r instanceof CSSMediaRule && r.conditionText === '(prefers-color-scheme: dark)',
+      ) as CSSMediaRule
       expect(dark.conditionText).toBe('(prefers-color-scheme: dark)')
       const darkRules = Array.from(dark.cssRules)
       expectStyle('.google-mark-light', { display: 'none' }, darkRules)

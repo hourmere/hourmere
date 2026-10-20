@@ -38,11 +38,21 @@ describe('the sign-in page', () => {
     })
     renderApp('/sign-in?next=%2Fapp%2Fapi-keys')
     await heading()
+    const assertHeader = () => {
+      const picker = screen.getByRole('combobox', { name: 'Interface language' })
+      const header = picker.closest('header')
+      expect(header?.classList.contains('card-header')).toBe(true)
+      expect(header?.querySelector('.logo')?.textContent).toBe('Hourmere')
+      expect(header?.parentElement?.classList.contains('card')).toBe(true)
+      expect(screen.getAllByRole('combobox', { name: 'Interface language' })).toHaveLength(1)
+    }
+    assertHeader()
     await userEvent.type(screen.getByLabelText('Email'), ' ada@example.com ')
     await userEvent.click(screen.getByRole('button', { name: 'Email me a sign-in link' }))
 
     const sent = await screen.findByRole('heading', { name: 'Check your email' })
     expect(document.activeElement).toBe(sent)
+    assertHeader()
     expect(screen.getByText('ada@example.com')).toBeDefined()
     expect(
       screen.getByText(

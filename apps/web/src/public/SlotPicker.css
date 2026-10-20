@@ -53,8 +53,10 @@
   cursor: pointer;
 }
 
-.picker .icon-button:hover:not(:disabled) {
-  background: var(--surface-muted);
+@media (hover: hover) {
+  .picker .icon-button:hover:not(:disabled) {
+    background: var(--surface-muted);
+  }
 }
 
 .picker .icon-button:disabled {
@@ -105,14 +107,22 @@
   cursor: pointer;
 }
 
-.picker .day-available:hover {
-  outline: 2px solid var(--accent);
+@media (hover: hover) {
+  .picker .day-available:hover {
+    outline: 2px solid var(--accent);
+  }
 }
 
-.picker .day-selected,
-.picker .day-selected:hover {
+.picker .day-selected {
   background: var(--accent);
   color: var(--accent-text);
+}
+
+@media (hover: hover) {
+  .picker .day-selected:hover {
+    background: var(--accent);
+    color: var(--accent-text);
+  }
 }
 
 .picker .day[aria-current="date"]::after {
@@ -194,14 +204,22 @@
   cursor: pointer;
 }
 
-.picker .slot:hover {
-  background: var(--accent-soft);
+@media (hover: hover) {
+  .picker .slot:hover {
+    background: var(--accent-soft);
+  }
 }
 
-.picker .slot-selected,
-.picker .slot-selected:hover {
+.picker .slot-selected {
   background: var(--accent);
   color: var(--accent-text);
+}
+
+@media (hover: hover) {
+  .picker .slot-selected:hover {
+    background: var(--accent);
+    color: var(--accent-text);
+  }
 }
 
 .picker .slots-placeholder {
@@ -230,8 +248,10 @@
   cursor: pointer;
 }
 
-:is(.public, .picker) .tz-toggle:hover {
-  background: var(--surface-muted);
+@media (hover: hover) {
+  :is(.public, .picker) .tz-toggle:hover {
+    background: var(--surface-muted);
+  }
 }
 
 :is(.public, .picker) .tz-caption {

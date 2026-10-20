@@ -30,6 +30,10 @@ describe('MCP connection approval', () => {
       })
     renderApp(`/oauth/authorize?${query}`)
     await screen.findByText('Synthetic AI app')
+    const header = screen.getByRole('combobox', { name: 'Interface language' }).closest('header')
+    expect(header?.classList.contains('card-header')).toBe(true)
+    expect(header?.querySelector('.logo')?.textContent).toBe('Hourmere')
+    expect(header?.parentElement?.classList.contains('card')).toBe(true)
     expect(screen.getByText(/attendee information and answers/)).toBeDefined()
     expect(
       screen.getByText(/after you sign out, for up to 30 days from its original approval/),
@@ -150,6 +154,56 @@ describe('MCP connection approval', () => {
     expect(api.to('POST /api/v1/mcp-oauth/request')).toHaveLength(0)
     expect(screen.queryByRole('button', { name: 'Allow access' })).toBeNull()
   })
+  it.each(['request', 'select', 'consent'] as const)(
+    'localizes malformed OAuth %s errors and presents them as alerts',
+    async (endpoint) => {
+      const user = userEvent.setup()
+      const malformed = () =>
+        json(400, {
+          error: 'invalid_request',
+          message: 'oauthQuery: Too small: expected string to have >=1 characters',
+        })
+      fakeApi({
+        ...signedIn,
+        'POST /api/v1/mcp-oauth/request':
+          endpoint === 'request'
+            ? malformed
+            : () => json(200, { ...info, selectedOrganization: info.organizations[1] }),
+        [`POST /api/v1/mcp-oauth/${endpoint}`]: malformed,
+      })
+      renderApp(
+        endpoint === 'consent'
+          ? `/oauth/consent?${query}#intent=00000000-0000-7000-8000-000000000004`
+          : `/oauth/authorize?${query}`,
+      )
+      if (endpoint !== 'request') {
+        await screen.findByText('Synthetic AI app')
+        if (endpoint === 'select')
+          await user.selectOptions(
+            screen.getByLabelText('Organization to connect'),
+            info.organizations[1]?.id as string,
+          )
+        await user.click(
+          screen.getByRole('button', {
+            name: endpoint === 'consent' ? 'Allow access' : 'Continue',
+          }),
+        )
+      }
+      const alert = await screen.findByRole('alert')
+      expect(alert.textContent).toBe(
+        'This connection request is invalid or expired. Restart it from your AI app.',
+      )
+      expect(alert.classList.contains('alert-error')).toBe(true)
+      await user.selectOptions(
+        screen.getByRole('combobox', { name: 'Interface language' }),
+        'zh-CN',
+      )
+      expect(screen.getByRole('alert').textContent).toBe(
+        '此连接请求无效或已过期。请从 AI 应用重新开始。',
+      )
+      expect(screen.getByRole('main').textContent).not.toContain('oauthQuery:')
+    },
+  )
   it('does not navigate when a slow authorization response arrives after leaving the page', async () => {
     const user = userEvent.setup(),
       pending = later()

@@ -12,6 +12,18 @@ import { msg } from '../i18n/translate.ts'
 import { signInPath } from '../next-path.ts'
 import { PageStatus, useSession } from '../session.tsx'
 
+// The authorization URL comes from the connecting app; schema details are not useful
+// guidance here. Reuse the localized restart message without changing API error handling.
+function authorizationError(error: unknown): unknown {
+  if (error instanceof RequestError && error.code === 'invalid_request')
+    return new RequestError(
+      error.status,
+      'invalid_oauth_request',
+      'This connection request is invalid or expired. Restart it from your AI app.',
+    )
+  return error
+}
+
 export function McpAuthorizePage() {
   const { t } = useI18n()
 
@@ -52,12 +64,16 @@ function Authorization({ email }: { email: string }) {
           'This connection attempt was interrupted. Restart it from your AI app.',
           msg('This connection attempt was interrupted. Restart it from your AI app.'),
         )
-      return unwrap(
-        api.POST('/api/v1/mcp-oauth/request', {
-          signal,
-          body: { oauthQuery, ...(intentId ? { intentId } : {}) },
-        }),
-      )
+      try {
+        return await unwrap(
+          api.POST('/api/v1/mcp-oauth/request', {
+            signal,
+            body: { oauthQuery, ...(intentId ? { intentId } : {}) },
+          }),
+        )
+      } catch (error) {
+        throw authorizationError(error)
+      }
     },
     [oauthQuery, intentId, consent],
   )
@@ -80,21 +96,27 @@ function Authorization({ email }: { email: string }) {
             )
       if (mounted.current) goTo(result.redirectUrl)
     } catch (err) {
-      setError(errorMessage(err))
+      setError(errorMessage(authorizationError(err)))
       setBusy(false)
     }
   }
   return (
     <main className="centered">
       <section className="card stack">
-        <Logo size={32} />
-        <LanguageSwitcher />
+        <header className="card-header">
+          <Logo size={32} />
+          <LanguageSwitcher />
+        </header>
         <h1>{consent ? t('Approve connection') : t('Connect an AI app')}</h1>
         <p>
           {t('Signed in as')} <strong>{email}</strong>.
         </p>
         {info.status === 'loading' && <p role="status">{t('Checking the connection request…')}</p>}
-        {info.status === 'error' && <p role="alert">{ui(info.message)}</p>}
+        {info.status === 'error' && (
+          <p className="alert alert-error" role="alert">
+            {ui(info.message)}
+          </p>
+        )}
         {info.status === 'ready' && (
           <>
             <p>
@@ -150,7 +172,11 @@ function Authorization({ email }: { email: string }) {
                 'Only approve apps you trust. The app name and return address are supplied by the app.',
               )}
             </p>
-            {error && <p role="alert">{ui(error)}</p>}
+            {error && (
+              <p className="alert alert-error" role="alert">
+                {ui(error)}
+              </p>
+            )}
             <button
               type="button"
               className="button button-primary"

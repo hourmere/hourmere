@@ -10,6 +10,10 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
+    build: {
+      // Safari 16.0–16.3 ignores media ranges. Keep min-width syntax after minification.
+      cssTarget: 'safari16',
+    },
     server: {
       // Fixed: `npm run dev` points the API's PUBLIC_URL (sign-in links, cookies) at this port.
       port: 5173,
