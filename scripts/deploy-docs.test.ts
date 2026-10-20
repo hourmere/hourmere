@@ -12,6 +12,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { deploymentPasteSkipReason, pasteIntoZshPty } from './deploy-docs-pty.ts'
+
+const zshPtySkipReason = deploymentPasteSkipReason(process.env)
 
 const guide = readFileSync(
   process.env.HOURMERE_DEPLOY_GUIDE ??
@@ -51,7 +54,23 @@ async function pasteIntoNestedShell(
   commands: string,
   cwd: string,
   env: NodeJS.ProcessEnv,
+  zshPty = false,
 ): Promise<InteractiveResult> {
+  const lines = [
+    'operator_shell=outer',
+    zshPty ? 'zsh -f -i' : 'sh -i',
+    'operator_shell=nested',
+    ...(zshPty
+      ? [`[[ -t 0 && -o interactive && ! -o interactivecomments ]] && printf 'ZSH_PTY_READY\\n'`]
+      : []),
+    ...commands.split('\n'),
+    'block_status=$?',
+    `printf 'BLOCK_RESULT:%s:%s\\n' "$operator_shell" "$block_status"`,
+    'exit 0',
+    `printf 'OUTER_RESULT:%s\\n' "$operator_shell"`,
+    'exit 0',
+  ]
+  if (zshPty) return pasteIntoZshPty(`${lines.join('\n')}\n`, cwd, env)
   const shell = spawn('sh', ['-i'], {
     cwd,
     env: { ...env, PS1: 'HOURMERE_PRIMARY> ', PS2: 'HOURMERE_CONTINUE> ' },
@@ -91,17 +110,6 @@ async function pasteIntoNestedShell(
   }
   const timeout = setTimeout(stopOwnedShells, 5000)
   try {
-    const lines = [
-      'operator_shell=outer',
-      'sh -i',
-      'operator_shell=nested',
-      ...commands.split('\n'),
-      'block_status=$?',
-      `printf 'BLOCK_RESULT:%s:%s\\n' "$operator_shell" "$block_status"`,
-      'exit 0',
-      `printf 'OUTER_RESULT:%s\\n' "$operator_shell"`,
-      'exit 0',
-    ]
     for (const line of lines) {
       while (prompts === consumedPrompts && !closed)
         await new Promise<void>((resolve) => {
@@ -121,8 +129,8 @@ async function pasteIntoNestedShell(
 
 function expectInteractiveShells(result: InteractiveResult, status: number) {
   expect(result.status, result.stderr).toBe(0)
-  expect(result.stdout).toContain(`BLOCK_RESULT:nested:${status}\n`)
-  expect(result.stdout).toContain('OUTER_RESULT:outer\n')
+  expect(result.stdout, result.stderr).toContain(`BLOCK_RESULT:nested:${status}\n`)
+  expect(result.stdout, result.stderr).toContain('OUTER_RESULT:outer\n')
 }
 
 async function executePastedCommands(
@@ -131,10 +139,12 @@ async function executePastedCommands(
     worker: enabled,
     proxy: hasProxy,
     failCommand = '',
+    zshPty = false,
   }: {
     worker: boolean
     proxy: boolean
     failCommand?: string
+    zshPty?: boolean
   },
 ) {
   if (!commands) throw new Error('Labelled instructions must include runnable commands')
@@ -168,7 +178,7 @@ esac
 ${rejectShellOverride}${log}case "$command" in
   'compose config --services') printf '%s\\n' app db${hasProxy ? ' proxy' : ''}${enabled ? ' worker' : ''} ;;
   'compose exec -T db pg_dump -U hourmere -d hourmere -Fc') printf '%s\\n' synthetic-dump ;;
-  'compose pull proxy db'|'compose stop app'|'compose stop app worker'|'compose stop worker'|'compose stop app proxy'|'compose up -d --build --wait'|'compose up -d --wait'|'compose cp proxy:/data'|'compose cp proxy:/config') ;;
+  'compose pull proxy db'|'compose pull db'|'compose stop app'|'compose stop app worker'|'compose stop worker'|'compose stop app proxy'|'compose up -d --build --wait'|'compose up -d --wait'|'compose cp proxy:/data'|'compose cp proxy:/config') ;;
   *) exit 1 ;;
 esac
 ${fail}`,
@@ -204,12 +214,14 @@ ${log}${fail}exec /usr/bin/install "$@"
         COMPOSE_FILE: 'conflicting-shell-selection.yml',
         FAIL_COMMAND: failCommand,
       },
+      zshPty,
     )
     const dump = join(backupDirectory, 'hourmere.dump')
     return {
       result,
       calls: existsSync(callLog) ? readFileSync(callLog, 'utf8').trim().split('\n') : [],
       dump: existsSync(dump) ? readFileSync(dump, 'utf8') : undefined,
+      backupDirectory,
     }
   } finally {
     rmSync(directory, { recursive: true, force: true })
@@ -286,7 +298,7 @@ describe('documented deployment operations', () => {
       /Before running the rewrite, replace those forms with the\s+complete quoted line/,
     )
     expect(drill).toMatch(
-      /verify the rewritten selection before starting any app\s+or worker:[\s\S]*?compose_services=\$\(docker compose config --services\)[\s\S]*?grep -qx worker/,
+      /verify the rewritten selection before starting any app\s+or worker[.:][\s\S]*?compose_services=\$\(docker compose config --services\)[\s\S]*?grep -qx worker/,
     )
   })
 
@@ -392,6 +404,7 @@ docker compose up -d --wait`)
     expect(guardedProcedures.map(({ commands }) => commands).sort()).toEqual(blocks.sort())
     for (const { name, commands } of guardedProcedures) {
       expect(commands, name).toMatch(/^\(\n(?: {2}[^\n]*\n)+\)$/)
+      expect(commands, name).not.toMatch(/^\s*#/m)
       expect(spawnSync('sh', ['-n', '-c', commands ?? '']).status, name).toBe(0)
       expect(commands?.match(/docker compose config --services/g), name).toHaveLength(1)
     }
@@ -411,6 +424,57 @@ docker compose up -d --wait`)
         ...(verificationOnly ? [] : ['compose up -d --build --wait']),
         ...(upgrade ? ['health'] : []),
       ]
+      it.for([
+        { name: 'missing proxy', proxy: false, failCommand: '', status: 1 },
+        {
+          name: 'Compose error with expected services',
+          proxy: true,
+          failCommand: 'compose config --services',
+          status: 7,
+        },
+      ])(
+        'keeps $name contained during a non-bracketed zsh PTY paste',
+        async ({ proxy, failCommand, status }, context) => {
+          if (zshPtySkipReason) context.skip(zshPtySkipReason)
+          const { result, calls } = await executePastedCommands(commands, {
+            worker: needsWorker,
+            proxy,
+            failCommand,
+            zshPty: true,
+          })
+          expect(result.stdout, result.stderr).toContain('ZSH_PTY_READY\n')
+          expectInteractiveShells(result, status)
+          expect(calls).toEqual([...prefix, 'compose config --services'])
+        },
+      )
+
+      it.for(upgrade ? [false, true] : [])(
+        'pastes a plain-mode upgrade with the proxy check deleted (guard passes: %s)',
+        async (verified, context) => {
+          if (zshPtySkipReason) context.skip(zshPtySkipReason)
+          const plain = commands
+            ?.replace(
+              /^ {2}\{ printf .*grep -qx proxy \|\|\n {4}\{ echo "Proxy service is missing;[^\n]*\n/m,
+              '',
+            )
+            .replace('docker compose pull proxy db', 'docker compose pull db')
+          expect(plain).not.toContain('grep -qx proxy')
+          const { result, calls } = await executePastedCommands(plain, {
+            worker: needsWorker,
+            proxy: false,
+            failCommand: verified ? '' : 'compose config --services',
+            zshPty: true,
+          })
+          expect(result.stdout, result.stderr).toContain('ZSH_PTY_READY\n')
+          expectInteractiveShells(result, verified ? 0 : 7)
+          expect(calls).toEqual([
+            ...prefix,
+            'compose config --services',
+            ...(verified ? startup.map((call) => call.replace('pull proxy db', 'pull db')) : []),
+          ])
+        },
+      )
+
       it.each([
         { worker: true, proxy: true },
         { worker: true, proxy: false },
@@ -487,20 +551,21 @@ docker compose up -d --wait`)
   it.each([false, true])(
     'stops an enabled worker before backing up (worker: %s)',
     async (enabled) => {
-      const { result, calls, dump } = await executePastedCommands(backupCommands, {
+      const { result, calls, dump, backupDirectory } = await executePastedCommands(backupCommands, {
         worker: enabled,
         proxy: true,
       })
       expectInteractiveShells(result, 0)
       expect(calls).toEqual(backupCalls(enabled))
       expect(dump).toBe('synthetic-dump\n')
+      expect(result.stdout).toContain(`${backupDirectory}\n`)
     },
   )
 
-  it.each(backupCalls(true).slice(0, -1))(
+  it.each(backupCalls(true))(
     'does not resume the stack after backup prerequisite %s fails',
     async (failCommand) => {
-      const { result, calls } = await executePastedCommands(backupCommands, {
+      const { result, calls, backupDirectory } = await executePastedCommands(backupCommands, {
         worker: true,
         proxy: true,
         failCommand,
@@ -508,6 +573,7 @@ docker compose up -d --wait`)
       expectInteractiveShells(result, 7)
       const expected = backupCalls(true)
       expect(calls).toEqual(expected.slice(0, expected.indexOf(failCommand) + 1))
+      expect(result.stdout).not.toContain(`${backupDirectory}\n`)
     },
   )
 
@@ -564,22 +630,99 @@ docker compose up -d --wait`)
     expect(single).toContain('Remove any old `HOURMERE_ROLE=web`')
     expect(single).toContain('docker compose up -d --build --wait')
     expect(single).toContain('default `all` role')
-    const command = single.match(/^docker compose rm .+$/m)?.[0]
+    const command = single.match(/```sh\n([^`]*docker compose rm[^`]*)\n```/)?.[1]
     const directory = mkdtempSync(join(tmpdir(), 'hourmere-single-container-docs-'))
     try {
-      writeFileSync(join(directory, 'docker'), '#!/bin/sh\nprintf "%s\\n" "$*" > "$CALL_LOG"\n', {
-        mode: 0o755,
-      })
+      writeFileSync(
+        join(directory, 'docker'),
+        `#!/bin/sh\n[ "\${COMPOSE_FILE+x}" != x ] || exit 9\nprintf "%s\\n" "$*" > "$CALL_LOG"\n`,
+        { mode: 0o755 },
+      )
       const callLog = join(directory, 'calls')
       const result = spawnSync('sh', ['-eu', '-c', command ?? 'exit 1'], {
         cwd: directory,
         encoding: 'utf8',
-        env: { PATH: `${directory}:${process.env.PATH}`, CALL_LOG: callLog },
+        env: {
+          PATH: `${directory}:${process.env.PATH}`,
+          CALL_LOG: callLog,
+          COMPOSE_FILE: 'conflicting-shell-selection.yml',
+        },
       })
       expect(result.status).toBe(0)
       expect(readFileSync(callLog, 'utf8')).toBe('compose rm -sf worker\n')
     } finally {
       rmSync(directory, { recursive: true, force: true })
     }
+  })
+
+  it.each([
+    {
+      name: 'backup failure recovery',
+      section: guide.split('If backup fails')[1]?.split('Set `backup_dir`')[0],
+      calls: ['compose up -d --wait'],
+    },
+    {
+      name: 'restore drill database start',
+      section: guide.split('To test restoration,')[1]?.split('The separate `APP_IMAGE`')[0],
+      calls: [
+        'compose up -d --wait db',
+        'compose exec -T db pg_restore -U hourmere -d hourmere --exit-on-error --single-transaction',
+        'compose exec -T db psql -U hourmere -d hourmere -Atc SELECT count(*) FROM auth."user";',
+      ],
+      databaseOnly: true,
+    },
+    {
+      name: 'actual recovery',
+      section: guide.split('For actual recovery,')[1]?.split('## Upgrade and roll back')[0],
+      calls: [
+        'compose build',
+        'compose create proxy',
+        'compose cp BACKUP/caddy-data/. proxy:/data',
+        'compose cp BACKUP/caddy-config/. proxy:/config',
+        'compose up -d --wait',
+      ],
+    },
+  ])('reads .env for standalone $name commands', ({ section, calls, databaseOnly }) => {
+    const block = section?.match(/```sh\n([\s\S]*?)\n```/)?.[1]
+    if (!block) throw new Error('Standalone Compose instructions must exist')
+    // The drill's checkout and .env preparation are covered above; run its database
+    // commands after the documented reset of an inherited Compose selection.
+    const commands = databaseOnly ? block.split('mv "$env_update" .env\n')[1] : block
+    if (!commands) throw new Error('Database commands must follow restore configuration')
+    const directory = mkdtempSync(join(tmpdir(), 'hourmere-standalone-docs-'))
+    try {
+      writeFileSync(join(directory, 'hourmere.dump'), 'synthetic-dump\n')
+      writeFileSync(
+        join(directory, 'docker'),
+        `#!/bin/sh\n[ "\${COMPOSE_FILE+x}" != x ] || exit 9\nprintf "%s\\n" "$*" >> "$CALL_LOG"\n`,
+        { mode: 0o755 },
+      )
+      const callLog = join(directory, 'calls')
+      const result = spawnSync('sh', ['-eu', '-c', commands], {
+        cwd: directory,
+        encoding: 'utf8',
+        env: {
+          PATH: `${directory}:${process.env.PATH}`,
+          CALL_LOG: callLog,
+          COMPOSE_FILE: 'conflicting-shell-selection.yml',
+          backup_dir: directory,
+        },
+      })
+      expect(result.status, result.stderr).toBe(0)
+      expect(
+        readFileSync(callLog, 'utf8').replaceAll(directory, 'BACKUP').trim().split('\n'),
+      ).toEqual(calls)
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('explains inspection and an incomplete backup before resuming a failed backup', () => {
+    const recovery = guide.split('If backup fails')[1]?.split('Set `backup_dir`')[0]
+    expect(recovery).toMatch(
+      /services remain stopped[\s\S]*Inspect the failed command and partial backup/,
+    )
+    expect(recovery).toContain('Treat the partial backup as incomplete')
+    expect(guide).not.toContain('Continue to `up` only if')
   })
 })
