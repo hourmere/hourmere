@@ -148,7 +148,8 @@ describe('booking email layout and action hierarchy', () => {
 
           const openLabel = locale === 'en' ? 'Open in Hourmere' : '在 Hourmere 中打开'
           expect(html.includes(`>${openLabel}</a>`)).toBe(role === 'host')
-          expect(message.text.includes(bookingUrl)).toBe(role === 'host')
+          const bookingLine = `${openLabel}${locale === 'en' ? ': ' : '：'}${bookingUrl}`
+          expect(message.text.split('\n').includes(bookingLine)).toBe(role === 'host')
           if (role === 'host') {
             expect(html).toContain(`href="${bookingUrl}"`)
           } else {
