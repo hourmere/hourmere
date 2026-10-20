@@ -256,13 +256,13 @@ Migration `0037_conference_pending_timeout.sql` is the first column drop and a h
 exception to the two-release policy: it removes the write-only
 `booking_conferences.retry_conference` flag while old binaries still write it. All old
 roles must stop before 0037 runs. Every migration that drops a column (including
-`ALTER TABLE ... DROP ...` without `COLUMN`), drops a table, or renames a column must have
-a same-basename Markdown sidecar in `packages/db/migrations` with a nonempty
+`ALTER TABLE ... DROP ...` without `COLUMN`), drops a table, or renames a table or column
+must have a same-basename Markdown sidecar in `packages/db/migrations` with a nonempty
 `Schema-break upgrade:` note describing compatibility with old binaries, the release
 sequence and required operator steps. Historical `Column-drop upgrade:` notes remain
-accepted. The migration policy test ignores comments and quoted strings; dynamically
-executed SQL and function bodies still need manual review. It flags missing notes; never
-edit published SQL to add one.
+accepted. The migration policy test is a static lint that ignores comments and quoted
+strings. Dynamic SQL, `DO` blocks and function bodies are out of scope and need manual
+review. It flags missing notes; never edit published SQL to add one.
 
 ## Sign-in email outbox
 

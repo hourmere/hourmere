@@ -111,14 +111,17 @@ if LC_ALL=C awk -v mode="$mode" -v ends_newline="$ends_newline" '
       line = selection(value)
       # Preserve CRLF for the changed assignment as well as unrelated records.
       if ($0 ~ /\r$/) line = line "\r"
-    } else if (line ~ /^[ \t]*(export[ \t]+)?[a-zA-Z_][a-zA-Z0-9_]*[ \t]*[:=]/) {
+    } else if (line ~ /^[ \t]*(export[ \t]+)?[][a-zA-Z0-9_.\200-\377-]+[ \t]*[:=]/) {
       # A key-looking line inside another quoted value is data, not a setting.
+      # Compose accepts more than shell identifiers (including ., -, brackets,
+      # digit-leading and Unicode names). With LC_ALL=C, preserve non-ASCII key
+      # bytes opaquely rather than interpreting them or relying on locale rules.
       key = line
       sub(/^[ \t]*(export[ \t]+)?/, "", key)
       sub(/[ \t]*[:=].*$/, "", key)
       if (key == "COMPOSE_FILE") invalid()
       value = line
-      sub(/^[ \t]*(export[ \t]+)?[a-zA-Z_][a-zA-Z0-9_]*[ \t]*[:=][ \t]*/, "", value)
+      sub(/^[ \t]*(export[ \t]+)?[][a-zA-Z0-9_.\200-\377-]+[ \t]*[:=][ \t]*/, "", value)
       delimiter = substr(value, 1, 1)
       if ((delimiter == quote || delimiter == "\"") && !quote_end(substr(value, 2), delimiter)) multiline = delimiter
     } else if (line !~ /^[ \t]*#/ && line ~ /(^|[^a-zA-Z0-9_])COMPOSE_FILE([^a-zA-Z0-9_]|$)/) {
