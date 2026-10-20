@@ -92,7 +92,7 @@ describe('booking email language goldens', () => {
 const calendarGuidance = {
   en: {
     invitee:
-      'Accepting or declining this calendar invitation does not cancel the booking. To cancel, use the Cancel link in this email.',
+      'Accepting or declining this calendar invitation does not cancel the booking. To cancel, use the “Cancel” link in this email.',
     host: 'Declining in your calendar is not synced to Hourmere; to cancel the booking, use Hourmere.',
     guest:
       'Accepting or declining this calendar invitation does not cancel the booking. To cancel, contact the person who booked or the host.',
