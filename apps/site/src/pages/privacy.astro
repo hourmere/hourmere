@@ -1,5 +1,6 @@
 ---
 import Legal from '../layouts/Legal.astro'
+import { resolveLegalPublicationDate } from '../privacy-publication.ts'
 import { company, contact, googlePolicies, site } from '../site'
 
 const sections = [
@@ -23,28 +24,31 @@ const sections = [
 ]
 
 const privacyMail = `mailto:${contact.privacy}`
+const publicationDate = resolveLegalPublicationDate()
 ---
 
 <Legal
   title="Privacy Policy"
   description="How Hourmere, operated by Cobaltmere, LLC, collects, uses, stores, shares and deletes personal data, including data from Google and Microsoft."
   path="/privacy"
-  effective="2026-11-30"
+  effective={publicationDate}
+  lastUpdated
   sections={sections}
 >
   <Fragment slot="intro">
     <p>
       This Privacy Policy explains how {company.name} ("{company.shortName}", "we", "us") collects,
       uses, stores, shares and deletes personal data in connection with Hourmere: the website at
-      hourmere.com, the Hourmere cloud service that we host ("Hourmere Cloud"), and its API and
+      hourmere.com, the Hourmere cloud service that we host at app.hourmere.com ("Hourmere Cloud"), and its API and
       remote MCP server (together, the "Service").
     </p>
     <p class="callout">
-      Hourmere is in development and Hourmere Cloud has not launched yet. This policy describes how
-      we will handle personal data once it does. Until then, the only personal data we receive
-      through Hourmere is the website request data described in
-      <a href="#this-website">section 14</a> and any messages you choose to send us, such as a
-      request for launch updates.
+      Hourmere Cloud, the hosted service we operate at
+      <a href="https://app.hourmere.com">app.hourmere.com</a>, is currently in an invitation-only preview
+      while we prepare its public launch. This policy applies to that preview, including any
+      Google user data it receives, and to this website. In the current preview, Microsoft sign-in,
+      Microsoft Calendar, Zoom and paid plans are not enabled. The sections about them describe
+      how we will handle that data if we enable them.
     </p>
     <section class="summary" aria-labelledby="summary-title">
       <h2 id="summary-title">The short version</h2>
@@ -105,12 +109,14 @@ const privacyMail = `mailto:${contact.privacy}`
       expiry is detected by the delivery worker or periodic cleanup.
     </li>
     <li>
-      <strong>Sign-in with Google or Microsoft:</strong> we receive your name, email address and
-      your Google account ID or Microsoft account identifier; Google may also provide a profile
-      picture. We use them to create your account and sign you in, and as your account profile:
+      <strong>Sign-in with Google or Microsoft:</strong> Google sign-in provides your Google account
+      ID, name, email address and profile picture (if available). Microsoft sign-in provides your
+      Microsoft account identifier, name and email address. We use them to create your account and sign
+      you in, and as your account profile:
       your name (and picture, if shown) appears in Hourmere, on your booking pages and in booking
       emails, and we send account and booking emails to your email address. Google and Microsoft
-      sign-in access and refresh tokens are stored encrypted; the ID token returned at sign-in is
+      sign-in access tokens are stored encrypted; neither sign-in flow requests offline access or
+      receives a refresh token. The ID token returned at sign-in is
       not stored.
     </li>
     <li>
@@ -181,7 +187,7 @@ const privacyMail = `mailto:${contact.privacy}`
     </li>
   </ul>
   <p class="callout">
-    Hourmere Cloud has not launched and takes no payments yet; the billing description above
+    Hourmere Cloud is in an invitation-only preview and takes no payments yet; the billing description above
     applies once paid plans are available.
   </p>
 
@@ -230,8 +236,8 @@ const privacyMail = `mailto:${contact.privacy}`
 
   <h3>Signing in with Google</h3>
   <p>
-    If you sign in with Google, Hourmere receives your name, email address, profile picture (if
-    available) and Google account ID. We use them to create your account and sign you in, and as
+    If you sign in with Google, Hourmere receives your Google account ID, name, email address and
+    profile picture (if available). We use them to create your account and sign you in, and as
     your account profile: your name (and picture, if shown) appears in Hourmere, on your booking
     pages and in booking emails, and we send account and booking emails to your email address.
   </p>
@@ -268,6 +274,37 @@ const privacyMail = `mailto:${contact.privacy}`
     We request only the permissions these features need. Google's consent screen shows the exact
     permissions before you agree.
   </p>
+  <h3>Google permissions Hourmere requests</h3>
+  <p>
+    Sign in with Google requests <code>openid</code>, <code>email</code> and <code>profile</code>
+    (your Google account ID, name, email address and profile picture) to create your account and
+    sign you in; it does not give Hourmere calendar access. Connecting Google Calendar is a
+    separate step. The Connect Google Calendar button requests all of the following permissions
+    together. A connection that has only the first two (for example, one created through the API
+    with calendar-list access) cannot check conflicts or write booking events until you choose
+    Enable calendar synchronization:
+  </p>
+  <ul>
+    <li>
+      <code>openid</code> and <code>email</code>, to identify the connected Google account;
+    </li>
+    <li>
+      <code>https://www.googleapis.com/auth/calendar.calendarlist.readonly</code>, to list your
+      calendars with their names, identifiers, primary-calendar status, time zones, your access
+      level and whether Google Meet is available, so you can choose calendars;
+    </li>
+    <li>
+      <code>https://www.googleapis.com/auth/calendar.events.readonly</code>, used only to read event
+      identifiers, start and end times, status, busy/free setting and your own response for events
+      on the calendars you select for conflict checks; and
+    </li>
+    <li>
+      <code>https://www.googleapis.com/auth/calendar.events.owned</code>, used only to create,
+      update and cancel the booking events Hourmere adds to the calendar you own and select for
+      new bookings, to add a Google Meet link to those events when you turn on automatic Google
+      Meet, and to read those booking events back to keep them in sync.
+    </li>
+  </ul>
 
   <h3>How we use it</h3>
   <p>
@@ -293,6 +330,11 @@ const privacyMail = `mailto:${contact.privacy}`
     </li>
   </ul>
 
+  <p>
+    Hourmere does not use data obtained through Google Workspace APIs to develop, improve, or
+    train generalized or non-personalized AI and/or ML models.
+  </p>
+
   <h3>How we share it</h3>
   <p>We do not share or transfer Google user data, except:</p>
   <ul>
@@ -304,9 +346,10 @@ const privacyMail = `mailto:${contact.privacy}`
       address and calendar names (see <a href="#ai-assistants">section 6</a>);
     </li>
     <li>
-      with service providers that host and run the Service for us, such as our cloud hosting and
-      database providers, who may process it only on our instructions and only to provide the
-      Service;
+      with the service providers that host the Service and deliver its email (see
+      <a href="#sharing">section 7</a>), only to provide the Service. For example, your name and
+      email address from Google sign-in, and Google Meet links, appear in booking emails that
+      our email provider delivers;
     </li>
     <li>when necessary for security purposes, such as investigating abuse;</li>
     <li>to comply with applicable laws; or</li>
@@ -327,17 +370,28 @@ const privacyMail = `mailto:${contact.privacy}`
 
   <h3>How we store and protect it</h3>
   <p>
-    Google user data is stored with our cloud hosting providers. Before Hourmere Cloud launches, we
-    will state where its data is hosted in
-    <a href="#international-transfers">section 12</a>. Google user data is encrypted in transit,
-    and calendar connection tokens are stored encrypted. Access is limited to the systems and
+    Hourmere Cloud, including the preview at app.hourmere.com, is operated by Cobaltmere on a
+    virtual private server that we rent from BandwagonHost (IT7 Networks Inc.) in Los Angeles,
+    United States. Google user data is stored in Hourmere's database
+    on that server and in its on-host backups (see <a href="#retention">section 10</a>).
+    Google user data is encrypted in transit. Google Calendar connection access and refresh
+    tokens are stored encrypted with AES-256-GCM. Google sign-in access tokens are also stored
+    encrypted; Hourmere does not request offline access when you sign in, so Google issues no
+    sign-in refresh token. Access is limited to the systems and
     personnel that need it to run the Service. See <a href="#security">section 11</a>.
   </p>
 
   <h3>Retention and deletion</h3>
   <p>
     We keep Google user data only as long as we need it to provide the features described above.
-    The busy times and sync data Hourmere stores are refreshed and replaced as your calendar changes.
+    While synchronization is active, Hourmere stores busy intervals only for events that overlap
+    a rolling window from three days before the current UTC day to 403 days (about 13 months)
+    ahead. It checks selected calendars about every minute using incremental updates and rebuilds
+    the stored intervals daily, which removes intervals that no longer overlap the window.
+    Events overlapping the window can start before it or end after it. If synchronization
+    stops, including when you turn off conflict checks, stored busy intervals and sync data remain
+    until the calendar is synchronized again, the connection is disconnected in Hourmere, or you
+    ask us to delete them.
   </p>
   <ul>
     <li>
@@ -369,12 +423,19 @@ const privacyMail = `mailto:${contact.privacy}`
     >, and you can ask us to delete your data by emailing <a href={privacyMail}>{contact.privacy}</a
     >.
   </p>
+  <p>
+    If you remove Hourmere's access in your Google Account, Hourmere can no longer read or update
+    your calendar. When Hourmere detects the authorization failure, it marks the connection as
+    needing reconnection; its stored connection data remains until you disconnect it in Hourmere
+    or ask us to delete it.
+  </p>
 
   <h3>Limited Use</h3>
   <p class="callout">
     Hourmere's use and transfer to any other app of information received from Google APIs will
     adhere to the <a href={googlePolicies.userData}>Google API Services User Data Policy</a>,
-    including the Limited Use requirements. Hourmere's use of information received from Google
+    including the <a href={`${googlePolicies.userData}#limited-use`}>Limited Use requirements</a>.
+    Hourmere's use of information received from Google
     Workspace APIs, including the Google Calendar API, also adheres to the <a
       href={googlePolicies.workspace}>Google Workspace API User Data and Developer Policy</a
     >.
@@ -386,8 +447,8 @@ const privacyMail = `mailto:${contact.privacy}`
 
   <h2 id="microsoft-calendar-data">5. Microsoft sign-in and calendar data</h2>
   <p>
-    If you sign in with Microsoft, Hourmere receives your name, email address and Microsoft account
-    identifier. The current Microsoft sign-in configuration does not request a profile photo. We
+    If you sign in with Microsoft, Hourmere receives your Microsoft account identifier, name and
+    email address. The current Microsoft sign-in configuration does not request a profile photo. We
     use this information to create your account, sign you in and show your account profile; your
     name appears on booking pages and in booking emails, and we send account and booking emails to
     your email address. Signing in does not give Hourmere access to your calendar.
@@ -445,9 +506,11 @@ const privacyMail = `mailto:${contact.privacy}`
   </p>
   <ul>
     <li>
-      <strong>Service providers</strong> that act only on our instructions, under contracts that
-      require them to protect the data: cloud hosting and database providers, and an email delivery
-      provider for sign-in links, booking confirmations and reminders.
+      <strong>Service providers</strong> that we use to run the Service: BandwagonHost (IT7 Networks
+      Inc.), which provides the virtual server in Los Angeles, United States, where we operate
+      Hourmere Cloud and store its backups, and Zoho, which delivers sign-in emails, booking
+      confirmations and reminders from its United States data center. We use them only to host
+      the Service and deliver its email.
     </li>
     <li>
       <strong>Payment providers:</strong> when you buy a paid plan, payments are processed by
@@ -483,7 +546,7 @@ const privacyMail = `mailto:${contact.privacy}`
     </li>
   </ul>
   <p class="callout">
-    Hourmere Cloud has not launched and takes no payments yet; the payment-provider description
+    Hourmere Cloud is in an invitation-only preview and takes no payments yet; the payment-provider description
     above applies once paid plans are available.
   </p>
 
@@ -602,19 +665,24 @@ const privacyMail = `mailto:${contact.privacy}`
     </li>
   </ul>
   <p>
-    Beyond the cleanup described in sections 2 and 7, Hourmere does not currently run other
+    Beyond the cleanup described in sections 2, 4 and 7 and the backup rotation below, Hourmere does not currently run other
     automatic deletion schedules for account data, conference identity and meeting records,
-    remaining OAuth and notification metadata, server and API logs, support correspondence or
-    backup copies. You can ask about or request deletion of the data {company.shortName} holds
+    remaining OAuth and notification metadata, server and API logs or support correspondence.
+    You can ask about or request deletion of the data {company.shortName} holds
     about you by emailing <a href={privacyMail}>{contact.privacy}</a>; we respond within one
     month. Data already sent to calendar, conference and email providers, webhook recipients or
     applications you authorized is handled under their own policies.
+  </p>
+  <p>
+    Hourmere Cloud makes a daily backup on the same server and keeps the latest 7 daily and 4
+    weekly copies. Older copies are deleted automatically, so deleted data can remain in backups
+    for up to about five weeks. Backups are not yet copied to another location.
   </p>
 
   <h2 id="security">11. Security</h2>
   <p>
     We protect personal data with measures appropriate to the risk, including encryption in transit,
-    encrypted storage of Google and Microsoft sign-in access and refresh tokens, calendar and
+    encrypted storage of Google and Microsoft sign-in access tokens, calendar and
     Zoom connection tokens, queued sign-in emails and webhook signing secrets, hashed API keys,
     access controls and the principle of least
     privilege. No system is completely secure. If a data breach affects your personal data, we will
@@ -625,9 +693,12 @@ const privacyMail = `mailto:${contact.privacy}`
 
   <h2 id="international-transfers">12. Where data is processed</h2>
   <p>
-    We are based in the United States. Hourmere Cloud has not launched. Before it does, we will
-    update this policy to state where Hourmere Cloud data is hosted and any mechanism we use for
-    international transfers of personal data. The hourmere.com website is published as static
+    Cobaltmere, LLC is a United States company registered as a Delaware limited liability company.
+    Personnel located outside the United States may administer Hourmere Cloud remotely to run,
+    secure and support the Service. Hourmere Cloud, including the invitation-only preview at
+    app.hourmere.com, is operated by Cobaltmere on a virtual private server that we rent from
+    BandwagonHost (IT7 Networks Inc.) in Los Angeles, United States.
+    Hourmere Cloud data and its on-host backups are stored there. The hourmere.com website is published as static
     files on Cloudflare Workers; the request data its hosting processes is described in
     <a href="#this-website">section 14</a>.
   </p>
@@ -657,8 +728,9 @@ const privacyMail = `mailto:${contact.privacy}`
     dark theme choice, in your browser's local storage; this stays on your device.
   </p>
   <p>
-    When Hourmere Cloud launches, it will use only cookies that are strictly necessary for it to
-    work, such as keeping you signed in. We do not use advertising cookies.
+    Hourmere Cloud, including the preview, uses only cookies that are strictly necessary for it to
+    work, such as keeping you signed in. If you choose a display language, it also remembers that
+    choice in a cookie and in your browser's local storage. We do not use advertising cookies.
   </p>
   <p>
     Booking widgets display an Hourmere booking page in an isolated frame on a website allowed by

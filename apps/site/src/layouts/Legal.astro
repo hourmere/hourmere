@@ -7,11 +7,13 @@ interface Props {
   path: string
   /** Effective date as YYYY-MM-DD. */
   effective: string
+  /** Also show the effective date as this policy's last-updated date. */
+  lastUpdated?: boolean
   /** Section anchors for the table of contents, in page order. */
   sections: { id: string; title: string }[]
 }
 
-const { title, description, path, effective, sections } = Astro.props
+const { title, description, path, effective, lastUpdated, sections } = Astro.props
 const effectiveLabel = new Date(`${effective}T00:00:00Z`).toLocaleDateString('en-US', {
   year: 'numeric',
   month: 'long',
@@ -26,6 +28,7 @@ const effectiveLabel = new Date(`${effective}T00:00:00Z`).toLocaleDateString('en
       <p class="eyebrow">Hourmere</p>
       <h1>{title}</h1>
       <p class="effective">Effective date: <time datetime={effective}>{effectiveLabel}</time></p>
+      {lastUpdated && <p class="effective">Last updated: <time datetime={effective}>{effectiveLabel}</time></p>}
     </header>
     <div class="prose">
       <slot name="intro" />

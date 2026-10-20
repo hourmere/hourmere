@@ -5,7 +5,7 @@ export const site = {
   url: 'https://hourmere.com',
   tagline: 'Open-source scheduling for people and AI agents.',
   description:
-    'Hourmere is open-source scheduling software in development, an alternative to Calendly. Share a booking link, let invitees pick a time that works, and let your AI assistant book meetings through an API and a remote MCP server.',
+    'Open-source scheduling software, an alternative to Calendly: share a booking link, let invitees pick a time, and let AI assistants book through an API and a remote MCP server. Hourmere Cloud is in an invitation-only preview at app.hourmere.com.',
   github: 'https://github.com/hourmere/hourmere',
   license: { name: 'AGPL-3.0', url: 'https://www.gnu.org/licenses/agpl-3.0.html' },
 } as const

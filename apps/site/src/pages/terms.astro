@@ -1,6 +1,9 @@
 ---
 import Legal from '../layouts/Legal.astro'
+import { resolveLegalPublicationDate } from '../privacy-publication.ts'
 import { company, contact, site } from '../site'
+
+const publicationDate = resolveLegalPublicationDate()
 
 const linkRefunds =
   'https://support.link.com/questions/requesting-a-refund-for-a-sold-through-link-payment'
@@ -31,7 +34,7 @@ const sections = [
   title="Terms of Service"
   description="The terms for using the Hourmere website and Hourmere Cloud, provided by Cobaltmere, LLC."
   path="/terms"
-  effective="2026-11-30"
+  effective={publicationDate}
   sections={sections}
 >
   <Fragment slot="intro">
@@ -48,15 +51,15 @@ const sections = [
       the authority to do so.
     </p>
     <p class="callout">
-      Hourmere is in development and Hourmere Cloud is not available yet. These Terms will apply to
-      Hourmere Cloud when it opens. Until then, they apply to your use of this website.
+      Hourmere Cloud is in an invitation-only preview at app.hourmere.com, and sign-ups are
+      currently closed. These Terms apply to that preview and to your use of this website.
     </p>
   </Fragment>
 
   <h2 id="the-service">1. The Service</h2>
   <p>
     Hourmere is scheduling software. It lets you share booking links so that invitees can pick a
-    time that works, syncs with Google Calendar and Microsoft 365, sends email confirmations and
+    time that works, syncs with Google Calendar, sends email confirmations and
     reminders, provides an embeddable booking widget, and offers an API and a remote MCP server so
     that AI assistants and other applications can work with your schedule.
   </p>
@@ -139,8 +142,8 @@ const sections = [
   <h2 id="plans-and-payment">7. Plans and payment</h2>
   <ul>
     <li>
-      Hourmere Cloud has not launched and paid plans are not yet available. Hourmere Cloud will
-      offer a Free plan and paid plans. Paid plans are billed per seat, in advance for each billing
+      Hourmere Cloud is in an invitation-only preview and paid plans are not yet available.
+      Hourmere Cloud will offer a Free plan and paid plans. Paid plans are billed per seat, in advance for each billing
       period, at the prices shown when you buy.
     </li>
     <li>
