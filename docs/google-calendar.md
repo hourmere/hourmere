@@ -17,8 +17,8 @@ readable; booking events can only be written to calendars the connected account 
 
 1. In Google Cloud, enable Google Calendar API and configure Google Auth Platform branding
    and an External audience. During development, keep the app in Testing and add the intended
-   Google accounts as test users. Public use and sensitive-scope verification are separate
-   launch steps.
+   Google accounts as test users. Review the publishing requirements below before relying
+   on a connection beyond development.
 2. Create a **Web application** OAuth client dedicated to calendar connections. Register
    exactly `{PUBLIC_URL}/api/calendar/google/callback` as its redirect URI. For `npm run dev`,
    this is `http://localhost:5173/api/calendar/google/callback`; Vite proxies `/api` to the
@@ -63,8 +63,28 @@ no attendee list, manage links or invitation emails are sent by this integration
 writeback creates no conference; automatic Meet requires the separate explicit opt-in below.
 Booking email/ICS continues through the existing notification worker.
 
-Google's External Testing mode has short-lived refresh-token rules; see the official
-[web server OAuth guide](https://developers.google.com/identity/protocols/oauth2/web-server).
+### Publishing status and verification
+
+For an External app whose publishing status is **Testing**, Google issues refresh tokens
+that expire after **7 days** when non-basic scopes are requested. Calendar scopes fall
+outside the basic `openid`, `email` and `profile` exception, so calendar connections drop
+weekly while the project remains in Testing. See Google's official
+[refresh-token expiration rules](https://developers.google.com/identity/protocols/oauth2#expiration).
+
+For ongoing use, change the project's Audience publishing status to **In production** and
+reconnect accounts whose Testing grants have expired. Publishing does not complete
+verification: an External unverified app requesting sensitive or restricted scopes still
+shows an **unverified app warning screen** and has a **100-user cap**. Google distinguishes
+this from Testing's 100-test-user limit in its
+[OAuth app state overview](https://developers.google.com/identity/protocols/oauth2/production-readiness/overview).
+
+As the self-hoster, you own the Google Cloud project and are responsible for its branding,
+domains, privacy policy and any required
+[sensitive-scope verification](https://developers.google.com/identity/protocols/oauth2/production-readiness/sensitive-scope-verification).
+Hourmere's hosted credentials or verification do not cover your deployment. Review Google's
+documented exceptions for personal or internal use before deciding whether verification
+is required.
+
 A revoked/expired grant changes the connection to `needs_reauth`; reconnect through the
 same separate consent flow. Temporary provider failures preserve the connection for retry.
 

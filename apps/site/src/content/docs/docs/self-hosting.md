@@ -12,7 +12,7 @@ release workflow is being prepared separately. Allow disk space for the source, 
 builds, PostgreSQL data and backups. Choose a dedicated deployment directory and volumes.
 
 For the bundled HTTPS proxy, point your hostname's DNS A record at the VPS, for example
-`app.hourmere.com`. **Publish only an A record with the bundled configuration.** Its
+`hourmere.example.com`. **Publish only an A record with the bundled configuration.** Its
 ingress network is IPv4-only: IPv6 connections can arrive through Docker's userland proxy
 with the bridge gateway as their source, putting all IPv6 visitors in one rate-limit bucket.
 Do not publish AAAA merely because the host has IPv6. Supporting it requires a custom
@@ -30,11 +30,11 @@ git clone https://github.com/hourmere/hourmere.git
 cd hourmere
 ./scripts/setup.sh
 docker compose up -d --build --wait
-curl --retry 20 --retry-delay 3 --retry-all-errors --fail https://app.hourmere.com/api/health
+curl --retry 20 --retry-delay 3 --retry-all-errors --fail https://hourmere.example.com/api/health
 ```
 
 In setup, accept the default `proxy` mode, explicitly enter your exact HTTPS origin (the example is
-`https://app.hourmere.com`), then enter your SMTP URL and sender. Use your own hostname in
+`https://hourmere.example.com`), then enter your SMTP URL and sender. Use your own hostname in
 all commands. A path prefix and a nonstandard public HTTPS port are not supported by this
 bundled proxy setup. Use a sender your SMTP provider accepts, for example
 `Hourmere <bookings@example.com>`. `smtp://…:587` requires STARTTLS; `smtps://…:465` uses TLS
@@ -49,6 +49,9 @@ that rejects mail bounces them. `RSVP=FALSE` does not stop Gmail from sending ca
 responses. A calendar decline does not cancel an Hourmere booking or automatically notify
 its host; use Cancel booking in Hourmere or the original email's cancellation link. See
 [Handle calendar replies](#handle-calendar-replies) for the operator procedure.
+
+For missing sign-in mail or spam placement, follow
+[email troubleshooting](/docs/troubleshooting#sign-in-emails-do-not-arrive-or-go-to-spam).
 
 The script copies `.env.example`, generates independent `POSTGRES_PASSWORD` and
 `BETTER_AUTH_SECRET` values with `openssl rand -base64 32`, and writes `.env` with mode
@@ -70,7 +73,7 @@ Run every later Compose command from that checkout so it reads the persisted pro
 file selection. Avoid exporting a conflicting `COMPOSE_PROJECT_NAME` or `COMPOSE_FILE` in
 your shell, which would override `.env`.
 
-Open `https://app.hourmere.com/sign-in` and sign in immediately with your own email. There
+Open `https://hourmere.example.com/sign-in` and sign in immediately with your own email. There
 is no separate sign-up page and no initial password: proving an eligible email address
 creates the account. The first account belongs to whoever completes sign-in first, so
 claim it before sharing the instance. Verify the email arrives and its confirmation button
@@ -96,6 +99,24 @@ In the app, set a profile handle and time zone, create working hours, then creat
 event type. Its public booking page is `/{handle}/{slug}`. Configure calendars explicitly
 through [Google Calendar](/docs/google-calendar), then use the [REST](/docs/rest) or
 [MCP](/docs/mcp) guides for agent access. Test one booking before inviting others.
+
+## Google sign-in and calendar publishing
+
+To add **Sign in with Google**, follow the
+[step-by-step client setup](/docs/configuration#sign-in-with-google). Sign-in requests only
+`openid`, `email` and `profile`; connecting Google Calendar requires its own OAuth client
+and consent.
+
+External Google projects in **Testing** issue non-basic calendar refresh tokens that expire
+after **7 days**, causing weekly disconnections. Google's official
+[expiration rules](https://developers.google.com/identity/protocols/oauth2#expiration)
+explain the basic identity-scope exception. For ongoing calendar use, publish **In production**.
+External unverified apps requesting sensitive or restricted scopes still show an
+**unverified app warning screen** and have a **100-user cap**; see Google's
+[app state overview](https://developers.google.com/identity/protocols/oauth2/production-readiness/overview).
+Any required sensitive-scope verification is your responsibility as the self-hoster for
+your own project. Follow the [Google Calendar publishing guide](/docs/google-calendar#publishing-status-and-verification)
+for verification requirements, exceptions and reconnecting expired grants.
 
 ## Proxy behavior and an existing proxy
 
@@ -588,7 +609,7 @@ The app keeps the default `all` role. From the deployment checkout:
   docker compose pull proxy db &&
   docker compose stop app &&
   docker compose up -d --build --wait &&
-  curl --retry 20 --retry-delay 3 --retry-all-errors --fail https://app.hourmere.com/api/health
+  curl --retry 20 --retry-delay 3 --retry-all-errors --fail https://hourmere.example.com/api/health
 )
 ```
 
@@ -610,7 +631,7 @@ stopping the old app and worker:
   docker compose pull proxy db &&
   docker compose stop app worker &&
   docker compose up -d --build --wait &&
-  curl --retry 20 --retry-delay 3 --retry-all-errors --fail https://app.hourmere.com/api/health
+  curl --retry 20 --retry-delay 3 --retry-all-errors --fail https://hourmere.example.com/api/health
 )
 ```
 
@@ -658,6 +679,9 @@ Use `docker compose ps`, `docker compose logs --tail=100 app`,
 status and startup failures. `docker compose logs -f app` follows app/jobs output. Do not
 share log-email links or secrets. The health URL is `GET /api/health` on the public origin;
 verify it after deployments and monitor failures externally.
+
+Use [Troubleshooting](/docs/troubleshooting) for email/worker failures, Caddy certificates,
+AAAA records and unsupported connection poolers.
 
 On Linux, Caddy's quic-go may warn about small UDP buffers for HTTP/3. The
 [quic-go guidance](https://quic-go.net/docs/quic/optimizations/#udp-buffer-sizes) recommends

@@ -78,10 +78,10 @@ git clone https://github.com/hourmere/hourmere.git
 cd hourmere
 ./scripts/setup.sh
 docker compose up -d --build --wait
-curl --retry 20 --retry-delay 3 --retry-all-errors --fail https://app.hourmere.com/api/health
+curl --retry 20 --retry-delay 3 --retry-all-errors --fail https://hourmere.example.com/api/health
 ```
 
-Accept `proxy`, enter your HTTPS origin (replace `app.hourmere.com` with your hostname),
+Accept `proxy`, enter your HTTPS origin (replace `hourmere.example.com` with your hostname),
 and configure SMTP and its sender. Setup generates separate secrets directly into a mode
 `600` `.env`, refuses to overwrite an existing file, and selects the optional Caddy override.
 Caddy obtains/renews TLS certificates; only TCP 80/443 and UDP 443 are published, and the app trusts only
