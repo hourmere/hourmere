@@ -104,6 +104,12 @@ jobs:
         run: |
           curl --fail --silent --show-error http://127.0.0.1:3000/api/health
           curl --fail --silent --show-error http://127.0.0.1:3000/ | grep -q '<title>Hourmere</title>'
+          unknown_well_known_status=$(curl --silent --show-error --output /dev/null \
+            --write-out '%{http_code}' http://127.0.0.1:3000/.well-known/does-not-exist)
+          [ "$unknown_well_known_status" = 404 ] || {
+            printf 'Unknown well-known route returned HTTP %s; expected 404\n' "$unknown_well_known_status" >&2
+            exit 1
+          }
       - name: Smoke test the separate worker overlay
         timeout-minutes: 2
         run: |
