@@ -3,6 +3,7 @@
 // assets, no tracking. Everything from the booking is someone's input and is treated so.
 import { type InterfaceLanguage, interfaceLanguage } from '@hourmere/core/language'
 import type { MailAttachment, MailMessage } from './index.ts'
+import { emailButton, emailLayout, emailLinkStyle, emailWrapStyle } from './layout.ts'
 import {
   escapeHtml,
   formatChineseTemplate,
@@ -169,18 +170,23 @@ function locationForText(location: MeetingLocation, language: InterfaceLanguage)
   return meetingLocationText(location)
 }
 
-function locationForHtml(location: MeetingLocation, language: InterfaceLanguage): string {
-  if (location.kind === 'link') {
-    const url = linkableUrl(location.url)
-    const label = location.label
-      ? `${escapeHtml(singleLine(location.label))}${language === 'zh-CN' ? '：' : ': '}`
-      : ''
-    const text = escapeHtml(singleLine(location.url))
-    return url
-      ? `${label}<a href="${escapeHtml(url)}" style="color: #111;">${text}</a>`
-      : `${label}${text}`
-  }
-  return htmlLines(locationForText(location, language))
+function joinLabel(
+  location: Extract<MeetingLocation, { kind: 'link' }>,
+  language: InterfaceLanguage,
+) {
+  const label = singleLine(location.label ?? '').toLowerCase()
+  const hostname = new URL(location.url).hostname.toLowerCase()
+  if (label === 'zoom' || /(^|\.)zoom\.(us|com)$/.test(hostname))
+    return message(language, 'Join Zoom meeting')
+  if (label === 'google meet' || hostname === 'meet.google.com')
+    return message(language, 'Join Google Meet meeting')
+  if (
+    label === 'teams' ||
+    label === 'microsoft teams' ||
+    ['teams.microsoft.com', 'teams.live.com', 'teams.cloud.microsoft'].includes(hostname)
+  )
+    return message(language, 'Join Teams meeting')
+  return message(language, 'Join meeting')
 }
 
 // --- Layout -------------------------------------------------------------------------------
@@ -196,30 +202,33 @@ interface Content {
   subject: string
   intro: string
   /** Label and value (already cleaned); the HTML value is escaped markup. */
-  fields: { label: string; text: string; html: string }[]
+  fields: { label: string; text: string; html: string; muted?: boolean }[]
   answers: readonly { question: string; answer: string }[]
+  join?: { label: string; url: string } | undefined
+  bookingUrl?: string | undefined
   manageLinks?: ManageLinks | undefined
   footer?: { language: InterfaceLanguage; text: string } | undefined
+  receivedWhy: string
 }
 
 function render(to: string, c: Content, attachment?: MailAttachment): MailMessage {
   const subject = subjectLine(c.subject)
   const t = (key: keyof typeof chinese) => message(c.language, key)
-  // Put invitation guidance beside the invitee's actions before the meeting details.
-  // Other messages retain their existing layout, and hosts/guests get no manage links.
-  const invitationActions = Boolean(c.manageLinks && c.footer)
   const actionText = c.manageLinks
     ? [
         '',
         t('Need to make a change?'),
+        `${t('Reschedule')} / ${t('Cancel')}`,
+        ...(c.footer ? [c.footer.text] : []),
+        t('If the buttons do not work, copy a link into your browser:'),
         textField(t('Reschedule'), c.manageLinks.reschedule, c.language),
         textField(t('Cancel'), c.manageLinks.cancel, c.language),
-        ...(invitationActions && c.footer ? [c.footer.text] : []),
       ]
     : []
   const text = [
+    'Hourmere',
+    '',
     c.intro,
-    ...(invitationActions ? actionText : []),
     '',
     ...c.fields.map((f) => textField(f.label, f.text, c.language)),
     ...(c.answers.length
@@ -229,49 +238,65 @@ function render(to: string, c: Content, attachment?: MailAttachment): MailMessag
           ...c.answers.map((a) => `${a.question}\n  ${a.answer.replaceAll('\n', '\n  ')}`),
         ]
       : []),
-    ...(!invitationActions ? actionText : []),
-    ...(c.footer && !invitationActions ? ['', c.footer.text] : []),
+    ...(c.join ? ['', c.join.label, c.join.url] : []),
+    ...(c.bookingUrl ? ['', textField(t('Open in Hourmere'), c.bookingUrl, c.language)] : []),
+    ...actionText,
+    ...(c.footer && !c.manageLinks ? ['', c.footer.text] : []),
+    '',
+    c.receivedWhy,
   ].join('\n')
 
   const cell = 'padding: 2px 16px 2px 0; vertical-align: top;'
   const rows = c.fields
     .map(
       (f) =>
-        `<tr><td style="${cell} color: #555;">${escapeHtml(f.label)}</td><td style="${cell}">${f.html}</td></tr>`,
+        `<tr><td style="${cell} color: #555; white-space: nowrap; width: 1%;">${escapeHtml(f.label)}</td><td style="${cell} ${emailWrapStyle}${f.muted ? ' color: #777; text-decoration: line-through;' : ''}">${f.html}</td></tr>`,
     )
     .join('\n')
   const answers = c.answers.length
     ? `<p style="margin: 24px 0 4px; font-weight: 600;">${t('Answers')}</p>\n${c.answers
         .map(
           (a) =>
-            `<p style="margin: 0 0 12px;"><span style="color: #555;">${htmlLines(a.question)}</span><br>${htmlLines(a.answer)}</p>`,
+            `<p style="margin: 0 0 12px; ${emailWrapStyle}"><span style="color: #555;">${htmlLines(a.question)}</span><br>${htmlLines(a.answer)}</p>`,
         )
         .join('\n')}`
     : ''
-  const button =
-    'display: inline-block; padding: 8px 14px; margin-right: 8px; background: #111; color: #fff; text-decoration: none; border-radius: 6px;'
   const footer = c.footer
-    ? `<p lang="${c.footer.language}" style="margin: ${invitationActions ? '0 0 8px' : '24px 0 0'}; color: #555; font-size: 13px;">${escapeHtml(c.footer.text)}</p>`
+    ? `<p lang="${c.footer.language}" style="margin: ${c.manageLinks ? '0 0 8px' : '24px 0 0'}; color: #555; font-size: 13px; ${emailWrapStyle}">${escapeHtml(c.footer.text)}</p>`
     : ''
   const links = c.manageLinks
     ? `<p style="margin: 24px 0 8px;">${t('Need to make a change?')}</p>
-<p style="margin: 0 0 8px;"><a href="${escapeHtml(c.manageLinks.reschedule)}" style="${button}">${t('Reschedule')}</a><a href="${escapeHtml(c.manageLinks.cancel)}" style="${button}">${t('Cancel')}</a></p>
-${invitationActions ? `${footer}\n` : ''}<p style="margin: 0; color: #555; font-size: 13px;">${t('If the buttons do not work, copy a link into your browser:')}<br>${escapeHtml(textField(t('Reschedule'), c.manageLinks.reschedule, c.language))}<br>${escapeHtml(textField(t('Cancel'), c.manageLinks.cancel, c.language))}</p>`
+${emailButton(t('Reschedule'), c.manageLinks.reschedule)}
+${emailButton(t('Cancel'), c.manageLinks.cancel, true)}
+${footer}${footer ? '\n' : ''}<p style="margin: 8px 0 0; color: #555; font-size: 13px; ${emailWrapStyle}">${t('If the buttons do not work, copy a link into your browser:')}<br>${escapeHtml(textField(t('Reschedule'), c.manageLinks.reschedule, c.language))}<br>${escapeHtml(textField(t('Cancel'), c.manageLinks.cancel, c.language))}</p>`
     : ''
-  const afterDetails = [answers, ...(invitationActions ? [] : [links, footer])]
+  const join = c.join
+    ? `<div style="margin: 24px 0 0;">
+${emailButton(c.join.label, c.join.url)}
+<p style="margin: 4px 0 0; font-size: 13px; ${emailWrapStyle}"><a href="${escapeHtml(c.join.url)}" style="${emailLinkStyle}">${escapeHtml(c.join.url)}</a></p>
+</div>`
+    : ''
+  const bookingLink = c.bookingUrl
+    ? `<div style="margin: 24px 0 0;">${emailButton(t('Open in Hourmere'), c.bookingUrl)}</div>`
+    : ''
+  const afterDetails = [
+    answers,
+    join,
+    bookingLink,
+    links,
+    ...(!c.manageLinks ? [footer] : []),
+    `<p style="margin: 24px 0 0; color: #555; font-size: 13px; ${emailWrapStyle}">${escapeHtml(c.receivedWhy)}</p>`,
+  ]
     .filter(Boolean)
     .join('\n')
-  const html = `<!doctype html>
-<html lang="${c.language}">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(subject)}</title></head>
-<body style="font-family: system-ui, sans-serif; line-height: 1.5; color: #111;">
-<p style="margin: 0 0 16px;">${escapeHtml(c.intro)}</p>
-${invitationActions ? `${links}\n` : ''}<table role="presentation" style="border-collapse: collapse;">
+  const html = emailLayout(
+    c.language,
+    subject,
+    `<p style="margin: 0 0 16px; ${emailWrapStyle}">${escapeHtml(c.intro)}</p>
+<table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
 ${rows}
-</table>${afterDetails ? `\n${afterDetails}` : ''}
-</body>
-</html>
-`
+</table>${afterDetails ? `\n${afterDetails}` : ''}`,
+  )
   return {
     to,
     subject,
@@ -298,6 +323,14 @@ const chinese = {
   'Need to make a change?': '需要更改预约吗？',
   Reschedule: '改期',
   Cancel: '取消',
+  'Online meeting': '线上会议',
+  'Join Zoom meeting': '加入 Zoom 会议',
+  'Join Google Meet meeting': '加入 Google Meet 会议',
+  'Join Teams meeting': '加入 Teams 会议',
+  'Join meeting': '加入会议',
+  'Open in Hourmere': '在 Hourmere 中打开',
+  'You received this email about a booking with {host} via Hourmere.':
+    '你收到此邮件，是因为通过 Hourmere 与{host}预约了会议。',
   'If the buttons do not work, copy a link into your browser:':
     '如果按钮无法使用，请将链接复制到浏览器中：',
   'Meeting link needs attention: {event} on {when}': '会议链接需要处理：{event}，{when}',
@@ -350,7 +383,7 @@ export function bookingEmail(
   kind: BookingEmailKind,
   meeting: BookingEmailMeeting,
   recipient: BookingEmailRecipient,
-  options: { attachment?: MailAttachment | undefined } = {},
+  options: { attachment?: MailAttachment | undefined; bookingUrl?: string | undefined } = {},
 ): MailMessage {
   const event = singleLine(meeting.eventName)
   const host = singleLine(meeting.hostName)
@@ -387,13 +420,13 @@ export function bookingEmail(
   } satisfies Record<BookingEmailKind, keyof typeof chinese>
   const intro = t(intros[kind], values)
 
-  const fields = [
+  const fields: Content['fields'] = [
     field(t('What'), event),
     field(t('When'), formatMeetingTime(meeting.start, meeting.end, recipient.timeZone, language)),
   ]
   if (kind === 'rescheduled' && meeting.previous) {
-    fields.push(
-      field(
+    fields.push({
+      ...field(
         t('Was'),
         formatMeetingTime(
           meeting.previous.start,
@@ -402,14 +435,17 @@ export function bookingEmail(
           language,
         ),
       ),
-    )
+      muted: true,
+    })
   }
   if (meeting.location) {
-    fields.push({
-      label: t('Where'),
-      text: locationForText(meeting.location, language),
-      html: locationForHtml(meeting.location, language),
-    })
+    const location = meeting.location
+    // Join URLs belong to the action below the details, and never to a cancelled email.
+    const locationText =
+      location.kind === 'link'
+        ? singleLine(location.label ?? '') || t('Online meeting')
+        : locationForText(location, language)
+    fields.push(field(t('Where'), locationText))
   }
   if (isHost) {
     fields.push(field(t('Invitee'), `${invitee} <${singleLine(meeting.inviteeEmail)}>`))
@@ -444,10 +480,31 @@ export function bookingEmail(
     kind !== 'cancelled' && kind !== 'conference_failed' && invitation
       ? { language, text: calendarDecline[language][footerRole] }
       : undefined
+  const joinUrl = meeting.location?.kind === 'link' ? linkableUrl(meeting.location.url) : null
+  const join =
+    joinUrl &&
+    meeting.location?.kind === 'link' &&
+    kind !== 'cancelled' &&
+    kind !== 'conference_failed'
+      ? { label: joinLabel(meeting.location, language), url: joinUrl }
+      : undefined
+  const bookingUrl =
+    isHost && options.bookingUrl ? (linkableUrl(options.bookingUrl) ?? undefined) : undefined
 
   return render(
     recipient.email,
-    { language, subject, intro, fields, answers, manageLinks, footer },
+    {
+      language,
+      subject,
+      intro,
+      fields,
+      answers,
+      join,
+      bookingUrl,
+      manageLinks,
+      footer,
+      receivedWhy: t('You received this email about a booking with {host} via Hourmere.', { host }),
+    },
     options.attachment,
   )
 }

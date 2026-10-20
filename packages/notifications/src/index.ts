@@ -60,7 +60,7 @@ export const BookingNotificationPayload = z.strictObject({
 export interface NotificationDeps {
   db: Db
   mailer: Mailer
-  /** PUBLIC_URL: the origin used for invitee manage links. */
+  /** PUBLIC_URL: the origin used for invitee manage links and host booking links. */
   publicUrl: string
   now?: (() => Temporal.Instant) | undefined
   /** Receives a line for each email the mail server refused for good. Default: console.warn. */
@@ -829,6 +829,8 @@ async function deliverBookingNotification(
             ),
           },
           {
+            bookingUrl: new URL(`/app/bookings/${encodeURIComponent(bookingId)}`, deps.publicUrl)
+              .href,
             attachment: invitation(
               invitee.name,
               interfaceLanguage(host.locale) ?? 'en',
