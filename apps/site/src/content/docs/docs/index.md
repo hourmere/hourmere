@@ -36,9 +36,12 @@ The website at hourmere.com is separate from your Hourmere instance.
 - PostgreSQL 18+ is required for `uuidv7()`; [PgBouncer is unsupported](/docs/configuration#server-and-database).
   The [upgrade notes](https://github.com/hourmere/hourmere/blob/main/CHANGELOG.md#upgrade-notes)
   cover the database version requirement.
-- [Bundled Caddy](/docs/self-hosting#prepare-the-host) uses an IPv4-only ingress network;
-  its [setup](/docs/self-hosting#first-start-with-automatic-https) supports no path prefix
-  or nonstandard public ports.
+- Hourmere must be served at the root of its own host name (no path prefix) in every deployment.
+  [Bundled Caddy](/docs/self-hosting#prepare-the-host) additionally requires ports 80/443,
+  an HTTPS host name without a port, and an IPv4-only ingress network.
+- [Rate limiting](https://github.com/hourmere/hourmere/blob/main/apps/server/src/rate-limit.ts)
+  uses in-process memory; multiple web replicas multiply the limits. Run a single web process;
+  a [separate worker](/docs/self-hosting#run-workers-separately) is supported.
 - [Interface languages](https://github.com/hourmere/hourmere/blob/main/docs/interface-languages.md)
   are English and Simplified Chinese only.
 - [Schema downgrade is not automatic](/docs/self-hosting#upgrade-and-roll-back). Some

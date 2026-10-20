@@ -35,8 +35,9 @@ curl --retry 20 --retry-delay 3 --retry-all-errors --fail https://hourmere.examp
 
 In setup, accept the default `proxy` mode, explicitly enter your exact HTTPS origin (the example is
 `https://hourmere.example.com`), then enter your SMTP URL and sender. Use your own hostname in
-all commands. A path prefix and a nonstandard public HTTPS port are not supported by this
-bundled proxy setup. Use a sender your SMTP provider accepts, for example
+all commands. Every deployment must serve Hourmere at the root of its own host name,
+without a path prefix. The bundled proxy additionally requires an HTTPS host name without
+a port. Use a sender your SMTP provider accepts, for example
 `Hourmere <bookings@example.com>`. `smtp://…:587` requires STARTTLS; `smtps://…:465` uses TLS
 from the start. Percent-encode special characters in SMTP credentials. Setup hides SMTP
 input on a terminal, and quotes values for Compose.
@@ -551,8 +552,9 @@ reopening traffic. Keep the old volumes and backup until recovery is accepted.
 
 ## Upgrade and roll back
 
-Read the intended release's changes and take the backup above first. Record its commit and
-preserve its `.env` and Caddy state. For 1.0 and later, check out the intended release tag
+Read the intended release's changes and take the backup above first. Record the current
+commit or tag before upgrading and preserve its `.env` and Caddy state.
+For 1.0 and later, check out the intended release tag
 rather than following `main`: replace `vX.Y.Z` in the commands below with the reviewed tag.
 No stable release has been published yet; these are the upgrade steps for future releases.
 Keep tracked Compose files unchanged and preserve the worker selection in `.env` so the
@@ -580,6 +582,8 @@ The app keeps the default `all` role. From the deployment checkout:
 )
 ```
 
+If a later guard fails after checkout, return with `git checkout <previous commit or tag>` using the value recorded before upgrading.
+
 ### Separate-worker upgrade
 
 From the deployment checkout, verify both the worker and the bundled HTTPS proxy before
@@ -602,6 +606,8 @@ stopping the old app and worker:
   curl --retry 20 --retry-delay 3 --retry-all-errors --fail https://hourmere.example.com/api/health
 )
 ```
+
+If a later guard fails after checkout, return with `git checkout <previous commit or tag>` using the value recorded before upgrading.
 
 For plain mode, remove both lines of the proxy verification before pasting either
 sequence, pull only `db`, and use your deployment's health URL.

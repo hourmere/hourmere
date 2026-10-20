@@ -161,10 +161,18 @@ describe('launch documentation disclosures', () => {
       claims: [/PostgreSQL 18\+ is required/, /PgBouncer is unsupported/],
     },
     {
-      topic: 'bundled proxy scope',
+      topic: 'deployment origin and bundled proxy scope',
       claims: [
-        /Bundled Caddy uses an IPv4-only ingress network/,
-        /no path prefix or nonstandard public ports/,
+        /Hourmere must be served at the root of its own host name \(no path prefix\) in every deployment/,
+        /Bundled Caddy additionally requires ports 80\/443, an HTTPS host name without a port, and an IPv4-only ingress network/,
+      ],
+    },
+    {
+      topic: 'single web process for in-memory rate limits',
+      claims: [
+        /Rate limiting uses in-process memory/,
+        /multiple web replicas multiply the limits/,
+        /Run a single web process; a separate worker is supported/,
       ],
     },
     {
@@ -196,7 +204,27 @@ describe('launch documentation disclosures', () => {
     it.each(limitations)(`discloses $topic in ${path}`, ({ claims }) => {
       for (const claim of claims) expect(prose(section ?? '')).toMatch(claim)
     })
+
+    it(`limits the missing real-account acceptance disclosure to Microsoft in ${path}`, () => {
+      const statements = prose(section ?? '').match(/[^.]*have not had real-account acceptance\./g)
+      expect(statements).toHaveLength(1)
+      expect(statements?.[0]).toMatch(/Microsoft sign-in and calendar connections/)
+      expect(statements?.[0]).not.toMatch(/Zoom|Meet|Google/)
+    })
   }
+
+  it('links the changelog database requirements to a section that requires PostgreSQL 18', () => {
+    const target = read('CHANGELOG.md').match(/\[database requirements\]\(([^)]+)\)/)?.[1]
+    expect(target).toBe(
+      'https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/configuration.md#server-and-database',
+    )
+    const section = read(`${siteDocs}/configuration.md`)
+      .split('## Server and database\n')[1]
+      ?.split('\n## ')[0]
+    expect(prose(section ?? '')).toMatch(
+      /PostgreSQL 18\+ is required because migrations use uuidv7\(\)/,
+    )
+  })
 })
 
 describe('Google self-hosting guidance', () => {

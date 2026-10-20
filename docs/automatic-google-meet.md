@@ -138,5 +138,8 @@ the unused database `retry_conference` flag; the persisted request UUID and PATC
 already determine reconciliation, so that write-only flag grants no retry authority. The
 MCP tool of the same name remains available. Existing rows and error codes otherwise keep
 their values and are not automatically retried. Automated validation uses fake Google/mail
-transports and helper-owned PostgreSQL. These tests do not establish real account policy,
-consent or delivery acceptance. Actual provider acceptance remains separately authorized.
+transports and helper-owned PostgreSQL.
+
+Real-account acceptance was performed on 2026-10-19 against a Google Cloud test project.
+Google OAuth verification is a separate step for the hosted service; self-hosters use their
+own Google Cloud projects.

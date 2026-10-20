@@ -229,6 +229,15 @@ ${log}${fail}exec /usr/bin/install "$@"
 }
 
 describe('documented deployment operations', () => {
+  it('requires a root host in every deployment and a portless HTTPS host for bundled Caddy', () => {
+    expect(guide).toMatch(
+      /Every deployment must serve Hourmere at the root of its own host name,\s+without a path prefix/,
+    )
+    expect(guide).toMatch(
+      /The bundled proxy additionally requires an HTTPS host name without\s+a port/,
+    )
+  })
+
   it('mirrors the calendar-reply forwarding example with its whole-mailbox settings page', () => {
     const notifications = readFileSync(new URL('../docs/notifications.md', import.meta.url), 'utf8')
     const example = notifications.match(
@@ -627,6 +636,17 @@ docker compose up -d --wait`)
     expect(legacy).toContain('docs/notifications.md#identity-and-recipients')
     expect(releases).not.toContain('0037_conference_pending_timeout.sql')
     expect(releases).not.toContain('0038_booking_ical_identity.sql')
+  })
+
+  it('records the previous revision and explains returning after each checkout guard fails', () => {
+    const upgrade = guide.split('## Upgrade and roll back\n')[1]?.split('\n## ')[0]
+    expect(upgrade).toMatch(/Record the current\s+commit or tag before upgrading/)
+    for (const title of ['Single-container', 'Separate-worker']) {
+      const section = upgrade?.split(`### ${title} upgrade\n`)[1]?.split('\n### ')[0]
+      expect(section, title).toMatch(
+        /git checkout vX\.Y\.Z &&[\s\S]*?\n```\n\nIf a later guard fails after checkout, return with `git checkout <previous commit or tag>` using the value recorded before upgrading\./,
+      )
+    }
   })
 
   it('migrates tracked worker edits before changing revisions and explains orphaned old images', () => {

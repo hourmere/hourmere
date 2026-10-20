@@ -228,7 +228,11 @@ and linked operating guides before deploying:
   actual host; collective and round-robin event types are unsupported.
 - Calendar RSVP replies are not processed; declining in a calendar does not cancel a booking.
 - PostgreSQL 18+ is required; PgBouncer is unsupported.
-- Bundled Caddy uses an IPv4-only ingress network, with no path prefix or nonstandard public ports.
+- Hourmere must be served at the root of its own host name (no path prefix) in every deployment.
+  Bundled Caddy additionally requires ports 80/443, an HTTPS host name without a port,
+  and an IPv4-only ingress network.
+- Rate limiting uses in-process memory; multiple web replicas multiply the limits. Run a
+  single web process; a separate worker is supported.
 - Interface languages are English and Simplified Chinese only.
 - No automatic schema downgrade; some migrations require stopping all old app and worker
   processes. Review the [migration notes](docs/data-model.md#changing-the-schema).
