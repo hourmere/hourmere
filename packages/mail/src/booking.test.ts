@@ -42,6 +42,18 @@ const host: HostRecipient = {
   ],
 }
 
+const requestAttachment = icsAttachment({
+  method: 'REQUEST',
+  uid: 'b@cal.example.com',
+  sequence: 0,
+  stamp: at('2026-10-16T10:00:00Z'),
+  start: meeting.start,
+  end: meeting.end,
+  summary: 'Intro call with Grace Hopper',
+  organizer: { name: 'Grace Hopper', email: 'grace@example.com' },
+  attendees: [{ name: 'Ada Lovelace', email: 'ada@example.com' }],
+})
+
 describe('formatMeetingTime', () => {
   it("shows the time in the recipient's zone, with the zone's name", () => {
     expect(formatMeetingTime(meeting.start, meeting.end, 'Europe/Berlin')).toBe(
@@ -98,8 +110,6 @@ describe('bookingEmail', () => {
         'Need to make a change?',
         `Reschedule: ${links.reschedule}`,
         `Cancel: ${links.cancel}`,
-        '',
-        "Declining this invitation in your calendar won't cancel the booking. To cancel, use the Cancel link in this email.",
         '',
       ].join('\n'),
     )
@@ -212,7 +222,14 @@ describe('bookingEmail', () => {
       [host, expected.host],
       [{ ...invitee, email: 'cb@example.com', manageLinks: undefined }, expected.guest],
     ] as const) {
-      const m = bookingEmail('confirmed', meeting, { ...recipient, locale })
+      const m = bookingEmail(
+        'confirmed',
+        meeting,
+        { ...recipient, locale },
+        {
+          attachment: requestAttachment,
+        },
+      )
       expect(m.text).toMatch(/\n\n[^\n]+\n$/)
       expect(m.text.endsWith(`\n\n${sentence}\n`)).toBe(true)
       expect(m.html).toContain(`<p lang="${language}"`)

@@ -53,6 +53,11 @@ must approve publication through the [release workflow](https://github.com/hourm
 
 ### Fixed
 
+- Booking emails now use English or Simplified Chinese for each recipient, including
+  subjects, bodies, dates and calendar summaries/descriptions. Guests follow the booking
+  language; hosts use their profile language. Sign-in emails follow the requesting
+  interface language. Calendar-decline footers appear on confirmations and reschedules
+  only when a REQUEST invitation is included, and never on cancellations.
 - Booking email invitations align new calendar organizers with the configured sending
   mailbox, distinguish calendar acceptance from booking confirmation, and use calendar MIME
   alternatives with downloadable ICS copies. Hosts with pinned provider copies receive

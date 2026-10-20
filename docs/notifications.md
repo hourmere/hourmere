@@ -118,6 +118,23 @@ cancellations a cancellation (`METHOD:CANCEL`); reminders carry none. New host n
 carry the same calendar item only when there is no pinned provider calendar copy (details
 below). Legacy host notifications retain their invitations and cancellations.
 
+### Email language
+
+Booking emails use English or Simplified Chinese throughout the subject, plain text, HTML
+and user-facing calendar SUMMARY/DESCRIPTION. The HTML `lang` matches the email language.
+The invitee's language comes from `booking_attendees.locale`, captured from the booking
+page's interface language at the first valid submission; changing the interface while
+retrying that submission keeps the original request and its language. REST/MCP callers can
+provide the same invitee locale. Guests follow the invitee's booking language. Each host
+uses their current profile locale independently. Supported English and Simplified Chinese
+BCP 47 tags map to `en` and `zh-CN`; missing, invalid or unsupported languages fall back to
+English. Reschedules retain the booking's saved language.
+
+Dates and times use that email language and the recipient time zone described above;
+language selection never changes the meeting instant or calendar UID/SEQUENCE. Titles,
+names, question labels, free-text answers, cancellation reasons and location values remain
+the original user content. Generated answer labels such as Yes/No are localized for the host.
+
 ### Checked when sent, not when queued
 
 The job reads the booking when it runs and sends only what is still true:
@@ -344,8 +361,11 @@ REPLY messages: Hourmere has no inbound calendar-response processor, and a calen
 never cancels a booking. Use the original confirmation's manage links for rescheduling or
 cancellation. Operators should monitor or deliberately forward the `MAIL_FROM` mailbox for
 unsolicited calendar replies and keep it able to receive mail; Reply-To is not a guarantee
-that those reach the host. Confirmation email footers also explain that declining in a
-calendar does not cancel the booking.
+that those reach the host. Confirmation and reschedule email footers explain that declining
+in a calendar does not cancel the booking, using the recipient's language and role. This
+footer appears only when the email carries a REQUEST invitation. Suppressed invitations
+(including hosts with provider copies and invitees using the same address), cancellations,
+reminders and conference-failure notices have no decline footer.
 
 SMTP uses Nodemailer's `icalEvent`: a `text/calendar; method=REQUEST` (or CANCEL) alternative
 with UTF-8 plus an identical downloadable `application/ics` attachment (`invite.ics` or
@@ -409,6 +429,11 @@ path; a worker decides account/registration eligibility. Job JSON carries only a
 ID, and the expiring outbox encrypts the recipient and scanner-safe fragment URL. See
 [data-model.md](data-model.md#sign-in-email-outbox) for storage and cleanup. Web-only
 processes need a worker for sign-in mail, just as they do for booking notifications.
+Sign-in emails use the requester's interface-language cookie (`hourmere-language`), then
+the request's `Accept-Language`, then English. That choice is stored inside the encrypted
+outbox payload so a worker and its retries use the same language; older queued payloads
+without a language remain English. Direct delivery uses the same selection. Subjects,
+plain text, HTML and HTML `lang` are localized together.
 
 ## Guest email controls
 

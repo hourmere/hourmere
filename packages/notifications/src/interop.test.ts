@@ -257,7 +257,8 @@ describe.skipIf(!serverUrl)('iMIP interoperability', () => {
           name: 'Charles Babbage',
           email: guestEmail,
           time_zone: 'UTC',
-          locale: attendeeLocale,
+          // A guest has no interface choice; even a legacy independent locale is ignored.
+          locale,
           is_booker: false,
         })
         .execute()
@@ -294,6 +295,203 @@ describe.skipIf(!serverUrl)('iMIP interoperability', () => {
       }
     },
   )
+
+  it.each(['en', 'zh-CN'] as const)(
+    'localizes every lifecycle invitation per recipient and preserves identity (%s booking)',
+    async (language) => {
+      const info = await setup()
+      const hostLanguage = language === 'en' ? 'zh-CN' : 'en'
+      await db
+        .updateTable('profiles')
+        .set({ locale: hostLanguage })
+        .where('user_id', '=', info.host.userId)
+        .execute()
+      const addLanguageAndGuest = async (bookingId: string) => {
+        await db
+          .updateTable('booking_attendees')
+          .set({ locale: language, time_zone: 'Asia/Tokyo' })
+          .where('booking_id', '=', bookingId)
+          .execute()
+        await db
+          .insertInto('booking_attendees')
+          .values({
+            booking_id: bookingId,
+            name: 'Charles Babbage',
+            email: 'charles@example.net',
+            time_zone: 'America/Los_Angeles',
+            locale: null,
+            is_booker: false,
+          })
+          .execute()
+      }
+      await addLanguageAndGuest(info.booking)
+      const mail = capture()
+      await mail.send(info.booking, 'confirmed')
+      const next = await move(info)
+      await addLanguageAndGuest(next)
+      await mail.send(next, 'rescheduled')
+      await db
+        .updateTable('bookings')
+        .set({ status: 'cancelled', cancelled_at: '2026-10-19T12:00Z' })
+        .where('id', '=', next)
+        .execute()
+      await mail.send(next, 'cancelled')
+      expect(mail.sent).toHaveLength(9)
+      for (const [revision, message] of mail.sent.entries()) {
+        const stage = Math.floor(revision / 3)
+        const isHost = message.to === hostEmail
+        const locale = isHost ? hostLanguage : language
+        const chinese = locale === 'zh-CN'
+        const other = isHost ? 'Ada Lovelace' : 'Grace Hopper'
+        const component = event(message)
+        const summary = chinese ? `Fixture booking（与 ${other}）` : `Fixture booking with ${other}`
+        const description = chinese
+          ? '通过 Hourmere 与 Grace Hopper 预约。'
+          : 'Booked with Grace Hopper using Hourmere.'
+        expect(component.getFirstPropertyValue('summary')).toBe(summary)
+        expect(component.getFirstPropertyValue('description')).toBe(description)
+        expect(component.getFirstPropertyValue('uid')).toBe(`${info.booking}@hourmere`)
+        expect(component.getFirstPropertyValue('sequence')).toBe(stage)
+        expect(component.getFirstPropertyValue('status')).toBe(
+          stage === 2 ? 'CANCELLED' : 'CONFIRMED',
+        )
+        expect(message.html).toContain(`<html lang="${locale}">`)
+        expect(message.subject).toContain(
+          chinese
+            ? stage === 0
+              ? isHost
+                ? '新预约'
+                : '已确认'
+              : stage === 1
+                ? '已改期'
+                : '已取消'
+            : stage === 0
+              ? isHost
+                ? 'New booking'
+                : 'Confirmed'
+              : stage === 1
+                ? 'Rescheduled'
+                : 'Cancelled',
+        )
+        const zone = isHost
+          ? 'Europe/Berlin'
+          : message.to === 'ada@outlook.com'
+            ? 'Asia/Tokyo'
+            : 'America/Los_Angeles'
+        expect(message.text).toContain(zone)
+        expect(
+          message.text.includes(
+            chinese ? '在日历中拒绝此邀请不会取消预约。' : 'Declining this invitation',
+          ),
+        ).toBe(stage !== 2)
+        if (chinese) expect(`${summary}\n${description}`).not.toMatch(/[,:;.!?()]/)
+        expect(message.attachments?.[0]?.content).not.toMatch(/token|answers|responses/i)
+      }
+    },
+  )
+
+  it.each([null, 'fr-FR', 'zh-Hant-TW', 'invalid_locale'])(
+    'falls back to English independently for unsupported or absent locales (%s)',
+    async (locale) => {
+      const info = await setup()
+      await db
+        .updateTable('profiles')
+        .set({ locale: locale ?? '' })
+        .where('user_id', '=', info.host.userId)
+        .execute()
+      await db
+        .updateTable('booking_attendees')
+        .set({ locale })
+        .where('booking_id', '=', info.booking)
+        .execute()
+      await db
+        .insertInto('booking_attendees')
+        .values({
+          booking_id: info.booking,
+          name: 'Charles',
+          email: 'charles@example.net',
+          time_zone: 'UTC',
+          locale: 'zh-CN',
+          is_booker: false,
+        })
+        .execute()
+      const mail = capture()
+      await mail.send(info.booking, 'confirmed')
+      expect(mail.sent).toHaveLength(3)
+      for (const message of mail.sent) {
+        expect(message.html).toContain('<html lang="en">')
+        expect(event(message).getFirstPropertyValue('description')).toBe(
+          'Booked with Grace Hopper using Hourmere.',
+        )
+      }
+    },
+  )
+
+  it.each(['en', 'zh-CN'])(
+    'localizes generated answers using the host language and preserves user text (%s)',
+    async (locale) => {
+      const info = await setup()
+      const typeId = await f.eventType(info.host.organizationId, info.host.userId, {
+        questions: [{ id: 'consent', label: 'Custom label?', type: 'checkbox', required: false }],
+      })
+      await db
+        .updateTable('profiles')
+        .set({ locale })
+        .where('user_id', '=', info.host.userId)
+        .execute()
+      await db
+        .updateTable('bookings')
+        .set({
+          event_type_id: typeId,
+          responses: {
+            consent: true,
+            removed: false,
+            options: ['Settings', 'a,b'],
+            text: 'Yes. Keep me!',
+          },
+        })
+        .where('id', '=', info.booking)
+        .execute()
+      const mail = capture()
+      await mail.send(info.booking, 'confirmed')
+      const host = mail.sent.find((m) => m.to === hostEmail) as MailMessage
+      expect(host.text).toContain(`Custom label?\n  ${locale === 'zh-CN' ? '是' : 'Yes'}`)
+      expect(host.text).toContain(`removed\n  ${locale === 'zh-CN' ? '否' : 'No'}`)
+      expect(host.text).toContain(
+        `options\n  ${locale === 'zh-CN' ? 'Settings、a,b' : 'Settings, a,b'}`,
+      )
+      expect(host.text).toContain('text\n  Yes. Keep me!')
+      expect(mail.sent.find((m) => m.to === 'ada@outlook.com')?.text).not.toContain('Custom label?')
+    },
+  )
+
+  it('localizes the generated host fallback when no current host survives cancellation', async () => {
+    const info = await setup()
+    await capture().send(info.booking, 'confirmed')
+    await db
+      .updateTable('auth.user')
+      .set({ emailVerified: false })
+      .where('id', '=', info.host.userId)
+      .execute()
+    await db
+      .updateTable('bookings')
+      .set({ status: 'cancelled', cancelled_at: '2026-10-19T12:00Z' })
+      .where('id', '=', info.booking)
+      .execute()
+    await db
+      .updateTable('booking_attendees')
+      .set({ locale: 'zh-CN' })
+      .where('booking_id', '=', info.booking)
+      .execute()
+    const mail = capture()
+    await mail.send(info.booking, 'cancelled')
+    expect(mail.sent).toHaveLength(1)
+    expect(mail.sent[0]?.text).toContain('主持人')
+    expect(mail.sent[0]?.text).not.toContain('Host')
+    expect(event(mail.sent[0] as MailMessage).getFirstPropertyValue('summary')).toBe(
+      'Fixture booking（与 主持人）',
+    )
+  })
 
   it('pins the new organizer across reschedule, host edits and MAIL_FROM changes', async () => {
     const info = await setup()
@@ -442,6 +640,11 @@ describe.skipIf(!serverUrl)('iMIP interoperability', () => {
     expect(mail.sent.filter((m) => m.to === hostEmail)).toHaveLength(3)
     expect(mail.sent.filter((m) => m.to === hostEmail).every((m) => !m.attachments)).toBe(true)
     expect(
+      mail.sent
+        .filter((m) => m.to === hostEmail)
+        .every((m) => !m.text.includes('Declining this invitation')),
+    ).toBe(true)
+    expect(
       mail.sent.filter((m) => m.to === 'ada@outlook.com').every((m) => m.attachments?.length === 1),
     ).toBe(true)
   })
@@ -529,5 +732,6 @@ describe.skipIf(!serverUrl)('iMIP interoperability', () => {
     await mail.send(info.booking, 'confirmed')
     expect(mail.sent).toHaveLength(2)
     expect(mail.sent.every((m) => !m.attachments)).toBe(true)
+    expect(mail.sent.every((m) => !m.text.includes('Declining this invitation'))).toBe(true)
   })
 })

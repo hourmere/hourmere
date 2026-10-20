@@ -84,31 +84,57 @@ const LONG_DATE: Intl.DateTimeFormatOptions = {
 }
 const SHORT_DATE: Intl.DateTimeFormatOptions = { weekday: 'short', month: 'short', day: 'numeric' }
 const TIME: Intl.DateTimeFormatOptions = { hour: 'numeric', minute: '2-digit' }
+const CHINESE_TIME: Intl.DateTimeFormatOptions = {
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+}
 
 // ICU puts a narrow no-break space before AM/PM; a plain space reads the same everywhere.
-const format = (time: Temporal.ZonedDateTime, options: Intl.DateTimeFormatOptions) =>
-  time.toLocaleString('en-US', options).replace(/[\u00a0\u202f]/g, ' ')
+const format = (
+  time: Temporal.ZonedDateTime,
+  options: Intl.DateTimeFormatOptions,
+  language: InterfaceLanguage,
+) =>
+  time
+    .toLocaleString(
+      language === 'en' ? 'en-US' : language,
+      language === 'zh-CN' && options === TIME ? CHINESE_TIME : options,
+    )
+    .replace(/[\u00a0\u202f]/g, ' ')
 
 /** `Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin)` */
 export function formatMeetingTime(
   start: Temporal.Instant,
   end: Temporal.Instant,
   timeZone: string,
+  locale?: string | null,
 ): string {
+  const language = interfaceLanguage(locale) ?? 'en'
   const zone = displayZone(timeZone)
   const s = start.toZonedDateTimeISO(zone)
   const e = end.toZonedDateTimeISO(zone)
   const until = s.toPlainDate().equals(e.toPlainDate())
-    ? format(e, TIME)
-    : `${format(e, LONG_DATE)}, ${format(e, TIME)}`
-  return `${format(s, LONG_DATE)}, ${format(s, TIME)} – ${until} (${zone})`
+    ? format(e, TIME, language)
+    : language === 'zh-CN'
+      ? `${format(e, LONG_DATE, language)}，${format(e, TIME, language)}`
+      : `${format(e, LONG_DATE, language)}, ${format(e, TIME, language)}`
+  return language === 'zh-CN'
+    ? `${format(s, LONG_DATE, language)}，${format(s, TIME, language)} 至 ${until}（${zone}）`
+    : `${format(s, LONG_DATE, language)}, ${format(s, TIME, language)} – ${until} (${zone})`
 }
 
 /** `Tue, Oct 20, 10:00 AM (Europe/Berlin)`, for subject lines. */
-function formatShortTime(start: Temporal.Instant, timeZone: string): string {
+function formatShortTime(
+  start: Temporal.Instant,
+  timeZone: string,
+  language: InterfaceLanguage,
+): string {
   const zone = displayZone(timeZone)
   const s = start.toZonedDateTimeISO(zone)
-  return `${format(s, SHORT_DATE)}, ${format(s, TIME)} (${zone})`
+  return language === 'zh-CN'
+    ? `${format(s, SHORT_DATE, language)}，${format(s, TIME, language)}（${zone}）`
+    : `${format(s, SHORT_DATE, language)}, ${format(s, TIME, language)} (${zone})`
 }
 
 // --- Locations ----------------------------------------------------------------------------
@@ -127,24 +153,27 @@ export function meetingLocationText(location: MeetingLocation): string {
   }
 }
 
-function locationForText(location: MeetingLocation): string {
+function locationForText(location: MeetingLocation, language: InterfaceLanguage): string {
   if (location.kind === 'link' && location.label) {
-    return `${singleLine(location.label)}: ${singleLine(location.url)}`
+    return textField(singleLine(location.label), singleLine(location.url), language)
   }
-  if (location.kind === 'phone') return `Phone ${singleLine(location.number)}`
+  if (location.kind === 'phone')
+    return `${message(language, 'Phone')} ${singleLine(location.number)}`
   return meetingLocationText(location)
 }
 
-function locationForHtml(location: MeetingLocation): string {
+function locationForHtml(location: MeetingLocation, language: InterfaceLanguage): string {
   if (location.kind === 'link') {
     const url = linkableUrl(location.url)
-    const label = location.label ? `${escapeHtml(singleLine(location.label))}: ` : ''
+    const label = location.label
+      ? `${escapeHtml(singleLine(location.label))}${language === 'zh-CN' ? '：' : ': '}`
+      : ''
     const text = escapeHtml(singleLine(location.url))
     return url
       ? `${label}<a href="${escapeHtml(url)}" style="color: #111;">${text}</a>`
       : `${label}${text}`
   }
-  return htmlLines(locationForText(location))
+  return htmlLines(locationForText(location, language))
 }
 
 // --- Layout -------------------------------------------------------------------------------
@@ -152,9 +181,11 @@ function locationForHtml(location: MeetingLocation): string {
 const htmlLines = (text: string) => escapeHtml(text).replaceAll('\n', '<br>')
 
 /** `Label: value`, with further lines of the value indented. */
-const textField = (label: string, value: string) => `${label}: ${value.replaceAll('\n', '\n  ')}`
+const textField = (label: string, value: string, language: InterfaceLanguage) =>
+  `${label}${language === 'zh-CN' ? '：' : ': '}${value.replaceAll('\n', '\n  ')}`
 
 interface Content {
+  language: InterfaceLanguage
   subject: string
   intro: string
   /** Label and value (already cleaned); the HTML value is escaped markup. */
@@ -166,23 +197,24 @@ interface Content {
 
 function render(to: string, c: Content, attachment?: MailAttachment): MailMessage {
   const subject = subjectLine(c.subject)
+  const t = (key: keyof typeof chinese) => message(c.language, key)
   const text = [
     c.intro,
     '',
-    ...c.fields.map((f) => textField(f.label, f.text)),
+    ...c.fields.map((f) => textField(f.label, f.text, c.language)),
     ...(c.answers.length
       ? [
           '',
-          'Answers',
+          t('Answers'),
           ...c.answers.map((a) => `${a.question}\n  ${a.answer.replaceAll('\n', '\n  ')}`),
         ]
       : []),
     ...(c.manageLinks
       ? [
           '',
-          'Need to make a change?',
-          `Reschedule: ${c.manageLinks.reschedule}`,
-          `Cancel: ${c.manageLinks.cancel}`,
+          t('Need to make a change?'),
+          textField(t('Reschedule'), c.manageLinks.reschedule, c.language),
+          textField(t('Cancel'), c.manageLinks.cancel, c.language),
         ]
       : []),
     ...(c.footer ? ['', c.footer.text] : []),
@@ -196,7 +228,7 @@ function render(to: string, c: Content, attachment?: MailAttachment): MailMessag
     )
     .join('\n')
   const answers = c.answers.length
-    ? `<p style="margin: 24px 0 4px; font-weight: 600;">Answers</p>\n${c.answers
+    ? `<p style="margin: 24px 0 4px; font-weight: 600;">${t('Answers')}</p>\n${c.answers
         .map(
           (a) =>
             `<p style="margin: 0 0 12px;"><span style="color: #555;">${htmlLines(a.question)}</span><br>${htmlLines(a.answer)}</p>`,
@@ -206,15 +238,15 @@ function render(to: string, c: Content, attachment?: MailAttachment): MailMessag
   const button =
     'display: inline-block; padding: 8px 14px; margin-right: 8px; background: #111; color: #fff; text-decoration: none; border-radius: 6px;'
   const links = c.manageLinks
-    ? `<p style="margin: 24px 0 8px;">Need to make a change?</p>
-<p style="margin: 0 0 8px;"><a href="${escapeHtml(c.manageLinks.reschedule)}" style="${button}">Reschedule</a><a href="${escapeHtml(c.manageLinks.cancel)}" style="${button}">Cancel</a></p>
-<p style="margin: 0; color: #555; font-size: 13px;">If the buttons do not work, copy a link into your browser:<br>Reschedule: ${escapeHtml(c.manageLinks.reschedule)}<br>Cancel: ${escapeHtml(c.manageLinks.cancel)}</p>`
+    ? `<p style="margin: 24px 0 8px;">${t('Need to make a change?')}</p>
+<p style="margin: 0 0 8px;"><a href="${escapeHtml(c.manageLinks.reschedule)}" style="${button}">${t('Reschedule')}</a><a href="${escapeHtml(c.manageLinks.cancel)}" style="${button}">${t('Cancel')}</a></p>
+<p style="margin: 0; color: #555; font-size: 13px;">${t('If the buttons do not work, copy a link into your browser:')}<br>${escapeHtml(textField(t('Reschedule'), c.manageLinks.reschedule, c.language))}<br>${escapeHtml(textField(t('Cancel'), c.manageLinks.cancel, c.language))}</p>`
     : ''
   const footer = c.footer
     ? `<p lang="${c.footer.language}" style="margin: 24px 0 0; color: #555; font-size: 13px;">${escapeHtml(c.footer.text)}</p>`
     : ''
   const html = `<!doctype html>
-<html lang="en">
+<html lang="${c.language}">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(subject)}</title></head>
 <body style="font-family: system-ui, sans-serif; line-height: 1.5; color: #111;">
 <p style="margin: 0 0 16px;">${escapeHtml(c.intro)}</p>
@@ -237,6 +269,51 @@ ${footer}
 }
 
 // --- Emails -------------------------------------------------------------------------------
+
+// English keys are the original email copy, shared by both renderings.
+const chinese = {
+  What: '活动',
+  When: '时间',
+  Was: '原时间',
+  Where: '地点',
+  Invitee: '预约人',
+  Guests: '来宾',
+  Host: '主持人',
+  Reason: '原因',
+  Phone: '电话',
+  Answers: '回答',
+  'Need to make a change?': '需要更改预约吗？',
+  Reschedule: '改期',
+  Cancel: '取消',
+  'If the buttons do not work, copy a link into your browser:':
+    '如果按钮无法使用，请将链接复制到浏览器中：',
+  'Meeting link needs attention: {event} on {when}': '会议链接需要处理：{event}，{when}',
+  'New booking: {event} with {invitee} on {when}': '新预约：与 {invitee} 的{event}，{when}',
+  'Confirmed: {event} with {host} on {when}': '已确认：与 {host} 的{event}，{when}',
+  'Rescheduled: {event} with {other}, now {when}': '已改期：与 {other} 的{event}，现为 {when}',
+  'Cancelled: {event} with {other} on {when}': '已取消：与 {other} 的{event}，{when}',
+  'Reminder: {event} with {other} on {when}': '提醒：与 {other} 的{event}，{when}',
+  'The time is reserved, but Google Meet could not be prepared. Open this booking in Hourmere to review the problem, retry safe reconciliation or cancel. No final calendar invitation has been sent.':
+    '时段已保留，但无法准备 Google Meet 链接。请在 Hourmere 中打开此预约，查看问题、重试安全核对或取消预约。最终日历邀请尚未发送。',
+  'Your time is reserved, but the host needs to fix the Google Meet link. No final calendar invitation has been sent. You can use the links below to manage or cancel the booking.':
+    '时段已为你保留，但主持人需要修复 Google Meet 链接。最终日历邀请尚未发送。你可以使用以下链接管理或取消预约。',
+  '{invitee} booked a meeting with you.': '{invitee} 预约了与你的会议。',
+  'Your meeting with {host} is booked.': '你与 {host} 的会议已预约。',
+  'Your meeting with {other} has moved to a new time.': '你与 {other} 的会议已改期。',
+  'Your meeting with {other} has been cancelled.': '你与 {other} 的会议已取消。',
+  'Your meeting with {other} is coming up.': '你与 {other} 的会议即将开始。',
+} as const
+
+function message(
+  language: InterfaceLanguage,
+  key: keyof typeof chinese,
+  values: Record<string, string> = {},
+): string {
+  return (language === 'zh-CN' ? chinese[key] : key).replace(
+    /\{(\w+)\}/g,
+    (placeholder, name: string) => values[name] ?? placeholder,
+  )
+}
 
 const field = (label: string, text: string) => ({ label, text, html: htmlLines(text) })
 const calendarDecline = {
@@ -269,64 +346,75 @@ export function bookingEmail(
   const isHost = recipient.role === 'host'
   // Who the meeting is with, from the recipient's side.
   const other = isHost ? invitee : host
-  const when = formatShortTime(meeting.start, recipient.timeZone)
+  const language = interfaceLanguage(recipient.locale) ?? 'en'
+  const t = (key: keyof typeof chinese, values?: Record<string, string>) =>
+    message(language, key, values)
+  const when = formatShortTime(meeting.start, recipient.timeZone, language)
+  const values = { event, host, invitee, other, when }
 
-  const subject = {
-    conference_failed: `Meeting link needs attention: ${event} on ${when}`,
+  const subjects = {
+    conference_failed: 'Meeting link needs attention: {event} on {when}',
     confirmed: isHost
-      ? `New booking: ${event} with ${invitee} on ${when}`
-      : `Confirmed: ${event} with ${host} on ${when}`,
-    rescheduled: `Rescheduled: ${event} with ${other}, now ${when}`,
-    cancelled: `Cancelled: ${event} with ${other} on ${when}`,
-    reminder: `Reminder: ${event} with ${other} on ${when}`,
-  }[kind]
-  const intro = {
+      ? 'New booking: {event} with {invitee} on {when}'
+      : 'Confirmed: {event} with {host} on {when}',
+    rescheduled: 'Rescheduled: {event} with {other}, now {when}',
+    cancelled: 'Cancelled: {event} with {other} on {when}',
+    reminder: 'Reminder: {event} with {other} on {when}',
+  } satisfies Record<BookingEmailKind, keyof typeof chinese>
+  const subject = t(subjects[kind], values)
+  const intros = {
     conference_failed: isHost
       ? 'The time is reserved, but Google Meet could not be prepared. Open this booking in Hourmere to review the problem, retry safe reconciliation or cancel. No final calendar invitation has been sent.'
       : 'Your time is reserved, but the host needs to fix the Google Meet link. No final calendar invitation has been sent. You can use the links below to manage or cancel the booking.',
     confirmed: isHost
-      ? `${invitee} booked a meeting with you.`
-      : `Your meeting with ${host} is booked.`,
-    rescheduled: `Your meeting with ${other} has moved to a new time.`,
-    cancelled: `Your meeting with ${other} has been cancelled.`,
-    reminder: `Your meeting with ${other} is coming up.`,
-  }[kind]
+      ? '{invitee} booked a meeting with you.'
+      : 'Your meeting with {host} is booked.',
+    rescheduled: 'Your meeting with {other} has moved to a new time.',
+    cancelled: 'Your meeting with {other} has been cancelled.',
+    reminder: 'Your meeting with {other} is coming up.',
+  } satisfies Record<BookingEmailKind, keyof typeof chinese>
+  const intro = t(intros[kind], values)
 
   const fields = [
-    field('What', event),
-    field('When', formatMeetingTime(meeting.start, meeting.end, recipient.timeZone)),
+    field(t('What'), event),
+    field(t('When'), formatMeetingTime(meeting.start, meeting.end, recipient.timeZone, language)),
   ]
   if (kind === 'rescheduled' && meeting.previous) {
     fields.push(
       field(
-        'Was',
-        formatMeetingTime(meeting.previous.start, meeting.previous.end, recipient.timeZone),
+        t('Was'),
+        formatMeetingTime(
+          meeting.previous.start,
+          meeting.previous.end,
+          recipient.timeZone,
+          language,
+        ),
       ),
     )
   }
   if (meeting.location) {
     fields.push({
-      label: 'Where',
-      text: locationForText(meeting.location),
-      html: locationForHtml(meeting.location),
+      label: t('Where'),
+      text: locationForText(meeting.location, language),
+      html: locationForHtml(meeting.location, language),
     })
   }
   if (isHost) {
-    fields.push(field('Invitee', `${invitee} <${singleLine(meeting.inviteeEmail)}>`))
+    fields.push(field(t('Invitee'), `${invitee} <${singleLine(meeting.inviteeEmail)}>`))
     if (meeting.guests?.length) {
       fields.push(
         field(
-          'Guests',
+          t('Guests'),
           meeting.guests.map((g) => `${singleLine(g.name)} <${singleLine(g.email)}>`).join('\n'),
         ),
       )
     }
   } else {
-    fields.push(field('Host', host))
+    fields.push(field(t('Host'), host))
   }
   if (kind === 'cancelled' && meeting.cancelReason) {
     const reason = multiLine(meeting.cancelReason)
-    if (reason) fields.push(field('Reason', reason))
+    if (reason) fields.push(field(t('Reason'), reason))
   }
 
   const answers = isHost
@@ -336,14 +424,18 @@ export function bookingEmail(
     : []
   const manageLinks =
     recipient.role === 'attendee' && kind !== 'cancelled' ? recipient.manageLinks : undefined
-  const language = interfaceLanguage(recipient.locale) ?? 'en'
   const footerRole = isHost ? 'host' : manageLinks ? 'invitee' : 'guest'
+  const invitation =
+    options.attachment?.contentType === 'text/calendar; method=REQUEST; charset=UTF-8' &&
+    /^METHOD:REQUEST\r?$/m.test(options.attachment.content)
   const footer =
-    kind === 'confirmed' ? { language, text: calendarDecline[language][footerRole] } : undefined
+    (kind === 'confirmed' || kind === 'rescheduled') && invitation
+      ? { language, text: calendarDecline[language][footerRole] }
+      : undefined
 
   return render(
     recipient.email,
-    { subject, intro, fields, answers, manageLinks, footer },
+    { language, subject, intro, fields, answers, manageLinks, footer },
     options.attachment,
   )
 }

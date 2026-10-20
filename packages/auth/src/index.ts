@@ -1,4 +1,5 @@
 import { apiKey } from '@better-auth/api-key'
+import { acceptLanguage, cookieLanguage, type InterfaceLanguage } from '@hourmere/core/language'
 import { type Db, guardPoolErrors } from '@hourmere/db'
 import { type Mailer, magicLinkEmail } from '@hourmere/mail'
 import { betterAuth } from 'better-auth'
@@ -100,7 +101,9 @@ export interface AuthConfig {
    * Omitted only by standalone auth fixtures and schema generation, which use direct mail.
    * The URL already uses the scanner-safe confirmation page and a fragment token.
    */
-  queueSignInEmail?: ((request: { email: string; url: string }) => Promise<void>) | undefined
+  queueSignInEmail?:
+    | ((request: { email: string; url: string; language?: InterfaceLanguage }) => Promise<void>)
+    | undefined
   /** Who may create an account (SIGNUP); the same policy the pool was created with. */
   signup: SignupPolicy
   /** Each provider is enabled only when configured. */
@@ -335,10 +338,14 @@ export function createAuth({
         expiresIn: MAGIC_LINK_MINUTES * 60,
         // Only a hash is stored, so a database leak does not expose usable links.
         storeToken: 'hashed',
-        sendMagicLink: async ({ email, url }) => {
+        sendMagicLink: async ({ email, url }, ctx) => {
+          const headers = ctx?.headers ?? ctx?.request?.headers
+          const language =
+            cookieLanguage(headers?.get('cookie') ?? undefined) ??
+            acceptLanguage(headers?.get('accept-language') ?? undefined)
           // No address-dependent reads or SMTP work on the production request path.
           if (queueSignInEmail) {
-            await queueSignInEmail({ email, url: confirmLink(url) })
+            await queueSignInEmail({ email, url: confirmLink(url), language })
             return
           }
           // Standalone auth fixtures/schema generation use the direct-mail fallback.
@@ -350,6 +357,7 @@ export function createAuth({
             to: email,
             url: confirmLink(url),
             expiresInMinutes: MAGIC_LINK_MINUTES,
+            language,
           })
           // Sent after the answer, for any address: waiting for SMTP would make an address that
           // gets an email answer later than one that does not, and an SMTP failure would answer

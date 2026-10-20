@@ -3,6 +3,7 @@
 // the booking services call inside their transactions to queue those jobs.
 
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
+import { type InterfaceLanguage, interfaceLanguage } from '@hourmere/core/language'
 import type { Db, Json } from '@hourmere/db'
 import { defineJob, type EnqueueOptions, type KyselyTransactionLike } from '@hourmere/jobs'
 import {
@@ -202,11 +203,13 @@ function meetingLocation(value: Json | null): MeetingLocation | null {
   }
 }
 
-function formatAnswer(value: unknown): string | undefined {
+function formatAnswer(value: unknown, language: InterfaceLanguage): string | undefined {
   if (typeof value === 'string') return value
-  if (typeof value === 'boolean') return value ? 'Yes' : 'No'
+  if (typeof value === 'boolean')
+    return language === 'zh-CN' ? (value ? '是' : '否') : value ? 'Yes' : 'No'
   if (typeof value === 'number') return String(value)
-  if (Array.isArray(value)) return value.filter((v) => typeof v === 'string').join(', ')
+  if (Array.isArray(value))
+    return value.filter((v) => typeof v === 'string').join(language === 'zh-CN' ? '、' : ', ')
   return undefined
 }
 
@@ -214,6 +217,7 @@ function formatAnswer(value: unknown): string | undefined {
 function answersOf(
   questions: Json | null,
   responses: Json,
+  language: InterfaceLanguage,
 ): { question: string; answer: string }[] {
   const given = isRecord(responses) ? responses : {}
   const answers: { question: string; answer: string }[] = []
@@ -221,11 +225,11 @@ function answersOf(
   for (const q of Array.isArray(questions) ? questions : []) {
     if (!isRecord(q) || typeof q.id !== 'string' || !Object.hasOwn(given, q.id)) continue
     seen.add(q.id)
-    const answer = formatAnswer(given[q.id])
+    const answer = formatAnswer(given[q.id], language)
     if (answer) answers.push({ question: typeof q.label === 'string' ? q.label : q.id, answer })
   }
   for (const [id, value] of Object.entries(given)) {
-    const answer = seen.has(id) ? undefined : formatAnswer(value)
+    const answer = seen.has(id) ? undefined : formatAnswer(value, language)
     if (answer) answers.push({ question: id, answer })
   }
   return answers
@@ -239,7 +243,8 @@ interface NotificationData {
     end: Temporal.Instant
     eventName: string
     location: MeetingLocation | null
-    answers: { question: string; answer: string }[]
+    questions: Json | null
+    responses: Json
     cancelReason: string | null
     rescheduledFromId: string | null
   }
@@ -393,7 +398,8 @@ function loadNotificationData(db: Db, bookingId: string): Promise<NotificationDa
         end: instant(b.end_at),
         eventName: b.event_title ?? b.title,
         location: meetingLocation(b.location),
-        answers: answersOf(b.questions, b.responses),
+        questions: b.questions,
+        responses: b.responses,
         cancelReason: b.cancel_reason,
         rescheduledFromId: b.rescheduled_from_id,
       },
@@ -638,6 +644,7 @@ async function deliverBookingNotification(
       )
     return 'skipped'
   }
+  const bookingLanguage = interfaceLanguage(invitee.locale) ?? 'en'
   const guests = kind === 'conference_failed' ? [] : attendees.filter((a) => a !== invitee)
   const email: typeof bookingEmail = (...args) => ({
     ...bookingEmail(...args),
@@ -654,7 +661,7 @@ async function deliverBookingNotification(
     eventName: booking.eventName,
     // A logistical failure needs no calendar organizer and must still reach the original
     // invitee when the pinned host was deleted or is no longer verified.
-    hostName: organizer?.name ?? 'Host',
+    hostName: organizer?.name ?? (bookingLanguage === 'zh-CN' ? '主持人' : 'Host'),
     inviteeName: invitee.name,
     inviteeEmail: invitee.email,
     guests: guests.map(({ name, email }) => ({ name, email })),
@@ -699,7 +706,7 @@ async function deliverBookingNotification(
       calendarOrganizer = { name: pinned.ical_organizer_name, email: pinned.ical_organizer_email }
   }
   calendarOrganizer ??= organizer
-  const invitation = (summary: string, hostId?: string) =>
+  const invitation = (other: string, language: InterfaceLanguage, hostId?: string) =>
     kind === 'reminder' ||
     kind === 'conference_failed' ||
     !calendarOrganizer ||
@@ -715,8 +722,15 @@ async function deliverBookingNotification(
           start: booking.start,
           end: booking.end,
           // Each recipient sees the other person, while UID/SEQUENCE retain event identity.
-          summary,
-          description: modern ? `Booked with ${calendarOrganizer.name} using Hourmere.` : undefined,
+          summary:
+            language === 'zh-CN'
+              ? `${booking.eventName}（与 ${other}）`
+              : `${booking.eventName} with ${other}`,
+          description: modern
+            ? language === 'zh-CN'
+              ? `通过 Hourmere 与 ${calendarOrganizer.name} 预约。`
+              : `Booked with ${calendarOrganizer.name} using Hourmere.`
+            : undefined,
           location: booking.location ? meetingLocationText(booking.location) : undefined,
           organizer: {
             ...calendarOrganizer,
@@ -763,12 +777,14 @@ async function deliverBookingNotification(
           role: 'attendee',
           email: attendee.email,
           timeZone: attendee.timeZone,
-          locale: attendee.locale,
+          // Guests have no independent interface choice; follow the booking language.
+          locale: bookingLanguage,
           manageLinks: token === undefined ? undefined : inviteeManageLinks(deps.publicUrl, token),
         },
         {
           attachment: invitation(
-            `${booking.eventName} with ${meeting.hostName}`,
+            meeting.hostName,
+            bookingLanguage,
             hosts.find((h) => h.email.toLowerCase() === attendee.email.toLowerCase())?.id,
           ),
         },
@@ -790,9 +806,13 @@ async function deliverBookingNotification(
             email: host.email,
             timeZone: host.timeZone,
             locale: host.locale,
-            answers: booking.answers,
+            answers: answersOf(
+              booking.questions,
+              booking.responses,
+              interfaceLanguage(host.locale) ?? 'en',
+            ),
           },
-          { attachment: invitation(`${booking.eventName} with ${invitee.name}`, host.id) },
+          { attachment: invitation(invitee.name, interfaceLanguage(host.locale) ?? 'en', host.id) },
         ),
     })),
     toAttendee(invitee),

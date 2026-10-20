@@ -709,6 +709,50 @@ describe('the booking page', () => {
     expect(screen.queryByLabelText(/Your link to change or cancel/)).toBeNull()
   })
 
+  it.each([
+    { languages: ['fr-FR', 'zh-Hans-CN'], language: 'zh-CN', locale: 'zh-CN' },
+    { languages: ['fr-FR', 'de-DE'], language: 'en', locale: 'en' },
+    { languages: ['zh-Hans-CN', 'en-US'], language: 'zh-CN', locale: 'zh-Hans-CN' },
+  ])(
+    'stores the visible interface language for browser preferences $languages',
+    async ({ languages, language, locale }) => {
+      const user = userEvent.setup()
+      vi.spyOn(navigator, 'languages', 'get').mockReturnValue(languages)
+      env.locale = languages[0] ?? 'en'
+      const chinese = language === 'zh-CN'
+      const api = fakeApi({
+        ...eventRoutes({ ...EVENT, allowGuests: false }, ['2026-11-02T14:00:00Z']),
+        'POST /api/v1/public/ada/intro/bookings': () =>
+          json(201, { booking: booking(), manageToken: TOKEN }),
+      })
+      renderApp('/ada/intro')
+      await screen.findByRole('heading', { name: 'Intro call', level: 1 })
+      expect(
+        screen.getByRole<HTMLSelectElement>('combobox', {
+          name: chinese ? '界面语言' : 'Interface language',
+        }).value,
+      ).toBe(language)
+      const selectedDay = await waitFor(() => {
+        const button = document.querySelector<HTMLButtonElement>('[data-day="2026-11-02"]')
+        expect(button?.disabled).toBe(false)
+        return button as HTMLButtonElement
+      })
+      await user.click(selectedDay)
+      const times = screen.getByRole('list', { name: chinese ? /的时间$/ : /^Times on/ })
+      await user.click(within(times).getAllByRole('button')[0] as HTMLElement)
+      await user.type(screen.getByLabelText(chinese ? '你的姓名' : 'Your name'), 'Invitee')
+      await user.type(screen.getByLabelText(chinese ? '邮箱' : 'Email'), 'invitee@example.invalid')
+      await user.click(
+        screen.getByRole('button', { name: chinese ? '确认预约' : 'Confirm booking' }),
+      )
+      await screen.findByRole('heading', { name: chinese ? '预约成功' : 'You’re booked' })
+      expect(api.to('POST /api/v1/public/ada/intro/bookings')[0]?.body).toHaveProperty(
+        'invitee.locale',
+        locale,
+      )
+    },
+  )
+
   it('uses a new key after an idempotency conflict even if the form is unchanged', async () => {
     const user = userEvent.setup()
     let attempts = 0

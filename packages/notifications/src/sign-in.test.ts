@@ -5,7 +5,7 @@ import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createJobs, type EnqueueOptions } from '@hourmere/jobs'
 import type { MailMessage } from '@hourmere/mail'
 import type pg from 'pg'
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   deliverSignInEmail,
   queuedSignInEmail,
@@ -22,7 +22,7 @@ const secret = randomBytes(32).toString('base64')
 describe.skipIf(!serverUrl)('queued sign-in email', () => {
   let owned: TestDatabase
   let db: Db
-  const pools: pg.Pool[] = []
+  const pools = new Map<string, pg.Pool>()
   const sent: MailMessage[] = []
   const queued: { name: string; payload: { emailId: string }; options?: EnqueueOptions }[] = []
   const deps = (overrides: Partial<SignInEmailDeps> = {}): SignInEmailDeps => ({
@@ -54,10 +54,8 @@ describe.skipIf(!serverUrl)('queued sign-in email', () => {
     db = createDb(owned.pool)
   })
   afterAll(async () => {
+    await Promise.all([...pools.values()].map((pool) => pool.end()))
     await owned?.drop()
-  })
-  afterEach(async () => {
-    await Promise.all(pools.splice(0).map((pool) => pool.end()))
   })
   beforeEach(async () => {
     await db.deleteFrom('sign_in_emails').execute()
@@ -79,13 +77,19 @@ describe.skipIf(!serverUrl)('queued sign-in email', () => {
     policy = closed,
     appDb = db,
     sender = queuedSignInEmail(queue, deps()),
+    direct = false,
   }: {
     policy?: SignupPolicy
     appDb?: Db
     sender?: (request: { email: string; url: string }) => Promise<void>
+    direct?: boolean
   } = {}) {
-    const pool = createAuthPool(owned.url, policy)
-    pools.push(pool)
+    const key = JSON.stringify(policy)
+    let pool = pools.get(key)
+    if (!pool) {
+      pool = createAuthPool(owned.url, policy)
+      pools.set(key, pool)
+    }
     return createAuth({
       pool,
       db: appDb,
@@ -93,18 +97,26 @@ describe.skipIf(!serverUrl)('queued sign-in email', () => {
       secret,
       signup: policy,
       mailer: {
-        send: async () => {
+        send: async (message) => {
+          if (direct) {
+            sent.push(message)
+            return
+          }
           throw new Error('direct mail must never run')
         },
       },
-      queueSignInEmail: sender,
+      ...(!direct && { queueSignInEmail: sender }),
     })
   }
-  async function request(auth: ReturnType<typeof authWith>, email = 'existing@example.com') {
+  async function request(
+    auth: ReturnType<typeof authWith>,
+    email = 'existing@example.com',
+    languageHeaders: Record<string, string> = {},
+  ) {
     return auth.handler(
       new Request(`${publicUrl}/api/auth/sign-in/magic-link`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', origin: publicUrl },
+        headers: { 'content-type': 'application/json', origin: publicUrl, ...languageHeaders },
         body: JSON.stringify({ email, callbackURL: '/app' }),
       }),
     )
@@ -118,6 +130,74 @@ describe.skipIf(!serverUrl)('queued sign-in email', () => {
     expect(row).toBeDefined()
     return row as NonNullable<typeof row>
   }
+
+  it.each([
+    [
+      'cookie Chinese overrides browser English',
+      { cookie: 'hourmere-language=zh-CN', 'accept-language': 'en-US' },
+      'zh-CN',
+    ],
+    [
+      'cookie English overrides browser Chinese',
+      { cookie: 'hourmere-language=en', 'accept-language': 'zh-CN' },
+      'en',
+    ],
+    ['browser Simplified Chinese', { 'accept-language': 'zh-Hans-CN,en;q=0.5' }, 'zh-CN'],
+    [
+      'invalid cookie falls back to browser language',
+      { cookie: 'hourmere-language=zh_CN', 'accept-language': 'zh-CN' },
+      'zh-CN',
+    ],
+    [
+      'unsupported browser language defaults to English',
+      { 'accept-language': 'zh-TW,fr-FR' },
+      'en',
+    ],
+    ['missing preferences default to English', {}, 'en'],
+  ] as const)(
+    'keeps the requester language through encrypted delivery: %s',
+    async (_, headers, language) => {
+      await existing()
+      const response = await request(authWith(), 'existing@example.com', headers)
+      expect(response.status).toBe(200)
+      expect(sent).toEqual([])
+      expect(queued).toHaveLength(1)
+      expect(Object.keys(queued[0]?.payload ?? {})).toEqual(['emailId'])
+      await deliverSignInEmail(deps(), (await rows())[0]?.id as string)
+      expect(sent).toHaveLength(1)
+      expect(sent[0]?.subject).toBe(language === 'zh-CN' ? '登录 Hourmere' : 'Sign in to Hourmere')
+      expect(sent[0]?.html).toContain(`<html lang="${language}">`)
+      expect(sent[0]?.text).toContain(language === 'zh-CN' ? '仅能使用一次' : 'works once')
+    },
+  )
+
+  it.each(['en', 'zh-CN'] as const)(
+    'localizes direct auth delivery using the same requester language: %s',
+    async (language) => {
+      await existing()
+      const response = await request(authWith({ direct: true }), 'existing@example.com', {
+        cookie: `hourmere-language=${language}`,
+      })
+      expect(response.status).toBe(200)
+      await vi.waitFor(() => expect(sent).toHaveLength(1))
+      expect(sent[0]?.subject).toBe(language === 'zh-CN' ? '登录 Hourmere' : 'Sign in to Hourmere')
+      expect(sent[0]?.html).toContain(`<html lang="${language}">`)
+      expect(queued).toEqual([])
+    },
+  )
+
+  it('delivers an older encrypted outbox payload without a language in English', async () => {
+    await existing()
+    const send = queuedSignInEmail(queue, deps())
+    const auth = authWith({ sender: ({ email, url }) => send({ email, url }) })
+    const response = await request(auth, 'existing@example.com', {
+      cookie: 'hourmere-language=zh-CN',
+    })
+    expect(response.status).toBe(200)
+    await deliverSignInEmail(deps(), (await rows())[0]?.id as string)
+    expect(sent[0]?.subject).toBe('Sign in to Hourmere')
+    expect(sent[0]?.html).toContain('<html lang="en">')
+  })
 
   it('queues every address with no request-time eligibility lookup, no SMTP, and no plaintext in jobs/outbox', async () => {
     const tables: string[] = []
