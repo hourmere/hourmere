@@ -16,6 +16,19 @@ version for compatible capabilities, and the patch version for compatible fixes.
 versioned REST contract remains additive within `/api/v1`; an incompatible API change
 requires a new API version too.
 
+The root `package.json` version is the product version used by OpenAPI and MCP.
+Its `version` lifecycle synchronizes the standalone CLI's packaged manifest, `server.json`
+and the npm lockfile. For an approved version bump (substitute the next version):
+
+```sh
+npm version 1.0.1 --no-git-tag-version
+npm run api:types
+npm test -- apps/server/src/version.test.ts scripts/sync-version.test.ts scripts/release.test.ts --maxWorkers=2
+```
+
+Review and commit these metadata changes together before tagging. Release preparation
+rejects a tag that differs from the root version, and CI checks all version surfaces.
+
 [CHANGELOG.md](../CHANGELOG.md) is the source of GitHub Release notes. The prepared
 `## [Unreleased → 1.0.0]` section is the matching, undated candidate for `v1.0.0`; the
 planned launch date appears in the introduction above the first `##` heading, outside
@@ -97,7 +110,8 @@ git push origin refs/tags/v1.0.0
 
 These are publication-triggering commands, not preparation steps. Do not run them while
 preparing a release PR. The tag must point to a commit reachable from `origin/main`.
-Tags on other commits, invalid versions, or missing changelog sections fail before any
+Tags on other commits, versions that differ from the root manifest, invalid versions,
+or missing changelog sections fail before any
 registry push or release creation. There is no manual or branch-push publication trigger.
 
 The [release workflow](../.github/workflows/release.yml) runs the existing CI workflow
@@ -179,21 +193,20 @@ package metadata was found; it neither reserves the name nor proves scope owners
 publication permission. The owner must confirm control of the `hourmere` npm organization,
 check the name again, and authorize the first public release.
 
-`tools/cli/package.json` stays at **`0.0.0`** during preparation. The first intended public
-version is **`1.0.0`**. During the owner-approved release preparation, update the workspace
-manifest and lockfile together, review and commit them before creating the release tag:
+The first intended public version is **`1.0.0`**, already recorded in the product and CLI
+manifests. Stamping this version does not publish the package. For later releases, update
+all metadata together using the versioning procedure above, then review the tarball:
 
 ```sh
-npm version 1.0.0 --workspace @hourmere/cli --no-git-tag-version
 npm run cli:pack-smoke
-git diff -- tools/cli/package.json package-lock.json
+git diff -- package.json tools/cli/package.json package-lock.json server.json
 ```
 
 The CLI reads its version from the packaged manifest, so `hourmere --version` follows the
 committed release version. The CLI version is tied to the product tag: every product
 release must bump/stamp the CLI manifest and lockfile to match that tag, or `publish-cli`
 fails its version check. Later releases use the same process with their approved SemVer.
-Do not publish the preparation version or change the version only on the CI runner.
+Do not change the version only on the CI runner; publication still requires owner approval.
 
 ## Review the standalone CLI artifact
 

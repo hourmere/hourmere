@@ -45,6 +45,7 @@ export default defineConfig({
         { label: 'Compare scheduling options', link: '/docs/comparison' },
         { label: 'Self-hosting', link: '/docs/self-hosting' },
         { label: 'Configuration', link: '/docs/configuration' },
+        { label: 'Troubleshooting', link: '/docs/troubleshooting' },
         { label: 'REST quickstart', link: '/docs/rest' },
         { label: 'MCP quickstart', link: '/docs/mcp' },
         { label: 'Website widgets', link: '/docs/embedding' },

@@ -67,6 +67,10 @@ function prepare(tag: string, sha: string) {
     'refs/remotes/origin/main',
   ])
   if (ancestry.status !== 0) throw new Error('The tagged commit must be on origin/main')
+  const manifest = JSON.parse(readFileSync('package.json', 'utf8')) as { version?: unknown }
+  if (manifest.version !== version.version) {
+    throw new Error('The tag version must match the root package.json version')
+  }
   const notes = releaseNotes(readFileSync('CHANGELOG.md', 'utf8'), version.version)
   const runnerTemp = process.env.RUNNER_TEMP
   const output = process.env.GITHUB_OUTPUT
@@ -114,7 +118,7 @@ if (import.meta.main) {
   } catch {
     // Git/API files are not printed: they may contain runner-specific or untrusted text.
     console.error(
-      'Release preparation failed; check the tag, main ancestry, notes and owner approval configuration.',
+      'Release preparation failed; check the tag, package version, main ancestry, notes and owner approval configuration.',
     )
     process.exitCode = 1
   }
