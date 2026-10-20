@@ -54,6 +54,11 @@ describe.each(['en', 'zh-CN'] as const)('admin consistency in %s', (language) =>
     const banner = screen.queryByRole('banner')
     expect(banner).not.toBeNull()
     expect(banner?.className).toBe('topbar')
+    expect(
+      within(banner as HTMLElement).queryByRole('link', {
+        name: language === 'en' ? 'Go to Hourmere' : '前往 Hourmere',
+      }),
+    ).not.toBeNull()
     const main = screen.getByRole('main')
     expect(main.querySelector('.page-skeleton')).not.toBeNull()
     expect(within(main).getByRole('status').getAttribute('aria-label')).toBe(

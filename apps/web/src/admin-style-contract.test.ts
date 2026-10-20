@@ -9,6 +9,19 @@ function rule(selector: string) {
 }
 
 describe('admin polish CSS protections', () => {
+  it('shrinks nested grid stacks and wraps long empty-state actions inside their panel', () => {
+    expect(rule('.stack')).toContain('min-width: 0;')
+    expect(rule('.stack')).toContain('grid-template-columns: minmax(0, 1fr);')
+    expect(rule('.empty-actions > .button')).toContain('max-width: 100%;')
+    expect(rule('.empty-actions > .button')).toContain('white-space: normal;')
+  })
+
+  it('gives editor checkboxes a 24px target even beside interactive field hints', () => {
+    const controls = rule('.editor input:is([type="checkbox"], [type="radio"])')
+    expect(controls).toContain('width: 1.5rem;')
+    expect(controls).toContain('height: 1.5rem;')
+  })
+
   it('uses one six-step type scale throughout the shared stylesheet', () => {
     const tokens = rule(':root')
     for (const [name, size] of [

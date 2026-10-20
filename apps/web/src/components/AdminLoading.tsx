@@ -12,7 +12,7 @@ export function AdminLoading() {
       </a>
       <header className="topbar">
         <div className="topbar-inner">
-          <a className="brand" href="/app">
+          <a className="brand" href="/app" aria-label={t('Go to Hourmere')}>
             <Logo />
           </a>
           <LanguageSwitcher compact />

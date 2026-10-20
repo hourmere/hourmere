@@ -546,7 +546,9 @@ main {
 /* Forms */
 
 .stack {
+  min-width: 0;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-3);
 }
 
@@ -748,6 +750,13 @@ input[readonly] {
   flex-wrap: wrap;
   gap: var(--space-3);
   margin-top: var(--space-3);
+}
+
+.empty-actions > .button {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: center;
 }
 
 .panel {
@@ -1300,6 +1309,11 @@ input[type="radio"] {
   min-height: 34px;
   font-weight: 500;
   cursor: pointer;
+}
+
+.editor input:is([type="checkbox"], [type="radio"]) {
+  width: 1.5rem;
+  height: 1.5rem;
 }
 
 .optional {
