@@ -3,6 +3,7 @@ import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { EmbedLanguage } from '../i18n/runtime.tsx'
 import { BookingPage } from './BookingPage.tsx'
 import { EmbeddedContext, embedMessageContext } from './embed-context.ts'
+import './embed.css'
 
 function EmbedFrame({ children }: { children: ReactNode }) {
   const [language] = useState(() => {

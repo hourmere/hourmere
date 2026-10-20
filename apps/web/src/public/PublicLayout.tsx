@@ -27,7 +27,7 @@ export function CreateBookingLink() {
  * page itself and a small footer. These pages load nothing of the signed-in app.
  */
 export function PublicLayout({ children, wide = false }: { children: ReactNode; wide?: boolean }) {
-  const { t } = useI18n()
+  const { t, locale } = useI18n()
   const [beforeBrand, afterBrand] = t('Powered by {0}').split('{0}')
   const [hostedSignupUrl, setHostedSignupUrl] = useState('https://hourmere.com')
   const [policyUrls, setPolicyUrls] = useState<{
@@ -49,12 +49,17 @@ export function PublicLayout({ children, wide = false }: { children: ReactNode; 
   }, [])
 
   const embedded = useEmbedded()
+  useEffect(() => {
+    if (embedded) document.documentElement.lang = locale
+  }, [embedded, locale])
   return (
     <HostedSignupUrl value={hostedSignupUrl}>
       <div className={`public${embedded ? ' public-embedded' : ''}`}>
-        <header className="public-language">
-          <LanguageSwitcher />
-        </header>
+        {!embedded && (
+          <header className="public-language">
+            <LanguageSwitcher />
+          </header>
+        )}
         <main id="main" className={`public-main${wide ? ' public-main-wide' : ''}`}>
           {children}
         </main>
