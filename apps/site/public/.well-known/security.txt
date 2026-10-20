@@ -1,0 +1,8 @@
+Contact: mailto:security@hourmere.com
+Contact: https://github.com/hourmere/hourmere/security/advisories/new
+Expires: 2027-10-01T00:00:00Z
+Preferred-Languages: en, zh
+Canonical: https://hourmere.com/.well-known/security.txt
+Canonical: https://www.hourmere.com/.well-known/security.txt
+Canonical: https://app.hourmere.com/.well-known/security.txt
+Policy: https://github.com/hourmere/hourmere/blob/main/SECURITY.md

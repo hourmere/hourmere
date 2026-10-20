@@ -318,22 +318,26 @@ describe('bookingEmail', () => {
       )
     })
 
-    it('escapes everything in the HTML and links only http(s) URLs', () => {
-      for (const kind of ['confirmed', 'cancelled'] as const) {
-        for (const recipient of [invitee, host]) {
-          const { html } = bookingEmail(kind, hostile, recipient)
-          // No markup from the input survives: only escaped text.
-          expect(html).not.toMatch(/<script|<img|<b>/)
-          expect(html).not.toContain('href="javascript:')
-          expect(html).not.toMatch(/="[^"]*'x'/)
+    it.each(['script', 'SCRIPT', 'ScRiPt'])(
+      'escapes %s markup in the HTML and links only http(s) URLs',
+      (tagName) => {
+        const input = { ...hostile, hostName: `<${tagName}>alert(1)</${tagName}> & "Co"` }
+        for (const kind of ['confirmed', 'cancelled'] as const) {
+          for (const recipient of [invitee, host]) {
+            const { html } = bookingEmail(kind, input, recipient)
+            // This is an assertion against emitted markup, never a tag-removal sanitizer.
+            expect(html).not.toMatch(/<(?:script|img|b)\b/i)
+            expect(html).not.toContain('href="javascript:')
+            expect(html).not.toMatch(/="[^"]*'x'/)
+          }
         }
-      }
-      const { html } = bookingEmail('cancelled', hostile, host)
-      expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;')
-      expect(bookingEmail('confirmed', hostile, invitee).html).toContain(
-        '&lt;script&gt;alert(1)&lt;/script&gt; &amp; &quot;Co&quot;',
-      )
-    })
+        const { html } = bookingEmail('cancelled', input, host)
+        expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;')
+        expect(bookingEmail('confirmed', input, invitee).html).toContain(
+          `&lt;${tagName}&gt;alert(1)&lt;/${tagName}&gt; &amp; &quot;Co&quot;`,
+        )
+      },
+    )
 
     it('keeps one-line fields from starting lines of their own in the text', () => {
       const { text } = bookingEmail('confirmed', hostile, host)

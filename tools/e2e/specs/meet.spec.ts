@@ -1,3 +1,4 @@
+import { icsHasLocation } from '../../../packages/mail/src/booking-link-testing.ts'
 import { expect, fillInvitee, pickSlot, test } from '../fixtures.ts'
 
 test.use({ automaticMeet: true })
@@ -98,10 +99,12 @@ for (const selected of ['en', 'zh-CN'] as const) {
       (await page.getByRole('link', { name: text.join, exact: true }).getAttribute('href')) ===
         join,
     ).toBe(true)
+    const download =
+      (await page.getByRole('link', { name: text.ics, exact: true }).getAttribute('href')) ?? ''
+    const dataPrefix = 'data:text/calendar;charset=utf-8,'
+    expect(download.startsWith(dataPrefix)).toBe(true)
     expect(
-      decodeURIComponent(
-        (await page.getByRole('link', { name: text.ics, exact: true }).getAttribute('href')) ?? '',
-      ).includes(join),
+      icsHasLocation(decodeURIComponent(download.slice(dataPrefix.length)), `Google Meet: ${join}`),
     ).toBe(true)
     expect((await app.meetState()).requests).toBe(2)
     expect((await app.meetState()).linkedRequests).toBe(true)

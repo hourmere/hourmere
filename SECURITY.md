@@ -17,8 +17,12 @@ discussion for them.
 - **GitHub:** use **Report a vulnerability** on the repository's
   [Security tab](https://github.com/hourmere/hourmere/security).
 
-Reports are handled in written English, by email or on GitHub. Phone and video calls are not
-available.
+Reports are handled in writing, in English or Chinese, by email or on GitHub. Phone and video
+calls are not available.
+
+The hosted website and application publish these channels at `/.well-known/security.txt`.
+The shared source is `apps/site/public/.well-known/security.txt`; renew its `Expires` date
+before it lapses, keeping it at most one year ahead when publishing.
 
 ### What to include
 

@@ -18,6 +18,7 @@ import { createZoomConferenceWork } from '../../packages/conferences/src/worker.
 import { zoomScopes } from '../../packages/conferences/src/zoom.ts'
 import { createDb, createPool } from '../../packages/db/src/index.ts'
 import { createTestDatabase } from '../../packages/db/src/testing.ts'
+import { textHasUrl } from '../../packages/mail/src/booking-link-testing.ts'
 import type { MailMessage } from '../../packages/mail/src/index.ts'
 import {
   dispatchConferenceNotifications,
@@ -454,7 +455,10 @@ export const test = base.extend<{
               .every(
                 (m) =>
                   m.sensitive &&
-                  m.text.includes('https://us02web.zoom.us/j/') &&
+                  textHasUrl(
+                    m.text,
+                    'https://us02web.zoom.us/j/81234567890?pwd=synthetic-only.1',
+                  ) &&
                   m.attachments?.every((a) => a.content.includes(`${c?.root_booking_id}@hourmere`)),
               ),
             rootStable: !c || !firstMeeting || c.zoom_meeting_id === firstMeeting,

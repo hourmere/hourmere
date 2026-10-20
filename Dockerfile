@@ -24,6 +24,7 @@ COPY --from=build /app/package.json ./
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/packages ./packages
 COPY --from=build /app/apps/server ./apps/server
+COPY --from=build /app/apps/site/public/.well-known/security.txt ./apps/site/public/.well-known/security.txt
 COPY --from=build /app/apps/web/dist ./apps/web/dist
 COPY --from=build /app/scripts/redispatch-calendar-writeback.ts ./scripts/redispatch-calendar-writeback.ts
 USER node

@@ -17,6 +17,7 @@ import { tokenAad } from '../../packages/calendars/src/index.ts'
 import { fakeGoogle, TEST_CALENDAR_KEY } from '../../packages/calendars/src/testing.ts'
 import { createDb, createPool } from '../../packages/db/src/index.ts'
 import { createTestDatabase } from '../../packages/db/src/testing.ts'
+import { icsHasLocation, textHasUrl } from '../../packages/mail/src/booking-link-testing.ts'
 import type { MailMessage } from '../../packages/mail/src/index.ts'
 import {
   dispatchConferenceNotifications,
@@ -614,9 +615,9 @@ export const test = base.extend<{
             ).length,
             linkedRequests: requests.every(
               (message) =>
-                message.text.includes(join) &&
+                textHasUrl(message.text, join) &&
                 message.attachments?.every((attachment) =>
-                  String(attachment.content).includes(join),
+                  icsHasLocation(attachment.content, join),
                 ),
             ),
             rootUidPreserved:

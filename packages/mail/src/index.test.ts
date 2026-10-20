@@ -101,8 +101,21 @@ describe('magicLinkEmail', () => {
     // The link opens a page; its button signs in.
     expect(m.text).toContain('then press "Sign in to Hourmere" on the page it opens')
     expect(m.html).toContain('then "Sign in to Hourmere" on the page it opens')
-    expect(m.html).toContain(`href="${url.replace('&', '&amp;')}"`)
+    // Explicit expected markup keeps this assertion independent of the escaping function.
+    expect(m.html).toContain(
+      'href="https://cal.example.com/sign-in/confirm#token=abc&amp;callbackURL=%2F"',
+    )
     expect(m.html).not.toContain('token=abc&callbackURL')
+  })
+
+  it('escapes every ampersand in a sign-in link without changing its plain text', () => {
+    const link =
+      'https://cal.example.com/sign-in/confirm#token=abc&callbackURL=%2F&errorCallbackURL=%2Fsign-in'
+    const message = magicLinkEmail({ to: 'ada@example.com', url: link, expiresInMinutes: 5 })
+    expect(message.text).toContain(link)
+    expect(message.html).toContain(
+      'href="https://cal.example.com/sign-in/confirm#token=abc&amp;callbackURL=%2F&amp;errorCallbackURL=%2Fsign-in"',
+    )
   })
 })
 

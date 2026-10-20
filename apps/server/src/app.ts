@@ -28,6 +28,7 @@ import {
   securityHeaders,
   strictTransportSecurity,
 } from './security-headers.ts'
+import { securityTxt } from './security-txt.ts'
 import { MAGIC_LINK_CONFIRM_PATH, signInConfirmPage } from './sign-in-confirm.ts'
 
 export interface AppDeps {
@@ -445,6 +446,12 @@ export function createApp({
 
   // Where emailed sign-in links lead; served here, ahead of the web app.
   app.get(MAGIC_LINK_CONFIRM_PATH, signInConfirmPage)
+
+  // Serve the disclosure policy before the SPA fallback, including without a web build.
+  app.get('/.well-known/security.txt', (c) => {
+    c.header('Cache-Control', 'public, max-age=3600')
+    return c.text(securityTxt)
+  })
 
   if (webDist) {
     // serveStatic resolves paths against the working directory.
