@@ -13,7 +13,10 @@ afterEach(() => {
   for (const dir of scratch.splice(0)) rmSync(dir, { recursive: true, force: true })
 })
 
-function fixture(changelog = '## [Unreleased → 1.0.0]\n\n### Added\n\n- Scheduling.\n') {
+function fixture(
+  changelog = '## [Unreleased → 1.0.0]\n\n### Added\n\n- Scheduling.\n',
+  version: unknown = '1.0.0',
+) {
   const dir = mkdtempSync(join(tmpdir(), 'hourmere-release-test-'))
   scratch.push(dir)
   const env = {
@@ -29,7 +32,8 @@ function fixture(changelog = '## [Unreleased → 1.0.0]\n\n### Added\n\n- Schedu
     execFileSync('git', args, { cwd: dir, env, encoding: 'utf8' }).trim()
   git('init', '--quiet', '--initial-branch=main')
   writeFileSync(join(dir, 'CHANGELOG.md'), changelog)
-  git('add', 'CHANGELOG.md')
+  writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'hourmere', version }))
+  git('add', 'CHANGELOG.md', 'package.json')
   git('commit', '--quiet', '-m', 'Prepare fixture')
   const sha = git('rev-parse', 'HEAD')
   git('update-ref', 'refs/remotes/origin/main', sha)
@@ -71,6 +75,7 @@ describe('release preparation', () => {
     const otherRepository = 'https://github.com/example/other/blob/main/docs.md'
     const repo = fixture(
       `## [${tag.slice(1)}] - 2026-11-30\n\n[Upgrade](${repository}/blob/main/docs/releasing.md#upgrade)\n[Other](${otherRepository})\n`,
+      tag.slice(1),
     )
     if (tag !== 'v1.0.0') repo.git('tag', tag)
     expect(repo.run('prepare', tag, repo.sha).status).toBe(0)
@@ -107,11 +112,19 @@ describe('release preparation', () => {
   })
 
   it('marks prereleases explicitly so they cannot advance stable aliases', () => {
-    const repo = fixture('## [1.2.0-rc.1] - 2026-11-01\n\n- Candidate.\n')
+    const repo = fixture('## [1.2.0-rc.1] - 2026-11-01\n\n- Candidate.\n', '1.2.0-rc.1')
     repo.git('tag', 'v1.2.0-rc.1')
     expect(repo.run('prepare', 'v1.2.0-rc.1', repo.sha).status).toBe(0)
     expect(repo.output()).toContain('version=1.2.0-rc.1\nmajor_minor=1.2\nprerelease=true\n')
   })
+
+  it.each(['0.0.0', '1.0.1', '1.0.0-rc.1', 'v1.0.0', '', null, 1])(
+    'rejects root package version %j when the tag and changelog identify 1.0.0',
+    (version) => {
+      const repo = fixture(undefined, version)
+      refused(repo, 'prepare', 'v1.0.0', repo.sha)
+    },
+  )
 
   it.each([
     '1.0.0',

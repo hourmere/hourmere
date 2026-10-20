@@ -27,7 +27,7 @@ plain Compose file or the optional automatic HTTPS override; see
 | `AUTO_MIGRATE` | `true` | Apply SQL/job migrations on startup. `false` requires manual migrations first; startup still needs database access. Forwarded by the default Compose file with a default of `true`. |
 | `WEB_DIST` | Unset | Built SPA directory. Not forwarded by the default Compose file: Docker sets `/app/apps/web/dist`; development uses Vite instead. |
 | `EMBED_ALLOWED_ORIGINS` | Unset | Up to 32 comma-separated exact HTTPS website origins permitted to embed public booking pages. Empty disables embedding; no wildcards or paths. Loopback HTTP is accepted for local development. |
-| `WEBHOOKS_ENABLED` | `false` | Capture new organization booking events for outbound HTTPS webhooks. No backfill; set identically on web and worker. See repository `docs/webhooks.md`. |
+| `WEBHOOKS_ENABLED` | `false` | Capture new organization booking events for outbound HTTPS webhooks. No backfill; set identically on web and worker. See [booking webhooks](https://github.com/hourmere/hourmere/blob/main/docs/webhooks.md). |
 | `WEBHOOK_ENCRYPTION_KEY` | Unset | Independent 32-byte base64 key required when webhooks are enabled. Encrypts signing secrets; keep stable and backed up. |
 | `WEBHOOK_PRIVATE_TARGETS` | Unset | Self-hosting only: up to 32 comma-separated exact `hostname:port`, `IPv4[/CIDR]:port[-port]` or `[IPv6[/CIDR]]:port[-port]` entries permitting private HTTP(S) webhook destinations. Empty preserves public HTTPS-only delivery. Set identically on web and worker. |
 | `MCP_OAUTH_ENABLED` | `false` | Enable MCP OAuth connectors alongside API keys. Requires HTTPS except on loopback; explicit organization approval and revocation at `/app/connected-apps`. No calendar/provider client credentials needed. Set identically on web and worker. |
@@ -103,7 +103,8 @@ destination responded. This visibility is inherent to allowing that destination.
 
 Recreate web and worker together after changing the setting; pending attempts use the new
 policy. See the [same-network n8n example](/docs/self-hosting#private-webhook-receivers)
-and repository `docs/webhooks.md` for configuration and delivery behavior.
+and [booking webhooks](https://github.com/hourmere/hourmere/blob/main/docs/webhooks.md)
+for configuration and delivery behavior.
 
 ## Email and registration
 
@@ -124,6 +125,8 @@ automatically notify its host. Use Cancel booking in Hourmere or the original em
 cancellation link. Keep the mailbox monitored and archive replies for manual host contact;
 see the [calendar-reply runbook](/docs/self-hosting#handle-calendar-replies) for a fixed
 single-host forwarding option and its multi-host limitation.
+
+For missing mail or spam placement, follow [email troubleshooting](/docs/troubleshooting#sign-in-emails-do-not-arrive-or-go-to-spam).
 
 With `first-user`, the first person who signs in can register; after that the domain allowlist
 applies. In either restricted mode, a pending, unexpired team invitation also permits its
@@ -159,6 +162,36 @@ from connecting a calendar.
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Unset | Google sign-in client; callback `{PUBLIC_URL}/api/auth/callback/google`. |
 | `MICROSOFT_CLIENT_ID` / `MICROSOFT_CLIENT_SECRET` | Unset | Microsoft sign-in client; callback `{PUBLIC_URL}/api/auth/callback/microsoft`. |
 
+### Sign in with Google
+
+1. Create or select your own project in [Google Cloud Console](https://console.cloud.google.com/).
+   Open **Google Auth Platform**, configure **Branding** with your app name, support email
+   and contact details, then choose the **Audience** appropriate for your users. Use
+   **External** if accounts outside your Google Workspace organization need access.
+2. In **Data Access**, configure only the basic identity scopes `openid`, `email` and
+   `profile` for sign-in (Google may show the equivalent `userinfo.email` and
+   `userinfo.profile` names). Calendar access uses the separate client below.
+3. In **Clients**, choose **Create client → Web application**. Add the exact authorized
+   redirect URI `<PUBLIC_URL>/api/auth/callback/google`, replacing `<PUBLIC_URL>` with your
+   configured origin, for example
+   `https://hourmere.example.com/api/auth/callback/google`. For `npm run dev`, use
+   `http://localhost:5173/api/auth/callback/google`. The scheme, hostname, path and trailing
+   slash must match exactly; do not add a slash after `google`. JavaScript origins are
+   unnecessary for this server-side flow. See Google's
+   [OAuth client setup](https://developers.google.com/identity/protocols/oauth2/web-server#creatingcred).
+4. Copy the client ID and secret into `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in your
+   private `.env`. Keep `PUBLIC_URL` set to the same external origin. Never commit the
+   credentials. The default Compose file forwards both variables; recreate affected
+   services with `docker compose up -d --wait`, or restart direct server processes.
+5. Open your instance's `/sign-in`, choose **Sign in with Google** and confirm that Google
+   returns you to Hourmere. The instance's registration policy still applies to new users.
+
+Google sign-in requests only `openid`, `email` and `profile`, with no offline access or
+Google refresh token. Google's Testing refresh-token expiration rule exempts these basic
+identity scopes; it affects the separate calendar grant described below.
+
+### Sign in with Microsoft
+
 Microsoft sign-in requires an email claim the auth library treats as verified. In Entra Token
 configuration add optional ID token claims `verified_primary_email` and
 `verified_secondary_email`; without verified email, the user gets `EMAIL_NOT_VERIFIED` and
@@ -190,6 +223,19 @@ together or leave them unset. See [Google Calendar](/docs/google-calendar).
 Each provider requires its client ID, secret and `CALENDAR_ENCRYPTION_KEY` together. Calendar
 connections require HTTPS except on loopback development hosts. Disabled configuration
 keeps local connections visible so people can disconnect or stop using their calendars.
+
+For an External Google app in **Testing**, non-basic calendar refresh tokens expire after
+**7 days**, causing weekly disconnections; see Google's official
+[expiration rules](https://developers.google.com/identity/protocols/oauth2#expiration).
+Set publishing status to **In production** for ongoing use. External unverified apps
+requesting sensitive or restricted scopes still have an **unverified app warning screen**
+and **100-user cap**, as explained in Google's
+[app state overview](https://developers.google.com/identity/protocols/oauth2/production-readiness/overview).
+The self-hoster is responsible for any required
+[sensitive-scope verification](https://developers.google.com/identity/protocols/oauth2/production-readiness/sensitive-scope-verification)
+for their project; Hourmere's hosted verification does not apply. See
+[Google Calendar publishing requirements](/docs/google-calendar#publishing-status-and-verification)
+for recovery and exceptions.
 
 ## Compose-only settings and overrides
 
@@ -305,14 +351,14 @@ mailer still prints delivered links, and anyone reading them can sign in.
 | `ZOOM_CLIENT_SECRET` | Unset | Matching confidential client secret; never expose it to the browser. |
 | `CONFERENCE_ENCRYPTION_KEY` | Unset | Independent canonical 32-byte base64 key for conference credentials and OAuth verifiers. Keep stable and back up privately. |
 | `ZOOM_MEETINGS_ENABLED` | `false` | Explicit meeting authorization and automatic Zoom for personal/individual single-host events; requires all three settings above. |
-| `ZOOM_WEBHOOK_SECRET_TOKEN` | Unset | Secret Token from the Zoom app's webhook configuration; independently enables signed `POST {PUBLIC_URL}/api/conference/zoom/events` for endpoint validation and app deauthorization. Empty leaves this endpoint at 404; a configured token must have at least 16 characters. Configured `ZOOM_CLIENT_ID` must match the signed deauthorization payload or the event is ignored, including old-app events after switching apps. Use the same URL for Event Subscriptions and the Deauthorization Notification Endpoint URL; see repository `docs/automatic-zoom.md`. Forwarded by Compose with an empty default. |
+| `ZOOM_WEBHOOK_SECRET_TOKEN` | Unset | Secret Token from the Zoom app's webhook configuration; independently enables signed `POST {PUBLIC_URL}/api/conference/zoom/events` for endpoint validation and app deauthorization. Empty leaves this endpoint at 404; a configured token must have at least 16 characters. Configured `ZOOM_CLIENT_ID` must match the signed deauthorization payload or the event is ignored, including old-app events after switching apps. Use the same URL for Event Subscriptions and the Deauthorization Notification Endpoint URL; see [automatic Zoom](https://github.com/hourmere/hourmere/blob/main/docs/automatic-zoom.md). Forwarded by Compose with an empty default. |
 
 The OAuth client ID, client secret and encryption key are required together when either Zoom client field is configured. A key alone
 does not enable Zoom. These settings do not enable sign-in, calendar access or meeting
 creation by themselves. Automatic creation also requires the flag, explicit meeting permissions
 and the actual host's session or own API-key account selection on each opted-in event. Existing passive
 Zoom labels remain inert. Collective/round-robin automatic Zoom is unsupported. Existing
-committed meeting intents reconcile after disabling the flag. See [Zoom account connections](/docs/zoom-connections/) for the conservative
+committed meeting intents reconcile after disabling the flag. See [Zoom account connections](/docs/zoom-connections) for the conservative
 returned-scope policy, actual-client prerequisites and local-disconnect semantics.
 
 Before inviting real Zoom users, configure the app's public HTTPS event endpoint and matching
@@ -323,4 +369,4 @@ for public apps; its private/development apps do not trigger those notifications
 
 ## Automatic Google Meet
 
-`GOOGLE_MEET_ENABLED` defaults to `false`. With Google Calendar write configuration it allows explicit individual, collective and round-robin automatic Meet event types. Collective meetings require an explicitly selected eligible organizer; round robin uses its assigned eligible host. Other collective hosts do not need a Google account. Existing committed intents continue reconciling after disabling the flag; no old provider labels are activated. See the repository automatic Google Meet guide for pending/failure and notification semantics.
+`GOOGLE_MEET_ENABLED` defaults to `false`. With Google Calendar write configuration it allows explicit individual, collective and round-robin automatic Meet event types. Collective meetings require an explicitly selected eligible organizer; round robin uses its assigned eligible host. Other collective hosts do not need a Google account. Existing committed intents continue reconciling after disabling the flag; no old provider labels are activated. See [automatic Google Meet](https://github.com/hourmere/hourmere/blob/main/docs/automatic-google-meet.md) for pending/failure and notification semantics.

@@ -8,7 +8,9 @@ description: Configure separate OAuth credentials, busy-time checks and booking 
 Google sign-in and Google Calendar use separate OAuth clients. Signing in does not grant
 calendar access. In your Google Cloud project enable Calendar API and configure branding,
 an External audience and the intended test users. Keep the app in Testing for development;
-public verification and publishing are separate launch steps.
+review the publishing requirements below before ongoing use. To enable the separate
+**Sign in with Google** button, follow the
+[sign-in setup](/docs/configuration#sign-in-with-google).
 
 Create a Web application OAuth client for calendar connections. Register exactly
 `{PUBLIC_URL}/api/calendar/google/callback`, for example
@@ -26,6 +28,27 @@ The browser connection requests `openid`, `email`, `calendar.calendarlist.readon
 `https://www.googleapis.com/auth/`). Configure these in your Google OAuth consent settings.
 Google's event-read permission covers all accessible calendars and the write permission
 covers owned calendars; Hourmere limits actual use to the calendars you explicitly select.
+
+## Publishing status and verification
+
+An External app in **Testing** receives refresh tokens that expire after **7 days** for
+non-basic scopes. Calendar access is outside the basic `openid`, `email` and `profile`
+exception, so connections drop weekly. See Google's official
+[refresh-token expiration rules](https://developers.google.com/identity/protocols/oauth2#expiration).
+For ongoing use, set Audience publishing status to **In production** and reconnect any
+account whose Testing grant expired.
+
+Publishing alone does not verify the app. An External unverified app requesting sensitive
+or restricted scopes shows an **unverified app warning screen** and has a **100-user cap**,
+separate from Testing's 100-test-user limit. Google's
+[OAuth app state overview](https://developers.google.com/identity/protocols/oauth2/production-readiness/overview)
+explains those states.
+
+You, the self-hoster, are responsible for your Google project's branding, domains, privacy
+policy and any required
+[sensitive-scope verification](https://developers.google.com/identity/protocols/oauth2/production-readiness/sensitive-scope-verification).
+Hourmere's hosted verification does not cover your OAuth client. Review Google's personal
+and internal-use exceptions if applicable.
 
 ## Select calendars
 
@@ -66,8 +89,7 @@ creation or Google invitation emails. Existing Hourmere booking notification ema
 separately. Google edits do not change Hourmere bookings.
 
 Expired/revoked access requires reconnecting. Temporary errors preserve credentials for
-retry. Google's External Testing mode can expire refresh tokens; see the
-[Google web-server OAuth guide](https://developers.google.com/identity/protocols/oauth2/web-server).
+retry. If this repeats weekly, check the [publishing status](#publishing-status-and-verification).
 You can turn off local conflict checking even when authorization has expired.
 
 Each host's ordinary calendar copy is processed independently, so one revoked connection
