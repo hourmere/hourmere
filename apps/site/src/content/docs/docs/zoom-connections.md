@@ -22,6 +22,10 @@ approve a suitable user-authorized Zoom Marketplace OAuth client. Creating or mo
 real client, accepting terms and granting real-account access require their own authorization;
 the automated tests use synthetic provider responses only.
 
+Real-account acceptance was performed on 2026-10-19 against a Zoom development-mode app.
+Production Zoom Marketplace publication is a separate step for the hosted service;
+self-hosters use their own Zoom apps.
+
 1. For identity-only use configure **only** granular `user:read:user`. Enabling separate
    meeting authorization requires an independently approved compatible client configuration
    and `ZOOM_MEETINGS_ENABLED=true`; follow [automatic Zoom](https://github.com/hourmere/hourmere/blob/main/docs/automatic-zoom.md). Never grant meeting

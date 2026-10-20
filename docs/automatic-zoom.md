@@ -303,14 +303,11 @@ forced reauthorization. New one-use v2 attempts authenticate mode, explicit expe
 connection/absence, owner, state digest and originating session. Published 0022–0024 are
 immutable; new checks belong in 0025.
 
-Tests use only synthetic providers/mail, owned temporary PostgreSQL and existing Chrome.
-They do not prove real Marketplace confidential PKCE/redirect/scope delivery, provider-side
-wrong-mode reconsent effects, regional join formats, account-specific duration/security
-policy, real calendar effects or inbox delivery. No real Zoom client, grant or meeting was
-used. Populated actual 0024→0025 preservation/no-op, generated API/DB parity, all gates,
-Chrome/privacy and non-author review remain required before this branch can be merged.
-Production Marketplace app review and actual deauthorization notification delivery still
-require operator acceptance of the configured public app and endpoint.
+Automated validation uses synthetic providers/mail and helper-owned PostgreSQL.
+Real-account acceptance was performed on 2026-10-19 against a Zoom development-mode app.
+Production Zoom Marketplace publication is a separate step for the hosted service;
+self-hosters use their own Zoom apps. Production deauthorization notification delivery still
+requires operator acceptance of the configured public app and endpoint.
 
 Primary references checked 19 October 2026:
 [OAuth](https://developers.zoom.us/docs/integrations/oauth/),

@@ -116,6 +116,32 @@ must approve publication through the [release workflow](https://github.com/hourm
   See [SECURITY.md](https://github.com/hourmere/hourmere/blob/main/SECURITY.md) for reporting
   and supported-version policy.
 
+### Known limitations
+
+- [Microsoft Calendar](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/microsoft-calendar.md)
+  lists calendars only, without busy-time synchronization or event writes. Microsoft sign-in
+  and calendar connections have not had real-account acceptance.
+- [Automatic Zoom](https://github.com/hourmere/hourmere/blob/main/docs/automatic-zoom.md)
+  supports personal event types and individual team event types with one actual host;
+  collective and round-robin event types are unsupported.
+- [Calendar RSVP replies](https://github.com/hourmere/hourmere/blob/main/docs/notifications.md#email-headers-mime-and-replies)
+  are not processed; declining in a calendar does not cancel an Hourmere booking.
+- PostgreSQL 18+ is required for `uuidv7()`; PgBouncer is unsupported. See
+  [database requirements](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/configuration.md#server-and-database)
+  and the upgrade notes below.
+- Hourmere must be served at the root of its own host name (no path prefix) in every deployment.
+  [Bundled Caddy](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/self-hosting.md#prepare-the-host)
+  additionally requires ports 80/443, an HTTPS host name without a port, and an IPv4-only ingress network.
+- [Rate limiting](https://github.com/hourmere/hourmere/blob/main/apps/server/src/rate-limit.ts)
+  uses in-process memory; multiple web replicas multiply the limits. Run a single web process;
+  a separate worker is supported.
+- [Interface languages](https://github.com/hourmere/hourmere/blob/main/docs/interface-languages.md)
+  are English and Simplified Chinese only.
+- Schema downgrade is not automatic. Some migrations are not rolling-upgrade safe: stop
+  all old app and worker processes as required by the
+  [migration notes](https://github.com/hourmere/hourmere/blob/main/docs/data-model.md#changing-the-schema)
+  and [calendar-email upgrade notes](https://github.com/hourmere/hourmere/blob/main/docs/notifications.md#identity-and-recipients).
+
 ### Upgrade notes
 
 These notes apply to existing installations of the development source tree. Back up the
