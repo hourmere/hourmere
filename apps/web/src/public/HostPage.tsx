@@ -5,6 +5,7 @@ import { useI18n } from '../i18n/runtime.tsx'
 import { literal } from '../i18n/translate.ts'
 import { codeOf, failureMessage, getHost } from './api.ts'
 import { locationLabel } from './BookingDetails.tsx'
+import { collapseBlankLines } from './description.ts'
 import { PublicLayout, PublicNotFound, PublicStatus } from './PublicLayout.tsx'
 import { normalizedHandle, useRequest } from './paths.ts'
 import { formatDuration } from './time.ts'
@@ -65,7 +66,11 @@ function HostPageContent({ handle }: { handle: string }) {
                   {formatDuration(et.durationMinutes, displayLocale)}
                   {et.location && ` · ${ui(locationLabel(et.location.kind))}`}
                 </span>
-                {et.description && <span className="event-card-description">{et.description}</span>}
+                {et.description && (
+                  <span className="event-card-description">
+                    {collapseBlankLines(et.description)}
+                  </span>
+                )}
               </Link>
             </li>
           ))}

@@ -79,11 +79,22 @@ describe('wall-clock time in a zone', () => {
 })
 
 describe('formatting', () => {
+  it.each(['en-GB', 'zh-CN', 'en-US'])(
+    'uses identical clock-hour formatting in slots and selected ranges for %s',
+    (locale) => {
+      const start = at('2026-11-02T00:00:00Z')
+      const end = at('2026-11-02T00:30:00Z')
+      const clock = formatTime(start, 'UTC', locale).replace(/\s*[AP]M$/, '')
+      expect(formatTimeRange(start, end, 'UTC', locale).startsWith(clock)).toBe(true)
+    },
+  )
+
   it('keeps Chinese calendar day labels small enough and unbroken in seven columns', () => {
     const css = readFileSync('apps/web/src/public/SlotPicker.css', 'utf8')
     const day = css.match(/\.picker \.day:lang\(zh\)\s*\{([^}]+)\}/)?.[1]
     expect(day).toContain('white-space: nowrap;')
-    expect(day).toContain('font-size: 0.875rem;')
+    // At most 0.875rem, and bound to the column width so bold 22日 fits 36px cells at 320px.
+    expect(day).toContain('font-size: min(0.875rem, 5cqw);')
   })
 
   it.each(['00:00', '04:00', '16:00'])(

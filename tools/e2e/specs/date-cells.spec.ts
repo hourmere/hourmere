@@ -59,3 +59,73 @@ test('Chinese public calendar days stay on one line and clear the today marker',
     ),
   ).toBe(true)
 })
+
+test('coarse-pointer calendars keep 44px day targets without striking unavailable dates', async ({
+  page,
+  app,
+}) => {
+  test.skip(!(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)), 'Touch only')
+  for (const width of [320, 360, 390]) {
+    await page.setViewportSize({ width, height: 844 })
+    await page.goto(app.url + app.personalPath)
+    await expect(page.locator('.calendar-grid')).toHaveAttribute('aria-busy', 'false')
+    const days = await page.locator('.calendar-grid .day').evaluateAll((buttons) =>
+      buttons.map((button) => {
+        const box = button.getBoundingClientRect()
+        const style = getComputedStyle(button)
+        return {
+          width: box.width,
+          height: box.height,
+          unavailable: button.getAttribute('aria-disabled') === 'true',
+          opacity: Number(style.opacity),
+          decoration: style.textDecorationLine,
+        }
+      }),
+    )
+    expect(days.length).toBeGreaterThanOrEqual(28)
+    // Seven 44px columns need a 308px track, which 390px phones provide. Narrower phones
+    // share the track across the columns instead of overflowing the card (WCAG 2.5.8: 24px).
+    const minimumWidth = width >= 390 ? 44 : 24
+    expect(
+      days.every((day) => day.width >= minimumWidth && day.height >= 44),
+      `${width}px targets`,
+    ).toBe(true)
+    const edges = await page.evaluate(() => {
+      const content = document.querySelector('.booking-main') as HTMLElement
+      const calendar = document.querySelector('.picker-calendar') as HTMLElement
+      const body = document.querySelector('.picker-body') as HTMLElement
+      const box = content.getBoundingClientRect()
+      const style = getComputedStyle(content)
+      const grid = calendar.getBoundingClientRect()
+      return {
+        contentLeft:
+          box.left +
+          Number.parseFloat(style.borderLeftWidth) +
+          Number.parseFloat(style.paddingLeft),
+        contentRight:
+          box.right -
+          Number.parseFloat(style.borderRightWidth) -
+          Number.parseFloat(style.paddingRight),
+        calendarLeft: grid.left,
+        calendarRight: grid.right,
+        clipped: body.scrollWidth > body.clientWidth + 1,
+      }
+    })
+    expect(edges.calendarLeft, `${width}px calendar inside the card`).toBeGreaterThanOrEqual(
+      edges.contentLeft - 0.5,
+    )
+    expect(edges.calendarRight, `${width}px calendar inside the card`).toBeLessThanOrEqual(
+      edges.contentRight + 0.5,
+    )
+    expect(edges.clipped, `${width}px picker body overflow`).toBe(false)
+    const unavailable = days.filter((day) => day.unavailable)
+    expect(unavailable.length).toBeGreaterThan(0)
+    expect(unavailable.every((day) => day.opacity < 1 && day.decoration === 'none')).toBe(true)
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+      `${width}px page fits`,
+    ).toBe(true)
+  }
+})

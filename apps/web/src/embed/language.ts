@@ -21,6 +21,13 @@ const messages = {
     failure: '预约组件无法加载。请检查 Hourmere 地址和实例的嵌入设置。',
   },
 } as const
+
+/** The iframe query overrides language only when one supported value is present. */
+export function embedQueryLanguage(search: string): InterfaceLanguage | undefined {
+  const query = new URLSearchParams(search)
+  return query.getAll('language').length === 1 ? explicitLanguage(query.get('language')) : undefined
+}
+
 export function widgetLanguage(value?: unknown): InterfaceLanguage {
   if (value !== undefined) {
     const language = explicitLanguage(value)

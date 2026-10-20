@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { BrowserRouter } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -364,13 +364,13 @@ describe('changing interface language through booking and account flows', () => 
       await user.type(screen.getByLabelText('Email'), 'invitee@example.invalid')
       await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
       const problem = await screen.findByRole('alert')
-      expect(problem.textContent).toBe(detail)
+      expect(within(problem).getByText(detail, { selector: 'p' }).textContent).toBe(detail)
       await setLanguage(user, 'zh-CN')
       expect(screen.getByRole('alert')).toBe(problem)
-      expect(problem.textContent).toBe(detail)
+      expect(within(problem).getByText(detail, { selector: 'p' }).textContent).toBe(detail)
       expect(screen.getByLabelText<HTMLInputElement>('你的姓名').value).toBe('Synthetic invitee')
       await setLanguage(user, 'en')
-      expect(problem.textContent).toBe(detail)
+      expect(within(problem).getByText(detail, { selector: 'p' }).textContent).toBe(detail)
       expect(api.to('POST /api/v1/public/ada/intro/bookings')).toHaveLength(1)
     },
   )

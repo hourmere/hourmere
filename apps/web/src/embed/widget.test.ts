@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { closePopup, destroyInline, iframeUrl, init, initInline, openPopup } from './widget.ts'
 
 const url = 'https://hourmere.test/ada/intro'
@@ -7,6 +7,9 @@ const dialogMethods = {
   showModal: Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal'),
   close: Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'close'),
 }
+beforeEach(() => {
+  vi.stubGlobal('CSS', { supports: vi.fn(() => true) })
+})
 function popupRoot() {
   return document.querySelector('[data-hourmere-popup-host]')?.shadowRoot ?? null
 }
@@ -554,7 +557,7 @@ describe('popup chrome protections', () => {
     open()
     const css = popupRoot()?.querySelector('style')?.textContent ?? '',
       mobile = css.slice(css.indexOf('@media'))
-    expect(mobile).toMatch(/^@media \(max-width: 480px\)/)
+    expect(mobile).toMatch(/^@media \(max-width: 480px\), \(max-height: 480px\)/)
     expect(mobile).toContain('width: 100vw;')
     expect(mobile).toContain('max-width: 100vw;')
     expect(mobile).toMatch(/height: 100vh;\s*height: 100dvh;/)
@@ -584,6 +587,8 @@ describe('popup chrome protections', () => {
     document.body.style.setProperty('overflow-y', 'auto', 'important')
     document.body.style.setProperty('color', 'red')
     open()
+    expect(document.documentElement.style.getPropertyValue('scrollbar-gutter')).toBe('stable')
+    expect(document.documentElement.style.getPropertyPriority('scrollbar-gutter')).toBe('important')
     for (const element of [document.documentElement, document.body]) {
       expect(element.style.getPropertyValue('overflow')).toBe('hidden')
       expect(element.style.getPropertyPriority('overflow')).toBe('important')
@@ -596,6 +601,100 @@ describe('popup chrome protections', () => {
     expect(document.body.style.getPropertyValue('overflow-y')).toBe('auto')
     expect(document.body.style.getPropertyPriority('overflow-y')).toBe('important')
     expect(document.body.style.color).toBe('blue')
+    expect(document.documentElement.style.getPropertyValue('scrollbar-gutter')).toBe('')
+  })
+  it('preserves a host stable both-edges gutter policy and restores its declaration', () => {
+    document.documentElement.style.setProperty('scrollbar-gutter', 'stable both-edges')
+    open()
+    expect(document.documentElement.style.getPropertyValue('scrollbar-gutter')).toBe(
+      'stable both-edges',
+    )
+    expect(document.documentElement.style.getPropertyPriority('scrollbar-gutter')).toBe('important')
+    closePopup()
+    expect(document.documentElement.style.getPropertyValue('scrollbar-gutter')).toBe(
+      'stable both-edges',
+    )
+    expect(document.documentElement.style.getPropertyPriority('scrollbar-gutter')).toBe('')
+  })
+  it('does not add compensation padding when a supported gutter already reserves scrollbar space', () => {
+    document.documentElement.style.setProperty('scrollbar-gutter', 'stable')
+    document.body.style.setProperty('padding-right', '12px', 'important')
+    vi.stubGlobal('innerWidth', 1024)
+    vi.spyOn(document.documentElement, 'clientWidth', 'get').mockReturnValue(1000)
+    open()
+    expect(CSS.supports).toHaveBeenCalledWith('scrollbar-gutter', 'stable')
+    expect(document.body.style.getPropertyValue('padding-right')).toBe('12px')
+    expect(document.body.style.getPropertyPriority('padding-right')).toBe('important')
+    closePopup()
+    expect(document.body.style.getPropertyValue('padding-right')).toBe('12px')
+  })
+  it.each(['', 'auto', 'stable', 'stable both-edges'])(
+    'introduces no gutter or padding when a supported host has no occupied scrollbar space (%s)',
+    (gutter) => {
+      vi.stubGlobal('innerWidth', 1024)
+      vi.spyOn(document.documentElement, 'clientWidth', 'get').mockReturnValue(1024)
+      if (gutter) document.documentElement.style.setProperty('scrollbar-gutter', gutter)
+      document.body.style.setProperty('padding-right', '12px')
+      open()
+      expect(document.documentElement.style.getPropertyValue('scrollbar-gutter')).toBe(gutter)
+      expect(document.documentElement.style.getPropertyPriority('scrollbar-gutter')).toBe('')
+      expect(document.body.style.getPropertyValue('padding-right')).toBe('12px')
+      expect(document.body.style.getPropertyPriority('padding-right')).toBe('')
+      expect(document.documentElement.style.overflow).toBe('hidden')
+      closePopup()
+      expect(document.documentElement.style.getPropertyValue('scrollbar-gutter')).toBe(gutter)
+      expect(document.body.style.getPropertyValue('padding-right')).toBe('12px')
+    },
+  )
+  it.each([false, undefined])(
+    'adds the measured scrollbar width to host padding when gutter support is %s',
+    (support) => {
+      vi.stubGlobal('CSS', support === undefined ? undefined : { supports: () => support })
+      vi.stubGlobal('innerWidth', 1024)
+      vi.spyOn(document.documentElement, 'clientWidth', 'get').mockReturnValue(1000)
+      document.body.style.setProperty('padding-right', '12px', 'important')
+      document.body.style.setProperty('color', 'red')
+      open()
+      expect(document.body.style.getPropertyValue('padding-right')).toBe('36px')
+      expect(document.body.style.getPropertyPriority('padding-right')).toBe('important')
+      expect(document.documentElement.style.getPropertyValue('scrollbar-gutter')).toBe('')
+      expect(document.documentElement.style.overflow).toBe('hidden')
+      document.body.style.setProperty('color', 'blue')
+      closePopup()
+      expect(document.body.style.getPropertyValue('padding-right')).toBe('12px')
+      expect(document.body.style.getPropertyPriority('padding-right')).toBe('important')
+      expect(document.body.style.color).toBe('blue')
+    },
+  )
+  it('restores host padding shorthands and their priorities after fallback compensation', () => {
+    vi.stubGlobal('CSS', { supports: () => false })
+    vi.stubGlobal('innerWidth', 1024)
+    vi.spyOn(document.documentElement, 'clientWidth', 'get').mockReturnValue(1000)
+    document.body.style.setProperty('padding', '4px 12px 8px 16px', 'important')
+    open()
+    expect(document.body.style.getPropertyValue('padding-right')).toBe('36px')
+    closePopup()
+    expect(document.body.style.getPropertyValue('padding')).toBe('4px 12px 8px 16px')
+    expect(document.body.style.getPropertyPriority('padding')).toBe('important')
+    expect(document.body.style.getPropertyPriority('padding-right')).toBe('important')
+  })
+  it('adds no padding for overlay scrollbars and removes fallback padding after a modal failure', () => {
+    vi.stubGlobal('CSS', { supports: () => false })
+    vi.stubGlobal('innerWidth', 1024)
+    const clientWidth = vi
+      .spyOn(document.documentElement, 'clientWidth', 'get')
+      .mockReturnValue(1024)
+    open()
+    expect(document.body.style.getPropertyValue('padding-right')).toBe('')
+    closePopup()
+    clientWidth.mockReturnValue(1000)
+    stubDialogs()
+    vi.spyOn(HTMLDialogElement.prototype, 'showModal').mockImplementation(() => {
+      throw new Error('Modal unavailable')
+    })
+    expect(() => openPopup({ url })).toThrow('Modal unavailable')
+    expect(document.body.style.getPropertyValue('padding-right')).toBe('')
+    expect(document.documentElement.style.getPropertyValue('overflow')).toBe('')
   })
   it('keeps the replacement locked and validates options before replacing it', () => {
     const first = open()
@@ -625,6 +724,7 @@ describe('popup chrome protections', () => {
     expect(document.querySelector('[data-hourmere-popup-host]')).toBeNull()
     expect(document.body.style.overflow).toBe('auto')
     expect(document.documentElement.style.overflow).toBe('')
+    expect(document.documentElement.style.getPropertyValue('scrollbar-gutter')).toBe('')
     expect(document.activeElement).toBe(opener)
   })
 })
