@@ -1,7 +1,7 @@
 ---
 title: Compare scheduling options
 description: Compare Hourmere, Calendly, Cal.com and Cal.diy by deployment, agent access and current limitations.
-lastVerified: '2026-10-18'
+lastVerified: '2026-10-20'
 ---
 
 Hourmere Cloud is in an [invitation-only preview](/#faq) with sign-ups closed, and the

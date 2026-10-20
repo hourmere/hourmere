@@ -161,5 +161,23 @@ jobs:
         run: google-chrome --version
       - run: npm ci --ignore-scripts --audit=false --fund=false
       - run: npm run build --workspace @hourmere/web
-      - run: npm run test:e2e
+      - name: Build a disposable site fixture and run browser regressions
+        run: |
+          legal_source=apps/site/src/data/legal.ts
+          legal_original=$(mktemp)
+          cp "$legal_source" "$legal_original"
+          restore_legal_source() {
+            cp "$legal_original" "$legal_source"
+            rm -f "$legal_original"
+            rm -rf apps/site/dist
+          }
+          trap restore_legal_source EXIT
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs'
+          const path = 'apps/site/src/data/legal.ts'
+          const source = readFileSync(path, 'utf8')
+          writeFileSync(path, source.replace("'SET_ON_PUBLICATION_DAY'", "'2000-01-01'"))
+          NODE
+          npm run build --workspace @hourmere/site
+          npm run test:e2e
       - run: npm run test:e2e:privacy

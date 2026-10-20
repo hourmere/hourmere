@@ -32,7 +32,7 @@ const effectiveLabel = new Date(`${effective}T00:00:00Z`).toLocaleDateString('en
     </header>
     <div class="prose">
       <slot name="intro" />
-      <nav class="toc" aria-labelledby="toc-title">
+      <nav id="contents" class="toc" aria-labelledby="toc-title">
         <h2 id="toc-title">Contents</h2>
         <ol>
           {
@@ -153,5 +153,42 @@ const effectiveLabel = new Date(`${effective}T00:00:00Z`).toLocaleDateString('en
 
   .toc li + li {
     margin-top: 4px;
+  }
+
+  .prose :global(.back-to-contents) {
+    margin-block: 24px 0;
+    font-size: 15px;
+  }
+
+  .prose :global(.back-to-contents a) {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+
+  @media print {
+    :global(.site-header),
+    :global(.site-footer),
+    :global(.skip-link),
+    .toc,
+    .prose :global(.back-to-contents) {
+      display: none;
+    }
+
+    .container.legal {
+      max-width: none;
+      padding: 0;
+    }
+
+    .prose :global(h2),
+    .prose :global(h3) {
+      break-after: avoid;
+    }
+
+    .prose :global(a[href^="http"])::after {
+      content: " (" attr(href) ")";
+      font-size: 0.9em;
+      overflow-wrap: anywhere;
+    }
   }
 </style>

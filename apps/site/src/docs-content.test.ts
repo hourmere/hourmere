@@ -12,11 +12,10 @@ const pages = globSync('**/*.md', { cwd: join(root, siteDocs) }).map((path) => (
 }))
 const githubDocs = 'https://github.com/hourmere/hourmere/blob/main/docs/'
 const normalize = (source: string) => source.replace(/\s+/g, ' ')
+const prose = (source: string) =>
+  normalize(source.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/[*`]/g, ''))
 const repositoryDocs = globSync('**/*.md', { cwd: join(root, 'docs') }).map(
   (path) => `docs/${path}`,
-)
-const sitePages = globSync('**/*.astro', { cwd: join(root, 'apps/site/src/pages') }).map(
-  (path) => `apps/site/src/pages/${path}`,
 )
 
 // These complete lines describe Hourmere's own website, hosted attribution or legal pages.
@@ -51,7 +50,7 @@ const ownSiteReferences: Record<string, readonly string[]> = {
     'TERMS_URL=https://hourmere.com/terms',
   ],
   [`${siteDocs}/index.md`]: [
-    'no stable release or hosted booking service yet. The website at hourmere.com is separate',
+    'The website at hourmere.com is separate from your Hourmere instance.',
     "to [security@hourmere.com](mailto:security@hourmere.com) or through the repository's",
   ],
   [`${siteDocs}/self-hosting.md`]: [
@@ -70,12 +69,8 @@ describe('self-hosting documentation links', () => {
     expect(remaining).not.toMatch(/\bdocs\/[\w./-]+\.md\b/)
   })
 
-  it.each([
-    'README.md',
-    ...repositoryDocs,
-    ...pages.map(({ path }) => `${siteDocs}/${path}`),
-    ...sitePages,
-  ])('uses canonical docs links in %s', (path) => {
+  // Rendered site links and anchors are checked against actual build output in build-output.test.ts.
+  it.each(['README.md', ...repositoryDocs])('uses canonical docs links in %s', (path) => {
     const source = read(path)
     expect(source).not.toMatch(
       /(?:(?<![\w.-])hourmere\.com|[(\s"'`])\/docs(?:\/[\w-]+)*\/(?=[?#\s"'`)<>{}]|$)/i,
@@ -114,6 +109,114 @@ describe('self-hosting documentation links', () => {
     'notifications',
   ])('makes the %s guide discoverable from the docs overview', (guide) => {
     expect(read(`${siteDocs}/index.md`)).toContain(`](${githubDocs}${guide}.md)`)
+  })
+})
+
+describe('launch documentation disclosures', () => {
+  it('keeps the docs overview consistent with the planned release and Cloud preview', () => {
+    const intro = prose(read(`${siteDocs}/index.md`).split(/^## /m)[0] ?? '')
+    expect(intro).toMatch(/no stable release yet/i)
+    expect(intro).toContain('2026-11-30')
+    expect(intro).toMatch(/release.*planned|planned.*release/i)
+    expect(intro).toMatch(/Hourmere Cloud is (?:in )?an invitation-only preview/)
+    expect(intro).not.toMatch(/no.*hosted booking service|stable release is available/i)
+  })
+
+  it('records the comparison claims re-verification date', () => {
+    expect(read(`${siteDocs}/comparison.md`)).toMatch(/^lastVerified: '2026-10-20'$/m)
+  })
+
+  const limitations = [
+    {
+      topic: 'Microsoft calendar scope and acceptance',
+      claims: [
+        /Microsoft [Cc]alendars? lists? (?:calendars )?only/,
+        /(?:no|without) busy-time sync(?:hronization)? or event writes/,
+        /Microsoft sign-in and calendar connections have not had real-account acceptance/,
+      ],
+    },
+    {
+      topic: 'automatic Zoom host scope',
+      claims: [
+        /Automatic Zoom supports personal event types and individual team event types with one actual host/,
+        /collective and round-robin event types are unsupported/,
+      ],
+    },
+    {
+      topic: 'calendar RSVP and cancellation',
+      claims: [
+        /Calendar RSVP replies are not processed/,
+        /declining in a calendar does not cancel (?:a|an Hourmere) booking/,
+      ],
+    },
+    {
+      topic: 'database requirements',
+      claims: [/PostgreSQL 18\+ is required/, /PgBouncer is unsupported/],
+    },
+    {
+      topic: 'deployment origin and bundled proxy scope',
+      claims: [
+        /Hourmere must be served at the root of its own host name \(no path prefix\) in every deployment/,
+        /Bundled Caddy additionally requires ports 80\/443, an HTTPS host name without a port, and an IPv4-only ingress network/,
+      ],
+    },
+    {
+      topic: 'single web process for in-memory rate limits',
+      claims: [
+        /Rate limiting uses in-process memory/,
+        /multiple web replicas multiply the limits/,
+        /Run a single web process; a separate worker is supported/,
+      ],
+    },
+    {
+      topic: 'interface languages',
+      claims: [/Interface languages are English and Simplified Chinese only/],
+    },
+    {
+      topic: 'downgrade and migration compatibility',
+      claims: [
+        /Schema downgrade is not automatic|No automatic schema downgrade/,
+        /[Ss]ome migrations (?:are not rolling-upgrade safe: stop|require stopping) all old app and worker processes/,
+      ],
+    },
+  ]
+
+  for (const path of ['README.md', 'CHANGELOG.md', `${siteDocs}/index.md`]) {
+    const section = read(path)
+      .split(/^#{2,3} Known limitations\n/m)[1]
+      ?.split(/^#{2,3} /m)[0]
+
+    it(`consolidates limitations with documentation links in ${path}`, () => {
+      expect(read(path).match(/^#{2,3} Known limitations$/gm)).toHaveLength(1)
+      expect(section).toMatch(/\[[^\]]+\]\([^)]+\)/)
+      if (path === 'CHANGELOG.md') {
+        expect(read(path).split('## [Unreleased → 1.0.0]')[1]).toContain('### Known limitations')
+      }
+    })
+
+    it.each(limitations)(`discloses $topic in ${path}`, ({ claims }) => {
+      for (const claim of claims) expect(prose(section ?? '')).toMatch(claim)
+    })
+
+    it(`limits the missing real-account acceptance disclosure to Microsoft in ${path}`, () => {
+      const statements = prose(section ?? '').match(/[^.]*have not had real-account acceptance\./g)
+      expect(statements).toHaveLength(1)
+      expect(statements?.[0]).toMatch(/Microsoft sign-in and calendar connections/)
+      expect(statements?.[0]).not.toMatch(/Zoom|Meet|Google/)
+    })
+  }
+
+  it('links the changelog database requirements to a section that requires PostgreSQL 18', () => {
+    const target = read('CHANGELOG.md').match(/\[database requirements\]\(([^)]+)\)/)?.[1]
+    expect(target).toBe(
+      'https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/configuration.md#server-and-database',
+    )
+    const section = read(`${siteDocs}/configuration.md`)
+      .split('## Server and database\n')[1]
+      ?.split('\n## ')[0]
+    expect(prose(section ?? '')).toMatch(
+      /PostgreSQL 18\+ is required because migrations use uuidv7\(\)/,
+    )
   })
 })
 

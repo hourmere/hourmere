@@ -1,5 +1,6 @@
 ---
 import { company, contact, site } from '../site'
+import { siteCopy } from '../ui-copy.ts'
 import Logo from './Logo.astro'
 
 const year = new Date().getFullYear()
@@ -23,6 +24,7 @@ const year = new Date().getFullYear()
           <li><a href="/#agents">AI agents</a></li>
           <li><a href="/#self-host">Self-host</a></li>
           <li><a href="/#pricing">Pricing</a></li>
+          <li><a href="/docs">{siteCopy.en.docs}</a></li>
         </ul>
       </nav>
       <nav aria-label="Legal">
@@ -39,12 +41,12 @@ const year = new Date().getFullYear()
           <li><a href={site.github}>GitHub</a></li>
         </ul>
       </nav>
-      <div>
+      <div class="contact">
         <h2>Contact</h2>
         <ul>
-          <li><a href={`mailto:${contact.hello}`}>{contact.hello}</a></li>
-          <li><a href={`mailto:${contact.support}`}>{contact.support}</a></li>
-          <li><a href={`mailto:${contact.security}`}>{contact.security}</a></li>
+          <li><a href={`mailto:${contact.hello}`}>{contact.hello.split('@')[0]}@<wbr />{contact.hello.split('@')[1]}</a></li>
+          <li><a href={`mailto:${contact.support}`}>{contact.support.split('@')[0]}@<wbr />{contact.support.split('@')[1]}</a></li>
+          <li><a href={`mailto:${contact.security}`}>{contact.security.split('@')[0]}@<wbr />{contact.security.split('@')[1]}</a></li>
         </ul>
       </div>
     </div>
@@ -70,8 +72,12 @@ const year = new Date().getFullYear()
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr));
   }
 
-  .about {
+  .about,
+  .contact {
     grid-column: 1 / -1;
+  }
+
+  .about {
     max-width: 420px;
   }
 
@@ -80,7 +86,8 @@ const year = new Date().getFullYear()
       grid-template-columns: 2fr repeat(4, 1fr);
     }
 
-    .about {
+    .about,
+    .contact {
       grid-column: auto;
     }
   }
@@ -115,10 +122,11 @@ const year = new Date().getFullYear()
 
   li a {
     display: inline-block;
-    padding-block: 2px;
+    min-height: 44px;
+    padding-block: 8px;
     color: var(--muted);
     text-decoration: none;
-    overflow-wrap: anywhere;
+    overflow-wrap: normal;
   }
 
   li a:hover {
