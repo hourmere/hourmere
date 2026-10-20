@@ -13,6 +13,12 @@
   min-height: 100vh;
 }
 
+@supports (height: 100svh) {
+  .public {
+    min-height: 100svh;
+  }
+}
+
 /* Let long names, addresses and links contribute a shrinkable min-content size. */
 .public .user-content {
   overflow-wrap: anywhere;
@@ -75,8 +81,10 @@
   text-decoration: none;
 }
 
-.public .public-footer a:hover {
-  text-decoration: underline;
+@media (hover: hover) {
+  .public .public-footer a:hover {
+    text-decoration: underline;
+  }
 }
 
 .public .public-signup {
@@ -173,8 +181,10 @@
   text-decoration: none;
 }
 
-.public .event-card:hover {
-  border-color: var(--accent);
+@media (hover: hover) {
+  .public .event-card:hover {
+    border-color: var(--accent);
+  }
 }
 
 .public .event-card-title {
@@ -209,7 +219,7 @@
   padding: 0 var(--space-4) var(--space-5);
 }
 
-@media (min-width: 900px) {
+@media (min-width: 960px) {
   .public .booking-layout {
     grid-template-columns: 300px minmax(0, 1fr);
     gap: 0;
@@ -324,7 +334,7 @@
   gap: 2px;
 }
 
-@media (min-width: 560px) {
+@media (min-width: 640px) {
   .public .details-row {
     grid-template-columns: 7rem minmax(0, 1fr);
     gap: var(--space-4);

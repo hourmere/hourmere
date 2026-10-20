@@ -84,13 +84,13 @@ export function useI18n() {
   return { locale, explicit: selected, formatLocale: selected, setLanguage, t, ui }
 }
 /** Changing this control updates text in place; router keys and form state do not change. */
-export function LanguageSwitcher() {
+export function LanguageSwitcher({ compact = false }: { compact?: boolean }) {
   const { locale, t, setLanguage } = useI18n()
   useEffect(() => {
     document.documentElement.lang = locale
   }, [locale])
   return (
-    <label className="language-picker">
+    <label className={`language-picker${compact ? ' language-picker-compact' : ''}`}>
       <span>{t('Interface language')}</span>
       <select
         aria-label={t('Interface language')}
