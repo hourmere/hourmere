@@ -68,11 +68,12 @@ npm run mcp:registry:validate -- --for-template-submission
   usable throughout review, and arrange a supported sign-in method with the reviewer. The
   development mail logger is not a public-demo sign-in method.
 - Decide the release version. `1.0.0` in this draft is the intended launch version, not a
-  released-server claim. The current MCP implementation advertises `0.0.0` in
-  `apps/server/src/mcp/endpoint.ts`; at release, align that advertised server version with
-  `server.json` and the deployed implementation before submission. The CLI also follows
-  the product tag: each product release must bump/stamp `tools/cli/package.json` and its
-  lockfile entry to match, or `publish-cli` fails. See [releasing](releasing.md).
+  released-server claim. The root `package.json` is the single source of the product
+  version advertised by MCP and OpenAPI. Run `npm version <next-version> --no-git-tag-version`
+  from the repository root: its version lifecycle runs `scripts/sync-version.ts` to
+  synchronize `server.json`, `tools/cli/package.json` and the npm lockfile. Review and
+  commit those changes together before tagging; `publish-cli` rejects a CLI version
+  that differs from the product tag. See [releasing](releasing.md).
 - Prepare a separate submission copy of `server.json`, choosing the template or concrete
   Registry option below. Update the version and draft notice to describe that choice
   accurately, and set

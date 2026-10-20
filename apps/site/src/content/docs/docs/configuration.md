@@ -3,8 +3,10 @@ title: Configuration reference
 description: Environment variables for the Hourmere server, workers and Docker Compose.
 ---
 
-Server variables below come from `apps/server/src/config.ts`. Empty optional values usually
-mean unset; `AUTO_MIGRATE` must be omitted or explicitly `true`/`false`. Direct processes read
+Server variables below come from
+[`apps/server/src/config.ts`](https://github.com/hourmere/hourmere/blob/main/apps/server/src/config.ts).
+Empty optional values usually mean unset; `AUTO_MIGRATE` must be omitted or explicitly
+`true`/`false`. Direct processes read
 their environment; Compose interpolates `.env` into the variables explicitly listed in
 `docker-compose.yml`. Adding an arbitrary entry to `.env` does not pass it to a container.
 Restart/recreate affected processes after changing configuration. The interactive
@@ -183,12 +185,20 @@ from connecting a calendar.
    private `.env`. Keep `PUBLIC_URL` set to the same external origin. Never commit the
    credentials. The default Compose file forwards both variables; recreate affected
    services with `docker compose up -d --wait`, or restart direct server processes.
-5. Open your instance's `/sign-in`, choose **Sign in with Google** and confirm that Google
+5. Open your instance's `/sign-in`, choose **Continue with Google** and confirm that Google
    returns you to Hourmere. The instance's registration policy still applies to new users.
 
 Google sign-in requests only `openid`, `email` and `profile`, with no offline access or
-Google refresh token. Google's Testing refresh-token expiration rule exempts these basic
-identity scopes; it affects the separate calendar grant described below.
+Google refresh token. An **External** app in **Testing** that requests only these basic
+identity scopes allows any Google account to sign in without being on the test-user list,
+subject to Google Workspace administrator controls. See Google's
+[OAuth app state overview](https://developers.google.com/identity/protocols/oauth2/production-readiness/overview).
+Google's Testing refresh-token expiration rule exempts these basic identity scopes; it
+affects the separate calendar grant described below.
+
+Sign-in and calendar OAuth clients in the same Google Cloud project share one publishing
+status and test-user list. Separate client credentials do not give them separate publishing
+settings; calendar access still requires test users while the project is in Testing.
 
 ### Sign in with Microsoft
 
@@ -196,6 +206,7 @@ Microsoft sign-in requires an email claim the auth library treats as verified. I
 configuration add optional ID token claims `verified_primary_email` and
 `verified_secondary_email`; without verified email, the user gets `EMAIL_NOT_VERIFIED` and
 must use an email link. Microsoft calendar synchronization is not implemented yet.
+The sign-in button reads **Sign in with Microsoft**.
 
 Microsoft sign-in requests only `openid`, `profile` and `email`. It establishes an Hourmere
 session; subsequent requests and session renewal use that session without refreshing the
@@ -233,7 +244,8 @@ and **100-user cap**, as explained in Google's
 [app state overview](https://developers.google.com/identity/protocols/oauth2/production-readiness/overview).
 The self-hoster is responsible for any required
 [sensitive-scope verification](https://developers.google.com/identity/protocols/oauth2/production-readiness/sensitive-scope-verification)
-for their project; Hourmere's hosted verification does not apply. See
+for their project. Each Google Cloud project is verified separately; a self-hosted instance
+uses your own project. See
 [Google Calendar publishing requirements](/docs/google-calendar#publishing-status-and-verification)
 for recovery and exceptions.
 
