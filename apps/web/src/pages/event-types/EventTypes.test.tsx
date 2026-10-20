@@ -1483,7 +1483,7 @@ it('a different team administrator can edit saved Zoom metadata without reading 
 })
 
 describe('event type editor layout', () => {
-  it('keeps save actions in a sticky bar after the editable fields with the shared header', async () => {
+  it('keeps only saving and its status in the sticky bar, with return navigation outside it', async () => {
     eventTypeServer()
     const heading = await openExisting()
     expect(heading.closest('.page-header')).not.toBeNull()
@@ -1491,15 +1491,17 @@ describe('event type editor layout', () => {
     const bar = save.closest('.sticky-form-actions')
     expect(bar).not.toBeNull()
     expect(bar?.parentElement?.tagName).toBe('FORM')
-    expect(bar?.previousElementSibling?.tagName).toBe('FIELDSET')
+    expect(bar?.previousElementSibling?.previousElementSibling?.tagName).toBe('FIELDSET')
     expect(
       within(bar as HTMLElement)
         .getByRole('status')
         .getAttribute('tabindex'),
     ).toBe('-1')
-    expect(
-      within(bar as HTMLElement).getByRole('link', { name: 'Back to event types' }),
-    ).toBeDefined()
+    expect(within(bar as HTMLElement).queryByRole('link')).toBeNull()
+    expect(bar?.children).toHaveLength(2)
+    expect(screen.getByRole('link', { name: 'Back to event types' }).parentElement).toBe(
+      bar?.previousElementSibling,
+    )
   })
 
   it('uses an accessible compact icon for each question option removal', async () => {
@@ -1527,7 +1529,7 @@ describe('event type booking link previews', () => {
     await openExisting()
     const preview = screen.getByText('/ada/intro-call')
     expect(preview.classList.contains('preview')).toBe(true)
-    expect(preview.querySelectorAll('wbr')).toHaveLength(2)
+    expect(preview.querySelectorAll('wbr')).toHaveLength(0)
     expect(screen.queryByText(`${window.location.origin}/ada/intro-call`)).toBeNull()
     await user.click(screen.getByRole('button', { name: 'Copy link' }))
     expect(await navigator.clipboard.readText()).toBe(`${window.location.origin}/ada/intro-call`)

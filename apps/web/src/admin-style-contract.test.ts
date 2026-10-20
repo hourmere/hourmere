@@ -43,11 +43,17 @@ describe('admin polish CSS protections', () => {
     ).toBe(true)
   })
 
-  it('pairs analytics dates, separates metrics, and spaces the caption', () => {
-    expect(rule('.analytics-date-range')).toContain(
-      'grid-template-columns: repeat(2, minmax(0, 1fr));',
-    )
+  it('stacks analytics dates until each native control has room for a full date', () => {
+    expect(rule('.analytics-filters')).toContain('container: analytics-filters / inline-size;')
+    expect(rule('.analytics-date-range')).toContain('grid-template-columns: minmax(0, 1fr);')
+    expect(rule('.analytics-date-range')).toContain('align-items: end;')
     expect(rule('.analytics-date-range')).toContain('gap: var(--space-4);')
+    expect(styles).toMatch(
+      /@container analytics-filters \(min-width: 400px\)\s*\{\s*\.analytics-date-range\s*\{\s*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/,
+    )
+  })
+
+  it('separates analytics metrics and spaces the caption', () => {
     expect(rule('.metric-cards')).toContain('display: grid;')
     expect(rule('.metric-cards > div')).toContain('padding: var(--space-4);')
     expect(rule('.metric-cards dd')).toContain('font-size: var(--text-2xl);')
@@ -74,6 +80,9 @@ describe('admin polish CSS protections', () => {
       'overflow-wrap: normal;',
     ])
       expect(pre).toContain(declaration)
+    const focus = rule('.code-block pre:focus-visible')
+    expect(focus).toContain('outline: 3px solid var(--focus);')
+    expect(focus).toContain('outline-offset: 2px;')
     expect(rule('.booking-link a,\n.booking-link .preview')).toContain('text-overflow: ellipsis;')
     expect(rule('.booking-link a,\n.booking-link .preview')).toContain('white-space: nowrap;')
     expect(rule('.booking-link a,\n.booking-link .preview')).toContain('min-width: 0;')

@@ -149,7 +149,14 @@ export function ApiKeysPage() {
           )}
         </p>
         <div className="code-block">
-          <pre data-layout-scroll="horizontal">
+          {/* biome-ignore lint/a11y/useSemanticElements: preserve command formatting on the scrollable region. */}
+          <pre
+            data-layout-scroll="horizontal"
+            // biome-ignore lint/a11y/noNoninteractiveTabindex: keyboard users need to focus the scrolling element.
+            tabIndex={0}
+            role="region"
+            aria-label={t('API key usage command')}
+          >
             <code>{curlExample('hm_…')}</code>
           </pre>
           <CopyButton text={curlExample('hm_…')} label={t('Copy command')} />
@@ -306,7 +313,14 @@ function NewKey({ apiKey, onDone }: { apiKey: CreatedApiKey; onDone: () => void 
       </div>
       <p>{t('Check that it works:')}</p>
       <div className="code-block">
-        <pre data-layout-scroll="horizontal">
+        {/* biome-ignore lint/a11y/useSemanticElements: preserve command formatting on the scrollable region. */}
+        <pre
+          data-layout-scroll="horizontal"
+          // biome-ignore lint/a11y/noNoninteractiveTabindex: keyboard users need to focus the scrolling element.
+          tabIndex={0}
+          role="region"
+          aria-label={t('New API key test command')}
+        >
           <code>{curlExample(apiKey.key)}</code>
         </pre>
         <CopyButton text={curlExample(apiKey.key)} label={t('Copy command')} />

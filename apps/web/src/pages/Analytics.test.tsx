@@ -68,6 +68,33 @@ describe('booking activity page', () => {
       'Europe/Berlin',
     )
   })
+  it.each([
+    ['en', 'Start date', 'End date', 'Both dates are included, up to 90 local days.'],
+    ['zh-CN', '开始日期', '结束日期', '包含起止日期，最多 90 个当地日历日。'],
+  ] as const)(
+    'describes both dates with one hint below their pair in %s',
+    async (locale, startLabel, endLabel, hintText) => {
+      chooseLanguage(locale)
+      fakeApi({
+        ...signedIn,
+        ...profile(),
+        'GET /api/v1/analytics/bookings': () => json(200, result),
+      })
+      renderApp('/app/analytics')
+      const start = await screen.findByLabelText(startLabel)
+      const end = screen.getByLabelText(endLabel)
+      const hint = screen.getByText(hintText)
+      expect(hint.id).not.toBe('')
+      expect(start.getAttribute('aria-describedby')).toBe(hint.id)
+      expect(end.getAttribute('aria-describedby')).toBe(hint.id)
+      const pair = start.closest('.analytics-date-range')
+      expect(pair?.contains(end)).toBe(true)
+      expect(pair?.contains(hint)).toBe(false)
+      expect(pair?.nextElementSibling).toBe(hint)
+      expect(start.closest('.field')?.querySelector('.hint')).toBeNull()
+      expect(end.closest('.field')?.querySelector('.hint')).toBeNull()
+    },
+  )
   it('keeps each Chinese report date together when the heading wraps on narrow screens', async () => {
     chooseLanguage('zh-CN')
     fakeApi({
@@ -130,6 +157,13 @@ describe('booking activity page', () => {
       0,
     )
     expect(api.to('GET /api/v1/analytics/bookings')).toHaveLength(1)
+    const end = screen.getByLabelText('End date')
+    const description = (end.getAttribute('aria-describedby') ?? '')
+      .split(' ')
+      .map((id) => document.getElementById(id)?.textContent)
+      .join(' ')
+    expect(description).toContain('Choose at most 90 calendar days')
+    expect(description).toContain('Both dates are included, up to 90 local days.')
   })
   it('gives ordinary team members an explicit permission explanation without counts', async () => {
     fakeApi({

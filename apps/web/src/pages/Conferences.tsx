@@ -205,11 +205,15 @@ export function ConferencesPage() {
           'Connect your own Zoom account separately from sign-in and calendars. Identity access and automatic meeting permissions are separate choices.',
         )}
       />
-      <p className="muted">
-        {text(
-          'Connect Zoom requests only basic account identity. Authorize Zoom meetings also requests create, read, update and delete meeting access. You choose your own connection when configuring automatic meetings.',
-        )}
-      </p>
+      {state.status === 'ready' && state.data.zoomEnabled && (
+        <p className="muted">
+          {text(
+            state.data.zoomMeetingsEnabled
+              ? 'Connect Zoom requests only basic account identity. Authorize Zoom meetings also requests create, read, update and delete meeting access. You choose your own connection when configuring automatic meetings.'
+              : 'Connect Zoom requests only basic account identity.',
+          )}
+        </p>
+      )}
       {notice && (
         <p className="alert alert-success" role="status">
           {ui(notice)}

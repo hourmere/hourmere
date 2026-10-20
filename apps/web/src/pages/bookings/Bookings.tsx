@@ -4,6 +4,7 @@ import { api, unwrap } from '../../api/client.ts'
 import { errorMessage } from '../../api/errors.ts'
 import { type Booking, loadProfile } from '../../api/resources.ts'
 import { BreakableText } from '../../components/BreakableText.tsx'
+import { EmptyState } from '../../components/EmptyState.tsx'
 import { PageHeader } from '../../components/PageHeader.tsx'
 import { PageSkeleton } from '../../components/PageSkeleton.tsx'
 import { zoned } from '../../format.ts'
@@ -181,19 +182,17 @@ function BookingList({
         )}
       </p>
       {shown.bookings.length === 0 ? (
-        <div className="empty">
-          {tab === 'upcoming' ? (
-            <>
-              <p>{t('No upcoming bookings.')}</p>
-              <p className="muted">
+        <EmptyState
+          title={tab === 'upcoming' ? t('No upcoming bookings.') : t('No past bookings yet.')}
+          action={
+            tab === 'upcoming' && (
+              <p>
                 {t('Share the links of your')} <Link to={PATHS.eventTypes}>{t('event types')}</Link>{' '}
                 {t('so people can book you.')}
               </p>
-            </>
-          ) : (
-            <p>{t('No past bookings yet.')}</p>
-          )}
-        </div>
+            )
+          }
+        />
       ) : (
         <div className="table-container">
           <table className="table table-bookings">

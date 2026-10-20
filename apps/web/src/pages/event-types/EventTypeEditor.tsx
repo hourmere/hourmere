@@ -11,7 +11,6 @@ import {
   type Profile,
   type Schedule,
 } from '../../api/resources.ts'
-import { BreakableText } from '../../components/BreakableText.tsx'
 import { ConfirmAction } from '../../components/ConfirmAction.tsx'
 import { CopyButton } from '../../components/CopyButton.tsx'
 import { ErrorSummary, Field, type FieldErrors, parseWhole } from '../../components/forms.tsx'
@@ -354,9 +353,7 @@ function EventTypeForm({
                     {t('Lowercase letters, digits and hyphens.')}{' '}
                     {previewUrl ? (
                       <span className="booking-link">
-                        <span className="mono preview">
-                          <BreakableText>{new URL(previewUrl).pathname}</BreakableText>
-                        </span>
+                        <span className="mono preview">{new URL(previewUrl).pathname}</span>
                         <CopyButton text={previewUrl} label={t('Copy link')} />
                       </span>
                     ) : (
@@ -729,13 +726,15 @@ function EventTypeForm({
           </section>
         </fieldset>
 
+        <div className="form-actions">
+          <Link to={PATHS.eventTypes} className="button">
+            {editing ? t('Back to event types') : t('Cancel')}
+          </Link>
+        </div>
         <StickyFormActions>
           <button type="submit" className="button button-primary" disabled={saving}>
             {saving ? t('Saving…') : editing ? t('Save changes') : t('Create event type')}
           </button>
-          <Link to={PATHS.eventTypes} className="button">
-            {editing ? t('Back to event types') : t('Cancel')}
-          </Link>
           <p className="form-status" role="status" tabIndex={-1} ref={statusRef}>
             {uiText(status || (dirty && editing ? 'Unsaved changes' : ''))}
           </p>

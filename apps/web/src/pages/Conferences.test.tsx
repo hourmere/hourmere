@@ -26,6 +26,51 @@ const list = (data = [account], zoomEnabled = true) => ({
 })
 const authUrl = 'https://zoom.us/oauth/authorize?state=synthetic-state'
 describe('separate conference accounts page', () => {
+  it.each([
+    ['en', false, false],
+    ['zh-CN', false, false],
+    ['en', false, true],
+    ['zh-CN', false, true],
+    ['en', true, false],
+    ['zh-CN', true, false],
+    ['en', true, true],
+    ['zh-CN', true, true],
+  ] as const)(
+    'describes only available Zoom authorization actions in %s (identity=%s, meetings=%s)',
+    async (locale, zoomEnabled, zoomMeetingsEnabled) => {
+      const user = userEvent.setup()
+      fakeApi({
+        ...signedIn,
+        'GET /api/v1/conference-connections': () =>
+          json(200, { ...list([], zoomEnabled), zoomMeetingsEnabled }),
+      })
+      renderApp('/app/conferences')
+      await screen.findByText('No Zoom accounts connected.')
+      if (locale === 'zh-CN')
+        await user.selectOptions(screen.getByLabelText('Interface language'), locale)
+      const identityText =
+        locale === 'en'
+          ? 'Connect Zoom requests only basic account identity.'
+          : '“连接 Zoom”仅请求基本账号身份。'
+      const meetingsText =
+        locale === 'en'
+          ? 'Authorize Zoom meetings also requests create, read, update and delete meeting access.'
+          : '“授权 Zoom 会议”还会请求创建、读取、更新和删除会议的权限。'
+      const content = screen.getByRole('main').textContent ?? ''
+      expect(content.includes(identityText)).toBe(zoomEnabled)
+      expect(content.includes(meetingsText)).toBe(zoomEnabled && zoomMeetingsEnabled)
+      expect(
+        screen.queryByRole('button', { name: locale === 'en' ? 'Connect Zoom' : '连接 Zoom' }) !==
+          null,
+      ).toBe(zoomEnabled)
+      expect(
+        screen.queryByRole('button', {
+          name: locale === 'en' ? 'Authorize Zoom meetings' : '授权 Zoom 会议',
+        }) !== null,
+      ).toBe(zoomEnabled && zoomMeetingsEnabled)
+    },
+  )
+
   it('keeps identity literal in both languages, preserves the mounted UI and consumes only known callback outcomes', async () => {
     const user = userEvent.setup()
     const requests = fakeApi({

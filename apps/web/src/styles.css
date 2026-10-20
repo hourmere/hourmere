@@ -856,6 +856,11 @@ input[readonly] {
   word-break: normal;
 }
 
+.code-block pre:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
 .copy {
   display: inline-flex;
   flex-wrap: wrap;
@@ -1431,14 +1436,29 @@ input[type="radio"] {
 
 /* An in-flow save bar remains reachable without covering focused controls. */
 .sticky-form-actions {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-2);
   position: sticky;
   bottom: 0;
   z-index: 5;
   margin-bottom: 0;
-  padding: var(--space-3);
+  padding: var(--space-2);
   background: var(--surface);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-small);
+}
+
+.sticky-form-actions[data-sticky="false"] {
+  position: static;
+}
+
+@media (min-width: 480px) {
+  .sticky-form-actions {
+    display: flex;
+    gap: var(--space-3);
+    padding: var(--space-3);
+  }
 }
 
 @media (max-height: 500px) {
@@ -1450,6 +1470,10 @@ input[type="radio"] {
 .form-status {
   margin: 0;
   color: var(--muted);
+}
+
+.sticky-form-actions .form-status {
+  min-width: 0;
 }
 
 .preview {
@@ -1698,6 +1722,10 @@ input[type="radio"] {
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+.card-list > .panel {
+  margin: 0;
 }
 
 .card-item {
@@ -2040,13 +2068,17 @@ input[aria-invalid="true"] {
   }
 
   .breadcrumb a,
-  .booking-link a,
   .fine-print a,
   .public-footer a,
   .public-signup a,
   .legal-links a {
     display: inline-flex;
     align-items: center;
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .booking-link a {
     min-width: 44px;
     min-height: 44px;
   }
@@ -2058,10 +2090,21 @@ input[aria-invalid="true"] {
 }
 
 /* Booking activity */
+.analytics-filters {
+  container: analytics-filters / inline-size;
+}
+
 .analytics-date-range {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
+  align-items: end;
   gap: var(--space-4);
+}
+
+@container analytics-filters (min-width: 400px) {
+  .analytics-date-range {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 .analytics-filters > .button {

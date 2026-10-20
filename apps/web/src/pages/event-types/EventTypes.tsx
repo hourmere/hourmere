@@ -7,7 +7,6 @@ import {
   loadSchedules,
   type Profile,
 } from '../../api/resources.ts'
-import { BreakableText } from '../../components/BreakableText.tsx'
 import { CopyButton } from '../../components/CopyButton.tsx'
 import { EmptyState } from '../../components/EmptyState.tsx'
 import { PageHeader } from '../../components/PageHeader.tsx'
@@ -181,7 +180,7 @@ function EventTypeTable({
                     {url ? (
                       <span className="booking-link">
                         <a href={url} target="_blank" rel="noreferrer" className="mono">
-                          <BreakableText>{new URL(url).pathname}</BreakableText>
+                          {new URL(url).pathname}
                           <span className="visually-hidden"> {t('(opens in a new tab)')}</span>
                         </a>
                         <CopyButton

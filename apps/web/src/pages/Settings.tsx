@@ -324,7 +324,8 @@ function ProfileForm({ profile, me }: { profile: Profile | null; me: Me }) {
               <span className="mono preview">
                 <BreakableText>{`/${handle || t('your-handle')}/`}</BreakableText>
               </span>
-              {t('. Lowercase letters, digits and hyphens, up to')} {PROFILE.handleMaxLength}.
+              {t('. Lowercase letters, digits and hyphens, up to')} {PROFILE.handleMaxLength}
+              {t('.')}
               {changingHandle && (
                 <strong className="warning">
                   {' '}
@@ -365,7 +366,7 @@ function ProfileForm({ profile, me }: { profile: Profile | null; me: Me }) {
           label={t('Booking language')}
           error={errors.locale}
           hint={t(
-            'Default language for your booking pages and emails. Change the interface language separately in the top bar.',
+            'Language of your own notification emails and calendar invitations. Booking pages and invitee emails use the visitor’s language. Change the interface language separately in the top bar.',
           )}
         >
           {(props) => (

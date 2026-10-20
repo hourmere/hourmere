@@ -1,8 +1,8 @@
-import { type FormEvent, useCallback, useState } from 'react'
+import { type FormEvent, useCallback, useId, useState } from 'react'
 import { api, type Schemas, unwrap } from '../api/client.ts'
 import { RequestError } from '../api/errors.ts'
 import { loadProfile } from '../api/resources.ts'
-import { ErrorSummary, Field, type FieldErrors } from '../components/forms.tsx'
+import { describedBy, ErrorSummary, Field, type FieldErrors } from '../components/forms.tsx'
 import { PageHeader } from '../components/PageHeader.tsx'
 import { PageSkeleton } from '../components/PageSkeleton.tsx'
 import { TimeZonePicker } from '../components/TimeZonePicker.tsx'
@@ -69,6 +69,7 @@ export function AnalyticsPage() {
 
 function ActivityForm({ timeZone }: { timeZone: string }) {
   const { t } = useI18n()
+  const datesHint = useId()
 
   const [filters, setFilters] = useState(() => initialActivityFilters(timeZone))
   const [draft, setDraft] = useState(filters)
@@ -106,21 +107,18 @@ function ActivityForm({ timeZone }: { timeZone: string }) {
             {(control) => (
               <input
                 {...control}
+                aria-describedby={describedBy(control['aria-describedby'], datesHint)}
                 type="date"
                 value={draft.startDate}
                 onChange={(event) => set('startDate', event.target.value)}
               />
             )}
           </Field>
-          <Field
-            id="endDate"
-            label={t('End date')}
-            hint={t('Both dates are included, up to 90 local days.')}
-            error={errors.endDate}
-          >
+          <Field id="endDate" label={t('End date')} error={errors.endDate}>
             {(control) => (
               <input
                 {...control}
+                aria-describedby={describedBy(control['aria-describedby'], datesHint)}
                 type="date"
                 value={draft.endDate}
                 onChange={(event) => set('endDate', event.target.value)}
@@ -128,6 +126,9 @@ function ActivityForm({ timeZone }: { timeZone: string }) {
             )}
           </Field>
         </div>
+        <p id={datesHint} className="hint">
+          {t('Both dates are included, up to 90 local days.')}
+        </p>
         <Field id="timeZone" label={t('Reporting time zone')} error={errors.timeZone}>
           {(control) => (
             <TimeZonePicker

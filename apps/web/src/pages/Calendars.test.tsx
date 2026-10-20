@@ -53,6 +53,45 @@ describe('the calendars page', () => {
         ?.contains(screen.getByRole('button', { name: 'Connect Google Calendar' })),
     ).toBe(true)
   })
+
+  it.each(['en', 'zh-CN'] as const)(
+    'directs an empty calendar list to the administrator when no provider is configured in %s',
+    async (locale) => {
+      const user = userEvent.setup()
+      fakeApi({ ...signedIn, ...profile(), ...list([], false, false) })
+      renderApp('/app/calendars')
+      await screen.findByText('No calendar accounts connected yet.')
+      if (locale === 'zh-CN')
+        await user.selectOptions(screen.getByLabelText('Interface language'), locale)
+      const empty = document.querySelector('.empty') as HTMLElement
+      expect(empty.textContent).toContain(
+        locale === 'en'
+          ? 'Ask your administrator to enable calendar connections.'
+          : '请联系管理员启用日历连接。',
+      )
+      expect(within(empty).queryByRole('link')).toBeNull()
+      expect(empty.textContent).not.toContain(
+        locale === 'en' ? 'Connect a calendar account to get started.' : '连接日历账号以开始使用。',
+      )
+    },
+  )
+
+  it.each([
+    [true, false],
+    [false, true],
+  ])(
+    'keeps connection guidance when Google=%s or Microsoft=%s is configured',
+    async (google, microsoft) => {
+      fakeApi({ ...signedIn, ...profile(), ...list([], google, microsoft) })
+      renderApp('/app/calendars')
+      await screen.findByText('No calendar accounts connected yet.')
+      const empty = document.querySelector('.empty') as HTMLElement
+      expect(within(empty).getByText('Connect a calendar account to get started.')).toBeDefined()
+      expect(
+        within(empty).getByRole('link', { name: 'Review calendar connection options' }),
+      ).toBeDefined()
+    },
+  )
   it('wraps account emails at address separators while preserving the visible address', async () => {
     fakeApi({ ...signedIn, ...profile(), ...list() })
     renderApp('/app/calendars')

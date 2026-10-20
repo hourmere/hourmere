@@ -78,6 +78,44 @@ const rowFor = async (name: string) =>
   (await within(await table()).findByRole('rowheader', { name: new RegExp(name) })).closest('tr')
 
 describe('the API keys page', () => {
+  it.each([
+    {
+      locale: 'en' as const,
+      name: 'Name',
+      create: 'Create key',
+      usage: 'API key usage command',
+      newKey: 'New API key test command',
+    },
+    {
+      locale: 'zh-CN' as const,
+      name: '名称',
+      create: '创建密钥',
+      usage: 'API 密钥使用命令',
+      newKey: '新 API 密钥测试命令',
+    },
+  ])('makes both scrollable command regions keyboard reachable in $locale', async (labels) => {
+    chooseLanguage(labels.locale)
+    const user = userEvent.setup()
+    keyServer()
+    renderApp('/app/api-keys')
+    const usage = await screen.findByRole('region', { name: labels.usage })
+    await user.type(screen.getByLabelText(labels.name), 'Keyboard test')
+    await user.click(screen.getByRole('button', { name: labels.create }))
+    const newKey = await screen.findByRole('region', { name: labels.newKey })
+
+    for (const command of [usage, newKey]) {
+      expect(command.tagName).toBe('PRE')
+      expect(command.getAttribute('data-layout-scroll')).toBe('horizontal')
+      expect(command.getAttribute('tabindex')).toBe('0')
+      command.focus()
+      expect(document.activeElement).toBe(command)
+      await user.tab()
+      expect(document.activeElement).toBe(command.parentElement?.querySelector('button'))
+      await user.tab({ shift: true })
+      expect(document.activeElement).toBe(command)
+    }
+  })
+
   it('distinguishes Chinese resource names, unused keys and nonexpiring keys', async () => {
     chooseLanguage('zh-CN')
     keyServer([{ ...existing, lastRequest: null }])

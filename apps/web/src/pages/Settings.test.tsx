@@ -1,4 +1,4 @@
-import { fireEvent, screen, within } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { Schemas } from '../api/client.ts'
@@ -60,7 +60,7 @@ describe('the profile settings', () => {
       bookingLanguage.getAttribute('aria-describedby') ?? '',
     )
     expect(explanation?.textContent).toBe(
-      'Default language for your booking pages and emails. Change the interface language separately in the top bar.',
+      'Language of your own notification emails and calendar invitations. Booking pages and invitee emails use the visitor’s language. Change the interface language separately in the top bar.',
     )
     await user.selectOptions(bookingLanguage, 'zh-CN')
     expect(screen.getByLabelText<HTMLSelectElement>('Interface language').value).toBe('en')
@@ -68,11 +68,49 @@ describe('the profile settings', () => {
     expect(api.to('PUT /api/v1/profile')).toHaveLength(0)
     await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
     expect(screen.getByLabelText<HTMLSelectElement>('预约语言').value).toBe('zh-CN')
-    expect(screen.getByText('预约页面和邮件的默认语言。界面语言请在顶栏单独切换。')).toBeDefined()
+    expect(explanation?.textContent).toBe(
+      '你收到的通知邮件和日历邀请所用的语言。预约页面和受邀者邮件使用访客的语言。界面语言请在顶栏单独切换。',
+    )
     await user.click(screen.getByRole('button', { name: '保存个人资料' }))
     await screen.findByText('已保存。')
     expect(api.to('PUT /api/v1/profile')[0]?.body).toMatchObject({ locale: 'zh-CN' })
   })
+
+  it('ends the Chinese handle hint with a full-width sentence mark', async () => {
+    const user = userEvent.setup()
+    profileServer(PROFILE)
+    renderApp('/app/settings')
+    const handle = await screen.findByLabelText('Handle')
+    await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+    const hint = document.getElementById(handle.getAttribute('aria-describedby') ?? '')
+    expect(hint?.textContent).toBe(
+      '你的预约链接以此开头 /ada/。使用小写字母、数字和连字符，最多 40。',
+    )
+  })
+
+  it.each([false, true])(
+    'normalizes a legacy stored locale on any explicit save (handle edited: %s)',
+    async (editHandle) => {
+      const user = userEvent.setup()
+      const requests = profileServer({ ...PROFILE, locale: 'en-GB' })
+      renderApp('/app/settings')
+      const language = await screen.findByRole<HTMLSelectElement>('combobox', {
+        name: 'Booking language',
+      })
+      expect(language.value).toBe('en')
+      expect(screen.queryByText('Unsaved changes')).toBeNull()
+      if (editHandle) await user.type(input('Handle'), '-new')
+      await user.click(screen.getByRole('button', { name: 'Save profile' }))
+      await waitFor(() => expect(requests.to('PUT /api/v1/profile')).toHaveLength(1))
+      await screen.findByText('Saved.')
+      expect(requests.to('PUT /api/v1/profile')[0]?.body).toEqual({
+        handle: editHandle ? 'ada-new' : 'ada',
+        timeZone: PROFILE.timeZone,
+        locale: 'en',
+      })
+      expect(language.value).toBe('en')
+    },
+  )
 
   it('suggests a profile to people without one, and creates it', async () => {
     const user = userEvent.setup()

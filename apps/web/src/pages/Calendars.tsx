@@ -380,12 +380,20 @@ export function CalendarsPage() {
               <EmptyState
                 title={t('No calendar accounts connected yet.')}
                 action={
-                  <a className="button" href="#calendar-connection-options">
-                    {t('Review calendar connection options')}
-                  </a>
+                  (state.data.googleEnabled || state.data.microsoftEnabled) && (
+                    <a className="button" href="#calendar-connection-options">
+                      {t('Review calendar connection options')}
+                    </a>
+                  )
                 }
               >
-                <p>{t('Connect a calendar account to get started.')}</p>
+                <p>
+                  {t(
+                    state.data.googleEnabled || state.data.microsoftEnabled
+                      ? 'Connect a calendar account to get started.'
+                      : 'Ask your administrator to enable calendar connections.',
+                  )}
+                </p>
               </EmptyState>
             )}
             {state.data.data.map((connection) => (

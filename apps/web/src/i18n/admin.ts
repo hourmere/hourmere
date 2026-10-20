@@ -1,5 +1,9 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  'API key usage command': 'API 密钥使用命令',
+  'New API key test command': '新 API 密钥测试命令',
+  'No schedules yet.': '尚无日程。',
+  'Ask your administrator to enable calendar connections.': '请联系管理员启用日历连接。',
   'Ask your administrator to enable Zoom connections.': '请联系管理员启用 Zoom 连接。',
   'Set the booking details, questions and availability for this event type.':
     '设置此活动类型的预约信息、问题和可预约时段。',
@@ -11,15 +15,15 @@ export const admin = {
   'Review meeting details and manage this booking.': '查看会议详情并管理此预约。',
   'Booking language': '预约语言',
   'Choose a supported booking language.': '请选择支持的预约语言。',
-  'Default language for your booking pages and emails. Change the interface language separately in the top bar.':
-    '预约页面和邮件的默认语言。界面语言请在顶栏单独切换。',
-  'Connect a calendar account to get started.': '连接日历账户以开始使用。',
+  'Language of your own notification emails and calendar invitations. Booking pages and invitee emails use the visitor’s language. Change the interface language separately in the top bar.':
+    '你收到的通知邮件和日历邀请所用的语言。预约页面和受邀者邮件使用访客的语言。界面语言请在顶栏单独切换。',
+  'Connect a calendar account to get started.': '连接日历账号以开始使用。',
   'Connect an AI app from its MCP settings, or use an API key.':
     '在 AI 应用的 MCP 设置中连接，或使用 API 密钥。',
   'Manage API keys': '管理 API 密钥',
   'Create your first key': '创建第一个密钥',
   'Give the key a name above, then choose Create key.': '在上方为密钥命名，然后选择“创建密钥”。',
-  'Connect a Zoom account to get started.': '连接 Zoom 账户以开始使用。',
+  'Connect a Zoom account to get started.': '连接 Zoom 账号以开始使用。',
   'Review calendar connection options': '查看日历连接选项',
   'Save schedule details and weekly hours here. Save date overrides in their section below.':
     '在此保存日程信息和每周时段。特定日期安排请在下方对应区域保存。',
@@ -45,6 +49,7 @@ export const admin = {
     '单独连接你自己的 Zoom 账号，与登录和日历互相独立。身份访问与自动创建会议权限需要分别选择。',
   'Connect Zoom requests only basic account identity. Authorize Zoom meetings also requests create, read, update and delete meeting access. You choose your own connection when configuring automatic meetings.':
     '“连接 Zoom”仅请求基本账号身份。“授权 Zoom 会议”还会请求创建、读取、更新和删除会议的权限。配置自动会议时，由你选择自己的连接。',
+  'Connect Zoom requests only basic account identity.': '“连接 Zoom”仅请求基本账号身份。',
   'Authorize Zoom meetings': '授权 Zoom 会议',
   'Meeting permissions': '会议权限',
   'Identity only': '仅身份访问',

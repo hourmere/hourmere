@@ -3,6 +3,7 @@ import { Link } from 'react-router'
 import { api, unwrap } from '../../api/client.ts'
 import { errorMessage } from '../../api/errors.ts'
 import { loadSchedules, type Schedule } from '../../api/resources.ts'
+import { EmptyState } from '../../components/EmptyState.tsx'
 import { PageHeader } from '../../components/PageHeader.tsx'
 import { PageSkeleton } from '../../components/PageSkeleton.tsx'
 import { useFlash } from '../../flash.ts'
@@ -49,16 +50,16 @@ export function AvailabilityPage() {
       )}
       {state.status === 'ready' &&
         (state.data.length === 0 ? (
-          <div className="empty">
+          <EmptyState
+            title={t('No schedules yet.')}
+            action={<Link to={PATHS.newSchedule}>{t('Set your weekly hours')}</Link>}
+          >
             <p>
               {t(
                 'You have no schedule yet, so your event types offer no times. Start with your working hours; you can change them any time.',
               )}
             </p>
-            <p>
-              <Link to={PATHS.newSchedule}>{t('Set your weekly hours')}</Link>
-            </p>
-          </div>
+          </EmptyState>
         ) : (
           <section aria-labelledby="schedules-heading">
             <h2 id="schedules-heading" className="visually-hidden">

@@ -73,10 +73,11 @@ describe.each(['en', 'zh-CN'] as const)('admin consistency in %s', (language) =>
   it('de-emphasizes inactive types and displays only copyable booking paths', async () => {
     chooseLanguage(language)
     const user = userEvent.setup()
+    const slug = `intro-${'long-slug-'.repeat(12)}call`
     fakeApi({
       ...signedIn,
       ...profile(),
-      'GET /api/v1/event-types': () => json(200, { data: [eventType({ isActive: false })] }),
+      'GET /api/v1/event-types': () => json(200, { data: [eventType({ isActive: false, slug })] }),
       'GET /api/v1/schedules': () => json(200, { data: [schedule()] }),
     })
     renderApp('/app/event-types')
@@ -85,18 +86,19 @@ describe.each(['en', 'zh-CN'] as const)('admin consistency in %s', (language) =>
     ) as HTMLElement
     expect(row.classList.contains('event-type-inactive')).toBe(true)
     const link = row.querySelector('.booking-link a') as HTMLAnchorElement
-    expect(link.textContent).toContain('/ada/intro-call')
+    expect(link.textContent).toContain(`/ada/${slug}`)
     expect(link.textContent).not.toContain(window.location.host)
-    expect(link.querySelector('wbr')).not.toBeNull()
+    // Chromium may honor <wbr> even under nowrap, defeating single-line ellipsis.
+    expect(link.querySelector('wbr')).toBeNull()
     await user.click(
       within(row).getByRole('button', {
         name: language === 'en' ? 'Copy link for Intro call' : '复制 Intro call 的链接',
       }),
     )
-    expect(await navigator.clipboard.readText()).toBe(`${window.location.origin}/ada/intro-call`)
+    expect(await navigator.clipboard.readText()).toBe(`${window.location.origin}/ada/${slug}`)
   })
 
-  it('places reschedule and cancel before attendee and answer details', async () => {
+  it('places meeting summary before actions, then attendee and answer details', async () => {
     chooseLanguage(language)
     const item = booking({ start: '2099-11-02T14:00:00Z', end: '2099-11-02T14:30:00Z' })
     fakeApi({
@@ -114,11 +116,54 @@ describe.each(['en', 'zh-CN'] as const)('admin consistency in %s', (language) =>
     })
     const people = screen.getByRole('region', { name: language === 'en' ? 'People' : '人员' })
     const answers = screen.getByRole('region', { name: language === 'en' ? 'Answers' : '回答' })
+    const when = screen.getByRole('region', { name: language === 'en' ? 'When' : '时间' })
     for (const action of [reschedule, cancel]) {
+      expect(when.compareDocumentPosition(action) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
       expect(action.compareDocumentPosition(people) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
       expect(
         action.compareDocumentPosition(answers) & Node.DOCUMENT_POSITION_FOLLOWING,
       ).toBeTruthy()
     }
+  })
+
+  it.each(['upcoming', 'past'] as const)(
+    'uses the shared empty state for %s bookings',
+    async (tab) => {
+      chooseLanguage(language)
+      fakeApi({
+        ...signedIn,
+        ...profile(),
+        'GET /api/v1/bookings': () => json(200, { data: [], nextCursor: null }),
+      })
+      renderApp(`/app/bookings?tab=${tab}`)
+      const title = await screen.findByText(
+        tab === 'upcoming'
+          ? language === 'en'
+            ? 'No upcoming bookings.'
+            : '没有即将到来的预约。'
+          : language === 'en'
+            ? 'No past bookings yet.'
+            : '尚无过去的预约。',
+      )
+      expect(title.classList.contains('empty-title')).toBe(true)
+      if (tab === 'upcoming') {
+        const action = title.closest('.empty')?.querySelector('.empty-actions a')
+        expect(action?.getAttribute('href')).toBe('/app/event-types')
+      }
+    },
+  )
+
+  it('uses the shared empty state to start a schedule', async () => {
+    chooseLanguage(language)
+    fakeApi({
+      ...signedIn,
+      'GET /api/v1/schedules': () => json(200, { data: [] }),
+    })
+    renderApp('/app/availability')
+    const title = await screen.findByText(language === 'en' ? 'No schedules yet.' : '尚无日程。')
+    expect(title.classList.contains('empty-title')).toBe(true)
+    expect(title.closest('.empty')?.querySelector('.empty-actions a')?.getAttribute('href')).toBe(
+      '/app/availability/new',
+    )
   })
 })

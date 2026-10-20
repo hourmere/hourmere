@@ -165,25 +165,6 @@ function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loa
         {ui(status)}
       </p>
 
-      {!cancelled && !started && <RescheduleBooking booking={booking} timeZone={timeZone} />}
-
-      {!cancelled && !started && (
-        <CancelBooking
-          booking={booking}
-          onCancelled={(updated) => {
-            updateBooking(updated)
-            setStatus('The booking is cancelled.')
-            statusRef.current?.focus()
-          }}
-          onAlreadyCancelled={(message) => {
-            setStatus(message)
-            statusRef.current?.focus()
-          }}
-        />
-      )}
-
-      <ConferenceNotice key={booking.id} booking={booking} host onChange={updateBooking} />
-      <CalendarCopyNotice key={`copy:${booking.id}`} booking={booking} onChange={updateBooking} />
       <section className="panel user-content" aria-labelledby="when-heading">
         <h2 id="when-heading">{t('When')}</h2>
         <p className="when">
@@ -264,6 +245,25 @@ function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loa
         </dl>
       </section>
 
+      {!cancelled && !started && <RescheduleBooking booking={booking} timeZone={timeZone} />}
+
+      {!cancelled && !started && (
+        <CancelBooking
+          booking={booking}
+          onCancelled={(updated) => {
+            updateBooking(updated)
+            setStatus('The booking is cancelled.')
+            statusRef.current?.focus()
+          }}
+          onAlreadyCancelled={(message) => {
+            setStatus(message)
+            statusRef.current?.focus()
+          }}
+        />
+      )}
+
+      <ConferenceNotice key={booking.id} booking={booking} host onChange={updateBooking} />
+      <CalendarCopyNotice key={`copy:${booking.id}`} booking={booking} onChange={updateBooking} />
       <section className="panel user-content" aria-labelledby="people-heading">
         <h2 id="people-heading">{t('People')}</h2>
         <dl className="details">

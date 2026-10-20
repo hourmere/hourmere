@@ -12,6 +12,15 @@ import { registerCatalog, translate } from './translate.ts'
 registerCatalog(admin)
 
 describe('Chinese copy and punctuation', () => {
+  it('uses the same account term for calendar and Zoom connection guidance', () => {
+    expect(translate('zh-CN', 'Connect a calendar account to get started.')).toBe(
+      '连接日历账号以开始使用。',
+    )
+    expect(translate('zh-CN', 'Connect a Zoom account to get started.')).toBe(
+      '连接 Zoom 账号以开始使用。',
+    )
+  })
+
   it('uses resource names, personal names and last-use wording in their own contexts', () => {
     expect(translate('zh-CN', 'Name')).toBe('名称')
     expect(translate('zh-CN', 'Name and time zone')).toBe('名称和时区')
