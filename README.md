@@ -102,9 +102,11 @@ background jobs; to split them after setup, run:
 ```sh
 unset COMPOSE_FILE
 ./scripts/enable-worker.sh
-docker compose config --services | grep -qx worker
+docker compose config --services | grep -qx worker ||
+  { echo "Worker service is missing; check COMPOSE_FILE before continuing."; exit 1; }
 # Bundled HTTPS only; omit this check in plain mode.
-docker compose config --services | grep -qx proxy
+docker compose config --services | grep -qx proxy ||
+  { echo "Proxy service is missing; check COMPOSE_FILE before continuing."; exit 1; }
 docker compose up -d --build --wait
 ```
 
