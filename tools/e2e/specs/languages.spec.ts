@@ -465,7 +465,7 @@ for (const selected of ['en', 'zh-CN'] as const) {
     await expect(
       page.getByRole('table', { name: /^(Daily booking activity|每日预约统计)$/ }),
     ).toBeVisible()
-    await expect(page.locator('dl.details dd').first()).toHaveText('1')
+    await expect(page.locator('dl.metric-cards dd').first()).toHaveText('1')
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
@@ -478,7 +478,7 @@ for (const selected of ['en', 'zh-CN'] as const) {
     await page.getByLabel(/^(End date|结束日期)$/).fill(today)
     await page.getByRole('button', { name: /^(Update report|更新统计)$/ }).click()
     await expect(page.getByRole('rowheader', { name: today, exact: true })).toHaveCount(1)
-    await expect(page.locator('dl.details dd').first()).toHaveText('1')
+    await expect(page.locator('dl.metric-cards dd').first()).toHaveText('1')
     await language(page, selected)
     await expect(
       page.getByRole('heading', { name: /^(Booking activity|预约统计)$/, level: 1 }),
@@ -510,7 +510,7 @@ for (const selected of ['en', 'zh-CN'] as const) {
     await expect(
       page.getByRole('table', { name: /^(Daily booking activity|每日预约统计)$/ }),
     ).toBeVisible()
-    await expect(page.locator('dl.details dd').first()).toHaveText('0')
+    await expect(page.locator('dl.metric-cards dd').first()).toHaveText('0')
   })
 }
 
