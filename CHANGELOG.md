@@ -51,6 +51,13 @@ must approve publication through the [release workflow](https://github.com/hourm
 - Docker Compose self-hosting with PostgreSQL-backed jobs, optional separate web/worker
   processes, health checks, security headers, request limits and graceful shutdown.
 
+### Deprecated
+
+- The Zoom conflict code `zoom_refresh_in_progress` is deprecated in favor of the additive
+  `errorAlias: "zoom_operation_busy"`. The original `error` code remains for all of
+  `/api/v1`; it will not be renamed or removed within v1. New clients may use a documented
+  alias when present and must retain support for the original code on older servers.
+
 ### Fixed
 
 - Booking emails now use English or Simplified Chinese for each recipient, including
@@ -83,12 +90,19 @@ must approve publication through the [release workflow](https://github.com/hourm
 - Exhausted automatic Meet polling reports `conference_pending_timeout`, distinct from
   transport/provider failures, and explains the safe host retry in both interface languages.
 
-### Deprecated
+### Security
 
-- The Zoom conflict code `zoom_refresh_in_progress` is deprecated in favor of the additive
-  `errorAlias: "zoom_operation_busy"`. The original `error` code remains for all of
-  `/api/v1`; it will not be renamed or removed within v1. New clients may use a documented
-  alias when present and must retain support for the original code on older servers.
+- Calendar, conference, sign-in and webhook credentials use separate protection domains;
+  tokens and private booking management links are excluded from public catalogs and
+  webhook snapshots. Optional provider integrations retain explicit ownership checks.
+- Public booking and invitee-link writes have bounded inputs and per-address rate limits;
+  authenticated REST APIs and MCP have bounded inputs and API-key rate limits, with
+  per-consent limits for MCP OAuth; origin checks apply to cookie-authenticated writes and
+  browser-originated MCP requests; calendar/conference provider authorization requires a
+  same-origin session and is rate limited. Session-authenticated REST requests have no
+  general rate limit. Optional embedding is disabled until exact origins are configured.
+  See [SECURITY.md](https://github.com/hourmere/hourmere/blob/main/SECURITY.md) for reporting
+  and supported-version policy.
 
 ### Upgrade notes
 
@@ -264,17 +278,3 @@ stack includes PostgreSQL 18.
   not authorize unlimited sends or replacement meetings. See
   [notification diagnostics](https://github.com/hourmere/hourmere/blob/main/docs/notifications.md#conference-outbox-delivery-budget) and
   [webhook operations](https://github.com/hourmere/hourmere/blob/main/docs/webhooks.md).
-
-### Security
-
-- Calendar, conference, sign-in and webhook credentials use separate protection domains;
-  tokens and private booking management links are excluded from public catalogs and
-  webhook snapshots. Optional provider integrations retain explicit ownership checks.
-- Public booking and invitee-link writes have bounded inputs and per-address rate limits;
-  authenticated REST APIs and MCP have bounded inputs and API-key rate limits, with
-  per-consent limits for MCP OAuth; origin checks apply to cookie-authenticated writes and
-  browser-originated MCP requests; calendar/conference provider authorization requires a
-  same-origin session and is rate limited. Session-authenticated REST requests have no
-  general rate limit. Optional embedding is disabled until exact origins are configured.
-  See [SECURITY.md](https://github.com/hourmere/hourmere/blob/main/SECURITY.md) for reporting
-  and supported-version policy.

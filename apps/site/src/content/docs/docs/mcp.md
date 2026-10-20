@@ -111,6 +111,12 @@ Use `list_bookings` to find a booking you host, then call `reschedule_booking` w
 exactly one of `bookingId` or `manageToken`; both forms share the same availability,
 notification and per-user management limits.
 
+Host booking fields include optional `rescheduledToId`: the immediate successor in the same
+organization that the caller also hosts, or null when none is available. It is returned even
+when the successor falls outside the current page or filters. Public/manage responses omit
+it. The predecessor's `status` remains `cancelled`; use `rescheduledToId` to distinguish a
+reschedule from a cancellation, and `rescheduledFromId` to trace back to its predecessor.
+
 A move creates a new booking with `rescheduledFromId` pointing to the old one. Retrying the
 old ID fails with `booking_cancelled`. If an answer is lost, inspect `list_bookings` before
 trying another move. Host moves return `manageToken: null`; the invitee's existing links

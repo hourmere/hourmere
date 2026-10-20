@@ -62,27 +62,38 @@ function isIdentifier(token: string | undefined) {
   )
 }
 
-function breaksTableCompatibility(statement: string[]) {
+function breaksSchemaCompatibility(statement: string[]) {
   if (statement[0] === 'DROP' && statement[1] === 'TABLE') return true
-  if (statement[0] !== 'ALTER' || statement[1] !== 'TABLE') return false
+  if (statement[0] !== 'ALTER') return false
+  const table = statement[1] === 'TABLE'
+  if (!table && statement[1] !== 'VIEW') return false
 
   let index = 2
   if (statement[index] === 'IF' && statement[index + 1] === 'EXISTS') index += 2
-  if (statement[index] === 'ONLY') index++
+  if (table && statement[index] === 'ONLY') index++
   if (!isIdentifier(statement[index++])) return false
   while (statement[index] === '.' && isIdentifier(statement[index + 1])) index += 2
-  if (statement[index] === '*') index++
+  if (table && statement[index] === '*') index++
 
   let depth = 0
   let actionStart = true
   for (; index < statement.length; index++) {
     const token = statement[index]
     if (actionStart) {
-      // DROP/RENAME CONSTRAINT and ALTER ... DROP DEFAULT/NOT NULL/IDENTITY/EXPRESSION
-      // preserve table and column names. Inspect only the beginning of each action.
-      if (token === 'DROP' && statement[index + 1] !== 'CONSTRAINT') return true
+      // Inspect only action beginnings, leaving defaults and constraint expressions
+      // opaque. Constraint renames and column metadata changes stay compatible.
+      if (table && token === 'DROP' && statement[index + 1] !== 'CONSTRAINT') return true
       if (token === 'RENAME' && statement[index + 1] !== 'CONSTRAINT') {
         return true
+      }
+      if (table && token === 'SET' && statement[index + 1] === 'SCHEMA') return true
+      if (table && token === 'ALTER') {
+        let type = index + 1
+        if (statement[type] === 'COLUMN') type++
+        if (isIdentifier(statement[type++])) {
+          if (statement[type] === 'SET' && statement[type + 1] === 'DATA') type += 2
+          if (statement[type] === 'TYPE') return true
+        }
       }
       actionStart = false
     }
@@ -97,11 +108,11 @@ export function requiresUpgradeNote(sql: string) {
   let statement: string[] = []
   for (const token of sqlTokens(sql)) {
     if (token === ';') {
-      if (breaksTableCompatibility(statement)) return true
+      if (breaksSchemaCompatibility(statement)) return true
       statement = []
     } else statement.push(token)
   }
-  return breaksTableCompatibility(statement)
+  return breaksSchemaCompatibility(statement)
 }
 
 export function undocumentedMigrations(directory: string) {
