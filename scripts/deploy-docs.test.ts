@@ -217,6 +217,16 @@ ${log}${fail}exec /usr/bin/install "$@"
 }
 
 describe('documented deployment operations', () => {
+  it('mirrors the calendar-reply forwarding example with its whole-mailbox settings page', () => {
+    const notifications = readFileSync(new URL('../docs/notifications.md', import.meta.url), 'utf8')
+    const example = notifications.match(
+      /For example, in \[Zoho Mail[\s\S]*?delivery failures\./,
+    )?.[0]
+    expect(example).toBeDefined()
+    expect(example).toContain('**Settings → Mail Accounts → Forwards**')
+    expect(guide.replace(/\s+/g, ' ')).toContain(example?.replace(/\s+/g, ' '))
+  })
+
   it.each(selections)(
     'persists migration and restore settings from $name backups',
     ({ file, worker: enabled }) => {

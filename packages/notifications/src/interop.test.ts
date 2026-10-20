@@ -297,7 +297,7 @@ describe.skipIf(!serverUrl)('iMIP interoperability', () => {
               : 'Accepting or declining this calendar invitation does not cancel the booking. To cancel, contact the person who booked or the host.'
             : chinese
               ? '在日历中接受或拒绝邀请不会取消预约。如需取消，请使用此邮件中的“取消”链接。'
-              : 'Accepting or declining this calendar invitation does not cancel the booking. To cancel, use the Cancel link in this email.'
+              : 'Accepting or declining this calendar invitation does not cancel the booking. To cancel, use the “Cancel” link in this email.'
         expect(message.text.includes(expected)).toBe(true)
         expect(message.html?.includes(`>${expected.replaceAll("'", '&#39;')}</p>`)).toBe(true)
         expect(message.html?.includes(`lang="${chinese ? 'zh-CN' : 'en'}"`)).toBe(true)

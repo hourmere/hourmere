@@ -2,8 +2,8 @@
 export const common = {
   'Didn’t get the email? Check spam or junk and add the sender to your contacts.':
     '没收到邮件？请检查垃圾邮件文件夹，并将发件人加入通讯录。',
-  'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use "Cancel booking" here.':
-    '在日历中接受或拒绝邀请不会取消预约。如需取消，请使用"取消预约"。',
+  'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use “Cancel booking” here.':
+    '在日历中接受或拒绝邀请不会取消预约。如需取消，请使用此处的“取消预约”。',
   'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use the booking link in your Hourmere confirmation email.':
     '在日历中接受或拒绝邀请不会取消预约。如需取消，请使用 Hourmere 确认邮件中的预约链接。',
   'Privacy policy': '隐私政策',

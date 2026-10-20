@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import './SlotPicker.css'
 import { TimeZonePicker } from '../components/TimeZonePicker.tsx'
 import { useI18n } from '../i18n/runtime.tsx'
@@ -66,6 +66,8 @@ interface SlotPickerProps {
   /** Changing it reloads the slots, e.g. after the chosen one was taken. */
   version: number
   title?: string
+  /** Supporting content read immediately after the heading, before the calendar. */
+  afterTitle?: ReactNode
   /** Focus the picker's heading when it appears (coming back to it from another step). */
   focusTitle?: boolean
   /** A message about the last attempt, shown above the calendar (e.g. the time was taken). */
@@ -93,6 +95,7 @@ export function SlotPicker({
   onSelect,
   version,
   title = 'Pick a time',
+  afterTitle,
   focusTitle = false,
   notice,
 }: SlotPickerProps) {
@@ -232,6 +235,7 @@ export function SlotPicker({
       <h2 id={headingId} className="picker-title" ref={heading} tabIndex={-1}>
         {ui(title)}
       </h2>
+      {afterTitle}
       {notice && (
         <div className="alert alert-info">
           <p role="alert">{ui(notice)}</p>
