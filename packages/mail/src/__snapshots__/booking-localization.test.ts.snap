@@ -14,9 +14,6 @@ exports[`booking email language goldens > en cancelled guest 1`] = `
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555;">Host</td><td style="padding: 2px 16px 2px 0; vertical-align: top;">Grace Hopper</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555;">Reason</td><td style="padding: 2px 16px 2px 0; vertical-align: top;">A scheduling conflict.<br>Please book another time.</td></tr>
 </table>
-
-
-
 </body>
 </html>
 ",
@@ -50,8 +47,6 @@ exports[`booking email language goldens > en cancelled host 1`] = `
 </table>
 <p style="margin: 24px 0 4px; font-weight: 600;">Answers</p>
 <p style="margin: 0 0 12px;"><span style="color: #555;">What should we discuss?</span><br>Analytical engines.<br>A short demo.</p>
-
-
 </body>
 </html>
 ",
@@ -88,9 +83,6 @@ exports[`booking email language goldens > en cancelled invitee 1`] = `
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555;">Host</td><td style="padding: 2px 16px 2px 0; vertical-align: top;">Grace Hopper</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555;">Reason</td><td style="padding: 2px 16px 2px 0; vertical-align: top;">A scheduling conflict.<br>Please book another time.</td></tr>
 </table>
-
-
-
 </body>
 </html>
 ",
@@ -120,9 +112,7 @@ exports[`booking email language goldens > en confirmed guest 1`] = `
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555;">Where</td><td style="padding: 2px 16px 2px 0; vertical-align: top;">Google Meet: <a href="https://meet.example.com/abc" style="color: #111;">https://meet.example.com/abc</a></td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555;">Host</td><td style="padding: 2px 16px 2px 0; vertical-align: top;">Grace Hopper</td></tr>
 </table>
-
-
-<p lang="en" style="margin: 24px 0 0; color: #555; font-size: 13px;">Calendar responses do not cancel this booking. To cancel, contact the booker or host.</p>
+<p lang="en" style="margin: 24px 0 0; color: #555; font-size: 13px;">Accepting or declining this calendar invitation does not cancel the booking. To cancel, contact the person who booked or the host.</p>
 </body>
 </html>
 ",
@@ -134,7 +124,7 @@ When: Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin)
 Where: Google Meet: https://meet.example.com/abc
 Host: Grace Hopper
 
-Calendar responses do not cancel this booking. To cancel, contact the booker or host.
+Accepting or declining this calendar invitation does not cancel the booking. To cancel, contact the person who booked or the host.
 ",
 }
 `;
@@ -155,8 +145,7 @@ exports[`booking email language goldens > en confirmed host 1`] = `
 </table>
 <p style="margin: 24px 0 4px; font-weight: 600;">Answers</p>
 <p style="margin: 0 0 12px;"><span style="color: #555;">What should we discuss?</span><br>Analytical engines.<br>A short demo.</p>
-
-<p lang="en" style="margin: 24px 0 0; color: #555; font-size: 13px;">Calendar declines are not synced to Hourmere yet; cancel the booking in Hourmere.</p>
+<p lang="en" style="margin: 24px 0 0; color: #555; font-size: 13px;">Declining in your calendar is not synced to Hourmere; to cancel the booking, use Hourmere.</p>
 </body>
 </html>
 ",
@@ -174,7 +163,7 @@ What should we discuss?
   Analytical engines.
   A short demo.
 
-Calendar declines are not synced to Hourmere yet; cancel the booking in Hourmere.
+Declining in your calendar is not synced to Hourmere; to cancel the booking, use Hourmere.
 ",
 }
 `;
@@ -188,7 +177,7 @@ exports[`booking email language goldens > en confirmed invitee 1`] = `
 <p style="margin: 0 0 16px;">Your meeting with Grace Hopper is booked.</p>
 <p style="margin: 24px 0 8px;">Need to make a change?</p>
 <p style="margin: 0 0 8px;"><a href="https://cal.example.com/booking#token=fixture&amp;action=reschedule" style="display: inline-block; padding: 8px 14px; margin-right: 8px; background: #111; color: #fff; text-decoration: none; border-radius: 6px;">Reschedule</a><a href="https://cal.example.com/booking#token=fixture&amp;action=cancel" style="display: inline-block; padding: 8px 14px; margin-right: 8px; background: #111; color: #fff; text-decoration: none; border-radius: 6px;">Cancel</a></p>
-<p lang="en" style="margin: 0 0 8px; color: #555; font-size: 13px;">Declining this invitation in your calendar won&#39;t cancel the booking. To cancel, use the Cancel link in this email.</p>
+<p lang="en" style="margin: 0 0 8px; color: #555; font-size: 13px;">Accepting or declining this calendar invitation does not cancel the booking. To cancel, use the Cancel link in this email.</p>
 <p style="margin: 0; color: #555; font-size: 13px;">If the buttons do not work, copy a link into your browser:<br>Reschedule: https://cal.example.com/booking#token=fixture&amp;action=reschedule<br>Cancel: https://cal.example.com/booking#token=fixture&amp;action=cancel</p>
 <table role="presentation" style="border-collapse: collapse;">
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555;">What</td><td style="padding: 2px 16px 2px 0; vertical-align: top;">Intro call</td></tr>
@@ -196,9 +185,6 @@ exports[`booking email language goldens > en confirmed invitee 1`] = `
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555;">Where</td><td style="padding: 2px 16px 2px 0; vertical-align: top;">Google Meet: <a href="https://meet.example.com/abc" style="color: #111;">https://meet.example.com/abc</a></td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555;">Host</td><td style="padding: 2px 16px 2px 0; vertical-align: top;">Grace Hopper</td></tr>
 </table>
-
-
-
 </body>
 </html>
 ",
@@ -208,7 +194,7 @@ exports[`booking email language goldens > en confirmed invitee 1`] = `
 Need to make a change?
 Reschedule: https://cal.example.com/booking#token=fixture&action=reschedule
 Cancel: https://cal.example.com/booking#token=fixture&action=cancel
-Declining this invitation in your calendar won't cancel the booking. To cancel, use the Cancel link in this email.
+Accepting or declining this calendar invitation does not cancel the booking. To cancel, use the Cancel link in this email.
 
 What: Intro call
 When: Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin)
@@ -232,9 +218,7 @@ exports[`booking email language goldens > en rescheduled guest 1`] = `
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555;">Where</td><td style="padding: 2px 16px 2px 0; vertical-align: top;">Google Meet: <a href="https://meet.example.com/abc" style="color: #111;">https://meet.example.com/abc</a></td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555;">Host</td><td style="padding: 2px 16px 2px 0; vertical-align: top;">Grace Hopper</td></tr>
 </table>
-
-
-<p lang="en" style="margin: 24px 0 0; color: #555; font-size: 13px;">Calendar responses do not cancel this booking. To cancel, contact the booker or host.</p>
+<p lang="en" style="margin: 24px 0 0; color: #555; font-size: 13px;">Accepting or declining this calendar invitation does not cancel the booking. To cancel, contact the person who booked or the host.</p>
 </body>
 </html>
 ",
@@ -247,7 +231,7 @@ Was: Monday, October 19, 2026, 10:00 AM – 10:30 AM (Europe/Berlin)
 Where: Google Meet: https://meet.example.com/abc
 Host: Grace Hopper
 
-Calendar responses do not cancel this booking. To cancel, contact the booker or host.
+Accepting or declining this calendar invitation does not cancel the booking. To cancel, contact the person who booked or the host.
 ",
 }
 `;
@@ -269,8 +253,7 @@ exports[`booking email language goldens > en rescheduled host 1`] = `
 </table>
 <p style="margin: 24px 0 4px; font-weight: 600;">Answers</p>
 <p style="margin: 0 0 12px;"><span style="color: #555;">What should we discuss?</span><br>Analytical engines.<br>A short demo.</p>
-
-<p lang="en" style="margin: 24px 0 0; color: #555; font-size: 13px;">Calendar declines are not synced to Hourmere yet; cancel the booking in Hourmere.</p>
+<p lang="en" style="margin: 24px 0 0; color: #555; font-size: 13px;">Declining in your calendar is not synced to Hourmere; to cancel the booking, use Hourmere.</p>
 </body>
 </html>
 ",
@@ -289,7 +272,7 @@ What should we discuss?
   Analytical engines.
   A short demo.
 
-Calendar declines are not synced to Hourmere yet; cancel the booking in Hourmere.
+Declining in your calendar is not synced to Hourmere; to cancel the booking, use Hourmere.
 ",
 }
 `;
@@ -303,7 +286,7 @@ exports[`booking email language goldens > en rescheduled invitee 1`] = `
 <p style="margin: 0 0 16px;">Your meeting with Grace Hopper has moved to a new time.</p>
 <p style="margin: 24px 0 8px;">Need to make a change?</p>
 <p style="margin: 0 0 8px;"><a href="https://cal.example.com/booking#token=fixture&amp;action=reschedule" style="display: inline-block; padding: 8px 14px; margin-right: 8px; background: #111; color: #fff; text-decoration: none; border-radius: 6px;">Reschedule</a><a href="https://cal.example.com/booking#token=fixture&amp;action=cancel" style="display: inline-block; padding: 8px 14px; margin-right: 8px; background: #111; color: #fff; text-decoration: none; border-radius: 6px;">Cancel</a></p>
-<p lang="en" style="margin: 0 0 8px; color: #555; font-size: 13px;">Declining this invitation in your calendar won&#39;t cancel the booking. To cancel, use the Cancel link in this email.</p>
+<p lang="en" style="margin: 0 0 8px; color: #555; font-size: 13px;">Accepting or declining this calendar invitation does not cancel the booking. To cancel, use the Cancel link in this email.</p>
 <p style="margin: 0; color: #555; font-size: 13px;">If the buttons do not work, copy a link into your browser:<br>Reschedule: https://cal.example.com/booking#token=fixture&amp;action=reschedule<br>Cancel: https://cal.example.com/booking#token=fixture&amp;action=cancel</p>
 <table role="presentation" style="border-collapse: collapse;">
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555;">What</td><td style="padding: 2px 16px 2px 0; vertical-align: top;">Intro call</td></tr>
@@ -312,9 +295,6 @@ exports[`booking email language goldens > en rescheduled invitee 1`] = `
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555;">Where</td><td style="padding: 2px 16px 2px 0; vertical-align: top;">Google Meet: <a href="https://meet.example.com/abc" style="color: #111;">https://meet.example.com/abc</a></td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555;">Host</td><td style="padding: 2px 16px 2px 0; vertical-align: top;">Grace Hopper</td></tr>
 </table>
-
-
-
 </body>
 </html>
 ",
@@ -324,7 +304,7 @@ exports[`booking email language goldens > en rescheduled invitee 1`] = `
 Need to make a change?
 Reschedule: https://cal.example.com/booking#token=fixture&action=reschedule
 Cancel: https://cal.example.com/booking#token=fixture&action=cancel
-Declining this invitation in your calendar won't cancel the booking. To cancel, use the Cancel link in this email.
+Accepting or declining this calendar invitation does not cancel the booking. To cancel, use the Cancel link in this email.
 
 What: Intro call
 When: Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin)
@@ -349,9 +329,6 @@ exports[`booking email language goldens > zh-CN cancelled guest 1`] = `
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555;">主持人</td><td style="padding: 2px 16px 2px 0; vertical-align: top;">Grace Hopper</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555;">原因</td><td style="padding: 2px 16px 2px 0; vertical-align: top;">A scheduling conflict.<br>Please book another time.</td></tr>
 </table>
-
-
-
 </body>
 </html>
 ",
@@ -385,8 +362,6 @@ exports[`booking email language goldens > zh-CN cancelled host 1`] = `
 </table>
 <p style="margin: 24px 0 4px; font-weight: 600;">回答</p>
 <p style="margin: 0 0 12px;"><span style="color: #555;">What should we discuss?</span><br>Analytical engines.<br>A short demo.</p>
-
-
 </body>
 </html>
 ",
@@ -423,9 +398,6 @@ exports[`booking email language goldens > zh-CN cancelled invitee 1`] = `
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555;">主持人</td><td style="padding: 2px 16px 2px 0; vertical-align: top;">Grace Hopper</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555;">原因</td><td style="padding: 2px 16px 2px 0; vertical-align: top;">A scheduling conflict.<br>Please book another time.</td></tr>
 </table>
-
-
-
 </body>
 </html>
 ",
@@ -455,9 +427,7 @@ exports[`booking email language goldens > zh-CN confirmed guest 1`] = `
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555;">地点</td><td style="padding: 2px 16px 2px 0; vertical-align: top;">Google Meet：<a href="https://meet.example.com/abc" style="color: #111;">https://meet.example.com/abc</a></td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555;">主持人</td><td style="padding: 2px 16px 2px 0; vertical-align: top;">Grace Hopper</td></tr>
 </table>
-
-
-<p lang="zh-CN" style="margin: 24px 0 0; color: #555; font-size: 13px;">日历回应不会取消此预约。如需取消，请联系预约人或主持人。</p>
+<p lang="zh-CN" style="margin: 24px 0 0; color: #555; font-size: 13px;">在日历中接受或拒绝邀请不会取消预约。如需取消，请联系预约人或主持人。</p>
 </body>
 </html>
 ",
@@ -469,7 +439,7 @@ exports[`booking email language goldens > zh-CN confirmed guest 1`] = `
 地点：Google Meet：https://meet.example.com/abc
 主持人：Grace Hopper
 
-日历回应不会取消此预约。如需取消，请联系预约人或主持人。
+在日历中接受或拒绝邀请不会取消预约。如需取消，请联系预约人或主持人。
 ",
 }
 `;
@@ -490,8 +460,7 @@ exports[`booking email language goldens > zh-CN confirmed host 1`] = `
 </table>
 <p style="margin: 24px 0 4px; font-weight: 600;">回答</p>
 <p style="margin: 0 0 12px;"><span style="color: #555;">What should we discuss?</span><br>Analytical engines.<br>A short demo.</p>
-
-<p lang="zh-CN" style="margin: 24px 0 0; color: #555; font-size: 13px;">日历中的拒绝尚未同步到 Hourmere；如需取消，请在 Hourmere 中操作。</p>
+<p lang="zh-CN" style="margin: 24px 0 0; color: #555; font-size: 13px;">在日历中拒绝邀请不会同步到 Hourmere；如需取消预约，请在 Hourmere 中操作。</p>
 </body>
 </html>
 ",
@@ -509,7 +478,7 @@ What should we discuss?
   Analytical engines.
   A short demo.
 
-日历中的拒绝尚未同步到 Hourmere；如需取消，请在 Hourmere 中操作。
+在日历中拒绝邀请不会同步到 Hourmere；如需取消预约，请在 Hourmere 中操作。
 ",
 }
 `;
@@ -523,7 +492,7 @@ exports[`booking email language goldens > zh-CN confirmed invitee 1`] = `
 <p style="margin: 0 0 16px;">你与 Grace Hopper 的会议已预约。</p>
 <p style="margin: 24px 0 8px;">需要更改预约吗？</p>
 <p style="margin: 0 0 8px;"><a href="https://cal.example.com/booking#token=fixture&amp;action=reschedule" style="display: inline-block; padding: 8px 14px; margin-right: 8px; background: #111; color: #fff; text-decoration: none; border-radius: 6px;">改期</a><a href="https://cal.example.com/booking#token=fixture&amp;action=cancel" style="display: inline-block; padding: 8px 14px; margin-right: 8px; background: #111; color: #fff; text-decoration: none; border-radius: 6px;">取消</a></p>
-<p lang="zh-CN" style="margin: 0 0 8px; color: #555; font-size: 13px;">在日历中拒绝此邀请不会取消预约。如需取消，请使用此邮件中的“取消”链接。</p>
+<p lang="zh-CN" style="margin: 0 0 8px; color: #555; font-size: 13px;">在日历中接受或拒绝邀请不会取消预约。如需取消，请使用此邮件中的“取消”链接。</p>
 <p style="margin: 0; color: #555; font-size: 13px;">如果按钮无法使用，请将链接复制到浏览器中：<br>改期：https://cal.example.com/booking#token=fixture&amp;action=reschedule<br>取消：https://cal.example.com/booking#token=fixture&amp;action=cancel</p>
 <table role="presentation" style="border-collapse: collapse;">
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555;">活动</td><td style="padding: 2px 16px 2px 0; vertical-align: top;">Intro call</td></tr>
@@ -531,9 +500,6 @@ exports[`booking email language goldens > zh-CN confirmed invitee 1`] = `
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555;">地点</td><td style="padding: 2px 16px 2px 0; vertical-align: top;">Google Meet：<a href="https://meet.example.com/abc" style="color: #111;">https://meet.example.com/abc</a></td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555;">主持人</td><td style="padding: 2px 16px 2px 0; vertical-align: top;">Grace Hopper</td></tr>
 </table>
-
-
-
 </body>
 </html>
 ",
@@ -543,7 +509,7 @@ exports[`booking email language goldens > zh-CN confirmed invitee 1`] = `
 需要更改预约吗？
 改期：https://cal.example.com/booking#token=fixture&action=reschedule
 取消：https://cal.example.com/booking#token=fixture&action=cancel
-在日历中拒绝此邀请不会取消预约。如需取消，请使用此邮件中的“取消”链接。
+在日历中接受或拒绝邀请不会取消预约。如需取消，请使用此邮件中的“取消”链接。
 
 活动：Intro call
 时间：2026年10月20日星期二，10:00 至 10:30（Europe/Berlin）
@@ -567,9 +533,7 @@ exports[`booking email language goldens > zh-CN rescheduled guest 1`] = `
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555;">地点</td><td style="padding: 2px 16px 2px 0; vertical-align: top;">Google Meet：<a href="https://meet.example.com/abc" style="color: #111;">https://meet.example.com/abc</a></td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555;">主持人</td><td style="padding: 2px 16px 2px 0; vertical-align: top;">Grace Hopper</td></tr>
 </table>
-
-
-<p lang="zh-CN" style="margin: 24px 0 0; color: #555; font-size: 13px;">日历回应不会取消此预约。如需取消，请联系预约人或主持人。</p>
+<p lang="zh-CN" style="margin: 24px 0 0; color: #555; font-size: 13px;">在日历中接受或拒绝邀请不会取消预约。如需取消，请联系预约人或主持人。</p>
 </body>
 </html>
 ",
@@ -582,7 +546,7 @@ exports[`booking email language goldens > zh-CN rescheduled guest 1`] = `
 地点：Google Meet：https://meet.example.com/abc
 主持人：Grace Hopper
 
-日历回应不会取消此预约。如需取消，请联系预约人或主持人。
+在日历中接受或拒绝邀请不会取消预约。如需取消，请联系预约人或主持人。
 ",
 }
 `;
@@ -604,8 +568,7 @@ exports[`booking email language goldens > zh-CN rescheduled host 1`] = `
 </table>
 <p style="margin: 24px 0 4px; font-weight: 600;">回答</p>
 <p style="margin: 0 0 12px;"><span style="color: #555;">What should we discuss?</span><br>Analytical engines.<br>A short demo.</p>
-
-<p lang="zh-CN" style="margin: 24px 0 0; color: #555; font-size: 13px;">日历中的拒绝尚未同步到 Hourmere；如需取消，请在 Hourmere 中操作。</p>
+<p lang="zh-CN" style="margin: 24px 0 0; color: #555; font-size: 13px;">在日历中拒绝邀请不会同步到 Hourmere；如需取消预约，请在 Hourmere 中操作。</p>
 </body>
 </html>
 ",
@@ -624,7 +587,7 @@ What should we discuss?
   Analytical engines.
   A short demo.
 
-日历中的拒绝尚未同步到 Hourmere；如需取消，请在 Hourmere 中操作。
+在日历中拒绝邀请不会同步到 Hourmere；如需取消预约，请在 Hourmere 中操作。
 ",
 }
 `;
@@ -638,7 +601,7 @@ exports[`booking email language goldens > zh-CN rescheduled invitee 1`] = `
 <p style="margin: 0 0 16px;">你与 Grace Hopper 的会议已改期。</p>
 <p style="margin: 24px 0 8px;">需要更改预约吗？</p>
 <p style="margin: 0 0 8px;"><a href="https://cal.example.com/booking#token=fixture&amp;action=reschedule" style="display: inline-block; padding: 8px 14px; margin-right: 8px; background: #111; color: #fff; text-decoration: none; border-radius: 6px;">改期</a><a href="https://cal.example.com/booking#token=fixture&amp;action=cancel" style="display: inline-block; padding: 8px 14px; margin-right: 8px; background: #111; color: #fff; text-decoration: none; border-radius: 6px;">取消</a></p>
-<p lang="zh-CN" style="margin: 0 0 8px; color: #555; font-size: 13px;">在日历中拒绝此邀请不会取消预约。如需取消，请使用此邮件中的“取消”链接。</p>
+<p lang="zh-CN" style="margin: 0 0 8px; color: #555; font-size: 13px;">在日历中接受或拒绝邀请不会取消预约。如需取消，请使用此邮件中的“取消”链接。</p>
 <p style="margin: 0; color: #555; font-size: 13px;">如果按钮无法使用，请将链接复制到浏览器中：<br>改期：https://cal.example.com/booking#token=fixture&amp;action=reschedule<br>取消：https://cal.example.com/booking#token=fixture&amp;action=cancel</p>
 <table role="presentation" style="border-collapse: collapse;">
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555;">活动</td><td style="padding: 2px 16px 2px 0; vertical-align: top;">Intro call</td></tr>
@@ -647,9 +610,6 @@ exports[`booking email language goldens > zh-CN rescheduled invitee 1`] = `
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555;">地点</td><td style="padding: 2px 16px 2px 0; vertical-align: top;">Google Meet：<a href="https://meet.example.com/abc" style="color: #111;">https://meet.example.com/abc</a></td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555;">主持人</td><td style="padding: 2px 16px 2px 0; vertical-align: top;">Grace Hopper</td></tr>
 </table>
-
-
-
 </body>
 </html>
 ",
@@ -659,7 +619,7 @@ exports[`booking email language goldens > zh-CN rescheduled invitee 1`] = `
 需要更改预约吗？
 改期：https://cal.example.com/booking#token=fixture&action=reschedule
 取消：https://cal.example.com/booking#token=fixture&action=cancel
-在日历中拒绝此邀请不会取消预约。如需取消，请使用此邮件中的“取消”链接。
+在日历中接受或拒绝邀请不会取消预约。如需取消，请使用此邮件中的“取消”链接。
 
 活动：Intro call
 时间：2026年10月20日星期二，10:00 至 10:30（Europe/Berlin）

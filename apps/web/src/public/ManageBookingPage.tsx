@@ -102,10 +102,12 @@ function CalendarResponseNote({ onCancel }: { onCancel?: () => void }) {
   return (
     <>
       <p className="muted">
-        {t('Booking confirmed. Calendar responses do not cancel it. Use Cancel booking here.')}
+        {t(
+          'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use "Cancel booking" here.',
+        )}
       </p>
       {onCancel && (
-        <button type="button" className="button button-small" onClick={onCancel}>
+        <button type="button" className="button button-small calendar-cancel" onClick={onCancel}>
           {t('Cancel booking')}
         </button>
       )}
@@ -371,22 +373,24 @@ function ManageView({
               {t('Keep the current time')}
             </button>
           </div>
-          <CalendarResponseNote onCancel={() => setMode({ kind: 'cancel' })} />
-          <SlotPicker
-            load={loadSlots}
-            durationMinutes={durationMinutes}
-            timeZone={timeZone}
-            onTimeZoneChange={setTimeZone}
-            locale={locale}
-            now={now}
-            selected={null}
-            excludeStart={booking.start}
-            onSelect={(slot) => setMode({ kind: 'confirm-reschedule', slot })}
-            version={version}
-            title={t('Pick a new time')}
-            focusTitle
-            notice={mode.notice}
-          />
+          <div className="stack">
+            <CalendarResponseNote onCancel={() => setMode({ kind: 'cancel' })} />
+            <SlotPicker
+              load={loadSlots}
+              durationMinutes={durationMinutes}
+              timeZone={timeZone}
+              onTimeZoneChange={setTimeZone}
+              locale={locale}
+              now={now}
+              selected={null}
+              excludeStart={booking.start}
+              onSelect={(slot) => setMode({ kind: 'confirm-reschedule', slot })}
+              version={version}
+              title={t('Pick a new time')}
+              focusTitle
+              notice={mode.notice}
+            />
+          </div>
         </div>
       ) : (
         <div className="card public-card manage">
@@ -424,13 +428,6 @@ function ManageView({
               </div>
             </>
           )}
-          {mode.kind !== 'view' && changeable && (
-            <CalendarResponseNote
-              {...(mode.kind === 'confirm-reschedule'
-                ? { onCancel: () => setMode({ kind: 'cancel' }) }
-                : {})}
-            />
-          )}
           {mode.kind === 'cancel' && (
             <CancelForm
               title={title}
@@ -466,6 +463,7 @@ function ManageView({
               current={booking}
               timeZone={timeZone}
               locale={locale}
+              onCancel={() => setMode({ kind: 'cancel' })}
               onBack={() => setMode({ kind: 'reschedule' })}
               onConfirm={async () => {
                 const { slot } = mode
@@ -624,6 +622,7 @@ function CancelForm({
   return (
     <form className="stack" onSubmit={submit} noValidate>
       <FocusHeading>{t('Cancel this booking?')}</FocusHeading>
+      <CalendarResponseNote />
       <p>
         {title}, {when}
       </p>
@@ -667,6 +666,7 @@ function ConfirmReschedule({
   current,
   timeZone,
   locale,
+  onCancel,
   onBack,
   onConfirm,
 }: {
@@ -674,6 +674,7 @@ function ConfirmReschedule({
   current: ManagedBooking
   timeZone: string
   locale: string
+  onCancel: () => void
   onBack: () => void
   onConfirm: () => Promise<UiText | null>
 }) {
@@ -687,6 +688,7 @@ function ConfirmReschedule({
   return (
     <div className="stack">
       <FocusHeading>{t('Move your booking?')}</FocusHeading>
+      <CalendarResponseNote onCancel={onCancel} />
       <DetailList
         items={[
           [

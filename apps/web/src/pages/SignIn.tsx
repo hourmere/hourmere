@@ -191,7 +191,7 @@ function SignInForm({ next, expired }: { next: string; expired: boolean }) {
             className="button button-block"
             onClick={() => setPhase({ kind: 'form', error: null })}
           >
-            {t('Use a different email')}
+            {t('Use a different email or try again')}
           </button>
           <LegalLinks {...(instance.status === 'ready' ? instance.data : {})} />
         </div>

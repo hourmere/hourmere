@@ -708,7 +708,12 @@ async function deliverBookingNotification(
       calendarOrganizer = { name: pinned.ical_organizer_name, email: pinned.ical_organizer_email }
   }
   calendarOrganizer ??= organizer
-  const invitation = (other: string, language: InterfaceLanguage, hostId?: string) =>
+  const invitation = (
+    other: string,
+    language: InterfaceLanguage,
+    role: 'invitee' | 'host' | 'guest',
+    hostId?: string,
+  ) =>
     kind === 'reminder' ||
     kind === 'conference_failed' ||
     !calendarOrganizer ||
@@ -737,7 +742,7 @@ async function deliverBookingNotification(
                     })
                   : `Booked with ${calendarOrganizer.name} using Hourmere.`
                 : undefined,
-              kind !== 'cancelled' ? calendarResponseDescription(language) : undefined,
+              kind !== 'cancelled' ? calendarResponseDescription(role, language) : undefined,
             ]
               .filter(Boolean)
               .join('\n\n') || undefined,
@@ -795,6 +800,7 @@ async function deliverBookingNotification(
           attachment: invitation(
             meeting.hostName,
             bookingLanguage,
+            attendee === invitee ? 'invitee' : 'guest',
             hosts.find((h) => h.email.toLowerCase() === attendee.email.toLowerCase())?.id,
           ),
         },
@@ -822,7 +828,14 @@ async function deliverBookingNotification(
               interfaceLanguage(host.locale) ?? 'en',
             ),
           },
-          { attachment: invitation(invitee.name, interfaceLanguage(host.locale) ?? 'en', host.id) },
+          {
+            attachment: invitation(
+              invitee.name,
+              interfaceLanguage(host.locale) ?? 'en',
+              'host',
+              host.id,
+            ),
+          },
         ),
     })),
     toAttendee(invitee),

@@ -322,8 +322,10 @@ primary host's name as CN. Hosts also appear as attendees; duplicate addresses a
 including when the booker is a host or the sending mailbox is the host's own address.
 Invitee/guest summaries name the host; host summaries name the invitee. Every recipient gets
 a neutral DESCRIPTION naming the host and Hourmere. REQUEST descriptions also explain that
-calendar responses do not cancel the booking and refer to the original email's cancellation
-link, in the recipient's language. That explanation contains no URL or secret.
+accepting or declining the calendar invitation does not cancel the booking, in the recipient's
+language. Invitees are directed to the confirmation email's cancellation link, hosts to open
+the booking in Hourmere, and guests to contact the person who booked or the host. That
+explanation contains no URL or secret.
 No booking answers, private management links or tokens enter calendar data.
 
 Avoid a Gmail or Google Workspace address, or any other address registered as a Google
@@ -417,7 +419,9 @@ replies to that host:
 For example, in [Zoho Mail's filter-based forwarding settings](https://www.zoho.com/mail/help/email-forwarding.html),
 open **Settings → Filters → New Filter**, set the tested conditions and select **Forward to**
 with the verified host address. Save the filter and keep the original message. For dedicated
-whole-mailbox forwarding, leave **Delete original email copy after forwarding** unchecked.
+whole-mailbox forwarding, open **Settings → Mail Accounts → Forwards** and leave
+**Delete original email copy after forwarding** unchecked; this setting belongs to the
+whole-mailbox forwarding page.
 Monitor forwarding health; Zoho can disable forwarding after repeated delivery failures.
 
 This is a fixed single-host workaround. Shared multi-host instances need the booking's UID

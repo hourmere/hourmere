@@ -92,14 +92,15 @@ describe('booking email language goldens', () => {
 const calendarGuidance = {
   en: {
     invitee:
-      "Declining this invitation in your calendar won't cancel the booking. To cancel, use the Cancel link in this email.",
-    host: 'Calendar declines are not synced to Hourmere yet; cancel the booking in Hourmere.',
-    guest: 'Calendar responses do not cancel this booking. To cancel, contact the booker or host.',
+      'Accepting or declining this calendar invitation does not cancel the booking. To cancel, use the Cancel link in this email.',
+    host: 'Declining in your calendar is not synced to Hourmere; to cancel the booking, use Hourmere.',
+    guest:
+      'Accepting or declining this calendar invitation does not cancel the booking. To cancel, contact the person who booked or the host.',
   },
   'zh-CN': {
-    invitee: '在日历中拒绝此邀请不会取消预约。如需取消，请使用此邮件中的“取消”链接。',
-    host: '日历中的拒绝尚未同步到 Hourmere；如需取消，请在 Hourmere 中操作。',
-    guest: '日历回应不会取消此预约。如需取消，请联系预约人或主持人。',
+    invitee: '在日历中接受或拒绝邀请不会取消预约。如需取消，请使用此邮件中的“取消”链接。',
+    host: '在日历中拒绝邀请不会同步到 Hourmere；如需取消预约，请在 Hourmere 中操作。',
+    guest: '在日历中接受或拒绝邀请不会取消预约。如需取消，请联系预约人或主持人。',
   },
 }
 
@@ -153,6 +154,22 @@ describe('calendar-response guidance', () => {
       const message = bookingEmail('confirmed', meeting, recipients.invitee, { attachment })
       expect(message.text).not.toContain(calendarGuidance.en.invitee)
       expect(message.html).not.toContain(calendarGuidance.en.invitee)
+    }
+  })
+
+  it('leaves no blank template placeholder lines before the invitee email body closes', () => {
+    for (const locale of languages) {
+      for (const kind of [...kinds, 'reminder', 'conference_failed'] as const) {
+        for (const attachment of [undefined, invitation('REQUEST'), invitation('CANCEL')]) {
+          const message = bookingEmail(
+            kind,
+            meeting,
+            { ...recipients.invitee, locale },
+            { attachment },
+          )
+          expect(message.html).not.toMatch(/\n[\t ]*\n(?=<\/body>)/)
+        }
+      }
     }
   })
 })

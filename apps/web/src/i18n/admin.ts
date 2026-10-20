@@ -630,7 +630,7 @@ export const admin = {
   'Up to {0} characters on one line.': '最多 {0} 个字符，限单行。',
   Upcoming: '即将到来',
   'Upcoming bookings': '即将到来的预约',
-  'Use a different email': '使用其他邮箱',
+  'Use a different email or try again': '使用其他邮箱或重试',
   'Use a link of at most {0} characters.': '链接最多 {0} 个字符。',
   'Use a link without spaces or control characters.': '链接不能包含空格或控制字符。',
   'Use at most 1000 characters, without control characters other than tabs and line breaks.':

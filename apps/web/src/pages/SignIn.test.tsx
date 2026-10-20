@@ -53,6 +53,7 @@ describe('the sign-in page', () => {
     expect(
       screen.getByText('没收到邮件？请检查垃圾邮件文件夹，并将发件人加入通讯录。'),
     ).toBeDefined()
+    expect(screen.getByRole('button', { name: '使用其他邮箱或重试' })).toBeDefined()
     await userEvent.selectOptions(screen.getByLabelText('界面语言'), 'en')
     expect(api.to('POST /api/auth/sign-in/magic-link').map((c) => c.body)).toEqual([
       {
@@ -62,7 +63,9 @@ describe('the sign-in page', () => {
       },
     ])
 
-    await userEvent.click(screen.getByRole('button', { name: 'Use a different email' }))
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Use a different email or try again' }),
+    )
     expect(await heading()).toBeDefined()
   })
 

@@ -355,6 +355,7 @@ function Confirmation({
   }, [embedded])
   const { booking: initialBooking, manageToken, replayed, timeZone } = confirmed
   const [booking, setBooking] = useState(initialBooking)
+  const canCancel = booking.status === 'confirmed' && Date.parse(booking.start) > currentTime()
   const invitee = booking.attendees.find((a) => a.isBooker)
   const guests = booking.attendees.filter((a) => !a.isBooker)
   const hostName =
@@ -423,51 +424,56 @@ function Confirmation({
           manageToken={manageToken}
           onChange={setBooking}
         />
-        {booking.status === 'confirmed' &&
-          (!booking.conference || booking.conference.status === 'ready') && (
-            <AddToCalendar
-              event={{
-                id: booking.id,
-                title,
-                start: Date.parse(booking.start),
-                end: Date.parse(booking.end),
-                description: event.description ?? undefined,
-                location: locationText(booking.location, ui),
-              }}
-            />
-          )}
-        {booking.status === 'confirmed' && Date.parse(booking.start) > currentTime() && (
-          <div className="alert alert-info">
-            <p>
-              {t(
-                manageToken
-                  ? 'Booking confirmed. Calendar responses do not cancel it. Use Cancel booking here.'
-                  : 'Booking confirmed. Calendar responses do not cancel it. To cancel, use the booking link in your Hourmere email.',
-              )}
-            </p>
-            {manageToken && (
-              <Link
-                className="button button-small"
-                to={`/booking#token=${encodeURIComponent(manageToken)}&action=cancel`}
-                target={embedded ? '_blank' : undefined}
-                rel={embedded ? 'noopener noreferrer' : undefined}
-              >
-                {t('Cancel booking')}
-              </Link>
+        <div className="stack">
+          {booking.status === 'confirmed' &&
+            (!booking.conference || booking.conference.status === 'ready') && (
+              <AddToCalendar
+                event={{
+                  id: booking.id,
+                  title,
+                  start: Date.parse(booking.start),
+                  end: Date.parse(booking.end),
+                  description: event.description ?? undefined,
+                  location: locationText(booking.location, ui),
+                }}
+              />
             )}
-          </div>
-        )}
-        {manageToken ? (
-          <ManageLink token={manageToken} intro={t('Use this link to reschedule or cancel.')} />
-        ) : replayed ? (
-          <div className="alert alert-info">
-            <p>
-              {t(
-                'This booking was already made by an earlier attempt, so its link to change or cancel can’t be shown again. Use the link in your confirmation email instead.',
+          {(canCancel || (!manageToken && replayed)) && (
+            <div className="alert alert-info">
+              {!manageToken && replayed && (
+                <p>
+                  {t(
+                    canCancel
+                      ? 'This booking was already made by an earlier attempt, so its link can’t be shown again.'
+                      : 'This booking was already made by an earlier attempt, so its link to change or cancel can’t be shown again. Use the link in your confirmation email instead.',
+                  )}
+                </p>
               )}
-            </p>
-          </div>
-        ) : null}
+              {canCancel && (
+                <p>
+                  {t(
+                    manageToken
+                      ? 'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use "Cancel booking" here.'
+                      : 'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use the booking link in your Hourmere confirmation email.',
+                  )}
+                </p>
+              )}
+              {manageToken && (
+                <Link
+                  className="button button-small"
+                  to={`/booking#token=${encodeURIComponent(manageToken)}&action=cancel`}
+                  target={embedded ? '_blank' : undefined}
+                  rel={embedded ? 'noopener noreferrer' : undefined}
+                >
+                  {t('Cancel booking')}
+                </Link>
+              )}
+            </div>
+          )}
+        </div>
+        {manageToken && (
+          <ManageLink token={manageToken} intro={t('Use this link to reschedule or cancel.')} />
+        )}
         <CreateBookingLink />
       </div>
     </PublicLayout>

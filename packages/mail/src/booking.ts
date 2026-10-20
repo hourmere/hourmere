@@ -258,6 +258,9 @@ function render(to: string, c: Content, attachment?: MailAttachment): MailMessag
 <p style="margin: 0 0 8px;"><a href="${escapeHtml(c.manageLinks.reschedule)}" style="${button}">${t('Reschedule')}</a><a href="${escapeHtml(c.manageLinks.cancel)}" style="${button}">${t('Cancel')}</a></p>
 ${invitationActions ? `${footer}\n` : ''}<p style="margin: 0; color: #555; font-size: 13px;">${t('If the buttons do not work, copy a link into your browser:')}<br>${escapeHtml(textField(t('Reschedule'), c.manageLinks.reschedule, c.language))}<br>${escapeHtml(textField(t('Cancel'), c.manageLinks.cancel, c.language))}</p>`
     : ''
+  const afterDetails = [answers, ...(invitationActions ? [] : [links, footer])]
+    .filter(Boolean)
+    .join('\n')
   const html = `<!doctype html>
 <html lang="${c.language}">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(subject)}</title></head>
@@ -265,10 +268,7 @@ ${invitationActions ? `${footer}\n` : ''}<p style="margin: 0; color: #555; font-
 <p style="margin: 0 0 16px;">${escapeHtml(c.intro)}</p>
 ${invitationActions ? `${links}\n` : ''}<table role="presentation" style="border-collapse: collapse;">
 ${rows}
-</table>
-${answers}
-${invitationActions ? '' : links}
-${invitationActions ? '' : footer}
+</table>${afterDetails ? `\n${afterDetails}` : ''}
 </body>
 </html>
 `
@@ -330,14 +330,15 @@ const field = (label: string, text: string) => ({ label, text, html: htmlLines(t
 const calendarDecline = {
   en: {
     invitee:
-      "Declining this invitation in your calendar won't cancel the booking. To cancel, use the Cancel link in this email.",
-    host: 'Calendar declines are not synced to Hourmere yet; cancel the booking in Hourmere.',
-    guest: 'Calendar responses do not cancel this booking. To cancel, contact the booker or host.',
+      'Accepting or declining this calendar invitation does not cancel the booking. To cancel, use the Cancel link in this email.',
+    host: 'Declining in your calendar is not synced to Hourmere; to cancel the booking, use Hourmere.',
+    guest:
+      'Accepting or declining this calendar invitation does not cancel the booking. To cancel, contact the person who booked or the host.',
   },
   'zh-CN': {
-    invitee: '在日历中拒绝此邀请不会取消预约。如需取消，请使用此邮件中的“取消”链接。',
-    host: '日历中的拒绝尚未同步到 Hourmere；如需取消，请在 Hourmere 中操作。',
-    guest: '日历回应不会取消此预约。如需取消，请联系预约人或主持人。',
+    invitee: '在日历中接受或拒绝邀请不会取消预约。如需取消，请使用此邮件中的“取消”链接。',
+    host: '在日历中拒绝邀请不会同步到 Hourmere；如需取消预约，请在 Hourmere 中操作。',
+    guest: '在日历中接受或拒绝邀请不会取消预约。如需取消，请联系预约人或主持人。',
   },
 }
 
