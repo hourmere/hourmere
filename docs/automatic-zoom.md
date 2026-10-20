@@ -180,7 +180,8 @@ See [Zoom connections](zoom-connections.md#callback-replay-and-busy).
 Explicit refresh adds `errorAlias: "zoom_operation_busy"` alongside the existing
 `error: "zoom_refresh_in_progress"` and a neutral busy/retry message while another token
 operation is in flight; workers return a retryable provider failure. The legacy code is
-deprecated for one release and retained for v1 compatibility.
+deprecated but remains unchanged for all of `/api/v1`; the alias is additive, and removing
+or renaming the old code requires a new API version.
 Token-changing provider calls have a hard deadline (15 seconds by default). Leases last
 at least one minute, using database time, and finishing transactions check lease ID and expiry
 before consuming provider results. Expired operations cannot overwrite or release a

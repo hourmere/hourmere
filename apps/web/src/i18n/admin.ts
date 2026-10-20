@@ -50,10 +50,6 @@ export const admin = {
   Retry: '重试',
   'Working…': '正在处理…',
   'Conference accounts': '会议账号',
-  'Connect your own Zoom identity separately from sign-in and calendars. This connection cannot create or read meetings.':
-    '单独连接你自己的 Zoom 身份，与登录和日历互相独立。此连接不能创建或读取会议。',
-  'Only basic Zoom account identity is requested. Calendar access and automatic meeting creation are separate features.':
-    '仅请求基本 Zoom 账号身份。日历访问和自动创建会议属于独立功能。',
   'Zoom account connected.': 'Zoom 账号已连接。',
   'Zoom was not connected because you cancelled authorization.': '你已取消授权，Zoom 未连接。',
   'This Zoom connection attempt expired or was already used. Start again.':
@@ -63,8 +59,6 @@ export const admin = {
     '无法连接 Zoom。请检查连接状态后再试。',
   'Reconnect this Zoom account before refreshing it.': '请先重新连接此 Zoom 账号，再刷新。',
   'Zoom account operations are busy. Try again shortly.': 'Zoom 账号操作繁忙。请稍后重试。',
-  'Zoom did not grant only the requested identity access. Check the app configuration and reconnect.':
-    'Zoom 返回的权限不符合所请求的最小身份权限。请检查应用配置后重新连接。',
   'Choose the same Zoom account when reconnecting this connection.':
     '重新连接时，请选择同一个 Zoom 账号。',
   'This Zoom identity is already connected to another Hourmere account.':
@@ -126,8 +120,6 @@ export const admin = {
   'Each pool member uses their current default availability. An available member is assigned when someone books.':
     '每位池成员使用当前的默认可用时间；有人预约时，将分配一位可用成员。',
 
-  'Choose current verified team members: one individual host or two to eight collective hosts.':
-    '请选择当前已验证的团队成员：单人会议选择一位，集体会议选择两至八位。',
   ', from': '，从',
   ', so there are times to book.': '，这样才会有可预约时间。',
   ', this browser’s time zone.': '（此浏览器的时区）。',
@@ -176,8 +168,6 @@ export const admin = {
     '你的其他活动类型已使用此链接。请选择另一个。',
   'Answer type': '回答类型',
   Answers: '回答',
-  'Anyone with the direct link can still book it. This does not restrict access.':
-    '持有直接链接的任何人仍可预约。这不会限制访问。',
   'API keys let AI agents and scripts use Hourmere for you, through the same API as this app. Each key acts in one organization and can do anything you can do there, so treat it like a password.':
     'API 密钥允许 AI 代理和脚本通过与本应用相同的 API 代表你使用 Hourmere。每个密钥在一个组织中生效，拥有你在该组织中的全部操作权限，请像密码一样保管。',
   'Approve connection': '批准连接',
@@ -267,7 +257,6 @@ export const admin = {
   'Connect Microsoft Calendar': '连接 Microsoft 日历',
   'Connected accounts': '已连接的账号',
   Continue: '继续',
-  'Continue with {0}': '使用 {0} 继续',
   'Continuing…': '正在继续…',
   'Copy command': '复制命令',
   'Copy key': '复制密钥',
@@ -379,18 +368,8 @@ export const admin = {
   'Free time kept before each meeting.': '每次会议前保留的空闲时间。',
   Fri: '周五',
   Friday: '星期五',
-  'Google Calendar connected. Your calendar list is ready.': 'Google 日历已连接。日历列表已就绪。',
-  'Google Calendar could not be reached. Try connecting again shortly.':
-    '暂时无法连接 Google 日历。请稍后重新连接。',
   'Google Calendar is not configured on this Hourmere instance. Contact its administrator to enable it.':
     '此 Hourmere 实例尚未配置 Google 日历。请联系管理员启用。',
-  'Google Calendar was not connected because you cancelled authorization.':
-    '你已取消授权，因此未连接 Google 日历。',
-  'Google did not grant the requested access. Connect again and allow the requested permissions.':
-    'Google 未授予所需权限。请重新连接并允许请求的权限。',
-  'Google did not provide continuing access. Connect again to try again.':
-    'Google 未提供持续访问权限。请重新连接后重试。',
-  'Google Meet (link created per booking)': 'Google Meet（每次预约时创建链接）',
   'Google will ask for your email, calendar list and event access: to check busy times on selected calendars, and to create one private copy of each new booking on the calendar you own and select. Changing this destination affects new bookings; existing booking copies continue to be updated or cancelled on their original calendar. Automatic Google Meet adds a link only when you enable it. Busy-time synchronization stores times and event IDs, not event titles or descriptions. Connecting is optional and separate from signing in.':
     'Google 将请求你的邮箱、日历列表和事件访问权限：读取所选日历的忙闲时间来检查冲突，并在你拥有且选作写入目标的日历中，为每个新预约创建一份私有副本。更改写入目标只影响新预约；现有预约的副本仍会在原日历中更新或取消。只有启用自动 Google Meet 时才会添加会议链接。忙闲同步保存时间和事件 ID，不保存事件标题或描述。连接日历是可选的，与登录相互独立。',
   'Disconnect below deletes stored credentials and local calendar data, but leaves existing event copies in Google Calendar and does not revoke your Google grant. You can revoke access in your Google Account:':
@@ -398,6 +377,8 @@ export const admin = {
   'Google Account connections': 'Google 账号连接',
   'Could not load privacy information. Try again before connecting Google Calendar.':
     '无法加载隐私信息。请重试后再连接 Google 日历。',
+  'Could not load your profile. Try again before choosing where new bookings are written.':
+    '无法加载个人资料。请重试后再选择用于写入新预约的日历。',
   'Guests receive confirmation emails and calendar invitations. Off by default; changing this does not remove guests from existing bookings.':
     '来宾会收到确认邮件和日历邀请。默认关闭；更改此项不会移除现有预约的来宾。',
   Handle: '用户名',
@@ -486,7 +467,6 @@ export const admin = {
   'Only approve apps you trust. The app name and return address are supplied by the app.':
     '仅批准你信任的应用。应用名称和返回地址均由该应用提供。',
   'OpenAPI document': 'OpenAPI 文档',
-  'Opening {0}…': '正在打开 {0}…',
   'Opening Google…': '正在打开 Google…',
   'Opening Microsoft…': '正在打开 Microsoft…',
   Option: '选项',
@@ -507,8 +487,6 @@ export const admin = {
   Position: '排序位置',
   Profile: '个人资料',
   'Profile created. Your booking links are ready.': '个人资料已创建。你的预约链接已就绪。',
-  'Public booking links for this scheduling mode are not available yet.':
-    '此排期方式暂不支持公开预约链接。',
   'Question {0}': '问题 {0}',
   Questions: '问题',
   'Reason:': '原因：',
@@ -576,12 +554,10 @@ export const admin = {
   'Signed in as': '当前登录账号',
   'so people can book you.': '，以便他人预约你。',
   'Start times every': '开始时间间隔',
-  'Stop writing bookings to {0}': '停止向 {0} 写入预约',
   'Store it somewhere safe, such as a password manager or your agent’s secret settings. If you lose it, revoke it and create a new one.':
     '请将密钥保存在安全的地方，例如密码管理器或代理的密钥设置中。若密钥丢失，请撤销并创建新密钥。',
   Sun: '周日',
   Sunday: '星期日',
-  Sync: '同步',
   'Synchronization failed. Booking times stay unavailable until synchronization recovers.':
     '同步失败。在同步恢复之前，相关时间将保持不可预约。',
   "That account's email address does not match yours. {0}": '该账号的邮箱与你的邮箱不符。{0}',
@@ -680,7 +656,6 @@ export const admin = {
   'Where the key will be used, e.g. “Claude Desktop”.': '密钥的使用位置，例如“Claude Desktop”。',
   'Where the meeting happens': '会议地点',
   'Working hours': '工作时间',
-  'Write new bookings to {0}': '向 {0} 写入新预约',
   Yes: '是',
   'You could not be signed in. Please try again.': '无法登录。请重试。',
   'You have no API keys yet.': '你尚无 API 密钥。',
@@ -706,7 +681,6 @@ export const admin = {
   'Your sign-in provider did not send your account details. Please try again.':
     '登录服务未提供你的账号信息。请重试。',
   'Your sign-in provider did not share your email address. {0}': '登录服务未提供你的邮箱地址。{0}',
-  'Zoom (link created per booking)': 'Zoom（每次预约时创建链接）',
   'the duration': '活动时长',
   '{0} account': '{0} 账号',
   '(primary)': '（主日历）',
@@ -788,13 +762,9 @@ export const admin = {
   'No booking activity was recorded in this range.': '此范围内没有预约操作记录。',
   'Daily booking activity': '每日预约统计',
   Hosts: '主持人',
-  'This legacy scheduling mode can keep its existing configuration while you edit other details.':
-    '编辑其他内容时，此旧版排期方式会保留现有配置。',
   Scheduling: '排期方式',
   'Individual: one host': '单人会议：一位主持人',
   'Collective: every selected host is required': '集体会议：所有选中的主持人都必须参加',
-  'Choose one current verified team member, or two to eight for a collective meeting. Changing hosts affects new bookings; existing meetings retain their original hosts.':
-    '选择一位当前已验证的团队成员；集体会议需选择两至八位。更改主持人会影响新预约；现有会议会保留原主持人。',
   'Loading team members…': '正在加载团队成员…',
   'Could not load team members. Only team owners and admins can assign hosts.':
     '无法加载团队成员。只有团队所有者和管理员可以分配主持人。',

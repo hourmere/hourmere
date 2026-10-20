@@ -139,8 +139,9 @@ Callback redirects use a fixed allowlist of outcomes under `/app/conferences`. R
 
 A refresh conflict returns HTTP 409 with `error: "zoom_refresh_in_progress"` and the neutral
 `errorAlias: "zoom_operation_busy"`. Prefer the alias in new clients and accept the old code
-for older servers. The old code is deprecated for one release and retained for v1
-compatibility. The conflict covers any token operation owned by the same Hourmere user,
+for older servers. The old code is deprecated but remains unchanged for all of `/api/v1`;
+the alias is additive, and removing or renaming the old code requires a new API version.
+The conflict covers any token operation owned by the same Hourmere user,
 including another connection's authorization or refresh; wait briefly and try again.
 
 Protocol references, checked 19 October 2026:
