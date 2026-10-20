@@ -50,6 +50,26 @@ describe('built website', () => {
       '/.well-known/security.txt\n  Content-Type: text/plain; charset=utf-8\n',
     )
   })
+  it('classifies documentation table cells and marks where long code may wrap', () => {
+    const html = readFileSync(join(output, 'docs/configuration.html'), 'utf8')
+    const nodes = elements(html)
+    const cells = nodes.filter((node) => node.tagName === 'td')
+    expect(cells.length).toBeGreaterThan(50)
+    for (const cell of cells) {
+      expect(['short', 'code', 'prose']).toContain(attr(cell, 'data-cell'))
+      expect(['Variable', 'Default', 'Meaning', 'Purpose']).toContain(attr(cell, 'data-label'))
+      expect(attr(cell, 'role')).toBe('cell')
+    }
+    expect(
+      nodes.filter((node) => node.tagName === 'table').map((node) => attr(node, 'role')),
+    ).toEqual(Array(7).fill('table'))
+    // Identifiers stay whole; long code gains a <wbr> after each separator run.
+    expect(html).toContain('<code dir="auto">DATABASE_URL</code>')
+    expect(html).toContain('<code dir="auto">MICROSOFT_CALENDAR_CLIENT_SECRET</code>')
+    expect(html).toContain('{PUBLIC_<wbr>URL}/<wbr>api/<wbr>auth/<wbr>callback/<wbr>google')
+    expect(html).not.toContain('DATABASE_<wbr>URL')
+  })
+
   it('resolves rendered internal links and anchors on apex and www, without trailing slashes', () => {
     const result = checkBuiltLinks(output)
     expect(result.pages).toBeGreaterThanOrEqual(15)

@@ -31,28 +31,35 @@ h1#_top {
   font-weight: 800;
 }
 
-/* Preserve readable labels and identifiers; scroll the table when they need more room. */
-.sl-markdown-content th,
-.sl-markdown-content td:first-child,
-.sl-markdown-content td:first-child code {
-  overflow-wrap: normal;
-  word-break: keep-all;
+/* Documentation tables. Cells are classified at build time (src/docs-tables.ts):
+   data-cell="short" holds a label or identifier, "code" a long code value with <wbr> after
+   its separators, and "prose" running text. Columns keep readable minimum widths and the
+   table scrolls when they do not fit; below 39rem the rows stack as labelled cards. */
+.sl-markdown-content {
+  container: docs / inline-size;
 }
 
-.sl-markdown-content th,
-.sl-markdown-content td:first-child code {
+.sl-markdown-content th {
+  overflow-wrap: normal;
   white-space: nowrap;
 }
 
-.sl-markdown-content td:first-child {
-  min-width: 12rem;
+.sl-markdown-content td code {
+  /* Code wraps only at the <wbr> points, never inside a word. */
+  overflow-wrap: normal;
 }
 
-/* Long values and URLs may wrap without shrinking the identifier column. */
-.sl-markdown-content td:not(:first-child),
-.sl-markdown-content td:not(:first-child) code {
-  overflow-wrap: anywhere;
-  white-space: normal;
+.sl-markdown-content td[data-cell="short"] {
+  white-space: nowrap;
+}
+
+.sl-markdown-content td[data-cell="code"] {
+  min-width: 11rem;
+}
+
+.sl-markdown-content td[data-cell="prose"] {
+  overflow-wrap: break-word;
+  min-width: 15rem;
 }
 
 .sl-markdown-content table {
@@ -68,6 +75,52 @@ h1#_top {
     radial-gradient(farthest-side at 100% 50%, var(--sl-color-gray-5), transparent) right center /
     0.75rem 100% scroll;
   background-repeat: no-repeat;
+}
+
+@container docs (max-width: 39rem) {
+  .sl-markdown-content table {
+    overflow-x: visible;
+    background: none;
+  }
+
+  .sl-markdown-content thead {
+    display: none;
+  }
+
+  .sl-markdown-content tbody,
+  .sl-markdown-content tr,
+  .sl-markdown-content td {
+    display: block;
+  }
+
+  .sl-markdown-content tr {
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0.5rem;
+    padding: 0.75rem 1rem;
+  }
+
+  .sl-markdown-content tr + tr {
+    margin-top: 0.75rem;
+  }
+
+  .sl-markdown-content td {
+    min-width: 0;
+    padding: 0;
+    border: 0;
+  }
+
+  .sl-markdown-content td + td {
+    margin-top: 0.625rem;
+  }
+
+  .sl-markdown-content td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 0.125rem;
+    color: var(--sl-color-gray-3);
+    font-size: var(--sl-text-xs);
+    font-weight: 600;
+  }
 }
 
 /* Touch copy controls get their own row, including for unwrapped dotenv blocks. */

@@ -1,5 +1,7 @@
+import { satteri } from '@astrojs/markdown-satteri'
 import starlight from '@astrojs/starlight'
 import { defineConfig } from 'astro/config'
+import docsTablesPlugin from './src/docs-tables.ts'
 import { resolveLegalPublicationDate } from './src/privacy-publication.ts'
 import { site } from './src/site.ts'
 import { siteCopy } from './src/ui-copy.ts'
@@ -16,6 +18,9 @@ export default defineConfig({
   // Astro's HTML compression drops the space at a line break next to an inline element
   // ("the\n<a>" renders as "the<a>"), which glues words together in the legal pages.
   compressHTML: false,
+  // Documentation tables are classified by cell content so the stylesheet can keep
+  // identifiers whole, wrap long code at separators and stack rows on narrow screens.
+  markdown: { processor: satteri({ hastPlugins: [docsTablesPlugin()] }) },
   integrations: [
     {
       name: 'legal-publication-date',

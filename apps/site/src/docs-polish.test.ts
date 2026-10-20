@@ -12,24 +12,35 @@ const root = process.env.HOURMERE_DOCS_ROOT ?? fileURLToPath(new URL('../../../'
 const read = (path: string) => readFileSync(join(root, 'apps/site', path), 'utf8')
 const css = postcss.parse(read('src/styles/starlight.css'))
 
-function rules(selector: string) {
+// Rules matching the selector; `within` restricts them to an at-rule (name and params) or,
+// with null, to the unconditional top level.
+function rules(selector: string, within?: string | null) {
   const matches: Rule[] = []
   css.walkRules((rule) => {
-    if (rule.selectors.includes(selector)) matches.push(rule)
+    if (!rule.selectors.includes(selector)) return
+    const parent = rule.parent?.type === 'atrule' ? rule.parent : undefined
+    const context = parent ? `@${parent.name} ${parent.params}` : null
+    if (within !== undefined && context !== within) return
+    matches.push(rule)
   })
-  expect(matches.length, `${selector} has an override`).toBeGreaterThan(0)
+  expect(
+    matches.length,
+    `${selector} has an override${within ? ` in ${within}` : ''}`,
+  ).toBeGreaterThan(0)
   return matches
 }
 
-function declaration(selector: string, property: string) {
+function declaration(selector: string, property: string, within?: string | null) {
   const values: string[] = []
-  for (const rule of rules(selector)) {
+  for (const rule of rules(selector, within)) {
     rule.walkDecls(property, (decl) => {
       values.push(decl.value)
     })
   }
   return values.at(-1)
 }
+
+const cards = '@container docs (max-width: 39rem)'
 
 function objectProperty(source: string, name: string) {
   const file = ts.createSourceFile('fixture.ts', source, ts.ScriptTarget.Latest, true)
@@ -46,46 +57,96 @@ function objectProperty(source: string, name: string) {
 }
 
 describe('documentation layout polish', () => {
-  it.each([
-    '.sl-markdown-content td:not(:first-child)',
-    '.sl-markdown-content td:not(:first-child) code',
-  ])('allows long table values to wrap in %s', (selector) => {
-    expect(declaration(selector, 'overflow-wrap')).toBe('anywhere')
-    expect(declaration(selector, 'white-space')).toBe('normal')
+  it('lays tables out by the cell kinds the build assigns, never by column position', () => {
+    const selectors: string[] = []
+    css.walkRules((rule) => {
+      if (/\btable\b|\bth\b|\btd\b|\btr\b|\bt(?:head|body)\b/.test(rule.selector)) {
+        selectors.push(rule.selector)
+      }
+    })
+    expect(selectors.length).toBeGreaterThan(5)
+    expect(selectors.filter((selector) => /first-child|nth-|last-child/.test(selector))).toEqual([])
+    expect(selectors.some((selector) => selector.includes('[data-cell="short"]'))).toBe(true)
+    expect(selectors.some((selector) => selector.includes('[data-cell="code"]'))).toBe(true)
+    expect(selectors.some((selector) => selector.includes('[data-cell="prose"]'))).toBe(true)
   })
 
-  it.each([
-    '.sl-markdown-content th',
-    '.sl-markdown-content td:first-child',
-    '.sl-markdown-content td:first-child code',
-  ])('preserves word boundaries in %s', (selector) => {
-    expect(declaration(selector, 'overflow-wrap')).toBe('normal')
-    expect(declaration(selector, 'word-break')).toBe('keep-all')
+  it('never wraps a header or a short label or identifier', () => {
+    expect(declaration('.sl-markdown-content th', 'white-space', null)).toBe('nowrap')
+    expect(declaration('.sl-markdown-content th', 'overflow-wrap', null)).toBe('normal')
+    expect(declaration('.sl-markdown-content td[data-cell="short"]', 'white-space', null)).toBe(
+      'nowrap',
+    )
   })
 
-  it.each(['.sl-markdown-content th', '.sl-markdown-content td:first-child code'])(
-    'keeps %s intact within the scrollable table',
-    (selector) => {
-      expect(declaration(selector, 'white-space')).toBe('nowrap')
-    },
-  )
+  it('wraps code only at its build-time <wbr> points and prose only between words', () => {
+    expect(declaration('.sl-markdown-content td code', 'overflow-wrap', null)).toBe('normal')
+    expect(declaration('.sl-markdown-content td code', 'white-space', null)).toBeUndefined()
+    expect(declaration('.sl-markdown-content td[data-cell="prose"]', 'overflow-wrap', null)).toBe(
+      'break-word',
+    )
+    css.walkDecls('overflow-wrap', (decl) => {
+      expect(decl.value, decl.parent?.toString()).not.toBe('anywhere')
+    })
+    css.walkDecls('word-break', (decl) => {
+      expect(decl.value, decl.parent?.toString()).not.toBe('break-all')
+    })
+  })
 
-  it('gives the identifier column readable space', () => {
-    expect(declaration('.sl-markdown-content td:first-child', 'min-width')).toBe('12rem')
+  it('keeps long code and prose columns at readable minimum widths', () => {
+    expect(declaration('.sl-markdown-content td[data-cell="code"]', 'min-width', null)).toBe(
+      '11rem',
+    )
+    expect(declaration('.sl-markdown-content td[data-cell="prose"]', 'min-width', null)).toBe(
+      '15rem',
+    )
   })
 
   it('keeps tables within the content width and hints at remaining horizontal content', () => {
-    expect(declaration('.sl-markdown-content table', 'display')).toBe('block')
-    expect(declaration('.sl-markdown-content table', 'overflow-x')).toBe('auto')
-    expect(declaration('.sl-markdown-content table', 'max-width')).toBe('100%')
-    const background = declaration('.sl-markdown-content table', 'background') ?? ''
+    expect(declaration('.sl-markdown-content table', 'display', null)).toBe('block')
+    expect(declaration('.sl-markdown-content table', 'overflow-x', null)).toBe('auto')
+    expect(declaration('.sl-markdown-content table', 'max-width', null)).toBe('100%')
+    const background = declaration('.sl-markdown-content table', 'background', null) ?? ''
     expect(background.match(/\blocal\b/g)).toHaveLength(2)
     expect(background.match(/\bscroll\b/g)).toHaveLength(2)
     expect(background).toContain('to right')
     expect(background).toContain('to left')
     expect(background).toContain('var(--sl-color-bg)')
     expect(background).toContain('var(--sl-color-gray-5)')
-    expect(declaration('.sl-markdown-content table', 'background-repeat')).toBe('no-repeat')
+    expect(declaration('.sl-markdown-content table', 'background-repeat', null)).toBe('no-repeat')
+  })
+
+  it('stacks each row as a labelled card when the content column is narrow', () => {
+    expect(declaration('.sl-markdown-content', 'container', null)).toBe('docs / inline-size')
+    expect(declaration('.sl-markdown-content table', 'overflow-x', cards)).toBe('visible')
+    expect(declaration('.sl-markdown-content table', 'background', cards)).toBe('none')
+    expect(declaration('.sl-markdown-content thead', 'display', cards)).toBe('none')
+    for (const selector of [
+      '.sl-markdown-content tbody',
+      '.sl-markdown-content tr',
+      '.sl-markdown-content td',
+    ]) {
+      expect(declaration(selector, 'display', cards)).toBe('block')
+    }
+    expect(declaration('.sl-markdown-content tr', 'border', cards)).toBe(
+      '1px solid var(--sl-color-gray-5)',
+    )
+    expect(declaration('.sl-markdown-content td', 'min-width', cards)).toBe('0')
+    expect(declaration('.sl-markdown-content td', 'padding', cards)).toBe('0')
+    const label = '.sl-markdown-content td[data-label]::before'
+    expect(declaration(label, 'content', cards)).toBe('attr(data-label)')
+    expect(declaration(label, 'display', cards)).toBe('block')
+    expect(declaration(label, 'color', cards)).toBe('var(--sl-color-gray-3)')
+    expect(declaration(label, 'font-size', cards)).toBe('var(--sl-text-xs)')
+  })
+
+  it('registers the table classifier with the Sätteri Markdown processor', () => {
+    const config = read('astro.config.ts')
+    expect(config).toContain("import { satteri } from '@astrojs/markdown-satteri'")
+    expect(config).toContain("import docsTablesPlugin from './src/docs-tables.ts'")
+    expect(config).toMatch(
+      /markdown: \{ processor: satteri\(\{ hastPlugins: \[docsTablesPlugin\(\)\] \}\) \}/,
+    )
   })
 
   it('puts copy controls outside the code on narrow or touch screens', () => {
