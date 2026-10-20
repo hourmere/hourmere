@@ -477,18 +477,41 @@ describe('localized dates and generated copy', () => {
       expect(message.subject).toContain('“初次”与‘交流’')
       expect(message.html).toContain(`<title>${message.subject}</title>`)
       if (locale === 'zh-CN') {
-        for (const quote of ['“', '”', '‘', '’']) {
+        for (const quote of ['“', '”']) {
           expect(message.html).toContain(
-            `<span class="cjk-quote" style="font-variant-east-asian: full-width; font-feature-settings: 'fwid';">${quote}</span>`,
+            `<span class="cjk-quote" style="font-family: &quot;PingFang SC&quot;,&quot;Hiragino Sans GB&quot;,&quot;Microsoft YaHei&quot;,&quot;Noto Sans CJK SC&quot;,&quot;Source Han Sans SC&quot;,sans-serif; font-variant-east-asian: full-width; font-feature-settings: 'fwid';">${quote}</span>`,
           )
         }
         const body = message.html?.split('<body')[1] ?? ''
         const spans = /<span class="cjk-quote"[^>]*>([^<]*)<\/span>/g
-        for (const match of body.matchAll(spans)) expect(match[1]).toMatch(/^[“”‘’]$/)
-        expect(body.replaceAll(spans, '')).not.toMatch(/[“”‘’]/)
+        for (const match of body.matchAll(spans)) expect(match[1]).toMatch(/^[“”]$/)
+        expect(body.replaceAll(spans, '')).not.toMatch(/[“”]/)
+        expect(body).toContain('与‘交流’')
       } else {
         expect(message.html).not.toContain('cjk-quote')
         expect(message.html).toContain('“初次”与‘交流’')
+      }
+    }
+  })
+
+  it('preserves Latin apostrophes in every Chinese booking email role and kind', () => {
+    for (const role of roles) {
+      for (const kind of [...kinds, 'reminder', 'conference_failed'] as const) {
+        const message = bookingEmail(
+          kind,
+          {
+            ...meeting,
+            hostName: 'O’Brien',
+            inviteeName: 'O’Brien',
+            eventName: 'Ada’s plan',
+          },
+          { ...recipients[role], locale: 'zh-CN' },
+        )
+        expect(message.html).toContain('O’Brien')
+        expect(message.html).toContain('Ada’s plan')
+        expect(message.text).toContain('O’Brien')
+        expect(message.text).toContain('Ada’s plan')
+        expect(message.html).not.toMatch(/<span class="cjk-quote"[^>]*>[‘’]<\/span>/)
       }
     }
   })

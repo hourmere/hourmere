@@ -253,7 +253,7 @@ describe('bookingEmail', () => {
         .replaceAll("'", '&#39;')
         .replace(/[“”]/g, (quote) =>
           language === 'zh-CN'
-            ? `<span class="cjk-quote" style="font-variant-east-asian: full-width; font-feature-settings: 'fwid';">${quote}</span>`
+            ? `<span class="cjk-quote" style="font-family: &quot;PingFang SC&quot;,&quot;Hiragino Sans GB&quot;,&quot;Microsoft YaHei&quot;,&quot;Noto Sans CJK SC&quot;,&quot;Source Han Sans SC&quot;,sans-serif; font-variant-east-asian: full-width; font-feature-settings: 'fwid';">${quote}</span>`
             : quote,
         )
       expect(m.html).toContain(`>${htmlSentence}</p>`)

@@ -431,7 +431,18 @@ function ManageView({
           {mode.kind === 'cancel' && (
             <CancelForm
               title={title}
-              when={`${formatDate(Date.parse(booking.start), timeZone, locale)}, ${formatTimeRange(Date.parse(booking.start), Date.parse(booking.end), timeZone, locale)}`}
+              when={formatList(
+                [
+                  formatDate(Date.parse(booking.start), timeZone, locale),
+                  formatTimeRange(
+                    Date.parse(booking.start),
+                    Date.parse(booking.end),
+                    timeZone,
+                    locale,
+                  ),
+                ],
+                language,
+              )}
               onBack={() => setMode({ kind: 'view' })}
               onCancel={async (reason) => {
                 try {
@@ -610,7 +621,7 @@ function CancelForm({
   onBack: () => void
   onCancel: (reason: string) => Promise<{ field?: UiText; form?: UiText } | null>
 }) {
-  const { t, ui } = useI18n()
+  const { t, ui, locale } = useI18n()
 
   const id = useId()
   const [reason, setReason] = useState('')
@@ -636,9 +647,7 @@ function CancelForm({
     <form className="stack" onSubmit={submit} noValidate>
       <FocusHeading>{t('Cancel this booking?')}</FocusHeading>
       <CalendarResponseNote />
-      <p>
-        {title}, {when}
-      </p>
+      <p>{formatList([title, when], locale)}</p>
       <div className="field">
         <label htmlFor={`${id}-reason`}>
           {t('Reason')}

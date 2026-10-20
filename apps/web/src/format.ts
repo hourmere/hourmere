@@ -1,4 +1,5 @@
 // Formatting for people: durations, and instants shown in a named time zone.
+import { formatTimeRange } from './public/time.ts'
 
 /** "30 min", "1 h", "1 h 30 min", "2 days", "1 day 4 h". */
 export function formatMinutes(total: number, locale = 'en'): string {
@@ -56,6 +57,8 @@ export function isKnownTimeZone(timeZone: string): boolean {
 /** Formats instants in one time zone, e.g. the host's. */
 export function zoned(timeZone: string, locale?: string) {
   const zone = isKnownTimeZone(timeZone) ? timeZone : 'UTC'
+  const chinese = locale?.startsWith('zh') ?? false
+  const separator = chinese ? '–' : ' – '
   const date = new Intl.DateTimeFormat(locale, {
     timeZone: zone,
     calendar: 'gregory',
@@ -72,14 +75,16 @@ export function zoned(timeZone: string, locale?: string) {
   const time = new Intl.DateTimeFormat(locale, {
     timeZone: zone,
     calendar: 'gregory',
-    hour: 'numeric',
+    hour: chinese ? '2-digit' : 'numeric',
     minute: '2-digit',
+    ...(chinese && { hourCycle: 'h23' }),
   })
   const dateTime = new Intl.DateTimeFormat(locale, {
     timeZone: zone,
     calendar: 'gregory',
     dateStyle: 'medium',
     timeStyle: 'short',
+    ...(chinese && { hourCycle: 'h23' }),
   })
   return {
     timeZone: zone,
@@ -94,13 +99,16 @@ export function zoned(timeZone: string, locale?: string) {
     dateTime: (iso: string) => dateTime.format(new Date(iso)),
     /** Includes each endpoint's date, so a range across midnight is unambiguous. */
     dateTimeRange: (start: string, end: string) =>
-      `${dateTime.format(new Date(start))} – ${dateTime.format(new Date(end))}`,
+      `${dateTime.format(new Date(start))}${separator}${dateTime.format(new Date(end))}`,
     /** "09:00 – 09:30", including the end date when it falls on another local day. */
     timeRange: (start: string, end: string) => {
       const from = new Date(start)
       const to = new Date(end)
+      if (chinese && date.format(from) === date.format(to)) {
+        return formatTimeRange(from.getTime(), to.getTime(), zone, locale ?? 'zh-CN')
+      }
       const until = date.format(from) === date.format(to) ? time.format(to) : dateTime.format(to)
-      return `${time.format(from)} – ${until}`
+      return `${time.format(from)}${separator}${until}`
     },
   }
 }

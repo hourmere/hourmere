@@ -81,7 +81,7 @@ describe('magicLinkEmail', () => {
       language: 'zh-CN',
     })
     expect(message.html).toContain(
-      '点击<span class="cjk-quote" style="font-variant-east-asian: full-width; font-feature-settings: \'fwid\';">“</span>登录 Hourmere<span class="cjk-quote" style="font-variant-east-asian: full-width; font-feature-settings: \'fwid\';">”</span>。',
+      '点击<span class="cjk-quote" style="font-family: &quot;PingFang SC&quot;,&quot;Hiragino Sans GB&quot;,&quot;Microsoft YaHei&quot;,&quot;Noto Sans CJK SC&quot;,&quot;Source Han Sans SC&quot;,sans-serif; font-variant-east-asian: full-width; font-feature-settings: \'fwid\';">“</span>登录 Hourmere<span class="cjk-quote" style="font-family: &quot;PingFang SC&quot;,&quot;Hiragino Sans GB&quot;,&quot;Microsoft YaHei&quot;,&quot;Noto Sans CJK SC&quot;,&quot;Source Han Sans SC&quot;,sans-serif; font-variant-east-asian: full-width; font-feature-settings: \'fwid\';">”</span>。',
     )
     expect(message.html).toContain(
       'href="https://cal.example.com/sign-in/confirm#label=“引用”&amp;token=fixture"',
@@ -270,7 +270,7 @@ describe('email layout', () => {
     const html = emailButton('“操作”', link, false, 'zh-CN')
     expect(html).toContain(`href="${link}"`)
     expect(html).toContain(
-      '<span class="cjk-quote" style="font-variant-east-asian: full-width; font-feature-settings: \'fwid\';">“</span>操作<span class="cjk-quote" style="font-variant-east-asian: full-width; font-feature-settings: \'fwid\';">”</span>',
+      '<span class="cjk-quote" style="font-family: &quot;PingFang SC&quot;,&quot;Hiragino Sans GB&quot;,&quot;Microsoft YaHei&quot;,&quot;Noto Sans CJK SC&quot;,&quot;Source Han Sans SC&quot;,sans-serif; font-variant-east-asian: full-width; font-feature-settings: \'fwid\';">“</span>操作<span class="cjk-quote" style="font-family: &quot;PingFang SC&quot;,&quot;Hiragino Sans GB&quot;,&quot;Microsoft YaHei&quot;,&quot;Noto Sans CJK SC&quot;,&quot;Source Han Sans SC&quot;,sans-serif; font-variant-east-asian: full-width; font-feature-settings: \'fwid\';">”</span>',
     )
     expect(emailButton('“Action”', link)).toContain('>“Action”</a>')
     expect(emailButton('“Action”', link)).not.toContain('cjk-quote')

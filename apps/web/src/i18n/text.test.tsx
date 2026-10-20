@@ -12,18 +12,26 @@ import { msg, registerCatalog } from './translate.ts'
 registerCatalog(admin)
 
 describe('Chinese quote typography', () => {
-  it('wraps only the four quote glyphs, preserving escaped text and Latin letters', () => {
+  it('wraps only double quote glyphs, preserving escaped text and Latin letters', () => {
     const content = '“Intro <img src=x>”与‘Working hours’'
     const { container } = render(<p>{renderUiText('zh-CN', content)}</p>)
     expect(container.textContent).toBe(content)
     expect([...container.querySelectorAll('.cjk-quote')].map((node) => node.textContent)).toEqual([
       '“',
       '”',
-      '‘',
-      '’',
     ])
     expect(container.querySelector('img')).toBeNull()
-    expect(container.querySelectorAll('span')).toHaveLength(4)
+    expect(container.querySelectorAll('span')).toHaveLength(2)
+  })
+
+  it('does not widen apostrophes in user-entered Latin names and titles in Chinese', () => {
+    const content = '你与O’Brien的“Ada’s plan”预约已确认'
+    const { container } = render(<p>{renderUiText('zh-CN', content)}</p>)
+    expect(container.textContent).toBe(content)
+    expect([...container.querySelectorAll('.cjk-quote')].map((node) => node.textContent)).toEqual([
+      '“',
+      '”',
+    ])
   })
 
   it('leaves English text untouched', () => {
@@ -89,16 +97,19 @@ describe('Chinese quote typography', () => {
     expect(screen.getByRole('group').querySelectorAll('.cjk-quote')).toHaveLength(2)
   })
 
-  it('restricts full-width font features to Chinese quote spans and disables balanced headings', () => {
+  it('uses CJK fonts before Latin system fonts for Chinese quote spans', () => {
+    const quote = styles.match(/\.cjk-quote:lang\(zh\)\s*\{([^}]+)\}/)?.[1]
+    expect(quote).toMatch(
+      /font-family:\s*"PingFang SC",\s*"Hiragino Sans GB",\s*"Microsoft YaHei",\s*"Noto Sans CJK SC",\s*"Source Han Sans SC",\s*sans-serif;/,
+    )
+  })
+
+  it('restricts full-width font features to Chinese quote spans and balances headings', () => {
     const quote = styles.match(/\.cjk-quote:lang\(zh\)\s*\{([^}]+)\}/)?.[1]
     expect(quote).toContain('font-variant-east-asian: full-width;')
     expect(quote).toContain('font-feature-settings: "fwid";')
     expect(styles).toMatch(
-      /h1:lang\(zh\),\s*h2:lang\(zh\),\s*h3:lang\(zh\)\s*\{\s*text-wrap: wrap;/,
-    )
-    expect(styles).toMatch(/@supports \(text-wrap: pretty\)\s*\{[^}]*text-wrap: pretty;/)
-    expect(styles).toMatch(
-      /@supports \(word-break: auto-phrase\)\s*\{[^}]*word-break: auto-phrase;/,
+      /h1:lang\(zh\),\s*h2:lang\(zh\),\s*h3:lang\(zh\)\s*\{\s*text-wrap: balance;/,
     )
   })
 })

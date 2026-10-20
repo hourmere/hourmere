@@ -10,10 +10,28 @@ import {
 } from './text.ts'
 
 describe('emailText', () => {
-  it.each(['“', '”', '‘', '’'])('widens only the Chinese %s glyph', (quote) => {
+  it.each(['“', '”'])('widens only the Chinese %s glyph', (quote) => {
     expect(emailText(`中${quote}Latin${quote}文`, 'zh-CN')).toBe(
-      `中<span class="cjk-quote" style="font-variant-east-asian: full-width; font-feature-settings: 'fwid';">${quote}</span>Latin<span class="cjk-quote" style="font-variant-east-asian: full-width; font-feature-settings: 'fwid';">${quote}</span>文`,
+      `中<span class="cjk-quote" style="font-family: &quot;PingFang SC&quot;,&quot;Hiragino Sans GB&quot;,&quot;Microsoft YaHei&quot;,&quot;Noto Sans CJK SC&quot;,&quot;Source Han Sans SC&quot;,sans-serif; font-variant-east-asian: full-width; font-feature-settings: 'fwid';">${quote}</span>Latin<span class="cjk-quote" style="font-family: &quot;PingFang SC&quot;,&quot;Hiragino Sans GB&quot;,&quot;Microsoft YaHei&quot;,&quot;Noto Sans CJK SC&quot;,&quot;Source Han Sans SC&quot;,sans-serif; font-variant-east-asian: full-width; font-feature-settings: 'fwid';">${quote}</span>文`,
     )
+  })
+
+  it('uses a CJK font before system fonts so Chinese double quotes can be full-width', () => {
+    const html = emailText('“中文”', 'zh-CN')
+    const styles = [...html.matchAll(/<span class="cjk-quote" style="([^"]*)">/g)]
+    expect(styles).toHaveLength(2)
+    for (const [, style] of styles) {
+      expect(style).toMatch(/^font-family: &quot;PingFang SC&quot;,/)
+      expect(style).toContain(
+        '&quot;Hiragino Sans GB&quot;,&quot;Microsoft YaHei&quot;,&quot;Noto Sans CJK SC&quot;,&quot;Source Han Sans SC&quot;,sans-serif;',
+      )
+      expect(style).toContain('font-variant-east-asian: full-width;')
+      expect(style).toContain("font-feature-settings: 'fwid';")
+    }
+  })
+
+  it.each(['O’Brien', 'Ada’s plan', '‘Latin words’'])('preserves %s in Chinese text', (text) => {
+    expect(emailText(`中文${text}预约`, 'zh-CN')).toBe(`中文${text}预约`)
   })
 
   it('leaves English curly quotes and unquoted Chinese text untouched', () => {
@@ -23,7 +41,7 @@ describe('emailText', () => {
 
   it('escapes untrusted HTML before wrapping Chinese quotes', () => {
     expect(emailText('<img src="x"> & “字”', 'zh-CN')).toBe(
-      '&lt;img src=&quot;x&quot;&gt; &amp; <span class="cjk-quote" style="font-variant-east-asian: full-width; font-feature-settings: \'fwid\';">“</span>字<span class="cjk-quote" style="font-variant-east-asian: full-width; font-feature-settings: \'fwid\';">”</span>',
+      '&lt;img src=&quot;x&quot;&gt; &amp; <span class="cjk-quote" style="font-family: &quot;PingFang SC&quot;,&quot;Hiragino Sans GB&quot;,&quot;Microsoft YaHei&quot;,&quot;Noto Sans CJK SC&quot;,&quot;Source Han Sans SC&quot;,sans-serif; font-variant-east-asian: full-width; font-feature-settings: \'fwid\';">“</span>字<span class="cjk-quote" style="font-family: &quot;PingFang SC&quot;,&quot;Hiragino Sans GB&quot;,&quot;Microsoft YaHei&quot;,&quot;Noto Sans CJK SC&quot;,&quot;Source Han Sans SC&quot;,sans-serif; font-variant-east-asian: full-width; font-feature-settings: \'fwid\';">”</span>',
     )
   })
 })

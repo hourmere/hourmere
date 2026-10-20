@@ -278,6 +278,13 @@ available. It is included even when the successor is outside the current page or
 and omitted from public/manage responses. Rescheduling still leaves the predecessor's API
 `status` as `cancelled`; the host UI uses this link to label that withdrawal `Rescheduled`.
 
+Host lists and details also add optional `eventTypeTitle`, the event type's current title
+(null when deleted). The stored `title` remains the original booking title. The web app
+localizes its generated composition only when it exactly equals `eventTypeTitle` +
+`" with "` + the booker's saved name; custom titles, older titles after event-type renames,
+and titles without current event metadata remain unchanged. Public/manage responses omit
+`eventTypeTitle`.
+
 ## Public endpoints
 
 Booking pages and invitee links work without credentials. The web app serves them at the

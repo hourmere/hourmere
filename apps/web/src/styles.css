@@ -1820,6 +1820,9 @@ input[aria-invalid="true"] {
 
 /* Chinese typography: limit full-width font features to quote glyphs. */
 .cjk-quote:lang(zh) {
+  font-family:
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC",
+    sans-serif;
   font-feature-settings: "fwid";
   font-variant-east-asian: full-width;
 }
@@ -1827,21 +1830,5 @@ input[aria-invalid="true"] {
 h1:lang(zh),
 h2:lang(zh),
 h3:lang(zh) {
-  text-wrap: wrap;
-}
-
-@supports (text-wrap: pretty) {
-  h1:lang(zh),
-  h2:lang(zh),
-  h3:lang(zh) {
-    text-wrap: pretty;
-  }
-}
-
-@supports (word-break: auto-phrase) {
-  h1:lang(zh),
-  h2:lang(zh),
-  h3:lang(zh) {
-    word-break: auto-phrase;
-  }
+  text-wrap: balance;
 }

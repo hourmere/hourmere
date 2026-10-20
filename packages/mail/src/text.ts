@@ -56,14 +56,14 @@ export function escapeHtml(text: string): string {
     .replaceAll("'", '&#39;')
 }
 
-/** Escape visible email text, widening only Chinese curly quote glyphs, never Latin text. */
+/** Escape visible email text, widening double quotes in Chinese but preserving apostrophes. */
 export function emailText(text: string, language: InterfaceLanguage): string {
   const escaped = escapeHtml(text)
   if (language !== 'zh-CN') return escaped
   return escaped.replace(
-    /[“”‘’]/g,
+    /[“”]/g,
     (quote) =>
-      `<span class="cjk-quote" style="font-variant-east-asian: full-width; font-feature-settings: 'fwid';">${quote}</span>`,
+      `<span class="cjk-quote" style="font-family: &quot;PingFang SC&quot;,&quot;Hiragino Sans GB&quot;,&quot;Microsoft YaHei&quot;,&quot;Noto Sans CJK SC&quot;,&quot;Source Han Sans SC&quot;,sans-serif; font-variant-east-asian: full-width; font-feature-settings: 'fwid';">${quote}</span>`,
   )
 }
 

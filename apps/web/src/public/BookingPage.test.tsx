@@ -58,12 +58,15 @@ async function chooseSlot(user: ReturnType<typeof userEvent.setup>, dayName: Reg
 }
 
 describe('the booking page', () => {
-  it('localizes required-host lists and confirmation guest lists and possessive spacing', async () => {
+  it.each([
+    ['主持人（王小明）', '主持人（王小明）'],
+    ['Ada Lovelace', ' Ada Lovelace '],
+  ])('localizes confirmation names and lists for %s', async (host, spaced) => {
     const user = userEvent.setup()
     const data = booking()
     const event = {
       ...EVENT,
-      host: { ...EVENT.host, name: '主持人（王小明）' },
+      host: { ...EVENT.host, name: host },
       hosts: [
         { name: '王小明', timeZone: 'Europe/Berlin' },
         { name: '李小红', timeZone: 'Asia/Shanghai' },
@@ -105,13 +108,20 @@ describe('the booking page', () => {
     await user.click(screen.getByRole('button', { name: '确认预约' }))
     await screen.findByRole('heading', { name: '预约成功' })
     expect(document.querySelector('.confirmation .lede')?.textContent).toBe(
-      '你与 主持人（王小明）的“Intro call”预约已确认。',
+      `你与${spaced}的“Intro call”预约已确认。`,
     )
     expect(
       document.querySelector('.confirmation .lede')?.querySelectorAll('.cjk-quote'),
     ).toHaveLength(2)
     expect(screen.getByText('周小刚、赵小华')).toBeDefined()
     expect(screen.getByText('Grace Hopper（grace@example.com）')).toBeDefined()
+    const calendarUrl = new URL(
+      screen.getByRole<HTMLAnchorElement>('link', { name: 'Google 日历' }).href,
+    )
+    expect(calendarUrl.searchParams.get('text')).toBe(`与${spaced}的Intro call`)
+    expect(document.querySelector('.manage-link p')?.textContent).toBe(
+      '使用此链接改期或取消。此链接仅在此页面显示一次；持有链接的任何人都可更改你的预约，请妥善保管。',
+    )
   })
 
   it('explains calendar responses and opens cancellation with the existing private capability', async () => {

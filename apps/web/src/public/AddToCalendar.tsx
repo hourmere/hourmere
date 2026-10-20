@@ -47,7 +47,7 @@ export function AddToCalendar({ event }: { event: CalendarEvent }) {
  * API returns it once and stores only its hash), never in the address bar or in storage.
  */
 export function ManageLink({ token, intro }: { token: string; intro: string }) {
-  const { t, ui } = useI18n()
+  const { t, ui, locale } = useI18n()
 
   const headingId = useId()
   const inputId = useId()
@@ -56,7 +56,8 @@ export function ManageLink({ token, intro }: { token: string; intro: string }) {
     <section className="panel manage-link" aria-labelledby={headingId}>
       <h2 id={headingId}>{t('Save your link to change or cancel')}</h2>
       <p>
-        {ui(intro)}{' '}
+        {ui(intro)}
+        {locale === 'zh-CN' ? '' : ' '}
         {t(
           'It is shown only this once on this page, and anyone who has it can change your booking, so keep it private.',
         )}

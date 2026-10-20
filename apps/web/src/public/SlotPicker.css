@@ -107,6 +107,11 @@
   cursor: pointer;
 }
 
+.picker .day:lang(zh) {
+  font-size: 0.875rem;
+  white-space: nowrap;
+}
+
 @media (hover: hover) {
   .picker .day-available:hover {
     outline: 2px solid var(--accent);

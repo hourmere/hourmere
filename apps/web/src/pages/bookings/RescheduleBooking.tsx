@@ -32,7 +32,7 @@ export function RescheduleBooking({
   const [busy, setBusy] = useState(false)
   const inFlight = useRef(false)
   const openButton = useRef<HTMLButtonElement>(null)
-  const format = zoned(timeZone, formatLocale)
+  const format = zoned(timeZone, locale === 'zh-CN' ? locale : formatLocale)
   const loadSlots: SlotLoader = useCallback(
     async (start, end, signal) => {
       const result = await unwrap(

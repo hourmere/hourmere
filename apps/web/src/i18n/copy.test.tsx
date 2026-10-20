@@ -5,7 +5,7 @@ import { QuestionsEditor } from '../pages/event-types/QuestionsEditor.tsx'
 import { BookingForm } from '../public/BookingForm.tsx'
 import { admin } from './admin.ts'
 import { common } from './common.ts'
-import { formatList } from './formatting.ts'
+import { formatCjkName, formatList } from './formatting.ts'
 import { chooseLanguage } from './store.ts'
 import { registerCatalog, translate } from './translate.ts'
 
@@ -38,10 +38,10 @@ describe('Chinese copy and punctuation', () => {
         event: '会议',
         host: '主持人（王小明）',
       }),
-    ).toBe('你与 主持人（王小明）的“会议”预约已确认。')
+    ).toBe('你与主持人（王小明）的“会议”预约已确认。')
     expect(
       translate('zh-CN', '{event} with {host}', { event: '会议', host: '主持人（王小明）' }),
-    ).toBe('与 主持人（王小明）的会议')
+    ).toBe('与主持人（王小明）的会议')
     expect(translate('zh-CN', 'Required hosts: {hosts}', { hosts: '王小明、李小红' })).toBe(
       '必选主持人：王小明、李小红',
     )
@@ -61,6 +61,28 @@ describe('Chinese copy and punctuation', () => {
   })
 
   it.each([
+    ['王小明', '王小明'],
+    ['Ada Lovelace', ' Ada Lovelace '],
+    ['O’Brien', ' O’Brien '],
+    ['Ada’s plan', ' Ada’s plan '],
+  ])('spaces the edges of %s consistently in Chinese booking prose', (name, spaced) => {
+    expect(formatCjkName(name, 'zh-CN')).toBe(spaced)
+    expect(formatCjkName(name, 'en')).toBe(name)
+    expect(
+      translate('zh-CN', 'Your {event} with {host} is confirmed.', {
+        event: '初次通话',
+        host: formatCjkName(name, 'zh-CN'),
+      }),
+    ).toBe(`你与${spaced}的“初次通话”预约已确认。`)
+    expect(
+      translate('zh-CN', '{event} with {host}', {
+        event: '初次通话',
+        host: formatCjkName(name, 'zh-CN'),
+      }),
+    ).toBe(`与${spaced}的初次通话`)
+  })
+
+  it.each([
     ['zh-CN', '王小明、李小红、周小刚'],
     ['en', '王小明, 李小红, 周小刚'],
   ])('uses %s list punctuation for literal names and selected answers', (locale, expected) => {
@@ -76,7 +98,7 @@ describe('Chinese copy and punctuation', () => {
       'Option 1 of question 3',
       'Remove option 1, “Pro”, of question 3',
     ],
-    ['zh-CN', '问题 3 的选项', '选项 1，所属问题 3', '移除选项 1，“Pro”，所属问题 3'],
+    ['zh-CN', '问题 3 的选项', '选项 1，所属问题 3', '移除问题 3 的选项 1“Pro”'],
   ] as const)(
     'formats whole option group and screen-reader labels in %s',
     (locale, group, option, remove) => {
@@ -89,7 +111,7 @@ describe('Chinese copy and punctuation', () => {
       render(<QuestionsEditor questions={questions} onChange={vi.fn()} errors={{}} />)
       const options = screen.getByRole('group', { name: group })
       expect(within(options).getByLabelText(option)).toBeDefined()
-      expect(within(options).getByRole('button', { name: remove })).toBeDefined()
+      expect(within(options).queryByRole('button', { name: remove })).not.toBeNull()
     },
   )
 

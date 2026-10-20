@@ -109,6 +109,21 @@ function manageServer(
 }
 
 describe('the invitee’s manage page', () => {
+  it.each([
+    ['en', 'Intro call, Monday, November 2, 2026, 9:00 – 9:30 AM'],
+    ['zh-CN', 'Intro call、2026年11月2日星期一、09:00–09:30'],
+  ])('uses %s separators throughout the cancel summary', async (language, expected) => {
+    localStorage.setItem('hourmere-language', language)
+    manageServer()
+    renderApp(`/booking#token=${TOKEN}&action=cancel`)
+    const heading = await screen.findByRole('heading', {
+      name: language === 'en' ? 'Cancel this booking?' : '取消此预约？',
+    })
+    const form = heading.closest('form')
+    const summary = form?.querySelectorAll('p')[1]
+    expect(plain(summary?.textContent)).toBe(expected)
+  })
+
   it('formats Chinese host and guest lists and booker brackets', async () => {
     localStorage.setItem('hourmere-language', 'zh-CN')
     const data = managed()

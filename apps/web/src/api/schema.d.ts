@@ -4925,6 +4925,8 @@ export interface components {
             end: string;
             /** Format: uuid */
             eventTypeId: string | null;
+            /** @description Authenticated host reads only: the event type's current title, or null when deleted. The stored booking title remains historical; clients must verify its exact composition before localizing it. */
+            eventTypeTitle?: string | null;
             /** Format: uuid */
             id: string;
             location: components["schemas"]["BookingLocation"];
