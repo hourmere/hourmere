@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
   createLogMailer,
   createSmtpMailer,
+  escapeHtml,
   icsAttachment,
   MailRejectedError,
   magicLinkEmail,
@@ -78,7 +79,9 @@ describe('magicLinkEmail', () => {
       const prose = [
         message.subject,
         message.text.replace(url, ''),
-        message.html?.replaceAll(url.replace('&', '&amp;'), '').replace(/<[^>]*>/g, ''),
+        ...Array.from(message.html?.matchAll(/>([^<>]*)</g) ?? [], (match) => match[1]).filter(
+          (text) => text !== escapeHtml(url),
+        ),
       ].join('\n')
       expect(prose).not.toMatch(/[.,:;!?"'()]/)
     }

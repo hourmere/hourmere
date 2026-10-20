@@ -215,7 +215,7 @@ describe('localized dates and generated copy', () => {
       { ...recipients.invitee, locale: 'zh-CN' },
     )
     expect(message.subject).toContain('<script>{host}</script>')
-    expect(message.html).not.toMatch(/<script|<b>|<img/)
+    expect(message.html).not.toMatch(/<script|<b>|<img/i)
     expect(message.html).toContain('&lt;script&gt;{host}&lt;/script&gt; &amp; &quot;intro&quot;')
     expect(message.html).toContain('&lt;b&gt;Ada&lt;/b&gt;')
     expect(message.html).toContain('&lt;img src=x onerror=alert(1)&gt;')
