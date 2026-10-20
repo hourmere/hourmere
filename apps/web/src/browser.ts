@@ -2,3 +2,7 @@
 export function goTo(url: string) {
   window.location.assign(url)
 }
+
+export function reloadPage() {
+  window.location.reload()
+}

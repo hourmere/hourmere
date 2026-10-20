@@ -7,7 +7,12 @@
 
 .picker .picker-body {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--space-5);
+}
+
+.picker .picker-body > * {
+  min-width: 0;
 }
 
 @media (min-width: 640px) {
@@ -153,12 +158,6 @@
   .picker .picker-slots {
     min-height: 0;
   }
-
-  .picker .slots {
-    max-height: 420px;
-    overflow-y: auto;
-    padding-right: var(--space-1);
-  }
 }
 
 .picker .slots-day {
@@ -172,6 +171,15 @@
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+@media (min-width: 640px) {
+  .picker .slots {
+    max-height: 420px;
+    overflow-y: auto;
+    /* The shared focus outline extends 5px beyond each slot button. */
+    padding: var(--space-2);
+  }
 }
 
 .picker .slot {
@@ -208,7 +216,7 @@
 
 :is(.public, .picker) .tz-toggle {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 0 var(--space-3);
   align-items: center;
   width: 100%;
@@ -234,6 +242,8 @@
 
 :is(.public, .picker) .tz-current {
   grid-column: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 :is(.public, .picker) .tz-name {
@@ -276,6 +286,11 @@
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-small);
   cursor: pointer;
+}
+
+:is(.public, .picker) .tz-option > :first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 :is(.public, .picker) .tz-option[data-active="true"] {
