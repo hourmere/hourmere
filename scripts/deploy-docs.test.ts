@@ -172,7 +172,7 @@ async function executePastedCommands(
     writeFileSync(join(directory, '.env'), 'synthetic-backup-settings\n')
     const log = `printf '%s\\n' "$command" >> "$CALL_LOG"
 `
-    const rejectShellOverride = `if [ "\${COMPOSE_FILE+x}" = x ]; then exit 9; fi\n`
+    const rejectShellOverride = `if [ "\${COMPOSE_FILE+x}" = x ] || [ "\${HOURMERE_VERSION+x}" = x ]; then exit 9; fi\n`
     const fail = '[ "$command" != "$FAIL_COMMAND" ] || exit 7\n'
     for (const mode of ['enable', 'disable']) {
       writeFileSync(
@@ -619,6 +619,16 @@ docker compose up -d --wait`)
           )
       })
 
+      it('reads the private image version despite an exported shell override', async () => {
+        const { result, calls } = await executePastedCommands(commands, {
+          worker: needsWorker,
+          proxy: true,
+          shellVersion: '9.9.9',
+        })
+        expectInteractiveShells(result, 0)
+        expect(calls).toEqual([...prefix, 'compose config --services', ...startup])
+      })
+
       it('rejects a Compose error even when it prints the expected services', async () => {
         const { result, calls } = await executePastedCommands(commands, {
           worker: needsWorker,
@@ -750,7 +760,8 @@ docker compose up -d --wait`)
       /insert `docker-compose.image.yml` immediately after `docker-compose.yml` in `COMPOSE_FILE`/,
     )
     expect(section).toContain("COMPOSE_FILE='docker-compose.yml:docker-compose.image.yml'")
-    expect(section).toContain("HOURMERE_VERSION='1.0.1'")
+    expect(section).toContain("HOURMERE_VERSION='1.0.0'")
+    expect(section).not.toContain('1.0.1')
     expect(section).toContain('never `latest`')
     expect(section?.replace(/\s+/g, ' ')).toMatch(
       /(?:Preserve|preserving) proxy, worker and custom overlays/,
@@ -775,6 +786,7 @@ docker compose up -d --wait`)
       const { result, calls, dump, backupDirectory } = await executePastedCommands(backupCommands, {
         worker: enabled,
         proxy: true,
+        shellVersion: '9.9.9',
       })
       expectInteractiveShells(result, 0)
       expect(calls).toEqual(backupCalls(enabled))
@@ -797,22 +809,6 @@ docker compose up -d --wait`)
       expect(result.stdout).not.toContain(`${backupDirectory}\n`)
     },
   )
-
-  it.each([
-    [
-      'environment example',
-      process.env.HOURMERE_DEPLOY_ENV_EXAMPLE ?? new URL('../.env.example', import.meta.url),
-    ],
-    [
-      'worker overlay',
-      process.env.HOURMERE_DEPLOY_WORKER_COMPOSE ??
-        new URL('../docker-compose.worker.yml', import.meta.url),
-    ],
-  ])('chains the worker verification comment in the %s', (_name, path) => {
-    expect(readFileSync(path, 'utf8')).toContain(
-      '# docker compose config --services | grep -qx worker && docker compose up -d --build --wait',
-    )
-  })
 
   it('uses release tags for 1.0 upgrades and isolates pre-1.0 main-tracking notes', () => {
     const upgrade = guide.split('## Upgrade and roll back\n')[1]?.split('\n## ')[0]
@@ -1048,7 +1044,7 @@ docker compose up -d --wait`)
     try {
       writeFileSync(
         join(directory, 'docker'),
-        `#!/bin/sh\n[ "\${COMPOSE_FILE+x}" != x ] || exit 9\nprintf "%s\\n" "$*" > "$CALL_LOG"\n`,
+        `#!/bin/sh\n[ "\${COMPOSE_FILE+x}" != x ] && [ "\${HOURMERE_VERSION+x}" != x ] || exit 9\nprintf "%s\\n" "$*" > "$CALL_LOG"\n`,
         { mode: 0o755 },
       )
       const callLog = join(directory, 'calls')
@@ -1059,6 +1055,7 @@ docker compose up -d --wait`)
           PATH: `${directory}:${process.env.PATH}`,
           CALL_LOG: callLog,
           COMPOSE_FILE: 'conflicting-shell-selection.yml',
+          HOURMERE_VERSION: '9.9.9',
         },
       })
       expect(result.status).toBe(0)
@@ -1069,6 +1066,12 @@ docker compose up -d --wait`)
   })
 
   it.each([
+    {
+      name: 'Caddy migration',
+      section: guide.split('## Migrate an existing installation to Caddy\n')[1]?.split('\n## ')[0],
+      calls: ['compose config --images app'],
+      caddyMigration: true,
+    },
     {
       name: 'backup failure recovery',
       section: guide.split('If backup fails')[1]?.split('Set `backup_dir`')[0],
@@ -1095,40 +1098,49 @@ docker compose up -d --wait`)
         'compose up -d --wait',
       ],
     },
-  ])('reads .env for standalone $name commands', ({ section, calls, databaseOnly }) => {
-    const block = section?.match(/```sh\n([\s\S]*?)\n```/)?.[1]
-    if (!block) throw new Error('Standalone Compose instructions must exist')
-    // The drill's checkout and .env preparation are covered above; run its database
-    // commands after the documented reset of an inherited Compose selection.
-    const commands = databaseOnly ? block.split('mv "$env_update" .env\n')[1] : block
-    if (!commands) throw new Error('Database commands must follow restore configuration')
-    const directory = mkdtempSync(join(tmpdir(), 'hourmere-standalone-docs-'))
-    try {
-      writeFileSync(join(directory, 'hourmere.dump'), 'synthetic-dump\n')
-      writeFileSync(
-        join(directory, 'docker'),
-        `#!/bin/sh\n[ "\${COMPOSE_FILE+x}" != x ] || exit 9\nprintf "%s\\n" "$*" >> "$CALL_LOG"\n`,
-        { mode: 0o755 },
-      )
-      const callLog = join(directory, 'calls')
-      const result = spawnSync('sh', ['-eu', '-c', commands], {
-        cwd: directory,
-        encoding: 'utf8',
-        env: {
-          PATH: `${directory}:${process.env.PATH}`,
-          CALL_LOG: callLog,
-          COMPOSE_FILE: 'conflicting-shell-selection.yml',
-          backup_dir: directory,
-        },
-      })
-      expect(result.status, result.stderr).toBe(0)
-      expect(
-        readFileSync(callLog, 'utf8').replaceAll(directory, 'BACKUP').trim().split('\n'),
-      ).toEqual(calls)
-    } finally {
-      rmSync(directory, { recursive: true, force: true })
-    }
-  })
+  ])(
+    'reads .env for standalone $name commands',
+    ({ section, calls, databaseOnly, caddyMigration }) => {
+      const block = section?.match(/```sh\n([\s\S]*?)\n```/)?.[1]
+      if (!block) throw new Error('Standalone Compose instructions must exist')
+      // The drill's checkout and .env preparation are covered above; run its database
+      // commands after the documented reset of an inherited Compose selection.
+      const commands = databaseOnly
+        ? block.split('mv "$env_update" .env\n')[1]
+        : caddyMigration
+          ? `${block}\ndocker compose config --images app`
+          : block
+      if (!commands) throw new Error('Database commands must follow restore configuration')
+      const directory = mkdtempSync(join(tmpdir(), 'hourmere-standalone-docs-'))
+      try {
+        writeFileSync(join(directory, 'hourmere.dump'), 'synthetic-dump\n')
+        writeFileSync(join(directory, '.env'), 'HOURMERE_VERSION=1.0.0\n')
+        writeFileSync(
+          join(directory, 'docker'),
+          `#!/bin/sh\n[ "\${COMPOSE_FILE+x}" != x ] && [ "\${HOURMERE_VERSION+x}" != x ] || exit 9\nprintf "%s\\n" "$*" >> "$CALL_LOG"\n`,
+          { mode: 0o755 },
+        )
+        const callLog = join(directory, 'calls')
+        const result = spawnSync('sh', ['-eu', '-c', commands], {
+          cwd: directory,
+          encoding: 'utf8',
+          env: {
+            PATH: `${directory}:${process.env.PATH}`,
+            CALL_LOG: callLog,
+            COMPOSE_FILE: 'conflicting-shell-selection.yml',
+            HOURMERE_VERSION: '9.9.9',
+            backup_dir: directory,
+          },
+        })
+        expect(result.status, result.stderr).toBe(0)
+        expect(
+          readFileSync(callLog, 'utf8').replaceAll(directory, 'BACKUP').trim().split('\n'),
+        ).toEqual(calls)
+      } finally {
+        rmSync(directory, { recursive: true, force: true })
+      }
+    },
+  )
 
   it('explains inspection and an incomplete backup before resuming a failed backup', () => {
     const recovery = guide.split('If backup fails')[1]?.split('Set `backup_dir`')[0]

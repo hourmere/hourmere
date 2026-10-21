@@ -277,7 +277,7 @@ before recreating the stack. For plain mode, remove both lines of the proxy veri
 
 ```sh
 (
-  unset COMPOSE_FILE &&
+  unset COMPOSE_FILE HOURMERE_VERSION &&
   ./scripts/enable-worker.sh &&
   compose_services=$(docker compose config --services) &&
   { printf '%s\n' "$compose_services" | grep -qx worker ||

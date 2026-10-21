@@ -294,9 +294,6 @@ Make the documentation changes in a separate follow-up after verifying public ac
   | Same guide `:454–551` (restore) | Preserve the backed-up image selection/version and pull instead of building; keep drill isolation and fresh-volume restore. |
   | Same guide `:553–745` (Upgrade and roll back) | Make version edit → `docker compose pull` → stop all old roles → `docker compose up -d --wait` primary; keep startup migration boundary and source/pre-1.0 alternatives. |
   | `apps/site/src/content/docs/docs/configuration.md:259`, `:265`, `:267`, `:296` (Compose-only reference and manual edits) | Describe image-aware setup and `COMPOSE_FILE` selections, published `APP_IMAGE` behavior and exact `HOURMERE_VERSION`; preserve the image overlay in worker examples and explain that source omits it. |
-  | `.env.example:116–121` (Compose/image comments) | Describe published exact-version image setup and retain the explicit source-build alternative. |
-  | `docker-compose.yml` and `docker-compose.worker.yml` (header comments) | Point primary setup at the image overlay, preserve same-version app/worker selection, and identify source builds as the alternative. |
-  | `scripts/enable-worker.sh` (`--build` hint) | Print an image-aware startup hint without `--build` for image installs; retain `--build` for source installs. |
   | `apps/site/src/legal-content.test.ts:80` (comparison introduction guard) | Replace the unpublished-image assertion with a published-image link assertion alongside the comparison copy in card 213; add install/version/rollback guards for README and self-hosting without weakening provider-acceptance guards. |
   | `scripts/deploy-docs.test.ts` and `scripts/restore-env.test.ts` | Update executable paste/restore expectations with the docs, preserving failure guards and private `.env` handling. |
 

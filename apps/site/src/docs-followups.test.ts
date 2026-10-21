@@ -150,17 +150,18 @@ describe('release-day documentation flip list', () => {
         'HOURMERE_VERSION',
       ],
     },
-    { area: 'example environment comments', targets: ['.env.example:116–121'] },
-    {
-      area: 'Compose header comments',
-      targets: ['`docker-compose.yml` and `docker-compose.worker.yml` (header comments)'],
-    },
-    {
-      area: 'worker helper startup hint',
-      targets: ['`scripts/enable-worker.sh` (`--build` hint)'],
-    },
     { area: 'Caddy migration', targets: [':174–220', '(Caddy migration)'] },
   ])('includes $area', ({ targets }) => {
     for (const target of targets) expect(checklist).toContain(target)
+  })
+
+  it.each([
+    '.env.example',
+    'docker-compose.yml',
+    'docker-compose.worker.yml',
+    'scripts/enable-worker.sh',
+  ])('keeps completed setup preparation out of the release-day map (%s)', (file) => {
+    expect(checklist).not.toContain(`\`${file}\``)
+    expect(checklist).not.toContain(`\`${file}:`)
   })
 })

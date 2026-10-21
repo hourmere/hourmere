@@ -237,6 +237,7 @@ PROXY_DYNAMIC_RANGE=172.30.62.8/29
 EOF
 chmod 600 "$env_update"
 mv "$env_update" .env
+unset COMPOSE_FILE HOURMERE_VERSION
 ```
 
 Review the private file locally. For an image deployment, retain its exact
@@ -259,7 +260,7 @@ pasting:
 
 ```sh
 (
-  unset COMPOSE_FILE &&
+  unset COMPOSE_FILE HOURMERE_VERSION &&
   ./scripts/enable-worker.sh &&
   compose_services=$(docker compose config --services) &&
   { printf '%s\n' "$compose_services" | grep -qx worker ||
@@ -274,9 +275,9 @@ The helper rewrites only
 `COMPOSE_FILE` in your private `.env`, keeps its mode `600`, and preserves the existing
 image and proxy selections. It accepts quoted, unquoted and `export COMPOSE_FILE=` assignments, adds
 the setting if missing, and can be run again safely. It refuses a symlink `.env`.
-A shell-exported `COMPOSE_FILE` overrides `.env`. Each guarded block unsets it only inside
-its own subshell; standalone Compose commands need their own `unset COMPOSE_FILE` so they
-read `.env` too.
+Shell-exported `COMPOSE_FILE` and `HOURMERE_VERSION` override `.env`. Each guarded block
+unsets them only inside its own subshell; standalone Compose commands need their own
+`unset COMPOSE_FILE HOURMERE_VERSION` so they read `.env` too.
 
 Unsupported or ambiguous `COMPOSE_FILE` syntax, including YAML-style `COMPOSE_FILE: ...`,
 is refused without changes. A leading UTF-8 BOM is also refused: save `.env` as UTF-8
@@ -318,14 +319,14 @@ If moving from the old commented worker block, follow
 Remove the worker container while the overlay is still selected:
 
 ```sh
-unset COMPOSE_FILE && docker compose rm -sf worker
+unset COMPOSE_FILE HOURMERE_VERSION && docker compose rm -sf worker
 ```
 
 Remove any old `HOURMERE_ROLE=web` setting from `.env`. Then deselect the overlay with the helper:
 
 ```sh
 (
-  unset COMPOSE_FILE &&
+  unset COMPOSE_FILE HOURMERE_VERSION &&
   ./scripts/disable-worker.sh &&
   compose_services=$(docker compose config --services) &&
   { ! printf '%s\n' "$compose_services" | grep -qx worker ||
@@ -398,7 +399,7 @@ n8n port. Verify the worker selection and recreate both app and worker:
 
 ```sh
 (
-  unset COMPOSE_FILE &&
+  unset COMPOSE_FILE HOURMERE_VERSION &&
   compose_services=$(docker compose config --services) &&
   { printf '%s\n' "$compose_services" | grep -qx worker ||
     { echo "Worker service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
@@ -445,7 +446,7 @@ volumes. Store the backup outside the checkout:
 ```sh
 (
   umask 077 &&
-  unset COMPOSE_FILE &&
+  unset COMPOSE_FILE HOURMERE_VERSION &&
   backup_dir="$HOME/hourmere-backups/$(date -u +%Y%m%dT%H%M%SZ)" &&
   mkdir -p "$backup_dir" &&
   compose_services=$(docker compose config --services) &&
@@ -477,7 +478,7 @@ Inspect the failed command and partial backup, fix the cause, then resume the ex
 deployment from its checkout:
 
 ```sh
-unset COMPOSE_FILE && docker compose up -d --wait
+unset COMPOSE_FILE HOURMERE_VERSION && docker compose up -d --wait
 ```
 
 Treat the partial backup as incomplete and take a new successful backup before continuing.
@@ -521,7 +522,7 @@ PROXY_DYNAMIC_RANGE=172.30.63.8/29
 EOF
 chmod 600 "$env_update"
 mv "$env_update" .env
-unset COMPOSE_FILE
+unset COMPOSE_FILE HOURMERE_VERSION
 docker compose up -d --wait db
 docker compose exec -T db \
   pg_restore -U hourmere -d hourmere --exit-on-error --single-transaction < "$backup_dir/hourmere.dump"
@@ -550,7 +551,7 @@ command:
 
 ```sh
 (
-  unset COMPOSE_FILE &&
+  unset COMPOSE_FILE HOURMERE_VERSION &&
   compose_services=$(docker compose config --services) &&
   { printf '%s\n' "$compose_services" | grep -qx worker ||
     { echo "Worker service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
@@ -575,7 +576,7 @@ do not overwrite the prepared `.env` again. Restore the database as above, then 
 proxy container and copy its saved state into the new volumes before starting it:
 
 ```sh
-unset COMPOSE_FILE
+unset COMPOSE_FILE HOURMERE_VERSION
 docker compose pull
 docker compose create proxy
 docker compose cp "$backup_dir/caddy-data/." proxy:/data
@@ -609,20 +610,20 @@ pre-1.0 checkout, read
 Existing source deployments must select the image overlay before using either image
 upgrade below. Edit the existing private `.env`: insert `docker-compose.image.yml`
 immediately after `docker-compose.yml` in `COMPOSE_FILE`, and set `HOURMERE_VERSION` to
-the exact reviewed release without `v` (for example, `1.0.1`), never `latest`. Preserve
+the exact reviewed release without `v` (for example, `1.0.0`), never `latest`. Preserve
 proxy, worker and custom overlays in their existing order. For a plain single-container
 installation, the selection becomes:
 
 ```dotenv
 COMPOSE_FILE='docker-compose.yml:docker-compose.image.yml'
-HOURMERE_VERSION='1.0.1'
+HOURMERE_VERSION='1.0.0'
 ```
 
 For an existing bundled-proxy deployment with a separate worker, it becomes:
 
 ```dotenv
 COMPOSE_FILE='docker-compose.yml:docker-compose.image.yml:docker-compose.proxy.yml:docker-compose.worker.yml'
-HOURMERE_VERSION='1.0.1'
+HOURMERE_VERSION='1.0.0'
 ```
 
 Do not rerun setup: it refuses an existing `.env`. Unset shell-exported `COMPOSE_FILE`
@@ -795,7 +796,7 @@ The app keeps the default `all` role. From the deployment checkout:
 (
   git fetch --tags &&
   git checkout vX.Y.Z &&
-  unset COMPOSE_FILE &&
+  unset COMPOSE_FILE HOURMERE_VERSION &&
   compose_services=$(docker compose config --services) &&
   { ! printf '%s\n' "$compose_services" | grep -qx worker ||
     { echo "This deployment runs a separate worker; use the separate-worker upgrade."; exit 1; }; } &&
@@ -825,7 +826,7 @@ stopping the old app and worker:
 (
   git fetch --tags &&
   git checkout vX.Y.Z &&
-  unset COMPOSE_FILE &&
+  unset COMPOSE_FILE HOURMERE_VERSION &&
   ./scripts/enable-worker.sh &&
   compose_services=$(docker compose config --services) &&
   { printf '%s\n' "$compose_services" | grep -qx worker ||

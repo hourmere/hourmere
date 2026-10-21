@@ -112,7 +112,7 @@ background jobs; to split them after setup, run:
 
 ```sh
 (
-  unset COMPOSE_FILE &&
+  unset COMPOSE_FILE HOURMERE_VERSION &&
   ./scripts/enable-worker.sh &&
   compose_services=$(docker compose config --services) &&
   { printf '%s\n' "$compose_services" | grep -qx worker ||
@@ -130,8 +130,8 @@ The helper safely updates `COMPOSE_FILE`
 in the private `.env`, preserving the image and proxy selections. The tracked overlay automatically
 selects `web` for the app and `worker` for the separate worker, using the same image and
 secrets.
-The block unsets a shell-exported `COMPOSE_FILE` only inside its subshell; unset it
-separately before standalone Compose commands so they read `.env` too.
+The block unsets shell-exported `COMPOSE_FILE` and `HOURMERE_VERSION` only inside its
+subshell; unset them separately before standalone Compose commands so they read `.env` too.
 The `.env` backup preserves this choice, and upgrades need no tracked Compose edits.
 Give containers at least 35 seconds to stop.
 
@@ -186,7 +186,7 @@ reviewed release without `v`, never `latest`. For a plain single-container insta
 
 ```dotenv
 COMPOSE_FILE='docker-compose.yml:docker-compose.image.yml'
-HOURMERE_VERSION='1.0.1'
+HOURMERE_VERSION='1.0.0'
 ```
 
 Unset shell-exported `COMPOSE_FILE` and `HOURMERE_VERSION`, then run the guide's
