@@ -393,9 +393,11 @@ export interface Bookings {
 }
 
 export interface CalendarBusy {
+  all_day_end: string | null;
+  all_day_start: string | null;
   calendar_id: string;
   external_event_id: string;
-  period: string;
+  period: string | null;
 }
 
 export interface CalendarConnections {

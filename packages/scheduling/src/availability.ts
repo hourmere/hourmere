@@ -596,7 +596,8 @@ export interface AvailabilityQuery {
  *   Date overrides near the range are included.
  * - busy: intervals mirrored from the host's calendars that have `check_conflicts` on,
  *   clipped to the window around the range (so unbounded and infinite ones work), except
- *   the calendar event mirrored from `excludeBookingId` itself.
+ *   the calendar event mirrored from `excludeBookingId` itself. All-day dates expand at
+ *   local day boundaries in the schedule being evaluated, independently of calendar zone.
  * - bookings: the host's active bookings (`booking_hosts.active`, in any organization),
  *   each with the buffers of its own event type (0 when it has none). Bookings of this
  *   event type are passed as `bookings`, so they count toward `max_bookings_per_day`;
@@ -672,7 +673,7 @@ export async function buildAvailabilityInput(
       !state ||
       typeof state !== 'object' ||
       Array.isArray(state) ||
-      state.version !== 1 ||
+      state.version !== 2 ||
       state.timeZone !== calendar.time_zone ||
       typeof state.start !== 'string' ||
       typeof state.end !== 'string'
@@ -690,6 +691,10 @@ export async function buildAvailabilityInput(
   }
   const windowRange = <DB, TB extends keyof DB>(eb: ExpressionBuilder<DB, TB>) =>
     eb.fn<string>('tstzrange', [eb.val(window.start.toString()), eb.val(window.end.toString())])
+  const windowDates = {
+    start: boundedDate(window.start, schedule.time_zone),
+    end: boundedDate(window.end, schedule.time_zone),
+  }
   // Postgres keeps microseconds, node-postgres Dates milliseconds: blocked time is widened to
   // whole milliseconds in SQL (start down, end up), so converting it never shrinks or empties
   // it (e.g. a range clipped to [10:00:00, 10:00:00.0005)).
@@ -711,8 +716,8 @@ export async function buildAvailabilityInput(
       .selectFrom('schedule_overrides')
       .select(['date', 'intervals'])
       .where('schedule_id', '=', schedule.id)
-      .where('date', '>=', utcDate(window.start))
-      .where('date', '<=', utcDate(window.end))
+      .where('date', '>=', boundedDate(window.start))
+      .where('date', '<=', boundedDate(window.end))
       .orderBy('date')
       .execute(),
     db
@@ -726,11 +731,21 @@ export async function buildAvailabilityInput(
         return [
           floorMs(eb, eb.fn('lower', [clipped])).as('start'),
           ceilMs(eb, eb.fn('upper', [clipped])).as('end'),
+          'cb.all_day_start',
+          'cb.all_day_end',
         ]
       })
       .where('cc.user_id', '=', hostUserId)
       .where('c.check_conflicts', '=', true)
-      .where((eb) => eb('cb.period', '&&', windowRange(eb)))
+      .where((eb) =>
+        eb.or([
+          eb('cb.period', '&&', windowRange(eb)),
+          eb.and([
+            eb('cb.all_day_start', '<=', windowDates.end),
+            eb('cb.all_day_end', '>', windowDates.start),
+          ]),
+        ]),
+      )
       // The moved booking's own event in the host's calendar must not block its new time.
       .$if(excludeBookingId !== undefined, (q) =>
         q.where(({ not, exists, selectFrom }) =>
@@ -790,8 +805,20 @@ export async function buildAvailabilityInput(
   ])
 
   const busyIntervals: InstantInterval[] = busy
-    .map((row) => ({ start: toInstant(row.start), end: toInstant(row.end) }))
-    // Cannot happen after widening; the engine refuses empty intervals, so never pass one.
+    .map((row) => {
+      if (row.all_day_start !== null && row.all_day_end !== null) {
+        // Resolve both dates separately: a local day can span 23 or 25 hours across DST.
+        const start = Temporal.PlainDate.from(row.all_day_start)
+          .toZonedDateTime(schedule.time_zone)
+          .toInstant()
+        const end = Temporal.PlainDate.from(row.all_day_end)
+          .toZonedDateTime(schedule.time_zone)
+          .toInstant()
+        return { start: later(start, window.start), end: earlier(end, window.end) }
+      }
+      return { start: toInstant(row.start), end: toInstant(row.end) }
+    })
+    // The engine refuses empty intervals, including a local date skipped by a zone change.
     .filter((i) => Temporal.Instant.compare(i.end, i.start) > 0)
   const ownBookings: ExistingBooking[] = []
   for (const row of bookings) {
@@ -840,9 +867,9 @@ export async function buildAvailabilityInput(
   }
 }
 
-/** `YYYY-MM-DD` of an instant in UTC, kept inside the years Postgres and the engine accept. */
-function utcDate(instant: Temporal.Instant): string {
-  const date = instant.toZonedDateTimeISO('UTC').toPlainDate()
+/** A window's date, kept inside the years Postgres and the engine accept. */
+function boundedDate(instant: Temporal.Instant, timeZone = 'UTC'): string {
+  const date = instant.toZonedDateTimeISO(timeZone).toPlainDate()
   if (date.year < 1) return '0001-01-01'
   if (date.year > 9999) return '9999-12-31'
   return date.toString()
