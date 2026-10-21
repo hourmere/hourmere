@@ -265,9 +265,32 @@ describe.skipIf(!databaseUrl)('calendar HTTP routes (real Postgres)', () => {
     }
     const listed = await request('/api/v1/calendar-connections')
     expect(listed.status).toBe(200)
-    expect(JSON.stringify(await listed.json())).not.toMatch(
-      /credentials|fake-access-token|fake-refresh-token/,
-    )
+    const metadata = await listed.json()
+    expect(metadata).toMatchObject({
+      data: [{ calendars: [{ timeZone: 'America/Los_Angeles' }] }],
+    })
+    expect(JSON.stringify(metadata)).not.toMatch(/credentials|fake-access-token|fake-refresh-token/)
+  })
+
+  it('documents nullable calendar time zones in OpenAPI', async () => {
+    const response = await request('/api/v1/openapi.json')
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      components: {
+        schemas: {
+          CalendarConnection: {
+            properties: {
+              calendars: {
+                items: {
+                  properties: { timeZone: { type: ['string', 'null'] } },
+                  required: expect.arrayContaining(['timeZone']),
+                },
+              },
+            },
+          },
+        },
+      },
+    })
   })
 
   it('handles missing sessions and untrusted errors without copying them to redirects', async () => {

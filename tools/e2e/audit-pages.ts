@@ -129,7 +129,11 @@ async function verifyAuditContent(page: Page, id: AuditPageId) {
       await page.locator('#activity-summary').waitFor()
       break
     case 'calendars':
-      await page.getByText(/^(No calendar accounts connected yet\.|尚未连接日历账号。)$/).waitFor()
+      await page.getByText('Synthetic cross-zone calendar', { exact: true }).waitFor()
+      await page
+        .locator('.calendar-list .alert-info')
+        .filter({ hasText: 'America/Argentina/Buenos Aires' })
+        .waitFor()
       break
     case 'conferences':
       await page.getByText(/^(No Zoom accounts connected\.|尚未连接 Zoom 账号。)$/).waitFor()
@@ -268,6 +272,13 @@ export async function openAuditPage(
     )
     verifyAuditPath(page.url(), paths[id])
     await verifyAuditContent(page, id)
+    if (
+      ['booking', 'booking-form', 'booking-time-zone', 'embedded-booking', 'team-booking'].includes(
+        id,
+      )
+    )
+      await page.locator('.event-facts li').filter({ hasText: 'America/New York' }).waitFor()
+    if (id === 'booking-form') await page.locator('.host-local-time').waitFor()
     await page.evaluate(() => window.scrollTo(0, 0))
     await page.evaluate(settleAuditLayout)
   } catch {

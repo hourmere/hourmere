@@ -442,7 +442,7 @@ describe.skipIf(!serverUrl)('iMIP interoperability', () => {
           ? 'Europe/Berlin'
           : message.to === 'ada@outlook.com'
             ? 'Asia/Tokyo'
-            : 'America/Los_Angeles'
+            : 'America/Los Angeles'
         expect(message.text).toContain(zone)
         const roleHint = isHost
           ? chinese

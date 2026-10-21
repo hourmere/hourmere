@@ -1,0 +1,5 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`the calendars page > explains a Google calendar zone mismatch using the default schedule rather than the profile in en 1`] = `"This Google calendar uses America/New York; your availability uses America/Los Angeles. Bookings land at the same moment; Google Calendar shows them in America/New York time."`;
+
+exports[`the calendars page > explains a Google calendar zone mismatch using the default schedule rather than the profile in zh-CN 1`] = `"此 Google 日历使用 America/New York 时区；你的可预约时段使用 America/Los Angeles 时区。预约对应同一时刻；Google 日历以 America/New York 时间显示。"`;

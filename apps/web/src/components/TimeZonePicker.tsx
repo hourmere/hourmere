@@ -4,7 +4,7 @@ import { isKnownTimeZone } from '../format.ts'
 import { useI18n } from '../i18n/runtime.tsx'
 import type { UiText } from '../i18n/translate.ts'
 import { type DateKey, parseDateKey } from '../public/calendar.ts'
-import { availableTimeZones } from '../public/env.ts'
+import { availableTimeZones, detectTimeZone } from '../public/env.ts'
 import { currentZoneId, instantOf, offsetLabel, zoneName } from '../public/time.ts'
 import type { ControlProps } from './forms.tsx'
 
@@ -107,6 +107,7 @@ export function TimeZonePicker({
   const editable = control !== undefined
   const id = useId()
   const [mountedAt] = useState(Date.now)
+  const [browserTimeZone] = useState(detectTimeZone)
   const at = now ?? mountedAt
   // Typing changes only the search; changing the displayed date refreshes every offset.
   const listed = useMemo(
@@ -114,22 +115,29 @@ export function TimeZonePicker({
     [at, referenceDate],
   )
   const zones = useMemo(() => {
-    if (!value || listed.some((zone) => zone.id === value) || !isKnownTimeZone(value)) return listed
-    const alias = zoneInfo(value, at, referenceDate)
-    return [...listed.filter((zone) => zone.canonical !== alias.canonical), alias].sort((a, b) =>
-      a.id.localeCompare(b.id),
-    )
-  }, [listed, value, at, referenceDate])
+    const preferredIds = new Set(editable ? [value] : [value, browserTimeZone])
+    const aliases = [...preferredIds]
+      .filter((id) => !listed.some((zone) => zone.id === id) && isKnownTimeZone(id))
+      .map((id) => zoneInfo(id, at, referenceDate))
+    if (!aliases.length) return listed
+    return [
+      ...listed.filter(
+        (zone) =>
+          preferredIds.has(zone.id) || !aliases.some((alias) => alias.canonical === zone.canonical),
+      ),
+      ...aliases,
+    ].sort((a, b) => a.id.localeCompare(b.id))
+  }, [listed, value, browserTimeZone, editable, at, referenceDate])
   // The public picker starts with the current choice and a short set of common zones.
   // Keep the editable settings combobox alphabetical for its existing keyboard navigation.
   const common = useMemo(() => {
     if (editable) return []
-    const ids = new Set([value, ...COMMON_ZONES])
+    const ids = new Set([value, browserTimeZone, ...COMMON_ZONES])
     return [...ids].flatMap((id) => {
       const zone = zones.find((zone) => zone.id === id)
       return zone ? [zone] : []
     })
-  }, [editable, value, zones])
+  }, [editable, value, browserTimeZone, zones])
   const ordered = useMemo(() => {
     const ids = new Set(common.map((zone) => zone.id))
     return [...common, ...zones.filter((zone) => !ids.has(zone.id))]

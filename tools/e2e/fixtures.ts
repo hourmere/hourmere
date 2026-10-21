@@ -494,6 +494,31 @@ export const test = base.extend<{
             .set({ time_zone: AUDIT_HOST_TIME_ZONE })
             .where('user_id', '=', host.userId)
             .execute()
+          // Exercise the calendar/schedule zone notice with a long display name.
+          // No calendar is selected for synchronization or provider writeback.
+          const auditConnection = await db
+            .insertInto('calendar_connections')
+            .values({
+              user_id: host.userId,
+              provider: 'google',
+              external_account_id: 'synthetic-audit-calendar-account',
+              account_email: 'synthetic-calendar@hourmere.invalid',
+              credentials: Buffer.from('synthetic-unused-calendar-credential'),
+              scopes: [...GOOGLE_CALENDAR_SYNC_SCOPES],
+            })
+            .returning('id')
+            .executeTakeFirstOrThrow()
+          await db
+            .insertInto('calendars')
+            .values({
+              connection_id: auditConnection.id,
+              external_id: 'synthetic-audit-calendar',
+              name: 'Synthetic cross-zone calendar',
+              access_role: 'owner',
+              time_zone: 'America/Argentina/Buenos_Aires',
+              check_conflicts: false,
+            })
+            .execute()
           const bookingId = await f.booking(
             host.organizationId,
             [host.userId],

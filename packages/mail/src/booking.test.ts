@@ -15,6 +15,7 @@ const meeting: BookingEmailMeeting = {
   hostName: 'Grace Hopper',
   inviteeName: 'Ada Lovelace',
   inviteeEmail: 'ada@example.com',
+  inviteeTimeZone: 'Europe/Berlin',
   start: at('2026-10-20T08:00:00Z'),
   end: at('2026-10-20T08:30:00Z'),
   location: { kind: 'link', url: 'https://meet.example.com/abc-defg', label: 'Google Meet' },
@@ -57,13 +58,13 @@ const requestAttachment = icsAttachment({
 describe('formatMeetingTime', () => {
   it("shows the time in the recipient's zone, with the zone's name", () => {
     expect(formatMeetingTime(meeting.start, meeting.end, 'Europe/Berlin')).toBe(
-      'Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin)',
+      'Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin, GMT+02:00)',
     )
     expect(formatMeetingTime(meeting.start, meeting.end, 'America/New_York')).toBe(
-      'Tuesday, October 20, 2026, 4:00 AM – 4:30 AM (America/New_York)',
+      'Tuesday, October 20, 2026, 4:00 AM – 4:30 AM (America/New York, GMT-04:00)',
     )
     expect(formatMeetingTime(meeting.start, meeting.end, 'Asia/Kolkata')).toBe(
-      'Tuesday, October 20, 2026, 1:30 PM – 2:00 PM (Asia/Kolkata)',
+      'Tuesday, October 20, 2026, 1:30 PM – 2:00 PM (Asia/Kolkata, GMT+05:30)',
     )
   })
 
@@ -71,7 +72,7 @@ describe('formatMeetingTime', () => {
     expect(
       formatMeetingTime(at('2026-10-20T21:30:00Z'), at('2026-10-20T22:30:00Z'), 'Europe/Berlin'),
     ).toBe(
-      'Tuesday, October 20, 2026, 11:30 PM – Wednesday, October 21, 2026, 12:30 AM (Europe/Berlin)',
+      'Tuesday, October 20, 2026, 11:30 PM – Wednesday, October 21, 2026, 12:30 AM (Europe/Berlin, GMT+02:00)',
     )
   })
 
@@ -79,13 +80,13 @@ describe('formatMeetingTime', () => {
     // Berlin leaves summer time on October 25, 2026.
     expect(
       formatMeetingTime(at('2026-10-26T08:00:00Z'), at('2026-10-26T08:30:00Z'), 'Europe/Berlin'),
-    ).toBe('Monday, October 26, 2026, 9:00 AM – 9:30 AM (Europe/Berlin)')
+    ).toBe('Monday, October 26, 2026, 9:00 AM – 9:30 AM (Europe/Berlin, GMT+01:00)')
   })
 
   it('falls back to UTC for a zone it does not know', () => {
     for (const zone of ['Mars/Olympus_Mons', '', '+02:00']) {
       expect(formatMeetingTime(meeting.start, meeting.end, zone)).toBe(
-        'Tuesday, October 20, 2026, 8:00 AM – 8:30 AM (UTC)',
+        'Tuesday, October 20, 2026, 8:00 AM – 8:30 AM (UTC, GMT+00:00)',
       )
     }
   })
@@ -96,7 +97,7 @@ describe('bookingEmail', () => {
     const m = bookingEmail('confirmed', meeting, invitee)
     expect(m.to).toBe('ada@example.com')
     expect(m.subject).toBe(
-      'Confirmed: Intro call with Grace Hopper on Tue, Oct 20, 10:00 AM (Europe/Berlin)',
+      'Confirmed: Intro call with Grace Hopper on Tue, Oct 20, 10:00 AM (Europe/Berlin, GMT+02:00)',
     )
     expect(m.text).toBe(
       [
@@ -105,7 +106,7 @@ describe('bookingEmail', () => {
         'Your meeting with Grace Hopper is booked.',
         '',
         'What: Intro call',
-        'When: Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin)',
+        'When: Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin, GMT+02:00)',
         'Where: Google Meet',
         'Host: Grace Hopper',
         '',
@@ -137,11 +138,11 @@ describe('bookingEmail', () => {
     )
     expect(m.to).toBe('grace@example.com')
     expect(m.subject).toBe(
-      'New booking: Intro call with Ada Lovelace on Tue, Oct 20, 4:00 AM (America/New_York)',
+      'New booking: Intro call with Ada Lovelace on Tue, Oct 20, 4:00 AM (America/New York, GMT-04:00)',
     )
     expect(m.text).toContain('Ada Lovelace booked a meeting with you.')
     expect(m.text).toContain(
-      'When: Tuesday, October 20, 2026, 4:00 AM – 4:30 AM (America/New_York)',
+      'When: Tuesday, October 20, 2026, 4:00 AM – 4:30 AM (America/New York, GMT-04:00)',
     )
     expect(m.text).toContain('Invitee: Ada Lovelace <ada@example.com>')
     expect(m.text).toContain('Guests: Charles <cb@example.com>')
@@ -163,17 +164,19 @@ describe('bookingEmail', () => {
       invitee,
     )
     expect(m.subject).toBe(
-      'Rescheduled: Intro call with Grace Hopper, now Tue, Oct 20, 10:00 AM (Europe/Berlin)',
+      'Rescheduled: Intro call with Grace Hopper, now Tue, Oct 20, 10:00 AM (Europe/Berlin, GMT+02:00)',
     )
     expect(m.text).toContain('Your meeting with Grace Hopper has moved to a new time.')
-    expect(m.text).toContain('Was: Monday, October 19, 2026, 10:00 AM – 10:30 AM (Europe/Berlin)')
+    expect(m.text).toContain(
+      'Was: Monday, October 19, 2026, 10:00 AM – 10:30 AM (Europe/Berlin, GMT+02:00)',
+    )
     expect(m.text).toContain(`Reschedule: ${links.reschedule}`)
   })
 
   it('gives the cancellation reason and no manage links once cancelled', () => {
     const m = bookingEmail('cancelled', { ...meeting, cancelReason: 'Sick.\r\nSorry!' }, invitee)
     expect(m.subject).toBe(
-      'Cancelled: Intro call with Grace Hopper on Tue, Oct 20, 10:00 AM (Europe/Berlin)',
+      'Cancelled: Intro call with Grace Hopper on Tue, Oct 20, 10:00 AM (Europe/Berlin, GMT+02:00)',
     )
     expect(m.text).toContain('Your meeting with Grace Hopper has been cancelled.')
     expect(m.text).toContain('Reason: Sick.\n  Sorry!')
@@ -184,11 +187,11 @@ describe('bookingEmail', () => {
 
   it('reminds both sides', () => {
     expect(bookingEmail('reminder', meeting, invitee).subject).toBe(
-      'Reminder: Intro call with Grace Hopper on Tue, Oct 20, 10:00 AM (Europe/Berlin)',
+      'Reminder: Intro call with Grace Hopper on Tue, Oct 20, 10:00 AM (Europe/Berlin, GMT+02:00)',
     )
     const m = bookingEmail('reminder', meeting, host)
     expect(m.subject).toBe(
-      'Reminder: Intro call with Ada Lovelace on Tue, Oct 20, 4:00 AM (America/New_York)',
+      'Reminder: Intro call with Ada Lovelace on Tue, Oct 20, 4:00 AM (America/New York, GMT-04:00)',
     )
     expect(m.text).toContain('Your meeting with Ada Lovelace is coming up.')
   })
