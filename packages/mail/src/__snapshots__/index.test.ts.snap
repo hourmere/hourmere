@@ -1,0 +1,87 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`magicLinkEmail > matches the complete en sign-in email 1`] = `
+{
+  "html": "<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>Sign in to Hourmere</title>
+<style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
+</head>
+<body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
+<!--[if mso]><table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" style="width: 600px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><![endif]-->
+<table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="width: 100%; max-width: 600px; margin: 0 auto; background-color: #ffffff; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;">
+<tr><td style="padding: 24px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; overflow-wrap: anywhere; word-break: break-word;">
+<p style="margin: 0 0 24px; color: #1f4fd8; font-size: 20px; font-weight: 700;">Hourmere</p>
+<p>To sign in to Hourmere, press the button below, then &quot;Sign in to Hourmere&quot; on the page it opens.</p>
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="padding: 16px 0; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td bgcolor="#1f4fd8" style="padding: 0; mso-padding-alt: 12px 18px; background-color: #1f4fd8; border: 1px solid #1f4fd8; border-radius: 6px; text-align: center; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><a href="https://cal.example.com/sign-in/confirm#token=abc&amp;callbackURL=%2F" style="display: block; padding: 12px 18px; line-height: 20px; min-height: 20px; color: #ffffff; text-decoration: none; overflow-wrap: anywhere; word-break: break-word;">Sign in</a></td></tr></table></td></tr></table>
+<p style="color: #555;">The link expires in 5 minutes and works once. If you did not ask to sign in, you can ignore this email.</p>
+<p style="color: #555; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;">If the button does not work, copy this link into your browser:<br><a href="https://cal.example.com/sign-in/confirm#token=abc&amp;callbackURL=%2F" style="color: #1f4fd8; overflow-wrap: anywhere; word-break: break-word;">https://cal.example.com/sign-in/confirm#token=abc&amp;callbackURL=%2F</a></p>
+<p style="margin-top: 24px; border-top: 1px solid #ddd; padding-top: 16px; color: #555; font-size: 13px;">You received this email because a sign-in link was requested for your Hourmere account.</p>
+</td></tr>
+</table>
+<!--[if mso]></td></tr></table><![endif]-->
+</body>
+</html>
+",
+  "subject": "Sign in to Hourmere",
+  "text": "Hourmere
+
+To sign in to Hourmere, open this link, then press "Sign in to Hourmere" on the page it opens:
+
+https://cal.example.com/sign-in/confirm#token=abc&callbackURL=%2F
+
+The link expires in 5 minutes and works once. If you did not ask to sign in, you can ignore this email.
+
+You received this email because a sign-in link was requested for your Hourmere account.
+",
+  "to": "ada@example.com",
+}
+`;
+
+exports[`magicLinkEmail > matches the complete zh-CN sign-in email 1`] = `
+{
+  "html": "<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>登录 Hourmere</title>
+<style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
+</head>
+<body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
+<!--[if mso]><table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" style="width: 600px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><![endif]-->
+<table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="width: 100%; max-width: 600px; margin: 0 auto; background-color: #ffffff; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;">
+<tr><td style="padding: 24px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; overflow-wrap: anywhere; word-break: break-word;">
+<p style="margin: 0 0 24px; color: #1f4fd8; font-size: 20px; font-weight: 700;">Hourmere</p>
+<p>如需登录 Hourmere，请点击下方按钮，然后在打开的页面上点击<span class="cjk-quote" style="font-family: &quot;PingFang SC&quot;,&quot;Hiragino Sans GB&quot;,&quot;Microsoft YaHei&quot;,&quot;Noto Sans CJK SC&quot;,&quot;Source Han Sans SC&quot;,sans-serif; font-variant-east-asian: full-width; font-feature-settings: 'fwid';">“</span>登录 Hourmere<span class="cjk-quote" style="font-family: &quot;PingFang SC&quot;,&quot;Hiragino Sans GB&quot;,&quot;Microsoft YaHei&quot;,&quot;Noto Sans CJK SC&quot;,&quot;Source Han Sans SC&quot;,sans-serif; font-variant-east-asian: full-width; font-feature-settings: 'fwid';">”</span>。</p>
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="padding: 16px 0; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td bgcolor="#1f4fd8" style="padding: 0; mso-padding-alt: 12px 18px; background-color: #1f4fd8; border: 1px solid #1f4fd8; border-radius: 6px; text-align: center; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><a href="https://cal.example.com/sign-in/confirm#token=abc&amp;callbackURL=%2F" style="display: block; padding: 12px 18px; line-height: 20px; min-height: 20px; color: #ffffff; text-decoration: none; overflow-wrap: anywhere; word-break: break-word;">登录</a></td></tr></table></td></tr></table>
+<p style="color: #555;">此链接将在 5 分钟后过期，且仅能使用一次。如果你没有申请登录，可以忽略此邮件。</p>
+<p style="color: #555; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;">如果按钮无法使用，请将此链接复制到浏览器中：<br><a href="https://cal.example.com/sign-in/confirm#token=abc&amp;callbackURL=%2F" style="color: #1f4fd8; overflow-wrap: anywhere; word-break: break-word;">https://cal.example.com/sign-in/confirm#token=abc&amp;callbackURL=%2F</a></p>
+<p style="margin-top: 24px; border-top: 1px solid #ddd; padding-top: 16px; color: #555; font-size: 13px;">你收到此邮件是因为有人为你的 Hourmere 账号申请了登录链接。</p>
+</td></tr>
+</table>
+<!--[if mso]></td></tr></table><![endif]-->
+</body>
+</html>
+",
+  "subject": "登录 Hourmere",
+  "text": "Hourmere
+
+如需登录 Hourmere，请打开此链接，然后在打开的页面上点击“登录 Hourmere”：
+
+https://cal.example.com/sign-in/confirm#token=abc&callbackURL=%2F
+
+此链接将在 5 分钟后过期，且仅能使用一次。如果你没有申请登录，可以忽略此邮件。
+
+你收到此邮件是因为有人为你的 Hourmere 账号申请了登录链接。
+",
+  "to": "ada@example.com",
+}
+`;

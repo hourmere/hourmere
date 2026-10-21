@@ -1,4 +1,4 @@
-import { act, screen } from '@testing-library/react'
+import { act, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { goTo } from '../browser.ts'
@@ -38,12 +38,33 @@ describe('the sign-in page', () => {
     })
     renderApp('/sign-in?next=%2Fapp%2Fapi-keys')
     await heading()
+    const assertHeader = () => {
+      const picker = screen.getByRole('combobox', { name: 'Interface language' })
+      const header = picker.closest('header')
+      expect(header?.classList.contains('card-header')).toBe(true)
+      expect(header?.querySelector('.logo')?.textContent).toBe('Hourmere')
+      expect(header?.parentElement?.classList.contains('card')).toBe(true)
+      expect(screen.getAllByRole('combobox', { name: 'Interface language' })).toHaveLength(1)
+    }
+    assertHeader()
     await userEvent.type(screen.getByLabelText('Email'), ' ada@example.com ')
     await userEvent.click(screen.getByRole('button', { name: 'Email me a sign-in link' }))
 
     const sent = await screen.findByRole('heading', { name: 'Check your email' })
-    expect(document.activeElement).toBe(sent)
+    await waitFor(() => expect(document.activeElement).toBe(sent))
+    assertHeader()
     expect(screen.getByText('ada@example.com')).toBeDefined()
+    expect(
+      screen.getByText(
+        'Didn’t get the email? Check spam or junk and add the sender to your contacts.',
+      ),
+    ).toBeDefined()
+    await userEvent.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+    expect(
+      screen.getByText('没收到邮件？请检查垃圾邮件文件夹，并将发件人加入通讯录。'),
+    ).toBeDefined()
+    expect(screen.getByRole('button', { name: '使用其他邮箱或重试' })).toBeDefined()
+    await userEvent.selectOptions(screen.getByLabelText('界面语言'), 'en')
     expect(api.to('POST /api/auth/sign-in/magic-link').map((c) => c.body)).toEqual([
       {
         email: 'ada@example.com',
@@ -52,7 +73,9 @@ describe('the sign-in page', () => {
       },
     ])
 
-    await userEvent.click(screen.getByRole('button', { name: 'Use a different email' }))
+    await userEvent.click(
+      screen.getByRole('button', { name: 'Use a different email or try again' }),
+    )
     expect(await heading()).toBeDefined()
   })
 
@@ -64,13 +87,56 @@ describe('the sign-in page', () => {
     await settle()
     expect(screen.getByRole('button', { name: 'Email me a sign-in link' })).toBeDefined()
     expect(screen.queryByRole('button', { name: /continue with/i })).toBeNull()
+    expect(screen.queryByText(/Google sign-in shares/)).toBeNull()
+    expect(screen.queryByText(/Use a personal Microsoft account/)).toBeNull()
   })
 
   it('shows the providers the instance has enabled, and only those', async () => {
     fakeApi({ ...signedOut, ...instance({ google: true }) })
     renderApp('/sign-in')
     expect(await screen.findByRole('button', { name: 'Continue with Google' })).toBeDefined()
-    expect(screen.queryByRole('button', { name: 'Continue with Microsoft' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Sign in with Microsoft' })).toBeNull()
+    expect(screen.queryByText(/Use a personal Microsoft account/)).toBeNull()
+  })
+
+  it('explains Google identity access separately from calendars before starting sign-in', async () => {
+    const api = fakeApi({
+      ...signedOut,
+      ...instance({ google: true }),
+      'POST /api/auth/sign-in/social': () =>
+        json(200, { url: 'https://accounts.google.com/authorize', redirect: true }),
+    })
+    renderApp('/sign-in')
+    const button = await screen.findByRole('button', { name: 'Continue with Google' })
+    expect(
+      screen.getByText(/Google sign-in shares your name, email and profile picture/).textContent,
+    ).toBe(
+      'Google sign-in shares your name, email and profile picture with Hourmere. Calendar access is a separate, optional step in Calendars.',
+    )
+    expect(button.getAttribute('aria-describedby')).toBe('google-sign-in-explanation')
+    expect(api.to('POST /api/auth/sign-in/social')).toHaveLength(0)
+    await userEvent.click(button)
+    await vi.waitFor(() =>
+      expect(goTo).toHaveBeenCalledWith('https://accounts.google.com/authorize'),
+    )
+    expect(button.getAttribute('aria-busy')).toBe('true')
+    expect(button.hasAttribute('disabled')).toBe(true)
+    expect(button.textContent?.trim()).toBe('Continue with Google')
+  })
+
+  it('uses Google’s approved Chinese wording and localizes the sign-in explanation', async () => {
+    fakeApi({ ...signedOut, ...instance({ google: true, microsoft: true }) })
+    renderApp('/sign-in')
+    await screen.findByRole('button', { name: 'Continue with Google' })
+    await userEvent.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+    expect(screen.getByRole('button', { name: '继续使用 Google' })).toBeDefined()
+    expect(screen.getByRole('button', { name: '使用 Microsoft 登录' })).toBeDefined()
+    expect(screen.getByText('使用个人 Microsoft 账号或工作或学校账号。')).toBeDefined()
+    const explanation = document.getElementById('google-sign-in-explanation')
+    expect(explanation?.textContent).toBe(
+      '通过 Google 登录会向 Hourmere 提供你的姓名、邮箱和头像。日历访问是独立的可选步骤，可在“日历”页面连接。',
+    )
+    expect(explanation?.querySelectorAll('.cjk-quote')).toHaveLength(2)
   })
 
   it('does not guess the providers when the instance cannot say', async () => {
@@ -95,7 +161,10 @@ describe('the sign-in page', () => {
         json(200, { url: 'https://login.microsoftonline.com/authorize?x=1', redirect: true }),
     })
     renderApp('/sign-in?next=%2Fapp%2Fbookings')
-    await userEvent.click(await screen.findByRole('button', { name: 'Continue with Microsoft' }))
+    expect(
+      await screen.findByText('Use a personal Microsoft account or a work or school account.'),
+    ).toBeDefined()
+    await userEvent.click(await screen.findByRole('button', { name: 'Sign in with Microsoft' }))
     await vi.waitFor(() =>
       expect(goTo).toHaveBeenCalledWith('https://login.microsoftonline.com/authorize?x=1'),
     )

@@ -1,0 +1,1083 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`booking email language goldens > en cancelled guest 1`] = `
+{
+  "html": "<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>Cancelled: Intro call with Grace Hopper on Tue, Oct 20, 10:00 AM (Europe/Berlin)</title>
+<style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
+</head>
+<body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
+<!--[if mso]><table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" style="width: 600px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><![endif]-->
+<table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="width: 100%; max-width: 600px; margin: 0 auto; background-color: #ffffff; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;">
+<tr><td style="padding: 24px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; overflow-wrap: anywhere; word-break: break-word;">
+<p style="margin: 0 0 24px; color: #1f4fd8; font-size: 20px; font-weight: 700;">Hourmere</p>
+<p style="margin: 0 0 16px; overflow-wrap: anywhere; word-break: break-word;">Your meeting with Grace Hopper has been cancelled.</p>
+<table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">What</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Intro call</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">When</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin)</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Where</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Google Meet</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Host</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Grace Hopper</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Reason</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">A scheduling conflict.<br>Please book another time.</td></tr>
+</table>
+<p style="margin: 24px 0 0; color: #555; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;">You received this email because Ada Lovelace added you to a booking with Grace Hopper via Hourmere.</p>
+</td></tr>
+</table>
+<!--[if mso]></td></tr></table><![endif]-->
+</body>
+</html>
+",
+  "subject": "Cancelled: Intro call with Grace Hopper on Tue, Oct 20, 10:00 AM (Europe/Berlin)",
+  "text": "Hourmere
+
+Your meeting with Grace Hopper has been cancelled.
+
+What: Intro call
+When: Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin)
+Where: Google Meet
+Host: Grace Hopper
+Reason: A scheduling conflict.
+  Please book another time.
+
+You received this email because Ada Lovelace added you to a booking with Grace Hopper via Hourmere.
+",
+}
+`;
+
+exports[`booking email language goldens > en cancelled host 1`] = `
+{
+  "html": "<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>Cancelled: Intro call with Ada Lovelace on Tue, Oct 20, 4:00 AM (America/New_York)</title>
+<style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
+</head>
+<body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
+<!--[if mso]><table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" style="width: 600px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><![endif]-->
+<table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="width: 100%; max-width: 600px; margin: 0 auto; background-color: #ffffff; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;">
+<tr><td style="padding: 24px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; overflow-wrap: anywhere; word-break: break-word;">
+<p style="margin: 0 0 24px; color: #1f4fd8; font-size: 20px; font-weight: 700;">Hourmere</p>
+<p style="margin: 0 0 16px; overflow-wrap: anywhere; word-break: break-word;">Your meeting with Ada Lovelace has been cancelled.</p>
+<table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">What</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Intro call</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">When</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Tuesday, October 20, 2026, 4:00 AM – 4:30 AM (America/New_York)</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Where</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Google Meet</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Invitee</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Ada Lovelace &lt;ada@example.com&gt;</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Guests</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Charles Babbage &lt;charles@example.com&gt;</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Reason</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">A scheduling conflict.<br>Please book another time.</td></tr>
+</table>
+<p style="margin: 24px 0 4px; font-weight: 600;">Answers</p>
+<p style="margin: 0 0 12px; overflow-wrap: anywhere; word-break: break-word;"><span style="color: #555;">What should we discuss?</span><br>Analytical engines.<br>A short demo.</p>
+<div style="margin: 24px 0 0;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="padding: 16px 0; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td bgcolor="#1f4fd8" style="padding: 0; mso-padding-alt: 12px 18px; background-color: #1f4fd8; border: 1px solid #1f4fd8; border-radius: 6px; text-align: center; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><a href="https://cal.example.com/app/bookings/019a1234-5678-7000-8000-000000000001" style="display: block; padding: 12px 18px; line-height: 20px; min-height: 20px; color: #ffffff; text-decoration: none; overflow-wrap: anywhere; word-break: break-word;">Open in Hourmere</a></td></tr></table></td></tr></table></div>
+<p style="margin: 24px 0 0; color: #555; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;">You received this email because Ada Lovelace booked a meeting with you via Hourmere.</p>
+</td></tr>
+</table>
+<!--[if mso]></td></tr></table><![endif]-->
+</body>
+</html>
+",
+  "subject": "Cancelled: Intro call with Ada Lovelace on Tue, Oct 20, 4:00 AM (America/New_York)",
+  "text": "Hourmere
+
+Your meeting with Ada Lovelace has been cancelled.
+
+What: Intro call
+When: Tuesday, October 20, 2026, 4:00 AM – 4:30 AM (America/New_York)
+Where: Google Meet
+Invitee: Ada Lovelace <ada@example.com>
+Guests: Charles Babbage <charles@example.com>
+Reason: A scheduling conflict.
+  Please book another time.
+
+Answers
+What should we discuss?
+  Analytical engines.
+  A short demo.
+
+Open in Hourmere: https://cal.example.com/app/bookings/019a1234-5678-7000-8000-000000000001
+
+You received this email because Ada Lovelace booked a meeting with you via Hourmere.
+",
+}
+`;
+
+exports[`booking email language goldens > en cancelled invitee 1`] = `
+{
+  "html": "<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>Cancelled: Intro call with Grace Hopper on Tue, Oct 20, 10:00 AM (Europe/Berlin)</title>
+<style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
+</head>
+<body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
+<!--[if mso]><table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" style="width: 600px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><![endif]-->
+<table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="width: 100%; max-width: 600px; margin: 0 auto; background-color: #ffffff; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;">
+<tr><td style="padding: 24px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; overflow-wrap: anywhere; word-break: break-word;">
+<p style="margin: 0 0 24px; color: #1f4fd8; font-size: 20px; font-weight: 700;">Hourmere</p>
+<p style="margin: 0 0 16px; overflow-wrap: anywhere; word-break: break-word;">Your meeting with Grace Hopper has been cancelled.</p>
+<table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">What</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Intro call</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">When</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin)</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Where</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Google Meet</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Host</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Grace Hopper</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Reason</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">A scheduling conflict.<br>Please book another time.</td></tr>
+</table>
+<p style="margin: 24px 0 0; color: #555; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;">You received this email because you booked a meeting with Grace Hopper via Hourmere.</p>
+</td></tr>
+</table>
+<!--[if mso]></td></tr></table><![endif]-->
+</body>
+</html>
+",
+  "subject": "Cancelled: Intro call with Grace Hopper on Tue, Oct 20, 10:00 AM (Europe/Berlin)",
+  "text": "Hourmere
+
+Your meeting with Grace Hopper has been cancelled.
+
+What: Intro call
+When: Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin)
+Where: Google Meet
+Host: Grace Hopper
+Reason: A scheduling conflict.
+  Please book another time.
+
+You received this email because you booked a meeting with Grace Hopper via Hourmere.
+",
+}
+`;
+
+exports[`booking email language goldens > en confirmed guest 1`] = `
+{
+  "html": "<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>Confirmed: Intro call with Grace Hopper on Tue, Oct 20, 10:00 AM (Europe/Berlin)</title>
+<style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
+</head>
+<body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
+<!--[if mso]><table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" style="width: 600px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><![endif]-->
+<table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="width: 100%; max-width: 600px; margin: 0 auto; background-color: #ffffff; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;">
+<tr><td style="padding: 24px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; overflow-wrap: anywhere; word-break: break-word;">
+<p style="margin: 0 0 24px; color: #1f4fd8; font-size: 20px; font-weight: 700;">Hourmere</p>
+<p style="margin: 0 0 16px; overflow-wrap: anywhere; word-break: break-word;">Your meeting with Grace Hopper is booked.</p>
+<table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">What</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Intro call</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">When</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin)</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Where</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Google Meet</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Host</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Grace Hopper</td></tr>
+</table>
+<div style="margin: 24px 0 0;">
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="padding: 16px 0; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td bgcolor="#1f4fd8" style="padding: 0; mso-padding-alt: 12px 18px; background-color: #1f4fd8; border: 1px solid #1f4fd8; border-radius: 6px; text-align: center; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><a href="https://meet.example.com/abc" style="display: block; padding: 12px 18px; line-height: 20px; min-height: 20px; color: #ffffff; text-decoration: none; overflow-wrap: anywhere; word-break: break-word;">Join Google Meet meeting</a></td></tr></table></td></tr></table>
+<p style="margin: 4px 0 0; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;"><a href="https://meet.example.com/abc" style="color: #1f4fd8; overflow-wrap: anywhere; word-break: break-word;">https://meet.example.com/abc</a></p>
+</div>
+<p lang="en" style="margin: 24px 0 0; color: #555; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;">Accepting or declining this calendar invitation does not cancel the booking. To cancel, contact the person who booked or the host.</p>
+<p style="margin: 24px 0 0; color: #555; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;">You received this email because Ada Lovelace added you to a booking with Grace Hopper via Hourmere.</p>
+</td></tr>
+</table>
+<!--[if mso]></td></tr></table><![endif]-->
+</body>
+</html>
+",
+  "subject": "Confirmed: Intro call with Grace Hopper on Tue, Oct 20, 10:00 AM (Europe/Berlin)",
+  "text": "Hourmere
+
+Your meeting with Grace Hopper is booked.
+
+What: Intro call
+When: Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin)
+Where: Google Meet
+Host: Grace Hopper
+
+Join Google Meet meeting
+https://meet.example.com/abc
+
+Accepting or declining this calendar invitation does not cancel the booking. To cancel, contact the person who booked or the host.
+
+You received this email because Ada Lovelace added you to a booking with Grace Hopper via Hourmere.
+",
+}
+`;
+
+exports[`booking email language goldens > en confirmed host 1`] = `
+{
+  "html": "<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>New booking: Intro call with Ada Lovelace on Tue, Oct 20, 4:00 AM (America/New_York)</title>
+<style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
+</head>
+<body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
+<!--[if mso]><table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" style="width: 600px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><![endif]-->
+<table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="width: 100%; max-width: 600px; margin: 0 auto; background-color: #ffffff; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;">
+<tr><td style="padding: 24px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; overflow-wrap: anywhere; word-break: break-word;">
+<p style="margin: 0 0 24px; color: #1f4fd8; font-size: 20px; font-weight: 700;">Hourmere</p>
+<p style="margin: 0 0 16px; overflow-wrap: anywhere; word-break: break-word;">Ada Lovelace booked a meeting with you.</p>
+<table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">What</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Intro call</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">When</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Tuesday, October 20, 2026, 4:00 AM – 4:30 AM (America/New_York)</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Where</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Google Meet</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Invitee</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Ada Lovelace &lt;ada@example.com&gt;</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Guests</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Charles Babbage &lt;charles@example.com&gt;</td></tr>
+</table>
+<p style="margin: 24px 0 4px; font-weight: 600;">Answers</p>
+<p style="margin: 0 0 12px; overflow-wrap: anywhere; word-break: break-word;"><span style="color: #555;">What should we discuss?</span><br>Analytical engines.<br>A short demo.</p>
+<div style="margin: 24px 0 0;">
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="padding: 16px 0; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td bgcolor="#1f4fd8" style="padding: 0; mso-padding-alt: 12px 18px; background-color: #1f4fd8; border: 1px solid #1f4fd8; border-radius: 6px; text-align: center; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><a href="https://meet.example.com/abc" style="display: block; padding: 12px 18px; line-height: 20px; min-height: 20px; color: #ffffff; text-decoration: none; overflow-wrap: anywhere; word-break: break-word;">Join Google Meet meeting</a></td></tr></table></td></tr></table>
+<p style="margin: 4px 0 0; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;"><a href="https://meet.example.com/abc" style="color: #1f4fd8; overflow-wrap: anywhere; word-break: break-word;">https://meet.example.com/abc</a></p>
+</div>
+<div style="margin: 24px 0 0;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="padding: 16px 0; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td bgcolor="#1f4fd8" style="padding: 0; mso-padding-alt: 12px 18px; background-color: #1f4fd8; border: 1px solid #1f4fd8; border-radius: 6px; text-align: center; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><a href="https://cal.example.com/app/bookings/019a1234-5678-7000-8000-000000000001" style="display: block; padding: 12px 18px; line-height: 20px; min-height: 20px; color: #ffffff; text-decoration: none; overflow-wrap: anywhere; word-break: break-word;">Open in Hourmere</a></td></tr></table></td></tr></table></div>
+<p lang="en" style="margin: 24px 0 0; color: #555; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;">Declining in your calendar is not synced to Hourmere; to cancel the booking, use Hourmere.</p>
+<p style="margin: 24px 0 0; color: #555; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;">You received this email because Ada Lovelace booked a meeting with you via Hourmere.</p>
+</td></tr>
+</table>
+<!--[if mso]></td></tr></table><![endif]-->
+</body>
+</html>
+",
+  "subject": "New booking: Intro call with Ada Lovelace on Tue, Oct 20, 4:00 AM (America/New_York)",
+  "text": "Hourmere
+
+Ada Lovelace booked a meeting with you.
+
+What: Intro call
+When: Tuesday, October 20, 2026, 4:00 AM – 4:30 AM (America/New_York)
+Where: Google Meet
+Invitee: Ada Lovelace <ada@example.com>
+Guests: Charles Babbage <charles@example.com>
+
+Answers
+What should we discuss?
+  Analytical engines.
+  A short demo.
+
+Join Google Meet meeting
+https://meet.example.com/abc
+
+Open in Hourmere: https://cal.example.com/app/bookings/019a1234-5678-7000-8000-000000000001
+
+Declining in your calendar is not synced to Hourmere; to cancel the booking, use Hourmere.
+
+You received this email because Ada Lovelace booked a meeting with you via Hourmere.
+",
+}
+`;
+
+exports[`booking email language goldens > en confirmed invitee 1`] = `
+{
+  "html": "<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>Confirmed: Intro call with Grace Hopper on Tue, Oct 20, 10:00 AM (Europe/Berlin)</title>
+<style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
+</head>
+<body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
+<!--[if mso]><table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" style="width: 600px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><![endif]-->
+<table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="width: 100%; max-width: 600px; margin: 0 auto; background-color: #ffffff; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;">
+<tr><td style="padding: 24px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; overflow-wrap: anywhere; word-break: break-word;">
+<p style="margin: 0 0 24px; color: #1f4fd8; font-size: 20px; font-weight: 700;">Hourmere</p>
+<p style="margin: 0 0 16px; overflow-wrap: anywhere; word-break: break-word;">Your meeting with Grace Hopper is booked.</p>
+<table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">What</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Intro call</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">When</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin)</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Where</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Google Meet</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Host</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Grace Hopper</td></tr>
+</table>
+<div style="margin: 24px 0 0;">
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="padding: 16px 0; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td bgcolor="#1f4fd8" style="padding: 0; mso-padding-alt: 12px 18px; background-color: #1f4fd8; border: 1px solid #1f4fd8; border-radius: 6px; text-align: center; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><a href="https://meet.example.com/abc" style="display: block; padding: 12px 18px; line-height: 20px; min-height: 20px; color: #ffffff; text-decoration: none; overflow-wrap: anywhere; word-break: break-word;">Join Google Meet meeting</a></td></tr></table></td></tr></table>
+<p style="margin: 4px 0 0; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;"><a href="https://meet.example.com/abc" style="color: #1f4fd8; overflow-wrap: anywhere; word-break: break-word;">https://meet.example.com/abc</a></p>
+</div>
+<p style="margin: 24px 0 8px;">Need to make a change?</p>
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="padding: 16px 0; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td bgcolor="#1f4fd8" style="padding: 0; mso-padding-alt: 12px 18px; background-color: #1f4fd8; border: 1px solid #1f4fd8; border-radius: 6px; text-align: center; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><a href="https://cal.example.com/booking#token=fixture&amp;action=reschedule" style="display: block; padding: 12px 18px; line-height: 20px; min-height: 20px; color: #ffffff; text-decoration: none; overflow-wrap: anywhere; word-break: break-word;">Reschedule</a></td></tr></table></td></tr></table>
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="padding: 16px 0; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td bgcolor="#ffffff" style="padding: 0; mso-padding-alt: 12px 18px; background-color: #ffffff; border: 1px solid #1f4fd8; border-radius: 6px; text-align: center; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><a href="https://cal.example.com/booking#token=fixture&amp;action=cancel" style="display: block; padding: 12px 18px; line-height: 20px; min-height: 20px; color: #1f4fd8; text-decoration: none; overflow-wrap: anywhere; word-break: break-word;">Cancel</a></td></tr></table></td></tr></table>
+<p lang="en" style="margin: 0 0 8px; color: #555; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;">Accepting or declining this calendar invitation does not cancel the booking. To cancel, use the “Cancel” link in this email.</p>
+<p style="margin: 8px 0 0; color: #555; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;">If the buttons do not work, copy a link into your browser:<br>Reschedule: https://cal.example.com/booking#token=fixture&amp;action=reschedule<br>Cancel: https://cal.example.com/booking#token=fixture&amp;action=cancel</p>
+<p style="margin: 24px 0 0; color: #555; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;">You received this email because you booked a meeting with Grace Hopper via Hourmere.</p>
+</td></tr>
+</table>
+<!--[if mso]></td></tr></table><![endif]-->
+</body>
+</html>
+",
+  "subject": "Confirmed: Intro call with Grace Hopper on Tue, Oct 20, 10:00 AM (Europe/Berlin)",
+  "text": "Hourmere
+
+Your meeting with Grace Hopper is booked.
+
+What: Intro call
+When: Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin)
+Where: Google Meet
+Host: Grace Hopper
+
+Join Google Meet meeting
+https://meet.example.com/abc
+
+Need to make a change?
+Accepting or declining this calendar invitation does not cancel the booking. To cancel, use the “Cancel” link in this email.
+Use these links to change or cancel:
+Reschedule: https://cal.example.com/booking#token=fixture&action=reschedule
+Cancel: https://cal.example.com/booking#token=fixture&action=cancel
+
+You received this email because you booked a meeting with Grace Hopper via Hourmere.
+",
+}
+`;
+
+exports[`booking email language goldens > en rescheduled guest 1`] = `
+{
+  "html": "<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>Rescheduled: Intro call with Grace Hopper, now Tue, Oct 20, 10:00 AM (Europe/Berlin)</title>
+<style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
+</head>
+<body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
+<!--[if mso]><table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" style="width: 600px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><![endif]-->
+<table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="width: 100%; max-width: 600px; margin: 0 auto; background-color: #ffffff; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;">
+<tr><td style="padding: 24px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; overflow-wrap: anywhere; word-break: break-word;">
+<p style="margin: 0 0 24px; color: #1f4fd8; font-size: 20px; font-weight: 700;">Hourmere</p>
+<p style="margin: 0 0 16px; overflow-wrap: anywhere; word-break: break-word;">Your meeting with Grace Hopper has moved to a new time.</p>
+<table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">What</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Intro call</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">When</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin)</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Was</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word; color: #777; text-decoration: line-through;">Monday, October 19, 2026, 10:00 AM – 10:30 AM (Europe/Berlin)</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Where</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Google Meet</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Host</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Grace Hopper</td></tr>
+</table>
+<div style="margin: 24px 0 0;">
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="padding: 16px 0; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td bgcolor="#1f4fd8" style="padding: 0; mso-padding-alt: 12px 18px; background-color: #1f4fd8; border: 1px solid #1f4fd8; border-radius: 6px; text-align: center; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><a href="https://meet.example.com/abc" style="display: block; padding: 12px 18px; line-height: 20px; min-height: 20px; color: #ffffff; text-decoration: none; overflow-wrap: anywhere; word-break: break-word;">Join Google Meet meeting</a></td></tr></table></td></tr></table>
+<p style="margin: 4px 0 0; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;"><a href="https://meet.example.com/abc" style="color: #1f4fd8; overflow-wrap: anywhere; word-break: break-word;">https://meet.example.com/abc</a></p>
+</div>
+<p lang="en" style="margin: 24px 0 0; color: #555; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;">Accepting or declining this calendar invitation does not cancel the booking. To cancel, contact the person who booked or the host.</p>
+<p style="margin: 24px 0 0; color: #555; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;">You received this email because Ada Lovelace added you to a booking with Grace Hopper via Hourmere.</p>
+</td></tr>
+</table>
+<!--[if mso]></td></tr></table><![endif]-->
+</body>
+</html>
+",
+  "subject": "Rescheduled: Intro call with Grace Hopper, now Tue, Oct 20, 10:00 AM (Europe/Berlin)",
+  "text": "Hourmere
+
+Your meeting with Grace Hopper has moved to a new time.
+
+What: Intro call
+When: Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin)
+Was: Monday, October 19, 2026, 10:00 AM – 10:30 AM (Europe/Berlin)
+Where: Google Meet
+Host: Grace Hopper
+
+Join Google Meet meeting
+https://meet.example.com/abc
+
+Accepting or declining this calendar invitation does not cancel the booking. To cancel, contact the person who booked or the host.
+
+You received this email because Ada Lovelace added you to a booking with Grace Hopper via Hourmere.
+",
+}
+`;
+
+exports[`booking email language goldens > en rescheduled host 1`] = `
+{
+  "html": "<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>Rescheduled: Intro call with Ada Lovelace, now Tue, Oct 20, 4:00 AM (America/New_York)</title>
+<style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
+</head>
+<body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
+<!--[if mso]><table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" style="width: 600px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><![endif]-->
+<table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="width: 100%; max-width: 600px; margin: 0 auto; background-color: #ffffff; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;">
+<tr><td style="padding: 24px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; overflow-wrap: anywhere; word-break: break-word;">
+<p style="margin: 0 0 24px; color: #1f4fd8; font-size: 20px; font-weight: 700;">Hourmere</p>
+<p style="margin: 0 0 16px; overflow-wrap: anywhere; word-break: break-word;">Your meeting with Ada Lovelace has moved to a new time.</p>
+<table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">What</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Intro call</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">When</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Tuesday, October 20, 2026, 4:00 AM – 4:30 AM (America/New_York)</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Was</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word; color: #777; text-decoration: line-through;">Monday, October 19, 2026, 4:00 AM – 4:30 AM (America/New_York)</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Where</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Google Meet</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Invitee</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Ada Lovelace &lt;ada@example.com&gt;</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Guests</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Charles Babbage &lt;charles@example.com&gt;</td></tr>
+</table>
+<p style="margin: 24px 0 4px; font-weight: 600;">Answers</p>
+<p style="margin: 0 0 12px; overflow-wrap: anywhere; word-break: break-word;"><span style="color: #555;">What should we discuss?</span><br>Analytical engines.<br>A short demo.</p>
+<div style="margin: 24px 0 0;">
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="padding: 16px 0; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td bgcolor="#1f4fd8" style="padding: 0; mso-padding-alt: 12px 18px; background-color: #1f4fd8; border: 1px solid #1f4fd8; border-radius: 6px; text-align: center; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><a href="https://meet.example.com/abc" style="display: block; padding: 12px 18px; line-height: 20px; min-height: 20px; color: #ffffff; text-decoration: none; overflow-wrap: anywhere; word-break: break-word;">Join Google Meet meeting</a></td></tr></table></td></tr></table>
+<p style="margin: 4px 0 0; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;"><a href="https://meet.example.com/abc" style="color: #1f4fd8; overflow-wrap: anywhere; word-break: break-word;">https://meet.example.com/abc</a></p>
+</div>
+<div style="margin: 24px 0 0;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="padding: 16px 0; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td bgcolor="#1f4fd8" style="padding: 0; mso-padding-alt: 12px 18px; background-color: #1f4fd8; border: 1px solid #1f4fd8; border-radius: 6px; text-align: center; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><a href="https://cal.example.com/app/bookings/019a1234-5678-7000-8000-000000000001" style="display: block; padding: 12px 18px; line-height: 20px; min-height: 20px; color: #ffffff; text-decoration: none; overflow-wrap: anywhere; word-break: break-word;">Open in Hourmere</a></td></tr></table></td></tr></table></div>
+<p lang="en" style="margin: 24px 0 0; color: #555; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;">Declining in your calendar is not synced to Hourmere; to cancel the booking, use Hourmere.</p>
+<p style="margin: 24px 0 0; color: #555; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;">You received this email because Ada Lovelace booked a meeting with you via Hourmere.</p>
+</td></tr>
+</table>
+<!--[if mso]></td></tr></table><![endif]-->
+</body>
+</html>
+",
+  "subject": "Rescheduled: Intro call with Ada Lovelace, now Tue, Oct 20, 4:00 AM (America/New_York)",
+  "text": "Hourmere
+
+Your meeting with Ada Lovelace has moved to a new time.
+
+What: Intro call
+When: Tuesday, October 20, 2026, 4:00 AM – 4:30 AM (America/New_York)
+Was: Monday, October 19, 2026, 4:00 AM – 4:30 AM (America/New_York)
+Where: Google Meet
+Invitee: Ada Lovelace <ada@example.com>
+Guests: Charles Babbage <charles@example.com>
+
+Answers
+What should we discuss?
+  Analytical engines.
+  A short demo.
+
+Join Google Meet meeting
+https://meet.example.com/abc
+
+Open in Hourmere: https://cal.example.com/app/bookings/019a1234-5678-7000-8000-000000000001
+
+Declining in your calendar is not synced to Hourmere; to cancel the booking, use Hourmere.
+
+You received this email because Ada Lovelace booked a meeting with you via Hourmere.
+",
+}
+`;
+
+exports[`booking email language goldens > en rescheduled invitee 1`] = `
+{
+  "html": "<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>Rescheduled: Intro call with Grace Hopper, now Tue, Oct 20, 10:00 AM (Europe/Berlin)</title>
+<style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
+</head>
+<body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
+<!--[if mso]><table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" style="width: 600px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><![endif]-->
+<table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="width: 100%; max-width: 600px; margin: 0 auto; background-color: #ffffff; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;">
+<tr><td style="padding: 24px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; overflow-wrap: anywhere; word-break: break-word;">
+<p style="margin: 0 0 24px; color: #1f4fd8; font-size: 20px; font-weight: 700;">Hourmere</p>
+<p style="margin: 0 0 16px; overflow-wrap: anywhere; word-break: break-word;">Your meeting with Grace Hopper has moved to a new time.</p>
+<table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">What</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Intro call</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">When</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin)</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Was</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word; color: #777; text-decoration: line-through;">Monday, October 19, 2026, 10:00 AM – 10:30 AM (Europe/Berlin)</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Where</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Google Meet</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Host</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Grace Hopper</td></tr>
+</table>
+<div style="margin: 24px 0 0;">
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="padding: 16px 0; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td bgcolor="#1f4fd8" style="padding: 0; mso-padding-alt: 12px 18px; background-color: #1f4fd8; border: 1px solid #1f4fd8; border-radius: 6px; text-align: center; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><a href="https://meet.example.com/abc" style="display: block; padding: 12px 18px; line-height: 20px; min-height: 20px; color: #ffffff; text-decoration: none; overflow-wrap: anywhere; word-break: break-word;">Join Google Meet meeting</a></td></tr></table></td></tr></table>
+<p style="margin: 4px 0 0; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;"><a href="https://meet.example.com/abc" style="color: #1f4fd8; overflow-wrap: anywhere; word-break: break-word;">https://meet.example.com/abc</a></p>
+</div>
+<p style="margin: 24px 0 8px;">Need to make a change?</p>
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="padding: 16px 0; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td bgcolor="#1f4fd8" style="padding: 0; mso-padding-alt: 12px 18px; background-color: #1f4fd8; border: 1px solid #1f4fd8; border-radius: 6px; text-align: center; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><a href="https://cal.example.com/booking#token=fixture&amp;action=reschedule" style="display: block; padding: 12px 18px; line-height: 20px; min-height: 20px; color: #ffffff; text-decoration: none; overflow-wrap: anywhere; word-break: break-word;">Reschedule</a></td></tr></table></td></tr></table>
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="padding: 16px 0; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td bgcolor="#ffffff" style="padding: 0; mso-padding-alt: 12px 18px; background-color: #ffffff; border: 1px solid #1f4fd8; border-radius: 6px; text-align: center; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><a href="https://cal.example.com/booking#token=fixture&amp;action=cancel" style="display: block; padding: 12px 18px; line-height: 20px; min-height: 20px; color: #1f4fd8; text-decoration: none; overflow-wrap: anywhere; word-break: break-word;">Cancel</a></td></tr></table></td></tr></table>
+<p lang="en" style="margin: 0 0 8px; color: #555; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;">Accepting or declining this calendar invitation does not cancel the booking. To cancel, use the “Cancel” link in this email.</p>
+<p style="margin: 8px 0 0; color: #555; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;">If the buttons do not work, copy a link into your browser:<br>Reschedule: https://cal.example.com/booking#token=fixture&amp;action=reschedule<br>Cancel: https://cal.example.com/booking#token=fixture&amp;action=cancel</p>
+<p style="margin: 24px 0 0; color: #555; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;">You received this email because you booked a meeting with Grace Hopper via Hourmere.</p>
+</td></tr>
+</table>
+<!--[if mso]></td></tr></table><![endif]-->
+</body>
+</html>
+",
+  "subject": "Rescheduled: Intro call with Grace Hopper, now Tue, Oct 20, 10:00 AM (Europe/Berlin)",
+  "text": "Hourmere
+
+Your meeting with Grace Hopper has moved to a new time.
+
+What: Intro call
+When: Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin)
+Was: Monday, October 19, 2026, 10:00 AM – 10:30 AM (Europe/Berlin)
+Where: Google Meet
+Host: Grace Hopper
+
+Join Google Meet meeting
+https://meet.example.com/abc
+
+Need to make a change?
+Accepting or declining this calendar invitation does not cancel the booking. To cancel, use the “Cancel” link in this email.
+Use these links to change or cancel:
+Reschedule: https://cal.example.com/booking#token=fixture&action=reschedule
+Cancel: https://cal.example.com/booking#token=fixture&action=cancel
+
+You received this email because you booked a meeting with Grace Hopper via Hourmere.
+",
+}
+`;
+
+exports[`booking email language goldens > zh-CN cancelled guest 1`] = `
+{
+  "html": "<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>已取消：与 Grace Hopper 的 Intro call，10月20日周二，10:00（Europe/Berlin）</title>
+<style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
+</head>
+<body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
+<!--[if mso]><table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" style="width: 600px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><![endif]-->
+<table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="width: 100%; max-width: 600px; margin: 0 auto; background-color: #ffffff; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;">
+<tr><td style="padding: 24px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; overflow-wrap: anywhere; word-break: break-word;">
+<p style="margin: 0 0 24px; color: #1f4fd8; font-size: 20px; font-weight: 700;">Hourmere</p>
+<p style="margin: 0 0 16px; overflow-wrap: anywhere; word-break: break-word;">你与 Grace Hopper 的会议已取消。</p>
+<table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">活动</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Intro call</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">时间</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">2026年10月20日星期二，10:00 至 10:30（Europe/Berlin）</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">地点</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Google Meet</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">主持人</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Grace Hopper</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">原因</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">A scheduling conflict.<br>Please book another time.</td></tr>
+</table>
+<p style="margin: 24px 0 0; color: #555; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;">你收到此邮件，是因为 Ada Lovelace 在通过 Hourmere 与 Grace Hopper 的预约中添加了你。</p>
+</td></tr>
+</table>
+<!--[if mso]></td></tr></table><![endif]-->
+</body>
+</html>
+",
+  "subject": "已取消：与 Grace Hopper 的 Intro call，10月20日周二，10:00（Europe/Berlin）",
+  "text": "Hourmere
+
+你与 Grace Hopper 的会议已取消。
+
+活动：Intro call
+时间：2026年10月20日星期二，10:00 至 10:30（Europe/Berlin）
+地点：Google Meet
+主持人：Grace Hopper
+原因：A scheduling conflict.
+  Please book another time.
+
+你收到此邮件，是因为 Ada Lovelace 在通过 Hourmere 与 Grace Hopper 的预约中添加了你。
+",
+}
+`;
+
+exports[`booking email language goldens > zh-CN cancelled host 1`] = `
+{
+  "html": "<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>已取消：与 Ada Lovelace 的 Intro call，10月20日周二，04:00（America/New_York）</title>
+<style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
+</head>
+<body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
+<!--[if mso]><table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" style="width: 600px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><![endif]-->
+<table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="width: 100%; max-width: 600px; margin: 0 auto; background-color: #ffffff; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;">
+<tr><td style="padding: 24px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; overflow-wrap: anywhere; word-break: break-word;">
+<p style="margin: 0 0 24px; color: #1f4fd8; font-size: 20px; font-weight: 700;">Hourmere</p>
+<p style="margin: 0 0 16px; overflow-wrap: anywhere; word-break: break-word;">你与 Ada Lovelace 的会议已取消。</p>
+<table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">活动</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Intro call</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">时间</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">2026年10月20日星期二，04:00 至 04:30（America/New_York）</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">地点</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Google Meet</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">预约人</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Ada Lovelace &lt;ada@example.com&gt;</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">来宾</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Charles Babbage &lt;charles@example.com&gt;</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">原因</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">A scheduling conflict.<br>Please book another time.</td></tr>
+</table>
+<p style="margin: 24px 0 4px; font-weight: 600;">回答</p>
+<p style="margin: 0 0 12px; overflow-wrap: anywhere; word-break: break-word;"><span style="color: #555;">What should we discuss?</span><br>Analytical engines.<br>A short demo.</p>
+<div style="margin: 24px 0 0;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="padding: 16px 0; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td bgcolor="#1f4fd8" style="padding: 0; mso-padding-alt: 12px 18px; background-color: #1f4fd8; border: 1px solid #1f4fd8; border-radius: 6px; text-align: center; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><a href="https://cal.example.com/app/bookings/019a1234-5678-7000-8000-000000000001" style="display: block; padding: 12px 18px; line-height: 20px; min-height: 20px; color: #ffffff; text-decoration: none; overflow-wrap: anywhere; word-break: break-word;">在 Hourmere 中打开</a></td></tr></table></td></tr></table></div>
+<p style="margin: 24px 0 0; color: #555; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;">你收到此邮件，是因为 Ada Lovelace 通过 Hourmere 预约了与你的会议。</p>
+</td></tr>
+</table>
+<!--[if mso]></td></tr></table><![endif]-->
+</body>
+</html>
+",
+  "subject": "已取消：与 Ada Lovelace 的 Intro call，10月20日周二，04:00（America/New_York）",
+  "text": "Hourmere
+
+你与 Ada Lovelace 的会议已取消。
+
+活动：Intro call
+时间：2026年10月20日星期二，04:00 至 04:30（America/New_York）
+地点：Google Meet
+预约人：Ada Lovelace <ada@example.com>
+来宾：Charles Babbage <charles@example.com>
+原因：A scheduling conflict.
+  Please book another time.
+
+回答
+What should we discuss?
+  Analytical engines.
+  A short demo.
+
+在 Hourmere 中打开：https://cal.example.com/app/bookings/019a1234-5678-7000-8000-000000000001
+
+你收到此邮件，是因为 Ada Lovelace 通过 Hourmere 预约了与你的会议。
+",
+}
+`;
+
+exports[`booking email language goldens > zh-CN cancelled invitee 1`] = `
+{
+  "html": "<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>已取消：与 Grace Hopper 的 Intro call，10月20日周二，10:00（Europe/Berlin）</title>
+<style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
+</head>
+<body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
+<!--[if mso]><table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" style="width: 600px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><![endif]-->
+<table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="width: 100%; max-width: 600px; margin: 0 auto; background-color: #ffffff; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;">
+<tr><td style="padding: 24px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; overflow-wrap: anywhere; word-break: break-word;">
+<p style="margin: 0 0 24px; color: #1f4fd8; font-size: 20px; font-weight: 700;">Hourmere</p>
+<p style="margin: 0 0 16px; overflow-wrap: anywhere; word-break: break-word;">你与 Grace Hopper 的会议已取消。</p>
+<table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">活动</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Intro call</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">时间</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">2026年10月20日星期二，10:00 至 10:30（Europe/Berlin）</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">地点</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Google Meet</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">主持人</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Grace Hopper</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">原因</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">A scheduling conflict.<br>Please book another time.</td></tr>
+</table>
+<p style="margin: 24px 0 0; color: #555; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;">你收到此邮件，是因为你通过 Hourmere 预约了与 Grace Hopper 的会议。</p>
+</td></tr>
+</table>
+<!--[if mso]></td></tr></table><![endif]-->
+</body>
+</html>
+",
+  "subject": "已取消：与 Grace Hopper 的 Intro call，10月20日周二，10:00（Europe/Berlin）",
+  "text": "Hourmere
+
+你与 Grace Hopper 的会议已取消。
+
+活动：Intro call
+时间：2026年10月20日星期二，10:00 至 10:30（Europe/Berlin）
+地点：Google Meet
+主持人：Grace Hopper
+原因：A scheduling conflict.
+  Please book another time.
+
+你收到此邮件，是因为你通过 Hourmere 预约了与 Grace Hopper 的会议。
+",
+}
+`;
+
+exports[`booking email language goldens > zh-CN confirmed guest 1`] = `
+{
+  "html": "<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>已确认：与 Grace Hopper 的 Intro call，10月20日周二，10:00（Europe/Berlin）</title>
+<style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
+</head>
+<body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
+<!--[if mso]><table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" style="width: 600px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><![endif]-->
+<table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="width: 100%; max-width: 600px; margin: 0 auto; background-color: #ffffff; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;">
+<tr><td style="padding: 24px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; overflow-wrap: anywhere; word-break: break-word;">
+<p style="margin: 0 0 24px; color: #1f4fd8; font-size: 20px; font-weight: 700;">Hourmere</p>
+<p style="margin: 0 0 16px; overflow-wrap: anywhere; word-break: break-word;">你与 Grace Hopper 的会议已预约。</p>
+<table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">活动</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Intro call</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">时间</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">2026年10月20日星期二，10:00 至 10:30（Europe/Berlin）</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">地点</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Google Meet</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">主持人</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Grace Hopper</td></tr>
+</table>
+<div style="margin: 24px 0 0;">
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="padding: 16px 0; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td bgcolor="#1f4fd8" style="padding: 0; mso-padding-alt: 12px 18px; background-color: #1f4fd8; border: 1px solid #1f4fd8; border-radius: 6px; text-align: center; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><a href="https://meet.example.com/abc" style="display: block; padding: 12px 18px; line-height: 20px; min-height: 20px; color: #ffffff; text-decoration: none; overflow-wrap: anywhere; word-break: break-word;">加入 Google Meet 会议</a></td></tr></table></td></tr></table>
+<p style="margin: 4px 0 0; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;"><a href="https://meet.example.com/abc" style="color: #1f4fd8; overflow-wrap: anywhere; word-break: break-word;">https://meet.example.com/abc</a></p>
+</div>
+<p lang="zh-CN" style="margin: 24px 0 0; color: #555; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;">在日历中接受或拒绝邀请不会取消预约。如需取消，请联系预约人或主持人。</p>
+<p style="margin: 24px 0 0; color: #555; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;">你收到此邮件，是因为 Ada Lovelace 在通过 Hourmere 与 Grace Hopper 的预约中添加了你。</p>
+</td></tr>
+</table>
+<!--[if mso]></td></tr></table><![endif]-->
+</body>
+</html>
+",
+  "subject": "已确认：与 Grace Hopper 的 Intro call，10月20日周二，10:00（Europe/Berlin）",
+  "text": "Hourmere
+
+你与 Grace Hopper 的会议已预约。
+
+活动：Intro call
+时间：2026年10月20日星期二，10:00 至 10:30（Europe/Berlin）
+地点：Google Meet
+主持人：Grace Hopper
+
+加入 Google Meet 会议
+https://meet.example.com/abc
+
+在日历中接受或拒绝邀请不会取消预约。如需取消，请联系预约人或主持人。
+
+你收到此邮件，是因为 Ada Lovelace 在通过 Hourmere 与 Grace Hopper 的预约中添加了你。
+",
+}
+`;
+
+exports[`booking email language goldens > zh-CN confirmed host 1`] = `
+{
+  "html": "<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>新预约：与 Ada Lovelace 的 Intro call，10月20日周二，04:00（America/New_York）</title>
+<style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
+</head>
+<body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
+<!--[if mso]><table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" style="width: 600px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><![endif]-->
+<table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="width: 100%; max-width: 600px; margin: 0 auto; background-color: #ffffff; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;">
+<tr><td style="padding: 24px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; overflow-wrap: anywhere; word-break: break-word;">
+<p style="margin: 0 0 24px; color: #1f4fd8; font-size: 20px; font-weight: 700;">Hourmere</p>
+<p style="margin: 0 0 16px; overflow-wrap: anywhere; word-break: break-word;">Ada Lovelace 预约了与你的会议。</p>
+<table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">活动</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Intro call</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">时间</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">2026年10月20日星期二，04:00 至 04:30（America/New_York）</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">地点</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Google Meet</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">预约人</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Ada Lovelace &lt;ada@example.com&gt;</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">来宾</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Charles Babbage &lt;charles@example.com&gt;</td></tr>
+</table>
+<p style="margin: 24px 0 4px; font-weight: 600;">回答</p>
+<p style="margin: 0 0 12px; overflow-wrap: anywhere; word-break: break-word;"><span style="color: #555;">What should we discuss?</span><br>Analytical engines.<br>A short demo.</p>
+<div style="margin: 24px 0 0;">
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="padding: 16px 0; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td bgcolor="#1f4fd8" style="padding: 0; mso-padding-alt: 12px 18px; background-color: #1f4fd8; border: 1px solid #1f4fd8; border-radius: 6px; text-align: center; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><a href="https://meet.example.com/abc" style="display: block; padding: 12px 18px; line-height: 20px; min-height: 20px; color: #ffffff; text-decoration: none; overflow-wrap: anywhere; word-break: break-word;">加入 Google Meet 会议</a></td></tr></table></td></tr></table>
+<p style="margin: 4px 0 0; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;"><a href="https://meet.example.com/abc" style="color: #1f4fd8; overflow-wrap: anywhere; word-break: break-word;">https://meet.example.com/abc</a></p>
+</div>
+<div style="margin: 24px 0 0;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="padding: 16px 0; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td bgcolor="#1f4fd8" style="padding: 0; mso-padding-alt: 12px 18px; background-color: #1f4fd8; border: 1px solid #1f4fd8; border-radius: 6px; text-align: center; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><a href="https://cal.example.com/app/bookings/019a1234-5678-7000-8000-000000000001" style="display: block; padding: 12px 18px; line-height: 20px; min-height: 20px; color: #ffffff; text-decoration: none; overflow-wrap: anywhere; word-break: break-word;">在 Hourmere 中打开</a></td></tr></table></td></tr></table></div>
+<p lang="zh-CN" style="margin: 24px 0 0; color: #555; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;">在日历中拒绝邀请不会同步到 Hourmere；如需取消预约，请在 Hourmere 中操作。</p>
+<p style="margin: 24px 0 0; color: #555; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;">你收到此邮件，是因为 Ada Lovelace 通过 Hourmere 预约了与你的会议。</p>
+</td></tr>
+</table>
+<!--[if mso]></td></tr></table><![endif]-->
+</body>
+</html>
+",
+  "subject": "新预约：与 Ada Lovelace 的 Intro call，10月20日周二，04:00（America/New_York）",
+  "text": "Hourmere
+
+Ada Lovelace 预约了与你的会议。
+
+活动：Intro call
+时间：2026年10月20日星期二，04:00 至 04:30（America/New_York）
+地点：Google Meet
+预约人：Ada Lovelace <ada@example.com>
+来宾：Charles Babbage <charles@example.com>
+
+回答
+What should we discuss?
+  Analytical engines.
+  A short demo.
+
+加入 Google Meet 会议
+https://meet.example.com/abc
+
+在 Hourmere 中打开：https://cal.example.com/app/bookings/019a1234-5678-7000-8000-000000000001
+
+在日历中拒绝邀请不会同步到 Hourmere；如需取消预约，请在 Hourmere 中操作。
+
+你收到此邮件，是因为 Ada Lovelace 通过 Hourmere 预约了与你的会议。
+",
+}
+`;
+
+exports[`booking email language goldens > zh-CN confirmed invitee 1`] = `
+{
+  "html": "<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>已确认：与 Grace Hopper 的 Intro call，10月20日周二，10:00（Europe/Berlin）</title>
+<style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
+</head>
+<body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
+<!--[if mso]><table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" style="width: 600px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><![endif]-->
+<table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="width: 100%; max-width: 600px; margin: 0 auto; background-color: #ffffff; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;">
+<tr><td style="padding: 24px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; overflow-wrap: anywhere; word-break: break-word;">
+<p style="margin: 0 0 24px; color: #1f4fd8; font-size: 20px; font-weight: 700;">Hourmere</p>
+<p style="margin: 0 0 16px; overflow-wrap: anywhere; word-break: break-word;">你与 Grace Hopper 的会议已预约。</p>
+<table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">活动</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Intro call</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">时间</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">2026年10月20日星期二，10:00 至 10:30（Europe/Berlin）</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">地点</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Google Meet</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">主持人</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Grace Hopper</td></tr>
+</table>
+<div style="margin: 24px 0 0;">
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="padding: 16px 0; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td bgcolor="#1f4fd8" style="padding: 0; mso-padding-alt: 12px 18px; background-color: #1f4fd8; border: 1px solid #1f4fd8; border-radius: 6px; text-align: center; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><a href="https://meet.example.com/abc" style="display: block; padding: 12px 18px; line-height: 20px; min-height: 20px; color: #ffffff; text-decoration: none; overflow-wrap: anywhere; word-break: break-word;">加入 Google Meet 会议</a></td></tr></table></td></tr></table>
+<p style="margin: 4px 0 0; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;"><a href="https://meet.example.com/abc" style="color: #1f4fd8; overflow-wrap: anywhere; word-break: break-word;">https://meet.example.com/abc</a></p>
+</div>
+<p style="margin: 24px 0 8px;">需要更改预约吗？</p>
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="padding: 16px 0; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td bgcolor="#1f4fd8" style="padding: 0; mso-padding-alt: 12px 18px; background-color: #1f4fd8; border: 1px solid #1f4fd8; border-radius: 6px; text-align: center; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><a href="https://cal.example.com/booking#token=fixture&amp;action=reschedule" style="display: block; padding: 12px 18px; line-height: 20px; min-height: 20px; color: #ffffff; text-decoration: none; overflow-wrap: anywhere; word-break: break-word;">改期</a></td></tr></table></td></tr></table>
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="padding: 16px 0; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td bgcolor="#ffffff" style="padding: 0; mso-padding-alt: 12px 18px; background-color: #ffffff; border: 1px solid #1f4fd8; border-radius: 6px; text-align: center; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><a href="https://cal.example.com/booking#token=fixture&amp;action=cancel" style="display: block; padding: 12px 18px; line-height: 20px; min-height: 20px; color: #1f4fd8; text-decoration: none; overflow-wrap: anywhere; word-break: break-word;">取消</a></td></tr></table></td></tr></table>
+<p lang="zh-CN" style="margin: 0 0 8px; color: #555; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;">在日历中接受或拒绝邀请不会取消预约。如需取消，请使用此邮件中的<span class="cjk-quote" style="font-family: &quot;PingFang SC&quot;,&quot;Hiragino Sans GB&quot;,&quot;Microsoft YaHei&quot;,&quot;Noto Sans CJK SC&quot;,&quot;Source Han Sans SC&quot;,sans-serif; font-variant-east-asian: full-width; font-feature-settings: 'fwid';">“</span>取消<span class="cjk-quote" style="font-family: &quot;PingFang SC&quot;,&quot;Hiragino Sans GB&quot;,&quot;Microsoft YaHei&quot;,&quot;Noto Sans CJK SC&quot;,&quot;Source Han Sans SC&quot;,sans-serif; font-variant-east-asian: full-width; font-feature-settings: 'fwid';">”</span>链接。</p>
+<p style="margin: 8px 0 0; color: #555; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;">如果按钮无法使用，请将链接复制到浏览器中：<br>改期：https://cal.example.com/booking#token=fixture&amp;action=reschedule<br>取消：https://cal.example.com/booking#token=fixture&amp;action=cancel</p>
+<p style="margin: 24px 0 0; color: #555; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;">你收到此邮件，是因为你通过 Hourmere 预约了与 Grace Hopper 的会议。</p>
+</td></tr>
+</table>
+<!--[if mso]></td></tr></table><![endif]-->
+</body>
+</html>
+",
+  "subject": "已确认：与 Grace Hopper 的 Intro call，10月20日周二，10:00（Europe/Berlin）",
+  "text": "Hourmere
+
+你与 Grace Hopper 的会议已预约。
+
+活动：Intro call
+时间：2026年10月20日星期二，10:00 至 10:30（Europe/Berlin）
+地点：Google Meet
+主持人：Grace Hopper
+
+加入 Google Meet 会议
+https://meet.example.com/abc
+
+需要更改预约吗？
+在日历中接受或拒绝邀请不会取消预约。如需取消，请使用此邮件中的“取消”链接。
+请使用以下链接更改或取消预约：
+改期：https://cal.example.com/booking#token=fixture&action=reschedule
+取消：https://cal.example.com/booking#token=fixture&action=cancel
+
+你收到此邮件，是因为你通过 Hourmere 预约了与 Grace Hopper 的会议。
+",
+}
+`;
+
+exports[`booking email language goldens > zh-CN rescheduled guest 1`] = `
+{
+  "html": "<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>已改期：与 Grace Hopper 的 Intro call，现为 10月20日周二，10:00（Europe/Berlin）</title>
+<style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
+</head>
+<body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
+<!--[if mso]><table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" style="width: 600px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><![endif]-->
+<table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="width: 100%; max-width: 600px; margin: 0 auto; background-color: #ffffff; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;">
+<tr><td style="padding: 24px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; overflow-wrap: anywhere; word-break: break-word;">
+<p style="margin: 0 0 24px; color: #1f4fd8; font-size: 20px; font-weight: 700;">Hourmere</p>
+<p style="margin: 0 0 16px; overflow-wrap: anywhere; word-break: break-word;">你与 Grace Hopper 的会议已改期。</p>
+<table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">活动</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Intro call</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">时间</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">2026年10月20日星期二，10:00 至 10:30（Europe/Berlin）</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">原时间</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word; color: #777; text-decoration: line-through;">2026年10月19日星期一，10:00 至 10:30（Europe/Berlin）</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">地点</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Google Meet</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">主持人</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Grace Hopper</td></tr>
+</table>
+<div style="margin: 24px 0 0;">
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="padding: 16px 0; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td bgcolor="#1f4fd8" style="padding: 0; mso-padding-alt: 12px 18px; background-color: #1f4fd8; border: 1px solid #1f4fd8; border-radius: 6px; text-align: center; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><a href="https://meet.example.com/abc" style="display: block; padding: 12px 18px; line-height: 20px; min-height: 20px; color: #ffffff; text-decoration: none; overflow-wrap: anywhere; word-break: break-word;">加入 Google Meet 会议</a></td></tr></table></td></tr></table>
+<p style="margin: 4px 0 0; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;"><a href="https://meet.example.com/abc" style="color: #1f4fd8; overflow-wrap: anywhere; word-break: break-word;">https://meet.example.com/abc</a></p>
+</div>
+<p lang="zh-CN" style="margin: 24px 0 0; color: #555; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;">在日历中接受或拒绝邀请不会取消预约。如需取消，请联系预约人或主持人。</p>
+<p style="margin: 24px 0 0; color: #555; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;">你收到此邮件，是因为 Ada Lovelace 在通过 Hourmere 与 Grace Hopper 的预约中添加了你。</p>
+</td></tr>
+</table>
+<!--[if mso]></td></tr></table><![endif]-->
+</body>
+</html>
+",
+  "subject": "已改期：与 Grace Hopper 的 Intro call，现为 10月20日周二，10:00（Europe/Berlin）",
+  "text": "Hourmere
+
+你与 Grace Hopper 的会议已改期。
+
+活动：Intro call
+时间：2026年10月20日星期二，10:00 至 10:30（Europe/Berlin）
+原时间：2026年10月19日星期一，10:00 至 10:30（Europe/Berlin）
+地点：Google Meet
+主持人：Grace Hopper
+
+加入 Google Meet 会议
+https://meet.example.com/abc
+
+在日历中接受或拒绝邀请不会取消预约。如需取消，请联系预约人或主持人。
+
+你收到此邮件，是因为 Ada Lovelace 在通过 Hourmere 与 Grace Hopper 的预约中添加了你。
+",
+}
+`;
+
+exports[`booking email language goldens > zh-CN rescheduled host 1`] = `
+{
+  "html": "<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>已改期：与 Ada Lovelace 的 Intro call，现为 10月20日周二，04:00（America/New_York）</title>
+<style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
+</head>
+<body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
+<!--[if mso]><table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" style="width: 600px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><![endif]-->
+<table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="width: 100%; max-width: 600px; margin: 0 auto; background-color: #ffffff; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;">
+<tr><td style="padding: 24px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; overflow-wrap: anywhere; word-break: break-word;">
+<p style="margin: 0 0 24px; color: #1f4fd8; font-size: 20px; font-weight: 700;">Hourmere</p>
+<p style="margin: 0 0 16px; overflow-wrap: anywhere; word-break: break-word;">你与 Ada Lovelace 的会议已改期。</p>
+<table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">活动</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Intro call</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">时间</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">2026年10月20日星期二，04:00 至 04:30（America/New_York）</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">原时间</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word; color: #777; text-decoration: line-through;">2026年10月19日星期一，04:00 至 04:30（America/New_York）</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">地点</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Google Meet</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">预约人</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Ada Lovelace &lt;ada@example.com&gt;</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">来宾</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Charles Babbage &lt;charles@example.com&gt;</td></tr>
+</table>
+<p style="margin: 24px 0 4px; font-weight: 600;">回答</p>
+<p style="margin: 0 0 12px; overflow-wrap: anywhere; word-break: break-word;"><span style="color: #555;">What should we discuss?</span><br>Analytical engines.<br>A short demo.</p>
+<div style="margin: 24px 0 0;">
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="padding: 16px 0; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td bgcolor="#1f4fd8" style="padding: 0; mso-padding-alt: 12px 18px; background-color: #1f4fd8; border: 1px solid #1f4fd8; border-radius: 6px; text-align: center; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><a href="https://meet.example.com/abc" style="display: block; padding: 12px 18px; line-height: 20px; min-height: 20px; color: #ffffff; text-decoration: none; overflow-wrap: anywhere; word-break: break-word;">加入 Google Meet 会议</a></td></tr></table></td></tr></table>
+<p style="margin: 4px 0 0; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;"><a href="https://meet.example.com/abc" style="color: #1f4fd8; overflow-wrap: anywhere; word-break: break-word;">https://meet.example.com/abc</a></p>
+</div>
+<div style="margin: 24px 0 0;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="padding: 16px 0; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td bgcolor="#1f4fd8" style="padding: 0; mso-padding-alt: 12px 18px; background-color: #1f4fd8; border: 1px solid #1f4fd8; border-radius: 6px; text-align: center; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><a href="https://cal.example.com/app/bookings/019a1234-5678-7000-8000-000000000001" style="display: block; padding: 12px 18px; line-height: 20px; min-height: 20px; color: #ffffff; text-decoration: none; overflow-wrap: anywhere; word-break: break-word;">在 Hourmere 中打开</a></td></tr></table></td></tr></table></div>
+<p lang="zh-CN" style="margin: 24px 0 0; color: #555; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;">在日历中拒绝邀请不会同步到 Hourmere；如需取消预约，请在 Hourmere 中操作。</p>
+<p style="margin: 24px 0 0; color: #555; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;">你收到此邮件，是因为 Ada Lovelace 通过 Hourmere 预约了与你的会议。</p>
+</td></tr>
+</table>
+<!--[if mso]></td></tr></table><![endif]-->
+</body>
+</html>
+",
+  "subject": "已改期：与 Ada Lovelace 的 Intro call，现为 10月20日周二，04:00（America/New_York）",
+  "text": "Hourmere
+
+你与 Ada Lovelace 的会议已改期。
+
+活动：Intro call
+时间：2026年10月20日星期二，04:00 至 04:30（America/New_York）
+原时间：2026年10月19日星期一，04:00 至 04:30（America/New_York）
+地点：Google Meet
+预约人：Ada Lovelace <ada@example.com>
+来宾：Charles Babbage <charles@example.com>
+
+回答
+What should we discuss?
+  Analytical engines.
+  A short demo.
+
+加入 Google Meet 会议
+https://meet.example.com/abc
+
+在 Hourmere 中打开：https://cal.example.com/app/bookings/019a1234-5678-7000-8000-000000000001
+
+在日历中拒绝邀请不会同步到 Hourmere；如需取消预约，请在 Hourmere 中操作。
+
+你收到此邮件，是因为 Ada Lovelace 通过 Hourmere 预约了与你的会议。
+",
+}
+`;
+
+exports[`booking email language goldens > zh-CN rescheduled invitee 1`] = `
+{
+  "html": "<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>已改期：与 Grace Hopper 的 Intro call，现为 10月20日周二，10:00（Europe/Berlin）</title>
+<style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
+</head>
+<body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
+<!--[if mso]><table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" style="width: 600px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><![endif]-->
+<table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="width: 100%; max-width: 600px; margin: 0 auto; background-color: #ffffff; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;">
+<tr><td style="padding: 24px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; overflow-wrap: anywhere; word-break: break-word;">
+<p style="margin: 0 0 24px; color: #1f4fd8; font-size: 20px; font-weight: 700;">Hourmere</p>
+<p style="margin: 0 0 16px; overflow-wrap: anywhere; word-break: break-word;">你与 Grace Hopper 的会议已改期。</p>
+<table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">活动</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Intro call</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">时间</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">2026年10月20日星期二，10:00 至 10:30（Europe/Berlin）</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">原时间</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word; color: #777; text-decoration: line-through;">2026年10月19日星期一，10:00 至 10:30（Europe/Berlin）</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">地点</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Google Meet</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">主持人</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Grace Hopper</td></tr>
+</table>
+<div style="margin: 24px 0 0;">
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="padding: 16px 0; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td bgcolor="#1f4fd8" style="padding: 0; mso-padding-alt: 12px 18px; background-color: #1f4fd8; border: 1px solid #1f4fd8; border-radius: 6px; text-align: center; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><a href="https://meet.example.com/abc" style="display: block; padding: 12px 18px; line-height: 20px; min-height: 20px; color: #ffffff; text-decoration: none; overflow-wrap: anywhere; word-break: break-word;">加入 Google Meet 会议</a></td></tr></table></td></tr></table>
+<p style="margin: 4px 0 0; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;"><a href="https://meet.example.com/abc" style="color: #1f4fd8; overflow-wrap: anywhere; word-break: break-word;">https://meet.example.com/abc</a></p>
+</div>
+<p style="margin: 24px 0 8px;">需要更改预约吗？</p>
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="padding: 16px 0; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td bgcolor="#1f4fd8" style="padding: 0; mso-padding-alt: 12px 18px; background-color: #1f4fd8; border: 1px solid #1f4fd8; border-radius: 6px; text-align: center; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><a href="https://cal.example.com/booking#token=fixture&amp;action=reschedule" style="display: block; padding: 12px 18px; line-height: 20px; min-height: 20px; color: #ffffff; text-decoration: none; overflow-wrap: anywhere; word-break: break-word;">改期</a></td></tr></table></td></tr></table>
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="padding: 16px 0; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td bgcolor="#ffffff" style="padding: 0; mso-padding-alt: 12px 18px; background-color: #ffffff; border: 1px solid #1f4fd8; border-radius: 6px; text-align: center; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><a href="https://cal.example.com/booking#token=fixture&amp;action=cancel" style="display: block; padding: 12px 18px; line-height: 20px; min-height: 20px; color: #1f4fd8; text-decoration: none; overflow-wrap: anywhere; word-break: break-word;">取消</a></td></tr></table></td></tr></table>
+<p lang="zh-CN" style="margin: 0 0 8px; color: #555; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;">在日历中接受或拒绝邀请不会取消预约。如需取消，请使用此邮件中的<span class="cjk-quote" style="font-family: &quot;PingFang SC&quot;,&quot;Hiragino Sans GB&quot;,&quot;Microsoft YaHei&quot;,&quot;Noto Sans CJK SC&quot;,&quot;Source Han Sans SC&quot;,sans-serif; font-variant-east-asian: full-width; font-feature-settings: 'fwid';">“</span>取消<span class="cjk-quote" style="font-family: &quot;PingFang SC&quot;,&quot;Hiragino Sans GB&quot;,&quot;Microsoft YaHei&quot;,&quot;Noto Sans CJK SC&quot;,&quot;Source Han Sans SC&quot;,sans-serif; font-variant-east-asian: full-width; font-feature-settings: 'fwid';">”</span>链接。</p>
+<p style="margin: 8px 0 0; color: #555; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;">如果按钮无法使用，请将链接复制到浏览器中：<br>改期：https://cal.example.com/booking#token=fixture&amp;action=reschedule<br>取消：https://cal.example.com/booking#token=fixture&amp;action=cancel</p>
+<p style="margin: 24px 0 0; color: #555; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;">你收到此邮件，是因为你通过 Hourmere 预约了与 Grace Hopper 的会议。</p>
+</td></tr>
+</table>
+<!--[if mso]></td></tr></table><![endif]-->
+</body>
+</html>
+",
+  "subject": "已改期：与 Grace Hopper 的 Intro call，现为 10月20日周二，10:00（Europe/Berlin）",
+  "text": "Hourmere
+
+你与 Grace Hopper 的会议已改期。
+
+活动：Intro call
+时间：2026年10月20日星期二，10:00 至 10:30（Europe/Berlin）
+原时间：2026年10月19日星期一，10:00 至 10:30（Europe/Berlin）
+地点：Google Meet
+主持人：Grace Hopper
+
+加入 Google Meet 会议
+https://meet.example.com/abc
+
+需要更改预约吗？
+在日历中接受或拒绝邀请不会取消预约。如需取消，请使用此邮件中的“取消”链接。
+请使用以下链接更改或取消预约：
+改期：https://cal.example.com/booking#token=fixture&action=reschedule
+取消：https://cal.example.com/booking#token=fixture&action=cancel
+
+你收到此邮件，是因为你通过 Hourmere 预约了与 Grace Hopper 的会议。
+",
+}
+`;

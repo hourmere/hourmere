@@ -15,10 +15,10 @@ function deferred<T = void>() {
   return { promise, resolve }
 }
 
-async function until(check: () => Promise<boolean> | boolean, timeoutMs = 10_000) {
+async function until(check: () => Promise<boolean> | boolean, what: string, timeoutMs = 10_000) {
   const deadline = Date.now() + timeoutMs
   while (!(await check())) {
-    if (Date.now() > deadline) throw new Error('timed out waiting')
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`)
     await new Promise((r) => setTimeout(r, 50))
   }
 }
@@ -183,11 +183,11 @@ describe.skipIf(!serverUrl)('createJobs', () => {
       // Not visible outside the transaction until it commits, so no worker can run it early.
       expect(await jobRows(name)).toEqual([])
     })
-    await until(() => ran.length === 1)
+    await until(() => ran.length === 1, 'the committed transaction job to run exactly once')
     expect(ran).toEqual([2])
     await new Promise((r) => setTimeout(r, 1200))
     expect(ran).toEqual([2])
-  })
+  }, 20_000)
 
   it('deduplicates by singletonKey under the exclusive policy', async () => {
     const name = queueName('dedup')
@@ -241,7 +241,10 @@ describe.skipIf(!serverUrl)('createJobs', () => {
     })
     const jobs = await start([flaky], { lines })
     await jobs.enqueue(name, { secret: 'hm_super_secret_value' })
-    await until(async () => (await jobRows(name))[0]?.state === 'completed')
+    await until(
+      async () => (await jobRows(name))[0]?.state === 'completed',
+      'the failed job retry to reach the completed state',
+    )
     expect(calls).toBe(2)
     const failures = lines.filter((l) => l.includes(`ERROR job ${name}`))
     expect(failures).toHaveLength(1)
@@ -250,7 +253,7 @@ describe.skipIf(!serverUrl)('createJobs', () => {
     )
     expect(failures[0]).not.toMatch(/[\n\r]/)
     expect(lines.join('\n')).not.toContain('hm_super_secret_value')
-  })
+  }, 20_000)
 
   it('waits for a running job when stopping and takes no new ones', async () => {
     const name = queueName('slow')

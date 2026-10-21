@@ -4,12 +4,14 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # A manual rehearsal on main must not cancel main's ordinary CI (or vice versa).
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -40,16 +42,57 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm run lint
       - run: npm run typecheck
-      - run: npm test
+      - name: Install the interactive deployment-test shell
+        run: sudo apt-get -o Acquire::Retries=3 update && sudo apt-get -o Acquire::Retries=3 install --no-install-recommends -y zsh
+      - run: npm test -- --maxWorkers=2
       - name: Generated table types match the migrations
         run: npm run db:migrate && npm run db:types -- --verify
       - name: Generated API types match the server's OpenAPI document
         run: npm run api:types && git diff --exit-code -- apps/web/src/api/schema.d.ts
-      - run: npm run build
+      - name: Build with a disposable legal publication fixture
+        run: |
+          legal_source=apps/site/src/data/legal.ts
+          legal_original=$(mktemp)
+          cp "$legal_source" "$legal_original"
+          restore_legal_source() {
+            cp "$legal_original" "$legal_source"
+            rm -f "$legal_original"
+            rm -rf apps/site/dist
+          }
+          trap restore_legal_source EXIT
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs'
+          const path = 'apps/site/src/data/legal.ts'
+          const source = readFileSync(path, 'utf8')
+          writeFileSync(path, source.replace("'SET_ON_PUBLICATION_DAY'", "'2000-01-01'"))
+          NODE
+          npm run build
+      - name: Inspect and smoke test the standalone npm CLI tarball
+        run: npm run cli:pack-smoke
+      - name: Validate the draft MCP Registry metadata against the official schema
+        run: npm run mcp:registry:validate
+
+  cli-compatibility:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci --ignore-scripts --audit=false --fund=false
+      - name: Pack and install the CLI standalone, then check help and version
+        run: npm run cli:pack-smoke
+      - name: Run CLI unit tests without PostgreSQL
+        run: npm test -- tools/cli/src/cli.test.ts tools/cli/src/package.test.ts --maxWorkers=2
 
   docker:
     runs-on: ubuntu-latest
     env:
+      COMPOSE_PROJECT_NAME: hourmere-ci-${{ github.run_id }}-${{ github.run_attempt }}
       # Deliberately contains URL-special characters: self-hosters' passwords will.
       POSTGRES_PASSWORD: ci/pass#word?with+specials=
       BETTER_AUTH_SECRET: ci-only-secret-not-used-anywhere-else-0123456789
@@ -61,9 +104,35 @@ jobs:
         run: |
           curl --fail --silent --show-error http://127.0.0.1:3000/api/health
           curl --fail --silent --show-error http://127.0.0.1:3000/ | grep -q '<title>Hourmere</title>'
+          unknown_well_known_status=$(curl --silent --show-error --output /dev/null \
+            --write-out '%{http_code}' http://127.0.0.1:3000/.well-known/does-not-exist)
+          [ "$unknown_well_known_status" = 404 ] || {
+            printf 'Unknown well-known route returned HTTP %s; expected 404\n' "$unknown_well_known_status" >&2
+            exit 1
+          }
+      - name: Smoke test the separate worker overlay
+        timeout-minutes: 2
+        run: |
+          compose_worker() { docker compose -f docker-compose.yml -f docker-compose.worker.yml "$@"; }
+          compose_worker config --format json > "$RUNNER_TEMP/worker-compose.json"
+          node --input-type=module -e '
+            import assert from "node:assert/strict";
+            import { readFileSync } from "node:fs";
+            const { services } = JSON.parse(readFileSync(process.argv[1], "utf8"));
+            assert.equal(services.app.environment.HOURMERE_ROLE, "web");
+            assert.equal(services.worker.environment.HOURMERE_ROLE, "worker");
+            assert.equal(services.worker.image, services.app.image);
+          ' "$RUNNER_TEMP/worker-compose.json"
+          # Reuse the built image and this job's disposable db service; no second build.
+          compose_worker up -d --no-build --wait --wait-timeout 75
+          compose_worker logs --no-color app | grep -q 'queued for a worker'
+          compose_worker logs --no-color worker | grep -q 'running jobs'
       - name: Logs
         if: failure()
-        run: docker compose logs
+        run: docker compose -f docker-compose.yml -f docker-compose.worker.yml logs
+      - name: Tear down the self-hosting stack
+        if: always()
+        run: docker compose -f docker-compose.yml -f docker-compose.worker.yml down --remove-orphans
 
   e2e:
     runs-on: ubuntu-latest
@@ -92,5 +161,23 @@ jobs:
         run: google-chrome --version
       - run: npm ci --ignore-scripts --audit=false --fund=false
       - run: npm run build --workspace @hourmere/web
-      - run: npm run test:e2e
+      - name: Build a disposable site fixture and run browser regressions
+        run: |
+          legal_source=apps/site/src/data/legal.ts
+          legal_original=$(mktemp)
+          cp "$legal_source" "$legal_original"
+          restore_legal_source() {
+            cp "$legal_original" "$legal_source"
+            rm -f "$legal_original"
+            rm -rf apps/site/dist
+          }
+          trap restore_legal_source EXIT
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs'
+          const path = 'apps/site/src/data/legal.ts'
+          const source = readFileSync(path, 'utf8')
+          writeFileSync(path, source.replace("'SET_ON_PUBLICATION_DAY'", "'2000-01-01'"))
+          NODE
+          npm run build --workspace @hourmere/site
+          npm run test:e2e
       - run: npm run test:e2e:privacy

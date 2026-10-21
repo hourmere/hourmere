@@ -1,10 +1,38 @@
 // Calendar invitations (iCalendar, RFC 5545; methods from iTIP, RFC 5546) attached to booking
 // emails, so the meeting lands in the recipient's calendar and later updates replace it.
+import { interfaceLanguage } from '@hourmere/core/language'
 import type { MailAttachment } from './index.ts'
+
+/** Public guidance only: calendar entries may be shared, so they never get manage links. */
+export function calendarResponseDescription(
+  role: 'invitee' | 'host' | 'guest',
+  locale?: string | null,
+): string {
+  if (interfaceLanguage(locale) === 'zh-CN') {
+    const cancellation = {
+      invitee: '如需取消，请使用 Hourmere 确认邮件中的取消链接。',
+      host: '如需取消，请在 Hourmere 中打开此预约。',
+      guest: '如需取消，请联系预约人或主持人。',
+    }
+    return `在日历中接受或拒绝邀请不会取消预约。${cancellation[role]}`
+  }
+  const cancellation = {
+    invitee: 'To cancel, use the link in your Hourmere confirmation email.',
+    host: 'To cancel, open the booking in Hourmere.',
+    guest: 'To cancel, contact the person who booked or the host.',
+  }
+  return `Accepting or declining this calendar invitation does not cancel the booking. ${cancellation[role]}`
+}
 
 export interface IcsPerson {
   name: string
   email: string
+}
+
+export interface IcsAttendee extends IcsPerson {
+  role?: 'CHAIR' | 'REQ-PARTICIPANT' | undefined
+  partstat?: 'NEEDS-ACTION' | 'ACCEPTED' | undefined
+  rsvp?: boolean | undefined
 }
 
 export interface IcsEvent {
@@ -21,8 +49,8 @@ export interface IcsEvent {
   summary: string
   description?: string | undefined
   location?: string | undefined
-  organizer: IcsPerson
-  attendees: readonly IcsPerson[]
+  organizer: IcsPerson & { sentBy?: string | undefined }
+  attendees: readonly IcsAttendee[]
 }
 
 // Control characters other than tab, which TEXT values may not contain (RFC 5545 3.3.11),
@@ -47,7 +75,12 @@ function quotedParam(value: string): string {
   return `"${value.replace(NOT_TAB, ' ').replace(/[\t"]/g, (c) => (c === '"' ? "'" : ' '))}"`
 }
 
-const mailto = (email: string) => `mailto:${email.replace(NOT_TAB, '').replace(/\s/g, '')}`
+// RFC 6068: mailbox punctuation such as #, ? and % must not become URI fragments, headers
+// or pre-existing escapes. Keep @ and + readable; both are legal in mailto's addr-spec.
+const mailto = (email: string) =>
+  `mailto:${encodeURIComponent(email.replace(NOT_TAB, '').replace(/\s/g, ''))
+    .replace(/%40/g, '@')
+    .replace(/%2B/g, '+')}`
 
 /** `20261020T080000Z` */
 function utc(instant: Temporal.Instant): string {
@@ -99,10 +132,10 @@ export function buildIcs(event: IcsEvent): string {
     `SUMMARY:${escapeIcsText(event.summary)}`,
     ...(event.description ? [`DESCRIPTION:${escapeIcsText(event.description)}`] : []),
     ...(event.location ? [`LOCATION:${escapeIcsText(event.location)}`] : []),
-    `ORGANIZER;CN=${quotedParam(event.organizer.name)}:${mailto(event.organizer.email)}`,
+    `ORGANIZER;CN=${quotedParam(event.organizer.name)}${event.organizer.sentBy ? `;SENT-BY=${quotedParam(mailto(event.organizer.sentBy))}` : ''}:${mailto(event.organizer.email)}`,
     ...event.attendees.map(
       (a) =>
-        `ATTENDEE;CN=${quotedParam(a.name)};ROLE=REQ-PARTICIPANT;PARTSTAT=ACCEPTED;RSVP=FALSE:${mailto(a.email)}`,
+        `ATTENDEE;CN=${quotedParam(a.name)};ROLE=${a.role ?? 'REQ-PARTICIPANT'};PARTSTAT=${a.partstat ?? 'ACCEPTED'};RSVP=${a.rsvp ? 'TRUE' : 'FALSE'}:${mailto(a.email)}`,
     ),
     `STATUS:${event.method === 'CANCEL' ? 'CANCELLED' : 'CONFIRMED'}`,
     'TRANSP:OPAQUE',

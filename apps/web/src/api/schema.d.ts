@@ -473,7 +473,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Retry safe conference reconciliation for an assigned host */
+        /**
+         * Retry safe conference reconciliation for an assigned host
+         * @description A Google Meet conference_pending_timeout retry rechecks the same event and conference request without creating a replacement. Only an explicit conference_failed result permits a new request on that event.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -631,7 +634,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description Too many requests from this address (`rate_limited`); see Retry-After */
+                /** @description The caller's per-user limit or the API key's rate limit is used up (`rate_limited`); see Retry-After */
                 429: {
                     headers: {
                         [name: string]: unknown;
@@ -722,7 +725,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description Too many requests from this address (`rate_limited`); see Retry-After */
+                /** @description The caller's per-user limit or the API key's rate limit is used up (`rate_limited`); see Retry-After */
                 429: {
                     headers: {
                         [name: string]: unknown;
@@ -2178,7 +2181,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description zoom_disabled, zoom_needs_reauth, zoom_refresh_incomplete, zoom_identity_mismatch or a safe provider failure */
+                /** @description zoom_disabled, zoom_needs_reauth, zoom_refresh_incomplete, zoom_identity_mismatch or a safe provider failure. Busy account operations add errorAlias=zoom_operation_busy alongside error=zoom_refresh_in_progress (deprecated but retained for all of /api/v1; removal or renaming requires a new API version); retry shortly. */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -3878,7 +3881,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description The time is not offered (`slot_unavailable`) or was just booked by someone else (`slot_taken`), the Idempotency-Key was used for a different request (`idempotency_key_reused`), or the round-robin host pool changed while the request waited (`booking_changed`; fetch current availability before retrying) */
+                /** @description The time is not offered (`slot_unavailable`) or was just booked by someone else (`slot_taken`), the Idempotency-Key was used for a different request (`idempotency_key_reused`), or the round-robin host pool or activation changed while the request waited (`booking_changed`; fetch current availability before retrying) */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -4110,7 +4113,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description The time is not offered (`slot_unavailable`) or was just booked by someone else (`slot_taken`), the Idempotency-Key was used for a different request (`idempotency_key_reused`), or the round-robin host pool changed while the request waited (`booking_changed`; fetch current availability before retrying) */
+                /** @description The time is not offered (`slot_unavailable`) or was just booked by someone else (`slot_taken`), the Idempotency-Key was used for a different request (`idempotency_key_reused`), or the round-robin host pool or activation changed while the request waited (`booking_changed`; fetch current availability before retrying) */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -4797,7 +4800,10 @@ export interface paths {
         /** List the current organization’s webhooks (owner/admin) */
         get: operations["listWebhooks"];
         put?: never;
-        /** Create an HTTPS webhook and reveal its signing secret once */
+        /**
+         * Create a webhook and reveal its signing secret once
+         * @description Public HTTPS destinations by default. Operators may allow exact private HTTP(S) targets. URL checks do not resolve DNS; every delivery revalidates all resolved addresses. Destinations are immutable.
+         */
         post: operations["createWebhook"];
         delete?: never;
         options?: never;
@@ -4893,6 +4899,10 @@ export interface components {
             cancelledAt: string | null;
             cancelReason: string | null;
             conference?: {
+                /**
+                 * @description Stable failure code, or null. conference_pending_timeout means Google still reports a pending conference after the polling budget; provider_unavailable means a provider or transport failure. Clients must accept additional codes.
+                 * @example conference_pending_timeout
+                 */
                 errorCode: string | null;
                 /** @enum {string} */
                 provider: "google_meet" | "zoom";
@@ -4915,6 +4925,8 @@ export interface components {
             end: string;
             /** Format: uuid */
             eventTypeId: string | null;
+            /** @description Authenticated host reads only: the event type's current title, or null when deleted. The stored booking title remains historical; clients must verify its exact composition before localizing it. */
+            eventTypeTitle?: string | null;
             /** Format: uuid */
             id: string;
             location: components["schemas"]["BookingLocation"];
@@ -4923,6 +4935,11 @@ export interface components {
              * @description The booking this one replaced when it was rescheduled
              */
             rescheduledFromId: string | null;
+            /**
+             * Format: uuid
+             * @description Authenticated host reads only: the immediate successor booking in the same organization that this caller also hosts, or null. A rescheduled predecessor keeps status cancelled.
+             */
+            rescheduledToId?: string | null;
             responses: components["schemas"]["Responses"];
             /**
              * @description How the booking was made; api and mcp are agents
@@ -5060,9 +5077,15 @@ export interface components {
         Error: {
             /** @description Machine-readable code, e.g. unauthorized */
             error: string;
+            errorAlias?: components["schemas"]["ErrorAlias"];
             /** @description Human-readable detail */
             message?: string;
         };
+        /**
+         * @description Optional additive alias from the documented error-code set. The original error code remains unchanged throughout /api/v1. New aliases may be added; fall back to error when an alias is absent or unknown. See https://hourmere.com/docs/api-conventions for code meanings.
+         * @enum {string}
+         */
+        ErrorAlias: "zoom_operation_busy";
         EventType: {
             /** @description Whether new bookings may add up to ten guest email recipients; existing booking attendees are preserved */
             allowGuests: boolean;
@@ -5359,6 +5382,11 @@ export interface components {
              * @description Hosted service destination for public attribution and sign-up links
              */
             hostedSignupUrl: string;
+            /**
+             * Format: uri
+             * @description This instance operator's privacy policy; absent when not configured
+             */
+            privacyPolicyUrl?: string;
             /** @description The sign-in methods people can use on this instance */
             signIn: {
                 /** @description Sign-in links sent by email */
@@ -5366,6 +5394,11 @@ export interface components {
                 google: boolean;
                 microsoft: boolean;
             };
+            /**
+             * Format: uri
+             * @description This instance operator's terms; absent when not configured
+             */
+            termsUrl?: string;
         };
         ManagedBooking: components["schemas"]["Booking"] & {
             /** @description The event type as it is now; null once it is deleted */

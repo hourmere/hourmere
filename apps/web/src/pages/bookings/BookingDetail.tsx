@@ -3,8 +3,11 @@ import { Link, useParams } from 'react-router'
 import { api, type Schemas, unwrap } from '../../api/client.ts'
 import { errorMessage, RequestError } from '../../api/errors.ts'
 import { type Booking, isNotFound, loadProfile } from '../../api/resources.ts'
+import { BreakableText } from '../../components/BreakableText.tsx'
 import { ConferenceNotice } from '../../components/ConferenceNotice.tsx'
 import { Field } from '../../components/forms.tsx'
+import { PageHeader } from '../../components/PageHeader.tsx'
+import { PageSkeleton } from '../../components/PageSkeleton.tsx'
 import { useFlash } from '../../flash.ts'
 import { zoned } from '../../format.ts'
 import { useLoad, usePageTitle } from '../../hooks.ts'
@@ -15,7 +18,14 @@ import { bookingPath, PATHS } from '../../paths.ts'
 import { isMultiLineText } from '../../text.ts'
 import { useUnsavedChanges } from '../../unsaved-changes.tsx'
 import { MissingRecord } from '../NotFound.tsx'
-import { answerText, describeLocation, hostZone, SOURCE_LABELS } from './booking-format.ts'
+import {
+  answerText,
+  bookingTitle,
+  bookingUpdate,
+  describeLocation,
+  hostZone,
+  SOURCE_LABELS,
+} from './booking-format.ts'
 import { CalendarCopyNotice } from './CalendarCopyNotice.tsx'
 import { RescheduleBooking } from './RescheduleBooking.tsx'
 
@@ -78,11 +88,11 @@ function BookingDetail({ id }: { id: string }) {
   const [state, reload] = useLoad(load)
   usePageTitle('Booking')
 
-  if (state.status === 'loading') return <p role="status">{t('Loading the booking…')}</p>
+  if (state.status === 'loading') return <PageSkeleton label="Loading the booking…" />
   if (state.status === 'error') {
     return (
       <>
-        <h1>{t('Booking')}</h1>
+        <PageHeader title={t('Booking')} />
         <div className="alert alert-error" role="alert">
           <p>
             {t('Could not load the booking.')} {ui(state.message)}
@@ -107,19 +117,24 @@ function BookingDetail({ id }: { id: string }) {
 }
 
 function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loaded) {
-  const { t, ui, formatLocale: displayLocale } = useI18n()
+  const { t, ui, locale, formatLocale: displayLocale } = useI18n()
   const flash = useFlash()
 
   const [booking, setBooking] = useState(initial)
+  function updateBooking(updated: Booking) {
+    setBooking((current) => bookingUpdate(current, updated))
+  }
   const [status, setStatus] = useState<UiText>(flash ?? '')
   const statusRef = useRef<HTMLParagraphElement>(null)
-  const format = zoned(timeZone, displayLocale)
+  const format = zoned(timeZone, locale === 'zh-CN' ? locale : displayLocale)
   const zoneName = format.timeZone.replaceAll('_', ' ')
+  const browserZoneHint = t('Shown in this browser’s time zone. {0}.').split('{0}')
   const [invitee, ...guests] = [...booking.attendees].sort(
     (a, b) => Number(b.isBooker) - Number(a.isBooker),
   )
   const location = describeLocation(booking.location)
   const cancelled = booking.status === 'cancelled'
+  const rescheduled = cancelled && Boolean(booking.rescheduledToId)
   const started = new Date(booking.start).getTime() <= Date.now()
 
   // Answers in the order of the questions, then any the event type no longer asks.
@@ -134,27 +149,36 @@ function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loa
       <p className="breadcrumb">
         <Link to={PATHS.bookings}>{t('Bookings')}</Link>
       </p>
-      <h1>
-        {booking.title}
-        {cancelled && <span className="badge badge-danger heading-badge">{t('Cancelled')}</span>}
-      </h1>
+      <PageHeader
+        title={
+          <>
+            {ui(bookingTitle(booking))}
+            {cancelled && (
+              <span className={`badge heading-badge${rescheduled ? '' : ' badge-danger'}`}>
+                {rescheduled ? t('Rescheduled') : t('Cancelled')}
+              </span>
+            )}
+          </>
+        }
+        lede={t('Review meeting details and manage this booking.')}
+      />
       <p className="flash" role="status" tabIndex={-1} ref={statusRef}>
         {ui(status)}
       </p>
 
-      <ConferenceNotice key={booking.id} booking={booking} host onChange={setBooking} />
-      <CalendarCopyNotice key={`copy:${booking.id}`} booking={booking} onChange={setBooking} />
-      <section className="panel" aria-labelledby="when-heading">
+      <section className="panel user-content" aria-labelledby="when-heading">
         <h2 id="when-heading">{t('When')}</h2>
         <p className="when">
           <time dateTime={booking.start}>{format.longDate(booking.start)}</time>
           <br />
-          {format.timeRange(booking.start, booking.end)} <span className="muted">({zoneName})</span>
+          {format.timeRange(booking.start, booking.end)}
+          <span className="muted">{t(' ({detail})', { detail: zoneName })}</span>
         </p>
         {!fromProfile && (
           <p className="hint">
-            {t('Shown in this browser’s time zone.')}{' '}
-            <Link to={PATHS.settings}>{t('Set your time zone')}</Link>.
+            {browserZoneHint[0]}
+            <Link to={PATHS.settings}>{t('Set your time zone')}</Link>
+            {browserZoneHint[1]}
           </p>
         )}
         <dl className="details">
@@ -165,10 +189,10 @@ function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loa
                 {ui(location.label)}
                 {location.detail && (
                   <>
-                    :{' '}
+                    {t(': ')}
                     {location.href ? (
                       <a href={location.href} target="_blank" rel="noreferrer">
-                        {location.detail}
+                        <BreakableText>{location.detail}</BreakableText>
                       </a>
                     ) : (
                       location.detail
@@ -183,7 +207,7 @@ function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loa
           <dt>{t('Booked')}</dt>
           <dd>
             {format.dateTime(booking.createdAt)}
-            {t(', through')} {ui(SOURCE_LABELS[booking.source])}
+            {t(', through {0}', { '0': ui(SOURCE_LABELS[booking.source]) })}
           </dd>
           {booking.rescheduledFromId && (
             <>
@@ -196,14 +220,24 @@ function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loa
           )}
           {cancelled && (
             <>
-              <dt>{t('Cancelled')}</dt>
+              <dt>{rescheduled ? t('Rescheduled') : t('Cancelled')}</dt>
               <dd>
                 {booking.cancelledAt ? format.dateTime(booking.cancelledAt) : t('Yes')}
+                {rescheduled && booking.rescheduledToId && (
+                  <>
+                    <br />
+                    <Link to={bookingPath(booking.rescheduledToId)}>
+                      {t('View rescheduled booking')}
+                    </Link>
+                  </>
+                )}
                 {booking.cancelReason && (
                   <>
                     <br />
                     <span className="multiline">
-                      {t('Reason:')} {booking.cancelReason}
+                      {t('Reason')}
+                      {t(': ')}
+                      {booking.cancelReason}
                     </span>
                   </>
                 )}
@@ -213,7 +247,26 @@ function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loa
         </dl>
       </section>
 
-      <section className="panel" aria-labelledby="people-heading">
+      {!cancelled && !started && <RescheduleBooking booking={booking} timeZone={timeZone} />}
+
+      {!cancelled && !started && (
+        <CancelBooking
+          booking={booking}
+          onCancelled={(updated) => {
+            updateBooking(updated)
+            setStatus('The booking is cancelled.')
+            statusRef.current?.focus()
+          }}
+          onAlreadyCancelled={(message) => {
+            setStatus(message)
+            statusRef.current?.focus()
+          }}
+        />
+      )}
+
+      <ConferenceNotice key={booking.id} booking={booking} host onChange={updateBooking} />
+      <CalendarCopyNotice key={`copy:${booking.id}`} booking={booking} onChange={updateBooking} />
+      <section className="panel user-content" aria-labelledby="people-heading">
         <h2 id="people-heading">{t('People')}</h2>
         <dl className="details">
           <dt>{t('Invitee')}</dt>
@@ -222,21 +275,19 @@ function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loa
               <>
                 {invitee.name}
                 <br />
-                <a href={`mailto:${invitee.email}`}>{invitee.email}</a>
+                <a href={`mailto:${invitee.email}`}>
+                  <BreakableText>{invitee.email}</BreakableText>
+                </a>
                 <br />
                 <span className="muted">
-                  {t('Time zone:')} {invitee.timeZone.replaceAll('_', ' ')}
-                  {invitee.timeZone !== format.timeZone && (
-                    <>
-                      {' '}
-                      (
-                      {zoned(invitee.timeZone, displayLocale).dateTimeRange(
-                        booking.start,
-                        booking.end,
-                      )}{' '}
-                      {t('there)')}
-                    </>
-                  )}
+                  {t('Time zone: {zone}', { zone: invitee.timeZone.replaceAll('_', ' ') })}
+                  {invitee.timeZone !== format.timeZone &&
+                    t(' ({time} there)', {
+                      time: zoned(
+                        invitee.timeZone,
+                        locale === 'zh-CN' ? locale : displayLocale,
+                      ).dateTimeRange(booking.start, booking.end),
+                    })}
                 </span>
               </>
             ) : (
@@ -251,7 +302,8 @@ function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loa
               <ul className="plain-list">
                 {guests.map((g) => (
                   <li key={g.email}>
-                    {g.name} <span className="muted">({g.email})</span>
+                    {g.name}
+                    <span className="muted">{t(' ({detail})', { detail: g.email })}</span>
                   </li>
                 ))}
               </ul>
@@ -272,7 +324,7 @@ function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loa
                 <dd className="multiline">
                   {(typeof booking.responses[qid] === 'boolean'
                     ? t(booking.responses[qid] ? 'Yes' : 'No')
-                    : answerText(booking.responses[qid])) ?? (
+                    : answerText(booking.responses[qid], locale)) ?? (
                     <span className="muted">{t('No answer')}</span>
                   )}
                 </dd>
@@ -281,23 +333,6 @@ function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loa
           </dl>
         )}
       </section>
-
-      {!cancelled && !started && <RescheduleBooking booking={booking} timeZone={timeZone} />}
-
-      {!cancelled && !started && (
-        <CancelBooking
-          booking={booking}
-          onCancelled={(updated) => {
-            setBooking(updated)
-            setStatus('The booking is cancelled.')
-            statusRef.current?.focus()
-          }}
-          onAlreadyCancelled={(message) => {
-            setStatus(message)
-            statusRef.current?.focus()
-          }}
-        />
-      )}
     </>
   )
 }

@@ -132,7 +132,10 @@ async function claim(deps: CalendarDeps, root: string) {
   })
 }
 type Claim = NonNullable<Awaited<ReturnType<typeof claim>>>
-type Outcome = ConferenceResult & { event?: GoogleEvent }
+type Outcome = ConferenceResult & {
+  event?: GoogleEvent
+  conferencePatchRequestId?: string
+}
 const valueFor = (c: Claim): GoogleEventWrite => ({
   iCalUID: `${c.root_booking_id}@hourmere`,
   summary: c.booking.title,
@@ -206,7 +209,21 @@ async function providerWork(deps: CalendarDeps, c: Claim, signal: AbortSignal): 
     return { cancelled: true }
   if (!deps.google || !c.connection_id || !c.calendar_id)
     return { error: 'calendar_unavailable', knownNoCreate: c.create }
-  let attemptedCreate = false
+  let attemptedImport = false
+  let knownEvent: GoogleEvent | undefined
+  // An import and its conference PATCH are distinct provider operations. Preserve
+  // the imported identity even when a later PATCH fails or its response is lost.
+  const remember = (event: GoogleEvent) => {
+    if (
+      !safeGoogleEventId(event.id) ||
+      event.iCalUID !== `${c.root_booking_id}@hourmere` ||
+      (c.external_event_id && c.external_event_id !== event.id) ||
+      (knownEvent && knownEvent.id !== event.id)
+    )
+      return false
+    knownEvent = event
+    return true
+  }
   try {
     const result = await useGoogleConnection(
       deps,
@@ -224,37 +241,25 @@ async function providerWork(deps: CalendarDeps, c: Claim, signal: AbortSignal): 
         const client = deps.google?.client
         if (!client) return { error: 'calendar_unavailable', knownNoCreate: c.create }
         const value = valueFor(c)
-        const request = {
-          createRequest: {
-            requestId: c.request_id,
-            conferenceSolutionKey: { type: 'hangoutsMeet' as const },
-          },
-        }
+        let found: GoogleEvent | undefined
         if (c.create) {
           if (!calendar.supports_google_meet)
             return { error: 'calendar_unavailable', knownNoCreate: true }
-          attemptedCreate = true
-          return interpretation(
-            await client.importEvent(
-              token,
-              calendar.external_id,
-              { ...value, conferenceData: request },
-              signal,
-            ),
-            c,
-          )
-        }
-        const found = c.external_event_id
-          ? await client.getConferenceEvent(
-              token,
-              calendar.external_id,
-              c.external_event_id,
-              signal,
-            )
-          : await client.findConferenceEvent(token, calendar.external_id, value.iCalUID, signal)
+          attemptedImport = true
+          // Google accepts createRequest on import without necessarily processing
+          // it. First import the private copy, then PATCH that known event below.
+          found = await client.importEvent(token, calendar.external_id, value, signal)
+        } else
+          found = c.external_event_id
+            ? await client.getConferenceEvent(
+                token,
+                calendar.external_id,
+                c.external_event_id,
+                signal,
+              )
+            : await client.findConferenceEvent(token, calendar.external_id, value.iCalUID, signal)
         if (!found) return c.create_started ? { error: 'ambiguous_create' } : { cancelled: true }
-        if (!safeGoogleEventId(found.id) || found.iCalUID !== value.iCalUID)
-          return { error: 'invalid_response' }
+        if (!remember(found)) return { error: 'invalid_response' }
         if (c.booking.status === 'cancelled') {
           if (found.status === 'cancelled') return { event: found, cancelled: true }
           const updated = await client.updateEvent(
@@ -265,24 +270,61 @@ async function providerWork(deps: CalendarDeps, c: Claim, signal: AbortSignal): 
             value,
             signal,
           )
-          return updated.id === found.id
+          return remember(updated)
             ? interpretation(updated, c)
-            : { error: 'invalid_response' }
+            : { event: found, error: 'invalid_response' }
         }
-        if (!sameTimes(found, c) || c.retry_conference) {
+        if (found.status === 'cancelled' || (c.create && !sameTimes(found, c)))
+          return { event: found, error: 'invalid_response' }
+        if (!sameTimes(found, c)) {
           const updated = await client.updateEvent(
             token,
             calendar.external_id,
             found.id,
             found.etag,
-            { ...value, ...(c.retry_conference ? { conferenceData: request } : {}) },
+            value,
             signal,
           )
-          return updated.id === found.id
-            ? interpretation(updated, c)
-            : { error: 'invalid_response' }
+          if (!remember(updated)) return { event: found, error: 'invalid_response' }
+          found = updated
         }
-        return interpretation(found, c)
+        if (!sameTimes(found, c) || found.status === 'cancelled')
+          return { event: found, error: 'invalid_response' }
+        const observed = interpretation(found, c)
+        // Existing successful links survive retries and moves. Acknowledged
+        // pending/failing requests only poll; NULL on legacy rows requires the
+        // same-ID PATCH first, even if import left a pending createRequest.
+        if (observed.url || c.conference_patch_request_id === c.request_id) return observed
+        const conference = found.conferenceData
+        const status = conference?.createRequest?.status?.statusCode
+        if (
+          status !== 'pending' &&
+          status !== 'failure' &&
+          (status === 'success' ||
+            conference?.conferenceSolution ||
+            conference?.entryPoints?.length)
+        )
+          return observed
+        if (!calendar.supports_google_meet) return { event: found, error: 'calendar_unavailable' }
+        const updated = await client.createConferenceEvent(
+          token,
+          calendar.external_id,
+          found.id,
+          found.etag,
+          c.request_id,
+          signal,
+        )
+        if (!remember(updated)) return { event: found, error: 'invalid_response' }
+        const acceptedId = updated.conferenceData?.createRequest?.requestId
+        if (acceptedId && acceptedId !== c.request_id)
+          return { event: updated, error: 'invalid_response' }
+        const outcome = interpretation(updated, c)
+        return {
+          ...outcome,
+          ...(outcome.pending || outcome.url || outcome.error === 'conference_failed'
+            ? { conferencePatchRequestId: c.request_id }
+            : {}),
+        }
       },
     )
     return result ?? { error: 'calendar_unavailable', knownNoCreate: c.create }
@@ -296,7 +338,8 @@ async function providerWork(deps: CalendarDeps, c: Claim, signal: AbortSignal): 
       return { cancelled: true }
     if (
       error instanceof GoogleCalendarError &&
-      attemptedCreate &&
+      attemptedImport &&
+      !knownEvent &&
       [400, 401, 403, 404, 429].includes(error.status ?? 0)
     )
       return {
@@ -310,13 +353,20 @@ async function providerWork(deps: CalendarDeps, c: Claim, signal: AbortSignal): 
       }
     if (error instanceof GoogleCalendarError)
       return {
-        error: attemptedCreate ? 'ambiguous_create' : error.code,
-        knownNoCreate: c.create && !attemptedCreate,
+        ...(knownEvent ? { event: knownEvent } : {}),
+        error:
+          attemptedImport && !knownEvent
+            ? 'ambiguous_create'
+            : knownEvent && error.status === 400
+              ? 'invalid_response'
+              : error.code,
+        knownNoCreate: c.create && !attemptedImport,
       }
     // Transport aborts and shutdown can occur after the provider committed the import.
     return {
-      error: attemptedCreate ? 'ambiguous_create' : 'provider_unavailable',
-      knownNoCreate: c.create && !attemptedCreate,
+      ...(knownEvent ? { event: knownEvent } : {}),
+      error: attemptedImport && !knownEvent ? 'ambiguous_create' : 'provider_unavailable',
+      knownNoCreate: c.create && !attemptedImport,
     }
   }
 }
@@ -389,6 +439,23 @@ export async function writeBookingConference(
         .where('root_booking_id', '=', root)
         .execute()
     if (current.lease_id !== c.lease) return
+    if (current.request_id !== c.request_id) {
+      await trx
+        .updateTable('booking_conferences')
+        .set({ lease_id: null, lease_until: null, next_attempt_at: clock(deps) })
+        .where('root_booking_id', '=', root)
+        .execute()
+      return
+    }
+    const acknowledgedPatch = outcome.conferencePatchRequestId === c.request_id
+    const attempts =
+      acknowledgedPatch && current.conference_patch_request_id !== c.request_id ? 1 : c.attempts
+    if (acknowledgedPatch)
+      await trx
+        .updateTable('booking_conferences')
+        .set({ conference_patch_request_id: c.request_id })
+        .where('root_booking_id', '=', root)
+        .execute()
     if (
       current.booking_id !== c.booking_id ||
       current.revision !== c.revision ||
@@ -427,12 +494,15 @@ export async function writeBookingConference(
       ? 'organizer_unavailable'
       : expired
         ? 'meeting_started'
-        : outcome.error
+        : (outcome.error ??
+          (c.provider === 'google_meet' && outcome.pending && attempts >= POLL_LIMIT
+            ? 'conference_pending_timeout'
+            : undefined))
     const retryable =
       organizerAvailable &&
       !expired &&
       (outcome.pending || error === 'provider_unavailable') &&
-      c.attempts < POLL_LIMIT
+      attempts < POLL_LIMIT
     const ready =
       organizerAvailable &&
       !expired &&
@@ -447,10 +517,10 @@ export async function writeBookingConference(
         error_code: ready ? null : retryable ? null : (error ?? 'provider_unavailable'),
         lease_id: null,
         lease_until: null,
-        retry_conference: false,
+        attempts,
         ...(outcome.knownNoCreate ? { create_started: false } : {}),
         next_attempt_at: new Date(
-          now.getTime() + Math.min(60_000, 5_000 * 2 ** Math.min(c.attempts, 4)),
+          now.getTime() + Math.min(60_000, 5_000 * 2 ** Math.min(attempts, 4)),
         ),
         updated_at: now,
       })
@@ -623,7 +693,7 @@ export async function retryBookingConference(ctx: ServiceContext, bookingId: str
         attempts: 0,
         error_code: null,
         next_attempt_at: ctx.now().toString(),
-        ...(knownFailure ? { request_id: randomUUID(), retry_conference: true } : {}),
+        ...(knownFailure ? { request_id: randomUUID() } : {}),
       })
       .where('root_booking_id', '=', c.root_booking_id)
       .execute()

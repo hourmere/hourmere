@@ -5,6 +5,8 @@ import { errorMessage } from '../../api/errors.ts'
 import { isNotFound, loadProfile, loadSchedules, type Schedule } from '../../api/resources.ts'
 import { ConfirmAction } from '../../components/ConfirmAction.tsx'
 import { ErrorSummary, Field, type FieldErrors } from '../../components/forms.tsx'
+import { PageHeader } from '../../components/PageHeader.tsx'
+import { PageSkeleton } from '../../components/PageSkeleton.tsx'
 import { TimeZonePicker } from '../../components/TimeZonePicker.tsx'
 import { flash, useFlash } from '../../flash.ts'
 import { browserTimeZone } from '../../format.ts'
@@ -47,7 +49,7 @@ export function ScheduleEditorPage() {
 }
 
 function ScheduleEditor({ id }: { id: string | undefined }) {
-  const { t, ui } = useI18n()
+  const { t, uiText: ui } = useI18n()
 
   const load = useCallback(
     async (signal: AbortSignal): Promise<Loaded | 'missing'> => {
@@ -77,11 +79,11 @@ function ScheduleEditor({ id }: { id: string | undefined }) {
   const [state, reload] = useLoad(load)
   usePageTitle(id === undefined ? 'New schedule' : 'Edit schedule')
 
-  if (state.status === 'loading') return <p role="status">{t('Loading…')}</p>
+  if (state.status === 'loading') return <PageSkeleton />
   if (state.status === 'error') {
     return (
       <>
-        <h1>{id === undefined ? t('New schedule') : t('Edit schedule')}</h1>
+        <PageHeader title={id === undefined ? t('New schedule') : t('Edit schedule')} />
         <div className="alert alert-error" role="alert">
           <p>
             {t('Could not load the schedule.')} {ui(state.message)}
@@ -106,7 +108,7 @@ function ScheduleEditor({ id }: { id: string | undefined }) {
 }
 
 function ScheduleForm({ schedule, schedules, defaultTimeZone }: Loaded) {
-  const { t, ui } = useI18n()
+  const { t, text, ui, uiText } = useI18n()
 
   const navigate = useNavigate()
   const message = useFlash()
@@ -210,7 +212,16 @@ function ScheduleForm({ schedule, schedules, defaultTimeZone }: Loaded) {
       <p className="breadcrumb">
         <Link to={PATHS.availability}>{t('Availability')}</Link>
       </p>
-      <h1>{saved ? t('Edit “{0}”', { '0': saved.name }) : t('New schedule')}</h1>
+      <PageHeader
+        title={saved ? text('Edit “{0}”', { '0': saved.name }) : t('New schedule')}
+        lede={
+          saved
+            ? t(
+                'Save schedule details and weekly hours here. Save date overrides in their section below.',
+              )
+            : t('Set your weekly hours in the time zone people can book you in.')
+        }
+      />
       {saved && (
         <DefaultStatus
           schedule={saved}
@@ -236,7 +247,7 @@ function ScheduleForm({ schedule, schedules, defaultTimeZone }: Loaded) {
                 id="name"
                 label={t('Name')}
                 error={errors.name}
-                hint={t('For you only, e.g. “Working hours”.')}
+                hint={text('For you only, e.g. “Working hours”.')}
               >
                 {(props) => (
                   <input
@@ -251,7 +262,7 @@ function ScheduleForm({ schedule, schedules, defaultTimeZone }: Loaded) {
                 id="timeZone"
                 label={t('Time zone')}
                 error={errors.timeZone}
-                hint={t('The hours below are in this zone. Type to search, e.g. “Berlin”.')}
+                hint={text('The hours below are in this zone. Type to search, e.g. “Berlin”.')}
               >
                 {(props) => (
                   <TimeZonePicker
@@ -331,7 +342,7 @@ function ScheduleForm({ schedule, schedules, defaultTimeZone }: Loaded) {
             {saved ? t('Back to availability') : t('Cancel')}
           </Link>
           <p className="form-status" role="status" tabIndex={-1} ref={statusRef}>
-            {ui(status || (dirty && saved ? 'Unsaved changes' : ''))}
+            {uiText(status || (dirty && saved ? 'Unsaved changes' : ''))}
           </p>
         </div>
       </form>
@@ -362,7 +373,7 @@ function DefaultStatus({
   schedule: Schedule
   onChanged: (schedule: Schedule) => void
 }) {
-  const { t, ui } = useI18n()
+  const { t, uiText: ui } = useI18n()
 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<UiText | null>(null)
@@ -423,16 +434,18 @@ function DeleteSchedule({
 }) {
   const { t } = useI18n()
 
+  const defaultHint = t(
+    'This is your default schedule. To delete it, first make another schedule the default on the {0}.',
+  ).split('{0}')
   const blocked = schedule.isDefault && others.length > 0
   return (
     <section className="panel panel-danger" aria-labelledby="delete-heading">
       <h2 id="delete-heading">{t('Delete this schedule')}</h2>
       {blocked ? (
         <p>
-          {t(
-            'This is your default schedule. To delete it, first make another schedule the default on the',
-          )}{' '}
-          <Link to={PATHS.availability}>{t('availability page')}</Link>.
+          {defaultHint[0]}
+          <Link to={PATHS.availability}>{t('availability page')}</Link>
+          {defaultHint[1]}
         </p>
       ) : (
         <>

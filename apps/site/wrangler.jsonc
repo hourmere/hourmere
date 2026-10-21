@@ -5,6 +5,7 @@
   "main": "./worker/index.ts",
   "compatibility_date": "2026-10-01",
   "assets": {
+    // Astro copies public/.well-known/security.txt here; serve it as an exact asset.
     "directory": "./dist",
     "binding": "ASSETS",
     "run_worker_first": ["/api/waitlist"],

@@ -2,6 +2,26 @@ import { displayConferenceUrl } from '@hourmere/core/conference-url'
 // How bookings read: their location and answers, and the host's time zone they are shown in.
 import type { Booking, Profile } from '../../api/resources.ts'
 import { browserTimeZone } from '../../format.ts'
+import { formatList } from '../../i18n/formatting.ts'
+import { literal, msg, type UiText } from '../../i18n/translate.ts'
+
+/** Localize only a verified generated title; retain custom and historical titles verbatim. */
+export function bookingTitle(booking: Booking): UiText {
+  const invitee = booking.attendees.find((attendee) => attendee.isBooker)
+  const event = booking.eventTypeTitle
+  if (!invitee || !event || booking.title !== `${event} with ${invitee.name}`)
+    return literal(booking.title)
+  return msg('{event} with {host}', { event, host: invitee.name })
+}
+
+/** Mutation responses omit host-read metadata; keep it only for the same booking. */
+export function bookingUpdate(current: Booking, updated: Booking): Booking {
+  return current.id === updated.id &&
+    updated.eventTypeTitle === undefined &&
+    current.eventTypeTitle !== undefined
+    ? { ...updated, eventTypeTitle: current.eventTypeTitle }
+    : updated
+}
 
 /** The zone bookings are shown in: the profile's, else the browser's. */
 export function hostZone(profile: Profile | null): { timeZone: string; fromProfile: boolean } {
@@ -63,9 +83,12 @@ export const SOURCE_LABELS: Record<Booking['source'], string> = {
 }
 
 /** An answer as text: options joined, checkboxes as Yes or No. */
-export function answerText(value: string | string[] | boolean | undefined): string | null {
+export function answerText(
+  value: string | string[] | boolean | undefined,
+  locale = 'en',
+): string | null {
   if (value === undefined) return null
   if (typeof value === 'boolean') return value ? 'Yes' : 'No'
-  if (Array.isArray(value)) return value.length ? value.join(', ') : null
+  if (Array.isArray(value)) return value.length ? formatList(value, locale) : null
   return value.trim() ? value : null
 }

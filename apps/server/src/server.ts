@@ -60,6 +60,7 @@ import { profileRoutes } from './routes/profile.ts'
 import { publicRoutes } from './routes/public.ts'
 import { scheduleRoutes } from './routes/schedules.ts'
 import { webhookRoutes } from './routes/webhooks.ts'
+import { zoomEventRoutes } from './routes/zoom-events.ts'
 import { closeConnectionsWhen, closeServer } from './shutdown.ts'
 import { createWorkerHealthApp } from './worker-health.ts'
 
@@ -75,6 +76,8 @@ export function productRoutes({
   googleCalendar,
   microsoftCalendar,
   zoomConference,
+  zoomWebhookSecretToken,
+  zoomWebhookClientId,
   enqueueCalendarSync,
   enqueueCalendarWritebackRecovery,
   mcpAuth,
@@ -83,11 +86,15 @@ export function productRoutes({
   automaticMeet = false,
   automaticZoom = false,
   hostedSignupUrl,
+  privacyPolicyUrl,
+  termsUrl,
 }: {
   db: Db
   automaticMeet?: boolean
   automaticZoom?: boolean
   hostedSignupUrl?: string
+  privacyPolicyUrl?: string
+  termsUrl?: string
   webhooks?: import('@hourmere/webhooks').WebhookSettings
   mcpAuth?: Pick<ReturnType<typeof createAuth>, 'handler'> | undefined
   publicUrl?: string
@@ -97,12 +104,21 @@ export function productRoutes({
   googleCalendar?: CalendarDeps['google']
   microsoftCalendar?: CalendarDeps['microsoft']
   zoomConference?: ConferenceDeps['zoom']
+  zoomWebhookSecretToken?: string | undefined
+  zoomWebhookClientId?: string | undefined
   enqueueCalendarSync?: CalendarDeps['enqueueSync']
   enqueueCalendarWritebackRecovery?: CalendarDeps['enqueueWritebackRecovery']
 }): RouteModule[] {
   return [
     mcpOAuthRoutes({ auth: mcpAuth, db, publicUrl }),
-    instanceRoutes({ socialProviders, automaticMeet, automaticZoom, hostedSignupUrl }),
+    instanceRoutes({
+      socialProviders,
+      automaticMeet,
+      automaticZoom,
+      hostedSignupUrl,
+      privacyPolicyUrl,
+      termsUrl,
+    }),
     calendarRoutes({
       db,
       google: googleCalendar,
@@ -111,6 +127,11 @@ export function productRoutes({
       enqueueWritebackRecovery: enqueueCalendarWritebackRecovery,
     }),
     conferenceRoutes({ db, zoom: zoomConference }),
+    zoomEventRoutes({
+      db,
+      secretToken: zoomWebhookSecretToken,
+      clientId: zoomWebhookClientId,
+    }),
     profileRoutes({ db }),
     scheduleRoutes({ db }),
     webhookRoutes({ db, ...webhooks }),
@@ -171,6 +192,10 @@ export async function startServer(env: NodeJS.ProcessEnv = process.env): Promise
 
 async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promise<RunningServer> {
   const config = loadConfig(env)
+  if (config.WEBHOOK_PRIVATE_TARGETS.length)
+    console.warn(
+      'WEBHOOK_PRIVATE_TARGETS permits operator-trusted private webhook destinations. Self-hosting only; Hourmere Cloud must never enable this setting.',
+    )
   const pool = createPool(config.DATABASE_URL)
   const db = createDb(pool)
 
@@ -266,6 +291,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
   const webhookSettings = {
     enabled: config.WEBHOOKS_ENABLED,
     encryptionKey: config.WEBHOOK_ENCRYPTION_KEY,
+    privateTargets: config.WEBHOOK_PRIVATE_TARGETS,
   }
   const calendarDeps: CalendarDeps = {
     db,
@@ -393,11 +419,15 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
         automaticMeet: config.GOOGLE_MEET_ENABLED,
         automaticZoom: config.ZOOM_MEETINGS_ENABLED,
         hostedSignupUrl: config.HOSTED_SIGNUP_URL,
+        privacyPolicyUrl: config.PRIVACY_POLICY_URL,
+        termsUrl: config.TERMS_URL,
         webhooks: webhookSettings,
         notify,
         googleCalendar,
         microsoftCalendar,
         zoomConference,
+        zoomWebhookSecretToken: config.ZOOM_WEBHOOK_SECRET_TOKEN,
+        zoomWebhookClientId: config.ZOOM_CLIENT_ID,
         enqueueCalendarSync: (id, trx) =>
           jobs.enqueue('calendar-sync', { calendarId: id }, { singletonKey: id, transaction: trx }),
         enqueueCalendarWritebackRecovery: (connectionId, trx) =>

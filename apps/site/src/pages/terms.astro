@@ -1,6 +1,10 @@
 ---
 import Legal from '../layouts/Legal.astro'
+import { resolveLegalPublicationDate } from '../privacy-publication.ts'
 import { company, contact, site } from '../site'
+import { siteCopy } from '../ui-copy.ts'
+
+const publicationDate = resolveLegalPublicationDate()
 
 const linkRefunds =
   'https://support.link.com/questions/requesting-a-refund-for-a-sold-through-link-payment'
@@ -31,7 +35,7 @@ const sections = [
   title="Terms of Service"
   description="The terms for using the Hourmere website and Hourmere Cloud, provided by Cobaltmere, LLC."
   path="/terms"
-  effective="2026-11-30"
+  effective={publicationDate}
   sections={sections}
 >
   <Fragment slot="intro">
@@ -48,18 +52,20 @@ const sections = [
       the authority to do so.
     </p>
     <p class="callout">
-      Hourmere is in development and Hourmere Cloud is not available yet. These Terms will apply to
-      Hourmere Cloud when it opens. Until then, they apply to your use of this website.
+      Hourmere Cloud is in an invitation-only preview at app.hourmere.com, and sign-ups are
+      currently closed. These Terms apply to that preview and to your use of this website.
     </p>
   </Fragment>
 
   <h2 id="the-service">1. The Service</h2>
   <p>
     Hourmere is scheduling software. It lets you share booking links so that invitees can pick a
-    time that works, syncs with Google Calendar and Microsoft 365, sends email confirmations and
+    time that works, syncs with Google Calendar, sends email confirmations and
     reminders, provides an embeddable booking widget, and offers an API and a remote MCP server so
     that AI assistants and other applications can work with your schedule.
   </p>
+
+  <p class="back-to-contents"><a href="#contents">{siteCopy.en.backToContents}</a></p>
 
   <h2 id="open-source">2. Open-source software and self-hosting</h2>
   <p>
@@ -71,6 +77,8 @@ const sections = [
     to calendar providers. These Terms apply only to the Service that we operate.
   </p>
 
+  <p class="back-to-contents"><a href="#contents">{siteCopy.en.backToContents}</a></p>
+
   <h2 id="accounts">3. Accounts</h2>
   <p>
     You must give accurate information when you create an account and keep access to your sign-in
@@ -78,6 +86,8 @@ const sections = [
     including activity by users you invite and by applications you authorize. You must be at least
     18 years old, or the age of majority where you live if that is higher, to use Hourmere Cloud.
   </p>
+
+  <p class="back-to-contents"><a href="#contents">{siteCopy.en.backToContents}</a></p>
 
   <h2 id="ai-agents-and-api">4. AI agents, the API and the MCP server</h2>
   <ul>
@@ -103,12 +113,16 @@ const sections = [
     </li>
   </ul>
 
+  <p class="back-to-contents"><a href="#contents">{siteCopy.en.backToContents}</a></p>
+
   <h2 id="calendar-connections">5. Calendar connections</h2>
   <p>
     When you connect a Google or Microsoft calendar, you authorize Hourmere to access it as described
     in our <a href="/privacy">Privacy Policy</a>. You can disconnect a calendar at any time. Your use
     of Google and Microsoft services remains subject to their own terms.
   </p>
+
+  <p class="back-to-contents"><a href="#contents">{siteCopy.en.backToContents}</a></p>
 
   <h2 id="your-data">6. Your data and your invitees</h2>
   <ul>
@@ -136,11 +150,13 @@ const sections = [
     </li>
   </ul>
 
+  <p class="back-to-contents"><a href="#contents">{siteCopy.en.backToContents}</a></p>
+
   <h2 id="plans-and-payment">7. Plans and payment</h2>
   <ul>
     <li>
-      Hourmere Cloud has not launched and paid plans are not yet available. Hourmere Cloud will
-      offer a Free plan and paid plans. Paid plans are billed per seat, in advance for each billing
+      Hourmere Cloud is in an invitation-only preview and paid plans are not yet available.
+      Hourmere Cloud will offer a Free plan and paid plans. Paid plans are billed per seat, in advance for each billing
       period, at the prices shown when you buy.
     </li>
     <li>
@@ -166,6 +182,8 @@ const sections = [
     </li>
   </ul>
 
+  <p class="back-to-contents"><a href="#contents">{siteCopy.en.backToContents}</a></p>
+
   <h2 id="acceptable-use">8. Acceptable use</h2>
   <p>You agree not to:</p>
   <ul>
@@ -183,12 +201,16 @@ const sections = [
   </ul>
   <p>We may suspend accounts that break these rules.</p>
 
+  <p class="back-to-contents"><a href="#contents">{siteCopy.en.backToContents}</a></p>
+
   <h2 id="third-party-services">9. Third-party services</h2>
   <p>
     The Service works with third-party services, such as Google Calendar, Microsoft 365, AI
     assistants and Stripe. Your use of those services is governed by their own terms, and we are not
     responsible for them.
   </p>
+
+  <p class="back-to-contents"><a href="#contents">{siteCopy.en.backToContents}</a></p>
 
   <h2 id="availability">10. Availability and changes</h2>
   <p>
@@ -199,12 +221,16 @@ const sections = [
     the Service ends.
   </p>
 
+  <p class="back-to-contents"><a href="#contents">{siteCopy.en.backToContents}</a></p>
+
   <h2 id="disclaimers">11. Disclaimers</h2>
   <p>
     To the maximum extent permitted by law, the Service is provided "as is" and "as available",
     without warranties of any kind, express or implied, including warranties of merchantability,
     fitness for a particular purpose and non-infringement.
   </p>
+
+  <p class="back-to-contents"><a href="#contents">{siteCopy.en.backToContents}</a></p>
 
   <h2 id="liability">12. Limitation of liability</h2>
   <p>
@@ -213,6 +239,8 @@ const sections = [
     total liability for any claim relating to the Service will not exceed the greater of the amounts
     you paid us for the Service in the 12 months before the claim and US$100.
   </p>
+
+  <p class="back-to-contents"><a href="#contents">{siteCopy.en.backToContents}</a></p>
 
   <h2 id="indemnification">13. Indemnification</h2>
   <p>
@@ -226,12 +254,16 @@ const sections = [
     consent.
   </p>
 
+  <p class="back-to-contents"><a href="#contents">{siteCopy.en.backToContents}</a></p>
+
   <h2 id="termination">14. Termination</h2>
   <p>
     You may stop using the Service and delete your account at any time. We may suspend or end your
     access if you materially breach these Terms. Sections that by their nature should survive
     termination will survive.
   </p>
+
+  <p class="back-to-contents"><a href="#contents">{siteCopy.en.backToContents}</a></p>
 
   <h2 id="governing-law">15. Governing law and venue</h2>
   <p>
@@ -242,6 +274,8 @@ const sections = [
     mandatory consumer protection laws of your country of residence, including any right to bring
     proceedings in the courts there.
   </p>
+
+  <p class="back-to-contents"><a href="#contents">{siteCopy.en.backToContents}</a></p>
 
   <h2 id="general">16. General</h2>
   <ul>
@@ -263,12 +297,16 @@ const sections = [
     </li>
   </ul>
 
+  <p class="back-to-contents"><a href="#contents">{siteCopy.en.backToContents}</a></p>
+
   <h2 id="changes">17. Changes to these Terms</h2>
   <p>
     We may update these Terms. We will post the new version on this page with a new effective date.
     If the changes are material, we will notify you by email or in the Service at least 30 days
     before they take effect.
   </p>
+
+  <p class="back-to-contents"><a href="#contents">{siteCopy.en.backToContents}</a></p>
 
   <h2 id="contact">18. Contact</h2>
   <p>
@@ -277,4 +315,5 @@ const sections = [
     Privacy: <a href={`mailto:${contact.privacy}`}>{contact.privacy}</a><br />
     Security reports: <a href={`mailto:${contact.security}`}>{contact.security}</a>
   </p>
+  <p class="back-to-contents"><a href="#contents">{siteCopy.en.backToContents}</a></p>
 </Legal>

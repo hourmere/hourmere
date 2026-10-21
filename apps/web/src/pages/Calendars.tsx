@@ -1,40 +1,63 @@
 import { useEffect, useRef, useState } from 'react'
-import { useLocation, useSearchParams } from 'react-router'
+import { Link, useLocation, useSearchParams } from 'react-router'
 import { api, type Schemas, unwrap } from '../api/client.ts'
 import { errorMessage } from '../api/errors.ts'
+import { loadProfile } from '../api/resources.ts'
 import { goTo } from '../browser.ts'
+import { BreakableText } from '../components/BreakableText.tsx'
 import { ConfirmAction } from '../components/ConfirmAction.tsx'
+import { EmptyState } from '../components/EmptyState.tsx'
+import { PageHeader } from '../components/PageHeader.tsx'
+import { PageSkeleton } from '../components/PageSkeleton.tsx'
 import { useLoad, useMounted, usePageTitle } from '../hooks.ts'
 import { useI18n } from '../i18n/runtime.tsx'
 import { msg, type UiText } from '../i18n/translate.ts'
+import { PATHS } from '../paths.ts'
 import { leavesPage } from '../unsaved-changes.tsx'
 
 type Connection = Schemas['CalendarConnection']
-const load = (signal: AbortSignal) => unwrap(api.GET('/api/v1/calendar-connections', { signal }))
-const outcomes = new Map([
-  ['connected', 'Google Calendar connected. Your calendar list is ready.'],
-  ['denied', 'Google Calendar was not connected because you cancelled authorization.'],
-  ['invalid_state', 'This connection attempt expired or was already used. Start again.'],
-  [
-    'permissions_missing',
-    'Google did not grant the requested access. Connect again and allow the requested permissions.',
-  ],
-  ['needs_reauth', 'Google did not provide continuing access. Connect again to try again.'],
-  ['provider_unavailable', 'Google Calendar could not be reached. Try connecting again shortly.'],
-  ['session_required', 'Sign in again, then start a new calendar connection.'],
-])
+const load = async (signal: AbortSignal) => {
+  const [connections, profile] = await Promise.all([
+    unwrap(api.GET('/api/v1/calendar-connections', { signal })),
+    loadProfile(signal).catch((err: unknown) => {
+      if (signal.aborted) throw err
+      return undefined
+    }),
+  ])
+  return {
+    ...connections,
+    hasProfile: profile !== null && profile !== undefined,
+    profileUnavailable: profile === undefined,
+  }
+}
+const loadInstance = (signal: AbortSignal) => unwrap(api.GET('/api/v1/instance', { signal }))
+const outcomes = {
+  connected: '{0} Calendar connected. Your calendar list is ready.',
+  denied: '{0} Calendar was not connected because you cancelled authorization.',
+  invalid_state: 'This connection attempt expired or was already used. Start again.',
+  permissions_missing:
+    '{0} did not grant the requested access. Connect again and allow the requested permissions.',
+  needs_reauth: '{0} did not provide continuing access. Connect again to try again.',
+  provider_unavailable: '{0} Calendar could not be reached. Try connecting again shortly.',
+  session_required: 'Sign in again, then start a new calendar connection.',
+} as const
 const providerName = (connection: Connection) =>
   connection.provider === 'microsoft' ? 'Microsoft' : 'Google'
-const noticeFor = (search: URLSearchParams) =>
-  outcomes
-    .get(search.get('connection') ?? '')
-    ?.replaceAll('Google', search.get('provider') === 'microsoft' ? 'Microsoft' : 'Google') ?? null
+const noticeFor = (search: URLSearchParams): UiText | null => {
+  const code = search.get('connection')
+  return code && Object.hasOwn(outcomes, code)
+    ? msg(outcomes[code as keyof typeof outcomes], {
+        '0': search.get('provider') === 'microsoft' ? 'Microsoft' : 'Google',
+      })
+    : null
+}
 
 export function CalendarsPage() {
-  const { t, ui, formatLocale: displayLocale } = useI18n()
+  const { t, text, ui, formatLocale: displayLocale } = useI18n()
 
   usePageTitle('Calendars')
   const [state, reload] = useLoad(load)
+  const [instance, reloadInstance] = useLoad(loadInstance)
   const [search, setSearch] = useSearchParams()
   const [notice, setNotice] = useState(() => noticeFor(search))
   const [error, setError] = useState<UiText | null>(null)
@@ -183,7 +206,10 @@ export function CalendarsPage() {
       if (!mounted.current) return
       setNotice(
         disconnect
-          ? `${providerName(connection)} Calendar disconnected. Stored credentials and local calendar data were deleted.`
+          ? msg(
+              '{0} Calendar disconnected. Stored credentials and local calendar data were deleted.',
+              { '0': providerName(connection) },
+            )
           : 'Calendar list refreshed.',
       )
       if (disconnect) accountsHeading.current?.focus()
@@ -200,12 +226,12 @@ export function CalendarsPage() {
 
   return (
     <div className="page stack">
-      <h1>{t('Calendars')}</h1>
-      <p>
-        {t(
+      <PageHeader
+        title={t('Calendars')}
+        lede={t(
           'Choose calendars whose busy times block bookings, and an owned calendar for new booking events. Existing meetings keep their original calendar when you change the destination.',
         )}
-      </p>
+      />
       {notice && (
         <div className="alert alert-info">
           <p role="status">{ui(notice)}</p>
@@ -219,7 +245,7 @@ export function CalendarsPage() {
           {ui(error)}
         </p>
       )}
-      {state.status === 'loading' && <p role="status">{t('Loading calendars…')}</p>}
+      {state.status === 'loading' && <PageSkeleton label="Loading calendars…" />}
       {state.status === 'error' && (
         <div className="alert alert-error">
           <p role="alert">{ui(state.message)}</p>
@@ -230,18 +256,82 @@ export function CalendarsPage() {
       )}
       {state.status === 'ready' && (
         <>
-          {state.data.googleEnabled ? (
-            <section className="stack" aria-label={t('Connect Google Calendar')}>
+          {state.data.data.length > 0 && state.data.profileUnavailable && (
+            <div className="alert alert-info" id="calendar-profile-hint">
               <p>
                 {t(
-                  'Google will ask for your email, calendar list, event read access and permission to change events on calendars you own. Busy-time synchronization stores times and event IDs, without event titles or descriptions. Connecting is separate from signing in.',
+                  'Could not load your profile. Try again before choosing where new bookings are written.',
                 )}
               </p>
+              <button type="button" className="button button-small" onClick={reload}>
+                {t('Try again')}
+              </button>
+            </div>
+          )}
+          {state.data.data.length > 0 &&
+            !state.data.hasProfile &&
+            !state.data.profileUnavailable && (
+              <p className="alert alert-info" id="calendar-profile-hint">
+                {t('Create a profile before choosing where new bookings are written.')}{' '}
+                <Link to={`${PATHS.settings}#profile-heading`}>{t('Create profile')}</Link>
+              </p>
+            )}
+          {state.data.googleEnabled ? (
+            <section
+              id="calendar-connection-options"
+              tabIndex={-1}
+              className="stack"
+              aria-label={t('Connect Google Calendar')}
+            >
+              <div id="google-calendar-permissions" className="stack">
+                <p>
+                  {t(
+                    'Google will ask for your email, calendar list and event access: to check busy times on selected calendars, and to create one private copy of each new booking on the calendar you own and select. Changing this destination affects new bookings; existing booking copies continue to be updated or cancelled on their original calendar. Automatic Google Meet adds a link only when you enable it. Busy-time synchronization stores times and event IDs, not event titles or descriptions. Connecting is optional and separate from signing in.',
+                  )}
+                </p>
+                <p>
+                  {text(
+                    'Disconnect below deletes stored credentials and local calendar data, but leaves existing event copies in Google Calendar and does not revoke your Google grant. You can revoke access in your Google Account:',
+                  )}{' '}
+                  <a
+                    href="https://myaccount.google.com/connections"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {t('Google Account connections')}
+                  </a>
+                  {t('.')}
+                </p>
+                {instance.status === 'ready' && instance.data.privacyPolicyUrl && (
+                  <p>
+                    <a
+                      href={instance.data.privacyPolicyUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      {t('Privacy policy')}
+                    </a>
+                  </p>
+                )}
+                {instance.status === 'error' && (
+                  <div className="alert alert-error">
+                    <p role="alert">
+                      {t(
+                        'Could not load privacy information. Try again before connecting Google Calendar.',
+                      )}
+                    </p>
+                    <button type="button" className="button" onClick={reloadInstance}>
+                      {t('Try again')}
+                    </button>
+                  </div>
+                )}
+              </div>
               <div>
                 <button
                   type="button"
                   className="button button-primary"
-                  disabled={pending !== null}
+                  aria-describedby="google-calendar-permissions"
+                  disabled={pending !== null || instance.status !== 'ready'}
                   onClick={() => connect()}
                 >
                   {pending === 'connect' ? t('Opening Google…') : t('Connect Google Calendar')}
@@ -249,7 +339,7 @@ export function CalendarsPage() {
               </div>
             </section>
           ) : (
-            <p className="alert alert-info">
+            <p id="calendar-connection-options" tabIndex={-1} className="alert alert-info">
               {t(
                 'Google Calendar is not configured on this Hourmere instance. Contact its administrator to enable it.',
               )}
@@ -286,11 +376,34 @@ export function CalendarsPage() {
             <h2 ref={accountsHeading} tabIndex={-1}>
               {t('Connected accounts')}
             </h2>
-            {state.data.data.length === 0 && <p>{t('No calendar accounts connected yet.')}</p>}
+            {state.data.data.length === 0 && (
+              <EmptyState
+                title={t('No calendar accounts connected yet.')}
+                action={
+                  (state.data.googleEnabled || state.data.microsoftEnabled) && (
+                    <a className="button" href="#calendar-connection-options">
+                      {t('Review calendar connection options')}
+                    </a>
+                  )
+                }
+              >
+                <p>
+                  {t(
+                    state.data.googleEnabled || state.data.microsoftEnabled
+                      ? 'Connect a calendar account to get started.'
+                      : 'Ask your administrator to enable calendar connections.',
+                  )}
+                </p>
+              </EmptyState>
+            )}
             {state.data.data.map((connection) => (
               <article className="panel stack" key={connection.id}>
                 <h3>
-                  {connection.accountEmail ?? t('{0} account', { '0': providerName(connection) })}
+                  {connection.accountEmail ? (
+                    <BreakableText>{connection.accountEmail}</BreakableText>
+                  ) : (
+                    t('{0} account', { '0': providerName(connection) })
+                  )}
                 </h3>
                 <p>
                   {providerName(connection)} {t('Calendar')}
@@ -319,23 +432,34 @@ export function CalendarsPage() {
                     <button
                       type="button"
                       className="button"
-                      disabled={pending !== null || !state.data.googleEnabled}
+                      aria-describedby={
+                        state.data.googleEnabled ? 'google-calendar-permissions' : undefined
+                      }
+                      disabled={
+                        pending !== null || !state.data.googleEnabled || instance.status !== 'ready'
+                      }
                       onClick={() => connect('sync')}
                     >
                       {t('Enable calendar synchronization')}
                     </button>
                   </div>
                 )}
-                <ul>
+                <ul className="calendar-list">
                   {connection.calendars.map((calendar) => (
-                    <li key={calendar.id}>
-                      {calendar.name}
-                      {calendar.isPrimary ? t(' (primary)') : ''}
+                    <li className="calendar-item" key={calendar.id}>
+                      <div id={`calendar-${calendar.id}`}>
+                        {calendar.name}
+                        {calendar.isPrimary ? t(' (primary)') : ''}
+                      </div>
                       {(connection.syncAuthorized ||
                         calendar.checkConflicts ||
                         state.data.destinationCalendarId === calendar.id) && (
-                        <fieldset className="form-fieldset" disabled={pending !== null}>
-                          <label className="choice">
+                        <fieldset
+                          className="form-fieldset calendar-controls"
+                          aria-labelledby={`calendar-${calendar.id}`}
+                          disabled={pending !== null}
+                        >
+                          <label className="checkbox">
                             <input
                               type="checkbox"
                               checked={calendar.checkConflicts}
@@ -351,7 +475,7 @@ export function CalendarsPage() {
                                 calendarAction(calendar.id, 'toggle', event.target.checked)
                               }
                             />
-                            {t('Check conflicts in')} {calendar.name}
+                            {t('Check this calendar for conflicts')}
                           </label>
                           {calendar.checkConflicts && (
                             <>
@@ -381,7 +505,7 @@ export function CalendarsPage() {
                                 }
                                 onClick={() => calendarAction(calendar.id, 'sync')}
                               >
-                                {t('Sync')} {calendar.name} {t('now')}
+                                {t('Sync now')}
                               </button>
                             </>
                           )}
@@ -390,9 +514,16 @@ export function CalendarsPage() {
                             <button
                               type="button"
                               className="button button-small"
+                              aria-describedby={
+                                state.data.hasProfile ||
+                                state.data.destinationCalendarId === calendar.id
+                                  ? undefined
+                                  : 'calendar-profile-hint'
+                              }
                               disabled={
                                 state.data.destinationCalendarId !== calendar.id &&
-                                (connection.status !== 'active' ||
+                                (!state.data.hasProfile ||
+                                  connection.status !== 'active' ||
                                   !state.data.googleEnabled ||
                                   !connection.syncAuthorized)
                               }
@@ -405,8 +536,8 @@ export function CalendarsPage() {
                               }
                             >
                               {state.data.destinationCalendarId === calendar.id
-                                ? t('Stop writing bookings to {0}', { '0': calendar.name })
-                                : t('Write new bookings to {0}', { '0': calendar.name })}
+                                ? t('Stop writing bookings here')
+                                : t('Write new bookings here')}
                             </button>
                           )}
                         </fieldset>

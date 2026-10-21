@@ -3,12 +3,16 @@ import { Link, useSearchParams } from 'react-router'
 import { api, unwrap } from '../../api/client.ts'
 import { errorMessage } from '../../api/errors.ts'
 import { type Booking, loadProfile } from '../../api/resources.ts'
+import { BreakableText } from '../../components/BreakableText.tsx'
+import { EmptyState } from '../../components/EmptyState.tsx'
+import { PageHeader } from '../../components/PageHeader.tsx'
+import { PageSkeleton } from '../../components/PageSkeleton.tsx'
 import { zoned } from '../../format.ts'
 import { useLoad, usePageTitle } from '../../hooks.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
 import { msg, type UiText } from '../../i18n/translate.ts'
 import { bookingPath, PATHS } from '../../paths.ts'
-import { hostZone } from './booking-format.ts'
+import { bookingTitle, hostZone } from './booking-format.ts'
 
 type Tab = 'upcoming' | 'past'
 
@@ -30,7 +34,7 @@ export function BookingsPage() {
 
   return (
     <>
-      <h1>{t('Bookings')}</h1>
+      <PageHeader title={t('Bookings')} lede={t('Review and manage the meetings you host.')} />
       <nav className="tabs" aria-label={t('Bookings')}>
         <ul>
           {TABS.map((t) => (
@@ -46,7 +50,7 @@ export function BookingsPage() {
           ))}
         </ul>
       </nav>
-      {profile.status === 'loading' && <p role="status">{t('Loading bookings…')}</p>}
+      {profile.status === 'loading' && <PageSkeleton label="Loading bookings…" />}
       {profile.status === 'error' && (
         <div className="alert alert-error" role="alert">
           <p>
@@ -79,7 +83,7 @@ function BookingList({
   timeZone: string
   fromProfile: boolean
 }) {
-  const { t, ui, formatLocale: displayLocale } = useI18n()
+  const { t, ui, locale, formatLocale: displayLocale } = useI18n()
 
   // Every page of a list uses the same moment, as the API's cursors require the same filters.
   const [now] = useState(() => new Date().toISOString())
@@ -109,7 +113,7 @@ function BookingList({
   const [status, setStatus] = useState<UiText>('')
   const [focusId, setFocusId] = useState<string | null>(null)
   const list = useRef<HTMLTableSectionElement>(null)
-  const format = zoned(timeZone, displayLocale)
+  const format = zoned(timeZone, locale === 'zh-CN' ? locale : displayLocale)
 
   useEffect(() => {
     if (!focusId) return
@@ -117,7 +121,7 @@ function BookingList({
     setFocusId(null)
   }, [focusId])
 
-  if (first.status === 'loading') return <p role="status">{t('Loading bookings…')}</p>
+  if (first.status === 'loading') return <PageSkeleton label="Loading bookings…" />
   if (first.status === 'error') {
     return (
       <div className="alert alert-error" role="alert">
@@ -160,6 +164,13 @@ function BookingList({
     setLoadingMore(false)
   }
 
+  // One sentence per language around the link, so Chinese keeps its punctuation unspaced.
+  const share = t('Share the links of your {0} so people can book you.').split('{0}')
+  // Both zone notes are whole templates, so the zh colon and brackets match between them.
+  const zone = format.timeZone.replaceAll('_', ' ')
+  const browserZoneNote = t('Times are in {zone}, this browser’s time zone. {0}.', { zone }).split(
+    '{0}',
+  )
   return (
     <section aria-labelledby="list-heading">
       <h2 id="list-heading" className="visually-hidden">
@@ -167,86 +178,107 @@ function BookingList({
       </h2>
       <p className="muted zone-note">
         {tab === 'past' ? t('Newest first. ') : ''}
-        {t('Times are in')} {format.timeZone.replaceAll('_', ' ')}
         {fromProfile ? (
-          t(', your time zone.')
+          t('Times are in {zone}, your time zone.', { zone })
         ) : (
           <>
-            {t(', this browser’s time zone.')}{' '}
-            <Link to={PATHS.settings}>{t('Set your time zone')}</Link>.
+            {browserZoneNote[0]}
+            <Link to={PATHS.settings}>{t('Set your time zone')}</Link>
+            {browserZoneNote[1]}
           </>
         )}
       </p>
       {shown.bookings.length === 0 ? (
-        <div className="empty">
-          {tab === 'upcoming' ? (
-            <>
-              <p>{t('No upcoming bookings.')}</p>
-              <p className="muted">
-                {t('Share the links of your')} <Link to={PATHS.eventTypes}>{t('event types')}</Link>{' '}
-                {t('so people can book you.')}
+        <EmptyState
+          title={tab === 'upcoming' ? t('No upcoming bookings.') : t('No past bookings yet.')}
+          action={
+            tab === 'upcoming' && (
+              <p>
+                {share[0]}
+                <Link to={PATHS.eventTypes}>{t('event types')}</Link>
+                {share[1]}
               </p>
-            </>
-          ) : (
-            <p>{t('No past bookings yet.')}</p>
-          )}
-        </div>
+            )
+          }
+        />
       ) : (
-        <table className="table">
-          <thead>
-            <tr>
-              <th scope="col">{t('When')}</th>
-              <th scope="col">{t('Event')}</th>
-              <th scope="col">{t('Invitee')}</th>
-              <th scope="col">{t('Status')}</th>
-            </tr>
-          </thead>
-          <tbody ref={list}>
-            {shown.bookings.map((b) => {
-              const invitee = b.attendees.find((a) => a.isBooker) ?? b.attendees[0]
-              const guests = b.attendees.length - 1
-              return (
-                <tr key={b.id}>
-                  <td data-label={t('When')}>
-                    <time dateTime={b.start}>
-                      <span className="nowrap">{format.date(b.start)}</span>{' '}
-                      <span className="nowrap">{format.timeRange(b.start, b.end)}</span>
-                    </time>
-                  </td>
-                  <th scope="row" data-label={t('Event')}>
-                    <Link to={bookingPath(b.id)} data-booking={b.id}>
-                      {b.title}
-                    </Link>
-                  </th>
-                  <td data-label={t('Invitee')}>
-                    {invitee ? (
-                      <>
-                        {invitee.name}
-                        <br />
-                        <span className="muted">{invitee.email}</span>
-                        {guests > 0 && (
-                          <span className="muted">
-                            {' '}
-                            + {guests} {guests === 1 ? t('guest') : t('guests')}
-                          </span>
+        <div className="table-container">
+          <table className="table table-bookings">
+            <thead>
+              <tr>
+                <th scope="col" className="fit">
+                  {t('When')}
+                </th>
+                <th scope="col">{t('Event')}</th>
+                <th scope="col">{t('Invitee')}</th>
+                <th scope="col" className="fit nowrap">
+                  {t('Status')}
+                </th>
+              </tr>
+            </thead>
+            <tbody ref={list}>
+              {shown.bookings.map((b) => {
+                const invitee = b.attendees.find((a) => a.isBooker) ?? b.attendees[0]
+                const guests = b.attendees.length - 1
+                return (
+                  <tr key={b.id}>
+                    <td data-label={t('When')} className="fit">
+                      <div className="table-value">
+                        <time dateTime={b.start}>
+                          <span className="nowrap">{format.date(b.start)}</span>{' '}
+                          <span className="nowrap">{format.timeRange(b.start, b.end)}</span>
+                        </time>
+                      </div>
+                    </td>
+                    <th scope="row" data-label={t('Event')} className="user-content">
+                      <Link to={bookingPath(b.id)} data-booking={b.id}>
+                        {ui(bookingTitle(b))}
+                      </Link>
+                    </th>
+                    <td data-label={t('Invitee')} className="user-content">
+                      <div className="table-value">
+                        {invitee ? (
+                          <>
+                            {invitee.name}
+                            <br />
+                            <span className="muted">
+                              <BreakableText>{invitee.email}</BreakableText>
+                            </span>
+                            {guests > 0 && (
+                              <span className="muted">
+                                {' '}
+                                + {guests} {guests === 1 ? t('guest') : t('guests')}
+                              </span>
+                            )}
+                          </>
+                        ) : (
+                          <span className="muted">{t('Unknown')}</span>
                         )}
-                      </>
-                    ) : (
-                      <span className="muted">{t('Unknown')}</span>
-                    )}
-                  </td>
-                  <td data-label={t('Status')}>
-                    {b.status === 'cancelled' ? (
-                      <span className="badge badge-danger">{t('Cancelled')}</span>
-                    ) : (
-                      <span className="badge badge-success">{t('Confirmed')}</span>
-                    )}
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
+                      </div>
+                    </td>
+                    <td data-label={t('Status')} className="fit">
+                      <div className="table-value">
+                        {b.status === 'cancelled' && b.rescheduledToId ? (
+                          <>
+                            <span className="badge">{t('Rescheduled')}</span>
+                            <br />
+                            <Link to={bookingPath(b.rescheduledToId)}>
+                              {t('View rescheduled booking')}
+                            </Link>
+                          </>
+                        ) : b.status === 'cancelled' ? (
+                          <span className="badge badge-danger">{t('Cancelled')}</span>
+                        ) : (
+                          <span className="badge badge-success">{t('Confirmed')}</span>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
       <p className="visually-hidden" role="status">
         {ui(status)}

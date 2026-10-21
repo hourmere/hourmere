@@ -1,5 +1,6 @@
 import { createContext, type ReactNode, useContext, useEffect, useRef, useState } from 'react'
 import { api } from '../api/client.ts'
+import { LegalLinks } from '../components/LegalLinks.tsx'
 import { Logo } from '../components/Logo.tsx'
 import { usePageTitle } from '../hooks.ts'
 import { LanguageSwitcher, useI18n } from '../i18n/runtime.tsx'
@@ -26,15 +27,22 @@ export function CreateBookingLink() {
  * page itself and a small footer. These pages load nothing of the signed-in app.
  */
 export function PublicLayout({ children, wide = false }: { children: ReactNode; wide?: boolean }) {
-  const { t } = useI18n()
-  const [beforeBrand, afterBrand] = t('Powered by {0}').split('{0}')
+  const { t, locale } = useI18n()
+  // Interpolate first so Han/Latin boundary spacing also applies around the logo.
+  const [beforeBrand, afterBrand] = t('Powered by {0}', { '0': 'Hourmere' }).split('Hourmere')
   const [hostedSignupUrl, setHostedSignupUrl] = useState('https://hourmere.com')
+  const [policyUrls, setPolicyUrls] = useState<{
+    privacyPolicyUrl?: string
+    termsUrl?: string
+  }>({})
   useEffect(() => {
     const controller = new AbortController()
     api.GET('/api/v1/instance', { signal: controller.signal }).then(
       ({ data }) => {
-        if (!controller.signal.aborted && data?.hostedSignupUrl)
-          setHostedSignupUrl(data.hostedSignupUrl)
+        if (!controller.signal.aborted && data) {
+          if (data.hostedSignupUrl) setHostedSignupUrl(data.hostedSignupUrl)
+          setPolicyUrls({ privacyPolicyUrl: data.privacyPolicyUrl, termsUrl: data.termsUrl })
+        }
       },
       () => {}, // Attribution remains usable when instance discovery is unavailable.
     )
@@ -42,13 +50,18 @@ export function PublicLayout({ children, wide = false }: { children: ReactNode; 
   }, [])
 
   const embedded = useEmbedded()
+  useEffect(() => {
+    if (embedded) document.documentElement.lang = locale
+  }, [embedded, locale])
   return (
     <HostedSignupUrl value={hostedSignupUrl}>
       <div className={`public${embedded ? ' public-embedded' : ''}`}>
-        <div className="public-language">
-          <LanguageSwitcher />
-        </div>
-        <main id="main" className={`public-main${wide ? ' public-main-wide' : ''}`}>
+        {!embedded && (
+          <header className="public-language">
+            <LanguageSwitcher />
+          </header>
+        )}
+        <main id="main" className={`public-main user-content${wide ? ' public-main-wide' : ''}`}>
           {children}
         </main>
         <footer className="public-footer">
@@ -57,6 +70,7 @@ export function PublicLayout({ children, wide = false }: { children: ReactNode; 
             <Logo size={18} />
             {afterBrand}
           </a>
+          <LegalLinks {...policyUrls} />
         </footer>
       </div>
     </HostedSignupUrl>

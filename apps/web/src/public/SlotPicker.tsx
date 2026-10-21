@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import './SlotPicker.css'
 import { TimeZonePicker } from '../components/TimeZonePicker.tsx'
 import { useI18n } from '../i18n/runtime.tsx'
@@ -66,6 +66,8 @@ interface SlotPickerProps {
   /** Changing it reloads the slots, e.g. after the chosen one was taken. */
   version: number
   title?: string
+  /** Supporting content read immediately after the heading, before the calendar. */
+  afterTitle?: ReactNode
   /** Focus the picker's heading when it appears (coming back to it from another step). */
   focusTitle?: boolean
   /** A message about the last attempt, shown above the calendar (e.g. the time was taken). */
@@ -93,10 +95,11 @@ export function SlotPicker({
   onSelect,
   version,
   title = 'Pick a time',
+  afterTitle,
   focusTitle = false,
   notice,
 }: SlotPickerProps) {
-  const { t, ui } = useI18n()
+  const { t, uiText } = useI18n()
 
   const headingId = useId()
   const heading = useRef<HTMLHeadingElement>(null)
@@ -112,6 +115,10 @@ export function SlotPicker({
   const [focusDay, setFocusDay] = useState<DateKey>(today)
   const [focusRequested, setFocusRequested] = useState(false)
   const [retry, setRetry] = useState(0)
+  const slotsHeading = useRef<HTMLHeadingElement>(null)
+  const slotsList = useRef<HTMLUListElement>(null)
+  const [daySelection, setDaySelection] = useState(0)
+  const [moreSlots, setMoreSlots] = useState(false)
   // Loaded data remembers what it was loaded for, so a render between a change and the new
   // answer never takes the previous month's slots for this one's.
   const request = `${monthKey(month)}|${version}|${retry}`
@@ -199,6 +206,35 @@ export function SlotPicker({
   const focusDone = useCallback(() => setFocusRequested(false), [])
 
   const daySlots = day ? (byDay.get(day) ?? []) : []
+  const updateSlotOverflow = useCallback(() => {
+    const list = slotsList.current
+    setMoreSlots(!!list && list.scrollHeight - list.scrollTop > list.clientHeight + 1)
+  }, [])
+  // biome-ignore lint/correctness/useExhaustiveDependencies: measure after the chosen day or its slot count changes
+  useEffect(() => {
+    const list = slotsList.current
+    if (list) list.scrollTop = 0
+    updateSlotOverflow()
+    const observer =
+      typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updateSlotOverflow)
+    if (list) observer?.observe(list)
+    return () => observer?.disconnect()
+  }, [day, daySlots.length, updateSlotOverflow])
+  useEffect(() => {
+    if (!day || !daySelection) return
+    if (!window.matchMedia?.('(max-width: 639px)').matches) return
+    slotsHeading.current?.scrollIntoView?.({
+      block: 'start',
+      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+        ? 'instant'
+        : 'smooth',
+    })
+  }, [day, daySelection])
+  // Before a day is chosen, use the focused day in the visible month. A date rather than
+  // today's instant lets every listed zone use its own DST rules for that calendar day.
+  const referenceDate =
+    day ??
+    (compareMonths(monthOf(focusDay), month) === 0 ? focusDay : toDateKey({ ...month, day: 1 }))
   const labels = daySlots.map((s) => formatTime(Date.parse(s.start), timeZone, locale))
   // Where clocks go back, one wall time happens twice: add the zone's abbreviation then.
   const repeated = new Set(labels.filter((l, i) => labels.indexOf(l) !== i))
@@ -225,11 +261,12 @@ export function SlotPicker({
   return (
     <section className="picker" aria-labelledby={headingId}>
       <h2 id={headingId} className="picker-title" ref={heading} tabIndex={-1}>
-        {ui(title)}
+        {uiText(title)}
       </h2>
+      {afterTitle}
       {notice && (
         <div className="alert alert-info">
-          <p role="alert">{ui(notice)}</p>
+          <p role="alert">{uiText(notice)}</p>
         </div>
       )}
       <div className="picker-body">
@@ -241,7 +278,10 @@ export function SlotPicker({
             onMonthChange={changeMonth}
             available={available}
             selected={day}
-            onSelect={setDay}
+            onSelect={(next) => {
+              setDaySelection((attempt) => attempt + 1)
+              setDay(next)
+            }}
             focusDay={focusDay}
             onFocusDay={moveFocus}
             focusRequested={focusRequested}
@@ -252,11 +292,11 @@ export function SlotPicker({
             busy={state.status === 'loading'}
           />
           <p className="picker-status" role="status">
-            {ui(status)}
+            {uiText(status)}
           </p>
           {state.status === 'error' && (
             <div className="alert alert-error picker-error">
-              <p role="alert">{ui(state.message)}</p>
+              <p role="alert">{uiText(state.message)}</p>
               <button
                 type="button"
                 className="button button-small"
@@ -281,37 +321,44 @@ export function SlotPicker({
             value={timeZone}
             onChange={onTimeZoneChange}
             now={now}
+            referenceDate={referenceDate}
             error={timeZoneError}
           />
         </div>
         <div className="picker-slots">
           {day ? (
             <>
-              <h3 className="slots-day">{formatDateKey(day, locale)}</h3>
-              <ul
-                className="slots"
-                aria-label={t('Times on {0}', { '0': formatDateKey(day, locale) })}
-              >
-                {daySlots.map((slot, i) => {
-                  const start = Date.parse(slot.start)
-                  const label = repeated.has(labels[i] as string)
-                    ? formatTime(start, timeZone, locale, { withZone: true })
-                    : (labels[i] as string)
-                  const isSelected = selected?.start === slot.start
-                  return (
-                    <li key={slot.start}>
-                      <button
-                        type="button"
-                        className={`slot${isSelected ? ' slot-selected' : ''}`}
-                        aria-pressed={isSelected}
-                        onClick={() => onSelect(slot)}
-                      >
-                        {label}
-                      </button>
-                    </li>
-                  )
-                })}
-              </ul>
+              <h3 className="slots-day" ref={slotsHeading}>
+                {formatDateKey(day, locale)}
+              </h3>
+              <div className="slots-scroll" data-more={moreSlots}>
+                <ul
+                  className="slots"
+                  ref={slotsList}
+                  onScroll={updateSlotOverflow}
+                  aria-label={t('Times on {0}', { '0': formatDateKey(day, locale) })}
+                >
+                  {daySlots.map((slot, i) => {
+                    const start = Date.parse(slot.start)
+                    const label = repeated.has(labels[i] as string)
+                      ? formatTime(start, timeZone, locale, { withZone: true })
+                      : (labels[i] as string)
+                    const isSelected = selected?.start === slot.start
+                    return (
+                      <li key={slot.start}>
+                        <button
+                          type="button"
+                          className={`slot${isSelected ? ' slot-selected' : ''}`}
+                          aria-pressed={isSelected}
+                          onClick={() => onSelect(slot)}
+                        >
+                          {label}
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </div>
             </>
           ) : (
             <p className="slots-placeholder muted">

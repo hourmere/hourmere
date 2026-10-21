@@ -10,6 +10,7 @@ export default defineConfig({
       {
         test: {
           name: 'node',
+          setupFiles: ['scripts/test-database-setup.ts'],
           include: [
             'apps/*/src/**/*.test.{ts,tsx}',
             'packages/*/src/**/*.test.ts',
@@ -25,6 +26,8 @@ export default defineConfig({
           name: 'web',
           include: ['apps/web/src/**/*.test.{ts,tsx}'],
           environment: 'jsdom',
+          // Layout assertions need the real stylesheet instead of Vitest's empty CSS mock.
+          css: { include: [/\/apps\/web\/src\/(styles|public\/public)\.css\?raw$/] },
           setupFiles: ['apps/web/src/test/setup.ts'],
         },
       },

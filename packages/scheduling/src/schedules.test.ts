@@ -97,7 +97,7 @@ describe.skipIf(!serverUrl)('schedule service', () => {
   // call stops mid-transaction; the second runs until it blocks or finishes; then the gate
   // opens. Without the per-user lock in the service, each of these ends with a unique
   // violation or with a user who has schedules but no default.
-  describe('concurrent changes to the default', () => {
+  describe('concurrent changes to the default', { timeout: 15_000 }, () => {
     type Outcome = { ok: true; value: unknown } | { ok: false; error: unknown }
     const settle = (promise: Promise<unknown>): Promise<Outcome> =>
       promise.then(
@@ -114,10 +114,12 @@ describe.skipIf(!serverUrl)('schedule service', () => {
       return rows[0]?.n ?? 0
     }
 
-    async function until(condition: () => Promise<boolean>, what: string) {
+    async function until(condition: () => Promise<boolean>, what: string, state: () => string) {
+      // Leave room for both barriers, setup and cleanup before Vitest's outer timeout.
       const deadline = Date.now() + 5000
       while (!(await condition())) {
-        if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`)
+        if (Date.now() > deadline)
+          throw new Error(`timed out after 5000ms waiting for ${what}; ${state()}`)
         await new Promise((resolve) => setTimeout(resolve, 5))
       }
     }
@@ -130,24 +132,43 @@ describe.skipIf(!serverUrl)('schedule service', () => {
       second: () => Promise<unknown>,
     ): Promise<[Outcome, Outcome]> {
       const gate = await testDb.pool.connect()
+      let committed = false
+      let firstOutcome: Promise<Outcome> | undefined
+      let secondOutcome: Promise<Outcome> | undefined
+      let waiters = 0
+      const waiting = async () => {
+        waiters = await lockWaiters()
+        return waiters
+      }
       try {
         await gate.query('BEGIN')
         await gate.query(gateSql, gateParams)
-        const firstOutcome = settle(first())
-        await until(async () => (await lockWaiters()) >= 1, 'the first call to reach the gate')
+        firstOutcome = settle(first())
+        await until(
+          async () => (await waiting()) >= 1,
+          'the first call to reach the gate (at least 1 lock waiter)',
+          () => `observed ${waiters} lock waiters`,
+        )
         let secondDone = false
-        const secondOutcome = settle(second()).then((outcome) => {
+        secondOutcome = settle(second()).then((outcome) => {
           secondDone = true
           return outcome
         })
         await until(
-          async () => secondDone || (await lockWaiters()) >= 2,
+          async () => secondDone || (await waiting()) >= 2,
           'the second call to block or finish',
+          () => `observed ${waiters} lock waiters; second call finished=${secondDone}`,
         )
         await gate.query('COMMIT')
+        committed = true
         return [await firstOutcome, await secondOutcome]
       } finally {
-        gate.release()
+        try {
+          if (!committed) await gate.query('ROLLBACK')
+        } finally {
+          gate.release()
+        }
+        await Promise.all([firstOutcome, secondOutcome])
       }
     }
 

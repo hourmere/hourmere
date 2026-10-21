@@ -24,7 +24,7 @@ import { createApp } from './app.ts'
 import { requireCaller } from './caller.ts'
 import { chunkedBody } from './chunked-body.ts'
 import { profileRoutes } from './routes/profile.ts'
-import { pressConfirmButton } from './sign-in-confirm-testing.ts'
+import { inlineAsset, pressConfirmButton } from './sign-in-confirm-testing.ts'
 
 const serverUrl = process.env.DATABASE_URL
 // Sign-up control has its own tests (signup.test.ts).
@@ -767,8 +767,8 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
         expect(html).not.toMatch(/\s(src|href)=/)
         const sha256 = (source = '') =>
           `'sha256-${createHash('sha256').update(source).digest('base64')}'`
-        const script = /<script>([\s\S]*?)<\/script>/.exec(html)?.[1]
-        const style = /<style>([\s\S]*?)<\/style>/.exec(html)?.[1]
+        const script = inlineAsset(html, 'script')
+        const style = inlineAsset(html, 'style')
         expect(res.headers.get('content-security-policy')?.split('; ')).toEqual([
           "default-src 'none'",
           `script-src ${sha256(script)}`,
@@ -1752,11 +1752,12 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
       }),
     })
 
+    // HTTP sign-in accepts only the web app's redirect flow. Use Better Auth's trusted
+    // server API for synthetic ID-token fixtures while retaining the real account hooks.
     const socialSignIn = (i: Instance, provider: 'google' | 'microsoft') =>
-      i.app.request('/api/auth/sign-in/social', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ provider, idToken: { token: 'header.payload.signature' } }),
+      i.auth.api.signInSocial({
+        body: { provider, idToken: { token: 'header.payload.signature' } },
+        asResponse: true,
       })
 
     it.each(['google', 'microsoft'] as const)(
@@ -2014,7 +2015,7 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
       async function startGoogle(i: Instance, redirects: Record<string, string>) {
         const res = await i.app.request('/api/auth/sign-in/social', {
           method: 'POST',
-          headers: { 'content-type': 'application/json' },
+          headers: { 'content-type': 'application/json', origin },
           body: JSON.stringify({ provider: 'google', ...redirects }),
         })
         expect(res.status).toBe(200)

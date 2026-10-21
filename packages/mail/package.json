@@ -9,6 +9,7 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@hourmere/core": "*",
     "nodemailer": "10.0.16"
   },
   "devDependencies": {

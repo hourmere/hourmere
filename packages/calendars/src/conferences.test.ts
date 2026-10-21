@@ -14,6 +14,7 @@ import {
 } from '@hourmere/scheduling'
 import { createFixtures } from '@hourmere/scheduling/testing'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { htmlHasLink, icsHasLocation, textHasUrl } from '../../mail/src/booking-link-testing.ts'
 import {
   BookingNotificationPayload,
   bookingNotificationJob,
@@ -147,7 +148,7 @@ describe.skipIf(!serverUrl)('automatic Meet durable flow (real PostgreSQL)', () 
       const values = provider.controls.storedEvents
       if (init.method === 'POST') {
         const value = JSON.parse(String(init.body))
-        const item = { ...value, id: 'meet-event', etag: '"v1"', conferenceData: conference() }
+        const item = { ...value, id: 'meet-event', etag: '"v1"' }
         values.set(item.id, item)
         return Response.json(item)
       }
@@ -173,11 +174,14 @@ describe.skipIf(!serverUrl)('automatic Meet durable flow (real PostgreSQL)', () 
         return Response.json({
           items: [...values.values()]
             .filter((v) => v.iCalUID === url.searchParams.get('iCalUID'))
-            .map((v) => ({ ...v, conferenceData: conference() })),
+            .map((v) => ({ ...v, ...(v.conferenceData ? { conferenceData: conference() } : {}) })),
         })
       const item = values.get(id)
       return item
-        ? Response.json({ ...item, conferenceData: conference() })
+        ? Response.json({
+            ...item,
+            ...(item.conferenceData ? { conferenceData: conference() } : {}),
+          })
         : Response.json({}, { status: 404 })
     }
   })
@@ -265,7 +269,7 @@ describe.skipIf(!serverUrl)('automatic Meet durable flow (real PostgreSQL)', () 
     await writeBookingConference(deps, b.booking.id)
     await writeBookingCalendar(deps, b.booking.id)
     expect(imports()).toHaveLength(1)
-    expect(imports()[0]?.url.searchParams.get('conferenceDataVersion')).toBe('1')
+    expect(JSON.parse(String(imports()[0]?.init.body))).not.toHaveProperty('conferenceData')
     expect((await row()).state).toBe('pending')
     expect(provider.calls.some((c) => String(c.init.body).includes('attendees'))).toBe(false)
   })
@@ -286,9 +290,9 @@ describe.skipIf(!serverUrl)('automatic Meet durable flow (real PostgreSQL)', () 
     expect(
       sent.every(
         (m) =>
-          m.text.includes(JOIN) &&
-          Boolean(m.html?.includes(JOIN)) &&
-          Boolean(m.attachments?.[0]?.content.includes(JOIN)),
+          textHasUrl(m.text, JOIN) &&
+          htmlHasLink(m.html ?? '', JOIN) &&
+          icsHasLocation(m.attachments?.[0]?.content ?? '', JOIN),
       ),
     ).toBe(true)
     expect(
@@ -296,8 +300,7 @@ describe.skipIf(!serverUrl)('automatic Meet durable flow (real PostgreSQL)', () 
     ).toBe(true)
     const log: string[] = []
     await createLogMailer((l) => log.push(l)).send(sent[0] as MailMessage)
-    expect(log.join('').includes(JOIN)).toBe(false)
-    expect(log.join('').includes('#token=')).toBe(false)
+    expect(log).toEqual(['[mail] {"notSent":"SMTP_URL is not set","sensitive":true}'])
   })
   it('retains event/UID/Meet URL and pinned destination through reschedule, including flag off for existing roots', async () => {
     const b = await ready()

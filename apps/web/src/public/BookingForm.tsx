@@ -1,11 +1,14 @@
-import { type FormEvent, useEffect, useId, useRef, useState } from 'react'
+import { type FormEvent, useId, useRef, useState } from 'react'
+import { ErrorSummary } from '../components/forms.tsx'
 import { useI18n } from '../i18n/runtime.tsx'
-import { msg, type UiText } from '../i18n/translate.ts'
+import { literal, msg, type UiText } from '../i18n/translate.ts'
 import {
   type Answer,
   answerError,
   emailError,
   type FieldErrors,
+  guestsFor,
+  isEmptyGuest,
   LIMITS,
   nameError,
   type Question,
@@ -41,12 +44,13 @@ export function validateBookingForm(
   const email = emailError(values.email)
   if (email) errors.email = email
   values.guests.forEach((guest, i) => {
+    if (isEmptyGuest(guest)) return
     const guestName = nameError(guest.name, 'a name')
     if (guestName) errors[`guest-${i}-name`] = guestName
     const guestEmail = emailError(guest.email)
     if (guestEmail) errors[`guest-${i}-email`] = guestEmail
   })
-  if (values.guests.length > LIMITS.guests)
+  if (guestsFor(values.guests).length > LIMITS.guests)
     errors.guests = msg('Add at most {0} guests.', { '0': LIMITS.guests })
   for (const q of questions) {
     const error = answerError(q, values.answers[q.id])
@@ -55,20 +59,9 @@ export function validateBookingForm(
   return errors
 }
 
-/** The order fields appear in, for focusing the first one with a problem. */
-function fieldOrder(questions: readonly Question[], values: BookingFormValues): string[] {
-  return [
-    'name',
-    'email',
-    ...questions.map((q) => `q-${q.id}`),
-    'guests',
-    ...values.guests.flatMap((_, i) => [`guest-${i}-name`, `guest-${i}-email`]),
-  ]
-}
-
 /**
  * The invitee's details: name, email, the event type's questions (all six kinds) and up to ten
- * guests. Problems show next to their fields; on submit, focus goes to the first one.
+ * guests. Problems show next to their fields and in a focused summary linking to each one.
  */
 export function BookingForm({
   allowGuests,
@@ -80,21 +73,15 @@ export function BookingForm({
   submitting,
   onSubmit,
 }: BookingFormProps) {
-  const { t, ui } = useI18n()
+  const { t, ui, locale } = useI18n()
 
   const prefix = useId()
   const form = useRef<HTMLFormElement>(null)
   const [clientErrors, setClientErrors] = useState<FieldErrors>({})
   const [submitted, setSubmitted] = useState(false)
+  const [attempt, setAttempt] = useState(0)
   const errors = { ...serverErrors, ...clientErrors }
   const fieldId = (field: string) => `${prefix}${field}`
-
-  // The server found a problem the checks here did not: take people to it.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: only when the server answers
-  useEffect(() => {
-    const first = fieldOrder(questions, values).find((f) => serverErrors[f])
-    if (first) form.current?.querySelector<HTMLElement>(`[data-field="${first}"]`)?.focus()
-  }, [serverErrors])
 
   function update(change: Partial<BookingFormValues>) {
     const next = { ...values, ...change }
@@ -110,14 +97,47 @@ export function BookingForm({
   function submit(event: FormEvent) {
     event.preventDefault()
     setSubmitted(true)
+    setAttempt((current) => current + 1)
     const found = validateBookingForm(questions, values)
     setClientErrors(found)
-    const first = fieldOrder(questions, values).find((f) => found[f])
-    if (first) {
-      form.current?.querySelector<HTMLElement>(`[data-field="${first}"]`)?.focus()
-      return
-    }
+    if (Object.keys(found).length > 0) return
     onSubmit()
+  }
+
+  const labels: Record<string, UiText> = {
+    name: 'Your name',
+    email: 'Email',
+    ...Object.fromEntries(questions.map((q) => [`q-${q.id}`, literal(q.label)])),
+    guests: 'Guests',
+    ...Object.fromEntries(
+      values.guests.flatMap((_, i) => [
+        [`guest-${i}-name`, msg('Guest {0} name', { '0': i + 1 })],
+        [`guest-${i}-email`, msg('Guest {0} email', { '0': i + 1 })],
+      ]),
+    ),
+  }
+  // Follow the rendered fields even when server errors arrive in a different order.
+  const summaryErrors: FieldErrors = {}
+  for (const id of new Set([...Object.keys(labels), ...Object.keys(errors)])) {
+    const error = errors[id]
+    if (!error) continue
+    const label = labels[id]
+    if (!label) {
+      summaryErrors[fieldId(id)] = error
+      continue
+    }
+    // Punctuated labels take no colon; only Chinese full-width punctuation drops the gap.
+    const text = ui(label)
+    const template =
+      locale === 'zh-CN' && /[？：。]\s*$/u.test(text)
+        ? '{0}{1}'
+        : /[?？:：。]\s*$/u.test(text)
+          ? '{0} {1}'
+          : '{0}: {1}'
+    summaryErrors[fieldId(id)] = msg(template, {
+      '0': text,
+      '1': ui(error),
+    })
   }
 
   const describedBy = (field: string, hint?: string) =>
@@ -140,7 +160,7 @@ export function BookingForm({
     <div className="field">
       <label htmlFor={fieldId(field)}>
         {ui(label)}
-        {options.required === false && <span className="optional"> {t('(optional)')}</span>}
+        {options.required === false && <span className="optional">{t(' (optional)')}</span>}
       </label>
       <input
         id={fieldId(field)}
@@ -159,6 +179,7 @@ export function BookingForm({
 
   return (
     <form ref={form} className="stack booking-form" noValidate onSubmit={submit}>
+      <ErrorSummary errors={summaryErrors} message={formError} attempt={attempt} />
       {textInput('name', 'Your name', values.name, (name) => update({ name }), {
         autoComplete: 'name',
       })}
@@ -182,14 +203,15 @@ export function BookingForm({
       {(allowGuests || values.guests.length > 0) && (
         <fieldset
           className="guests"
+          id={fieldId('guests')}
           data-field="guests"
           tabIndex={-1}
           aria-describedby={describedBy('guests')}
         >
           <legend>
-            {t('Guests')}{' '}
+            {t('Guests')}
             <span className="optional">
-              {t('(optional, up to')} {LIMITS.guests})
+              {t(' (optional, up to {count})', { count: LIMITS.guests })}
             </span>
           </legend>
           {errorText('guests')}
@@ -247,11 +269,6 @@ export function BookingForm({
         </fieldset>
       )}
 
-      {formError && (
-        <div className="alert alert-error">
-          <p role="alert">{ui(formError)}</p>
-        </div>
-      )}
       <button type="submit" className="button button-primary button-block" disabled={submitting}>
         {submitting ? t('Booking…') : t('Confirm booking')}
       </button>
@@ -284,7 +301,7 @@ function QuestionField({ question: q, id, field, value, onChange, error }: Quest
   const label = (
     <>
       {q.label}
-      {!q.required && <span className="optional"> {t('(optional)')}</span>}
+      {!q.required && <span className="optional">{t(' (optional)')}</span>}
     </>
   )
 
@@ -348,7 +365,7 @@ function QuestionField({ question: q, id, field, value, onChange, error }: Quest
     case 'multi_select': {
       const chosen = Array.isArray(value) ? value : []
       return (
-        <fieldset className="field choices" data-field={field} tabIndex={-1} {...common}>
+        <fieldset className="field choices" id={id} data-field={field} tabIndex={-1} {...common}>
           <legend>{label}</legend>
           {(q.options ?? []).map((option, i) => (
             <label key={option} className="choice" htmlFor={`${id}-${i}`}>

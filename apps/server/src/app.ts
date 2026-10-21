@@ -18,6 +18,7 @@ import { logger } from 'hono/logger'
 import { apiBodyLimit, checkBodyAsRead } from './body-limit.ts'
 import { requireCaller } from './caller.ts'
 import { clientIp, withClientIp } from './client-ip.ts'
+import { errorAliasFor } from './error-aliases.ts'
 import type { McpModule } from './mcp/endpoint.ts'
 import { describeCaller, Me } from './me.ts'
 import { authenticated, ErrorBody, json, type RouteModule } from './openapi.ts'
@@ -28,6 +29,7 @@ import {
   strictTransportSecurity,
 } from './security-headers.ts'
 import { MAGIC_LINK_CONFIRM_PATH, signInConfirmPage } from './sign-in-confirm.ts'
+import { VERSION } from './version.ts'
 
 export interface AppDeps {
   /** Resolves when the database answers; rejects otherwise. */
@@ -81,7 +83,7 @@ const healthRoute = createRoute({
   },
 })
 
-// HTTP status for each kind of DomainError (see docs/api-conventions.md).
+// HTTP status for each kind of DomainError (see https://hourmere.com/docs/api-conventions).
 const domainStatus = {
   invalid: 400,
   forbidden: 403,
@@ -306,7 +308,12 @@ export function createApp({
     if (err instanceof DomainError && Object.hasOwn(domainStatus, err.kind)) {
       // The lower-level error a service wrapped is for us, not the client.
       if (err.cause !== undefined) logError(c, `${err.code} caused by `, err.cause)
-      const body = err.detail ? { error: err.code, message: err.detail } : { error: err.code }
+      const errorAlias = errorAliasFor(err.code)
+      const body = {
+        error: err.code,
+        ...(errorAlias !== undefined && { errorAlias }),
+        ...(err.detail && { message: err.detail }),
+      }
       return c.json(body, domainStatus[err.kind])
     }
     logError(c, '', err)
@@ -432,13 +439,17 @@ export function createApp({
   // nullable fields as `type: [..., "null"]` (3.1 has no `nullable` keyword).
   app.doc31('/api/v1/openapi.json', {
     openapi: '3.1.0',
-    info: { title: 'Hourmere API', version: '0.0.0' },
+    info: { title: 'Hourmere API', version: VERSION },
   })
 
   app.all('/api/*', (c) => c.json({ error: 'not_found' }, 404))
 
   // Where emailed sign-in links lead; served here, ahead of the web app.
   app.get(MAGIC_LINK_CONFIRM_PATH, signInConfirmPage)
+
+  // Explicit discovery routes are mounted above. Unknown well-known resources must never
+  // resolve to a static file or the SPA, including on self-hosted instances.
+  app.all('/.well-known/*', (c) => c.text('Not found', 404))
 
   if (webDist) {
     // serveStatic resolves paths against the working directory.

@@ -1,6 +1,8 @@
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
+import { chooseLanguage } from '../i18n/store.ts'
+import styles from '../styles.css?raw'
 import { fakeApi, json, later, profile, renderApp, signedIn } from '../test/fake-api.tsx'
 import { initialActivityFilters } from './Analytics.tsx'
 
@@ -31,6 +33,26 @@ describe('booking activity page', () => {
     })
     renderApp('/app/analytics')
     const table = await screen.findByRole('table', { name: 'Daily booking activity' })
+    const heading = screen.getByRole('heading', { name: 'Booking activity', level: 1 })
+    expect(heading.closest('.page-intro')?.querySelector('.lede')).not.toBeNull()
+    const form = screen.getByRole('button', { name: 'Update report' }).closest('form')
+    expect(form?.classList.contains('stack')).toBe(true)
+    const start = screen.getByLabelText('Start date').closest('.field')
+    const end = screen.getByLabelText('End date').closest('.field')
+    expect(start?.parentElement).toBe(end?.parentElement)
+    expect(start?.parentElement?.classList.contains('analytics-date-range')).toBe(true)
+    const metrics = [...document.querySelectorAll('.metric-cards > div')]
+    expect(
+      metrics.map((card) => [
+        card.querySelector('dt')?.textContent,
+        card.querySelector('dd')?.textContent,
+      ]),
+    ).toEqual([
+      ['Bookings created', '4'],
+      ['Reschedules', '2'],
+      ['Cancellations', '1'],
+    ])
+    expect(table.querySelector('caption')?.classList.contains('analytics-caption')).toBe(true)
     expect(
       within(table)
         .getAllByRole('rowheader')
@@ -45,6 +67,49 @@ describe('booking activity page', () => {
     expect(query(api.to('GET /api/v1/analytics/bookings')[0]?.path ?? '').timeZone).toBe(
       'Europe/Berlin',
     )
+  })
+  it.each([
+    ['en', 'Start date', 'End date', 'Both dates are included, up to 90 local days.'],
+    ['zh-CN', '开始日期', '结束日期', '包含起止日期，最多 90 个当地日历日。'],
+  ] as const)(
+    'describes both dates with one hint below their pair in %s',
+    async (locale, startLabel, endLabel, hintText) => {
+      chooseLanguage(locale)
+      fakeApi({
+        ...signedIn,
+        ...profile(),
+        'GET /api/v1/analytics/bookings': () => json(200, result),
+      })
+      renderApp('/app/analytics')
+      const start = await screen.findByLabelText(startLabel)
+      const end = screen.getByLabelText(endLabel)
+      const hint = screen.getByText(hintText)
+      expect(hint.id).not.toBe('')
+      expect(start.getAttribute('aria-describedby')).toBe(hint.id)
+      expect(end.getAttribute('aria-describedby')).toBe(hint.id)
+      const pair = start.closest('.analytics-date-range')
+      expect(pair?.contains(end)).toBe(true)
+      expect(pair?.contains(hint)).toBe(false)
+      expect(pair?.nextElementSibling).toBe(hint)
+      expect(start.closest('.field')?.querySelector('.hint')).toBeNull()
+      expect(end.closest('.field')?.querySelector('.hint')).toBeNull()
+    },
+  )
+  it('keeps each Chinese report date together when the heading wraps on narrow screens', async () => {
+    chooseLanguage('zh-CN')
+    fakeApi({
+      ...signedIn,
+      ...profile(),
+      'GET /api/v1/analytics/bookings': () =>
+        json(200, { ...result, startDate: '2026-09-21', endDate: '2026-10-20' }),
+    })
+    renderApp('/app/analytics')
+    const heading = await screen.findByRole('heading', { name: '2026-09-21 至 2026-10-20' })
+    expect([...heading.querySelectorAll('.nowrap')].map((date) => date.textContent)).toEqual([
+      '2026-09-21',
+      '2026-10-20',
+    ])
+    expect(styles).toMatch(/\.nowrap\s*\{\s*white-space: nowrap;/)
   })
   it('uses UTC before onboarding, displays zero activity and submits explicit valid filters', async () => {
     const user = userEvent.setup()
@@ -92,6 +157,13 @@ describe('booking activity page', () => {
       0,
     )
     expect(api.to('GET /api/v1/analytics/bookings')).toHaveLength(1)
+    const end = screen.getByLabelText('End date')
+    const description = (end.getAttribute('aria-describedby') ?? '')
+      .split(' ')
+      .map((id) => document.getElementById(id)?.textContent)
+      .join(' ')
+    expect(description).toContain('Choose at most 90 calendar days')
+    expect(description).toContain('Both dates are included, up to 90 local days.')
   })
   it('gives ordinary team members an explicit permission explanation without counts', async () => {
     fakeApi({
@@ -115,6 +187,7 @@ describe('booking activity page', () => {
     })
     renderApp('/app/analytics')
     await screen.findByText('Loading booking activity…')
+    expect(screen.getByText('Loading booking activity…').closest('.page-skeleton')).not.toBeNull()
     await delayed.answer(json(500, { error: 'internal_error' }))
     await screen.findByRole('alert')
     await user.click(screen.getByRole('button', { name: 'Try again' }))

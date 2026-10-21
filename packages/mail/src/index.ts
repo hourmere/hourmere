@@ -1,9 +1,13 @@
+import { domainToASCII } from 'node:url'
+import type { InterfaceLanguage } from '@hourmere/core/language'
 import nodemailer from 'nodemailer'
-import { escapeHtml } from './text.ts'
+import addressparser from 'nodemailer/lib/addressparser'
+import { emailButton, emailLayout, emailLinkStyle, emailWrapStyle } from './layout.ts'
+import { emailText, escapeHtml, singleLine } from './text.ts'
 
 export * from './booking.ts'
 export * from './ics.ts'
-export { escapeHtml, multiLine, singleLine, subjectLine } from './text.ts'
+export { escapeHtml, formatChineseTemplate, multiLine, singleLine, subjectLine } from './text.ts'
 
 export interface MailAttachment {
   /** File name shown to the recipient, e.g. `invite.ics`. */
@@ -18,6 +22,8 @@ export interface MailMessage {
   sensitive?: boolean | undefined
   /** One address. It is never parsed as a list, so a comma in it cannot add recipients. */
   to: string
+  /** The person a human email reply should reach; never overrides the configured From. */
+  replyTo?: { name: string; email: string } | undefined
   subject: string
   text: string
   html?: string
@@ -38,6 +44,8 @@ export interface SendOptions {
  * MailRejectedError.
  */
 export interface Mailer {
+  /** One configured SMTP sender mailbox, used to align iMIP's organizer and email From. */
+  readonly senderEmail?: string | undefined
   send(message: MailMessage, options?: SendOptions): Promise<void>
 }
 
@@ -138,8 +146,58 @@ export interface SmtpMailerOptions {
    * Special characters in the user or password must be percent-encoded.
    */
   url: string
-  /** Sender, e.g. `Hourmere <hourmere@example.com>`. */
+  /** One sender mailbox, e.g. `Hourmere <hourmere@example.com>`. */
   from: string
+}
+
+/** An unquoted mailbox safe in both a structured email header and a calendar mailto URI. */
+function isMailbox(address: string): boolean {
+  const parts = address.split('@')
+  const [local, domain] = parts
+  if (parts.length !== 2 || !local || !domain || address.length > 254 || local.length > 64) {
+    return false
+  }
+  if (!/^[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*$/.test(local)) {
+    return false
+  }
+  // domainToASCII uses URL host parsing, which can silently discard a path or controls.
+  if (!/^[\p{L}\p{N}\p{M}.-]+$/u.test(domain)) return false
+  const ascii = domainToASCII(domain)
+  return (
+    ascii.length > 0 &&
+    ascii.length <= 253 &&
+    ascii.split('.').every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label))
+  )
+}
+
+/** Reject addressparser's recovery of malformed lists: MAIL_FROM must mean exactly one mailbox. */
+function senderMailbox(from: string): string {
+  const entries = addressparser(from)
+  const entry = entries[0]
+  // Only a bare address or one optional display name followed by <address> is supported.
+  // A quoted display name can contain commas; unquoted separators and comments are refused.
+  const value = from.trim()
+  const opening = value.lastIndexOf('<')
+  const displayName = value.slice(0, opening).trimEnd()
+  // Split before validating either segment so whitespace cannot be redistributed between
+  // overlapping regex repetitions during a failed match.
+  const validName =
+    /^"(?:[^"\\]|\\.)*"$/u.test(displayName) || !/["<>@,;:()[\]\\]/u.test(displayName)
+  const angleAddress =
+    opening !== -1 && value.endsWith('>') && validName ? value.slice(opening + 1, -1) : undefined
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: reject header and display controls
+  const controls = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/u
+  if (
+    controls.test(from) ||
+    entries.length !== 1 ||
+    !entry?.address ||
+    entry.group ||
+    !isMailbox(entry.address) ||
+    (value !== entry.address && angleAddress !== entry.address)
+  ) {
+    throw new Error('MAIL_FROM must contain one valid mailbox')
+  }
+  return entry.address
 }
 
 const isLoopback = (hostname: string) => {
@@ -170,19 +228,41 @@ export function smtpTransportOptions(url: string) {
 
 /** Works with any SMTP provider, including Resend, Postmark and Amazon SES SMTP endpoints. */
 export function createSmtpMailer({ url, from }: SmtpMailerOptions): Mailer {
+  const senderEmail = senderMailbox(from)
   const transport = nodemailer.createTransport(smtpTransportOptions(url), { from })
   return {
-    async send({ to, subject, text, html, attachments }, { signal } = {}) {
+    senderEmail,
+    async send({ to, replyTo, subject, text, html, attachments }, { signal } = {}) {
       signal?.throwIfAborted()
+      // Reply-To is optional user input. A booking may accept an address SMTP cannot
+      // represent here; omit it rather than preventing every recipient's notification.
+      const safeReplyTo = replyTo && isMailbox(replyTo.email) ? replyTo : undefined
+      const calendar = attachments?.find((a) =>
+        /^text\/calendar; method=(REQUEST|CANCEL); charset=UTF-8$/.test(a.contentType),
+      )
+      const calendarMethod = calendar?.contentType.match(/method=(REQUEST|CANCEL);/)?.[1]
+      const files = attachments?.filter((a) => a !== calendar)
       const sending = transport.sendMail({
         // An address object is taken as one address; a string would be parsed as a list.
         to: { name: '', address: to },
+        ...(safeReplyTo && {
+          replyTo: { name: singleLine(safeReplyTo.name), address: safeReplyTo.email },
+        }),
         // nodemailer folds long headers but would keep a line break; a subject is one line.
         subject: subject.replace(/[\r\n]+/g, ' '),
         text,
         ...(html !== undefined && { html }),
-        ...(attachments?.length && {
-          attachments: attachments.map(({ filename, contentType, content }) => ({
+        // iMIP clients need the calendar alternative. Nodemailer also emits an application/ics
+        // attachment for clients that import files, while retaining our text and HTML bodies.
+        ...(calendar && {
+          icalEvent: {
+            filename: calendar.filename,
+            content: calendar.content,
+            method: calendarMethod,
+          },
+        }),
+        ...(files?.length && {
+          attachments: files.map(({ filename, contentType, content }) => ({
             filename,
             contentType,
             content,
@@ -247,28 +327,51 @@ export function magicLinkEmail({
   to,
   url,
   expiresInMinutes,
+  language = 'en',
 }: {
   to: string
   url: string
   expiresInMinutes: number
+  language?: InterfaceLanguage | undefined
 }): MailMessage {
-  const expiry = `The link expires in ${expiresInMinutes} minutes and works once. If you did not ask to sign in, you can ignore this email.`
+  const words = {
+    en: {
+      subject: 'Sign in to Hourmere',
+      instruction:
+        'To sign in to Hourmere, open this link, then press "Sign in to Hourmere" on the page it opens:',
+      htmlInstruction:
+        'To sign in to Hourmere, press the button below, then "Sign in to Hourmere" on the page it opens.',
+      button: 'Sign in',
+      expiry: `The link expires in ${expiresInMinutes} minutes and works once. If you did not ask to sign in, you can ignore this email.`,
+      fallback: 'If the button does not work, copy this link into your browser:',
+      footer:
+        'You received this email because a sign-in link was requested for your Hourmere account.',
+    },
+    'zh-CN': {
+      subject: '登录 Hourmere',
+      instruction: '如需登录 Hourmere，请打开此链接，然后在打开的页面上点击“登录 Hourmere”：',
+      htmlInstruction: '如需登录 Hourmere，请点击下方按钮，然后在打开的页面上点击“登录 Hourmere”。',
+      button: '登录',
+      expiry: `此链接将在 ${expiresInMinutes} 分钟后过期，且仅能使用一次。如果你没有申请登录，可以忽略此邮件。`,
+      fallback: '如果按钮无法使用，请将此链接复制到浏览器中：',
+      footer: '你收到此邮件是因为有人为你的 Hourmere 账号申请了登录链接。',
+    },
+  }[language]
   const link = escapeHtml(url)
   // The link opens a page whose button signs in (so that mail scanners opening the link do
   // not use it up).
   return {
     to,
-    subject: 'Sign in to Hourmere',
-    text: `To sign in to Hourmere, open this link, then press "Sign in to Hourmere" on the page it opens:\n\n${url}\n\n${expiry}\n`,
-    html: `<!doctype html>
-<html lang="en">
-<body style="font-family: system-ui, sans-serif; line-height: 1.5; color: #111;">
-<p>To sign in to Hourmere, press the button below, then "Sign in to Hourmere" on the page it opens.</p>
-<p><a href="${link}" style="display: inline-block; padding: 10px 16px; background: #111; color: #fff; text-decoration: none; border-radius: 6px;">Sign in</a></p>
-<p style="color: #555;">${escapeHtml(expiry)}</p>
-<p style="color: #555; font-size: 13px;">If the button does not work, copy this link into your browser:<br>${link}</p>
-</body>
-</html>
-`,
+    subject: words.subject,
+    text: `Hourmere\n\n${words.instruction}\n\n${url}\n\n${words.expiry}\n\n${words.footer}\n`,
+    html: emailLayout(
+      language,
+      words.subject,
+      `<p>${emailText(words.htmlInstruction, language)}</p>
+${emailButton(words.button, url, false, language)}
+<p style="color: #555;">${emailText(words.expiry, language)}</p>
+<p style="color: #555; font-size: 13px; ${emailWrapStyle}">${emailText(words.fallback, language)}<br><a href="${link}" style="${emailLinkStyle}">${emailText(url, language)}</a></p>
+<p style="margin-top: 24px; border-top: 1px solid #ddd; padding-top: 16px; color: #555; font-size: 13px;">${emailText(words.footer, language)}</p>`,
+    ),
   }
 }

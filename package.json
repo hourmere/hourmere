@@ -1,5 +1,6 @@
 {
   "name": "hourmere",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "license": "AGPL-3.0-only",
@@ -12,16 +13,21 @@
     "tools/*"
   ],
   "scripts": {
+    "version": "node scripts/sync-version.ts && biome format --write server.json",
     "cli": "node tools/cli/src/index.ts",
+    "cli:build": "tsc -p tools/cli/tsconfig.build.json",
+    "cli:pack-smoke": "node tools/cli/scripts/pack-smoke.ts",
+    "mcp:registry:validate": "node scripts/validate-mcp-registry.ts",
     "dev": "node scripts/dev.ts",
-    "db:up": "docker compose -f docker-compose.dev.yml up -d --wait",
-    "db:down": "docker compose -f docker-compose.dev.yml down",
+    "db:up": "docker compose -p hourmere-dev -f docker-compose.dev.yml up -d --wait",
+    "db:down": "docker compose -p hourmere-dev -f docker-compose.dev.yml down",
+    "db:cleanup-tests": "node --env-file-if-exists=.env scripts/cleanup-test-databases.ts",
     "db:migrate": "node --env-file-if-exists=.env packages/db/src/migrate-cli.ts && node --env-file-if-exists=.env packages/jobs/src/migrate-cli.ts",
     "lint": "biome check .",
     "format": "biome check --write .",
-    "typecheck": "npm run typecheck --workspaces --if-present && tsc -p tools/api-types && tsc -p scripts",
+    "typecheck": "npm run typecheck --workspaces --if-present && tsc -p tools/api-types && tsc -p tools/cli && tsc -p scripts",
     "test": "vitest run",
-    "build": "npm run build --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present && npm run cli:build",
     "start": "node apps/server/src/index.ts",
     "auth:sql": "npm run --workspace @hourmere/auth schema:sql",
     "api:types": "npm run --silent --workspace @hourmere/api-types generate",
@@ -32,8 +38,11 @@
   "devDependencies": {
     "@biomejs/biome": "2.5.15",
     "@types/node": "26.6.5",
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1",
     "typescript": "7.0.2",
-    "vitest": "5.0.5"
+    "vitest": "5.0.5",
+    "yaml": "2.9.1"
   },
   "overrides": {
     "postcss-nested": {

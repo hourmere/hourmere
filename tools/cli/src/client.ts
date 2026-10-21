@@ -1,4 +1,11 @@
 // A single stateless MCP call. No automatic retries: a lost reschedule response is ambiguous.
+import { readFileSync } from 'node:fs'
+
+// The standalone tarball carries this synchronized copy of the root product version.
+export const { version } = JSON.parse(
+  readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
+) as { version: string }
+
 export const MAX_INPUT_BYTES = 2 * 1024 * 1024 - 4096
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 const PROTOCOL = '2026-07-28'
@@ -124,6 +131,7 @@ export async function callTool(options: {
         'MCP-Protocol-Version': PROTOCOL,
         'Mcp-Method': 'tools/call',
         'Mcp-Name': tool,
+        'User-Agent': `hourmere-cli/${version}`,
       },
       body,
     })

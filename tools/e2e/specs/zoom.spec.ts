@@ -148,7 +148,7 @@ test.describe('Zoom disabled by default', () => {
       await expect(page.getByText(labels[language].disabled, { exact: true })).toBeVisible()
       await expect(
         page.getByRole('button', { name: labels[language].connect, exact: true }),
-      ).toBeDisabled()
+      ).toHaveCount(0)
       expect(await zoomApp.state()).toMatchObject({
         connections: 0,
         secrets: 0,

@@ -86,7 +86,9 @@ export function webhookRoutes(deps: ServiceDeps & WebhookSettings): RouteModule 
         path: '/api/v1/webhooks',
         tags: ['Webhooks'],
         operationId: 'createWebhook',
-        summary: 'Create an HTTPS webhook and reveal its signing secret once',
+        summary: 'Create a webhook and reveal its signing secret once',
+        description:
+          'Public HTTPS destinations by default. Operators may allow exact private HTTP(S) targets. URL checks do not resolve DNS; every delivery revalidates all resolved addresses. Destinations are immutable.',
         security: authenticated,
         middleware: caller,
         request: { body: { required: true, content: json(WebhookCreateInput) } },
@@ -123,6 +125,7 @@ export function webhookRoutes(deps: ServiceDeps & WebhookSettings): RouteModule 
             serviceContext(deps, c.var.principal),
             c.req.valid('param').id,
             c.req.valid('json'),
+            deps,
           ),
           200,
         ),

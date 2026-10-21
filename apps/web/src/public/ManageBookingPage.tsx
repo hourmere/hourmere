@@ -1,7 +1,10 @@
 import { type FormEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 import { ConferenceNotice } from '../components/ConferenceNotice.tsx'
+import { EmailDeliveryHint } from '../components/EmailDeliveryHint.tsx'
+import { isKnownTimeZone } from '../format.ts'
 import { usePageTitle } from '../hooks.ts'
+import { formatList } from '../i18n/formatting.ts'
 import { useI18n } from '../i18n/runtime.tsx'
 import { msg, type UiText } from '../i18n/translate.ts'
 import { ManageLink } from './AddToCalendar.tsx'
@@ -90,10 +93,37 @@ function NoToken() {
 }
 
 type Mode =
-  | { kind: 'view'; message?: UiText | undefined }
+  | { kind: 'view'; message?: UiText | undefined; emailNotice?: boolean; meetingStarted?: boolean }
   | { kind: 'cancel' }
   | { kind: 'reschedule'; notice?: UiText | undefined }
   | { kind: 'confirm-reschedule'; slot: Slot }
+
+function CalendarResponseNote() {
+  const { text } = useI18n()
+  return (
+    <p className="muted">
+      {text(
+        'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use “Cancel booking” here.',
+      )}
+    </p>
+  )
+}
+
+async function followReschedule(
+  booking: ManagedBooking,
+  token: string,
+  signal?: AbortSignal,
+): Promise<ManagedBooking> {
+  if (booking.status !== 'cancelled' || booking.conference) return booking
+  // Token resolution can precede a reschedule while hydration sees its cancelled
+  // predecessor. Resolve the same capability once more, using its existing successor
+  // rules. The result is final, even when cancelled too; this must not become polling.
+  try {
+    return await getManagedBooking(token, signal)
+  } catch {
+    return booking
+  }
+}
 
 function ManageBooking({ token: initialToken, action }: { token: string; action: Action | null }) {
   const { t, ui } = useI18n()
@@ -102,7 +132,8 @@ function ManageBooking({ token: initialToken, action }: { token: string; action:
   const [token, setToken] = useState(initialToken)
   const [newToken, setNewToken] = useState<string | null>(null)
   const load = useCallback(
-    (signal: AbortSignal) => getManagedBooking(initialToken, signal),
+    async (signal: AbortSignal) =>
+      followReschedule(await getManagedBooking(initialToken, signal), initialToken, signal),
     [initialToken],
   )
   const [state, reload] = useRequest(load)
@@ -151,7 +182,11 @@ function ManageBooking({ token: initialToken, action }: { token: string; action:
       token={token}
       newToken={newToken}
       initialAction={action}
-      onUpdated={(fresh) => setBooking((previous) => previous && { ...previous, ...fresh })}
+      onUpdated={async (fresh) => {
+        const next = await followReschedule(fresh, token)
+        // A later action or snapshot wins over a slow successor lookup.
+        setBooking((current) => (current === booking ? next : current))
+      }}
       onCancelled={(cancelled) => setBooking({ ...booking, ...cancelled })}
       onRescheduled={(next, nextToken) => {
         setBooking({ ...booking, ...next })
@@ -164,7 +199,7 @@ function ManageBooking({ token: initialToken, action }: { token: string; action:
         // The booking changed elsewhere (cancelled in another tab, say), or an answer was
         // lost: show it as the server has it now.
         try {
-          const fresh = await getManagedBooking(token)
+          const fresh = await followReschedule(await getManagedBooking(token), token)
           setBooking(fresh)
           return fresh
         } catch {
@@ -195,24 +230,26 @@ function ManageView({
   /** Loads the booking again; null when that fails too. */
   onStale: () => Promise<ManagedBooking | null>
 }) {
-  const { t, explicit } = useI18n()
+  const { t, explicit, locale: language } = useI18n()
 
   const browserFormatLocale = useMemo(preferredLocale, [])
   const locale = explicit ?? browserFormatLocale
-  const [timeZone, setTimeZone] = useState(detectTimeZone)
+  const [timeZone, setTimeZone] = useState(() => {
+    const stored = booking.attendees.find((attendee) => attendee.isBooker)?.timeZone
+    return stored && isKnownTimeZone(stored) ? stored : detectTimeZone()
+  })
   const [now, setNow] = useState(currentTime)
   const [version, setVersion] = useState(0)
-  const started = Date.parse(booking.start) <= now
+  const observedNow = currentTime()
+  const started = Date.parse(booking.start) <= observedNow
+  const ended = Date.parse(booking.end) <= observedNow
   const changeable = booking.status === 'confirmed' && !started
   const [mode, setMode] = useState<Mode>(() =>
     initialAction && changeable ? { kind: initialAction } : { kind: 'view' },
   )
   const loadSlots = useMemo(() => rescheduleSlots(token), [token])
   const title = booking.eventType?.title ?? booking.title
-  const hosts = booking.hosts
-    .map((h) => h.name)
-    .filter(Boolean)
-    .join(', ')
+  const hosts = formatList(booking.hosts.map((h) => h.name).filter(Boolean), language)
   const durationMinutes =
     booking.eventType?.durationMinutes ??
     Math.round((Date.parse(booking.end) - Date.parse(booking.start)) / 60_000)
@@ -222,7 +259,9 @@ function ManageView({
     initialAction && !changeable
       ? booking.status === 'cancelled'
         ? 'This booking is cancelled, so it can’t be changed.'
-        : 'This meeting has already started, so it can’t be changed.'
+        : ended
+          ? 'This meeting has ended.'
+          : 'This meeting has already started, so it can’t be changed.'
       : undefined
 
   /** What to say after a reschedule whose answer never arrived, from the booking as it is now. */
@@ -255,13 +294,11 @@ function ManageView({
     }
     if (code === 'booking_cancelled' || code === 'booking_in_past') {
       await onStale()
-      setMode({
-        kind: 'view',
-        message:
-          code === 'booking_cancelled'
-            ? 'This booking was already cancelled.'
-            : 'This meeting has already started, so it can’t be changed.',
-      })
+      setMode(
+        code === 'booking_cancelled'
+          ? { kind: 'view', message: 'This booking was already cancelled.' }
+          : { kind: 'view', meetingStarted: true },
+      )
       return true
     }
     if (during === 'reschedule' && (code === 'slot_taken' || code === 'slot_unavailable')) {
@@ -288,27 +325,38 @@ function ManageView({
   }
 
   return (
-    <PublicLayout wide={mode.kind === 'reschedule'}>
+    <PublicLayout wide>
       <ConferenceNotice
         key={booking.id}
         booking={booking}
         manageToken={token}
-        onChange={(fresh) => onUpdated({ ...booking, ...fresh })}
+        onChange={(fresh) => {
+          // A reschedule can remove the old booking's optional conference entirely.
+          // Replace the read state; retain only metadata absent from the base callback type.
+          onUpdated({ eventType: booking.eventType, hosts: booking.hosts, ...fresh })
+          if (fresh.id !== booking.id || fresh.status !== booking.status) setMode({ kind: 'view' })
+        }}
       />
       {mode.kind === 'reschedule' ? (
-        <div className="reschedule">
-          <div className="reschedule-header">
-            <p className="muted">
-              {t('Rescheduling')} {title}
-              {hosts && t('with {0}', { '0': hosts })}
-              {t(', now on')} {formatDate(Date.parse(booking.start), timeZone, locale)},{' '}
-              {formatTimeRange(
-                Date.parse(booking.start),
-                Date.parse(booking.end),
-                timeZone,
-                locale,
-              )}
-            </p>
+        <div className="booking-layout reschedule">
+          <aside className="event-info reschedule-summary" aria-label={t('Current booking')}>
+            <p className="event-host">{t('Current booking')}</p>
+            <h1 className="event-title">{title}</h1>
+            <DetailList
+              items={[
+                [
+                  'When',
+                  <When
+                    key="current"
+                    start={booking.start}
+                    end={booking.end}
+                    timeZone={timeZone}
+                    locale={locale}
+                  />,
+                ],
+                ...(hosts ? [['Host', hosts] as [string, string]] : []),
+              ]}
+            />
             <button
               type="button"
               className="button button-small"
@@ -316,22 +364,24 @@ function ManageView({
             >
               {t('Keep the current time')}
             </button>
+          </aside>
+          <div className="booking-main">
+            <SlotPicker
+              load={loadSlots}
+              durationMinutes={durationMinutes}
+              timeZone={timeZone}
+              onTimeZoneChange={setTimeZone}
+              locale={locale}
+              now={now}
+              selected={null}
+              excludeStart={booking.start}
+              onSelect={(slot) => setMode({ kind: 'confirm-reschedule', slot })}
+              version={version}
+              title={t('Pick a new time')}
+              focusTitle
+              notice={mode.notice}
+            />
           </div>
-          <SlotPicker
-            load={loadSlots}
-            durationMinutes={durationMinutes}
-            timeZone={timeZone}
-            onTimeZoneChange={setTimeZone}
-            locale={locale}
-            now={now}
-            selected={null}
-            excludeStart={booking.start}
-            onSelect={(slot) => setMode({ kind: 'confirm-reschedule', slot })}
-            version={version}
-            title={t('Pick a new time')}
-            focusTitle
-            notice={mode.notice}
-          />
         </div>
       ) : (
         <div className="card public-card manage">
@@ -343,34 +393,59 @@ function ManageView({
               timeZone={timeZone}
               locale={locale}
               started={started}
-              message={mode.message ?? unavailable}
+              ended={ended}
+              message={
+                mode.meetingStarted
+                  ? ended
+                    ? 'This meeting has ended.'
+                    : 'This meeting has already started, so it can’t be changed.'
+                  : (mode.message ?? unavailable)
+              }
+              emailNotice={mode.emailNotice ?? false}
               newToken={newToken}
             />
           )}
-          {mode.kind === 'view' && changeable && (
-            <div className="manage-actions">
-              <button
-                type="button"
-                className="button button-primary"
-                onClick={() => setMode({ kind: 'reschedule' })}
-              >
-                {t('Reschedule')}
-              </button>
-              <button type="button" className="button" onClick={() => setMode({ kind: 'cancel' })}>
-                {t('Cancel booking')}
-              </button>
-            </div>
+          {mode.kind === 'view' && changeable && !mode.meetingStarted && (
+            <>
+              <CalendarResponseNote />
+              <div className="manage-actions">
+                <button
+                  type="button"
+                  className="button button-primary"
+                  onClick={() => setMode({ kind: 'reschedule' })}
+                >
+                  {t('Reschedule')}
+                </button>
+                <button
+                  type="button"
+                  className="button"
+                  onClick={() => setMode({ kind: 'cancel' })}
+                >
+                  {t('Cancel booking')}
+                </button>
+              </div>
+            </>
           )}
           {mode.kind === 'cancel' && (
             <CancelForm
               title={title}
-              when={`${formatDate(Date.parse(booking.start), timeZone, locale)}, ${formatTimeRange(Date.parse(booking.start), Date.parse(booking.end), timeZone, locale)}`}
+              date={formatDate(Date.parse(booking.start), timeZone, locale)}
+              time={formatTimeRange(
+                Date.parse(booking.start),
+                Date.parse(booking.end),
+                timeZone,
+                locale,
+              )}
               onBack={() => setMode({ kind: 'view' })}
               onCancel={async (reason) => {
                 try {
                   const cancelled = await cancelManagedBooking(token, reason)
                   onCancelled({ ...booking, ...cancelled })
-                  setMode({ kind: 'view', message: 'Your booking is cancelled.' })
+                  setMode({
+                    kind: 'view',
+                    message: 'Your booking is cancelled.',
+                    emailNotice: true,
+                  })
                   return null
                 } catch (err) {
                   if (await failed(err, 'cancel')) return null
@@ -398,7 +473,11 @@ function ManageView({
                 try {
                   const result = await rescheduleManagedBooking(token, slot.start)
                   onRescheduled({ ...booking, ...result.booking }, result.manageToken)
-                  setMode({ kind: 'view', message: 'Your booking is moved to the new time.' })
+                  setMode({
+                    kind: 'view',
+                    message: 'Your booking is moved to the new time.',
+                    emailNotice: true,
+                  })
                   return null
                 } catch (err) {
                   if (await failed(err, 'reschedule')) return null
@@ -428,7 +507,9 @@ function BookingSummary({
   timeZone,
   locale,
   started,
+  ended,
   message,
+  emailNotice,
   newToken,
 }: {
   booking: ManagedBooking
@@ -437,10 +518,12 @@ function BookingSummary({
   timeZone: string
   locale: string
   started: boolean
+  ended: boolean
   message: UiText | undefined
+  emailNotice: boolean
   newToken: string | null
 }) {
-  const { t, ui } = useI18n()
+  const { t, ui, locale: language } = useI18n()
 
   const invitee = booking.attendees.find((a) => a.isBooker)
   const guests = booking.attendees.filter((a) => !a.isBooker)
@@ -453,6 +536,10 @@ function BookingSummary({
           <p role="status">{ui(message)}</p>
         </div>
       )}
+      {emailNotice &&
+        (cancelled || !booking.conference || booking.conference.status === 'ready') && (
+          <EmailDeliveryHint />
+        )}
       {!message && cancelled && (
         <div className="alert alert-info">
           <p>
@@ -467,12 +554,17 @@ function BookingSummary({
       )}
       {!message && !cancelled && started && (
         <div className="alert alert-info">
-          <p>{t('This meeting has already started, so it can’t be changed here.')}</p>
+          <p>
+            {ended
+              ? t('This meeting has ended.')
+              : t('This meeting has already started, so it can’t be changed here.')}
+          </p>
         </div>
       )}
       <DetailList
         items={[
           ['What', title],
+          ['Status', cancelled ? t('Cancelled booking') : ended ? t('Ended') : t('Confirmed')],
           [
             'When',
             <span key="when" className={cancelled ? 'struck' : undefined}>
@@ -482,10 +574,23 @@ function BookingSummary({
           ['Where', <LocationDetails key="where" location={booking.location} />],
           ...(hosts ? ([['Host', hosts]] as [string, string][]) : []),
           ...(invitee
-            ? ([['Booked by', `${invitee.name} (${invitee.email})`]] as [string, string][])
+            ? ([
+                [
+                  'Booked by',
+                  t('{name} ({detail})', { name: invitee.name, detail: invitee.email }),
+                ],
+              ] as [string, string][])
             : []),
           ...(guests.length
-            ? ([['Guests', guests.map((g) => g.name).join(', ')]] as [string, string][])
+            ? ([
+                [
+                  'Guests',
+                  formatList(
+                    guests.map((g) => g.name),
+                    language,
+                  ),
+                ],
+              ] as [string, string][])
             : []),
           ...(cancelled && booking.cancelReason
             ? ([['Reason', booking.cancelReason]] as [string, string][])
@@ -506,12 +611,14 @@ function BookingSummary({
 
 function CancelForm({
   title,
-  when,
+  date,
+  time,
   onBack,
   onCancel,
 }: {
   title: string
-  when: string
+  date: string
+  time: string
   onBack: () => void
   onCancel: (reason: string) => Promise<{ field?: UiText; form?: UiText } | null>
 }) {
@@ -540,12 +647,13 @@ function CancelForm({
   return (
     <form className="stack" onSubmit={submit} noValidate>
       <FocusHeading>{t('Cancel this booking?')}</FocusHeading>
-      <p>
-        {title}, {when}
-      </p>
+      <CalendarResponseNote />
+      {/* One booking's title, date and time: a sentence, not a list, so no list separators. */}
+      <p>{t('{title}, {date}, {time}', { title, date, time })}</p>
       <div className="field">
         <label htmlFor={`${id}-reason`}>
-          {t('Reason')} <span className="optional">{t('(optional, shared with your host)')}</span>
+          {t('Reason')}
+          <span className="optional">{t(' (optional, shared with your host)')}</span>
         </label>
         <textarea
           id={`${id}-reason`}
@@ -600,31 +708,47 @@ function ConfirmReschedule({
   // A reschedule is not idempotent: one request at a time, and only when people press.
   const inFlight = useRef(false)
   const start = Date.parse(slot.start)
+  // Keep the breakable space and opening bracket outside the no-wrap numeric offset.
+  const offset = offsetLabel(timeZone, start)
+  const zoneLabel = t(' ({offset})', { offset })
+  const offsetAt = zoneLabel.lastIndexOf(offset)
   return (
     <div className="stack">
       <FocusHeading>{t('Move your booking?')}</FocusHeading>
+
       <DetailList
         items={[
           [
             'From',
             <span key="from" className="struck">
-              {formatDate(Date.parse(current.start), timeZone, locale)},{' '}
-              {formatTimeRange(
-                Date.parse(current.start),
-                Date.parse(current.end),
-                timeZone,
-                locale,
-              )}
+              {t('{date}, {time}', {
+                date: formatDate(Date.parse(current.start), timeZone, locale),
+                time: formatTimeRange(
+                  Date.parse(current.start),
+                  Date.parse(current.end),
+                  timeZone,
+                  locale,
+                ),
+              })}
             </span>,
           ],
           [
             'To',
             <strong key="to">
-              {formatDate(start, timeZone, locale)},{' '}
-              {formatTimeRange(start, Date.parse(slot.end), timeZone, locale)}
+              {t('{date}, {time}', {
+                date: formatDate(start, timeZone, locale),
+                time: formatTimeRange(start, Date.parse(slot.end), timeZone, locale),
+              })}
             </strong>,
           ],
-          ['Time zone', `${zoneName(timeZone)} (${offsetLabel(timeZone, start)})`],
+          [
+            'Time zone',
+            <span key="zone">
+              {zoneName(timeZone)}
+              {zoneLabel.slice(0, offsetAt)}
+              <span className="time-offset">{zoneLabel.slice(offsetAt)}</span>
+            </span>,
+          ],
         ]}
       />
       {error && (

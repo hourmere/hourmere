@@ -1,5 +1,6 @@
 ---
 import Base from '../layouts/Base.astro'
+import { siteCopy } from '../ui-copy.ts'
 ---
 
 <Base
@@ -10,13 +11,22 @@ import Base from '../layouts/Base.astro'
     <p class="eyebrow">404</p>
     <h1>Page not found</h1>
     <p>The page you are looking for does not exist or has moved.</p>
-    <a class="btn btn-primary" href="/">Go to the homepage</a>
+    <div class="links">
+      <a class="btn btn-primary" href="/">Go to the homepage</a>
+      <a class="btn" href="/docs">{siteCopy.en.browseDocs}</a>
+    </div>
   </section>
 </Base>
 
 <style>
   .not-found {
     padding-block: 96px 120px;
+  }
+
+  .links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
   }
 
   h1 {

@@ -1,7 +1,10 @@
+import { interfaceLanguage } from '@hourmere/core/language'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Navigate, useLocation, useParams } from 'react-router'
+import { Link, Navigate, useLocation, useParams } from 'react-router'
 import { ConferenceNotice } from '../components/ConferenceNotice.tsx'
+import { EmailDeliveryHint } from '../components/EmailDeliveryHint.tsx'
 import { usePageTitle } from '../hooks.ts'
+import { formatList } from '../i18n/formatting.ts'
 import { useI18n } from '../i18n/runtime.tsx'
 import { literal, msg, type UiText } from '../i18n/translate.ts'
 import { AddToCalendar, ManageLink } from './AddToCalendar.tsx'
@@ -26,6 +29,7 @@ import {
   When,
 } from './BookingDetails.tsx'
 import { BookingForm, type BookingFormValues } from './BookingForm.tsx'
+import { EventDescription } from './EventDescription.tsx'
 import { notifyEmbedBooked, useEmbedded } from './embed-context.ts'
 import { now as currentTime, detectTimeZone, preferredLocale } from './env.ts'
 import {
@@ -38,7 +42,13 @@ import {
 import { normalizedHandle, normalizedSlug, teamSlug, useRequest } from './paths.ts'
 import { SlotPicker } from './SlotPicker.tsx'
 import { formatDate, formatDuration, formatTimeRange, offsetLabel, zoneName } from './time.ts'
-import { bookingErrors, bookingLocale, type FieldErrors, responsesFor } from './validation.ts'
+import {
+  bookingErrors,
+  bookingLocale,
+  type FieldErrors,
+  guestsFor,
+  responsesFor,
+} from './validation.ts'
 
 /** /{handle}/{slug}: pick a time, fill in the form, get the confirmation. */
 export function TeamBookingPage() {
@@ -133,7 +143,6 @@ function BookingFlow({
   const embedded = useEmbedded()
   const browserFormatLocale = useMemo(preferredLocale, [])
   const locale = explicit ?? browserFormatLocale
-  const [requestLocale] = useState(() => bookingLocale(explicit ?? preferredLocale()))
   const [timeZone, setTimeZone] = useState(detectTimeZone)
   const [now, setNow] = useState(currentTime)
   const [slot, setSlot] = useState<Slot | null>(null)
@@ -148,8 +157,9 @@ function BookingFlow({
   const [gone, setGone] = useState(false)
   // One Idempotency-Key per booking attempt: resending the same request (after a network
   // error or a lost answer) reuses it, so the server answers with the booking it may already
-  // have made instead of booking twice; any change to the request starts a new attempt.
-  const attempt = useRef<{ key: string; body: string } | null>(null)
+  // have made instead of booking twice. Language changes preserve that attempt; changing
+  // booking details starts a new attempt in the interface language selected at submission.
+  const attempt = useRef<{ key: string; details: string; body: CreateBooking } | null>(null)
   const loadSlots = useMemo(() => eventSlots(handle, slug, team), [handle, slug, team])
 
   if (gone) return <PublicNotFound what="event" />
@@ -168,8 +178,7 @@ function BookingFlow({
 
   async function submit() {
     if (!slot) return
-    const inviteeLocale = requestLocale
-    const guests = values.guests.map((g) => ({ name: g.name.trim(), email: g.email.trim() }))
+    const guests = guestsFor(values.guests)
     const body: CreateBooking = {
       ...(embedded && { source: 'embed' as const }),
       start: slot.start,
@@ -177,15 +186,23 @@ function BookingFlow({
         name: values.name.trim(),
         email: values.email.trim(),
         timeZone,
-        ...(inviteeLocale && { locale: inviteeLocale }),
       },
       ...(guests.length > 0 && { guests }),
       ...(event.questions.length > 0 && {
         responses: responsesFor(event.questions, values.answers),
       }),
     }
-    const json = JSON.stringify(body)
-    if (attempt.current?.body !== json) attempt.current = { key: randomKey(), body: json }
+    const details = JSON.stringify(body)
+    if (attempt.current?.details !== details) {
+      const inviteeLocale = bookingLocale(
+        explicit ??
+          (interfaceLanguage(browserFormatLocale) === displayLocale
+            ? browserFormatLocale
+            : displayLocale),
+      )
+      if (inviteeLocale) body.invitee.locale = inviteeLocale
+      attempt.current = { key: randomKey(), details, body }
+    }
     setSubmitting(true)
     setFormError(null)
     setServerErrors({})
@@ -193,7 +210,7 @@ function BookingFlow({
       const { result, replayed } = await createBooking(
         handle,
         slug,
-        body,
+        attempt.current.body,
         attempt.current.key,
         team,
       )
@@ -226,7 +243,7 @@ function BookingFlow({
       } else if (err.status === 429 || err.status >= 500) {
         setFormError(failureMessage(err))
       } else {
-        const mapped = bookingErrors(err, event.questions)
+        const mapped = bookingErrors(err, event.questions, values.guests)
         const { timeZone: zoneError, ...fields } = mapped.fields
         setServerErrors(fields)
         setFormError(
@@ -244,6 +261,11 @@ function BookingFlow({
     }
   }
 
+  // Keep the breakable space and opening bracket outside the no-wrap numeric offset.
+  const chosenOffset = slot ? offsetLabel(timeZone, Date.parse(slot.start)) : ''
+  const chosenZoneLabel = t(' ({offset})', { offset: chosenOffset })
+  const chosenOffsetAt = chosenZoneLabel.lastIndexOf(chosenOffset)
+
   return (
     <PublicLayout wide>
       <div className="booking-layout">
@@ -257,15 +279,21 @@ function BookingFlow({
           )}
           {event.hosts && (
             <p className="event-description">
-              {t('Required hosts:')}{' '}
-              {event.hosts.map((host) => `${host.name} (${host.timeZone})`).join(', ')}
+              {t('Required hosts: {hosts}', {
+                hosts: formatList(
+                  event.hosts.map((host) =>
+                    t('{name} ({detail})', { name: host.name, detail: host.timeZone }),
+                  ),
+                  displayLocale,
+                ),
+              })}
             </p>
           )}
           <ul className="event-facts">
             <li>{formatDuration(event.durationMinutes, displayLocale)}</li>
             {event.location && <li>{ui(locationLabel(event.location.kind))}</li>}
           </ul>
-          {event.description && <p className="event-description">{event.description}</p>}
+          {event.description && <EventDescription>{event.description}</EventDescription>}
           {slot && (
             <div className="chosen-time">
               <p>
@@ -274,7 +302,9 @@ function BookingFlow({
                 {formatTimeRange(Date.parse(slot.start), Date.parse(slot.end), timeZone, locale)}
                 <br />
                 <span className="muted">
-                  {zoneName(timeZone)} ({offsetLabel(timeZone, Date.parse(slot.start))})
+                  {zoneName(timeZone)}
+                  {chosenZoneLabel.slice(0, chosenOffsetAt)}
+                  <span className="time-offset">{chosenZoneLabel.slice(chosenOffsetAt)}</span>
                 </span>
               </p>
               <button type="button" className="button button-small" onClick={changeTime}>
@@ -333,7 +363,7 @@ function Confirmation({
   confirmed: Confirmed
   locale: string
 }) {
-  const { t, ui } = useI18n()
+  const { t, text, ui, locale: language } = useI18n()
 
   usePageTitle('Booking confirmed')
   const embedded = useEmbedded()
@@ -346,6 +376,8 @@ function Confirmation({
   }, [embedded])
   const { booking: initialBooking, manageToken, replayed, timeZone } = confirmed
   const [booking, setBooking] = useState(initialBooking)
+  const ended = Date.parse(booking.end) <= currentTime()
+  const canCancel = booking.status === 'confirmed' && Date.parse(booking.start) > currentTime()
   const invitee = booking.attendees.find((a) => a.isBooker)
   const guests = booking.attendees.filter((a) => !a.isBooker)
   const hostName =
@@ -355,34 +387,45 @@ function Confirmation({
         ? booking.assignedHost.name.trim() || t('Host')
         : event.host.name
   const hostDetail = booking.assignedHost
-    ? `${hostName} (${booking.assignedHost.timeZone})`
+    ? t('{name} ({detail})', { name: hostName, detail: booking.assignedHost.timeZone })
     : hostName
   const title = t('{event} with {host}', { event: event.title, host: hostName })
   return (
     <PublicLayout>
       <div className="card public-card confirmation">
+        {booking.status === 'confirmed' && !ended && booking.conference?.status !== 'failed' && (
+          <span className="confirmation-indicator" aria-hidden="true">
+            ✓
+          </span>
+        )}
         <FocusHeading>
           {t(
             booking.status === 'cancelled'
               ? 'Cancelled booking'
-              : booking.conference?.status === 'failed'
-                ? 'Time reserved; meeting link needs attention'
-                : booking.conference?.status === 'pending'
-                  ? 'Time reserved; meeting link pending'
-                  : 'You’re booked',
+              : ended
+                ? 'Ended'
+                : booking.conference?.status === 'failed'
+                  ? 'Time reserved; meeting link needs attention'
+                  : booking.conference?.status === 'pending'
+                    ? 'Time reserved; meeting link pending'
+                    : 'You’re booked',
           )}
         </FocusHeading>
         <p className="lede">
-          {t(
+          {text(
             booking.status === 'cancelled'
               ? 'This booking was already cancelled.'
-              : 'Your {event} with {host} is confirmed.',
+              : ended
+                ? 'This meeting has ended.'
+                : 'Your {event} with {host} is confirmed.',
             {
               event: event.title,
               host: hostName,
             },
           )}
         </p>
+        {booking.status === 'confirmed' &&
+          (!booking.conference || booking.conference.status === 'ready') && <EmailDeliveryHint />}
         <DetailList
           items={[
             ['What', event.title],
@@ -399,10 +442,20 @@ function Confirmation({
             ['Where', <LocationDetails key="where" location={booking.location} />],
             ['Host', hostDetail],
             ...(invitee
-              ? ([['You', `${invitee.name} (${invitee.email})`]] as [string, string][])
+              ? ([
+                  ['You', t('{name} ({detail})', { name: invitee.name, detail: invitee.email })],
+                ] as [string, string][])
               : []),
             ...(guests.length
-              ? ([['Guests', guests.map((g) => g.name).join(', ')]] as [string, string][])
+              ? ([
+                  [
+                    'Guests',
+                    formatList(
+                      guests.map((g) => g.name),
+                      language,
+                    ),
+                  ],
+                ] as [string, string][])
               : []),
           ]}
         />
@@ -412,30 +465,56 @@ function Confirmation({
           manageToken={manageToken}
           onChange={setBooking}
         />
-        {booking.status === 'confirmed' &&
-          (!booking.conference || booking.conference.status === 'ready') && (
-            <AddToCalendar
-              event={{
-                id: booking.id,
-                title,
-                start: Date.parse(booking.start),
-                end: Date.parse(booking.end),
-                description: event.description ?? undefined,
-                location: locationText(booking.location, ui),
-              }}
-            />
-          )}
-        {manageToken ? (
-          <ManageLink token={manageToken} intro={t('Use this link to reschedule or cancel.')} />
-        ) : replayed ? (
-          <div className="alert alert-info">
-            <p>
-              {t(
-                'This booking was already made by an earlier attempt, so its link to change or cancel can’t be shown again. Use the link in your confirmation email instead.',
+        <div className="stack">
+          {booking.status === 'confirmed' &&
+            (!booking.conference || booking.conference.status === 'ready') && (
+              <AddToCalendar
+                event={{
+                  id: booking.id,
+                  title,
+                  start: Date.parse(booking.start),
+                  end: Date.parse(booking.end),
+                  description: event.description ?? undefined,
+                  location: locationText(booking.location, ui, t(': ')),
+                }}
+              />
+            )}
+          {(canCancel || (!manageToken && replayed)) && (
+            <div className="alert alert-info">
+              {!manageToken && replayed && (
+                <p>
+                  {t(
+                    canCancel
+                      ? 'This booking was already made by an earlier attempt, so its link can’t be shown again.'
+                      : 'This booking was already made by an earlier attempt, so its link to change or cancel can’t be shown again. Use the link in your confirmation email instead.',
+                  )}
+                </p>
               )}
-            </p>
-          </div>
-        ) : null}
+              {canCancel && (
+                <p>
+                  {text(
+                    manageToken
+                      ? 'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use “Cancel booking” here.'
+                      : 'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use the booking link in your Hourmere confirmation email.',
+                  )}
+                </p>
+              )}
+              {manageToken && (
+                <Link
+                  className="button button-small"
+                  to={`/booking#token=${encodeURIComponent(manageToken)}&action=cancel`}
+                  target={embedded ? '_blank' : undefined}
+                  rel={embedded ? 'noopener noreferrer' : undefined}
+                >
+                  {t('Cancel booking')}
+                </Link>
+              )}
+            </div>
+          )}
+        </div>
+        {manageToken && (
+          <ManageLink token={manageToken} intro={t('Use this link to reschedule or cancel.')} />
+        )}
         <CreateBookingLink />
       </div>
     </PublicLayout>

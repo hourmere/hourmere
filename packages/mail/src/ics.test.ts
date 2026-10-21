@@ -1,6 +1,12 @@
 import ICAL from 'ical.js'
 import { describe, expect, it } from 'vitest'
-import { buildIcs, foldIcsLine, type IcsEvent, icsAttachment } from './ics.ts'
+import {
+  buildIcs,
+  calendarResponseDescription,
+  foldIcsLine,
+  type IcsEvent,
+  icsAttachment,
+} from './ics.ts'
 
 const base: IcsEvent = {
   method: 'REQUEST',
@@ -155,6 +161,64 @@ describe('buildIcs', () => {
     expect(attendees.map((a) => a.getParameter('partstat'))).toEqual(['ACCEPTED', 'ACCEPTED'])
   })
 
+  it('round-trips delegated organizers and explicit participant response states', () => {
+    const ics = buildIcs({
+      ...base,
+      organizer: { ...base.organizer, sentBy: 'calendar@selfhosted.example' },
+      attendees: [
+        { ...base.organizer, role: 'CHAIR', partstat: 'ACCEPTED', rsvp: false },
+        { name: 'Ada Lovelace', email: 'ada@example.com', partstat: 'NEEDS-ACTION', rsvp: true },
+      ],
+    })
+    expectWellFormed(ics)
+    expect(contentLines(ics)).toContain(
+      'ORGANIZER;CN="Grace Hopper";SENT-BY="mailto:calendar@selfhosted.example":mailto:grace@example.com',
+    )
+    const { event } = parse(ics)
+    expect(event.getFirstProperty('organizer')?.getParameter('sent-by')).toBe(
+      'mailto:calendar@selfhosted.example',
+    )
+    const attendees = event.getAllProperties('attendee')
+    expect(attendees.map((a) => a.getParameter('role'))).toEqual(['CHAIR', 'REQ-PARTICIPANT'])
+    expect(attendees.map((a) => a.getParameter('partstat'))).toEqual(['ACCEPTED', 'NEEDS-ACTION'])
+    expect(attendees.map((a) => a.getParameter('rsvp'))).toEqual(['FALSE', 'TRUE'])
+  })
+
+  it('keeps SENT-BY quoted and removes controls before it can introduce a property', () => {
+    const ics = buildIcs({
+      ...base,
+      organizer: {
+        ...base.organizer,
+        sentBy: 'relay@example.com";X-UNTRUSTED=1\r\nATTENDEE:mailto:extra@example.com',
+      },
+    })
+    expectWellFormed(ics)
+    const { event } = parse(ics)
+    expect(event.getAllProperties('attendee')).toHaveLength(1)
+    const organizer = event.getFirstProperty('organizer')
+    expect(organizer?.getParameter('x-untrusted')).toBeUndefined()
+    expect(decodeURIComponent(organizer?.getParameter('sent-by') as string)).toBe(
+      'mailto:relay@example.com";X-UNTRUSTED=1ATTENDEE:mailto:extra@example.com',
+    )
+  })
+
+  it('encodes mailbox punctuation as URI data for organizers, sent-by and attendees', () => {
+    const email = 'calendar#?%&/=+tag@example.com'
+    const encoded = 'mailto:calendar%23%3F%25%26%2F%3D+tag@example.com'
+    const ics = buildIcs({
+      ...base,
+      organizer: { name: 'Calendar', email, sentBy: email },
+      attendees: [{ name: 'Calendar', email }],
+    })
+    expectWellFormed(ics)
+    const { event } = parse(ics)
+    const organizer = event.getFirstProperty('organizer')
+    expect(organizer?.getFirstValue()).toBe(encoded)
+    expect(organizer?.getParameter('sent-by')).toBe(encoded)
+    expect(event.getFirstPropertyValue('attendee')).toBe(encoded)
+    expect(decodeURIComponent(organizer?.getFirstValue() as string)).toBe(`mailto:${email}`)
+  })
+
   it('survives every special character at once', () => {
     const nasty = 'A "quote", a; semicolon: colon \\ backslash\n\ttab, 😀 emoji, 中文, end'
     const ics = buildIcs({
@@ -206,5 +270,54 @@ describe('icsAttachment', () => {
       filename: 'cancel.ics',
       contentType: 'text/calendar; method=CANCEL; charset=UTF-8',
     })
+  })
+})
+
+describe('calendarResponseDescription', () => {
+  it.each([
+    [
+      'invitee',
+      'en',
+      'Accepting or declining this calendar invitation does not cancel the booking. To cancel, use the link in your Hourmere confirmation email.',
+    ],
+    [
+      'host',
+      'en',
+      'Accepting or declining this calendar invitation does not cancel the booking. To cancel, open the booking in Hourmere.',
+    ],
+    [
+      'guest',
+      'en',
+      'Accepting or declining this calendar invitation does not cancel the booking. To cancel, contact the person who booked or the host.',
+    ],
+    [
+      'invitee',
+      'zh-CN',
+      '在日历中接受或拒绝邀请不会取消预约。如需取消，请使用 Hourmere 确认邮件中的取消链接。',
+    ],
+    ['host', 'zh-CN', '在日历中接受或拒绝邀请不会取消预约。如需取消，请在 Hourmere 中打开此预约。'],
+    ['guest', 'zh-CN', '在日历中接受或拒绝邀请不会取消预约。如需取消，请联系预约人或主持人。'],
+  ] as const)('provides secret-free %s calendar guidance in %s', (role, locale, expected) => {
+    const description = calendarResponseDescription(role, locale)
+    expect(description).toBe(expected)
+    expect(/https?:|token|#|\bmanage\b/i.test(description)).toBe(false)
+    const ics = buildIcs({ ...base, description })
+    expectWellFormed(ics)
+    expect(parse(ics).event.getFirstPropertyValue('description')).toBe(expected)
+  })
+
+  it('normalizes recipient locales and falls back to English', () => {
+    for (const role of ['invitee', 'host', 'guest'] as const) {
+      for (const locale of ['zh', 'zh-Hans-SG']) {
+        expect(calendarResponseDescription(role, locale)).toBe(
+          calendarResponseDescription(role, 'zh-CN'),
+        )
+      }
+      for (const locale of [undefined, null, 'en-GB', 'zh-TW', 'fr', 'invalid_locale']) {
+        expect(calendarResponseDescription(role, locale)).toBe(
+          calendarResponseDescription(role, 'en'),
+        )
+      }
+    }
   })
 })

@@ -1,5 +1,6 @@
 // Making text from bookings (names, answers, reasons: all typed by someone else) safe to put
 // into an email header, a plain-text body or HTML.
+import { type InterfaceLanguage, spaceCjkBoundaries } from '@hourmere/core/language'
 
 // C0 and C1 control characters, line and paragraph separators, and bidi embedding, override
 // and isolate characters, which can make text read differently from what it contains.
@@ -32,6 +33,19 @@ export function subjectLine(text: string, max = 200): string {
   return line.length <= max ? line : `${line.slice(0, max - 1).trimEnd()}…`
 }
 
+/** Space Han/Latin substitution boundaries without rewriting the user's text itself. */
+export function formatChineseTemplate(template: string, values: Record<string, string>): string {
+  return template.replace(/\{(\w+)\}/g, (placeholder, name: string, offset: number) => {
+    const value = values[name]
+    if (value === undefined) return placeholder
+    return spaceCjkBoundaries(
+      template.slice(0, offset),
+      value,
+      template.slice(offset + placeholder.length),
+    )
+  })
+}
+
 export function escapeHtml(text: string): string {
   return text
     .replaceAll('&', '&amp;')
@@ -39,6 +53,17 @@ export function escapeHtml(text: string): string {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#39;')
+}
+
+/** Escape visible email text, widening double quotes in Chinese but preserving apostrophes. */
+export function emailText(text: string, language: InterfaceLanguage): string {
+  const escaped = escapeHtml(text)
+  if (language !== 'zh-CN') return escaped
+  return escaped.replace(
+    /[“”]/g,
+    (quote) =>
+      `<span class="cjk-quote" style="font-family: &quot;PingFang SC&quot;,&quot;Hiragino Sans GB&quot;,&quot;Microsoft YaHei&quot;,&quot;Noto Sans CJK SC&quot;,&quot;Source Han Sans SC&quot;,sans-serif; font-variant-east-asian: full-width; font-feature-settings: 'fwid';">${quote}</span>`,
+  )
 }
 
 /** A URL that may be linked: absolute http(s) only, so no `javascript:` or `data:` links. */

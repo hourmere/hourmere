@@ -1,13 +1,9 @@
-import { randomBytes } from 'node:crypto'
+import { createHash, createHmac, randomBytes } from 'node:crypto'
 import { createServer as createHttpServer, type Server } from 'node:http'
-import {
-  createConnection,
-  createServer as createProbe,
-  type Server as SocketServer,
-} from 'node:net'
+import { createServer as createTcpServer } from 'node:net'
 import { fileURLToPath } from 'node:url'
 import { test as base, expect, type FrameLocator, type Locator, type Page } from '@playwright/test'
-import { type RunningServer, startServer } from '../../apps/server/src/server.ts'
+import type { RunningServer } from '../../apps/server/src/server.ts'
 import { createAuth, createAuthPool } from '../../packages/auth/src/index.ts'
 import { writeBookingCalendar } from '../../packages/calendars/src/booking-events.ts'
 import { writeBookingConference } from '../../packages/calendars/src/conferences.ts'
@@ -17,35 +13,32 @@ import { tokenAad } from '../../packages/calendars/src/index.ts'
 import { fakeGoogle, TEST_CALENDAR_KEY } from '../../packages/calendars/src/testing.ts'
 import { createDb, createPool } from '../../packages/db/src/index.ts'
 import { createTestDatabase } from '../../packages/db/src/testing.ts'
+import { icsHasLocation, textHasUrl } from '../../packages/mail/src/booking-link-testing.ts'
 import type { MailMessage } from '../../packages/mail/src/index.ts'
 import {
   dispatchConferenceNotifications,
   sendBookingNotification,
 } from '../../packages/notifications/src/index.ts'
 import { createFixtures } from '../../packages/scheduling/src/testing.ts'
+import {
+  AUDIT_BOOKING_END,
+  AUDIT_BOOKING_START,
+  AUDIT_DESCRIPTION,
+  AUDIT_EMAIL,
+  AUDIT_NOW,
+  AUDIT_TITLE,
+  type AuditFixtureState,
+} from './audit-data.ts'
+import { startFixtureServer } from './fixture-server.ts'
+import { listenOwned, type OwnedListener } from './listeners.ts'
 
-async function listenLoopback(server: SocketServer): Promise<number> {
-  while (true) {
-    await new Promise<void>((resolve, reject) => {
-      server.once('error', reject)
-      server.listen(0, '127.0.0.1', () => {
-        server.off('error', reject)
-        resolve()
-      })
-    })
-    const address = server.address()
-    if (!address || typeof address === 'string') throw new Error('No fixture port')
-    if (![3000, 3998].includes(address.port)) return address.port
-    await new Promise<void>((resolve, reject) =>
-      server.close((error) => (error ? reject(error) : resolve())),
-    )
-  }
-}
-
-interface FixtureApp {
+export interface FixtureApp {
   url: string
   parentUrl: string
   personalPath: string
+  auditState: () => Promise<AuditFixtureState>
+  auditSignIn: (signedIn: boolean) => Promise<void>
+  auditOAuthQuery: () => Promise<string>
   teamPath: string
   collectivePath: string
   meetPath: string
@@ -62,6 +55,10 @@ interface FixtureApp {
   advanceMeet: (state: 'pending' | 'success' | 'failure' | 'lost') => Promise<void>
   meetState: () => Promise<{
     imports: number
+    privateImports: boolean
+    conferencePatches: number
+    conferenceSafe: boolean
+    deletes: number
     rows: number
     requests: number
     cancellations: number
@@ -84,14 +81,19 @@ interface FixtureApp {
     originalFingerprintPreserved: boolean
   }>
 }
+export interface FixtureOptions {
+  uiAudit: boolean
+}
 export const test = base.extend<{
   app: FixtureApp
   suppressFailureDom: undefined
   automaticMeet: boolean
   multiHostMeet: boolean
+  uiAudit: boolean
 }>({
   automaticMeet: [false, { option: true }],
   multiHostMeet: [false, { option: true }],
+  uiAudit: [false, { option: true }],
   suppressFailureDom: [
     async ({ context }, use, testInfo) => {
       // Depending on context runs this teardown before its artifact finalization.
@@ -106,7 +108,7 @@ export const test = base.extend<{
     },
     { auto: true },
   ],
-  app: async ({ context, automaticMeet, multiHostMeet }, use) => {
+  app: async ({ context, automaticMeet, multiHostMeet, uiAudit }, use) => {
     const bootstrap = process.env.HOURMERE_E2E_BOOTSTRAP_URL
     if (!bootstrap)
       throw new Error(
@@ -115,15 +117,10 @@ export const test = base.extend<{
     const owned = await createTestDatabase(bootstrap)
     let app: RunningServer | undefined, parent: Server | undefined
     let authPool: ReturnType<typeof createAuthPool> | undefined
-    const ownedPorts: number[] = []
+    let appListener: OwnedListener | undefined, parentListener: OwnedListener | undefined
     try {
-      const probe = createProbe()
-      const port = await listenLoopback(probe)
-      ownedPorts.push(port)
-      await new Promise<void>((resolve, reject) =>
-        probe.close((error) => (error ? reject(error) : resolve())),
-      )
-      const url = `http://127.0.0.1:${port}`,
+      appListener = await listenOwned(createTcpServer({ allowHalfOpen: true }))
+      const url = appListener.url,
         db = createDb(owned.pool),
         f = createFixtures(db),
         host = await f.host({ handle: 'fixture-host', name: 'Fixture Host', timeZone: 'UTC' })
@@ -132,42 +129,74 @@ export const test = base.extend<{
         sent: MailMessage[] = []
       let meetResponse: 'pending' | 'success' | 'failure' | 'lost' = 'pending'
       const join = 'https://meet.google.com/abc-defg-hij'
-      const conferenceData = () => ({
-        createRequest: {
-          status: { statusCode: meetResponse === 'lost' ? 'pending' : meetResponse },
-        },
-        conferenceSolution: { key: { type: 'hangoutsMeet' } },
-        ...(meetResponse === 'success' && {
-          entryPoints: [{ entryPointType: 'video', uri: join }],
-        }),
-      })
+      const conferenceRequests = new Map<string, { requestId: string; polls: number }>()
       let loseMirror = false
       provider.controls.eventHook = async (target, init) => {
         const values = provider.controls.storedEvents,
           calendar = decodeURIComponent(target.pathname.split('/')[4] as string)
-        const describe = (value: Record<string, unknown>) => ({
-          ...value,
-          ...(value.conferenceData ? { conferenceData: conferenceData() } : {}),
-        })
+        const describe = (value: Record<string, unknown>, poll = false) => {
+          const request = conferenceRequests.get(String(value.id))
+          if (!request) return value
+          if (poll) request.polls++
+          const status = request.polls > 0 && meetResponse !== 'lost' ? meetResponse : 'pending'
+          return {
+            ...value,
+            conferenceData: {
+              createRequest: { requestId: request.requestId, status: { statusCode: status } },
+              ...(status === 'success'
+                ? {
+                    conferenceSolution: { key: { type: 'hangoutsMeet' } },
+                    entryPoints: [{ entryPointType: 'video', uri: join }],
+                  }
+                : {}),
+            },
+          }
+        }
         if (init.method === 'POST') {
           const input = JSON.parse(String(init.body)),
             value = {
               ...input,
               id: multiHostMeet ? `fixture-${calendar}` : 'fixture-meet-event',
+              etag: '"v1"',
               fixtureCalendar: calendar,
-              ...(input.conferenceData ? { conferenceData: conferenceData() } : {}),
+              // Reproduce Google: an import createRequest is accepted but stays
+              // pending forever. Only a later conference PATCH starts progress.
+              ...(input.conferenceData
+                ? {
+                    conferenceData: {
+                      createRequest: {
+                        ...input.conferenceData.createRequest,
+                        status: { statusCode: 'pending' },
+                      },
+                    },
+                  }
+                : {}),
             }
           values.set(value.id, value)
-          if (
-            (input.conferenceData && meetResponse === 'lost') ||
-            (!input.conferenceData && loseMirror)
-          )
+          const ordinaryCopy = input.location === join
+          if ((!ordinaryCopy && meetResponse === 'lost') || (ordinaryCopy && loseMirror))
             throw new TypeError('Synthetic lost provider response')
           return Response.json(value)
         }
         const id = target.pathname.split('/').at(-1) as string
         if (init.method === 'PATCH') {
-          const value = describe({ ...values.get(id), ...JSON.parse(String(init.body)), id })
+          const previous = values.get(id)
+          if (!previous) return Response.json({}, { status: 404 })
+          if (new Headers(init.headers).get('if-match') !== previous.etag)
+            return Response.json({}, { status: 412 })
+          const input = JSON.parse(String(init.body))
+          if (input.conferenceData) {
+            const requestId = input.conferenceData.createRequest.requestId
+            const previousRequest = conferenceRequests.get(id)
+            if (!previousRequest || previousRequest.requestId !== requestId)
+              conferenceRequests.set(id, { requestId, polls: 0 })
+          }
+          const value = describe({
+            ...previous,
+            ...input,
+            id,
+            etag: `"v${provider.calls.filter((call) => call.init.method === 'PATCH').length + 1}"`,
+          })
           values.set(id, value)
           return Response.json(value)
         }
@@ -179,10 +208,10 @@ export const test = base.extend<{
                   v.iCalUID === target.searchParams.get('iCalUID') &&
                   v.fixtureCalendar === calendar,
               )
-              .map(describe),
+              .map((value) => describe(value, true)),
           })
         const value = values.get(id)
-        return value ? Response.json(describe(value)) : Response.json({}, { status: 404 })
+        return value ? Response.json(describe(value, true)) : Response.json({}, { status: 404 })
       }
       if (automaticMeet) {
         const account = 'fixture-google-account'
@@ -338,6 +367,17 @@ export const test = base.extend<{
         .values({ event_type_id: roundId, enabled: true })
         .execute()
       parent = createHttpServer((request, response) => {
+        if (
+          uiAudit &&
+          process.env.CI &&
+          new URL(request.url ?? '/', 'http://localhost').pathname === '/axe-canary'
+        ) {
+          response.setHeader('Content-Type', 'text/html; charset=utf-8')
+          response.end(
+            '<!doctype html><html lang="en"><head><title>Axe pipeline canary</title></head><body><main><h1>Axe pipeline canary</h1><button class="axe-canary-button"></button><img class="axe-canary-image" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw=="></main></body></html>',
+          )
+          return
+        }
         const language = new URL(request.url ?? '/', 'http://localhost').searchParams.get(
           'language',
         )
@@ -362,18 +402,16 @@ export const test = base.extend<{
           `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Fixture website</title><button type="button" data-hourmere-popup${languageAttribute} data-hourmere-url="${url}${bookingPath}">Book a meeting</button><div data-hourmere-inline${languageAttribute} data-hourmere-url="${url}${bookingPath}"></div><script src="/parent.js" defer></script><script src="${url}/hourmere-embed.js" defer></script>`,
         )
       })
-      const parentPort = await listenLoopback(parent)
-      ownedPorts.push(parentPort)
-      const parentUrl = `http://127.0.0.1:${parentPort}`
+      parentListener = await listenOwned(parent)
+      const parentUrl = parentListener.url
       const authSecret = randomBytes(32).toString('base64')
-      app = await startServer({
+      app = await startFixtureServer(appListener, {
         DATABASE_URL: owned.url,
-        PORT: String(port),
-        PUBLIC_URL: url,
         BETTER_AUTH_SECRET: authSecret,
         SIGNUP: 'closed',
         HOURMERE_ROLE: 'web',
         EMBED_ALLOWED_ORIGINS: parentUrl,
+        ...(uiAudit && { MCP_OAUTH_ENABLED: 'true' }),
         ...(automaticMeet && {
           GOOGLE_MEET_ENABLED: 'true',
           GOOGLE_CALENDAR_CLIENT_ID: 'synthetic-client',
@@ -405,10 +443,168 @@ export const test = base.extend<{
         }
       })
       const firstFingerprints = new Map<string, Buffer>()
+      let auditState: AuditFixtureState | undefined
+      let auditCookie: string | undefined
+      let auditOAuthQuery: string | undefined
       await use({
         url,
         parentUrl,
         personalPath: '/fixture-host/call',
+        auditState: async () => {
+          if (auditState) return auditState
+          const eventTypeId = await f.eventType(host.organizationId, host.userId, {
+            slug: 'layout-audit',
+            title: AUDIT_TITLE,
+            description: AUDIT_DESCRIPTION,
+            minimumNoticeMinutes: 30,
+          })
+          await f.eventType(team, null, {
+            slug: 'layout-audit',
+            title: AUDIT_TITLE,
+            description: AUDIT_DESCRIPTION,
+            minimumNoticeMinutes: 30,
+            hosts: [{ userId: host.userId }],
+          })
+          const schedule = await db
+            .selectFrom('schedules')
+            .select('id')
+            .where('user_id', '=', host.userId)
+            .where('is_default', '=', true)
+            .executeTakeFirstOrThrow()
+          await db
+            .updateTable('schedules')
+            .set({ name: 'Synthetic working hours' })
+            .where('id', '=', schedule.id)
+            .execute()
+          await db
+            .updateTable('auth.user')
+            .set({ email: 'synthetic-host@hourmere.invalid' })
+            .where('id', '=', host.userId)
+            .execute()
+          await db
+            .updateTable('auth.organization')
+            .set({ name: 'Synthetic organization' })
+            .where('id', '=', host.organizationId)
+            .execute()
+          const bookingId = await f.booking(
+            host.organizationId,
+            [host.userId],
+            AUDIT_BOOKING_START,
+            AUDIT_BOOKING_END,
+            {
+              eventTypeId,
+              attendee: { name: 'Synthetic long-email invitee', email: AUDIT_EMAIL },
+            },
+          )
+          const manageToken = randomBytes(32).toString('base64url')
+          await db
+            .updateTable('bookings')
+            .set({
+              title: AUDIT_TITLE,
+              created_at: AUDIT_NOW,
+              manage_token_hash: createHash('sha256').update(manageToken).digest(),
+            })
+            .where('id', '=', bookingId)
+            .execute()
+          auditState = {
+            organizationId: host.organizationId,
+            eventTypeId,
+            scheduleId: schedule.id,
+            bookingId,
+            manageToken,
+            bookingPath: '/fixture-host/layout-audit',
+            teamBookingPath: '/team/FixtureTeam/layout-audit',
+          }
+          return auditState
+        },
+        auditSignIn: async (signedIn) => {
+          // Audit pages exercise the same browser-session endpoints as people do.
+          // No API-key header remains when switching back to a public/sign-in state.
+          authorization = undefined
+          if (!signedIn) {
+            await context.clearCookies({ name: 'better-auth.session_token' })
+            return
+          }
+          if (!auditCookie) {
+            const token = randomBytes(24).toString('base64url')
+            await db
+              .insertInto('auth.session')
+              .values({
+                userId: host.userId,
+                activeOrganizationId: host.organizationId,
+                token,
+                updatedAt: new Date(),
+                expiresAt: new Date(
+                  Math.max(Date.now(), uiAudit ? Date.parse(AUDIT_NOW) : 0) + 86_400_000,
+                ),
+              })
+              .execute()
+            auditCookie = encodeURIComponent(
+              `${token}.${createHmac('sha256', authSecret).update(token).digest('base64')}`,
+            )
+          }
+          await context.addCookies([
+            {
+              name: 'better-auth.session_token',
+              value: auditCookie,
+              url,
+              httpOnly: true,
+              sameSite: 'Lax',
+            },
+          ])
+        },
+        auditOAuthQuery: async () => {
+          if (auditOAuthQuery) return auditOAuthQuery
+          if (!uiAudit) throw new Error('OAuth audit requires the UI audit fixture')
+          // Each test owns its database, but Better Auth's registration limiter is
+          // process-wide. Seed public client metadata rather than spending the
+          // five-per-minute DCR budget for every viewport in the same worker.
+          const clientId = 'synthetic-ui-audit-client'
+          await db
+            .insertInto('auth.oauthClient')
+            .values({
+              clientId,
+              name: 'Synthetic audit connector',
+              redirectUris: JSON.stringify(['https://hourmere.invalid/callback']),
+              grantTypes: JSON.stringify(['authorization_code', 'refresh_token']),
+              responseTypes: JSON.stringify(['code']),
+              scopes: JSON.stringify(['mcp:tools', 'offline_access']),
+              tokenEndpointAuthMethod: 'none',
+              applicationType: 'web',
+              requirePKCE: true,
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            })
+            .execute()
+          await db
+            .insertInto('auth.oauthClientResource')
+            .values({ clientId, resourceId: `${url}/mcp`, createdAt: new Date() })
+            .execute()
+          const query = new URLSearchParams({
+            client_id: clientId,
+            redirect_uri: 'https://hourmere.invalid/callback',
+            response_type: 'code',
+            scope: 'mcp:tools offline_access',
+            resource: `${url}/mcp`,
+            code_challenge: 'A'.repeat(43),
+            code_challenge_method: 'S256',
+            state: 'synthetic-ui-audit',
+          })
+          const continued = await fetch(`${url}/api/auth/oauth2/authorize?${query}`, {
+            redirect: 'manual',
+          })
+          // fetch requests receive JSON; browser navigations receive a 302.
+          const continuation = continued.status === 200 ? await continued.json() : undefined
+          const location =
+            continued.headers.get('location') ?? continuation?.url ?? continuation?.redirect_uri
+          if (![200, 302].includes(continued.status) || typeof location !== 'string')
+            throw new Error('Could not prepare synthetic connector')
+          const selection = new URL(location, url)
+          if (selection.origin !== url || selection.pathname !== '/oauth/authorize')
+            throw new Error('Unexpected synthetic connector continuation')
+          auditOAuthQuery = selection.search
+          return auditOAuthQuery
+        },
         teamPath: '/team/FixtureTeam/call',
         collectivePath: '/team/FixtureTeam/collective',
         meetPath: '/fixture-host/meet',
@@ -481,10 +677,25 @@ export const test = base.extend<{
             },
           }
           for (const intent of intents) {
-            await writeBookingConference(
-              { db, google: { client: provider.client, encryptionKey: TEST_CALENDAR_KEY } },
-              intent.root_booking_id,
-            )
+            // The fake provider needs one read after the conference PATCH. Drive
+            // that transition without a wall-clock wait when readiness is requested.
+            for (let attempt = 0; attempt < 2; attempt++) {
+              await writeBookingConference(
+                { db, google: { client: provider.client, encryptionKey: TEST_CALENDAR_KEY } },
+                intent.root_booking_id,
+              )
+              const current = await db
+                .selectFrom('booking_conferences')
+                .select('state')
+                .where('root_booking_id', '=', intent.root_booking_id)
+                .executeTakeFirstOrThrow()
+              if (current.state !== 'pending' || state === 'pending' || state === 'lost') break
+              await db
+                .updateTable('booking_conferences')
+                .set({ next_attempt_at: new Date() })
+                .where('root_booking_id', '=', intent.root_booking_id)
+                .execute()
+            }
             await writeBookingCalendar(
               { db, google: { client: provider.client, encryptionKey: TEST_CALENDAR_KEY } },
               intent.root_booking_id,
@@ -502,7 +713,7 @@ export const test = base.extend<{
         meetState: async () => {
           const intents = await db
             .selectFrom('booking_conferences')
-            .select(['root_booking_id', 'booking_id'])
+            .select(['root_booking_id', 'booking_id', 'request_id', 'external_event_id'])
             .execute()
           const requests = sent.filter((message) =>
             message.attachments?.some((attachment) =>
@@ -512,10 +723,43 @@ export const test = base.extend<{
           const eventUids = [...provider.controls.storedEvents.values()].map(
             (event) => event.iCalUID,
           )
+          const imports = provider.calls.filter(
+            (call) => call.init.method === 'POST' && call.url.pathname.endsWith('/import'),
+          )
+          const conferences = provider.calls.filter(
+            (call) =>
+              call.init.method === 'PATCH' && JSON.parse(String(call.init.body)).conferenceData,
+          )
           return {
-            imports: provider.calls.filter(
-              (call) => call.init.method === 'POST' && call.url.pathname.endsWith('/import'),
-            ).length,
+            imports: imports.length,
+            privateImports: imports.every((call) => {
+              const body = JSON.parse(String(call.init.body))
+              return (
+                call.url.search === '' &&
+                !Object.hasOwn(body, 'attendees') &&
+                !Object.hasOwn(body, 'conferenceData')
+              )
+            }),
+            conferencePatches: conferences.length,
+            conferenceSafe: conferences.every((call) => {
+              const body = JSON.parse(String(call.init.body)),
+                request = body.conferenceData.createRequest
+              return (
+                Object.keys(body).join() === 'conferenceData' &&
+                Object.keys(body.conferenceData).join() === 'createRequest' &&
+                Object.keys(request).sort().join() === 'conferenceSolutionKey,requestId' &&
+                Object.keys(request.conferenceSolutionKey).join() === 'type' &&
+                request.conferenceSolutionKey.type === 'hangoutsMeet' &&
+                intents.some(
+                  (intent) =>
+                    request.requestId === intent.request_id &&
+                    call.url.pathname.endsWith(`/events/${intent.external_event_id}`),
+                ) &&
+                call.url.search === '?sendUpdates=none&conferenceDataVersion=1' &&
+                Boolean(new Headers(call.init.headers).get('if-match'))
+              )
+            }),
+            deletes: provider.calls.filter((call) => call.init.method === 'DELETE').length,
             rows: intents.length,
             requests: requests.length,
             cancellations: sent.filter((message) =>
@@ -524,13 +768,15 @@ export const test = base.extend<{
               ),
             ).length,
             failures: sent.filter((message) =>
-              message.subject.startsWith('Meeting link needs attention'),
+              ['Meeting link needs attention:', '会议链接需要处理：'].some((prefix) =>
+                message.subject.startsWith(prefix),
+              ),
             ).length,
             linkedRequests: requests.every(
               (message) =>
-                message.text.includes(join) &&
+                textHasUrl(message.text, join) &&
                 message.attachments?.every((attachment) =>
-                  String(attachment.content).includes(join),
+                  icsHasLocation(attachment.content, join),
                 ),
             ),
             rootUidPreserved:
@@ -645,14 +891,13 @@ export const test = base.extend<{
     } finally {
       try {
         try {
-          if (parent?.listening) {
-            parent.closeAllConnections()
-            await new Promise<void>((resolve, reject) =>
-              parent?.close((error) => (error ? reject(error) : resolve())),
-            )
-          }
+          await parentListener?.close()
         } finally {
-          await app?.close()
+          try {
+            await app?.close()
+          } finally {
+            await appListener?.close()
+          }
         }
       } finally {
         try {
@@ -671,26 +916,11 @@ export const test = base.extend<{
           } finally {
             await verification.end()
           }
-          for (const port of ownedPorts) {
-            const closed = await new Promise<boolean>((resolve) => {
-              const socket = createConnection({ host: '127.0.0.1', port })
-              socket.once('connect', () => {
-                socket.destroy()
-                resolve(false)
-              })
-              socket.once('error', (error) => {
-                resolve((error as NodeJS.ErrnoException).code === 'ECONNREFUSED')
-              })
-              socket.setTimeout(1000, () => {
-                socket.destroy()
-                resolve(false)
-              })
-            })
-            expect(closed, 'The helper-owned listener must be closed').toBe(true)
-          }
-          console.log('Fixture cleanup verified: database absent and owned listeners closed')
+          await appListener?.assertClosed()
+          await parentListener?.assertClosed()
         }
       }
+      console.log('Fixture cleanup verified: database absent and owned listeners closed')
     }
   },
 })

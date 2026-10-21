@@ -1,18 +1,18 @@
-# Self-hosting: copy .env.example to .env, set POSTGRES_PASSWORD, BETTER_AUTH_SECRET and
-# PUBLIC_URL (optionally SMTP and Google/Microsoft sign-in), then
-#   docker compose up -d
+# Self-hosting: ./scripts/setup.sh creates a private .env, then
+#   docker compose up -d --build --wait
+# The optional docker-compose.proxy.yml adds Caddy HTTPS (selected by setup.sh).
 # The app listens on 127.0.0.1:3000; put a reverse proxy with TLS in front of it. Until SMTP
 # is configured, sign-in links are printed by `docker compose logs app`. With the default
 # SIGNUP=first-user, sign in right after the first start: the first account should be yours.
-# Background jobs (booking emails) run inside `app` unless you split them out (the `worker`
-# service below).
+# Background jobs run inside `app` unless COMPOSE_FILE in .env also selects
+# docker-compose.worker.yml, which runs them in a separate worker.
 name: hourmere
 
 services:
   app:
     build: .
-    # Built here, never pulled; the optional worker below runs the same image.
-    image: hourmere:local
+    # Built here, never pulled; the optional worker overlay runs the same image.
+    image: ${APP_IMAGE:-hourmere:local}
     pull_policy: never
     environment:
       # The password stays out of the URL so it may contain any characters (/, #, ?, …);
@@ -21,9 +21,12 @@ services:
       PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:3000}
       HOSTED_SIGNUP_URL: ${HOSTED_SIGNUP_URL:-https://hourmere.com}
+      PRIVACY_POLICY_URL: ${PRIVACY_POLICY_URL:-}
+      TERMS_URL: ${TERMS_URL:-}
       EMBED_ALLOWED_ORIGINS: ${EMBED_ALLOWED_ORIGINS:-}
       WEBHOOKS_ENABLED: ${WEBHOOKS_ENABLED:-false}
       WEBHOOK_ENCRYPTION_KEY: ${WEBHOOK_ENCRYPTION_KEY:-}
+      WEBHOOK_PRIVATE_TARGETS: ${WEBHOOK_PRIVATE_TARGETS:-}
       MCP_OAUTH_ENABLED: ${MCP_OAUTH_ENABLED:-false}
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set BETTER_AUTH_SECRET in .env (openssl rand -base64 32)}
       SMTP_URL: ${SMTP_URL:-}
@@ -38,6 +41,7 @@ services:
       MICROSOFT_CALENDAR_CLIENT_SECRET: ${MICROSOFT_CALENDAR_CLIENT_SECRET:-}
       ZOOM_CLIENT_ID: ${ZOOM_CLIENT_ID:-}
       ZOOM_CLIENT_SECRET: ${ZOOM_CLIENT_SECRET:-}
+      ZOOM_WEBHOOK_SECRET_TOKEN: ${ZOOM_WEBHOOK_SECRET_TOKEN:-}
       CONFERENCE_ENCRYPTION_KEY: ${CONFERENCE_ENCRYPTION_KEY:-}
       CALENDAR_ENCRYPTION_KEY: ${CALENDAR_ENCRYPTION_KEY:-}
       MICROSOFT_CLIENT_ID: ${MICROSOFT_CLIENT_ID:-}
@@ -60,19 +64,6 @@ services:
     # Allow a 10 s HTTP drain, 20 s job drain and 5 s margin before Docker kills it.
     stop_grace_period: 35s
     restart: unless-stopped
-
-  # To run background jobs in a container of their own (same image), set HOURMERE_ROLE=web
-  # in .env and uncomment this service. Its port stays unpublished: it only answers the
-  # health check.
-  # worker:
-  #   extends: app
-  #   build: !reset null
-  #   environment:
-  #     HOURMERE_ROLE: worker
-  #   ports: !reset []
-  #   depends_on:
-  #     db:
-  #       condition: service_healthy
 
   db:
     image: postgres:18-alpine

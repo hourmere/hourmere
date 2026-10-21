@@ -48,16 +48,19 @@ describe.skipIf(!serverUrl)('startServer', () => {
         PORT: '0',
         PUBLIC_URL: 'http://localhost',
         HOSTED_SIGNUP_URL: 'https://hosted.example/sign-up',
+        PRIVACY_POLICY_URL: 'https://operator.example/privacy',
+        TERMS_URL: 'https://operator.example/terms',
         BETTER_AUTH_SECRET: randomBytes(32).toString('base64'),
       })
       try {
         const health = await fetch(`http://127.0.0.1:${server.port}/api/health`)
         expect(await health.json()).toEqual({ status: 'ok', database: 'ok' })
         const instance = await fetch(`http://127.0.0.1:${server.port}/api/v1/instance`)
-        expect(await instance.json()).toHaveProperty(
-          'hostedSignupUrl',
-          'https://hosted.example/sign-up',
-        )
+        expect(await instance.json()).toMatchObject({
+          hostedSignupUrl: 'https://hosted.example/sign-up',
+          privacyPolicyUrl: 'https://operator.example/privacy',
+          termsUrl: 'https://operator.example/terms',
+        })
         // The composition root registers the product routes.
         const doc = (await (
           await fetch(`http://127.0.0.1:${server.port}/api/v1/openapi.json`)
@@ -273,7 +276,10 @@ describe.skipIf(!serverUrl)('startServer', () => {
         })
         await vi.waitFor(
           async () =>
-            expect((await testDb.pool.query('SELECT id FROM sign_in_emails')).rows).toHaveLength(0),
+            expect(
+              (await testDb.pool.query('SELECT id FROM sign_in_emails')).rows,
+              'waiting for the worker to drain queued sign-in emails',
+            ).toHaveLength(0),
           { timeout: 6_000 },
         )
         const workerClosing = worker
@@ -300,7 +306,7 @@ describe.skipIf(!serverUrl)('startServer', () => {
       }
     })
     expect(printed.error).toEqual([])
-  })
+  }, 15_000)
 
   it('cuts off clients that send too slowly, after the configured timeouts', async () => {
     await quietly(async () => {

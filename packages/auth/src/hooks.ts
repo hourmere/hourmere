@@ -12,6 +12,52 @@ const ID_FIELDS = ['id', 'userId', 'organizationId', 'memberId', 'invitationId',
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === 'object' && v !== null && !Array.isArray(v)
 
+const SOCIAL_AUTHORIZATION_FIELDS = new Set([
+  'provider',
+  'callbackURL',
+  'errorCallbackURL',
+  'newUserCallbackURL',
+  'disableRedirect',
+])
+
+/** Keep the provider grant fixed even when a caller bypasses the web UI. */
+function requireSocialAuthorizationRequest(ctx: AuthMiddlewareContext) {
+  if (ctx.path !== '/sign-in/social' && ctx.path !== '/link-social') return
+  // Better Auth runs this hook before its endpoint schema strips unknown fields. Check
+  // presence, including empty/null values, rather than maintaining a parameter denylist.
+  const unsupportedBody =
+    isRecord(ctx.body) &&
+    Object.keys(ctx.body).some(
+      (key) =>
+        !SOCIAL_AUTHORIZATION_FIELDS.has(key) &&
+        // Trusted server APIs retain direct-token authentication; HTTP uses redirects only.
+        !(!ctx.request && key === 'idToken'),
+    )
+  const unsupportedQuery = isRecord(ctx.query) && Object.keys(ctx.query).length > 0
+  if (unsupportedBody || unsupportedQuery) {
+    throw new APIError('BAD_REQUEST', {
+      code: 'UNSUPPORTED_SOCIAL_AUTHORIZATION_PARAMETERS',
+      message: 'Custom social authorization parameters are not supported',
+    })
+  }
+  if (!ctx.request) return
+  // Better Auth's default origin check skips requests without cookies. Starting login
+  // still creates OAuth state/cookies, so require the same origin even on a first visit.
+  const origin = ctx.request.headers.get('origin')
+  if (!origin || origin === 'null') {
+    throw new APIError('FORBIDDEN', {
+      code: 'MISSING_OR_NULL_ORIGIN',
+      message: 'A same-origin request is required',
+    })
+  }
+  if (origin !== new URL(ctx.context.baseURL).origin) {
+    throw new APIError('FORBIDDEN', {
+      code: 'INVALID_ORIGIN',
+      message: 'A same-origin request is required',
+    })
+  }
+}
+
 /**
  * Answers 400 for an id that is not a UUID. Better Auth would pass it to Postgres, which
  * fails and echoes the value back in its error: a 500, and attacker-chosen text in the log.
@@ -53,6 +99,7 @@ async function personalOwnerStays(ctx: AuthMiddlewareContext, db: Db) {
 /** Better Auth's `hooks.before`: checks that apply across its endpoints. */
 export function beforeHook(db: Db) {
   return createAuthMiddleware(async (ctx) => {
+    requireSocialAuthorizationRequest(ctx)
     requireUuidIds(ctx.query)
     requireUuidIds(ctx.body)
     const filter = checkListQuery(ctx.path, ctx.query)

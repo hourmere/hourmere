@@ -1,4 +1,4 @@
-import { createEvent, fireEvent, screen, within } from '@testing-library/react'
+import { createEvent, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { EventType } from '../../api/resources.ts'
@@ -9,6 +9,7 @@ import {
   json,
   later,
   ME,
+  PROFILE,
   profile,
   type Routes,
   renderApp,
@@ -164,6 +165,11 @@ describe('the event types list', () => {
     fakeApi({ ...signedIn, ...emptyAccount })
     renderApp('/app/event-types')
     expect(await screen.findByText(/You have no event types yet/)).toBeDefined()
+    expect(
+      screen
+        .getByRole('link', { name: 'Create your first event type' })
+        .classList.contains('button'),
+    ).toBe(true)
     expect(screen.getByRole('link', { name: 'Choose your handle' }).getAttribute('href')).toBe(
       '/app/settings',
     )
@@ -190,6 +196,46 @@ describe('the event types list', () => {
 })
 
 describe('creating an event type', () => {
+  it.each(['en', 'zh-CN'] as const)(
+    'keeps the editor preview handle and slug separate in %s with a complete URL to copy',
+    async (language) => {
+      const user = userEvent.setup()
+      chooseLanguage(language)
+      const handle = 'alexandria-review-very-long-host-handle'
+      const slug = 'paused-very-long-slug-for-the-booking-link-truncation-check-r3'
+      eventTypeServer([eventType({ slug })], profile({ ...PROFILE, handle }))
+      renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
+      await screen.findByRole('heading', {
+        name: language === 'en' ? 'Edit “Intro call”' : '编辑“Intro call”',
+        level: 1,
+      })
+      const preview = document.querySelector('.booking-link .preview')
+      expect(preview?.classList.contains('booking-link-path')).toBe(true)
+      expect(preview?.querySelector('.booking-link-handle')?.textContent).toBe(`/${handle}`)
+      expect(preview?.querySelector('.booking-link-slug')?.textContent).toBe(`/${slug}`)
+      expect(preview?.textContent).toBe(`/${handle}/${slug}`)
+      expect(preview?.getAttribute('title')).toBe(`${window.location.origin}/${handle}/${slug}`)
+      expect(preview?.querySelector('wbr')).toBeNull()
+      await user.click(
+        screen.getByRole('button', { name: language === 'en' ? 'Copy link' : '复制链接' }),
+      )
+      expect(await navigator.clipboard.readText()).toBe(
+        `${window.location.origin}/${handle}/${slug}`,
+      )
+    },
+  )
+
+  it('separates the English minimum notice description, range and day equivalent with spaces', async () => {
+    const user = userEvent.setup()
+    eventTypeServer([])
+    await openNew()
+    const hint = document.getElementById('minimumNoticeMinutes-hint')
+    expect(hint?.textContent).toBe('How far ahead a meeting must be booked. 0–525,600.')
+    await user.clear(field('Minimum notice (minutes)'))
+    await user.type(field('Minimum notice (minutes)'), '1440')
+    expect(hint?.textContent).toBe('How far ahead a meeting must be booked. 0–525,600. = 1 day.')
+  })
+
   it('translates the minimum notice and buffer hints in Simplified Chinese', async () => {
     chooseLanguage('zh-CN')
     eventTypeServer([])
@@ -256,7 +302,9 @@ describe('creating an event type', () => {
     await user.type(field('Title'), 'Intro call')
     // The link follows the title until edited.
     expect(field('Booking link').value).toBe('intro-call')
-    expect(screen.getByText(`${window.location.origin}/ada/intro-call`)).toBeDefined()
+    expect(document.querySelector('.booking-link .preview')?.textContent).toBe('/ada/intro-call')
+    await user.click(screen.getByRole('button', { name: 'Copy link' }))
+    expect(await navigator.clipboard.readText()).toBe(`${window.location.origin}/ada/intro-call`)
     await user.type(field(/Description/), 'Let us talk.{Enter}Bring questions.')
     await user.clear(field('Duration (minutes)'))
     await user.type(field('Duration (minutes)'), '45')
@@ -1078,7 +1126,11 @@ describe('team booking links', () => {
     expect(screen.queryByText(/Choose your handle/)).toBeNull()
     await user.click(row.getByRole('link', { name: 'Edit Intro call' }))
     await screen.findByRole('heading', { name: 'Edit “Intro call”' })
-    expect(screen.getByText(url)).toBeDefined()
+    expect(document.querySelector('.booking-link .preview')?.textContent).toBe(
+      new URL(url).pathname,
+    )
+    await user.click(screen.getByRole('button', { name: 'Copy link' }))
+    expect(await navigator.clipboard.readText()).toBe(url)
   })
 })
 
@@ -1465,4 +1517,89 @@ it('a different team administrator can edit saved Zoom metadata without reading 
   for (const key of ['location', 'hosts', 'zoomConnectionId', 'scheduleId'])
     expect(api.to(`PATCH /api/v1/event-types/${EVENT_TYPE_ID}`)[0]?.body).not.toHaveProperty(key)
   expect(api.to('GET /api/v1/conference-connections')).toHaveLength(0)
+})
+
+describe('event type editor layout', () => {
+  it('keeps only saving and its status in the sticky bar, with return navigation outside it', async () => {
+    eventTypeServer()
+    const heading = await openExisting()
+    expect(heading.closest('.page-header')).not.toBeNull()
+    const save = screen.getByRole('button', { name: 'Save changes' })
+    const bar = save.closest('.sticky-form-actions')
+    expect(bar).not.toBeNull()
+    expect(bar?.parentElement?.tagName).toBe('FORM')
+    expect(bar?.previousElementSibling?.previousElementSibling?.tagName).toBe('FIELDSET')
+    expect(
+      within(bar as HTMLElement)
+        .getByRole('status')
+        .getAttribute('tabindex'),
+    ).toBe('-1')
+    expect(within(bar as HTMLElement).queryByRole('link')).toBeNull()
+    expect(bar?.children).toHaveLength(2)
+    expect(screen.getByRole('link', { name: 'Back to event types' }).parentElement).toBe(
+      bar?.previousElementSibling,
+    )
+  })
+
+  it('uses an accessible compact icon for each question option removal', async () => {
+    const user = userEvent.setup()
+    eventTypeServer([])
+    await openNew()
+    await user.click(screen.getByRole('button', { name: 'Add a question' }))
+    await user.keyboard('Team size')
+    await user.selectOptions(screen.getByLabelText('Answer type'), 'select')
+    const remove = screen.getByRole('button', { name: 'Remove option 1, of question 1' })
+    expect(remove.classList.contains('button-icon')).toBe(true)
+    expect(remove.querySelector('[aria-hidden="true"]')?.textContent).toBe('×')
+    expect(remove.closest('.option-row')?.querySelector('input')).toBe(
+      screen.getByLabelText('Option 1 of question 1'),
+    )
+    await user.click(remove)
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Add an option' }))
+  })
+})
+
+describe('event type booking link previews', () => {
+  it('shows only the path while copying the complete ready booking URL', async () => {
+    const user = userEvent.setup()
+    eventTypeServer()
+    await openExisting()
+    const preview = document.querySelector('.booking-link .preview') as HTMLElement
+    expect(preview?.textContent).toBe('/ada/intro-call')
+    expect(preview.classList.contains('preview')).toBe(true)
+    expect(preview.querySelectorAll('wbr')).toHaveLength(0)
+    expect(screen.queryByText(`${window.location.origin}/ada/intro-call`)).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Copy link' }))
+    expect(await navigator.clipboard.readText()).toBe(`${window.location.origin}/ada/intro-call`)
+  })
+
+  it('keeps the localized setup explanation when a booking URL is not ready', async () => {
+    chooseLanguage('zh-CN')
+    eventTypeServer([], profile(null))
+    renderApp('/app/event-types/new')
+    await screen.findByRole('heading', { name: '新活动类型', level: 1 })
+    expect(screen.getByText('请在设置中选择用户名，以获得预约链接。')).toBeDefined()
+    expect(screen.queryByRole('button', { name: '复制链接' })).toBeNull()
+  })
+})
+
+it('keeps the event type editor inside the app shell while its skeleton loads', async () => {
+  const loading = later()
+  const answered = vi.fn()
+  void loading.response.then(answered)
+  const api = eventTypeServer([eventType()], {
+    [`GET /api/v1/event-types/${EVENT_TYPE_ID}`]: () => loading.response,
+  })
+  renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
+  // AdminLoading uses the same label before the session and lazy route are ready.
+  await screen.findByRole('navigation', { name: 'Main' })
+  await waitFor(() => expect(api.to(`GET /api/v1/event-types/${EVENT_TYPE_ID}`)).toHaveLength(1))
+  const skeleton = await within(screen.getByRole('main')).findByRole('status', {
+    name: 'Loading…',
+  })
+  expect(skeleton.classList.contains('page-skeleton')).toBe(true)
+  expect(skeleton.closest('[aria-busy="true"]')).toBeNull()
+  expect(answered).not.toHaveBeenCalled()
+  await loading.answer(json(200, eventType()))
+  expect(screen.getByRole('heading', { name: 'Edit “Intro call”', level: 1 })).toBeDefined()
 })

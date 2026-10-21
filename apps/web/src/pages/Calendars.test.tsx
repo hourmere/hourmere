@@ -3,7 +3,8 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { Schemas } from '../api/client.ts'
 import { goTo } from '../browser.ts'
-import { fakeApi, json, profile, renderApp, signedIn } from '../test/fake-api.tsx'
+import styles from '../styles.css?raw'
+import { fakeApi, json, later, PROFILE, profile, renderApp, signedIn } from '../test/fake-api.tsx'
 
 vi.mock('../browser.ts', () => ({ goTo: vi.fn() }))
 const connection: Schemas['CalendarConnection'] = {
@@ -33,6 +34,405 @@ const list = (data = [connection], googleEnabled = true, microsoftEnabled = fals
 const authorizationUrl = 'https://accounts.google.com/o/oauth2/v2/auth?state=fake-state'
 
 describe('the calendars page', () => {
+  it('uses a shared introduction and an empty state leading to available connection options', async () => {
+    fakeApi({ ...signedIn, ...profile(), ...list([]) })
+    renderApp('/app/calendars')
+    await screen.findByText('No calendar accounts connected yet.')
+    expect(
+      screen
+        .getByRole('heading', { name: 'Calendars', level: 1 })
+        .closest('.page-intro')
+        ?.querySelector('.lede'),
+    ).not.toBeNull()
+    const action = screen.getByRole('link', { name: 'Review calendar connection options' })
+    expect(action.closest('.empty-actions')).not.toBeNull()
+    expect(action.getAttribute('href')).toBe('#calendar-connection-options')
+    expect(
+      document
+        .querySelector('#calendar-connection-options')
+        ?.contains(screen.getByRole('button', { name: 'Connect Google Calendar' })),
+    ).toBe(true)
+  })
+
+  it.each(['en', 'zh-CN'] as const)(
+    'directs an empty calendar list to the administrator when no provider is configured in %s',
+    async (locale) => {
+      const user = userEvent.setup()
+      fakeApi({ ...signedIn, ...profile(), ...list([], false, false) })
+      renderApp('/app/calendars')
+      await screen.findByText('No calendar accounts connected yet.')
+      if (locale === 'zh-CN')
+        await user.selectOptions(screen.getByLabelText('Interface language'), locale)
+      const empty = document.querySelector('.empty') as HTMLElement
+      expect(empty.textContent).toContain(
+        locale === 'en'
+          ? 'Ask your administrator to enable calendar connections.'
+          : '请联系管理员启用日历连接。',
+      )
+      expect(within(empty).queryByRole('link')).toBeNull()
+      expect(empty.textContent).not.toContain(
+        locale === 'en' ? 'Connect a calendar account to get started.' : '连接日历账号以开始使用。',
+      )
+    },
+  )
+
+  it.each([
+    [true, false],
+    [false, true],
+  ])(
+    'keeps connection guidance when Google=%s or Microsoft=%s is configured',
+    async (google, microsoft) => {
+      fakeApi({ ...signedIn, ...profile(), ...list([], google, microsoft) })
+      renderApp('/app/calendars')
+      await screen.findByText('No calendar accounts connected yet.')
+      const empty = document.querySelector('.empty') as HTMLElement
+      expect(within(empty).getByText('Connect a calendar account to get started.')).toBeDefined()
+      expect(
+        within(empty).getByRole('link', { name: 'Review calendar connection options' }),
+      ).toBeDefined()
+    },
+  )
+  it('wraps account emails at address separators while preserving the visible address', async () => {
+    fakeApi({ ...signedIn, ...profile(), ...list() })
+    renderApp('/app/calendars')
+    const heading = await screen.findByRole('heading', { name: 'calendar@example.com' })
+    expect(heading.textContent).toBe('calendar@example.com')
+    expect(heading.querySelectorAll('wbr')).toHaveLength(2)
+  })
+
+  it.each([404, 503, 'network'] as const)(
+    'keeps calendar controls available after an unrelated profile failure: %s',
+    async (failure) => {
+      const user = userEvent.setup()
+      let recovered = false
+      const calendar = connection.calendars[0] as NonNullable<(typeof connection.calendars)[0]>
+      const requests = fakeApi({
+        ...signedIn,
+        ...list([{ ...connection, syncAuthorized: true }]),
+        'GET /api/v1/profile': () => {
+          if (recovered) return json(200, PROFILE)
+          if (failure === 'network') throw new TypeError('Failed to fetch')
+          return json(failure, { error: 'unexpected_profile_error' })
+        },
+        [`PATCH /api/v1/calendars/${calendar.id}`]: () => new Response(null, { status: 204 }),
+      })
+      renderApp('/app/calendars')
+      await screen.findByRole('heading', { name: 'calendar@example.com' })
+      const hint = screen.getByText(
+        'Could not load your profile. Try again before choosing where new bookings are written.',
+      ).parentElement as HTMLElement
+      expect(screen.queryByRole('alert')).toBeNull()
+      expect(screen.queryByRole('link', { name: 'Create profile' })).toBeNull()
+      const write = screen.getByRole('button', { name: 'Write new bookings here' })
+      expect(write.matches(':disabled')).toBe(true)
+      expect(write.getAttribute('aria-describedby')).toBe(hint.id)
+      await user.click(write)
+      expect(requests.to('PUT /api/v1/calendar-destination')).toHaveLength(0)
+      const conflict = screen.getByRole('checkbox', { name: 'Check this calendar for conflicts' })
+      expect(conflict.matches(':disabled')).toBe(false)
+      await user.click(conflict)
+      expect(requests.to(`PATCH /api/v1/calendars/${calendar.id}`)).toHaveLength(1)
+      recovered = true
+      await user.click(within(hint).getByRole('button', { name: 'Try again' }))
+      await vi.waitFor(() => expect(write.matches(':disabled')).toBe(false))
+      expect(screen.queryByText(/Could not load your profile/)).toBeNull()
+      expect(write.getAttribute('aria-describedby')).toBeNull()
+    },
+  )
+
+  it.each([404, 503, 'network'] as const)(
+    'allows clearing the existing booking destination after a profile failure: %s',
+    async (failure) => {
+      const user = userEvent.setup()
+      const calendar = connection.calendars[0] as NonNullable<(typeof connection.calendars)[0]>
+      let destination: string | null = calendar.id
+      const requests = fakeApi({
+        ...signedIn,
+        'GET /api/v1/profile': () => {
+          if (failure === 'network') throw new TypeError('Failed to fetch')
+          return json(failure, { error: 'unexpected_profile_error' })
+        },
+        'GET /api/v1/calendar-connections': () =>
+          json(200, {
+            googleEnabled: true,
+            microsoftEnabled: false,
+            destinationCalendarId: destination,
+            data: [
+              {
+                ...connection,
+                syncAuthorized: true,
+                calendars: [
+                  calendar,
+                  {
+                    ...calendar,
+                    id: 'c0000000-0000-7000-8000-000000000002',
+                    name: 'Other calendar',
+                    isPrimary: false,
+                  },
+                ],
+              },
+            ],
+          }),
+        'PUT /api/v1/calendar-destination': () => {
+          destination = null
+          return new Response(null, { status: 204 })
+        },
+      })
+      renderApp('/app/calendars')
+      await screen.findByRole('heading', { name: 'calendar@example.com' })
+      const stop = screen.getByRole('button', { name: 'Stop writing bookings here' })
+      expect(stop.matches(':disabled')).toBe(false)
+      expect(stop.getAttribute('aria-describedby')).toBeNull()
+      const write = screen.getByRole('button', { name: 'Write new bookings here' })
+      expect(write.matches(':disabled')).toBe(true)
+      expect(write.getAttribute('aria-describedby')).toBe('calendar-profile-hint')
+      await user.click(write)
+      expect(requests.to('PUT /api/v1/calendar-destination')).toHaveLength(0)
+      await user.click(stop)
+      await vi.waitFor(() =>
+        expect(screen.queryByRole('button', { name: 'Stop writing bookings here' })).toBeNull(),
+      )
+      expect(requests.to('PUT /api/v1/calendar-destination')).toHaveLength(1)
+      expect(requests.to('PUT /api/v1/calendar-destination')[0]?.body).toEqual({ calendarId: null })
+      for (const button of screen.getAllByRole('button', { name: 'Write new bookings here' }))
+        expect(button.matches(':disabled')).toBe(true)
+      expect(screen.getByText(/Could not load your profile/)).toBeDefined()
+      expect(screen.queryByRole('link', { name: 'Create profile' })).toBeNull()
+    },
+  )
+
+  it.each([404, 503] as const)(
+    'hides profile setup and availability hints before any calendar is connected: %s',
+    async (status) => {
+      fakeApi({
+        ...signedIn,
+        ...list([]),
+        'GET /api/v1/profile': () =>
+          json(status, { error: status === 404 ? 'profile_not_found' : 'internal_error' }),
+      })
+      renderApp('/app/calendars')
+      await screen.findByText('No calendar accounts connected yet.')
+      expect(document.getElementById('calendar-profile-hint')).toBeNull()
+      expect(screen.queryByRole('link', { name: 'Create profile' })).toBeNull()
+      expect(screen.getByRole('button', { name: 'Connect Google Calendar' })).toBeDefined()
+    },
+  )
+
+  it('localizes the unavailable-profile hint without claiming a profile is missing', async () => {
+    const user = userEvent.setup()
+    fakeApi({
+      ...signedIn,
+      ...list([{ ...connection, syncAuthorized: true }]),
+      'GET /api/v1/profile': () => json(503, { error: 'internal_error' }),
+    })
+    renderApp('/app/calendars')
+    await screen.findByRole('heading', { name: 'calendar@example.com' })
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Interface language' }), 'zh-CN')
+    expect(screen.getByText('无法加载个人资料。请重试后再选择用于写入新预约的日历。')).toBeDefined()
+    expect(screen.queryByRole('link', { name: '创建个人资料' })).toBeNull()
+    expect(screen.getByRole('button', { name: '重试' })).toBeDefined()
+  })
+
+  it.each([
+    ['en', 'Sign in again, then start a new calendar connection.'],
+    ['zh-CN', '请重新登录，然后开始新的日历连接。'],
+  ] as const)(
+    'keeps calendar session callback guidance contextual in %s',
+    async (locale, message) => {
+      const user = userEvent.setup()
+      fakeApi({ ...signedIn, ...list([]) })
+      renderApp('/app/calendars?connection=session_required')
+      await screen.findByText('No calendar accounts connected yet.')
+      if (locale === 'zh-CN')
+        await user.selectOptions(
+          screen.getByRole('combobox', { name: 'Interface language' }),
+          locale,
+        )
+      expect(within(screen.getByRole('main')).getByRole('status').textContent).toBe(message)
+    },
+  )
+
+  it.each([
+    ['en', 'Create profile', 'Create a profile before choosing where new bookings are written.'],
+    ['zh-CN', '创建个人资料', '请先创建个人资料，再选择用于写入新预约的日历。'],
+  ] as const)(
+    'guides a host without a profile to Settings in %s before writing bookings',
+    async (language, createLabel, hint) => {
+      const user = userEvent.setup()
+      const requests = fakeApi({
+        ...signedIn,
+        ...list([{ ...connection, syncAuthorized: true }]),
+      })
+      renderApp('/app/calendars')
+      await screen.findByRole('heading', { name: 'calendar@example.com' })
+      if (language === 'zh-CN')
+        await user.selectOptions(
+          screen.getByRole('combobox', { name: 'Interface language' }),
+          language,
+        )
+      const link = screen.getByRole('link', { name: createLabel })
+      expect(link.getAttribute('href')).toBe('/app/settings#profile-heading')
+      const destination = screen.getByRole('button', {
+        name: language === 'en' ? 'Write new bookings here' : '将新预约写入此日历',
+      })
+      expect(destination.matches(':disabled')).toBe(true)
+      expect(screen.getByText(hint).contains(link)).toBe(true)
+      expect(destination.getAttribute('aria-describedby')).toBe(screen.getByText(hint).id)
+      await user.click(destination)
+      expect(requests.to('PUT /api/v1/calendar-destination')).toHaveLength(0)
+      await user.click(link)
+      expect(await screen.findByRole('button', { name: createLabel })).toBeDefined()
+      expect(screen.getByTestId('location').textContent).toBe('/app/settings')
+    },
+  )
+
+  it('separates calendars within one connected account with individual borders', async () => {
+    const first = connection.calendars[0] as NonNullable<(typeof connection.calendars)[0]>
+    fakeApi({
+      ...signedIn,
+      ...profile(),
+      ...list([
+        {
+          ...connection,
+          syncAuthorized: true,
+          calendars: [
+            first,
+            { ...first, id: 'c0000000-0000-7000-8000-000000000002', name: 'Other calendar' },
+          ],
+        },
+      ]),
+    })
+    const sheet = document.createElement('style')
+    sheet.textContent = styles
+    document.head.append(sheet)
+    try {
+      renderApp('/app/calendars')
+      await screen.findByRole('heading', { name: 'calendar@example.com' })
+      const items = screen.getByText('Work calendar (primary)').closest('ul') as HTMLUListElement
+      expect(within(items).getAllByRole('listitem')).toHaveLength(2)
+      for (const item of within(items).getAllByRole('listitem')) {
+        const style = getComputedStyle(item)
+        expect(style.borderTopStyle).toBe('solid')
+        expect(style.borderTopWidth).toBe('1px')
+      }
+    } finally {
+      sheet.remove()
+    }
+  })
+
+  it.each([
+    ['en', 'Create your profile in Settings first.'],
+    ['zh-CN', '请先在“设置”中创建个人资料。'],
+  ] as const)(
+    'localizes a stale missing-profile refusal by code in %s and refreshes the hint',
+    async (language, expected) => {
+      const user = userEvent.setup()
+      let hasProfile = true
+      fakeApi({
+        ...signedIn,
+        ...list([{ ...connection, syncAuthorized: true }]),
+        'GET /api/v1/profile': () =>
+          hasProfile ? json(200, PROFILE) : json(404, { error: 'profile_not_found' }),
+        'PUT /api/v1/calendar-destination': () => {
+          hasProfile = false
+          return json(404, {
+            error: 'profile_not_found',
+            message: 'Changed server prose, unrelated to any translation key.',
+          })
+        },
+      })
+      renderApp('/app/calendars')
+      await screen.findByRole('heading', { name: 'calendar@example.com' })
+      if (language === 'zh-CN')
+        await user.selectOptions(
+          screen.getByRole('combobox', { name: 'Interface language' }),
+          language,
+        )
+      await user.click(
+        screen.getByRole('button', {
+          name: language === 'en' ? 'Write new bookings here' : '将新预约写入此日历',
+        }),
+      )
+      expect((await screen.findByRole('alert')).textContent).toBe(expected)
+      const createLabel = language === 'en' ? 'Create profile' : '创建个人资料'
+      expect(await screen.findByRole('link', { name: createLabel })).toBeDefined()
+      expect(document.body.textContent).not.toContain('Changed server prose')
+    },
+  )
+
+  it.each([
+    ['en', 'Check this calendar for conflicts', 'Write new bookings here'],
+    ['zh-CN', '检查此日历的冲突', '将新预约写入此日历'],
+  ] as const)(
+    'keeps calendar names literal and controls in separate wrapping rows in %s',
+    async (language, conflictLabel, writeLabel) => {
+      const user = userEvent.setup()
+      const name = `Settings-${'long-calendar-name'.repeat(8)}`
+      const calendar = {
+        ...(connection.calendars[0] as NonNullable<(typeof connection.calendars)[0]>),
+        name,
+      }
+      fakeApi({
+        ...signedIn,
+        ...profile(),
+        ...list([{ ...connection, syncAuthorized: true, calendars: [calendar] }]),
+      })
+      const sheet = document.createElement('style')
+      sheet.textContent = styles
+      document.head.append(sheet)
+      try {
+        renderApp('/app/calendars')
+        await screen.findByRole('heading', { name: 'calendar@example.com' })
+        if (language === 'zh-CN')
+          await user.selectOptions(
+            screen.getByRole('combobox', { name: 'Interface language' }),
+            language,
+          )
+        const group = screen.getByRole('group', {
+          name: `${name}${language === 'en' ? ' (primary)' : '（主日历）'}`,
+        })
+        const label = within(group).getByRole('checkbox').closest('label') as HTMLLabelElement
+        expect(label.textContent).toBe(conflictLabel)
+        const write = within(group).getByText(writeLabel)
+        expect(group.contains(label)).toBe(true)
+        expect(label.contains(within(group).getByRole('checkbox'))).toBe(true)
+        expect(label.contains(write)).toBe(false)
+        expect(group.parentElement?.textContent?.split(name)).toHaveLength(2)
+        expect(getComputedStyle(group).display).toBe('grid')
+        expect(getComputedStyle(group).gridTemplateColumns).toBe('minmax(0, 1fr)')
+        expect(getComputedStyle(write).maxWidth).toBe('100%')
+        expect(getComputedStyle(write).overflowWrap).toBe('anywhere')
+      } finally {
+        sheet.remove()
+      }
+    },
+  )
+
+  it('translates Microsoft callback and disconnect notices with the provider kept literal', async () => {
+    const user = userEvent.setup()
+    const microsoft = { ...connection, provider: 'microsoft' as const }
+    fakeApi({
+      ...signedIn,
+      ...list([microsoft], false, true),
+      [`DELETE /api/v1/calendar-connections/${connection.id}`]: () =>
+        new Response(null, { status: 204 }),
+    })
+    renderApp('/app/calendars?connection=connected&provider=microsoft')
+    await screen.findByRole('heading', { name: 'calendar@example.com' })
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Interface language' }), 'zh-CN')
+    expect(within(screen.getByRole('main')).getByRole('status').textContent).toBe(
+      'Microsoft 日历已连接。日历列表已就绪。',
+    )
+    await user.click(screen.getByRole('button', { name: '断开连接：calendar@example.com' }))
+    const group = screen.getByRole('group', { name: /断开 calendar@example.com？/ })
+    await user.click(within(group).getByRole('button', { name: '断开账号连接' }))
+    await vi.waitFor(() =>
+      expect(within(screen.getByRole('main')).getByRole('status').textContent).toBe(
+        'Microsoft 日历已断开连接。保存的凭据和本地日历数据已删除。',
+      ),
+    )
+  })
+
   it('prompts the host to reconnect an active account with a writeback permissions failure', async () => {
     fakeApi({
       ...signedIn,
@@ -112,24 +512,222 @@ describe('the calendars page', () => {
       expect(screen.getByTestId('location').textContent).toBe('/app/calendars'),
     )
   })
-  it('lists calendars and explains the current permissions before connecting', async () => {
+  it.each([
+    ['Connect Google Calendar', 'needs_reauth'],
+    ['Enable calendar synchronization', 'active'],
+  ] as const)(
+    'explains permissions and revocation before %s redirects to Google',
+    async (action, status) => {
+      const user = userEvent.setup()
+      vi.mocked(goTo).mockClear()
+      const requests = fakeApi({
+        ...signedIn,
+        ...list([{ ...connection, status }]),
+        'POST /api/v1/calendar-connections/google/authorize': () => json(200, { authorizationUrl }),
+      })
+      renderApp('/app/calendars')
+      expect(await screen.findByText('Work calendar (primary)')).toBeDefined()
+      const section = screen.getByRole('region', { name: 'Connect Google Calendar' })
+      const disclosure = within(section).getByText(/Google will ask for your email/)
+      expect(disclosure.textContent).toContain('calendar list')
+      expect(disclosure.textContent).toContain('check busy times on selected calendars')
+      expect(disclosure.textContent).toContain('create one private copy of each new booking')
+      expect(disclosure.textContent).toContain('the calendar you own and select')
+      expect(disclosure.textContent).toContain(
+        'Automatic Google Meet adds a link only when you enable it',
+      )
+      expect(disclosure.textContent).toContain('not event titles or descriptions')
+      expect(disclosure.textContent).toContain('optional and separate from signing in')
+      expect(within(section).getByText(/Disconnect below/).textContent).toContain(
+        'deletes stored credentials and local calendar data',
+      )
+      const revoke = within(section).getByRole('link', { name: 'Google Account connections' })
+      expect(revoke.getAttribute('href')).toBe('https://myaccount.google.com/connections')
+      expect(revoke.getAttribute('rel')).toContain('noreferrer')
+      const button = screen.getByRole('button', { name: action })
+      const descriptionId = button.getAttribute('aria-describedby')
+      expect(descriptionId).toBeTruthy()
+      expect(document.getElementById(descriptionId as string)?.contains(disclosure)).toBe(true)
+      expect(disclosure.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+        Node.DOCUMENT_POSITION_FOLLOWING,
+      )
+      expect(requests.to('POST /api/v1/calendar-connections/google/authorize')).toHaveLength(0)
+      expect(goTo).not.toHaveBeenCalled()
+      await user.click(button)
+      await vi.waitFor(() => expect(goTo).toHaveBeenCalledWith(authorizationUrl))
+      expect(requests.to('POST /api/v1/calendar-connections/google/authorize')[0]?.body).toEqual({
+        access: 'sync',
+      })
+    },
+  )
+
+  it('localizes Google calendar permissions and revocation in Simplified Chinese', async () => {
+    fakeApi({
+      ...signedIn,
+      ...profile({ ...PROFILE, locale: 'zh-CN' }),
+      ...list(),
+    })
+    renderApp('/app/calendars')
+    const section = await screen.findByRole('region', { name: '连接 Google 日历' })
+    const disclosure = within(section).getByText(/Google 将请求你的邮箱/)
+    expect(disclosure.textContent).toContain('读取所选日历的忙闲时间来检查冲突')
+    expect(disclosure.textContent).toContain('为每个新预约创建一份私有副本')
+    expect(disclosure.textContent).toContain('只有启用自动 Google Meet 时才会添加会议链接')
+    expect(disclosure.textContent).toContain('不保存事件标题或描述')
+    expect(disclosure.textContent).toContain('与登录相互独立')
+    expect(
+      within(section).getByText(
+        (_, node) => node?.tagName === 'P' && /使用下方的“断开连接”/.test(node.textContent ?? ''),
+      ).textContent,
+    ).toContain('删除已存储的凭证和本地日历数据')
+    expect(
+      within(section).getByRole('link', { name: 'Google 账号连接' }).getAttribute('href'),
+    ).toBe('https://myaccount.google.com/connections')
+  })
+
+  it.each([undefined, '', 'https://operator.example/privacy'])(
+    'shows the pre-consent privacy link only when configured: %s',
+    async (privacyPolicyUrl) => {
+      fakeApi({
+        ...signedIn,
+        ...list([]),
+        'GET /api/v1/instance': () =>
+          json(200, {
+            signIn: { email: true, google: false, microsoft: false },
+            privacyPolicyUrl,
+          }),
+      })
+      renderApp('/app/calendars')
+      const section = await screen.findByRole('region', { name: 'Connect Google Calendar' })
+      if (privacyPolicyUrl) {
+        const privacy = await within(section).findByRole('link', { name: 'Privacy policy' })
+        expect(privacy.getAttribute('href')).toBe(privacyPolicyUrl)
+        expect(privacy.getAttribute('target')).toBe('_blank')
+        expect(privacy.getAttribute('rel')).toContain('noreferrer')
+        expect(
+          privacy.compareDocumentPosition(
+            within(section).getByRole('button', { name: 'Connect Google Calendar' }),
+          ) & Node.DOCUMENT_POSITION_FOLLOWING,
+        ).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+      } else {
+        await vi.waitFor(() =>
+          expect(
+            within(section)
+              .getByRole('button', { name: 'Connect Google Calendar' })
+              .matches(':disabled'),
+          ).toBe(false),
+        )
+        expect(within(section).queryByRole('link', { name: 'Privacy policy' })).toBeNull()
+      }
+    },
+  )
+
+  it('waits for configured privacy information before allowing a Google redirect', async () => {
     const user = userEvent.setup()
+    const instance = later()
+    vi.mocked(goTo).mockClear()
     const requests = fakeApi({
       ...signedIn,
       ...list(),
+      'GET /api/v1/instance': async () => (await instance.response).clone(),
       'POST /api/v1/calendar-connections/google/authorize': () => json(200, { authorizationUrl }),
     })
     renderApp('/app/calendars')
-    expect(await screen.findByText('Work calendar (primary)')).toBeDefined()
-    expect(screen.getByText(/separate from signing in/).textContent).toContain(
-      'event read access and permission to',
+    const section = await screen.findByRole('region', { name: 'Connect Google Calendar' })
+    for (const name of ['Connect Google Calendar', 'Enable calendar synchronization']) {
+      const button = screen.getByRole('button', { name })
+      expect(button.matches(':disabled')).toBe(true)
+      await user.click(button)
+    }
+    expect(requests.to('POST /api/v1/calendar-connections/google/authorize')).toHaveLength(0)
+    expect(goTo).not.toHaveBeenCalled()
+    await instance.answer(
+      json(200, {
+        signIn: { email: true, google: false, microsoft: false },
+        privacyPolicyUrl: 'https://operator.example/privacy',
+      }),
     )
-    await user.click(screen.getByRole('button', { name: 'Connect Google Calendar' }))
+    expect(within(section).getByRole('link', { name: 'Privacy policy' }).getAttribute('href')).toBe(
+      'https://operator.example/privacy',
+    )
+    const connect = within(section).getByRole('button', { name: 'Connect Google Calendar' })
+    expect(connect.matches(':disabled')).toBe(false)
+    await user.click(connect)
     await vi.waitFor(() => expect(goTo).toHaveBeenCalledWith(authorizationUrl))
-    expect(requests.to('POST /api/v1/calendar-connections/google/authorize')[0]?.body).toEqual({
-      access: 'sync',
-    })
   })
+
+  it.each([
+    ['en', 'Connect Google Calendar'],
+    ['en', 'Enable calendar synchronization'],
+    ['zh-CN', '连接 Google 日历'],
+  ] as const)(
+    'blocks %s %s after privacy discovery fails and recovers through retry',
+    async (locale, action) => {
+      const user = userEvent.setup()
+      const retry = later()
+      let retrying = false
+      vi.mocked(goTo).mockClear()
+      const requests = fakeApi({
+        ...signedIn,
+        ...profile({ ...PROFILE, locale }),
+        ...list(),
+        'GET /api/v1/instance': async () =>
+          retrying ? (await retry.response).clone() : json(503, { error: 'service_unavailable' }),
+        'POST /api/v1/calendar-connections/google/authorize': () => json(200, { authorizationUrl }),
+      })
+      renderApp('/app/calendars')
+      const chinese = locale === 'zh-CN'
+      const section = await screen.findByRole('region', {
+        name: chinese ? '连接 Google 日历' : 'Connect Google Calendar',
+      })
+      expect((await within(section).findByRole('alert')).textContent).toBe(
+        chinese
+          ? '无法加载隐私信息。请重试后再连接 Google 日历。'
+          : 'Could not load privacy information. Try again before connecting Google Calendar.',
+      )
+      const names = chinese
+        ? ['连接 Google 日历', '启用日历同步']
+        : ['Connect Google Calendar', 'Enable calendar synchronization']
+      for (const name of names) {
+        const button = screen.getByRole('button', { name })
+        expect(button.matches(':disabled')).toBe(true)
+        await user.click(button)
+      }
+      expect(requests.to('POST /api/v1/calendar-connections/google/authorize')).toHaveLength(0)
+      expect(goTo).not.toHaveBeenCalled()
+      const discoveryCalls = requests.to('GET /api/v1/instance').length
+      retrying = true
+      await user.click(
+        within(section).getByRole('button', { name: chinese ? '重试' : 'Try again' }),
+      )
+      await vi.waitFor(() =>
+        expect(requests.to('GET /api/v1/instance')).toHaveLength(discoveryCalls + 1),
+      )
+      for (const name of names)
+        expect(screen.getByRole('button', { name }).matches(':disabled')).toBe(true)
+      expect(goTo).not.toHaveBeenCalled()
+      await retry.answer(
+        json(200, {
+          signIn: { email: true, google: false, microsoft: false },
+          privacyPolicyUrl: 'https://operator.example/privacy',
+        }),
+      )
+      expect(
+        within(section)
+          .getByRole('link', { name: chinese ? '隐私政策' : 'Privacy policy' })
+          .getAttribute('href'),
+      ).toBe('https://operator.example/privacy')
+      expect(within(section).queryByRole('alert')).toBeNull()
+      for (const name of names)
+        expect(screen.getByRole('button', { name }).matches(':disabled')).toBe(false)
+      expect(requests.to('POST /api/v1/calendar-connections/google/authorize')).toHaveLength(0)
+      await user.click(screen.getByRole('button', { name: action }))
+      await vi.waitFor(() => expect(goTo).toHaveBeenCalledWith(authorizationUrl))
+      expect(requests.to('POST /api/v1/calendar-connections/google/authorize')[0]?.body).toEqual({
+        access: 'sync',
+      })
+    },
+  )
 
   it('shows a disabled instance without hiding existing connections', async () => {
     fakeApi({ ...signedIn, ...list([connection], false) })
@@ -215,6 +813,7 @@ describe('the calendars page', () => {
     const calendar = connection.calendars[0] as NonNullable<(typeof connection.calendars)[0]>
     const requests = fakeApi({
       ...signedIn,
+      ...profile(),
       'GET /api/v1/calendar-connections': () =>
         json(200, {
           googleEnabled: true,
@@ -249,18 +848,16 @@ describe('the calendars page', () => {
     })
     renderApp('/app/calendars')
     await user.click(
-      await screen.findByRole('checkbox', { name: 'Check conflicts in Work calendar' }),
+      await screen.findByRole('checkbox', { name: 'Check this calendar for conflicts' }),
     )
     expect(await screen.findByText(/Waiting for the first synchronization/)).toBeDefined()
     expect(requests.to(`PATCH /api/v1/calendars/${calendar.id}`)[0]?.body).toEqual({
       checkConflicts: true,
     })
-    await user.click(screen.getByRole('button', { name: 'Sync Work calendar now' }))
+    await user.click(screen.getByRole('button', { name: 'Sync now' }))
     expect(await screen.findByText(/Last synchronized:/)).toBeDefined()
-    await user.click(screen.getByRole('button', { name: 'Write new bookings to Work calendar' }))
-    expect(
-      await screen.findByRole('button', { name: 'Stop writing bookings to Work calendar' }),
-    ).toBeDefined()
+    await user.click(screen.getByRole('button', { name: 'Write new bookings here' }))
+    expect(await screen.findByRole('button', { name: 'Stop writing bookings here' })).toBeDefined()
     expect(requests.to('PUT /api/v1/calendar-destination')[0]?.body).toEqual({
       calendarId: calendar.id,
     })
@@ -279,7 +876,7 @@ describe('the calendars page', () => {
     })
     renderApp('/app/calendars')
     await user.click(
-      await screen.findByRole('checkbox', { name: 'Check conflicts in Work calendar' }),
+      await screen.findByRole('checkbox', { name: 'Check this calendar for conflicts' }),
     )
     expect((await screen.findByRole('alert')).textContent).toContain(
       'Reconnect before enabling busy times.',
@@ -288,7 +885,7 @@ describe('the calendars page', () => {
       expect(
         (
           screen.getByRole('checkbox', {
-            name: 'Check conflicts in Work calendar',
+            name: 'Check this calendar for conflicts',
           }) as HTMLInputElement
         ).checked,
       ).toBe(false),
@@ -324,13 +921,13 @@ describe('the calendars page', () => {
       })
       renderApp('/app/calendars')
       const checkbox = (await screen.findByRole('checkbox', {
-        name: 'Check conflicts in Work calendar',
+        name: 'Check this calendar for conflicts',
       })) as HTMLInputElement
       expect(checkbox.matches(':disabled')).toBe(false)
       await user.click(checkbox)
       await vi.waitFor(() =>
         expect(
-          screen.queryByRole('checkbox', { name: 'Check conflicts in Work calendar' }),
+          screen.queryByRole('checkbox', { name: 'Check this calendar for conflicts' }),
         ).toBeNull(),
       )
       expect(selected).toBe(false)

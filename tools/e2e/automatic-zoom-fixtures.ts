@@ -1,11 +1,9 @@
 import { createHmac, randomBytes } from 'node:crypto'
-import type { Server } from 'node:http'
-import { createConnection, createServer as createProbe } from 'node:net'
+import { createServer as createHttpServer } from 'node:http'
 import { fileURLToPath } from 'node:url'
-import { serve } from '@hono/node-server'
+import { getRequestListener } from '@hono/node-server'
 import { createApp } from '../../apps/server/src/app.ts'
 import { productRoutes } from '../../apps/server/src/server.ts'
-import { closeServer } from '../../apps/server/src/shutdown.ts'
 import { createAuth, createAuthPool, createCallerResolver } from '../../packages/auth/src/index.ts'
 import { writeBookingCalendar } from '../../packages/calendars/src/booking-events.ts'
 import { writeBookingConference } from '../../packages/calendars/src/conferences.ts'
@@ -18,6 +16,7 @@ import { createZoomConferenceWork } from '../../packages/conferences/src/worker.
 import { zoomScopes } from '../../packages/conferences/src/zoom.ts'
 import { createDb, createPool } from '../../packages/db/src/index.ts'
 import { createTestDatabase } from '../../packages/db/src/testing.ts'
+import { textHasUrl } from '../../packages/mail/src/booking-link-testing.ts'
 import type { MailMessage } from '../../packages/mail/src/index.ts'
 import {
   dispatchConferenceNotifications,
@@ -26,6 +25,7 @@ import {
 import type { BookingEvent } from '../../packages/scheduling/src/context.ts'
 import { createFixtures } from '../../packages/scheduling/src/testing.ts'
 import { test as base, expect } from './fixtures.ts'
+import { listenOwned, type OwnedListener } from './listeners.ts'
 
 interface ZoomMeetingApp {
   url: string
@@ -72,21 +72,10 @@ export const test = base.extend<{
     if (!bootstrap)
       throw new Error('HOURMERE_E2E_BOOTSTRAP_URL must bootstrap helper-owned databases')
     const owned = await createTestDatabase(bootstrap)
-    let server: Server | undefined,
-      authPool: ReturnType<typeof createAuthPool> | undefined,
-      port: number | undefined
+    let listener: OwnedListener | undefined, authPool: ReturnType<typeof createAuthPool> | undefined
     try {
-      const probe = createProbe()
-      await new Promise<void>((resolve, reject) => {
-        probe.once('error', reject)
-        probe.listen(0, '127.0.0.1', resolve)
-      })
-      const address = probe.address()
-      if (!address || typeof address === 'string' || [3000, 3998].includes(address.port))
-        throw new Error('Invalid fixture port')
-      port = address.port
-      await new Promise<void>((resolve, reject) => probe.close((e) => (e ? reject(e) : resolve())))
-      const url = `http://127.0.0.1:${port}`,
+      listener = await listenOwned(createHttpServer())
+      const { server, url } = listener,
         db = createDb(owned.pool),
         f = createFixtures(db)
       const host = await f.host({ handle: 'zoom-booking', name: 'Settings', timeZone: 'UTC' }),
@@ -259,12 +248,7 @@ export const test = base.extend<{
         title: 'Team Zoom call',
         location: { kind: 'zoom' },
       })
-      server = await new Promise<Server>((resolve, reject) => {
-        const s = serve({ fetch: app.fetch, hostname: '127.0.0.1', port }, () =>
-          resolve(s as Server),
-        )
-        s.once('error', reject)
-      })
+      server.on('request', getRequestListener(app.fetch, { hostname: '127.0.0.1' }))
       let external = 0,
         privateListFailure = false
       await context.route('**/*', async (route) => {
@@ -454,7 +438,10 @@ export const test = base.extend<{
               .every(
                 (m) =>
                   m.sensitive &&
-                  m.text.includes('https://us02web.zoom.us/j/') &&
+                  textHasUrl(
+                    m.text,
+                    'https://us02web.zoom.us/j/81234567890?pwd=synthetic-only.1',
+                  ) &&
                   m.attachments?.every((a) => a.content.includes(`${c?.root_booking_id}@hourmere`)),
               ),
             rootStable: !c || !firstMeeting || c.zoom_meeting_id === firstMeeting,
@@ -475,7 +462,7 @@ export const test = base.extend<{
       expect(external, 'All non-loopback browser requests must remain blocked').toBe(0)
     } finally {
       try {
-        if (server) await closeServer(server)
+        await listener?.close()
       } finally {
         try {
           await authPool?.end()
@@ -493,24 +480,7 @@ export const test = base.extend<{
           } finally {
             await verification.end()
           }
-          if (port) {
-            const ownedPort = port
-            const closed = await new Promise<boolean>((resolve) => {
-              const socket = createConnection({ host: '127.0.0.1', port: ownedPort })
-              socket.once('connect', () => {
-                socket.destroy()
-                resolve(false)
-              })
-              socket.once('error', (e) =>
-                resolve((e as NodeJS.ErrnoException).code === 'ECONNREFUSED'),
-              )
-              socket.setTimeout(1000, () => {
-                socket.destroy()
-                resolve(false)
-              })
-            })
-            expect(closed, 'Own Zoom meeting listener must be closed').toBe(true)
-          }
+          await listener?.assertClosed()
           console.log('Automatic Zoom fixture cleanup verified: fresh 3D000, owned listener closed')
         }
       }

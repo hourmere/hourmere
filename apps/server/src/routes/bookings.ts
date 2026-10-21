@@ -20,6 +20,7 @@ import {
   type ServiceContext,
 } from '@hourmere/scheduling'
 import type { MiddlewareHandler } from 'hono'
+import { createMiddleware } from 'hono/factory'
 import type { CallerEnv } from '../caller.ts'
 import { authenticated, ErrorBody, json, type RouteModule } from '../openapi.ts'
 import { createRateLimiter, PUBLIC_RATE_LIMITS, type RateLimit, rateLimit } from '../rate-limit.ts'
@@ -80,12 +81,20 @@ export const Booking = z
     start: Instant,
     end: Instant,
     title: z.string(),
+    eventTypeTitle: z.string().nullable().optional().openapi({
+      description:
+        "Authenticated host reads only: the event type's current title, or null when deleted. The stored booking title remains historical; clients must verify its exact composition before localizing it.",
+    }),
     location: BookingLocation.nullable(),
     conference: z
       .object({
         provider: z.enum(['google_meet', 'zoom']),
         status: z.enum(['pending', 'ready', 'failed']),
-        errorCode: z.string().max(64).nullable(),
+        errorCode: z.string().max(64).nullable().openapi({
+          description:
+            'Stable failure code, or null. conference_pending_timeout means Google still reports a pending conference after the polling budget; provider_unavailable means a provider or transport failure. Clients must accept additional codes.',
+          example: 'conference_pending_timeout',
+        }),
       })
       .optional(),
     conferenceCanRetry: z.boolean().optional().openapi({
@@ -105,6 +114,10 @@ export const Booking = z
     attendees: z.array(Attendee).openapi({ description: 'The invitee first, then guests' }),
     rescheduledFromId: z.uuid().nullable().openapi({
       description: 'The booking this one replaced when it was rescheduled',
+    }),
+    rescheduledToId: z.uuid().nullable().optional().openapi({
+      description:
+        'Authenticated host reads only: the immediate successor booking in the same organization that this caller also hosts, or null. A rescheduled predecessor keeps status cancelled.',
     }),
     cancelledAt: Instant.nullable(),
     cancelReason: z.string().nullable(),
@@ -196,6 +209,9 @@ const unauthorized = error('No valid session or API key')
 const keyRateLimited = error(
   "The API key's rate limit is used up (`rate_limited`); see Retry-After",
 )
+const hostRateLimited = error(
+  "The caller's per-user limit or the API key's rate limit is used up (`rate_limited`); see Retry-After",
+)
 const crossOrigin = error(
   'A cookie-authenticated write that does not come from the app itself (`forbidden`)',
 )
@@ -213,6 +229,8 @@ export interface BookingRoutesDeps {
   notify?: BookingNotifier | undefined
   /** Replaces PUBLIC_RATE_LIMITS.manage (and .slots for the reschedule slots), e.g. in tests. */
   rateLimits?: Partial<Record<keyof typeof PUBLIC_RATE_LIMITS, RateLimit>>
+  /** Per-user host limits, separate from invitee IP counters; defaults are 30/120 per minute. */
+  hostRateLimits?: Partial<Record<'manage' | 'slots', RateLimit>>
 }
 
 /**
@@ -227,6 +245,7 @@ export function bookingRoutes({
   automaticMeet,
   automaticZoom,
   rateLimits = {},
+  hostRateLimits = {},
 }: BookingRoutesDeps): RouteModule {
   const publicContext: PublicContext = { db, now, notify, automaticMeet, automaticZoom }
   const manageLimit = rateLimit(createRateLimiter(rateLimits.manage ?? PUBLIC_RATE_LIMITS.manage))
@@ -234,11 +253,26 @@ export function bookingRoutes({
   const manageSlotsLimit = rateLimit(
     createRateLimiter(rateLimits.slots ?? PUBLIC_RATE_LIMITS.slots),
   )
+  // Authentication must run first: these counters follow the user across sessions, keys,
+  // organizations and IPs, without consuming the anonymous invitee's address budget.
+  const hostLimit = (limit: RateLimit) => {
+    const limiter = createRateLimiter(limit)
+    return createMiddleware<CallerEnv>(async (c, next) => {
+      const retryAfter = limiter.hit(c.var.principal.user.id)
+      if (retryAfter !== undefined) {
+        c.header('Retry-After', String(retryAfter))
+        return c.json({ error: 'rate_limited' }, 429)
+      }
+      await next()
+    })
+  }
+  const hostManageLimit = hostLimit(hostRateLimits.manage ?? PUBLIC_RATE_LIMITS.manage)
+  const hostSlotsLimit = hostLimit(hostRateLimits.slots ?? PUBLIC_RATE_LIMITS.slots)
 
   return ({ app, caller }) => {
     // Tuples preserve caller's principal type through createRoute's middleware inference.
-    const hostManage: [typeof caller, MiddlewareHandler<CallerEnv>] = [caller, manageLimit]
-    const hostSlots: [typeof caller, MiddlewareHandler<CallerEnv>] = [caller, manageSlotsLimit]
+    const hostManage: [typeof caller, MiddlewareHandler<CallerEnv>] = [caller, hostManageLimit]
+    const hostSlots: [typeof caller, MiddlewareHandler<CallerEnv>] = [caller, hostSlotsLimit]
     const context = (principal: ServiceContext['principal']): ServiceContext => ({
       db,
       principal,
@@ -256,6 +290,8 @@ export function bookingRoutes({
         middleware: caller,
         tags: ['Bookings'],
         summary: 'Retry safe conference reconciliation for an assigned host',
+        description:
+          'A Google Meet conference_pending_timeout retry rechecks the same event and conference request without creating a replacement. Only an explicit conference_failed result permits a new request on that event.',
         request: {
           params: z.object({ id: z.uuid() }),
           body: { required: true, content: json(z.strictObject({})) },
@@ -468,7 +504,7 @@ export function bookingRoutes({
           409: error(
             'Already cancelled (`booking_cancelled`), already started (`booking_in_past`), the event type no longer takes bookings (`event_type_unavailable`), or required hosts are unavailable (`booking_has_no_host`, `booking_hosts_unavailable`)',
           ),
-          429: rateLimited,
+          429: hostRateLimited,
         },
       }),
       async (c) => {
@@ -510,7 +546,7 @@ export function bookingRoutes({
           409: error(
             'Already cancelled (`booking_cancelled`), already started (`booking_in_past`), the event type no longer takes bookings (`event_type_unavailable`), required hosts are unavailable (`booking_has_no_host`, `booking_hosts_unavailable`), or the time is not offered (`slot_unavailable`, `slot_taken`)',
           ),
-          429: rateLimited,
+          429: hostRateLimited,
         },
       }),
       async (c) => {

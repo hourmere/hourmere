@@ -1,7 +1,8 @@
-import { fireEvent, screen, within } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { Schedule } from '../../api/resources.ts'
+import { chooseLanguage } from '../../i18n/store.ts'
 import { browserLocale } from '../../test/browser-locale.ts'
 import {
   fakeApi,
@@ -122,6 +123,9 @@ describe('the availability page', () => {
     expect(screen.getByRole('link', { name: 'Set your weekly hours' }).getAttribute('href')).toBe(
       '/app/availability/new',
     )
+    expect(
+      screen.getByRole('link', { name: 'Set your weekly hours' }).classList.contains('button'),
+    ).toBe(true)
   })
 })
 
@@ -421,6 +425,7 @@ describe('date overrides', () => {
       const section = await screen.findByRole('region', { name: 'Date overrides' })
       await within(section).findByText(date)
       await user.click(within(section).getByRole('button', { name: `Remove override: ${date}` }))
+      await user.click(within(section).getByRole('button', { name: 'Save removals' }))
       expect(await within(section).findByText(`Removed the override for ${date}.`)).toBeDefined()
     },
   )
@@ -609,12 +614,199 @@ describe('date overrides', () => {
     const remove = await within(section).findByRole('button', { name: /Remove override: / })
     api.setOverrides([])
     await user.click(remove)
+    expect(api.to(`DELETE /api/v1/schedules/${SCHEDULE_ID}/overrides/2030-12-24`)).toHaveLength(0)
+    expect(within(section).getByText('Removal pending save')).toBeDefined()
+    await user.click(within(section).getByRole('button', { name: 'Save removals' }))
     expect(await within(section).findByText('No upcoming date overrides.')).toBeDefined()
     expect(within(section).getByText(/Removed the override for /)).toBeDefined()
     expect(document.activeElement).toBe(
       within(section).getByRole('heading', { name: 'Date overrides' }),
     )
     expect(api.to(`DELETE /api/v1/schedules/${SCHEDULE_ID}/overrides/2030-12-24`)).toHaveLength(1)
+  })
+
+  it('keeps removals unsaved until an explicit save, with undo and navigation protection', async () => {
+    const user = userEvent.setup()
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const api = scheduleServer([schedule()], {
+      overrides: [{ date: '2030-12-24', intervals: [] }],
+    })
+    renderApp(`/app/availability/${SCHEDULE_ID}`)
+    const section = await overridesSection()
+    const remove = await within(section).findByRole('button', { name: /Remove override:/ })
+    await user.click(remove)
+    expect(within(section).getByText('Unsaved date override removals')).toBeDefined()
+    expect(api.calls.some((call) => call.method === 'DELETE')).toBe(false)
+    const reload = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(reload)
+    expect(reload.defaultPrevented).toBe(true)
+    await user.click(screen.getByRole('link', { name: 'Settings' }))
+    expect(confirm).toHaveBeenCalledOnce()
+    expect(location()).toBe(`/app/availability/${SCHEDULE_ID}`)
+    await user.click(within(section).getByRole('button', { name: /Undo removal:/ }))
+    expect(within(section).queryByRole('button', { name: 'Save removals' })).toBeNull()
+    const restored = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(restored)
+    expect(restored.defaultPrevented).toBe(false)
+  })
+
+  it('keeps failed removals for retry without repeating successful deletes', async () => {
+    const user = userEvent.setup()
+    let fail = true
+    const api = scheduleServer([schedule()], {
+      overrides: [
+        { date: '2030-12-24', intervals: [] },
+        { date: '2030-12-31', intervals: [] },
+      ],
+      extra: {
+        [`DELETE /api/v1/schedules/${SCHEDULE_ID}/overrides/2030-12-24`]: () => {
+          api.setOverrides([{ date: '2030-12-31', intervals: [] }])
+          return new Response(null, { status: 204 })
+        },
+        [`DELETE /api/v1/schedules/${SCHEDULE_ID}/overrides/2030-12-31`]: () => {
+          if (fail) return json(503, { error: 'service_unavailable', message: 'Try again later.' })
+          api.setOverrides([])
+          return new Response(null, { status: 204 })
+        },
+      },
+    })
+    renderApp(`/app/availability/${SCHEDULE_ID}`)
+    const section = await overridesSection()
+    const removes = await within(section).findAllByRole('button', { name: /Remove override:/ })
+    for (const remove of removes) await user.click(remove)
+    await user.click(within(section).getByRole('button', { name: 'Save removals' }))
+    expect((await within(section).findByRole('alert')).textContent).toContain(
+      'Saved removals are kept; try again for the remaining dates.',
+    )
+    expect(within(section).getByText('Unsaved date override removals')).toBeDefined()
+    await within(section).findByRole('button', { name: /Undo removal:/ })
+    const reload = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(reload)
+    expect(reload.defaultPrevented).toBe(true)
+    fail = false
+    await user.click(within(section).getByRole('button', { name: 'Save removals' }))
+    await within(section).findByText('No upcoming date overrides.')
+    expect(api.to(`DELETE /api/v1/schedules/${SCHEDULE_ID}/overrides/2030-12-24`)).toHaveLength(1)
+    expect(api.to(`DELETE /api/v1/schedules/${SCHEDULE_ID}/overrides/2030-12-31`)).toHaveLength(2)
+    const saved = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(saved)
+    expect(saved.defaultPrevented).toBe(false)
+  })
+
+  it('uses separate explicit save actions for schedule details and override drafts', async () => {
+    const user = userEvent.setup()
+    const api = scheduleServer([schedule()], {
+      overrides: [{ date: '2030-12-24', intervals: [] }],
+    })
+    renderApp(`/app/availability/${SCHEDULE_ID}`)
+    const section = await overridesSection()
+    await user.click(await within(section).findByRole('button', { name: /Remove override:/ }))
+    await user.type(input('Name'), ' 2')
+    await user.click(screen.getByRole('button', { name: 'Save changes' }))
+    await screen.findByText('Saved.')
+    expect(api.to(`PATCH /api/v1/schedules/${SCHEDULE_ID}`)).toHaveLength(1)
+    expect(api.calls.some((call) => call.method === 'DELETE')).toBe(false)
+    expect(within(section).getByText('Unsaved date override removals')).toBeDefined()
+    expect(
+      screen.getByText(
+        'Save schedule details and weekly hours here. Save date overrides in their section below.',
+      ),
+    ).toBeDefined()
+    expect(screen.queryByText(/They are saved right away/)).toBeNull()
+  })
+
+  it('locks both override actions during a removal save and does not send duplicate deletes', async () => {
+    const user = userEvent.setup()
+    const remove = later()
+    const api = scheduleServer([schedule()], {
+      overrides: [{ date: '2030-12-24', intervals: [] }],
+      extra: {
+        [`DELETE /api/v1/schedules/${SCHEDULE_ID}/overrides/2030-12-24`]: () => remove.response,
+        [`PUT /api/v1/schedules/${SCHEDULE_ID}/overrides/2030-12-31`]: ({ body }) =>
+          json(201, { date: '2030-12-31', ...(body as object) }),
+      },
+    })
+    renderApp(`/app/availability/${SCHEDULE_ID}`)
+    const section = await overridesSection()
+    await user.click(await within(section).findByRole('button', { name: /Remove override:/ }))
+    fireEvent.change(within(section).getByLabelText('Date'), { target: { value: '2030-12-31' } })
+    const save = within(section).getByRole('button', { name: 'Save removals' })
+    await user.click(save)
+    expect(save.matches(':disabled')).toBe(true)
+    expect(document.activeElement).toBe(
+      within(section).getByRole('heading', { name: 'Date overrides' }),
+    )
+    expect(within(section).getByLabelText('Date').matches(':disabled')).toBe(true)
+    expect(
+      within(section)
+        .getByRole('button', { name: /Undo removal:/ })
+        .matches(':disabled'),
+    ).toBe(true)
+    fireEvent.submit(
+      within(section)
+        .getByRole('button', { name: 'Save override' })
+        .closest('form') as HTMLFormElement,
+    )
+    await user.click(save)
+    expect(api.calls.filter((call) => call.method === 'PUT')).toHaveLength(0)
+    expect(api.to(`DELETE /api/v1/schedules/${SCHEDULE_ID}/overrides/2030-12-24`)).toHaveLength(1)
+    api.setOverrides([])
+    await remove.answer(new Response(null, { status: 204 }))
+    await within(section).findByText('No upcoming date overrides.')
+    expect(within(section).getByLabelText('Date').matches(':disabled')).toBe(false)
+  })
+
+  it('locks removal actions during an override save, then keeps a saved replacement', async () => {
+    const user = userEvent.setup()
+    const save = later()
+    const api = scheduleServer([schedule()], {
+      overrides: [{ date: '2030-12-24', intervals: [] }],
+      extra: {
+        [`PUT /api/v1/schedules/${SCHEDULE_ID}/overrides/2030-12-24`]: () => save.response,
+      },
+    })
+    renderApp(`/app/availability/${SCHEDULE_ID}`)
+    const section = await overridesSection()
+    await user.click(await within(section).findByRole('button', { name: /Remove override:/ }))
+    fireEvent.change(within(section).getByLabelText('Date'), { target: { value: '2030-12-24' } })
+    await user.click(within(section).getByRole('button', { name: 'Save override' }))
+    expect(
+      within(section).getByRole('button', { name: 'Save removals' }).matches(':disabled'),
+    ).toBe(true)
+    expect(
+      within(section)
+        .getByRole('button', { name: /Undo removal:/ })
+        .matches(':disabled'),
+    ).toBe(true)
+    await user.click(within(section).getByRole('button', { name: 'Save removals' }))
+    expect(api.calls.filter((call) => call.method === 'DELETE')).toHaveLength(0)
+    await save.answer(json(200, { date: '2030-12-24', intervals: [] }))
+    await within(section).findByText(/Replaced the override for/)
+    expect(within(section).queryByRole('button', { name: 'Save removals' })).toBeNull()
+    expect(await within(section).findByRole('button', { name: /Remove override:/ })).toBeDefined()
+    const saved = new Event('beforeunload', { cancelable: true })
+    window.dispatchEvent(saved)
+    expect(saved.defaultPrevented).toBe(false)
+  })
+
+  it('treats an already removed override as a saved removal', async () => {
+    const user = userEvent.setup()
+    const api = scheduleServer([schedule()], {
+      overrides: [{ date: '2030-12-24', intervals: [] }],
+      extra: {
+        [`DELETE /api/v1/schedules/${SCHEDULE_ID}/overrides/2030-12-24`]: () => {
+          api.setOverrides([])
+          return json(404, { error: 'schedule_override_not_found' })
+        },
+      },
+    })
+    renderApp(`/app/availability/${SCHEDULE_ID}`)
+    const section = await overridesSection()
+    await user.click(await within(section).findByRole('button', { name: /Remove override:/ }))
+    await user.click(within(section).getByRole('button', { name: 'Save removals' }))
+    await within(section).findByText('No upcoming date overrides.')
+    expect(within(section).queryByRole('alert')).toBeNull()
+    expect(within(section).queryByRole('button', { name: 'Save removals' })).toBeNull()
   })
 
   it('waits for the schedule to exist', async () => {
@@ -706,4 +898,79 @@ describe('answers that arrive after leaving or editing on', () => {
     await save.answer(json(201, { date: '2030-12-24', intervals: [] }))
     expect(within(section).getByLabelText('Date').matches(':disabled')).toBe(false)
   })
+})
+
+describe('Chinese schedule names', () => {
+  it('uses resource-name wording and wrapped quotes on the schedule editor', async () => {
+    chooseLanguage('zh-CN')
+    scheduleServer()
+    renderApp(`/app/availability/${SCHEDULE_ID}`)
+    const heading = await screen.findByRole('heading', { name: '编辑“Working hours”', level: 1 })
+    expect(screen.getByRole('heading', { name: '名称和时区' })).toBeDefined()
+    expect(screen.getByLabelText('名称')).toBeDefined()
+    expect(heading.querySelectorAll('.cjk-quote')).toHaveLength(2)
+  })
+})
+
+describe('schedule editor layout and accessible controls', () => {
+  it('uses shared page headers on the schedule list and editor', async () => {
+    const user = userEvent.setup()
+    scheduleServer()
+    renderApp('/app/availability')
+    const heading = await screen.findByRole('heading', { name: 'Availability', level: 1 })
+    expect(heading.closest('.page-header')).not.toBeNull()
+    await user.click(await screen.findByRole('link', { name: 'Edit Working hours' }))
+    const editor = await screen.findByRole('heading', { name: 'Edit “Working hours”', level: 1 })
+    expect(editor.closest('.page-header')).not.toBeNull()
+  })
+
+  it('keeps a time range in one compact row with a named icon remove control', async () => {
+    scheduleServer()
+    renderApp(`/app/availability/${SCHEDULE_ID}`)
+    const remove = await screen.findByRole('button', { name: 'Remove Monday, hours 1' })
+    expect(remove.classList.contains('button-icon')).toBe(true)
+    expect(remove.querySelector('[aria-hidden="true"]')?.textContent).toBe('×')
+    const row = remove.closest('.interval-row')
+    expect(row?.querySelectorAll('input[type="time"]')).toHaveLength(2)
+    expect(input('Monday, hours 1, from').closest('.interval-row')).toBe(row)
+    expect(input('Monday, hours 1, until').closest('.interval-row')).toBe(row)
+    expect(row?.lastElementChild).toBe(remove)
+  })
+})
+
+describe('availability loading skeleton', () => {
+  it('keeps the page header and app navigation visible while schedules load', async () => {
+    const loading = later()
+    scheduleServer([], { extra: { 'GET /api/v1/schedules': () => loading.response } })
+    renderApp('/app/availability')
+    await screen.findByRole('heading', { name: 'Availability', level: 1 })
+    expect(screen.getByRole('navigation', { name: 'Main' })).toBeDefined()
+    const skeleton = screen.getByRole('status', { name: 'Loading schedules…' })
+    expect(skeleton.classList.contains('page-skeleton')).toBe(true)
+    expect(skeleton.querySelectorAll('[aria-hidden="true"]')).toHaveLength(3)
+    await loading.answer(json(200, { data: [] }))
+    expect(screen.queryByRole('status', { name: 'Loading schedules…' })).toBeNull()
+    expect(screen.getByText(/You have no schedule yet/)).toBeDefined()
+  })
+})
+
+it('keeps the schedule editor inside the app shell while its skeleton loads', async () => {
+  const loading = later()
+  const answered = vi.fn()
+  void loading.response.then(answered)
+  const api = scheduleServer([schedule()], {
+    extra: { [`GET /api/v1/schedules/${SCHEDULE_ID}`]: () => loading.response },
+  })
+  renderApp(`/app/availability/${SCHEDULE_ID}`)
+  // AdminLoading uses the same label before the session and lazy route are ready.
+  await screen.findByRole('navigation', { name: 'Main' })
+  await waitFor(() => expect(api.to(`GET /api/v1/schedules/${SCHEDULE_ID}`)).toHaveLength(1))
+  const skeleton = await within(screen.getByRole('main')).findByRole('status', {
+    name: 'Loading…',
+  })
+  expect(skeleton.classList.contains('page-skeleton')).toBe(true)
+  expect(skeleton.closest('[aria-busy="true"]')).toBeNull()
+  expect(answered).not.toHaveBeenCalled()
+  await loading.answer(json(200, schedule()))
+  expect(screen.getByRole('heading', { name: 'Edit “Working hours”', level: 1 })).toBeDefined()
 })

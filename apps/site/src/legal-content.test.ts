@@ -71,23 +71,35 @@ describe('comparison review information', () => {
       }
     })
 
-    it(`${page} states development, image and Cloud launch limits in its sourced introduction`, () => {
+    it(`${page} states preview, image and self-hosted release limits in its sourced introduction`, () => {
       const source = read(`./content/docs/docs/${page}`)
       const intro = source.split(/^## /m)[0] ?? ''
-      expect(intro).toMatch(/\[in development and not yet ready to use\]\(\/#faq\)/)
+      expect(intro).toMatch(/\[invitation-only preview\]\(\/#faq\) with sign-ups closed/)
+      expect(intro).toContain('planned for November 30, 2026')
       expect(intro).not.toMatch(/README/)
       expect(intro).toMatch(/no prebuilt public image is published/)
       expect(intro).toContain('](/docs/self-hosting)')
-      expect(intro).toMatch(/Hourmere Cloud has not launched\]\(\/privacy\)/)
+      expect(intro).not.toMatch(/not yet ready to use|Cloud has not launched/)
     })
   }
 
-  it('links the development status to the home-page FAQ answer', () => {
+  it('states the hosted preview, closed sign-ups and self-hosted release on the home page', () => {
     const home = read('./pages/index.astro')
     expect(home).toMatch(/<section[^>]*\sid="faq"/)
-    expect(plainText(home)).toMatch(
-      /Can I use Hourmere today\? Not yet\. Hourmere is in development\./,
+    const text = plainText(home)
+    expect(text).toMatch(
+      /Can I use Hourmere today\? Hourmere Cloud is in an invitation-only preview/,
     )
+    expect(text).toContain('Sign-ups are currently closed.')
+    expect(text).toContain(
+      'The open-source release for self-hosting is planned for November 30, 2026.',
+    )
+    expect(home).toContain('href="https://app.hourmere.com"')
+    expect(home).toContain('operated by {company.shortName}')
+    expect(home).toContain('href="/privacy"')
+    expect(home).toContain('href="/terms"')
+    expect(text).not.toMatch(/Not yet\.|not available yet|no sign-up today|[Ii]n development/)
+    expect(read('./site.ts')).not.toContain('adrian@cobaltmere.com')
   })
 
   it('describes MCP OAuth 2.1 as operator-enabled, not planned, on the home and terms pages', () => {
@@ -126,7 +138,7 @@ describe('comparison review information', () => {
     expect(read('./content.config.ts')).toMatch(/lastVerified:\s*z\.iso\.date\(\)/)
     const title = read('./components/DocsPageTitle.astro')
     expect(title).toContain('Astro.locals.starlightRoute.entry.data')
-    expect(title).toMatch(/<time datetime=\{lastVerified\}>\{lastVerified\}<\/time>/)
+    expect(title).toMatch(/<time datetime=\{lastVerified\}>\{verifiedLabel\}<\/time>/)
   })
 })
 
@@ -149,10 +161,14 @@ describe('MCP quickstart authentication', () => {
 })
 
 describe('privacy data-flow disclosures', () => {
-  it('is publishable: effective date set, no draft banner and no owner TODO markers', () => {
+  it('uses the fixed publication date for privacy and terms', () => {
     const terms = read('./pages/terms.astro')
-    expect(privacy).toMatch(/effective="2026-11-30"/)
-    expect(terms).toMatch(/effective="2026-11-30"/)
+    for (const page of [privacy, terms]) {
+      expect(page).toContain('const publicationDate = resolveLegalPublicationDate()')
+      expect(page).toContain('effective={publicationDate}')
+      expect(page).not.toMatch(/effective="\d{4}-\d{2}-\d{2}"|import\.meta\.env/)
+    }
+    expect(privacy).toMatch(/\s lastUpdated\s/)
     for (const page of [privacy, terms, read('./content/docs/docs/comparison.md')]) {
       expect(plainText(page)).not.toMatch(/Draft for owner review|TODO|owner review|owner decision/)
     }
@@ -201,6 +217,91 @@ describe('privacy data-flow disclosures', () => {
     expect(section('scope')).toMatch(/Hourmere Cloud.*(?:company\.(?:name|shortName)|Cobaltmere)/)
     expect(section('self-hosted')).toMatch(/operator.*(?:responsible|policy)/)
     expect(section('scope')).toContain('For Hourmere Cloud, the instance operator is Cobaltmere.')
+    expect(plainText(privacy)).toContain(
+      'the Hourmere cloud service that we host at app.hourmere.com ("Hourmere Cloud")',
+    )
+    expect(plainText(privacy)).toMatch(
+      /This policy applies to that preview, including any Google user data it receives, and to this website\./,
+    )
+    expect(plainText(privacy)).not.toContain('the only personal data we receive')
+    expect(plainText(privacy)).not.toMatch(/in development|not available yet|has not launched/i)
+  })
+
+  it('applies the terms to the current preview and marks disabled preview features', () => {
+    const terms = plainText(read('./pages/terms.astro'))
+    expect(terms).toContain(
+      'Hourmere Cloud is in an invitation-only preview at app.hourmere.com, and sign-ups are currently closed.',
+    )
+    expect(terms).toContain('These Terms apply to that preview and to your use of this website.')
+    expect(terms).not.toMatch(/in development|not available yet|has not launched/i)
+    expect(plainText(privacy)).toContain(
+      'In the current preview, Microsoft sign-in, Microsoft Calendar, Zoom and paid plans are not enabled.',
+    )
+    expect(plainText(privacy)).toContain(
+      'The sections about them describe how we will handle that data if we enable them.',
+    )
+  })
+
+  it('limits the terms service summary to Google Calendar synchronization', () => {
+    const terms = plainText(read('./pages/terms.astro'))
+    expect(terms).toContain(
+      'time that works, syncs with Google Calendar, sends email confirmations and reminders',
+    )
+    expect(terms).not.toMatch(/syncs with Google Calendar and Microsoft 365/)
+  })
+
+  it('locks the Google Limited Use commitment and Workspace AI statement', () => {
+    const google = section('google-user-data')
+    expect(google.replace(/\s+([,.])/g, '$1')).toContain(
+      "Hourmere's use and transfer to any other app of information received from Google APIs will adhere to the Google API Services User Data Policy, including the Limited Use requirements.",
+    )
+    expect(privacy).toContain('href={googlePolicies.userData}')
+    expect(privacy).toContain('#limited-use`}>Limited Use requirements</a>')
+    expect(read('./site.ts')).toContain(
+      'https://developers.google.com/terms/api-services-user-data-policy',
+    )
+    expect(google).toContain(
+      'Hourmere does not use data obtained through Google Workspace APIs to develop, improve, or train generalized or non-personalized AI and/or ML models.',
+    )
+  })
+
+  it('maps Google identity, calendar-list and synchronization scopes to their limited uses', () => {
+    const google = section('google-user-data')
+    expect(google).toMatch(/Sign in with Google requests openid , email and profile/)
+    expect(google).toMatch(
+      /Sign in with Google requests openid , email and profile \(your Google account ID, name, email address and profile picture\)/,
+    )
+    expect(google).toMatch(
+      /Connect Google Calendar button requests all of the following permissions together/,
+    )
+    expect(google).toMatch(
+      /only the first two.*API with calendar-list access.*cannot check conflicts or write booking events until you choose Enable calendar synchronization/,
+    )
+    expect(google).not.toMatch(/when you enable synchronization/)
+    expect(google).toMatch(
+      /calendar\.calendarlist\.readonly , to list your calendars.*primary-calendar status.*whether Google Meet is available/,
+    )
+    expect(google).toMatch(
+      /https:\/\/www\.googleapis\.com\/auth\/calendar\.events\.readonly , used only to read event identifiers, start and end times/,
+    )
+    expect(google).toMatch(
+      /https:\/\/www\.googleapis\.com\/auth\/calendar\.events\.owned , used only to create, update and cancel.*calendar you own and select.*Google Meet.*read those booking events back/,
+    )
+  })
+
+  it('explains incremental busy synchronization and retention when synchronization stops', () => {
+    const google = section('google-user-data')
+    expect(google).toMatch(
+      /three days before the current UTC day to 403 days \(about 13 months\) ahead/,
+    )
+    expect(google).toMatch(/stores busy intervals only for events that overlap a rolling window/)
+    expect(google).toMatch(
+      /about every minute using incremental updates and rebuilds the stored intervals daily, which removes intervals that no longer overlap the window/,
+    )
+    expect(google).toMatch(/Events overlapping the window can start before it or end after it/)
+    expect(google).toMatch(
+      /when you turn off conflict checks, stored busy intervals and sync data remain until.*disconnected in Hourmere, or you ask us to delete them/,
+    )
   })
 
   it('discloses Google busy data, limited booking writes and encrypted credentials', () => {
@@ -229,10 +330,17 @@ describe('privacy data-flow disclosures', () => {
     )
     expect(google).toMatch(/does not automatically revoke Google's account-wide grant/)
     expect(google).toMatch(/Disconnecting does not delete them or an existing join link/)
+    expect(google).toMatch(
+      /When Hourmere detects the authorization failure, it marks the connection as needing reconnection; its stored connection data remains until you disconnect it in Hourmere or ask us to delete it/,
+    )
+    expect(privacy).toContain('href={googlePolicies.connections}')
   })
 
   it('describes Microsoft as list-only with encrypted tokens and separate grant revocation', () => {
     const microsoft = section('microsoft-calendar-data')
+    expect(microsoft).toContain(
+      'If you sign in with Microsoft, Hourmere receives your Microsoft account identifier, name and email address.',
+    )
     expect(microsoft).toMatch(/calendar list containing identifiers/)
     expect(microsoft).toMatch(
       /does not read event times or busy intervals, synchronize events, or write booking events/,
@@ -311,15 +419,25 @@ describe('privacy data-flow disclosures', () => {
     )
   })
 
-  it('discloses encrypted sign-in access and refresh tokens and that the ID token is not stored', () => {
+  it('discloses sign-in account identifiers and access tokens without offline access', () => {
     const collected = section('information-we-collect')
     expect(collected).toMatch(
-      /Google or Microsoft:.*sign-in access and refresh tokens are stored encrypted; the ID token returned at sign-in is not stored\./,
+      /Google sign-in provides your Google account ID, name, email address and profile picture \(if available\)/,
+    )
+    expect(collected).toContain(
+      'Microsoft sign-in provides your Microsoft account identifier, name and email address.',
+    )
+    expect(section('google-user-data')).toMatch(
+      /Hourmere receives your Google account ID, name, email address and profile picture \(if available\)/,
+    )
+    expect(section('google-user-data')).toContain('Google account ID')
+    expect(collected).toMatch(
+      /sign-in access tokens are stored encrypted; neither sign-in flow requests offline access or receives a refresh token\. The ID token returned at sign-in is not stored\./,
     )
     expect(collected).not.toMatch(/sign-in OAuth tokens|stored as received/)
     const security = section('security')
     expect(security).toMatch(
-      /encrypted storage of Google and Microsoft sign-in access and refresh tokens, calendar and Zoom connection tokens/,
+      /encrypted storage of Google and Microsoft sign-in access tokens, calendar and Zoom connection tokens/,
     )
     expect(security).not.toMatch(/sign-in OAuth tokens/)
   })
@@ -366,27 +484,79 @@ describe('privacy data-flow disclosures', () => {
   it.each([
     [
       'information-we-collect',
-      /Hourmere Cloud has not launched and takes no payments yet; the billing description above applies once paid plans are available\./,
+      /Hourmere Cloud is in an invitation-only preview and takes no payments yet; the billing description above applies once paid plans are available\./,
     ],
     [
       'sharing',
-      /Hourmere Cloud has not launched and takes no payments yet; the payment-provider description above applies once paid plans are available\./,
+      /Hourmere Cloud is in an invitation-only preview and takes no payments yet; the payment-provider description above applies once paid plans are available\./,
     ],
-    [
-      'international-transfers',
-      /Hourmere Cloud has not launched\. Before it does, we will update this policy to state where Hourmere Cloud data is hosted and any mechanism we use for international transfers of personal data\. The hourmere\.com website is published as static files on Cloudflare Workers/,
-    ],
-  ] as const)('states the pre-launch position in %s', (id, disclosure) => {
+  ] as const)('states preview payment limits in %s', (id, disclosure) => {
     expect(section(id)).toMatch(disclosure)
   })
 
-  it('does not promise a hosting region or transfer safeguards before Cloud launches', () => {
+  it('discloses actual hosted storage and on-host backups without unsupported safeguards', () => {
     expect(plainText(privacy)).not.toMatch(
       /Standard Contractual Clauses|intended to be hosted|European Union/,
     )
-    expect(section('google-user-data')).toMatch(
-      /Before Hourmere Cloud launches, we will state where its data is hosted in section 12 ?\./,
+    for (const id of ['google-user-data', 'international-transfers']) {
+      expect(section(id)).toMatch(
+        /operated by Cobaltmere on a virtual private server that we rent from BandwagonHost \(IT7 Networks Inc\.\) in Los Angeles, United States/,
+      )
+      expect(section(id)).toContain('on-host backups')
+    }
+    const google = section('google-user-data')
+    expect(google).toMatch(
+      /Google Calendar connection access and refresh tokens are stored encrypted with AES-256-GCM/,
     )
+    expect(google).toMatch(/Google sign-in access tokens are also stored encrypted/)
+    expect(google).toMatch(
+      /does not request offline access when you sign in, so Google issues no sign-in refresh token/,
+    )
+    expect(google).not.toMatch(/all data.*encrypted at rest/i)
+    expect(section('retention')).toMatch(
+      /daily backup on the same server and keeps the latest 7 daily and 4 weekly copies/,
+    )
+    expect(section('retention')).toContain('Backups are not yet copied to another location.')
+    expect(section('retention')).toMatch(
+      /Older copies are deleted automatically, so deleted data can remain in backups for up to about five weeks/,
+    )
+  })
+
+  it('names hosting and email providers and discloses Google data in email without contract claims', () => {
+    const providers = block('li', 'Service providers')
+    expect(providers).toMatch(/BandwagonHost \(IT7 Networks Inc\.\)/)
+    expect(providers).toMatch(/where we operate Hourmere Cloud and store its backups/)
+    expect(providers).toMatch(
+      /Zoho, which delivers sign-in emails, booking confirmations and reminders from its United States data center/,
+    )
+    expect(providers).toContain('We use them only to host the Service and deliver its email.')
+    expect(providers).not.toMatch(/Cloudflare|GitHub/)
+    const google = section('google-user-data')
+    expect(google).toMatch(
+      /providers that host the Service and deliver its email \(see section 7 ?\)/,
+    )
+    expect(google).toMatch(
+      /your name and email address from Google sign-in, and Google Meet links, appear in booking emails that our email provider delivers/,
+    )
+    expect(plainText(privacy)).not.toMatch(
+      /database providers|under contracts that require them to protect|may process it only on our instructions/,
+    )
+  })
+
+  it('discloses the US company and remote administration outside the US without naming a country', () => {
+    const transfers = section('international-transfers')
+    expect(transfers).toContain('Cobaltmere, LLC is a United States company')
+    expect(transfers).toMatch(
+      /Personnel located outside the United States may administer Hourmere Cloud remotely/,
+    )
+    expect(transfers).not.toMatch(/We are based|China|Chinese|Sent folder|sent-copy retention/i)
+  })
+
+  it('discloses the chosen display language in a cookie and local storage', () => {
+    expect(section('this-website')).toMatch(
+      /If you choose a display language, it also remembers that choice in a cookie and in your browser's local storage/,
+    )
+    expect(section('this-website')).toContain('We do not use advertising cookies.')
   })
 
   it('describes Stripe and Link payment processing conditionally in privacy and terms', () => {
@@ -400,7 +570,9 @@ describe('privacy data-flow disclosures', () => {
     expect(providers).toMatch(conditional)
     expect(providers).toMatch(/independent controllers for their own purposes/)
     const terms = plainText(read('./pages/terms.astro'))
-    expect(terms).toMatch(/Hourmere Cloud has not launched and paid plans are not yet available\./)
+    expect(terms).toMatch(
+      /Hourmere Cloud is in an invitation-only preview and paid plans are not yet available\./,
+    )
     expect(terms).toMatch(conditional)
     for (const page of [plainText(privacy), terms]) {
       expect(page).not.toMatch(
@@ -424,7 +596,7 @@ describe('privacy data-flow disclosures', () => {
     expect(retention).toMatch(
       /ask about or request deletion of the data \{company\.shortName\} holds about you by emailing .*we respond within one month/,
     )
-    expect(retention).not.toMatch(/(?:\d+|thirty) days|\d+ years|owner/)
+    expect(retention).not.toMatch(/\d+ years|owner/)
     expect(section('google-user-data')).toMatch(
       /Deletion requests: you can ask about or request deletion of the Google sign-in data and other account data we hold by emailing .*we respond within one month/,
     )

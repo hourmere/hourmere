@@ -1,0 +1,57 @@
+name: Build release image
+description: Build the same multi-platform image and attestations for publication or rehearsal.
+
+inputs:
+  push:
+    description: Publish the image to the registry; only the protected release job enables this.
+    required: false
+    default: 'false'
+  version:
+    description: Validated release version, without the leading v.
+    required: true
+  tags:
+    description: Image tags selected by the caller.
+    required: false
+  outputs:
+    description: Optional Buildx exporters, such as a local OCI archive for a dry run.
+    required: false
+
+outputs:
+  build-ref:
+    description: Buildx history reference for platform timing logs
+    value: ${{ steps.build.outputs.metadata && fromJSON(steps.build.outputs.metadata)['buildx.build.ref'] }}
+  digest:
+    description: Digest of the built multi-platform image.
+    value: ${{ steps.build.outputs.digest }}
+  metadata:
+    description: Buildx metadata, including the build record reference.
+    value: ${{ steps.build.outputs.metadata }}
+
+runs:
+  using: composite
+  steps:
+    - name: Enable arm64 emulation
+      uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      with:
+        image: docker.io/tonistiigi/binfmt:latest@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0 # qemu-v10.2.3
+        platforms: arm64
+    - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      with:
+        driver-opts: image=docker.io/moby/buildkit:buildx-stable-1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea # v0.33.1
+    - name: Build both architectures
+      id: build
+      uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+      with:
+        context: .
+        file: ./Dockerfile
+        platforms: linux/amd64,linux/arm64
+        push: ${{ inputs.push }}
+        tags: ${{ inputs.tags }}
+        outputs: ${{ inputs.outputs }}
+        labels: |
+          org.opencontainers.image.source=https://github.com/hourmere/hourmere
+          org.opencontainers.image.licenses=AGPL-3.0-only
+          org.opencontainers.image.version=${{ inputs.version }}
+          org.opencontainers.image.revision=${{ github.sha }}
+        provenance: mode=max
+        sbom: generator=docker.io/docker/buildkit-syft-scanner:stable-1@sha256:ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9 # 1.12.0

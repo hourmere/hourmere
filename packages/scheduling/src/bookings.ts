@@ -22,7 +22,6 @@ import {
   type ConferenceStatus,
   cancelBookingConference,
   eligibleMeetHosts,
-  ownCalendarCopyStates,
   prepareBookingConference,
   unresolvedLocation,
 } from './conferences.ts'
@@ -52,6 +51,8 @@ export interface Booking {
   start: string
   end: string
   title: string
+  /** Authenticated host reads only: the event type's current title, or null if deleted. */
+  eventTypeTitle?: string | null
   /** Where the meeting happens, with its details (number, address, link). */
   location: Location | null
   conference?: ConferenceStatus
@@ -63,6 +64,8 @@ export interface Booking {
   attendees: Attendee[]
   /** The booking this one replaced when it was rescheduled. */
   rescheduledFromId: string | null
+  /** Authenticated host reads only: the immediate successor the caller also hosts, or null. */
+  rescheduledToId?: string | null
   cancelledAt: string | null
   cancelReason: string | null
   source: BookingSource
@@ -390,6 +393,7 @@ interface BookingRow {
   start_at: Date
   end_at: Date
   title: string
+  event_type_title?: string | null
   location: Json | null
   responses: Json
   rescheduled_from_id: string | null
@@ -402,7 +406,11 @@ interface BookingRow {
 }
 
 /** Adds the attendees (one query for all rows) and maps rows to the API shape. */
-async function toBookings(db: Db, rows: readonly BookingRow[]): Promise<Booking[]> {
+async function toBookings(
+  db: Db,
+  rows: readonly BookingRow[],
+  host?: { userId: string; now: () => Temporal.Instant },
+): Promise<Booking[]> {
   if (!rows.length) return []
   const attendees = await db
     .selectFrom('booking_attendees')
@@ -427,9 +435,30 @@ async function toBookings(db: Db, rows: readonly BookingRow[]): Promise<Booking[
     })
     byBooking.set(a.booking_id, list)
   }
+  const successors = new Map<string, string>()
+  if (host) {
+    const replacements = await db
+      .selectFrom('bookings as successor')
+      .innerJoin('bookings as predecessor', 'predecessor.id', 'successor.rescheduled_from_id')
+      .innerJoin('booking_hosts as successor_host', 'successor_host.booking_id', 'successor.id')
+      .select(['predecessor.id as predecessor_id', 'successor.id'])
+      .where(
+        'predecessor.id',
+        'in',
+        rows.map((row) => row.id),
+      )
+      .whereRef('successor.organization_id', '=', 'predecessor.organization_id')
+      .where('successor_host.user_id', '=', host.userId)
+      .execute()
+    for (const replacement of replacements)
+      successors.set(replacement.predecessor_id, replacement.id)
+  }
+  // Read successor metadata before the lifecycle snapshot so no later successor read
+  // can outlive the status, location and conference state returned together below.
   const conferences = await bookingConferenceViews(
     db,
     rows.map((r) => r.id),
+    host?.userId,
   )
   const assigned = new Map<string, { name: string; timeZone: string }>()
   const assignedIds = rows
@@ -457,10 +486,11 @@ async function toBookings(db: Db, rows: readonly BookingRow[]): Promise<Booking[
         timeZone: host.time_zone,
       })
   }
+  const now = host?.now()
   return rows.map((row) => {
     const view = conferences.get(row.id)
-    // Cancellation may commit after the first booking read. Keep its top-level state
-    // on the same snapshot as conference readiness and the protected location.
+    // Cancellation/rescheduling may commit after the first booking read, even moving
+    // the conference pointer away. Hydrate lifecycle state for every booking id.
     const r = view
       ? {
           ...row,
@@ -477,18 +507,34 @@ async function toBookings(db: Db, rows: readonly BookingRow[]): Promise<Booking[
       start: toIso(toInstant(r.start_at)),
       end: toIso(toInstant(r.end_at)),
       title: r.title,
+      ...(host ? { eventTypeTitle: r.event_type_title ?? null } : {}),
       location: parseLocation(
         (automaticZoom(location) || automaticMeet(location)) &&
           (r.status !== 'confirmed' ||
             view?.bookingStatus !== 'confirmed' ||
-            view?.conference.status !== 'ready')
+            view?.conference?.status !== 'ready')
           ? unresolvedLocation(location)
           : location,
       ),
-      ...(view ? { conference: view.conference } : {}),
+      ...(view?.conference ? { conference: view.conference } : {}),
+      ...(now && view?.calendarCopy
+        ? {
+            calendarCopy: {
+              ...view.calendarCopy,
+              canRetry:
+                view.calendarCopy.canRetry &&
+                (r.status === 'cancelled' ||
+                  Temporal.Instant.compare(toInstant(r.start_at), now) > 0),
+            },
+          }
+        : {}),
+      ...(host && view?.conferenceCanRetry !== undefined
+        ? { conferenceCanRetry: view.conferenceCanRetry }
+        : {}),
       responses: (isRecord(r.responses) ? r.responses : {}) as Responses,
       attendees: byBooking.get(r.id) ?? [],
       rescheduledFromId: r.rescheduled_from_id,
+      ...(host ? { rescheduledToId: successors.get(r.id) ?? null } : {}),
       cancelledAt: r.cancelled_at && toIso(toInstant(r.cancelled_at)),
       cancelReason: r.cancel_reason,
       source: r.source as BookingSource,
@@ -1173,7 +1219,11 @@ export async function listHostBookings(
   const rows = await ctx.db
     .selectFrom('bookings as b')
     .innerJoin('booking_hosts as bh', 'bh.booking_id', 'b.id')
+    .leftJoin('event_types as et', (join) =>
+      join.onRef('et.id', '=', 'b.event_type_id').on('et.deleted_at', 'is', null),
+    )
     .select(BOOKING_COLUMNS)
+    .select('et.title as event_type_title')
     // start_at with its microseconds, for the cursor (node-postgres Dates have milliseconds).
     .select((eb) =>
       eb
@@ -1218,7 +1268,7 @@ export async function listHostBookings(
   const page = rows.slice(0, limit)
   const last = page.at(-1)
   return {
-    data: await withOwnCalendarCopies(ctx, await toBookings(ctx.db, page)),
+    data: await toBookings(ctx.db, page, { userId: ctx.principal.user.id, now: ctx.now }),
     nextCursor: rows.length > limit && last ? encodeCursor(last) : null,
   }
 }
@@ -1229,14 +1279,21 @@ export async function getHostBooking(ctx: ServiceContext, id: string): Promise<B
   const row = await ctx.db
     .selectFrom('bookings as b')
     .innerJoin('booking_hosts as bh', 'bh.booking_id', 'b.id')
+    .leftJoin('event_types as et', (join) =>
+      join.onRef('et.id', '=', 'b.event_type_id').on('et.deleted_at', 'is', null),
+    )
     .select(BOOKING_COLUMNS)
+    .select('et.title as event_type_title')
     .where('b.id', '=', id)
     .where('bh.user_id', '=', ctx.principal.user.id)
     .where('b.organization_id', '=', ctx.principal.organization.id)
     .executeTakeFirst()
   if (!row) throw bookingNotFound()
-  const [booking] = await toBookings(ctx.db, [row])
-  return (await withOwnCalendarCopies(ctx, [booking as Booking]))[0] as Booking
+  const [booking] = await toBookings(ctx.db, [row], {
+    userId: ctx.principal.user.id,
+    now: ctx.now,
+  })
+  return booking as Booking
 }
 
 /**
@@ -1318,51 +1375,5 @@ export async function cancelHostBooking(
         oauthConsentId: ctx.principal.kind === 'oauth' ? ctx.principal.oauthConsentId : null,
       },
     )
-  })
-}
-
-async function withOwnCalendarCopies(ctx: ServiceContext, bookings: Booking[]) {
-  const states = await ownCalendarCopyStates(
-    ctx.db,
-    bookings.map((b) => b.id),
-    ctx.principal.user.id,
-  )
-  const conferences = bookings.length
-    ? await ctx.db
-        .selectFrom('booking_conferences')
-        .select(['booking_id', 'organizer_user_id'])
-        .where(
-          'booking_id',
-          'in',
-          bookings.map((b) => b.id),
-        )
-        .execute()
-    : []
-  const now = ctx.now()
-  return bookings.map((b) => {
-    const copy = states.get(b.id)
-    return {
-      ...b,
-      ...(copy
-        ? {
-            calendarCopy: {
-              ...copy,
-              canRetry:
-                copy.canRetry &&
-                (b.status === 'cancelled' ||
-                  Temporal.Instant.compare(Temporal.Instant.from(b.start), now) > 0),
-            },
-          }
-        : {}),
-      ...(b.conference
-        ? {
-            conferenceCanRetry:
-              b.conference.errorCode !== 'organizer_unavailable' &&
-              conferences.some(
-                (c) => c.booking_id === b.id && c.organizer_user_id === ctx.principal.user.id,
-              ),
-          }
-        : {}),
-    }
   })
 }

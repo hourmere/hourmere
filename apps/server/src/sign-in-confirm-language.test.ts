@@ -4,7 +4,7 @@ import { LANGUAGE_COOKIE } from '@hourmere/core/language'
 import { Hono } from 'hono'
 import { describe, expect, it } from 'vitest'
 import { MAGIC_LINK_CONFIRM_PATH, signInConfirmPage } from './sign-in-confirm.ts'
-import { pressConfirmButton } from './sign-in-confirm-testing.ts'
+import { inlineAsset, pressConfirmButton } from './sign-in-confirm-testing.ts'
 
 const app = new Hono().get(MAGIC_LINK_CONFIRM_PATH, signInConfirmPage)
 const content = async (headers: Record<string, string> = {}) => {
@@ -14,11 +14,12 @@ const content = async (headers: Record<string, string> = {}) => {
 
 interface Element {
   hidden: boolean
+  value: string
   textContent: string
   attributes: Record<string, string>
-  events: Record<string, () => void>
+  events: Record<string, (event: { target: { value: string } }) => void>
   setAttribute(name: string, value: string): void
-  addEventListener(name: string, listener: () => void): void
+  addEventListener(name: string, listener: (event: { target: { value: string } }) => void): void
   append(input: { type?: string; name?: string; value?: string }): void
 }
 
@@ -31,13 +32,13 @@ function browser(html: string, fragment: string, storageBlocked = false, protoco
     'page-title',
     'confirm-instruction',
     'scanner-note',
-    'language-controls',
-    'language-en',
-    'language-zh',
+    'language-label',
+    'language-select',
   ]) {
     const text = new RegExp(`<[^>]+id="${id}"[^>]*>([^<]*)<`).exec(html)?.[1] ?? ''
     elements.set(id, {
       hidden: id === 'confirm' || id === 'incomplete',
+      value: '',
       textContent: text,
       attributes: {},
       events: {},
@@ -101,8 +102,7 @@ function browser(html: string, fragment: string, storageBlocked = false, protoco
       },
     },
   }
-  const script = /<script>([\s\S]*?)<\/script>/.exec(html)?.[1]
-  if (!script) throw new Error('Missing confirmation script')
+  const script = inlineAsset(html, 'script')
   runInNewContext(script, context)
   return {
     document,
@@ -114,10 +114,10 @@ function browser(html: string, fragment: string, storageBlocked = false, protoco
     switchTo(value: string) {
       runInNewContext(`setLanguage(${JSON.stringify(value)})`, context)
     },
-    click(id: 'language-en' | 'language-zh') {
-      const listener = elements.get(id)?.events.click
-      if (!listener) throw new Error('Language button is not wired')
-      listener()
+    select(language: 'en' | 'zh-CN') {
+      const listener = elements.get('language-select')?.events.change
+      if (!listener) throw new Error('Language select is not wired')
+      listener({ target: { value: language } })
     },
   }
 }
@@ -149,8 +149,8 @@ describe('server-rendered sign-in confirmation languages', () => {
       const { response, html } = await content({ Cookie: `${LANGUAGE_COOKIE}=${language}` })
       const hash = (source = '') =>
         `'sha256-${createHash('sha256').update(source).digest('base64')}'`
-      const script = /<script>([\s\S]*?)<\/script>/.exec(html)?.[1]
-      const style = /<style>([\s\S]*?)<\/style>/.exec(html)?.[1]
+      const script = inlineAsset(html, 'script')
+      const style = inlineAsset(html, 'style')
       expect(response.headers.get('Content-Security-Policy')?.split('; ')).toEqual([
         "default-src 'none'",
         `script-src ${hash(script)}`,
@@ -178,18 +178,20 @@ describe('server-rendered sign-in confirmation languages', () => {
     expect(view.elements.get('incomplete')?.hidden).toBe(true)
     expect(view.cookies).toEqual([])
     expect(view.stored).toEqual([])
-    view.click('language-zh')
+    expect(view.elements.get('language-select')?.events.change).toBeTypeOf('function')
+    view.select('zh-CN')
     expect(view.document.documentElement.lang).toBe('zh-CN')
     expect(view.document.title).toBe('登录 Hourmere')
     expect(view.submit.textContent).toBe('登录 Hourmere')
     expect(view.elements.get('incomplete')?.textContent).toContain('链接不完整')
-    expect(view.elements.get('language-controls')?.attributes['aria-label']).toBe('界面语言')
-    expect(view.elements.get('language-zh')?.attributes['aria-pressed']).toBe('true')
+    expect(view.elements.get('language-select')?.attributes['aria-label']).toBe('界面语言')
+    expect(view.elements.get('language-label')?.textContent).toBe('界面语言')
+    expect(view.elements.get('language-select')?.value).toBe('zh-CN')
     expect(view.stored).toEqual([[LANGUAGE_COOKIE, 'zh-CN']])
     expect(view.cookies).toEqual([
       `${LANGUAGE_COOKIE}=zh-CN; Path=/; SameSite=Lax; Max-Age=31536000; Secure`,
     ])
-    view.click('language-en')
+    view.select('en')
     expect(view.document.documentElement.lang).toBe('en')
     expect(view.submit.textContent).toBe('Sign in to Hourmere')
     expect(JSON.stringify(view.inputs)).toBe(original)
@@ -204,7 +206,7 @@ describe('server-rendered sign-in confirmation languages', () => {
     const view = browser(html, '#callbackURL=%2F', true)
     expect(view.elements.get('confirm')?.hidden).toBe(true)
     expect(view.elements.get('incomplete')?.hidden).toBe(false)
-    expect(() => view.click('language-zh')).not.toThrow()
+    expect(() => view.select('zh-CN')).not.toThrow()
     expect(view.document.title).toBe('登录 Hourmere')
     expect(view.elements.get('incomplete')?.textContent).toContain('链接不完整')
     expect(view.elements.get('confirm')?.hidden).toBe(true)

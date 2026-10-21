@@ -323,11 +323,22 @@ describe.skipIf(!databaseUrl)('independent Zoom connections (real Postgres)', ()
   )
   it('redeems a concurrent callback at most once', async () => {
     const { state } = await start(),
-      outcomes = await Promise.all([
-        finishZoomConnection(deps, owner, query(state)),
-        finishZoomConnection(deps, owner, query(state)),
-      ])
-    expect(outcomes.sort()).toEqual(['connected', 'invalid_state'])
+      entered = deferred<void>(),
+      release = deferred<Response>()
+    provider.controls.tokenHook = async () => {
+      entered.resolve()
+      return release.promise
+    }
+    const first = finishZoomConnection(deps, owner, query(state))
+    try {
+      await entered.promise
+      expect(await finishZoomConnection(deps, owner, query(state))).toBe('busy')
+    } finally {
+      release.resolve(Response.json(provider.controls.token))
+      await first
+    }
+    expect(await first).toBe('connected')
+    expect(await finishZoomConnection(deps, owner, query(state))).toBe('invalid_state')
     expect(provider.calls.filter((c) => c.url.includes('/oauth/token'))).toHaveLength(1)
   })
   it('keeps the same stable ID for the same owner and prevents identity/owner transfer', async () => {
@@ -411,16 +422,56 @@ describe.skipIf(!databaseUrl)('independent Zoom connections (real Postgres)', ()
       await connect()
     }
     const a = await start(),
-      b = await start()
-    provider.controls.tokenHook = async (init) => {
-      provider.controls.identity.id = new URLSearchParams(String(init.body)).get('code')
-      return Response.json(provider.controls.token)
+      b = await start(),
+      firstIdentity = deferred<void>(),
+      releaseIdentities = deferred<void>()
+    let identitiesRead = 0
+    const providers = new Map(
+      ['new-identity-a', 'new-identity-b'].map((code) => {
+        const fake = fakeZoom()
+        fake.controls.token.access_token = code
+        fake.controls.identity.id = code
+        return [code, fake] as const
+      }),
+    )
+    deps = {
+      ...deps,
+      zoom: {
+        encryptionKey: TEST_CONFERENCE_KEY,
+        client: {
+          ...provider.client,
+          exchange: async (code, ...args) => {
+            const fake = providers.get(code)
+            if (!fake) throw new Error('Unexpected synthetic OAuth code')
+            return fake.client.exchange(code, ...args)
+          },
+          identity: async (accessToken, signal) => {
+            const fake = providers.get(accessToken)
+            if (!fake) throw new Error('Unexpected synthetic access token')
+            const identity = await fake.client.identity(accessToken, signal)
+            if (++identitiesRead === 1) firstIdentity.resolve()
+            await releaseIdentities.promise
+            return identity
+          },
+        },
+      },
     }
-    const outcomes = await Promise.all([
-      finishZoomConnection(deps, owner, query(a.state, { code: 'new-identity-a' })),
-      finishZoomConnection(deps, owner, query(b.state, { code: 'new-identity-b' })),
-    ])
-    expect(outcomes.sort()).toEqual(['connected', 'connection_limit'])
+    const first = finishZoomConnection(deps, owner, query(a.state, { code: 'new-identity-a' }))
+    try {
+      await firstIdentity.promise
+      expect(
+        await finishZoomConnection(deps, owner, query(b.state, { code: 'new-identity-b' })),
+      ).toBe('busy')
+      expect(identitiesRead).toBe(1)
+    } finally {
+      releaseIdentities.resolve()
+      await first
+    }
+    expect(await first).toBe('connected')
+    expect(
+      await finishZoomConnection(deps, owner, query(b.state, { code: 'new-identity-b' })),
+    ).toBe('connection_limit')
+    expect(identitiesRead).toBe(2)
     expect((await listConferenceConnections(deps, owner)).data).toHaveLength(5)
     expect(
       await db
@@ -457,7 +508,7 @@ describe.skipIf(!databaseUrl)('independent Zoom connections (real Postgres)', ()
       code: 'zoom_connection_not_found',
     })
   })
-  it('durably retires credentials before rotation, serializes concurrent refreshes, and never retries an old token', async () => {
+  it('durably retires credentials before rotation, rejects concurrent refreshes, and never retries an old token', async () => {
     const first = await connect(),
       entered = deferred<void>(),
       release = deferred<Response>()
@@ -468,19 +519,27 @@ describe.skipIf(!databaseUrl)('independent Zoom connections (real Postgres)', ()
     const refreshing = refreshConference(deps, owner, first.id)
     await entered.promise
     expect(await row(first.id)).toMatchObject({ status: 'refreshing', credentials: null })
-    const concurrent = refreshConference(deps, owner, first.id)
-    provider.controls.token.refresh_token = 'synthetic-rotated-refresh'
-    release.resolve(Response.json(provider.controls.token))
-    await refreshing
-    // A serialized explicit second action may rotate the new token, never the retired one.
-    provider.controls.tokenHook = undefined
-    const outcomes = await Promise.allSettled([concurrent])
-    expect(outcomes[0]?.status).toBe('fulfilled')
+    try {
+      await expect(refreshConference(deps, owner, first.id)).rejects.toMatchObject({
+        kind: 'conflict',
+        code: 'zoom_refresh_in_progress',
+        message: 'Zoom account operations are busy. Try again shortly.',
+      })
+    } finally {
+      provider.controls.token.refresh_token = 'synthetic-rotated-refresh'
+      release.resolve(Response.json(provider.controls.token))
+      await refreshing
+    }
     const refreshBodies = provider.calls
       .filter((c) => new URLSearchParams(String(c.init.body)).get('grant_type') === 'refresh_token')
       .map((c) => new URLSearchParams(String(c.init.body)).get('refresh_token'))
-    expect(refreshBodies).toEqual(['synthetic-zoom-refresh', 'synthetic-rotated-refresh'])
+    expect(refreshBodies).toEqual(['synthetic-zoom-refresh'])
     expect(tokens(await row(first.id)).refreshToken).toBe('synthetic-rotated-refresh')
+    provider.controls.tokenHook = undefined
+    await refreshConference(deps, owner, first.id)
+    expect(new URLSearchParams(String(provider.calls.at(-2)?.init.body)).get('refresh_token')).toBe(
+      'synthetic-rotated-refresh',
+    )
   })
   it.each(['user:read:user meeting:write:meeting'])(
     'retired rotating tokens remain unusable after invalid returned scopes: %s',
@@ -583,6 +642,12 @@ describe.skipIf(!databaseUrl)('independent Zoom connections (real Postgres)', ()
       await expect(refreshConference(deps, owner, first.id)).rejects.toMatchObject({
         code: 'zoom_needs_reauth',
       })
+      expect(await row(first.id)).toMatchObject({
+        status: 'needs_reauth',
+        credentials: null,
+        operation_id: null,
+        last_error: 'needs_reauth',
+      })
       expect(provider.calls).toHaveLength(count)
     } finally {
       await database.pool.query(
@@ -605,11 +670,19 @@ describe.skipIf(!databaseUrl)('independent Zoom connections (real Postgres)', ()
       return release.promise
     }
     const refreshing = refreshConference(deps, owner, first.id)
+    const outcome = refreshing.catch((error: unknown) => error)
     await entered.promise
-    const disconnect = disconnectConference(deps, owner, first.id)
-    release.resolve(Response.json(provider.controls.token))
-    await refreshing
-    await disconnect
+    try {
+      await disconnectConference(deps, owner, first.id)
+      expect(await row(first.id)).toMatchObject({
+        status: 'disconnected',
+        credentials: null,
+        operation_id: null,
+      })
+    } finally {
+      release.resolve(Response.json(provider.controls.token))
+    }
+    expect(await outcome).toMatchObject({ code: 'zoom_needs_reauth' })
     expect(await row(first.id)).toMatchObject({
       status: 'disconnected',
       credentials: null,
@@ -618,6 +691,7 @@ describe.skipIf(!databaseUrl)('independent Zoom connections (real Postgres)', ()
   })
   it('account deletion racing callback I/O wipes credentials, attempts and display identity while retaining a secret-free ID', async () => {
     const disposable = await conferenceTestSession(db),
+      original = await connect(disposable),
       initial = await start(disposable),
       entered = deferred<void>(),
       release = deferred<Response>()
@@ -627,15 +701,25 @@ describe.skipIf(!databaseUrl)('independent Zoom connections (real Postgres)', ()
     }
     const finishing = finishZoomConnection(deps, disposable, query(initial.state))
     await entered.promise
-    const deletion = db.deleteFrom('auth.user').where('id', '=', disposable.user.id).execute()
-    release.resolve(Response.json(provider.controls.token))
-    expect(await finishing).toBe('connected')
-    await deletion
+    try {
+      await db.deleteFrom('auth.user').where('id', '=', disposable.user.id).execute()
+      expect(
+        await db
+          .selectFrom('auth.user')
+          .select('id')
+          .where('id', '=', disposable.user.id)
+          .execute(),
+      ).toHaveLength(0)
+    } finally {
+      release.resolve(Response.json(provider.controls.token))
+    }
+    expect(await finishing).toBe('invalid_state')
     const tombstone = await db
       .selectFrom('conference_connections')
       .selectAll()
       .executeTakeFirstOrThrow()
     expect(tombstone).toMatchObject({
+      id: original.id,
       user_id: null,
       external_user_id: null,
       account_email: null,
@@ -661,11 +745,12 @@ describe.skipIf(!databaseUrl)('independent Zoom connections (real Postgres)', ()
       code: 'zoom_connection_not_found',
     })
   })
-  async function pauseFirstCommit() {
+  async function pauseFirstCommit(connectionId?: string, commitNumber = 1) {
     const pool = createPool(database.url),
       reached = deferred<void>(),
       resume = deferred<void>()
-    let armed = true
+    let armed = true,
+      commits = 0
     const proxy = new Proxy(pool, {
       get(target, property) {
         if (property === 'connect')
@@ -681,7 +766,12 @@ describe.skipIf(!databaseUrl)('independent Zoom connections (real Postgres)', ()
                     ])
                     const text =
                       typeof input === 'string' ? input : (input as { text?: string })?.text
-                    if (armed && text?.trim().toLowerCase() === 'commit') {
+                    if (
+                      armed &&
+                      text?.trim().toLowerCase() === 'commit' &&
+                      (!connectionId || (await row(connectionId)).status === 'refreshing') &&
+                      ++commits === commitNumber
+                    ) {
                       armed = false
                       reached.resolve()
                       await resume.promise
@@ -707,7 +797,7 @@ describe.skipIf(!databaseUrl)('independent Zoom connections (real Postgres)', ()
   it('disconnect between the durable callback claim and exchange invalidates the attempt before I/O', async () => {
     const first = await connect(),
       pending = await start(),
-      paused = await pauseFirstCommit(),
+      paused = await pauseFirstCommit(undefined, 2),
       count = provider.calls.length
     try {
       const finishing = finishZoomConnection(
@@ -733,7 +823,7 @@ describe.skipIf(!databaseUrl)('independent Zoom connections (real Postgres)', ()
   })
   it('disconnect between durable token retirement and refresh prevents provider I/O and resurrection', async () => {
     const first = await connect(),
-      paused = await pauseFirstCommit(),
+      paused = await pauseFirstCommit(first.id),
       count = provider.calls.length
     try {
       const refreshing = refreshConference({ ...deps, db: paused.db }, owner, first.id)
@@ -754,6 +844,41 @@ describe.skipIf(!databaseUrl)('independent Zoom connections (real Postgres)', ()
       await paused.close()
     }
   })
+  it.each(['logout', 'expiry'] as const)(
+    '%s after durable token retirement clears the claim before provider I/O',
+    async (change) => {
+      const disposable = await conferenceTestSession(db),
+        first = await connect(disposable),
+        paused = await pauseFirstCommit(first.id),
+        count = provider.calls.length
+      const refreshing = refreshConference({ ...deps, db: paused.db }, disposable, first.id)
+      const outcome = refreshing.catch((error: unknown) => error)
+      try {
+        await paused.reached
+        expect(await row(first.id)).toMatchObject({ status: 'refreshing', credentials: null })
+        if (change === 'logout')
+          await db.deleteFrom('auth.session').where('id', '=', disposable.sessionId).execute()
+        else
+          await db
+            .updateTable('auth.session')
+            .set({ expiresAt: new Date(0) })
+            .where('id', '=', disposable.sessionId)
+            .execute()
+        paused.resume()
+        expect(await outcome).toMatchObject({ code: 'zoom_needs_reauth' })
+        expect(await row(first.id)).toMatchObject({
+          status: 'needs_reauth',
+          operation_id: null,
+          credentials: null,
+        })
+        expect(provider.calls).toHaveLength(count)
+      } finally {
+        paused.resume()
+        await outcome
+        await paused.close()
+      }
+    },
+  )
   it('failed callback commit leaves a durable consumed claim that cannot redeem the code again', async () => {
     const { state } = await start()
     await database.pool.query(

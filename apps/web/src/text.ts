@@ -1,6 +1,6 @@
 import { type MessageKey, msg, type UiText } from './i18n/translate.ts'
 
-// The API's rules for free text (docs/api-conventions.md, Validation): well-formed Unicode
+// The API's rules for free text (https://hourmere.com/docs/api-conventions, Validation): well-formed Unicode
 // without control characters; only multi-line fields may hold tabs and line breaks. The same
 // checks as packages/scheduling/src/text.ts, so the forms can say what is wrong before the
 // server refuses it.

@@ -1,5 +1,38 @@
 // Public/shared UI messages. Admin messages live in a lazy catalog.
 export const common = {
+  'Skip to content': '跳至内容',
+  '{0}: {1}': '{0}：{1}',
+  '{0} {1}': '{0} {1}',
+  '{0}{1}': '{0}{1}',
+  'Show more': '展开',
+  'Show less': '收起',
+  'Current booking': '当前预约',
+  'Current and common time zones': '当前和常用时区',
+  'All time zones': '所有时区',
+  'Please check the form': '请检查表单',
+  'Could not save': '无法保存',
+  Confirmed: '已确认',
+  Ended: '已结束',
+  'This meeting has ended.': '此会议已结束。',
+  'Something went wrong': '出错了',
+  Reload: '重新加载',
+  'Scheduling page powered by Hourmere — pick a time that works.':
+    '由 Hourmere 提供支持的预约页面，选择适合你的时间。',
+  'Didn’t get the email? Check spam or junk and add the sender to your contacts.':
+    '没收到邮件？请检查垃圾邮件文件夹，并将发件人加入通讯录。',
+  'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use “Cancel booking” here.':
+    '在日历中接受或拒绝邀请不会取消预约。如需取消，请使用此处的“取消预约”。',
+  'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use the booking link in your Hourmere confirmation email.':
+    '在日历中接受或拒绝邀请不会取消预约。如需取消，请使用 Hourmere 确认邮件中的预约链接。',
+  'Privacy policy': '隐私政策',
+  'Terms of service': '服务条款',
+  // Google's official Simplified Chinese branding guidelines approve this wording.
+  'Continue with Google': '继续使用 Google',
+  'Sign in with Microsoft': '使用 Microsoft 登录',
+  'Use a personal Microsoft account or a work or school account.':
+    '使用个人 Microsoft 账号或工作或学校账号。',
+  'Google sign-in shares your name, email and profile picture with Hourmere. Calendar access is a separate, optional step in Calendars.':
+    '通过 Google 登录会向 Hourmere 提供你的姓名、邮箱和头像。日历访问是独立的可选步骤，可在“日历”页面连接。',
   'The original organizer’s verified invitation identity is unavailable. This booking will not switch organizers. Contact the host or cancel the booking.':
     '原组织者已验证的邀请身份不可用。此预约不会更换组织者。请联系主持人或取消预约。',
 
@@ -22,6 +55,8 @@ export const common = {
     '时段已为你保留，但会议链接需要主持人处理，最终日历邀请尚未发送。',
   'Google may have created the meeting. Rechecking only looks for that meeting and never creates a replacement.':
     'Google 可能已创建会议。重新检查只会查找该会议，不会另外创建。',
+  'Google is still preparing the Meet link after repeated checks. The host can recheck the existing request; a retry does not create a replacement meeting.':
+    '多次检查后，Google 仍在准备 Meet 链接。主持人可重新检查现有请求；重试不会创建替代会议。',
   'The original Google calendar is unavailable. This booking will not switch to a different account or calendar.':
     '原 Google 日历不可用，此预约不会切换到其他账号或日历。',
   'The host needs to reconnect the original Google Calendar account before retrying.':
@@ -41,8 +76,6 @@ export const common = {
   'Time reserved; meeting link needs attention': '时段已保留，会议链接需要处理',
   'Automatic Google Meet': '自动创建 Google Meet',
   'Create a unique Google Meet link for each booking': '为每次预约创建独立的 Google Meet 链接',
-  'The assigned individual host must connect an owned, Meet-capable Google calendar. Final invitations wait for the link.':
-    '指定的单人主持人须连接支持 Meet 的自有 Google 日历，链接生成后才会发送最终邀请。',
   'Automatic creation is unavailable on this instance or meeting mode. You can keep the provider label or use your own meeting link.':
     '此实例或会议模式不支持自动创建。你可以保留服务名称，或使用自己的会议链接。',
   'Google Meet (provider label only)': 'Google Meet（仅显示服务名称）',
@@ -63,17 +96,26 @@ export const common = {
   Status: '状态',
   'There is nothing at this address.': '此地址没有内容。',
   Unknown: '未知',
-  ' (primary)': ' （主日历）',
+  ' (primary)': '（主日历）',
+  ' (personal)': '（个人）',
   'Interface language': '界面语言',
-  ', now on': '，当前时间：',
   '. If it was moved to another time, the new booking has its own link.':
     '。如果已改期，新预约有单独的链接。',
   '(optional, shared with your host)': '（可选，将与主持人共享）',
   '(optional, up to': '（可选，最多',
   '(optional)': '（可选）',
+  ' (optional)': '（可选）',
+  ' (optional, up to {count})': '（可选，最多{count}位）',
+  ' (optional, shared with your host)': '（可选，将与主持人共享）',
+  ': ': '：',
+  '{name} ({detail})': '{name}（{detail}）',
+  ' ({detail})': '（{detail}）',
+  ' ({zone}, {offset})': '（{zone}，{offset}）',
+  ' ({offset})': '（{offset}）',
+  '{date}, {time}': '{date}，{time}',
   'About this event': '关于此活动',
   'Add a guest': '添加来宾',
-  'Add at most {0} guests.': '最多添加 {0} 位来宾。',
+  'Add at most {0} guests.': '最多添加{0}位来宾。',
   'Add to your calendar': '添加到日历',
   'API keys': 'API 密钥',
   'Booked by': '预约人',
@@ -120,8 +162,8 @@ export const common = {
   'Enter your name, at most 200 characters.': '请输入你的姓名，最多 200 个字符。',
   From: '从',
   'Google Calendar': 'Google 日历',
-  'Guest {0} email': '来宾 {0} 的邮箱',
-  'Guest {0} name': '来宾 {0} 的姓名',
+  'Guest {0} email': '来宾{0}的邮箱',
+  'Guest {0} name': '来宾{0}的姓名',
   Guests: '来宾',
   'guests.': '位来宾。',
   'has no events you can book right now.': '目前没有可预约的活动。',
@@ -145,7 +187,7 @@ export const common = {
     '改期后会生成新链接。Hourmere 邮件中的链接仍然有效；最初预约时显示的链接现在指向旧的、已取消的时间。',
   'Moving…': '正在改期…',
   'Next month': '下个月',
-  'No answer': '不回答',
+  'No answer': '未回答',
   'No available times this month.': '本月没有可用时间。',
   'No time zone matches “': '没有匹配以下内容的时区：“',
   'no times available': '没有可用时间',
@@ -159,7 +201,7 @@ export const common = {
   'Pick a time': '选择时间',
   'Pick an event to see available times.': '选择活动以查看可用时间。',
   'Pick another time': '选择其他时间',
-  'Powered by {0}': '由 {0} 提供支持',
+  'Powered by {0}': '由{0}提供支持',
   'Create your own booking link': '创建你自己的预约链接',
   'Previous month': '上个月',
   Question: '问题',
@@ -168,7 +210,7 @@ export const common = {
   'Remove control characters from this answer.': '请移除此回答中的控制字符。',
   'Remove guest': '移除来宾',
   Reschedule: '改期',
-  Rescheduling: '正在改期',
+  '{title}, {date}, {time}': '{title}，{date}，{time}',
   'Save your link to change or cancel': '保存用于更改或取消的链接',
   'Search by city or offset': '按城市或时差搜索',
   'Search time zones': '搜索时区',
@@ -196,6 +238,8 @@ export const common = {
     '此预约刚刚发生变更。请查看最新状态后再重试。',
   'This booking page doesn’t exist': '此预约页面不存在',
   'This booking was already cancelled.': '此预约已被取消。',
+  'This booking was already made by an earlier attempt, so its link can’t be shown again.':
+    '此前的尝试已创建此预约，因此无法再次显示预约链接。',
   'This booking was already made by an earlier attempt, so its link to change or cancel can’t be shown again. Use the link in your confirmation email instead.':
     '此前的尝试已创建此预约，因此无法再次显示更改或取消链接。请使用确认邮件中的链接。',
   'This connection attempt expired or was already used. Restart it from your AI app.':
@@ -215,15 +259,14 @@ export const common = {
   'To see, reschedule or cancel a booking, open the link from your confirmation email or the one you saved when you booked. For your security it is removed from the address bar once opened, so reloading this page needs the link again.':
     '如需查看、改期或取消预约，请打开确认邮件中的链接，或预约时保存的链接。出于安全考虑，链接打开后会从地址栏移除，因此刷新页面后需重新打开链接。',
   'Too many requests from your network. Try again in {0} seconds.':
-    '来自你所在网络的请求过多。请在 {0} 秒后重试。',
+    '来自你所在网络的请求过多。请在{0}秒后重试。',
   'Too many requests from your network. Wait a minute and try again.':
     '来自你所在网络的请求过多。请稍等一分钟后重试。',
   'Too many requests. Wait a minute and try again.': '请求过多。请稍等一分钟后重试。',
   'Try again': '重试',
   'Type to narrow down the': '输入文字以缩小范围，共',
-  'Use at most {0} characters, without control characters.':
-    '最多 {0} 个字符，且不能包含控制字符。',
-  'Use at most {0} characters.': '最多 {0} 个字符。',
+  'Use at most {0} characters, without control characters.': '最多{0}个字符，且不能包含控制字符。',
+  'Use at most {0} characters.': '最多{0}个字符。',
   'Use letters, digits and punctuation only, on one line.': '请仅使用单行字母、数字和标点符号。',
   'Use one line without control characters.': '请使用单行文字，且不含控制字符。',
   'Use this link to reschedule or cancel.': '使用此链接改期或取消。',
@@ -254,9 +297,8 @@ export const common = {
   'Your time zone ({0}) was not accepted. Change the time, pick another time zone and try again.':
     '时区（{0}）未被接受。请更改时间、选择其他时区后重试。',
   '1 time zone': '1 个时区',
-  '{0} time zones': '{0} 个时区',
-  'with {0}': '与 {0}',
-  '(since {0})': '（自 {0} 起）',
+  '{0} time zones': '{0}个时区',
+  '(since {0})': '（自{0}起）',
   'Enter your name.': '请输入你的姓名。',
   'Enter a name.': '请输入姓名。',
   'Confirm your email address by signing in with an email link before using API keys':
@@ -264,21 +306,21 @@ export const common = {
   'Reconnect Google Calendar': '请重新连接 Google 日历。',
   'Make another schedule the default before deleting this one':
     '请先将其他日程设为默认，再删除此日程。',
-  '{0} Your booking is not confirmed yet.': '{0} 你的预约尚未确认。',
+  '{0} Your booking is not confirmed yet.': '{0}你的预约尚未确认。',
   'Reconnect before enabling busy times.': '启用忙闲同步前，请重新连接日历。',
   '{date}, loading': '{date}，正在加载',
   '{date}, available': '{date}，可预约',
   '{date}, no times available': '{date}，无可预约时间',
-  '{count} time available on {day}.': '{day}有 {count} 个可预约时间。',
-  '{count} times available on {day}.': '{day}有 {count} 个可预约时间。',
-  '{count} day has available times this month.': '本月有 {count} 天可预约。',
-  '{count} days have available times this month.': '本月有 {count} 天可预约。',
+  '{count} time available on {day}.': '{day}有{count}个可预约时间。',
+  '{count} times available on {day}.': '{day}有{count}个可预约时间。',
+  '{count} day has available times this month.': '本月有{count}天可预约。',
+  '{count} days have available times this month.': '本月有{count}天可预约。',
   'No time zone matches “{query}”.': '没有匹配“{query}”的时区。',
-  'Type to narrow down the {count} time zones.': '输入文字以缩小 {count} 个时区的搜索范围。',
-  'Your {event} with {host} is confirmed.': '你与 {host} 的“{event}”预约已确认。',
+  'Your {event} with {host} is confirmed.': '你与{host}的“{event}”预约已确认。',
   'an AI agent (MCP)': 'AI 代理（MCP）',
-  '{event} with {host}': '与 {host} 的{event}',
+  '{event} with {host}': '与{host}的{event}',
   'Required hosts:': '必选主持人：',
+  'Required hosts: {hosts}': '必选主持人：{hosts}',
   'Zoom meeting update': 'Zoom 会议更新',
   'Your booking is cancelled. The Zoom meeting update is pending.':
     '预约已取消，Zoom 会议仍在更新。',

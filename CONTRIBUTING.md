@@ -33,6 +33,11 @@ The repository is one npm workspace (`apps/*`, `packages/*` and `tools/*`) with 
 
 ## Checks
 
+The deployment documentation's interactive PTY paste checks are skipped locally when
+`zsh` or `python3` is missing from `PATH`, with a skip reason naming the missing tool.
+Both are required in CI (`sudo apt-get install zsh python3` on Debian/Ubuntu); a missing
+tool makes CI fail immediately.
+
 CI runs these on every pull request; run them before you push:
 
 ```sh
@@ -69,6 +74,47 @@ the test never reads or writes application data in the named development databas
 pool counts bounded and close every pool in teardown; CI uses PostgreSQL's default
 `max_connections=100`.
 
+All test database creation goes through `createTestDatabase` from `@hourmere/db/testing`.
+It uses `hourmere_test_<tag>_<pid>_<hex>` names, connects to `postgres` for administration,
+and drops a failed setup before returning. Close additional pools before calling the
+owner's `drop()` in `finally` or `afterAll`; the helper force-drops lingering connections.
+Vitest also registers a final cleanup hook for databases whose normal teardown failed.
+That hook uses a lightweight registry, so files can mock database dependencies before
+loading them. Fork workers also attempt cleanup when their parent's IPC channel disconnects,
+including when only the Vitest parent receives SIGINT or SIGTERM. Signal and disconnect
+cleanup are best effort, bounded to 15 seconds: forced termination, worker crashes and
+unavailable PostgreSQL can still leave databases behind.
+
+On slow machines, set `HOURMERE_TEST_DATABASE_ADMIN_TIMEOUT_MS` to a positive integer
+number of milliseconds (at most 2147482647). It changes the helper's CREATE/ALTER
+statement timeout from the default 5000 ms. DROP uses at least 30000 ms, or the configured
+value when higher. Each client query timeout is its statement timeout plus 1000 ms.
+The connection timeout remains 5000 ms and shutdown cleanup still has its independent
+15-second deadline.
+
+Inspect those leftovers manually (the default is **dry run**):
+
+```sh
+DATABASE_URL=postgres://hourmere:hourmere@localhost:5432/hourmere npm run db:cleanup-tests
+# After reviewing the output:
+DATABASE_URL=postgres://hourmere:hourmere@localhost:5432/hourmere npm run db:cleanup-tests -- --yes
+```
+
+`--admin-url <url>` overrides `DATABASE_URL`; administration always connects to `postgres`,
+never `hourmere`. `--older-than-hours <hours>` changes the default 24-hour threshold (must
+be positive). The script lists test databases only and skips unknown ages, databases with
+connections, and names carrying a PID that is still live on this machine. Legacy names
+without a PID rely on age and connection checks. Run it on the machine that created the
+databases: local PID checks cannot identify processes on other hosts, and PID reuse can
+conservatively retain an old database. Age uses the server's `PG_VERSION` modification
+time, which can be newer after maintenance and delay cleanup. The account needs permission
+to inspect that file metadata. Before dropping, the script rechecks age, connections, PID
+and database OID, and uses ordinary DROP so an arriving connection prevents deletion.
+Cleanup is manual; test startup never sweeps other runs' databases.
+If another cleanup removes a candidate after its final recheck, the script reports
+`SKIP <name>: already gone` and continues. Other database failures report only a safe
+SQLSTATE code when available, without the driver's connection details.
+
 When adding tables or columns, extend the seed at a checkpoint whose schema contains them.
 The early checkpoint ends at migration 0012; use a later checkpoint for newer tables, or
 add a later checkpoint when needed. Seed realistic related rows through that historical
@@ -103,6 +149,14 @@ the account sign-in gate. Each scenario runs at desktop and mobile viewport size
 are genuine SPA/HTTP/PostgreSQL flows, without API response mocks. CI runs the suite in a
 separate job with its own PostgreSQL service and the runner's installed Chrome.
 
+CI also builds a disposable static-site fixture and checks documentation table geometry at
+360px and 1280px, including page overflow, identifier line counts and mid-word header wraps.
+Touch copy controls are checked at both widths. These site tests use only a local static
+server, block external requests and create no database. Rendered negative controls verify
+that the assertions detect the rejected wrapping, overflow and copy-button overlap. The site
+tests are skipped outside CI; any local browser run requires an escalated shell. CI restores
+the legal-date source and deletes the fixture output after the browser suite.
+
 Traces, videos, screenshots and automatic failure DOM snapshots are disabled to keep
 one-time management capabilities out of artifacts. Playwright's pinned
 `PLAYWRIGHT_NO_COPY_PROMPT` switch disables fallback DOM capture. Always import `test` and
@@ -112,15 +166,148 @@ Recheck both protections when upgrading the dependency. `npm run test:e2e:privac
 non-secret DOM marker and a removed-guard control to verify actual locator assertion
 failures. CI runs it after the browser suite; intentional failures are checked internally
 and all probe files are deleted. Per-test artifacts under ignored `temp/` are not retained;
-runner status metadata can remain. No browser artifacts are uploaded by CI. Do not enable
+runner status metadata can remain. The required functional job uploads no browser artifacts;
+the visual measurement lane below uploads only explicitly masked baselines. Do not enable
 debugging artifacts or log request headers, management fragments or response bodies
 containing capabilities. Assert capability handling as booleans rather than comparing or
 printing the actual token strings.
 
+### Responsive, accessibility and visual measurements / 响应式、无障碍与视觉检测
+
+The reusable [CI workflow](.github/workflows/ci.yml) keeps exactly its existing `check`,
+`cli-compatibility`, `docker` and `e2e` jobs. The separate
+[UI checks workflow](.github/workflows/ui-checks.yml) runs on pull requests, pushes to main
+and manual dispatches. Layout shards fail on every layout finding, scan error, browser
+failure or missing report; axe fails on serious/critical violations and scan/execution
+errors or missing reports. Cross-engine test failures fail the job. The layout/axe run steps
+return browser failures immediately; their summaries still run and gate UI findings after
+exceptions apply. Sanitized-report uploads remain advisory. Visual-baseline detection, visual
+comparison and baseline generation remain advisory with `continue-on-error: true`. The workflow
+is not called by CI or the release workflow and does not run on release tags.
+
+Layout covers 16 CSS viewport sizes, light/dark, English and Simplified Chinese, plus
+British English on booking. Layout and axe include the booking calendar, form, confirmation,
+time-zone panel, embedded and team booking, and OAuth consent states. Axe checks WCAG
+2.0/2.1/2.2 A/AA tags, records passes/incomplete and moderate/minor counts and reports
+serious/critical violations.
+A CI-only canary with known violations verifies the in-browser scan pipeline. Cross-engine
+smoke covers booking, sign-in and the embed popup in desktop WebKit, iPhone WebKit and
+Firefox. These measurements use synthetic data and the disposable-database fixture.
+Browser downloads are cached by the pinned Playwright version. The system dependency check
+runs even on cache hits because a browser cache does not preserve runner apt packages;
+Playwright installs system packages only when its dry-run check finds packages missing.
+
+可复用 CI 保留原有四个任务。独立的 **UI checks** 工作流在拉取请求、主分支推送和手动触发时运行，
+布局、axe 严重/致命问题和跨引擎测试回归会使任务失败；视觉检测仍为建议项。
+CI 和发布工作流都不调用它，发布标签不会运行这些检测。
+布局检测覆盖 16 种 CSS 视口、明暗主题、中英文，预约页另测英式英语；axe 记录通过、待人工确认、
+中等和轻微项数，并报告严重和致命问题；漏扫也会导致失败。
+检测涵盖预约表单、确认页、时区面板、嵌入页、团队预约和 OAuth 授权页。
+跨引擎冒烟覆盖 WebKit 桌面版、iPhone 预设和 Firefox 的预约、登录及嵌入弹窗。
+
+Build the web app as above, then run from the repository root. In Codex, **every command
+that launches a browser requires `sandbox_permissions: "require_escalated"`**; never run
+these in its default sandbox. If escalation is denied, use CI and record the local skip.
+
+先构建网页，再从仓库根目录运行以下命令。在 Codex 中，启动浏览器的命令必须申请提升权限；
+禁止在默认沙箱运行。若提升权限被拒绝，请使用 CI，并注明本地未运行。
+
+```sh
+export HOURMERE_E2E_BOOTSTRAP_URL=postgres://hourmere:hourmere@localhost:5432/hourmere
+(
+  export HOURMERE_UI_REPORT_DIR="$(mktemp -d)"
+  node tools/e2e/run-audit.ts layout --shard=1/4
+  node tools/e2e/reports-summary.ts --suite=layout --shard=1/4
+) # repeat 2/4, 3/4, 4/4 in new directories / 其余分片各用新目录
+(
+  export HOURMERE_UI_REPORT_DIR="$(mktemp -d)"
+  node tools/e2e/run-audit.ts a11y
+  node tools/e2e/reports-summary.ts --suite=a11y
+)
+npx playwright install --with-deps webkit firefox
+(
+  export HOURMERE_UI_REPORT_DIR="$(mktemp -d)"
+  node tools/e2e/run-audit.ts cross-engine
+  node tools/e2e/reports-summary.ts --suite=cross-engine
+)
+```
+
+Reports go to ignored `temp/ui-audit-reports/` (override `HOURMERE_UI_REPORT_DIR`). Each
+**UI checks** job appends per-page finding counts and execution status to its GitHub Actions
+summary. Download the `ui-layout-*`, `ui-a11y`, `ui-cross-engine` and `ui-visual` artifacts
+from that workflow run for sanitized JSON/Markdown; artifacts are retained for seven days.
+The `ui-visual` artifact contains browser execution metadata only. Local masked expected,
+actual and diff PNGs from failed screenshot comparisons are in `temp/ui-visual-results/`;
+CI does not upload those diff images. Findings include static selector hints made from tag,
+class tokens and `data-testid`, without DOM text, emails, URLs or tokens. Review missing scans,
+incomplete axe results and execution errors alongside counts. Visually hidden and ellipsis
+content and form-control internal scrolling are excluded from element overflow, which reports
+only the innermost cause. Intentional horizontal scrollers such as the mobile admin navigation
+use `data-layout-scroll="horizontal"`; this does not excuse document overflow.
+
+报告写入忽略目录 `temp/ui-audit-reports/`，可用 `HOURMERE_UI_REPORT_DIR` 指定位置。
+CI 摘要按页面统计问题和执行状态，脱敏报告保留七天。报告不含 DOM 文本、邮箱、网址或令牌。
+评审时须同时查看未完成的扫描和运行错误。预期的横向滚动容器用上述数据属性明确标记，
+该标记不豁免文档级溢出。可在 **UI checks** 运行页面下载报告；视觉任务仅上传执行状态，
+本地脱敏截图差异位于 `temp/ui-visual-results/`，CI 不上传这些差异图片。
+
+Visual comparisons are skipped until reviewed PNG baselines exist in `tools/e2e/snapshots/`.
+To generate them, dispatch the **UI checks** workflow on the review branch with `visual_baselines`
+enabled. The Linux-only `visual-baselines` job runs `--update-snapshots` with Noto CJK,
+fixed browser time, disabled animations, hidden carets and masked private fields. Download
+`visual-baselines-linux`, inspect every image, then commit reviewed baselines with a DCO
+sign-off. Do not commit local macOS baselines. Only masked PNG baselines are uploaded;
+traces, videos and failure DOM remain disabled. Continue to run `npm run test:e2e:privacy`
+when changing fixtures or Playwright. Real-device, screen-reader and pixel review remain
+manual; WebKit's iPhone preset does not establish real iOS compatibility.
+
+在已审核 PNG 基线提交前，CI 跳过视觉比较。在评审分支手动触发 **UI checks** 工作流并启用
+`visual_baselines`，即可下载 Linux 生成的脱敏基线。逐张审核后以 DCO 签署提交；不要提交
+macOS 本地基线。仍需人工检查真机、读屏和视觉效果，iPhone 预设不能替代真机验收。
+
+The terminal summary gates layout and axe after every scan has reported, allowing scoped,
+dated exceptions to apply without aborting the matrix early. It derives the expected report
+identities from Playwright's selected matrix (`--list` with the same suite/shard), rather
+than fixed counts; missing, duplicate or unexpected reports fail. Browser failures and
+unreadable reports fail too. Axe `incomplete`, moderate and minor results remain informational:
+summaries print their counts and rule IDs for review. Use a separate report directory for
+each local lane/shard (`HOURMERE_UI_REPORT_DIR`); rerun into an empty directory so old reports
+cannot mask a loss.
+
+The summary lists the first 20 unexcepted findings with page, viewport, locale, theme,
+category, axe rule ID and sanitized selector hint, followed by the remaining count.
+Browser failures include the exit code and point to the measurement run-step log;
+matrix-enumeration failures include the listing child's status, signal and stderr tail.
+
+仓库中的终端汇总会核对 Playwright 实际矩阵的每项报告；缺失、重复、多余、无法读取的报告和
+浏览器执行错误均导致失败。axe 待人工确认项、中等和轻微问题只显示数量和规则 ID，不阻断检测。
+每次本地运行使用独立、空的报告目录，避免旧报告掩盖漏扫。
+
+Known findings require an entry in `tools/e2e/ui-check-exceptions.json` (initially `[]`),
+with exact `suite` (`layout` or `a11y`), `page`, `viewport: {width, height}`, `locale`, `theme`,
+finding `category`, an axe `rule` when applicable, a nonempty `reason` and ISO `expires` date.
+Unknown keys are rejected, including extra keys inside `viewport`; DOM selectors cannot
+narrow an exception. Expired, invalid and stale entries fail; a stale entry no longer matches a finding in its
+selected state. Each layout shard checks the exceptions for its own selected states, and
+selectors absent from the full matrix fail in every shard. Scan errors, lost reports and
+browser failures cannot be excepted. Legacy scan-time `a11y-exemptions.json` suppressions
+are rejected by the gate; use this shared file so every accepted finding remains visible.
+
+已知问题例外须精确指定检测、页面、视口、语言、主题及问题类别（axe 另含规则），并填写原因与
+到期日。过期、无效或已不再匹配问题的例外均导致失败；扫描错误、漏扫和浏览器失败不允许豁免。
+
+Only the repository owner decides whether to make these checks required in branch protection:
+add the exact check names `e2e-layout (1)`, `e2e-layout (2)`, `e2e-layout (3)`,
+`e2e-layout (4)`, `e2e-a11y` and `e2e-cross-engine` from **UI checks**. This change does
+not alter repository settings; retain the four existing required CI checks and keep visual
+checks advisory until reviewed baselines are committed.
+
 ## Conventions
 
-- **API:** [docs/api-conventions.md](docs/api-conventions.md). Changes within `/api/v1` are
+- **API:** [API conventions](https://hourmere.com/docs/api-conventions). Changes within `/api/v1` are
   additive only, and errors use the shared shape and codes described there.
+- **MCP tools:** [Adding a tool](docs/mcp-development.md#adding-a-tool) covers extensions to the
+  shared MCP tool registry.
 - **Data:** [docs/data-model.md](docs/data-model.md). Migrations in `packages/db/migrations`
   are never edited once merged; add a new one instead.
 - **Layers:** see the repository layout in the [README](README.md#repository-layout).

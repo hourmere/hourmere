@@ -1,7 +1,7 @@
 // "Add to calendar" for a booking just made: an .ics file built here (no request, nothing
 // secret in it: never the manage link) and Google and Outlook links. The UID matches the
 // invitation the server emails for a new booking (<booking id>@hourmere, see
-// docs/notifications.md), so a calendar that gets both keeps one event.
+// https://hourmere.com/docs/notifications), so a calendar that gets both keeps one event.
 
 export interface CalendarEvent {
   /** The booking's id. */

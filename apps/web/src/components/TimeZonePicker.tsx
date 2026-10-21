@@ -1,10 +1,11 @@
 // One searchable IANA picker for public slot selection and editable admin fields.
-import { type KeyboardEvent, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { Fragment, type KeyboardEvent, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { isKnownTimeZone } from '../format.ts'
 import { useI18n } from '../i18n/runtime.tsx'
 import type { UiText } from '../i18n/translate.ts'
+import { type DateKey, parseDateKey } from '../public/calendar.ts'
 import { availableTimeZones } from '../public/env.ts'
-import { currentZoneId, offsetLabel, zoneName } from '../public/time.ts'
+import { currentZoneId, instantOf, offsetLabel, zoneName } from '../public/time.ts'
 import type { ControlProps } from './forms.tsx'
 
 interface TimeZonePickerProps {
@@ -12,13 +13,48 @@ interface TimeZonePickerProps {
   onChange: (value: string) => void
   /** With a field control, allow free typing so the surrounding form can validate it. */
   control?: ControlProps
-  /** Otherwise show a toggle and a separate search field, for public slot selection. */
+  /** Offsets on this calendar date, at local noon in each listed zone. */
+  referenceDate?: DateKey
+  /** Fallback offset instant when no calendar date is supplied. */
   now?: number
   error?: UiText | undefined
 }
 
 const MAX_SHOWN = 100
+const COMMON_ZONES = [
+  'UTC',
+  'America/Los_Angeles',
+  'America/New_York',
+  'Europe/London',
+  'Europe/Paris',
+  'Asia/Shanghai',
+  'Asia/Tokyo',
+  'Australia/Sydney',
+]
 const normalize = (text: string) => text.toLowerCase().replaceAll('_', ' ')
+
+/**
+ * Break opportunities after each slash; the stylesheet's `overflow-wrap: anywhere` still
+ * splits a segment that is wider than a 320px option on its own, instead of overflowing.
+ */
+function TimeZoneName({ name, className }: { name: string; className?: string }) {
+  return (
+    <span className={className}>
+      {name.split('/').map((part, index, parts) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: fixed components of a display name
+        <Fragment key={index}>
+          {part}
+          {index < parts.length - 1 && (
+            <>
+              {'/'}
+              <wbr />
+            </>
+          )}
+        </Fragment>
+      ))}
+    </span>
+  )
+}
 
 export function timeZoneNames(): string[] {
   try {
@@ -43,9 +79,12 @@ interface Zone {
   haystack: string
 }
 
-function zoneInfo(id: string, now: number): Zone {
+function zoneInfo(id: string, now: number, referenceDate?: DateKey): Zone {
   const name = zoneName(id)
-  const offset = offsetLabel(id, now)
+  const offset = offsetLabel(
+    id,
+    referenceDate ? instantOf(parseDateKey(referenceDate), 12, 0, id) : now,
+  )
   return {
     id,
     name,
@@ -55,22 +94,46 @@ function zoneInfo(id: string, now: number): Zone {
   }
 }
 
-export function TimeZonePicker({ value, onChange, control, now, error }: TimeZonePickerProps) {
-  const { t, ui } = useI18n()
+export function TimeZonePicker({
+  value,
+  onChange,
+  control,
+  now,
+  referenceDate,
+  error,
+}: TimeZonePickerProps) {
+  const { t, ui, text: translatedText } = useI18n()
 
   const editable = control !== undefined
   const id = useId()
   const [mountedAt] = useState(Date.now)
   const at = now ?? mountedAt
-  // Typing changes only the search: offsets for all zones are computed once per instant.
-  const listed = useMemo(() => timeZoneNames().map((zone) => zoneInfo(zone, at)), [at])
+  // Typing changes only the search; changing the displayed date refreshes every offset.
+  const listed = useMemo(
+    () => timeZoneNames().map((zone) => zoneInfo(zone, at, referenceDate)),
+    [at, referenceDate],
+  )
   const zones = useMemo(() => {
     if (!value || listed.some((zone) => zone.id === value) || !isKnownTimeZone(value)) return listed
-    const alias = zoneInfo(value, at)
+    const alias = zoneInfo(value, at, referenceDate)
     return [...listed.filter((zone) => zone.canonical !== alias.canonical), alias].sort((a, b) =>
       a.id.localeCompare(b.id),
     )
-  }, [listed, value, at])
+  }, [listed, value, at, referenceDate])
+  // The public picker starts with the current choice and a short set of common zones.
+  // Keep the editable settings combobox alphabetical for its existing keyboard navigation.
+  const common = useMemo(() => {
+    if (editable) return []
+    const ids = new Set([value, ...COMMON_ZONES])
+    return [...ids].flatMap((id) => {
+      const zone = zones.find((zone) => zone.id === id)
+      return zone ? [zone] : []
+    })
+  }, [editable, value, zones])
+  const ordered = useMemo(() => {
+    const ids = new Set(common.map((zone) => zone.id))
+    return [...common, ...zones.filter((zone) => !ids.has(zone.id))]
+  }, [common, zones])
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [filtering, setFiltering] = useState(false)
@@ -84,8 +147,8 @@ export function TimeZonePicker({ value, onChange, control, now, error }: TimeZon
     .filter(Boolean)
   const matches =
     !editable || filtering
-      ? zones.filter((zone) => words.every((word) => zone.haystack.includes(word)))
-      : zones
+      ? ordered.filter((zone) => words.every((word) => zone.haystack.includes(word)))
+      : ordered
   const shown = editable && filtering ? matches.slice(0, MAX_SHOWN) : matches
   const optionId = (index: number) => `${id}-option-${index}`
   const current = zones.find((zone) => zone.id === value)
@@ -117,7 +180,7 @@ export function TimeZonePicker({ value, onChange, control, now, error }: TimeZon
         setActive(
           Math.max(
             0,
-            zones.findIndex((zone) => zone.id === value),
+            ordered.findIndex((zone) => zone.id === value),
           ),
         )
       } else if (open) {
@@ -135,6 +198,27 @@ export function TimeZonePicker({ value, onChange, control, now, error }: TimeZon
     }
   }
 
+  function renderOption(zone: Zone, index: number) {
+    return (
+      // biome-ignore lint/a11y/useKeyWithClickEvents: the combobox input handles keys
+      <div
+        key={zone.id}
+        id={optionId(index)}
+        role="option"
+        aria-selected={editable ? index === active : zone.id === value}
+        data-active={index === active}
+        tabIndex={-1}
+        className={editable ? 'combobox-option' : 'tz-option'}
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() => pick(zone.id)}
+        onMouseMove={() => index !== active && setActive(index)}
+      >
+        <TimeZoneName name={zone.name} />
+        <span className={editable ? 'muted' : 'tz-offset'}>{zone.offset}</span>
+      </div>
+    )
+  }
+
   return (
     <div className={editable ? 'combobox' : 'tz-picker'}>
       {!editable && (
@@ -148,14 +232,19 @@ export function TimeZonePicker({ value, onChange, control, now, error }: TimeZon
           onClick={() => {
             if (open) close()
             else {
-              setActive(0)
+              setActive(
+                Math.max(
+                  0,
+                  ordered.findIndex((zone) => zone.id === value),
+                ),
+              )
               setOpen(true)
             }
           }}
         >
           <span className="tz-caption">{t('Time zone')}</span>
           <span className="tz-current">
-            <span className="tz-name">{current?.name ?? zoneName(value)}</span>{' '}
+            <TimeZoneName className="tz-name" name={current?.name ?? zoneName(value)} />{' '}
             <span className="tz-offset">{current?.offset}</span>
           </span>
           <span className="tz-change">{open ? t('Close') : t('Change')}</span>
@@ -213,23 +302,27 @@ export function TimeZonePicker({ value, onChange, control, now, error }: TimeZon
             hidden={!open || shown.length === 0}
           >
             {open &&
-              shown.map((zone, index) => (
-                // biome-ignore lint/a11y/useKeyWithClickEvents: the combobox input handles keys
-                <div
-                  key={zone.id}
-                  id={optionId(index)}
-                  role="option"
-                  aria-selected={editable ? index === active : zone.id === value}
-                  data-active={index === active}
-                  tabIndex={-1}
-                  className={editable ? 'combobox-option' : 'tz-option'}
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => pick(zone.id)}
-                  onMouseMove={() => index !== active && setActive(index)}
-                >
-                  <span>{zone.name}</span>
-                  <span className={editable ? 'muted' : 'tz-offset'}>{zone.offset}</span>
-                </div>
+              (!editable && !query ? (
+                <>
+                  {/* biome-ignore lint/a11y/useSemanticElements: APG listbox option groups use a labelled group, not form fields */}
+                  <div role="group" aria-labelledby={`${id}-common`}>
+                    <div className="tz-group-label" id={`${id}-common`}>
+                      {t('Current and common time zones')}
+                    </div>
+                    {shown.slice(0, common.length).map(renderOption)}
+                  </div>
+                  {/* biome-ignore lint/a11y/useSemanticElements: APG listbox option groups use a labelled group, not form fields */}
+                  <div role="group" aria-labelledby={`${id}-all`}>
+                    <div className="tz-group-label" id={`${id}-all`}>
+                      {t('All time zones')}
+                    </div>
+                    {shown
+                      .slice(common.length)
+                      .map((zone, index) => renderOption(zone, index + common.length))}
+                  </div>
+                </>
+              ) : (
+                shown.map(renderOption)
               ))}
           </div>
           {!editable && (
@@ -241,7 +334,7 @@ export function TimeZonePicker({ value, onChange, control, now, error }: TimeZon
           )}
           {open && shown.length === 0 && (
             <div className={editable ? 'combobox-list combobox-empty' : 'muted tz-empty'}>
-              {t('No time zone matches “{query}”.', { query: text })}
+              {translatedText('No time zone matches “{query}”.', { query: text })}
             </div>
           )}
           {editable && open && shown.length < matches.length && (

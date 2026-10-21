@@ -67,6 +67,13 @@ for (const language of ['en', 'zh-CN'] as const) {
     await expect(
       page.getByRole('link', { name: zh ? '加入 Google Meet' : 'Join Google Meet', exact: true }),
     ).toBeVisible()
+    expect(await app.meetState()).toMatchObject({
+      imports: 2,
+      privateImports: true,
+      conferencePatches: 1,
+      conferenceSafe: true,
+      deletes: 0,
+    })
     const state = await app.multiMeetState()
     expect(state).toMatchObject({
       organizerName: 'Second Required Host',
@@ -159,6 +166,13 @@ test('round-robin Meet uses the actual winner and never creates pool mirrors', a
   expect(state.organizerName).toBe(assigned.assignedNames[0])
   expect(state.mirrors).toEqual([])
   expect(state.copies).toBe(1)
+  expect(await app.meetState()).toMatchObject({
+    imports: 1,
+    privateImports: true,
+    conferencePatches: 1,
+    conferenceSafe: true,
+    deletes: 0,
+  })
 })
 test('a host safely reconciles a failed ordinary copy without replacing its ready Meet', async ({
   page,

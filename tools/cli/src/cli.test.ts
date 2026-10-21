@@ -126,6 +126,15 @@ describe('CLI transport and arguments', () => {
     },
   )
 
+  it('shows the package version without credentials, stdin or network', async () => {
+    const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
+    const result = await run(['--version'], undefined, { env: {} })
+    expect(result.code).toBe(0)
+    expect(result.stdout).toBe(`${manifest.version}\n`)
+    expect(result.stderr).toBe('')
+    expect(result.fetcher).not.toHaveBeenCalled()
+  })
+
   it.each(
     [
       ['__proto__'],

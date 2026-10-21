@@ -29,7 +29,7 @@ export function QuestionsEditor({
   onChange: (questions: QuestionDraft[]) => void
   errors: FieldErrors
 }) {
-  const { t, ui } = useI18n()
+  const { t, uiText: ui } = useI18n()
 
   const [focus, setFocus] = useState<FocusTarget>(null)
   const [announcement, setAnnouncement] = useState<UiText>('')
@@ -64,7 +64,7 @@ export function QuestionsEditor({
     setAnnouncement(
       msg('Removed question {0}{1}.', {
         '0': index + 1,
-        '1': removed.label ? `, “${removed.label}”` : '',
+        '1': removed.label ? msg(', “{label}”', { label: removed.label }) : '',
       }),
     )
   }
@@ -101,9 +101,9 @@ export function QuestionsEditor({
     <div className="questions">
       <p className="hint">
         {t(
-          'Invitees always give their name and email. Add questions for anything else you need to know, up to',
-        )}{' '}
-        {QUESTIONS.maxQuestions}.
+          'Invitees always give their name and email. Add questions for anything else you need to know, up to {count}.',
+          { count: QUESTIONS.maxQuestions },
+        )}
       </p>
       {listError && <FieldError id="questions-error">{listError}</FieldError>}
       {questions.length === 0 ? (
@@ -245,7 +245,7 @@ function QuestionCard({
           aria-describedby={optionsError ? `${questionField(q, 'options')}-error` : undefined}
         >
           <p id={`question-${q.key}-options-label`} className="options-label">
-            {t('Options for question')} {number}
+            {t('Options for question {number}', { number })}
           </p>
           {optionsError && (
             <FieldError id={`${questionField(q, 'options')}-error`}>{optionsError}</FieldError>
@@ -257,7 +257,7 @@ function QuestionCard({
               return (
                 <li key={o.key} className={`option${error ? ' field-invalid' : ''}`}>
                   <label htmlFor={id} className="visually-hidden">
-                    {t('Option')} {optionIndex + 1} {t('of question')} {number}
+                    {t('Option {option} of question {number}', { option: optionIndex + 1, number })}
                   </label>
                   {error && <FieldError id={`${id}-error`}>{error}</FieldError>}
                   <div className="option-row">
@@ -277,15 +277,15 @@ function QuestionCard({
                     />
                     <button
                       type="button"
-                      className="button button-small"
+                      className="button button-small button-icon"
                       onClick={() => removeOption(optionIndex)}
                       aria-label={t('Remove option {0}{1}, of question {2}', {
                         '0': optionIndex + 1,
-                        '1': o.text.trim() ? `, “${o.text.trim()}”` : '',
+                        '1': o.text.trim() ? t(', “{label}”', { label: o.text.trim() }) : '',
                         '2': number,
                       })}
                     >
-                      {t('Remove')}
+                      <span aria-hidden="true">×</span>
                     </button>
                   </div>
                 </li>

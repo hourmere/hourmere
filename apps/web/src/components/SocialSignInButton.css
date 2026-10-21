@@ -1,0 +1,157 @@
+/* Provider colors and spacing follow the official guidelines; see assets/identity/README.md. */
+@font-face {
+  font-family: "Google Sans";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("../assets/identity/google-sans-medium-latin.woff2") format("woff2");
+}
+
+.social-sign-in {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  overflow: hidden;
+  cursor: pointer;
+  isolation: isolate;
+  white-space: nowrap;
+}
+
+.social-sign-in:disabled {
+  cursor: default;
+}
+
+.social-sign-in-google {
+  height: 40px;
+  /* The 1px border and 11px content padding put the G 12px from the outer edge. */
+  padding: 0 11px;
+  border: 1px solid #747775;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #1f1f1f;
+  font:
+    500 14px / 20px "Google Sans",
+    Arial,
+    sans-serif;
+  letter-spacing: 0.25px;
+}
+
+.social-sign-in-google-mark {
+  display: block;
+  flex: 0 0 20px;
+  width: 20px;
+  height: 20px;
+  margin-right: 10px;
+  overflow: hidden;
+}
+
+.google-mark-light {
+  display: block;
+}
+
+.google-mark-dark {
+  display: none;
+}
+
+/* Crop only the original button boundary; the official 20px G remains at its original size. */
+.social-sign-in-google-mark svg {
+  display: block;
+  width: 40px;
+  height: 40px;
+  transform: translate(-10px, -10px);
+}
+
+.social-sign-in-google-mark .google-mark-gradient {
+  width: 100%;
+  height: 100%;
+  opacity: 1;
+  background: conic-gradient(
+    from 90deg,
+    rgba(255, 70, 65, 1) 0deg,
+    rgba(255, 70, 65, 1) 4.14555deg,
+    rgba(49, 134, 255, 1) 39.154deg,
+    rgba(49, 134, 255, 1) 72.0044deg,
+    rgba(0, 165, 183, 1) 96.7463deg,
+    rgba(14, 188, 95, 1) 120.897deg,
+    rgba(14, 188, 95, 1) 154.722deg,
+    rgba(108, 196, 0, 1) 179.136deg,
+    rgba(255, 204, 0, 1) 203.588deg,
+    rgba(255, 211, 20, 1) 226.915deg,
+    rgba(255, 204, 0, 1) 251.688deg,
+    rgba(255, 106, 43, 1) 273.129deg,
+    rgba(253, 70, 65, 1) 289.305deg,
+    rgba(255, 70, 65, 1) 359.593deg,
+    rgba(255, 70, 65, 1) 360deg
+  );
+}
+
+.social-sign-in-google .social-sign-in-label {
+  flex: 1;
+  text-align: center;
+}
+
+.social-sign-in-state {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  pointer-events: none;
+  background: currentColor;
+  opacity: 0;
+}
+
+@media (hover: hover) {
+  .social-sign-in:not(:disabled):hover .social-sign-in-state {
+    opacity: 0.08;
+  }
+}
+
+.social-sign-in:not(:disabled):active .social-sign-in-state {
+  opacity: 0.12;
+}
+
+.social-sign-in-microsoft {
+  height: 41px;
+  gap: 11px;
+  padding: 0 11px;
+  border: 1px solid #8c8c8c;
+  border-radius: 0;
+  background: #ffffff;
+  color: #5e5e5e;
+  font:
+    600 15px / 20px "Segoe UI",
+    Arial,
+    sans-serif;
+}
+
+.social-sign-in-microsoft img {
+  flex: 0 0 21px;
+}
+
+.social-sign-in:disabled .social-sign-in-label,
+.social-sign-in:disabled .social-sign-in-google-mark,
+.social-sign-in:disabled img {
+  opacity: 0.38;
+}
+
+@media (prefers-color-scheme: dark) {
+  .google-mark-light {
+    display: none;
+  }
+
+  .google-mark-dark {
+    display: block;
+  }
+
+  .social-sign-in-google {
+    border-color: #8e918f;
+    background: #131314;
+    color: #e3e3e3;
+  }
+
+  .social-sign-in-microsoft {
+    border-color: #2f2f2f;
+    background: #2f2f2f;
+    color: #ffffff;
+  }
+}

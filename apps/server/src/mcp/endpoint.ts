@@ -1,5 +1,5 @@
 // The remote MCP server: Streamable HTTP at /mcp on the same server as the REST API,
-// stateless, authenticated with API keys or optional OAuth grants. See docs/mcp.md.
+// stateless, authenticated with API keys or optional OAuth grants. See https://hourmere.com/docs/mcp.
 import { inspect } from 'node:util'
 import type { OpenAPIHono } from '@hono/zod-openapi'
 import {
@@ -14,6 +14,7 @@ import { routeBodyLimit } from '../body-limit.ts'
 import { withClientIpHeader } from '../client-ip.ts'
 import { createRateLimiter } from '../rate-limit.ts'
 import { BOOKING_BODY_LIMIT } from '../routes/public.ts'
+import { VERSION } from '../version.ts'
 import { clip, type McpCaller, prepareTools, registerTools, type Tool } from './tools.ts'
 
 export const MCP_PATH = '/mcp'
@@ -25,12 +26,13 @@ export const MCP_PATH = '/mcp'
  */
 export const MCP_BODY_LIMIT = BOOKING_BODY_LIMIT
 
-const SERVER_INFO = { name: 'hourmere', title: 'Hourmere', version: '0.0.0' }
+const SERVER_INFO = { name: 'hourmere', title: 'Hourmere', version: VERSION }
 
 const INSTRUCTIONS = `Hourmere schedules meetings. You act as the user in the organization bound to your API key or OAuth grant (whoami tells you who that is).
 To book time with someone, call find_available_slots for their event type (handle and slug come from their booking link https://<host>/<handle>/<slug>), then create_booking with the exact start of one of the returned slots.
 Times are RFC 3339: results give each time in UTC (Z) and, where you pass a timeZone, in that IANA time zone too.
-create_booking and reschedule_booking return a manageToken once: keep it, it is the only way to reschedule or cancel that booking as the invitee.`
+create_booking returns a manageToken once for a new booking (idempotent replays return null): keep it to reschedule or cancel as the invitee. reschedule_booking with manageToken returns a new token; the previous response token stays on the cancelled booking. Tokens from invitee emails follow the meeting.
+For host flows, use bookingId from list_bookings to reschedule or cancel a booking you host in this organization. Host reschedules return manageToken: null and preserve the invitee's existing token on the successor; they never reveal an invitee token. Rescheduling is not idempotent: never retry automatically after a lost response.`
 
 /** The MCP module as createApp mounts it. */
 export interface McpModule {
@@ -301,18 +303,8 @@ export function mcpEndpoint({ tools, oauth }: McpEndpointOptions): McpModule {
       )
     }
 
-    // Unknown or disabled discovery paths get JSON 404 rather than the SPA's HTML.
-    for (const path of [
-      '/.well-known/oauth-protected-resource',
-      '/.well-known/oauth-protected-resource/*',
-      '/.well-known/oauth-authorization-server',
-      '/.well-known/oauth-authorization-server/*',
-      '/.well-known/openid-configuration',
-      '/.well-known/openid-configuration/*',
-      `${MCP_PATH}/*`,
-    ]) {
-      app.all(path, (c) => c.json({ error: 'not_found' }, 404))
-    }
+    // createApp handles unknown well-known resources; MCP subpaths keep API errors.
+    app.all(`${MCP_PATH}/*`, (c) => c.json({ error: 'not_found' }, 404))
   }
   return { oauth: oauth !== undefined, mount }
 }

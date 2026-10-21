@@ -6,6 +6,12 @@ const Instance = z
     hostedSignupUrl: z.url().openapi({
       description: 'Hosted service destination for public attribution and sign-up links',
     }),
+    privacyPolicyUrl: z.url().optional().openapi({
+      description: "This instance operator's privacy policy; absent when not configured",
+    }),
+    termsUrl: z.url().optional().openapi({
+      description: "This instance operator's terms; absent when not configured",
+    }),
     automaticGoogleMeet: z.boolean().optional(),
     automaticZoom: z.boolean().optional(),
     signIn: z
@@ -28,15 +34,21 @@ export function instanceRoutes({
   automaticMeet = false,
   automaticZoom = false,
   hostedSignupUrl = 'https://hourmere.com',
+  privacyPolicyUrl,
+  termsUrl,
 }: {
   /** The configured sign-in providers (config.socialProviders); only their presence counts. */
   socialProviders: { google?: unknown; microsoft?: unknown }
   automaticMeet?: boolean
   automaticZoom?: boolean
   hostedSignupUrl?: string
+  privacyPolicyUrl?: string
+  termsUrl?: string
 }): RouteModule {
   const body: z.infer<typeof Instance> = {
     hostedSignupUrl,
+    ...(privacyPolicyUrl && { privacyPolicyUrl }),
+    ...(termsUrl && { termsUrl }),
     automaticGoogleMeet: automaticMeet,
     automaticZoom,
     signIn: {

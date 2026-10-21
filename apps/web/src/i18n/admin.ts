@@ -1,5 +1,42 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  'API key usage command': 'API 密钥使用命令',
+  'New API key test command': '新 API 密钥测试命令',
+  'No schedules yet.': '尚无日程。',
+  'Ask your administrator to enable calendar connections.': '请联系管理员启用日历连接。',
+  'Ask your administrator to enable Zoom connections.': '请联系管理员启用 Zoom 连接。',
+  'Set the booking details, questions and availability for this event type.':
+    '设置此活动类型的预约信息、问题和可预约时段。',
+  'Set your weekly hours in the time zone people can book you in.':
+    '设置每周可预约时段及其所在时区。',
+
+  'Manage your profile and booking defaults.': '管理个人资料和预约默认设置。',
+  'Review and manage the meetings you host.': '查看和管理你主持的会议。',
+  'Review meeting details and manage this booking.': '查看会议详情并管理此预约。',
+  'Notification language': '通知语言',
+  'Choose a supported notification language.': '请选择支持的通知语言。',
+  'Language of your own notification emails and calendar invitations. Booking pages and invitee emails use the visitor’s language. Change the interface language separately in the top bar.':
+    '你收到的通知邮件和日历邀请所用的语言。预约页面和受邀者邮件使用访客的语言。界面语言请在顶栏单独切换。',
+  'Connect a calendar account to get started.': '连接日历账号以开始使用。',
+  'Connect an AI app from its MCP settings, or use an API key.':
+    '在 AI 应用的 MCP 设置中连接，或使用 API 密钥。',
+  'Manage API keys': '管理 API 密钥',
+  'Create your first key': '创建第一个密钥',
+  'Give the key a name above, then choose Create key.': '在上方为密钥命名，然后选择“创建密钥”。',
+  'Connect a Zoom account to get started.': '连接 Zoom 账号以开始使用。',
+  'Review calendar connection options': '查看日历连接选项',
+  'Save schedule details and weekly hours here. Save date overrides in their section below.':
+    '在此保存日程信息和每周时段。特定日期安排请在下方对应区域保存。',
+  '. Use Save override to save a date. Select dates to remove, then use Save removals.':
+    '。点击“保存日期安排”保存单个日期；选择要移除的日期后，点击“保存移除”。',
+  'Save removals': '保存移除',
+  'Unsaved date override removals': '日期安排移除尚未保存',
+  'Removal pending save': '移除待保存',
+  'Undo removal: {0}': '撤销移除：{0}',
+  'Undo removal': '撤销移除',
+  'Could not save all removals. Saved removals are kept; try again for the remaining dates. {0}':
+    '未能保存所有移除操作。已保存的移除仍然有效，请重试剩余日期。{0}',
+
   '.': '。',
   '{0}–{1}.': '{0}–{1}。',
   '= {0}.': '= {0}。',
@@ -12,6 +49,7 @@ export const admin = {
     '单独连接你自己的 Zoom 账号，与登录和日历互相独立。身份访问与自动创建会议权限需要分别选择。',
   'Connect Zoom requests only basic account identity. Authorize Zoom meetings also requests create, read, update and delete meeting access. You choose your own connection when configuring automatic meetings.':
     '“连接 Zoom”仅请求基本账号身份。“授权 Zoom 会议”还会请求创建、读取、更新和删除会议的权限。配置自动会议时，由你选择自己的连接。',
+  'Connect Zoom requests only basic account identity.': '“连接 Zoom”仅请求基本账号身份。',
   'Authorize Zoom meetings': '授权 Zoom 会议',
   'Meeting permissions': '会议权限',
   'Identity only': '仅身份访问',
@@ -50,10 +88,6 @@ export const admin = {
   Retry: '重试',
   'Working…': '正在处理…',
   'Conference accounts': '会议账号',
-  'Connect your own Zoom identity separately from sign-in and calendars. This connection cannot create or read meetings.':
-    '单独连接你自己的 Zoom 身份，与登录和日历互相独立。此连接不能创建或读取会议。',
-  'Only basic Zoom account identity is requested. Calendar access and automatic meeting creation are separate features.':
-    '仅请求基本 Zoom 账号身份。日历访问和自动创建会议属于独立功能。',
   'Zoom account connected.': 'Zoom 账号已连接。',
   'Zoom was not connected because you cancelled authorization.': '你已取消授权，Zoom 未连接。',
   'This Zoom connection attempt expired or was already used. Start again.':
@@ -62,8 +96,7 @@ export const admin = {
   'Zoom could not be reached. Check the connection status before trying again.':
     '无法连接 Zoom。请检查连接状态后再试。',
   'Reconnect this Zoom account before refreshing it.': '请先重新连接此 Zoom 账号，再刷新。',
-  'Zoom did not grant only the requested identity access. Check the app configuration and reconnect.':
-    'Zoom 返回的权限不符合所请求的最小身份权限。请检查应用配置后重新连接。',
+  'Zoom account operations are busy. Try again shortly.': 'Zoom 账号操作繁忙。请稍后重试。',
   'Choose the same Zoom account when reconnecting this connection.':
     '重新连接时，请选择同一个 Zoom 账号。',
   'This Zoom identity is already connected to another Hourmere account.':
@@ -103,7 +136,7 @@ export const admin = {
   'Choose one individual host, two to eight collective hosts, or one to eight round-robin pool members. Changes affect new bookings; existing meetings retain their original hosts.':
     '单人会议选择一位主持人，集体会议选择两至八位，轮询池选择一至八位。更改只影响新预约；已有会议保留原主持人。',
   'Host pool': '主持人池',
-  'Remove selected host {0}': '移除已选主持人 {0}',
+  'Remove selected host {0}': '移除已选主持人{0}',
   'Choose one to eight pool members.': '请选择一至八位主持人池成员。',
   'Choose one to eight pool members to get a round-robin booking link.':
     '请选择一至八位主持人池成员，以获取轮询预约链接。',
@@ -125,15 +158,10 @@ export const admin = {
   'Each pool member uses their current default availability. An available member is assigned when someone books.':
     '每位池成员使用当前的默认可用时间；有人预约时，将分配一位可用成员。',
 
-  'Choose current verified team members: one individual host or two to eight collective hosts.':
-    '请选择当前已验证的团队成员：单人会议选择一位，集体会议选择两至八位。',
   ', from': '，从',
-  ', so there are times to book.': '，这样才会有可预约时间。',
-  ', this browser’s time zone.': '（此浏览器的时区）。',
-  ', through': '，至',
+  ', through {0}': '，通过{0}',
   ', until': '，至',
   ', your personal organization': '（你的个人组织）',
-  ', your time zone.': '（你的时区）。',
   '. Lowercase letters, digits and hyphens, up to': '。使用小写字母、数字和连字符，最多',
   '. Open it to sign in; it works once and expires in a few minutes.':
     '。打开链接即可登录；链接仅可使用一次，几分钟后过期。',
@@ -155,7 +183,7 @@ export const admin = {
   'Add an option': '添加选项',
   'Add at least one option.': '请至少添加一个选项。',
   'Add hours': '添加时间段',
-  'Add hours on {0}': '添加{0}的时间段',
+  'Add hours on {0}': '添加时间段（{0}）',
   'Add hours, or choose unavailable all day.': '请添加时间段，或选择全天不可用。',
   Added: '已添加',
   Address: '地址',
@@ -175,12 +203,10 @@ export const admin = {
     '你的其他活动类型已使用此链接。请选择另一个。',
   'Answer type': '回答类型',
   Answers: '回答',
-  'Anyone with the direct link can still book it. This does not restrict access.':
-    '持有直接链接的任何人仍可预约。这不会限制访问。',
   'API keys let AI agents and scripts use Hourmere for you, through the same API as this app. Each key acts in one organization and can do anything you can do there, so treat it like a password.':
     'API 密钥允许 AI 代理和脚本通过与本应用相同的 API 代表你使用 Hourmere。每个密钥在一个组织中生效，拥有你在该组织中的全部操作权限，请像密码一样保管。',
   'Approve connection': '批准连接',
-  'Ask at most {0} questions.': '最多提出 {0} 个问题。',
+  'Ask at most {0} questions.': '最多提出{0}个问题。',
   'availability page': '可预约时间页面',
   'Back to availability': '返回可预约时间',
   'Back to bookings': '返回预约列表',
@@ -203,7 +229,41 @@ export const admin = {
   'Cancel booking…': '取消预约…',
   'Cancel this booking': '取消此预约',
   Cancelled: '已取消',
-  'Check conflicts in': '检查以下日历的冲突',
+  'Check this calendar for conflicts': '检查此日历的冲突',
+  'Write new bookings here': '将新预约写入此日历',
+  'Stop writing bookings here': '停止向此日历写入预约',
+  'Sync now': '立即同步',
+  '{0} Calendar connected. Your calendar list is ready.': '{0}日历已连接。日历列表已就绪。',
+  '{0} Calendar was not connected because you cancelled authorization.':
+    '你已取消授权，因此未连接{0}日历。',
+  '{0} did not grant the requested access. Connect again and allow the requested permissions.':
+    '{0}未授予所需权限。请重新连接并允许请求的权限。',
+  '{0} did not provide continuing access. Connect again to try again.':
+    '{0}未提供持续访问权限。请重新连接后重试。',
+  '{0} Calendar could not be reached. Try connecting again shortly.':
+    '暂时无法连接{0}日历。请稍后重新连接。',
+  '{0} Calendar disconnected. Stored credentials and local calendar data were deleted.':
+    '{0}日历已断开连接。保存的凭据和本地日历数据已删除。',
+  'Create a profile before choosing where new bookings are written.':
+    '请先创建个人资料，再选择用于写入新预约的日历。',
+  'Create your profile in Settings first.': '请先在“设置”中创建个人资料。',
+  'Check your calendar settings and try again.': '请检查日历设置后重试。',
+  'Choose calendar-list access or calendar synchronization.': '请选择日历列表访问或日历同步权限。',
+  'This calendar connection no longer exists.': '此日历连接已不存在。',
+  'This calendar is no longer available. Refresh the calendar list.':
+    '此日历已不可用。请刷新日历列表。',
+  'Select at most 20 conflict calendars.': '最多可选择 20 个用于检查冲突的日历。',
+  'This calendar does not allow event synchronization.': '此日历不允许同步事件。',
+  'Select this calendar for conflict checks before synchronizing it.':
+    '请先选择此日历用于检查冲突，再进行同步。',
+  'Choose an owned Google calendar and enable synchronization first.':
+    '请先选择你拥有的 Google 日历并启用同步。',
+  'Google Calendar could not be reached. Try again shortly.': '无法连接 Google 日历。请稍后重试。',
+  'Microsoft Calendar could not be reached. Try again shortly.':
+    '无法连接 Microsoft 日历。请稍后重试。',
+  'Reconnect Microsoft Calendar to restore access.': '请重新连接 Microsoft 日历以恢复访问。',
+  'Reconnect Microsoft Calendar and allow the requested permissions.':
+    '请重新连接 Microsoft 日历并允许请求的权限。',
   'Check that it works:': '检查是否可用：',
   'Check these hours: each must end after it starts.':
     '请检查这些时间段：每段的结束时间必须晚于开始时间。',
@@ -232,21 +292,20 @@ export const admin = {
   'Connect Microsoft Calendar': '连接 Microsoft 日历',
   'Connected accounts': '已连接的账号',
   Continue: '继续',
-  'Continue with {0}': '使用 {0} 继续',
   'Continuing…': '正在继续…',
   'Copy command': '复制命令',
   'Copy key': '复制密钥',
-  'Copy link for {0}': '复制 {0} 的链接',
-  'Copy your new key “': '复制新密钥“',
+  'Copy link for {0}': '复制链接：{0}',
+  'Copy your new key “{name}”': '复制新密钥“{name}”',
   'Could not cancel the booking. {0}': '无法取消预约。{0}',
   'Could not check your session. Please reload.': '无法检查登录状态。请刷新页面。',
-  'Could not connect {0} Calendar. {1}': '无法连接 {0} 日历。{1}',
+  'Could not connect {0} Calendar. {1}': '无法连接{0}日历。{1}',
   "Could not create the key: you can't create keys in {0}.":
-    '无法创建密钥：你不能在 {0} 中创建密钥。',
+    '无法创建密钥：你不能在{0}中创建密钥。',
   'Could not create the key. {0}': '无法创建密钥。{0}',
   'Could not delete the event type.': '无法删除活动类型。',
   'Could not delete the schedule.': '无法删除日程。',
-  'Could not disconnect {0} Calendar.': '无法断开 {0} 日历。',
+  'Could not disconnect {0} Calendar.': '无法断开{0}日历。',
   'Could not load more bookings. {0}': '无法加载更多预约。{0}',
   'Could not load the booking.': '无法加载预约。',
   'Could not load the date overrides.': '无法加载特定日期安排。',
@@ -295,9 +354,9 @@ export const admin = {
   Description: '描述',
   Disabled: '已禁用',
   Disconnect: '断开连接',
-  'Disconnect {0}': '断开 {0}',
+  'Disconnect {0}': '断开连接：{0}',
   'Disconnect {0}? This deletes stored credentials and local calendar data. You can also remove Hourmere’s access in {1} account settings.':
-    '断开 {0}？此操作将删除已保存的凭据和本地日历数据。你也可以在 {1} 账号设置中移除 Hourmere 的访问权限。',
+    '断开{0}？此操作将删除已保存的凭据和本地日历数据。你也可以在{1}账号设置中移除 Hourmere 的访问权限。',
   'Disconnect account': '断开账号连接',
   'Disconnecting…': '正在断开连接…',
   'Display name': '显示名称',
@@ -305,7 +364,7 @@ export const admin = {
   Duration: '时长',
   Edit: '编辑',
   'Edit “{0}”': '编辑“{0}”',
-  'Edit {0}': '编辑 {0}',
+  'Edit {0}': '编辑{0}',
   'Edit display name': '编辑显示名称',
   'Edit event type': '编辑活动类型',
   'Edit schedule': '编辑日程',
@@ -318,7 +377,7 @@ export const admin = {
   'Enter a handle.': '请输入用户名。',
   'Enter a language tag such as en, en-GB or pt-BR.': '请输入语言标签，例如 en、en-GB 或 pt-BR。',
   'Enter a link starting with https:// or http://.': '请输入以 https:// 或 http:// 开头的链接。',
-  'Enter a name on one line, up to {0} characters.': '请输入单行姓名，最多 {0} 个字符。',
+  'Enter a name on one line, up to {0} characters.': '请输入单行姓名，最多{0}个字符。',
   'Enter a start time.': '请输入开始时间。',
   'Enter an address of up to 500 characters on one line.': '请输入单行地址，最多 500 个字符。',
   'Enter an end time.': '请输入结束时间。',
@@ -344,27 +403,24 @@ export const admin = {
   'Free time kept before each meeting.': '每次会议前保留的空闲时间。',
   Fri: '周五',
   Friday: '星期五',
-  'Google Calendar connected. Your calendar list is ready.': 'Google 日历已连接。日历列表已就绪。',
-  'Google Calendar could not be reached. Try connecting again shortly.':
-    '暂时无法连接 Google 日历。请稍后重新连接。',
   'Google Calendar is not configured on this Hourmere instance. Contact its administrator to enable it.':
     '此 Hourmere 实例尚未配置 Google 日历。请联系管理员启用。',
-  'Google Calendar was not connected because you cancelled authorization.':
-    '你已取消授权，因此未连接 Google 日历。',
-  'Google did not grant the requested access. Connect again and allow the requested permissions.':
-    'Google 未授予所需权限。请重新连接并允许请求的权限。',
-  'Google did not provide continuing access. Connect again to try again.':
-    'Google 未提供持续访问权限。请重新连接后重试。',
-  'Google Meet (link created per booking)': 'Google Meet（每次预约时创建链接）',
-  'Google will ask for your email, calendar list, event read access and permission to change events on calendars you own. Busy-time synchronization stores times and event IDs, without event titles or descriptions. Connecting is separate from signing in.':
-    'Google 将请求你的邮箱、日历列表、事件读取权限，以及修改自有日历事件的权限。忙闲同步仅保存时间和事件 ID，不保存事件标题或描述。连接日历与登录相互独立。',
+  'Google will ask for your email, calendar list and event access: to check busy times on selected calendars, and to create one private copy of each new booking on the calendar you own and select. Changing this destination affects new bookings; existing booking copies continue to be updated or cancelled on their original calendar. Automatic Google Meet adds a link only when you enable it. Busy-time synchronization stores times and event IDs, not event titles or descriptions. Connecting is optional and separate from signing in.':
+    'Google 将请求你的邮箱、日历列表和事件访问权限：读取所选日历的忙闲时间来检查冲突，并在你拥有且选作写入目标的日历中，为每个新预约创建一份私有副本。更改写入目标只影响新预约；现有预约的副本仍会在原日历中更新或取消。只有启用自动 Google Meet 时才会添加会议链接。忙闲同步保存时间和事件 ID，不保存事件标题或描述。连接日历是可选的，与登录相互独立。',
+  'Disconnect below deletes stored credentials and local calendar data, but leaves existing event copies in Google Calendar and does not revoke your Google grant. You can revoke access in your Google Account:':
+    '使用下方的“断开连接”可删除已存储的凭证和本地日历数据，但会保留 Google 日历中的现有事件副本，也不会撤销 Google 授权。你可以在 Google 账号中撤销授权：',
+  'Google Account connections': 'Google 账号连接',
+  'Could not load privacy information. Try again before connecting Google Calendar.':
+    '无法加载隐私信息。请重试后再连接 Google 日历。',
+  'Could not load your profile. Try again before choosing where new bookings are written.':
+    '无法加载个人资料。请重试后再选择用于写入新预约的日历。',
   'Guests receive confirmation emails and calendar invitations. Off by default; changing this does not remove guests from existing bookings.':
     '来宾会收到确认邮件和日历邀请。默认关闭；更改此项不会移除现有预约的来宾。',
   Handle: '用户名',
   'Hide from your booking page': '在预约主页中隐藏',
   Hours: '时间段',
-  'Hours {0}, from': '时间段 {0}，从',
-  'Hours {0}, until': '时间段 {0}，至',
+  'Hours {0}, from': '时间段{0}，从',
+  'Hours {0}, until': '时间段{0}，至',
   'Hours on that date': '该日期的时间段',
   'How far ahead a meeting must be booked.': '会议至少需要提前多久预约。',
   'I’ve saved my key': '我已保存密钥',
@@ -375,8 +431,8 @@ export const admin = {
     '使用国际格式，例如 +14155550123。受邀人在预约后可见。',
   Inactive: '未启用',
   Invitee: '受邀人',
-  'Invitees always give their name and email. Add questions for anything else you need to know, up to':
-    '受邀人始终需要提供姓名和邮箱。可添加其他问题，最多',
+  'Invitees always give their name and email. Add questions for anything else you need to know, up to {count}.':
+    '受邀人始终需要提供姓名和邮箱。可添加其他问题，最多{count}。',
   'It can stay connected after you sign out, for up to 30 days from its original approval. Refreshing does not extend that time. Leaving the organization or revoking access in Connected apps stops the connection immediately.':
     '此应用可在你退出登录后继续连接，最长为首次批准起的 30 天。刷新令牌不会延长此期限。离开组织或在“已连接的应用”中撤销访问会立即终止连接。',
   'Its booking link stops working at once. Bookings already made are kept, and you can still see them under Bookings.':
@@ -397,7 +453,7 @@ export const admin = {
   Location: '地点',
   'Long text': '长文本',
   'Lower numbers come first on your booking page.': '数值较小的活动在预约主页中排在前面。',
-  'Lowercase letters, digits and hyphens.': '使用小写字母、数字和连字符。',
+  'Lowercase letters, digits and hyphens. {0}': '使用小写字母、数字和连字符。{0}',
   'Make default': '设为默认',
   'Make default: {0}': '设为默认：{0}',
   'Make this my default schedule': '设为我的默认日程',
@@ -414,11 +470,12 @@ export const admin = {
   'Move down: {0}': '下移：{0}',
   'Move up': '上移',
   'Move up: {0}': '上移：{0}',
-  'Moved {0} to position {1} of {2}.': '已将 {0} 移至第 {1} 位，共 {2} 项。',
+  'Moved {0} to position {1} of {2}.': '已将{0}移至第{1}位，共{2}项。',
   'Must be ticked to book': '须勾选才能预约',
-  Name: '姓名',
-  'Name and time zone': '姓名和时区',
+  Name: '名称',
+  'Name and time zone': '名称和时区',
   Never: '永不到期',
+  'Never used': '从未使用',
   'New API key': '新 API 密钥',
   'New event type': '新活动类型',
   'New schedule': '新日程',
@@ -439,18 +496,15 @@ export const admin = {
   'No upcoming date overrides.': '没有即将到来的特定日期安排。',
   None: '无',
   'Not set': '未设置',
-  'Nothing there? Check your spam folder, or try again.':
-    '未收到邮件？请检查垃圾邮件文件夹，或重试。',
-  'of question': '，所属问题',
-  'Offer at most {0} options.': '最多提供 {0} 个选项。',
+  'Offer at most {0} options.': '最多提供{0}个选项。',
   'Only approve apps you trust. The app name and return address are supplied by the app.':
     '仅批准你信任的应用。应用名称和返回地址均由该应用提供。',
   'OpenAPI document': 'OpenAPI 文档',
-  'Opening {0}…': '正在打开 {0}…',
   'Opening Google…': '正在打开 Google…',
   'Opening Microsoft…': '正在打开 Microsoft…',
   Option: '选项',
-  'Options for question': '问题的选项',
+  'Options for question {number}': '问题{number}的选项',
+  'Option {option} of question {number}': '问题{number}的选项{option}',
   Organization: '组织',
   'Organization to connect': '要连接的组织',
   'Organization:': '组织：',
@@ -467,22 +521,20 @@ export const admin = {
   Position: '排序位置',
   Profile: '个人资料',
   'Profile created. Your booking links are ready.': '个人资料已创建。你的预约链接已就绪。',
-  'Public booking links for this scheduling mode are not available yet.':
-    '此排期方式暂不支持公开预约链接。',
-  'Question {0}': '问题 {0}',
+  'Question {0}': '问题{0}',
   Questions: '问题',
   'Reason:': '原因：',
   'Refresh calendar list': '刷新日历列表',
   Remove: '移除',
-  'Remove {0}': '移除 {0}',
-  'Remove option {0}{1}, of question {2}': '移除选项 {0}{1}，所属问题 {2}',
+  'Remove {0}': '移除{0}',
+  'Remove option {0}{1}, of question {2}': '移除问题{2}的选项{0}{1}',
   'Remove override: {0}': '移除日期安排：{0}',
   'Remove question': '移除问题',
   'Remove question: {0}': '移除问题：{0}',
   'Remove special control characters (tabs and line breaks are fine).':
     '请移除特殊控制字符（可保留制表符和换行符）。',
-  'Removed question {0}{1}.': '已移除问题 {0}{1}。',
-  'Removed the override for {0}.': '已移除 {0} 的日期安排。',
+  'Removed question {0}{1}.': '已移除问题{0}{1}。',
+  'Removed the override for {0}.': '已移除{0}的日期安排。',
   'Removing…': '正在移除…',
   Replaced: '已替换',
   Required: '必填',
@@ -493,10 +545,11 @@ export const admin = {
   'The response was lost. The booking may have moved. Check your bookings before trying again.':
     '未收到响应。预约可能已改期。再次尝试前请先查看预约列表。',
   Rescheduled: '已改期',
+  'View rescheduled booking': '查看改期后的预约',
   'Return address:': '返回地址：',
   Revoke: '撤销',
   'Revoke “': '撤销“',
-  'Revoke {0}': '撤销 {0}',
+  'Revoke {0}': '撤销{0}',
   'Revoke access': '撤销访问',
   'Revoke key': '撤销密钥',
   'Revoked “{0}”.': '已撤销“{0}”。',
@@ -519,11 +572,10 @@ export const admin = {
   'Set your availability': '设置可预约时间',
   'Set your time zone': '设置时区',
   'Set your weekly hours': '设置每周时间段',
-  'Share the links of your': '分享你的',
+  'Share the links of your {0} so people can book you.': '分享你的{0}，以便他人预约你。',
   'Short text': '短文本',
   'Show more bookings': '显示更多预约',
-  'Showing {0} bookings.': '共显示 {0} 个预约。',
-  'Shown in this browser’s time zone.': '以此浏览器的时区显示。',
+  'Showing {0} bookings.': '共显示{0}个预约。',
   'Shown on booking pages, in emails and in calendar invitations.':
     '显示在预约页面、邮件和日历邀请中。',
   'Shown on the booking page. Line breaks are kept.': '显示在预约页面上。保留换行。',
@@ -533,14 +585,11 @@ export const admin = {
   'Sign-in did not work{0}. Please try again.': '登录失败{0}。请重试。',
   'Sign-in was cancelled.': '已取消登录。',
   'Signed in as': '当前登录账号',
-  'so people can book you.': '，以便他人预约你。',
   'Start times every': '开始时间间隔',
-  'Stop writing bookings to {0}': '停止向 {0} 写入预约',
   'Store it somewhere safe, such as a password manager or your agent’s secret settings. If you lose it, revoke it and create a new one.':
     '请将密钥保存在安全的地方，例如密码管理器或代理的密钥设置中。若密钥丢失，请撤销并创建新密钥。',
   Sun: '周日',
   Sunday: '星期日',
-  Sync: '同步',
   'Synchronization failed. Booking times stay unavailable until synchronization recovers.':
     '同步失败。在同步恢复之前，相关时间将保持不可预约。',
   "That account's email address does not match yours. {0}": '该账号的邮箱与你的邮箱不符。{0}',
@@ -558,14 +607,13 @@ export const admin = {
   'the booking page': '预约页面',
   'The hours below are in this zone. Type to search, e.g. “Berlin”.':
     '下方时间段使用此时区。输入城市搜索，例如“Berlin”。',
-  'The invitee can see it. Up to {0} characters.': '受邀人可见。最多 {0} 个字符。',
+  'The invitee can see it. Up to {0} characters.': '受邀人可见。最多{0}个字符。',
   'The key will act in': '密钥将作用于',
   'The kinds of meetings people can book with you, each with its own link.':
     '可供他人预约的会议类型，每种类型有独立链接。',
   'The time becomes free again. The invitee can see that it is cancelled, and why if you give a reason, with their booking.':
     '该时间将恢复空闲。受邀人可在预约中看到取消状态，以及你填写的取消原因。',
-  'The weekly hours times are offered in.': '用于提供每周时间段的时区。',
-  'there)': '（当地））',
+  'The weekly hours times are offered in. {0}': '用于提供每周时间段的时区。{0}',
   'These hours overlap: {0}.': '以下时间段重叠：{0}。',
   'This app can use MCP tools with your permissions in this organization: view event types and availability, and create, view, reschedule or cancel bookings. It receives booking details, including attendee information and answers. It cannot manage your account or API keys.':
     '此应用可在该组织中以你的权限使用 MCP 工具：查看活动类型和可用时间，以及创建、查看、改期或取消预约。应用将收到预约详情，包括参会人信息和回答。它无法管理你的账号或 API 密钥。',
@@ -591,8 +639,6 @@ export const admin = {
     '此 Hourmere 实例不允许该邮箱创建新账号。',
   'This is not a time zone the server knows. Choose one from the list.':
     '服务器不识别此时区。请从列表中选择。',
-  'This is your default schedule. To delete it, first make another schedule the default on the':
-    '这是你的默认日程。如需删除，请先在以下页面将其他日程设为默认：',
   'This is your only schedule: without it, your event types offer no times.':
     '这是你唯一的日程：删除后，活动类型将不再提供可预约时间。',
   'This option is already in the list.': '列表中已有此选项。',
@@ -602,9 +648,19 @@ export const admin = {
   Thu: '周四',
   Thursday: '星期四',
   'Time zone:': '时区：',
-  'Times are in': '时间使用以下时区',
+  'Time zone: {zone}': '时区：{zone}',
+  ' ({time} there)': '（{time}，当地时间）',
+  'Times are in {zone}, your time zone.': '时间使用以下时区：{zone}（你的时区）。',
+  'Times are in {zone}, this browser’s time zone. {0}.':
+    '时间使用以下时区：{zone}（此浏览器的时区）。{0}。',
+  'Shown in this browser’s time zone. {0}.': '以此浏览器的时区显示。{0}。',
+  'You have no schedule yet, so no times are offered. {0}.':
+    '你尚无日程，因此没有可预约时间。{0}。',
+  'This is your default schedule. To delete it, first make another schedule the default on the {0}.':
+    '这是你的默认日程。如需删除，请先在以下页面将其他日程设为默认：{0}。',
+  '{0} to get booking links.': '{0}以获取预约链接。',
+  '{0}, so there are times to book.': '{0}，这样才会有可预约时间。',
   Title: '标题',
-  'to get booking links.': '以获取预约链接。',
   Tue: '周二',
   Tuesday: '星期二',
   Unavailable: '不可用',
@@ -612,11 +668,11 @@ export const admin = {
   Unlisted: '仅限链接',
   Unnamed: '未命名',
   'Unsaved changes': '未保存的更改',
-  'Up to {0} characters on one line.': '最多 {0} 个字符，限单行。',
+  'Up to {0} characters on one line.': '最多{0}个字符，限单行。',
   Upcoming: '即将到来',
   'Upcoming bookings': '即将到来的预约',
-  'Use a different email': '使用其他邮箱',
-  'Use a link of at most {0} characters.': '链接最多 {0} 个字符。',
+  'Use a different email or try again': '使用其他邮箱或重试',
+  'Use a link of at most {0} characters.': '链接最多{0}个字符。',
   'Use a link without spaces or control characters.': '链接不能包含空格或控制字符。',
   'Use at most 1000 characters, without control characters other than tabs and line breaks.':
     '最多 1000 个字符，除制表符和换行符外不能包含控制字符。',
@@ -639,18 +695,16 @@ export const admin = {
   'Where the key will be used, e.g. “Claude Desktop”.': '密钥的使用位置，例如“Claude Desktop”。',
   'Where the meeting happens': '会议地点',
   'Working hours': '工作时间',
-  'Write new bookings to {0}': '向 {0} 写入新预约',
   Yes: '是',
   'You could not be signed in. Please try again.': '无法登录。请重试。',
   'You have no API keys yet.': '你尚无 API 密钥。',
   'You have no event types yet. Create one to start taking bookings.':
     '你尚无活动类型。创建一个即可开始接收预约。',
-  'You have no schedule yet, so no times are offered.': '你尚无日程，因此没有可预约时间。',
   'You have no schedule yet, so your event types offer no times. Start with your working hours; you can change them any time.':
     '你尚无日程，活动类型无法提供预约时间。请先设置工作时间；以后随时可以更改。',
   'You won’t be able to see this key again.': '你将无法再次查看此密钥。',
   "You're no longer a member of {0}, so no key was created. Keys you create now act in {1}.":
-    '你已不再是 {0} 的成员，因此未创建密钥。现在创建的密钥将作用于 {1}。',
+    '你已不再是{0}的成员，因此未创建密钥。现在创建的密钥将作用于{1}。',
   'Your account could not be created. Please try again.': '无法创建账号。请重试。',
   'Your booking links start with': '你的预约链接以此开头',
   'Your default schedule': '你的默认日程',
@@ -665,32 +719,32 @@ export const admin = {
   'Your sign-in provider did not send your account details. Please try again.':
     '登录服务未提供你的账号信息。请重试。',
   'Your sign-in provider did not share your email address. {0}': '登录服务未提供你的邮箱地址。{0}',
-  'Zoom (link created per booking)': 'Zoom（每次预约时创建链接）',
   'the duration': '活动时长',
-  '{0} account': '{0} 账号',
+  '{0} account': '{0}账号',
   '(primary)': '（主日历）',
   'your-handle': 'your-handle',
   guest: '位来宾',
   guests: '位来宾',
   '{0} (minutes)': '{0}（分钟）',
-  'Question {0} type': '问题 {0} 的类型',
-  'Question {0} options': '问题 {0} 的选项',
-  'Question {0}, option {1}': '问题 {0}，选项 {1}',
-  'Newest first. ': '最新的排在前面。 ',
+  'Question {0} type': '问题{0}的类型',
+  'Question {0} options': '问题{0}的选项',
+  'Question {0}, option {1}': '问题{0}，选项{1}',
+  'Newest first. ': '最新的排在前面。',
   'a title': '标题',
   'an address': '地址',
   'an option': '选项',
   'a question': '问题',
-  'a name': '姓名',
+  'a name': '名称',
   'the question': '该问题',
-  'question {number}': '问题 {number}',
-  'question {number}, “{label}”': '问题 {number}，“{label}”',
-  '{label}, hours {count}': '{label}，时间段 {count}',
-  '{label}, hours {count}, from': '{label}，时间段 {count}，从',
-  '{label}, hours {count}, until': '{label}，时间段 {count}，至',
+  'question {number}': '问题{number}',
+  ', “{label}”': '“{label}”',
+  'question {number}, “{label}”': '问题{number}，“{label}”',
+  '{label}, hours {count}': '{label}，时间段{count}',
+  '{label}, hours {count}, from': '{label}，时间段{count}，从',
+  '{label}, hours {count}, until': '{label}，时间段{count}，至',
   '“{name}” is now your default schedule.': '“{name}”现已设为你的默认日程。',
-  'Added the override for {date}: {hours}.': '已添加 {date} 的日期安排：{hours}。',
-  'Replaced the override for {date}: {hours}.': '已替换 {date} 的日期安排：{hours}。',
+  'Added the override for {date}: {hours}.': '已添加{date}的日期安排：{hours}。',
+  'Replaced the override for {date}: {hours}.': '已替换{date}的日期安排：{hours}。',
   Availability: '可预约时间',
   Bookings: '预约',
   Calendars: '日历',
@@ -699,7 +753,7 @@ export const admin = {
   'Could not save': '无法保存',
   'Could not sign out. {0}': '无法退出登录。{0}',
   Dismiss: '关闭提示',
-  'Enter a number from {0} to {1}.': '请输入 {0} 至 {1} 之间的数字。',
+  'Enter a number from {0} to {1}.': '请输入{0}至{1}之间的数字。',
   'Enter a number.': '请输入数字。',
   'Enter a whole number.': '请输入整数。',
   'Error:': '错误：',
@@ -709,13 +763,12 @@ export const admin = {
   'Please check the form': '请检查表单',
   Settings: '设置',
   'Sign out': '退出登录',
-  'Skip to content': '跳至内容',
-  'Use at most {0} characters (now {1}).': '最多 {0} 个字符（当前 {1} 个）。',
+  'Use at most {0} characters (now {1}).': '最多{0}个字符（当前{1}个）。',
   'Use one line of text without special control characters.':
     '请使用单行文字，且不含特殊控制字符。',
   'You have unsaved changes. Leave this page and discard them?':
     '你有未保存的更改。离开此页面并放弃更改？',
-  '{first} and {second}': '{first} 与 {second}',
+  '{first} and {second}': '{first}与{second}',
   'Booking activity': '预约统计',
   'Booking actions by the day they were recorded, rather than the meeting date. These counts describe currently retained bookings; deleting data can change history.':
     '按预约操作的记录日期统计，而非会议日期。统计仅反映当前保留的预约；删除数据可能改变历史统计。',
@@ -736,9 +789,8 @@ export const admin = {
   'Booking activity is available to personal account owners and team owners or admins. Your current team role does not permit this report.':
     '个人账号所有者，以及团队所有者或管理员可查看预约统计。你当前的团队角色无权查看此统计。',
   to: '至',
-  'Reporting time zone:': '统计时区：',
-  '. Days can have 23 or 25 hours when the clocks change.':
-    '。夏令时切换时，一天可能有 23 或 25 小时。',
+  'Reporting time zone: {0}. Days can have 23 or 25 hours when the clocks change.':
+    '统计时区：{0}。夏令时切换时，一天可能有 23 或 25 小时。',
   'Bookings created': '新建预约',
   Reschedules: '改期',
   Cancellations: '取消',
@@ -747,13 +799,9 @@ export const admin = {
   'No booking activity was recorded in this range.': '此范围内没有预约操作记录。',
   'Daily booking activity': '每日预约统计',
   Hosts: '主持人',
-  'This legacy scheduling mode can keep its existing configuration while you edit other details.':
-    '编辑其他内容时，此旧版排期方式会保留现有配置。',
   Scheduling: '排期方式',
   'Individual: one host': '单人会议：一位主持人',
   'Collective: every selected host is required': '集体会议：所有选中的主持人都必须参加',
-  'Choose one current verified team member, or two to eight for a collective meeting. Changing hosts affects new bookings; existing meetings retain their original hosts.':
-    '选择一位当前已验证的团队成员；集体会议需选择两至八位。更改主持人会影响新预约；现有会议会保留原主持人。',
   'Loading team members…': '正在加载团队成员…',
   'Could not load team members. Only team owners and admins can assign hosts.':
     '无法加载团队成员。只有团队所有者和管理员可以分配主持人。',
@@ -769,7 +817,7 @@ export const admin = {
     '每位必选主持人使用各自当前的默认时间安排。只有所有主持人都可在同一时间开始和结束时，才会提供该时段。',
   'Choose two to eight required hosts to get a collective booking link.':
     '选择两至八位必选主持人后即可获取集体会议预约链接。',
-  'every {0} (the duration)': '每 {0}（会议时长）',
+  'every {0} (the duration)': '每{0}（会议时长）',
   'Create a unique Zoom meeting for each booking': '为每次预约创建独立的 Zoom 会议',
   'Choose your own authorized meetings account. Final invitations wait for the link. A Google calendar is optional.':
     '请选择自己已授权会议权限的账号。链接生成后才会发送最终邀请，无需连接 Google 日历。',

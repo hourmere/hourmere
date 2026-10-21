@@ -316,6 +316,7 @@ export interface BookingConferences {
   attempts: Generated<number>;
   booking_id: string;
   calendar_id: string | null;
+  conference_patch_request_id: string | null;
   connection_id: string | null;
   create_started: Generated<boolean>;
   error_code: string | null;
@@ -329,7 +330,6 @@ export interface BookingConferences {
   organizer_user_id: string;
   provider: Generated<string>;
   request_id: Generated<string>;
-  retry_conference: Generated<boolean>;
   revision: Generated<number>;
   root_booking_id: string;
   state: Generated<string>;
@@ -372,6 +372,9 @@ export interface Bookings {
   end_at: Timestamp;
   event_type_id: string | null;
   hosts_use_default_schedule: Generated<boolean>;
+  ical_organizer_email: string | null;
+  ical_organizer_name: string | null;
+  ical_version: Generated<number>;
   id: Generated<string>;
   idempotency_fingerprint: Buffer | null;
   idempotency_key: string | null;
@@ -438,6 +441,7 @@ export interface Calendars {
 
 export interface ConferenceConnections {
   account_email: string | null;
+  authorized_at: Timestamp | null;
   created_at: Generated<Timestamp>;
   credentials: Buffer | null;
   display_name: string | null;
@@ -464,6 +468,12 @@ export interface ConferenceOauthStates {
   state_hash: string;
   user_id: string;
   verifier: Buffer | null;
+}
+
+export interface ConferenceTokenOperations {
+  expires_at: Timestamp;
+  operation_id: string;
+  user_id: string;
 }
 
 export interface EventTypeHosts {
@@ -634,6 +644,7 @@ export interface DB {
   calendars: Calendars;
   conference_connections: ConferenceConnections;
   conference_oauth_states: ConferenceOauthStates;
+  conference_token_operations: ConferenceTokenOperations;
   event_type_hosts: EventTypeHosts;
   event_types: EventTypes;
   mcp_oauth_client_activity: McpOauthClientActivity;

@@ -2,11 +2,13 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fakeApi, json, renderApp } from '../test/fake-api.tsx'
+import { expectStackGap } from '../test/layout.ts'
 import {
   ALL_QUESTIONS,
   booking,
   EVENT,
   eventRoutes,
+  managed,
   slot,
   slotsAnswer,
   TOKEN,
@@ -56,6 +58,304 @@ async function chooseSlot(user: ReturnType<typeof userEvent.setup>, dayName: Reg
 }
 
 describe('the booking page', () => {
+  it.each([
+    ['en', 'America/New York (GMT-05:00)', 'GMT-05:00)', ' ('],
+    ['zh-CN', 'America/New York（GMT-05:00）', 'GMT-05:00）', '（'],
+  ])(
+    'localizes chosen-time offset brackets in %s without breaking the offset',
+    async (language, expected, offset, prefix) => {
+      const user = userEvent.setup()
+      fakeApi(eventRoutes(EVENT, DST_SLOTS))
+      renderApp('/ada/intro')
+      await chooseSlot(user, /November 2, available/, '9:00 AM')
+      await user.selectOptions(screen.getByLabelText('Interface language'), language)
+      const zone = document.querySelector('.chosen-time .muted')
+      expect(zone?.textContent).toBe(expected)
+      const offsetSpan = zone?.querySelector('.time-offset')
+      expect(offsetSpan?.textContent).toBe(offset)
+      // Keep the English ASCII space breakable and the opening bracket outside the span.
+      expect(offsetSpan?.previousSibling?.textContent?.endsWith(prefix)).toBe(true)
+    },
+  )
+
+  it.each([
+    {
+      host: '主持人（王小明）',
+      title: 'Intro call',
+      lede: '你与主持人（王小明）的“Intro call”预约已确认。',
+      calendar: '与主持人（王小明）的 Intro call',
+    },
+    {
+      host: 'Ada Lovelace',
+      title: 'Intro call',
+      lede: '你与 Ada Lovelace 的“Intro call”预约已确认。',
+      calendar: '与 Ada Lovelace 的 Intro call',
+    },
+    {
+      host: 'O’Brien',
+      title: 'Ada’s review',
+      lede: '你与 O’Brien 的“Ada’s review”预约已确认。',
+      calendar: '与 O’Brien 的 Ada’s review',
+    },
+  ])(
+    'localizes confirmation names and lists for $host and $title',
+    async ({ host, title, lede, calendar }) => {
+      const user = userEvent.setup()
+      const data = booking()
+      const event = {
+        ...EVENT,
+        title,
+        host: { ...EVENT.host, name: host },
+        hosts: [
+          { name: '王小明', timeZone: 'Europe/Berlin' },
+          { name: '李小红', timeZone: 'Asia/Shanghai' },
+        ],
+      }
+      fakeApi({
+        ...eventRoutes(event, DST_SLOTS),
+        'POST /api/v1/public/ada/intro/bookings': () =>
+          json(201, {
+            booking: {
+              ...data,
+              attendees: [
+                ...data.attendees,
+                {
+                  ...{ timeZone: 'America/New_York', locale: 'en-US' },
+                  name: '周小刚',
+                  email: 'guest1@example.invalid',
+                  isBooker: false,
+                },
+                {
+                  ...{ timeZone: 'America/New_York', locale: 'en-US' },
+                  name: '赵小华',
+                  email: 'guest2@example.invalid',
+                  isBooker: false,
+                },
+              ],
+            },
+            manageToken: TOKEN,
+          }),
+      })
+      renderApp('/ada/intro')
+      await chooseSlot(user, /November 2, available/, '9:00 AM')
+      await user.type(screen.getByLabelText('Your name'), 'Grace Hopper')
+      await user.type(screen.getByLabelText('Email'), 'grace@example.com')
+      await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+      expect(
+        screen.getByText('必选主持人：王小明（Europe/Berlin）、李小红（Asia/Shanghai）'),
+      ).toBeDefined()
+      await user.click(screen.getByRole('button', { name: '确认预约' }))
+      await screen.findByRole('heading', { name: '预约成功' })
+      expect(document.querySelector('.confirmation .lede')?.textContent).toBe(lede)
+      // Only the Chinese double quotes get quote markup; apostrophes in Latin text do not.
+      expect(
+        [
+          ...(document.querySelector('.confirmation .lede')?.querySelectorAll('.cjk-quote') ?? []),
+        ].map((span) => span.textContent),
+      ).toEqual(['“', '”'])
+      expect(screen.getByText('周小刚、赵小华')).toBeDefined()
+      expect(screen.getByText('Grace Hopper（grace@example.com）')).toBeDefined()
+      const calendarUrl = new URL(
+        screen.getByRole<HTMLAnchorElement>('link', { name: 'Google 日历' }).href,
+      )
+      expect(calendarUrl.searchParams.get('text')).toBe(calendar)
+      expect(document.querySelector('.manage-link p')?.textContent).toBe(
+        '使用此链接改期或取消。此链接仅在此页面显示一次；持有链接的任何人都可更改你的预约，请妥善保管。',
+      )
+    },
+  )
+
+  it('explains calendar responses and opens cancellation with the existing private capability', async () => {
+    const user = userEvent.setup()
+    const api = fakeApi({
+      ...eventRoutes(EVENT, DST_SLOTS),
+      'POST /api/v1/public/ada/intro/bookings': () =>
+        json(201, { booking: booking(), manageToken: TOKEN }),
+      'GET /api/v1/bookings/manage': () => json(200, managed()),
+    })
+    renderApp('/ada/intro')
+    await chooseSlot(user, /November 2, available/, '9:00 AM')
+    await user.type(screen.getByLabelText('Your name'), 'Grace Hopper')
+    await user.type(screen.getByLabelText('Email'), 'grace@example.com')
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+    await screen.findByRole('heading', { name: 'You’re booked' })
+    expect(document.querySelector('.confirmation-indicator')?.textContent).toBe('✓')
+    expect(document.querySelector('.confirmation-indicator')?.getAttribute('aria-hidden')).toBe(
+      'true',
+    )
+    const note = screen.getByText(
+      'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use “Cancel booking” here.',
+    )
+    const cancel = within(note.parentElement as HTMLElement).getByRole('link', {
+      name: 'Cancel booking',
+    })
+    const calendar = screen.getByRole('heading', { name: 'Add to your calendar' }).parentElement
+    expect(calendar?.nextElementSibling).toBe(note.parentElement)
+    expectStackGap(note.parentElement?.parentElement as HTMLElement)
+    expect(cancel.getAttribute('href')).toBe(`/booking#token=${TOKEN}&action=cancel`)
+    expect(cancel.getAttribute('target')).toBeNull()
+    for (const link of document.querySelectorAll('.calendar-links a')) {
+      expect(decodeURIComponent(link.getAttribute('href') ?? '')).not.toContain(TOKEN)
+    }
+    await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+    expect(
+      screen.getByText(
+        (_, element) =>
+          element?.tagName === 'P' &&
+          element.textContent ===
+            '在日历中接受或拒绝邀请不会取消预约。如需取消，请使用此处的“取消预约”。',
+      ),
+    ).toBeDefined()
+    await user.click(screen.getByRole('link', { name: '取消预约' }))
+    expect(await screen.findByRole('heading', { name: '取消此预约？' })).toBeDefined()
+    expect(api.to('GET /api/v1/bookings/manage')[0]?.headers.get('x-manage-token')).toBe(TOKEN)
+    expect(api.to('POST /api/v1/bookings/manage/cancel')).toHaveLength(0)
+    expect(api.calls.every((call) => !call.path.includes(TOKEN))).toBe(true)
+    expect(screen.getByTestId('location').textContent).toBe('/booking')
+  })
+
+  it.each(['cancelled', 'started'] as const)(
+    'does not offer calendar cancellation advice for a %s booking',
+    async (state) => {
+      const user = userEvent.setup()
+      fakeApi({
+        ...eventRoutes(EVENT, DST_SLOTS),
+        'POST /api/v1/public/ada/intro/bookings': () =>
+          json(200, {
+            booking: booking(
+              state === 'cancelled'
+                ? { status: 'cancelled' }
+                : { start: '2026-10-01T14:00:00Z', end: '2026-10-01T14:30:00Z' },
+            ),
+            manageToken: null,
+          }),
+      })
+      renderApp('/ada/intro')
+      await chooseSlot(user, /November 2, available/, '9:00 AM')
+      await user.type(screen.getByLabelText('Your name'), 'Grace Hopper')
+      await user.type(screen.getByLabelText('Email'), 'grace@example.com')
+      await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+      await screen.findByRole('heading', {
+        name: state === 'cancelled' ? 'Cancelled booking' : 'Ended',
+      })
+      expect(
+        screen.queryByText(/Accepting or declining the calendar invitation does not cancel/),
+      ).toBeNull()
+      expect(screen.queryByRole('link', { name: 'Cancel booking' })).toBeNull()
+      expect(screen.getByText(/Use the link in your confirmation email instead/)).toBeDefined()
+      expect(document.querySelectorAll('.confirmation .alert-info')).toHaveLength(1)
+    },
+  )
+
+  it.each(['pending', 'failed'] as const)(
+    'keeps calendar cancellation advice consistent with a %s meeting-link heading',
+    async (status) => {
+      const user = userEvent.setup()
+      const reserved = booking({
+        location: { kind: 'google_meet', autoCreate: true },
+        conference: {
+          provider: 'google_meet',
+          status,
+          errorCode: status === 'failed' ? 'provider_unavailable' : null,
+        },
+      })
+      fakeApi({
+        ...eventRoutes(EVENT, DST_SLOTS),
+        'POST /api/v1/public/ada/intro/bookings': () =>
+          json(201, { booking: reserved, manageToken: TOKEN }),
+        'GET /api/v1/bookings/manage': () => json(200, reserved),
+      })
+      renderApp('/ada/intro')
+      await chooseSlot(user, /November 2, available/, '9:00 AM')
+      await user.type(screen.getByLabelText('Your name'), 'Grace Hopper')
+      await user.type(screen.getByLabelText('Email'), 'grace@example.com')
+      await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+      await screen.findByRole('heading', {
+        name:
+          status === 'pending'
+            ? 'Time reserved; meeting link pending'
+            : 'Time reserved; meeting link needs attention',
+      })
+      expect(
+        screen.getByText(
+          'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use “Cancel booking” here.',
+        ),
+      ).toBeDefined()
+      expect(screen.queryByText(/^Booking confirmed\./)).toBeNull()
+      await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+      expect(
+        screen.getByText(
+          (_, element) =>
+            element?.tagName === 'P' &&
+            element.textContent ===
+              '在日历中接受或拒绝邀请不会取消预约。如需取消，请使用此处的“取消预约”。',
+        ),
+      ).toBeDefined()
+      expect(screen.queryByText(/^预约已确认。/)).toBeNull()
+    },
+  )
+
+  it('updates every zone offset for the selected date across DST while preserving slot instants', async () => {
+    const user = userEvent.setup()
+    env.zone = 'Europe/London'
+    env.now = Date.parse('2026-10-19T08:00:00Z')
+    const api = fakeApi({
+      ...eventRoutes(EVENT, ['2026-10-20T09:00:00Z', '2026-10-27T09:00:00Z']),
+      'POST /api/v1/public/ada/intro/bookings': () =>
+        json(201, { booking: booking(), manageToken: TOKEN }),
+    })
+    renderApp('/ada/intro')
+    const toggle = await screen.findByRole('button', { name: /Time zone/ })
+    expect(toggle.textContent).toContain('GMT+01:00')
+    await user.click(await day(/October 27, available/))
+    expect(toggle.textContent).toContain('GMT+00:00')
+    expect(slotButtons()).toEqual(['9:00 AM'])
+    await user.click(toggle)
+    const search = screen.getByRole('combobox', { name: 'Search time zones' })
+    await user.type(search, 'london')
+    const zones = within(screen.getByRole('listbox', { name: 'Time zones' }))
+    expect(zones.getByRole('option').textContent).toBe('Europe/LondonGMT+00:00')
+    await user.clear(search)
+    await user.type(search, 'berlin')
+    expect(zones.getByRole('option').textContent).toBe('Europe/BerlinGMT+01:00')
+    await user.click(zones.getByRole('option'))
+    expect(slotButtons()).toEqual(['10:00 AM'])
+    await user.click(await day(/October 20, available/))
+    expect(toggle.textContent).toContain('GMT+02:00')
+    await user.click(await day(/October 27, available/))
+    expect(toggle.textContent).toContain('GMT+01:00')
+    expect(api.to('GET /api/v1/public/ada/intro/slots')).toHaveLength(1)
+    await user.click(screen.getByRole('button', { name: '10:00 AM' }))
+    await user.type(screen.getByLabelText('Your name'), 'Grace Hopper')
+    await user.type(screen.getByLabelText('Email'), 'grace@example.com')
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+    await screen.findByRole('heading', { name: 'You’re booked' })
+    expect(
+      screen.getByText(
+        'Didn’t get the email? Check spam or junk and add the sender to your contacts.',
+      ),
+    ).toBeDefined()
+    expect(api.to('POST /api/v1/public/ada/intro/bookings')[0]?.body).toMatchObject({
+      start: '2026-10-27T09:00:00.000Z',
+      invitee: { timeZone: 'Europe/Berlin' },
+    })
+  })
+
+  it('uses the visible month when paging without a selected day', async () => {
+    const user = userEvent.setup()
+    env.zone = 'Europe/London'
+    env.now = Date.parse('2026-10-19T08:00:00Z')
+    fakeApi(eventRoutes(EVENT, ['2026-10-20T09:00:00Z', '2026-11-02T09:00:00Z']))
+    renderApp('/ada/intro')
+    const toggle = await screen.findByRole('button', { name: /Time zone/ })
+    expect(toggle.textContent).toContain('GMT+01:00')
+    await user.click(screen.getByRole('button', { name: 'Next month' }))
+    await screen.findByRole('heading', { name: 'November 2026' })
+    expect(toggle.textContent).toContain('GMT+00:00')
+    await user.click(screen.getByRole('button', { name: 'Previous month' }))
+    expect(toggle.textContent).toContain('GMT+01:00')
+  })
+
   it('keeps unobtrusive attribution on ordinary booking pages, pointing to the hosted service', async () => {
     fakeApi(eventRoutes(EVENT, DST_SLOTS))
     renderApp('/ada/intro')
@@ -66,6 +366,7 @@ describe('the booking page', () => {
     expect(mark.getAttribute('target')).toBe('_blank')
     expect(mark.getAttribute('rel')).toContain('noreferrer')
     expect(screen.queryByRole('link', { name: 'Create your own booking link' })).toBeNull()
+    expect(screen.queryByText(/Didn’t get the email/)).toBeNull()
   })
 
   it('uses the configured hosted destination for attribution and the confirmation CTA without sharing booking data', async () => {
@@ -137,6 +438,7 @@ describe('the booking page', () => {
     await user.type(screen.getByLabelText('Email'), 'invitee@example.com')
     await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
     await screen.findByRole('heading', { name: 'Time reserved; meeting link pending' })
+    expect(screen.queryByText(/Didn’t get the email/)).toBeNull()
     expect(screen.queryByRole('link', { name: 'Download .ics file' })).toBeNull()
     expect(screen.queryByRole('link', { name: 'Google Calendar' })).toBeNull()
     expect(screen.queryByRole('link', { name: 'Outlook' })).toBeNull()
@@ -144,6 +446,11 @@ describe('the booking page', () => {
     // Keep the real two-second protected status poll: this exercises the page's parent
     // update, not just the isolated notice component.
     await screen.findByRole('link', { name: 'Join Google Meet' }, { timeout: 4000 })
+    expect(
+      screen.getByText(
+        'Didn’t get the email? Check spam or junk and add the sender to your contacts.',
+      ),
+    ).toBeDefined()
     const download =
       screen.getByRole('link', { name: 'Download .ics file' }).getAttribute('href') ?? ''
     expect(decodeURIComponent(download)).toContain(JOIN)
@@ -184,6 +491,10 @@ describe('the booking page', () => {
       await user.type(screen.getByLabelText('Email'), 'invitee@example.com')
       await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
       await screen.findByRole('heading', { name: 'You’re booked' })
+      const cancel = screen.getByRole('link', { name: 'Cancel booking' })
+      expect(cancel.getAttribute('href')).toBe(`/booking#token=${TOKEN}&action=cancel`)
+      expect(cancel.getAttribute('target')).toBe('_blank')
+      expect(cancel.getAttribute('rel')).toBe('noopener noreferrer')
       expect(api.to(`POST ${prefix}/bookings`)[0]?.body).toHaveProperty('source', 'embed')
       const messages = postMessage.mock.calls.filter(([data]) => data.type === 'hourmere:booked')
       expect(messages).toEqual([
@@ -553,7 +864,7 @@ describe('the booking page', () => {
     await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
     expect(api.to('POST /api/v1/public/ada/intro/bookings')).toHaveLength(0)
     const name = screen.getByLabelText('Your name')
-    expect(document.activeElement).toBe(name)
+    expect(document.activeElement?.classList.contains('error-summary')).toBe(true)
     expect(name.getAttribute('aria-invalid')).toBe('true')
     expect(screen.getByText('Enter your name.')).toBeDefined()
     expect(screen.getByText('Enter an email address.')).toBeDefined()
@@ -565,11 +876,15 @@ describe('the booking page', () => {
     await user.type(name, 'Grace Hopper')
     expect(screen.queryByText('Enter your name.')).toBeNull()
     await user.type(screen.getByLabelText('Email'), 'grace@example')
-    expect(screen.getByText(/Enter a valid email address/)).toBeDefined()
+    expect(
+      screen.getByText(/Enter a valid email address/, { selector: '.field-error' }),
+    ).toBeDefined()
     await user.type(screen.getByLabelText(/Phone/), 'call me')
-    expect(screen.getByText(/Enter a phone number/)).toBeDefined()
+    expect(screen.getByText(/Enter a phone number/, { selector: '.field-error' })).toBeDefined()
     fireEvent.change(screen.getByLabelText('Topic'), { target: { value: 'x'.repeat(501) } })
-    expect(screen.getByText('Use at most 500 characters.')).toBeDefined()
+    expect(
+      screen.getByText('Use at most 500 characters.', { selector: '.field-error' }),
+    ).toBeDefined()
 
     // Up to ten guests.
     for (let i = 0; i < 10; i++)
@@ -579,7 +894,7 @@ describe('the booking page', () => {
     expect(screen.getAllByRole('button', { name: /^Remove guest/ })).toHaveLength(10)
     await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
     expect(api.to('POST /api/v1/public/ada/intro/bookings')).toHaveLength(0)
-    expect(document.activeElement).toBe(screen.getByLabelText('Email'))
+    expect(document.activeElement?.classList.contains('error-summary')).toBe(true)
   })
 
   it('books with one Idempotency-Key per attempt and shows the confirmation', async () => {
@@ -649,9 +964,67 @@ describe('the booking page', () => {
     expect(posts[1]?.headers.get('idempotency-key')).toBe(key)
     expect(posts[1]?.body).toEqual(posts[0]?.body)
     // A replay has no manage token to show.
-    expect(screen.getByText(/already made by an earlier attempt/)).toBeDefined()
+    const replayNote = screen.getByText(/already made by an earlier attempt/)
     expect(screen.queryByLabelText(/Your link to change or cancel/)).toBeNull()
+    const calendarNote = screen.getByText(
+      'Accepting or declining the calendar invitation does not cancel the booking. To cancel, use the booking link in your Hourmere confirmation email.',
+    )
+    expect(replayNote.parentElement).toBe(calendarNote.parentElement)
+    expect(document.querySelectorAll('.confirmation .alert-info')).toHaveLength(1)
+    expectStackGap(calendarNote.parentElement?.parentElement as HTMLElement)
+    expect(screen.queryByRole('link', { name: 'Cancel booking' })).toBeNull()
+    await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+    expect(screen.getByText('此前的尝试已创建此预约，因此无法再次显示预约链接。')).toBeDefined()
+    expect(
+      screen.getByText(
+        '在日历中接受或拒绝邀请不会取消预约。如需取消，请使用 Hourmere 确认邮件中的预约链接。',
+      ),
+    ).toBeDefined()
   })
+
+  it.each([
+    { languages: ['fr-FR', 'zh-Hans-CN'], language: 'zh-CN', locale: 'zh-CN' },
+    { languages: ['fr-FR', 'de-DE'], language: 'en', locale: 'en' },
+    { languages: ['zh-Hans-CN', 'en-US'], language: 'zh-CN', locale: 'zh-Hans-CN' },
+  ])(
+    'stores the visible interface language for browser preferences $languages',
+    async ({ languages, language, locale }) => {
+      const user = userEvent.setup()
+      vi.spyOn(navigator, 'languages', 'get').mockReturnValue(languages)
+      env.locale = languages[0] ?? 'en'
+      const chinese = language === 'zh-CN'
+      const api = fakeApi({
+        ...eventRoutes({ ...EVENT, allowGuests: false }, ['2026-11-02T14:00:00Z']),
+        'POST /api/v1/public/ada/intro/bookings': () =>
+          json(201, { booking: booking(), manageToken: TOKEN }),
+      })
+      renderApp('/ada/intro')
+      await screen.findByRole('heading', { name: 'Intro call', level: 1 })
+      expect(
+        screen.getByRole<HTMLSelectElement>('combobox', {
+          name: chinese ? '界面语言' : 'Interface language',
+        }).value,
+      ).toBe(language)
+      const selectedDay = await waitFor(() => {
+        const button = document.querySelector<HTMLButtonElement>('[data-day="2026-11-02"]')
+        expect(button?.disabled).toBe(false)
+        return button as HTMLButtonElement
+      })
+      await user.click(selectedDay)
+      const times = screen.getByRole('list', { name: chinese ? /的时间$/ : /^Times on/ })
+      await user.click(within(times).getAllByRole('button')[0] as HTMLElement)
+      await user.type(screen.getByLabelText(chinese ? '你的姓名' : 'Your name'), 'Invitee')
+      await user.type(screen.getByLabelText(chinese ? '邮箱' : 'Email'), 'invitee@example.invalid')
+      await user.click(
+        screen.getByRole('button', { name: chinese ? '确认预约' : 'Confirm booking' }),
+      )
+      await screen.findByRole('heading', { name: chinese ? '预约成功' : 'You’re booked' })
+      expect(api.to('POST /api/v1/public/ada/intro/bookings')[0]?.body).toHaveProperty(
+        'invitee.locale',
+        locale,
+      )
+    },
+  )
 
   it('uses a new key after an idempotency conflict even if the form is unchanged', async () => {
     const user = userEvent.setup()
@@ -739,6 +1112,38 @@ describe('the booking page', () => {
     )
   })
 
+  it('omits fully empty guests and maps server errors back to the submitted guest row', async () => {
+    const user = userEvent.setup()
+    const api = fakeApi({
+      ...eventRoutes(EVENT, DST_SLOTS),
+      'POST /api/v1/public/ada/intro/bookings': () =>
+        json(400, { error: 'invalid_request', message: 'guests.0.email: Invalid email' }),
+    })
+    renderApp('/ada/intro')
+    await chooseSlot(user, /November 2, available/, '9:00 AM')
+    await user.type(screen.getByLabelText('Your name'), 'Grace Hopper')
+    await user.type(screen.getByLabelText('Email'), 'grace@example.com')
+    await user.click(screen.getByRole('button', { name: 'Add a guest' }))
+    await user.click(screen.getByRole('button', { name: 'Add a guest' }))
+    const names = [screen.getByLabelText('Guest 1 name'), screen.getByLabelText('Guest 2 name')]
+    const emails = [
+      screen.getByLabelText('Email'),
+      screen.getByLabelText('Guest 1 email'),
+      screen.getByLabelText('Guest 2 email'),
+    ]
+    await user.type(names[1] as HTMLElement, 'Guest')
+    await user.type(emails[2] as HTMLElement, 'guest@example.com')
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+    const summary = await screen.findByRole('alert', { name: 'Please check the form' })
+    expect(api.to('POST /api/v1/public/ada/intro/bookings')[0]?.body).toMatchObject({
+      guests: [{ name: 'Guest', email: 'guest@example.com' }],
+    })
+    expect(emails[1]?.getAttribute('aria-invalid')).toBeNull()
+    expect(emails[2]?.getAttribute('aria-invalid')).toBe('true')
+    await user.click(within(summary).getByRole('link'))
+    expect(document.activeElement).toBe(emails[2])
+  })
+
   it('puts the server’s objections on the fields they are about', async () => {
     const user = userEvent.setup()
     const answers = [
@@ -764,12 +1169,18 @@ describe('the booking page', () => {
     await confirm()
     const email = screen.getByLabelText('Email')
     await waitFor(() => expect(email.getAttribute('aria-invalid')).toBe('true'))
-    await waitFor(() => expect(document.activeElement).toBe(email))
-    expect(screen.getByText(/Enter a valid email address/)).toBeDefined()
+    await waitFor(() =>
+      expect(document.activeElement?.classList.contains('error-summary')).toBe(true),
+    )
+    expect(
+      screen.getByText(/Enter a valid email address/, { selector: '.field-error' }),
+    ).toBeDefined()
 
     await confirm()
     expect(await screen.findByText('Check this answer.')).toBeDefined()
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText('Topic')))
+    await waitFor(() =>
+      expect(document.activeElement?.classList.contains('error-summary')).toBe(true),
+    )
 
     await confirm()
     expect(await screen.findByText(/Try again in 30 seconds/)).toBeDefined()

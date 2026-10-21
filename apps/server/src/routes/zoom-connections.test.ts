@@ -108,6 +108,20 @@ describe.skipIf(!databaseUrl)('Zoom HTTP integration settings (real Postgres)', 
     ).toBe('/app/conferences?zoom=connected')
     return db.selectFrom('conference_connections').select('id').executeTakeFirstOrThrow()
   }
+  it('documents the additive busy alias and preserves the legacy code for all of v1', async () => {
+    const response = await req('/api/v1/openapi.json')
+    expect(response.status).toBe(200)
+    const doc = (await response.json()) as {
+      paths: Record<string, { post: { responses: Record<string, { description: string }> } }>
+    }
+    const conflict =
+      doc.paths['/api/v1/conference-connections/{id}/refresh']?.post.responses['409']?.description
+    expect(conflict).toContain('errorAlias=zoom_operation_busy')
+    expect(conflict).toContain('error=zoom_refresh_in_progress')
+    expect(conflict).toContain('deprecated but retained for all of /api/v1')
+    expect(conflict).toContain('removal or renaming requires a new API version')
+    expect(conflict).toContain('retry shortly')
+  })
   it('lists private metadata without credentials and supports explicit refresh/disconnect', async () => {
     const { id } = await connect(),
       response = await req('/api/v1/conference-connections')
@@ -123,6 +137,52 @@ describe.skipIf(!databaseUrl)('Zoom HTTP integration settings (real Postgres)', 
       204,
     )
     expect((await req(`/api/v1/conference-connections/${id}`, 'DELETE', '{}')).status).toBe(204)
+  })
+  it('returns retryable busy outcomes for concurrent refresh and callback without provider I/O', async () => {
+    const { id } = await connect(),
+      state = await start(),
+      callback = `/api/conference/zoom/callback?state=${state}&code=synthetic-code`
+    let entered!: () => void, release!: () => void
+    const pending = new Promise<void>((resolve) => {
+        entered = resolve
+      }),
+      gate = new Promise<void>((resolve) => {
+        release = resolve
+      })
+    provider.controls.tokenHook = async () => {
+      entered()
+      await gate
+      return Response.json(provider.controls.token)
+    }
+    const first = req(`/api/v1/conference-connections/${id}/refresh`, 'POST', '{}')
+    try {
+      await pending
+      const count = provider.calls.length,
+        second = await req(`/api/v1/conference-connections/${id}/refresh`, 'POST', '{}')
+      expect(second.status).toBe(409)
+      expect(await second.json()).toEqual({
+        error: 'zoom_refresh_in_progress',
+        errorAlias: 'zoom_operation_busy',
+        message: 'Zoom account operations are busy. Try again shortly.',
+      })
+      const busy = await req(callback)
+      expect(busy.status).toBe(303)
+      expect(busy.headers.get('location')).toBe('/app/conferences?zoom=busy')
+      expect(busy.headers.get('cache-control')).toBe('no-store')
+      expect(busy.headers.get('referrer-policy')).toBe('no-referrer')
+      const attempt = await db
+        .selectFrom('conference_oauth_states')
+        .select(['claimed', 'verifier'])
+        .where('user_id', '=', owner.user.id)
+        .executeTakeFirstOrThrow()
+      expect(attempt.claimed).toBe(false)
+      expect(attempt.verifier).not.toBeNull()
+      expect(provider.calls).toHaveLength(count)
+    } finally {
+      release()
+      expect((await first).status).toBe(204)
+    }
+    expect((await req(callback)).headers.get('location')).toBe('/app/conferences?zoom=connected')
   })
   it.each([
     ['authorization', 'Bearer synthetic-api-key'],

@@ -1,5 +1,6 @@
 import { Link } from 'react-router'
 import { Logo } from '../components/Logo.tsx'
+import { PageHeader } from '../components/PageHeader.tsx'
 import { usePageTitle } from '../hooks.ts'
 import { LanguageSwitcher, useI18n } from '../i18n/runtime.tsx'
 import type { UiText } from '../i18n/translate.ts'
@@ -12,8 +13,10 @@ export function NotFoundPage() {
   return (
     <main className="centered">
       <div className="card">
-        <Logo />
-        <LanguageSwitcher />
+        <header className="card-header">
+          <Logo />
+          <LanguageSwitcher />
+        </header>
         <h1>{t('Page not found')}</h1>
         <p>{t('There is nothing at this address.')}</p>
         <p>
@@ -31,8 +34,7 @@ export function AppNotFoundPage() {
   usePageTitle('Page not found')
   return (
     <>
-      <h1>{t('Page not found')}</h1>
-      <p>{t('There is nothing at this address.')}</p>
+      <PageHeader title={t('Page not found')} lede={t('There is nothing at this address.')} />
       <p>
         <Link to={PATHS.home}>{t('Go to your event types')}</Link>
       </p>
@@ -55,8 +57,7 @@ export function MissingRecord({
   usePageTitle(title)
   return (
     <>
-      <h1>{ui(title)}</h1>
-      <p>{ui(message)}</p>
+      <PageHeader title={ui(title)} lede={ui(message)} />
       <p>
         <Link to={back.to}>{ui(back.label)}</Link>
       </p>

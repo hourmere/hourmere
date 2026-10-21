@@ -1,6 +1,7 @@
 import type { InterfaceLanguage } from '@hourmere/core/language'
 import type { admin } from './admin.ts'
 import { common } from './common.ts'
+import { spaceCjkBoundaries } from './formatting.ts'
 export type MessageKey = keyof typeof common | keyof typeof admin
 export type Catalog = Readonly<Record<string, string>>
 export interface UiMessage {
@@ -57,14 +58,23 @@ export function translate(
         template = catalog[key] ?? key
         break
       }
-  return template.replace(/\{(\w+)\}/g, (placeholder, name: string) => {
+  return template.replace(/\{(\w+)\}/g, (placeholder, name: string, offset: number) => {
     if (!Object.hasOwn(values, name)) return placeholder
     const value = values[name]
-    return typeof value === 'object' && value !== null
-      ? translateMessage(locale, value, formatting)
-      : typeof value === 'number'
-        ? new Intl.NumberFormat(locale, { useGrouping: false }).format(value)
-        : String(value)
+    const text =
+      typeof value === 'object' && value !== null
+        ? translateMessage(locale, value, formatting)
+        : typeof value === 'number'
+          ? new Intl.NumberFormat(locale, { useGrouping: false }).format(value)
+          : String(value)
+    // Web and mail share the Han/Latin boundary rule, including accents and combining marks.
+    return locale === 'zh-CN'
+      ? spaceCjkBoundaries(
+          template.slice(0, offset),
+          text,
+          template.slice(offset + placeholder.length),
+        )
+      : text
   })
 }
 /** Plain strings here are local semantic keys; dynamic arguments remain untouched user data. */

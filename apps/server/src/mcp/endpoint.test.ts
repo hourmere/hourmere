@@ -162,6 +162,18 @@ afterEach(() => {
 })
 
 describe('MCP transport', () => {
+  it('distinguishes invitee tokens from host booking IDs in server instructions', async () => {
+    const { result } = await message(await rpc(initialize))
+    const { instructions } = result as { instructions: string }
+    expect(instructions).toContain('create_booking returns a manageToken once for a new booking')
+    expect(instructions).toContain('idempotent replays return null')
+    expect(instructions).toContain('reschedule_booking with manageToken returns a new token')
+    expect(instructions).toContain('Tokens from invitee emails follow the meeting')
+    expect(instructions).toContain('use bookingId from list_bookings')
+    expect(instructions).toContain('Host reschedules return manageToken: null')
+    expect(instructions).toContain("preserve the invitee's existing token on the successor")
+  })
+
   it.each(['legacy', 'modern'] as const)(
     'serves %s clients: tools in order, then a call',
     async (era) => {
@@ -404,7 +416,10 @@ describe('MCP transport', () => {
       ]) {
         const res = await withWeb.request(path)
         expect(res.status, path).toBe(404)
-        expect(await res.json()).toEqual({ error: 'not_found' })
+        if (path.startsWith('/.well-known/')) {
+          expect(res.headers.get('content-type')?.toLowerCase()).toBe('text/plain; charset=utf-8')
+          expect(await res.text()).toBe('Not found')
+        } else expect(await res.json()).toEqual({ error: 'not_found' })
         expect(res.headers.get('cache-control')).toBe(path.startsWith('/mcp') ? 'no-store' : null)
       }
       for (const path of ['/mcp', '/mcp/']) {

@@ -8,6 +8,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { type AppDeps, createApp, hasUnsafeJsonText } from './app.ts'
 import { DEFAULT_BODY_LIMIT as MAX_BODY_BYTES } from './body-limit.ts'
 import { CHUNK_SIZE, chunkedBody } from './chunked-body.ts'
+import { errorAliases } from './error-aliases.ts'
 import { authenticated, callerWithBodyLimit, json, type RouteModule } from './openapi.ts'
 
 // Sign-in is covered by auth.test.ts against a real database.
@@ -64,6 +65,29 @@ describe('API surface', () => {
     const doc = (await res.json()) as { openapi: string; paths: Record<string, unknown> }
     expect(doc.openapi).toBe('3.1.0')
     expect(Object.keys(doc.paths)).toEqual(expect.arrayContaining(['/api/health', '/api/v1/me']))
+  })
+
+  it('documents a shared alias code set without requiring an alias for other errors', async () => {
+    const response = await app.request('/api/v1/openapi.json')
+    const doc = (await response.json()) as {
+      components: {
+        schemas: {
+          Error: { properties: Record<string, unknown>; required: string[] }
+          ErrorAlias: { type: string; enum: string[]; description: string }
+        }
+      }
+    }
+    expect(doc.components.schemas.Error.properties.errorAlias).toEqual({
+      $ref: '#/components/schemas/ErrorAlias',
+    })
+    expect(doc.components.schemas.ErrorAlias).toMatchObject({
+      type: 'string',
+      enum: Object.values(errorAliases),
+      description: expect.stringContaining(
+        'original error code remains unchanged throughout /api/v1',
+      ),
+    })
+    expect(doc.components.schemas.Error.required).toEqual(['error'])
   })
 
   it('answers 401 JSON on authenticated routes when nobody is signed in', async () => {
@@ -164,6 +188,15 @@ describe('route modules and errors', () => {
         if (fail === 'conflict')
           throw new DomainError('conflict', 'slot_taken', 'Someone booked this time first')
         if (fail === 'empty') throw new DomainError('invalid', 'bad_thing', '')
+        if (fail?.startsWith('alias:')) throw new DomainError('conflict', fail.slice(6))
+        if (fail === 'zoom_busy' || fail === 'zoom_busy_without_detail')
+          throw new DomainError(
+            'conflict',
+            'zoom_refresh_in_progress',
+            fail === 'zoom_busy'
+              ? 'Zoom account operations are busy. Try again shortly.'
+              : undefined,
+          )
         if (fail === 'weird') throw new DomainError('weird' as DomainErrorKind, 'weird')
         if (fail === 'prepared')
           throw new HTTPException(418, { res: new Response('teapot', { status: 418 }) })
@@ -237,6 +270,30 @@ describe('route modules and errors', () => {
     })
     expect(await (await post('?fail=empty', valid)).json()).toEqual({ error: 'bad_thing' })
   })
+
+  it.each(['zoom_busy', 'zoom_busy_without_detail'])(
+    'adds the neutral Zoom alias while preserving the legacy code (%s)',
+    async (fail) => {
+      const response = await post(`?fail=${fail}`, valid)
+      expect(response.status).toBe(409)
+      expect(await response.json()).toEqual({
+        error: 'zoom_refresh_in_progress',
+        errorAlias: 'zoom_operation_busy',
+        ...(fail === 'zoom_busy' && {
+          message: 'Zoom account operations are busy. Try again shortly.',
+        }),
+      })
+    },
+  )
+
+  it.each(Object.entries(errorAliases))(
+    'adds the registered alias for %s without changing the original code',
+    async (error, errorAlias) => {
+      const response = await post(`?fail=alias:${error}`, valid)
+      expect(response.status).toBe(409)
+      expect(await response.json()).toEqual({ error, errorAlias })
+    },
+  )
 
   it('treats a DomainError with an unknown kind as a bug', async () => {
     const res = await post('?fail=weird', valid)

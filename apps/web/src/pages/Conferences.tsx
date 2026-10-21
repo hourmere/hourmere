@@ -3,7 +3,11 @@ import { useLocation, useSearchParams } from 'react-router'
 import { api, type Schemas, unwrap } from '../api/client.ts'
 import { errorMessage } from '../api/errors.ts'
 import { goTo } from '../browser.ts'
+import { BreakableText } from '../components/BreakableText.tsx'
 import { ConfirmAction } from '../components/ConfirmAction.tsx'
+import { EmptyState } from '../components/EmptyState.tsx'
+import { PageHeader } from '../components/PageHeader.tsx'
+import { PageSkeleton } from '../components/PageSkeleton.tsx'
 import { useLoad, useMounted, usePageTitle } from '../hooks.ts'
 import { useI18n } from '../i18n/runtime.tsx'
 import { msg, type UiText } from '../i18n/translate.ts'
@@ -13,6 +17,7 @@ type Connection = Schemas['ConferenceConnection']
 const load = (signal: AbortSignal) => unwrap(api.GET('/api/v1/conference-connections', { signal }))
 const outcomes = {
   connected: 'Zoom account connected.',
+  busy: 'Zoom account operations are busy. Try again shortly.',
   denied: 'Zoom was not connected because you cancelled authorization.',
   invalid_state: 'This Zoom connection attempt expired or was already used. Start again.',
   disabled: 'Zoom connections are not configured on this instance.',
@@ -43,7 +48,7 @@ function outcome(search: URLSearchParams): UiText | null {
 }
 
 export function ConferencesPage() {
-  const { t, ui, formatLocale } = useI18n()
+  const { t, text, ui, formatLocale } = useI18n()
   usePageTitle('Conference accounts')
   const [state, reload] = useLoad(load),
     [search, setSearch] = useSearchParams()
@@ -169,21 +174,46 @@ export function ConferencesPage() {
       timeStyle: 'short',
       calendar: 'gregory',
     }).format(new Date(value))
+  const connectActions =
+    state.status === 'ready' && state.data.zoomEnabled ? (
+      <div className="form-actions">
+        <button
+          type="button"
+          className="button button-primary"
+          disabled={pending !== null || state.data.data.length >= state.data.maximumConnections}
+          onClick={() => void connect()}
+        >
+          {t(pending === 'connect' ? 'Connecting to Zoom…' : 'Connect Zoom')}
+        </button>
+        {state.data.zoomMeetingsEnabled && (
+          <button
+            type="button"
+            className="button"
+            disabled={pending !== null || state.data.data.length >= state.data.maximumConnections}
+            onClick={() => void connect(undefined, true)}
+          >
+            {t(pending === 'meetings' ? 'Connecting to Zoom…' : 'Authorize Zoom meetings')}
+          </button>
+        )}
+      </div>
+    ) : undefined
   return (
     <>
-      <div className="page-header">
-        <h1>{t('Conference accounts')}</h1>
-      </div>
-      <p className="muted">
-        {t(
+      <PageHeader
+        title={t('Conference accounts')}
+        lede={t(
           'Connect your own Zoom account separately from sign-in and calendars. Identity access and automatic meeting permissions are separate choices.',
         )}
-      </p>
-      <p className="muted">
-        {t(
-          'Connect Zoom requests only basic account identity. Authorize Zoom meetings also requests create, read, update and delete meeting access. You choose your own connection when configuring automatic meetings.',
-        )}
-      </p>
+      />
+      {state.status === 'ready' && state.data.zoomEnabled && (
+        <p className="muted">
+          {text(
+            state.data.zoomMeetingsEnabled
+              ? 'Connect Zoom requests only basic account identity. Authorize Zoom meetings also requests create, read, update and delete meeting access. You choose your own connection when configuring automatic meetings.'
+              : 'Connect Zoom requests only basic account identity.',
+          )}
+        </p>
+      )}
       {notice && (
         <p className="alert alert-success" role="status">
           {ui(notice)}
@@ -194,7 +224,7 @@ export function ConferencesPage() {
           {ui(error)}
         </p>
       )}
-      {state.status === 'loading' && <p role="status">{t('Loading conference accounts…')}</p>}
+      {state.status === 'loading' && <PageSkeleton label="Loading conference accounts…" />}
       {state.status === 'error' && (
         <div className="alert alert-error" role="alert">
           <p>{ui(state.message)}</p>
@@ -206,48 +236,25 @@ export function ConferencesPage() {
       {state.status === 'ready' && (
         <>
           {!state.data.zoomEnabled && (
-            <p className="alert" role="status">
+            <p className="alert alert-info" role="status">
               {t('Zoom connections are not configured on this instance.')}
             </p>
           )}
-          <button
-            type="button"
-            className="button button-primary"
-            disabled={
-              !state.data.zoomEnabled ||
-              pending !== null ||
-              state.data.data.length >= state.data.maximumConnections
-            }
-            onClick={() => void connect()}
-          >
-            {t(pending === 'connect' ? 'Connecting to Zoom…' : 'Connect Zoom')}
-          </button>
-          {state.data.zoomMeetingsEnabled && (
-            <button
-              type="button"
-              className="button"
-              disabled={
-                !state.data.zoomEnabled ||
-                pending !== null ||
-                state.data.data.length >= state.data.maximumConnections
-              }
-              onClick={() => void connect(undefined, true)}
-            >
-              {t(pending === 'meetings' ? 'Connecting to Zoom…' : 'Authorize Zoom meetings')}
-            </button>
-          )}
-          {!state.data.zoomMeetingsEnabled && (
+          {state.data.data.length > 0 && connectActions}
+          {state.data.zoomEnabled && !state.data.zoomMeetingsEnabled && (
             <p className="muted">
               {t(
                 'New automatic Zoom authorization is disabled on this instance. Existing connections reconnect with their saved permissions.',
               )}
             </p>
           )}
-          <p className="muted">
-            {t(
-              'Connect up to five Zoom identities at once. Disconnecting frees a place and keeps the connection ID for a future reconnection.',
-            )}
-          </p>
+          {state.data.zoomEnabled && (
+            <p className="muted">
+              {t(
+                'Connect up to five Zoom identities at once. Disconnecting frees a place and keeps the connection ID for a future reconnection.',
+              )}
+            </p>
+          )}
           {state.data.pendingAttempts > 0 && (
             <p role="status">
               {t(
@@ -255,19 +262,36 @@ export function ConferencesPage() {
               )}
             </p>
           )}
-          {state.data.data.length === 0 && <p>{t('No Zoom accounts connected.')}</p>}
+          {state.data.data.length === 0 && (
+            <EmptyState title={t('No Zoom accounts connected.')} action={connectActions}>
+              <p>
+                {t(
+                  state.data.zoomEnabled
+                    ? 'Connect a Zoom account to get started.'
+                    : 'Ask your administrator to enable Zoom connections.',
+                )}
+              </p>
+            </EmptyState>
+          )}
           <div className="card-list">
             {state.data.data.map((connection: Connection) => (
               <article
-                className="card conference-account"
+                className="panel stack conference-account"
                 key={connection.id}
                 aria-labelledby={`conference-${connection.id}`}
               >
                 <h2 id={`conference-${connection.id}`}>
-                  {connection.displayName || connection.accountEmail || t('Zoom account')}
+                  {connection.displayName ||
+                    (connection.accountEmail ? (
+                      <BreakableText>{connection.accountEmail}</BreakableText>
+                    ) : (
+                      t('Zoom account')
+                    ))}
                 </h2>
                 {connection.accountEmail && connection.displayName && (
-                  <p>{connection.accountEmail}</p>
+                  <p>
+                    <BreakableText>{connection.accountEmail}</BreakableText>
+                  </p>
                 )}
                 <p>{t(statusLabels[connection.status])}</p>
                 <p>{t(connection.mode === 'meetings' ? 'Meeting permissions' : 'Identity only')}</p>
@@ -276,7 +300,7 @@ export function ConferencesPage() {
                   <time dateTime={connection.updatedAt}>{date(connection.updatedAt)}</time>
                 </p>
                 {connection.lastError && (
-                  <p className="alert" role="status">
+                  <p className="alert alert-info" role="status">
                     {ui(
                       msg(
                         outcomes[
@@ -311,7 +335,9 @@ export function ConferencesPage() {
                     type="button"
                     className="button button-small"
                     disabled={
-                      !state.data.zoomEnabled || pending !== null || connection.status !== 'active'
+                      !state.data.zoomEnabled ||
+                      pending !== null ||
+                      (connection.status !== 'active' && connection.status !== 'refreshing')
                     }
                     onClick={() => void refresh(connection.id)}
                   >
@@ -331,11 +357,13 @@ export function ConferencesPage() {
               </article>
             ))}
           </div>
-          <p className="muted">
-            {t(
-              'Disconnecting removes local credentials. The retained account record keeps its identity and does not revoke the app in Zoom. Deleting your Hourmere account also removes the stored identity details.',
-            )}
-          </p>
+          {(state.data.zoomEnabled || state.data.data.length > 0) && (
+            <p className="muted">
+              {t(
+                'Disconnecting removes local credentials. The retained account record keeps its identity and does not revoke the app in Zoom. Deleting your Hourmere account also removes the stored identity details.',
+              )}
+            </p>
+          )}
         </>
       )}
     </>

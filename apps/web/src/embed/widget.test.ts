@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { closePopup, destroyInline, iframeUrl, init, initInline, openPopup } from './widget.ts'
 
 const url = 'https://hourmere.test/ada/intro'
@@ -6,6 +6,29 @@ const handles: ReturnType<typeof initInline>[] = []
 const dialogMethods = {
   showModal: Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'showModal'),
   close: Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, 'close'),
+}
+beforeEach(() => {
+  vi.stubGlobal('CSS', { supports: vi.fn(() => true) })
+})
+function popupRoot() {
+  return document.querySelector('[data-hourmere-popup-host]')?.shadowRoot ?? null
+}
+function popupDialog() {
+  return popupRoot()?.querySelector('dialog') ?? null
+}
+function stubDialogs() {
+  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
+    configurable: true,
+    value: function (this: HTMLDialogElement) {
+      this.setAttribute('open', '')
+    },
+  })
+  Object.defineProperty(HTMLDialogElement.prototype, 'close', {
+    configurable: true,
+    value: function (this: HTMLDialogElement) {
+      this.removeAttribute('open')
+    },
+  })
 }
 function mount(raw = url) {
   const element = document.createElement('div')
@@ -18,6 +41,9 @@ afterEach(() => {
   closePopup()
   for (const handle of handles.splice(0)) handle.destroy()
   document.body.replaceChildren()
+  document.documentElement.removeAttribute('lang')
+  document.documentElement.removeAttribute('style')
+  document.body.removeAttribute('style')
   for (const key of ['showModal', 'close'] as const) {
     const descriptor = dialogMethods[key]
     if (descriptor) Object.defineProperty(HTMLDialogElement.prototype, key, descriptor)
@@ -44,7 +70,7 @@ describe('standalone booking widget', () => {
         value: vi.fn(),
       })
     expect(() => openPopup({ url })).not.toThrow()
-    const dialog = document.querySelector('dialog') as HTMLDialogElement,
+    const dialog = popupDialog() as HTMLDialogElement,
       title = dialog.querySelector('h2') as HTMLHeadingElement,
       frame = dialog.querySelector('iframe') as HTMLIFrameElement
     expect(title.id).toMatch(/^hourmere-title-[a-f0-9]{32}$/)
@@ -198,7 +224,7 @@ describe('standalone booking widget', () => {
     try {
       init()
       opener.click()
-      const frame = document.querySelector('dialog iframe') as HTMLIFrameElement,
+      const frame = popupRoot()?.querySelector('iframe') as HTMLIFrameElement,
         src = new URL(frame.src),
         id = src.searchParams.get('embedId'),
         other = mount(),
@@ -232,7 +258,7 @@ describe('standalone booking widget', () => {
       expect(completed).toHaveBeenCalledOnce()
       opener.focus()
       openPopup({ url })
-      const replacement = document.querySelector('dialog iframe') as HTMLIFrameElement,
+      const replacement = popupRoot()?.querySelector('iframe') as HTMLIFrameElement,
         replacementUrl = new URL(replacement.src)
       opener.remove()
       window.dispatchEvent(
@@ -269,18 +295,18 @@ describe('standalone booking widget', () => {
     })
     openPopup({ url })
     expect(show).toHaveBeenCalledOnce()
-    const dialog = document.querySelector('dialog') as HTMLDialogElement,
+    const dialog = popupDialog() as HTMLDialogElement,
       close = dialog.querySelector('button') as HTMLButtonElement
-    expect(document.activeElement).toBe(close)
+    expect(popupRoot()?.activeElement).toBe(close)
     expect(close.getAttribute('aria-label')).toBe('Close booking')
     dialog.dispatchEvent(new Event('cancel', { cancelable: true }))
-    expect(document.querySelector('dialog')).toBeNull()
+    expect(popupDialog()).toBeNull()
     expect(document.activeElement).toBe(open)
     openPopup({ url })
     openPopup({ url })
-    expect(document.querySelectorAll('dialog')).toHaveLength(1)
+    expect(document.querySelectorAll('[data-hourmere-popup-host]')).toHaveLength(1)
     const other = mount(),
-      active = document.querySelector('dialog iframe') as HTMLIFrameElement,
+      active = popupRoot()?.querySelector('iframe') as HTMLIFrameElement,
       src = new URL(active.src),
       id = src.searchParams.get('embedId')
     window.dispatchEvent(
@@ -290,7 +316,7 @@ describe('standalone booking widget', () => {
         data: { type: 'hourmere:close', id },
       }),
     )
-    expect(document.querySelector('dialog')).not.toBeNull()
+    expect(popupDialog()).not.toBeNull()
     window.dispatchEvent(
       new MessageEvent('message', {
         origin: src.origin,
@@ -298,7 +324,7 @@ describe('standalone booking widget', () => {
         data: { type: 'hourmere:close', id: new URL(other.iframe.src).searchParams.get('embedId') },
       }),
     )
-    expect(document.querySelector('dialog')).not.toBeNull()
+    expect(popupDialog()).not.toBeNull()
     window.dispatchEvent(
       new MessageEvent('message', {
         origin: src.origin,
@@ -306,7 +332,7 @@ describe('standalone booking widget', () => {
         data: { type: 'hourmere:close', id },
       }),
     )
-    expect(document.querySelector('dialog')).toBeNull()
+    expect(popupDialog()).toBeNull()
     other.destroy()
     closePopup()
     expect(document.querySelector('iframe')).toBeNull()
@@ -335,25 +361,25 @@ describe('standalone booking widget', () => {
       },
     })
     const first = openPopup({ url }),
-      retired = document.querySelector('dialog') as HTMLDialogElement
+      retired = popupDialog() as HTMLDialogElement
     openPopup({ url: 'https://hourmere.test/ada/second' })
-    const replacement = document.querySelector('dialog') as HTMLDialogElement
+    const replacement = popupDialog() as HTMLDialogElement
     await Promise.resolve()
     expect(replacement.isConnected).toBe(true)
     expect(replacement.hasAttribute('open')).toBe(true)
-    expect(document.querySelectorAll('dialog')).toHaveLength(1)
+    expect(document.querySelectorAll('[data-hourmere-popup-host]')).toHaveLength(1)
     first.close()
     retired.dispatchEvent(new Event('cancel', { cancelable: true }))
     retired.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     expect(replacement.isConnected).toBe(true)
     closePopup()
     openPopup({ url })
-    const reopened = document.querySelector('dialog') as HTMLDialogElement
+    const reopened = popupDialog() as HTMLDialogElement
     await Promise.resolve()
     expect(reopened.isConnected).toBe(true)
     reopened.close()
     await Promise.resolve()
-    expect(document.querySelector('dialog')).toBeNull()
+    expect(popupDialog()).toBeNull()
   })
   it('initializes declarative inline placeholders once', () => {
     const element = document.createElement('div')
@@ -403,13 +429,13 @@ describe('standalone widget languages', () => {
       },
     })
     openPopup({ url, language: 'zh-CN' })
-    const dialog = document.querySelector('dialog') as HTMLDialogElement
+    const dialog = popupDialog() as HTMLDialogElement
     expect(dialog.querySelector('h2')?.textContent).toBe('预约会议')
     expect(dialog.querySelector('button')?.getAttribute('aria-label')).toBe('关闭预约窗口')
     const frame = dialog.querySelector('iframe') as HTMLIFrameElement
     expect(new URL(frame.src).searchParams.get('language')).toBe('zh-CN')
     dialog.dispatchEvent(new Event('cancel', { cancelable: true }))
-    expect(document.querySelector('dialog')).toBeNull()
+    expect(popupDialog()).toBeNull()
   })
   it('supports declarative language and uses the same language for failure messages', () => {
     const element = document.createElement('div')
@@ -422,5 +448,391 @@ describe('standalone widget languages', () => {
       '预约组件无法加载。请检查 Hourmere 地址和实例的嵌入设置。',
     )
     expect(element.querySelector('iframe')).toBeNull()
+  })
+})
+
+describe('popup chrome protections', () => {
+  const rect = { left: 20, right: 420, top: 30, bottom: 530 }
+  function open() {
+    stubDialogs()
+    const handle = openPopup({ url }),
+      dialog = popupDialog() as HTMLDialogElement
+    vi.spyOn(dialog, 'getBoundingClientRect').mockReturnValue(rect as DOMRect)
+    return { handle, dialog }
+  }
+  it('keeps dialog padding, edges and descendant clicks open', () => {
+    const { dialog } = open()
+    for (const [clientX, clientY] of [
+      [21, 31],
+      [20, 30],
+      [420, 530],
+      [419, 529],
+    ]) {
+      dialog.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX, clientY }))
+      expect(dialog.isConnected).toBe(true)
+    }
+    dialog.querySelector('h2')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(dialog.isConnected).toBe(true)
+  })
+  it.each([
+    [19, 100],
+    [421, 100],
+    [100, 29],
+    [100, 531],
+  ])('closes only for a backdrop click outside the rect at %i,%i', (clientX, clientY) => {
+    const { dialog } = open()
+    dialog.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX, clientY }))
+    expect(popupDialog()).toBeNull()
+  })
+  it('isolates every chrome element from host selectors and inherited styles', () => {
+    stubDialogs()
+    openPopup({ url })
+    expect(popupRoot()).not.toBeNull()
+    const root = popupRoot() as ShadowRoot,
+      host = root.host as HTMLElement
+    expect(document.querySelector('dialog')).toBeNull()
+    expect(document.querySelector('h2')).toBeNull()
+    expect(host.style.getPropertyValue('all')).toBe('initial')
+    expect(host.style.getPropertyPriority('all')).toBe('important')
+    expect(host.style.getPropertyValue('display')).toBe('contents')
+    expect(host.style.getPropertyPriority('display')).toBe('important')
+    for (const tag of ['dialog', 'h2', 'button', 'iframe'])
+      expect(root.querySelector(tag)?.getRootNode()).toBe(root)
+    const css = root.querySelector('style')?.textContent ?? ''
+    expect(css).toMatch(/dialog\s*\{\s*all: revert;/)
+    expect(css).toContain('font: 16px/1.5 system-ui, sans-serif;')
+    expect(css).toContain('text-align: start;')
+    expect(css).toContain('direction: ltr;')
+    expect(css).toMatch(/button:focus-visible\s*\{[^}]*outline: 2px solid Highlight;/)
+  })
+  it('adopts a constructed sheet without adding a CSP-blocked inline style element', () => {
+    const descriptor = Object.getOwnPropertyDescriptor(ShadowRoot.prototype, 'adoptedStyleSheets'),
+      sheets: ConstructedSheet[] = []
+    class ConstructedSheet {
+      replaceSync(_css: string) {}
+      constructor() {
+        sheets.push(this)
+      }
+    }
+    const replaceSync = vi.spyOn(ConstructedSheet.prototype, 'replaceSync')
+    vi.stubGlobal('CSSStyleSheet', ConstructedSheet)
+    Object.defineProperty(ShadowRoot.prototype, 'adoptedStyleSheets', {
+      configurable: true,
+      writable: true,
+      value: [],
+    })
+    try {
+      open()
+      const root = popupRoot() as ShadowRoot
+      expect(root.querySelector('style')).toBeNull()
+      expect(sheets).toHaveLength(1)
+      expect(root.adoptedStyleSheets).toEqual([sheets[0]])
+      expect(replaceSync).toHaveBeenCalledOnce()
+      expect(replaceSync.mock.calls[0]?.[0]).toContain('color-scheme: light dark;')
+    } finally {
+      if (descriptor) Object.defineProperty(ShadowRoot.prototype, 'adoptedStyleSheets', descriptor)
+      else Reflect.deleteProperty(ShadowRoot.prototype, 'adoptedStyleSheets')
+    }
+  })
+  it('follows the visitor color scheme and visibly dims the backdrop', () => {
+    open()
+    const css = popupRoot()?.querySelector('style')?.textContent ?? ''
+    expect(css).toContain('color-scheme: light dark;')
+    expect(css).toMatch(/dialog\s*\{[^}]*color: CanvasText;[^}]*background: Canvas;/)
+    expect(css).toContain('border: 1px solid GrayText;')
+    expect(css).toMatch(/dialog::backdrop\s*\{\s*background: rgb\(0 0 0 \/ .5\);/)
+  })
+  it('uses dynamic viewport limits with fallbacks and one contained content scroller', () => {
+    open()
+    const css = popupRoot()?.querySelector('style')?.textContent ?? '',
+      desktop = css.slice(0, css.indexOf('@media'))
+    expect(desktop).toMatch(/max-height: 90vh;\s*max-height: 90dvh;/)
+    expect(desktop).toContain('overflow: hidden;')
+    expect(desktop).toMatch(/dialog\s*\{[^}]*overscroll-behavior: contain;/)
+    expect(desktop).toMatch(
+      /\.content\s*\{[^}]*min-height: 0;[^}]*overflow: auto;[^}]*overscroll-behavior: contain;/,
+    )
+  })
+  it('fills small viewports without frame padding or borders', () => {
+    open()
+    const css = popupRoot()?.querySelector('style')?.textContent ?? '',
+      mobile = css.slice(css.indexOf('@media'))
+    expect(mobile).toMatch(/^@media \(max-width: 480px\), \(max-height: 480px\)/)
+    expect(mobile).toContain('width: 100vw;')
+    expect(mobile).toContain('max-width: 100vw;')
+    expect(mobile).toMatch(/height: 100vh;\s*height: 100dvh;/)
+    expect(mobile).toMatch(/max-height: 100vh;\s*max-height: 100dvh;/)
+    for (const declaration of ['padding: 0;', 'margin: 0;', 'border: 0;', 'border-radius: 0;'])
+      expect(mobile).toContain(declaration)
+    expect(mobile).toMatch(/\.content\s*\{\s*flex: 1;/)
+  })
+  it('places a labelled 44 by 44 close control at the end of the title row', () => {
+    open()
+    const root = popupRoot() as ShadowRoot,
+      header = root.querySelector('header') as HTMLElement,
+      close = header.lastElementChild as HTMLButtonElement,
+      css = root.querySelector('style')?.textContent ?? ''
+    expect(header.firstElementChild?.tagName).toBe('H2')
+    expect(close.tagName).toBe('BUTTON')
+    expect(close.textContent).toBe('×')
+    expect(close.getAttribute('aria-label')).toBe('Close booking')
+    expect(css).toMatch(/header\s*\{[^}]*display: flex;[^}]*justify-content: space-between;/)
+    expect(css).toMatch(/button\s*\{[^}]*width: 44px;[^}]*height: 44px;/)
+    close.click()
+    expect(popupDialog()).toBeNull()
+  })
+  it('locks the page and restores existing scroll declarations including priorities', () => {
+    document.documentElement.style.setProperty('overflow', 'clip', 'important')
+    document.body.style.setProperty('overflow-x', 'scroll')
+    document.body.style.setProperty('overflow-y', 'auto', 'important')
+    document.body.style.setProperty('color', 'red')
+    open()
+    expect(document.documentElement.style.getPropertyValue('scrollbar-gutter')).toBe('stable')
+    expect(document.documentElement.style.getPropertyPriority('scrollbar-gutter')).toBe('important')
+    for (const element of [document.documentElement, document.body]) {
+      expect(element.style.getPropertyValue('overflow')).toBe('hidden')
+      expect(element.style.getPropertyPriority('overflow')).toBe('important')
+    }
+    document.body.style.setProperty('color', 'blue')
+    closePopup()
+    expect(document.documentElement.style.getPropertyValue('overflow')).toBe('clip')
+    expect(document.documentElement.style.getPropertyPriority('overflow')).toBe('important')
+    expect(document.body.style.getPropertyValue('overflow-x')).toBe('scroll')
+    expect(document.body.style.getPropertyValue('overflow-y')).toBe('auto')
+    expect(document.body.style.getPropertyPriority('overflow-y')).toBe('important')
+    expect(document.body.style.color).toBe('blue')
+    expect(document.documentElement.style.getPropertyValue('scrollbar-gutter')).toBe('')
+  })
+  it('preserves a host stable both-edges gutter policy and restores its declaration', () => {
+    document.documentElement.style.setProperty('scrollbar-gutter', 'stable both-edges')
+    open()
+    expect(document.documentElement.style.getPropertyValue('scrollbar-gutter')).toBe(
+      'stable both-edges',
+    )
+    expect(document.documentElement.style.getPropertyPriority('scrollbar-gutter')).toBe('important')
+    closePopup()
+    expect(document.documentElement.style.getPropertyValue('scrollbar-gutter')).toBe(
+      'stable both-edges',
+    )
+    expect(document.documentElement.style.getPropertyPriority('scrollbar-gutter')).toBe('')
+  })
+  it('does not add compensation padding when a supported gutter already reserves scrollbar space', () => {
+    document.documentElement.style.setProperty('scrollbar-gutter', 'stable')
+    document.body.style.setProperty('padding-right', '12px', 'important')
+    vi.stubGlobal('innerWidth', 1024)
+    vi.spyOn(document.documentElement, 'clientWidth', 'get').mockReturnValue(1000)
+    open()
+    expect(CSS.supports).toHaveBeenCalledWith('scrollbar-gutter', 'stable')
+    expect(document.body.style.getPropertyValue('padding-right')).toBe('12px')
+    expect(document.body.style.getPropertyPriority('padding-right')).toBe('important')
+    closePopup()
+    expect(document.body.style.getPropertyValue('padding-right')).toBe('12px')
+  })
+  it.each(['', 'auto', 'stable', 'stable both-edges'])(
+    'introduces no gutter or padding when a supported host has no occupied scrollbar space (%s)',
+    (gutter) => {
+      vi.stubGlobal('innerWidth', 1024)
+      vi.spyOn(document.documentElement, 'clientWidth', 'get').mockReturnValue(1024)
+      if (gutter) document.documentElement.style.setProperty('scrollbar-gutter', gutter)
+      document.body.style.setProperty('padding-right', '12px')
+      open()
+      expect(document.documentElement.style.getPropertyValue('scrollbar-gutter')).toBe(gutter)
+      expect(document.documentElement.style.getPropertyPriority('scrollbar-gutter')).toBe('')
+      expect(document.body.style.getPropertyValue('padding-right')).toBe('12px')
+      expect(document.body.style.getPropertyPriority('padding-right')).toBe('')
+      expect(document.documentElement.style.overflow).toBe('hidden')
+      closePopup()
+      expect(document.documentElement.style.getPropertyValue('scrollbar-gutter')).toBe(gutter)
+      expect(document.body.style.getPropertyValue('padding-right')).toBe('12px')
+    },
+  )
+  it.each([false, undefined])(
+    'adds the measured scrollbar width to host padding when gutter support is %s',
+    (support) => {
+      vi.stubGlobal('CSS', support === undefined ? undefined : { supports: () => support })
+      vi.stubGlobal('innerWidth', 1024)
+      vi.spyOn(document.documentElement, 'clientWidth', 'get').mockReturnValue(1000)
+      document.body.style.setProperty('padding-right', '12px', 'important')
+      document.body.style.setProperty('color', 'red')
+      open()
+      expect(document.body.style.getPropertyValue('padding-right')).toBe('36px')
+      expect(document.body.style.getPropertyPriority('padding-right')).toBe('important')
+      expect(document.documentElement.style.getPropertyValue('scrollbar-gutter')).toBe('')
+      expect(document.documentElement.style.overflow).toBe('hidden')
+      document.body.style.setProperty('color', 'blue')
+      closePopup()
+      expect(document.body.style.getPropertyValue('padding-right')).toBe('12px')
+      expect(document.body.style.getPropertyPriority('padding-right')).toBe('important')
+      expect(document.body.style.color).toBe('blue')
+    },
+  )
+  it('restores host padding shorthands and their priorities after fallback compensation', () => {
+    vi.stubGlobal('CSS', { supports: () => false })
+    vi.stubGlobal('innerWidth', 1024)
+    vi.spyOn(document.documentElement, 'clientWidth', 'get').mockReturnValue(1000)
+    document.body.style.setProperty('padding', '4px 12px 8px 16px', 'important')
+    open()
+    expect(document.body.style.getPropertyValue('padding-right')).toBe('36px')
+    closePopup()
+    expect(document.body.style.getPropertyValue('padding')).toBe('4px 12px 8px 16px')
+    expect(document.body.style.getPropertyPriority('padding')).toBe('important')
+    expect(document.body.style.getPropertyPriority('padding-right')).toBe('important')
+  })
+  it('adds no padding for overlay scrollbars and removes fallback padding after a modal failure', () => {
+    vi.stubGlobal('CSS', { supports: () => false })
+    vi.stubGlobal('innerWidth', 1024)
+    const clientWidth = vi
+      .spyOn(document.documentElement, 'clientWidth', 'get')
+      .mockReturnValue(1024)
+    open()
+    expect(document.body.style.getPropertyValue('padding-right')).toBe('')
+    closePopup()
+    clientWidth.mockReturnValue(1000)
+    stubDialogs()
+    vi.spyOn(HTMLDialogElement.prototype, 'showModal').mockImplementation(() => {
+      throw new Error('Modal unavailable')
+    })
+    expect(() => openPopup({ url })).toThrow('Modal unavailable')
+    expect(document.body.style.getPropertyValue('padding-right')).toBe('')
+    expect(document.documentElement.style.getPropertyValue('overflow')).toBe('')
+  })
+  it('keeps the replacement locked and validates options before replacing it', () => {
+    const first = open()
+    openPopup({ url })
+    const current = popupDialog()
+    first.handle.close()
+    expect(document.body.style.overflow).toBe('hidden')
+    expect(() => openPopup({ url: 'javascript:bad' })).toThrow()
+    expect(() => openPopup({ url, language: 'fr' as 'en' })).toThrow()
+    expect(popupDialog()).toBe(current)
+    expect(document.documentElement.style.overflow).toBe('hidden')
+    closePopup()
+    expect(document.documentElement.style.overflow).toBe('')
+    expect(document.body.style.overflow).toBe('')
+  })
+  it('restores scrolling and opener focus when showModal fails', () => {
+    stubDialogs()
+    const opener = document.createElement('button')
+    document.body.append(opener)
+    opener.focus()
+    document.body.style.overflow = 'auto'
+    vi.spyOn(HTMLDialogElement.prototype, 'showModal').mockImplementation(() => {
+      throw new Error('Modal unavailable')
+    })
+    expect(() => openPopup({ url })).toThrow('Modal unavailable')
+    expect(popupDialog()).toBeNull()
+    expect(document.querySelector('[data-hourmere-popup-host]')).toBeNull()
+    expect(document.body.style.overflow).toBe('auto')
+    expect(document.documentElement.style.overflow).toBe('')
+    expect(document.documentElement.style.getPropertyValue('scrollbar-gutter')).toBe('')
+    expect(document.activeElement).toBe(opener)
+  })
+})
+
+describe('declarative widget protections', () => {
+  function placeholder(height?: string) {
+    const element = document.createElement('div')
+    element.dataset.hourmereInline = ''
+    element.dataset.hourmereUrl = url
+    if (height !== undefined) element.dataset.hourmereHeight = height
+    document.body.append(element)
+    return element
+  }
+  it.each(['240', '640', '2000'])('uses the declared initial height %s', (height) => {
+    const element = placeholder(height)
+    init()
+    expect(element.querySelector('iframe')?.style.height).toBe(`${height}px`)
+    destroyInline(element)
+  })
+  it.each(['', '239', '2001', '720px', 'Infinity', '240.5'])(
+    'refuses invalid declared height %s',
+    (height) => {
+      const element = placeholder(height)
+      init()
+      expect(element.querySelector('iframe')).toBeNull()
+      expect(element.querySelectorAll('[role="alert"]')).toHaveLength(1)
+    },
+  )
+  it('reuses a single inline error and clears it after recovery', () => {
+    const element = placeholder()
+    element.dataset.hourmereUrl = 'javascript:bad'
+    init()
+    const status = element.querySelector('[role="alert"]')
+    init()
+    expect(element.querySelectorAll('[role="alert"]')).toHaveLength(1)
+    expect(element.querySelector('[role="alert"]')).toBe(status)
+    element.dataset.hourmereUrl = url
+    init()
+    expect(element.querySelector('iframe')).not.toBeNull()
+    expect(element.querySelector('[role="alert"]')).toBeNull()
+    destroyInline(element)
+  })
+  it('reuses one error per popup trigger and clears only the recovered trigger', () => {
+    stubDialogs()
+    const first = document.createElement('button'),
+      second = document.createElement('button')
+    for (const trigger of [first, second]) {
+      trigger.dataset.hourmerePopup = ''
+      trigger.dataset.hourmereUrl = 'javascript:bad'
+      document.body.append(trigger)
+    }
+    init()
+    first.click()
+    const status = document.querySelector('[role="alert"]')
+    first.click()
+    expect(document.querySelectorAll('[role="alert"]')).toHaveLength(1)
+    expect(document.querySelector('[role="alert"]')).toBe(status)
+    second.click()
+    expect(document.querySelectorAll('[role="alert"]')).toHaveLength(2)
+    first.dataset.hourmereUrl = url
+    first.click()
+    expect(document.querySelectorAll('[role="alert"]')).toHaveLength(1)
+    expect(status?.isConnected).toBe(false)
+  })
+})
+
+describe('host page language defaults', () => {
+  it.each([
+    ['en-US', 'zh-CN', 'en'],
+    ['zh-CN', 'en-US', 'zh-CN'],
+    ['zh-Hans', 'en-US', 'zh-CN'],
+  ])('prefers host %s over browser %s', (page, browser, expected) => {
+    document.documentElement.lang = page
+    vi.spyOn(navigator, 'languages', 'get').mockReturnValue([browser])
+    const { iframe } = mount()
+    expect(new URL(iframe.src).searchParams.get('language')).toBe(expected)
+  })
+  it.each(['', 'fr', 'zh-TW', 'invalid tag'])('falls back from host %s to the browser', (page) => {
+    document.documentElement.lang = page
+    vi.spyOn(navigator, 'languages', 'get').mockReturnValue(['fr', 'zh-CN'])
+    const { iframe } = mount()
+    expect(new URL(iframe.src).searchParams.get('language')).toBe('zh-CN')
+  })
+  it('retains explicit option priority over the host language', () => {
+    document.documentElement.lang = 'zh-CN'
+    const element = document.createElement('div')
+    document.body.append(element)
+    const handle = initInline({ element, url, language: 'en' })
+    handles.push(handle)
+    expect(new URL(handle.iframe.src).searchParams.get('language')).toBe('en')
+  })
+  it('uses the host language for declarative popup controls and load errors', () => {
+    stubDialogs()
+    document.documentElement.lang = 'zh-CN'
+    vi.spyOn(navigator, 'languages', 'get').mockReturnValue(['en-US'])
+    const trigger = document.createElement('button')
+    trigger.dataset.hourmerePopup = ''
+    trigger.dataset.hourmereUrl = 'javascript:bad'
+    document.body.append(trigger)
+    init()
+    trigger.click()
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain('预约组件无法加载。')
+    trigger.dataset.hourmereUrl = url
+    trigger.click()
+    expect(popupDialog()?.lang).toBe('zh-CN')
+    expect(popupRoot()?.querySelector('button')?.getAttribute('aria-label')).toBe('关闭预约窗口')
+    expect(
+      new URL(popupRoot()?.querySelector('iframe')?.src ?? '').searchParams.get('language'),
+    ).toBe('zh-CN')
   })
 })

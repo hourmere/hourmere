@@ -12,7 +12,9 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react'
+import { ScopedRouteErrorBoundary } from '../components/route-error-scope.tsx'
 import { browserLanguage, chooseLanguage, languageChoice, subscribeLanguage } from './store.ts'
+import { renderUiText } from './text.tsx'
 import {
   type MessageKey,
   translate,
@@ -35,7 +37,7 @@ export function EmbedLanguage({
   const [current, setCurrent] = useState(language)
   return (
     <EmbeddedLanguage value={{ language: current, setLanguage: setCurrent }}>
-      {children}
+      <ScopedRouteErrorBoundary>{children}</ScopedRouteErrorBoundary>
     </EmbeddedLanguage>
   )
 }
@@ -48,7 +50,11 @@ export function AccountLanguage({
   locale: string | undefined
   children: ReactNode
 }) {
-  return <AccountDefault value={interfaceLanguage(locale)}>{children}</AccountDefault>
+  return (
+    <AccountDefault value={interfaceLanguage(locale)}>
+      <ScopedRouteErrorBoundary>{children}</ScopedRouteErrorBoundary>
+    </AccountDefault>
+  )
 }
 export function useI18n() {
   const explicit = useSyncExternalStore(subscribeLanguage, languageChoice, () => undefined)
@@ -76,16 +82,24 @@ export function useI18n() {
       translateMessage(locale, message, { dateLocale: selected }),
     [locale, selected],
   )
-  return { locale, explicit: selected, formatLocale: selected, setLanguage, t, ui }
+  const text = useCallback(
+    (key: MessageKey, values?: UiMessage['values']) => renderUiText(locale, t(key, values)),
+    [locale, t],
+  )
+  const uiText = useCallback(
+    (message: UiText | null | undefined) => renderUiText(locale, ui(message)),
+    [locale, ui],
+  )
+  return { locale, explicit: selected, formatLocale: selected, setLanguage, t, ui, text, uiText }
 }
 /** Changing this control updates text in place; router keys and form state do not change. */
-export function LanguageSwitcher() {
+export function LanguageSwitcher({ compact = false }: { compact?: boolean }) {
   const { locale, t, setLanguage } = useI18n()
   useEffect(() => {
     document.documentElement.lang = locale
   }, [locale])
   return (
-    <label className="language-picker">
+    <label className={`language-picker${compact ? ' language-picker-compact' : ''}`}>
       <span>{t('Interface language')}</span>
       <select
         aria-label={t('Interface language')}

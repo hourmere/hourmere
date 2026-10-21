@@ -1,0 +1,85 @@
+name: Release dry run
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version without v; must equal the root package.json version and have matching CHANGELOG notes on main
+        required: true
+        default: '1.0.0'
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+      - name: Create a runner-local version tag
+        id: tag
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          tag="v$VERSION"
+          git check-ref-format "refs/tags/$tag"
+          if ! git show-ref --verify --quiet "refs/tags/$tag"; then
+            git tag "$tag" "$GITHUB_SHA"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - name: Validate the version, main ancestry and changelog
+        id: release
+        env:
+          RELEASE_TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          git fetch --no-tags origin refs/heads/main:refs/remotes/origin/main
+          node scripts/release.ts prepare "$RELEASE_TAG" "$GITHUB_SHA"
+      - name: Upload the extracted release notes
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: release-dry-run-notes
+          path: ${{ steps.release.outputs.notes_file }}
+          if-no-files-found: error
+
+  ci:
+    needs: prepare
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    needs: [prepare, ci]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+      - name: Build both architectures without publishing
+        id: build
+        uses: ./.github/actions/release-build
+        with:
+          push: false
+          version: ${{ needs.prepare.outputs.version }}
+          tags: hourmere-dry-run:${{ needs.prepare.outputs.version }}
+          # An OCI exporter exercises attestations; a cache-only build does not retain them.
+          outputs: type=oci,dest=${{ runner.temp }}/hourmere-dry-run.oci.tar
+      - name: Report build duration per platform
+        env:
+          BUILD_REF: ${{ steps.build.outputs.build-ref }}
+        run: |
+          test -n "$BUILD_REF"
+          builder="${BUILD_REF%%/*}"
+          build_id="${BUILD_REF##*/}"
+          docker buildx --builder "$builder" history logs --progress rawjson "$build_id" 2> "$RUNNER_TEMP/release-build-progress.jsonl"
+          node scripts/release-build-summary.ts "$RUNNER_TEMP/release-build-progress.jsonl"

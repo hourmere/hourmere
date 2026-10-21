@@ -1,12 +1,12 @@
 ---
 title: Compare scheduling options
 description: Compare Hourmere, Calendly, Cal.com and Cal.diy by deployment, agent access and current limitations.
-lastVerified: '2026-10-18'
+lastVerified: '2026-10-20'
 ---
 
-Hourmere is [in development and not yet ready to use](/#faq). Its
-[self-hosting guide](/docs/self-hosting) requires a source build;
-no prebuilt public image is published. [Hourmere Cloud has not launched](/privacy).
+Hourmere Cloud is in an [invitation-only preview](/#faq) with sign-ups closed, and the
+open-source release for self-hosting is planned for November 30, 2026. Its
+[self-hosting guide](/docs/self-hosting) requires a source build; no prebuilt public image is published.
 This page describes the documented implementation and its current limitations.
 
 The verification date above applies to the linked sources on this page. Follow them for
@@ -45,7 +45,7 @@ Hourmere's [MCP OAuth guide](/docs/mcp#connect-with-oauth) also describes opt-in
 authorization, explicit organization approval and revocation through Connected apps.
 The instance needs HTTPS outside loopback development; verify the intended hosted client
 separately before relying on it. See the
-[MCP protocol documentation](https://github.com/hourmere/hourmere/blob/main/docs/mcp.md)
+[MCP protocol documentation](/docs/mcp)
 for the current implementation and limits.
 
 Calendly also has both a REST API and MCP support. Its

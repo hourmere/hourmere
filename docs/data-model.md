@@ -4,7 +4,7 @@ Google synchronization also records `booking_calendar_targets`: one destination 
 reschedule-chain root and host, saved in the booking transaction. It survives changes to the
 profile's default calendar and provider retries, and cascades away on booking/user/calendar
 deletion. `booking_calendar_events` maps each written booking version to the same external
-event. See [Google Calendar synchronization](google-calendar.md) for the cursor, freshness
+event. See [Google Calendar synchronization](https://hourmere.com/docs/google-calendar) for the cursor, freshness
 and writeback rules.
 
 PostgreSQL is the system of record. The schema is defined by the SQL files in
@@ -47,11 +47,35 @@ types in `packages/db/src/tables.ts` are generated from the migrated database.
 Google and Microsoft sign-in ID tokens are used during authentication and are not stored:
 `account."idToken"` remains NULL on account creation and every update, including linking,
 repeat sign-in and token refresh. Migration 0031 clears existing values without changing
-other account data. Sign-in access and refresh tokens remain encrypted by Better Auth's
+other account data. Retained sign-in OAuth tokens remain encrypted by Better Auth's
 `encryptOAuthTokens` option. Calendar credentials and MCP OAuth grants are independent.
+
+Google sign-in requests only `email`, `profile` and `openid`. Better Auth 1.7.10's
+`includeGrantedScopes: false` omits `include_granted_scopes`; Google's
+[OIDC authorization endpoint](https://developers.google.com/identity/openid-connect/openid-connect#authenticationuriparameters)
+includes previous grants only when that parameter is supplied as `true`. This matters even
+with separate sign-in/calendar clients: Google's
+[combined authorization](https://developers.google.com/identity/protocols/oauth2/web-server#incrementalAuth)
+can include grants to other clients in the same project. `accessType` remains unset, so
+`access_type` is omitted and Google's default online access applies; no offline access or
+forced consent is requested. Hourmere's session renewal needs no Google refresh token.
+Google account creation and every account update therefore discard any returned refresh
+token and its expiry, and clear legacy refresh credentials on the next successful sign-in,
+relink or partial update, even when Google omits a replacement. Updates look up the stored
+account's provider, including internal refresh updates that omit `providerId`.
+The account's provider/subject/user binding
+is retained so automatic account linking and repeat sign-in continue to work. Existing
+credentials are not bulk-rewritten or revoked. Calendar connections still explicitly send
+`include_granted_scopes=false`, `access_type=offline` and `prompt=consent` for their own
+calendar scopes and encrypted refresh credentials.
 
 Microsoft sign-in requests only `openid`, `profile` and `email`: it needs identity once to
 create an Hourmere session, whose lifetime and renewal do not depend on Microsoft tokens.
+Better Auth's default scopes are disabled, and its Graph profile-photo request is disabled
+to avoid `User.Read`. Microsoft's v2 endpoint requires an explicit
+[`offline_access` scope](https://learn.microsoft.com/en-us/entra/identity-platform/scopes-oidc#the-offline_access-scope)
+to issue refresh tokens; this sign-in flow does not request it. Unexpected Microsoft tokens
+retain the existing encrypted-storage behavior.
 No application feature reads or refreshes the stored sign-in access token, and the unused
 Better Auth token retrieval/refresh HTTP endpoints are disabled. A Microsoft sign-in
 refresh token is therefore unnecessary; `offline_access` is intentionally omitted.
@@ -64,7 +88,7 @@ calendar-list access.
 
 | Table | Owner | Purpose |
 |---|---|---|
-| `profiles` | user | Public handle (`hourmere.com/{handle}/{event}`), time zone, locale, default destination calendar |
+| `profiles` | user | Public handle (`hourmere.example.com/{handle}/{event}`), time zone, locale, default destination calendar |
 | `personal_organizations` | user | Marks the organization created for each user; deleting the user deletes it, and it cannot be deleted on its own |
 | `schedules` | user | Named working hours: time zone + weekly intervals (JSON); one default per user |
 | `schedule_overrides` | user | Per-date exceptions: unavailable, or replacement intervals |
@@ -113,7 +137,7 @@ calendar-list access.
   reschedule clears the predecessor's hash and transfers it to the successor in the same
   transaction, returning no raw token; the invitee's existing link keeps working. An
   email's token follows `rescheduled_from_id` forward to the latest booking of the chain. See
-  [notifications.md](notifications.md#which-booking-a-token-opens).
+  [Notifications and background jobs](https://hourmere.com/docs/notifications#which-booking-a-token-opens).
 - **An email is sent once, with a narrow duplicate window.** A notification job inserts its `booking_notifications` row
   (primary key: booking, kind, recipient) and keeps that transaction open while the mail
   server takes the email: a failed send rolls the row back for the retry, a concurrent
@@ -220,6 +244,29 @@ application foreign keys reference its tables.
    `packages/auth/auth-schema.generated.sql`; prefix it with
    `SET LOCAL search_path TO auth, public;` and save it as the next migration.
 
+Column removals use two releases: release N stops writing the column, and release N+1
+removes it. Stop all old app (`all` or `web`) and worker processes before applying a version
+whose migrations drop columns; this includes workers managed outside the app's Compose
+project. A single-container `docker compose up -d --build` stops the old app before
+starting its replacement, but a separate worker must be stopped explicitly before the new
+app or a manual migration applies the drop. Restart every role with the upgraded code.
+See the [operator upgrade procedure](https://hourmere.com/docs/self-hosting#upgrade-and-roll-back).
+
+Migration `0037_conference_pending_timeout.sql` is the first column drop and a historical
+exception to the two-release policy: it removes the write-only
+`booking_conferences.retry_conference` flag while old binaries still write it. All old
+roles must stop before 0037 runs. Every migration that drops a column (including
+`ALTER TABLE ... DROP ...` without `COLUMN`), drops a table or view, renames a table,
+view, materialized view, sequence, foreign table or column (including a view column),
+moves a table or view with `SET SCHEMA`, or changes a column's type with
+`ALTER [COLUMN] ... [SET DATA] TYPE` must have a same-basename Markdown sidecar
+in `packages/db/migrations` with a nonempty
+`Schema-break upgrade:` note describing compatibility with old binaries, the release
+sequence and required operator steps. Historical `Column-drop upgrade:` notes remain
+accepted. The migration policy test is a static lint that ignores comments and quoted
+strings. Dynamic SQL, `DO` blocks and function bodies are out of scope and need manual
+review. It flags missing notes; never edit published SQL to add one.
+
 ## Sign-in email outbox
 
 `sign_in_emails` is instance-wide authentication delivery state. Every link request writes
@@ -280,7 +327,7 @@ The backfill captures the booking host rows still present at migration time. A h
 before that migration cannot be recovered; these legacy bookings retain only their remaining
 identities. A historical booking with no snapshot and no hosts cannot be rescheduled.
 
-See [collective scheduling](collective-scheduling.md) for assignment, availability and locking.
+See [collective scheduling](https://hourmere.com/docs/collective-scheduling) for assignment, availability and locking.
 
 ## Host reschedule tokens
 
@@ -299,10 +346,19 @@ snapshot plus bounded attempt metadata). The booking transaction captures subscr
 endpoints and queues only delivery IDs. Composite foreign keys keep deliveries in their
 endpoint organization; endpoint/booking/organization deletion cascades snapshots. Runtime
 locks use endpoint then delivery so deletion, pause and rotation cannot deadlock delivery
-through inverse lock order. Details and retention are in [webhooks.md](webhooks.md).
+through inverse lock order. Details and retention are in [Booking webhooks](https://hourmere.com/docs/webhooks).
 
 Migration 0028 adds safe `interrupted`/`job_missing` error classifications for finite retry
 accounting and orphan reconciliation, preserving existing webhook delivery data.
+
+Migration 0034 adds a partial `webhook_deliveries(id)` index for `status = 'pending'`.
+It excludes terminal delivery rows from the index and can supply pending IDs in order.
+It does not guarantee an index scan or a reconciliation plan without `Sort`, and does not
+index pg-boss's retained job history. The migration uses ordinary `CREATE INDEX`, not
+`CREATE INDEX CONCURRENTLY`: creation can wait for writers and blocks writes to
+`webhook_deliveries` while it runs. Allow for that lock when upgrading a busy installation.
+Retention has no status filter and uses the existing `created_at` index; delivery metadata
+pages use the existing `(webhook_id,id)` index in reverse order.
 
 ## Independent conference identities
 
@@ -310,8 +366,43 @@ accounting and orphan reconciliation, preserving existing webhook delivery data.
 `calendar_connections`. It has a stable UUID, owner FK, provider/external-identity uniqueness,
 optional bounded display metadata, minimal scopes, a safe status/error and purpose-bound
 AES-256-GCM ciphertext. A durable `refreshing` operation holds no reusable credentials.
-All operations lock the owner, then the live session, then the connection/state. Provider
-I/O stays bounded under that owner lock; state claims and token retirement commit first.
+Browser and worker connection operations use short transactions that lock the owner,
+then the session (for browser operations), then the connection/state. State claims and
+token retirement commit before bounded provider I/O, which runs without row locks.
+Migration 0035 adds `conference_token_operations`: an owner-keyed, expiring operation UUID
+lease that cascades on user deletion without changing existing connections or OAuth states.
+OAuth only learns the external identity after exchange, so token-changing operations
+serialize by owner. Claims and consumption use short owner-first transactions; no lock or
+pool connection spans provider I/O. Token-changing provider calls have a hard deadline
+(15 seconds by default), with a lease of at least one minute measured by database time.
+Completion checks
+the live lease ID and expiry under a short share lock before storing credentials. Release
+compares the operation ID; a stale operation cannot release a successor. Crash recovery
+can take over an expired lease. Callbacks acquire the lease before claiming OAuth state;
+an occupied lease returns `busy` immediately without inspecting or consuming state or exchanging
+the code. This includes a replay of an already claimed or completed attempt: `busy` does not
+prove that the attempt is valid or reusable. After the lease is released, that replay returns
+`invalid_state` without a second exchange. See [Zoom connections](https://hourmere.com/docs/zoom-connections#callback-replay-and-busy)
+for the distinction from a still-unclaimed retry.
+Explicit refresh returns the legacy `zoom_refresh_in_progress` code with the neutral
+`errorAlias: "zoom_operation_busy"` and a busy/retry message; workers retry while the lease
+is occupied. The legacy code is deprecated but remains unchanged for all of `/api/v1`;
+the alias is additive, and removing or renaming the old code requires a new API version.
+A newly acquired valid lease that finds `refreshing`
+proves the old rotation was abandoned: worker and explicit refresh retire it to
+`needs_reauth`, clearing the old operation and credentials so the user can reconnect.
+Disconnect/logout/deletion do not wait for token operations. Completion rechecks the session
+and claimed state or refresh operation; OAuth additionally checks current acting-organization
+membership at connection start, before exchange and before persistence. Workers check
+credential revisions around identity/meeting I/O and operation/revision around rotation.
+Their best-effort credential retirement skips writes while another token operation owns
+a live lease.
+OAuth expiry is validated with atomic single-use consumption before exchange, without
+rejecting a successful exchange solely because time elapsed. Expiry cleanup retains
+claimed attempts. A wrong-mode identity exchange retires an existing meetings grant even
+if unrelated metadata changed. Logout or session expiry retires a still-owned browser
+refresh claim to `needs_reauth`, clears its operation and credentials, and prevents new
+automatic bookings. If observed before provider I/O, it skips the rotation entirely.
 Transient refresh transport failures retry at most three times with backoff; if they remain
 transient, the operation restores the original encrypted grant as active for later recovery.
 Other token rejections or malformed successful responses also preserve the prior grant;
@@ -333,6 +424,21 @@ usable. New OAuth attempts bind mode and expected connection under v2; retained 
 require a restart without code exchange. See the Zoom setup guide for the
 explicit local-disconnect versus provider-wide revocation distinction.
 
+The optional signed Zoom event endpoint handles `app_deauthorized` using the globally
+unique stored Zoom `external_user_id`. The notification's `account_id` is validated but
+is not persisted or used to widen deletion to other users in that Zoom account. Cleanup
+shares local disconnect's credential, scope, operation and pending-attempt retirement, and
+additionally clears the connection's external ID, email and display name. The secret-free
+disconnected row remains for existing references. Like local disconnect, automatic Zoom
+event types retain activation and configuration, with the saved account unavailable in the
+dashboard editor. Migration 0033 adds nullable `authorized_at`, set on every successful OAuth
+connection/reconsent and unchanged by refresh. Removal events older than that time are ignored
+under the owner lock, preventing delayed deliveries from retiring a new grant. Existing rows
+are not rewritten; a null value uses `created_at` as the only known lower bound.
+Existing booking and conference records follow their existing retention policy; cleanup
+does not contact Zoom or store the event payload. Repeated notifications and unknown users
+make no change. See [automatic Zoom](https://hourmere.com/docs/automatic-zoom#app-removal-and-event-endpoint).
+
 ## Automatic conferences
 
 `booking_conferences` retains one provider intent per opted-in root booking, pinned organizer/destination IDs, desired/applied revision, request identity, create ambiguity, bounded state/error and recoverable operation lease. It intentionally survives calendar/connection deletion. `booking_conference_notifications` is the durable release outbox for final linked messages and no-ICS failure notices; recipient deduplication remains in `booking_notifications`. `calendars.supports_google_meet` is cached capability, default false. `provider` defaults to `google_meet` for old roots. New Zoom roots have independent immutable
@@ -341,13 +447,20 @@ calendar/connection/event identity. `event_types.zoom_connection_id` is private 
 configuration; it is not exposed in public catalogs. `booking_conference_mirrors` preserves
 ordinary calendar targets and unknown-import claims; a single-host Zoom organizer may have
 one such optional copy. The join URL is stored only in the current ready protected booking
-location. See [automatic-google-meet.md](automatic-google-meet.md) and
-[automatic-zoom.md](automatic-zoom.md).
+location. See [Automatic Google Meet](https://hourmere.com/docs/automatic-google-meet) and
+[Automatic Zoom for one host](https://hourmere.com/docs/automatic-zoom).
 
-Protected booking reads hydrate the booking status, cancellation time/reason, resolved
-location and conference state from the same joined snapshot. A cancellation committed
-after the initial booking lookup therefore cannot leave a confirmed booking paired with
-the cancelled conference's cleared link. These reads take no booking row locks.
+Protected booking reads hydrate every booking's status, cancellation time/reason, resolved
+location and optional conference state from one booking-driven LEFT JOIN snapshot, including
+the pinned organizer's availability. Authenticated host reads join only that caller's ordinary
+calendar copy and derive conference retry ownership from the same snapshot; public/manage
+reads neither join copies nor expose host retry controls. If a concurrent reschedule moves
+the conference pointer to a successor after the initial lookup, the predecessor still
+hydrates as cancelled without a conference or join link. The same applies when the successor
+has already been cancelled.
+This reuses the existing hydration query without extra round trips, a transaction-held
+connection or booking row locks. Manage-token resolution and list membership still precede
+hydration; a later read follows a moved token according to the existing token rules.
 
 Migration 0032 indexes the mutable `booking_conferences.booking_id` pointer used by
 booking reads and cancellation. The index is non-unique: the existing schema guarantees
@@ -358,7 +471,7 @@ Migration 0024 adds a persisted attempt count, random bounded lease, safe error 
 exhausted timestamp to each conference notification. Existing due times and delivery flags
 are preserved. Attempt claims commit before SMTP; lease/attempt comparison protects completion
 and the row has a finite initial-attempt-plus-twelve-retry budget across cron executions.
-See [notifications.md](notifications.md#conference-outbox-delivery-budget) for diagnostics,
+See [Notifications and background jobs](https://hourmere.com/docs/notifications#conference-outbox-delivery-budget) for diagnostics,
 legacy-row backfill and the remaining SMTP acceptance/failed-commit duplicate window.
 
 Migration 0026 adds `skipped_at` as a distinct terminal outcome for obsolete conference
@@ -366,10 +479,37 @@ notices. Cancellation, replacement or a closed delivery gate records a skip with
 `delivered=false`; pending conference reconciliation remains eligible for a later attempt.
 The migration preserves existing delivery history and does not update old rows.
 
+Migration 0036 adds nullable `booking_conferences.conference_patch_request_id`. It records
+the acknowledged Meet conference PATCH request identity separately from the import claim.
+Existing rows remain null and keep their original event/request identity, enabling a
+same-ID PATCH for old import-created pending requests. A lost PATCH response reuses the
+same persisted request ID; acknowledged pending requests only poll.
+
+Migration 0037 extends `booking_conferences.error_code`'s CHECK constraint with
+`conference_pending_timeout` for an exhausted pending-conference polling budget. Existing
+error codes and terminal state are preserved without reclassification or requeueing. It
+also drops the unused `retry_conference` column: no reader used that write-only flag, and
+durable `request_id`/`conference_patch_request_id` already distinguish a new conference
+request from safe polling. The public retry endpoint and MCP `retry_conference` tool are
+unaffected. A host timeout retry keeps those identities; a known provider
+`conference_failed` can rotate the UUID on the same event.
+Old web/all/worker processes must stop before applying this migration because they still
+write the removed flag; restart every role with the upgraded code.
+
 ## Round-robin assignment state
 
 Migration 0020 adds `round_robin_state` (event primary key, monotonic `bigint` sequence,
 explicit enabled flag), retained host `last_assigned_sequence`, and immutable booking
 `hosts_use_default_schedule`. Activation and mode changes preserve sequence history;
 new successful bookings update fairness with the booking/outbox transaction. No legacy
-configuration is activated by migration. See [round-robin scheduling](round-robin-scheduling.md).
+configuration is activated by migration. See [round-robin scheduling](https://hourmere.com/docs/round-robin-scheduling).
+
+## Booking calendar email identity
+
+Migration0038 adds `bookings.ical_version` and nullable organizer-name/email snapshots.
+Predecessor rows are v1, with the best surviving host/conference organizer backfilled while
+preserving existing timestamps; newly inserted rows default to v2. Notification workers
+always read the reschedule-chain root's fields. A new root atomically pins its configured
+sending mailbox before its first SMTP invitation; later versions reuse that identity.
+See [calendar invitations](https://hourmere.com/docs/notifications#calendar-invitations) for the coordinated upgrade,
+legacy compatibility, recipient policy and reply limitations.

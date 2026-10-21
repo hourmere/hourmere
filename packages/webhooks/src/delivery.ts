@@ -20,7 +20,7 @@ export interface WebhookQueue {
 export interface WebhookDeps extends WebhookSettings {
   db: Db
   now?: (() => Temporal.Instant) | undefined
-  /** Only isolated fixtures replace the built-in HTTPS/DNS transport. */
+  /** Only isolated fixtures replace the built-in HTTP(S)/DNS transport. */
   transport?: WebhookTransport | undefined
 }
 
@@ -193,6 +193,7 @@ export async function deliverWebhook(
       try {
         status = await (deps.transport ?? sendWebhook)({
           url: endpoint.url,
+          privateTargets: deps.privateTargets,
           body: delivery.payload,
           signal,
           headers: {
@@ -210,9 +211,10 @@ export async function deliverWebhook(
         error = 'transport_error'
       }
     }
-    // Commit shutdown consumption before asking pg-boss to retry. A killed process is
-    // accounted for by the next jobAttempt or by periodic orphan reconciliation.
-    if (signal.aborted) {
+    // A received 2xx acknowledges delivery even if shutdown raced its response. Otherwise
+    // commit shutdown consumption before retrying. A killed process is accounted for by
+    // the next jobAttempt or by periodic orphan reconciliation.
+    if (signal.aborted && (status === null || error !== null)) {
       error = 'interrupted'
       status = null
     }
@@ -242,45 +244,79 @@ export function webhookCleanupJob(db: Db, now = () => Temporal.Now.instant()) {
     policy: 'exclusive',
     schedule: { cron: '*/15 * * * *', payload: {} },
     expireInSeconds: 30,
-    handler: async () => {
+    handler: async (_, { signal }) => {
+      // One orphan batch and one retention batch per dispatch; unfinished work stays for
+      // the next scheduled run. Leave 20s of the 30s pg-boss lease for scheduling/commit.
+      const deadline = performance.now() + 10_000
+      async function batch(
+        phase: 'reconciliation' | 'retention',
+        run: (trx: Db) => Promise<unknown>,
+      ) {
+        if (signal.aborted || performance.now() >= deadline) return
+        try {
+          await db.transaction().execute(async (trx) => {
+            // Pool acquisition may itself have consumed the budget.
+            const remaining = Math.floor(deadline - performance.now())
+            if (signal.aborted || remaining <= 0) return
+            await sql`SELECT
+              set_config('statement_timeout', ${`${Math.min(5000, remaining)}ms`}, true),
+              set_config('lock_timeout', ${`${Math.min(1000, remaining)}ms`}, true)
+            `.execute(trx)
+            if (signal.aborted || performance.now() >= deadline) return
+            await run(trx)
+          })
+        } catch (error) {
+          // A canceled or lock-unavailable batch rolls back completely. Retry next pass rather than
+          // overrunning the lease; unrelated SQL failures must still fail the job.
+          const code = (error as { code?: string } | null)?.code
+          if (code !== '57014' && code !== '55P03') throw error
+          // SQL error text can contain private data. Log only fixed metadata and the
+          // recognized SQLSTATE so a repeatedly deferred phase stays observable.
+          console.warn(JSON.stringify({ event: 'webhook_cleanup_deferred', phase, code }))
+        }
+      }
       // Capture and enqueue are atomic. A visible pending row with no created/retry/active
       // job cannot make progress. Keep this test in the UPDATE statement and skip locked
       // deliveries so reconciliation never races an in-flight acknowledgement.
       // pg-boss is pinned; its schema belongs to pg-boss and is never migrated here.
-      await sql`
-        WITH orphaned AS (
-          SELECT d.id FROM webhook_deliveries d
-          WHERE d.status = 'pending' AND NOT EXISTS (
-            SELECT 1 FROM pgboss.job j
-            WHERE j.name = ${WEBHOOK_DELIVERY_JOB} AND j.singleton_key = d.id::text
-              AND j.state IN ('created', 'retry', 'active')
-          )
+      await batch('reconciliation', (trx) =>
+        sql`
+        WITH job_history AS MATERIALIZED (
+          -- Keep only pending keys before aggregating. Reuse one retained-job scan for
+          -- liveness and attempts; hashing all retained jobs can spill as history grows.
+          -- No time/policy cutoff: even an old or differently configured live job protects
+          -- its delivery, and every retained attempt contributes to the maximum.
+          SELECT j.singleton_key,
+            BOOL_OR(j.state IN ('created', 'retry', 'active')) AS live,
+            MAX(CASE WHEN j.started_on IS NULL THEN 0 ELSE j.retry_count + 1 END) AS attempts
+          FROM pgboss.job j
+          WHERE j.name = ${WEBHOOK_DELIVERY_JOB}
+            AND j.singleton_key IN (
+              SELECT p.id::text FROM webhook_deliveries p WHERE p.status = 'pending'
+            )
+          GROUP BY j.singleton_key
+        ), orphaned AS MATERIALIZED (
+          SELECT d.id, h.attempts FROM webhook_deliveries d
+          LEFT JOIN job_history h ON h.singleton_key = d.id::text
+          WHERE d.status = 'pending' AND NOT COALESCE(h.live, false)
           ORDER BY d.id LIMIT 1000 FOR UPDATE OF d SKIP LOCKED
         )
         UPDATE webhook_deliveries d SET status = 'failed', last_error = 'job_missing',
-          attempts = LEAST(13, GREATEST(d.attempts, COALESCE((
-            SELECT MAX(CASE WHEN j.started_on IS NULL THEN 0 ELSE j.retry_count + 1 END)
-            FROM pgboss.job j
-            WHERE j.name = ${WEBHOOK_DELIVERY_JOB} AND j.singleton_key = d.id::text
-          ), 0)))
-        FROM orphaned o WHERE d.id = o.id AND d.status = 'pending'
-      `.execute(db)
-      const expired = await db
-        .selectFrom('webhook_deliveries')
-        .select('id')
-        .where('created_at', '<', new Date(now().subtract({ hours: 24 * 30 }).epochMilliseconds))
-        .orderBy('id')
-        .limit(1000)
-        .execute()
-      if (expired.length)
-        await db
-          .deleteFrom('webhook_deliveries')
-          .where(
-            'id',
-            'in',
-            expired.map((row) => row.id),
-          )
-          .execute()
+          attempts = LEAST(13, GREATEST(d.attempts, COALESCE(o.attempts, 0)))
+        FROM orphaned o
+        WHERE d.id = o.id AND d.status = 'pending'
+      `.execute(trx),
+      )
+      await batch('retention', (trx) =>
+        sql`
+        WITH expired AS (
+          SELECT id FROM webhook_deliveries
+          WHERE created_at < ${new Date(now().subtract({ hours: 24 * 30 }).epochMilliseconds)}
+          ORDER BY created_at, id LIMIT 1000 FOR UPDATE SKIP LOCKED
+        )
+        DELETE FROM webhook_deliveries d USING expired e WHERE d.id = e.id
+      `.execute(trx),
+      )
     },
   })
 }

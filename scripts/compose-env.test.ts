@@ -104,6 +104,39 @@ describe('documented Compose configuration', () => {
     expect(compose).toMatch(/^ {6}ZOOM_MEETINGS_ENABLED: \$\{ZOOM_MEETINGS_ENABLED:-false\}$/m)
   })
 
+  it('forwards operator policy links without supplying a hosted policy for self-hosted instances', () => {
+    const environment = composeAppEnvironment(compose)
+    for (const key of ['PRIVACY_POLICY_URL', 'TERMS_URL']) {
+      expect(environment.get(key)).toBe(`\${${key}:-}`)
+      expect(example).toMatch(new RegExp(`^${key}=$`, 'm'))
+      const row = reference.split('\n').find((line) => line.startsWith(`| \`${key}\` |`))
+      expect(row).toContain('| Unset |')
+    }
+  })
+
+  it('forwards the optional Zoom webhook token without enabling it by default', () => {
+    expect(composeAppEnvironment(compose).get('ZOOM_WEBHOOK_SECRET_TOKEN') ?? '').toMatch(
+      /^\$\{ZOOM_WEBHOOK_SECRET_TOKEN:-\}$/,
+    )
+    expect(example).toMatch(/^ZOOM_WEBHOOK_SECRET_TOKEN=$/m)
+    const row = reference
+      .split('\n')
+      .find((line) => line.startsWith('| `ZOOM_WEBHOOK_SECRET_TOKEN` |'))
+    expect(row).toContain('| Unset |')
+  })
+
+  it('keeps private webhook destinations empty by default', () => {
+    expect(composeAppEnvironment(compose).get('WEBHOOK_PRIVATE_TARGETS') ?? '').toMatch(
+      /^\$\{WEBHOOK_PRIVATE_TARGETS:-\}$/,
+    )
+    expect(example).toMatch(/^WEBHOOK_PRIVATE_TARGETS=$/m)
+    const row = reference
+      .split('\n')
+      .find((line) => line.startsWith('| `WEBHOOK_PRIVATE_TARGETS` |'))
+    expect(row).toContain('| Unset |')
+    expect(reference).toContain('Hourmere Cloud MUST NEVER set')
+  })
+
   it('forwards automatic migrations with the documented true default', () => {
     expect(composeAppEnvironment(compose).get('AUTO_MIGRATE')).toMatch(/^\$\{AUTO_MIGRATE:-true\}$/)
     const row = reference.split('\n').find((line) => line.startsWith('| `AUTO_MIGRATE` |'))

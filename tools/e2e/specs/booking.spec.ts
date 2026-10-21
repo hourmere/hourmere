@@ -12,6 +12,22 @@ for (const kind of ['personal', 'team'] as const)
     )
     await page.goto(app.url + (kind === 'team' ? app.teamPath : app.personalPath))
     await slots
+    // The language control stays in a compact top-right header at both project widths.
+    const header = page.locator('.public-language')
+    const language = header.getByRole('combobox', { name: 'Interface language' })
+    await expect(language).toBeVisible()
+    const headerBox = await header.boundingBox()
+    const languageBox = await language.boundingBox()
+    const cardBox = await page.locator('.booking-layout').boundingBox()
+    const mainBox = await page.locator('.public-main').boundingBox()
+    expect(Boolean(headerBox && languageBox && cardBox && mainBox)).toBe(true)
+    if (headerBox && languageBox && cardBox && mainBox) {
+      expect(headerBox.y).toBeLessThan(20)
+      expect(headerBox.height).toBeLessThan(80)
+      expect(languageBox.x + languageBox.width).toBeGreaterThan(mainBox.x + mainBox.width - 50)
+      expect(cardBox.y).toBeGreaterThanOrEqual(headerBox.y + headerBox.height)
+      expect(cardBox.y).toBeLessThan(160)
+    }
     expect(
       await page.evaluate(
         () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
@@ -79,6 +95,100 @@ test('an invitee can reschedule then cancel through a scrubbed manage-token frag
   expect(managedRequests.every((r) => r.hasHeader && !r.queryHasToken && !r.hasReferrer)).toBe(true)
 })
 
+test('a host moves a booking on the web and the original invitee link opens its successor', async ({
+  page,
+  app,
+}) => {
+  await page.goto(app.url + app.personalPath)
+  await pickSlot(page, page)
+  await fillInvitee(page)
+  const creating = page.waitForResponse(
+    (response) => response.request().method() === 'POST' && response.url().endsWith('/bookings'),
+  )
+  await page.getByRole('button', { name: 'Confirm booking' }).click()
+  const original = (await (await creating).json()) as {
+    booking: { id: string; start: string }
+  }
+  await expect(page.getByRole('heading', { name: 'You’re booked', exact: true })).toBeVisible()
+  const inviteeLink = await page
+    .getByLabel('Your link to change or cancel this booking')
+    .inputValue()
+  expect(Boolean(new URL(inviteeLink).hash)).toBe(true)
+
+  await app.authorizeHost()
+  const hostRequests: { hasManageToken: boolean }[] = []
+  page.on('request', (request) => {
+    const path = new URL(request.url()).pathname
+    if (!path.startsWith(`/api/v1/bookings/${original.booking.id}/`)) return
+    const headers = request.headers()
+    hostRequests.push({
+      hasManageToken: Boolean(headers['x-manage-token']),
+    })
+  })
+  await page.goto(`${app.url}/app/bookings/${original.booking.id}`)
+  const slots = page.waitForResponse(
+    (response) =>
+      new URL(response.url()).pathname === `/api/v1/bookings/${original.booking.id}/slots` &&
+      response.status() === 200,
+  )
+  await page.getByRole('button', { name: 'Reschedule', exact: true }).click()
+  await slots
+  await pickSlot(page, page)
+  const moving = page.waitForResponse(
+    (response) =>
+      response.request().method() === 'POST' &&
+      new URL(response.url()).pathname === `/api/v1/bookings/${original.booking.id}/reschedule`,
+  )
+  await page.getByRole('button', { name: 'Confirm new time', exact: true }).click()
+  const response = await moving
+  expect(response.status()).toBe(200)
+  const moved = (await response.json()) as {
+    booking: { id: string; start: string; status: string; rescheduledFromId: string }
+    manageToken: unknown
+  }
+  expect(moved.manageToken === null).toBe(true)
+  expect(moved.booking.id !== original.booking.id).toBe(true)
+  expect(moved.booking.start !== original.booking.start).toBe(true)
+  expect(moved.booking.status).toBe('confirmed')
+  expect(moved.booking.rescheduledFromId).toBe(original.booking.id)
+  expect(response.request().postDataJSON()).toEqual({ start: moved.booking.start })
+  await expect(page).toHaveURL(`${app.url}/app/bookings/${moved.booking.id}`)
+  await expect(
+    page.getByText('The booking is moved to the new time.', { exact: true }),
+  ).toBeVisible()
+  await expect(page.locator('.when time')).toHaveAttribute('datetime', moved.booking.start)
+  expect(hostRequests.length >= 2).toBe(true)
+  expect(hostRequests.every((request) => !request.hasManageToken)).toBe(true)
+
+  await page.goto(`${app.url}/booking`)
+  await expect(page.getByRole('heading', { name: 'Open your booking link' })).toBeVisible()
+  const opening = page.waitForResponse(
+    (result) => new URL(result.url()).pathname === '/api/v1/bookings/manage',
+  )
+  await page.evaluate((link) => {
+    window.location.hash = new URL(link).hash
+  }, inviteeLink)
+  const opened = await opening
+  expect(opened.status()).toBe(200)
+  expect(Boolean(opened.request().headers().authorization)).toBe(false)
+  const managed = (await opened.json()) as { id: string; start: string; status: string }
+  expect(managed.id).toBe(moved.booking.id)
+  expect(managed.start).toBe(moved.booking.start)
+  expect(managed.status).toBe('confirmed')
+  await expect(page.getByRole('heading', { name: 'Your booking', exact: true })).toBeVisible()
+  await expect(page.locator('.booking-details time')).toHaveAttribute(
+    'datetime',
+    moved.booking.start,
+  )
+  await expect(page.getByRole('button', { name: 'Reschedule', exact: true })).toBeVisible()
+  expect(await page.evaluate(() => window.location.hash === '')).toBe(true)
+  expect((await app.bookingState()).successors).toBe(1)
+  expect(await app.rows()).toEqual([
+    { source: 'web', status: 'cancelled' },
+    { source: 'api', status: 'confirmed' },
+  ])
+})
+
 test('a stale public form recovers from a real database booking conflict', async ({
   page,
   context,
@@ -121,15 +231,32 @@ test('popup booking keeps completion data private and supports cross-frame Escap
   app,
 }) => {
   await page.goto(app.parentUrl)
+  await page.addStyleTag({
+    content:
+      'div { text-transform: uppercase; } h2 { color: red !important; text-transform: uppercase !important; } button { all: unset !important; } dialog { display: none !important; }',
+  })
+  await page.evaluate(() => {
+    const policy = document.createElement('meta')
+    policy.httpEquiv = 'Content-Security-Policy'
+    policy.content = "style-src 'none'"
+    document.head.append(policy)
+  })
   const opener = page.getByRole('button', { name: 'Book a meeting', exact: true })
   await opener.click()
   const dialog = page.getByRole('dialog'),
     frame = dialog.locator('iframe').contentFrame()
+  await expect(dialog).toHaveCSS('color-scheme', 'light dark')
+  await expect(dialog.getByRole('heading', { name: 'Book a meeting' })).toHaveCSS(
+    'text-transform',
+    'none',
+  )
+  await expect(dialog.getByRole('button', { name: 'Close booking' })).toHaveCSS('width', '44px')
+  await expect(dialog.getByRole('button', { name: 'Close booking' })).toHaveCSS('height', '44px')
   await expect(frame.getByRole('heading', { name: 'Fixture call' })).toBeVisible()
   expect(
-    await page.evaluate(() => {
-      const bounds = document.querySelector('dialog')?.getBoundingClientRect()
-      return Boolean(bounds && bounds.left >= 0 && bounds.right <= innerWidth)
+    await dialog.evaluate((element) => {
+      const bounds = element.getBoundingClientRect()
+      return bounds.left >= 0 && bounds.right <= innerWidth
     }),
   ).toBe(true)
   expect(
@@ -142,13 +269,13 @@ test('popup booking keeps completion data private and supports cross-frame Escap
   await expect(dialog).toHaveCount(0)
   await expect(opener).toBeFocused()
   await opener.click()
-  await page.evaluate((url) => {
+  await dialog.evaluate((element, url) => {
     const state = window as unknown as {
       Hourmere: { openPopup: (options: { url: string }) => unknown }
       retiredCloseCount: number
     }
     state.retiredCloseCount = 0
-    document.querySelector('dialog')?.addEventListener('close', () => state.retiredCloseCount++)
+    element.addEventListener('close', () => state.retiredCloseCount++)
     state.Hourmere.openPopup({ url })
   }, app.url + app.personalPath)
   await expect
@@ -157,8 +284,8 @@ test('popup booking keeps completion data private and supports cross-frame Escap
     )
     .toBe(1)
   await expect(dialog).toHaveCount(1)
-  const rejected = await page.evaluate(() => {
-    const current = document.querySelector('dialog'),
+  const rejected = await dialog.evaluate((element) => {
+    const current = element as HTMLDialogElement,
       widget = (
         window as unknown as { Hourmere: { openPopup: (options: { url: string }) => unknown } }
       ).Hourmere
@@ -176,7 +303,7 @@ test('popup booking keeps completion data private and supports cross-frame Escap
         widget.openPopup({ url: `${origin}/fixture-host/call` })
         return false
       } catch {
-        return document.querySelector('dialog') === current && Boolean(current?.open)
+        return current.isConnected && current.open
       }
     })
   })

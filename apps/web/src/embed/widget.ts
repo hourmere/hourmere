@@ -14,7 +14,128 @@ export interface EmbedHandle {
   destroy: () => void
 }
 const mounted = new WeakMap<HTMLElement, EmbedHandle>()
-let popup: { dialog: HTMLDialogElement; handle: EmbedHandle; previous: Element | null } | undefined
+let popup:
+  | {
+      dialog: HTMLDialogElement
+      host: HTMLElement
+      handle: EmbedHandle
+      previous: Element | null
+      restoreScroll: () => void
+    }
+  | undefined
+
+// Inside the shadow root, host-page resets cannot restyle the dialog or its controls.
+const popupStyles = `
+  dialog {
+    all: revert;
+    color-scheme: light dark;
+    font: 16px/1.5 system-ui, sans-serif;
+    text-align: start;
+    direction: ltr;
+    color: CanvasText;
+    background: Canvas;
+    border: 1px solid GrayText;
+    border-radius: 12px;
+    box-sizing: border-box;
+    width: min(1000px, calc(100vw - 24px));
+    max-width: 1000px;
+    max-height: 90vh;
+    max-height: 90dvh;
+    margin: auto;
+    padding: 16px;
+    overflow: hidden;
+    overscroll-behavior: contain;
+  }
+  dialog[open] { display: flex; flex-direction: column; gap: 12px; }
+  dialog::backdrop { background: rgb(0 0 0 / .5); }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  h2 { font: 600 18px/1.5 system-ui, sans-serif; margin: 0; }
+  button {
+    appearance: none;
+    flex: none;
+    width: 44px;
+    height: 44px;
+    box-sizing: border-box;
+    display: grid;
+    place-items: center;
+    margin: 0;
+    padding: 0;
+    border: 1px solid GrayText;
+    border-radius: 8px;
+    background: Canvas;
+    color: CanvasText;
+    font: 28px/1 system-ui, sans-serif;
+    cursor: pointer;
+  }
+  button:focus-visible { outline: 2px solid Highlight; outline-offset: 2px; }
+  .content { min-height: 0; overflow: auto; overscroll-behavior: contain; }
+  @media (max-width: 480px), (max-height: 480px) {
+    dialog {
+      width: 100vw;
+      max-width: 100vw;
+      height: 100vh;
+      height: 100dvh;
+      max-height: 100vh;
+      max-height: 100dvh;
+      margin: 0;
+      padding: 0;
+      border: 0;
+      border-radius: 0;
+    }
+    header { padding: 8px 12px 0; }
+    .content { flex: 1; }
+  }
+`
+
+function lockBackgroundScroll() {
+  const properties = [
+    'overflow',
+    'overflow-x',
+    'overflow-y',
+    'scrollbar-gutter',
+    'padding',
+    'padding-top',
+    'padding-right',
+    'padding-bottom',
+    'padding-left',
+  ] as const
+  const originals = [document.documentElement, document.body].map((element) => ({
+    element,
+    values: properties.map((name) => ({
+      name,
+      value: element.style.getPropertyValue(name),
+      priority: element.style.getPropertyPriority(name),
+    })),
+  }))
+  const root = document.documentElement
+  const scrollbarWidth = Math.max(0, window.innerWidth - root.clientWidth)
+  if (
+    scrollbarWidth > 0 &&
+    typeof CSS !== 'undefined' &&
+    CSS.supports?.('scrollbar-gutter', 'stable')
+  ) {
+    // Retain a host's existing both-edges policy without adding padding as well.
+    const gutter = getComputedStyle(root).getPropertyValue('scrollbar-gutter')
+    root.style.setProperty(
+      'scrollbar-gutter',
+      gutter.includes('stable') ? gutter : 'stable',
+      'important',
+    )
+  } else if (scrollbarWidth > 0) {
+    // Safari before 18.2 has no stable gutter. Replace the disappearing scrollbar
+    // with padding, keeping any padding the host page already has.
+    const padding = Number.parseFloat(getComputedStyle(document.body).paddingRight) || 0
+    document.body.style.setProperty('padding-right', `${padding + scrollbarWidth}px`, 'important')
+  }
+  for (const { element } of originals) element.style.setProperty('overflow', 'hidden', 'important')
+  return () => {
+    for (const { element, values } of originals) {
+      for (const name of properties) element.style.removeProperty(name)
+      for (const { name, value, priority } of values)
+        if (value) element.style.setProperty(name, value, priority)
+    }
+  }
+}
 
 /** Validated booking URLs cannot turn this helper into a general-purpose iframe loader. */
 export function iframeUrl(
@@ -133,10 +254,14 @@ export function closePopup() {
   if (!current) return
   popup = undefined
   current.handle.destroy()
-  current.dialog.close()
-  current.dialog.remove()
-  if (current.previous instanceof HTMLElement && current.previous.isConnected)
-    current.previous.focus()
+  try {
+    current.dialog.close()
+  } finally {
+    current.restoreScroll()
+    current.host.remove()
+    if (current.previous instanceof HTMLElement && current.previous.isConnected)
+      current.previous.focus()
+  }
 }
 export function openPopup({ url, language }: { url: string; language?: InterfaceLanguage }) {
   const selectedLanguage = widgetLanguage(language),
@@ -145,35 +270,34 @@ export function openPopup({ url, language }: { url: string; language?: Interface
   iframeUrl(url, window.location.origin, randomHex(16))
   closePopup()
   const previous = document.activeElement,
+    host = document.createElement('div'),
+    root = host.attachShadow({ mode: 'open' }),
     dialog = document.createElement('dialog'),
+    header = document.createElement('header'),
     title = document.createElement('h2'),
     close = document.createElement('button'),
     holder = document.createElement('div')
+  host.setAttribute('data-hourmere-popup-host', '')
+  host.style.setProperty('all', 'initial', 'important')
+  host.style.setProperty('display', 'contents', 'important')
+  // Constructed sheets also work when a host CSP disallows inline <style> elements.
+  if ('adoptedStyleSheets' in root && typeof CSSStyleSheet.prototype.replaceSync === 'function') {
+    const sheet = new CSSStyleSheet()
+    sheet.replaceSync(popupStyles)
+    root.adoptedStyleSheets = [sheet]
+  } else {
+    const style = document.createElement('style')
+    style.textContent = popupStyles
+    root.append(style)
+  }
   title.id = `hourmere-title-${randomHex(16)}`
   title.textContent = text.title
+  dialog.lang = selectedLanguage
   dialog.setAttribute('aria-labelledby', title.id)
-  Object.assign(dialog.style, {
-    width: 'min(1000px, calc(100vw - 24px))',
-    maxWidth: '1000px',
-    maxHeight: '90vh',
-    padding: '16px',
-    border: '1px solid #888',
-    borderRadius: '12px',
-    background: '#fff',
-    color: '#111',
-    overflow: 'auto',
-    boxSizing: 'border-box',
-  })
-  Object.assign(title.style, { font: '600 18px system-ui', margin: '0 0 12px' })
   close.type = 'button'
-  close.textContent = text.close
+  close.textContent = '×'
   close.setAttribute('aria-label', text.closeLabel)
-  Object.assign(close.style, {
-    font: 'inherit',
-    marginBottom: '12px',
-    padding: '8px 16px',
-    cursor: 'pointer',
-  })
+  holder.className = 'content'
   // A retiring dialog's queued events and stale handle cannot close its replacement.
   const closeCurrent = () => {
     if (popup?.dialog === dialog) closePopup()
@@ -185,31 +309,58 @@ export function openPopup({ url, language }: { url: string; language?: Interface
   })
   dialog.addEventListener('close', closeCurrent)
   dialog.addEventListener('click', (event) => {
-    if (event.target === dialog) closeCurrent()
+    if (event.target !== dialog) return
+    const rect = dialog.getBoundingClientRect()
+    if (
+      event.clientX < rect.left ||
+      event.clientX > rect.right ||
+      event.clientY < rect.top ||
+      event.clientY > rect.bottom
+    )
+      closeCurrent()
   })
-  dialog.append(title, close, holder)
-  document.body.append(dialog)
+  header.append(title, close)
+  dialog.append(header, holder)
+  root.append(dialog)
+  document.body.append(host)
   try {
     const handle = initInline({ element: holder, url, language: selectedLanguage })
     handle.iframe.removeAttribute('loading')
-    popup = { dialog, handle, previous }
+    popup = { dialog, host, handle, previous, restoreScroll: lockBackgroundScroll() }
     dialog.showModal()
     close.focus()
     return { close: closeCurrent }
   } catch (error) {
-    popup?.handle.destroy()
-    popup = undefined
-    dialog.remove()
+    if (popup?.dialog === dialog) {
+      popup.handle.destroy()
+      popup.restoreScroll()
+      popup = undefined
+    }
+    host.remove()
+    if (previous instanceof HTMLElement && previous.isConnected) previous.focus()
     throw error
   }
 }
 
 const buttons = new WeakSet<HTMLElement>()
-function errorMessage(element: HTMLElement, language?: InterfaceLanguage) {
-  const status = document.createElement('p')
-  status.setAttribute('role', 'alert')
+const errors = new WeakMap<HTMLElement, HTMLParagraphElement>()
+function clearError(element: HTMLElement) {
+  errors.get(element)?.remove()
+  errors.delete(element)
+}
+function errorMessage(
+  element: HTMLElement,
+  language?: InterfaceLanguage,
+  container: HTMLElement = element,
+) {
+  let status = errors.get(element)
+  if (!status) {
+    status = document.createElement('p')
+    status.setAttribute('role', 'alert')
+    errors.set(element, status)
+  }
   status.textContent = widgetMessages(widgetLanguage(language)).failure
-  element.append(status)
+  container.append(status)
 }
 export function init() {
   for (const element of document.querySelectorAll<HTMLElement>('[data-hourmere-inline]')) {
@@ -219,7 +370,11 @@ export function init() {
         element,
         url: element.getAttribute('data-hourmere-url') ?? '',
         language: widgetLanguage(element.getAttribute('data-hourmere-language') ?? undefined),
+        height: element.hasAttribute('data-hourmere-height')
+          ? Number(element.getAttribute('data-hourmere-height'))
+          : undefined,
       })
+      clearError(element)
     } catch {
       errorMessage(element, explicitLanguage(element.getAttribute('data-hourmere-language')))
     }
@@ -235,10 +390,12 @@ export function init() {
           url: element.getAttribute('data-hourmere-url') ?? '',
           language: widgetLanguage(element.getAttribute('data-hourmere-language') ?? undefined),
         })
+        clearError(element)
       } catch {
         errorMessage(
-          element.parentElement ?? element,
+          element,
           explicitLanguage(element.getAttribute('data-hourmere-language')),
+          element.parentElement ?? element,
         )
       }
     })

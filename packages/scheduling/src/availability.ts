@@ -47,7 +47,7 @@ const LATEST_RANGE_END = Temporal.Instant.from('9999-12-01T00:00:00Z')
 const HANDLE = /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/
 const SLUG = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/
 
-/** RFC 3339 in UTC with milliseconds, e.g. `2026-10-15T09:30:00.000Z` (docs/api-conventions.md). */
+/** RFC 3339 in UTC with milliseconds, e.g. `2026-10-15T09:30:00.000Z` (https://hourmere.com/docs/api-conventions). */
 export function toIso(instant: Temporal.Instant): string {
   return instant.toString({ fractionalSecondDigits: 3 })
 }

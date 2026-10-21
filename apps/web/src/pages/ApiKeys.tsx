@@ -11,6 +11,9 @@ import {
 } from '../api/auth.ts'
 import { errorMessage, RequestError } from '../api/errors.ts'
 import { CopyButton } from '../components/CopyButton.tsx'
+import { EmptyState } from '../components/EmptyState.tsx'
+import { PageHeader } from '../components/PageHeader.tsx'
+import { PageSkeleton } from '../components/PageSkeleton.tsx'
 import { useLoad, usePageTitle } from '../hooks.ts'
 import { useI18n } from '../i18n/runtime.tsx'
 import { msg, type UiText } from '../i18n/translate.ts'
@@ -26,19 +29,21 @@ const EXPIRY_OPTIONS = [
   { value: String(365 * DAY), label: 'In 1 year' },
 ] as const
 
-function formatDate(iso: string, locale: string | undefined, withTime = false) {
+function formatDate(iso: string, locale: string | undefined) {
   const date = new Date(iso)
   const full = new Intl.DateTimeFormat(locale, {
     calendar: 'gregory',
     dateStyle: 'medium',
     timeStyle: 'short',
   })
-  const format = withTime
-    ? full
-    : new Intl.DateTimeFormat(locale, { calendar: 'gregory', dateStyle: 'medium' })
   return (
-    <time dateTime={iso} title={full.format(date)}>
-      {format.format(date)}
+    <time className="date-time" dateTime={iso} title={full.format(date)}>
+      <span>
+        {new Intl.DateTimeFormat(locale, { calendar: 'gregory', dateStyle: 'medium' }).format(date)}
+      </span>{' '}
+      <span>
+        {new Intl.DateTimeFormat(locale, { calendar: 'gregory', timeStyle: 'short' }).format(date)}
+      </span>
     </time>
   )
 }
@@ -54,7 +59,7 @@ const curlExample = (key: string) =>
   `curl -H "Authorization: Bearer ${key}" ${window.location.origin}/api/v1/me`
 
 export function ApiKeysPage() {
-  const { t, ui } = useI18n()
+  const { t, uiText: ui } = useI18n()
 
   usePageTitle('API keys')
   const me = useMe()
@@ -65,12 +70,12 @@ export function ApiKeysPage() {
 
   return (
     <>
-      <h1>{t('API keys')}</h1>
-      <p className="lede">
-        {t(
+      <PageHeader
+        title={t('API keys')}
+        lede={t(
           'API keys let AI agents and scripts use Hourmere for you, through the same API as this app. Each key acts in one organization and can do anything you can do there, so treat it like a password.',
         )}
-      </p>
+      />
 
       {created ? (
         <NewKey
@@ -99,7 +104,7 @@ export function ApiKeysPage() {
         <p className="copy-status" role="status">
           {ui(status)}
         </p>
-        {keys.status === 'loading' && <p role="status">{t('Loading keys…')}</p>}
+        {keys.status === 'loading' && <PageSkeleton label="Loading keys…" />}
         {keys.status === 'error' && (
           <div className="alert alert-error" role="alert">
             <p>
@@ -112,7 +117,16 @@ export function ApiKeysPage() {
         )}
         {keys.status === 'ready' &&
           (keys.data.keys.length === 0 ? (
-            <p className="muted">{t('You have no API keys yet.')}</p>
+            <EmptyState
+              title={t('You have no API keys yet.')}
+              action={
+                <a className="button" href="#key-name">
+                  {t('Create your first key')}
+                </a>
+              }
+            >
+              <p>{t('Give the key a name above, then choose Create key.')}</p>
+            </EmptyState>
           ) : (
             <KeyTable
               keys={keys.data.keys}
@@ -135,7 +149,14 @@ export function ApiKeysPage() {
           )}
         </p>
         <div className="code-block">
-          <pre>
+          {/* biome-ignore lint/a11y/useSemanticElements: preserve command formatting on the scrollable region. */}
+          <pre
+            data-layout-scroll="horizontal"
+            // biome-ignore lint/a11y/noNoninteractiveTabindex: keyboard users need to focus the scrolling element.
+            tabIndex={0}
+            role="region"
+            aria-label={t('API key usage command')}
+          >
             <code>{curlExample('hm_…')}</code>
           </pre>
           <CopyButton text={curlExample('hm_…')} label={t('Copy command')} />
@@ -158,7 +179,7 @@ function CreateKeyForm({
   organization: Me['organization']
   onCreated: (key: CreatedApiKey) => void
 }) {
-  const { t, ui } = useI18n()
+  const { t, text, uiText: ui } = useI18n()
 
   const [name, setName] = useState('')
   const [expiresIn, setExpiresIn] = useState('')
@@ -232,7 +253,7 @@ function CreateKeyForm({
             autoComplete="off"
           />
           <p id={nameHint} className="hint">
-            {t('Where the key will be used, e.g. “Claude Desktop”.')}
+            {text('Where the key will be used, e.g. “Claude Desktop”.')}
           </p>
         </div>
         <div className="field">
@@ -260,7 +281,7 @@ function CreateKeyForm({
 
 /** The new key's secret, shown this once: Better Auth stores only a hash of it. */
 function NewKey({ apiKey, onDone }: { apiKey: CreatedApiKey; onDone: () => void }) {
-  const { t } = useI18n()
+  const { t, text } = useI18n()
 
   const heading = useRef<HTMLHeadingElement>(null)
   useEffect(() => heading.current?.focus(), [])
@@ -268,8 +289,7 @@ function NewKey({ apiKey, onDone }: { apiKey: CreatedApiKey; onDone: () => void 
   return (
     <section aria-labelledby="new-key-heading" className="panel panel-success">
       <h2 id="new-key-heading" ref={heading} tabIndex={-1}>
-        {t('Copy your new key “')}
-        {apiKey.name}”
+        {text('Copy your new key “{name}”', { name: apiKey.name ?? '' })}
       </h2>
       <p>
         <strong>{t('You won’t be able to see this key again.')}</strong>{' '}
@@ -293,7 +313,14 @@ function NewKey({ apiKey, onDone }: { apiKey: CreatedApiKey; onDone: () => void 
       </div>
       <p>{t('Check that it works:')}</p>
       <div className="code-block">
-        <pre>
+        {/* biome-ignore lint/a11y/useSemanticElements: preserve command formatting on the scrollable region. */}
+        <pre
+          data-layout-scroll="horizontal"
+          // biome-ignore lint/a11y/noNoninteractiveTabindex: keyboard users need to focus the scrolling element.
+          tabIndex={0}
+          role="region"
+          aria-label={t('New API key test command')}
+        >
           <code>{curlExample(apiKey.key)}</code>
         </pre>
         <CopyButton text={curlExample(apiKey.key)} label={t('Copy command')} />
@@ -334,64 +361,84 @@ function KeyTable({
 
   const now = Date.now()
   return (
-    <table className="table">
-      <thead>
-        <tr>
-          <th scope="col">{t('Name')}</th>
-          <th scope="col">{t('Key')}</th>
-          <th scope="col">{t('Organization')}</th>
-          <th scope="col">{t('Created')}</th>
-          <th scope="col">{t('Last used')}</th>
-          <th scope="col">{t('Expires')}</th>
-          <th scope="col">
-            <span className="visually-hidden">{t('Actions')}</span>
-          </th>
-        </tr>
-      </thead>
-      <tbody>
-        {keys.map((key) => (
-          <tr key={key.id}>
-            <th scope="row" data-label={t('Name')}>
-              {key.name || <span className="muted">{t('Unnamed')}</span>}
-              {!key.enabled && <span className="badge">{t('Disabled')}</span>}
+    <div className="table-container">
+      <table className="table table-api-keys">
+        <thead>
+          <tr>
+            <th scope="col">{t('Name')}</th>
+            <th scope="col" className="fit nowrap">
+              {t('Key')}
             </th>
-            <td data-label={t('Key')}>
-              <code>{key.start ? `${key.start}…` : '…'}</code>
-            </td>
-            <td data-label={t('Organization')}>{organizationOf(key, organizations, t)}</td>
-            <td data-label={t('Created')}>{formatDate(key.createdAt, displayLocale)}</td>
-            <td data-label={t('Last used')}>
-              {key.lastRequest ? (
-                formatDate(key.lastRequest, displayLocale, true)
-              ) : (
-                <span className="muted">{t('Never')}</span>
-              )}
-            </td>
-            <td data-label={t('Expires')}>
-              {key.expiresAt === null ? (
-                <span className="muted">{t('Never')}</span>
-              ) : (
-                <>
-                  {new Date(key.expiresAt).getTime() <= now && (
-                    <span className="badge badge-danger">{t('Expired')}</span>
-                  )}
-                  {formatDate(key.expiresAt, displayLocale)}
-                </>
-              )}
-            </td>
-            <td className="actions">
-              <RevokeButton apiKey={key} onRevoked={onRevoked} />
-            </td>
+            <th scope="col">{t('Organization')}</th>
+            <th scope="col" className="fit nowrap">
+              {t('Created')}
+            </th>
+            <th scope="col" className="fit nowrap">
+              {t('Last used')}
+            </th>
+            <th scope="col" className="fit nowrap">
+              {t('Expires')}
+            </th>
+            <th scope="col" className="fit">
+              <span className="visually-hidden">{t('Actions')}</span>
+            </th>
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {keys.map((key) => (
+            <tr key={key.id}>
+              <th scope="row" data-label={t('Name')} className="user-content">
+                {key.name || <span className="muted">{t('Unnamed')}</span>}
+                {!key.enabled && <span className="badge">{t('Disabled')}</span>}
+              </th>
+              <td data-label={t('Key')} className="fit nowrap">
+                <div className="table-value">
+                  <code>{key.start ? `${key.start}…` : '…'}</code>
+                </div>
+              </td>
+              <td data-label={t('Organization')} className="user-content">
+                <div className="table-value">{organizationOf(key, organizations, t)}</div>
+              </td>
+              <td data-label={t('Created')} className="fit">
+                <div className="table-value">{formatDate(key.createdAt, displayLocale)}</div>
+              </td>
+              <td data-label={t('Last used')} className="fit">
+                <div className="table-value">
+                  {key.lastRequest ? (
+                    formatDate(key.lastRequest, displayLocale)
+                  ) : (
+                    <span className="muted">{t('Never used')}</span>
+                  )}
+                </div>
+              </td>
+              <td data-label={t('Expires')} className="fit">
+                <div className="table-value">
+                  {key.expiresAt === null ? (
+                    <span className="muted">{t('Never')}</span>
+                  ) : (
+                    <>
+                      {new Date(key.expiresAt).getTime() <= now && (
+                        <span className="badge badge-danger">{t('Expired')}</span>
+                      )}
+                      {formatDate(key.expiresAt, displayLocale)}
+                    </>
+                  )}
+                </div>
+              </td>
+              <td className="actions">
+                <RevokeButton apiKey={key} onRevoked={onRevoked} />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   )
 }
 
 /** Revoking asks for confirmation in place: the button turns into Revoke / Cancel. */
 function RevokeButton({ apiKey, onRevoked }: { apiKey: ApiKey; onRevoked: (key: ApiKey) => void }) {
-  const { t, ui } = useI18n()
+  const { t, text, uiText: ui } = useI18n()
 
   const [confirming, setConfirming] = useState(false)
   const [revoking, setRevoking] = useState(false)
@@ -448,9 +495,9 @@ function RevokeButton({ apiKey, onRevoked }: { apiKey: ApiKey; onRevoked: (key: 
       }}
     >
       <p id={promptId}>
-        {t('Revoke “')}
+        {text('Revoke “')}
         {label}
-        {t('”? Anything using it stops working at once. This cannot be undone.')}
+        {text('”? Anything using it stops working at once. This cannot be undone.')}
       </p>
       <div className="confirm-buttons">
         <button

@@ -1,17 +1,32 @@
 import { literal, type MessageKey, msg, type UiText } from '../i18n/translate.ts'
+import type { components } from './schema.d.ts'
+
+/** Documented aliases this client understands; unknown aliases fall back to `error`. */
+const errorAliases: ReadonlySet<string> = new Set<components['schemas']['ErrorAlias']>([
+  'zoom_operation_busy',
+])
 /** A request the server answered with an error status. `message` is safe to show. */
 export class RequestError extends Error {
   readonly displayMessage: UiText | undefined
   readonly status: number
   /** The machine-readable code: `error` for /api/v1, `code` for Better Auth's /api/auth. */
   readonly code: string | undefined
+  /** A recognized additive alias; `code` retains the original API error. */
+  readonly codeAlias: string | undefined
 
-  constructor(status: number, code: string | undefined, message: string, displayMessage?: UiText) {
+  constructor(
+    status: number,
+    code: string | undefined,
+    message: string,
+    displayMessage?: UiText,
+    codeAlias?: string,
+  ) {
     super(message)
     this.name = 'RequestError'
     this.displayMessage = displayMessage
     this.status = status
     this.code = code
+    this.codeAlias = codeAlias
   }
 }
 
@@ -30,7 +45,7 @@ const isRecord = (v: unknown): v is Record<string, unknown> =>
 
 /**
  * The error for a response with status `status` and parsed body `body`. Both APIs send
- * human-readable messages meant to be shown (docs/api-conventions.md); without one, the
+ * human-readable messages meant to be shown (https://hourmere.com/docs/api-conventions); without one, the
  * status decides.
  */
 export function requestError(status: number, body: unknown): RequestError {
@@ -55,7 +70,17 @@ export function requestError(status: number, body: unknown): RequestError {
     (typeof record.message === 'string' && record.message.trim()
       ? record.message
       : messageForStatus(status))
-  return new RequestError(status, code, message)
+  const codeAlias =
+    typeof record.errorAlias === 'string' && errorAliases.has(record.errorAlias)
+      ? record.errorAlias
+      : undefined
+  // Schema validation names the offending fields in server prose. Keep those details
+  // literal instead of replacing them with the generic localized form guidance.
+  const displayMessage =
+    code === 'invalid_request' && typeof record.message === 'string' && record.message.trim()
+      ? literal(record.message)
+      : undefined
+  return new RequestError(status, code, message, displayMessage, codeAlias)
 }
 
 export async function errorFromResponse(response: Response): Promise<RequestError> {
@@ -68,6 +93,29 @@ export function errorMessage(err: unknown): UiText {
   if (!(err instanceof RequestError)) return msg(UNREACHABLE)
   if (err.displayMessage) return err.displayMessage
   const known: Readonly<Record<string, MessageKey>> = {
+    invalid_request: 'Check the form and try again.',
+    invalid_calendar_settings: 'Check your calendar settings and try again.',
+    invalid_calendar_access: 'Choose calendar-list access or calendar synchronization.',
+    profile_not_found: 'Create your profile in Settings first.',
+    session_required: 'Your session has ended. Sign in again.',
+    invalid_oauth_state: 'This connection attempt expired or was already used. Start again.',
+    calendar_connection_not_found: 'This calendar connection no longer exists.',
+    calendar_not_found: 'This calendar is no longer available. Refresh the calendar list.',
+    calendar_selection_limit: 'Select at most 20 conflict calendars.',
+    calendar_events_unreadable: 'This calendar does not allow event synchronization.',
+    calendar_sync_disabled: 'Select this calendar for conflict checks before synchronizing it.',
+    calendar_not_writable: 'Choose an owned Google calendar and enable synchronization first.',
+    google_calendar_disabled:
+      'Google Calendar is not configured on this Hourmere instance. Contact its administrator to enable it.',
+    google_calendar_provider_unavailable:
+      'Google Calendar could not be reached. Try again shortly.',
+    microsoft_calendar_disabled:
+      'Microsoft Calendar is not configured on this Hourmere instance. Contact its administrator to enable it.',
+    microsoft_calendar_provider_unavailable:
+      'Microsoft Calendar could not be reached. Try again shortly.',
+    microsoft_calendar_needs_reauth: 'Reconnect Microsoft Calendar to restore access.',
+    microsoft_calendar_permissions_missing:
+      'Reconnect Microsoft Calendar and allow the requested permissions.',
     automatic_zoom_disabled: 'Automatic Zoom meetings are disabled on this instance.',
     automatic_zoom_unavailable:
       'Automatic Zoom meetings are unavailable. Contact the host or choose another meeting type.',
@@ -85,6 +133,8 @@ export function errorMessage(err: unknown): UiText {
     zoom_connection_not_found: 'This Zoom connection is not available.',
     zoom_connection_limit: 'This account has reached its limit of five connected Zoom identities.',
     zoom_needs_reauth: 'Reconnect this Zoom account before refreshing it.',
+    zoom_operation_busy: 'Zoom account operations are busy. Try again shortly.',
+    zoom_refresh_in_progress: 'Zoom account operations are busy. Try again shortly.',
     zoom_permissions_missing:
       'Zoom did not return exactly the requested permissions. Check the app configuration and reconnect.',
     zoom_provider_unavailable:
@@ -121,7 +171,8 @@ export function errorMessage(err: unknown): UiText {
     booking_hosts_unavailable:
       'This booking can no longer be moved to another time. You can still cancel it, or contact your host.',
   }
-  const key = err.code && Object.hasOwn(known, err.code) ? known[err.code] : undefined
+  const code = err.codeAlias ?? err.code
+  const key = code && Object.hasOwn(known, code) ? known[code] : undefined
   if (key) return msg(key)
   if (
     err.status === 401 ||

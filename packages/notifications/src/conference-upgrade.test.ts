@@ -10,7 +10,7 @@ import { migrationsDir, runMigrations } from '../../db/src/migrate.ts'
 const serverUrl = process.env.DATABASE_URL
 
 describe.skipIf(!serverUrl)('conference migrations preserve populated predecessor data', () => {
-  it('upgrades0023 to current migrations without rewriting historical rows, then does nothing', async () => {
+  it('upgrades0023 without changing historical values, then does nothing', async () => {
     const predecessor = await mkdtemp(join(tmpdir(), 'hourmere-conference-predecessor-'))
     const migrations = (await readdir(migrationsDir)).filter((file) => file.endsWith('.sql')).sort()
     for (const file of migrations) {
@@ -94,12 +94,20 @@ describe.skipIf(!serverUrl)('conference migrations preserve populated predecesso
         'conference_oauth_states',
       ] as const
       const before = new Map<string, Record<string, unknown>[]>()
-      for (const table of tables)
-        before.set(
-          table,
-          (await owned.pool.query(`SELECT *,xmin::text AS original_xmin FROM ${table} ORDER BY 1`))
-            .rows,
-        )
+      for (const table of tables) {
+        const rows = (
+          await owned.pool.query(`SELECT *,xmin::text AS original_xmin FROM ${table} ORDER BY 1`)
+        ).rows
+        // 0037 intentionally retires this unused flag. 0038 backfills booking
+        // organizer metadata, so only bookings may change their physical tuples;
+        // every retained predecessor value, including updated_at, must survive.
+        if (table === 'booking_conferences')
+          for (const row of rows) {
+            expect(row.retry_conference).toBe(false)
+            delete row.retry_conference
+          }
+        before.set(table, rows)
+      }
       const applied = await runMigrations(owned.pool)
       let previousIndex = -1
       for (const migration of [
@@ -110,6 +118,7 @@ describe.skipIf(!serverUrl)('conference migrations preserve populated predecesso
         '0028_webhook_interrupted_deliveries.sql',
         '0029_host_reschedule_tokens.sql',
         '0030_mcp_oauth_client_activity.sql',
+        '0038_booking_ical_identity.sql',
       ]) {
         const index = applied.indexOf(migration)
         expect(index, migration).toBeGreaterThan(previousIndex)
@@ -121,11 +130,26 @@ describe.skipIf(!serverUrl)('conference migrations preserve populated predecesso
           await owned.pool.query(`SELECT *,xmin::text AS original_xmin FROM ${table} ORDER BY 1`)
         ).rows
         expect(after).toHaveLength(old.length)
+        if (table === 'booking_conferences')
+          for (const row of after) expect(row).not.toHaveProperty('retry_conference')
+        if (table === 'bookings')
+          for (const [index, row] of after.entries()) {
+            expect(row.original_xmin).not.toBe(old[index]?.original_xmin)
+            expect(row).toMatchObject({
+              ical_version: 1,
+              ical_organizer_name: 'Synthetic Host',
+              ical_organizer_email: 'host@example.test',
+            })
+          }
+        const predecessorKeys = (row: Record<string, unknown>) =>
+          Object.keys(row).filter((key) => table !== 'bookings' || key !== 'original_xmin')
         expect(
           after.map((row, index) =>
-            Object.fromEntries(Object.keys(old[index] ?? {}).map((key) => [key, row[key]])),
+            Object.fromEntries(predecessorKeys(old[index] ?? {}).map((key) => [key, row[key]])),
           ),
-        ).toEqual(old)
+        ).toEqual(
+          old.map((row) => Object.fromEntries(predecessorKeys(row).map((key) => [key, row[key]]))),
+        )
       }
       const notices = await db
         .selectFrom('booking_conference_notifications')

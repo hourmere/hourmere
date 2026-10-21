@@ -29,13 +29,13 @@ test('booking activity reports real personal actions and enforces current team p
   await app.authorizeHost()
   await page.goto(`${app.url}/app/analytics`)
   await expect(page.getByRole('table', { name: 'Daily booking activity' })).toBeVisible()
-  await expect(page.locator('dl.details dd').first()).toHaveText('1')
+  await expect(page.locator('dl.metric-cards dd').first()).toHaveText('1')
   const today = Temporal.Now.plainDateISO('UTC').toString()
   await page.getByLabel('Start date').fill(today)
   await page.getByLabel('End date').fill(today)
   await page.getByRole('button', { name: 'Update report' }).click()
   await expect(page.getByRole('rowheader', { name: today, exact: true })).toHaveCount(1)
-  await expect(page.locator('dl.details dd').first()).toHaveText('1')
+  await expect(page.locator('dl.metric-cards dd').first()).toHaveText('1')
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
@@ -48,5 +48,5 @@ test('booking activity reports real personal actions and enforces current team p
   await app.authorizeHost('owner')
   await page.reload()
   await expect(page.getByText('No booking activity was recorded in this range.')).toBeVisible()
-  await expect(page.locator('dl.details dd').first()).toHaveText('0')
+  await expect(page.locator('dl.metric-cards dd').first()).toHaveText('0')
 })

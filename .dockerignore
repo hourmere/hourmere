@@ -3,6 +3,7 @@
 **/node_modules
 **/dist
 **/*.test.ts
+apps/server/src/sign-in-confirm-testing.ts
 temp
 .env
 .env.*

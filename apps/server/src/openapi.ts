@@ -6,11 +6,18 @@ import { QuestionSchema, type ServiceContext } from '@hourmere/scheduling'
 import type { MiddlewareHandler } from 'hono'
 import { routeBodyLimit } from './body-limit.ts'
 import type { CallerEnv, requireCaller } from './caller.ts'
+import { errorAliases } from './error-aliases.ts'
 
-// See docs/api-conventions.md.
+export const ErrorAlias = z.enum(Object.values(errorAliases)).openapi('ErrorAlias', {
+  description:
+    'Optional additive alias from the documented error-code set. The original error code remains unchanged throughout /api/v1. New aliases may be added; fall back to error when an alias is absent or unknown. See https://hourmere.com/docs/api-conventions for code meanings.',
+})
+
+// See https://hourmere.com/docs/api-conventions.
 export const ErrorBody = z
   .object({
     error: z.string().openapi({ description: 'Machine-readable code, e.g. unauthorized' }),
+    errorAlias: ErrorAlias.optional(),
     message: z.string().optional().openapi({ description: 'Human-readable detail' }),
   })
   .openapi('Error')

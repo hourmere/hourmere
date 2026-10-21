@@ -7,11 +7,13 @@ interface Props {
   path: string
   /** Effective date as YYYY-MM-DD. */
   effective: string
+  /** Also show the effective date as this policy's last-updated date. */
+  lastUpdated?: boolean
   /** Section anchors for the table of contents, in page order. */
   sections: { id: string; title: string }[]
 }
 
-const { title, description, path, effective, sections } = Astro.props
+const { title, description, path, effective, lastUpdated, sections } = Astro.props
 const effectiveLabel = new Date(`${effective}T00:00:00Z`).toLocaleDateString('en-US', {
   year: 'numeric',
   month: 'long',
@@ -26,10 +28,11 @@ const effectiveLabel = new Date(`${effective}T00:00:00Z`).toLocaleDateString('en
       <p class="eyebrow">Hourmere</p>
       <h1>{title}</h1>
       <p class="effective">Effective date: <time datetime={effective}>{effectiveLabel}</time></p>
+      {lastUpdated && <p class="effective">Last updated: <time datetime={effective}>{effectiveLabel}</time></p>}
     </header>
     <div class="prose">
       <slot name="intro" />
-      <nav class="toc" aria-labelledby="toc-title">
+      <nav id="contents" class="toc" aria-labelledby="toc-title">
         <h2 id="toc-title">Contents</h2>
         <ol>
           {
@@ -150,5 +153,42 @@ const effectiveLabel = new Date(`${effective}T00:00:00Z`).toLocaleDateString('en
 
   .toc li + li {
     margin-top: 4px;
+  }
+
+  .prose :global(.back-to-contents) {
+    margin-block: 24px 0;
+    font-size: 15px;
+  }
+
+  .prose :global(.back-to-contents a) {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+
+  @media print {
+    :global(.site-header),
+    :global(.site-footer),
+    :global(.skip-link),
+    .toc,
+    .prose :global(.back-to-contents) {
+      display: none;
+    }
+
+    .container.legal {
+      max-width: none;
+      padding: 0;
+    }
+
+    .prose :global(h2),
+    .prose :global(h3) {
+      break-after: avoid;
+    }
+
+    .prose :global(a[href^="http"])::after {
+      content: " (" attr(href) ")";
+      font-size: 0.9em;
+      overflow-wrap: anywhere;
+    }
   }
 </style>

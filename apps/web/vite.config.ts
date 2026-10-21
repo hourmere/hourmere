@@ -10,6 +10,12 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
+    build: {
+      // Lightning CSS rewrites container ranges despite this target; esbuild preserves
+      // min-width queries for Safari 16.0–16.3, which ignores range syntax.
+      cssMinify: 'esbuild',
+      cssTarget: 'safari16',
+    },
     server: {
       // Fixed: `npm run dev` points the API's PUBLIC_URL (sign-in links, cookies) at this port.
       port: 5173,
