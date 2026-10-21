@@ -113,9 +113,12 @@ is not (it should not exist; see [data model](https://github.com/hourmere/hourme
 invitation, so a booking without a verified host sends nothing (the job logs one WARN line
 naming the booking and the kind, since the invitee hears nothing either). Guests are
 addresses an anonymous booker typed (up to 10 per booking); limiting abuse of that is a
-product follow-up. Times are shown in the recipient's zone with its IANA name: the attendee's zone from `booking_attendees`, a
-host's from their profile, else their default schedule, else UTC. Host emails add the
-invitee's contact details, guests and answers; only the invitee's email has manage links.
+product follow-up. Times are shown in the recipient's zone with its IANA display name
+(spaces instead of underscores) and the GMT offset for the meeting date: the attendee's
+zone from `booking_attendees`, a host's from their profile, else their default schedule,
+else UTC. Host emails also show the invitee's local time when the saved invitee zone
+differs from the host email's zone. Host emails add the invitee's contact details, guests
+and answers; only the invitee's email has manage links.
 Invitee/guest confirmations and reschedules carry an invitation (`METHOD:REQUEST`),
 cancellations a cancellation (`METHOD:CANCEL`); reminders carry none. New host notifications
 carry the same calendar item only when there is no pinned provider calendar copy (details

@@ -494,6 +494,37 @@ export const test = base.extend<{
             .set({ time_zone: AUDIT_HOST_TIME_ZONE })
             .where('user_id', '=', host.userId)
             .execute()
+          // Exercise the selected destination's zone notice with a long display name.
+          // Conflict sync stays off; the web-only fixture never runs provider workers.
+          const auditConnection = await db
+            .insertInto('calendar_connections')
+            .values({
+              user_id: host.userId,
+              provider: 'google',
+              external_account_id: 'synthetic-audit-calendar-account',
+              account_email: 'synthetic-calendar@hourmere.invalid',
+              credentials: Buffer.from('synthetic-unused-calendar-credential'),
+              scopes: [...GOOGLE_CALENDAR_SYNC_SCOPES],
+            })
+            .returning('id')
+            .executeTakeFirstOrThrow()
+          const auditCalendar = await db
+            .insertInto('calendars')
+            .values({
+              connection_id: auditConnection.id,
+              external_id: 'synthetic-audit-calendar',
+              name: 'Synthetic cross-zone calendar',
+              access_role: 'owner',
+              time_zone: 'America/Argentina/Buenos_Aires',
+              check_conflicts: false,
+            })
+            .returning('id')
+            .executeTakeFirstOrThrow()
+          await db
+            .updateTable('profiles')
+            .set({ destination_calendar_id: auditCalendar.id })
+            .where('user_id', '=', host.userId)
+            .execute()
           const bookingId = await f.booking(
             host.organizationId,
             [host.userId],

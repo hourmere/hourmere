@@ -34,6 +34,8 @@ export interface BookingEmailMeeting {
   /** The invitee who booked. */
   inviteeName: string
   inviteeEmail: string
+  /** The booker's stored IANA time zone, also shown to hosts in another zone. */
+  inviteeTimeZone: string
   /** People the invitee added. */
   guests?: readonly { name: string; email: string }[] | undefined
   start: Temporal.Instant
@@ -75,7 +77,7 @@ export type BookingEmailRecipient = AttendeeRecipient | HostRecipient
 
 // --- Times --------------------------------------------------------------------------------
 
-/** The zone's canonical name, or UTC when it is not a valid IANA time zone. */
+/** A valid IANA zone name, or UTC when it is not valid. Temporal preserves aliases. */
 function displayZone(timeZone: string): string {
   if (timeZone === '' || /^[+-]/.test(timeZone)) return 'UTC'
   try {
@@ -83,6 +85,12 @@ function displayZone(timeZone: string): string {
   } catch {
     return 'UTC'
   }
+}
+
+/** Compare aliases without changing the zone name printed in the email. */
+function comparisonZone(timeZone: string): string {
+  return new Intl.DateTimeFormat('en', { timeZone: displayZone(timeZone) }).resolvedOptions()
+    .timeZone
 }
 
 const LONG_DATE: Intl.DateTimeFormatOptions = {
@@ -112,7 +120,14 @@ const format = (
     .format(time.epochMilliseconds)
     .replace(/[\u00a0\u202f]/g, ' ')
 
-/** `Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin)` */
+/** The same readable zone and date-specific GMT offset used on booking pages. */
+function zoneLabel(time: Temporal.ZonedDateTime, language: InterfaceLanguage): string {
+  const name = time.timeZoneId.replaceAll('_', ' ')
+  const offset = `GMT${time.offset}`
+  return language === 'zh-CN' ? `（${name}，${offset}）` : ` (${name}, ${offset})`
+}
+
+/** `Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin, GMT+02:00)` */
 export function formatMeetingTime(
   start: Temporal.Instant,
   end: Temporal.Instant,
@@ -129,11 +144,11 @@ export function formatMeetingTime(
       ? `${format(e, LONG_DATE, language)}，${format(e, TIME, language)}`
       : `${format(e, LONG_DATE, language)}, ${format(e, TIME, language)}`
   return language === 'zh-CN'
-    ? `${format(s, LONG_DATE, language)}，${format(s, TIME, language)} 至 ${until}（${zone}）`
-    : `${format(s, LONG_DATE, language)}, ${format(s, TIME, language)} – ${until} (${zone})`
+    ? `${format(s, LONG_DATE, language)}，${format(s, TIME, language)} 至 ${until}${zoneLabel(s, language)}`
+    : `${format(s, LONG_DATE, language)}, ${format(s, TIME, language)} – ${until}${zoneLabel(s, language)}`
 }
 
-/** `Tue, Oct 20, 10:00 AM (Europe/Berlin)`, for subject lines. */
+/** `Tue, Oct 20, 10:00 AM (Europe/Berlin, GMT+02:00)`, for subjects and invitee time. */
 function formatShortTime(
   start: Temporal.Instant,
   timeZone: string,
@@ -142,8 +157,8 @@ function formatShortTime(
   const zone = displayZone(timeZone)
   const s = start.toZonedDateTimeISO(zone)
   return language === 'zh-CN'
-    ? `${format(s, SHORT_DATE, language)}，${format(s, TIME, language)}（${zone}）`
-    : `${format(s, SHORT_DATE, language)}, ${format(s, TIME, language)} (${zone})`
+    ? `${format(s, SHORT_DATE, language)}，${format(s, TIME, language)}${zoneLabel(s, language)}`
+    : `${format(s, SHORT_DATE, language)}, ${format(s, TIME, language)}${zoneLabel(s, language)}`
 }
 
 // --- Locations ----------------------------------------------------------------------------
@@ -317,6 +332,7 @@ const chinese = {
   Was: '原时间',
   Where: '地点',
   Invitee: '预约人',
+  "Invitee's time": '预约人当地时间',
   Guests: '来宾',
   Host: '主持人',
   Reason: '原因',
@@ -431,6 +447,11 @@ export function bookingEmail(
     field(t('What'), event),
     field(t('When'), formatMeetingTime(meeting.start, meeting.end, recipient.timeZone, language)),
   ]
+  if (isHost && comparisonZone(meeting.inviteeTimeZone) !== comparisonZone(recipient.timeZone)) {
+    fields.push(
+      field(t("Invitee's time"), formatShortTime(meeting.start, meeting.inviteeTimeZone, language)),
+    )
+  }
   if (kind === 'rescheduled' && meeting.previous) {
     fields.push({
       ...field(

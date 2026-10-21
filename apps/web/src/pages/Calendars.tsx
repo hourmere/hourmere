@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router'
 import { api, type Schemas, unwrap } from '../api/client.ts'
 import { errorMessage } from '../api/errors.ts'
-import { loadProfile } from '../api/resources.ts'
+import { loadProfile, loadSchedules } from '../api/resources.ts'
 import { goTo } from '../browser.ts'
 import { BreakableText } from '../components/BreakableText.tsx'
 import { ConfirmAction } from '../components/ConfirmAction.tsx'
@@ -13,6 +13,7 @@ import { useLoad, useMounted, usePageTitle } from '../hooks.ts'
 import { useI18n } from '../i18n/runtime.tsx'
 import { msg, type UiText } from '../i18n/translate.ts'
 import { PATHS } from '../paths.ts'
+import { zoneName } from '../public/time.ts'
 import { leavesPage } from '../unsaved-changes.tsx'
 
 type Connection = Schemas['CalendarConnection']
@@ -24,8 +25,19 @@ const load = async (signal: AbortSignal) => {
       return undefined
     }),
   ])
+  const schedules = connections.data.some(
+    (connection) =>
+      connection.provider === 'google' &&
+      connection.calendars.some((calendar) => calendar.timeZone),
+  )
+    ? await loadSchedules(signal).catch((err: unknown) => {
+        if (signal.aborted) throw err
+        return []
+      })
+    : []
   return {
     ...connections,
+    defaultScheduleZone: schedules.find((schedule) => schedule.isDefault)?.timeZone,
     hasProfile: profile !== null && profile !== undefined,
     profileUnavailable: profile === undefined,
   }
@@ -451,6 +463,23 @@ export function CalendarsPage() {
                         {calendar.name}
                         {calendar.isPrimary ? t(' (primary)') : ''}
                       </div>
+                      {connection.provider === 'google' &&
+                        calendar.accessRole === 'owner' &&
+                        state.data.destinationCalendarId === calendar.id &&
+                        calendar.timeZone &&
+                        state.data.defaultScheduleZone &&
+                        zoneName(calendar.timeZone) !==
+                          zoneName(state.data.defaultScheduleZone) && (
+                          <p className="alert alert-info">
+                            {t(
+                              'This Google calendar uses {calendarZone}; your availability uses {scheduleZone}. Bookings land at the same moment; Google Calendar usually shows them in {calendarZone} time.',
+                              {
+                                calendarZone: zoneName(calendar.timeZone),
+                                scheduleZone: zoneName(state.data.defaultScheduleZone),
+                              },
+                            )}
+                          </p>
+                        )}
                       {(connection.syncAuthorized ||
                         calendar.checkConflicts ||
                         state.data.destinationCalendarId === calendar.id) && (

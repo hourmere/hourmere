@@ -3,6 +3,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, Navigate, useLocation, useParams } from 'react-router'
 import { ConferenceNotice } from '../components/ConferenceNotice.tsx'
 import { EmailDeliveryHint } from '../components/EmailDeliveryHint.tsx'
+import { TimeZoneName } from '../components/TimeZonePicker.tsx'
+import { isKnownTimeZone } from '../format.ts'
 import { usePageTitle } from '../hooks.ts'
 import { formatList } from '../i18n/formatting.ts'
 import { useI18n } from '../i18n/runtime.tsx'
@@ -41,7 +43,15 @@ import {
 } from './PublicLayout.tsx'
 import { normalizedHandle, normalizedSlug, teamSlug, useRequest } from './paths.ts'
 import { SlotPicker } from './SlotPicker.tsx'
-import { formatDate, formatDuration, formatTimeRange, offsetLabel, zoneName } from './time.ts'
+import {
+  formatDate,
+  formatDuration,
+  formatTime,
+  formatTimeRange,
+  offsetAt,
+  offsetLabel,
+  zoneName,
+} from './time.ts'
 import {
   bookingErrors,
   bookingLocale,
@@ -49,6 +59,7 @@ import {
   guestsFor,
   responsesFor,
 } from './validation.ts'
+import { rememberVisitorTimeZone, visitorTimeZone } from './visitor-time-zone.ts'
 
 /** /{handle}/{slug}: pick a time, fill in the form, get the confirmation. */
 export function TeamBookingPage() {
@@ -143,7 +154,7 @@ function BookingFlow({
   const embedded = useEmbedded()
   const browserFormatLocale = useMemo(preferredLocale, [])
   const locale = explicit ?? browserFormatLocale
-  const [timeZone, setTimeZone] = useState(detectTimeZone)
+  const [timeZone, setTimeZone] = useState(() => visitorTimeZone(detectTimeZone()))
   const [now, setNow] = useState(currentTime)
   const [slot, setSlot] = useState<Slot | null>(null)
   const [version, setVersion] = useState(0)
@@ -265,6 +276,8 @@ function BookingFlow({
   const chosenOffset = slot ? offsetLabel(timeZone, Date.parse(slot.start)) : ''
   const chosenZoneLabel = t(' ({offset})', { offset: chosenOffset })
   const chosenOffsetAt = chosenZoneLabel.lastIndexOf(chosenOffset)
+  const hostTimeZone =
+    event.schedulingType !== 'round_robin' && !event.hosts ? event.host.timeZone : undefined
 
   return (
     <PublicLayout wide>
@@ -282,7 +295,7 @@ function BookingFlow({
               {t('Required hosts: {hosts}', {
                 hosts: formatList(
                   event.hosts.map((host) =>
-                    t('{name} ({detail})', { name: host.name, detail: host.timeZone }),
+                    t('{name} ({detail})', { name: host.name, detail: zoneName(host.timeZone) }),
                   ),
                   displayLocale,
                 ),
@@ -292,6 +305,14 @@ function BookingFlow({
           <ul className="event-facts">
             <li>{formatDuration(event.durationMinutes, displayLocale)}</li>
             {event.location && <li>{ui(locationLabel(event.location.kind))}</li>}
+            {hostTimeZone && (
+              <li className="user-content">
+                <TimeZoneName
+                  className="host-time-zone"
+                  name={t("Host's time zone: {zone}", { zone: zoneName(hostTimeZone) })}
+                />
+              </li>
+            )}
           </ul>
           {event.description && <EventDescription>{event.description}</EventDescription>}
           {slot && (
@@ -307,6 +328,19 @@ function BookingFlow({
                   <span className="time-offset">{chosenZoneLabel.slice(chosenOffsetAt)}</span>
                 </span>
               </p>
+              {hostTimeZone &&
+                isKnownTimeZone(hostTimeZone) &&
+                offsetAt(Date.parse(slot.start), hostTimeZone) !==
+                  offsetAt(Date.parse(slot.start), timeZone) && (
+                  <p className="host-local-time user-content">
+                    {t("That's {time} for the host", {
+                      time: t('{date}, {time}', {
+                        date: formatDate(Date.parse(slot.start), hostTimeZone, locale),
+                        time: formatTime(Date.parse(slot.start), hostTimeZone, locale),
+                      }),
+                    })}
+                  </p>
+                )}
               <button type="button" className="button button-small" onClick={changeTime}>
                 {t('Change time')}
               </button>
@@ -338,7 +372,10 @@ function BookingFlow({
               load={loadSlots}
               durationMinutes={event.durationMinutes}
               timeZone={timeZone}
-              onTimeZoneChange={setTimeZone}
+              onTimeZoneChange={(zone) => {
+                rememberVisitorTimeZone(zone)
+                setTimeZone(zone)
+              }}
               locale={locale}
               now={now}
               selected={slot}
@@ -387,7 +424,10 @@ function Confirmation({
         ? booking.assignedHost.name.trim() || t('Host')
         : event.host.name
   const hostDetail = booking.assignedHost
-    ? t('{name} ({detail})', { name: hostName, detail: booking.assignedHost.timeZone })
+    ? t('{name} ({detail})', {
+        name: hostName,
+        detail: zoneName(booking.assignedHost.timeZone),
+      })
     : hostName
   const title = t('{event} with {host}', { event: event.title, host: hostName })
   return (

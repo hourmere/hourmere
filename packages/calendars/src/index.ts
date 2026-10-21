@@ -242,6 +242,7 @@ export async function listCalendarConnections(deps: CalendarDeps, principal: Pri
           'id',
           'connection_id',
           'name',
+          'time_zone',
           'is_primary',
           'check_conflicts',
           'access_role',
@@ -281,6 +282,7 @@ export async function listCalendarConnections(deps: CalendarDeps, principal: Pri
         .map((c) => ({
           id: c.id,
           name: c.name,
+          timeZone: c.time_zone,
           isPrimary: c.is_primary,
           checkConflicts: c.check_conflicts,
           accessRole: c.access_role,

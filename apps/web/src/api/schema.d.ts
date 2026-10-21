@@ -5004,6 +5004,7 @@ export interface components {
                 lastSyncedAt: string | null;
                 name: string;
                 syncError: string | null;
+                timeZone: string | null;
             }[];
             /** Format: date-time */
             createdAt: string;

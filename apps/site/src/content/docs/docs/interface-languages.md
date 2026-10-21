@@ -23,13 +23,23 @@ Gregorian calendar and the selected IANA time zone. A booking flow freezes its r
 locale independently of display changes, so retrying after a lost response keeps the same
 body and idempotency key.
 
-The only preference stored is the tiny allowlisted value `en` or `zh-CN`, under
+The language preference stores only the tiny allowlisted value `en` or `zh-CN`, under
 `hourmere-language` in local storage and a same-name `SameSite=Lax`, path-wide cookie. The
 cookie has a one-year lifetime and is `Secure` on HTTPS. Refusing either storage mechanism
 does not prevent changing the current page. No account identifiers, answers or management
 capabilities enter preference storage. The standalone email sign-in confirmation page uses
 the same preference cookie, then `Accept-Language`, and provides its own language buttons.
 Language changes never submit that form or change its fragment.
+
+Public booking and rescheduling pages also remember an explicitly selected IANA time
+zone in local storage. A valid saved choice becomes the default on later booking-page visits;
+browser detection alone does not save a preference. Each manage link starts in that booking's
+stored invitee zone, matching its emails, or the browser zone if the stored zone is unavailable.
+A choice made on the manage page applies for that view and future booking-page visits.
+The picker still includes the browser's zone.
+Blocked storage does not prevent choosing a zone for the current visit. Individual booking
+pages show the host's profile zone and, when the selected instant has a different local time
+in that known zone, the meeting time for the host. Round-robin pages wait until a host is assigned.
 
 User-provided event titles, descriptions, names, answers, locations and question options
 are left as entered. Known error codes have fixed local messages. Unknown server prose is

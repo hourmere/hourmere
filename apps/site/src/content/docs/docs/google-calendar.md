@@ -109,6 +109,12 @@ immediate read; workers poll selected active calendars every minute. A web-only 
 without a worker does not perform scheduled synchronization. **Refresh calendar list**
 updates metadata.
 
+Calendar listings include each calendar's saved `timeZone` (null when the provider has
+not supplied one). When your selected owned Google booking destination uses a different
+zone from your default availability schedule, **Calendars** explains both zones. A booking
+still lands at the same instant; Google Calendar usually shows it in that calendar's time
+zone, depending on the viewer's Google Calendar time-zone setting.
+
 The user's own API keys can list calendar connections/status, refresh the calendar list,
 choose conflict calendars and the writeback destination, and sync now through the public
 REST API with the same ownership checks. Read-only MCP `list_calendar_connections` accepts

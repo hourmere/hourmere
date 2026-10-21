@@ -1418,6 +1418,7 @@ input[type="radio"] {
 
 .calendar-controls .button {
   max-width: 100%;
+  white-space: normal;
   overflow-wrap: anywhere;
   text-align: start;
 }

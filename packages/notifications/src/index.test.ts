@@ -171,18 +171,32 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
       const { bookingId, apiToken, hostId, hostEmail, organizationId } = await booked({
         guests: true,
       })
+      await db
+        .updateTable('booking_attendees')
+        .set({ time_zone: 'Pacific/Honolulu' })
+        .where('booking_id', '=', bookingId)
+        .where('is_booker', '=', false)
+        .execute()
       await db.updateTable('profiles').set({ locale }).where('user_id', '=', hostId).execute()
       const { mailer, sent } = testMailer()
       const config = {
         ...deps(mailer),
         publicUrl: `${PUBLIC_URL}/ignored?source=fixture#ignored`,
       }
-      const check = (id: string) => {
+      const check = (id: string, moved = false) => {
         const host = sent.find(to(hostEmail))
         const url = `${PUBLIC_URL}/app/bookings/${id}`
         expect(host).toBeDefined()
         expect(host?.html?.includes(`href="${url}"`)).toBe(true)
         expect(host?.text?.includes(url)).toBe(true)
+        const inviteeTime =
+          locale === 'en'
+            ? `Tue, Nov 3, ${moved ? '10' : '6'}:00 PM (Asia/Tokyo, GMT+09:00)`
+            : `11月3日周二，${moved ? '22' : '18'}:00（Asia/Tokyo，GMT+09:00）`
+        expect(host?.text).toContain(
+          `${locale === 'en' ? "Invitee's time: " : '预约人当地时间：'}${inviteeTime}`,
+        )
+        expect(host?.html).toContain(inviteeTime)
         expect(host?.html).toContain(locale === 'en' ? 'Open in Hourmere' : '在 Hourmere 中打开')
         expect(/token=|\/booking#|source=fixture|#ignored/.test(`${host?.html}${host?.text}`)).toBe(
           false,
@@ -229,10 +243,10 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
         start: instant('2026-11-03T13:00:00Z'),
       })
       await sendBookingNotification(config, moved.booking.id, 'rescheduled')
-      check(moved.booking.id)
+      check(moved.booking.id, true)
       await cancelManagedBooking(ctx, moved.manageToken as string, {})
       await sendBookingNotification(config, moved.booking.id, 'cancelled')
-      check(moved.booking.id)
+      check(moved.booking.id, true)
     },
   )
 
@@ -245,17 +259,17 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
     expect(sent.map((m) => m.to)).toEqual([hostEmail, 'ada@example.com', 'charles@example.com'])
     const [toHost, toInvitee, toGuest] = sent
     expect(toInvitee?.subject).toBe(
-      'Confirmed: Intro call with Grace Hopper on Tue, Nov 3, 6:00 PM (Asia/Tokyo)',
+      'Confirmed: Intro call with Grace Hopper on Tue, Nov 3, 6:00 PM (Asia/Tokyo, GMT+09:00)',
     )
     expect(toInvitee?.text.includes('Where: Online meeting')).toBe(true)
     expect(toInvitee?.text.includes('Join meeting\nhttps://meet.example.com/abc')).toBe(true)
     expect(toInvitee?.text).toMatch(
       /Reschedule: https:\/\/cal\.example\.com\/booking#token=[A-Za-z0-9_-]{43}&action=reschedule/,
     )
-    expect(toGuest?.subject).toContain('(Asia/Tokyo)')
+    expect(toGuest?.subject).toContain('(Asia/Tokyo, GMT+09:00)')
     expect(toGuest?.text).not.toContain('token=')
     expect(toHost?.subject).toBe(
-      'New booking: Intro call with Ada Lovelace on Tue, Nov 3, 4:00 AM (America/New_York)',
+      'New booking: Intro call with Ada Lovelace on Tue, Nov 3, 4:00 AM (America/New York, GMT-05:00)',
     )
     expect(toHost?.text).toContain('Invitee: Ada Lovelace <ada@example.com>')
     expect(toHost?.text).toContain('Guests: Charles Babbage <charles@example.com>')
@@ -653,10 +667,10 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
     expect(sent.map((m) => m.to)).toEqual([hostEmail, 'ada@example.com'])
     const toInvitee = sent[1]
     expect(toInvitee?.subject).toBe(
-      'Rescheduled: Intro call with Grace Hopper, now Tue, Nov 3, 10:00 PM (Asia/Tokyo)',
+      'Rescheduled: Intro call with Grace Hopper, now Tue, Nov 3, 10:00 PM (Asia/Tokyo, GMT+09:00)',
     )
     expect(toInvitee?.text).toContain(
-      'Was: Tuesday, November 3, 2026, 6:00 PM – 6:30 PM (Asia/Tokyo)',
+      'Was: Tuesday, November 3, 2026, 6:00 PM – 6:30 PM (Asia/Tokyo, GMT+09:00)',
     )
     expect(tokenIn(toInvitee)).toBeTruthy()
     // Same calendar entry as the original booking, one version later.

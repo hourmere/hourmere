@@ -850,9 +850,9 @@ describe('the booking page', () => {
     const details = await screen.findByRole('heading', { name: 'Your details' })
     await waitFor(() => expect(document.activeElement).toBe(details))
     // The chosen time, in the visitor's zone.
-    expect(plain(screen.getByText(/Monday, November 2, 2026/).parentElement?.textContent)).toMatch(
-      /9:00 – 9:30 AM.*America\/New York \(GMT-05:00\)/,
-    )
+    expect(
+      plain(screen.getByText(/^Monday, November 2, 2026$/).parentElement?.textContent),
+    ).toMatch(/9:00 – 9:30 AM.*America\/New York \(GMT-05:00\)/)
     // All six kinds of question.
     expect(screen.getByLabelText('Topic').tagName).toBe('INPUT')
     expect(screen.getByLabelText(/Anything else\?/).tagName).toBe('TEXTAREA')
@@ -1091,9 +1091,9 @@ describe('the booking page', () => {
     expect(second?.headers.get('idempotency-key')).not.toBe(first?.headers.get('idempotency-key'))
 
     // The details, in the visitor's zone.
-    expect(plain(screen.getByText(/Monday, November 2, 2026/).parentElement?.textContent)).toMatch(
-      /9:00 – 9:30 AM \(America\/New York, GMT-05:00\)/,
-    )
+    expect(
+      plain(screen.getByText(/^Monday, November 2, 2026$/).parentElement?.textContent),
+    ).toMatch(/9:00 – 9:30 AM \(America\/New York, GMT-05:00\)/)
     expect(screen.getByRole('link', { name: '+49 30 1234567' }).getAttribute('href')).toBe(
       'tel:+49301234567',
     )
