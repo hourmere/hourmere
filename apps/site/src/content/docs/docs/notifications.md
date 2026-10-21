@@ -508,9 +508,9 @@ all email abuse.
 The composition root also invokes the optional webhook notifier in the same booking
 transaction. Its ID-only jobs and immutable minimal snapshots are independent of email
 delivery and management capabilities. Global configuration defaults off; see
-[webhooks.md](/docs/webhooks) for signatures, retry limits, permissions and network policy.
+[Booking webhooks](/docs/webhooks) for signatures, retry limits, permissions and network policy.
 
-For explicitly automatic Google Meet bookings, confirmed/rescheduled invitations and reminders wait for current-revision readiness through a durable outbox. Old generic jobs gate again before each send. Terminal failures generate a separately labelled `conference_failed` notice to host/booker without REQUEST ICS; cancellation messages remain independent. Sensitive meeting messages are omitted from the development log mailer. See [automatic-google-meet.md](/docs/automatic-google-meet).
+For explicitly automatic Google Meet bookings, confirmed/rescheduled invitations and reminders wait for current-revision readiness through a durable outbox. Old generic jobs gate again before each send. Terminal failures generate a separately labelled `conference_failed` notice to host/booker without REQUEST ICS; cancellation messages remain independent. Sensitive meeting messages are omitted from the development log mailer. See [Automatic Google Meet](/docs/automatic-google-meet).
 
 ### Conference outbox delivery budget
 

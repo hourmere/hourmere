@@ -171,7 +171,7 @@ assert a live public instance or a published listing.
   stream for that request. There are no sessions (`Mcp-Session-Id`) and no standing GET
   stream: `GET` and `DELETE` get 405. Any server instance can answer any request.
 - **Limits:** bodies up to 2 MB (the largest legal booking, see
-  [api-conventions.md](/docs/api-conventions#validation)); larger ones get 413.
+  [API conventions](/docs/api-conventions#validation)); larger ones get 413.
 - Responses are never cached (`Cache-Control: no-store`).
 
 ## Authentication
@@ -411,7 +411,7 @@ fields are those of the REST API (`/api/v1/openapi.json`). Results come as
   one of the invitee's booking emails (`https://<host>/booking#token=<token>`); each email
   has its own. A response token follows host moves, but after an invitee move stays on
   the cancelled booking. An email's token follows the meeting to the booking that
-  replaced it ([api-conventions.md](/docs/api-conventions#public-endpoints)).
+  replaced it ([API conventions](/docs/api-conventions#public-endpoints)).
 - **Host moves:** pass `bookingId` from `list_bookings` and a new `start` to
   `reschedule_booking`. You must host the booking in the key's current organization.
   Give exactly one of `bookingId` or `manageToken`. All hosts' current availability is
@@ -423,7 +423,7 @@ fields are those of the REST API (`/api/v1/openapi.json`). Results come as
   People and REST clients use the same service through `POST /api/v1/bookings/{id}/reschedule`
   (`{ start }`); the admin booking detail page offers the same action and authorized slots.
 - **Emails:** bookings made, moved or cancelled through MCP send the same emails as the
-  booking page (hosts, invitee, guests; [notifications.md](/docs/notifications)).
+  booking page (hosts, invitee, guests; [Notifications and background jobs](/docs/notifications)).
 - **Retries:** give `create_booking` an `idempotencyKey` (a new random value per booking,
   e.g. a UUIDv4). A retry with the same key and arguments returns the original booking with
   `replayed: true` and `manageToken: null`; the same key with other arguments fails with
@@ -473,7 +473,7 @@ from `provider_unavailable`. For that timeout, `retry_conference` (CLI `retry-me
 grants another bounded read/poll budget for the same event and UUID; it does not repeat an
 acknowledged PATCH or force-create a new request. A permanently stuck pending UUID needs
 the documented operator repair.
-See [automatic-google-meet.md](/docs/automatic-google-meet) for optional copies and identity policy.
+See [Automatic Google Meet](/docs/automatic-google-meet) for optional copies and identity policy.
 
 
 ## Automatic Zoom reconciliation
@@ -494,4 +494,4 @@ retain existing pinned-organizer permissions, including authorized API keys. The
 a known meeting ID without selecting another account or creating a replacement. An unknown
 claimed create remains ambiguous even after retry; no force-create/list/adoption argument is
 accepted. A private optional ordinary Google copy does not create a second conference or gate
-ready Zoom mail. See [automatic-zoom.md](/docs/automatic-zoom) for setup and acceptance limits.
+ready Zoom mail. See [Automatic Zoom for one host](/docs/automatic-zoom) for setup and acceptance limits.

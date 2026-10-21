@@ -137,7 +137,7 @@ calendar-list access.
   reschedule clears the predecessor's hash and transfers it to the successor in the same
   transaction, returning no raw token; the invitee's existing link keeps working. An
   email's token follows `rescheduled_from_id` forward to the latest booking of the chain. See
-  [notifications.md](https://hourmere.com/docs/notifications#which-booking-a-token-opens).
+  [Notifications and background jobs](https://hourmere.com/docs/notifications#which-booking-a-token-opens).
 - **An email is sent once, with a narrow duplicate window.** A notification job inserts its `booking_notifications` row
   (primary key: booking, kind, recipient) and keeps that transaction open while the mail
   server takes the email: a failed send rolls the row back for the retry, a concurrent
@@ -346,7 +346,7 @@ snapshot plus bounded attempt metadata). The booking transaction captures subscr
 endpoints and queues only delivery IDs. Composite foreign keys keep deliveries in their
 endpoint organization; endpoint/booking/organization deletion cascades snapshots. Runtime
 locks use endpoint then delivery so deletion, pause and rotation cannot deadlock delivery
-through inverse lock order. Details and retention are in [webhooks.md](https://hourmere.com/docs/webhooks).
+through inverse lock order. Details and retention are in [Booking webhooks](https://hourmere.com/docs/webhooks).
 
 Migration 0028 adds safe `interrupted`/`job_missing` error classifications for finite retry
 accounting and orphan reconciliation, preserving existing webhook delivery data.
@@ -447,8 +447,8 @@ calendar/connection/event identity. `event_types.zoom_connection_id` is private 
 configuration; it is not exposed in public catalogs. `booking_conference_mirrors` preserves
 ordinary calendar targets and unknown-import claims; a single-host Zoom organizer may have
 one such optional copy. The join URL is stored only in the current ready protected booking
-location. See [automatic-google-meet.md](https://hourmere.com/docs/automatic-google-meet) and
-[automatic-zoom.md](https://hourmere.com/docs/automatic-zoom).
+location. See [Automatic Google Meet](https://hourmere.com/docs/automatic-google-meet) and
+[Automatic Zoom for one host](https://hourmere.com/docs/automatic-zoom).
 
 Protected booking reads hydrate every booking's status, cancellation time/reason, resolved
 location and optional conference state from one booking-driven LEFT JOIN snapshot, including
@@ -471,7 +471,7 @@ Migration 0024 adds a persisted attempt count, random bounded lease, safe error 
 exhausted timestamp to each conference notification. Existing due times and delivery flags
 are preserved. Attempt claims commit before SMTP; lease/attempt comparison protects completion
 and the row has a finite initial-attempt-plus-twelve-retry budget across cron executions.
-See [notifications.md](https://hourmere.com/docs/notifications#conference-outbox-delivery-budget) for diagnostics,
+See [Notifications and background jobs](https://hourmere.com/docs/notifications#conference-outbox-delivery-budget) for diagnostics,
 legacy-row backfill and the remaining SMTP acceptance/failed-commit duplicate window.
 
 Migration 0026 adds `skipped_at` as a distinct terminal outcome for obsolete conference

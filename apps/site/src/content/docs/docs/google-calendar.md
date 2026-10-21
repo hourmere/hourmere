@@ -8,7 +8,8 @@ description: Configure separate OAuth credentials, busy-time checks and booking 
 Google sign-in and Google Calendar use separate OAuth clients. Signing in does not grant
 calendar access. Signing in never requests
 calendar permissions, and connecting a calendar never creates or links a sign-in account.
-Connections belong to a user across their organizations. In your Google Cloud project enable Calendar API and configure branding,
+Connections belong to a user across their organizations. In your Google Cloud project enable
+Google Calendar API and configure Google Auth Platform branding,
 an External audience and the intended test users. Keep the app in Testing for development;
 review the publishing requirements below before ongoing use. To enable the separate
 **Continue with Google** button, follow the
@@ -26,13 +27,16 @@ put the sign-in OAuth client in a separate Google Cloud project.
 Create a Web application OAuth client for calendar connections. Register exactly
 `{PUBLIC_URL}/api/calendar/google/callback`, for example
 `https://meet.example.com/api/calendar/google/callback`. Local `npm run dev` uses
-`http://localhost:5173/api/calendar/google/callback`. JavaScript origins are unnecessary for
-this server-side flow. Use HTTPS except on loopback development hosts.
+`http://localhost:5173/api/calendar/google/callback`; Vite proxies `/api` to the server.
+JavaScript origins are unnecessary for this server-side authorization-code flow. Use HTTPS
+except on loopback development hosts.
 
 Set `GOOGLE_CALENDAR_CLIENT_ID`, `GOOGLE_CALENDAR_CLIENT_SECRET` and a separate
 `CALENDAR_ENCRYPTION_KEY` of 32 random bytes encoded in base64 (`openssl rand -base64 32`).
-Keep the key stable and backed up; losing it makes saved tokens unreadable. The sign-in
-settings `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` do not configure calendar access.
+Keep the key stable, private and backed up with the deployment secrets; losing it makes
+saved tokens unreadable. Never put these values in version control. Docker Compose passes
+all three variables to the app/worker. The sign-in settings `GOOGLE_CLIENT_ID` /
+`GOOGLE_CLIENT_SECRET` do not configure calendar access.
 
 These settings do not enable Google sign-in. `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` and
 `/api/auth/callback/google` continue to configure only sign-in. Separate clients in the same
@@ -92,21 +96,24 @@ project. Review Google's personal and internal-use exceptions if applicable.
 ## Select calendars
 
 Sign in, create your profile and open **Calendars**. Choose **Connect Google Calendar** and
-review the permissions in Google's consent page. Connecting alone does not select any
-conflict calendar or destination. Existing list-only connections need an explicit upgrade.
+review the permissions in Google's consent page. Returning to the app shows the calendar
+list. Connecting alone does not select any conflict calendar or destination: new calendars
+have `check_conflicts=false` and the profile has no destination. List-only connections remain
+supported and must be reauthorized before using synchronization.
 
 Select **Check conflicts** on each calendar whose busy times should block bookings. Choose
 **Write new bookings** on one owned calendar to project new bookings there. Shared readable
 calendars can block time; a shared calendar owned by someone else cannot be a destination.
 Changing the destination does not move existing projected meetings. Use **Sync now** for an
 immediate read; workers poll selected active calendars every minute. A web-only process
-without a worker does not perform scheduled synchronization.
+without a worker does not perform scheduled synchronization. **Refresh calendar list**
+updates metadata.
 
 The user's own API keys can list calendar connections/status, refresh the calendar list,
 choose conflict calendars and the writeback destination, and sync now through the public
-REST API with the same ownership checks. Read-only MCP `list_calendar_connections` also
-accepts enabled MCP OAuth grants. OAuth authorization, code exchange and disconnect require
-a live browser session. Cookie-authenticated writes require the app's own origin.
+REST API with the same ownership checks. Read-only MCP `list_calendar_connections` accepts
+API keys and enabled MCP OAuth grants. OAuth authorization, code exchange and disconnect
+require a live browser session. Cookie-authenticated writes require the app's own origin.
 
 External event titles/descriptions are not fetched or stored; synchronization retains IDs
 and busy intervals. Cancelled, transparent and self-declined events do not block time.
@@ -127,7 +134,8 @@ reschedules. The integration creates a private host copy without attendees, conf
 creation or Google invitation emails. Existing Hourmere booking notification emails run
 separately. Google edits do not change Hourmere bookings.
 
-Expired/revoked access requires reconnecting. Temporary errors preserve credentials for
+A revoked/expired grant changes the connection to `needs_reauth`; reconnect through the
+same separate consent flow. Temporary errors preserve credentials for
 retry. If this repeats weekly, check the [publishing status](#publishing-status-and-verification).
 You can turn off local conflict checking even when authorization has expired.
 
@@ -165,8 +173,8 @@ settings change. The host booking page shows only the caller's copy state and sa
 Automatic Meet reports `conference_pending_timeout` when Google still has not finished
 after the bounded polling budget. **Retry meeting** checks the same event and request again;
 it can recover a link that became ready later, but does not force a new conference. A
-permanently pending request needs the repository's
-[operator repair](/docs/google-calendar#automatic-meet-projection).
+permanently pending request needs the
+[operator repair described below](#automatic-meet-projection).
 After upgrade, legacy pending requests receive one same-UUID conference PATCH automatically;
 already failed requests need the pinned host to retry. Google HTTP 400 on a known-event
 PATCH, including moves and cancellation, is terminal `invalid_response`; correct the

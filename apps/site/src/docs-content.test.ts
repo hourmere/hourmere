@@ -221,7 +221,9 @@ describe('launch documentation disclosures', () => {
 
   it('links the changelog database requirements to a section that requires PostgreSQL 18', () => {
     const target = read('CHANGELOG.md').match(/\[database requirements\]\(([^)]+)\)/)?.[1]
-    expect(target).toBe('https://hourmere.com/docs/configuration#server-and-database')
+    expect(target).toBe(
+      'https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/configuration.md#server-and-database',
+    )
     const section = read(`${siteDocs}/configuration.md`)
       .split('## Server and database\n')[1]
       ?.split('\n## ')[0]
@@ -492,5 +494,77 @@ describe('complete public documentation', () => {
     expect(readme).toContain('with the current committed date, that substitution makes no change')
     expect(readme).toContain('A placeholder or invalid date stops the site build')
     expect(readme).not.toContain('SET_ON_PUBLICATION_DAY')
+    expect(legal).toContain(
+      'The legal publication date is set for the currently published legal text.',
+    )
+    expect(legal).toContain('change it only when publishing revised legal text')
+    expect(legal).not.toContain('replaces this placeholder')
+  })
+})
+
+describe('consolidated guide facts', () => {
+  it.each([
+    ['embedding', 'Popup', 'the rest of the page is inert'],
+    ['embedding', 'Popup', '`HTMLDialogElement.showModal()`'],
+    ['embedding', 'Inline', 'Its width follows the container'],
+    [
+      'embedding',
+      'Interface language',
+      'See [interface languages](/docs/interface-languages) for preference and formatting behavior',
+    ],
+    ['embedding', 'Booking completion', 'including successful idempotent retry confirmations'],
+    ['embedding', 'Booking completion', "iframe's `hourmere:booked` postMessage"],
+    ['embedding', 'Booking completion', 'not a trusted booking, billing or analytics record'],
+    ['google-calendar', 'Configure the provider', 'Never put these values in version control.'],
+    [
+      'google-calendar',
+      'Configure the provider',
+      'Docker Compose passes all three variables to the app/worker.',
+    ],
+    ['google-calendar', 'Configure the provider', 'Vite proxies `/api` to the server'],
+    [
+      'google-calendar',
+      'Configure the provider',
+      'Keep the key stable, private and backed up with the deployment secrets',
+    ],
+    ['google-calendar', 'Select calendars', '**Refresh calendar list** updates metadata.'],
+    ['google-calendar', 'Select calendars', 'Returning to the app shows the calendar list.'],
+    [
+      'google-calendar',
+      'Select calendars',
+      'new calendars have `check_conflicts=false` and the profile has no destination',
+    ],
+    [
+      'google-calendar',
+      'Select calendars',
+      'List-only connections remain supported and must be reauthorized before using synchronization.',
+    ],
+    [
+      'google-calendar',
+      'Booking projection and disconnect',
+      'A revoked/expired grant changes the connection to `needs_reauth`; reconnect through the same separate consent flow.',
+    ],
+    [
+      'google-calendar',
+      'Booking projection and disconnect',
+      '[operator repair described below](#automatic-meet-projection)',
+    ],
+  ])('retains %s / %s: %s', (guide, heading, fact) => {
+    const section = read(`${siteDocs}/${guide}.md`).split(`## ${heading}\n`)[1]?.split('\n## ')[0]
+    expect(normalize(section ?? '')).toContain(fact)
+  })
+
+  it.each([
+    'wildcards',
+    '`script-src`',
+    '`frame-src`',
+    '`CSSStyleSheet`',
+    '`adoptedStyleSheets`',
+    'https://calendar.example.com/team/Alpha/intro',
+    'Repeated loading failures',
+    'No booking ID',
+    'The browser checks every ancestor',
+  ])('explains the embedding constraint %s once', (fact) => {
+    expect(read(`${siteDocs}/embedding.md`).split(fact)).toHaveLength(2)
   })
 })

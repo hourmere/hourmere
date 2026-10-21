@@ -197,4 +197,4 @@ actual host's own API key; the CLI has no account-selection tool. A claimed crea
 with no validated ID remains ambiguous: retry does not issue another POST or adopt a guessed
 meeting. Inspect/remove any orphan in Zoom before replacing the booking. Personal and
 individual single-host team events are supported; collective/round-robin automatic Zoom
-requires a later per-host policy. See [automatic-zoom.md](/docs/automatic-zoom).
+requires a later per-host policy. See [Automatic Zoom for one host](/docs/automatic-zoom).

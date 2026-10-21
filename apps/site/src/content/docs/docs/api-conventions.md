@@ -162,7 +162,7 @@ configured with `PRIVACY_POLICY_URL` and `TERMS_URL`. Each field is omitted when
 empty, including on self-hosted instances; clients hide the corresponding link.
 
 `GET /api/v1/me` returns the caller, the organization they act in and whether they used a
-session or an API key. The MCP server at `/mcp` ([mcp.md](/docs/mcp)) accepts API keys and,
+session or an API key. The MCP server at `/mcp` ([MCP quickstart](/docs/mcp)) accepts API keys and,
 when enabled, MCP OAuth grants. Session cookies never authenticate MCP. OAuth grants are
 limited to MCP tools and do not authenticate REST requests.
 
@@ -262,7 +262,7 @@ surrogate pair. A name that becomes empty stays empty until the person chooses o
 calendar dates), with explicit `startDate`, `endDate` and IANA `timeZone`. Personal owners
 and team owners/admins may read the acting organization's totals; ordinary members receive
 `403 insufficient_role`. It reports stored operation dates, excludes reschedule withdrawals
-from cancellations, and includes no booking or attendee details. See [analytics.md](/docs/analytics)
+from cancellations, and includes no booking or attendee details. See [Booking activity](/docs/analytics)
 for the retained-record and deletion semantics.
 
 A list response is `{ "data": [ … ] }`. Lists that can grow without bound use cursor
@@ -318,7 +318,7 @@ everywhere a token is taken, REST and MCP:
   its hash to the successor, clearing it on the predecessor in the same transaction, so
   the invitee's existing link opens the new booking without exposing a secret to the host.
 - **An email's token**, from the manage links in the invitee's booking emails; each email
-  carries its own ([notifications.md](/docs/notifications#which-booking-a-token-opens)). It
+  carries its own ([Notifications and background jobs](/docs/notifications#which-booking-a-token-opens)). It
   follows the meeting: after a reschedule it opens the booking that replaced it (the latest
   of the chain), and cancels or reschedules that one.
 
@@ -464,11 +464,11 @@ endpoint even after its allowlist entry is removed; all other updates recheck th
 Every actual send re-resolves all addresses against the current policy and pins a validated
 address to the socket. Accepted configuration does not establish receiver availability.
 The instance must explicitly enable new captures; no historical bookings are backfilled.
-See [webhooks.md](/docs/webhooks) for the payload, signed headers, retention and delivery contract.
+See [Booking webhooks](/docs/webhooks) for the payload, signed headers, retention and delivery contract.
 
 ### Automatic Google Meet
 
-The optional event-type input `location: {kind:"google_meet",autoCreate:true}` explicitly enables per-booking provisioning when the instance and selected owned calendar support it. Label-only existing input is unchanged. Collective opt-ins require an authenticated `conferenceOrganizer: {userId}` from their required hosts; individual and round-robin types use their actual host/winner and reject a fixed selection. Unsupported configurations return `automatic_meet_disabled`, `automatic_meet_unavailable` or `invalid_conference_organizer`. Protected booking details add optional bounded `conference` state; catalogs expose no join URL. The current verified pinned organizer can POST an empty strict JSON object to `/api/v1/bookings/{id}/conference/retry` for safe reconciliation. It never overrides an ambiguous create or switches the pinned destination. See [automatic-google-meet.md](/docs/automatic-google-meet) for ready-gated invitations, cancellation and retry limits.
+The optional event-type input `location: {kind:"google_meet",autoCreate:true}` explicitly enables per-booking provisioning when the instance and selected owned calendar support it. Label-only existing input is unchanged. Collective opt-ins require an authenticated `conferenceOrganizer: {userId}` from their required hosts; individual and round-robin types use their actual host/winner and reject a fixed selection. Unsupported configurations return `automatic_meet_disabled`, `automatic_meet_unavailable` or `invalid_conference_organizer`. Protected booking details add optional bounded `conference` state; catalogs expose no join URL. The current verified pinned organizer can POST an empty strict JSON object to `/api/v1/bookings/{id}/conference/retry` for safe reconciliation. It never overrides an ambiguous create or switches the pinned destination. See [Automatic Google Meet](/docs/automatic-google-meet) for ready-gated invitations, cancellation and retry limits.
 
 `conference.status="failed"` with `conference.errorCode="conference_pending_timeout"`
 means Google still reported pending when the bounded provisioning poll budget expired;

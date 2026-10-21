@@ -152,6 +152,10 @@ describe('provider publication and verification claims throughout documentation'
     .filter((path) => /\b(?:google|microsoft|zoom|meet|smtp|mail|emails?)\b/i.test(source(path)))
     .map((path) => ({ path, allowed: providerClaimAllowlist[path] ?? [] }))
 
+  it('discovers at least the 21 expected provider and delivery pages', () => {
+    expect(pages.length).toBeGreaterThanOrEqual(21)
+  })
+
   it.each(pages)(
     'allows only reviewed complete sentences throughout $path',
     ({ path, allowed }) => {
