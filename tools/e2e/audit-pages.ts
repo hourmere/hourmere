@@ -169,7 +169,7 @@ export async function openAuditPage(
     // before navigation so later pages never inherit wall-clock-dependent rows.
     await page.clock.setFixedTime(new Date(AUDIT_NOW))
     const fixture = await app.auditState()
-    await app.auditSignIn(!publicPages.has(id))
+    await app.auditSignIn(!publicPages.has(id), locale)
     await page.addInitScript(prepareAuditLocale, locale)
     const paths: Record<AuditPageId, string> = {
       host: '/fixture-host',

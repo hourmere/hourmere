@@ -1194,19 +1194,21 @@ input[readonly] {
   }
 }
 
-/* The smallest cards reserve more room for complete time ranges. */
+/* The smallest cards reserve more room for values. */
 @container data-table (max-width: 300px) {
   .table td[data-label] {
     grid-template-columns: 5rem minmax(0, 1fr);
     gap: var(--space-2);
   }
+}
 
-  /* Complete dates and overnight ranges need the card's full value width. */
+/* Stack every booking field consistently when overnight ranges need the full width. */
+@container data-table not (min-width: 440px) {
   .table-bookings :is(th, td) {
     padding-inline: var(--space-2);
   }
 
-  .table-bookings td.booking-when {
+  .table-bookings td[data-label] {
     grid-template-columns: minmax(0, 1fr);
     gap: 0;
   }
