@@ -1,5 +1,6 @@
-# Self-hosting: ./scripts/setup.sh creates a private .env, then
-#   docker compose up -d --build --wait
+# Self-hosting: ./scripts/setup.sh creates a private .env and prints the next commands.
+# --image selects docker-compose.image.yml and an exact HOURMERE_VERSION; start without --build.
+# --source builds this checkout with docker compose up -d --build --wait.
 # The optional docker-compose.proxy.yml adds Caddy HTTPS (selected by setup.sh).
 # The app listens on 127.0.0.1:3000; put a reverse proxy with TLS in front of it. Until SMTP
 # is configured, sign-in links are printed by `docker compose logs app`. With the default

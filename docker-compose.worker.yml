@@ -1,6 +1,7 @@
-# Optional separate worker. Run ./scripts/enable-worker.sh after setup.sh, then verify:
-# docker compose config --services | grep -qx worker && docker compose up -d --build --wait
+# Optional separate worker. Run ./scripts/enable-worker.sh after setup.sh, then follow its
+# verification and start commands: image installs omit --build; source installs include --build.
 # Manual example: COMPOSE_FILE='docker-compose.yml:docker-compose.proxy.yml:docker-compose.worker.yml'
+# Preserve docker-compose.image.yml in the file list for an image install.
 # The overlay selects both roles so only the worker runs background jobs.
 services:
   app:
