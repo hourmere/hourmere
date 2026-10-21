@@ -1,4 +1,7 @@
-# Interface languages
+---
+title: Interface languages
+description: Choose English or Simplified Chinese in the web interface and booking widgets.
+---
 
 The web interface is available in English and Simplified Chinese. The language control is
 available on sign-in, account and standalone public booking pages.
@@ -47,8 +50,8 @@ completion messages contain no booking or attendee data.
 
 ## Development
 
-`apps/web/src/i18n/common.ts` contains public/shared message keys and Simplified Chinese
-text. The separate `admin.ts` catalog is registered only through the existing lazy session
+[`apps/web/src/i18n/common.ts`](https://github.com/hourmere/hourmere/blob/main/apps/web/src/i18n/common.ts) contains public/shared message keys and Simplified Chinese
+text. The separate [`admin.ts`](https://github.com/hourmere/hourmere/blob/main/apps/web/src/i18n/admin.ts) catalog is registered only through the existing lazy session
 graph. English text is the typed semantic key. Use `t(key, values)` during render and
 `msg(key, values)` for a notice or validation message held in state. Nested messages, date
 arguments and lists are formatted when rendered, so an already visible message follows a

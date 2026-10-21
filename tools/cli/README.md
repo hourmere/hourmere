@@ -89,9 +89,9 @@ outside the current page or filters. Public/manage responses omit it. The predec
 `status` remains `cancelled`; follow `rescheduledToId` forward and `rescheduledFromId` back
 when inspecting a move after a lost response.
 
-See the [complete CLI guide](https://github.com/hourmere/hourmere/blob/main/docs/cli.md)
+See the [complete CLI guide](https://hourmere.com/docs/cli)
 for argument tables, private results, pagination and recovery, and the
-[MCP guide](https://github.com/hourmere/hourmere/blob/main/docs/mcp.md) for tool semantics.
+[MCP guide](https://hourmere.com/docs/mcp) for tool semantics.
 Report bugs on [GitHub](https://github.com/hourmere/hourmere/issues).
 
 ## License

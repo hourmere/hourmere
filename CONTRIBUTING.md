@@ -304,8 +304,10 @@ checks advisory until reviewed baselines are committed.
 
 ## Conventions
 
-- **API:** [docs/api-conventions.md](docs/api-conventions.md). Changes within `/api/v1` are
+- **API:** [API conventions](https://hourmere.com/docs/api-conventions). Changes within `/api/v1` are
   additive only, and errors use the shared shape and codes described there.
+- **MCP tools:** [Adding a tool](docs/mcp-development.md#adding-a-tool) covers extensions to the
+  shared MCP tool registry.
 - **Data:** [docs/data-model.md](docs/data-model.md). Migrations in `packages/db/migrations`
   are never edited once merged; add a new one instead.
 - **Layers:** see the repository layout in the [README](README.md#repository-layout).

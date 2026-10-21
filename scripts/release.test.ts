@@ -70,6 +70,38 @@ describe('release preparation', () => {
     expect(notes).not.toContain('https://github.com/hourmere/hourmere/blob/main/')
   })
 
+  it('pins relocated and existing site guides in the real changelog to the released version', () => {
+    const changelog = readFileSync(
+      process.env.HOURMERE_RELEASE_CHANGELOG ??
+        fileURLToPath(new URL('../CHANGELOG.md', import.meta.url)),
+      'utf8',
+    )
+    const repo = fixture(changelog)
+    expect(repo.run('prepare', 'v1.0.0', repo.sha).status).toBe(0)
+    const notes = readFileSync(join(repo.dir, 'hourmere-release-notes.md'), 'utf8')
+    const guides = [
+      'microsoft-calendar.md',
+      'automatic-zoom.md',
+      'notifications.md#email-headers-mime-and-replies',
+      'configuration.md#server-and-database',
+      'self-hosting.md#prepare-the-host',
+      'interface-languages.md',
+      'notifications.md#identity-and-recipients',
+      'self-hosting.md#back-up-and-restore',
+      'notifications.md#calendar-invitations',
+      'self-hosting.md#upgrade-and-roll-back',
+      'google-calendar.md#automatic-meet-projection',
+      'notifications.md#conference-outbox-delivery-budget',
+      'webhooks.md',
+    ]
+    for (const guide of guides) {
+      expect(notes).toContain(
+        `https://github.com/hourmere/hourmere/blob/v1.0.0/apps/site/src/content/docs/docs/${guide}`,
+      )
+    }
+    expect(notes).not.toContain('https://hourmere.com/docs')
+  })
+
   it.each(['v1.0.0', 'v1.2.0-rc.1'])('pins repository guidance to the published tag %s', (tag) => {
     const repository = 'https://github.com/hourmere/hourmere'
     const otherRepository = 'https://github.com/example/other/blob/main/docs.md'

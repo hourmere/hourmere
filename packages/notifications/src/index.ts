@@ -1,4 +1,4 @@
-// Booking notifications (docs/notifications.md): the job that emails attendees and hosts
+// Booking notifications (https://hourmere.com/docs/notifications): the job that emails attendees and hosts
 // when a booking is confirmed, rescheduled or cancelled and before it starts, and the helper
 // the booking services call inside their transactions to queue those jobs.
 

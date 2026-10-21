@@ -29,7 +29,7 @@ Secrets are never accepted as command-line flags. No .env or credential store is
 stdout is JSON with management capabilities redacted. --output creates a new 0600 JSON
 file including returned management tokens; keep it private. Existing files are refused.
 book requires an explicit random idempotencyKey in its input. Calls are never retried.
-See https://github.com/hourmere/hourmere/blob/main/docs/cli.md for complete usage.
+See https://hourmere.com/docs/cli for complete usage.
 `
 
 interface Options {

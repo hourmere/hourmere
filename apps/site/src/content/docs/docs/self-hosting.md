@@ -142,7 +142,7 @@ filter replaces query strings with `?REDACTED` and deletes request headers, incl
 upstream errors; retain this filter when customizing the Caddyfile.
 
 If you already operate a proxy, select `plain` during setup. This selects only
-`docker-compose.yml`, which publishes `127.0.0.1:${PORT:-3000}:3000`; PostgreSQL remains
+[`docker-compose.yml`](https://github.com/hourmere/hourmere/blob/main/docker-compose.yml), which publishes `127.0.0.1:${PORT:-3000}:3000`; PostgreSQL remains
 unpublished. Supply the exact public HTTPS origin and SMTP settings, then configure your
 proxy to preserve the Host, set `X-Forwarded-Proto: https`, and replace untrusted incoming
 `X-Forwarded-For` with the actual visitor address. Forward every path unchanged, including
@@ -270,11 +270,11 @@ COMPOSE_FILE='docker-compose.yml:docker-compose.worker.yml'
 Run the verification command above after any manual edit. The tracked overlay
 automatically sets the app to `HOURMERE_ROLE=web` and the worker to
 `HOURMERE_ROLE=worker`, so exactly one service runs
-jobs; no separate role edit or change to `docker-compose.yml` is needed. The worker uses
+jobs; no separate role edit or change to [`docker-compose.yml`](https://github.com/hourmere/hourmere/blob/main/docker-compose.yml) is needed. The worker uses
 the same image, environment and secrets as the base app, and its port stays unpublished.
 A web-only deployment needs a running worker for queued sign-in email, booking email and
 calendar updates. The worker exposes only `/api/health` for health checks. Keep web and
-worker on the same version and secrets. Development's `docker-compose.dev.yml` and
+worker on the same version and secrets. Development's [`docker-compose.dev.yml`](https://github.com/hourmere/hourmere/blob/main/docker-compose.dev.yml) and
 `hourmere-dev` project remain independent of this production selection.
 
 If moving from the old commented worker block, follow
@@ -498,7 +498,7 @@ local image tag. Compare the count with your expected account data, and inspect 
 expected records privately. Persisting `COMPOSE_PROJECT_NAME=hourmere-restore` ensures later
 backup, upgrade and log commands in this checkout target the restored project too. These
 assignments also work with backups from before the deployment settings existed, provided
-the selected source revision contains `Caddyfile` and `docker-compose.proxy.yml`. If the
+the selected source revision contains [`Caddyfile`](https://github.com/hourmere/hourmere/blob/main/Caddyfile) and [`docker-compose.proxy.yml`](https://github.com/hourmere/hourmere/blob/main/docker-compose.proxy.yml). If the
 backup commit predates this kit, select a reviewed newer revision containing these files
 instead of that old commit before using the HTTPS commands; startup will apply its pending
 migrations, so retain the original dump for rollback. The rewrite preserves only the exact
@@ -624,7 +624,7 @@ Once that `up` is attempted, follow [Back up and restore](#back-up-and-restore),
 it fails: a new app or worker may already have applied migrations; old code against the
 new schema is unsafe.
 
-Git does not undo `enable-worker.sh`'s private `.env` edit. Before checking out the prior
+Git does not undo [`enable-worker.sh`](https://github.com/hourmere/hourmere/blob/main/scripts/enable-worker.sh)'s private `.env` edit. Before checking out the prior
 revision, restore only the pre-upgrade `COMPOSE_FILE` assignment from the saved private
 `.env` (remove the assignment if it was absent), preserving the proxy/custom overlays
 and other current settings. If a worker was already selected before the upgrade, keep
@@ -707,17 +707,17 @@ and `worker` process, including any on other hosts. With Compose, run
 `docker compose stop app` and, if the separate worker is configured, `docker compose stop worker`. Leave
 PostgreSQL running, then apply the migration and start every role with the new code. With
 `AUTO_MIGRATE=true`, the first new process applies the migration on startup. See the
-[calendar identity migration notes](https://github.com/hourmere/hourmere/blob/main/docs/notifications.md#identity-and-recipients).
+[calendar identity migration notes](/docs/notifications#identity-and-recipients).
 
 Migration `0037_conference_pending_timeout.sql` is the project's first column drop:
 old versions still write the removed `booking_conferences.retry_conference` column.
 Stop every old app and worker before it runs, then restart every role with the upgraded
 code. See the [0037 migration notes](https://github.com/hourmere/hourmere/blob/main/packages/db/migrations/0037_conference_pending_timeout.md).
 
-**If you uncommented the old worker block in `docker-compose.yml`, migrate it before
+**If you uncommented the old worker block in [`docker-compose.yml`](https://github.com/hourmere/hourmere/blob/main/docker-compose.yml), migrate it before
 changing revisions.** Those tracked edits make `git pull --ff-only` refuse the upgrade
 and can prevent checking out a release tag. If your checkout already has
-`scripts/enable-worker.sh`, run it first. Otherwise replace or add the
+[`scripts/enable-worker.sh`](https://github.com/hourmere/hourmere/blob/main/scripts/enable-worker.sh), run it first. Otherwise replace or add the
 complete `COMPOSE_FILE` line in `.env` before restoring the tracked file. For bundled HTTPS:
 
 ```dotenv

@@ -59,7 +59,7 @@ image version, database, `PUBLIC_URL`, `BETTER_AUTH_SECRET` and mail settings as
 process. Follow [Run workers separately](/docs/self-hosting#run-workers-separately) to select
 the tracked overlay and recreate the stack. Keep the worker port private. After restoring
 the worker, request a fresh sign-in link. See
-[notifications and background jobs](https://github.com/hourmere/hourmere/blob/main/docs/notifications.md)
+[notifications and background jobs](/docs/notifications)
 for delivery and retry behavior.
 
 ## Caddy cannot obtain or renew a certificate

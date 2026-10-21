@@ -6,7 +6,7 @@ description: Independent Zoom identity OAuth and explicit single-host meeting au
 Hourmere can connect a personal Zoom identity under **Conference accounts**, separately from
 sign-in, Google/Microsoft calendar connections, and the passive Zoom location label on event
 types. The identity-only choice does **not** create or read meetings. Optional automatic meeting
-authorization is a separate explicit choice; see [automatic Zoom](https://github.com/hourmere/hourmere/blob/main/docs/automatic-zoom.md)
+authorization is a separate explicit choice; see [automatic Zoom](/docs/automatic-zoom)
 for lifecycle, private host selection, safe retry and acceptance limits. The user's own API
 keys can list Zoom connections and select their own meeting-mode connection for automatic
 Zoom through REST on event types they actually host, with the same organization checks.
@@ -29,7 +29,7 @@ self-hosters use their own Zoom apps.
 
 1. For identity-only use configure **only** granular `user:read:user`. Enabling separate
    meeting authorization requires an independently approved compatible client configuration
-   and `ZOOM_MEETINGS_ENABLED=true`; follow [automatic Zoom](https://github.com/hourmere/hourmere/blob/main/docs/automatic-zoom.md). Never grant meeting
+   and `ZOOM_MEETINGS_ENABLED=true`; follow [automatic Zoom](/docs/automatic-zoom). Never grant meeting
    access implicitly to the identity action, and never add admin/unrelated scopes. Zoom's basic authorization query can include the required and
    optional scopes configured in Marketplace.
 2. Enable the client's S256 PKCE capability, while using its **confidential** client ID and
@@ -50,7 +50,7 @@ self-hosters use their own Zoom apps.
    **Secret Token** and configure both its **Event notification endpoint URL** and
    **Deauthorization Notification Endpoint URL** as
    `{PUBLIC_URL}/api/conference/zoom/events`. Validate and save the publicly reachable HTTPS
-   endpoint; see [automatic Zoom](https://github.com/hourmere/hourmere/blob/main/docs/automatic-zoom.md) for build-flow details and delivery limitations.
+   endpoint; see [automatic Zoom](/docs/automatic-zoom) for build-flow details and delivery limitations.
    This endpoint remains enabled independently of OAuth and automatic meeting flags. Zoom documents deauthorization delivery for public
    apps; private/development apps do not trigger it.
 6. Sign in, open **Conference accounts**, and explicitly choose **Connect Zoom**. Do not use a
@@ -60,7 +60,7 @@ Hourmere uses the official fixed authorize/token/users-me hosts. The advanced au
 query includes `scope=user:read:user`, empty `optional_scope`, and omits
 `include_granted_scopes`. Requests cannot select a broader scope. Each connection stores its explicitly requested mode. Identity mode conservatively
 requires every code exchange and refresh response to report exactly `user:read:user`;
-meeting mode requires its distinct exact set from [automatic Zoom](https://github.com/hourmere/hourmere/blob/main/docs/automatic-zoom.md). An absent, duplicated, unknown or broader scope fails closed. This is
+meeting mode requires its distinct exact set from [automatic Zoom](/docs/automatic-zoom). An absent, duplicated, unknown or broader scope fails closed. This is
 Hourmere's conservative policy, not a claim that OAuth or Zoom universally guarantees a scope
 field on every response. Check actual client response compatibility before enabling a real
 integration; do not work around the policy by requesting broader access.
@@ -122,7 +122,7 @@ connection, a default-off instance flag and the actual host's session or own API
 They reconcile one pinned meeting through reschedule/cancellation, hold final mail/ICS until
 ready and can pin one optional ordinary Google copy. Collective/round-robin automatic Zoom
 is unsupported. An unknown create is never retried with another POST: inspect/remove any
-orphan in Zoom before replacing the booking. See [automatic Zoom](https://github.com/hourmere/hourmere/blob/main/docs/automatic-zoom.md) for the complete
+orphan in Zoom before replacing the booking. See [automatic Zoom](/docs/automatic-zoom) for the complete
 contract and real-client acceptance limits.
 
 ## Reference API
@@ -156,3 +156,61 @@ Protocol references, checked 19 October 2026:
 [granular scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-granular/),
 [webhook verification](https://developers.zoom.us/docs/api/webhooks/),
 [app deauthorization](https://developers.zoom.us/docs/integrations/end-user-auth/).
+
+## Refresh and abandoned operations
+
+The Conference accounts page offers **Refresh Zoom account** for both `active` and
+`refreshing` connections. An owner-scoped operation lease serializes Zoom token changes,
+including changes for different Zoom identities belonging to that Hourmere user.
+
+If an operation still owns a live lease, explicit refresh returns HTTP 409:
+
+```json
+{
+  "error": "zoom_refresh_in_progress",
+  "errorAlias": "zoom_operation_busy",
+  "message": "Zoom account operations are busy. Try again shortly."
+}
+```
+
+New clients should prefer the neutral `errorAlias` and accept `zoom_refresh_in_progress`
+when talking to older servers. The legacy code is deprecated, but its `error` value remains
+for all of `/api/v1`; the alias is additive, and removing or renaming the old code requires
+a new API version ([API conventions](/docs/api-conventions#errors)). The conflict means an owner
+operation is busy; it does not identify which connection or operation holds the lease.
+Wait briefly before retrying.
+
+A refresh that acquires a valid lease and still finds `refreshing` can prove that the old
+rotation was abandoned. It changes the connection to `needs_reauth`, clears the old
+operation and credentials, and returns `zoom_needs_reauth` without calling Zoom. The page
+then tells the user to choose **Reconnect Zoom**. This explicit path also recovers
+identity-only connections, which have no meeting worker to discover the abandoned refresh.
+
+## Callback replay and busy
+
+`GET /api/conference/zoom/callback` returns to `/app/conferences` with a fixed result code.
+For a syntactically valid state, it tries to acquire the owner's token-operation lease
+before inspecting the OAuth attempt. An occupied lease returns `busy` immediately; that
+request neither consumes state nor exchanges a provider code.
+
+The result describes lease contention, not the state of the submitted attempt:
+
+| Submitted attempt | While the owner's lease is occupied | After the lease is released |
+| --- | --- | --- |
+| Unclaimed, unexpired, same-session state with a valid provider code | `busy`, with the attempt unchanged | Can complete normally |
+| Already claimed by an exchange still in progress | `busy`, without a second exchange | `invalid_state`, without a second exchange |
+| Already completed or otherwise invalid state with valid syntax | `busy`, without another exchange | `invalid_state`, without another exchange |
+
+In particular, replaying the same callback while its first exchange is in progress returns
+`busy`, rather than `invalid_state`. The same can happen when a different exchange for that
+owner holds the lease. A `busy` result is not evidence that a state or provider code remains
+valid or reusable. State claims are durable, single-use and session-bound; they clear the
+stored PKCE verifier before provider I/O. Completion, failure or a failed final commit does
+not make a claimed attempt reusable. Expiry is checked when claiming; an exchange claimed
+before expiry may finish successfully after expiry.
+
+The browser offers a neutral retry message and the user can start **Connect Zoom** or
+**Reconnect Zoom** again after the busy operation finishes. The original callback can only
+succeed on retry if its state was never claimed, its session and attempt remain valid, and
+the provider code is still valid. Do not automatically replay a claimed callback or infer
+successful authorization from `busy`.

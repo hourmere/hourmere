@@ -7,11 +7,7 @@ const root = process.env.HOURMERE_DOCS_ROOT ?? fileURLToPath(new URL('../../../'
 const read = (path: string) => readFileSync(join(root, path), 'utf8')
 const normalize = (source: string) => source.replace(/\s+/g, ' ')
 const siteDocs = 'apps/site/src/content/docs/docs'
-const googleGuides = [
-  `${siteDocs}/configuration.md`,
-  `${siteDocs}/google-calendar.md`,
-  'docs/google-calendar.md',
-]
+const googleGuides = [`${siteDocs}/configuration.md`, `${siteDocs}/google-calendar.md`]
 
 describe('self-hosting documentation follow-ups', () => {
   it.each(['configuration', 'google-calendar', 'self-hosting'])(
@@ -55,7 +51,7 @@ describe('self-hosting documentation follow-ups', () => {
     )
   })
 
-  it.each([`${siteDocs}/google-calendar.md`, 'docs/google-calendar.md'])(
+  it.each([`${siteDocs}/google-calendar.md`])(
     'offers a separate-project fallback when shared-project sign-in access fails in %s',
     (path) => {
       expect(normalize(read(path))).toMatch(

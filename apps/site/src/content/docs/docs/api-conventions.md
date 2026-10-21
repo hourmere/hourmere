@@ -1,4 +1,7 @@
-# API conventions
+---
+title: API conventions
+description: Versioning, authentication, validation, errors and booking semantics for the REST API.
+---
 
 Rules for the product API under `/api/v1`. Agents depend on it for years, so changes are
 additive within a version. The OpenAPI document is served at `/api/v1/openapi.json`.
@@ -14,7 +17,7 @@ additive within a version. The OpenAPI document is served at `/api/v1/openapi.js
   error shape (`{ "message", "code" }`), not the ones below.
 - `/api/calendar/google/callback` is the separate calendar OAuth protocol callback. The
   owner-side connection API is versioned under `/api/v1/calendar-connections`; see
-  [Google Calendar connections](google-calendar.md).
+  [Google Calendar connections](/docs/google-calendar).
 - `/api/conference/zoom/callback` is the separate conference OAuth callback.
   `POST /api/conference/zoom/events` is Zoom's signed webhook protocol, enabled only by
   `ZOOM_WEBHOOK_SECRET_TOKEN`, independently of OAuth or automatic meeting configuration.
@@ -28,7 +31,7 @@ additive within a version. The OpenAPI document is served at `/api/v1/openapi.js
   return 200 without creating records. `deauthorization_time` is required; when
   `ZOOM_CLIENT_ID` is configured, missing/different payload client IDs are ignored. It requires no
   browser session or API key; invalid signatures/timestamps return 401. See
-  [automatic Zoom](automatic-zoom.md#app-removal-and-event-endpoint) for operator setup.
+  [automatic Zoom](/docs/automatic-zoom#app-removal-and-event-endpoint) for operator setup.
 
 Magic-link verification failures default to `/sign-in?error=CODE`, where the app explains
 the failure and offers a new link. An explicit `errorCallbackURL` still applies (subject
@@ -76,7 +79,7 @@ does not schedule its removal from v1: its original `error` value remains for **
 |---|---|---|
 | `zoom_operation_busy` | `zoom_refresh_in_progress` (deprecated) | HTTP 409: another token operation for the same Hourmere owner is in progress, possibly for a different Zoom identity. It does not mean the selected connection is refreshing; retry shortly. |
 
-See [Zoom connections](zoom-connections.md) for callback replay and recovery semantics.
+See [Zoom connections](/docs/zoom-connections) for callback replay and recovery semantics.
 
 | Status | Meaning |
 |---|---|
@@ -108,8 +111,8 @@ for failures the caller can act on; the server maps the kind to a status and ans
 Anything else a service throws is a bug: 500 `internal_error`, logged on one escaped line.
 A lower-level error wrapped as a DomainError's `cause` is logged the same way and never sent
 to the client.
-New route groups are `RouteModule`s (`apps/server/src/openapi.ts`) created in `server.ts` with
-their services and registered by `createApp`; `apps/server/src/app.test.ts` has a template.
+New route groups are `RouteModule`s ([`apps/server/src/openapi.ts`](https://github.com/hourmere/hourmere/blob/main/apps/server/src/openapi.ts)) created in [`server.ts`](https://github.com/hourmere/hourmere/blob/main/apps/server/src/server.ts) with
+their services and registered by `createApp`; [`apps/server/src/app.test.ts`](https://github.com/hourmere/hourmere/blob/main/apps/server/src/app.test.ts) has a template.
 
 ## Authentication
 
@@ -159,7 +162,7 @@ configured with `PRIVACY_POLICY_URL` and `TERMS_URL`. Each field is omitted when
 empty, including on self-hosted instances; clients hide the corresponding link.
 
 `GET /api/v1/me` returns the caller, the organization they act in and whether they used a
-session or an API key. The MCP server at `/mcp` ([mcp.md](mcp.md)) accepts API keys and,
+session or an API key. The MCP server at `/mcp` ([MCP quickstart](/docs/mcp)) accepts API keys and,
 when enabled, MCP OAuth grants. Session cookies never authenticate MCP. OAuth grants are
 limited to MCP tools and do not authenticate REST requests.
 
@@ -214,13 +217,13 @@ fields (long answers, reasons, event type descriptions) may contain tabs and lin
 Services refuse anything else with the field's code (`invalid_invitee`, `invalid_guests`,
 `invalid_responses`, `invalid_reason`, `invalid_questions`, `invalid_schedule`,
 `invalid_event_type`, `invalid_location`), using the helpers in
-`packages/scheduling/src/text.ts`.
+[`packages/scheduling/src/text.ts`](https://github.com/hourmere/hourmere/blob/main/packages/scheduling/src/text.ts).
 As a safety net for every `/api/v1` route, a JSON body with NUL or a lone surrogate anywhere
 (values or keys) is refused with 400 `invalid_request` when the route reads it, before the
 route can use it.
 
 Request bodies are limited to 64 KB on all of `/api`, sign-in included, unless a route
-declares a different limit (`routeBodyLimit` in `apps/server/src/body-limit.ts`); beyond the limit, 413
+declares a different limit (`routeBodyLimit` in [`apps/server/src/body-limit.ts`](https://github.com/hourmere/hourmere/blob/main/apps/server/src/body-limit.ts)); beyond the limit, 413
 `payload_too_large`. A `Content-Length` over the limit is refused at once; any other body
 (e.g. sent chunked) is counted while the route reads it, which also stops a body longer than
 its `Content-Length`. Nothing reads the body before the route needs it: rate limits and
@@ -259,7 +262,7 @@ surrogate pair. A name that becomes empty stays empty until the person chooses o
 calendar dates), with explicit `startDate`, `endDate` and IANA `timeZone`. Personal owners
 and team owners/admins may read the acting organization's totals; ordinary members receive
 `403 insufficient_role`. It reports stored operation dates, excludes reschedule withdrawals
-from cancellations, and includes no booking or attendee details. See [analytics.md](analytics.md)
+from cancellations, and includes no booking or attendee details. See [Booking activity](/docs/analytics)
 for the retained-record and deletion semantics.
 
 A list response is `{ "data": [ … ] }`. Lists that can grow without bound use cursor
@@ -315,7 +318,7 @@ everywhere a token is taken, REST and MCP:
   its hash to the successor, clearing it on the predecessor in the same transaction, so
   the invitee's existing link opens the new booking without exposing a secret to the host.
 - **An email's token**, from the manage links in the invitee's booking emails; each email
-  carries its own ([notifications.md](notifications.md#which-booking-a-token-opens)). It
+  carries its own ([Notifications and background jobs](/docs/notifications#which-booking-a-token-opens)). It
   follows the meeting: after a reschedule it opens the booking that replaced it (the latest
   of the chain), and cancels or reschedules that one.
 
@@ -371,7 +374,7 @@ Because booking pages share the root with the web app, the API and static files,
 can never be a handle: every top-level path the app or the server answers (`app`, `api`,
 `assets`, `booking`, `sign-in`, `event-types`, `favicon.ico`, …) and pages people expect from
 the product itself (`support`, `security`, `pricing`, `status`, …). The list is
-`RESERVED_NAMES` in `packages/core/src/reserved.ts`, compared case-insensitively. Setting one
+`RESERVED_NAMES` in [`packages/core/src/reserved.ts`](https://github.com/hourmere/hourmere/blob/main/packages/core/src/reserved.ts), compared case-insensitively. Setting one
 as a handle (`PUT /api/v1/profile`) is refused with 400 `handle_reserved`, and personal
 organization slugs never take one (`Admin` becomes `admin-user`). A handle stored before its
 name was reserved is not served: its host page, event pages, slots and bookings answer 404 as
@@ -415,7 +418,7 @@ public fields. Personal organizations and personal event types cannot be reached
 this namespace. Only active, non-deleted types with valid, verified team members as hosts
 are served: `individual` types have one assigned host, while `collective` types require all
 two to eight assigned hosts to be available for the complete interval. Collective hosts use
-their current default schedules; see [collective scheduling](collective-scheduling.md) for
+their current default schedules; see [collective scheduling](/docs/collective-scheduling) for
 configuration, concurrency and rescheduling rules. Round-robin types offer the union of
 currently eligible hosts and assign one available host in a durable equal rotation. Legacy
 and newly saved round-robin pools need explicit activation; ordinary metadata saves never
@@ -423,7 +426,7 @@ activate them. Round-robin event metadata omits `host.timeZone`; invitees view s
 their own zone. Booking results include only safe assigned-host name/time zone. A pool edit
 committed while a booking waits returns retryable `409 booking_changed` when the event
 still exists; fetch current availability before retrying. See
-[round-robin scheduling](round-robin-scheduling.md) for activation, fairness and failure rules.
+[round-robin scheduling](/docs/round-robin-scheduling) for activation, fairness and failure rules.
 Team bookings use the same availability rules, locks, idempotency scope, notifications and
 manage links as personal bookings.
 
@@ -461,11 +464,11 @@ endpoint even after its allowlist entry is removed; all other updates recheck th
 Every actual send re-resolves all addresses against the current policy and pins a validated
 address to the socket. Accepted configuration does not establish receiver availability.
 The instance must explicitly enable new captures; no historical bookings are backfilled.
-See [webhooks.md](webhooks.md) for the payload, signed headers, retention and delivery contract.
+See [Booking webhooks](/docs/webhooks) for the payload, signed headers, retention and delivery contract.
 
 ### Automatic Google Meet
 
-The optional event-type input `location: {kind:"google_meet",autoCreate:true}` explicitly enables per-booking provisioning when the instance and selected owned calendar support it. Label-only existing input is unchanged. Collective opt-ins require an authenticated `conferenceOrganizer: {userId}` from their required hosts; individual and round-robin types use their actual host/winner and reject a fixed selection. Unsupported configurations return `automatic_meet_disabled`, `automatic_meet_unavailable` or `invalid_conference_organizer`. Protected booking details add optional bounded `conference` state; catalogs expose no join URL. The current verified pinned organizer can POST an empty strict JSON object to `/api/v1/bookings/{id}/conference/retry` for safe reconciliation. It never overrides an ambiguous create or switches the pinned destination. See [automatic-google-meet.md](automatic-google-meet.md) for ready-gated invitations, cancellation and retry limits.
+The optional event-type input `location: {kind:"google_meet",autoCreate:true}` explicitly enables per-booking provisioning when the instance and selected owned calendar support it. Label-only existing input is unchanged. Collective opt-ins require an authenticated `conferenceOrganizer: {userId}` from their required hosts; individual and round-robin types use their actual host/winner and reject a fixed selection. Unsupported configurations return `automatic_meet_disabled`, `automatic_meet_unavailable` or `invalid_conference_organizer`. Protected booking details add optional bounded `conference` state; catalogs expose no join URL. The current verified pinned organizer can POST an empty strict JSON object to `/api/v1/bookings/{id}/conference/retry` for safe reconciliation. It never overrides an ambiguous create or switches the pinned destination. See [Automatic Google Meet](/docs/automatic-google-meet) for ready-gated invitations, cancellation and retry limits.
 
 `conference.status="failed"` with `conference.errorCode="conference_pending_timeout"`
 means Google still reported pending when the bounded provisioning poll budget expired;
