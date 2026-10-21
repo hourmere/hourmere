@@ -101,6 +101,7 @@ describe('published image configuration reference', () => {
 
   it('pins the image version without a v prefix or floating tags', () => {
     const row = tableRow('HOURMERE_VERSION')
+    expect(row).toContain('Not forwarded by the default Compose file: consumed by the Compose CLI')
     expect(row).toContain('Exact published release version')
     expect(row).toContain('without a leading `v`')
     expect(row).toContain('never `latest` or a floating minor tag')
