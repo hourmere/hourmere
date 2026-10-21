@@ -1,4 +1,4 @@
-import { fireEvent, screen, within } from '@testing-library/react'
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { Schedule } from '../../api/resources.ts'
@@ -956,13 +956,21 @@ describe('availability loading skeleton', () => {
 
 it('keeps the schedule editor inside the app shell while its skeleton loads', async () => {
   const loading = later()
-  scheduleServer([schedule()], {
+  const answered = vi.fn()
+  void loading.response.then(answered)
+  const api = scheduleServer([schedule()], {
     extra: { [`GET /api/v1/schedules/${SCHEDULE_ID}`]: () => loading.response },
   })
   renderApp(`/app/availability/${SCHEDULE_ID}`)
-  const skeleton = await screen.findByRole('status', { name: 'Loading…' })
+  // AdminLoading uses the same label before the session and lazy route are ready.
+  await screen.findByRole('navigation', { name: 'Main' })
+  await waitFor(() => expect(api.to(`GET /api/v1/schedules/${SCHEDULE_ID}`)).toHaveLength(1))
+  const skeleton = await within(screen.getByRole('main')).findByRole('status', {
+    name: 'Loading…',
+  })
   expect(skeleton.classList.contains('page-skeleton')).toBe(true)
-  expect(screen.getByRole('navigation', { name: 'Main' })).toBeDefined()
+  expect(skeleton.closest('[aria-busy="true"]')).toBeNull()
+  expect(answered).not.toHaveBeenCalled()
   await loading.answer(json(200, schedule()))
   expect(screen.getByRole('heading', { name: 'Edit “Working hours”', level: 1 })).toBeDefined()
 })
