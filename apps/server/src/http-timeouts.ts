@@ -28,7 +28,7 @@ export interface HttpTimeouts {
  * Defaults. A client that keeps a connection busy by sending slowly ties up a socket and the
  * request's buffers, and with Node's defaults it may do so for minutes. 20 s is plenty for any
  * client's headers; 60 s for the whole request lets the largest body any route accepts (2 MB,
- * see docs/api-conventions.md) through at about 280 kbit/s.
+ * see https://hourmere.com/docs/api-conventions) through at about 280 kbit/s.
  *
  * Keep-alive is long on purpose: a reverse proxy reuses idle connections to the app for as
  * long as its own idle timeout, and reusing one the app has just closed fails the request

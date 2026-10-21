@@ -8,7 +8,7 @@ import type { z } from 'zod'
 export type { KyselyTransactionLike } from 'pg-boss'
 
 /**
- * How pg-boss treats jobs that share a `singletonKey` (see docs/notifications.md):
+ * How pg-boss treats jobs that share a `singletonKey` (see https://hourmere.com/docs/notifications):
  * - `standard`: keys are ignored, every job is queued.
  * - `exclusive`: at most one job per key is queued or running; enqueueing another returns null.
  * - `stately`: at most one queued and one running job per key.

@@ -31,7 +31,7 @@ this schema has no standard OAuth configuration field. That extension is informa
 clients must use Hourmere's discovery endpoints. OAuth clients must not also configure the
 static API-key Authorization header.
 
-Hourmere's existing [MCP guide](mcp.md#oauth-21-connectors) describes
+Hourmere's existing [MCP guide](https://hourmere.com/docs/mcp#oauth-21-connectors) describes
 `MCP_OAUTH_ENABLED=true`, HTTPS `PUBLIC_URL`, resource and issuer discovery, S256 PKCE,
 CIMD/DCR, `mcp:tools`, and optional `offline_access`. OAuth is disabled by default; API keys
 work independently. This preparation does not change that behavior.

@@ -27,10 +27,10 @@ The website at hourmere.com is separate from your Hourmere instance.
 - [Microsoft Calendar](/docs/microsoft-calendar) lists calendars only, without busy-time
   synchronization or event writes. [Microsoft sign-in](/docs/configuration#sign-in-with-microsoft)
   and calendar connections have not had real-account acceptance.
-- [Automatic Zoom](https://github.com/hourmere/hourmere/blob/main/docs/automatic-zoom.md)
+- [Automatic Zoom](/docs/automatic-zoom)
   supports personal event types and individual team event types with one actual host;
   collective and round-robin event types are unsupported.
-- [Calendar RSVP replies](https://github.com/hourmere/hourmere/blob/main/docs/notifications.md#email-headers-mime-and-replies)
+- [Calendar RSVP replies](/docs/notifications#email-headers-mime-and-replies)
   are not processed; declining in a calendar does not cancel an Hourmere booking. Use
   Hourmere's cancellation action; operators must [handle replies manually](/docs/self-hosting#handle-calendar-replies).
 - PostgreSQL 18+ is required for `uuidv7()`; [PgBouncer is unsupported](/docs/configuration#server-and-database).
@@ -42,27 +42,27 @@ The website at hourmere.com is separate from your Hourmere instance.
 - [Rate limiting](https://github.com/hourmere/hourmere/blob/main/apps/server/src/rate-limit.ts)
   uses in-process memory; multiple web replicas multiply the limits. Run a single web process;
   a [separate worker](/docs/self-hosting#run-workers-separately) is supported.
-- [Interface languages](https://github.com/hourmere/hourmere/blob/main/docs/interface-languages.md)
+- [Interface languages](/docs/interface-languages)
   are English and Simplified Chinese only.
 - [Schema downgrade is not automatic](/docs/self-hosting#upgrade-and-roll-back). Some
   migrations are not rolling-upgrade safe: stop all old app and worker processes as required
   by the [migration notes](https://github.com/hourmere/hourmere/blob/main/docs/data-model.md#changing-the-schema)
-  and [calendar-email upgrade notes](https://github.com/hourmere/hourmere/blob/main/docs/notifications.md#identity-and-recipients).
+  and [calendar-email upgrade notes](/docs/notifications#identity-and-recipients).
 
-## More guides on GitHub
+## More guides
 
-These detailed guides remain in the repository:
+Explore these detailed guides:
 
-- [CLI](https://github.com/hourmere/hourmere/blob/main/docs/cli.md): use the booking tools
+- [CLI](/docs/cli): use the booking tools
   from a terminal with an API key.
-- [Booking webhooks](https://github.com/hourmere/hourmere/blob/main/docs/webhooks.md):
+- [Booking webhooks](/docs/webhooks):
   configure signed delivery and retries.
-- Team scheduling: [collective meetings](https://github.com/hourmere/hourmere/blob/main/docs/collective-scheduling.md)
-  and [round-robin pools](https://github.com/hourmere/hourmere/blob/main/docs/round-robin-scheduling.md).
-- [Automatic Google Meet](https://github.com/hourmere/hourmere/blob/main/docs/automatic-google-meet.md)
-  and [automatic Zoom](https://github.com/hourmere/hourmere/blob/main/docs/automatic-zoom.md):
+- Team scheduling: [collective meetings](/docs/collective-scheduling)
+  and [round-robin pools](/docs/round-robin-scheduling).
+- [Automatic Google Meet](/docs/automatic-google-meet)
+  and [automatic Zoom](/docs/automatic-zoom):
   configure explicit meeting creation and recovery.
-- [Notifications and background jobs](https://github.com/hourmere/hourmere/blob/main/docs/notifications.md):
+- [Notifications and background jobs](/docs/notifications):
   understand delivery, retries and calendar invitations.
 
 The software is licensed under AGPL-3.0. File bugs and feature ideas in

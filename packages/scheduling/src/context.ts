@@ -2,7 +2,7 @@ import type { Principal } from '@hourmere/auth'
 import type { Db } from '@hourmere/db'
 
 /**
- * A change to a booking that people are told about (docs/notifications.md). Only ids and
+ * A change to a booking that people are told about (https://hourmere.com/docs/notifications). Only ids and
  * the start: whoever is notified loads the rest when it acts, and must check then that the
  * booking is still as described.
  */

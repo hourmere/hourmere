@@ -1,4 +1,7 @@
-# Command-line client
+---
+title: Command-line client
+description: Use API-key booking tools from a terminal.
+---
 
 The standalone CLI supports Node.js 22 or later; repository development still uses Node.js 26.
 It calls the existing stateless MCP tools at `/mcp` for API-key users, using Node's built-in
@@ -19,7 +22,7 @@ npm run --silent cli -- --help
 Install the standalone **`@hourmere/cli`** package from npm once published; until then,
 use the source commands above. Install with `npm install --global @hourmere/cli` and use
 `hourmere whoami`, `hourmere --help` and `hourmere --version`. See the
-[npm README](../tools/cli/README.md) and [release procedure](releasing.md) for the tarball
+[npm README](https://github.com/hourmere/hourmere/blob/main/tools/cli/README.md) and [release procedure](https://github.com/hourmere/hourmere/blob/main/docs/releasing.md) for the tarball
 checks and owner approval requirements.
 
 Create an API key on `/app/api-keys` in the intended organization. The CLI reads only
@@ -31,7 +34,7 @@ can be forwarded. Requests time out after 30 seconds and are never automatically
 
 ## Commands and JSON arguments
 
-Arguments are the corresponding [MCP tool's](mcp.md#tools) JSON object. Supply them with
+Arguments are the corresponding [MCP tool's](/docs/mcp#tools) JSON object. Supply them with
 `--input FILE` or `--input -` for standard input. No input means `{}`. Secrets and attendee
 data need not appear in process arguments or shell history. Input files must be regular
 files (symlinks are refused); input is limited to slightly less than 2 MiB to leave room
@@ -56,7 +59,7 @@ commands accept exactly one of `handle` (personal link) or `teamSlug` (team link
 slugs keep their stored case; collective types require every configured host. Activated
 round-robin types offer the union and assign one available host; `book` returns its safe
 `assignedHost` name/time zone. Replaying the same JSON/key retains the selection. See
-[round-robin scheduling](round-robin-scheduling.md) for explicit activation and fairness. `reschedule` and `cancel` by ID require hosting that booking in the key's
+[round-robin scheduling](/docs/round-robin-scheduling) for explicit activation and fairness. `reschedule` and `cancel` by ID require hosting that booking in the key's
 organization. A management token instead acts as the invitee. These operations can send
 the same notification emails and calendar updates as the booking page.
 
@@ -194,4 +197,4 @@ actual host's own API key; the CLI has no account-selection tool. A claimed crea
 with no validated ID remains ambiguous: retry does not issue another POST or adopt a guessed
 meeting. Inspect/remove any orphan in Zoom before replacing the booking. Personal and
 individual single-host team events are supported; collective/round-robin automatic Zoom
-requires a later per-host policy. See [automatic-zoom.md](automatic-zoom.md).
+requires a later per-host policy. See [automatic-zoom.md](/docs/automatic-zoom).

@@ -3,6 +3,16 @@ Open-source scheduling for people and AI agents. Self-host from source; Hourmere
 
 > Early development. Nothing here is ready to use yet.
 
+## Features
+
+- Personal and team booking pages, including [collective meetings](https://hourmere.com/docs/collective-scheduling)
+  and [round-robin scheduling](https://hourmere.com/docs/round-robin-scheduling).
+- [Google Calendar](https://hourmere.com/docs/google-calendar) busy-time sync and booking writeback.
+- [REST](https://hourmere.com/docs/rest), [MCP](https://hourmere.com/docs/mcp) and
+  [CLI](https://hourmere.com/docs/cli) access for agents and scripts.
+- [Booking emails](https://hourmere.com/docs/notifications), optional signed
+  [webhooks](https://hourmere.com/docs/webhooks) and first-party [booking activity](https://hourmere.com/docs/analytics).
+
 ## Repository layout
 
 | Path | What it is |
@@ -14,14 +24,14 @@ Open-source scheduling for people and AI agents. Self-host from source; Hourmere
 | `packages/db` | Database access (Kysely) and SQL migrations in `packages/db/migrations`. |
 | `packages/scheduling` | Service layer shared by the REST API and the MCP server: reads and writes the database, enforces permissions, throws `DomainError`. |
 | `packages/auth` | Sign-in (Better Auth: email links, Google, Microsoft), sessions, organizations, API keys. |
-| `packages/calendars` | Separate Google Calendar OAuth, encrypted credentials, incremental busy-time sync and booking writeback. See [docs/google-calendar.md](docs/google-calendar.md). |
-| `packages/conferences` | Independent Zoom connections and single-host automatic meetings; see [automatic Zoom](docs/automatic-zoom.md), separate from sign-in. |
+| `packages/calendars` | Separate Google Calendar OAuth, encrypted credentials, incremental busy-time sync and booking writeback. See [Google Calendar](https://hourmere.com/docs/google-calendar). |
+| `packages/conferences` | Independent Zoom connections and single-host automatic meetings; see [automatic Zoom](https://hourmere.com/docs/automatic-zoom), separate from sign-in. |
 | `packages/mail` | Outgoing email: SMTP, or the server log when SMTP is not configured; booking email templates and calendar invitations. |
 | `packages/jobs` | Background jobs on Postgres (pg-boss): typed job definitions, enqueueing inside a transaction, workers. |
-| `packages/webhooks` | Optional signed organization booking webhooks, transactional delivery and bounded retries. See [docs/webhooks.md](docs/webhooks.md). |
-| `packages/notifications` | Durable booking and sign-in email delivery, retries and the encrypted credential outbox. See [docs/notifications.md](docs/notifications.md). |
+| `packages/webhooks` | Optional signed organization booking webhooks, transactional delivery and bounded retries. See [webhooks](https://hourmere.com/docs/webhooks). |
+| `packages/notifications` | Durable booking and sign-in email delivery, retries and the encrypted credential outbox. See [notifications](https://hourmere.com/docs/notifications). |
 | `tools/api-types` | Generates the web app's API types from the server's OpenAPI document (`npm run api:types`). |
-| `tools/cli` | API-key command-line client using the existing MCP tools (`npm run --silent cli -- --help`). See [docs/cli.md](docs/cli.md). |
+| `tools/cli` | API-key command-line client using the existing MCP tools (`npm run --silent cli -- --help`). See [CLI](https://hourmere.com/docs/cli). |
 
 ## Development
 
@@ -54,21 +64,19 @@ Other commands: `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`
 The website runs on its own: `npm run dev --workspace @hourmere/site` (http://localhost:4321). `npm run build` writes it to `apps/site/dist`. `npm run deploy --workspace @hourmere/site` builds it and publishes it as Cloudflare Workers static assets on hourmere.com and www.hourmere.com (config in `apps/site/wrangler.jsonc`); it needs `wrangler login` to the Cobaltmere Cloudflare account.
 
 The privacy policy's effective and last-updated dates and the terms' effective date share
-`LEGAL_PUBLICATION_DATE` in `apps/site/src/data/legal.ts`. The project lead replaces
-`SET_ON_PUBLICATION_DAY` with the actual publication day in `YYYY-MM-DD` format in the
-publication deploy commit, then runs `npm run deploy --workspace @hourmere/site`. A placeholder
-or invalid date stops the site build. Environment variables cannot override the source date.
-Keep the committed date on later deployments, including documentation and homepage changes;
-change it only when publishing revised legal text. For a local nonpublishing build, temporarily
-substitute a fixture date and restore the source afterward. CI does that substitution in its
-build step, restores the source with an exit trap, and deletes the generated site output;
-never deploy fixture output or commit a fixture date.
+`LEGAL_PUBLICATION_DATE` in `apps/site/src/data/legal.ts`, currently `2026-10-20`.
+Keep that date on later deployments, including documentation and homepage changes; change it
+only when publishing revised legal text. A placeholder or invalid date stops the site build.
+Environment variables cannot override the source date. CI retains a fixture-date substitution
+for a placeholder source date; with the current committed date, that substitution makes no
+change. Its build steps restore the source with an exit trap and delete the generated site
+output. Never deploy fixture output or commit a fixture date.
 
 ## Self-hosting
 
-The Starlight documentation includes a [self-hosting guide](apps/site/src/content/docs/docs/self-hosting.md),
-[configuration reference](apps/site/src/content/docs/docs/configuration.md),
-and [REST](apps/site/src/content/docs/docs/rest.md) / [MCP](apps/site/src/content/docs/docs/mcp.md) quickstarts.
+The Starlight documentation includes a [self-hosting guide](https://hourmere.com/docs/self-hosting),
+[configuration reference](https://hourmere.com/docs/configuration),
+and [REST](https://hourmere.com/docs/rest) / [MCP](https://hourmere.com/docs/mcp) quickstarts.
 
 Requires Git, OpenSSL, Docker Engine and Docker Compose 2.24.4 or newer. Point your hostname
 at the host with an A record only and allow TCP 80/443 and UDP 443 (plus SSH) before using automatic HTTPS:
@@ -95,7 +103,7 @@ automatically (`AUTO_MIGRATE=true`). Open `/sign-in` and claim the first account
 Select `plain` for an existing proxy or an explicitly acknowledged private loopback trial.
 It keeps the app on `127.0.0.1:3000` and PostgreSQL unpublished. For your own proxy, set its
 exact address as the app sees it in `TRUSTED_PROXIES` and preserve Host/forwarded headers;
-see the [self-hosting guide](apps/site/src/content/docs/docs/self-hosting.md) for the complete
+see the [self-hosting guide](https://hourmere.com/docs/self-hosting) for the complete
 TLS, backup/restore, upgrade and host-hardening procedures. The default app also runs
 background jobs; to split them after setup, run:
 
@@ -128,7 +136,7 @@ Before upgrading, take a full backup and record the current branch name or tag a
 the backup's saved commit. A checkout-only rollback with
 `git checkout <previous branch or tag>` is safe if a guard, `docker compose pull` or
 `docker compose stop` fails before the new-version `docker compose up` command runs.
-Once that `up` is attempted, follow [Back up and restore](apps/site/src/content/docs/docs/self-hosting.md#back-up-and-restore),
+Once that `up` is attempted, follow [Back up and restore](https://hourmere.com/docs/self-hosting#back-up-and-restore),
 even if it fails: a new app or worker may already have applied migrations; old code against
 the new schema is unsafe. In the supplied Compose files, `AUTO_MIGRATE=true` runs application
 and pg-boss migrations at process startup for every role (`all`, `web` and `worker`),
@@ -143,7 +151,7 @@ not undo the update. If rollback leaves a pre-1.0 `main`-tracking checkout detac
 Git does not undo `enable-worker.sh`'s private `.env` edit. Before checking out the prior
 revision, restore only the pre-upgrade `COMPOSE_FILE` assignment from the saved private
 `.env` (remove the assignment if it was absent), preserving the proxy/custom overlays
-and other current settings. See the [guarded upgrade procedures](apps/site/src/content/docs/docs/self-hosting.md#upgrade-and-roll-back).
+and other current settings. See the [guarded upgrade procedures](https://hourmere.com/docs/self-hosting#upgrade-and-roll-back).
 
 For a pre-start failure, if the app or worker was already stopped (including a partial
 `stop` failure), bring the old version back with the block below after restoring that
@@ -168,11 +176,11 @@ URLs to display them in the app. Both default to empty, which hides the correspo
 link; self-hosted installations do not inherit Hourmere Cloud's policies. The hosted
 instance must explicitly set `https://hourmere.com/privacy` and `https://hourmere.com/terms`.
 
-Team owners and admins can configure [collective meetings](docs/collective-scheduling.md)
-with two to eight required hosts, or [round-robin pools](docs/round-robin-scheduling.md)
+Team owners and admins can configure [collective meetings](https://hourmere.com/docs/collective-scheduling)
+with two to eight required hosts, or [round-robin pools](https://hourmere.com/docs/round-robin-scheduling)
 with one to eight hosts and explicit activation.
 
-Website widgets support inline and popup booking; see [embedding](docs/embedding.md) for the
+Website widgets support inline and popup booking; see [embedding](https://hourmere.com/docs/embedding) for the
 explicit parent-origin allow list, integration snippets and privacy contract.
 
 Responses carry security headers: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY` (except explicitly approved dedicated embed pages),
@@ -241,20 +249,30 @@ otherwise use up the one-time link before the person clicks it.
 Agents use API keys (`hm_…`) sent as `Authorization: Bearer <key>`. Create them on the web
 app's API keys page (`/app/api-keys`), or with Better Auth's endpoints while signed in (`POST
 /api/auth/api-key/create`, `GET /api/auth/api-key/list`, `POST /api/auth/api-key/delete`). The API is described at
-`/api/v1/openapi.json`; its conventions are in [docs/api-conventions.md](docs/api-conventions.md).
+`/api/v1/openapi.json`; its conventions are in [API conventions](https://hourmere.com/docs/api-conventions).
 The same keys connect MCP clients such as Claude Code to the remote MCP server at `/mcp`; see
-[docs/mcp.md](docs/mcp.md).
+[MCP](https://hourmere.com/docs/mcp).
 
-For terminal scripts, the dependency-free [CLI](docs/cli.md) supports configuration discovery,
+For terminal scripts, the dependency-free [CLI](https://hourmere.com/docs/cli) supports configuration discovery,
 slots, booking, host history, rescheduling and cancellation with the same API key.
 
-Organization owners can view first-party [booking activity](docs/analytics.md) at
+Organization owners can view first-party [booking activity](https://hourmere.com/docs/analytics) at
 `/app/analytics`: daily creations, reschedules and actual cancellations, without visitor
 tracking or attendee details.
 
+## Integrations
+
+Optional [independent Zoom account connections](https://hourmere.com/docs/zoom-connections)
+provide a separate minimum-scope identity foundation. Explicit opt-in [automatic Zoom](https://hourmere.com/docs/automatic-zoom) supports personal and single-host team
+bookings with durable reconciliation, same-meeting rescheduling and cancellation, ready-only
+invitations and an optional ordinary Google calendar copy. Zoom is not a sign-in provider. See the
+[Zoom account guide](https://hourmere.com/docs/zoom-connections) before configuring a real client.
+
+Optional [automatic Google Meet](https://hourmere.com/docs/automatic-google-meet) creates one conference per explicitly opted-in individual, collective or round-robin booking, with durable pending/failure state and final invitations held until its link is ready.
+
 ## Known limitations
 
-See the [consolidated limitations](apps/site/src/content/docs/docs/index.md#known-limitations)
+See the [consolidated limitations](https://hourmere.com/docs#known-limitations)
 and linked operating guides before deploying:
 
 - Microsoft Calendar lists calendars only; no busy-time sync or event writes. Microsoft sign-in and
@@ -288,11 +306,3 @@ Report vulnerabilities privately through the repository's
 ## License
 
 [AGPL-3.0](LICENSE)
-
-Optional [independent Zoom account connections](apps/site/src/content/docs/docs/zoom-connections.md)
-provide a separate minimum-scope identity foundation. Explicit opt-in [automatic Zoom](docs/automatic-zoom.md) supports personal and single-host team
-bookings with durable reconciliation, same-meeting rescheduling and cancellation, ready-only
-invitations and an optional ordinary Google calendar copy. Zoom is not a sign-in provider. See the repository guide in
-`apps/site/src/content/docs/docs/zoom-connections.md` before configuring a real client.
-
-Optional [automatic Google Meet](docs/automatic-google-meet.md) creates one conference per explicitly opted-in individual, collective or round-robin booking, with durable pending/failure state and final invitations held until its link is ready.

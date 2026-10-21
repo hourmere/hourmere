@@ -45,7 +45,7 @@ Hourmere's [MCP OAuth guide](/docs/mcp#connect-with-oauth) also describes opt-in
 authorization, explicit organization approval and revocation through Connected apps.
 The instance needs HTTPS outside loopback development; verify the intended hosted client
 separately before relying on it. See the
-[MCP protocol documentation](https://github.com/hourmere/hourmere/blob/main/docs/mcp.md)
+[MCP protocol documentation](/docs/mcp)
 for the current implementation and limits.
 
 Calendly also has both a REST API and MCP support. Its

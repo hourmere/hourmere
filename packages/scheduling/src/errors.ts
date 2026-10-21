@@ -20,7 +20,7 @@ export const RESERVED_ERROR_CODES: ReadonlySet<string> = new Set([
  * surfaces as 500 internal_error.
  *
  * - `code` is a specific, stable snake_case value clients branch on, e.g.
- *   `event_type_not_found` or `slot_taken` (see docs/api-conventions.md). The HTTP status
+ *   `event_type_not_found` or `slot_taken` (see https://hourmere.com/docs/api-conventions). The HTTP status
  *   already carries the category.
  * - `message` is shown to API clients verbatim: write it as a constant sentence. Never pass
  *   a lower-level error's text (database errors can contain other users' data); keep that

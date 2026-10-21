@@ -1,4 +1,7 @@
-# Automatic Google Meet
+---
+title: Automatic Google Meet
+description: Configure explicit automatic Meet creation, reconciliation and invitation delivery.
+---
 
 Automatic Meet is an explicit instance and event-type opt-in for individual, collective and explicitly activated round-robin meetings. Set `GOOGLE_MEET_ENABLED=true` with the existing Google Calendar OAuth/write configuration, refresh the host's calendar list, select an owned calendar that advertises Meet support, and explicitly enable automatic creation on the event type. There is no extra OAuth scope beyond the current Calendar synchronization scopes. Google account policy can still refuse creation after booking.
 
@@ -28,7 +31,7 @@ The pinned host can safely retry failed cleanup after reconnecting the original 
 
 One root booking chain has one pinned organizer, destination and conference-bearing Google event, with UID `<root-booking-id>@hourmere`. An idempotent booking retry adds no intent or provider request. A reschedule retains the event and Meet URL while updating its dates; the successor is pending until its own revision is applied. Changing profile destinations does not move an existing chain to another calendar. Disconnecting never deletes the durable intent, never transfers it to another account and never changes an ambiguous import into permission to import again. A ready URL remains available only while that original protected booking is confirmed and current; a subsequent move with missing credentials becomes an explicit failure.
 
-Google conference creation can be pending, successful or failed. The job persists a conference request identity before the first import, commits its claim, and imports a private copy without a conference request. It then adds Meet to that known event with a body-only conference PATCH, `sendUpdates=none`, `conferenceDataVersion=1` and `If-Match`. The acknowledged request ID is recorded durably; pending attempts poll rather than repeatedly patch. A lost PATCH response replays the same UUID. Existing import-created pending requests receive a same-ID PATCH first; request rollover is never automatic. See [Meet projection and the legacy repair fallback](google-calendar.md#automatic-meet-projection).
+Google conference creation can be pending, successful or failed. The job persists a conference request identity before the first import, commits its claim, and imports a private copy without a conference request. It then adds Meet to that known event with a body-only conference PATCH, `sendUpdates=none`, `conferenceDataVersion=1` and `If-Match`. The acknowledged request ID is recorded durably; pending attempts poll rather than repeatedly patch. A lost PATCH response replays the same UUID. Existing import-created pending requests receive a same-ID PATCH first; request rollover is never automatic. See [Meet projection and the legacy repair fallback](/docs/google-calendar#automatic-meet-projection).
 
 A request still pending after the twelve-attempt provisioning budget ends in `failed` with
 `conference_pending_timeout`. This means the bounded wait expired, not that Google rejected

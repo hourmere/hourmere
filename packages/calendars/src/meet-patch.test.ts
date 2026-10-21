@@ -405,7 +405,7 @@ describe.skipIf(!serverUrl)('Meet import then conference PATCH recovery (real Po
         lease_until: null,
       })
 
-      // Follow docs/google-calendar.md's maintenance procedure with reconciliation stopped.
+      // Follow https://hourmere.com/docs/google-calendar's maintenance procedure with reconciliation stopped.
       const inspected = await provider.client.getConferenceEvent(
         'fake-access',
         'owned@example.com',

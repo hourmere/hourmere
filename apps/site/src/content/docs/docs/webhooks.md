@@ -1,4 +1,7 @@
-# Booking webhooks
+---
+title: Booking webhooks
+description: Configure signed outbound booking webhooks and their delivery limits.
+---
 
 Webhooks are optional outbound signed notifications for booking creation, rescheduling and
 cancellation. They use the same booking services for public pages, REST and MCP. They do
@@ -99,7 +102,7 @@ Host can expose multiple services through one allowed address. Delivery records 
 `httpStatus` (stored as `http_status`), revealing whether an allowed internal destination
 responded and its HTTP status; this visibility is inherent to allowing that destination.
 See the
-[same-network n8n Compose example](../apps/site/src/content/docs/docs/self-hosting.md#private-webhook-receivers).
+[same-network n8n Compose example](/docs/self-hosting#private-webhook-receivers).
 
 ## Payload and signatures
 

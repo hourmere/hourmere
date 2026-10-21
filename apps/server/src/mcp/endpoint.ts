@@ -1,5 +1,5 @@
 // The remote MCP server: Streamable HTTP at /mcp on the same server as the REST API,
-// stateless, authenticated with API keys or optional OAuth grants. See docs/mcp.md.
+// stateless, authenticated with API keys or optional OAuth grants. See https://hourmere.com/docs/mcp.
 import { inspect } from 'node:util'
 import type { OpenAPIHono } from '@hono/zod-openapi'
 import {

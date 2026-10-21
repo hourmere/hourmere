@@ -103,9 +103,8 @@ describe('REST and MCP capability contract', () => {
 
 describe('repository and website capability documentation', () => {
   it.each([
-    'docs/mcp.md',
     'apps/site/src/content/docs/docs/mcp.md',
-    'docs/cli.md',
+    'apps/site/src/content/docs/docs/cli.md',
     'tools/cli/README.md',
   ])('%s explains host reschedule links and their visibility boundary', async (path) => {
     const doc = (await rootFile(path)).replace(/\s+/g, ' ')
@@ -122,7 +121,7 @@ describe('repository and website capability documentation', () => {
     }
   })
 
-  it.each(['docs/mcp.md', 'apps/site/src/content/docs/docs/mcp.md'])(
+  it.each(['apps/site/src/content/docs/docs/mcp.md'])(
     '%s describes optional MCP OAuth without contradicting API-key or cookie authentication',
     async (path) => {
       const doc = (await rootFile(path)).replace(/\s+/g, ' ')
@@ -143,7 +142,7 @@ describe('repository and website capability documentation', () => {
     },
   )
 
-  it.each(['docs/mcp.md', 'apps/site/src/content/docs/docs/mcp.md'])(
+  it.each(['apps/site/src/content/docs/docs/mcp.md'])(
     '%s describes the same integration ownership and consent boundaries',
     async (path) => {
       const doc = (await rootFile(path)).replace(/\s+/g, ' ')

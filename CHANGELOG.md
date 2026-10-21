@@ -118,35 +118,35 @@ must approve publication through the [release workflow](https://github.com/hourm
 
 ### Known limitations
 
-- [Microsoft Calendar](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/microsoft-calendar.md)
+- [Microsoft Calendar](https://hourmere.com/docs/microsoft-calendar)
   lists calendars only, without busy-time synchronization or event writes. Microsoft sign-in
   and calendar connections have not had real-account acceptance.
-- [Automatic Zoom](https://github.com/hourmere/hourmere/blob/main/docs/automatic-zoom.md)
+- [Automatic Zoom](https://hourmere.com/docs/automatic-zoom)
   supports personal event types and individual team event types with one actual host;
   collective and round-robin event types are unsupported.
-- [Calendar RSVP replies](https://github.com/hourmere/hourmere/blob/main/docs/notifications.md#email-headers-mime-and-replies)
+- [Calendar RSVP replies](https://hourmere.com/docs/notifications#email-headers-mime-and-replies)
   are not processed; declining in a calendar does not cancel an Hourmere booking.
 - PostgreSQL 18+ is required for `uuidv7()`; PgBouncer is unsupported. See
-  [database requirements](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/configuration.md#server-and-database)
+  [database requirements](https://hourmere.com/docs/configuration#server-and-database)
   and the upgrade notes below.
 - Hourmere must be served at the root of its own host name (no path prefix) in every deployment.
-  [Bundled Caddy](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/self-hosting.md#prepare-the-host)
+  [Bundled Caddy](https://hourmere.com/docs/self-hosting#prepare-the-host)
   additionally requires ports 80/443, an HTTPS host name without a port, and an IPv4-only ingress network.
 - [Rate limiting](https://github.com/hourmere/hourmere/blob/main/apps/server/src/rate-limit.ts)
   uses in-process memory; multiple web replicas multiply the limits. Run a single web process;
   a separate worker is supported.
-- [Interface languages](https://github.com/hourmere/hourmere/blob/main/docs/interface-languages.md)
+- [Interface languages](https://hourmere.com/docs/interface-languages)
   are English and Simplified Chinese only.
 - Schema downgrade is not automatic. Some migrations are not rolling-upgrade safe: stop
   all old app and worker processes as required by the
   [migration notes](https://github.com/hourmere/hourmere/blob/main/docs/data-model.md#changing-the-schema)
-  and [calendar-email upgrade notes](https://github.com/hourmere/hourmere/blob/main/docs/notifications.md#identity-and-recipients).
+  and [calendar-email upgrade notes](https://hourmere.com/docs/notifications#identity-and-recipients).
 
 ### Upgrade notes
 
 These notes apply to existing installations of the development source tree. Back up the
 full database (`auth`, `public` and `pgboss`), deployment configuration and original secrets
-before upgrading. Review [self-hosting recovery guidance](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/self-hosting.md#back-up-and-restore);
+before upgrading. Review [self-hosting recovery guidance](https://hourmere.com/docs/self-hosting#back-up-and-restore);
 schema downgrade is not automatic. Direct source deployments require Node.js 26.
 Hourmere requires PostgreSQL 18+ because migrations use `uuidv7()`; the provided Compose
 stack includes PostgreSQL 18.
@@ -175,7 +175,7 @@ stack includes PostgreSQL 18.
   mailbox for unsolicited responses. Human email replies reach the host via Reply-To.
   Calendar declines do not cancel bookings. Some clients show only the calendar card;
   open the original confirmation body to access management links. See
-  [calendar invitations](https://github.com/hourmere/hourmere/blob/main/docs/notifications.md#calendar-invitations).
+  [calendar invitations](https://hourmere.com/docs/notifications#calendar-invitations).
 - **Guests require renewed host opt-in.** Migration
   `0015_guest_email_controls.sql` adds `allow_guests=false` to **all existing event types**
   as well as defaulting new types to false. Hosts must re-enable **Allow invitees to add
@@ -212,7 +212,7 @@ stack includes PostgreSQL 18.
   `docker compose config --services | grep -qx proxy` succeed before recreating the
   stack. Restoring without selecting the overlay leaves the old worker container orphaned
   on the old image and the app possibly web-only. See the
-  [worker upgrade steps](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/self-hosting.md#upgrade-and-roll-back).
+  [worker upgrade steps](https://hourmere.com/docs/self-hosting#upgrade-and-roll-back).
 - **Stop every old role before a column drop.** Migration 0037 is the first column drop;
   old app and worker binaries still write its removed `retry_conference` flag. Stop all
   old web/all/worker processes before the new app or a manual migration runs, including
@@ -289,7 +289,7 @@ stack includes PostgreSQL 18.
   explicit retry. Google may ignore the duplicate UUID. Exhausted pending requests now
   report `conference_pending_timeout`; host retry retains the UUID and polls the known
   event again, without repeating an acknowledged PATCH. A request that stays pending needs
-  the [quiesced operator repair](https://github.com/hourmere/hourmere/blob/main/docs/google-calendar.md#automatic-meet-projection)
+  the [quiesced operator repair](https://hourmere.com/docs/google-calendar#automatic-meet-projection)
   before deliberate UUID rotation; no host/CLI force-create path is added. Migration 0037
   adds the timeout classification and drops the unused database `retry_conference` flag;
   the public retry endpoint, MCP tool and CLI command remain available. Existing error
@@ -314,5 +314,5 @@ stack includes PostgreSQL 18.
   0028 supports interrupted/lost-job reconciliation within finite retry accounting.
   Repair the delivery cause before deliberately retrying exhausted work; queued jobs do
   not authorize unlimited sends or replacement meetings. See
-  [notification diagnostics](https://github.com/hourmere/hourmere/blob/main/docs/notifications.md#conference-outbox-delivery-budget) and
-  [webhook operations](https://github.com/hourmere/hourmere/blob/main/docs/webhooks.md).
+  [notification diagnostics](https://hourmere.com/docs/notifications#conference-outbox-delivery-budget) and
+  [webhook operations](https://hourmere.com/docs/webhooks).

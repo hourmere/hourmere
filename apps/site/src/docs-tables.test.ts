@@ -1,4 +1,8 @@
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { createSatteriMarkdownProcessor } from '@astrojs/markdown-satteri'
+import { JSDOM } from 'jsdom'
 import { describe, expect, it } from 'vitest'
 import docsTablesPlugin, {
   classifyCell,
@@ -192,5 +196,50 @@ describe('documentation table rendering', () => {
       '<td role="cell" data-cell="code" data-label="Default"><code>http://<wbr>localhost:&lt;PORT&gt;</code></td>',
     )
     expect(html).toContain('<td role="cell" data-cell="short" data-label="Meaning">Origin.</td>')
+  })
+})
+
+// Render the real newly published tables as well as the small synthetic classifier fixture.
+const root = process.env.HOURMERE_DOCS_ROOT ?? fileURLToPath(new URL('../../../', import.meta.url))
+const publishedTablePages = [
+  ['webhooks', 4],
+  ['cli', 1],
+  ['notifications', 4],
+  ['api-conventions', 3],
+  ['google-calendar', 1],
+  ['mcp', 3],
+  ['zoom-connections', 2],
+] as const
+
+describe('published documentation table coverage', () => {
+  it.each(publishedTablePages)('classifies and labels every cell in %s', async (page, count) => {
+    const source = readFileSync(
+      join(root, 'apps/site/src/content/docs/docs', `${page}.md`),
+      'utf8',
+    ).replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, '')
+    const renderer = await createSatteriMarkdownProcessor({
+      hastPlugins: [docsTablesPlugin()],
+      syntaxHighlight: false,
+    })
+    const { code: html } = await renderer.render(source)
+    const document = new JSDOM(html).window.document
+    const tables = [...document.querySelectorAll('table')]
+    expect(tables, page).toHaveLength(count)
+    for (const table of tables) {
+      expect(table.getAttribute('role')).toBe('table')
+      const headers = [...table.querySelectorAll('thead th')].map((cell) =>
+        (cell.textContent ?? '').trim(),
+      )
+      expect(headers.length).toBeGreaterThan(0)
+      for (const row of table.querySelectorAll('tbody tr')) {
+        const cells = [...row.querySelectorAll('td')]
+        expect(cells).toHaveLength(headers.length)
+        for (const [index, cell] of cells.entries()) {
+          expect(cell.getAttribute('role')).toBe('cell')
+          expect(['short', 'code', 'prose']).toContain(cell.getAttribute('data-cell'))
+          expect(cell.getAttribute('data-label')).toBe(headers[index])
+        }
+      }
+    }
   })
 })

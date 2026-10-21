@@ -1,4 +1,7 @@
-# Automatic Zoom for one host
+---
+title: Automatic Zoom for one host
+description: Configure explicit automatic Zoom meetings for personal and single-host team events.
+---
 
 Hourmere can create one scheduled Zoom meeting for an explicitly opted-in personal event
 or an individual team event with one actual host. Existing `{kind:"zoom"}` locations remain
@@ -176,7 +179,7 @@ operation finishes. An untouched callback can also be retried while its attempt 
 code remain valid. A replay of an already claimed or completed attempt also returns `busy`
 while the owner lease is occupied; that result does not prove the state is reusable. Once
 the lease is released, such a replay returns `invalid_state` without another exchange.
-See [Zoom connections](zoom-connections.md#callback-replay-and-busy).
+See [Zoom connections](/docs/zoom-connections#callback-replay-and-busy).
 Explicit refresh adds `errorAlias: "zoom_operation_busy"` alongside the existing
 `error: "zoom_refresh_in_progress"` and a neutral busy/retry message while another token
 operation is in flight; workers return a retryable provider failure. The legacy code is
