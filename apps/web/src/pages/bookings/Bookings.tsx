@@ -222,7 +222,7 @@ function BookingList({
                 const guests = b.attendees.length - 1
                 return (
                   <tr key={b.id}>
-                    <td data-label={t('When')} className="fit">
+                    <td data-label={t('When')} className="fit booking-when">
                       <div className="table-value">
                         <time dateTime={b.start}>
                           <span className="nowrap">{format.date(b.start)}</span>{' '}

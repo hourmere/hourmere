@@ -1200,6 +1200,20 @@ input[readonly] {
     grid-template-columns: 5rem minmax(0, 1fr);
     gap: var(--space-2);
   }
+
+  /* Complete dates and overnight ranges need the card's full value width. */
+  .table-bookings :is(th, td) {
+    padding-inline: var(--space-2);
+  }
+
+  .table-bookings td.booking-when {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+
+  .table-bookings .booking-when time .nowrap {
+    display: block;
+  }
 }
 
 /* Admin pages: page headers, editors and their fields */
