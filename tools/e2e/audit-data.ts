@@ -2,6 +2,10 @@
 export const AUDIT_NOW = '2030-01-07T10:00:00.000Z'
 export const AUDIT_BOOKING_START = '2030-01-09T14:00:00.000Z'
 export const AUDIT_BOOKING_END = '2030-01-09T14:30:00.000Z'
+export const AUDIT_HOST_TIME_ZONE = 'America/New_York'
+// 11:30 PM–12:15 AM locally: the next-day end includes its date in the host list.
+export const AUDIT_OVERNIGHT_BOOKING_START = '2030-11-26T04:30:00.000Z'
+export const AUDIT_OVERNIGHT_BOOKING_END = '2030-11-26T05:15:00.000Z'
 export const AUDIT_TITLE = '跨地区产品设计与项目协作讨论：这是一段用于检查窄屏换行的中文活动标题'
 export const AUDIT_DESCRIPTION =
   'Synthetic layout fixture. Discuss scheduling, accessibility, and responsive interfaces. ' +
