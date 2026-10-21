@@ -441,6 +441,48 @@ describe('release publication checklist', () => {
       'utf8',
     ).replace(/\s+/g, ' ')
 
+  it('rehearses anonymous native-platform pulls and attestation before image installation', () => {
+    const rehearsal =
+      docs().split('## RC image installation rehearsal')[1]?.split('## Verify publication')[0] ?? ''
+    expect(rehearsal).toContain('No public image is available yet.')
+    for (const platform of ['amd64', 'arm64']) {
+      expect(rehearsal).toContain(
+        `DOCKER_CONFIG="$anonymous_config" docker pull --platform linux/${platform} ghcr.io/hourmere/hourmere:1.0.0-rc.1`,
+      )
+    }
+    expect(rehearsal).toContain(
+      'gh attestation verify oci://ghcr.io/hourmere/hourmere:1.0.0-rc.1 -R hourmere/hourmere',
+    )
+    expect(rehearsal).toContain(
+      './scripts/setup.sh --image --version 1.0.0-rc.1 docker compose pull docker compose up -d --wait',
+    )
+    expect(rehearsal).toContain('never `latest` or `1.0`')
+    expect(rehearsal).toContain(
+      'Once `up` is attempted (or any migration runs earlier), use the pre-upgrade backup/restore procedure',
+    )
+  })
+
+  it('holds the image documentation flip for verified release-day publication', () => {
+    const checklist =
+      docs().split(
+        'Make the documentation changes in a separate follow-up after verifying public access:',
+      )[1] ?? ''
+    expect(checklist).toContain('**Release day: install from the published image**')
+    expect(checklist).toContain(
+      'only after anonymous pull and attestation verification succeed for stable `1.0.0`',
+    )
+    for (const file of [
+      'README.md:2',
+      'apps/site/src/content/docs/docs/self-hosting.md:8',
+      'apps/site/src/legal-content.test.ts:80',
+      'scripts/deploy-docs.test.ts',
+      'scripts/restore-env.test.ts',
+    ]) {
+      expect(checklist).toContain(file)
+    }
+    expect(checklist).toContain('without weakening provider-acceptance guards')
+  })
+
   it('updates the README introduction only after the first public image is published', () => {
     const checklist =
       docs().split(

@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from 'node:child_process'
+import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import {
   copyFileSync,
   existsSync,
@@ -16,7 +16,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
 
-const source = readFileSync(new URL('./setup.sh', import.meta.url), 'utf8')
+// Mutation probes use a source copy without changing the worktree implementation.
+const source = readFileSync(
+  process.env.HOURMERE_SETUP_SCRIPT ?? new URL('./setup.sh', import.meta.url),
+  'utf8',
+)
 const example = new URL('../.env.example', import.meta.url)
 const directories: string[] = []
 const smtp = "smtps://synthetic:$literal'pass@smtp.example.test:465"
@@ -38,13 +42,18 @@ function fixture(script = source) {
   return {
     directory,
     envFile: join(directory, '.env'),
-    run(input = proxyInput, env: NodeJS.ProcessEnv = {}, trace = false) {
-      return spawnSync('/bin/sh', [...(trace ? ['-x'] : []), 'scripts/setup.sh'], {
+    run(
+      input = proxyInput,
+      env: NodeJS.ProcessEnv = {},
+      trace = false,
+      args: string[] = ['--source'],
+    ) {
+      return spawnSync('/bin/sh', [...(trace ? ['-x'] : []), 'scripts/setup.sh', ...args], {
         cwd: directory,
         encoding: 'utf8',
         input,
         timeout: 15_000,
-        env: { ...process.env, COMPOSE_PROJECT_NAME: '', ...env },
+        env: { ...process.env, COMPOSE_PROJECT_NAME: '', HOURMERE_VERSION: '', ...env },
       })
     },
     text() {
@@ -157,8 +166,8 @@ describe('first-run deployment setup', { timeout: 20_000 }, () => {
     // cat supplies a real pipe while script gives setup a genuine pseudo-terminal.
     const command =
       process.platform === 'darwin'
-        ? 'cat | script -q /dev/null /bin/sh scripts/setup.sh'
-        : 'cat | script -q -e -c "/bin/sh scripts/setup.sh" /dev/null'
+        ? 'cat | script -q /dev/null /bin/sh scripts/setup.sh --source'
+        : 'cat | script -q -e -c "/bin/sh scripts/setup.sh --source" /dev/null'
     const child = spawn('/bin/sh', ['-c', command], {
       cwd: setup.directory,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -345,5 +354,214 @@ else
 fi`
     expect(setup.run(proxyInput, setup.fakeOpenSSL(command)).status).toBe(1)
     expect(existsSync(setup.envFile)).toBe(false)
+  })
+})
+
+function taggedCheckout(setup: ReturnType<typeof fixture>, tag: string, annotated = false) {
+  const env = {
+    ...process.env,
+    GIT_AUTHOR_NAME: 'Setup fixture',
+    GIT_COMMITTER_NAME: 'Setup fixture',
+    GIT_AUTHOR_EMAIL: 'setup@example.invalid',
+    GIT_COMMITTER_EMAIL: 'setup@example.invalid',
+  }
+  const git = (...args: string[]) =>
+    execFileSync('git', args, { cwd: setup.directory, env, encoding: 'utf8' }).trim()
+  git('init', '--quiet', '--initial-branch=main')
+  git('add', '.env.example', 'scripts/setup.sh')
+  git('commit', '--quiet', '-m', 'Prepare setup fixture')
+  git('tag', ...(annotated ? ['-a', '-m', 'Release fixture'] : []), tag)
+  git('checkout', '--quiet', '--detach', tag)
+  return git
+}
+
+describe('published image installation selection', () => {
+  it('offers the published image by default and prompts for an exact version', () => {
+    const setup = fixture()
+    const result = setup.run(`\n1.2.3\n${proxyInput}`, {}, false, [])
+    expect(result.status).toBe(0)
+    expect(result.stderr).toMatch(/image\/source.*image/)
+    expect(setup.text().includes("HOURMERE_VERSION='1.2.3'\n")).toBe(true)
+    expect(
+      setup
+        .text()
+        .includes(
+          "COMPOSE_FILE='docker-compose.yml:docker-compose.image.yml:docker-compose.proxy.yml'\n",
+        ),
+    ).toBe(true)
+    expect(result.stdout).toContain('docker compose pull')
+    expect(result.stdout).toContain('docker compose up -d --wait')
+    expect(result.stdout).not.toContain('--build')
+  })
+
+  it('accepts the source alternative at the installation prompt', () => {
+    const setup = fixture()
+    const result = setup.run(`source\n${plainInput}`, {}, false, [])
+    expect(result.status).toBe(0)
+    expect(setup.text().includes("COMPOSE_FILE='docker-compose.yml'\n")).toBe(true)
+    expect(/^HOURMERE_VERSION=/m.test(setup.text())).toBe(false)
+    expect(result.stdout).toContain('docker compose up -d --build --wait')
+  })
+
+  it.each([
+    { path: 'image', proxy: false },
+    { path: 'image', proxy: true },
+    { path: 'source', proxy: false },
+    { path: 'source', proxy: true },
+  ])('selects the $path path with proxy=$proxy through flags', ({ path, proxy }) => {
+    const setup = fixture()
+    const args = path === 'image' ? ['--image', '--version', '1.0.0'] : ['--source']
+    const result = setup.run(proxy ? proxyInput : plainInput, {}, false, args)
+    expect(result.status).toBe(0)
+    const files = [
+      'docker-compose.yml',
+      ...(path === 'image' ? ['docker-compose.image.yml'] : []),
+      ...(proxy ? ['docker-compose.proxy.yml'] : []),
+    ]
+    expect(setup.text().includes(`COMPOSE_FILE='${files.join(':')}'\n`)).toBe(true)
+    expect(setup.text().match(/^COMPOSE_FILE=/gm)).toHaveLength(1)
+    expect(/^HOURMERE_VERSION=/m.test(setup.text())).toBe(path === 'image')
+    expect(result.stdout.includes('--build')).toBe(path === 'source')
+  })
+
+  it.each(['1.0.0', '12.34.567', '1.0.0-rc.1', '1.2.3-alpha-beta.0'])(
+    'persists a valid exact release version %s without floating aliases',
+    (version) => {
+      const setup = fixture()
+      const result = setup.run(plainInput, {}, false, ['--image', '--version', version])
+      expect(result.status).toBe(0)
+      expect(setup.text().includes(`HOURMERE_VERSION='${version}'\n`)).toBe(true)
+      expect(setup.text().match(/^HOURMERE_VERSION=/gm)).toHaveLength(1)
+    },
+  )
+
+  it.each([
+    'latest',
+    '1',
+    '1.2',
+    'v1.2.3',
+    '01.2.3',
+    '1.02.3',
+    '1.2.03',
+    '1.2.3-01',
+    '1.2.3-rc.01',
+    '1.2.3+build.1',
+    '1.2.3-',
+    '1.2.3-rc..1',
+    '1.2.3/other',
+    '1.2.3 trailing',
+    '1.2.3\nOTHER=value',
+    `1.2.3-${'a'.repeat(123)}`,
+  ])('rejects a floating or invalid image version %j before writing configuration', (version) => {
+    const setup = fixture()
+    expect(setup.run(plainInput, {}, false, ['--image', '--version', version]).status).toBe(1)
+    expect(existsSync(setup.envFile)).toBe(false)
+    expect(setup.noStaging()).toBe(true)
+  })
+
+  it.each(['latest', '1.2', 'v1.2.3'])(
+    'validates explicitly prompted versions too (%s)',
+    (version) => {
+      const setup = fixture()
+      expect(setup.run(`${version}\n${plainInput}`, {}, false, ['--image']).status).toBe(1)
+      expect(existsSync(setup.envFile)).toBe(false)
+    },
+  )
+
+  it('requires a version when the checkout has no exact release tag', () => {
+    const setup = fixture()
+    expect(setup.run('', {}, false, ['--image']).status).toBe(1)
+    expect(existsSync(setup.envFile)).toBe(false)
+  })
+
+  it('rejects an empty version flag instead of falling back to a prompted version', () => {
+    const setup = fixture()
+    expect(setup.run(`1.2.3\n${plainInput}`, {}, false, ['--image', '--version', '']).status).toBe(
+      1,
+    )
+    expect(existsSync(setup.envFile)).toBe(false)
+  })
+
+  it.each(
+    [
+      ['--version'],
+      ['--version', ''],
+      ['--unknown'],
+      ['--image', '--source'],
+      ['--source', '--image'],
+    ].map((args) => ({ args })),
+  )('rejects incomplete or ambiguous selection flags $args', ({ args }) => {
+    const setup = fixture()
+    expect(setup.run(plainInput, {}, false, args).status).toBe(1)
+    expect(existsSync(setup.envFile)).toBe(false)
+  })
+
+  it('uses an explicitly supplied environment version', () => {
+    const setup = fixture()
+    const result = setup.run(plainInput, { HOURMERE_VERSION: '1.0.0-rc.1' }, false, ['--image'])
+    expect(result.status).toBe(0)
+    expect(setup.text().includes("HOURMERE_VERSION='1.0.0-rc.1'\n")).toBe(true)
+  })
+
+  it('rejects an invalid environment version', () => {
+    const setup = fixture()
+    expect(setup.run(plainInput, { HOURMERE_VERSION: 'latest' }, false, ['--image']).status).toBe(1)
+    expect(existsSync(setup.envFile)).toBe(false)
+  })
+
+  it('rejects an inherited image version on the source path before writing configuration', () => {
+    const setup = fixture()
+    expect(setup.run(plainInput, { HOURMERE_VERSION: '1.0.0' }).status).toBe(1)
+    expect(existsSync(setup.envFile)).toBe(false)
+    expect(setup.noStaging()).toBe(true)
+  })
+
+  it('rejects the version flag on the source path', () => {
+    const setup = fixture()
+    expect(setup.run(plainInput, {}, false, ['--source', '--version', '1.0.0']).status).toBe(1)
+    expect(existsSync(setup.envFile)).toBe(false)
+  })
+
+  it('rejects an image version when source is selected at the prompt', () => {
+    const setup = fixture()
+    expect(setup.run(`source\n${plainInput}`, {}, false, ['--version', '1.0.0']).status).toBe(1)
+    expect(existsSync(setup.envFile)).toBe(false)
+  })
+
+  it('lets the version flag override the environment', () => {
+    const setup = fixture()
+    expect(
+      setup.run(plainInput, { HOURMERE_VERSION: 'latest' }, false, [
+        '--image',
+        '--version',
+        '1.2.3',
+      ]).status,
+    ).toBe(0)
+    expect(setup.text().includes("HOURMERE_VERSION='1.2.3'\n")).toBe(true)
+  })
+
+  it.each([
+    { tag: 'v1.0.0', annotated: false },
+    { tag: 'v1.0.0-rc.1', annotated: true },
+  ])('derives the exact version from checked-out tag $tag', ({ tag, annotated }) => {
+    const setup = fixture()
+    taggedCheckout(setup, tag, annotated)
+    expect(setup.run(plainInput, {}, false, ['--image']).status).toBe(0)
+    expect(setup.text().includes(`HOURMERE_VERSION='${tag.slice(1)}'\n`)).toBe(true)
+  })
+
+  it('requires a prompt beyond the tagged commit instead of choosing an ancestor release', () => {
+    const setup = fixture()
+    const git = taggedCheckout(setup, 'v1.0.0')
+    git('commit', '--quiet', '--allow-empty', '-m', 'Advance checkout')
+    expect(setup.run(plainInput, {}, false, ['--image']).status).toBe(1)
+    expect(existsSync(setup.envFile)).toBe(false)
+  })
+
+  it('lets an explicit version override the checked-out release tag', () => {
+    const setup = fixture()
+    taggedCheckout(setup, 'v1.0.0')
+    expect(setup.run(plainInput, {}, false, ['--image', '--version', '1.0.1']).status).toBe(0)
+    expect(setup.text().includes("HOURMERE_VERSION='1.0.1'\n")).toBe(true)
   })
 })

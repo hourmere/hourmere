@@ -84,7 +84,7 @@ at the host with an A record only and allow TCP 80/443 and UDP 443 (plus SSH) be
 ```sh
 git clone https://github.com/hourmere/hourmere.git
 cd hourmere
-./scripts/setup.sh
+./scripts/setup.sh --source
 docker compose up -d --build --wait
 curl --retry 20 --retry-delay 3 --retry-all-errors --fail https://hourmere.example.com/api/health
 ```
