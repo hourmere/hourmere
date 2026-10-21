@@ -55,6 +55,11 @@ const year = new Date().getFullYear()
       {company.name}. Hourmere is being developed as open-source software under the{' '}
       <a href={site.license.url}>{site.license.name}</a>.
     </p>
+    <p class="trademark-notice">
+      Calendly, Cal.com, Cal.diy, Google, Google Calendar, Microsoft, Zoom, Docker Compose,
+      PostgreSQL and GitHub are trademarks of their respective owners;
+      Hourmere is not affiliated with or endorsed by them.
+    </p>
   </div>
 </footer>
 
@@ -138,6 +143,10 @@ const year = new Date().getFullYear()
     margin-top: 40px;
     padding-top: 20px;
     border-top: 1px solid var(--border);
+  }
+
+  .fine,
+  .trademark-notice {
     font-size: 14px;
   }
 </style>
