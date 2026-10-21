@@ -83,7 +83,7 @@ const healthRoute = createRoute({
   },
 })
 
-// HTTP status for each kind of DomainError (see docs/api-conventions.md).
+// HTTP status for each kind of DomainError (see https://hourmere.com/docs/api-conventions).
 const domainStatus = {
   invalid: 400,
   forbidden: 403,

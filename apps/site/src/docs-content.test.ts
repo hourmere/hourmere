@@ -1,6 +1,8 @@
-import { existsSync, globSync, readFileSync } from 'node:fs'
+import { existsSync, globSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { runInNewContext } from 'node:vm'
+import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 
 const root = process.env.HOURMERE_DOCS_ROOT ?? fileURLToPath(new URL('../../../', import.meta.url))
@@ -36,7 +38,9 @@ const ownSiteReferences: Record<string, readonly string[]> = {
   'tools/cli/README.md': [
     'Command-line scheduling for [Hourmere](https://hourmere.com), an open-source scheduling',
   ],
-  'docs/api-conventions.md': ['with `HOSTED_SIGNUP_URL` and defaulting to `https://hourmere.com`.'],
+  [`${siteDocs}/api-conventions.md`]: [
+    'with `HOSTED_SIGNUP_URL` and defaulting to `https://hourmere.com`.',
+  ],
   'docs/mcp-directories.md': [
     "`com.hourmere/hourmere` requires proof of control of `hourmere.com` via the registry's",
   ],
@@ -96,7 +100,16 @@ describe('self-hosting documentation links', () => {
       .split('\n')
       .filter((line) => !allowed.includes(line.trim()))
       .join('\n')
-    expect(source).not.toMatch(/(?<![\w.-])(?:[\w-]+\.)*hourmere\.com(?![\w-]|\.[\w-])/i)
+    // Public documentation URLs are site destinations, rather than application-host examples.
+    const examples = source.replace(
+      /https:\/\/hourmere\.com\/docs(?:\/[\w-]+)?(?:#[\w-]+)?/g,
+      (target) => {
+        const page = target.replace('https://hourmere.com/docs', '').split('#')[0] || '/index'
+        expect(existsSync(join(root, siteDocs, `${page.slice(1)}.md`)), target).toBe(true)
+        return ''
+      },
+    )
+    expect(examples).not.toMatch(/(?<![\w.-])(?:[\w-]+\.)*hourmere\.com(?![\w-]|\.[\w-])/i)
   })
 
   it.each([
@@ -108,7 +121,7 @@ describe('self-hosting documentation links', () => {
     'round-robin-scheduling',
     'notifications',
   ])('makes the %s guide discoverable from the docs overview', (guide) => {
-    expect(read(`${siteDocs}/index.md`)).toContain(`](${githubDocs}${guide}.md)`)
+    expect(read(`${siteDocs}/index.md`)).toContain(`](/docs/${guide})`)
   })
 })
 
@@ -222,7 +235,6 @@ describe('launch documentation disclosures', () => {
 
 describe('Google self-hosting guidance', () => {
   const paths = [
-    'docs/google-calendar.md',
     `${siteDocs}/google-calendar.md`,
     `${siteDocs}/configuration.md`,
     `${siteDocs}/self-hosting.md`,
@@ -370,5 +382,189 @@ describe('self-hosting troubleshooting', () => {
     },
   ])('explains $topic with actionable checks', ({ heading, required }) => {
     for (const value of required) expect(section(heading)).toContain(value)
+  })
+})
+
+const publishedGuides = [
+  'webhooks',
+  'cli',
+  'automatic-google-meet',
+  'automatic-zoom',
+  'round-robin-scheduling',
+  'collective-scheduling',
+  'notifications',
+  'analytics',
+  'interface-languages',
+  'api-conventions',
+  'embedding',
+  'google-calendar',
+  'mcp',
+  'zoom-connections',
+]
+
+function sidebarLinks() {
+  const file = ts.createSourceFile(
+    'astro.config.ts',
+    read('apps/site/astro.config.ts'),
+    ts.ScriptTarget.Latest,
+    true,
+  )
+  let expression = ''
+  function visit(node: ts.Node) {
+    if (ts.isPropertyAssignment(node) && node.name.getText(file) === 'sidebar') {
+      expression = node.initializer.getText(file)
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(file)
+  expect(expression, 'Starlight sidebar is configured').not.toBe('')
+  const sidebar = runInNewContext(`(${expression})`, {
+    siteCopy: { en: { home: 'Home', pricing: 'Pricing' } },
+  }) as {
+    link?: string
+    items?: unknown[]
+  }[]
+  const links: string[] = []
+  function collect(items: typeof sidebar) {
+    for (const item of items) {
+      if (item.link) links.push(item.link)
+      if (item.items) collect(item.items as typeof sidebar)
+    }
+  }
+  collect(sidebar)
+  return links
+}
+
+describe('complete public documentation', () => {
+  it.each(publishedGuides)('publishes %s with Starlight metadata and one source', (guide) => {
+    const source = read(`${siteDocs}/${guide}.md`)
+    const frontmatter = source.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/)?.[1] ?? ''
+    expect(frontmatter).toMatch(/^title: .+$/m)
+    expect(frontmatter).toMatch(/^description: .+$/m)
+    const original = `docs/${guide}.md`
+    if (guide === 'notifications') {
+      expect(read(original).trim()).toBe(
+        '[Notifications and background jobs](https://hourmere.com/docs/notifications).',
+      )
+    } else {
+      expect(existsSync(join(root, original)), original).toBe(false)
+    }
+  })
+
+  it('makes every published documentation page reachable from the sidebar', () => {
+    const links = sidebarLinks()
+    for (const { path } of pages) {
+      const route = path === 'index.md' ? '/docs' : `/docs/${path.replace(/\.md$/, '')}`
+      expect(
+        links.filter((link) => link === route),
+        route,
+      ).toHaveLength(1)
+    }
+  })
+
+  it.each(pages)('links Markdown file references in $path', ({ source }) => {
+    const prose = source
+      .replace(/^```[^\n]*\n[\s\S]*?^```\s*$/gm, '')
+      .replace(/\[[^\]]+\]\([^)]+\)/g, '')
+    expect(prose).not.toMatch(/`[\w./-]+\.md(?:#[\w-]+)?`/)
+    for (const [, target] of source.matchAll(
+      /\]\(https:\/\/github\.com\/hourmere\/hourmere\/blob\/main\/([^)]+)\)/g,
+    )) {
+      const path = target?.split('#')[0] ?? ''
+      expect(path, 'GitHub links name a repository file').not.toBe('')
+      expect(existsSync(join(root, path)) && statSync(join(root, path)).isFile(), target).toBe(true)
+    }
+  })
+
+  it('keeps the README license section limited to its license', () => {
+    const license = read('README.md')
+      .split(/^## License\r?$/m)[1]
+      ?.trim()
+    expect(license).toBe('[AGPL-3.0](LICENSE)')
+  })
+
+  it('documents the committed legal publication date and fixture build policy', () => {
+    const readme = normalize(read('README.md'))
+    const legal = read('apps/site/src/data/legal.ts')
+    const date = legal.match(/LEGAL_PUBLICATION_DATE[^=]*=\s*'([^']+)'/)?.[1]
+    expect(date).toBe('2026-10-20')
+    expect(readme).toContain('2026-10-20')
+    expect(readme).toContain('change it only when publishing revised legal text')
+    expect(readme).toContain('CI retains a fixture-date substitution')
+    expect(readme).toContain('with the current committed date, that substitution makes no change')
+    expect(readme).toContain('A placeholder or invalid date stops the site build')
+    expect(readme).not.toContain('SET_ON_PUBLICATION_DAY')
+    expect(legal).toContain(
+      'The legal publication date is set for the currently published legal text.',
+    )
+    expect(legal).toContain('change it only when publishing revised legal text')
+    expect(legal).not.toContain('replaces this placeholder')
+  })
+})
+
+describe('consolidated guide facts', () => {
+  it.each([
+    ['embedding', 'Popup', 'the rest of the page is inert'],
+    ['embedding', 'Popup', '`HTMLDialogElement.showModal()`'],
+    ['embedding', 'Inline', 'Its width follows the container'],
+    [
+      'embedding',
+      'Interface language',
+      'See [interface languages](/docs/interface-languages) for preference and formatting behavior',
+    ],
+    ['embedding', 'Booking completion', 'including successful idempotent retry confirmations'],
+    ['embedding', 'Booking completion', "iframe's `hourmere:booked` postMessage"],
+    ['embedding', 'Booking completion', 'not a trusted booking, billing or analytics record'],
+    ['google-calendar', 'Configure the provider', 'Never put these values in version control.'],
+    [
+      'google-calendar',
+      'Configure the provider',
+      'Docker Compose passes all three variables to the app/worker.',
+    ],
+    ['google-calendar', 'Configure the provider', 'Vite proxies `/api` to the server'],
+    [
+      'google-calendar',
+      'Configure the provider',
+      'Keep the key stable, private and backed up with the deployment secrets',
+    ],
+    ['google-calendar', 'Select calendars', '**Refresh calendar list** updates metadata.'],
+    ['google-calendar', 'Select calendars', 'Returning to the app shows the calendar list.'],
+    [
+      'google-calendar',
+      'Select calendars',
+      'new calendars have `check_conflicts=false` and the profile has no destination',
+    ],
+    [
+      'google-calendar',
+      'Select calendars',
+      'List-only connections remain supported and must be reauthorized before using synchronization.',
+    ],
+    [
+      'google-calendar',
+      'Booking projection and disconnect',
+      'A revoked/expired grant changes the connection to `needs_reauth`; reconnect through the same separate consent flow.',
+    ],
+    [
+      'google-calendar',
+      'Booking projection and disconnect',
+      '[operator repair described below](#automatic-meet-projection)',
+    ],
+  ])('retains %s / %s: %s', (guide, heading, fact) => {
+    const section = read(`${siteDocs}/${guide}.md`).split(`## ${heading}\n`)[1]?.split('\n## ')[0]
+    expect(normalize(section ?? '')).toContain(fact)
+  })
+
+  it.each([
+    'wildcards',
+    '`script-src`',
+    '`frame-src`',
+    '`CSSStyleSheet`',
+    '`adoptedStyleSheets`',
+    'https://calendar.example.com/team/Alpha/intro',
+    'Repeated loading failures',
+    'No booking ID',
+    'The browser checks every ancestor',
+  ])('explains the embedding constraint %s once', (fact) => {
+    expect(read(`${siteDocs}/embedding.md`).split(fact)).toHaveLength(2)
   })
 })

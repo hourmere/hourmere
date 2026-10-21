@@ -8,9 +8,9 @@ Server variables below come from
 Empty optional values usually mean unset; `AUTO_MIGRATE` must be omitted or explicitly
 `true`/`false`. Direct processes read
 their environment; Compose interpolates `.env` into the variables explicitly listed in
-`docker-compose.yml`. Adding an arbitrary entry to `.env` does not pass it to a container.
+[`docker-compose.yml`](https://github.com/hourmere/hourmere/blob/main/docker-compose.yml). Adding an arbitrary entry to `.env` does not pass it to a container.
 Restart/recreate affected processes after changing configuration. The interactive
-`scripts/setup.sh` creates a private `.env` from `.env.example` and selects either the
+[`scripts/setup.sh`](https://github.com/hourmere/hourmere/blob/main/scripts/setup.sh) creates a private `.env` from [`.env.example`](https://github.com/hourmere/hourmere/blob/main/.env.example) and selects either the
 plain Compose file or the optional automatic HTTPS override; see
 [self-hosting](/docs/self-hosting) for the complete command sequence.
 
@@ -32,7 +32,7 @@ includes PostgreSQL 18.
 | `AUTO_MIGRATE` | `true` | Apply SQL/job migrations on startup. `false` requires manual migrations first; startup still needs database access. Forwarded by the default Compose file with a default of `true`. |
 | `WEB_DIST` | Unset | Built SPA directory. Not forwarded by the default Compose file: Docker sets `/app/apps/web/dist`; development uses Vite instead. |
 | `EMBED_ALLOWED_ORIGINS` | Unset | Up to 32 comma-separated exact HTTPS website origins permitted to embed public booking pages. Empty disables embedding; no wildcards or paths. Loopback HTTP is accepted for local development. |
-| `WEBHOOKS_ENABLED` | `false` | Capture new organization booking events for outbound HTTPS webhooks. No backfill; set identically on web and worker. See [booking webhooks](https://github.com/hourmere/hourmere/blob/main/docs/webhooks.md). |
+| `WEBHOOKS_ENABLED` | `false` | Capture new organization booking events for outbound HTTPS webhooks. No backfill; set identically on web and worker. See [booking webhooks](/docs/webhooks). |
 | `WEBHOOK_ENCRYPTION_KEY` | Unset | Independent 32-byte base64 key required when webhooks are enabled. Encrypts signing secrets; keep stable and backed up. |
 | `WEBHOOK_PRIVATE_TARGETS` | Unset | Self-hosting only: up to 32 comma-separated exact `hostname:port`, `IPv4[/CIDR]:port[-port]` or `[IPv6[/CIDR]]:port[-port]` entries permitting private HTTP(S) webhook destinations. Empty preserves public HTTPS-only delivery. Set identically on web and worker. |
 | `MCP_OAUTH_ENABLED` | `false` | Enable MCP OAuth connectors alongside API keys. Requires HTTPS except on loopback; explicit organization approval and revocation at `/app/connected-apps`. No calendar/provider client credentials needed. Set identically on web and worker. |
@@ -108,7 +108,7 @@ destination responded. This visibility is inherent to allowing that destination.
 
 Recreate web and worker together after changing the setting; pending attempts use the new
 policy. See the [same-network n8n example](/docs/self-hosting#private-webhook-receivers)
-and [booking webhooks](https://github.com/hourmere/hourmere/blob/main/docs/webhooks.md)
+and [booking webhooks](/docs/webhooks)
 for configuration and delivery behavior.
 
 ## Email and registration
@@ -256,13 +256,13 @@ for recovery and exceptions.
 
 These settings control Docker Compose rather than the server configuration loader. Compose
 2.24.4 or newer is required for the HTTPS and worker overlays' `!reset` tags. Setup defaults to the
-HTTPS path and writes the combined `COMPOSE_FILE`; copying `.env.example` without setup
+HTTPS path and writes the combined `COMPOSE_FILE`; copying [`.env.example`](https://github.com/hourmere/hourmere/blob/main/.env.example) without setup
 keeps the plain path.
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `POSTGRES_PASSWORD` | Required | Initializes the PostgreSQL role and becomes the app's `PGPASSWORD`. Changing `.env` does not change an already initialized database role's password. |
-| `COMPOSE_FILE` | `docker-compose.yml` | Not forwarded by the default Compose file: consumed by the Compose CLI. Setup writes `docker-compose.yml:docker-compose.proxy.yml` for bundled HTTPS, or `docker-compose.yml` for plain mode. After setup, run `./scripts/enable-worker.sh` to select the separate-worker overlay safely; it preserves the proxy selection and automatically switches the app to `web`. The saved `.env` preserves this choice for backups and upgrades without editing tracked Compose files. |
+| `COMPOSE_FILE` | [`docker-compose.yml`](https://github.com/hourmere/hourmere/blob/main/docker-compose.yml) | Not forwarded by the default Compose file: consumed by the Compose CLI. Setup writes `docker-compose.yml:docker-compose.proxy.yml` for bundled HTTPS, or [`docker-compose.yml`](https://github.com/hourmere/hourmere/blob/main/docker-compose.yml) for plain mode. After setup, run [`./scripts/enable-worker.sh`](https://github.com/hourmere/hourmere/blob/main/scripts/enable-worker.sh) to select the separate-worker overlay safely; it preserves the proxy selection and automatically switches the app to `web`. The saved `.env` preserves this choice for backups and upgrades without editing tracked Compose files. |
 | `COMPOSE_PROJECT_NAME` | `hourmere` | Not forwarded by the default Compose file: consumed by the Compose CLI to select containers, networks and volumes. Setup persists this name; set it in setup's environment to choose an independent deployment. Keep the original name when migrating an existing installation; persist the new name when restoring to a separate project. |
 | `APP_IMAGE` | `hourmere:local` | Local image tag built from this checkout; `pull_policy: never` remains in force. Use a distinct tag for independent deployments on one Docker host. No prebuilt public image is published yet. |
 | `PROXY_SUBNET` | `172.30.62.0/28` | Not forwarded by the default Compose file: the HTTPS override uses this dedicated IPv4 ingress subnet. Change it together with `PROXY_IP` and `PROXY_DYNAMIC_RANGE` before starting if it overlaps another network or another deployment. |
@@ -288,7 +288,7 @@ before recreating the stack. For plain mode, remove both lines of the proxy veri
 
 The helper rewrites only `COMPOSE_FILE` in `.env`,
 handles quoted/unquoted and `export COMPOSE_FILE=` assignments, keeps mode `600` and
-refuses symlinks. Run `./scripts/disable-worker.sh` to deselect it, after removing the
+refuses symlinks. Run [`./scripts/disable-worker.sh`](https://github.com/hourmere/hourmere/blob/main/scripts/disable-worker.sh) to deselect it, after removing the
 worker container as described in [self-hosting](/docs/self-hosting#switch-back-to-a-single-container).
 If editing manually, replace the whole quoted line, for example:
 
@@ -366,7 +366,7 @@ mailer still prints delivered links, and anyone reading them can sign in.
 | `ZOOM_CLIENT_SECRET` | Unset | Matching confidential client secret; never expose it to the browser. |
 | `CONFERENCE_ENCRYPTION_KEY` | Unset | Independent canonical 32-byte base64 key for conference credentials and OAuth verifiers. Keep stable and back up privately. |
 | `ZOOM_MEETINGS_ENABLED` | `false` | Explicit meeting authorization and automatic Zoom for personal/individual single-host events; requires all three settings above. |
-| `ZOOM_WEBHOOK_SECRET_TOKEN` | Unset | Secret Token from the Zoom app's webhook configuration; independently enables signed `POST {PUBLIC_URL}/api/conference/zoom/events` for endpoint validation and app deauthorization. Empty leaves this endpoint at 404; a configured token must have at least 16 characters. Configured `ZOOM_CLIENT_ID` must match the signed deauthorization payload or the event is ignored, including old-app events after switching apps. Use the same URL for Event Subscriptions and the Deauthorization Notification Endpoint URL; see [automatic Zoom](https://github.com/hourmere/hourmere/blob/main/docs/automatic-zoom.md). Forwarded by Compose with an empty default. |
+| `ZOOM_WEBHOOK_SECRET_TOKEN` | Unset | Secret Token from the Zoom app's webhook configuration; independently enables signed `POST {PUBLIC_URL}/api/conference/zoom/events` for endpoint validation and app deauthorization. Empty leaves this endpoint at 404; a configured token must have at least 16 characters. Configured `ZOOM_CLIENT_ID` must match the signed deauthorization payload or the event is ignored, including old-app events after switching apps. Use the same URL for Event Subscriptions and the Deauthorization Notification Endpoint URL; see [automatic Zoom](/docs/automatic-zoom). Forwarded by Compose with an empty default. |
 
 The OAuth client ID, client secret and encryption key are required together when either Zoom client field is configured. A key alone
 does not enable Zoom. These settings do not enable sign-in, calendar access or meeting
@@ -384,4 +384,4 @@ for public apps; its private/development apps do not trigger those notifications
 
 ## Automatic Google Meet
 
-`GOOGLE_MEET_ENABLED` defaults to `false`. With Google Calendar write configuration it allows explicit individual, collective and round-robin automatic Meet event types. Collective meetings require an explicitly selected eligible organizer; round robin uses its assigned eligible host. Other collective hosts do not need a Google account. Existing committed intents continue reconciling after disabling the flag; no old provider labels are activated. See [automatic Google Meet](https://github.com/hourmere/hourmere/blob/main/docs/automatic-google-meet.md) for pending/failure and notification semantics.
+`GOOGLE_MEET_ENABLED` defaults to `false`. With Google Calendar write configuration it allows explicit individual, collective and round-robin automatic Meet event types. Collective meetings require an explicitly selected eligible organizer; round robin uses its assigned eligible host. Other collective hosts do not need a Google account. Existing committed intents continue reconciling after disabling the flag; no old provider labels are activated. See [automatic Google Meet](/docs/automatic-google-meet) for pending/failure and notification semantics.

@@ -45,7 +45,7 @@ const isRecord = (v: unknown): v is Record<string, unknown> =>
 
 /**
  * The error for a response with status `status` and parsed body `body`. Both APIs send
- * human-readable messages meant to be shown (docs/api-conventions.md); without one, the
+ * human-readable messages meant to be shown (https://hourmere.com/docs/api-conventions); without one, the
  * status decides.
  */
 export function requestError(status: number, body: unknown): RequestError {

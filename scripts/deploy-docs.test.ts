@@ -239,7 +239,10 @@ describe('documented deployment operations', () => {
   })
 
   it('mirrors the calendar-reply forwarding example with its whole-mailbox settings page', () => {
-    const notifications = readFileSync(new URL('../docs/notifications.md', import.meta.url), 'utf8')
+    const notifications = readFileSync(
+      new URL('../apps/site/src/content/docs/docs/notifications.md', import.meta.url),
+      'utf8',
+    )
     const example = notifications.match(
       /For example, in \[Zoho Mail[\s\S]*?delivery failures\./,
     )?.[0]
@@ -633,7 +636,7 @@ docker compose up -d --wait`)
     expect(legacy).toContain('0038_booking_ical_identity.sql')
     expect(legacy).toContain('do not use a rolling deployment')
     expect(legacy).toContain('packages/db/migrations/0037_conference_pending_timeout.md')
-    expect(legacy).toContain('docs/notifications.md#identity-and-recipients')
+    expect(legacy).toContain('/docs/notifications#identity-and-recipients')
     expect(releases).not.toContain('0037_conference_pending_timeout.sql')
     expect(releases).not.toContain('0038_booking_ical_identity.sql')
   })
@@ -659,7 +662,7 @@ docker compose up -d --wait`)
     {
       name: 'README',
       source: readme,
-      restoreLink: 'apps/site/src/content/docs/docs/self-hosting.md#back-up-and-restore',
+      restoreLink: 'https://hourmere.com/docs/self-hosting#back-up-and-restore',
     },
     ...['Single-container', 'Separate-worker'].map((title) => ({
       name: `${title} upgrade`,
@@ -778,7 +781,9 @@ docker compose up -d --wait`)
       guide.split('### Separate-worker upgrade\n')[1]?.split('\n### ')[0],
     ],
   ])('explains how to revert the private worker selection in the %s', (_name, source) => {
-    expect(source).toContain("Git does not undo `enable-worker.sh`'s private `.env` edit.")
+    expect(source?.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')).toContain(
+      "Git does not undo `enable-worker.sh`'s private `.env` edit.",
+    )
     expect(source).toMatch(
       /Before checking out the prior\s+revision, restore only the pre-upgrade `COMPOSE_FILE` assignment from the saved private\s+`\.env` \(remove the assignment if it was absent\), preserving the proxy\/custom overlays\s+and other current settings/,
     )

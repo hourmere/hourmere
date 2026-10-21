@@ -1,4 +1,4 @@
-// The public API calls behind the booking and manage pages (docs/api-conventions.md, "Public
+// The public API calls behind the booking and manage pages (https://hourmere.com/docs/api-conventions, "Public
 // endpoints"), through the same typed client as the rest of the app. No credentials: the manage
 // token travels in the X-Manage-Token header, never in a URL.
 import { api, type Schemas } from '../api/client.ts'

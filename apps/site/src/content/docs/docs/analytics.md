@@ -1,4 +1,7 @@
-# Booking activity
+---
+title: Booking activity
+description: View bounded daily booking activity for your organization.
+---
 
 `/app/analytics` shows first-party booking activity in the current organization: three
 totals and a daily table. Choose inclusive start/end dates (at most 90 calendar dates) and

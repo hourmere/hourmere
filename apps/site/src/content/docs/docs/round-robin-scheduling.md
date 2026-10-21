@@ -1,4 +1,7 @@
-# Round-robin scheduling
+---
+title: Round-robin scheduling
+description: Configure and activate equal-rotation team scheduling pools.
+---
 
 A team owner or admin can configure an equal-rotation pool of **one to eight** current,
 verified team members. Every booking assigns exactly one available person. Individual and

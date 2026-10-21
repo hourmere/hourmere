@@ -129,7 +129,10 @@ describe('CLI npm packaging protections', () => {
     expect(root.engines.node).toBe('>=26')
     expect(lock.packages[''].engines.node).toBe('>=26')
     const readme = await readFile(new URL('../README.md', import.meta.url), 'utf8')
-    const guide = await readFile(new URL('../../../docs/cli.md', import.meta.url), 'utf8')
+    const guide = await readFile(
+      new URL('../../../apps/site/src/content/docs/docs/cli.md', import.meta.url),
+      'utf8',
+    )
     expect(readme).toContain('Node.js 22 or later')
     expect(guide).toContain('Node.js 22 or later')
     expect(guide).toContain('repository development still uses Node.js 26')

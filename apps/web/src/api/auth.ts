@@ -1,5 +1,5 @@
 // The parts of Better Auth's own HTTP protocol (/api/auth/*) the web app uses: sign-in,
-// sign-out, profile updates and API keys. It is not in our OpenAPI document (docs/api-conventions.md), so
+// sign-out, profile updates and API keys. It is not in our OpenAPI document (https://hourmere.com/docs/api-conventions), so
 // the shapes used here are written out by hand. Errors are `{ "message", "code" }`.
 import { notifyUnauthorized } from './client.ts'
 import { errorFromResponse } from './errors.ts'

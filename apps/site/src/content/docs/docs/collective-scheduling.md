@@ -1,9 +1,12 @@
-# Collective team scheduling
+---
+title: Collective team scheduling
+description: Book every required team host together.
+---
 
 A collective event type books **every selected host** together. Team owners and admins can
 choose two to eight current members with verified email addresses in the event editor.
 An individual team event has one host. Personal event types keep one host, their owner.
-For one-host equal rotation, see [round-robin scheduling](round-robin-scheduling.md). Legacy
+For one-host equal rotation, see [round-robin scheduling](/docs/round-robin-scheduling). Legacy
 and newly saved round-robin pools remain metadata-only until explicitly activated; ordinary
 metadata saves never activate them.
 

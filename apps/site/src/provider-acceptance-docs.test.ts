@@ -1,8 +1,9 @@
-import { readFileSync } from 'node:fs'
+import { globSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
+const siteDocs = 'apps/site/src/content/docs/docs'
 const root = process.env.HOURMERE_DOCS_ROOT ?? fileURLToPath(new URL('../../../', import.meta.url))
 const source = (path: string) => readFileSync(join(root, path), 'utf8')
 const normalize = (text: string) => text.replace(/\s+/g, ' ').trim()
@@ -11,7 +12,7 @@ const zoomAcceptance =
   'Real-account acceptance was performed on 2026-10-19 against a Zoom development-mode app. Its scope was creating, rescheduling and cancelling a real meeting. Production Zoom Marketplace publication is a separate step for the hosted service; self-hosters use their own Zoom apps.'
 const guides = [
   {
-    path: 'docs/automatic-zoom.md',
+    path: `${siteDocs}/automatic-zoom.md`,
     environment: 'a Zoom development-mode app',
     productionStep: 'Production Zoom Marketplace publication',
     ownApps: 'Zoom apps',
@@ -25,7 +26,7 @@ const guides = [
     acceptanceParagraph: zoomAcceptance,
   },
   {
-    path: 'docs/automatic-google-meet.md',
+    path: `${siteDocs}/automatic-google-meet.md`,
     environment: 'a Google Cloud test project',
     productionStep: 'Google OAuth verification',
     ownApps: 'Google Cloud projects',
@@ -37,14 +38,14 @@ const guides = [
 // Only these exact, file-scoped sentences have been reviewed. Scan the whole page so a
 // new publication/verification claim cannot hide outside the real-account paragraph.
 const providerClaimAllowlist: Record<string, readonly string[]> = {
-  'docs/automatic-zoom.md': [
+  [`${siteDocs}/automatic-zoom.md`]: [
     'A real Marketplace client must be separately configured and verified to honor both choices.',
     'Disconnecting retires credentials and may require explicit reconnection before a known meeting can be updated or removed; it does not revoke the whole Marketplace grant.',
     'Adding a Marketplace grant revocation would require a separate provider contract and policy, since a discarded exchange can concern an identity with an existing grant.',
     'Production Zoom Marketplace publication is a separate step for the hosted service; self-hosters use their own Zoom apps.',
     'Operator reports (not protocol guarantees): [missing deauthorization verification headers, March 2026](https://devforum.zoom.us/t/oauth-app-deauthorization-webhook-requests-missing-verification-headers-authorization-x-zm-signature/142352), [missing signing headers, August 2022](https://devforum.zoom.us/t/x-zm-signature-x-zm-request-timestamp-are-missed-in-deauthorization-webhook/73990).',
   ],
-  'docs/automatic-google-meet.md': [
+  [`${siteDocs}/automatic-google-meet.md`]: [
     'A collective Google Meet opt-in must explicitly select a current verified required host with an owned, Meet-capable Google destination.',
     'Google OAuth verification is a separate step for the hosted service; self-hosters use their own Google Cloud projects.',
   ],
@@ -56,16 +57,11 @@ const providerClaimAllowlist: Record<string, readonly string[]> = {
     'It retains the identity record for future references and does **not** revoke the entire Marketplace app grant.',
     'Protocol references, checked 19 October 2026: [Zoom OAuth](https://developers.zoom.us/docs/integrations/oauth/), [Zoom PKCE](https://developers.zoom.us/blog/public-pkce/), [advanced scope query](https://godevelopers.zoom.us/docs/integrations/oauth-scopes-overview/), [granular scopes](https://developers.zoom.us/docs/integrations/oauth-scopes-granular/), [webhook verification](https://developers.zoom.us/docs/api/webhooks/), [app deauthorization](https://developers.zoom.us/docs/integrations/end-user-auth/).',
   ],
-  'docs/google-calendar.md': [
-    'As the self-hoster, you own the Google Cloud project and are responsible for its branding, domains, privacy policy and any required [sensitive-scope verification](https://developers.google.com/identity/protocols/oauth2/production-readiness/sensitive-scope-verification).',
+  'apps/site/src/content/docs/docs/google-calendar.md': [
     'Each Google Cloud project is verified separately; a self-hosted instance uses your own project.',
-    "Review Google's documented exceptions for personal or internal use before deciding whether verification is required.",
     'Only the stable Google account ID from the authenticated UserInfo endpoint identifies the external account; the returned email must be verified.',
     'Inspect the exact pinned Google event; verify the current booking is confirmed, its poll budget exhausted, the root UID matches and Google still reports a pending create request without a valid Meet link.',
-  ],
-  'apps/site/src/content/docs/docs/google-calendar.md': [
     "You, the self-hoster, are responsible for your Google project's branding, domains, privacy policy and any required [sensitive-scope verification](https://developers.google.com/identity/protocols/oauth2/production-readiness/sensitive-scope-verification).",
-    'Each Google Cloud project is verified separately; a self-hosted instance uses your own project.',
   ],
   'apps/site/src/content/docs/docs/configuration.md': [
     "External unverified apps requesting sensitive or restricted scopes still have an **unverified app warning screen** and **100-user cap**, as explained in Google's [app state overview](https://developers.google.com/identity/protocols/oauth2/production-readiness/overview).",
@@ -137,16 +133,28 @@ describe('provider real-account acceptance documentation', () => {
   })
 
   it.each([
-    ['docs/automatic-zoom.md', 'No real Zoom client, grant or meeting was used'],
-    ['docs/automatic-zoom.md', 'remain required before this branch can be merged'],
-    ['docs/automatic-google-meet.md', 'Actual provider acceptance remains separately authorized'],
+    [`${siteDocs}/automatic-zoom.md`, 'No real Zoom client, grant or meeting was used'],
+    [`${siteDocs}/automatic-zoom.md`, 'remain required before this branch can be merged'],
+    [
+      `${siteDocs}/automatic-google-meet.md`,
+      'Actual provider acceptance remains separately authorized',
+    ],
   ])('removes stale acceptance wording from %s: %s', (path, staleClaim) => {
     expect(read(path)).not.toContain(staleClaim)
   })
 })
 
 describe('provider publication and verification claims throughout documentation', () => {
-  const pages = Object.entries(providerClaimAllowlist).map(([path, allowed]) => ({ path, allowed }))
+  // Discover pages from their complete text, so publishing another provider or delivery
+  // guide automatically gives it the same claim guard, even if its allowlist is empty.
+  const pages = globSync('**/*.md', { cwd: join(root, siteDocs) })
+    .map((file) => `${siteDocs}/${file}`)
+    .filter((path) => /\b(?:google|microsoft|zoom|meet|smtp|mail|emails?)\b/i.test(source(path)))
+    .map((path) => ({ path, allowed: providerClaimAllowlist[path] ?? [] }))
+
+  it('discovers at least the 21 expected provider and delivery pages', () => {
+    expect(pages.length).toBeGreaterThanOrEqual(21)
+  })
 
   it.each(pages)(
     'allows only reviewed complete sentences throughout $path',
@@ -197,18 +205,21 @@ describe('provider publication and verification claims throughout documentation'
     },
   )
 
-  it.each(pages)('requires a complete sentence match in $path', ({ path, allowed }) => {
-    for (const claim of [
-      `The hosted app is approved: ${allowed[0]}`,
-      `${allowed[0]}—the hosted app is fully approved.`,
-    ]) {
-      expect(unapprovedProviderClaims(`${source(path)}\n\n${claim}\n`, allowed)).toEqual([claim])
-    }
-  })
+  it.each(pages.filter(({ allowed }) => allowed.length > 0))(
+    'requires a complete sentence match in $path',
+    ({ path, allowed }) => {
+      for (const claim of [
+        `The hosted app is approved: ${allowed[0]}`,
+        `${allowed[0]}—the hosted app is fully approved.`,
+      ]) {
+        expect(unapprovedProviderClaims(`${source(path)}\n\n${claim}\n`, allowed)).toEqual([claim])
+      }
+    },
+  )
 
   it('keeps a reviewed sentence scoped to its own file', () => {
-    const zoomPath = 'docs/automatic-zoom.md'
-    const googlePath = 'docs/automatic-google-meet.md'
+    const zoomPath = `${siteDocs}/automatic-zoom.md`
+    const googlePath = `${siteDocs}/automatic-google-meet.md`
     const zoomAllowed = providerClaimAllowlist[zoomPath] ?? []
     const googleAllowed = providerClaimAllowlist[googlePath] ?? []
     const claim = zoomAllowed[0] ?? ''

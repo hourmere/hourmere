@@ -5082,7 +5082,7 @@ export interface components {
             message?: string;
         };
         /**
-         * @description Optional additive alias from the documented error-code set. The original error code remains unchanged throughout /api/v1. New aliases may be added; fall back to error when an alias is absent or unknown. See docs/api-conventions.md for code meanings.
+         * @description Optional additive alias from the documented error-code set. The original error code remains unchanged throughout /api/v1. New aliases may be added; fall back to error when an alias is absent or unknown. See https://hourmere.com/docs/api-conventions for code meanings.
          * @enum {string}
          */
         ErrorAlias: "zoom_operation_busy";

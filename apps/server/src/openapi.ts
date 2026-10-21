@@ -10,10 +10,10 @@ import { errorAliases } from './error-aliases.ts'
 
 export const ErrorAlias = z.enum(Object.values(errorAliases)).openapi('ErrorAlias', {
   description:
-    'Optional additive alias from the documented error-code set. The original error code remains unchanged throughout /api/v1. New aliases may be added; fall back to error when an alias is absent or unknown. See docs/api-conventions.md for code meanings.',
+    'Optional additive alias from the documented error-code set. The original error code remains unchanged throughout /api/v1. New aliases may be added; fall back to error when an alias is absent or unknown. See https://hourmere.com/docs/api-conventions for code meanings.',
 })
 
-// See docs/api-conventions.md.
+// See https://hourmere.com/docs/api-conventions.
 export const ErrorBody = z
   .object({
     error: z.string().openapi({ description: 'Machine-readable code, e.g. unauthorized' }),
