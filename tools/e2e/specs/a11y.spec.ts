@@ -51,6 +51,10 @@ for (const theme of ['light', 'dark'] as const) {
               passes: result.passes,
               incomplete: result.incomplete,
               incompleteRules: result.incompleteRules,
+              moderate: result.moderate,
+              moderateRules: result.moderateRules,
+              minor: result.minor,
+              minorRules: result.minorRules,
             }
           } catch {
             report.findings.push({ code: 'scan-error', phase })

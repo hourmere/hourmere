@@ -61,6 +61,12 @@ export async function scanA11y(page: Page) {
     passes: result.passes.length,
     incomplete: result.incomplete.length,
     incompleteRules: result.incomplete.map((rule) => rule.id),
+    moderate: result.violations.filter((rule) => rule.impact === 'moderate').length,
+    moderateRules: result.violations
+      .filter((rule) => rule.impact === 'moderate')
+      .map((rule) => rule.id),
+    minor: result.violations.filter((rule) => rule.impact === 'minor').length,
+    minorRules: result.violations.filter((rule) => rule.impact === 'minor').map((rule) => rule.id),
   }
 }
 

@@ -13,6 +13,7 @@ interface Step {
   name?: string
   run?: string
   if?: string
+  'continue-on-error'?: boolean
   uses?: string
   with?: Record<string, string>
   env?: Record<string, string>
@@ -211,6 +212,7 @@ describe('UI measurement CI contract', () => {
         // Findings are evaluated after all scans so checked-in exceptions can apply.
         expect(browser?.env?.HOURMERE_UI_BLOCKING).toBeUndefined()
         expect(job?.env?.HOURMERE_UI_BLOCKING).toBeUndefined()
+        expect(browser?.env?.HOURMERE_UI_FAIL_ON_EXIT).toBe('1')
       }
     },
   )
@@ -232,6 +234,7 @@ describe('UI measurement CI contract', () => {
       expect(steps.find((step) => step.name === 'Summarize measurements')?.if).toBe('always()')
       const upload = steps.find((step) => step.uses?.startsWith('actions/upload-artifact@'))
       expect(upload?.if).toBe('always()')
+      if (id !== 'e2e-visual') expect(upload?.['continue-on-error']).toBe(true)
       expect(upload?.with?.path).toBe('temp/ui-audit-reports/')
       expect(steps.some((step) => step.run?.includes('node tools/e2e/run-audit.ts'))).toBe(true)
     },
@@ -368,43 +371,46 @@ describe('report-only browser command', () => {
     }
   })
 
-  it.each([false, true])(
-    'records browser failures and blocking=%s controls the exit',
-    (blocking) => {
-      const directory = mkdtempSync(join(tmpdir(), 'hourmere-ui-runner-'))
-      try {
-        const child = join(directory, 'fake-cli.mjs')
-        writeFileSync(child, 'process.exitCode = 7\n')
-        const runnerSource = readFileSync(
-          process.env.HOURMERE_UI_RUNNER ?? join(root, 'tools/e2e/run-audit.ts'),
-          'utf8',
+  it.each([
+    [false, false],
+    [true, false],
+    [false, true],
+    [true, true],
+  ])('records browser failures with blocking=%s and failOnExit=%s', (blocking, failOnExit) => {
+    const directory = mkdtempSync(join(tmpdir(), 'hourmere-ui-runner-'))
+    try {
+      const child = join(directory, 'fake-cli.mjs')
+      writeFileSync(child, 'process.exitCode = 7\n')
+      const runnerSource = readFileSync(
+        process.env.HOURMERE_UI_RUNNER ?? join(root, 'tools/e2e/run-audit.ts'),
+        'utf8',
+      )
+        .replace("fileURLToPath(new URL('../../', import.meta.url))", JSON.stringify(root))
+        .replace(
+          "fileURLToPath(import.meta.resolve('@playwright/test/cli'))",
+          JSON.stringify(child),
         )
-          .replace("fileURLToPath(new URL('../../', import.meta.url))", JSON.stringify(root))
-          .replace(
-            "fileURLToPath(import.meta.resolve('@playwright/test/cli'))",
-            JSON.stringify(child),
-          )
-        const runner = join(directory, 'runner.mts')
-        writeFileSync(runner, runnerSource)
-        const result = spawnSync(process.execPath, [runner, 'layout'], {
-          encoding: 'utf8',
-          env: {
-            ...process.env,
-            HOURMERE_UI_REPORT_DIR: directory,
-            HOURMERE_UI_BLOCKING: blocking ? '1' : '0',
-          },
-        })
-        expect(result.status, result.stderr).toBe(blocking ? 7 : 0)
-        expect(JSON.parse(readFileSync(join(directory, 'layout-execution.json'), 'utf8'))).toEqual({
-          schemaVersion: 1,
-          kind: 'execution',
-          suite: 'layout',
-          exitCode: 7,
-          blocking,
-        })
-      } finally {
-        rmSync(directory, { recursive: true, force: true })
-      }
-    },
-  )
+      const runner = join(directory, 'runner.mts')
+      writeFileSync(runner, runnerSource)
+      const result = spawnSync(process.execPath, [runner, 'layout'], {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          HOURMERE_UI_REPORT_DIR: directory,
+          HOURMERE_UI_BLOCKING: blocking ? '1' : '0',
+          HOURMERE_UI_FAIL_ON_EXIT: failOnExit ? '1' : '0',
+        },
+      })
+      expect(result.status, result.stderr).toBe(blocking || failOnExit ? 7 : 0)
+      expect(JSON.parse(readFileSync(join(directory, 'layout-execution.json'), 'utf8'))).toEqual({
+        schemaVersion: 1,
+        kind: 'execution',
+        suite: 'layout',
+        exitCode: 7,
+        blocking,
+      })
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
 })

@@ -10,6 +10,7 @@ if (!suite || !['layout', 'a11y', 'visual', 'cross-engine'].includes(suite)) {
 const root = fileURLToPath(new URL('../../', import.meta.url))
 const directory = resolve(root, process.env.HOURMERE_UI_REPORT_DIR ?? 'temp/ui-audit-reports')
 const blocking = process.env.HOURMERE_UI_BLOCKING === '1'
+const failOnExit = process.env.HOURMERE_UI_FAIL_ON_EXIT === '1'
 await mkdir(directory, { recursive: true })
 const exitCode = await new Promise<number>((resolveExit) => {
   const child = spawn(
@@ -35,4 +36,4 @@ await writeFile(
   `${JSON.stringify({ schemaVersion: 1, kind: 'execution', suite, exitCode, blocking }, null, 2)}\n`,
 )
 console.log(`UI measurement ${suite}: browser exit ${exitCode}; blocking=${blocking}`)
-process.exitCode = blocking ? exitCode : 0
+process.exitCode = blocking || failOnExit ? exitCode : 0

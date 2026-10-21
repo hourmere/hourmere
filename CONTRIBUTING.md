@@ -86,10 +86,11 @@ cleanup are best effort, bounded to 15 seconds: forced termination, worker crash
 unavailable PostgreSQL can still leave databases behind.
 
 On slow machines, set `HOURMERE_TEST_DATABASE_ADMIN_TIMEOUT_MS` to a positive integer
-number of milliseconds (at most 2147482647). It changes the helper's CREATE/ALTER/DROP
-statement timeout from the default 5000 ms; the client query timeout is that value plus
-1000 ms (default 6000 ms). The connection timeout remains 5000 ms and shutdown cleanup
-still has its independent 15-second deadline.
+number of milliseconds (at most 2147482647). It changes the helper's CREATE/ALTER
+statement timeout from the default 5000 ms. DROP uses at least 30000 ms, or the configured
+value when higher. Each client query timeout is its statement timeout plus 1000 ms.
+The connection timeout remains 5000 ms and shutdown cleanup still has its independent
+15-second deadline.
 
 Inspect those leftovers manually (the default is **dry run**):
 
@@ -178,14 +179,17 @@ The reusable [CI workflow](.github/workflows/ci.yml) keeps exactly its existing 
 [UI checks workflow](.github/workflows/ui-checks.yml) runs on pull requests, pushes to main
 and manual dispatches. Layout shards fail on every layout finding, scan error, browser
 failure or missing report; axe fails on serious/critical violations and scan/execution
-errors. Cross-engine test failures fail the job. Visual-baseline detection, visual comparison
-and baseline generation remain advisory with `continue-on-error: true`. The workflow is not
-called by CI or the release workflow and does not run on release tags.
+errors or missing reports. Cross-engine test failures fail the job. The layout/axe run steps
+return browser failures immediately; their summaries still run and gate UI findings after
+exceptions apply. Sanitized-report uploads remain advisory. Visual-baseline detection, visual
+comparison and baseline generation remain advisory with `continue-on-error: true`. The workflow
+is not called by CI or the release workflow and does not run on release tags.
 
 Layout covers 16 CSS viewport sizes, light/dark, English and Simplified Chinese, plus
 British English on booking. Layout and axe include the booking calendar, form, confirmation,
 time-zone panel, embedded and team booking, and OAuth consent states. Axe checks WCAG
-2.0/2.1/2.2 A/AA tags, records passes/incomplete counts and reports serious/critical violations.
+2.0/2.1/2.2 A/AA tags, records passes/incomplete and moderate/minor counts and reports
+serious/critical violations.
 A CI-only canary with known violations verifies the in-browser scan pipeline. Cross-engine
 smoke covers booking, sign-in and the embed popup in desktop WebKit, iPhone WebKit and
 Firefox. These measurements use synthetic data and the disposable-database fixture.
@@ -196,8 +200,9 @@ Playwright installs system packages only when its dry-run check finds packages m
 可复用 CI 保留原有四个任务。独立的 **UI checks** 工作流在拉取请求、主分支推送和手动触发时运行，
 布局、axe 严重/致命问题和跨引擎测试回归会使任务失败；视觉检测仍为建议项。
 CI 和发布工作流都不调用它，发布标签不会运行这些检测。
-布局检测覆盖 16 种 CSS 视口、明暗主题、中英文，预约页另测英式英语；axe 记录通过和待人工确认项数，
-并报告严重和致命问题。检测涵盖预约表单、确认页、时区面板、嵌入页、团队预约和 OAuth 授权页。
+布局检测覆盖 16 种 CSS 视口、明暗主题、中英文，预约页另测英式英语；axe 记录通过、待人工确认、
+中等和轻微项数，并报告严重和致命问题；漏扫也会导致失败。
+检测涵盖预约表单、确认页、时区面板、嵌入页、团队预约和 OAuth 授权页。
 跨引擎冒烟覆盖 WebKit 桌面版、iPhone 预设和 Firefox 的预约、登录及嵌入弹窗。
 
 Build the web app as above, then run from the repository root. In Codex, **every command
@@ -264,18 +269,25 @@ The terminal summary gates layout and axe after every scan has reported, allowin
 dated exceptions to apply without aborting the matrix early. It derives the expected report
 identities from Playwright's selected matrix (`--list` with the same suite/shard), rather
 than fixed counts; missing, duplicate or unexpected reports fail. Browser failures and
-unreadable reports fail too. Axe `incomplete` results remain informational: summaries print
-their count and rule IDs for review. Use a separate report directory for each local lane/shard
-(`HOURMERE_UI_REPORT_DIR`); rerun into an empty directory so old reports cannot mask a loss.
+unreadable reports fail too. Axe `incomplete`, moderate and minor results remain informational:
+summaries print their counts and rule IDs for review. Use a separate report directory for
+each local lane/shard (`HOURMERE_UI_REPORT_DIR`); rerun into an empty directory so old reports
+cannot mask a loss.
+
+The summary lists the first 20 unexcepted findings with page, viewport, locale, theme,
+category, axe rule ID and sanitized selector hint, followed by the remaining count.
+Browser failures include the exit code and point to the measurement run-step log;
+matrix-enumeration failures include the listing child's status, signal and stderr tail.
 
 仓库中的终端汇总会核对 Playwright 实际矩阵的每项报告；缺失、重复、多余、无法读取的报告和
-浏览器执行错误均导致失败。axe 待人工确认项只显示数量和规则 ID，不阻断检测。每次本地运行
-使用独立、空的报告目录，避免旧报告掩盖漏扫。
+浏览器执行错误均导致失败。axe 待人工确认项、中等和轻微问题只显示数量和规则 ID，不阻断检测。
+每次本地运行使用独立、空的报告目录，避免旧报告掩盖漏扫。
 
 Known findings require an entry in `tools/e2e/ui-check-exceptions.json` (initially `[]`),
 with exact `suite` (`layout` or `a11y`), `page`, `viewport: {width, height}`, `locale`, `theme`,
 finding `category`, an axe `rule` when applicable, a nonempty `reason` and ISO `expires` date.
-Expired, invalid and stale entries fail; a stale entry no longer matches a finding in its
+Unknown keys are rejected, including extra keys inside `viewport`; DOM selectors cannot
+narrow an exception. Expired, invalid and stale entries fail; a stale entry no longer matches a finding in its
 selected state. Each layout shard checks the exceptions for its own selected states, and
 selectors absent from the full matrix fail in every shard. Scan errors, lost reports and
 browser failures cannot be excepted. Legacy scan-time `a11y-exemptions.json` suppressions

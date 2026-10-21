@@ -11,7 +11,7 @@ import { cleanupTestDatabases, createTestDatabase } from './testing.ts'
 
 function fakePool() {
   return {
-    query: vi.fn(async (_sql: string) => ({ rows: [] })),
+    query: vi.fn(async (_sql: string, _values?: string[]) => ({ rows: [] })),
     end: vi.fn(async () => {}),
     on: vi.fn(),
   }
@@ -67,21 +67,158 @@ describe('test database ownership', () => {
     )
     expect(migrationModule.runMigrations).toHaveBeenCalledWith(pool, '/migrations')
     await owned.drop()
-    expect(events.at(-2)).toBe('pool.end')
+    expect(events.at(-3)).toBe('pool.end')
     expect(events.at(-1)).toMatch(/^DROP DATABASE IF EXISTS hourmere_test_.* WITH \(FORCE\)$/)
     expect(admin.end).toHaveBeenCalledTimes(2)
   })
 
-  it('allows slower admin statements with a bounded driver timeout', async () => {
+  it('gives teardown its own longer timeout without shortening a configured timeout', async () => {
     vi.stubEnv('HOURMERE_TEST_DATABASE_ADMIN_TIMEOUT_MS', '12000')
     const owned = await createTestDatabase('postgres://localhost/hourmere')
     await owned.drop()
     expect(pg.Pool).toHaveBeenCalledTimes(2)
-    for (const [config] of vi.mocked(pg.Pool).mock.calls) {
-      expect(config).toEqual(
-        expect.objectContaining({ statement_timeout: 12_000, query_timeout: 13_000 }),
-      )
+    expect(vi.mocked(pg.Pool).mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({ statement_timeout: 12_000, query_timeout: 13_000 }),
+    )
+    expect(vi.mocked(pg.Pool).mock.calls[1]?.[0]).toEqual(
+      expect.objectContaining({
+        max: 1,
+        connectionTimeoutMillis: 5_000,
+        statement_timeout: 30_000,
+        query_timeout: 31_000,
+      }),
+    )
+    vi.stubEnv('HOURMERE_TEST_DATABASE_ADMIN_TIMEOUT_MS', '60000')
+    const slower = await createTestDatabase('postgres://localhost/hourmere')
+    await slower.drop()
+    expect(vi.mocked(pg.Pool).mock.calls[3]?.[0]).toEqual(
+      expect.objectContaining({ statement_timeout: 60_000, query_timeout: 61_000 }),
+    )
+  })
+
+  it('keeps effective admin timeouts independent of fixture URL and environment overrides', async () => {
+    vi.stubEnv('PGOPTIONS', '-c statement_timeout=1 -c lock_timeout=1')
+    const parameters = new URLSearchParams({
+      statement_timeout: '2',
+      query_timeout: '3',
+      connectionTimeoutMillis: '1',
+      lock_timeout: '1',
+      options: '-c statement_timeout=1 -c lock_timeout=1',
+      sslmode: 'disable',
+    })
+    const owned = await createTestDatabase(`postgres://localhost/hourmere?${parameters}`)
+    await owned.drop()
+    expect(new URL(owned.url).searchParams.toString()).toBe(parameters.toString())
+    for (const [index, timeout] of [5_000, 30_000].entries()) {
+      const config = vi.mocked(pg.Pool).mock.calls[index]?.[0]
+      const client = new pg.Client(config) as pg.Client & {
+        connectionParameters: {
+          statement_timeout: number
+          query_timeout: number
+          lock_timeout: false
+          connect_timeout: number
+          options: string
+        }
+      }
+      try {
+        expect(client.connectionParameters).toEqual(
+          expect.objectContaining({
+            statement_timeout: timeout,
+            query_timeout: timeout + 1_000,
+            lock_timeout: false,
+            connect_timeout: 5,
+            options: `-c statement_timeout=${timeout} -c lock_timeout=0`,
+          }),
+        )
+      } finally {
+        await client.end()
+      }
     }
+  })
+
+  it('terminates only the owned database backends before force-dropping it', async () => {
+    const owned = await createTestDatabase('postgres://localhost/hourmere')
+    await owned.drop()
+    const name = new URL(owned.url).pathname.slice(1)
+    expect(admin.query).toHaveBeenNthCalledWith(
+      3,
+      'SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()',
+      [name],
+    )
+    expect(admin.query).toHaveBeenNthCalledWith(4, `DROP DATABASE IF EXISTS ${name} WITH (FORCE)`)
+  })
+
+  it.each([
+    [
+      'statement timeout',
+      Object.assign(new Error('canceling statement due to statement timeout'), { code: '57014' }),
+    ],
+    [
+      'database in use',
+      Object.assign(new Error('database is being accessed by other users'), { code: '55006' }),
+    ],
+    ['driver timeout', new Error('Query read timeout')],
+  ])('retries a transient %s and retains one admin pool', async (_label, error) => {
+    const owned = await createTestDatabase('postgres://localhost/hourmere')
+    let attempts = 0
+    admin.query.mockImplementation(async (sql) => {
+      if (sql.startsWith('DROP') && ++attempts === 1) throw error
+      return { rows: [] }
+    })
+    await expect(owned.drop()).resolves.toBeUndefined()
+    expect(attempts).toBe(2)
+    expect(
+      admin.query.mock.calls.filter(([sql]) => sql.startsWith('SELECT pg_terminate_backend')),
+    ).toHaveLength(2)
+    expect(pg.Pool).toHaveBeenCalledTimes(2)
+    expect(admin.end).toHaveBeenCalledTimes(2)
+    expect(pool.end).toHaveBeenCalledOnce()
+  })
+
+  it('retries a timeout while terminating fixture backends', async () => {
+    const owned = await createTestDatabase('postgres://localhost/hourmere')
+    admin.query.mockRejectedValueOnce(
+      Object.assign(new Error('statement timeout'), { code: '57014' }),
+    )
+    await expect(owned.drop()).resolves.toBeUndefined()
+    expect(
+      admin.query.mock.calls.filter(([sql]) => sql.startsWith('SELECT pg_terminate_backend')),
+    ).toHaveLength(2)
+    expect(admin.query.mock.calls.filter(([sql]) => sql.startsWith('DROP'))).toHaveLength(1)
+    expect(admin.end).toHaveBeenCalledTimes(2)
+  })
+
+  it('bounds automatic retries and keeps ownership for later cleanup', async () => {
+    const owned = await createTestDatabase('postgres://localhost/hourmere')
+    let attempts = 0
+    const error = Object.assign(new Error('statement timeout'), { code: '57014' })
+    admin.query.mockImplementation(async (sql) => {
+      if (sql.startsWith('DROP') && ++attempts <= 3) throw error
+      return { rows: [] }
+    })
+    await expect(owned.drop()).rejects.toBe(error)
+    expect(attempts).toBe(3)
+    expect(admin.end).toHaveBeenCalledTimes(2)
+    await cleanupTestDatabases()
+    expect(attempts).toBe(4)
+    expect(admin.end).toHaveBeenCalledTimes(3)
+    expect(pool.end).toHaveBeenCalledOnce()
+  })
+
+  it('does not retry unrelated drop errors and closes the admin pool', async () => {
+    const owned = await createTestDatabase('postgres://localhost/hourmere')
+    let attempts = 0
+    const error = Object.assign(new Error('permission denied'), { code: '42501' })
+    admin.query.mockImplementation(async (sql) => {
+      if (sql.startsWith('DROP') && ++attempts === 1) throw error
+      return { rows: [] }
+    })
+    await expect(owned.drop()).rejects.toBe(error)
+    expect(attempts).toBe(1)
+    expect(admin.end).toHaveBeenCalledTimes(2)
+    await owned.drop()
+    expect(attempts).toBe(2)
+    expect(pool.end).toHaveBeenCalledOnce()
   })
 
   it.each(['0', '-1', '1.5', 'NaN', '10000000000000000', '2147482648'])(
@@ -154,7 +291,7 @@ describe('test database ownership', () => {
     await expect(createTestDatabase('postgres://localhost/hourmere')).rejects.toThrow(
       'migration failed',
     )
-    expect(events.at(-2)).toBe('pool.end')
+    expect(events.at(-3)).toBe('pool.end')
     expect(events.at(-1)).toMatch(/^DROP .*WITH \(FORCE\)$/)
   })
 
@@ -315,6 +452,50 @@ describe.skipIf(!serverUrl)('real test database cleanup', () => {
       await owned.drop()
     }
   })
+
+  it('repeatedly removes busy fixtures without terminating another fixture', async () => {
+    const neighbor = await createTestDatabase(serverUrl as string, undefined, {
+      migrate: false,
+      tag: 'neighbor',
+    })
+    const neighborClient = await neighbor.pool.connect()
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      // Two concurrent owners keep this file far below CI's 100-connection ceiling.
+      for (let round = 0; round < 8; round += 1) {
+        await Promise.all(
+          Array.from({ length: 2 }, async () => {
+            const owned = await createTestDatabase(serverUrl as string, undefined, {
+              migrate: false,
+              tag: 'stress',
+            })
+            const extraPool = new pg.Pool({ connectionString: owned.url, max: 1 })
+            databaseModule.guardPoolErrors(extraPool)
+            let ownedClient: pg.PoolClient | undefined
+            let extraClient: pg.PoolClient | undefined
+            try {
+              ownedClient = await owned.pool.connect()
+              extraClient = await extraPool.connect()
+              await ownedClient.query('BEGIN')
+              await extraClient.query('SELECT 1')
+              await owned.drop()
+              expect(await exists(new URL(owned.url).pathname.slice(1))).toBe(false)
+            } finally {
+              ownedClient?.release(true)
+              extraClient?.release(true)
+              await extraPool.end()
+              await owned.drop()
+            }
+          }),
+        )
+        expect((await neighborClient.query('SELECT 1 AS alive')).rows).toEqual([{ alive: 1 }])
+      }
+    } finally {
+      neighborClient.release(true)
+      await neighbor.drop()
+      errorLog.mockRestore()
+    }
+  }, 30_000)
 
   it('removes the database when a real migration fails', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'hourmere-failing-migration-'))
