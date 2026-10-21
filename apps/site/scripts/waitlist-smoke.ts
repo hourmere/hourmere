@@ -59,6 +59,15 @@ async function freePort() {
 }
 
 let worker: ReturnType<typeof spawn> | undefined
+async function stopWorker() {
+  if (worker?.pid && worker.exitCode === null) {
+    const stopped = new Promise<void>((resolve) => worker?.once('exit', () => resolve()))
+    // The detached process group contains only this probe's npx/Wrangler/workerd.
+    process.kill(-worker.pid, 'SIGTERM')
+    await stopped
+  }
+}
+
 try {
   // The first D1 migration has no predecessor waitlist schema. An unrelated populated
   // table proves applying it preserves data already in the database.
@@ -77,48 +86,52 @@ try {
     assert.deepEqual(query('SELECT count(*) AS count FROM waitlist', persistTo), [{ count: 0 }])
   }
 
-  const port = await freePort()
-  const origin = `http://127.0.0.1:${port}`
-  let workerOutput = ''
-  worker = spawn(
-    'npx',
-    [
-      ...wrangler,
-      'dev',
-      '--local',
-      '--env',
-      'development',
-      '--ip',
-      '127.0.0.1',
-      '--port',
-      String(port),
-      '--inspector-port',
-      '0',
-      '--persist-to',
-      state,
-      '--log-level',
-      'error',
-    ],
-    { cwd, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] },
-  )
-  worker.stdout?.on('data', (chunk: Buffer) => {
-    workerOutput += chunk.toString()
-  })
-  worker.stderr?.on('data', (chunk: Buffer) => {
-    workerOutput += chunk.toString()
-  })
-  let ready = false
-  for (let attempt = 0; attempt < 150; attempt++) {
-    assert.equal(worker.exitCode, null, `Local Worker exited: ${workerOutput}`)
-    try {
-      ready = (await fetch(origin)).ok
-    } catch {
-      // Only this newly started loopback listener is polled.
+  async function startWorker(persistTo = state) {
+    const port = await freePort()
+    const origin = `http://127.0.0.1:${port}`
+    let workerOutput = ''
+    worker = spawn(
+      'npx',
+      [
+        ...wrangler,
+        'dev',
+        '--local',
+        '--env',
+        'development',
+        '--ip',
+        '127.0.0.1',
+        '--port',
+        String(port),
+        '--inspector-port',
+        '0',
+        '--persist-to',
+        persistTo,
+        '--log-level',
+        'error',
+      ],
+      { cwd, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] },
+    )
+    worker.stdout?.on('data', (chunk: Buffer) => {
+      workerOutput += chunk.toString()
+    })
+    worker.stderr?.on('data', (chunk: Buffer) => {
+      workerOutput += chunk.toString()
+    })
+    let ready = false
+    for (let attempt = 0; attempt < 150; attempt++) {
+      assert.equal(worker.exitCode, null, `Local Worker exited: ${workerOutput}`)
+      try {
+        ready = (await fetch(origin)).ok
+      } catch {
+        // Only this newly started loopback listener is polled.
+      }
+      if (ready) break
+      await delay(200)
     }
-    if (ready) break
-    await delay(200)
+    assert(ready, `Local Worker did not become ready: ${workerOutput}`)
+    return origin
   }
-  assert(ready, `Local Worker did not become ready: ${workerOutput}`)
+  let origin = await startWorker()
 
   for (const [path, file] of [
     ['/', 'index.html'],
@@ -145,23 +158,6 @@ try {
   const canonical = await fetch(`${origin}/privacy/`, { redirect: 'manual' })
   assert.equal(canonical.status, 307)
   assert.equal(new URL(canonical.headers.get('Location') ?? '', origin).pathname, '/privacy')
-
-  // Use a separate synthetic client for validation so the five success-path requests
-  // below still fit in the native binding's budget. No public provider is contacted.
-  const invalid = await fetch(`${origin}/api/waitlist`, {
-    method: 'POST',
-    headers: {
-      Origin: origin,
-      'Content-Type': 'application/json',
-      'CF-Connecting-IP': '192.0.2.80',
-    },
-    body: JSON.stringify({ email: 'invalid-address' }),
-  })
-  assert.equal(invalid.status, 400)
-  assert.equal(invalid.headers.get('Cache-Control'), 'no-store')
-  assert.match(await invalid.text(), /Enter one valid email address/)
-  assert.deepEqual(query('SELECT count(*) AS count FROM waitlist'), [{ count: 0 }])
-  console.log('Invalid address: HTTP 400; no row stored.')
 
   async function post(body: unknown) {
     const response = await fetch(`${origin}/api/waitlist`, {
@@ -238,6 +234,26 @@ try {
   }
   assert.deepEqual(query('SELECT * FROM waitlist'), stored)
   console.log('Rate limit: next three attempts HTTP 429 with Retry-After: 60; no row stored.')
+
+  // Use this probe's separate fresh state and a new port for the validation case.
+  // Miniflare supplies the client IP and can persist local binding counters, so
+  // callers cannot select a second bucket by supplying a synthetic IP header.
+  await stopWorker()
+  origin = await startWorker(freshState)
+  const invalid = await fetch(`${origin}/api/waitlist`, {
+    method: 'POST',
+    headers: {
+      Origin: origin,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ email: 'invalid-address' }),
+  })
+  assert.equal(invalid.status, 400)
+  assert.equal(invalid.headers.get('Cache-Control'), 'no-store')
+  assert.match(await invalid.text(), /Enter one valid email address/)
+  assert.deepEqual(query('SELECT * FROM waitlist', freshState), [])
+  console.log('Invalid address: HTTP 400; no row stored.')
+
   migrate()
   assert.deepEqual(query('SELECT * FROM waitlist'), stored)
   assert.deepEqual(query('SELECT value FROM predecessor_probe'), [{ value: 'keep' }])
@@ -245,11 +261,6 @@ try {
     'Local waitlist smoke passed: 5 byte-identical pages, headers/404/redirect, JSON/URL-encoded/multipart POST, duplicate/invalid/honeypot/rate-limit, migration preservation/fresh/no-op.',
   )
 } finally {
-  if (worker?.pid && worker.exitCode === null) {
-    const stopped = new Promise<void>((resolve) => worker?.once('exit', () => resolve()))
-    // The detached process group contains only this probe's npx/Wrangler/workerd.
-    process.kill(-worker.pid, 'SIGTERM')
-    await stopped
-  }
+  await stopWorker()
   await rm(scratch, { recursive: true, force: true })
 }
