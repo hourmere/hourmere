@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { extname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { listenOwned } from './listeners.ts'
 
 const directory = fileURLToPath(new URL('../../apps/site/dist/', import.meta.url))
 const contentTypes: Record<string, string> = {
@@ -45,29 +46,6 @@ export async function startSiteFixture() {
       response.writeHead(400).end()
     }
   })
-  const close = () =>
-    new Promise<void>((resolve, reject) => {
-      if (!server.listening) resolve()
-      else server.close((error) => (error ? reject(error) : resolve()))
-    })
-  try {
-    let port: number
-    do {
-      await new Promise<void>((resolve, reject) => {
-        server.once('error', reject)
-        server.listen(0, '127.0.0.1', () => {
-          server.off('error', reject)
-          resolve()
-        })
-      })
-      const address = server.address()
-      if (!address || typeof address === 'string') throw new Error('No static-site fixture port')
-      port = address.port
-      if ([3000, 3998].includes(port)) await close()
-    } while ([3000, 3998].includes(port))
-    return { origin: `http://127.0.0.1:${port}`, close }
-  } catch (error) {
-    await close()
-    throw error
-  }
+  const owned = await listenOwned(server)
+  return { origin: owned.url, close: () => owned.close() }
 }
