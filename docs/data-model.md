@@ -7,6 +7,22 @@ deletion. `booking_calendar_events` maps each written booking version to the sam
 event. See [Google Calendar synchronization](https://hourmere.com/docs/google-calendar) for the cursor, freshness
 and writeback rules.
 
+`calendar_busy` stores each event ID with exactly one representation: a nonempty
+`period` (`tstzrange`) for a timed event, or `all_day_start` and `all_day_end` (`date`)
+with an exclusive end for an all-day event. The dates are finite, within years 0001–9999,
+and strictly increasing. Availability expands all-day dates in each evaluated host's
+schedule zone, including collective and round-robin hosts; it does not use the source
+calendar's zone. Timed events retain their absolute instants.
+
+Migration `0039_calendar_busy_all_day_dates.sql` invalidates `sync_state` and
+`last_synced_at` for every Google calendar, including unselected calendars. Original
+all-day dates cannot be reconstructed unambiguously from old instant ranges. Existing
+busy rows remain until the next complete sync replaces them atomically; selected
+calendars fail the existing availability freshness check until that sync succeeds.
+Other providers, bookings and calendar settings are preserved. Stop every old web/all
+and worker process before applying the migration, then restart all roles with the new
+code: old binaries cannot read date-based busy rows safely.
+
 PostgreSQL is the system of record. The schema is defined by the SQL files in
 `packages/db/migrations` (applied in order, never edited once applied); TypeScript table
 types in `packages/db/src/tables.ts` are generated from the migrated database.
@@ -30,9 +46,10 @@ types in `packages/db/src/tables.ts` are generated from the migrated database.
 - **Public namespaces.** Organization creation and explicit slug updates reject the same
   case-insensitive reserved names as profile handles. Existing rows are not rewritten;
   metadata-only updates remain available for legacy slugs.
-- **Time** is always `timestamptz` (an instant). Wall-clock rules (working hours) are
-  stored with their IANA time zone and expanded by the availability engine
-  (`@hourmere/core`), which handles DST.
+- **Instants** use `timestamptz`. All-day calendar events retain a start date and
+  exclusive end date; availability expands them at local midnights in the evaluated
+  host's schedule zone. Wall-clock rules (working hours) retain their IANA time zone.
+  Temporal handles DST when these dates and rules become instants.
 
 ## Tables
 
@@ -95,7 +112,7 @@ calendar-list access.
 | `calendar_connections` | user | A connected Google / Microsoft / CalDAV account; credentials encrypted (AES-256-GCM) |
 | `calendar_oauth_states` | user + session | Short-lived, single-use calendar connection attempts: state digest, encrypted PKCE verifier and expiry; separate from sign-in |
 | `calendars` | user | Calendars inside a connection: conflict checking on/off, sync cursor and push channel |
-| `calendar_busy` | user | Busy intervals mirrored by incremental sync (recurring events expanded) |
+| `calendar_busy` | user | Timed busy intervals or all-day date ranges mirrored by incremental sync (recurring events expanded) |
 | `event_types` | organization | What can be booked: duration, step, buffers, notice, window, daily limit, location, questions; soft-deleted |
 | `event_type_hosts` | organization | Who hosts an event type, with optional per-host schedule, destination calendar and round-robin weight |
 | `bookings` | organization | A booked meeting: instant range, status, resolved location, answers, source (`web`/`embed`/`api`/`mcp`), idempotency key |

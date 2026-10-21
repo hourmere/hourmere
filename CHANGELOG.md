@@ -62,6 +62,10 @@ must approve publication through the [release workflow](https://github.com/hourm
 
 ### Fixed
 
+- All-day Google events block their dates in each host's availability schedule zone,
+  including collective and round-robin hosts, when the calendar uses another zone.
+  Exclusive end dates and daylight-saving transitions are preserved; timed events remain
+  absolute instants.
 - Unknown `/.well-known/*` paths on application instances return a plain-text 404 instead
   of the web app.
 - Email-sent and public booking success screens suggest checking spam or junk and adding
@@ -151,6 +155,17 @@ schema downgrade is not automatic. Direct source deployments require Node.js 26.
 Hourmere requires PostgreSQL 18+ because migrations use `uuidv7()`; the provided Compose
 stack includes PostgreSQL 18.
 
+- **Rebuild Google busy snapshots for all-day dates.** Stop all old web/all/worker
+  processes, including workers on other hosts, before applying
+  `0039_calendar_busy_all_day_dates.sql`, then restart every role with the upgraded code.
+  Old binaries cannot safely read the new date-based all-day representation, so this is
+  not a rolling upgrade. The migration clears the sync cursor and last successful sync
+  time for every Google calendar, including unselected calendars, while retaining busy
+  rows, timed intervals, bookings and settings. Old instant ranges cannot unambiguously
+  recover the original all-day dates. The next sync fetches a complete snapshot and
+  atomically replaces the old busy rows. Selected calendars return
+  `calendar_sync_unavailable` until that sync succeeds; run workers and allow the sync to
+  finish, or use **Sync now**. See [Google busy-time synchronization](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/google-calendar.md#busy-time-and-recurring-event-synchronization).
 - **Restart web and worker processes together for localized sign-in mail.** Stop all
   old web/all/worker processes and restart every role with the upgraded code. New sign-in
   outbox payloads include `language`; an old worker rejects that unknown field and

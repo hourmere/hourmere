@@ -122,19 +122,14 @@ function eventInstant(
   zone: string | null,
 ): Temporal.Instant {
   try {
-    if (value.dateTime) {
-      try {
-        return Temporal.Instant.from(value.dateTime)
-      } catch {
-        return Temporal.PlainDateTime.from(value.dateTime)
-          .toZonedDateTime(value.timeZone ?? zone ?? '', { disambiguation: 'reject' })
-          .toInstant()
-      }
+    if (!value.dateTime) throw failure()
+    try {
+      return Temporal.Instant.from(value.dateTime)
+    } catch {
+      return Temporal.PlainDateTime.from(value.dateTime)
+        .toZonedDateTime(value.timeZone ?? zone ?? '', { disambiguation: 'reject' })
+        .toInstant()
     }
-    if (!value.date || !/^\d{4}-\d{2}-\d{2}$/.test(value.date)) throw failure()
-    return Temporal.PlainDate.from(value.date)
-      .toZonedDateTime(value.timeZone ?? zone ?? '')
-      .toInstant()
   } catch {
     throw failure()
   }
@@ -142,7 +137,7 @@ function eventInstant(
 export function eventPeriod(
   event: GoogleEvent,
   zone: string | null,
-): { start: string; end: string } | null {
+): { kind: 'timed' | 'all_day'; start: string; end: string } | null {
   if (
     event.status === 'cancelled' ||
     event.transparency === 'transparent' ||
@@ -151,10 +146,28 @@ export function eventPeriod(
     return null
   if (!event.start || !event.end) throw failure()
   if (Boolean(event.start.date) !== Boolean(event.end.date)) throw failure()
+  if (event.start.date && event.end.date) {
+    try {
+      if (
+        event.start.dateTime ||
+        event.end.dateTime ||
+        !/^(?!0000)\d{4}-\d{2}-\d{2}$/.test(event.start.date) ||
+        !/^(?!0000)\d{4}-\d{2}-\d{2}$/.test(event.end.date)
+      )
+        throw failure()
+      const start = Temporal.PlainDate.from(event.start.date)
+      const end = Temporal.PlainDate.from(event.end.date)
+      if (Temporal.PlainDate.compare(end, start) <= 0) throw failure()
+      return { kind: 'all_day', start: start.toString(), end: end.toString() }
+    } catch {
+      throw failure()
+    }
+  }
   const start = eventInstant(event.start, zone)
   const end = eventInstant(event.end, zone)
   if (Temporal.Instant.compare(end, start) <= 0) throw failure()
   return {
+    kind: 'timed',
     start: start.round({ smallestUnit: 'millisecond', roundingMode: 'floor' }).toString(),
     end: end.round({ smallestUnit: 'millisecond', roundingMode: 'ceil' }).toString(),
   }
@@ -191,6 +204,12 @@ export async function syncGoogleCalendar(
         const day = now.toZonedDateTimeISO('UTC').toPlainDate().toZonedDateTime('UTC').toInstant()
         const start = day.subtract({ hours: 72 }).toString()
         const end = day.add({ hours: 403 * 24 }).toString()
+        // Google filters date-only events in the calendar zone. Fetch beyond our
+        // advertised instant coverage so a different schedule zone keeps its edge days.
+        const fetchWindow = {
+          start: Temporal.Instant.from(start).subtract({ hours: 48 }).toString(),
+          end: Temporal.Instant.from(end).add({ hours: 48 }).toString(),
+        }
         const saved = cursor.safeParse(calendar.sync_state)
         let incremental =
           saved.success &&
@@ -202,20 +221,20 @@ export async function syncGoogleCalendar(
           page = await client.events(
             accessToken,
             calendar.external_id,
-            { start, end, token: incremental && saved.success ? saved.data.token : undefined },
+            { ...fetchWindow, token: incremental && saved.success ? saved.data.token : undefined },
             signal,
           )
         } catch (error) {
           if (!(error instanceof GoogleSyncReset)) throw error
           incremental = false
-          page = await client.events(accessToken, calendar.external_id, { start, end }, signal)
+          page = await client.events(accessToken, calendar.external_id, fetchWindow, signal)
         }
-        // The collection timezone is current even when the list metadata is stale. An
-        // empty delta cannot re-interpret stored all-day dates, so rebuild the snapshot.
+        // Offset-less timed events use the collection timezone, which can be newer than
+        // the list metadata. Rebuild them when it changes, even after an empty delta.
         let timeZone = page.timeZone ?? calendar.time_zone
         if (incremental && page.timeZone !== null && page.timeZone !== calendar.time_zone) {
           incremental = false
-          page = await client.events(accessToken, calendar.external_id, { start, end }, signal)
+          page = await client.events(accessToken, calendar.external_id, fetchWindow, signal)
           timeZone = page.timeZone ?? timeZone
         }
         // Validate every interval before changing the snapshot; partial pages never become live.
@@ -225,17 +244,32 @@ export async function syncGoogleCalendar(
         }))
         if (!incremental)
           await trx.deleteFrom('calendar_busy').where('calendar_id', '=', calendarId).execute()
+        // A date can overlap the covered instant window in any schedule timezone.
+        // Keep the neighboring UTC dates too; expand them only during availability.
+        const firstDate = Temporal.Instant.from(start)
+          .toZonedDateTimeISO('UTC')
+          .toPlainDate()
+          .subtract({ days: 1 })
+        const lastDate = Temporal.Instant.from(end)
+          .toZonedDateTimeISO('UTC')
+          .toPlainDate()
+          .add({ days: 1 })
         for (const event of events) {
           if (
             !event.period ||
-            Temporal.Instant.compare(
-              Temporal.Instant.from(event.period.end),
-              Temporal.Instant.from(start),
-            ) <= 0 ||
-            Temporal.Instant.compare(
-              Temporal.Instant.from(event.period.start),
-              Temporal.Instant.from(end),
-            ) >= 0
+            (event.period.kind === 'all_day'
+              ? Temporal.PlainDate.compare(Temporal.PlainDate.from(event.period.end), firstDate) <=
+                  0 ||
+                Temporal.PlainDate.compare(Temporal.PlainDate.from(event.period.start), lastDate) >=
+                  0
+              : Temporal.Instant.compare(
+                  Temporal.Instant.from(event.period.end),
+                  Temporal.Instant.from(start),
+                ) <= 0 ||
+                Temporal.Instant.compare(
+                  Temporal.Instant.from(event.period.start),
+                  Temporal.Instant.from(end),
+                ) >= 0)
           ) {
             await trx
               .deleteFrom('calendar_busy')
@@ -248,12 +282,19 @@ export async function syncGoogleCalendar(
               .values({
                 calendar_id: calendarId,
                 external_event_id: event.id,
-                period: sql<string>`tstzrange(${event.period.start}::timestamptz,${event.period.end}::timestamptz,'[)')`,
+                period:
+                  event.period.kind === 'timed'
+                    ? sql<string>`tstzrange(${event.period.start}::timestamptz,${event.period.end}::timestamptz,'[)')`
+                    : null,
+                all_day_start: event.period.kind === 'all_day' ? event.period.start : null,
+                all_day_end: event.period.kind === 'all_day' ? event.period.end : null,
               })
               .onConflict((oc) =>
-                oc
-                  .columns(['calendar_id', 'external_event_id'])
-                  .doUpdateSet((eb) => ({ period: eb.ref('excluded.period') })),
+                oc.columns(['calendar_id', 'external_event_id']).doUpdateSet((eb) => ({
+                  period: eb.ref('excluded.period'),
+                  all_day_start: eb.ref('excluded.all_day_start'),
+                  all_day_end: eb.ref('excluded.all_day_end'),
+                })),
               )
               .execute()
           }

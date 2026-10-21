@@ -116,9 +116,10 @@ API keys and enabled MCP OAuth grants. OAuth authorization, code exchange and di
 require a live browser session. Cookie-authenticated writes require the app's own origin.
 
 External event titles/descriptions are not fetched or stored; synchronization retains IDs
-and busy intervals. Cancelled, transparent and self-declined events do not block time.
-Google expands recurring instances and exceptions; all-day events use exclusive local
-midnights with daylight-saving rules. A timezone change rebuilds the busy snapshot.
+and busy intervals or all-day dates. Cancelled, transparent and self-declined events do not
+block time. Google expands recurring instances and exceptions; all-day dates expand from
+local midnight to exclusive end midnight in each host's schedule zone, with daylight-saving
+rules. A calendar timezone change rebuilds the busy snapshot.
 
 Missing, failed, stale (over ten minutes) or uncovered snapshots return
 `calendar_sync_unavailable`, rather than making unknown time bookable. The window extends
@@ -247,9 +248,23 @@ bounded (100 pages / 20,000 events); an incomplete or malformed result never rep
 live data. Cursor and busy intervals commit atomically. Retries preserve rotated credentials.
 
 Google expands recurring events and their exceptions (`singleEvents=true`). Cancelled,
-transparent and self-declined events remove their busy intervals. All-day ends are exclusive
-local midnights in the calendar's time zone, including DST changes. Sub-millisecond intervals
-are widened before database storage. Only event IDs and busy intervals are mirrored.
+transparent and self-declined events remove their busy entries. All-day events retain their
+start date and exclusive end date. They block those whole local days in the time zone of
+the host's availability schedule, including DST changes; the Google calendar's time zone
+does not shift the blocked dates. Collective and round-robin meetings apply each host's
+own schedule zone. Timed events retain their absolute instants, and sub-millisecond
+intervals are widened before database storage. Only event IDs and busy intervals or dates
+are mirrored.
+
+When upgrading an existing installation, migration `0039_calendar_busy_all_day_dates.sql`
+clears every Google calendar's sync cursor and last successful sync time, including
+calendars not currently selected for conflict checks. Original all-day dates cannot be
+recovered unambiguously from the old instant ranges. The next sync fetches a complete
+snapshot and atomically replaces those rows; existing busy data remains until it succeeds.
+Availability for selected calendars returns `calendar_sync_unavailable` until their new
+snapshot is ready. Run workers and let synchronization complete, or use **Sync now** for a
+selected calendar. Stop all old web/all/worker processes before migration and restart every
+role with the upgraded code, because old binaries cannot read the new all-day representation.
 
 Availability over REST, public pages and MCP refuses selected Google calendars when their
 snapshot is missing, failed, older than ten minutes, revoked, or does not cover the requested

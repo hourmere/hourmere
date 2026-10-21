@@ -43,14 +43,30 @@ async function tables(pool: pg.Pool): Promise<Table[]> {
 // Keep the predecessor's explicit column list: to_jsonb(current_row) alone could
 // accidentally bless a dropped column. PostgreSQL text retains timestamp microseconds,
 // JSON, arrays and bytea without JavaScript's Date/number conversion losing precision.
-async function data(pool: pg.Pool, inventory: Table[], discardIdTokens = false, tuples = false) {
+async function data(pool: pg.Pool, inventory: Table[], applyBackfills = false, tuples = false) {
   const result: Record<string, string[]> = {}
   for (const table of inventory) {
-    const columns = table.columns.map((column) =>
-      discardIdTokens && table.schema === 'auth' && table.name === 'account' && column === 'idToken'
-        ? 'NULL::text AS "idToken"' // 0031 deliberately retires only sign-in ID tokens.
-        : quote(column),
-    )
+    const columns = table.columns.map((column) => {
+      if (
+        applyBackfills &&
+        table.schema === 'auth' &&
+        table.name === 'account' &&
+        column === 'idToken'
+      )
+        return 'NULL::text AS "idToken"' // 0031 deliberately retires only sign-in ID tokens.
+      // 0039 invalidates only Google's cursor and freshness, including unselected
+      // calendars. Preserve every other predecessor column and provider value.
+      if (
+        applyBackfills &&
+        table.schema === 'public' &&
+        table.name === 'calendars' &&
+        (column === 'sync_state' || column === 'last_synced_at')
+      )
+        return `CASE WHEN EXISTS (SELECT FROM calendar_connections cc
+          WHERE cc.id=connection_id AND cc.provider='google')
+          THEN NULL ELSE ${quote(column)} END AS ${quote(column)}`
+      return quote(column)
+    })
     if (tuples) columns.push('xmin::text AS "_xmin"', 'ctid::text AS "_ctid"')
     result[`${table.schema}.${table.name}`] = (
       await pool.query<{ row: string }>(
