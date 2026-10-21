@@ -193,6 +193,68 @@ After the image push and attestation succeed, the publishing job appends the ima
 every pushed image tag, and the attestation URL and ID to its job summary on the same run.
 Use these values for publication verification and reproducible deployments.
 
+## RC image installation rehearsal
+
+The owner chose the published GHCR image as the primary self-hosting path on 2026-10-20
+(card 197, option A). The installer and `docker-compose.image.yml` are prepared now;
+the live README and website must continue to select `setup.sh --source` until publication.
+No public image is available yet. Rehearse the image path during the approved November
+11–13 RC window, after an RC has actually been published and made public through the
+release process above. A successful dry-run build alone does not make an image pullable.
+
+For the approved RC, replace `1.0.0-rc.1` below with its **exact** version. On both an
+amd64 host and an arm64 host, pull anonymously with an empty Docker credential directory;
+run the matching platform command on each host. Do not reuse a GHCR login:
+
+```sh
+(
+  anonymous_config=$(mktemp -d) &&
+  trap 'rmdir "$anonymous_config"' EXIT &&
+  DOCKER_CONFIG="$anonymous_config" docker pull --platform linux/amd64 ghcr.io/hourmere/hourmere:1.0.0-rc.1
+)
+(
+  anonymous_config=$(mktemp -d) &&
+  trap 'rmdir "$anonymous_config"' EXIT &&
+  DOCKER_CONFIG="$anonymous_config" docker pull --platform linux/arm64 ghcr.io/hourmere/hourmere:1.0.0-rc.1
+)
+gh attestation verify oci://ghcr.io/hourmere/hourmere:1.0.0-rc.1 -R hourmere/hourmere
+```
+
+Record the pulled manifest digest, native architecture, verification result and release
+workflow identity from the attestation. Stable releases push the exact version, minor
+alias and `latest`; RCs push only the exact prerelease version. Installations must use
+`HOURMERE_VERSION=1.0.0` or an exact prerelease such as `1.0.0-rc.1`, without a leading
+`v`, never `latest` or `1.0`. Keep the checked-out release tag and image version together.
+
+On each host, use a separate checkout of the approved RC tag and a fresh project/volumes.
+Choose `plain`, a free loopback port (for example `http://localhost:4187`), blank SMTP and
+explicitly acknowledge the private trial. No real provider credentials are needed:
+
+```sh
+COMPOSE_PROJECT_NAME=hourmere-rc-trial ./scripts/setup.sh --image --version 1.0.0-rc.1
+docker compose pull
+docker compose up -d --wait
+curl --fail http://127.0.0.1:4187/api/health
+```
+
+Setup persists `HOURMERE_VERSION` and selects
+`COMPOSE_FILE='docker-compose.yml:docker-compose.image.yml'`; proxy mode also selects
+`docker-compose.proxy.yml`. `./scripts/enable-worker.sh` preserves this selection while
+adding `docker-compose.worker.yml`. Repeat with the worker enabled and verify that app
+and worker use the same exact GHCR image, neither has a build, and only the worker runs
+jobs. Verify fresh application and pg-boss migrations, health, and a synthetic sign-in
+link in the private app/worker log without copying that link into evidence. Test the
+bundled proxy separately with the documented HTTPS/SMTP prerequisites. Keep provider
+acceptance limits: synthetic sign-in and health do not establish real SMTP, Google,
+Microsoft or Zoom acceptance.
+
+Before changing the version, back up the database, `.env`, deployed commit/tag and Caddy
+state. Change `HOURMERE_VERSION`, then `docker compose pull`, stop every old app/worker,
+then `docker compose up -d --wait`. Before new-version startup, revert the version and
+checkout/Compose selection to recover. Once `up` is attempted (or any migration runs
+earlier), use the pre-upgrade backup/restore procedure; old code against a new schema is
+unsafe. Never delete a production volume as part of upgrading or rolling back.
+
 ## Verify publication and handle failures
 
 Confirm the GitHub Release, image digest, both architecture manifests, labels,
@@ -216,11 +278,29 @@ Make the documentation changes in a separate follow-up after verifying public ac
 - Rename the changelog heading to `## [1.0.0] - 2026-11-30` and remove the introductory
   candidate note above the first `##` heading.
 - Update `README.md` line 2 (`Self-host from source`) to describe the published image.
+- Merge the separate **draft** PR titled **Release day: install from the published image**
+  together with the release-day docs PR (card 213), only after anonymous pull and
+  attestation verification succeed for stable `1.0.0`. It must make the image the primary
+  install and upgrade path, retaining source builds as the alternative. Use this line
+  map from the preparation baseline (headings/snippets remain the anchors if lines move):
+
+  | File / preparation lines | Release-day change |
+  |---|---|
+  | `README.md:2`, `:75–134` (Self-hosting) | Describe the published image; clone `--branch v1.0.0`, select image setup, pull, then `up -d --wait` without `--build`; retain explicit `--source` alternative. |
+  | `README.md:135–169` (upgrade/recovery) | Record the old exact version; change `HOURMERE_VERSION`, pull and start; revert it before startup, use backup/restore after any migration/startup. |
+  | `apps/site/src/content/docs/docs/self-hosting.md:8–79` (Prepare / First start) | Remove the unpublished-image claim, require an exact release tag/version, describe the image overlay and same-version worker. |
+  | Same guide `:122–173`, `:221–397` (plain / worker / webhook) | Preserve the image overlay in every file list and remove image-path builds. |
+  | Same guide `:454–551` (restore) | Preserve the backed-up image selection/version and pull instead of building; keep drill isolation and fresh-volume restore. |
+  | Same guide `:553–745` (Upgrade and roll back) | Make version edit → `docker compose pull` → stop all old roles → `docker compose up -d --wait` primary; keep startup migration boundary and source/pre-1.0 alternatives. |
+  | `apps/site/src/legal-content.test.ts:80` (comparison introduction guard) | Replace the unpublished-image assertion with a published-image link assertion alongside the comparison copy in card 213; add install/version/rollback guards for README and self-hosting without weakening provider-acceptance guards. |
+  | `scripts/deploy-docs.test.ts` and `scripts/restore-env.test.ts` | Update executable paste/restore expectations with the docs, preserving failure guards and private `.env` handling. |
+
 - Replace the no-stable-release/public-image sentences in `README.md`, `SECURITY.md`,
   the site's self-hosting, comparison and index guides, homepage, site description and
-  legal pages. Update `apps/site/src/legal-content.test.ts` (currently line 79, asserting
+  legal pages. Update `apps/site/src/legal-content.test.ts` (currently line 80, asserting
   `no prebuilt public image is published`) together with the corresponding docs sentences.
-  Keep source-build Compose instructions until explicitly revised.
+  The draft PR above is the prepared revision of the source-build install instructions;
+  keep the source-build alternative and exact-version/rollback guidance when merging it.
 - Retain Cloud nonavailability and its separate legal timing until Cloud launch is
   approved. Releasing the self-hosted software does not establish that Hourmere Cloud has
   launched or that real provider integrations have passed live acceptance.

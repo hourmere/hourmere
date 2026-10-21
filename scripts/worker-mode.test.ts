@@ -25,6 +25,7 @@ const disable = readFileSync(new URL('scripts/disable-worker.sh', root), 'utf8')
 const directories: string[] = []
 const base = 'docker-compose.yml'
 const proxy = 'docker-compose.proxy.yml'
+const image = 'docker-compose.image.yml'
 const worker = 'docker-compose.worker.yml'
 const composeKeys = ['COMPOSE_FILE-EXTRA', 'COMPOSE_FILE.EXTRA', '9OTHER', 'OTHER[0]', '变量']
 const prefix =
@@ -104,6 +105,12 @@ const forms = [
   { name: 'duplicate worker', value: `${base}:${worker}:${worker}`, selected: base },
   { name: 'relative worker alias', value: `${base}:./${worker}`, selected: base },
   { name: 'custom overlay', value: `${base}:custom.yml`, selected: `${base}:custom.yml` },
+  { name: 'published image', value: `'${base}:${image}'`, selected: `${base}:${image}` },
+  {
+    name: 'published image with proxy',
+    value: `'${base}:${image}:${proxy}'`,
+    selected: `${base}:${image}:${proxy}`,
+  },
 ]
 
 describe('private worker overlay configuration', () => {
@@ -473,32 +480,43 @@ describe.each(shells)('worker script portability under $name', (shell) => {
 })
 
 describe.skipIf(!hasCompose)('worker script with real Compose config (no daemon)', () => {
-  it.each([false, true])('renders a worker for setup quoting (proxy: %s)', (proxied) => {
-    const setup = fixture(
-      `COMPOSE_FILE='${base}${proxied ? `:${proxy}` : ''}'\nPOSTGRES_PASSWORD='synthetic-password'\nBETTER_AUTH_SECRET='synthetic-auth-value'\nPUBLIC_URL='https://meet.example.test'\n${composeKeys.map((key) => `${key}='first\nCOMPOSE_FILE=ignored.yml\nlast'\n`).join('')}`,
-    )
-    for (const file of [base, proxy, worker]) {
-      copyFileSync(new URL(file, root), join(setup.directory, file))
-    }
-    expect(setup.run().status).toBe(0)
-    const render = () =>
-      spawnSync('docker', ['compose', 'config', '--format', 'json'], {
-        cwd: setup.directory,
-        encoding: 'utf8',
-        env: { PATH: process.env.PATH, HOME: process.env.HOME },
-      })
-    const enabled = render()
-    expect(enabled.status, 'Compose must render the enabled overlay').toBe(0)
-    const enabledServices = JSON.parse(enabled.stdout).services
-    expect(enabledServices.app.environment.HOURMERE_ROLE).toBe('web')
-    expect(enabledServices.worker.environment.HOURMERE_ROLE).toBe('worker')
-    expect(Boolean(enabledServices.proxy)).toBe(proxied)
-    expect(setup.run('off').status).toBe(0)
-    const disabled = render()
-    expect(disabled.status, 'Compose must render the disabled overlay').toBe(0)
-    const disabledServices = JSON.parse(disabled.stdout).services
-    expect(disabledServices.worker).toBeUndefined()
-    expect(disabledServices.app.environment.HOURMERE_ROLE).toBe('')
-    expect(Boolean(disabledServices.proxy)).toBe(proxied)
-  })
+  it.each(
+    [false, true].flatMap((published) => [false, true].map((proxied) => ({ published, proxied }))),
+  )(
+    'renders a worker for setup quoting (image: $published, proxy: $proxied)',
+    ({ published, proxied }) => {
+      const setup = fixture(
+        `COMPOSE_FILE='${base}${published ? `:${image}` : ''}${proxied ? `:${proxy}` : ''}'\n${published ? "HOURMERE_VERSION='1.0.0-rc.1'\n" : ''}POSTGRES_PASSWORD='synthetic-password'\nBETTER_AUTH_SECRET='synthetic-auth-value'\nPUBLIC_URL='https://meet.example.test'\n${composeKeys.map((key) => `${key}='first\nCOMPOSE_FILE=ignored.yml\nlast'\n`).join('')}`,
+      )
+      for (const file of [base, image, proxy, worker]) {
+        copyFileSync(new URL(file, root), join(setup.directory, file))
+      }
+      expect(setup.run().status).toBe(0)
+      const render = () =>
+        spawnSync('docker', ['compose', 'config', '--format', 'json'], {
+          cwd: setup.directory,
+          encoding: 'utf8',
+          env: { PATH: process.env.PATH, HOME: process.env.HOME },
+        })
+      const enabled = render()
+      expect(enabled.status, 'Compose must render the enabled overlay').toBe(0)
+      const enabledServices = JSON.parse(enabled.stdout).services
+      expect(enabledServices.app.environment.HOURMERE_ROLE).toBe('web')
+      expect(enabledServices.worker.environment.HOURMERE_ROLE).toBe('worker')
+      expect(Boolean(enabledServices.proxy)).toBe(proxied)
+      expect(enabledServices.app.image).toBe(
+        published ? 'ghcr.io/hourmere/hourmere:1.0.0-rc.1' : 'hourmere:local',
+      )
+      expect(enabledServices.worker.image).toBe(enabledServices.app.image)
+      expect(setup.text().includes(`HOURMERE_VERSION='1.0.0-rc.1'\n`)).toBe(published)
+      expect(setup.run('off').status).toBe(0)
+      const disabled = render()
+      expect(disabled.status, 'Compose must render the disabled overlay').toBe(0)
+      const disabledServices = JSON.parse(disabled.stdout).services
+      expect(disabledServices.worker).toBeUndefined()
+      expect(disabledServices.app.environment.HOURMERE_ROLE).toBe('')
+      expect(Boolean(disabledServices.proxy)).toBe(proxied)
+      expect(disabledServices.app.image).toBe(enabledServices.app.image)
+    },
+  )
 })

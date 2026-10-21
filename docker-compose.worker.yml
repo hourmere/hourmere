@@ -12,6 +12,10 @@ services:
     extends:
       file: docker-compose.yml
       service: app
+    # An image install reuses the exact release image pulled for app. Source
+    # installs leave HOURMERE_VERSION unset, retain APP_IMAGE/hourmere:local and
+    # never pull a local build. App pulls a shared release image before creation.
+    image: ${HOURMERE_VERSION:+ghcr.io/hourmere/hourmere:}${HOURMERE_VERSION:-${APP_IMAGE:-hourmere:local}}
     build: !reset null
     environment:
       HOURMERE_ROLE: worker

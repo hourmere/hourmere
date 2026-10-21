@@ -74,7 +74,7 @@ and applies application and job migrations before serving requests.
 `--wait` waits for the app and database health checks; the curl command also checks the
 public TLS/proxy path. A health response checks the process/database, not SMTP delivery or
 external calendar access. For an independent installation, choose a unique lowercase project
-name before setup, for example `COMPOSE_PROJECT_NAME=hourmere-staging ./scripts/setup.sh`.
+name before setup, for example `COMPOSE_PROJECT_NAME=hourmere-staging ./scripts/setup.sh --source`.
 Run every later Compose command from that checkout so it reads the persisted project and
 file selection. Avoid exporting a conflicting `COMPOSE_PROJECT_NAME`, `COMPOSE_FILE` or
 `HOURMERE_VERSION` in your shell, which would override `.env`.
