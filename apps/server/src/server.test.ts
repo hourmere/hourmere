@@ -484,7 +484,12 @@ describe.skipIf(!serverUrl)('startServer', () => {
       handle: `mail-${randomBytes(3).toString('hex')}`,
     })
     await f.schedule(host.userId)
-    await f.eventType(host.organizationId, host.userId, { slug: 'intro', title: 'Intro call' })
+    await f.eventType(host.organizationId, host.userId, {
+      slug: 'intro',
+      title: 'Intro call',
+      // Keep the booking cancellable while the real job workers send its emails.
+      minimumNoticeMinutes: 60,
+    })
     // An API key for MCP, made the way the server's own Better Auth would.
     const signup = { mode: 'open', allowedDomains: [] } as const
     const authPool = createAuthPool(testDb.url, signup)
@@ -518,6 +523,9 @@ describe.skipIf(!serverUrl)('startServer', () => {
       }
       return mails()
     }
+    // Monday, one second before a 10:00 Europe/Berlin slot. Keep job timers real.
+    let now = Temporal.Instant.from('2026-11-02T08:59:59Z')
+    const clock = vi.spyOn(Temporal.Now, 'instant').mockImplementation(() => now)
     try {
       const server = await startServer({
         DATABASE_URL: testDb.url,
@@ -528,7 +536,6 @@ describe.skipIf(!serverUrl)('startServer', () => {
       try {
         const base = `http://127.0.0.1:${server.port}`
         const page = `${base}/api/v1/public/${host.handle}/intro`
-        const now = Temporal.Now.instant()
         const slots = (await (
           await fetch(`${page}/slots?start=${now}&end=${now.add({ hours: 14 * 24 })}`)
         ).json()) as { data: { start: string }[] }
@@ -577,6 +584,8 @@ describe.skipIf(!serverUrl)('startServer', () => {
           'ada@example.com',
         ])
 
+        // Cross the slot boundary: without minimum notice, the first booking is now past.
+        now = now.add({ seconds: 3 })
         // The emailed link's secret cancels the first booking.
         const cancelled = await fetch(`${base}/api/v1/bookings/manage/cancel`, {
           method: 'POST',
@@ -595,6 +604,7 @@ describe.skipIf(!serverUrl)('startServer', () => {
         await server.close()
       }
     } finally {
+      clock.mockRestore()
       for (const spy of spies) spy.mockRestore()
     }
   }, 60_000)
