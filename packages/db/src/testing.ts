@@ -1,5 +1,6 @@
 // Test support: isolated databases, never the data in the development database.
 import { randomBytes } from 'node:crypto'
+import { setTimeout } from 'node:timers/promises'
 import pg from 'pg'
 import { createPool, guardPoolErrors } from './index.ts'
 import { runMigrations } from './migrate.ts'
@@ -23,6 +24,8 @@ export interface TestDatabaseOptions {
 }
 
 const POOL_CLOSE_GRACE_MS = 250
+const DROP_STATEMENT_TIMEOUT_MS = 30_000
+const DROP_MAX_ATTEMPTS = 3
 
 function adminStatementTimeout(): number {
   const value = process.env.HOURMERE_TEST_DATABASE_ADMIN_TIMEOUT_MS
@@ -40,18 +43,62 @@ function adminStatementTimeout(): number {
   return milliseconds
 }
 
-function adminPool(url: string): pg.Pool {
-  const statementTimeout = adminStatementTimeout()
+function adminPool(url: string, statementTimeout = adminStatementTimeout()): pg.Pool {
+  const maintenance = new URL(url)
+  // node-pg gives URL parameters precedence over Pool settings. Fixture/session options
+  // must not shorten administrative timeouts, including via options or PGOPTIONS.
+  for (const key of [
+    'statement_timeout',
+    'query_timeout',
+    'connectionTimeoutMillis',
+    'lock_timeout',
+    'options',
+  ]) {
+    maintenance.searchParams.delete(key)
+  }
   // A broken server must not leave test shutdown waiting indefinitely.
   const pool = new pg.Pool({
-    connectionString: url,
+    connectionString: maintenance.toString(),
     max: 1,
     connectionTimeoutMillis: 5_000,
     statement_timeout: statementTimeout,
     query_timeout: statementTimeout + 1_000,
+    options: `-c statement_timeout=${statementTimeout} -c lock_timeout=0`,
   })
   guardPoolErrors(pool)
   return pool
+}
+
+async function dropDatabase(maintenanceUrl: string, name: string): Promise<void> {
+  // DROP can wait for backend termination/checkpoints, well beyond fixture setup's timeout.
+  const admin = adminPool(
+    maintenanceUrl,
+    Math.max(adminStatementTimeout(), DROP_STATEMENT_TIMEOUT_MS),
+  )
+  try {
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        // Limit termination to this fixture; other tasks share the same Postgres server.
+        await admin.query(
+          'SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()',
+          [name],
+        )
+        // Another pool, or a checked-out client that never released, cannot block removal.
+        await admin.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`)
+        return
+      } catch (error) {
+        const code = (error as { code?: string } | null)?.code
+        const retryable =
+          code === '57014' ||
+          code === '55006' ||
+          (error instanceof Error && error.message === 'Query read timeout')
+        if (!retryable || attempt >= DROP_MAX_ATTEMPTS) throw error
+        await setTimeout(attempt * 50)
+      }
+    }
+  } finally {
+    await admin.end()
+  }
 }
 
 /** Creates a new database on serverUrl's server, using postgres only for maintenance. */
@@ -92,14 +139,8 @@ export async function createTestDatabase(
       })
       if (poolEnding) await withDeadline(poolEnding, POOL_CLOSE_GRACE_MS)
       if (created) {
-        const admin = adminPool(maintenanceUrl)
-        try {
-          // Another pool, or a checked-out client that never released, cannot block removal.
-          await admin.query(`DROP DATABASE IF EXISTS ${name} WITH (FORCE)`)
-          created = false
-        } finally {
-          await admin.end()
-        }
+        await dropDatabase(maintenanceUrl, name)
+        created = false
       }
       unregister()
       if (poolError) throw poolError

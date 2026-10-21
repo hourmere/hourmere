@@ -1,7 +1,12 @@
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { auditLocales, auditPages } from './audit-pages.ts'
-import type { AuditFinding, AuditReport, FindingCode } from './reports.ts'
+import {
+  type AuditFinding,
+  type AuditReport,
+  type FindingCode,
+  safeAuditReport,
+} from './reports.ts'
 
 export type BlockingSuite = 'layout' | 'a11y' | 'cross-engine'
 export type ReportIdentity = Pick<AuditReport, 'kind' | 'page' | 'theme' | 'locale' | 'viewport'>
@@ -33,6 +38,28 @@ const locales = new Set(['en-US', 'zh-CN', 'en-GB'])
 const themes = new Set(['light', 'dark'])
 const positiveInteger = (value: unknown): value is number =>
   typeof value === 'number' && Number.isInteger(value) && value > 0
+const exceptionKeys = new Set([
+  'suite',
+  'page',
+  'viewport',
+  'locale',
+  'theme',
+  'category',
+  'rule',
+  'reason',
+  'expires',
+])
+
+function unknownExceptionKeys(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false
+  return (
+    Object.keys(value).some((key) => !exceptionKeys.has(key)) ||
+    ('viewport' in value &&
+      value.viewport !== null &&
+      typeof value.viewport === 'object' &&
+      Object.keys(value.viewport).some((key) => key !== 'width' && key !== 'height'))
+  )
+}
 
 export function reportIdentity(report: ReportIdentity): string {
   return [
@@ -50,7 +77,7 @@ function exceptionIdentity(exception: UiCheckException): string {
 }
 
 function validException(value: unknown): value is UiCheckException {
-  if (!value || typeof value !== 'object') return false
+  if (!value || typeof value !== 'object' || unknownExceptionKeys(value)) return false
   const entry = value as UiCheckException
   return (
     (entry.suite === 'layout' || entry.suite === 'a11y') &&
@@ -103,8 +130,11 @@ export function evaluateUiGate({
   const failures: string[] = []
   const laneExecutions = executions.filter((execution) => execution.suite === suite)
   if (laneExecutions.length !== 1) failures.push('Expected exactly one browser execution report')
-  if (laneExecutions.some((execution) => execution.exitCode !== 0))
-    failures.push('Browser execution failed')
+  for (const execution of laneExecutions)
+    if (execution.exitCode !== 0)
+      failures.push(
+        `Browser execution failed (exit ${execution.exitCode}); see the Run ${suite} measurement step log`,
+      )
   if (unreadable) failures.push(`Unreadable reports: ${unreadable}`)
 
   const expectedIds = new Set(expected.map(reportIdentity))
@@ -130,7 +160,9 @@ export function evaluateUiGate({
   else
     for (const [index, entry] of exceptions.entries()) {
       if (!validException(entry)) {
-        failures.push(`Invalid UI check exception: ${index + 1}`)
+        failures.push(
+          `Invalid UI check exception: ${index + 1}${unknownExceptionKeys(entry) ? ' (unknown keys; allowed: suite, page, viewport, locale, theme, category, rule, reason, expires; viewport allows only width, height)' : ''}`,
+        )
         continue
       }
       if (entry.expires < today) {
@@ -158,11 +190,30 @@ export function evaluateUiGate({
 
   let exemptedFindings = 0
   let blockingFindings = 0
-  for (const report of reports)
+  const blockingFindingDetails: (Omit<ReportIdentity, 'kind'> & {
+    category: FindingCode
+    rule?: string
+    selector?: string
+  })[] = []
+  for (const input of reports) {
+    const report = safeAuditReport(input)
     for (const finding of report.findings) {
       if (active.some((entry) => matches(entry, report, finding))) exemptedFindings++
-      else blockingFindings++
+      else {
+        blockingFindings++
+        if (blockingFindingDetails.length < 20)
+          blockingFindingDetails.push({
+            page: report.page,
+            viewport: report.viewport,
+            locale: report.locale,
+            theme: report.theme,
+            category: finding.code,
+            ...(finding.rule ? { rule: finding.rule } : {}),
+            ...(finding.element?.selector ? { selector: finding.element.selector } : {}),
+          })
+      }
     }
+  }
   if (blockingFindings) failures.push(`Unexcepted findings: ${blockingFindings}`)
   return {
     suite,
@@ -171,7 +222,40 @@ export function evaluateUiGate({
     actualReports: reports.length,
     exemptedFindings,
     blockingFindings,
+    blockingFindingDetails,
     failures,
+  }
+}
+
+export function uiGateFindingsSummary(gate: ReturnType<typeof evaluateUiGate>): string {
+  return [
+    `Blocking findings / 阻断问题：${gate.blockingFindings}`,
+    ...(gate.blockingFindingDetails.length
+      ? [
+          '',
+          '| Page | Viewport | Locale | Theme | Code / category | Axe rule ID | Selector hint |',
+          '| --- | --- | --- | --- | --- | --- | --- |',
+          ...gate.blockingFindingDetails.map(
+            (finding) =>
+              `| ${finding.page} | ${finding.viewport.width}x${finding.viewport.height} | ${finding.locale} | ${finding.theme} | ${finding.category} | ${finding.rule ?? '—'} | ${finding.selector ?? '—'} |`,
+          ),
+        ]
+      : []),
+    ...(gate.blockingFindings > gate.blockingFindingDetails.length
+      ? [
+          `… ${gate.blockingFindings - gate.blockingFindingDetails.length} more blocking findings / 更多阻断问题`,
+        ]
+      : []),
+  ].join('\n')
+}
+
+// Only --list stderr is exposed: it contains configuration/infrastructure diagnostics,
+// never a browser scan or its DOM. Other parser errors remain private.
+export class UiMatrixEnumerationError extends Error {
+  constructor(child: { status: number | null; signal: string | null; stderr: string }) {
+    super(
+      `Unable to enumerate UI measurement matrix (exit status: ${child.status ?? 'none'}; signal: ${child.signal ?? 'none'}); stderr tail: ${JSON.stringify((child.stderr ?? '').slice(-4000))}`,
+    )
   }
 }
 
@@ -278,8 +362,14 @@ export async function loadExpectedReports(suite: BlockingSuite, shard?: string) 
         timeout: 60_000,
       },
     )
-    if (child.status !== 0) throw new Error('Unable to enumerate UI measurement matrix')
-    return expectedFromPlaywrightList(JSON.parse(child.stdout), suite, projectViewports)
+    if (child.status === 0) {
+      try {
+        return expectedFromPlaywrightList(JSON.parse(child.stdout), suite, projectViewports)
+      } catch {
+        // Parsing diagnostics can contain stdout; expose only the safe child metadata.
+      }
+    }
+    throw new UiMatrixEnumerationError(child)
   }
   const expected = list(shard)
   return { expected, allExpected: shard ? list() : expected }

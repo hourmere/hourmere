@@ -13,6 +13,7 @@ const {
   expectedFromPlaywrightList,
   loadExpectedReports,
   reportIdentity,
+  uiGateFindingsSummary,
 }: typeof import('../tools/e2e/ui-check-gate.ts') = await import(
   process.env.HOURMERE_UI_GATE_MODULE ??
     new URL('../tools/e2e/ui-check-gate.ts', import.meta.url).href
@@ -95,8 +96,19 @@ describe('blocking UI gate', () => {
     expect(result.blockingFindings).toBe(1)
   })
 
-  it('passes incomplete-only axe results', () => {
-    const input = { ...report(), kind: 'a11y' as const, axe: { passes: 10, incomplete: 3 } }
+  it('passes informational incomplete, moderate and minor axe results', () => {
+    const input = {
+      ...report(),
+      kind: 'a11y' as const,
+      axe: {
+        passes: 10,
+        incomplete: 3,
+        moderate: 2,
+        minor: 1,
+        moderateRules: ['region'],
+        minorRules: ['landmark-one-main'],
+      },
+    }
     expect(
       gate({
         suite: 'a11y',
@@ -149,7 +161,9 @@ describe('blocking UI gate', () => {
       executions: [{ suite, exitCode: 7, blocking: false }],
     })
     expect(result.passed).toBe(false)
-    expect(result.failures).toContain('Browser execution failed')
+    expect(result.failures).toContain(
+      `Browser execution failed (exit 7); see the Run ${suite} measurement step log`,
+    )
   })
 
   it('passes a successful cross-engine execution', () => {
@@ -182,6 +196,22 @@ describe('checked-in exceptions', () => {
     })
     expect(result.passed).toBe(true)
     expect(result.exemptedFindings).toBe(1)
+  })
+
+  it.each([
+    { selector: 'div.grid' },
+    { viewport: { width: 320, height: 568, selector: 'div.grid' } },
+  ])('rejects unknown exception keys instead of silently broadening scope %#', (extra) => {
+    const result = gate({
+      reports: [report([{ code: 'element-overflow' }])],
+      exceptions: [{ ...exception(), ...extra }],
+    })
+    expect(result.passed).toBe(false)
+    expect(result.exemptedFindings).toBe(0)
+    expect(result.blockingFindings).toBe(1)
+    expect(result.failures).toContain(
+      'Invalid UI check exception: 1 (unknown keys; allowed: suite, page, viewport, locale, theme, category, rule, reason, expires; viewport allows only width, height)',
+    )
   })
 
   it.each([
@@ -301,6 +331,65 @@ describe('checked-in exceptions', () => {
     })
     expect(result.passed).toBe(false)
     expect(result.blockingFindings).toBe(1)
+  })
+})
+
+describe('blocking finding details', () => {
+  it('lists at most 20 unexcepted findings with all exception fields and the remainder', () => {
+    const result = gate({
+      reports: [
+        report([
+          { code: 'element-overflow' },
+          ...Array.from({ length: 23 }, () => ({
+            code: 'axe-serious' as const,
+            rule: 'button-name',
+            element: { tag: 'button', index: 3, selector: 'button.grid[data-testid="submit"]' },
+          })),
+        ]),
+      ],
+      exceptions: [exception()],
+    })
+    expect(result.blockingFindings).toBe(23)
+    expect(result.exemptedFindings).toBe(1)
+    expect(result.blockingFindingDetails).toHaveLength(20)
+    expect(result.blockingFindingDetails[0]).toEqual({
+      page: 'booking',
+      viewport: { width: 320, height: 568 },
+      locale: 'en-US',
+      theme: 'light',
+      category: 'axe-serious',
+      rule: 'button-name',
+      selector: 'button.grid[data-testid="submit"]',
+    })
+    const summary = uiGateFindingsSummary(result)
+    expect(summary).toContain(
+      '| booking | 320x568 | en-US | light | axe-serious | button-name | button.grid[data-testid="submit"] |',
+    )
+    expect(summary.match(/\| booking \|/g)).toHaveLength(20)
+    expect(summary).toContain('3 more blocking findings')
+    expect(summary).not.toContain('element-overflow')
+  })
+
+  it('keeps DOM content, unknown fields and unsafe selectors out of details', () => {
+    const input = report([
+      {
+        code: 'element-overflow',
+        element: {
+          tag: 'div',
+          index: 1,
+          selector: 'div[data-email="UI_GATE_PRIVACY_CANARY_NONSECRET"]',
+        },
+      },
+    ])
+    Object.assign(input.findings[0] ?? {}, { html: 'UI_GATE_PRIVACY_CANARY_NONSECRET' })
+    const result = gate({ reports: [input] })
+    const summary = uiGateFindingsSummary(result)
+    expect(JSON.stringify(result.blockingFindingDetails)).not.toContain(
+      'UI_GATE_PRIVACY_CANARY_NONSECRET',
+    )
+    expect(summary).not.toContain('UI_GATE_PRIVACY_CANARY_NONSECRET')
+    expect(summary).toContain('| element-overflow | — | — |')
+    expect(uiGateFindingsSummary(gate())).toBe('Blocking findings / 阻断问题：0')
   })
 })
 
@@ -431,12 +520,25 @@ describe('matrix-derived report completeness', () => {
     expect(clean.status, clean.stderr).toBe(0)
     expect(clean.stdout).toContain('blocking / 阻断')
     expect(clean.stdout).toContain(`incomplete ${expected.length}`)
+    expect(clean.stdout).toContain('Blocking findings / 阻断问题：0')
     const first = join(directory, 'report-0.json')
     const original = await readFile(first, 'utf8')
     const failingReport = JSON.parse(original) as AuditReport
-    failingReport.findings = [{ code: 'axe-serious', rule: 'button-name' }]
+    failingReport.findings = [
+      {
+        code: 'axe-serious',
+        rule: 'button-name',
+        element: { tag: 'button', index: 1, selector: 'button.submit' },
+      },
+    ]
+    Object.assign(failingReport.findings[0] ?? {}, { html: 'UI_GATE_PRIVACY_CANARY_NONSECRET' })
     await writeFile(first, JSON.stringify(failingReport))
-    expect(summarize().status).toBe(1)
+    const regression = summarize()
+    expect(regression.status).toBe(1)
+    expect(regression.stdout).toContain(
+      `| ${failingReport.page} | ${failingReport.viewport.width}x${failingReport.viewport.height} | ${failingReport.locale} | ${failingReport.theme} | axe-serious | button-name | button.submit |`,
+    )
+    expect(regression.stdout).not.toContain('UI_GATE_PRIVACY_CANARY_NONSECRET')
     await writeFile(first, original)
     await rm(first)
     const missing = summarize()
@@ -457,6 +559,86 @@ describe('matrix-derived report completeness', () => {
         blocking: false,
       }),
     )
-    expect(summarize().status).toBe(1)
+    const failedBrowser = summarize()
+    expect(failedBrowser.status).toBe(1)
+    expect(failedBrowser.stdout).toContain(
+      'Browser execution failed (exit 7); see the Run a11y measurement step log',
+    )
   }, 30_000)
+
+  it.each(['exit', 'signal', 'invalid-json', 'empty-matrix'] as const)(
+    'prints enumeration %s status and the bounded stderr tail',
+    async (mode) => {
+      const directory = await mkdtemp(join(tmpdir(), 'hourmere-ui-list-error-'))
+      directories.push(directory)
+      const child = join(directory, 'list.mjs')
+      await writeFile(
+        child,
+        `
+      process.stderr.write('LIST_DIAGNOSTIC_HEAD' + 'x'.repeat(5000) + 'LIST_DIAGNOSTIC_TAIL');
+      ${mode === 'exit' ? 'process.exitCode = 9' : mode === 'signal' ? "process.kill(process.pid, 'SIGTERM')" : `process.stdout.write(${JSON.stringify(mode === 'invalid-json' ? 'UI_GATE_PRIVACY_CANARY_NONSECRET' : '{"suites":[]}')})`};
+    `,
+      )
+      const root = new URL('../', import.meta.url)
+      const gateSource = await readFile(
+        process.env.HOURMERE_UI_GATE_MODULE ??
+          new URL('../tools/e2e/ui-check-gate.ts', import.meta.url),
+        'utf8',
+      )
+      const copiedGate = join(directory, 'gate.mts')
+      await writeFile(
+        copiedGate,
+        gateSource
+          .replace(
+            "'./audit-pages.ts'",
+            JSON.stringify(new URL('tools/e2e/audit-pages.ts', root).href),
+          )
+          .replace("'./reports.ts'", JSON.stringify(new URL('tools/e2e/reports.ts', root).href))
+          .replace(
+            "fileURLToPath(new URL('../../', import.meta.url))",
+            JSON.stringify(root.pathname),
+          )
+          .replace(
+            "new URL('./playwright.audit.config.ts', import.meta.url)",
+            `new URL(${JSON.stringify(new URL('tools/e2e/playwright.audit.config.ts', root).href)})`,
+          )
+          .replace(
+            "fileURLToPath(import.meta.resolve('@playwright/test/cli'))",
+            JSON.stringify(child),
+          ),
+      )
+      const summarySource = await readFile(
+        process.env.HOURMERE_UI_SUMMARY_MODULE ??
+          new URL('../tools/e2e/reports-summary.ts', import.meta.url),
+        'utf8',
+      )
+      const copiedSummary = join(directory, 'summary.mts')
+      await writeFile(
+        copiedSummary,
+        summarySource
+          .replace("'./reports.ts'", JSON.stringify(new URL('tools/e2e/reports.ts', root).href))
+          .replace("'./ui-check-gate.ts'", JSON.stringify(copiedGate))
+          .replace(
+            "new URL('./ui-check-exceptions.json', import.meta.url)",
+            `new URL(${JSON.stringify(new URL('tools/e2e/ui-check-exceptions.json', root).href)})`,
+          ),
+      )
+      const result = spawnSync(process.execPath, [copiedSummary, directory, '--suite=layout'], {
+        encoding: 'utf8',
+        env: { ...process.env, GITHUB_STEP_SUMMARY: '' },
+      })
+      expect(result.status, result.stderr).toBe(1)
+      expect(result.stdout).toContain('Unable to enumerate UI measurement matrix')
+      expect(result.stdout).toContain(
+        mode === 'exit'
+          ? 'exit status: 9; signal: none'
+          : mode === 'signal'
+            ? 'exit status: none; signal: SIGTERM'
+            : 'exit status: 0; signal: none',
+      )
+      expect(result.stdout).toContain('LIST_DIAGNOSTIC_TAIL')
+      expect(result.stdout).not.toContain('LIST_DIAGNOSTIC_HEAD')
+      expect(result.stdout).not.toContain('UI_GATE_PRIVACY_CANARY_NONSECRET')
+    },
+  )
 })

@@ -52,12 +52,15 @@ jobs:
       - name: Verify the existing Chrome installation
         run: google-chrome --version
       - name: Run layout measurement
+        env:
+          HOURMERE_UI_FAIL_ON_EXIT: '1'
         run: node tools/e2e/run-audit.ts layout --shard=${{ matrix.shard }}/4
       - name: Summarize measurements
         if: always()
         run: node tools/e2e/reports-summary.ts --suite=layout --shard=${{ matrix.shard }}/4
       - name: Upload sanitized measurements
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: ui-layout-${{ matrix.shard }}
@@ -94,12 +97,15 @@ jobs:
       - name: Verify the existing Chrome installation
         run: google-chrome --version
       - name: Run a11y measurement
+        env:
+          HOURMERE_UI_FAIL_ON_EXIT: '1'
         run: node tools/e2e/run-audit.ts a11y
       - name: Summarize measurements
         if: always()
         run: node tools/e2e/reports-summary.ts --suite=a11y
       - name: Upload sanitized measurements
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: ui-a11y
@@ -156,6 +162,7 @@ jobs:
         run: node tools/e2e/reports-summary.ts --suite=cross-engine
       - name: Upload sanitized measurements
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: ui-cross-engine

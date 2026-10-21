@@ -12,6 +12,8 @@ import {
   type BlockingSuite,
   evaluateUiGate,
   loadExpectedReports,
+  UiMatrixEnumerationError,
+  uiGateFindingsSummary,
 } from './ui-check-gate.ts'
 
 const arguments_ = process.argv.slice(2)
@@ -56,8 +58,8 @@ try {
 }
 let gate: ReturnType<typeof evaluateUiGate> | undefined
 if (suite) {
-  // The runner remains report-only for layout/axe: this terminal gate owns
-  // exceptions as well as completeness and browser-execution failures.
+  // Layout/axe findings remain report-only during scans: this terminal gate owns
+  // exceptions and completeness, and repeats browser-execution failures for context.
   process.env.HOURMERE_UI_BLOCKING = '1'
   let exceptions: unknown
   try {
@@ -68,17 +70,20 @@ if (suite) {
     // A missing or unreadable exception file must not become an empty allowlist.
   }
   let matrix: Awaited<ReturnType<typeof loadExpectedReports>> = { expected: [], allExpected: [] }
-  let matrixError = false
+  let matrixError: string | undefined
   try {
     matrix = await loadExpectedReports(suite, shard)
-  } catch {
-    // Do not print parser errors or test-list diagnostics from child processes.
-    matrixError = true
+  } catch (error) {
+    // Only the listing child's status/signal/stderr are safe infrastructure diagnostics.
+    matrixError =
+      error instanceof UiMatrixEnumerationError
+        ? error.message
+        : 'Unable to enumerate UI measurement matrix'
   }
   gate = evaluateUiGate({ suite, reports, executions, unreadable, ...matrix, exceptions })
   if (matrixError) {
     gate.passed = false
-    gate.failures.push('Unable to enumerate UI measurement matrix')
+    gate.failures.push(matrixError)
   }
 }
 const summary = [
@@ -95,6 +100,8 @@ const summary = [
         `Gate / 阻断检查：${gate.passed ? 'PASS / 通过' : 'FAIL / 失败'}`,
         `Expected reports / 预期报告：${gate.expectedReports}; actual / 实际：${gate.actualReports}; excepted findings / 豁免问题：${gate.exemptedFindings}`,
         ...gate.failures.map((failure) => `- ${failure}`),
+        '',
+        uiGateFindingsSummary(gate),
         '',
       ]
     : []),

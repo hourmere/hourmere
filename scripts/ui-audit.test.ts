@@ -359,6 +359,13 @@ const verifyAxeScan = async (scan = scanA11y) => {
         impact: 'critical',
         nodes: [{ target: ['button.audit-button'], html: 'PRIVATE_TOKEN_VALUE' }],
       },
+      {
+        id: 'region',
+        impact: 'moderate',
+        nodes: [{ target: ['button.audit-button'] }, { target: ['button.audit-button'] }],
+      },
+      { id: 'landmark-one-main', impact: 'moderate', nodes: [] },
+      { id: 'skip-link', impact: 'minor', nodes: [{ target: ['button.audit-button'] }] },
     ],
     passes: [{}, {}],
     incomplete: [{ id: 'color-contrast' }],
@@ -372,6 +379,10 @@ const verifyAxeScan = async (scan = scanA11y) => {
   expect(result.passes).toBe(2)
   expect(result.incomplete).toBe(1)
   expect(result.incompleteRules).toEqual(['color-contrast'])
+  expect(result.moderate).toBe(2)
+  expect(result.moderateRules).toEqual(['region', 'landmark-one-main'])
+  expect(result.minor).toBe(1)
+  expect(result.minorRules).toEqual(['skip-link'])
   expect(a11yFindings('booking', result.violations, []).findings).toEqual([
     {
       code: 'axe-critical',
@@ -474,6 +485,68 @@ const verifyIncompleteSummary = (summarize = auditSummary) => {
   expect(summary).toContain('passes 5, incomplete 3')
   expect(summary).toContain('Axe incomplete rules / Axe 待人工确认规则：color-contrast, label')
 }
+const verifyInformationalRules = (safe = safeAuditReport) => {
+  for (const severity of ['moderate', 'minor'] as const) {
+    const input = report()
+    input.axe = {
+      passes: 2,
+      incomplete: 0,
+      [severity]: 3,
+      [`${severity}Rules`]: [
+        'region',
+        'landmark-one-main',
+        'region',
+        '#token=REPORT_PRIVACY_CANARY_NONSECRET',
+        'private@example.invalid',
+        '<button>',
+        7,
+      ],
+    }
+    expect(safe(input).axe).toEqual({
+      passes: 2,
+      incomplete: 0,
+      [severity]: 3,
+      [`${severity}Rules`]: ['landmark-one-main', 'region'],
+    })
+    input.axe[severity] = -1
+    expect(safe(input).axe?.[severity]).toBeUndefined()
+  }
+}
+const verifyInformationalSummary = (summarize = auditSummary) => {
+  const inputs: AuditReport[] = [
+    {
+      ...report(),
+      kind: 'a11y',
+      findings: [],
+      axe: {
+        passes: 2,
+        incomplete: 0,
+        moderate: 2,
+        moderateRules: ['region', 'landmark-one-main'],
+        minor: 1,
+        minorRules: ['skip-link'],
+      },
+    },
+    {
+      ...report(),
+      kind: 'a11y',
+      findings: [],
+      axe: {
+        passes: 3,
+        incomplete: 0,
+        moderate: 1,
+        moderateRules: ['region'],
+        minor: 2,
+        minorRules: ['tabindex', 'skip-link'],
+      },
+    },
+  ]
+  const summary = summarize(inputs)
+  expect(summary).toContain('passes 5, incomplete 0, moderate 3, minor 3')
+  expect(summary).toContain('Axe moderate rules / Axe 中等问题规则：landmark-one-main, region')
+  expect(summary).toContain('Axe minor rules / Axe 轻微问题规则：skip-link, tabindex')
+  expect(() => assertAuditFindings(inputs, true)).not.toThrow()
+}
 const verifyA11yReportPipeline = async (replacement?: [string, string]) => {
   let source = readFileSync('tools/e2e/specs/a11y.spec.ts', 'utf8')
   if (replacement) {
@@ -504,7 +577,16 @@ const verifyA11yReportPipeline = async (replacement?: [string, string]) => {
     () => ['en-US'],
     async () => '[]',
     async () => {},
-    async () => ({ violations: [], passes: 2, incomplete: 1, incompleteRules: ['color-contrast'] }),
+    async () => ({
+      violations: [],
+      passes: 2,
+      incomplete: 1,
+      incompleteRules: ['color-contrast'],
+      moderate: 2,
+      moderateRules: ['landmark-one-main', 'region'],
+      minor: 1,
+      minorRules: ['skip-link'],
+    }),
     a11yFindings,
     async (report: AuditReport) => reports.push(safeAuditReport(report)),
     assertAuditFindings,
@@ -518,6 +600,10 @@ const verifyA11yReportPipeline = async (replacement?: [string, string]) => {
     passes: 2,
     incomplete: 1,
     incompleteRules: ['color-contrast'],
+    moderate: 2,
+    moderateRules: ['landmark-one-main', 'region'],
+    minor: 1,
+    minorRules: ['skip-link'],
   })
 }
 const verifyPrivacy = (safe = safeAuditReport) => {
@@ -547,6 +633,10 @@ describe('accessibility findings and private report output', () => {
   it('allowlists and deduplicates static incomplete rule ids', () => verifyIncompleteRules())
   it('summarizes incomplete rule ids and counts without creating findings', () =>
     verifyIncompleteSummary())
+  it('allowlists moderate/minor counts and deduplicates safe rule ids', () =>
+    verifyInformationalRules())
+  it('summarizes moderate/minor rule ids and counts without blocking', () =>
+    verifyInformationalSummary())
   it('passes incomplete rule ids from the product scan into sanitized reports', async () =>
     verifyA11yReportPipeline())
   it('includes WCAG 2.0, 2.1 and 2.2 AA tags and reports only serious/critical node counts', () => {
@@ -794,6 +884,31 @@ describe('source-copy mutation controls', () => {
       'incomplete rule ids',
       ['incompleteRules: result.incomplete.map((rule) => rule.id)', 'incompleteRules: []'],
     ],
+    [
+      'moderate count',
+      [
+        "moderate: result.violations.filter((rule) => rule.impact === 'moderate').length",
+        'moderate: 0',
+      ],
+    ],
+    [
+      'minor count',
+      ["minor: result.violations.filter((rule) => rule.impact === 'minor').length", 'minor: 0'],
+    ],
+    [
+      'moderate rule ids',
+      [
+        "moderateRules: result.violations\n      .filter((rule) => rule.impact === 'moderate')\n      .map((rule) => rule.id)",
+        'moderateRules: []',
+      ],
+    ],
+    [
+      'minor rule ids',
+      [
+        "minorRules: result.violations.filter((rule) => rule.impact === 'minor').map((rule) => rule.id)",
+        'minorRules: []',
+      ],
+    ],
     ['axe selector hints', ['const tokens = [...element.classList]', 'const tokens = []']],
   ] as const)('detects removal of %s from the scan pipeline', async (_name, replacement) => {
     const copy = sourceCopy<{ scanA11y: typeof scanA11y }>('a11y', 'scanA11y', [...replacement])
@@ -839,12 +954,69 @@ describe('source-copy mutation controls', () => {
     }>('reports', 'safeAuditReport, auditSummary')
     verifyIncompleteRules(copy.safeAuditReport)
     verifyIncompleteSummary(copy.auditSummary)
+    verifyInformationalRules(copy.safeAuditReport)
+    verifyInformationalSummary(copy.auditSummary)
   })
+  it.each(['moderate', 'minor'] as const)(
+    'detects loss of %s rule privacy filtering',
+    (severity) => {
+      const copy = sourceCopy<{ safeAuditReport: typeof safeAuditReport }>(
+        'reports',
+        'safeAuditReport',
+        [
+          `report.axe.${severity}Rules.filter(\n                        (rule) => typeof rule === 'string' && /^[a-z][a-z0-9-]{0,79}$/.test(rule),\n                      )`,
+          `report.axe.${severity}Rules`,
+        ],
+      )
+      expect(() => verifyInformationalRules(copy.safeAuditReport)).toThrow(
+        expect.objectContaining({ name: 'AssertionError' }),
+      )
+    },
+  )
+  it.each(['moderate', 'minor'] as const)('detects loss of %s count validation', (severity) => {
+    const copy = sourceCopy<{ safeAuditReport: typeof safeAuditReport }>(
+      'reports',
+      'safeAuditReport',
+      [`finite(report.axe.${severity})`, 'true'],
+    )
+    expect(() => verifyInformationalRules(copy.safeAuditReport)).toThrow(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
+  })
+  it.each(['moderate', 'minor'] as const)(
+    'detects loss of %s rule ids and counts from the summary',
+    (severity) => {
+      for (const replacement of [
+        [`...(safe.axe?.${severity}Rules ?? [])`, '...[]'],
+        [`total.${severity} + (safe.axe?.${severity} ?? 0)`, '0'],
+      ] satisfies [string, string][]) {
+        const copy = sourceCopy<{ auditSummary: typeof auditSummary }>(
+          'reports',
+          'auditSummary',
+          replacement,
+        )
+        expect(() => verifyInformationalSummary(copy.auditSummary)).toThrow(
+          expect.objectContaining({ name: 'AssertionError' }),
+        )
+      }
+    },
+  )
   it('detects loss of incomplete rule ids between the scan and report', async () => {
     await expect(
       verifyA11yReportPipeline(['incompleteRules: result.incompleteRules', 'incompleteRules: []']),
     ).rejects.toMatchObject({ name: 'AssertionError' })
   })
+  it.each(['moderate', 'moderateRules', 'minor', 'minorRules'] as const)(
+    'detects loss of %s between the scan and report',
+    async (field) => {
+      await expect(
+        verifyA11yReportPipeline([
+          `${field}: result.${field}`,
+          `${field}: ${field.endsWith('Rules') ? '[]' : '0'}`,
+        ]),
+      ).rejects.toMatchObject({ name: 'AssertionError' })
+    },
+  )
   it.each([
     ['button canary', ["!rules.has('button-name')", 'false']],
     ['image canary', ["!rules.has('image-alt')", 'false']],

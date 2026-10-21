@@ -36,7 +36,15 @@ export interface AuditReport {
   viewport: { width: number; height: number }
   findings: AuditFinding[]
   exempted?: number
-  axe?: { passes: number; incomplete: number; incompleteRules?: string[] }
+  axe?: {
+    passes: number
+    incomplete: number
+    incompleteRules?: string[]
+    moderate?: number
+    moderateRules?: string[]
+    minor?: number
+    minorRules?: string[]
+  }
 }
 
 const codes = new Set<FindingCode>([
@@ -122,6 +130,30 @@ export function safeAuditReport(report: AuditReport): AuditReport {
                   ].sort(),
                 }
               : {}),
+            ...(finite(report.axe.moderate) ? { moderate: report.axe.moderate } : {}),
+            ...(Array.isArray(report.axe.moderateRules)
+              ? {
+                  moderateRules: [
+                    ...new Set(
+                      report.axe.moderateRules.filter(
+                        (rule) => typeof rule === 'string' && /^[a-z][a-z0-9-]{0,79}$/.test(rule),
+                      ),
+                    ),
+                  ].sort(),
+                }
+              : {}),
+            ...(finite(report.axe.minor) ? { minor: report.axe.minor } : {}),
+            ...(Array.isArray(report.axe.minorRules)
+              ? {
+                  minorRules: [
+                    ...new Set(
+                      report.axe.minorRules.filter(
+                        (rule) => typeof rule === 'string' && /^[a-z][a-z0-9-]{0,79}$/.test(rule),
+                      ),
+                    ),
+                  ].sort(),
+                }
+              : {}),
           },
         }
       : {}),
@@ -181,9 +213,21 @@ export function auditSummary(reports: AuditReport[]): string {
         passes: total.passes + (safe.axe?.passes ?? 0),
         incomplete: total.incomplete + (safe.axe?.incomplete ?? 0),
         incompleteRules: new Set([...total.incompleteRules, ...(safe.axe?.incompleteRules ?? [])]),
+        moderate: total.moderate + (safe.axe?.moderate ?? 0),
+        moderateRules: new Set([...total.moderateRules, ...(safe.axe?.moderateRules ?? [])]),
+        minor: total.minor + (safe.axe?.minor ?? 0),
+        minorRules: new Set([...total.minorRules, ...(safe.axe?.minorRules ?? [])]),
       }
     },
-    { passes: 0, incomplete: 0, incompleteRules: new Set<string>() },
+    {
+      passes: 0,
+      incomplete: 0,
+      incompleteRules: new Set<string>(),
+      moderate: 0,
+      moderateRules: new Set<string>(),
+      minor: 0,
+      minorRules: new Set<string>(),
+    },
   )
   return [
     '## UI measurement report / 界面测量报告',
@@ -205,8 +249,10 @@ export function auditSummary(reports: AuditReport[]): string {
       ({ code, count, issues }) => `| ${code} | ${count} | ${issues.join(', ') || '—'} |`,
     ),
     '',
-    `Axe rule results / Axe 规则结果：passes ${axe.passes}, incomplete ${axe.incomplete}`,
+    `Axe rule results / Axe 规则结果：passes ${axe.passes}, incomplete ${axe.incomplete}, moderate ${axe.moderate}, minor ${axe.minor}`,
     `Axe incomplete rules / Axe 待人工确认规则：${[...axe.incompleteRules].sort().join(', ') || '—'}`,
+    `Axe moderate rules / Axe 中等问题规则：${[...axe.moderateRules].sort().join(', ') || '—'}`,
+    `Axe minor rules / Axe 轻微问题规则：${[...axe.minorRules].sort().join(', ') || '—'}`,
     '',
     'Counts are findings across all scanned states, not unique defects. / 数量为所有扫描状态的问题总数，并非独立缺陷数。',
     'JSON contains only page identifiers, static selector hints, audit codes and measurements. / JSON 仅含页面标识、静态选择器提示、检查代码与测量值。',

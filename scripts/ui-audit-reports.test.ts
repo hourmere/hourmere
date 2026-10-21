@@ -57,7 +57,15 @@ it('publishes per-page JSON and human summaries and preserves browser execution 
         { code: 'axe-critical', rule: 'button-name', count: 2 },
         { code: 'scan-error', phase: 'navigate' },
       ],
-      axe: { passes: 2, incomplete: 1, incompleteRules: ['color-contrast'] },
+      axe: {
+        passes: 2,
+        incomplete: 1,
+        incompleteRules: ['color-contrast'],
+        moderate: 2,
+        moderateRules: ['landmark-one-main', 'region'],
+        minor: 1,
+        minorRules: ['skip-link'],
+      },
     },
     directory,
   )
@@ -83,6 +91,11 @@ it('publishes per-page JSON and human summaries and preserves browser execution 
   expect(result.stdout).toContain('Unreadable reports / 无法读取的报告：1')
   expect(result.stdout).toContain('passes 2, incomplete 1')
   expect(result.stdout).toContain('Axe incomplete rules / Axe 待人工确认规则：color-contrast')
+  expect(result.stdout).toContain('moderate 2, minor 1')
+  expect(result.stdout).toContain(
+    'Axe moderate rules / Axe 中等问题规则：landmark-one-main, region',
+  )
+  expect(result.stdout).toContain('Axe minor rules / Axe 轻微问题规则：skip-link')
   expect((await readFile(summary, 'utf8')).trim()).toBe(result.stdout.trim())
   expect((await readFile(join(directory, 'summary.md'), 'utf8')).trim()).toBe(result.stdout.trim())
   expect(JSON.parse(await readFile(join(directory, 'summary.json'), 'utf8'))).toEqual({
