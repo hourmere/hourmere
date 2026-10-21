@@ -60,6 +60,7 @@ export async function scanA11y(page: Page) {
     })),
     passes: result.passes.length,
     incomplete: result.incomplete.length,
+    incompleteRules: result.incomplete.map((rule) => rule.id),
   }
 }
 
