@@ -25,7 +25,10 @@ import {
   AUDIT_BOOKING_START,
   AUDIT_DESCRIPTION,
   AUDIT_EMAIL,
+  AUDIT_HOST_TIME_ZONE,
   AUDIT_NOW,
+  AUDIT_OVERNIGHT_BOOKING_END,
+  AUDIT_OVERNIGHT_BOOKING_START,
   AUDIT_TITLE,
   type AuditFixtureState,
 } from './audit-data.ts'
@@ -37,7 +40,7 @@ export interface FixtureApp {
   parentUrl: string
   personalPath: string
   auditState: () => Promise<AuditFixtureState>
-  auditSignIn: (signedIn: boolean) => Promise<void>
+  auditSignIn: (signedIn: boolean, locale?: string) => Promise<void>
   auditOAuthQuery: () => Promise<string>
   teamPath: string
   collectivePath: string
@@ -486,6 +489,11 @@ export const test = base.extend<{
             .set({ name: 'Synthetic organization' })
             .where('id', '=', host.organizationId)
             .execute()
+          await db
+            .updateTable('profiles')
+            .set({ time_zone: AUDIT_HOST_TIME_ZONE })
+            .where('user_id', '=', host.userId)
+            .execute()
           const bookingId = await f.booking(
             host.organizationId,
             [host.userId],
@@ -506,6 +514,24 @@ export const test = base.extend<{
             })
             .where('id', '=', bookingId)
             .execute()
+          const overnightBookingId = await f.booking(
+            host.organizationId,
+            [host.userId],
+            AUDIT_OVERNIGHT_BOOKING_START,
+            AUDIT_OVERNIGHT_BOOKING_END,
+            {
+              eventTypeId,
+              attendee: {
+                name: 'Synthetic overnight invitee',
+                email: 'synthetic.overnight@hourmere.invalid',
+              },
+            },
+          )
+          await db
+            .updateTable('bookings')
+            .set({ title: AUDIT_TITLE, created_at: AUDIT_NOW })
+            .where('id', '=', overnightBookingId)
+            .execute()
           auditState = {
             organizationId: host.organizationId,
             eventTypeId,
@@ -517,7 +543,7 @@ export const test = base.extend<{
           }
           return auditState
         },
-        auditSignIn: async (signedIn) => {
+        auditSignIn: async (signedIn, locale = 'en') => {
           // Audit pages exercise the same browser-session endpoints as people do.
           // No API-key header remains when switching back to a public/sign-in state.
           authorization = undefined
@@ -525,6 +551,12 @@ export const test = base.extend<{
             await context.clearCookies({ name: 'better-auth.session_token' })
             return
           }
+          // Signed-in routes prefer the account language over the browser language.
+          await db
+            .updateTable('profiles')
+            .set({ locale: locale === 'zh-CN' ? 'zh-CN' : 'en' })
+            .where('user_id', '=', host.userId)
+            .execute()
           if (!auditCookie) {
             const token = randomBytes(24).toString('base64url')
             await db

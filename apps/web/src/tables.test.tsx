@@ -82,6 +82,8 @@ describe.each(['en', 'zh-CN'] as const)('table card markup in %s', (language) =>
     )
     // When and status shrink to their one-line values; title and invitee take the rest.
     expectCellKinds(screen.getByRole('table'), { userContent: [1, 2], nowrap: [], fit: [0, 3] })
+    const when = screen.getByRole('table').querySelector('td.booking-when')
+    expect(when?.querySelectorAll('time > .nowrap')).toHaveLength(2)
     expect(screen.getByText(longEmail)).toBeDefined()
     expect(
       screen.getByRole('link', { name: zh ? '查看改期后的预约' : 'View rescheduled booking' }),
