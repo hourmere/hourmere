@@ -4,6 +4,7 @@
   "name": "hourmere-site",
   "main": "./worker/index.ts",
   "compatibility_date": "2026-10-01",
+  "observability": { "enabled": false },
   "assets": {
     // Astro copies public/.well-known/security.txt here; serve it as an exact asset.
     "directory": "./dist",

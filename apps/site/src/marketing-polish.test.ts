@@ -147,6 +147,28 @@ describe('marketing navigation and layout polish', () => {
       expect(contrast(dark['--button-hover-border'] ?? '', root['--ink'] ?? '')).toBeGreaterThan(3)
     }
   })
+
+  it('gives waitlist input outlines at least 3:1 contrast in both themes', () => {
+    const input = declarations('./components/WaitlistForm.astro', 'input[type="email"]')
+    expect(input.border).toBe('2px solid var(--muted)')
+    expect(input.background).toBe('var(--bg)')
+    const root = declarations(css, ':root')
+    for (const [selector, media] of [
+      [':root', undefined],
+      [':root:not([data-theme="light"])', '(prefers-color-scheme: dark)'],
+      [':root[data-theme="dark"]', undefined],
+    ] as const) {
+      const theme = { ...root, ...declarations(css, selector, media) }
+      const resolve = (value: string): string =>
+        value.startsWith('var(') ? resolve(theme[value.slice(4, -1)] ?? '') : value
+      for (const background of ['--bg', '--bg-soft', '--surface']) {
+        expect(
+          contrast(resolve(theme['--muted'] ?? ''), resolve(theme[background] ?? '')),
+          `${selector} on ${background}`,
+        ).toBeGreaterThanOrEqual(3)
+      }
+    }
+  })
 })
 
 describe('legal navigation and print polish', () => {

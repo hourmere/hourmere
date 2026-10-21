@@ -105,6 +105,7 @@ describe('waitlist progressive enhancement', () => {
     [400, 'Enter one valid email address and try again.'],
     [429, 'Too many requests. Please wait a minute and try again.'],
     [500, "We couldn't save your request. Please try again."],
+    [503, "We couldn't save your request. Please try again."],
   ])(
     'shows a safe inline error for HTTP %s and leaves the email available to retry',
     async (code, message) => {
@@ -330,7 +331,7 @@ describe('waitlist layout protections', () => {
   })
 
   it('changes only the invalid input border color without increasing its size', () => {
-    expect(declarations(component, 'input[type="email"]').border).toBe('2px solid var(--border)')
+    expect(declarations(component, 'input[type="email"]').border).toBe('2px solid var(--muted)')
     const invalid = declarations(component, 'input[aria-invalid="true"]')
     expect(invalid['border-color']).toBe('var(--text)')
     expect(invalid['border-width']).toBeUndefined()

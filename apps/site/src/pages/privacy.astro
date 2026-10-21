@@ -188,7 +188,7 @@ const publicationDate = resolveLegalPublicationDate()
     <li>
       <strong>Website and Cloud waitlist:</strong> if you join the Hourmere Cloud waitlist,
       {company.shortName} stores your trimmed, lowercased email address, the time you joined,
-      the page source and language (locale), and the consent text version. See <a href="#this-website">section 14</a>.
+      which form you used, the language (locale), and the consent text version. See <a href="#this-website">section 14</a>.
     </li>
     <li>
       <strong>Communications:</strong> messages you send to us, for example to our support address
@@ -528,8 +528,9 @@ const publicationDate = resolveLegalPublicationDate()
     <li>
       <strong>Service providers</strong> that we use to run the Service: BandwagonHost (IT7 Networks
       Inc.), which provides the virtual server in Los Angeles, United States, where we operate
-      Hourmere Cloud and store its backups, and Zoho, which delivers sign-in emails, booking
-      confirmations and reminders from its United States data center. We use them only to host
+      Hourmere Cloud and store its backups, Zoho, which delivers sign-in emails, booking
+      confirmations and reminders from its United States data center, and Cloudflare, which hosts
+      this website and stores the Cloud waitlist. We use them only to host
       the Service and deliver its email.
     </li>
     <li>
@@ -688,6 +689,8 @@ const publicationDate = resolveLegalPublicationDate()
     <li>
       <strong>Cloud waitlist entries and requests for launch updates</strong> are kept until you
       ask us to stop or we have sent the launch notification.
+      Cloudflare D1 keeps a restorable history of the database for up to 30 days, so deleted
+      waitlist entries can remain recoverable for up to 30 days.
     </li>
   </ul>
   <p>
@@ -729,7 +732,9 @@ const publicationDate = resolveLegalPublicationDate()
     app.hourmere.com, is operated by Cobaltmere on a virtual private server that we rent from
     BandwagonHost (IT7 Networks Inc.) in Los Angeles, United States.
     Hourmere Cloud data and its on-host backups are stored there. The Hourmere Cloud waitlist is
-    stored in Cloudflare D1 in the United States. The hourmere.com website serves static pages
+    stored in Cloudflare D1 in the United States. Authorized personnel, who may be outside the
+    United States, can access or export the waitlist to send the Cloud opening notification.
+    The hourmere.com website serves static pages
     and its waitlist form on Cloudflare Workers; the request data its hosting processes is described in
     <a href="#this-website">section 14</a>.
   </p>
@@ -765,10 +770,12 @@ const publicationDate = resolveLegalPublicationDate()
   <h3>Hourmere Cloud waitlist</h3>
   <p>
     If you join the Hourmere Cloud waitlist, Cobaltmere stores your trimmed, lowercased email
-    address, the time you joined, the page source and language (locale), and the consent text
+    address, the time you joined, which form you used, the language (locale), and the consent text
     version. We use the list only to tell you when Hourmere Cloud opens. The list is stored in
-    Cloudflare D1 in the United States. We do not sell the list or share it except with
-    Cloudflare as needed to host the website and waitlist.
+    Cloudflare D1 in the United States. We do not sell the list. We share it only with Cloudflare,
+    which hosts the website and stores the list, and with the email service we use to send the
+    opening notification. Authorized personnel, who may be outside the United States, can access
+    or export the list to send that notification.
   </p>
   <p>
     To prevent abuse, the waitlist uses your IP address to derive a SHA-256 key for Cloudflare's
@@ -781,6 +788,8 @@ const publicationDate = resolveLegalPublicationDate()
   <p>
     The legal basis for the waitlist is your consent, which you can withdraw at any time. We keep
     waitlist entries until you ask us to stop or we have sent the Cloud opening notification.
+    Cloudflare D1 keeps a restorable history of the database for up to 30 days, so deleted waitlist
+    entries can remain recoverable for up to 30 days.
     To unsubscribe, withdraw consent or ask for deletion, email
     <a href={waitlistMail}>{contact.hello}</a>. The form does not send a confirmation email.
   </p>

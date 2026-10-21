@@ -25,7 +25,7 @@ const repositoryDocs = globSync('**/*.md', { cwd: join(root, 'docs') }).map(
 const ownSiteReferences: Record<string, readonly string[]> = {
   'README.md': [
     '| `apps/site` | Website for hourmere.com (Astro + Starlight): homepage, legal pages, docs. Static; not part of the Docker image. |',
-    'The website runs on its own: `npm run dev --workspace @hourmere/site` (http://localhost:4321). `npm run build` writes it to `apps/site/dist`. A small Cloudflare Worker handles the Hourmere Cloud waitlist and serves the static assets on hourmere.com and www.hourmere.com (config in `apps/site/wrangler.jsonc`). See [website operations](docs/website.md) for local D1/form testing and the resources the lead must configure before running `npm run deploy --workspace @hourmere/site` in the Cobaltmere Cloudflare account.',
+    'The website runs on its own: `npm run dev --workspace @hourmere/site` (http://localhost:4321). `npm run build` writes it to `apps/site/dist`. A small Cloudflare Worker handles the Hourmere Cloud waitlist and serves the static assets on hourmere.com and www.hourmere.com (config in `apps/site/wrangler.jsonc`). The D1 database already exists. See [website operations](docs/website.md) for local D1/form testing and the migration the lead must apply before running `npm run deploy --workspace @hourmere/site` in the Cobaltmere Cloudflare account.',
     'hosted service. `HOSTED_SIGNUP_URL` sets their destination (default `https://hourmere.com`);',
     'instance must explicitly set `https://hourmere.com/privacy` and `https://hourmere.com/terms`.',
     '[security@hourmere.com](mailto:security@hourmere.com), not in a public issue. See [SECURITY.md](SECURITY.md).',

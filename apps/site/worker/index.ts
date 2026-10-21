@@ -12,11 +12,11 @@ export interface WaitlistEnv {
 }
 
 const maxBodyBytes = 4096
-const consentTextVersion = '2026-11-30'
+const consentTextVersion = '2026-10-22'
 const successMessage = "Thanks. We'll email you when Hourmere Cloud launches."
 const invalidMessage = 'Enter one valid email address and try again.'
-const rateLimitedMessage = 'Too many attempts. Please try again in a minute.'
-const unavailableMessage = "We couldn't save your request. Please try again later."
+const rateLimitedMessage = 'Too many requests. Please wait a minute and try again.'
+const unavailableMessage = "We couldn't save your request. Please try again."
 const fields = new Set(['email', 'hm_extra', 'locale', 'source'])
 const sources = new Set(['pricing', 'cloud', 'faq'])
 
@@ -39,6 +39,8 @@ function allowedOrigin(request: Request, env: WaitlistEnv): boolean {
 }
 
 async function boundedBody(request: Request): Promise<Uint8Array<ArrayBuffer> | null> {
+  const contentLength = request.headers.get('Content-Length')
+  if (contentLength !== null && Number(contentLength) > maxBodyBytes) return null
   const reader = request.body?.getReader()
   if (!reader) return null
   const chunks: Uint8Array[] = []
@@ -202,12 +204,24 @@ function reply(request: Request, status: number, message: string): Response {
     return new Response(null, { status: 303, headers })
   }
   headers.set('Content-Type', 'text/html; charset=utf-8')
+  const styleNonce = crypto.randomUUID()
   headers.set(
     'Content-Security-Policy',
-    "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+    `default-src 'none'; style-src 'nonce-${styleNonce}'; frame-ancestors 'none'; base-uri 'none'`,
   )
   return new Response(
-    `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Hourmere Cloud waitlist</title></head><body><main><h1>Hourmere Cloud waitlist</h1><p role="alert">${message}</p><p><a href="/#cloud-waitlist">Return to the waitlist form</a></p></main></body></html>`,
+    `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Hourmere Cloud waitlist</title><style nonce="${styleNonce}">
+:root { color-scheme: light dark; }
+body { margin: 0; background: #fff; color: #0e1015; font: 1.0625rem/1.6 system-ui, sans-serif; }
+main { max-width: 42rem; margin: 4rem auto; padding: 0 1rem; overflow-wrap: anywhere; }
+h1 { font-size: 2rem; line-height: 1.2; }
+a { display: inline-block; min-height: 44px; color: #1f4fd8; text-underline-offset: 0.18em; }
+a:focus-visible { outline: 3px solid currentColor; outline-offset: 2px; }
+@media (prefers-color-scheme: dark) {
+  body { background: #0e1015; color: #e9edf7; }
+  a { color: #8faeff; }
+}
+</style></head><body><main><h1>Hourmere Cloud waitlist</h1><p role="alert">${message}</p><p><a href="/#cloud-waitlist">Return to the waitlist form</a></p></main></body></html>`,
     { status, headers },
   )
 }

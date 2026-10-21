@@ -11,6 +11,16 @@ const config = JSON.parse(
 )
 
 describe('Cloud waitlist operations contract', () => {
+  it('disables Worker observability instead of relying on logging defaults', () => {
+    expect(config.observability).toEqual({ enabled: false })
+  })
+
+  it('ties the recorded consent version to the published launch-notification consent', () => {
+    expect(prose).toContain('`2026-10-22`')
+    expect(prose).toContain('displayed launch-notification consent and policy publication date')
+    expect(prose).not.toContain('`2026-11-30`')
+  })
+
   it('binds the existing production D1 database and keeps development local', () => {
     expect(config.d1_databases).toEqual([
       {

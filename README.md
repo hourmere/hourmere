@@ -61,7 +61,7 @@ The web app only uses the public API (`/api/v1/*` and Better Auth's `/api/auth/*
 
 Other commands: `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`, `npm run db:migrate`, `npm run db:down`, `npm run api:types`.
 
-The website runs on its own: `npm run dev --workspace @hourmere/site` (http://localhost:4321). `npm run build` writes it to `apps/site/dist`. A small Cloudflare Worker handles the Hourmere Cloud waitlist and serves the static assets on hourmere.com and www.hourmere.com (config in `apps/site/wrangler.jsonc`). See [website operations](docs/website.md) for local D1/form testing and the resources the lead must configure before running `npm run deploy --workspace @hourmere/site` in the Cobaltmere Cloudflare account.
+The website runs on its own: `npm run dev --workspace @hourmere/site` (http://localhost:4321). `npm run build` writes it to `apps/site/dist`. A small Cloudflare Worker handles the Hourmere Cloud waitlist and serves the static assets on hourmere.com and www.hourmere.com (config in `apps/site/wrangler.jsonc`). The D1 database already exists. See [website operations](docs/website.md) for local D1/form testing and the migration the lead must apply before running `npm run deploy --workspace @hourmere/site` in the Cobaltmere Cloudflare account.
 
 The privacy policy's effective and last-updated dates and the terms' effective date share
 `LEGAL_PUBLICATION_DATE` in `apps/site/src/data/legal.ts`, currently `2026-10-22`.

@@ -1,7 +1,9 @@
 import { readFileSync } from 'node:fs'
 import { DatabaseSync } from 'node:sqlite'
+import postcss from 'postcss'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { handleWaitlist, type WaitlistEnv } from '../worker/index.ts'
+import { waitlistMessages } from './waitlist-client.ts'
 
 let database: DatabaseSync
 let env: WaitlistEnv
@@ -68,7 +70,7 @@ describe('Cloud waitlist input', () => {
         created_at: '2026-11-30T12:34:56.000Z',
         source: 'cloud',
         locale: 'en',
-        consent_text_version: '2026-11-30',
+        consent_text_version: '2026-10-22',
       },
     ])
     expect(await response.text()).not.toContain('Person')
@@ -234,6 +236,34 @@ describe('Cloud waitlist input', () => {
     expect(rows()).toHaveLength(0)
   })
 
+  it.each(['4097', '1000000', '999999999999999999999999999999'])(
+    'rejects oversized Content-Length %s before reading the body',
+    async (length) => {
+      const post = request(undefined, { 'Content-Length': length })
+      const reader = vi.spyOn(post.body as ReadableStream<Uint8Array>, 'getReader')
+      const response = await handleWaitlist(post, env)
+      expect(response.status).toBe(400)
+      expect(reader).not.toHaveBeenCalled()
+      expect(post.bodyUsed).toBe(false)
+      expect(rows()).toHaveLength(0)
+      expect(env.WAITLIST_DB.prepare).not.toHaveBeenCalled()
+    },
+  )
+
+  it('accepts a valid body at the 4096-byte limit', async () => {
+    const body = JSON.stringify({ email: 'person@example.com' }).padEnd(4096, ' ')
+    const response = await handleWaitlist(rawRequest(body, { 'Content-Length': '4096' }), env)
+    expect(response.status).toBe(200)
+    expect(rows()).toHaveLength(1)
+  })
+
+  it('rejects an oversized body with no Content-Length', async () => {
+    const post = rawRequest(`${' '.repeat(4096)}{"email":"person@example.com"}`)
+    expect(post.headers.has('Content-Length')).toBe(false)
+    expect((await handleWaitlist(post, env)).status).toBe(400)
+    expect(rows()).toHaveLength(0)
+  })
+
   it('bounds the body actually read rather than trusting Content-Length', async () => {
     const response = await handleWaitlist(
       rawRequest(`${' '.repeat(4096)}{"email":"person@example.com"}`, { 'Content-Length': '1' }),
@@ -282,7 +312,7 @@ describe('waitlist privacy and abuse protections', () => {
         created_at: '2026-11-30T00:00:00.000Z',
         source: 'pricing',
         locale: null,
-        consent_text_version: '2026-11-30',
+        consent_text_version: '2026-10-22',
       },
     ])
   })
@@ -341,6 +371,27 @@ describe('waitlist privacy and abuse protections', () => {
     expect(rows()).toHaveLength(0)
     expect(env.WAITLIST_DB.prepare).not.toHaveBeenCalled()
     expect(await response.text()).not.toContain('192.0.2.10')
+  })
+
+  it.each([429, 503])('matches the client message for HTTP %s', async (status) => {
+    if (status === 429) env.WAITLIST_RATE_LIMITER.limit = async () => ({ success: false })
+    else {
+      env.WAITLIST_DB.prepare = () => {
+        throw new Error('private database detail')
+      }
+    }
+    const response = await handleWaitlist(request(), env)
+    expect(response.status).toBe(status)
+    const message = status === 429 ? waitlistMessages.rateLimited : waitlistMessages.unavailable
+    expect(await response.json()).toEqual({ message })
+    const htmlResponse = await handleWaitlist(
+      rawRequest('email=person%40example.com', {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      }),
+      env,
+    )
+    expect(htmlResponse.status).toBe(status)
+    expect(await htmlResponse.text()).toContain(`<p role="alert">${message}</p>`)
   })
 
   it('uses a stable client IP digest across minute boundaries without retaining the address', async () => {
@@ -435,6 +486,30 @@ describe('waitlist privacy and abuse protections', () => {
     expect(html).toContain('role="alert"')
     expect(html).toContain('href="/#cloud-waitlist"')
     expect(html).not.toContain('<script>')
+    const style = html.match(/<style nonce="([^"]+)">([\s\S]*?)<\/style>/)
+    expect(style).not.toBeNull()
+    expect(response.headers.get('Content-Security-Policy')).toContain(
+      `style-src 'nonce-${style?.[1]}'`,
+    )
+    const rules = new Map<string, Record<string, string>>()
+    postcss.parse(style?.[2] ?? '').walkRules((rule) => {
+      const media = rule.parent?.type === 'atrule' ? ' dark' : ''
+      const declarations: Record<string, string> = {}
+      rule.walkDecls((declaration) => {
+        declarations[declaration.prop] = declaration.value
+      })
+      rules.set(`${rule.selector}${media}`, declarations)
+    })
+    expect(rules.get('main')).toMatchObject({
+      'max-width': '42rem',
+      margin: '4rem auto',
+      padding: '0 1rem',
+      'overflow-wrap': 'anywhere',
+    })
+    expect(rules.get('body')).toMatchObject({ background: '#fff', color: '#0e1015' })
+    expect(rules.get('body dark')).toMatchObject({ background: '#0e1015', color: '#e9edf7' })
+    expect(rules.get('a')).toMatchObject({ 'min-height': '44px', color: '#1f4fd8' })
+    expect(rules.get('a dark')).toMatchObject({ color: '#8faeff' })
   })
 
   it.each([

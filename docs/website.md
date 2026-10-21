@@ -19,8 +19,11 @@ JSON, URL-encoded and multipart/form-data submissions accept exactly one `email`
 an optional `hm_extra` honeypot, optional `locale` (`en`), and optional `source`
 (`cloud`, `pricing`, or `faq`). The email is trimmed, lowercased, bounded to 254 characters,
 and checked as one ordinary email address. Unknown fields, repeated form fields,
-and malformed values are rejected. The server records consent text version
-`2026-11-30`, joining time, source and locale. Duplicate inserts preserve the
+and malformed values are rejected. Request bodies are limited to 4096 bytes;
+an oversized `Content-Length` is rejected before reading, and streaming bodies
+are also counted while reading. The server records joining time, source, locale
+and consent text version `2026-10-22`, tied to the displayed launch-notification
+consent and policy publication date. Duplicate inserts preserve the
 original record; their success response is identical to a first submission.
 A filled honeypot returns that same success without storing anything.
 The site's JavaScript sends multipart/form-data; the native form without
@@ -35,7 +38,8 @@ and return link. Fetch clients get JSON and inline feedback. Responses never
 echo submitted input and use `Cache-Control: no-store`.
 
 The native `WAITLIST_RATE_LIMITER` binding allows 5 attempts per 60 seconds per
-client IP. No IP column, application log or persistent IP map is created. The
+client IP. No IP column, application log or persistent IP map is created.
+Worker observability is explicitly disabled in `wrangler.jsonc`. The
 limiter receives a stable SHA-256 key rather than the raw address; the binding
 controls the 60-second period, so crossing a clock-minute boundary does not change
 the key. Missing production client IPs or unavailable dependencies fail closed. Cloudflare's
@@ -136,8 +140,9 @@ npx --yes wrangler@4.151.0 d1 execute WAITLIST_DB --remote --env="" \
 
 Remove the address from any outstanding launch-mail export/queue too, and delete
 operator-created files when finished. A subsequent new form submission expresses
-new consent. This implementation has no other email delivery integration and
-makes no numeric retention promise.
+new consent. This implementation has no other email delivery integration.
+Cloudflare D1 keeps a restorable history of the database for up to 30 days, so
+deleted waitlist entries can remain recoverable for up to 30 days.
 
 After the Hourmere Cloud launch notification has been sent, delete the list,
 matching the privacy policy's retention limit of until withdrawal or the launch

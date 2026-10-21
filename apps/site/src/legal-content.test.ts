@@ -195,16 +195,21 @@ describe('privacy data-flow disclosures', () => {
     for (const disclosure of [collected, website]) {
       expect(disclosure).toMatch(/trimmed, lowercased email address/)
       expect(disclosure).toMatch(/the time you joined/)
-      expect(disclosure).toMatch(/the page source and language \(locale\)/)
+      expect(disclosure).toMatch(/which form you used, the language \(locale\)/)
       expect(disclosure).toMatch(/the consent text version/)
     }
+    expect(plainText(privacy)).not.toContain('page source')
   })
 
-  it('limits the waitlist purpose and sharing to opening updates and Cloudflare hosting', () => {
+  it('limits the waitlist purpose and sharing to opening updates, hosting and email delivery', () => {
     const waitlist = block('p', 'If you join the Hourmere Cloud waitlist,')
     expect(waitlist).toContain('We use the list only to tell you when Hourmere Cloud opens.')
+    expect(waitlist).toContain('We do not sell the list.')
     expect(waitlist).toMatch(
-      /We do not sell the list or share it except with Cloudflare as needed to host the website and waitlist\./,
+      /We share it only with Cloudflare, which hosts the website and stores the list, and with the email service we use to send the opening notification\./,
+    )
+    expect(waitlist).toMatch(
+      /Authorized personnel, who may be outside the United States, can access or export the list to send that notification\./,
     )
   })
 
@@ -251,6 +256,23 @@ describe('privacy data-flow disclosures', () => {
     expect(block('p', 'The legal basis for the waitlist')).toMatch(
       /We keep waitlist entries until you ask us to stop or we have sent the Cloud opening notification\./,
     )
+  })
+
+  it.each(['retention', 'this-website'])(
+    'discloses recoverable deleted waitlist entries in %s',
+    (id) => {
+      expect(section(id)).toContain(
+        'Cloudflare D1 keeps a restorable history of the database for up to 30 days, so deleted waitlist entries can remain recoverable for up to 30 days.',
+      )
+    },
+  )
+
+  it('documents D1 recovery history when administering waitlist deletions', () => {
+    const operations = plainText(read('../../../docs/website.md'))
+    expect(operations).toContain(
+      'Cloudflare D1 keeps a restorable history of the database for up to 30 days, so deleted waitlist entries can remain recoverable for up to 30 days.',
+    )
+    expect(operations).not.toContain('makes no numeric retention promise')
   })
 
   it('does not promise a confirmation email or an existing delivery integration', () => {
@@ -576,8 +598,9 @@ describe('privacy data-flow disclosures', () => {
     expect(providers).toMatch(
       /Zoho, which delivers sign-in emails, booking confirmations and reminders from its United States data center/,
     )
+    expect(providers).toMatch(/Cloudflare, which hosts this website and stores the Cloud waitlist/)
     expect(providers).toContain('We use them only to host the Service and deliver its email.')
-    expect(providers).not.toMatch(/Cloudflare|GitHub/)
+    expect(providers).not.toMatch(/GitHub/)
     const google = section('google-user-data')
     expect(google).toMatch(
       /providers that host the Service and deliver its email \(see section 7 ?\)/,
@@ -595,6 +618,9 @@ describe('privacy data-flow disclosures', () => {
     expect(transfers).toContain('Cobaltmere, LLC is a United States company')
     expect(transfers).toMatch(
       /Personnel located outside the United States may administer Hourmere Cloud remotely/,
+    )
+    expect(transfers).toMatch(
+      /Authorized personnel, who may be outside the United States, can access or export the waitlist to send the Cloud opening notification\./,
     )
     expect(transfers).not.toMatch(/We are based|China|Chinese|Sent folder|sent-copy retention/i)
   })

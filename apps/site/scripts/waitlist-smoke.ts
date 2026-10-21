@@ -1,10 +1,12 @@
 // Local-only integration probe. Build the site first; no Cloudflare account is needed.
 import assert from 'node:assert/strict'
 import { spawn, spawnSync } from 'node:child_process'
+import { globSync } from 'node:fs'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { setTimeout as delay } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 
@@ -37,6 +39,25 @@ function query(sql: string, persistTo = state): Record<string, unknown>[] {
   )
   const results = JSON.parse(output) as { results: Record<string, unknown>[] }[]
   return results.flatMap((result) => result.results)
+}
+
+function waitlistRows(persistTo = state) {
+  // Read the actual local D1 file without starting npx between rate-limited requests.
+  // Repeated CLI startup can outlast the binding's 60-second window.
+  const files = globSync('v3/d1/**/*.sqlite', { cwd: persistTo })
+  const matches = []
+  for (const file of files) {
+    const database = new DatabaseSync(join(persistTo, file), { readOnly: true })
+    try {
+      if (database.prepare("SELECT name FROM sqlite_schema WHERE name = 'waitlist'").get()) {
+        matches.push(database.prepare('SELECT * FROM waitlist').all())
+      }
+    } finally {
+      database.close()
+    }
+  }
+  assert.equal(matches.length, 1, 'Exactly one local D1 file must contain the waitlist table')
+  return matches[0] ?? []
 }
 
 function migrate(persistTo = state) {
@@ -170,20 +191,22 @@ try {
     return response.text()
   }
   const first = await post({ email: ' Smoke@Example.test ', source: 'cloud', locale: 'en' })
-  const duplicate = await post({ email: 'smoke@example.test', source: 'pricing' })
-  const honeypot = await post({ email: 'bot@example.test', hm_extra: 'filled' })
-  assert.equal(first, duplicate)
-  assert.equal(first, honeypot)
   assert(!first.includes('smoke@example.test'))
-  const stored = query('SELECT * FROM waitlist')
+  const stored = waitlistRows()
   assert.equal(stored.length, 1)
   assert.equal(stored[0]?.email, 'smoke@example.test')
   assert.equal(stored[0]?.source, 'cloud')
   assert.equal(stored[0]?.locale, 'en')
-  assert.equal(stored[0]?.consent_text_version, '2026-11-30')
+  assert.equal(stored[0]?.consent_text_version, '2026-10-22')
   assert(Number.isFinite(Date.parse(String(stored[0]?.created_at))))
   console.log('Valid address: HTTP 200; one normalized row stored.')
+  const duplicate = await post({ email: 'smoke@example.test', source: 'pricing' })
+  assert.equal(first, duplicate)
+  assert.deepEqual(waitlistRows(), stored)
   console.log('Duplicate: HTTP 200; identical response and original metadata retained.')
+  const honeypot = await post({ email: 'bot@example.test', hm_extra: 'filled' })
+  assert.equal(first, honeypot)
+  assert.deepEqual(waitlistRows(), stored)
   console.log('Honeypot: HTTP 200; identical response and no honeypot row stored.')
 
   const form = await fetch(`${origin}/api/waitlist`, {
@@ -200,7 +223,7 @@ try {
   assert.equal(form.status, 303)
   assert.equal(form.headers.get('Cache-Control'), 'no-store')
   assert.match(form.headers.get('Location') ?? '', /^\/\?waitlist=success#cloud-waitlist-success$/)
-  assert.deepEqual(query('SELECT * FROM waitlist'), stored)
+  assert.deepEqual(waitlistRows(), stored)
 
   // The site's JavaScript submits FormData and asks for a JSON response.
   const multipart = new FormData()
@@ -216,7 +239,7 @@ try {
   assert.equal(enhancedForm.status, 200)
   assert.equal(enhancedForm.headers.get('Cache-Control'), 'no-store')
   assert.equal(await enhancedForm.text(), first)
-  assert.deepEqual(query('SELECT * FROM waitlist'), stored)
+  assert.deepEqual(waitlistRows(), stored)
 
   // The preceding five requests share the actual local binding counter. Assert
   // rejected requests cannot write, including the native no-JavaScript response.
@@ -230,9 +253,9 @@ try {
     assert.equal(limited.status, 429)
     assert.equal(limited.headers.get('Retry-After'), '60')
     assert.equal(limited.headers.get('Cache-Control'), 'no-store')
-    assert.match(await limited.text(), /Too many attempts\. Please try again in a minute\./)
+    assert.match(await limited.text(), /Too many requests\. Please wait a minute and try again\./)
+    assert.deepEqual(waitlistRows(), stored)
   }
-  assert.deepEqual(query('SELECT * FROM waitlist'), stored)
   console.log('Rate limit: next three attempts HTTP 429 with Retry-After: 60; no row stored.')
 
   // Use this probe's separate fresh state and a new port for the validation case.
@@ -251,14 +274,30 @@ try {
   assert.equal(invalid.status, 400)
   assert.equal(invalid.headers.get('Cache-Control'), 'no-store')
   assert.match(await invalid.text(), /Enter one valid email address/)
-  assert.deepEqual(query('SELECT * FROM waitlist', freshState), [])
+  assert.deepEqual(waitlistRows(freshState), [])
   console.log('Invalid address: HTTP 400; no row stored.')
 
+  const oversizedBody = JSON.stringify({ email: 'oversized@example.test' }).padEnd(4097, ' ')
+  const oversized = await fetch(`${origin}/api/waitlist`, {
+    method: 'POST',
+    headers: {
+      Origin: origin,
+      'Content-Type': 'application/json',
+      'Content-Length': String(Buffer.byteLength(oversizedBody)),
+      Accept: 'application/json',
+    },
+    body: oversizedBody,
+  })
+  assert.equal(oversized.status, 400)
+  assert.equal(oversized.headers.get('Cache-Control'), 'no-store')
+  assert.deepEqual(waitlistRows(freshState), [])
+  console.log('Oversized Content-Length (4097 bytes): HTTP 400; no row stored.')
+
   migrate()
-  assert.deepEqual(query('SELECT * FROM waitlist'), stored)
+  assert.deepEqual(waitlistRows(), stored)
   assert.deepEqual(query('SELECT value FROM predecessor_probe'), [{ value: 'keep' }])
   console.log(
-    'Local waitlist smoke passed: 5 byte-identical pages, headers/404/redirect, JSON/URL-encoded/multipart POST, duplicate/invalid/honeypot/rate-limit, migration preservation/fresh/no-op.',
+    'Local waitlist smoke passed: 5 byte-identical pages, headers/404/redirect, JSON/URL-encoded/multipart POST, duplicate/invalid/honeypot/oversized Content-Length/rate-limit, migration preservation/fresh/no-op.',
   )
 } finally {
   await stopWorker()
