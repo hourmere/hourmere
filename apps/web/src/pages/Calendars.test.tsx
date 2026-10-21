@@ -29,9 +29,14 @@ const connection: Schemas['CalendarConnection'] = {
     },
   ],
 }
-const list = (data = [connection], googleEnabled = true, microsoftEnabled = false) => ({
+const list = (
+  data = [connection],
+  googleEnabled = true,
+  microsoftEnabled = false,
+  destinationCalendarId: string | null = null,
+) => ({
   'GET /api/v1/calendar-connections': () =>
-    json(200, { data, googleEnabled, microsoftEnabled, destinationCalendarId: null }),
+    json(200, { data, googleEnabled, microsoftEnabled, destinationCalendarId }),
 })
 const authorizationUrl = 'https://accounts.google.com/o/oauth2/v2/auth?state=fake-state'
 
@@ -44,7 +49,12 @@ describe('the calendars page', () => {
       fakeApi({
         ...signedIn,
         ...profile({ ...PROFILE, timeZone: 'Asia/Shanghai' }),
-        ...list([{ ...connection, calendars: [{ ...calendar, timeZone: 'America/New_York' }] }]),
+        ...list(
+          [{ ...connection, calendars: [{ ...calendar, timeZone: 'America/New_York' }] }],
+          true,
+          false,
+          calendar.id,
+        ),
         'GET /api/v1/schedules': () =>
           json(200, {
             data: [
@@ -66,6 +76,51 @@ describe('the calendars page', () => {
   )
 
   it.each([
+    ['reader calendar in another zone', 'reader', 'this', false],
+    ['owned non-destination calendar in another zone', 'owner', 'other', false],
+    ['owned destination calendar in another zone', 'owner', 'this', true],
+    ['no selected destination', 'owner', null, false],
+  ] as const)(
+    'limits the zone notice to an owned booking destination: %s',
+    async (_name, accessRole, selected, expected) => {
+      const calendar = connection.calendars[0] as NonNullable<(typeof connection.calendars)[0]>
+      const otherId = 'c0000000-0000-7000-8000-000000000002'
+      fakeApi({
+        ...signedIn,
+        ...profile(),
+        ...list(
+          [
+            {
+              ...connection,
+              syncAuthorized: true,
+              calendars: [
+                { ...calendar, accessRole, timeZone: 'America/New_York' },
+                {
+                  ...calendar,
+                  id: otherId,
+                  name: 'Other calendar',
+                  isPrimary: false,
+                  timeZone: 'America/Los_Angeles',
+                },
+              ],
+            },
+          ],
+          true,
+          false,
+          selected === 'this' ? calendar.id : selected === 'other' ? otherId : null,
+        ),
+        'GET /api/v1/schedules': () =>
+          json(200, { data: [schedule({ timeZone: 'America/Los_Angeles' })] }),
+      })
+      renderApp('/app/calendars')
+      await screen.findByRole('heading', { name: 'calendar@example.com' })
+      const notices = document.querySelectorAll('.calendar-list .alert-info')
+      expect(notices).toHaveLength(expected ? 1 : 0)
+      if (expected) expect(notices[0]?.closest('li')?.textContent).toContain('Work calendar')
+    },
+  )
+
+  it.each([
     ['matching zones', 'google', 'America/New_York', 'America/New_York', false],
     ['renamed matching zones', 'google', 'Asia/Calcutta', 'Asia/Kolkata', false],
     ['unknown calendar zone', 'google', null, 'America/Los_Angeles', false],
@@ -79,19 +134,29 @@ describe('the calendars page', () => {
       fakeApi({
         ...signedIn,
         ...profile(),
-        ...list([
-          { ...connection, provider, syncAuthorized: true, calendars: [{ ...calendar, timeZone }] },
-          ...(!timeZone || provider === 'microsoft'
-            ? [
-                {
-                  ...connection,
-                  id: 'a0000000-0000-7000-8000-000000000002',
-                  accountEmail: 'other@example.com',
-                  calendars: [{ ...calendar, timeZone: scheduleZone }],
-                },
-              ]
-            : []),
-        ]),
+        ...list(
+          [
+            {
+              ...connection,
+              provider,
+              syncAuthorized: true,
+              calendars: [{ ...calendar, timeZone }],
+            },
+            ...(!timeZone || provider === 'microsoft'
+              ? [
+                  {
+                    ...connection,
+                    id: 'a0000000-0000-7000-8000-000000000002',
+                    accountEmail: 'other@example.com',
+                    calendars: [{ ...calendar, timeZone: scheduleZone }],
+                  },
+                ]
+              : []),
+          ],
+          true,
+          false,
+          calendar.id,
+        ),
         'GET /api/v1/schedules': () =>
           unavailable
             ? json(503, { error: 'internal_error' })

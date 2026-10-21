@@ -18,8 +18,8 @@ export const admin = {
   'Language of your own notification emails and calendar invitations. Booking pages and invitee emails use the visitor’s language. Change the interface language separately in the top bar.':
     '你收到的通知邮件和日历邀请所用的语言。预约页面和受邀者邮件使用访客的语言。界面语言请在顶栏单独切换。',
   'Connect a calendar account to get started.': '连接日历账号以开始使用。',
-  'This Google calendar uses {calendarZone}; your availability uses {scheduleZone}. Bookings land at the same moment; Google Calendar shows them in {calendarZone} time.':
-    '此 Google 日历使用{calendarZone}时区；你的可预约时段使用{scheduleZone}时区。预约对应同一时刻；Google 日历以{calendarZone}时间显示。',
+  'This Google calendar uses {calendarZone}; your availability uses {scheduleZone}. Bookings land at the same moment; Google Calendar usually shows them in {calendarZone} time.':
+    '此 Google 日历使用{calendarZone}时区；你的可预约时段使用{scheduleZone}时区。预约对应同一时刻；Google 日历通常以{calendarZone}时间显示。',
   'Connect an AI app from its MCP settings, or use an API key.':
     '在 AI 应用的 MCP 设置中连接，或使用 API 密钥。',
   'Manage API keys': '管理 API 密钥',

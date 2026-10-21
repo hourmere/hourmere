@@ -573,6 +573,7 @@ describe('the invitee’s manage page', () => {
 
   it('starts in the booker’s stored time zone and lets them change it without shifting a slot', async () => {
     const user = userEvent.setup()
+    localStorage.setItem('hourmere-visitor-time-zone', 'Pacific/Honolulu')
     const api = manageServer(
       managed({
         attendees: [
@@ -626,6 +627,7 @@ describe('the invitee’s manage page', () => {
     'falls back to the browser time zone for %s',
     async (scenario) => {
       env.zone = 'Europe/Berlin'
+      localStorage.setItem('hourmere-visitor-time-zone', 'Pacific/Honolulu')
       manageServer(
         managed({
           attendees:

@@ -464,13 +464,15 @@ export function CalendarsPage() {
                         {calendar.isPrimary ? t(' (primary)') : ''}
                       </div>
                       {connection.provider === 'google' &&
+                        calendar.accessRole === 'owner' &&
+                        state.data.destinationCalendarId === calendar.id &&
                         calendar.timeZone &&
                         state.data.defaultScheduleZone &&
                         zoneName(calendar.timeZone) !==
                           zoneName(state.data.defaultScheduleZone) && (
                           <p className="alert alert-info">
                             {t(
-                              'This Google calendar uses {calendarZone}; your availability uses {scheduleZone}. Bookings land at the same moment; Google Calendar shows them in {calendarZone} time.',
+                              'This Google calendar uses {calendarZone}; your availability uses {scheduleZone}. Bookings land at the same moment; Google Calendar usually shows them in {calendarZone} time.',
                               {
                                 calendarZone: zoneName(calendar.timeZone),
                                 scheduleZone: zoneName(state.data.defaultScheduleZone),

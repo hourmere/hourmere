@@ -118,6 +118,26 @@ describe('cross-zone booking email clarity', () => {
   const crossZoneHost = { ...recipients.host, timeZone: 'America/Los_Angeles' }
 
   for (const locale of languages) {
+    it(`${locale} suppresses duplicate invitee times for aliases across all host email kinds`, () => {
+      const label = locale === 'en' ? "Invitee's time" : '预约人当地时间'
+      for (const [inviteeZone, hostZone] of [
+        ['US/Pacific', 'America/Los_Angeles'],
+        ['America/Los_Angeles', 'US/Pacific'],
+        ['Asia/Calcutta', 'Asia/Kolkata'],
+        ['Europe/Kyiv', 'Europe/Kiev'],
+      ] as const) {
+        for (const kind of [...kinds, 'reminder', 'conference_failed'] as const) {
+          const message = bookingEmail(
+            kind,
+            { ...crossZoneMeeting, inviteeTimeZone: inviteeZone },
+            { ...crossZoneHost, timeZone: hostZone, locale },
+          )
+          expect(message.text).not.toContain(label)
+          expect(message.html).not.toContain(label.replaceAll("'", '&#39;'))
+        }
+      }
+    })
+
     for (const kind of [...kinds, 'reminder', 'conference_failed'] as const) {
       it(`${locale} ${kind} shows the invitee's local date and time to the host`, () => {
         const message = bookingEmail(kind, crossZoneMeeting, { ...crossZoneHost, locale })

@@ -77,7 +77,7 @@ export type BookingEmailRecipient = AttendeeRecipient | HostRecipient
 
 // --- Times --------------------------------------------------------------------------------
 
-/** The zone's canonical name, or UTC when it is not a valid IANA time zone. */
+/** A valid IANA zone name, or UTC when it is not valid. Temporal preserves aliases. */
 function displayZone(timeZone: string): string {
   if (timeZone === '' || /^[+-]/.test(timeZone)) return 'UTC'
   try {
@@ -85,6 +85,12 @@ function displayZone(timeZone: string): string {
   } catch {
     return 'UTC'
   }
+}
+
+/** Compare aliases without changing the zone name printed in the email. */
+function comparisonZone(timeZone: string): string {
+  return new Intl.DateTimeFormat('en', { timeZone: displayZone(timeZone) }).resolvedOptions()
+    .timeZone
 }
 
 const LONG_DATE: Intl.DateTimeFormatOptions = {
@@ -441,7 +447,7 @@ export function bookingEmail(
     field(t('What'), event),
     field(t('When'), formatMeetingTime(meeting.start, meeting.end, recipient.timeZone, language)),
   ]
-  if (isHost && displayZone(meeting.inviteeTimeZone) !== displayZone(recipient.timeZone)) {
+  if (isHost && comparisonZone(meeting.inviteeTimeZone) !== comparisonZone(recipient.timeZone)) {
     fields.push(
       field(t("Invitee's time"), formatShortTime(meeting.start, meeting.inviteeTimeZone, language)),
     )

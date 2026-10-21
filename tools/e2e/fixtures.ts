@@ -494,8 +494,8 @@ export const test = base.extend<{
             .set({ time_zone: AUDIT_HOST_TIME_ZONE })
             .where('user_id', '=', host.userId)
             .execute()
-          // Exercise the calendar/schedule zone notice with a long display name.
-          // No calendar is selected for synchronization or provider writeback.
+          // Exercise the selected destination's zone notice with a long display name.
+          // Conflict sync stays off; the web-only fixture never runs provider workers.
           const auditConnection = await db
             .insertInto('calendar_connections')
             .values({
@@ -508,7 +508,7 @@ export const test = base.extend<{
             })
             .returning('id')
             .executeTakeFirstOrThrow()
-          await db
+          const auditCalendar = await db
             .insertInto('calendars')
             .values({
               connection_id: auditConnection.id,
@@ -518,6 +518,12 @@ export const test = base.extend<{
               time_zone: 'America/Argentina/Buenos_Aires',
               check_conflicts: false,
             })
+            .returning('id')
+            .executeTakeFirstOrThrow()
+          await db
+            .updateTable('profiles')
+            .set({ destination_calendar_id: auditCalendar.id })
+            .where('user_id', '=', host.userId)
             .execute()
           const bookingId = await f.booking(
             host.organizationId,

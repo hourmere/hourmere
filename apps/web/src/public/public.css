@@ -24,6 +24,11 @@
   overflow-wrap: anywhere;
 }
 
+/* Keep a zone's name together between the explicit break opportunities after slashes. */
+.public .host-time-zone .time-zone-segment {
+  white-space: nowrap;
+}
+
 .public > *,
 .public .public-main > *,
 .public .event-list > *,

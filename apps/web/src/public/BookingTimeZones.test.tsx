@@ -48,6 +48,10 @@ async function pickZone(user: ReturnType<typeof userEvent.setup>, zone: string) 
   await user.click(within(screen.getByRole('listbox', { name: 'Time zones' })).getByRole('option'))
 }
 
+function hostZoneLabel() {
+  return screen.findByText((_, element) => element?.classList.contains('host-time-zone') ?? false)
+}
+
 describe('cross-zone public booking details', () => {
   it.each([
     ['/ada/intro', 'en'],
@@ -62,9 +66,11 @@ describe('cross-zone public booking details', () => {
       fakeApi(eventRoutes(EVENT_IN_LA, [START]))
       renderApp(`${path}?language=${language}`)
       const chinese = language === 'zh-CN'
-      const zone = await screen.findByText(
-        chinese ? '主持人的时区：America/Los Angeles' : "Host's time zone: America/Los Angeles",
-      )
+      const zone = await hostZoneLabel()
+      expect(zone.querySelectorAll('wbr')).toHaveLength(1)
+      expect(zone.querySelector('wbr')?.previousSibling?.textContent).toBe('/')
+      expect(zone.lastElementChild?.textContent).toBe('Los Angeles')
+      expect(zone.lastElementChild?.classList.contains('time-zone-segment')).toBe(true)
       await chooseDay(user, '2026-11-11')
       await user.click(screen.getByRole('button', { name: chinese ? '08:00' : '8:00 AM' }))
       if (chinese) {
@@ -91,7 +97,7 @@ describe('cross-zone public booking details', () => {
       'GET /api/v1/public/teams/crew/intro/slots': slotsAnswer([START]),
     })
     renderApp('/team/crew/intro')
-    expect(await screen.findByText("Host's time zone: America/Los Angeles")).toBeDefined()
+    expect((await hostZoneLabel()).textContent).toBe("Host's time zone: America/Los Angeles")
   })
 
   it('does not repeat the chosen time when the visitor and host share a zone', async () => {
@@ -99,9 +105,42 @@ describe('cross-zone public booking details', () => {
     env.zone = 'America/Los_Angeles'
     fakeApi(eventRoutes(EVENT_IN_LA, [START]))
     renderApp('/ada/intro')
-    await screen.findByText("Host's time zone: America/Los Angeles")
+    await hostZoneLabel()
     await chooseDay(user, '2026-11-10')
     await user.click(screen.getByRole('button', { name: '4:00 PM' }))
+    expect(document.querySelector('.host-local-time')).toBeNull()
+  })
+
+  it.each([
+    ['US/Pacific', 'America/Los_Angeles'],
+    ['America/Los_Angeles', 'US/Pacific'],
+  ])('does not repeat the host time for aliases %s and %s', async (visitorZone, hostZone) => {
+    const user = userEvent.setup()
+    env.zone = visitorZone
+    fakeApi(
+      eventRoutes({ ...EVENT_IN_LA, host: { ...EVENT_IN_LA.host, timeZone: hostZone } }, [START]),
+    )
+    renderApp('/ada/intro')
+    await hostZoneLabel()
+    await chooseDay(user, '2026-11-10')
+    await user.click(screen.getByRole('button', { name: '4:00 PM' }))
+    expect(screen.getByRole('heading', { name: 'Your details' })).toBeDefined()
+    expect(document.querySelector('.host-local-time')).toBeNull()
+  })
+
+  it('keeps the details form usable when the host profile has an unknown zone', async () => {
+    const user = userEvent.setup()
+    fakeApi(
+      eventRoutes({ ...EVENT_IN_LA, host: { ...EVENT_IN_LA.host, timeZone: 'Future/Unknown' } }, [
+        START,
+      ]),
+    )
+    renderApp('/ada/intro')
+    expect((await hostZoneLabel()).textContent).toBe("Host's time zone: Future/Unknown")
+    await chooseDay(user, '2026-11-11')
+    await user.click(screen.getByRole('button', { name: '8:00 AM' }))
+    expect(screen.getByRole('heading', { name: 'Your details' })).toBeDefined()
+    expect(screen.getByLabelText('Your name')).toBeDefined()
     expect(document.querySelector('.host-local-time')).toBeNull()
   })
 
@@ -221,7 +260,7 @@ describe('remembering explicit visitor zone choices', () => {
     expect(localStorage.getItem(STORAGE_KEY)).toBeNull()
   })
 
-  it('uses and updates the same explicit preference when opening the reschedule picker', async () => {
+  it('starts rescheduling in the booking zone and retains a new pick for the current view and future booking pages', async () => {
     const user = userEvent.setup()
     localStorage.setItem(STORAGE_KEY, 'Pacific/Honolulu')
     fakeApi({
@@ -231,15 +270,57 @@ describe('remembering explicit visitor zone choices', () => {
     })
     const manage = renderApp(`/booking#token=${TOKEN}&action=reschedule`)
     expect((await screen.findByRole('button', { name: /Time zone/ })).textContent).toContain(
-      'Pacific/Honolulu',
+      'America/New York',
     )
     await pickZone(user, 'Europe/Paris')
+    expect(screen.getByRole('button', { name: /Time zone/ }).textContent).toContain('Europe/Paris')
+    await user.click(screen.getByRole('button', { name: 'Keep the current time' }))
+    expect(screen.getByText(/Monday, November 2, 2026/).parentElement?.textContent).toContain(
+      'Europe/Paris',
+    )
+    await user.click(screen.getByRole('button', { name: 'Reschedule' }))
+    expect((await screen.findByRole('button', { name: /Time zone/ })).textContent).toContain(
+      'Europe/Paris',
+    )
     expect(localStorage.getItem(STORAGE_KEY)).toBe('Europe/Paris')
     manage.unmount()
     renderApp('/ada/intro')
     expect((await screen.findByRole('button', { name: /Time zone/ })).textContent).toContain(
       'Europe/Paris',
     )
+  })
+
+  it('loads each managed booking in its stored zone after a pick on another managed booking', async () => {
+    const user = userEvent.setup()
+    let timeZone = 'America/New_York'
+    fakeApi({
+      'GET /api/v1/bookings/manage': () =>
+        json(
+          200,
+          managed({
+            attendees: [
+              {
+                name: 'Grace Hopper',
+                email: 'grace@example.com',
+                timeZone,
+                locale: 'en-US',
+                isBooker: true,
+              },
+            ],
+          }),
+        ),
+      'GET /api/v1/bookings/manage/slots': slotsAnswer([START]),
+    })
+    const first = renderApp(`/booking#token=${TOKEN}&action=reschedule`)
+    await screen.findByRole('button', { name: /Time zone/ })
+    await pickZone(user, 'Europe/Paris')
+    first.unmount()
+    timeZone = 'Asia/Tokyo'
+    renderApp(`/booking#token=${TOKEN}&action=reschedule`)
+    expect((await screen.findByRole('button', { name: /Time zone/ })).textContent).toContain(
+      'Asia/Tokyo',
+    )
+    expect(localStorage.getItem(STORAGE_KEY)).toBe('Europe/Paris')
   })
 
   it.each(['not/a-zone', '+08:00'])(

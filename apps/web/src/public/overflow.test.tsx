@@ -103,6 +103,16 @@ describe('public overflow protections', () => {
     })
   })
 
+  it('keeps host zone segments together between the slash break opportunities', () => {
+    inspectStyles(publicStyles, (rules) => {
+      expect(
+        declarations(rules, '.public .host-time-zone .time-zone-segment').getPropertyValue(
+          'white-space',
+        ),
+      ).toBe('nowrap')
+    })
+  })
+
   it('leaves focus-outline space on every side of the scrollable slot list after the reset', () => {
     inspectStyles(pickerStyles, (rules) => {
       const slotRules = rules.filter(

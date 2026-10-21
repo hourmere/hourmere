@@ -3,6 +3,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, Navigate, useLocation, useParams } from 'react-router'
 import { ConferenceNotice } from '../components/ConferenceNotice.tsx'
 import { EmailDeliveryHint } from '../components/EmailDeliveryHint.tsx'
+import { TimeZoneName } from '../components/TimeZonePicker.tsx'
+import { isKnownTimeZone } from '../format.ts'
 import { usePageTitle } from '../hooks.ts'
 import { formatList } from '../i18n/formatting.ts'
 import { useI18n } from '../i18n/runtime.tsx'
@@ -46,6 +48,7 @@ import {
   formatDuration,
   formatTime,
   formatTimeRange,
+  offsetAt,
   offsetLabel,
   zoneName,
 } from './time.ts'
@@ -304,7 +307,10 @@ function BookingFlow({
             {event.location && <li>{ui(locationLabel(event.location.kind))}</li>}
             {hostTimeZone && (
               <li className="user-content">
-                {t("Host's time zone: {zone}", { zone: zoneName(hostTimeZone) })}
+                <TimeZoneName
+                  className="host-time-zone"
+                  name={t("Host's time zone: {zone}", { zone: zoneName(hostTimeZone) })}
+                />
               </li>
             )}
           </ul>
@@ -322,16 +328,19 @@ function BookingFlow({
                   <span className="time-offset">{chosenZoneLabel.slice(chosenOffsetAt)}</span>
                 </span>
               </p>
-              {hostTimeZone && hostTimeZone !== timeZone && (
-                <p className="host-local-time user-content">
-                  {t("That's {time} for the host", {
-                    time: t('{date}, {time}', {
-                      date: formatDate(Date.parse(slot.start), hostTimeZone, locale),
-                      time: formatTime(Date.parse(slot.start), hostTimeZone, locale),
-                    }),
-                  })}
-                </p>
-              )}
+              {hostTimeZone &&
+                isKnownTimeZone(hostTimeZone) &&
+                offsetAt(Date.parse(slot.start), hostTimeZone) !==
+                  offsetAt(Date.parse(slot.start), timeZone) && (
+                  <p className="host-local-time user-content">
+                    {t("That's {time} for the host", {
+                      time: t('{date}, {time}', {
+                        date: formatDate(Date.parse(slot.start), hostTimeZone, locale),
+                        time: formatTime(Date.parse(slot.start), hostTimeZone, locale),
+                      }),
+                    })}
+                  </p>
+                )}
               <button type="button" className="button button-small" onClick={changeTime}>
                 {t('Change time')}
               </button>
