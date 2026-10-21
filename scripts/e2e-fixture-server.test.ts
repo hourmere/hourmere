@@ -39,6 +39,7 @@ async function exercise(start: Start = startFixtureServer, leaveBackendOpen = fa
       incoming.on('data', (chunk) => body.push(chunk))
       incoming.on('end', () => {
         response.setHeader('Location', `${env.PUBLIC_URL}/next`)
+        response.setHeader('Content-Type', 'application/json')
         response.end(
           JSON.stringify({
             method: incoming.method,
