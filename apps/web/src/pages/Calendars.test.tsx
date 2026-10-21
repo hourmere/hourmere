@@ -500,11 +500,13 @@ describe('the calendars page', () => {
   )
 
   it.each([
-    ['en', 'Check this calendar for conflicts', 'Write new bookings here'],
-    ['zh-CN', '检查此日历的冲突', '将新预约写入此日历'],
+    ['en', 'Check this calendar for conflicts', 'Write new bookings here', false],
+    ['en', 'Check this calendar for conflicts', 'Stop writing bookings here', true],
+    ['zh-CN', '检查此日历的冲突', '将新预约写入此日历', false],
+    ['zh-CN', '检查此日历的冲突', '停止向此日历写入预约', true],
   ] as const)(
-    'keeps calendar names literal and controls in separate wrapping rows in %s',
-    async (language, conflictLabel, writeLabel) => {
+    'keeps calendar names literal and %s controls in separate wrapping rows: %s, %s',
+    async (language, conflictLabel, writeLabel, destination) => {
       const user = userEvent.setup()
       const name = `Settings-${'long-calendar-name'.repeat(8)}`
       const calendar = {
@@ -514,7 +516,12 @@ describe('the calendars page', () => {
       fakeApi({
         ...signedIn,
         ...profile(),
-        ...list([{ ...connection, syncAuthorized: true, calendars: [calendar] }]),
+        ...list(
+          [{ ...connection, syncAuthorized: true, calendars: [calendar] }],
+          true,
+          false,
+          destination ? calendar.id : null,
+        ),
       })
       const sheet = document.createElement('style')
       sheet.textContent = styles
@@ -540,6 +547,7 @@ describe('the calendars page', () => {
         expect(getComputedStyle(group).display).toBe('grid')
         expect(getComputedStyle(group).gridTemplateColumns).toBe('minmax(0, 1fr)')
         expect(getComputedStyle(write).maxWidth).toBe('100%')
+        expect(getComputedStyle(write).whiteSpace).toBe('normal')
         expect(getComputedStyle(write).overflowWrap).toBe('anywhere')
       } finally {
         sheet.remove()
