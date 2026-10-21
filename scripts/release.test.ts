@@ -474,7 +474,7 @@ describe('release publication checklist', () => {
     for (const file of [
       'README.md:2',
       'apps/site/src/content/docs/docs/self-hosting.md:8',
-      'apps/site/src/legal-content.test.ts:79',
+      'apps/site/src/legal-content.test.ts:80',
       'scripts/deploy-docs.test.ts',
       'scripts/restore-env.test.ts',
     ]) {
