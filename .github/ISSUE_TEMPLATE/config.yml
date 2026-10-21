@@ -1,5 +1,8 @@
 blank_issues_enabled: false
 contact_links:
+  - name: Questions and help
+    url: https://hourmere.com/docs
+    about: For questions and help, read the docs or email support@hourmere.com. Use issues only for bug reports and feature requests.
   - name: Report a security vulnerability
     url: https://github.com/hourmere/hourmere/security/policy
     about: Please report vulnerabilities privately as described in SECURITY.md, not in a public issue.
