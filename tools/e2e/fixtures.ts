@@ -918,9 +918,9 @@ export const test = base.extend<{
           }
           await appListener?.assertClosed()
           await parentListener?.assertClosed()
-          console.log('Fixture cleanup verified: database absent and owned listeners closed')
         }
       }
+      console.log('Fixture cleanup verified: database absent and owned listeners closed')
     }
   },
 })

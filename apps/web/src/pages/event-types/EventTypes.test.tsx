@@ -1,4 +1,4 @@
-import { createEvent, fireEvent, screen, within } from '@testing-library/react'
+import { createEvent, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { EventType } from '../../api/resources.ts'
@@ -1585,13 +1585,21 @@ describe('event type booking link previews', () => {
 
 it('keeps the event type editor inside the app shell while its skeleton loads', async () => {
   const loading = later()
-  eventTypeServer([eventType()], {
+  const answered = vi.fn()
+  void loading.response.then(answered)
+  const api = eventTypeServer([eventType()], {
     [`GET /api/v1/event-types/${EVENT_TYPE_ID}`]: () => loading.response,
   })
   renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
-  const skeleton = await screen.findByRole('status', { name: 'Loading…' })
+  // AdminLoading uses the same label before the session and lazy route are ready.
+  await screen.findByRole('navigation', { name: 'Main' })
+  await waitFor(() => expect(api.to(`GET /api/v1/event-types/${EVENT_TYPE_ID}`)).toHaveLength(1))
+  const skeleton = await within(screen.getByRole('main')).findByRole('status', {
+    name: 'Loading…',
+  })
   expect(skeleton.classList.contains('page-skeleton')).toBe(true)
-  expect(screen.getByRole('navigation', { name: 'Main' })).toBeDefined()
+  expect(skeleton.closest('[aria-busy="true"]')).toBeNull()
+  expect(answered).not.toHaveBeenCalled()
   await loading.answer(json(200, eventType()))
   expect(screen.getByRole('heading', { name: 'Edit “Intro call”', level: 1 })).toBeDefined()
 })
