@@ -81,7 +81,7 @@ describe('comparison review information', () => {
         '[self-hosting guide](/docs/self-hosting) installs the published image pinned to an exact release version',
       )
       expect(intro).toContain('building from source remains an alternative')
-      expect(intro).not.toMatch(/no prebuilt public image is published/)
+      expect(intro).not.toMatch(/no prebuilt public image is published/i)
       expect(intro).toContain('](/docs/self-hosting)')
       expect(intro).not.toMatch(/not yet ready to use|Cloud has not launched/)
     })
