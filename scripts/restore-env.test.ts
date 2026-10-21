@@ -18,12 +18,14 @@ const rewrites = Array.from(
   }),
 )
 const hasCompose = spawnSync('docker', ['compose', 'version'], { encoding: 'utf8' }).status === 0
-const selection = 'docker-compose.yml:docker-compose.proxy.yml:docker-compose.worker.yml'
+const sourceSelection = 'docker-compose.yml:docker-compose.proxy.yml:docker-compose.worker.yml'
 
 function rewrite(awk: string, assignment: string) {
   const directory = mkdtempSync(join(tmpdir(), 'hourmere-restore-env-'))
   try {
-    writeFileSync(join(directory, '.env'), `${assignment}\nKEEP=value\n`, { mode: 0o600 })
+    writeFileSync(join(directory, '.env'), `${assignment}\nHOURMERE_VERSION=1.0.0\nKEEP=value\n`, {
+      mode: 0o600,
+    })
     const result = spawnSync('awk', [awk, '.env'], { cwd: directory, encoding: 'utf8' })
     expect(result.status, result.stderr).toBe(0)
     return result.stdout
@@ -37,6 +39,7 @@ function services(env: string) {
   try {
     for (const file of [
       'docker-compose.yml',
+      'docker-compose.image.yml',
       'docker-compose.proxy.yml',
       'docker-compose.worker.yml',
     ]) {
@@ -69,12 +72,31 @@ it('finds both documented environment rewrites', () => {
   expect(rewrites).toHaveLength(2)
 })
 
-describe.each(rewrites)('$name environment rewrite', ({ awk }) => {
+describe.each(
+  rewrites.flatMap((rewrite) => [
+    { ...rewrite, selection: sourceSelection, published: false },
+    {
+      ...rewrite,
+      name: `${rewrite.name} (image)`,
+      selection: sourceSelection.replace(
+        'docker-compose.yml:',
+        'docker-compose.yml:docker-compose.image.yml:',
+      ),
+      published: true,
+    },
+  ]),
+)('$name environment rewrite', ({ awk, selection, published }) => {
+  it('keeps the exact backed-up application version', () => {
+    expect(rewrite(awk, `COMPOSE_FILE=${selection}`)).toContain('HOURMERE_VERSION=1.0.0\n')
+    if (published)
+      expect(rewrite(awk, `COMPOSE_FILE=${selection}`)).toContain('docker-compose.image.yml')
+  })
+
   it.each([selection, `'${selection}'`, `"${selection}"`])(
     'preserves the worker selected by COMPOSE_FILE=%s',
     (value) => {
       const output = rewrite(awk, `COMPOSE_FILE=${value}`)
-      expect(output).toBe(`KEEP=value\nCOMPOSE_FILE=${selection}\n`)
+      expect(output).toBe(`HOURMERE_VERSION=1.0.0\nKEEP=value\nCOMPOSE_FILE=${selection}\n`)
     },
   )
 
@@ -84,10 +106,10 @@ describe.each(rewrites)('$name environment rewrite', ({ awk }) => {
     // The old exported assignment survives, then the new non-worker value wins in
     // Compose. Make this limitation explicit so operators normalize before restoring.
     expect(output).toBe(
-      `${assignment}\nKEEP=value\nCOMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml\n`,
+      `${assignment}\nHOURMERE_VERSION=1.0.0\nKEEP=value\nCOMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml\n`,
     )
     expect(rewrite(awk, assignment.replace(/^export /, ''))).toBe(
-      `KEEP=value\nCOMPOSE_FILE=${selection}\n`,
+      `HOURMERE_VERSION=1.0.0\nKEEP=value\nCOMPOSE_FILE=${selection}\n`,
     )
   })
 

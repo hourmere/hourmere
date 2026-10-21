@@ -123,7 +123,7 @@ describe('deployment paste skip wiring', () => {
       const ptyTests = json.testResults
         .flatMap((suite) => suite.assertionResults)
         .filter((test) => /zsh PTY paste|pastes a plain-mode/.test(test.fullName))
-      expect(ptyTests).toHaveLength(20)
+      expect(ptyTests).toHaveLength(28)
       expect(
         ptyTests.every((test) => test.status === 'skipped'),
         output,

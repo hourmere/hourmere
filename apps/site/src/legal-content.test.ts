@@ -71,13 +71,17 @@ describe('comparison review information', () => {
       }
     })
 
-    it(`${page} states preview, image and self-hosted release limits in its sourced introduction`, () => {
+    it(`${page} states preview, published-image and self-hosted release limits in its sourced introduction`, () => {
       const source = read(`./content/docs/docs/${page}`)
       const intro = source.split(/^## /m)[0] ?? ''
       expect(intro).toMatch(/\[invitation-only preview\]\(\/#faq\) with sign-ups closed/)
       expect(intro).toContain('planned for November 30, 2026')
       expect(intro).not.toMatch(/README/)
-      expect(intro).toMatch(/no prebuilt public image is published/)
+      expect(intro.replace(/\s+/g, ' ')).toContain(
+        '[self-hosting guide](/docs/self-hosting) installs the published image pinned to an exact release version',
+      )
+      expect(intro).toContain('building from source remains an alternative')
+      expect(intro).not.toMatch(/no prebuilt public image is published/)
       expect(intro).toContain('](/docs/self-hosting)')
       expect(intro).not.toMatch(/not yet ready to use|Cloud has not launched/)
     })
