@@ -206,7 +206,7 @@ describe('production fixture source-copy negative controls', () => {
   })
   it('detects removal of the owned backend closure guard', async () => {
     const copy = sourceCopy([
-      'await backend.close(() => running.close())\n        await backend.assertClosed()',
+      'await backend.close(() => running.close())\n          await backend.assertClosed()',
       'await running.close()',
     ])
     await expect(exercise(copy, true)).rejects.toThrow()

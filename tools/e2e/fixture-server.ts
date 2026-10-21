@@ -90,10 +90,13 @@ export async function startFixtureServer(
     port: listener.port,
     close() {
       closing ??= (async () => {
-        for (const socket of outbound) socket.destroy()
-        await Promise.all(pendingClose)
-        await backend.close(() => running.close())
-        await backend.assertClosed()
+        try {
+          await backend.close(() => running.close())
+          await backend.assertClosed()
+        } finally {
+          for (const socket of outbound) socket.destroy()
+          await Promise.all(pendingClose)
+        }
         if (outbound.size || pendingClose.size)
           throw new Error('The fixture must release its outbound proxy connections')
       })()

@@ -1,5 +1,11 @@
 import assert from 'node:assert/strict'
+import { Server as HttpServer } from 'node:http'
 import type { Server, Socket } from 'node:net'
+import {
+  closeServer,
+  DEFAULT_SHUTDOWN_TIMING,
+  type ShutdownTiming,
+} from '../../apps/server/src/shutdown.ts'
 
 export interface TrackedListener<T extends Server = Server> {
   server: T
@@ -13,7 +19,10 @@ export interface OwnedListener<T extends Server = Server> extends TrackedListene
 }
 
 /** Track the object we own, never a port number that another worker can reuse. */
-export function trackOwned<T extends Server>(server: T): TrackedListener<T> {
+export function trackOwned<T extends Server>(
+  server: T,
+  timing: ShutdownTiming = DEFAULT_SHUTDOWN_TIMING,
+): TrackedListener<T> {
   const sockets = new Set<Socket>()
   let closeCompleted = false,
     closeEmitted = false,
@@ -43,21 +52,33 @@ export function trackOwned<T extends Server>(server: T): TrackedListener<T> {
     assertClosed,
     close(shutdown) {
       closing ??= (async () => {
-        // Stop accepting first, then terminate even upgraded/non-HTTP connections.
-        // A supplied shutdown (startServer.close) awaits the same native close callback.
-        const completion = shutdown
-          ? shutdown()
-          : new Promise<void>((resolve, reject) =>
-              server.close((error) => (error ? reject(error) : resolve())),
-            )
-        const disconnected = [...sockets].map((socket) => {
-          const done = new Promise<void>((resolve) => socket.once('close', resolve))
-          socket.destroy()
-          return done
-        })
-        await completion
-        closeCompleted = true
-        await Promise.all(disconnected)
+        const disconnected: Promise<void>[] = []
+        const disconnect = () => {
+          for (const socket of sockets) {
+            disconnected.push(new Promise<void>((resolve) => socket.once('close', resolve)))
+            socket.destroy()
+          }
+        }
+        let cutoff: ReturnType<typeof setTimeout> | undefined
+        try {
+          // Preserve in-flight HTTP work before pools close. The additional cutoff
+          // also covers upgraded sockets, which closeAllConnections omits.
+          const completion = shutdown
+            ? shutdown()
+            : server instanceof HttpServer
+              ? closeServer(server, timing)
+              : new Promise<void>((resolve, reject) =>
+                  server.close((error) => (error ? reject(error) : resolve())),
+                )
+          if (!shutdown && !(server instanceof HttpServer)) disconnect()
+          else cutoff = setTimeout(disconnect, timing.cutoffMs)
+          await completion
+          closeCompleted = true
+        } finally {
+          clearTimeout(cutoff)
+          disconnect()
+          await Promise.all(disconnected)
+        }
         await assertClosed()
         server.off('connection', connected)
         server.off('close', closed)

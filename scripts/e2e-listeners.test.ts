@@ -1,24 +1,33 @@
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
 import { readFileSync } from 'node:fs'
-import { createServer, get } from 'node:http'
+import { createServer, get, Server as HttpServer } from 'node:http'
 import { stripTypeScriptTypes } from 'node:module'
-import { createConnection, type Server, type Socket } from 'node:net'
+import {
+  createConnection,
+  createServer as createTcpServer,
+  type Server,
+  type Socket,
+} from 'node:net'
 import { getRequestListener } from '@hono/node-server'
 import { describe, expect, it, vi } from 'vitest'
+import { closeServer, DEFAULT_SHUTDOWN_TIMING } from '../apps/server/src/shutdown.ts'
 import { listenOwned, trackOwned } from '../tools/e2e/listeners.ts'
 
 type Helpers = { listenOwned: typeof listenOwned; trackOwned: typeof trackOwned }
 function sourceCopy(replacement: [string, string]): Helpers {
   let source = readFileSync('tools/e2e/listeners.ts', 'utf8')
   expect(source.includes(replacement[0]), 'mutation must match source').toBe(true)
-  source = source.replace(...replacement).replace(/^import .*\n/gm, '')
+  source = source.replace(...replacement).replace(/^import[\s\S]*? from ['"].+?['"]\n/gm, '')
   source = stripTypeScriptTypes(source).replace(/\bexport (?=(?:async )?function)/g, '')
   return new Function(
     'assert',
     'createConnection',
+    'HttpServer',
+    'closeServer',
+    'DEFAULT_SHUTDOWN_TIMING',
     `${source}; return { listenOwned, trackOwned }`,
-  )(assert, createConnection) as Helpers
+  )(assert, createConnection, HttpServer, closeServer, DEFAULT_SHUTDOWN_TIMING) as Helpers
 }
 
 async function verifyLiveHandoff(bind = listenOwned) {
@@ -62,7 +71,7 @@ async function verifyExcluded(bind = listenOwned, port = 3998) {
 }
 
 async function verifyCloseError(track = trackOwned) {
-  const server = createServer()
+  const server = createTcpServer()
   const nativeClose = server.close.bind(server)
   const owned = track(server)
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
@@ -104,13 +113,12 @@ async function verifyInvariant(
     server.emit('close')
     await expect(owned.assertClosed()).rejects.toThrow('close callback')
   } else if (state === 'tracked') {
-    // Add an accepted connection during the callback, after the destruction snapshot.
+    // Inject a late accept after final disconnection, before the completion assertion.
     const socket = new EventEmitter()
     await expect(
       owned.close(async () => {
         await new Promise<void>((resolve) => server.close(() => resolve()))
-        await Promise.resolve()
-        server.emit('connection', socket as Socket)
+        queueMicrotask(() => queueMicrotask(() => server.emit('connection', socket as Socket)))
       }),
     ).rejects.toThrow('tracked connection')
   } else {
@@ -146,7 +154,97 @@ async function verifyPortReuse(bind = listenOwned) {
   }
 }
 
+async function verifyHttpDrain(track = trackOwned) {
+  let begin!: () => void, release!: () => void, accepted: Socket | undefined
+  const started = new Promise<void>((resolve) => {
+    begin = resolve
+  })
+  const ready = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  let finished = false
+  const server = createServer(async (request, response) => {
+    accepted = request.socket
+    begin()
+    await ready
+    finished = true
+    response.end('complete response')
+  })
+  const owned = track(server, { sweepMs: 5, cutoffMs: 1000 })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  if (!address || typeof address === 'string') throw new Error('No HTTP test port')
+  const response = new Promise<string>((resolve, reject) => {
+    const outgoing = get(`http://127.0.0.1:${address.port}`, { agent: false }, (incoming) => {
+      const chunks: Buffer[] = []
+      incoming.on('data', (chunk) => chunks.push(chunk))
+      incoming.on('end', () => resolve(Buffer.concat(chunks).toString()))
+    })
+    outgoing.once('error', reject)
+  })
+  void response.catch(() => {})
+  let closing: Promise<void> | undefined
+  try {
+    await started
+    closing = owned.close()
+    void closing.catch(() => {})
+    expect(accepted?.destroyed, 'Active HTTP requests must drain before disconnecting').toBe(false)
+    release()
+    expect(await response).toBe('complete response')
+    await closing
+    expect(finished).toBe(true)
+  } finally {
+    release()
+    server.closeAllConnections()
+    await Promise.allSettled([response, closing])
+    if (server.listening) await owned.close()
+  }
+}
+
+async function verifyUpgradeCutoff(track = trackOwned) {
+  const server = createServer()
+  const owned = track(server, { sweepMs: 5, cutoffMs: 10 })
+  let upgraded!: () => void, accepted: Socket | undefined
+  const started = new Promise<void>((resolve) => {
+    upgraded = resolve
+  })
+  server.on('upgrade', (_request, socket) => {
+    accepted = socket as Socket
+    socket.write(
+      'HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: fixture\r\n\r\n',
+    )
+    upgraded()
+  })
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  if (!address || typeof address === 'string') throw new Error('No upgrade port')
+  const client = createConnection({ host: '127.0.0.1', port: address.port })
+  client.on('error', () => {})
+  client.resume()
+  let closing: Promise<void> | undefined
+  try {
+    client.write(
+      'GET / HTTP/1.1\r\nHost: localhost\r\nConnection: Upgrade\r\nUpgrade: fixture\r\n\r\n',
+    )
+    await started
+    closing = owned.close()
+    void closing.catch(() => {})
+    await new Promise((resolve) => setTimeout(resolve, 40))
+    expect(accepted?.destroyed, 'The cutoff must disconnect upgraded HTTP sockets').toBe(true)
+    await closing
+    await owned.assertClosed()
+  } finally {
+    accepted?.destroy()
+    client.destroy()
+    await Promise.allSettled([closing])
+    if (server.listening) await owned.close()
+  }
+}
+
 describe('fixture-owned listeners', () => {
+  it('drains active HTTP requests before disconnecting', () => verifyHttpDrain())
+  it('bounds upgraded HTTP connections that native closeAllConnections omits', () =>
+    verifyUpgradeCutoff())
   it('keeps the actual listener bound while its handler is constructed', () => verifyLiveHandoff())
   it.each([3000, 3998])('excludes port %i without closing and retrying', (port) =>
     verifyExcluded(listenOwned, port),
@@ -188,6 +286,17 @@ describe('fixture-owned listeners', () => {
 })
 
 describe('source-copy negative controls', () => {
+  it('detects treating HTTP shutdown as immediate raw TCP destruction', async () => {
+    const copy = sourceCopy([
+      'if (!shutdown && !(server instanceof HttpServer)) disconnect()',
+      'if (!shutdown) disconnect()',
+    ])
+    await expect(verifyHttpDrain(copy.trackOwned)).rejects.toThrow('Active HTTP requests')
+  })
+  it('detects removal of the upgraded-socket cutoff', async () => {
+    const copy = sourceCopy(['else cutoff = setTimeout(disconnect, timing.cutoffMs)', ''])
+    await expect(verifyUpgradeCutoff(copy.trackOwned)).rejects.toThrow('cutoff must disconnect')
+  })
   it('deterministically detects restoring the old port-based teardown probe', async () => {
     const copy = sourceCopy([
       // biome-ignore lint/suspicious/noTemplateCurlyInString: Match the literal TypeScript source.
