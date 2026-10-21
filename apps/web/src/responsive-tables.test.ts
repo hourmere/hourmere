@@ -118,6 +118,9 @@ describe('responsive table CSS contract', () => {
     const when = rule(narrow, '.table-bookings td.booking-when')
     expect(when).toContain('grid-template-columns: minmax(0, 1fr);')
     expect(when).toContain('gap: 0;')
+    expect(rule(narrow, '.table-bookings .booking-when time')).toContain(
+      'font-size: var(--text-sm);',
+    )
     expect(rule(narrow, '.table-bookings .booking-when time .nowrap')).toContain('display: block;')
     expect(rule(styles, '.nowrap')).toContain('white-space: nowrap;')
     // The overrides are scoped to the smallest cards, leaving ordinary table geometry intact.

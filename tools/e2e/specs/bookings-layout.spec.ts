@@ -32,12 +32,15 @@ for (const locale of ['en-US', 'zh-CN', 'en-GB'] as const) {
       const value = cell.querySelector('.table-value') as HTMLElement
       const pieces = [...cell.querySelectorAll('time > .nowrap')] as HTMLElement[]
       const originals = pieces.map((piece) => piece.textContent)
+      let maxTextWidth = 0
       const measure = () => {
         const valueBox = value.getBoundingClientRect()
         const boxes = pieces.map((piece) => {
           const range = document.createRange()
           range.selectNodeContents(piece)
-          return { text: range.getBoundingClientRect(), lines: range.getClientRects().length }
+          const text = range.getBoundingClientRect()
+          maxTextWidth = Math.max(maxTextWidth, text.width)
+          return { text, lines: range.getClientRects().length }
         })
         return {
           fits: boxes.every(
@@ -68,10 +71,15 @@ for (const locale of ['en-US', 'zh-CN', 'en-GB'] as const) {
       return {
         loadedFits,
         fallbackFits,
+        maxTextWidth,
         width: value.getBoundingClientRect().width,
         documentFits: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
       }
     }, samples)
+    expect(
+      geometry.maxTextWidth + 8,
+      'Widest date/time piece retains room for platform font variation',
+    ).toBeLessThanOrEqual(geometry.width)
     expect(geometry, 'Every fixed date and overnight range fits with loaded fonts').toMatchObject({
       loadedFits: true,
     })

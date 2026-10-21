@@ -1211,6 +1211,10 @@ input[readonly] {
     gap: 0;
   }
 
+  .table-bookings .booking-when time {
+    font-size: var(--text-sm);
+  }
+
   .table-bookings .booking-when time .nowrap {
     display: block;
   }
