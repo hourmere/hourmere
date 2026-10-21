@@ -98,7 +98,7 @@ describe.skipIf(!url)('calendar connection and booking lock compatibility', () =
           check_conflicts: true,
           last_synced_at: new Date(now),
           sync_state: JSON.stringify({
-            version: 1,
+            version: 2,
             timeZone: 'UTC',
             token: 'synthetic-cursor',
             start: day.subtract({ hours: 72 }).toString(),

@@ -117,6 +117,83 @@ describe.skipIf(!url)('Google sync authorization and fail-closed guards (real Po
     expect((await calendar()).last_synced_at).toBeNull()
   })
 
+  it.each([1, null])(
+    'rebuilds legacy busy ranges after a v1 worker or migration invalidation (version=%s)',
+    async (version) => {
+      const day = instant('2026-11-01T00:00:00Z')
+      await db
+        .updateTable('calendars')
+        .set({
+          sync_state:
+            version === null
+              ? null
+              : JSON.stringify({
+                  version,
+                  start: day.subtract({ hours: 72 }).toString(),
+                  end: day.add({ hours: 403 * 24 }).toString(),
+                  token: 'legacy-cursor',
+                  timeZone: 'UTC',
+                }),
+          last_synced_at: version === null ? null : new Date(now),
+        })
+        .where('id', '=', calendarId)
+        .execute()
+      await db
+        .insertInto('calendar_busy')
+        .values(
+          ['all-day', 'removed'].map((id) => ({
+            calendar_id: calendarId,
+            external_event_id: id,
+            period: '[2026-11-01T16:00:00Z,2026-11-02T16:00:00Z)',
+          })),
+        )
+        .execute()
+      await expect(availability()).rejects.toMatchObject({ code: 'calendar_sync_unavailable' })
+      provider.controls.eventHook = async (request) =>
+        Response.json({
+          items: request.searchParams.has('syncToken')
+            ? []
+            : [{ id: 'all-day', start: { date: '2026-11-02' }, end: { date: '2026-11-03' } }],
+          nextSyncToken: 'rebuilt-cursor',
+        })
+
+      await syncGoogleCalendar(deps, calendarId)
+
+      expect(provider.calls.at(-1)?.url.searchParams.has('syncToken')).toBe(false)
+      expect(
+        await db
+          .selectFrom('calendar_busy')
+          .select(['external_event_id', 'period', 'all_day_start', 'all_day_end'])
+          .where('calendar_id', '=', calendarId)
+          .execute(),
+      ).toEqual([
+        {
+          external_event_id: 'all-day',
+          period: null,
+          all_day_start: '2026-11-02',
+          all_day_end: '2026-11-03',
+        },
+      ])
+      expect((await calendar()).sync_state).toMatchObject({ version: 2, token: 'rebuilt-cursor' })
+      await expect(availability()).resolves.toBeDefined()
+    },
+  )
+
+  it('accepts a v2 snapshot for availability and incremental synchronization', async () => {
+    provider.controls.eventPages = [{ items: [timed('retained')], nextSyncToken: 'v2-cursor' }]
+    await syncGoogleCalendar(deps, calendarId)
+    expect((await calendar()).sync_state).toMatchObject({ version: 2, token: 'v2-cursor' })
+    await expect(availability()).resolves.toBeDefined()
+    provider.controls.eventPages = [{ items: [], nextSyncToken: 'next-v2-cursor' }]
+
+    await syncGoogleCalendar(deps, calendarId)
+
+    expect(provider.calls.at(-1)?.url.searchParams.get('syncToken')).toBe('v2-cursor')
+    expect(await busy()).toEqual([{ external_event_id: 'retained' }])
+    expect((await calendar()).sync_state).toMatchObject({ version: 2, token: 'next-v2-cursor' })
+    await expect(availability()).resolves.toBeDefined()
+  })
+
   it('invalidates fresh availability immediately when a provider sync fails', async () => {
     provider.controls.eventPages = [{ items: [timed('retained')], nextSyncToken: 'before' }]
     await syncGoogleCalendar(deps, calendarId)
@@ -176,10 +253,10 @@ describe.skipIf(!url)('Google sync authorization and fail-closed guards (real Po
     await syncGoogleCalendar(deps, calendarId)
     const request = provider.calls.at(-1)?.url
     expect(request?.searchParams.has('syncToken')).toBe(false)
-    expect(request?.searchParams.get('timeMin')).toBe('2026-10-30T00:00:00Z')
+    expect(request?.searchParams.get('timeMin')).toBe('2026-10-28T00:00:00Z')
     expect(request?.searchParams.get('timeMax')).toBe(
       instant('2026-11-02T00:00:00Z')
-        .add({ hours: 403 * 24 })
+        .add({ hours: 405 * 24 })
         .toString(),
     )
     expect(await busy()).toEqual([{ external_event_id: 'new-day' }])
@@ -258,6 +335,111 @@ describe.skipIf(!url)('Google sync authorization and fail-closed guards (real Po
     provider.controls.eventPages = [
       {
         items: [timed('inside', end.toString(), end.add({ hours: 1 }).toString())],
+        nextSyncToken: 'after',
+      },
+    ]
+    await syncGoogleCalendar(deps, calendarId)
+    expect(await busy()).toEqual([
+      { external_event_id: 'cross-end' },
+      { external_event_id: 'cross-start' },
+    ])
+  })
+  it.each([
+    { calendarZone: 'Pacific/Kiritimati', edge: 'start' },
+    { calendarZone: 'Etc/GMT+12', edge: 'end' },
+  ])(
+    'fetches and retains all-day dates at the $edge coverage edge from $calendarZone',
+    async ({ calendarZone, edge }) => {
+      const coverageStart = instant('2026-10-29T00:00:00Z')
+      const coverageEnd = instant('2026-11-01T00:00:00Z').add({ hours: 403 * 24 })
+      const startDate = (edge === 'start' ? coverageStart.subtract({ hours: 24 }) : coverageEnd)
+        .toZonedDateTimeISO('UTC')
+        .toPlainDate()
+      const endDate = startDate.add({ days: 1 })
+      provider.controls.eventHook = async (request) => {
+        const sourceStart = startDate.toZonedDateTime(calendarZone).toInstant()
+        const sourceEnd = endDate.toZonedDateTime(calendarZone).toInstant()
+        const retained =
+          Temporal.Instant.compare(
+            sourceEnd,
+            instant(request.searchParams.get('timeMin') as string),
+          ) > 0 &&
+          Temporal.Instant.compare(
+            sourceStart,
+            instant(request.searchParams.get('timeMax') as string),
+          ) < 0
+        return Response.json({
+          timeZone: calendarZone,
+          items: retained
+            ? [
+                {
+                  id: 'edge-day',
+                  start: { date: startDate.toString() },
+                  end: { date: endDate.toString() },
+                },
+              ]
+            : [],
+          nextSyncToken: 'edge',
+        })
+      }
+      await syncGoogleCalendar(deps, calendarId)
+      expect(
+        await db
+          .selectFrom('calendar_busy')
+          .select(['external_event_id', 'period', 'all_day_start', 'all_day_end'])
+          .where('calendar_id', '=', calendarId)
+          .execute(),
+      ).toEqual([
+        {
+          external_event_id: 'edge-day',
+          period: null,
+          all_day_start: startDate.toString(),
+          all_day_end: endDate.toString(),
+        },
+      ])
+      const request = provider.calls.at(-1)?.url
+      expect(request?.searchParams.get('timeMin')).toBe(
+        coverageStart.subtract({ hours: 48 }).toString(),
+      )
+      expect(request?.searchParams.get('timeMax')).toBe(coverageEnd.add({ hours: 48 }).toString())
+      expect((await calendar()).sync_state).toMatchObject({
+        start: coverageStart.toString(),
+        end: coverageEnd.toString(),
+      })
+    },
+  )
+
+  it('bounds all-day date snapshots and removes date deltas that leave the window', async () => {
+    const end = instant('2026-11-01T00:00:00Z')
+      .add({ hours: 403 * 24 })
+      .toZonedDateTimeISO('UTC')
+      .toPlainDate()
+    const day = (id: string, start: string, end: string) => ({
+      id,
+      start: { date: start },
+      end: { date: end },
+    })
+    provider.controls.eventPages = [
+      {
+        items: [
+          day('before', '2026-10-27', '2026-10-28'),
+          day('cross-start', '2026-10-27', '2026-10-29'),
+          day('cross-end', end.toString(), end.add({ days: 2 }).toString()),
+          day('after', end.add({ days: 1 }).toString(), end.add({ days: 2 }).toString()),
+          day('inside', '2026-11-10', '2026-11-11'),
+        ],
+        nextSyncToken: 'before',
+      },
+    ]
+    await syncGoogleCalendar(deps, calendarId)
+    expect(await busy()).toEqual([
+      { external_event_id: 'cross-end' },
+      { external_event_id: 'cross-start' },
+      { external_event_id: 'inside' },
+    ])
+    provider.controls.eventPages = [
+      {
+        items: [day('inside', end.add({ days: 1 }).toString(), end.add({ days: 2 }).toString())],
         nextSyncToken: 'after',
       },
     ]

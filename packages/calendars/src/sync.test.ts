@@ -2,6 +2,7 @@ import type { Principal } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createJobs } from '@hourmere/jobs'
+import { sql } from 'kysely'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { buildAvailabilityInput } from '../../scheduling/src/availability.ts'
 import { createPublicBooking } from '../../scheduling/src/bookings.ts'
@@ -35,6 +36,11 @@ const timed = (id: string, start = '2026-11-02T10:00:00Z', end = '2026-11-02T11:
   id,
   start: { dateTime: start },
   end: { dateTime: end },
+})
+const allDay = (id: string, start = '2026-11-10', end = '2026-11-11') => ({
+  id,
+  start: { date: start },
+  end: { date: end },
 })
 describe.skipIf(!url)('Google busy and booking synchronization (real Postgres)', () => {
   let database: TestDatabase
@@ -344,6 +350,107 @@ describe.skipIf(!url)('Google busy and booking synchronization (real Postgres)',
     expect(call?.searchParams.get('syncToken')).toBe('first')
     expect(call?.searchParams.has('timeMin')).toBe(false)
   })
+  it.each(['Asia/Shanghai', 'America/New_York'])(
+    'preserves all-day dates from a %s calendar without making calendar-zone instants',
+    async (timeZone) => {
+      await select()
+      provider.controls.eventPages = [
+        { timeZone, items: [allDay('days', '2026-11-10', '2026-11-13')], nextSyncToken: 'days' },
+      ]
+      await syncGoogleCalendar(deps, calendarId)
+      expect(await busy()).toEqual([
+        expect.objectContaining({
+          external_event_id: 'days',
+          period: null,
+          all_day_start: '2026-11-10',
+          all_day_end: '2026-11-13',
+        }),
+      ])
+    },
+  )
+  it('removes cancelled, transparent and self-declined all-day entries in deltas', async () => {
+    await select()
+    provider.controls.eventPages = [
+      { items: ['a', 'b', 'c', 'd'].map((id) => allDay(id)), nextSyncToken: 'before' },
+    ]
+    await syncGoogleCalendar(deps, calendarId)
+    expect(await busy()).toHaveLength(4)
+    provider.controls.eventPages = [
+      {
+        items: [
+          allDay('a'),
+          { id: 'b', status: 'cancelled' },
+          { ...allDay('c'), transparency: 'transparent' },
+          { ...allDay('d'), attendees: [{ self: true, responseStatus: 'declined' }] },
+        ],
+        nextSyncToken: 'after',
+      },
+    ]
+    await syncGoogleCalendar(deps, calendarId)
+    expect((await busy()).map((row) => row.external_event_id)).toEqual(['a'])
+  })
+  it('replaces both representations when a provider event changes between timed and all-day', async () => {
+    await select()
+    provider.controls.eventPages = [{ items: [timed('changing')], nextSyncToken: 'timed' }]
+    await expect(syncGoogleCalendar(deps, calendarId)).resolves.toBeUndefined()
+    expect((await busy())[0]).toMatchObject({
+      period: expect.stringContaining('2026-11-02 10:00:00'),
+      all_day_start: null,
+      all_day_end: null,
+    })
+    provider.controls.eventPages = [{ items: [allDay('changing')], nextSyncToken: 'day' }]
+    await expect(syncGoogleCalendar(deps, calendarId)).resolves.toBeUndefined()
+    expect((await busy())[0]).toMatchObject({
+      period: null,
+      all_day_start: '2026-11-10',
+      all_day_end: '2026-11-11',
+    })
+    provider.controls.eventPages = [
+      {
+        items: [timed('changing', '2026-11-10T09:00:00-08:00', '2026-11-10T10:00:00-08:00')],
+        nextSyncToken: 'timed-again',
+      },
+    ]
+    await expect(syncGoogleCalendar(deps, calendarId)).resolves.toBeUndefined()
+    expect((await busy())[0]).toMatchObject({
+      period: expect.stringContaining('2026-11-10 17:00:00'),
+      all_day_start: null,
+      all_day_end: null,
+    })
+  })
+  it('rebuilds invalidated legacy all-day ranges as dates on the next sync', async () => {
+    await select()
+    await db
+      .insertInto('calendar_busy')
+      .values(
+        ['all-day', 'stale-legacy'].map((id) => ({
+          calendar_id: calendarId,
+          external_event_id: id,
+          period: sql<string>`tstzrange('2026-11-09T16:00Z'::timestamptz,'2026-11-10T16:00Z'::timestamptz,'[)')`,
+        })),
+      )
+      .execute()
+    // The upgrade migration invalidates these fields because ranges cannot recover dates.
+    await db
+      .updateTable('calendars')
+      .set({ sync_state: null, last_synced_at: null })
+      .where('id', '=', calendarId)
+      .execute()
+    provider.controls.eventPages = [
+      { timeZone: 'Asia/Shanghai', items: [allDay('all-day')], nextSyncToken: 'rebuilt' },
+    ]
+    await syncGoogleCalendar(deps, calendarId)
+    const call = provider.calls.filter((c) => c.url.pathname.endsWith('/events')).at(-1)?.url
+    expect(call?.searchParams.has('syncToken')).toBe(false)
+    expect(await busy()).toEqual([
+      expect.objectContaining({
+        external_event_id: 'all-day',
+        period: null,
+        all_day_start: '2026-11-10',
+        all_day_end: '2026-11-11',
+      }),
+    ])
+  })
   it('preserves selected hidden calendars and their busy data and booking targets on list refresh', async () => {
     await select()
     await setCalendarDestination(deps, owner, calendarId)
@@ -421,7 +528,7 @@ describe.skipIf(!url)('Google busy and booking synchronization (real Postgres)',
     ).toMatchObject({ token: 'old' })
   })
   it.each([false, true])(
-    'rebuilds all-day intervals when the collection or list timezone changes (metadata=%s)',
+    'rebuilds offset-less timed intervals on collection/list timezone changes and keeps dates (metadata=%s)',
     async (refreshMetadata) => {
       await select()
       await db
@@ -429,8 +536,11 @@ describe.skipIf(!url)('Google busy and booking synchronization (real Postgres)',
         .set({ time_zone: 'UTC' })
         .where('id', '=', calendarId)
         .execute()
-      const day = { id: 'all-day', start: { date: '2026-11-02' }, end: { date: '2026-11-03' } }
-      provider.controls.eventPages = [{ timeZone: 'UTC', items: [day], nextSyncToken: 'utc' }]
+      const day = allDay('all-day', '2026-11-02', '2026-11-03')
+      const localTimed = timed('local-timed', '2026-11-02T10:00:00', '2026-11-02T11:00:00')
+      provider.controls.eventPages = [
+        { timeZone: 'UTC', items: [day, localTimed], nextSyncToken: 'utc' },
+      ]
       await syncGoogleCalendar(deps, calendarId)
       if (refreshMetadata)
         await db
@@ -441,12 +551,19 @@ describe.skipIf(!url)('Google busy and booking synchronization (real Postgres)',
       provider.controls.eventHook = async (url) =>
         Response.json({
           timeZone: 'America/Los_Angeles',
-          items: url.searchParams.has('syncToken') ? [] : [day],
+          items: url.searchParams.has('syncToken') ? [] : [day, localTimed],
           nextSyncToken: 'la',
         })
       await syncGoogleCalendar(deps, calendarId)
-      const row = (await busy())[0]
-      expect(row?.period).toContain('2026-11-03 08:00:00')
+      const rows = await busy()
+      expect(rows.find((row) => row.external_event_id === 'all-day')).toMatchObject({
+        period: null,
+        all_day_start: '2026-11-02',
+        all_day_end: '2026-11-03',
+      })
+      expect(rows.find((row) => row.external_event_id === 'local-timed')?.period).toContain(
+        '2026-11-02 18:00:00',
+      )
       expect(
         (
           await db
@@ -945,14 +1062,16 @@ describe.skipIf(!url)('Google busy and booking synchronization (real Postgres)',
 })
 
 describe('Google event time semantics', () => {
-  it('uses local all-day midnights across DST and keeps the end exclusive', () => {
-    expect(
-      eventPeriod(
-        { id: 'day', start: { date: '2026-03-08' }, end: { date: '2026-03-09' } },
-        'America/Los_Angeles',
-      ),
-    ).toEqual({ start: '2026-03-08T08:00:00Z', end: '2026-03-09T07:00:00Z' })
-  })
+  it.each([null, 'America/Los_Angeles', 'Asia/Shanghai', 'Europe/Berlin'])(
+    'keeps all-day dates and their exclusive end without interpreting timezone %s',
+    (zone) => {
+      expect(eventPeriod(allDay('day', '2026-03-08', '2026-03-10'), zone)).toEqual({
+        kind: 'all_day',
+        start: '2026-03-08',
+        end: '2026-03-10',
+      })
+    },
+  )
   it.each([
     { id: 'cancelled', status: 'cancelled' as const },
     { ...timed('transparent'), transparency: 'transparent' as const },
@@ -966,12 +1085,34 @@ describe('Google event time semantics', () => {
         timed('tiny', '2026-11-02T10:00:00.000000001Z', '2026-11-02T10:00:00.000000002Z'),
         'UTC',
       ),
-    ).toEqual({ start: '2026-11-02T10:00:00Z', end: '2026-11-02T10:00:00.001Z' })
+    ).toEqual({ kind: 'timed', start: '2026-11-02T10:00:00Z', end: '2026-11-02T10:00:00.001Z' })
   })
-  it('refuses incomplete intervals and a missing all-day timezone', () => {
+  it('keeps explicit timed offsets independent of the calendar timezone', () => {
+    expect(
+      eventPeriod(
+        timed('timed', '2026-11-10T09:00:00-08:00', '2026-11-10T10:00:00-08:00'),
+        'Asia/Shanghai',
+      ),
+    ).toEqual({ kind: 'timed', start: '2026-11-10T17:00:00Z', end: '2026-11-10T18:00:00Z' })
+  })
+  it('refuses incomplete intervals', () => {
     expect(() => eventPeriod({ id: 'broken' }, 'UTC')).toThrow()
-    expect(() =>
-      eventPeriod({ id: 'day', start: { date: '2026-03-08' }, end: { date: '2026-03-09' } }, null),
-    ).toThrow()
+  })
+  it.each([
+    allDay('impossible', '2026-02-30', '2026-03-02'),
+    allDay('malformed', '2026-2-01', '2026-03-02'),
+    allDay('zero-year', '0000-01-01', '0000-01-02'),
+    allDay('negative-year', '-000001-01-01', '2026-03-02'),
+    allDay('expanded-year', '2026-03-01', '+010000-03-02'),
+    allDay('empty', '2026-03-02', '2026-03-02'),
+    allDay('reversed', '2026-03-03', '2026-03-02'),
+    { id: 'mixed', start: { date: '2026-03-01' }, end: { dateTime: '2026-03-02T00:00:00Z' } },
+    {
+      id: 'ambiguous',
+      start: { date: '2026-03-01', dateTime: '2026-03-01T00:00:00Z' },
+      end: { date: '2026-03-02' },
+    },
+  ])('refuses malformed all-day dates or date ranges ($id)', (event) => {
+    expect(() => eventPeriod(event, 'UTC')).toThrow()
   })
 })
