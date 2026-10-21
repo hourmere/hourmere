@@ -11,6 +11,7 @@ staging=
 terminal_state=
 install_path=
 release_version=
+version_source=
 
 cleanup() {
   if [ -n "$terminal_state" ]; then
@@ -45,6 +46,7 @@ while [ "$#" -gt 0 ]; do
       [ "$#" -gt 1 ] && [ -n "$2" ] || fail '--version requires an exact release version.'
       [ -z "$release_version" ] || fail 'Pass --version only once.'
       release_version=$2
+      version_source=--version
       shift
       ;;
     --help|-h) usage; exit 0 ;;
@@ -147,23 +149,36 @@ if [ -z "$install_path" ]; then
 fi
 case "$install_path" in
   image)
-    release_version=${release_version:-${HOURMERE_VERSION:-}}
-    if [ -z "$release_version" ] && command -v git >/dev/null 2>&1; then
+    checked_out_version=
+    if command -v git >/dev/null 2>&1; then
       # An arbitrary main checkout is not a release. Never infer a nearby tag.
       release_tag=$(git -C "$repo" describe --tags --exact-match --match 'v[0-9]*' 2>/dev/null || :)
       case "$release_tag" in
         v*)
           if valid_version "${release_tag#v}"; then
-            release_version=${release_tag#v}
+            checked_out_version=${release_tag#v}
           fi
           ;;
       esac
     fi
+    if [ -z "$release_version" ] && [ -n "${HOURMERE_VERSION:-}" ]; then
+      release_version=$HOURMERE_VERSION
+      version_source=HOURMERE_VERSION
+    fi
+    if [ -z "$release_version" ] && [ -n "$checked_out_version" ]; then
+      release_version=$checked_out_version
+      version_source="the checked-out tag v$checked_out_version"
+    fi
     if [ -z "$release_version" ]; then
       prompt 'Exact published image version (for example 1.0.0): '
       release_version=$answer
+      version_source='the prompted version'
     fi
     valid_version "$release_version" || fail 'Use an exact release version such as 1.0.0 or 1.0.0-rc.1, without v, build metadata or a floating tag.'
+    # Keep the checked-out Compose files and scripts aligned with the application.
+    [ -z "$checked_out_version" ] || [ "$release_version" = "$checked_out_version" ] ||
+      fail "Selected image version $release_version from $version_source differs from checked-out tag v$checked_out_version. Check out the matching release tag before running setup."
+    printf 'Using image version %s from %s.\n' "$release_version" "$version_source"
     ;;
   source)
     [ -z "$release_version" ] || fail '--version is only supported for an image install.'

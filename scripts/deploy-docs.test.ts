@@ -148,11 +148,17 @@ async function executePastedCommands(
     proxy: hasProxy,
     failCommand = '',
     zshPty = false,
+    appImage = 'ghcr.io/hourmere/hourmere:X.Y.Z',
+    workerImage = 'ghcr.io/hourmere/hourmere:X.Y.Z',
+    shellVersion,
   }: {
     worker: boolean
     proxy: boolean
     failCommand?: string
     zshPty?: boolean
+    appImage?: string
+    workerImage?: string
+    shellVersion?: string
   },
 ) {
   if (!commands) throw new Error('Labelled instructions must include runnable commands')
@@ -184,6 +190,8 @@ case "$command" in
   'compose cp proxy:/config '*) command='compose cp proxy:/config' ;;
 esac
 ${rejectShellOverride}${log}case "$command" in
+  'compose config --images app') printf '%s\\n' postgres:18-alpine "\${HOURMERE_VERSION:+ghcr.io/hourmere/hourmere:}\${HOURMERE_VERSION:-$APP_IMAGE_OUTPUT}" ;;
+  'compose config --images worker') printf '%s\\n' postgres:18-alpine "\${HOURMERE_VERSION:+ghcr.io/hourmere/hourmere:}\${HOURMERE_VERSION:-$WORKER_IMAGE_OUTPUT}" ;;
   'compose config --services') printf '%s\\n' app db${hasProxy ? ' proxy' : ''}${enabled ? ' worker' : ''} ;;
   'compose exec -T db pg_dump -U hourmere -d hourmere -Fc') printf '%s\\n' synthetic-dump ;;
   'compose pull'|'compose pull proxy db'|'compose pull db'|'compose stop app'|'compose stop app worker'|'compose stop worker'|'compose stop app proxy'|'compose up -d --build --wait'|'compose up -d --wait'|'compose cp proxy:/data'|'compose cp proxy:/config') ;;
@@ -221,6 +229,9 @@ ${log}${fail}exec /usr/bin/install "$@"
         BACKUP_DIRECTORY: backupDirectory,
         COMPOSE_FILE: 'conflicting-shell-selection.yml',
         FAIL_COMMAND: failCommand,
+        APP_IMAGE_OUTPUT: appImage,
+        WORKER_IMAGE_OUTPUT: workerImage,
+        ...(shellVersion === undefined ? {} : { HOURMERE_VERSION: shellVersion }),
       },
       zshPty,
     )
@@ -262,6 +273,10 @@ describe('documented deployment operations', () => {
       expect(source.replace(/\s+/g, ' ')).toMatch(/restore the previous `HOURMERE_VERSION`/i)
     },
   )
+
+  it('uses image setup for the independent-install example', () => {
+    expect(guide).toContain('COMPOSE_PROJECT_NAME=hourmere-staging ./scripts/setup.sh --image')
+  })
 
   it.each(['Single-container', 'Separate-worker'])(
     'pins the %s image upgrade and restores the private version before startup rollback',
@@ -422,7 +437,6 @@ docker compose up -d --wait`)
     },
     {
       name: 'configuration worker setup',
-      sourceBuild: true,
       commands: enableCommands(configuration),
       worker: true,
       helper: 'enable',
@@ -514,7 +528,15 @@ docker compose up -d --wait`)
         ...(upgrade ? ['git fetch --tags', 'git checkout vX.Y.Z'] : []),
         ...(helper ? [`${helper}-worker`] : []),
       ]
+      const imageChecks =
+        upgrade && !sourceBuild
+          ? [
+              'compose config --images app',
+              ...(needsWorker ? ['compose config --images worker'] : []),
+            ]
+          : []
       const startup = [
+        ...imageChecks,
         ...(upgrade
           ? [
               sourceBuild ? 'compose pull proxy db' : 'compose pull',
@@ -620,7 +642,7 @@ docker compose up -d --wait`)
         },
       )
 
-      it.each(upgrade ? startup.slice(0, 2) : [])(
+      it.each(upgrade ? startup.filter((call) => /^compose (pull|stop) /.test(`${call} `)) : [])(
         'stops before startup when %s fails',
         async (failCommand) => {
           const { result, calls } = await executePastedCommands(commands, {
@@ -638,6 +660,103 @@ docker compose up -d --wait`)
       )
     },
   )
+
+  describe.each(['Single-container', 'Separate-worker'])('%s image selection', (title) => {
+    const needsWorker = title === 'Separate-worker'
+    const commands = upgradeCommands(title)
+    const prefix = [
+      'git fetch --tags',
+      'git checkout vX.Y.Z',
+      ...(needsWorker ? ['enable-worker'] : []),
+      'compose config --services',
+    ]
+    it.each([
+      { name: 'source app', appImage: 'hourmere:local' },
+      { name: 'wrong exact version', appImage: 'ghcr.io/hourmere/hourmere:9.9.9' },
+      { name: 'floating tag', appImage: 'ghcr.io/hourmere/hourmere:latest' },
+      { name: 'lookalike registry', appImage: 'ghcrXio/hourmere/hourmere:X.Y.Z' },
+    ])('rejects $name before pulling or stopping', async ({ appImage }) => {
+      const { result, calls } = await executePastedCommands(commands, {
+        worker: needsWorker,
+        proxy: true,
+        appImage,
+      })
+      expectInteractiveShells(result, 1)
+      expect(result.stdout).toContain('Image overlay or HOURMERE_VERSION is not selected')
+      expect(calls).toEqual([...prefix, 'compose config --images app'])
+    })
+
+    it.each(needsWorker ? ['hourmere:local', 'ghcr.io/hourmere/hourmere:9.9.9'] : [])(
+      'rejects a mismatched worker (%s) before pulling or stopping',
+      async (workerImage) => {
+        const { result, calls } = await executePastedCommands(commands, {
+          worker: needsWorker,
+          proxy: true,
+          workerImage,
+        })
+        expectInteractiveShells(result, 1)
+        expect(result.stdout).toContain('Worker image does not match the release')
+        expect(calls).toEqual([
+          ...prefix,
+          'compose config --images app',
+          'compose config --images worker',
+        ])
+      },
+    )
+
+    it.each(['app', ...(needsWorker ? ['worker'] : [])])(
+      'rejects a config error even with the expected %s image output',
+      async (service) => {
+        const { result, calls } = await executePastedCommands(commands, {
+          worker: needsWorker,
+          proxy: true,
+          failCommand: `compose config --images ${service}`,
+        })
+        expectInteractiveShells(result, 7)
+        expect(calls).toEqual([
+          ...prefix,
+          'compose config --images app',
+          ...(service === 'worker' ? ['compose config --images worker'] : []),
+        ])
+      },
+    )
+
+    it.for([false, true])(
+      'uses the private version despite an exported shell override (zsh PTY: %s)',
+      async (zshPty, context) => {
+        if (zshPty && zshPtySkipReason) context.skip(zshPtySkipReason)
+        const { result, calls } = await executePastedCommands(commands, {
+          worker: needsWorker,
+          proxy: true,
+          shellVersion: '9.9.9',
+          zshPty,
+        })
+        expectInteractiveShells(result, 0)
+        expect(calls).toContain(`compose stop app${needsWorker ? ' worker' : ''}`)
+        expect(calls).toContain('compose up -d --wait')
+      },
+    )
+  })
+
+  it.each([
+    ['README', readme],
+    ['self-hosting guide', guide],
+  ])('documents the source-to-image switch in the %s', (_name, source) => {
+    const section = source
+      .split('### Switch a source installation to the published image\n')[1]
+      ?.split('\n### ')[0]
+    expect(section).toBeDefined()
+    expect(section?.replace(/\s+/g, ' ')).toMatch(
+      /insert `docker-compose.image.yml` immediately after `docker-compose.yml` in `COMPOSE_FILE`/,
+    )
+    expect(section).toContain("COMPOSE_FILE='docker-compose.yml:docker-compose.image.yml'")
+    expect(section).toContain("HOURMERE_VERSION='1.0.1'")
+    expect(section).toContain('never `latest`')
+    expect(section?.replace(/\s+/g, ' ')).toMatch(
+      /(?:Preserve|preserving) proxy, worker and custom overlays/,
+    )
+    expect(section).toMatch(/(?:run the matching image|image upgrade)/)
+  })
 
   const backupCalls = (enabled: boolean) => [
     'compose config --services',
@@ -714,6 +833,7 @@ docker compose up -d --wait`)
         /^\(\n {2}git fetch --tags &&\n {2}git checkout vX\.Y\.Z &&\n/,
       )
     }
+    expect(legacy).toContain('Pre-1.0 deployments are source deployments.')
     expect(legacy).toContain('replace `git fetch --tags` and')
     expect(legacy).toContain('with `git pull --ff-only`')
     expect(legacy).toContain('0037_conference_pending_timeout.sql')
@@ -797,7 +917,10 @@ docker compose up -d --wait`)
     expect(text).toMatch(/even before this Compose `up`/)
     expect(text).toMatch(/including a partial `stop` failure/)
     expect(text).toMatch(/If no service was stopped, only the checkout is needed/)
-    expect(text).toMatch(/do not add `--build` or pull an application image during this recovery/)
+    expect(text).toMatch(/do not build during this recovery/)
+    expect(text).toMatch(
+      /pulling the old exact version is safe after restoring its version and overlay/,
+    )
   })
 
   const rollbackProcedures = [
@@ -814,7 +937,7 @@ docker compose up -d --wait`)
     it('chains checkout, Compose selection reset and old-image startup in one subshell', () => {
       expect(commands).toBe(`(
   git checkout "PREVIOUS_BRANCH_OR_TAG" &&
-  unset COMPOSE_FILE &&
+  unset COMPOSE_FILE HOURMERE_VERSION &&
   docker compose up -d --wait
 )`)
     })

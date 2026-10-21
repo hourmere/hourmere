@@ -74,7 +74,7 @@ and applies application and job migrations before serving requests.
 `--wait` waits for the app and database health checks; the curl command also checks the
 public TLS/proxy path. A health response checks the process/database, not SMTP delivery or
 external calendar access. For an independent installation, choose a unique lowercase project
-name before setup, for example `COMPOSE_PROJECT_NAME=hourmere-staging ./scripts/setup.sh --source`.
+name before setup, for example `COMPOSE_PROJECT_NAME=hourmere-staging ./scripts/setup.sh --image`.
 Run every later Compose command from that checkout so it reads the persisted project and
 file selection. Avoid exporting a conflicting `COMPOSE_PROJECT_NAME`, `COMPOSE_FILE` or
 `HOURMERE_VERSION` in your shell, which would override `.env`.
@@ -604,6 +604,33 @@ upgrade recreates any separate worker on the same pinned image. If starting from
 pre-1.0 checkout, read
 [its migration notes](#upgrading-from-a-pre-10-checkout) before either sequence.
 
+### Switch a source installation to the published image
+
+Existing source deployments must select the image overlay before using either image
+upgrade below. Edit the existing private `.env`: insert `docker-compose.image.yml`
+immediately after `docker-compose.yml` in `COMPOSE_FILE`, and set `HOURMERE_VERSION` to
+the exact reviewed release without `v` (for example, `1.0.1`), never `latest`. Preserve
+proxy, worker and custom overlays in their existing order. For a plain single-container
+installation, the selection becomes:
+
+```dotenv
+COMPOSE_FILE='docker-compose.yml:docker-compose.image.yml'
+HOURMERE_VERSION='1.0.1'
+```
+
+For an existing bundled-proxy deployment with a separate worker, it becomes:
+
+```dotenv
+COMPOSE_FILE='docker-compose.yml:docker-compose.image.yml:docker-compose.proxy.yml:docker-compose.worker.yml'
+HOURMERE_VERSION='1.0.1'
+```
+
+Do not rerun setup: it refuses an existing `.env`. Unset shell-exported `COMPOSE_FILE`
+and `HOURMERE_VERSION` before standalone Compose commands, then run the matching image
+upgrade below. Its guards check the app's exact image before pulling or stopping services,
+and check the worker's image too when selected. Setting `HOURMERE_VERSION` alone does
+not select the app image overlay and can leave a source app paired with an image worker.
+
 ### Single-container upgrade
 
 The app keeps the default `all` role. First edit `.env` to set `HOURMERE_VERSION` to the
@@ -615,12 +642,15 @@ deployment checkout:
 (
   git fetch --tags &&
   git checkout vX.Y.Z &&
-  unset COMPOSE_FILE &&
+  unset COMPOSE_FILE HOURMERE_VERSION &&
   compose_services=$(docker compose config --services) &&
   { ! printf '%s\n' "$compose_services" | grep -qx worker ||
     { echo "This deployment runs a separate worker; use the separate-worker upgrade."; exit 1; }; } &&
   { printf '%s\n' "$compose_services" | grep -qx proxy ||
     { echo "Proxy service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
+  compose_app_images=$(docker compose config --images app) &&
+  { printf '%s\n' "$compose_app_images" | grep -Fxq 'ghcr.io/hourmere/hourmere:X.Y.Z' ||
+    { echo "Image overlay or HOURMERE_VERSION is not selected; check .env before continuing."; exit 1; }; } &&
   docker compose pull &&
   docker compose stop app &&
   docker compose up -d --wait &&
@@ -650,13 +680,19 @@ stopping the old app and worker:
 (
   git fetch --tags &&
   git checkout vX.Y.Z &&
-  unset COMPOSE_FILE &&
+  unset COMPOSE_FILE HOURMERE_VERSION &&
   ./scripts/enable-worker.sh &&
   compose_services=$(docker compose config --services) &&
   { printf '%s\n' "$compose_services" | grep -qx worker ||
     { echo "Worker service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
   { printf '%s\n' "$compose_services" | grep -qx proxy ||
     { echo "Proxy service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
+  compose_app_images=$(docker compose config --images app) &&
+  { printf '%s\n' "$compose_app_images" | grep -Fxq 'ghcr.io/hourmere/hourmere:X.Y.Z' ||
+    { echo "Image overlay or HOURMERE_VERSION is not selected; check .env before continuing."; exit 1; }; } &&
+  compose_worker_images=$(docker compose config --images worker) &&
+  { printf '%s\n' "$compose_worker_images" | grep -Fxq 'ghcr.io/hourmere/hourmere:X.Y.Z' ||
+    { echo "Worker image does not match the release; check .env before continuing."; exit 1; }; } &&
   docker compose pull &&
   docker compose stop app worker &&
   docker compose up -d --wait &&
@@ -695,14 +731,15 @@ For a pre-start failure, if the app or worker was already stopped (including a p
 pre-upgrade `HOURMERE_VERSION` and `COMPOSE_FILE` selections as described above.
 Replace `PREVIOUS_BRANCH_OR_TAG`
 with the recorded name. If no service was stopped, only the checkout is needed. The block
-uses the existing old application image; do not add `--build` or pull an application image
-during this recovery. The subshell clears an inherited `COMPOSE_FILE` so Compose reads the
-restored selection from `.env`, and a failed checkout prevents startup.
+uses the previous application image; do not build during this recovery. For an image
+deployment, pulling the old exact version is safe after restoring its version and overlay.
+The subshell clears inherited `COMPOSE_FILE` and `HOURMERE_VERSION` values so Compose reads
+the restored selection from `.env`, and a failed checkout prevents startup.
 
 ```sh
 (
   git checkout "PREVIOUS_BRANCH_OR_TAG" &&
-  unset COMPOSE_FILE &&
+  unset COMPOSE_FILE HOURMERE_VERSION &&
   docker compose up -d --wait
 )
 ```
@@ -818,8 +855,9 @@ that selection.
 
 ### Upgrading from a pre-1.0 checkout
 
-Before moving an early `main` checkout to a release tag, check the historical migration
-notes below. To continue tracking pre-1.0 `main` instead, replace `git fetch --tags` and
+Pre-1.0 deployments are source deployments. Before moving an early `main` checkout to a
+release tag, check the historical migration notes below, then either follow the source-build
+upgrade or [switch to the published image](#switch-a-source-installation-to-the-published-image). To continue tracking pre-1.0 `main` instead, replace `git fetch --tags` and
 `git checkout vX.Y.Z` in the appropriate **source-build** guarded sequence with `git pull --ff-only`;
 retain the remaining verification, stop, build and health steps.
 For a failed main-tracking update, the backup's saved commit identifies the exact pre-upgrade

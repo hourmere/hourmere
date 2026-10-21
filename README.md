@@ -138,7 +138,8 @@ Give containers at least 35 seconds to stop.
 Before upgrading, take a full backup and record the current branch name or tag alongside
 the backup's saved commit and pinned `HOURMERE_VERSION`. Change `HOURMERE_VERSION` in
 `.env` to the exact reviewed release (for example, `1.0.1`), check out its matching `v1.0.1`
-tag, run `docker compose pull`, stop every old app/worker, then run
+tag, and use the guide's guarded image upgrade to verify the app and any worker select
+`ghcr.io/hourmere/hourmere:1.0.1` before `docker compose pull` or stopping services. Then run
 `docker compose up -d --wait`. Follow the guide's guarded upgrade blocks. Before `up`,
 restore the previous `HOURMERE_VERSION` and `COMPOSE_FILE` from the backup if an upgrade
 fails. A checkout-only rollback with
@@ -164,16 +165,37 @@ and other current settings. See the [guarded upgrade procedures](https://hourmer
 For a pre-start failure, if the app or worker was already stopped (including a partial
 `stop` failure), bring the old version back with the block below after restoring that
 selection. Replace `PREVIOUS_BRANCH_OR_TAG` with the recorded name. If no service was
-stopped, only the checkout is needed. The block uses the existing old application image;
-do not add `--build` or pull an application image during this recovery.
+stopped, only the checkout is needed. The block uses the previous application image;
+do not build during this recovery. For an image deployment, pulling the old exact version
+is safe after restoring its version and overlay.
 
 ```sh
 (
   git checkout "PREVIOUS_BRANCH_OR_TAG" &&
-  unset COMPOSE_FILE &&
+  unset COMPOSE_FILE HOURMERE_VERSION &&
   docker compose up -d --wait
 )
 ```
+
+### Switch a source installation to the published image
+
+Pre-1.0 deployments are source deployments. In the existing private `.env`, insert
+`docker-compose.image.yml` immediately after `docker-compose.yml` in `COMPOSE_FILE`,
+preserving proxy, worker and custom overlays, and set `HOURMERE_VERSION` to the exact
+reviewed release without `v`, never `latest`. For a plain single-container installation:
+
+```dotenv
+COMPOSE_FILE='docker-compose.yml:docker-compose.image.yml'
+HOURMERE_VERSION='1.0.1'
+```
+
+Unset shell-exported `COMPOSE_FILE` and `HOURMERE_VERSION`, then run the guide's
+[image upgrade](https://hourmere.com/docs/self-hosting#single-container-upgrade), or its
+[separate-worker upgrade](https://hourmere.com/docs/self-hosting#separate-worker-upgrade).
+The guards verify the app's exact image and any worker's image before pulling or stopping
+services. Setting the version alone can leave a source app paired with an image worker.
+
+### Build from source
 
 To build from source instead, clone the reviewed release tag, run
 `./scripts/setup.sh --source`, then `docker compose up -d --build --wait`. The source path
