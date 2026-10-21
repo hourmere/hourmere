@@ -64,7 +64,9 @@ test('event-types list beside a long booking link', async ({ page, app }) => {
   await openAuditPage(page, app, 'event-types')
   const initialWidth = page.viewportSize()?.width ?? 0
   if (initialWidth >= 1024) {
-    // A short path that fits its column is shown whole in every engine.
+    // A short path that fits its column is shown whole in every engine: measured at 1440,
+    // where it has room to spare in each engine's fallback monospace font.
+    await page.setViewportSize({ width: 1440, height: 900 })
     const whole = await measureEventTypesTable(page, SHORT_BOOKING_SLUG)
     expect(whole.handleOverflow).toBe(false)
     expect(whole.slugOverflow).toBe(false)

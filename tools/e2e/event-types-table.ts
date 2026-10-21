@@ -80,6 +80,9 @@ export function measureBookingLinkPreview(preview: Locator): Promise<BookingLink
     const handle = node.querySelector<HTMLElement>('.booking-link-handle')
     const slug = node.querySelector<HTMLElement>('.booking-link-slug')
     if (!handle?.firstChild || !slug?.firstChild) throw new Error('Preview path missing')
+    // Firefox and WebKit can round scrollWidth up and clientWidth down on a fractional box,
+    // so a whole segment may read 1px over; a clipped one is over by at least a cell.
+    const clips = (segment: HTMLElement) => segment.scrollWidth > segment.clientWidth + 1
     // Each segment's own text rows: the two flex items' boxes can differ by a subpixel.
     const lines = (segment: HTMLElement) => {
       const range = document.createRange()
@@ -101,8 +104,8 @@ export function measureBookingLinkPreview(preview: Locator): Promise<BookingLink
       )
     return {
       lines: Math.max(lines(handle), lines(slug)),
-      handleOverflow: handle.scrollWidth > handle.clientWidth,
-      slugOverflow: slug.scrollWidth > slug.clientWidth,
+      handleOverflow: clips(handle),
+      slugOverflow: clips(slug),
       unusedPathWidth: contentWidth - handle.getBoundingClientRect().width - slugRect.width,
       slugStartVisible:
         startRect.width > 0 &&
@@ -163,6 +166,9 @@ export function measureEventTypesTable(page: Page, slug: string): Promise<EventT
       range.selectNodeContents(node)
       return new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size
     }
+    // Firefox and WebKit can round scrollWidth up and clientWidth down on a fractional box,
+    // so a whole segment may read 1px over; a clipped one is over by at least a cell.
+    const clips = (segment: HTMLElement) => segment.scrollWidth > segment.clientWidth + 1
     return {
       tableMode: getComputedStyle(thead).position !== 'absolute',
       tableWidth: table.getBoundingClientRect().width,
@@ -170,12 +176,11 @@ export function measureEventTypesTable(page: Page, slug: string): Promise<EventT
       linkColumnWidth: linkCell.getBoundingClientRect().width,
       titleLines: lines(titleLink.firstChild),
       linkLines: Math.max(lines(handle), lines(slugPart)),
-      linkOverflow:
-        handle.scrollWidth > handle.clientWidth || slugPart.scrollWidth > slugPart.clientWidth,
+      linkOverflow: clips(handle) || clips(slugPart),
       copyBeside: copy.getBoundingClientRect().top < link.getBoundingClientRect().bottom,
       linkEllipsis: getComputedStyle(slugPart).textOverflow,
-      handleOverflow: handle.scrollWidth > handle.clientWidth,
-      slugOverflow: slugPart.scrollWidth > slugPart.clientWidth,
+      handleOverflow: clips(handle),
+      slugOverflow: clips(slugPart),
       unusedPathWidth: linkContentWidth - handle.getBoundingClientRect().width - slugRect.width,
       slugStartVisible:
         startRect.width > 0 &&

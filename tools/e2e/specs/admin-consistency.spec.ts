@@ -82,7 +82,9 @@ for (const locale of ['en-US', 'zh-CN'] as const) {
   }) => {
     await page.setViewportSize({ width: 1280, height: 900 })
     await openAuditPage(page, app, 'event-types', { locale })
-    // A short path that fits its column is shown whole: nothing caps the handle.
+    // A short path that fits its column is shown whole: nothing caps the handle. Measured
+    // at 1440, where it fits with room to spare in every engine's fallback monospace font.
+    await page.setViewportSize({ width: 1440, height: 900 })
     const whole = await measureEventTypesTable(page, SHORT_BOOKING_SLUG)
     expect(whole.tableMode, 'short path table mode').toBe(true)
     expect(whole.handleOverflow, 'short path handle unclipped').toBe(false)
