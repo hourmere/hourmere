@@ -55,20 +55,6 @@ jobs:
         env:
           HOURMERE_UI_FAIL_ON_EXIT: '1'
         run: node tools/e2e/run-audit.ts layout --shard=${{ matrix.shard }}/4
-      - name: Inject temporary finding negative control
-        if: matrix.shard == 1
-        run: |
-          node --input-type=module <<'NODE'
-          import { readdir, readFile, writeFile } from 'node:fs/promises'
-          import { join } from 'node:path'
-          const directory = process.env.HOURMERE_UI_REPORT_DIR
-          const file = (await readdir(directory)).sort().find((name) => name.startsWith('layout-') && !name.endsWith('execution.json'))
-          if (!file) throw new Error('Negative control needs a measured layout report')
-          const path = join(directory, file)
-          const report = JSON.parse(await readFile(path, 'utf8'))
-          report.findings.push({ code: 'element-overflow', element: { tag: 'div', index: 0, selector: 'div.ui-negative-control' } })
-          await writeFile(path, JSON.stringify(report))
-          NODE
       - name: Summarize measurements
         if: always()
         run: node tools/e2e/reports-summary.ts --suite=layout --shard=${{ matrix.shard }}/4
