@@ -361,7 +361,7 @@ const verifyAxeScan = async (scan = scanA11y) => {
       },
     ],
     passes: [{}, {}],
-    incomplete: [{}],
+    incomplete: [{ id: 'color-contrast' }],
   } as never)
   const page = {
     evaluate: async (callback: (targets: unknown) => unknown, targets: unknown) =>
@@ -371,6 +371,7 @@ const verifyAxeScan = async (scan = scanA11y) => {
   expect(analyze).toHaveBeenCalledTimes(1)
   expect(result.passes).toBe(2)
   expect(result.incomplete).toBe(1)
+  expect(result.incompleteRules).toEqual(['color-contrast'])
   expect(a11yFindings('booking', result.violations, []).findings).toEqual([
     {
       code: 'axe-critical',
@@ -434,6 +435,91 @@ const verifySafeSelectors = (safe = safeAuditReport) => {
     expect(safe(input).findings[0]?.element?.selector).toBeUndefined()
   }
 }
+const verifyIncompleteRules = (safe = safeAuditReport) => {
+  const input = report()
+  input.axe = {
+    passes: 2,
+    incomplete: 2,
+    incompleteRules: [
+      'label',
+      'color-contrast',
+      'color-contrast',
+      '#token=REPORT_PRIVACY_CANARY_NONSECRET',
+      'private@example.invalid',
+      '<button>',
+      7 as unknown as string,
+    ],
+  }
+  expect(safe(input).axe).toEqual({
+    passes: 2,
+    incomplete: 2,
+    incompleteRules: ['color-contrast', 'label'],
+  })
+}
+const verifyIncompleteSummary = (summarize = auditSummary) => {
+  const summary = summarize([
+    {
+      ...report(),
+      kind: 'a11y',
+      findings: [],
+      axe: { passes: 2, incomplete: 1, incompleteRules: ['label'] },
+    },
+    {
+      ...report(),
+      kind: 'a11y',
+      findings: [],
+      axe: { passes: 3, incomplete: 2, incompleteRules: ['color-contrast', 'label'] },
+    },
+  ])
+  expect(summary).toContain('passes 5, incomplete 3')
+  expect(summary).toContain('Axe incomplete rules / Axe 待人工确认规则：color-contrast, label')
+}
+const verifyA11yReportPipeline = async (replacement?: [string, string]) => {
+  let source = readFileSync('tools/e2e/specs/a11y.spec.ts', 'utf8')
+  if (replacement) {
+    expect(source.includes(replacement[0]), 'mutation must match its source').toBe(true)
+    source = source.replace(replacement[0], replacement[1])
+  }
+  source = stripTypeScriptTypes(
+    source
+      .replace(/^import[\s\S]*? from ['"].+?['"]\n/gm, '')
+      .replaceAll('import.meta.url', "'file:///tmp/a11y.spec.ts'"),
+  )
+  const scans: ((fixtures: unknown) => Promise<void>)[] = []
+  const test = Object.assign(
+    (_name: string, callback: (fixtures: unknown) => Promise<void>) => scans.push(callback),
+    {
+      describe: (_name: string, callback: () => void) => callback(),
+      use: () => {},
+      setTimeout: () => {},
+    },
+  )
+  const reports: AuditReport[] = []
+  new Function(
+    'test, auditPages, auditLocales, readFile, openAuditPage, scanA11y, a11yFindings, writeAuditReport, assertAuditFindings',
+    source,
+  )(
+    test,
+    [{ id: 'booking' }],
+    () => ['en-US'],
+    async () => '[]',
+    async () => {},
+    async () => ({ violations: [], passes: 2, incomplete: 1, incompleteRules: ['color-contrast'] }),
+    a11yFindings,
+    async (report: AuditReport) => reports.push(safeAuditReport(report)),
+    assertAuditFindings,
+  )
+  await scans[0]?.({
+    page: { viewportSize: () => ({ width: 320, height: 568 }), emulateMedia: async () => {} },
+    app: {},
+  })
+  expect(reports).toHaveLength(1)
+  expect(reports[0]?.axe).toEqual({
+    passes: 2,
+    incomplete: 1,
+    incompleteRules: ['color-contrast'],
+  })
+}
 const verifyPrivacy = (safe = safeAuditReport) => {
   const unsafe = report() as AuditReport & { html: string }
   unsafe.html = 'REPORT_PRIVACY_CANARY_NONSECRET'
@@ -458,6 +544,11 @@ describe('accessibility findings and private report output', () => {
   it('records axe passes/incomplete and static selectors from the actual scan result', async () =>
     verifyAxeScan())
   it('allowlists static selector grammar and pass/incomplete metrics', () => verifySafeSelectors())
+  it('allowlists and deduplicates static incomplete rule ids', () => verifyIncompleteRules())
+  it('summarizes incomplete rule ids and counts without creating findings', () =>
+    verifyIncompleteSummary())
+  it('passes incomplete rule ids from the product scan into sanitized reports', async () =>
+    verifyA11yReportPipeline())
   it('includes WCAG 2.0, 2.1 and 2.2 AA tags and reports only serious/critical node counts', () => {
     expect(axeTags).toEqual(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa'])
     verifyAxe()
@@ -699,6 +790,10 @@ describe('source-copy mutation controls', () => {
   it.each([
     ['passes count', ['passes: result.passes.length', 'passes: 0']],
     ['incomplete count', ['incomplete: result.incomplete.length', 'incomplete: 0']],
+    [
+      'incomplete rule ids',
+      ['incompleteRules: result.incomplete.map((rule) => rule.id)', 'incompleteRules: []'],
+    ],
     ['axe selector hints', ['const tokens = [...element.classList]', 'const tokens = []']],
   ] as const)('detects removal of %s from the scan pipeline', async (_name, replacement) => {
     const copy = sourceCopy<{ scanA11y: typeof scanA11y }>('a11y', 'scanA11y', [...replacement])
@@ -717,6 +812,38 @@ describe('source-copy mutation controls', () => {
     expect(() => verifySafeSelectors(copy.safeAuditReport)).toThrow(
       expect.objectContaining({ name: 'AssertionError' }),
     )
+  })
+  it('detects removal of incomplete rule id privacy filtering', () => {
+    const copy = sourceCopy<{ safeAuditReport: typeof safeAuditReport }>(
+      'reports',
+      'safeAuditReport',
+      ["typeof rule === 'string' && /^[a-z][a-z0-9-]{0,79}$/.test(rule)", 'true'],
+    )
+    expect(() => verifyIncompleteRules(copy.safeAuditReport)).toThrow(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
+  })
+  it('detects removal of incomplete rule ids from the summary', () => {
+    const copy = sourceCopy<{ auditSummary: typeof auditSummary }>('reports', 'auditSummary', [
+      '...(safe.axe?.incompleteRules ?? [])',
+      '...[]',
+    ])
+    expect(() => verifyIncompleteSummary(copy.auditSummary)).toThrow(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
+  })
+  it('verifies the unmutated incomplete report source copy', () => {
+    const copy = sourceCopy<{
+      safeAuditReport: typeof safeAuditReport
+      auditSummary: typeof auditSummary
+    }>('reports', 'safeAuditReport, auditSummary')
+    verifyIncompleteRules(copy.safeAuditReport)
+    verifyIncompleteSummary(copy.auditSummary)
+  })
+  it('detects loss of incomplete rule ids between the scan and report', async () => {
+    await expect(
+      verifyA11yReportPipeline(['incompleteRules: result.incompleteRules', 'incompleteRules: []']),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
   })
   it.each([
     ['button canary', ["!rules.has('button-name')", 'false']],

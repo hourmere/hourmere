@@ -57,6 +57,7 @@ it('publishes per-page JSON and human summaries and preserves browser execution 
         { code: 'axe-critical', rule: 'button-name', count: 2 },
         { code: 'scan-error', phase: 'navigate' },
       ],
+      axe: { passes: 2, incomplete: 1, incompleteRules: ['color-contrast'] },
     },
     directory,
   )
@@ -80,6 +81,8 @@ it('publishes per-page JSON and human summaries and preserves browser execution 
   expect(result.stdout).toContain('| booking | 2 | 1 | 2 | 1 | 1 |')
   expect(result.stdout).toContain('layout — exit / 退出码 1')
   expect(result.stdout).toContain('Unreadable reports / 无法读取的报告：1')
+  expect(result.stdout).toContain('passes 2, incomplete 1')
+  expect(result.stdout).toContain('Axe incomplete rules / Axe 待人工确认规则：color-contrast')
   expect((await readFile(summary, 'utf8')).trim()).toBe(result.stdout.trim())
   expect((await readFile(join(directory, 'summary.md'), 'utf8')).trim()).toBe(result.stdout.trim())
   expect(JSON.parse(await readFile(join(directory, 'summary.json'), 'utf8'))).toEqual({

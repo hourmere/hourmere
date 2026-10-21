@@ -47,7 +47,11 @@ for (const theme of ['light', 'dark'] as const) {
             const scan = a11yFindings(state.id, result.violations, exemptions)
             report.findings = scan.findings
             report.exempted = scan.exempted
-            report.axe = { passes: result.passes, incomplete: result.incomplete }
+            report.axe = {
+              passes: result.passes,
+              incomplete: result.incomplete,
+              incompleteRules: result.incompleteRules,
+            }
           } catch {
             report.findings.push({ code: 'scan-error', phase })
           }
