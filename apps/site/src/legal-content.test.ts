@@ -169,6 +169,7 @@ describe('privacy data-flow disclosures', () => {
       expect(page).not.toMatch(/effective="\d{4}-\d{2}-\d{2}"|import\.meta\.env/)
     }
     expect(privacy).toMatch(/\s lastUpdated\s/)
+    expect(read('./data/legal.ts')).toContain("LEGAL_PUBLICATION_DATE: string = '2026-10-22'")
     for (const page of [privacy, terms, read('./content/docs/docs/comparison.md')]) {
       expect(plainText(page)).not.toMatch(/Draft for owner review|TODO|owner review|owner decision/)
     }
@@ -188,28 +189,74 @@ describe('privacy data-flow disclosures', () => {
     expect(uses).toMatch(/You can withdraw consent at any time/)
   })
 
-  it('describes the Cloud waitlist data, storage, narrow purpose and consent choices', () => {
-    expect(block('li', 'Website and Cloud waitlist:')).toMatch(
-      /stores your email address, the time you joined, the page language and source, and the consent text version/,
-    )
+  it('discloses every persisted waitlist field and email normalization', () => {
+    const collected = block('li', 'Website and Cloud waitlist:')
+    const website = section('this-website')
+    for (const disclosure of [collected, website]) {
+      expect(disclosure).toMatch(/trimmed, lowercased email address/)
+      expect(disclosure).toMatch(/the time you joined/)
+      expect(disclosure).toMatch(/the page source and language \(locale\)/)
+      expect(disclosure).toMatch(/the consent text version/)
+    }
+  })
+
+  it('limits the waitlist purpose and sharing to opening updates and Cloudflare hosting', () => {
     const waitlist = block('p', 'If you join the Hourmere Cloud waitlist,')
+    expect(waitlist).toContain('We use the list only to tell you when Hourmere Cloud opens.')
     expect(waitlist).toMatch(
-      /Cobaltmere stores your email address, the time you joined and the page language and source to tell you when Hourmere Cloud launches/,
+      /We do not sell the list or share it except with Cloudflare as needed to host the website and waitlist\./,
     )
-    expect(waitlist).toMatch(/The list is stored in Cloudflare D1/)
-    expect(section('international-transfers')).toMatch(
-      /The Hourmere Cloud waitlist is stored in Cloudflare D1 in the United States\./,
+  })
+
+  it('places the waitlist records in United States Cloudflare D1 storage', () => {
+    for (const disclosure of [
+      section('international-transfers'),
+      block('p', 'If you join the Hourmere Cloud waitlist,'),
+    ]) {
+      expect(disclosure).toMatch(/stored in Cloudflare D1 in the United States\./)
+    }
+  })
+
+  it('separates transient IP abuse checks from persisted waitlist records and hosting requests', () => {
+    const website = section('this-website')
+    expect(website).toMatch(/hosting provider processes standard request data, such as IP address/)
+    expect(website).toMatch(
+      /uses your IP address to derive a SHA-256 key for Cloudflare's transient rate limiter/,
     )
-    expect(waitlist).toMatch(
-      /do not use it for other purposes or share it except with service providers that host it/,
+    expect(website).toContain('60-second counter period')
+    expect(website).toContain('The raw IP address is not sent to that limiter.')
+    expect(website).toMatch(
+      /does not write your IP address, the limiter key, other request data or the honeypot field to D1 or application logs/,
     )
-    expect(waitlist).toMatch(/legal basis is your consent, which you can withdraw at any time/)
-    expect(waitlist).toMatch(/ask for deletion by emailing \{contact\.privacy\}/)
-    expect(waitlist).toMatch(/each email includes a way to opt out/)
-    expect(read('./site.ts')).toMatch(/privacy: 'privacy@cobaltmere\.com'/)
+    expect(website).toMatch(
+      /Cloudflare also processes standard website request data.*its own handling of that data is separate from the waitlist records/,
+    )
+  })
+
+  it('makes waitlist consent withdrawal and deletion available at the hello address', () => {
+    const choices = block('p', 'The legal basis for the waitlist')
+    expect(choices).toMatch(/your consent, which you can withdraw at any time/)
+    expect(choices).toMatch(
+      /To unsubscribe, withdraw consent or ask for deletion, email \{contact\.hello\}/,
+    )
+    expect(privacy).toContain('<a href={waitlistMail}>{contact.hello}</a>')
+    expect(privacy).toMatch(/const waitlistMail = `mailto:\$\{contact\.hello\}`/)
+    expect(read('./site.ts')).toContain("hello: 'hello@hourmere.com'")
+  })
+
+  it('limits waitlist retention to withdrawal or the opening notification', () => {
     expect(block('li', 'Cloud waitlist entries and requests for launch updates')).toMatch(
       /until you ask us to stop or we have sent the launch notification/,
     )
+    expect(block('p', 'The legal basis for the waitlist')).toMatch(
+      /We keep waitlist entries until you ask us to stop or we have sent the Cloud opening notification\./,
+    )
+  })
+
+  it('does not promise a confirmation email or an existing delivery integration', () => {
+    const website = section('this-website')
+    expect(website).toContain('The form does not send a confirmation email.')
+    expect(website).not.toMatch(/each email includes|confirmation email (?:will be|is) sent/)
   })
 
   it('distinguishes the hosted operator from the self-hosted operator', () => {

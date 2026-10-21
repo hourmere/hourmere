@@ -64,7 +64,7 @@ Other commands: `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`
 The website runs on its own: `npm run dev --workspace @hourmere/site` (http://localhost:4321). `npm run build` writes it to `apps/site/dist`. A small Cloudflare Worker handles the Hourmere Cloud waitlist and serves the static assets on hourmere.com and www.hourmere.com (config in `apps/site/wrangler.jsonc`). See [website operations](docs/website.md) for local D1/form testing and the resources the lead must configure before running `npm run deploy --workspace @hourmere/site` in the Cobaltmere Cloudflare account.
 
 The privacy policy's effective and last-updated dates and the terms' effective date share
-`LEGAL_PUBLICATION_DATE` in `apps/site/src/data/legal.ts`, currently `2026-10-20`.
+`LEGAL_PUBLICATION_DATE` in `apps/site/src/data/legal.ts`, currently `2026-10-22`.
 Keep that date on later deployments, including documentation and homepage changes; change it
 only when publishing revised legal text. A placeholder or invalid date stops the site build.
 Environment variables cannot override the source date. CI retains a fixture-date substitution

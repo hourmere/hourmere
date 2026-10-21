@@ -1,8 +1,10 @@
 # Website and Hourmere Cloud waitlist
 
-`apps/site` is the English-only Astro website. On November 30, 2026, Hourmere
-launches as open-source software for self-hosting; Hourmere Cloud opens a waitlist,
-not a hosted account signup. The waitlist sends no email yet. Any later launch
+`apps/site` is the English-only Astro website. Hourmere Cloud is in an
+invitation-only preview with sign-ups closed. The open-source self-hosted release
+is planned for November 30, 2026. The Cloud waitlist collects requests to hear
+when Cloud opens to everyone; it does not create a hosted account or paid plan.
+The waitlist sends no email yet. Any later launch
 email must include a way to opt out and use the list only for its stated purpose.
 
 The Worker handles only `POST /api/waitlist`; every other request goes to `ASSETS`.
@@ -54,7 +56,8 @@ The smoke script starts `npx --yes wrangler@4.151.0 dev --local` with the
 `development` environment, an unused loopback port and temporary local D1 state.
 It compares five routes against the built HTML bytes, including the custom 404,
 checks response headers and canonical redirects, then tests JSON, URL-encoded and multipart POST,
-duplicate insertion, honeypot suppression and schema preservation/fresh/no-op
+duplicate insertion, invalid input, honeypot suppression, the real local rate-limit
+binding and schema preservation/fresh/no-op
 migration. It stops its own processes and removes its own temporary state.
 No Cloudflare resources are created and no deployment occurs.
 
@@ -67,39 +70,39 @@ npx --yes wrangler@4.151.0 dev --local --env development --port 8787
 
 Astro's normal `dev` command serves the UI only; use Wrangler for real form POSTs.
 
-## Lead configuration before deployment
+## Lead commands after acceptance
 
 Only after acceptance and owner approval, in the Cobaltmere Cloudflare account:
 
-1. Create the D1 database named **`hourmere-cloud-waitlist`** in the United States,
-   matching privacy policy section 12. From `apps/site`, run:
+The lead has already created **`hourmere-cloud-waitlist`**, ID
+**`1af0d108-0f24-4166-8f33-d20583d15798`**, jurisdiction **`us`** (United States),
+matching privacy policy section 12. The production binding is **`WAITLIST_DB`**;
+the development entry remains local-only. Do not create another database or use
+`--update-config`, which can rewrite existing bindings.
 
-   ```sh
-   npx --yes wrangler@4.151.0 d1 create hourmere-cloud-waitlist --jurisdiction us
-   ```
-
-   Do not use `--update-config`: it can rewrite the existing binding configuration.
-   Replace
-   `TODO_CREATE_WAITLIST_D1_DATABASE` in the production `d1_databases` entry with
-   the returned ID; keep the **`WAITLIST_DB`** binding and `migrations_dir`.
-   The development entry is local-only and retains its placeholder.
-2. Choose an unused account-unique numeric rate-limit namespace ID, replacing
-   the production placeholder namespace `1001`. Keep the
+1. Keep rate-limit namespace **`1001`** account-unique. Keep the
    **`WAITLIST_RATE_LIMITER`** binding and its `simple` limit 5, period 60.
    This is configured by the Worker binding; no KV, Durable Object or Turnstile
    resource/key is required. Never enable `WAITLIST_DEVELOPMENT` in production.
-3. Apply the remote migration from `apps/site`:
+2. Apply the remote migration from `apps/site`:
 
    ```sh
    npx --yes wrangler@4.151.0 d1 migrations apply WAITLIST_DB --remote --env=""
    ```
 
-4. Confirm the existing custom-domain routes **`hourmere.com`** and
+3. Confirm the existing custom-domain routes **`hourmere.com`** and
    **`www.hourmere.com`**, and the **`ASSETS`** binding with API worker-first
    routing in `wrangler.jsonc`. The account must control the domains/DNS.
    `workers_dev` and preview URLs remain disabled.
-5. The lead can then run `npm run deploy --workspace @hourmere/site` from the
-   repository root and verify both domains. This task does not run that command.
+4. From the repository root, build and deploy the top-level production environment,
+   then verify both domains:
+
+   ```sh
+   npm run deploy --workspace @hourmere/site
+   ```
+
+   The script runs `npm run build && npx --yes wrangler@4.151.0 deploy --env=""`
+   from `apps/site`. The construction task runs no remote Wrangler commands.
 
 See Cloudflare's [D1 command reference](https://developers.cloudflare.com/d1/wrangler-commands/)
 for account-side operations. Keep remote operations separate from local checks.
@@ -116,7 +119,7 @@ npx --yes wrangler@4.151.0 d1 execute WAITLIST_DB --remote --env="" --json \
   > /secure/operator-owned-directory/waitlist.json
 ```
 
-For an individual deletion/withdrawal request sent to `privacy@cobaltmere.com`,
+For an individual deletion/withdrawal request sent to `hello@hourmere.com`,
 verify the request through the privacy process, normalize the address, then
 prepare a private SQL file outside the repository. Use a SQL string literal
 (double any embedded single quote); never interpolate untrusted shell text.

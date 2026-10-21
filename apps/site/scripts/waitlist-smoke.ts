@@ -146,6 +146,23 @@ try {
   assert.equal(canonical.status, 307)
   assert.equal(new URL(canonical.headers.get('Location') ?? '', origin).pathname, '/privacy')
 
+  // Use a separate synthetic client for validation so the five success-path requests
+  // below still fit in the native binding's budget. No public provider is contacted.
+  const invalid = await fetch(`${origin}/api/waitlist`, {
+    method: 'POST',
+    headers: {
+      Origin: origin,
+      'Content-Type': 'application/json',
+      'CF-Connecting-IP': '192.0.2.80',
+    },
+    body: JSON.stringify({ email: 'invalid-address' }),
+  })
+  assert.equal(invalid.status, 400)
+  assert.equal(invalid.headers.get('Cache-Control'), 'no-store')
+  assert.match(await invalid.text(), /Enter one valid email address/)
+  assert.deepEqual(query('SELECT count(*) AS count FROM waitlist'), [{ count: 0 }])
+  console.log('Invalid address: HTTP 400; no row stored.')
+
   async function post(body: unknown) {
     const response = await fetch(`${origin}/api/waitlist`, {
       method: 'POST',
@@ -169,6 +186,9 @@ try {
   assert.equal(stored[0]?.locale, 'en')
   assert.equal(stored[0]?.consent_text_version, '2026-11-30')
   assert(Number.isFinite(Date.parse(String(stored[0]?.created_at))))
+  console.log('Valid address: HTTP 200; one normalized row stored.')
+  console.log('Duplicate: HTTP 200; identical response and original metadata retained.')
+  console.log('Honeypot: HTTP 200; identical response and no honeypot row stored.')
 
   const form = await fetch(`${origin}/api/waitlist`, {
     method: 'POST',
@@ -201,11 +221,28 @@ try {
   assert.equal(enhancedForm.headers.get('Cache-Control'), 'no-store')
   assert.equal(await enhancedForm.text(), first)
   assert.deepEqual(query('SELECT * FROM waitlist'), stored)
+
+  // The preceding five requests share the actual local binding counter. Assert
+  // rejected requests cannot write, including the native no-JavaScript response.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const limited = await fetch(`${origin}/api/waitlist`, {
+      method: 'POST',
+      headers: { Origin: origin },
+      body: new URLSearchParams({ email: 'limited@example.test' }),
+      redirect: 'manual',
+    })
+    assert.equal(limited.status, 429)
+    assert.equal(limited.headers.get('Retry-After'), '60')
+    assert.equal(limited.headers.get('Cache-Control'), 'no-store')
+    assert.match(await limited.text(), /Too many attempts\. Please try again in a minute\./)
+  }
+  assert.deepEqual(query('SELECT * FROM waitlist'), stored)
+  console.log('Rate limit: next three attempts HTTP 429 with Retry-After: 60; no row stored.')
   migrate()
   assert.deepEqual(query('SELECT * FROM waitlist'), stored)
   assert.deepEqual(query('SELECT value FROM predecessor_probe'), [{ value: 'keep' }])
   console.log(
-    'Local waitlist smoke passed: 5 byte-identical pages, headers/404/redirect, JSON/URL-encoded/multipart POST, duplicate/honeypot, migration preservation/fresh/no-op.',
+    'Local waitlist smoke passed: 5 byte-identical pages, headers/404/redirect, JSON/URL-encoded/multipart POST, duplicate/invalid/honeypot/rate-limit, migration preservation/fresh/no-op.',
   )
 } finally {
   if (worker?.pid && worker.exitCode === null) {

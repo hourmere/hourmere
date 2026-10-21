@@ -6,14 +6,70 @@ const prose = operations.replace(/\s+/g, ' ')
 const commands = [...operations.matchAll(/```sh\n([\s\S]*?)```/g)].map((match) =>
   (match[1] ?? '').replace(/\\\n\s*/g, '').trim(),
 )
+const config = JSON.parse(
+  readFileSync(new URL('../wrangler.jsonc', import.meta.url), 'utf8').replace(/^\s*\/\/.*$/gm, ''),
+)
 
 describe('Cloud waitlist operations contract', () => {
-  it('creates D1 in the disclosed US jurisdiction without rewriting bindings', () => {
+  it('binds the existing production D1 database and keeps development local', () => {
+    expect(config.d1_databases).toEqual([
+      {
+        binding: 'WAITLIST_DB',
+        database_name: 'hourmere-cloud-waitlist',
+        database_id: '1af0d108-0f24-4166-8f33-d20583d15798',
+        migrations_dir: './migrations',
+        remote: false,
+      },
+    ])
+    expect(config.env.development.d1_databases[0]).toMatchObject({
+      database_id: 'LOCAL_ONLY_WAITLIST_D1_DATABASE',
+      remote: false,
+    })
+    expect(prose).toContain('jurisdiction **`us`** (United States)')
+    expect(prose).toContain('**`1af0d108-0f24-4166-8f33-d20583d15798`**')
+    expect(prose).toContain('Do not create another database or use `--update-config`')
+    expect(operations).not.toContain('TODO_CREATE_WAITLIST_D1_DATABASE')
+  })
+
+  it('keeps namespace 1001 account-unique and retains the five-per-minute binding', () => {
+    expect(config.ratelimits).toEqual([
+      {
+        name: 'WAITLIST_RATE_LIMITER',
+        namespace_id: '1001',
+        simple: { limit: 5, period: 60 },
+      },
+    ])
+    expect(prose).toContain('Keep rate-limit namespace **`1001`** account-unique')
+    expect(config.vars?.WAITLIST_DEVELOPMENT).toBeUndefined()
+    expect(config.env.development.vars.WAITLIST_DEVELOPMENT).toBe('true')
+  })
+
+  it('gives the lead exact migration and production deployment commands', () => {
     expect(commands).toContain(
-      'npx --yes wrangler@4.151.0 d1 create hourmere-cloud-waitlist --jurisdiction us',
+      'npx --yes wrangler@4.151.0 d1 migrations apply WAITLIST_DB --remote --env=""',
     )
-    expect(prose).toContain('Do not use `--update-config`')
-    expect(prose).toContain('Replace `TODO_CREATE_WAITLIST_D1_DATABASE`')
+    expect(commands).toContain('npm run deploy --workspace @hourmere/site')
+    const sitePackage = JSON.parse(
+      readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
+    )
+    expect(sitePackage.scripts.deploy).toBe(
+      'npm run build && npx --yes wrangler@4.151.0 deploy --env=""',
+    )
+    expect(prose).toContain('The construction task runs no remote Wrangler commands.')
+  })
+
+  it('exports the complete stored fields privately and deletes one normalized address on request', () => {
+    expect(commands).toContain(
+      'umask 077\nnpx --yes wrangler@4.151.0 d1 execute WAITLIST_DB --remote --env="" --json --command \'SELECT email, created_at, source, locale, consent_text_version FROM waitlist ORDER BY created_at\' > /secure/operator-owned-directory/waitlist.json',
+    )
+    expect(commands).toContain(
+      'npx --yes wrangler@4.151.0 d1 execute WAITLIST_DB --remote --env="" --file /secure/operator-owned-directory/delete-waitlist.sql',
+    )
+    expect(operations).toContain("DELETE FROM waitlist WHERE email = 'person@example.test';")
+    expect(prose).toContain('request sent to `hello@hourmere.com`')
+    expect(prose).toContain('normalize the address')
+    expect(prose).toContain('double any embedded single quote')
+    expect(prose).toContain('Remove the address from any outstanding launch-mail export/queue too')
   })
 
   it('deletes the stored list and exported copies after the launch notification', () => {

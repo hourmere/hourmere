@@ -1,4 +1,6 @@
 ---
+import { waitlistMessages } from '../waitlist-client'
+
 interface Props {
   source: 'cloud' | 'pricing' | 'faq'
 }
@@ -32,15 +34,20 @@ const statusId = source === 'cloud' ? 'cloud-waitlist-success' : `${id}-status`
     <p class="waitlist-consent" id={`${id}-consent`}>
       We'll email you when Hourmere Cloud launches. See our <a href="/privacy">privacy policy</a>.
     </p>
-    <p
-      class="waitlist-status"
-      id={statusId}
-      role="status"
-      aria-live="polite"
-      aria-atomic="true"
-      tabindex="-1"
-      data-waitlist-status
-    >{source === 'cloud' ? "Thanks. We'll email you when Hourmere Cloud launches." : ''}</p>
+    <div class="waitlist-feedback">
+      <div class="waitlist-feedback-space" aria-hidden="true">
+        {Object.values(waitlistMessages).map((message) => <span>{message}</span>)}
+      </div>
+      <p
+        class="waitlist-status"
+        id={statusId}
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        tabindex="-1"
+        data-waitlist-status
+      >{source === 'cloud' ? waitlistMessages.success : ''}</p>
+    </div>
   </form>
 </div>
 
@@ -75,7 +82,7 @@ const statusId = source === 'cloud' ? 'cloud-waitlist-success' : `${id}-status`
     min-width: 0;
     min-height: 46px;
     padding: 10px 12px;
-    border: 1px solid var(--border);
+    border: 2px solid var(--border);
     border-radius: 10px;
     background: var(--bg);
     color: var(--text);
@@ -84,7 +91,6 @@ const statusId = source === 'cloud' ? 'cloud-waitlist-success' : `${id}-status`
   }
 
   input[aria-invalid="true"] {
-    border-width: 2px;
     border-color: var(--text);
   }
 
@@ -113,17 +119,46 @@ const statusId = source === 'cloud' ? 'cloud-waitlist-success' : `${id}-status`
     font-size: 14px;
   }
 
-  .waitlist .waitlist-status {
-    display: none;
-    margin: 12px 0 0;
+  @media (pointer: coarse) {
+    .waitlist-consent a {
+      display: inline-flex;
+      align-items: center;
+      min-height: 44px;
+    }
+  }
+
+  /* Reserve the tallest possible message at every width, including before JavaScript runs. */
+  .waitlist-feedback,
+  .waitlist-feedback-space {
+    display: grid;
+  }
+
+  .waitlist-feedback {
+    margin-top: 12px;
     color: var(--text);
     font-size: 16px;
     font-weight: 700;
+    line-height: 1.6;
+  }
+
+  .waitlist-feedback-space,
+  .waitlist .waitlist-status {
+    visibility: hidden;
+  }
+
+  .waitlist-feedback-space,
+  .waitlist-feedback-space span,
+  .waitlist .waitlist-status {
+    grid-area: 1 / 1;
+  }
+
+  .waitlist .waitlist-status {
+    margin: 0;
     scroll-margin-top: 24px;
   }
 
   .waitlist-status:target,
   .waitlist-status[data-state] {
-    display: block;
+    visibility: visible;
   }
 </style>

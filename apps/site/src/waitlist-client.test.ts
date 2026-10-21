@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 import { readFileSync } from 'node:fs'
+import postcss, { type AtRule } from 'postcss'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { setupWaitlistForms } from './waitlist-client'
+import { setupWaitlistForms, waitlistMessages } from './waitlist-client'
 
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8')
 const formMarkup = (id: string) => `
-  <form action="/api/waitlist" method="post" data-waitlist-form>
+  <div id="${id}-waitlist"><form action="/api/waitlist" method="post" data-waitlist-form>
     <input name="email" type="email" value="" aria-describedby="${id}-consent" />
     <input name="hm_extra" value="" />
     <input name="locale" value="en" />
@@ -13,7 +14,7 @@ const formMarkup = (id: string) => `
     <button type="submit">Join the Cloud waitlist</button>
     <p id="${id}-consent">We'll email you when Hourmere Cloud launches.</p>
     <p id="${id}-status" tabindex="-1" role="status" data-waitlist-status></p>
-  </form>`
+  </form></div>`
 
 const getForm = (index = 0) => {
   const form = document.querySelectorAll<HTMLFormElement>('form')[index]
@@ -174,6 +175,42 @@ describe('waitlist progressive enhancement', () => {
   })
 })
 
+describe('waitlist CTA focus', () => {
+  beforeEach(() => {
+    document.body.innerHTML = `
+      <a href="#cloud-waitlist" data-waitlist-link>Join the Cloud waitlist</a>
+      <a href="#missing-waitlist" data-waitlist-link>Unavailable form</a>
+      ${formMarkup('cloud')}`
+    setupWaitlistForms(document)
+  })
+
+  it('focuses the email when a native link click is activated, including keyboard activation', () => {
+    const link = document.querySelector<HTMLAnchorElement>('a[data-waitlist-link]')
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })
+    link?.dispatchEvent(click)
+    expect(click.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(getForm().email)
+  })
+
+  it.each(['metaKey', 'ctrlKey', 'shiftKey', 'altKey'])(
+    'preserves browser navigation for a modified click with %s',
+    (modifier) => {
+      const link = document.querySelector<HTMLAnchorElement>('a[data-waitlist-link]')
+      const click = new MouseEvent('click', { cancelable: true, [modifier]: true })
+      link?.dispatchEvent(click)
+      expect(click.defaultPrevented).toBe(false)
+      expect(document.activeElement).not.toBe(getForm().email)
+    },
+  )
+
+  it('leaves the native hash fallback available when a form is missing', () => {
+    const link = document.querySelectorAll<HTMLAnchorElement>('a[data-waitlist-link]')[1]
+    const click = new MouseEvent('click', { cancelable: true })
+    link?.dispatchEvent(click)
+    expect(click.defaultPrevented).toBe(false)
+  })
+})
+
 describe('waitlist page integration', () => {
   const component = read('./components/WaitlistForm.astro')
   const home = read('./pages/index.astro')
@@ -182,7 +219,7 @@ describe('waitlist page integration', () => {
     expect(home).toMatch(/<WaitlistForm source="cloud"/)
     expect(home).toMatch(/<WaitlistForm source="pricing"/)
     expect(home).toMatch(
-      /When will Hourmere Cloud be available\?[\s\S]*?Hourmere Cloud has not launched\.[\s\S]*?<WaitlistForm source="faq"/,
+      /When will Hourmere Cloud be available\?[\s\S]*?invitation-only preview[\s\S]*?<WaitlistForm source="faq"/,
     )
   })
 
@@ -227,9 +264,106 @@ describe('waitlist page integration', () => {
 
   it('reveals the no-JavaScript success state only at its dedicated redirect target', () => {
     expect(component).toContain("source === 'cloud' ? 'cloud-waitlist-success'")
-    expect(component).toMatch(/\.waitlist \.waitlist-status\s*\{\s*display: none/)
-    expect(component).toMatch(/\.waitlist-status:target,[\s\S]*?display: block/)
-    expect(component).toContain("Thanks. We'll email you when Hourmere Cloud launches.")
+    expect(component).toMatch(/\.waitlist \.waitlist-status\s*\{\s*visibility: hidden/)
+    expect(component).toMatch(/\.waitlist-status:target,[\s\S]*?visibility: visible/)
+    expect(component).toContain("source === 'cloud' ? waitlistMessages.success : ''")
     expect(component).toContain('id={id}')
+  })
+})
+
+describe('waitlist layout protections', () => {
+  const component = read('./components/WaitlistForm.astro')
+  const home = read('./pages/index.astro')
+  const declarations = (source: string, selector: string, media?: string) => {
+    const result: Record<string, string> = {}
+    postcss.parse(source.match(/<style>([\s\S]*?)<\/style>/)?.[1] ?? '').walkRules((rule) => {
+      const context = rule.parent?.type === 'atrule' ? (rule.parent as AtRule).params : undefined
+      if (
+        rule.selector
+          .split(',')
+          .map((part) => part.trim())
+          .includes(selector) &&
+        context === media
+      ) {
+        rule.walkDecls((declaration) => {
+          result[declaration.prop] = declaration.value
+        })
+      }
+    })
+    return result
+  }
+
+  it('replaces all four launch-update mailto CTAs and preserves the general contact link', () => {
+    const links = [...home.matchAll(/<a\s+[^>]*data-waitlist-link[^>]*>/g)].map((match) => match[0])
+    expect(links).toHaveLength(4)
+    for (const link of links) expect(link).toContain('href="#cloud-waitlist"')
+    expect(home).not.toContain('launchUpdatesHref')
+    expect(home).toMatch(/href=\{`mailto:\$\{contact\.hello\}`\}/)
+    expect(home).not.toContain('Cloud has not launched')
+    expect(home.match(/Sign-ups are currently closed\./g)).toHaveLength(3)
+    expect(home).toContain(
+      'The open-source release for self-hosting is planned for November 30, 2026.',
+    )
+  })
+
+  it('reserves every possible status at its actual wrapped height before any request starts', () => {
+    expect(component).toContain('class="waitlist-feedback-space" aria-hidden="true"')
+    expect(component).toContain(
+      'Object.values(waitlistMessages).map((message) => <span>{message}</span>)',
+    )
+    expect(Object.values(waitlistMessages)).toHaveLength(5)
+    for (const selector of ['.waitlist-feedback', '.waitlist-feedback-space']) {
+      expect(declarations(component, selector).display).toBe('grid')
+    }
+    for (const selector of [
+      '.waitlist-feedback-space',
+      '.waitlist-feedback-space span',
+      '.waitlist .waitlist-status',
+    ]) {
+      expect(declarations(component, selector)['grid-area']).toBe('1 / 1')
+    }
+    expect(declarations(component, '.waitlist-feedback-space').visibility).toBe('hidden')
+    expect(declarations(component, '.waitlist .waitlist-status').visibility).toBe('hidden')
+    expect(declarations(component, '.waitlist .waitlist-status').display).toBeUndefined()
+    expect(declarations(component, '.waitlist-status[data-state]').visibility).toBe('visible')
+    expect(declarations(component, '.waitlist-status:target').visibility).toBe('visible')
+  })
+
+  it('changes only the invalid input border color without increasing its size', () => {
+    expect(declarations(component, 'input[type="email"]').border).toBe('2px solid var(--border)')
+    const invalid = declarations(component, 'input[aria-invalid="true"]')
+    expect(invalid['border-color']).toBe('var(--text)')
+    expect(invalid['border-width']).toBeUndefined()
+    expect(invalid.border).toBeUndefined()
+  })
+
+  it('keeps the form fluid and gives touch users at least 44px input, button and link targets', () => {
+    expect(declarations(component, '.waitlist-fields')).toMatchObject({
+      display: 'flex',
+      'flex-wrap': 'wrap',
+    })
+    expect(declarations(component, 'input[type="email"]')).toMatchObject({
+      width: '100%',
+      'min-width': '0',
+      'min-height': '46px',
+    })
+    expect(read('./styles/global.css')).toMatch(/\.btn\s*\{[^}]*min-height: 46px/)
+    for (const [source, selector] of [
+      [component, '.waitlist-consent a'],
+      [home, 'a[data-waitlist-link]'],
+    ]) {
+      expect(declarations(source ?? '', selector ?? '', '(pointer: coarse)')).toMatchObject({
+        display: 'inline-flex',
+        'min-height': '44px',
+      })
+    }
+  })
+
+  it('uses the site dark-mode palette for the input and feedback', () => {
+    expect(declarations(component, 'input[type="email"]')).toMatchObject({
+      background: 'var(--bg)',
+      color: 'var(--text)',
+    })
+    expect(declarations(component, '.waitlist-feedback').color).toBe('var(--text)')
   })
 })
