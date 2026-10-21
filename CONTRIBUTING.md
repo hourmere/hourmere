@@ -176,9 +176,11 @@ printing the actual token strings.
 The reusable [CI workflow](.github/workflows/ci.yml) keeps exactly its existing `check`,
 `cli-compatibility`, `docker` and `e2e` jobs. The separate
 [UI checks workflow](.github/workflows/ui-checks.yml) runs on pull requests, pushes to main
-and manual dispatches. Its layout shards, axe, cross-engine, visual-baseline detection,
-visual comparison and baseline generation jobs are advisory with `continue-on-error: true`.
-It is not called by CI or the release workflow and does not run on release tags.
+and manual dispatches. Layout shards fail on every layout finding, scan error, browser
+failure or missing report; axe fails on serious/critical violations and scan/execution
+errors. Cross-engine test failures fail the job. Visual-baseline detection, visual comparison
+and baseline generation remain advisory with `continue-on-error: true`. The workflow is not
+called by CI or the release workflow and does not run on release tags.
 
 Layout covers 16 CSS viewport sizes, light/dark, English and Simplified Chinese, plus
 British English on booking. Layout and axe include the booking calendar, form, confirmation,
@@ -192,7 +194,8 @@ runs even on cache hits because a browser cache does not preserve runner apt pac
 Playwright installs system packages only when its dry-run check finds packages missing.
 
 可复用 CI 保留原有四个任务。独立的 **UI checks** 工作流在拉取请求、主分支推送和手动触发时运行，
-只报告问题，不阻断合并；CI 和发布工作流都不调用它，发布标签不会运行这些检测。
+布局、axe 严重/致命问题和跨引擎测试回归会使任务失败；视觉检测仍为建议项。
+CI 和发布工作流都不调用它，发布标签不会运行这些检测。
 布局检测覆盖 16 种 CSS 视口、明暗主题、中英文，预约页另测英式英语；axe 记录通过和待人工确认项数，
 并报告严重和致命问题。检测涵盖预约表单、确认页、时区面板、嵌入页、团队预约和 OAuth 授权页。
 跨引擎冒烟覆盖 WebKit 桌面版、iPhone 预设和 Firefox 的预约、登录及嵌入弹窗。
@@ -206,11 +209,22 @@ these in its default sandbox. If escalation is denied, use CI and record the loc
 
 ```sh
 export HOURMERE_E2E_BOOTSTRAP_URL=postgres://hourmere:hourmere@localhost:5432/hourmere
-node tools/e2e/run-audit.ts layout --shard=1/4 # repeat 2/4, 3/4, 4/4 / 依次运行其余分片
-node tools/e2e/run-audit.ts a11y
+(
+  export HOURMERE_UI_REPORT_DIR="$(mktemp -d)"
+  node tools/e2e/run-audit.ts layout --shard=1/4
+  node tools/e2e/reports-summary.ts --suite=layout --shard=1/4
+) # repeat 2/4, 3/4, 4/4 in new directories / 其余分片各用新目录
+(
+  export HOURMERE_UI_REPORT_DIR="$(mktemp -d)"
+  node tools/e2e/run-audit.ts a11y
+  node tools/e2e/reports-summary.ts --suite=a11y
+)
 npx playwright install --with-deps webkit firefox
-node tools/e2e/run-audit.ts cross-engine
-node tools/e2e/reports-summary.ts
+(
+  export HOURMERE_UI_REPORT_DIR="$(mktemp -d)"
+  node tools/e2e/run-audit.ts cross-engine
+  node tools/e2e/reports-summary.ts --suite=cross-engine
+)
 ```
 
 Reports go to ignored `temp/ui-audit-reports/` (override `HOURMERE_UI_REPORT_DIR`). Each
@@ -246,17 +260,35 @@ manual; WebKit's iPhone preset does not establish real iOS compatibility.
 `visual_baselines`，即可下载 Linux 生成的脱敏基线。逐张审核后以 DCO 签署提交；不要提交
 macOS 本地基线。仍需人工检查真机、读屏和视觉效果，iPhone 预设不能替代真机验收。
 
-To promote a lane, first resolve findings and execution errors, review the dated exemptions
-in `tools/e2e/a11y-exemptions.json`, set `HOURMERE_UI_BLOCKING=1` in that job in
-`.github/workflows/ui-checks.yml`, and remove its job-level `continue-on-error`. Only the
-repository owner can add its job name to required checks in branch protection. Keep UI
-checks outside reusable CI so releases retain their existing gates; keep the four existing
-required IDs unchanged and update `scripts/ui-ci.test.ts`. Exemptions require an issue/reason and an expiry date; expired
-entries are reported as errors, and the initial list is empty.
+The terminal summary gates layout and axe after every scan has reported, allowing scoped,
+dated exceptions to apply without aborting the matrix early. It derives the expected report
+identities from Playwright's selected matrix (`--list` with the same suite/shard), rather
+than fixed counts; missing, duplicate or unexpected reports fail. Browser failures and
+unreadable reports fail too. Axe `incomplete` results remain informational: summaries print
+their count and rule IDs for review. Use a separate report directory for each local lane/shard
+(`HOURMERE_UI_REPORT_DIR`); rerun into an empty directory so old reports cannot mask a loss.
 
-提升为阻断检查前，先修复问题和运行错误，审核有到期日的豁免，设置 `HOURMERE_UI_BLOCKING=1`，
-再移除相应任务的 `continue-on-error`。只有仓库所有者可以在分支保护中将新任务设为必需检查。
-现有必需任务 ID 不变，并须更新工作流契约测试。豁免须注明原因、问题链接和到期日；初始清单为空。
+仓库中的终端汇总会核对 Playwright 实际矩阵的每项报告；缺失、重复、多余、无法读取的报告和
+浏览器执行错误均导致失败。axe 待人工确认项只显示数量和规则 ID，不阻断检测。每次本地运行
+使用独立、空的报告目录，避免旧报告掩盖漏扫。
+
+Known findings require an entry in `tools/e2e/ui-check-exceptions.json` (initially `[]`),
+with exact `suite` (`layout` or `a11y`), `page`, `viewport: {width, height}`, `locale`, `theme`,
+finding `category`, an axe `rule` when applicable, a nonempty `reason` and ISO `expires` date.
+Expired, invalid and stale entries fail; a stale entry no longer matches a finding in its
+selected state. Each layout shard checks the exceptions for its own selected states, and
+selectors absent from the full matrix fail in every shard. Scan errors, lost reports and
+browser failures cannot be excepted. Legacy scan-time `a11y-exemptions.json` suppressions
+are rejected by the gate; use this shared file so every accepted finding remains visible.
+
+已知问题例外须精确指定检测、页面、视口、语言、主题及问题类别（axe 另含规则），并填写原因与
+到期日。过期、无效或已不再匹配问题的例外均导致失败；扫描错误、漏扫和浏览器失败不允许豁免。
+
+Only the repository owner decides whether to make these checks required in branch protection:
+add the exact check names `e2e-layout (1)`, `e2e-layout (2)`, `e2e-layout (3)`,
+`e2e-layout (4)`, `e2e-a11y` and `e2e-cross-engine` from **UI checks**. This change does
+not alter repository settings; retain the four existing required CI checks and keep visual
+checks advisory until reviewed baselines are committed.
 
 ## Conventions
 

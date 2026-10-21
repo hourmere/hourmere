@@ -21,7 +21,6 @@ concurrency:
 jobs:
   e2e-layout:
     runs-on: ubuntu-latest
-    continue-on-error: true
     timeout-minutes: 25
     strategy:
       fail-fast: false
@@ -52,11 +51,11 @@ jobs:
       - run: npm run build --workspace @hourmere/web
       - name: Verify the existing Chrome installation
         run: google-chrome --version
-      - name: Run report-only layout measurement
+      - name: Run layout measurement
         run: node tools/e2e/run-audit.ts layout --shard=${{ matrix.shard }}/4
       - name: Summarize measurements
         if: always()
-        run: node tools/e2e/reports-summary.ts
+        run: node tools/e2e/reports-summary.ts --suite=layout --shard=${{ matrix.shard }}/4
       - name: Upload sanitized measurements
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
@@ -68,7 +67,6 @@ jobs:
 
   e2e-a11y:
     runs-on: ubuntu-latest
-    continue-on-error: true
     timeout-minutes: 25
     services:
       postgres:
@@ -95,11 +93,11 @@ jobs:
       - run: npm run build --workspace @hourmere/web
       - name: Verify the existing Chrome installation
         run: google-chrome --version
-      - name: Run report-only a11y measurement
+      - name: Run a11y measurement
         run: node tools/e2e/run-audit.ts a11y
       - name: Summarize measurements
         if: always()
-        run: node tools/e2e/reports-summary.ts
+        run: node tools/e2e/reports-summary.ts --suite=a11y
       - name: Upload sanitized measurements
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
@@ -111,7 +109,6 @@ jobs:
 
   e2e-cross-engine:
     runs-on: ubuntu-latest
-    continue-on-error: true
     timeout-minutes: 25
     services:
       postgres:
@@ -150,11 +147,13 @@ jobs:
         run: npx playwright install webkit firefox
       - name: Install only missing browser system dependencies
         run: npx playwright install-deps --dry-run webkit firefox || npx playwright install-deps webkit firefox
-      - name: Run report-only cross-engine measurement
+      - name: Run cross-engine measurement
+        env:
+          HOURMERE_UI_BLOCKING: '1'
         run: node tools/e2e/run-audit.ts cross-engine
       - name: Summarize measurements
         if: always()
-        run: node tools/e2e/reports-summary.ts
+        run: node tools/e2e/reports-summary.ts --suite=cross-engine
       - name: Upload sanitized measurements
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0

@@ -15,6 +15,7 @@ interface Step {
   if?: string
   uses?: string
   with?: Record<string, string>
+  env?: Record<string, string>
 }
 interface Job {
   needs?: string
@@ -156,7 +157,7 @@ describe('UI measurement CI contract', () => {
     })
   })
 
-  it('isolates advisory UI jobs from reusable CI and releases', () => {
+  it('isolates UI jobs from reusable CI and releases', () => {
     expect(Object.keys(requiredWorkflow.jobs).sort()).toEqual([
       'check',
       'cli-compatibility',
@@ -188,13 +189,39 @@ describe('UI measurement CI contract', () => {
     ).toBe(digest)
   })
 
-  it.each(Object.keys(workflow.jobs))(
-    'keeps %s advisory with default PostgreSQL connection limits',
+  it.each(Object.keys(workflow.jobs))('keeps %s on default PostgreSQL connection limits', (id) => {
+    expect(workflow.jobs[id]?.services?.postgres.options ?? '').not.toContain('max_connections')
+  })
+
+  it.each(['e2e-layout', 'e2e-a11y', 'e2e-cross-engine'])(
+    'makes %s fail on the terminal gate while preserving reports on failure',
     (id) => {
       const job = workflow.jobs[id]
-      expect(job?.['continue-on-error']).toBe(true)
-      expect(job?.services?.postgres.options ?? '').not.toContain('max_connections')
-      expect(job?.env?.HOURMERE_UI_BLOCKING).not.toBe('1')
+      expect(job?.['continue-on-error']).toBeUndefined()
+      const suite = id.slice('e2e-'.length)
+      const summary = job?.steps.find((step) => step.name === 'Summarize measurements')
+      // biome-ignore lint/suspicious/noTemplateCurlyInString: GitHub Actions expression is literal.
+      const shard = suite === 'layout' ? ' --shard=${{ matrix.shard }}/4' : ''
+      expect(summary?.run).toBe(`node tools/e2e/reports-summary.ts --suite=${suite}${shard}`)
+      expect(summary?.if).toBe('always()')
+      const browser = job?.steps.find((step) => step.run?.includes('node tools/e2e/run-audit.ts'))
+      expect(browser?.run).toBe(`node tools/e2e/run-audit.ts ${suite}${shard}`)
+      if (suite === 'cross-engine') expect(browser?.env?.HOURMERE_UI_BLOCKING).toBe('1')
+      else {
+        // Findings are evaluated after all scans so checked-in exceptions can apply.
+        expect(browser?.env?.HOURMERE_UI_BLOCKING).toBeUndefined()
+        expect(job?.env?.HOURMERE_UI_BLOCKING).toBeUndefined()
+      }
+    },
+  )
+
+  it.each(['visual-baseline-status', 'e2e-visual', 'visual-baselines'])(
+    'keeps %s advisory until reviewed visual baselines exist',
+    (id) => {
+      expect(workflow.jobs[id]?.['continue-on-error']).toBe(true)
+      expect(
+        workflow.jobs[id]?.steps.find((step) => step.name === 'Summarize measurements')?.run ?? '',
+      ).not.toContain('--suite=')
     },
   )
 

@@ -36,7 +36,7 @@ export interface AuditReport {
   viewport: { width: number; height: number }
   findings: AuditFinding[]
   exempted?: number
-  axe?: { passes: number; incomplete: number }
+  axe?: { passes: number; incomplete: number; incompleteRules?: string[] }
 }
 
 const codes = new Set<FindingCode>([
@@ -107,7 +107,23 @@ export function safeAuditReport(report: AuditReport): AuditReport {
     }),
     ...(finite(report.exempted) ? { exempted: report.exempted } : {}),
     ...(report.axe && finite(report.axe.passes) && finite(report.axe.incomplete)
-      ? { axe: { passes: report.axe.passes, incomplete: report.axe.incomplete } }
+      ? {
+          axe: {
+            passes: report.axe.passes,
+            incomplete: report.axe.incomplete,
+            ...(Array.isArray(report.axe.incompleteRules)
+              ? {
+                  incompleteRules: [
+                    ...new Set(
+                      report.axe.incompleteRules.filter(
+                        (rule) => typeof rule === 'string' && /^[a-z][a-z0-9-]{0,79}$/.test(rule),
+                      ),
+                    ),
+                  ].sort(),
+                }
+              : {}),
+          },
+        }
       : {}),
   }
 }
@@ -164,9 +180,10 @@ export function auditSummary(reports: AuditReport[]): string {
       return {
         passes: total.passes + (safe.axe?.passes ?? 0),
         incomplete: total.incomplete + (safe.axe?.incomplete ?? 0),
+        incompleteRules: new Set([...total.incompleteRules, ...(safe.axe?.incompleteRules ?? [])]),
       }
     },
-    { passes: 0, incomplete: 0 },
+    { passes: 0, incomplete: 0, incompleteRules: new Set<string>() },
   )
   return [
     '## UI measurement report / 界面测量报告',
@@ -189,6 +206,7 @@ export function auditSummary(reports: AuditReport[]): string {
     ),
     '',
     `Axe rule results / Axe 规则结果：passes ${axe.passes}, incomplete ${axe.incomplete}`,
+    `Axe incomplete rules / Axe 待人工确认规则：${[...axe.incompleteRules].sort().join(', ') || '—'}`,
     '',
     'Counts are findings across all scanned states, not unique defects. / 数量为所有扫描状态的问题总数，并非独立缺陷数。',
     'JSON contains only page identifiers, static selector hints, audit codes and measurements. / JSON 仅含页面标识、静态选择器提示、检查代码与测量值。',
