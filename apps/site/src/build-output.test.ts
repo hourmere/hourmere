@@ -12,7 +12,7 @@ const siteRoot = fileURLToPath(new URL('../', import.meta.url))
 const scratch = mkdtempSync(join(siteRoot, 'node_modules/.hourmere-site-build-'))
 const output = join(scratch, 'dist')
 const trademarkNotice =
-  'Calendly, Cal.com, Cal.diy, Google, Google Calendar, Microsoft, Zoom, Docker Compose, PostgreSQL and GitHub are trademarks of their respective owners; Hourmere is not affiliated with or endorsed by them.'
+  'Calendly and Cal.com are trademarks of their respective owners; Hourmere is not affiliated with or endorsed by them.'
 const text = (node: Element) => node.textContent?.replace(/\s+/g, ' ').trim()
 afterAll(() => rmSync(scratch, { recursive: true, force: true }))
 
@@ -60,8 +60,20 @@ describe('built website', () => {
     expect(heading?.id).toBe('product-names-and-independence')
   })
 
+  it('preserves the comparison independence statement for Cal.diy', () => {
+    const document = new JSDOM(readFileSync(join(output, 'docs/comparison.html'), 'utf8')).window
+      .document
+    const statements = [...document.querySelectorAll('.sl-markdown-content p')].filter(
+      (paragraph) =>
+        text(paragraph) ===
+        'Hourmere is not affiliated with or endorsed by Calendly, Cal.com or the Cal.diy project.',
+    )
+    expect(statements).toHaveLength(1)
+    expect(statements[0]?.closest('[hidden], [aria-hidden="true"]')).toBeNull()
+  })
+
   it('keeps the trademark notice out of ordinary documentation', () => {
-    const document = new JSDOM(readFileSync(join(output, 'docs.html'), 'utf8')).window.document
+    const document = new JSDOM(readFileSync(join(output, 'docs/rest.html'), 'utf8')).window.document
     expect(text(document.body)).not.toContain(trademarkNotice)
   })
 

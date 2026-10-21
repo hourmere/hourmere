@@ -96,6 +96,6 @@ Cal.com is a trademark of Cal.com, Inc.; see its
 [Cal.diy trademark notice](https://www.cal.diy/). Other product names identify their respective
 products; any associated trademarks belong to their respective owners.
 
-Calendly, Cal.com, Cal.diy, Google, Google Calendar, Microsoft, Zoom, Docker Compose,
-PostgreSQL and GitHub are trademarks of their respective owners;
-Hourmere is not affiliated with or endorsed by them.
+Hourmere is not affiliated with or endorsed by Calendly, Cal.com or the Cal.diy project.
+
+Calendly and Cal.com are trademarks of their respective owners; Hourmere is not affiliated with or endorsed by them.
