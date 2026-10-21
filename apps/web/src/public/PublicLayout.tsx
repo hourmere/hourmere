@@ -28,7 +28,8 @@ export function CreateBookingLink() {
  */
 export function PublicLayout({ children, wide = false }: { children: ReactNode; wide?: boolean }) {
   const { t, locale } = useI18n()
-  const [beforeBrand, afterBrand] = t('Powered by {0}').split('{0}')
+  // Interpolate first so Han/Latin boundary spacing also applies around the logo.
+  const [beforeBrand, afterBrand] = t('Powered by {0}', { '0': 'Hourmere' }).split('Hourmere')
   const [hostedSignupUrl, setHostedSignupUrl] = useState('https://hourmere.com')
   const [policyUrls, setPolicyUrls] = useState<{
     privacyPolicyUrl?: string

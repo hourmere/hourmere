@@ -9,6 +9,7 @@ import {
   json,
   later,
   ME,
+  PROFILE,
   profile,
   type Routes,
   renderApp,
@@ -164,6 +165,11 @@ describe('the event types list', () => {
     fakeApi({ ...signedIn, ...emptyAccount })
     renderApp('/app/event-types')
     expect(await screen.findByText(/You have no event types yet/)).toBeDefined()
+    expect(
+      screen
+        .getByRole('link', { name: 'Create your first event type' })
+        .classList.contains('button'),
+    ).toBe(true)
     expect(screen.getByRole('link', { name: 'Choose your handle' }).getAttribute('href')).toBe(
       '/app/settings',
     )
@@ -190,6 +196,35 @@ describe('the event types list', () => {
 })
 
 describe('creating an event type', () => {
+  it.each(['en', 'zh-CN'] as const)(
+    'keeps the editor preview handle and slug separate in %s with a complete URL to copy',
+    async (language) => {
+      const user = userEvent.setup()
+      chooseLanguage(language)
+      const handle = 'alexandria-review-very-long-host-handle'
+      const slug = 'paused-very-long-slug-for-the-booking-link-truncation-check-r3'
+      eventTypeServer([eventType({ slug })], profile({ ...PROFILE, handle }))
+      renderApp(`/app/event-types/${EVENT_TYPE_ID}`)
+      await screen.findByRole('heading', {
+        name: language === 'en' ? 'Edit “Intro call”' : '编辑“Intro call”',
+        level: 1,
+      })
+      const preview = document.querySelector('.booking-link .preview')
+      expect(preview?.classList.contains('booking-link-path')).toBe(true)
+      expect(preview?.querySelector('.booking-link-handle')?.textContent).toBe(`/${handle}`)
+      expect(preview?.querySelector('.booking-link-slug')?.textContent).toBe(`/${slug}`)
+      expect(preview?.textContent).toBe(`/${handle}/${slug}`)
+      expect(preview?.getAttribute('title')).toBe(`${window.location.origin}/${handle}/${slug}`)
+      expect(preview?.querySelector('wbr')).toBeNull()
+      await user.click(
+        screen.getByRole('button', { name: language === 'en' ? 'Copy link' : '复制链接' }),
+      )
+      expect(await navigator.clipboard.readText()).toBe(
+        `${window.location.origin}/${handle}/${slug}`,
+      )
+    },
+  )
+
   it('separates the English minimum notice description, range and day equivalent with spaces', async () => {
     const user = userEvent.setup()
     eventTypeServer([])
@@ -267,7 +302,7 @@ describe('creating an event type', () => {
     await user.type(field('Title'), 'Intro call')
     // The link follows the title until edited.
     expect(field('Booking link').value).toBe('intro-call')
-    expect(screen.getByText('/ada/intro-call')).toBeDefined()
+    expect(document.querySelector('.booking-link .preview')?.textContent).toBe('/ada/intro-call')
     await user.click(screen.getByRole('button', { name: 'Copy link' }))
     expect(await navigator.clipboard.readText()).toBe(`${window.location.origin}/ada/intro-call`)
     await user.type(field(/Description/), 'Let us talk.{Enter}Bring questions.')
@@ -1091,7 +1126,9 @@ describe('team booking links', () => {
     expect(screen.queryByText(/Choose your handle/)).toBeNull()
     await user.click(row.getByRole('link', { name: 'Edit Intro call' }))
     await screen.findByRole('heading', { name: 'Edit “Intro call”' })
-    expect(screen.getByText(new URL(url).pathname)).toBeDefined()
+    expect(document.querySelector('.booking-link .preview')?.textContent).toBe(
+      new URL(url).pathname,
+    )
     await user.click(screen.getByRole('button', { name: 'Copy link' }))
     expect(await navigator.clipboard.readText()).toBe(url)
   })
@@ -1527,7 +1564,8 @@ describe('event type booking link previews', () => {
     const user = userEvent.setup()
     eventTypeServer()
     await openExisting()
-    const preview = screen.getByText('/ada/intro-call')
+    const preview = document.querySelector('.booking-link .preview') as HTMLElement
+    expect(preview?.textContent).toBe('/ada/intro-call')
     expect(preview.classList.contains('preview')).toBe(true)
     expect(preview.querySelectorAll('wbr')).toHaveLength(0)
     expect(screen.queryByText(`${window.location.origin}/ada/intro-call`)).toBeNull()

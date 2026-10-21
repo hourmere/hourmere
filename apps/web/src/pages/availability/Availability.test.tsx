@@ -123,6 +123,9 @@ describe('the availability page', () => {
     expect(screen.getByRole('link', { name: 'Set your weekly hours' }).getAttribute('href')).toBe(
       '/app/availability/new',
     )
+    expect(
+      screen.getByRole('link', { name: 'Set your weekly hours' }).classList.contains('button'),
+    ).toBe(true)
   })
 })
 

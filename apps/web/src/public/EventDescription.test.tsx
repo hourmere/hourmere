@@ -75,6 +75,21 @@ it('omits disclosure controls for descriptions that fit', () => {
   expect(screen.queryByRole('button')).toBeNull()
 })
 
+it('remeasures collapsed blank lines before showing an unnecessary disclosure', () => {
+  clampAt('3')
+  vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(function (
+    this: HTMLElement,
+  ) {
+    const value = this.textContent ?? ''
+    return value.includes('\n\n') ? 100 : 60
+  })
+  vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(60)
+  // No observer callback or resize is needed: React's layout effect must measure the
+  // collapsed text in its second commit, before the browser can paint a stale button.
+  render(<EventDescription>{'Para one.\n\nPara two.\n\nPara three.'}</EventDescription>)
+  expect(screen.queryByRole('button', { name: 'Show more' })).toBeNull()
+})
+
 it('localizes description controls in Chinese', () => {
   vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockReturnValue(180)
   vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(60)

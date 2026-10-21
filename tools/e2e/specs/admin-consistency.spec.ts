@@ -1,8 +1,11 @@
 import { openAuditPage } from '../audit-pages.ts'
 import {
+  LONG_BOOKING_HANDLE,
   LONG_BOOKING_SLUG,
+  measureBookingLinkPreview,
   measureEventTypesTable,
-  setLongBookingSlug,
+  SHORT_BOOKING_SLUG,
+  setLongBookingPath,
   useLongBookingSlug,
 } from '../event-types-table.ts'
 import { expect, test } from '../fixtures.ts'
@@ -79,6 +82,14 @@ for (const locale of ['en-US', 'zh-CN'] as const) {
   }) => {
     await page.setViewportSize({ width: 1280, height: 900 })
     await openAuditPage(page, app, 'event-types', { locale })
+    // A short path that fits its column is shown whole: nothing caps the handle. Measured
+    // at 1440, where it fits with room to spare in every engine's fallback monospace font.
+    await page.setViewportSize({ width: 1440, height: 900 })
+    const whole = await measureEventTypesTable(page, SHORT_BOOKING_SLUG)
+    expect(whole.tableMode, 'short path table mode').toBe(true)
+    expect(whole.handleOverflow, 'short path handle unclipped').toBe(false)
+    expect(whole.slugOverflow, 'short path slug unclipped').toBe(false)
+    expect(whole.linkLines, 'short path link lines').toBe(1)
     await useLongBookingSlug(page, app)
     for (const width of [1280, 1440]) {
       await page.setViewportSize({ width, height: 900 })
@@ -93,38 +104,58 @@ for (const locale of ['en-US', 'zh-CN'] as const) {
       expect(geometry.linkLines, `${width}px link lines`).toBe(1)
       expect(geometry.linkOverflow, `${width}px link clips`).toBe(true)
       expect(geometry.linkEllipsis, `${width}px ellipsis`).toBe('ellipsis')
+      expect(geometry.handleOverflow, `${width}px long handle clips`).toBe(true)
+      // The clipped handle takes all the width the slug leaves, within subpixel rounding.
+      expect(geometry.unusedPathWidth, `${width}px handle fills the link`).toBeLessThan(1)
+      expect(geometry.slugStartVisible, `${width}px slug start visible`).toBe(true)
+      expect(geometry.fullUrlTitle, `${width}px full URL title`).toBe(true)
       expect(geometry.copyBeside, `${width}px copy button beside`).toBe(true)
       expect(geometry.documentOverflow, `${width}px document`).toBe(false)
     }
   })
 
-  test(`editor booking-link preview truncates a long slug on narrow screens ${locale}`, async ({
+  test(`editor booking-link preview keeps the slug beside a long handle on narrow screens ${locale}`, async ({
     page,
     app,
   }) => {
     await page.setViewportSize({ width: 320, height: 568 })
-    await setLongBookingSlug(page, app)
+    await setLongBookingPath(page, app)
     await openAuditPage(page, app, 'event-type-editor', { locale })
-    const preview = page.locator('.booking-link .preview').filter({ hasText: LONG_BOOKING_SLUG })
+    const preview = page.locator('.booking-link .preview').filter({ hasText: LONG_BOOKING_HANDLE })
     await expect(preview).toBeVisible()
     for (const width of [320, 360]) {
       await page.setViewportSize({ width, height: 568 })
-      const geometry = await preview.evaluate((node) => {
-        const range = document.createRange()
-        range.selectNodeContents(node)
-        return {
-          lines: new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size,
-          overflow: node.scrollWidth > node.clientWidth,
-          ellipsis: getComputedStyle(node).textOverflow,
-          documentFits:
-            document.documentElement.scrollWidth <= document.documentElement.clientWidth,
-        }
-      })
+      // Long handle and long slug: both clip, on one line, with the slug's start readable.
+      const geometry = await measureBookingLinkPreview(preview)
       expect(geometry.lines, `${width}px lines`).toBe(1)
-      expect(geometry.overflow, `${width}px clips`).toBe(true)
+      expect(geometry.slugOverflow, `${width}px long slug clips`).toBe(true)
+      expect(geometry.handleOverflow, `${width}px long handle clips`).toBe(true)
+      expect(geometry.unusedPathWidth, `${width}px handle fills the preview`).toBeLessThan(1)
+      expect(geometry.slugStartVisible, `${width}px slug start visible`).toBe(true)
+      expect(geometry.fullUrlTitle, `${width}px full URL title`).toBe(true)
       expect(geometry.ellipsis, `${width}px ellipsis`).toBe('ellipsis')
       expect(geometry.documentFits, `${width}px document`).toBe(true)
     }
+    // Long handle and short slug: only the handle clips, and the whole slug stays visible.
+    await page.locator('#slug').fill('intro')
+    await expect(preview).toHaveText(`/${LONG_BOOKING_HANDLE}/intro`)
+    for (const width of [320, 360]) {
+      await page.setViewportSize({ width, height: 568 })
+      const geometry = await measureBookingLinkPreview(preview)
+      expect(geometry.lines, `${width}px short slug lines`).toBe(1)
+      expect(geometry.handleOverflow, `${width}px short slug handle clips`).toBe(true)
+      expect(geometry.slugOverflow, `${width}px short slug whole`).toBe(false)
+      expect(geometry.unusedPathWidth, `${width}px short slug handle fills`).toBeLessThan(1)
+      expect(geometry.slugStartVisible, `${width}px short slug visible`).toBe(true)
+      expect(geometry.documentFits, `${width}px short slug document`).toBe(true)
+    }
+    // When the whole path fits, nothing is clipped: no cap trims the handle to a stub.
+    await page.setViewportSize({ width: 1280, height: 900 })
+    const whole = await measureBookingLinkPreview(preview)
+    expect(whole.lines, '1280px lines').toBe(1)
+    expect(whole.handleOverflow, '1280px handle unclipped').toBe(false)
+    expect(whole.slugOverflow, '1280px slug unclipped').toBe(false)
+    expect(whole.fullUrlTitle, '1280px full URL title').toBe(true)
   })
 
   test(`long booking links retain one line and ellipsis with touch ${locale}`, async ({
@@ -156,21 +187,13 @@ for (const locale of ['en-US', 'zh-CN'] as const) {
     const link = page.locator('.booking-link a').filter({ hasText: slug })
     await expect(link).toBeVisible()
     await expect(link.locator('wbr')).toHaveCount(0)
-    const geometry = await link.evaluate((node) => {
-      const style = getComputedStyle(node)
-      const range = document.createRange()
-      range.selectNode(node.firstChild as Node)
-      return {
-        overflow: node.scrollWidth > node.clientWidth,
-        ellipsis: style.textOverflow,
-        display: style.display,
-        lineCount: new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size,
-      }
-    })
-    expect(geometry.overflow).toBe(true)
-    expect(geometry.ellipsis).toBe('ellipsis')
-    expect(geometry.display).toBe('block')
-    expect(geometry.lineCount).toBe(1)
+    const geometry = await measureEventTypesTable(page, slug)
+    expect(geometry.linkOverflow).toBe(true)
+    expect(geometry.linkEllipsis).toBe('ellipsis')
+    expect(geometry.linkLines).toBe(1)
+    expect(geometry.slugStartVisible).toBe(true)
+    expect(geometry.unusedPathWidth).toBeLessThan(1)
+    expect(geometry.fullUrlTitle).toBe(true)
     for (const width of [320, 360]) {
       await page.setViewportSize({ width, height: 568 })
       await expect.poll(documentFits).toBe(true)

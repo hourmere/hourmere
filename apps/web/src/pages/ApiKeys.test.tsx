@@ -232,7 +232,7 @@ describe('the API keys page', () => {
       },
     ])
     const reveal = await screen.findByRole('region', { name: /Copy your new key “CI deploy bot”/ })
-    expect(document.activeElement).toBe(within(reveal).getByRole('heading'))
+    await vi.waitFor(() => expect(document.activeElement).toBe(within(reveal).getByRole('heading')))
     expect(within(reveal).getByText(/won’t be able to see this key again/)).toBeDefined()
     expect(within(reveal).getByLabelText<HTMLInputElement>('New API key').value).toBe(SECRET)
     expect(within(reveal).getByText(new RegExp(`Bearer ${SECRET}`))).toBeDefined()

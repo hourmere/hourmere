@@ -116,7 +116,7 @@ describe('the invitee’s manage page', () => {
     expect(screen.getByRole('main').classList.contains('public-main-wide')).toBe(true)
     await user.click(screen.getByRole('button', { name: 'Reschedule' }))
     const heading = await screen.findByRole('heading', { name: 'Pick a new time' })
-    expect(document.activeElement).toBe(heading)
+    await waitFor(() => expect(document.activeElement).toBe(heading))
     expect(screen.getByRole('main').classList.contains('public-main-wide')).toBe(true)
     const summary = screen.getByRole('complementary', { name: 'Current booking' })
     expect(summary.closest('.booking-layout')).not.toBeNull()
@@ -152,6 +152,48 @@ describe('the invitee’s manage page', () => {
     expect(
       [...(note?.querySelectorAll('.cjk-quote') ?? [])].map((span) => span.textContent),
     ).toEqual(language === 'zh-CN' ? ['“', '”'] : [])
+  })
+
+  it.each([
+    {
+      language: 'en',
+      fromLabel: 'From',
+      from: 'Monday, November 2, 2026, 9:00 – 9:30 AM',
+      toLabel: 'To',
+      to: 'Tuesday, November 3, 2026, 10:00 – 10:30 AM',
+      zoneLabel: 'Time zone',
+      zone: 'America/New York (GMT-05:00)',
+      offset: 'GMT-05:00)',
+      prefix: ' (',
+    },
+    {
+      language: 'zh-CN',
+      fromLabel: '从',
+      from: '2026年11月2日星期一，09:00–09:30',
+      toLabel: '至',
+      to: '2026年11月3日星期二，10:00–10:30',
+      zoneLabel: '时区',
+      zone: 'America/New York（GMT-05:00）',
+      offset: 'GMT-05:00）',
+      prefix: '（',
+    },
+  ])('localizes the reschedule confirmation punctuation in $language', async (expected) => {
+    const user = userEvent.setup()
+    manageServer()
+    renderApp(`/booking#token=${TOKEN}&action=reschedule`)
+    await user.click(await screen.findByRole('button', { name: /November 3, available/ }))
+    await user.click(screen.getByRole('button', { name: '10:00 AM' }))
+    await user.selectOptions(screen.getByLabelText('Interface language'), expected.language)
+    const details = document.querySelector('.manage .booking-details') as HTMLElement
+    const value = (label: string) => within(details).getByText(label).nextElementSibling
+    expect(plain(value(expected.fromLabel)?.textContent)).toBe(expected.from)
+    expect(plain(value(expected.toLabel)?.textContent)).toBe(expected.to)
+    const zone = value(expected.zoneLabel)
+    expect(zone?.textContent).toBe(expected.zone)
+    const offsetSpan = zone?.querySelector('.time-offset')
+    expect(offsetSpan?.textContent).toBe(expected.offset)
+    // Keep the English ASCII space breakable and the opening bracket outside the span.
+    expect(offsetSpan?.previousSibling?.textContent?.endsWith(expected.prefix)).toBe(true)
   })
 
   it('formats Chinese host and guest lists and booker brackets', async () => {

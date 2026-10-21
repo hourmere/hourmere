@@ -10,7 +10,8 @@ export function EventDescription({ children }: { children: string }) {
   const [expanded, setExpanded] = useState(false)
   const [overflows, setOverflows] = useState(false)
   const [clamped, setClamped] = useState(false)
-  // Before paint, so a clamped description never flashes its blank lines first.
+  // Before paint, including the second commit after collapsing blank lines.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: clamped changes the committed paragraph text that is measured
   useLayoutEffect(() => {
     const element = text.current
     if (!element) return
@@ -29,7 +30,7 @@ export function EventDescription({ children }: { children: string }) {
       observer?.disconnect()
       window.removeEventListener('resize', measure)
     }
-  }, [expanded])
+  }, [expanded, clamped])
   return (
     <div className="event-description-disclosure">
       <p

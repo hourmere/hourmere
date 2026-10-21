@@ -708,6 +708,10 @@ function ConfirmReschedule({
   // A reschedule is not idempotent: one request at a time, and only when people press.
   const inFlight = useRef(false)
   const start = Date.parse(slot.start)
+  // Keep the breakable space and opening bracket outside the no-wrap numeric offset.
+  const offset = offsetLabel(timeZone, start)
+  const zoneLabel = t(' ({offset})', { offset })
+  const offsetAt = zoneLabel.lastIndexOf(offset)
   return (
     <div className="stack">
       <FocusHeading>{t('Move your booking?')}</FocusHeading>
@@ -717,27 +721,32 @@ function ConfirmReschedule({
           [
             'From',
             <span key="from" className="struck">
-              {formatDate(Date.parse(current.start), timeZone, locale)},{' '}
-              {formatTimeRange(
-                Date.parse(current.start),
-                Date.parse(current.end),
-                timeZone,
-                locale,
-              )}
+              {t('{date}, {time}', {
+                date: formatDate(Date.parse(current.start), timeZone, locale),
+                time: formatTimeRange(
+                  Date.parse(current.start),
+                  Date.parse(current.end),
+                  timeZone,
+                  locale,
+                ),
+              })}
             </span>,
           ],
           [
             'To',
             <strong key="to">
-              {formatDate(start, timeZone, locale)},{' '}
-              {formatTimeRange(start, Date.parse(slot.end), timeZone, locale)}
+              {t('{date}, {time}', {
+                date: formatDate(start, timeZone, locale),
+                time: formatTimeRange(start, Date.parse(slot.end), timeZone, locale),
+              })}
             </strong>,
           ],
           [
             'Time zone',
             <span key="zone">
-              {zoneName(timeZone)}{' '}
-              <span className="time-offset">({offsetLabel(timeZone, start)})</span>
+              {zoneName(timeZone)}
+              {zoneLabel.slice(0, offsetAt)}
+              <span className="time-offset">{zoneLabel.slice(offsetAt)}</span>
             </span>,
           ],
         ]}

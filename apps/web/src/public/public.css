@@ -474,14 +474,6 @@
   margin-top: var(--space-3);
 }
 
-.public .picker-note {
-  margin-bottom: var(--space-3);
-}
-
-.public .calendar-cancel {
-  justify-self: start;
-}
-
 .public .reschedule-summary .details-row {
   grid-template-columns: minmax(0, 1fr);
   gap: var(--space-1);

@@ -72,7 +72,11 @@ export function EventTypesPage() {
           {state.data.eventTypes.length === 0 ? (
             <EmptyState
               title={t('You have no event types yet. Create one to start taking bookings.')}
-              action={<Link to={PATHS.newEventType}>{t('Create your first event type')}</Link>}
+              action={
+                <Link to={PATHS.newEventType} className="button">
+                  {t('Create your first event type')}
+                </Link>
+              }
             />
           ) : (
             <EventTypeTable
@@ -99,6 +103,8 @@ function SetupHints({
 }) {
   const { t } = useI18n()
 
+  const handleHint = t('{0} to get booking links.').split('{0}')
+  const scheduleHint = t('{0}, so there are times to book.').split('{0}')
   const needsHandle = me.organization.personal && !profile
   if (!needsHandle && hasSchedule) return null
   return (
@@ -106,13 +112,16 @@ function SetupHints({
       <ul className="plain-list">
         {needsHandle && (
           <li>
-            <Link to={PATHS.settings}>{t('Choose your handle')}</Link> {t('to get booking links.')}
+            {handleHint[0]}
+            <Link to={PATHS.settings}>{t('Choose your handle')}</Link>
+            {handleHint[1]}
           </li>
         )}
         {!hasSchedule && (
           <li>
+            {scheduleHint[0]}
             <Link to={PATHS.newSchedule}>{t('Set your weekly hours')}</Link>
-            {t(', so there are times to book.')}
+            {scheduleHint[1]}
           </li>
         )}
       </ul>
@@ -165,6 +174,7 @@ function EventTypeTable({
                 : profile && e.ownerUserId === me.user.id
                   ? publicPageUrl(profile.handle, e.slug)
                   : null
+            const pathname = url ? new URL(url).pathname : ''
             return (
               <tr key={e.id} className={!e.isActive ? 'event-type-inactive' : undefined}>
                 <th scope="row" data-label={t('Title')} className="user-content">
@@ -179,8 +189,17 @@ function EventTypeTable({
                   <div className="table-value">
                     {url ? (
                       <span className="booking-link">
-                        <a href={url} target="_blank" rel="noreferrer" className="mono">
-                          {new URL(url).pathname}
+                        <a
+                          href={url}
+                          title={url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="mono booking-link-path"
+                        >
+                          <span className="booking-link-handle">
+                            {pathname.slice(0, pathname.lastIndexOf('/'))}
+                          </span>
+                          <span className="booking-link-slug">/{encodeURIComponent(e.slug)}</span>
                           <span className="visually-hidden"> {t('(opens in a new tab)')}</span>
                         </a>
                         <CopyButton

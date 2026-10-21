@@ -261,6 +261,11 @@ function BookingFlow({
     }
   }
 
+  // Keep the breakable space and opening bracket outside the no-wrap numeric offset.
+  const chosenOffset = slot ? offsetLabel(timeZone, Date.parse(slot.start)) : ''
+  const chosenZoneLabel = t(' ({offset})', { offset: chosenOffset })
+  const chosenOffsetAt = chosenZoneLabel.lastIndexOf(chosenOffset)
+
   return (
     <PublicLayout wide>
       <div className="booking-layout">
@@ -297,10 +302,9 @@ function BookingFlow({
                 {formatTimeRange(Date.parse(slot.start), Date.parse(slot.end), timeZone, locale)}
                 <br />
                 <span className="muted">
-                  {zoneName(timeZone)}{' '}
-                  <span className="time-offset">
-                    ({offsetLabel(timeZone, Date.parse(slot.start))})
-                  </span>
+                  {zoneName(timeZone)}
+                  {chosenZoneLabel.slice(0, chosenOffsetAt)}
+                  <span className="time-offset">{chosenZoneLabel.slice(chosenOffsetAt)}</span>
                 </span>
               </p>
               <button type="button" className="button button-small" onClick={changeTime}>
