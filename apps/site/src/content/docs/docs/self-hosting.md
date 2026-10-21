@@ -28,7 +28,7 @@ Run this sequence from a directory where you want the checkout:
 ```sh
 git clone https://github.com/hourmere/hourmere.git
 cd hourmere
-./scripts/setup.sh
+./scripts/setup.sh --source
 docker compose up -d --build --wait
 curl --retry 20 --retry-delay 3 --retry-all-errors --fail https://hourmere.example.com/api/health
 ```
@@ -69,7 +69,7 @@ starts PostgreSQL 18, and applies application and job migrations before serving 
 `--wait` waits for the app and database health checks; the curl command also checks the
 public TLS/proxy path. A health response checks the process/database, not SMTP delivery or
 external calendar access. For an independent installation, choose a unique lowercase project
-name before setup, for example `COMPOSE_PROJECT_NAME=hourmere-staging ./scripts/setup.sh`.
+name before setup, for example `COMPOSE_PROJECT_NAME=hourmere-staging ./scripts/setup.sh --source`.
 Run every later Compose command from that checkout so it reads the persisted project and
 file selection. Avoid exporting a conflicting `COMPOSE_PROJECT_NAME` or `COMPOSE_FILE` in
 your shell, which would override `.env`.

@@ -9,6 +9,8 @@ repo=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 env_file=$repo/.env
 staging=
 terminal_state=
+install_path=
+release_version=
 
 cleanup() {
   if [ -n "$terminal_state" ]; then
@@ -26,6 +28,31 @@ fail() {
   printf '%s\n' "$1" >&2
   exit 1
 }
+
+usage() {
+  printf '%s\n' 'Usage: scripts/setup.sh [--image|--source] [--version MAJOR.MINOR.PATCH[-prerelease]]' \
+    'The default image install uses an exact checked-out release tag, HOURMERE_VERSION, or a prompted version.' \
+    'Use --source to build the checked-out source. Deployment and SMTP settings are read from standard input.'
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --image|--source)
+      [ -z "$install_path" ] || fail 'Choose only one of --image or --source.'
+      install_path=${1#--}
+      ;;
+    --version)
+      [ "$#" -gt 1 ] && [ -n "$2" ] || fail '--version requires an exact release version.'
+      [ -z "$release_version" ] || fail 'Pass --version only once.'
+      release_version=$2
+      shift
+      ;;
+    --help|-h) usage; exit 0 ;;
+    *) usage >&2; fail 'Unknown setup argument.' ;;
+  esac
+  shift
+done
+[ "$install_path" != source ] || [ -z "$release_version" ] || fail '--version is only supported for an image install.'
 
 if [ -e "$env_file" ] || [ -L "$env_file" ]; then
   fail '.env already exists; setup never overwrites it. Edit that file instead.'
@@ -93,6 +120,57 @@ valid_origin() {
       exit 0
     }'
 }
+
+# Match the image tags accepted by scripts/release.ts: full SemVer without build
+# metadata, no leading zeroes in numeric identifiers, and Docker's 128-byte limit.
+valid_version() {
+  case "$1" in
+    *[!0-9a-zA-Z.-]*) return 1 ;;
+  esac
+  printf '%s\n' "$1" | LC_ALL=C awk '
+    {
+      if (length($0) > 128 || $0 !~ /^(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)(-[0-9A-Za-z-]+([.][0-9A-Za-z-]+)*)?$/) exit 1
+      prerelease = $0
+      if (sub(/^[0-9]+[.][0-9]+[.][0-9]+-/, "", prerelease)) {
+        count = split(prerelease, identifiers, ".")
+        for (i = 1; i <= count; i++) {
+          if (identifiers[i] ~ /^[0-9]+$/ && length(identifiers[i]) > 1 && substr(identifiers[i], 1, 1) == "0") exit 1
+        }
+      }
+      exit 0
+    }'
+}
+
+if [ -z "$install_path" ]; then
+  prompt 'Install from [image/source] (image): '
+  install_path=${answer:-image}
+fi
+case "$install_path" in
+  image)
+    release_version=${release_version:-${HOURMERE_VERSION:-}}
+    if [ -z "$release_version" ] && command -v git >/dev/null 2>&1; then
+      # An arbitrary main checkout is not a release. Never infer a nearby tag.
+      release_tag=$(git -C "$repo" describe --tags --exact-match --match 'v[0-9]*' 2>/dev/null || :)
+      case "$release_tag" in
+        v*)
+          if valid_version "${release_tag#v}"; then
+            release_version=${release_tag#v}
+          fi
+          ;;
+      esac
+    fi
+    if [ -z "$release_version" ]; then
+      prompt 'Exact published image version (for example 1.0.0): '
+      release_version=$answer
+    fi
+    valid_version "$release_version" || fail 'Use an exact release version such as 1.0.0 or 1.0.0-rc.1, without v, build metadata or a floating tag.'
+    ;;
+  source)
+    [ -z "$release_version" ] || fail '--version is only supported for an image install.'
+    [ -z "${HOURMERE_VERSION:-}" ] || fail 'Unset HOURMERE_VERSION for a source install so app and worker use the same local image.'
+    ;;
+  *) fail 'Choose image or source.' ;;
+esac
 
 prompt 'Deployment mode [proxy/plain] (proxy): '
 mode=${answer:-proxy}
@@ -179,7 +257,7 @@ staging=$(mktemp -d "$repo/.env.setup.XXXXXXXX")
 {
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in
-      BETTER_AUTH_SECRET=*|POSTGRES_PASSWORD=*|PUBLIC_URL=*|PORT=*|SMTP_URL=*|MAIL_FROM=*|SIGNUP=*|AUTO_MIGRATE=*|COMPOSE_FILE=*|COMPOSE_PROJECT_NAME=*|DATABASE_URL=*) continue ;;
+      BETTER_AUTH_SECRET=*|POSTGRES_PASSWORD=*|PUBLIC_URL=*|PORT=*|SMTP_URL=*|MAIL_FROM=*|SIGNUP=*|AUTO_MIGRATE=*|HOURMERE_VERSION=*|COMPOSE_FILE=*|COMPOSE_PROJECT_NAME=*|DATABASE_URL=*) continue ;;
     esac
     printf '%s\n' "$line"
   done < "$repo/.env.example"
@@ -193,15 +271,24 @@ staging=$(mktemp -d "$repo/.env.setup.XXXXXXXX")
   write_setting SIGNUP first-user
   write_setting AUTO_MIGRATE true
   write_setting COMPOSE_PROJECT_NAME "$project_name"
-  if [ "$mode" = proxy ]; then
-    write_setting COMPOSE_FILE docker-compose.yml:docker-compose.proxy.yml
-  else
-    write_setting COMPOSE_FILE docker-compose.yml
+  compose_files=docker-compose.yml
+  if [ "$install_path" = image ]; then
+    write_setting HOURMERE_VERSION "$release_version"
+    compose_files=$compose_files:docker-compose.image.yml
   fi
+  if [ "$mode" = proxy ]; then
+    compose_files=$compose_files:docker-compose.proxy.yml
+  fi
+  write_setting COMPOSE_FILE "$compose_files"
 } > "$staging/.env"
 
 # POSIX link creates exactly this path atomically and fails for every existing object,
 # including dangling symlinks and directories. Unlike ln, it never follows a target
 # directory. The temporary file is on the same filesystem and already has mode 0600.
 link "$staging/.env" "$env_file" 2>/dev/null || fail 'Could not create .env; it may already exist. No existing file was changed.'
-printf '%s\n' 'Created private .env (mode 600). Back it up securely.' 'Start Hourmere: docker compose up -d --build --wait'
+printf '%s\n' 'Created private .env (mode 600). Back it up securely.'
+if [ "$install_path" = image ]; then
+  printf '%s\n' 'Start Hourmere: docker compose pull && docker compose up -d --wait'
+else
+  printf '%s\n' 'Start Hourmere: docker compose up -d --build --wait'
+fi
