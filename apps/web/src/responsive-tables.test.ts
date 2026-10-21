@@ -112,6 +112,21 @@ describe('responsive table CSS contract', () => {
     expect(caption).toContain('margin-bottom: var(--space-2);')
   })
 
+  it('stacks every narrow booking field and separates complete date/time pieces', () => {
+    const narrow = container('not (min-width: 440px)')
+    expect(rule(narrow, '.table-bookings :is(th, td)')).toContain('padding-inline: var(--space-2);')
+    const field = rule(narrow, '.table-bookings td[data-label]')
+    expect(field).toContain('grid-template-columns: minmax(0, 1fr);')
+    expect(field).toContain('gap: 0;')
+    expect(rule(narrow, '.table-bookings .booking-when time')).toContain(
+      'font-size: var(--text-sm);',
+    )
+    expect(rule(narrow, '.table-bookings .booking-when time .nowrap')).toContain('display: block;')
+    expect(rule(styles, '.nowrap')).toContain('white-space: nowrap;')
+    // The overrides end before wider cards and tables, leaving table geometry intact.
+    expect(styles.split(narrow).join('')).not.toMatch(/\.booking-when[^{}]*\{/)
+  })
+
   it('keeps analytics in table mode from 400px while dense tables still use cards', () => {
     const narrow = container('not (min-width: 400px)')
     const tablet = container('(min-width: 400px) and (not (min-width: 880px))')
