@@ -11,7 +11,7 @@ staging=
 
 cleanup() {
   if [ -n "$staging" ]; then
-    rm -f -- "$staging/.env"
+    rm -f -- "$staging/.env" "$staging/image-install"
     rmdir -- "$staging"
   fi
 }
@@ -44,7 +44,7 @@ if [ -s "$env_file" ] && [ -z "$(tail -c 1 "$env_file")" ]; then
   ends_newline=true
 fi
 
-if LC_ALL=C awk -v mode="$mode" -v ends_newline="$ends_newline" '
+if LC_ALL=C awk -v mode="$mode" -v ends_newline="$ends_newline" -v image_marker="$staging/image-install" '
   BEGIN {
     quote = sprintf("%c", 39)
     bom = sprintf("%c%c%c", 239, 187, 191)
@@ -85,6 +85,10 @@ if LC_ALL=C awk -v mode="$mode" -v ends_newline="$ends_newline" '
     for (i = 1; i <= count; i++) {
       if (files[i] !~ /^[a-zA-Z0-9_.\/@+-]+$/) invalid()
       file = files[i]
+      if (file == "docker-compose.image.yml" || file == "./docker-compose.image.yml") {
+        # Only the parsed selection decides the hint; never evaluate .env.
+        print "image" > image_marker
+      }
       if (file == worker || file == "./" worker) {
         if (mode == "off" || has_worker) continue
         file = worker
@@ -159,9 +163,11 @@ fi
 chmod 600 "$staging/.env"
 mv -f -- "$staging/.env" "$repo/"
 
-printf '%s\n' 'Updated only COMPOSE_FILE in private .env (mode 600).' 'Run from this checkout:' '  unset COMPOSE_FILE'
+build_flag=' --build'
+if [ -f "$staging/image-install" ]; then build_flag=; fi
+printf '%s\n' 'Updated only COMPOSE_FILE in private .env (mode 600).' 'Run from this checkout:' '  unset COMPOSE_FILE HOURMERE_VERSION'
 if [ "$mode" = on ]; then
-  printf '%s\n' '  # Bundled HTTPS only; omit this check in plain mode.' '  docker compose config --services | grep -qx proxy &&' '  docker compose config --services | grep -qx worker &&' '    docker compose up -d --build --wait'
+  printf '%s\n' '  # Bundled HTTPS only; omit this check in plain mode.' '  docker compose config --services | grep -qx proxy &&' '  docker compose config --services | grep -qx worker &&' "    docker compose up -d${build_flag} --wait"
 else
-  printf '%s\n' '  # Remove any legacy HOURMERE_ROLE=web setting from .env before continuing.' '  docker compose up -d --build --wait --remove-orphans'
+  printf '%s\n' '  # Remove any legacy HOURMERE_ROLE=web setting from .env before continuing.' "  docker compose up -d${build_flag} --wait --remove-orphans"
 fi

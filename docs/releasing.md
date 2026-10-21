@@ -270,6 +270,12 @@ Smoke-test the intended deployment and check the upgrade notes before announcing
 availability. After the first successful image push, complete this publication checklist.
 Make the documentation changes in a separate follow-up after verifying public access:
 
+- **Done before tagging:** `scripts/setup.sh` and `scripts/setup.test.ts` report the
+  selected image version and its source, and reject a flag/environment version that
+  differs from the exact checked-out release tag. The `.env.example` image/version
+  comments, `docker-compose.yml` and `docker-compose.worker.yml` headers, and
+  `scripts/enable-worker.sh` image/source startup hints are also prepared. These changes
+  belong in the RC and v1.0.0 source; they do not assert that an image is public.
 - After the first authorized `GITHUB_TOKEN` push, check the GHCR package's **Manage Actions
   access** settings: publishing a package through a workflow automatically grants the
   repository **Admin** access, as described in GitHub's [Container registry documentation](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry).
@@ -282,7 +288,8 @@ Make the documentation changes in a separate follow-up after verifying public ac
   together with the release-day docs PR (card 213), only after anonymous pull and
   attestation verification succeed for stable `1.0.0`. It must make the image the primary
   install and upgrade path, retaining source builds as the alternative. Use this line
-  map from the preparation baseline (headings/snippets remain the anchors if lines move):
+  map for the remaining release-day changes from the preparation baseline
+  (headings/snippets remain the anchors if lines move):
 
   | File / preparation lines | Release-day change |
   |---|---|
