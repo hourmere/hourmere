@@ -598,12 +598,15 @@ describe('privacy data-flow disclosures', () => {
     expect(providers).toMatch(
       /Zoho, which delivers sign-in emails, booking confirmations and reminders from its United States data center/,
     )
-    expect(providers).toMatch(/Cloudflare, which hosts this website and stores the Cloud waitlist/)
+    expect(providers).toContain(
+      'Cloudflare, which hosts the hourmere.com website and stores the Hourmere Cloud waitlist (it does not host Hourmere Cloud or process Google user data)',
+    )
     expect(providers).toContain('We use them only to host the Service and deliver its email.')
     expect(providers).not.toMatch(/GitHub/)
     const google = section('google-user-data')
+    expect(google).not.toMatch(/Cloudflare|providers that host the Service/)
     expect(google).toMatch(
-      /providers that host the Service and deliver its email \(see section 7 ?\)/,
+      /providers that host Hourmere Cloud and deliver its email \(see section 7 ?\)/,
     )
     expect(google).toMatch(
       /your name and email address from Google sign-in, and Google Meet links, appear in booking emails that our email provider delivers/,
