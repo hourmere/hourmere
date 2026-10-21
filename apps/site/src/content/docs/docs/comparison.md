@@ -97,3 +97,5 @@ Cal.com is a trademark of Cal.com, Inc.; see its
 products; any associated trademarks belong to their respective owners.
 
 Hourmere is not affiliated with or endorsed by Calendly, Cal.com or the Cal.diy project.
+
+Calendly and Cal.com are trademarks of their respective owners; Hourmere is not affiliated with or endorsed by them.
