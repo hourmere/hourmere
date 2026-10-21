@@ -1568,16 +1568,11 @@ input[type="radio"] {
   white-space: nowrap;
 }
 
+/* The handle alone shrinks, so a path that fits is shown whole and only a long handle clips.
+   Its clipped box rarely ends on a whole monospace cell, so a sub-cell gap can remain between
+   the ellipsis and the slug's slash; capping or rounding the handle cuts far more than that. */
 .booking-link-handle {
-  flex: 0 0 auto;
-  max-width: 25%;
-}
-
-/* Whole monospace cells put the ellipsis directly beside the slug's slash. */
-@supports (max-width: round(down, 25%, 1ch)) {
-  .booking-link-handle {
-    max-width: round(down, 25%, 1ch);
-  }
+  flex: 0 1 auto;
 }
 
 .booking-link-slug {

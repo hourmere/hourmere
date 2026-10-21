@@ -166,9 +166,11 @@ function BookingList({
 
   // One sentence per language around the link, so Chinese keeps its punctuation unspaced.
   const share = t('Share the links of your {0} so people can book you.').split('{0}')
-  const browserZoneNote = t('Times are in {zone}, this browser’s time zone. {0}.', {
-    zone: format.timeZone.replaceAll('_', ' '),
-  }).split('{0}')
+  // Both zone notes are whole templates, so the zh colon and brackets match between them.
+  const zone = format.timeZone.replaceAll('_', ' ')
+  const browserZoneNote = t('Times are in {zone}, this browser’s time zone. {0}.', { zone }).split(
+    '{0}',
+  )
   return (
     <section aria-labelledby="list-heading">
       <h2 id="list-heading" className="visually-hidden">
@@ -177,10 +179,7 @@ function BookingList({
       <p className="muted zone-note">
         {tab === 'past' ? t('Newest first. ') : ''}
         {fromProfile ? (
-          <>
-            {t('Times are in')} {format.timeZone.replaceAll('_', ' ')}
-            {t(', your time zone.')}
-          </>
+          t('Times are in {zone}, your time zone.', { zone })
         ) : (
           <>
             {browserZoneNote[0]}

@@ -162,7 +162,6 @@ export const admin = {
   ', through {0}': '，通过{0}',
   ', until': '，至',
   ', your personal organization': '（你的个人组织）',
-  ', your time zone.': '（你的时区）。',
   '. Lowercase letters, digits and hyphens, up to': '。使用小写字母、数字和连字符，最多',
   '. Open it to sign in; it works once and expires in a few minutes.':
     '。打开链接即可登录；链接仅可使用一次，几分钟后过期。',
@@ -651,7 +650,7 @@ export const admin = {
   'Time zone:': '时区：',
   'Time zone: {zone}': '时区：{zone}',
   ' ({time} there)': '（{time}，当地时间）',
-  'Times are in': '时间使用以下时区',
+  'Times are in {zone}, your time zone.': '时间使用以下时区：{zone}（你的时区）。',
   'Times are in {zone}, this browser’s time zone. {0}.':
     '时间使用以下时区：{zone}（此浏览器的时区）。{0}。',
   'Shown in this browser’s time zone. {0}.': '以此浏览器的时区显示。{0}。',

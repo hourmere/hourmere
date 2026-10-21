@@ -1,5 +1,8 @@
-import type { Page } from '@playwright/test'
+import type { Locator, Page } from '@playwright/test'
 import type { FixtureApp } from './fixtures.ts'
+
+/** The fixture host's own short link, which fits the list and the editor preview whole. */
+export const SHORT_BOOKING_SLUG = 'call'
 
 /** Near the 64-character slug limit: a nowrap path this long must not size its column. */
 export const LONG_BOOKING_SLUG = 'paused-very-long-slug-for-the-booking-link-truncation-check-r3'
@@ -51,19 +54,73 @@ export interface EventTypesTableGeometry {
   copyBeside: boolean
   linkEllipsis: string
   handleOverflow: boolean
-  /** Subpixel remainder after whole monospace cells: a partial cell looks like a URL space. */
-  handleCellRemainder: number
+  slugOverflow: boolean
+  /** Link width neither segment uses: a clipped handle must fill what the slug leaves. */
+  unusedPathWidth: number
   slugStartVisible: boolean
   fullUrlTitle: boolean
   documentOverflow: boolean
 }
 
-/** Measures the row that shows `slug` in the event-types list, in table or card mode. */
+export interface BookingLinkPreviewGeometry {
+  lines: number
+  handleOverflow: boolean
+  slugOverflow: boolean
+  /** Preview width neither segment uses: a clipped handle must fill what the slug leaves. */
+  unusedPathWidth: number
+  slugStartVisible: boolean
+  ellipsis: string
+  fullUrlTitle: boolean
+  documentFits: boolean
+}
+
+/** Measures the editor's booking-link preview: its handle and slug segments and their clipping. */
+export function measureBookingLinkPreview(preview: Locator): Promise<BookingLinkPreviewGeometry> {
+  return preview.evaluate((node) => {
+    const handle = node.querySelector<HTMLElement>('.booking-link-handle')
+    const slug = node.querySelector<HTMLElement>('.booking-link-slug')
+    if (!handle?.firstChild || !slug?.firstChild) throw new Error('Preview path missing')
+    // Each segment's own text rows: the two flex items' boxes can differ by a subpixel.
+    const lines = (segment: HTMLElement) => {
+      const range = document.createRange()
+      range.selectNodeContents(segment)
+      return new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size
+    }
+    const start = document.createRange()
+    start.setStart(slug.firstChild, 0)
+    start.setEnd(slug.firstChild, Math.min(7, slug.firstChild.textContent?.length ?? 0))
+    const slugRect = slug.getBoundingClientRect()
+    const startRect = start.getBoundingClientRect()
+    const previewRect = node.getBoundingClientRect()
+    const style = getComputedStyle(node)
+    const contentWidth =
+      previewRect.width -
+      ['paddingLeft', 'paddingRight', 'borderLeftWidth', 'borderRightWidth'].reduce(
+        (sum, property) => sum + Number.parseFloat(style[property as 'paddingLeft']),
+        0,
+      )
+    return {
+      lines: Math.max(lines(handle), lines(slug)),
+      handleOverflow: handle.scrollWidth > handle.clientWidth,
+      slugOverflow: slug.scrollWidth > slug.clientWidth,
+      unusedPathWidth: contentWidth - handle.getBoundingClientRect().width - slugRect.width,
+      slugStartVisible:
+        startRect.width > 0 &&
+        startRect.left >= Math.max(slugRect.left, previewRect.left) - 1 &&
+        startRect.right <= Math.min(slugRect.right, previewRect.right) + 1,
+      ellipsis: getComputedStyle(slug).textOverflow,
+      fullUrlTitle: node.getAttribute('title') === `${window.location.origin}${node.textContent}`,
+      documentFits: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+    }
+  })
+}
+
+/** Measures the row whose booking link ends in `/slug`, in table or card mode. */
 export function measureEventTypesTable(page: Page, slug: string): Promise<EventTypesTableGeometry> {
   return page.evaluate((slug) => {
     const table = document.querySelector<HTMLTableElement>('.table-event-types')
-    const row = [...(table?.querySelectorAll<HTMLTableRowElement>('tbody tr') ?? [])].find((tr) =>
-      tr.querySelector('.booking-link a')?.textContent?.includes(slug),
+    const row = [...(table?.querySelectorAll<HTMLTableRowElement>('tbody tr') ?? [])].find(
+      (tr) => tr.querySelector('.booking-link a .booking-link-slug')?.textContent === `/${slug}`,
     )
     const thead = table?.querySelector('thead')
     const title = row?.querySelector<HTMLElement>('th[scope="row"]')
@@ -93,15 +150,13 @@ export function measureEventTypesTable(page: Page, slug: string): Promise<EventT
     const startRect = slugStart.getBoundingClientRect()
     const slugRect = slugPart.getBoundingClientRect()
     const linkRect = link.getBoundingClientRect()
-    // WebKit clips text Range geometry at the ellipsis. Measure the same font's CSS
-    // character unit outside the clipped handle, across ten cells to reduce rounding.
-    const handleCells = document.createElement('span')
-    handleCells.style.cssText = 'position:fixed;left:0;top:0;width:10ch;visibility:hidden'
-    handleCells.style.font = getComputedStyle(handle).font
-    document.body.append(handleCells)
-    const cellWidth = handleCells.getBoundingClientRect().width / 10
-    handleCells.remove()
-    const handleWidth = handle.getBoundingClientRect().width
+    const linkStyle = getComputedStyle(link)
+    const linkContentWidth =
+      linkRect.width -
+      ['paddingLeft', 'paddingRight', 'borderLeftWidth', 'borderRightWidth'].reduce(
+        (sum, property) => sum + Number.parseFloat(linkStyle[property as 'paddingLeft']),
+        0,
+      )
     const lines = (node: Node | null) => {
       if (!node) return 0
       const range = document.createRange()
@@ -120,7 +175,8 @@ export function measureEventTypesTable(page: Page, slug: string): Promise<EventT
       copyBeside: copy.getBoundingClientRect().top < link.getBoundingClientRect().bottom,
       linkEllipsis: getComputedStyle(slugPart).textOverflow,
       handleOverflow: handle.scrollWidth > handle.clientWidth,
-      handleCellRemainder: Math.abs(handleWidth - Math.round(handleWidth / cellWidth) * cellWidth),
+      slugOverflow: slugPart.scrollWidth > slugPart.clientWidth,
+      unusedPathWidth: linkContentWidth - handle.getBoundingClientRect().width - slugRect.width,
       slugStartVisible:
         startRect.width > 0 &&
         startRect.left >= Math.max(slugRect.left, linkRect.left) - 1 &&

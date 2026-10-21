@@ -44,6 +44,22 @@ describe.each(['en', 'zh-CN'] as const)('linked admin sentences in %s', (languag
     expect(link.getAttribute('href')).toBe('/app/settings')
   })
 
+  it('punctuates the profile-zone list note like the browser-zone note', async () => {
+    chooseLanguage(language)
+    pageApi()
+    renderApp('/app/bookings')
+    await screen.findByText(language === 'en' ? 'No upcoming bookings.' : '没有即将到来的预约。')
+    // The profile zone (Europe/Berlin) takes the place of the browser zone, with the same
+    // colon in zh and the same comma in en, and no link follows.
+    const note = document.querySelector('.zone-note')
+    expect(note?.textContent).toBe(
+      language === 'en'
+        ? 'Times are in Europe/Berlin, your time zone.'
+        : '时间使用以下时区：Europe/Berlin（你的时区）。',
+    )
+    expect(note?.querySelector('a')).toBeNull()
+  })
+
   it('keeps the browser-zone detail hint punctuation beside its link', async () => {
     chooseLanguage(language)
     pageApi({ hasProfile: false })
