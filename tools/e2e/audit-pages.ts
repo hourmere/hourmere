@@ -264,11 +264,6 @@ export async function openAuditPage(
     )
     verifyAuditPath(page.url(), paths[id])
     await verifyAuditContent(page, id)
-    // Temporary UI gate negative control; reverted after workflow evidence.
-    if (id === 'sign-in')
-      await page.evaluate(() => {
-        document.documentElement.style.minWidth = '200vw'
-      })
     await page.evaluate(() => window.scrollTo(0, 0))
   } catch {
     // Browser errors can quote current URLs, DOM text, headers, or a manage capability.
