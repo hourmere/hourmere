@@ -1,13 +1,9 @@
 import { createHash, createHmac, randomBytes } from 'node:crypto'
 import { createServer as createHttpServer, type Server } from 'node:http'
-import {
-  createConnection,
-  createServer as createProbe,
-  type Server as SocketServer,
-} from 'node:net'
+import { createServer as createTcpServer } from 'node:net'
 import { fileURLToPath } from 'node:url'
 import { test as base, expect, type FrameLocator, type Locator, type Page } from '@playwright/test'
-import { type RunningServer, startServer } from '../../apps/server/src/server.ts'
+import type { RunningServer } from '../../apps/server/src/server.ts'
 import { createAuth, createAuthPool } from '../../packages/auth/src/index.ts'
 import { writeBookingCalendar } from '../../packages/calendars/src/booking-events.ts'
 import { writeBookingConference } from '../../packages/calendars/src/conferences.ts'
@@ -33,24 +29,8 @@ import {
   AUDIT_TITLE,
   type AuditFixtureState,
 } from './audit-data.ts'
-
-async function listenLoopback(server: SocketServer): Promise<number> {
-  while (true) {
-    await new Promise<void>((resolve, reject) => {
-      server.once('error', reject)
-      server.listen(0, '127.0.0.1', () => {
-        server.off('error', reject)
-        resolve()
-      })
-    })
-    const address = server.address()
-    if (!address || typeof address === 'string') throw new Error('No fixture port')
-    if (![3000, 3998].includes(address.port)) return address.port
-    await new Promise<void>((resolve, reject) =>
-      server.close((error) => (error ? reject(error) : resolve())),
-    )
-  }
-}
+import { startFixtureServer } from './fixture-server.ts'
+import { listenOwned, type OwnedListener } from './listeners.ts'
 
 export interface FixtureApp {
   url: string
@@ -137,15 +117,10 @@ export const test = base.extend<{
     const owned = await createTestDatabase(bootstrap)
     let app: RunningServer | undefined, parent: Server | undefined
     let authPool: ReturnType<typeof createAuthPool> | undefined
-    const ownedPorts: number[] = []
+    let appListener: OwnedListener | undefined, parentListener: OwnedListener | undefined
     try {
-      const probe = createProbe()
-      const port = await listenLoopback(probe)
-      ownedPorts.push(port)
-      await new Promise<void>((resolve, reject) =>
-        probe.close((error) => (error ? reject(error) : resolve())),
-      )
-      const url = `http://127.0.0.1:${port}`,
+      appListener = await listenOwned(createTcpServer({ allowHalfOpen: true }))
+      const url = appListener.url,
         db = createDb(owned.pool),
         f = createFixtures(db),
         host = await f.host({ handle: 'fixture-host', name: 'Fixture Host', timeZone: 'UTC' })
@@ -427,14 +402,11 @@ export const test = base.extend<{
           `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>Fixture website</title><button type="button" data-hourmere-popup${languageAttribute} data-hourmere-url="${url}${bookingPath}">Book a meeting</button><div data-hourmere-inline${languageAttribute} data-hourmere-url="${url}${bookingPath}"></div><script src="/parent.js" defer></script><script src="${url}/hourmere-embed.js" defer></script>`,
         )
       })
-      const parentPort = await listenLoopback(parent)
-      ownedPorts.push(parentPort)
-      const parentUrl = `http://127.0.0.1:${parentPort}`
+      parentListener = await listenOwned(parent)
+      const parentUrl = parentListener.url
       const authSecret = randomBytes(32).toString('base64')
-      app = await startServer({
+      app = await startFixtureServer(appListener, {
         DATABASE_URL: owned.url,
-        PORT: String(port),
-        PUBLIC_URL: url,
         BETTER_AUTH_SECRET: authSecret,
         SIGNUP: 'closed',
         HOURMERE_ROLE: 'web',
@@ -919,14 +891,13 @@ export const test = base.extend<{
     } finally {
       try {
         try {
-          if (parent?.listening) {
-            parent.closeAllConnections()
-            await new Promise<void>((resolve, reject) =>
-              parent?.close((error) => (error ? reject(error) : resolve())),
-            )
-          }
+          await parentListener?.close()
         } finally {
-          await app?.close()
+          try {
+            await app?.close()
+          } finally {
+            await appListener?.close()
+          }
         }
       } finally {
         try {
@@ -945,23 +916,8 @@ export const test = base.extend<{
           } finally {
             await verification.end()
           }
-          for (const port of ownedPorts) {
-            const closed = await new Promise<boolean>((resolve) => {
-              const socket = createConnection({ host: '127.0.0.1', port })
-              socket.once('connect', () => {
-                socket.destroy()
-                resolve(false)
-              })
-              socket.once('error', (error) => {
-                resolve((error as NodeJS.ErrnoException).code === 'ECONNREFUSED')
-              })
-              socket.setTimeout(1000, () => {
-                socket.destroy()
-                resolve(false)
-              })
-            })
-            expect(closed, 'The helper-owned listener must be closed').toBe(true)
-          }
+          await appListener?.assertClosed()
+          await parentListener?.assertClosed()
           console.log('Fixture cleanup verified: database absent and owned listeners closed')
         }
       }
