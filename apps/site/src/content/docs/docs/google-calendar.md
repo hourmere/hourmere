@@ -121,8 +121,10 @@ block time. Google expands recurring instances and exceptions; all-day dates exp
 local midnight to exclusive end midnight in each host's schedule zone, with daylight-saving
 rules. A calendar timezone change rebuilds the busy snapshot.
 
-Missing, failed, stale (over ten minutes) or uncovered snapshots return
-`calendar_sync_unavailable`, rather than making unknown time bookable. The window extends
+Missing, failed, stale (over ten minutes), incompatible-version or uncovered snapshots
+make the affected host unavailable. Personal and collective availability returns
+`calendar_sync_unavailable`; round-robin pools omit affected hosts and can offer fresh
+slots from other hosts. The window extends
 from three days before the current UTC day through 403 days after it, renewed daily.
 Incremental tokens and 410 resets refresh that bounded snapshot. Network/polling delay can
 still race a newly created Google event; there is no shared atomic Google/Hourmere transaction.
@@ -261,15 +263,21 @@ clears every Google calendar's sync cursor and last successful sync time, includ
 calendars not currently selected for conflict checks. Original all-day dates cannot be
 recovered unambiguously from the old instant ranges. The next sync fetches a complete
 snapshot and atomically replaces those rows; existing busy data remains until it succeeds.
-Availability for selected calendars returns `calendar_sync_unavailable` until their new
-snapshot is ready. Run workers and let synchronization complete, or use **Sync now** for a
-selected calendar. Stop all old web/all/worker processes before migration and restart every
-role with the upgraded code, because old binaries cannot read the new all-day representation.
+Until a selected calendar's new snapshot is ready, its host's personal or collective
+availability returns `calendar_sync_unavailable`. Round-robin pools omit affected hosts
+and continue if another host offers a fresh slot; if no slots remain and any host has
+unavailable sync state, they return the same error. Run workers and let synchronization
+complete, or use **Sync now** for a selected calendar. Stop all old web/all/worker processes
+before migration and restart every role with the upgraded code. Snapshot version 2 makes
+old web processes reject new snapshots and makes new code reject and rebuild version 1
+snapshots from old workers, so mixed versions fail closed for affected hosts.
 
 Availability over REST, public pages and MCP refuses selected Google calendars when their
-snapshot is missing, failed, older than ten minutes, revoked, or does not cover the requested
-range including scheduling buffers. The error is 409 `calendar_sync_unavailable`: unknown
-calendar state never silently becomes free time. Far-future requests beyond the synchronized
+snapshot is missing, failed, older than ten minutes, revoked, has an incompatible version,
+or does not cover the requested range including scheduling buffers. Personal and collective
+requests fail with 409 `calendar_sync_unavailable`. Round-robin pools omit affected hosts;
+if no slots remain and any host has unavailable sync state, they return the same error.
+Unknown calendar state never silently becomes free time. Far-future requests beyond the synchronized
 window are unavailable. Disable a conflict calendar deliberately to stop using its busy time.
 Network/polling latency still permits an external event created after the last successful poll
 to race a booking; Google does not offer a transaction shared with our booking database.

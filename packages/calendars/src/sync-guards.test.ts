@@ -117,6 +117,83 @@ describe.skipIf(!url)('Google sync authorization and fail-closed guards (real Po
     expect((await calendar()).last_synced_at).toBeNull()
   })
 
+  it.each([1, null])(
+    'rebuilds legacy busy ranges after a v1 worker or migration invalidation (version=%s)',
+    async (version) => {
+      const day = instant('2026-11-01T00:00:00Z')
+      await db
+        .updateTable('calendars')
+        .set({
+          sync_state:
+            version === null
+              ? null
+              : JSON.stringify({
+                  version,
+                  start: day.subtract({ hours: 72 }).toString(),
+                  end: day.add({ hours: 403 * 24 }).toString(),
+                  token: 'legacy-cursor',
+                  timeZone: 'UTC',
+                }),
+          last_synced_at: version === null ? null : new Date(now),
+        })
+        .where('id', '=', calendarId)
+        .execute()
+      await db
+        .insertInto('calendar_busy')
+        .values(
+          ['all-day', 'removed'].map((id) => ({
+            calendar_id: calendarId,
+            external_event_id: id,
+            period: '[2026-11-01T16:00:00Z,2026-11-02T16:00:00Z)',
+          })),
+        )
+        .execute()
+      await expect(availability()).rejects.toMatchObject({ code: 'calendar_sync_unavailable' })
+      provider.controls.eventHook = async (request) =>
+        Response.json({
+          items: request.searchParams.has('syncToken')
+            ? []
+            : [{ id: 'all-day', start: { date: '2026-11-02' }, end: { date: '2026-11-03' } }],
+          nextSyncToken: 'rebuilt-cursor',
+        })
+
+      await syncGoogleCalendar(deps, calendarId)
+
+      expect(provider.calls.at(-1)?.url.searchParams.has('syncToken')).toBe(false)
+      expect(
+        await db
+          .selectFrom('calendar_busy')
+          .select(['external_event_id', 'period', 'all_day_start', 'all_day_end'])
+          .where('calendar_id', '=', calendarId)
+          .execute(),
+      ).toEqual([
+        {
+          external_event_id: 'all-day',
+          period: null,
+          all_day_start: '2026-11-02',
+          all_day_end: '2026-11-03',
+        },
+      ])
+      expect((await calendar()).sync_state).toMatchObject({ version: 2, token: 'rebuilt-cursor' })
+      await expect(availability()).resolves.toBeDefined()
+    },
+  )
+
+  it('accepts a v2 snapshot for availability and incremental synchronization', async () => {
+    provider.controls.eventPages = [{ items: [timed('retained')], nextSyncToken: 'v2-cursor' }]
+    await syncGoogleCalendar(deps, calendarId)
+    expect((await calendar()).sync_state).toMatchObject({ version: 2, token: 'v2-cursor' })
+    await expect(availability()).resolves.toBeDefined()
+    provider.controls.eventPages = [{ items: [], nextSyncToken: 'next-v2-cursor' }]
+
+    await syncGoogleCalendar(deps, calendarId)
+
+    expect(provider.calls.at(-1)?.url.searchParams.get('syncToken')).toBe('v2-cursor')
+    expect(await busy()).toEqual([{ external_event_id: 'retained' }])
+    expect((await calendar()).sync_state).toMatchObject({ version: 2, token: 'next-v2-cursor' })
+    await expect(availability()).resolves.toBeDefined()
+  })
+
   it('invalidates fresh availability immediately when a provider sync fails', async () => {
     provider.controls.eventPages = [{ items: [timed('retained')], nextSyncToken: 'before' }]
     await syncGoogleCalendar(deps, calendarId)

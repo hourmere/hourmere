@@ -17,11 +17,15 @@ calendar's zone. Timed events retain their absolute instants.
 Migration `0039_calendar_busy_all_day_dates.sql` invalidates `sync_state` and
 `last_synced_at` for every Google calendar, including unselected calendars. Original
 all-day dates cannot be reconstructed unambiguously from old instant ranges. Existing
-busy rows remain until the next complete sync replaces them atomically; selected
-calendars fail the existing availability freshness check until that sync succeeds.
+busy rows remain until the next complete sync replaces them atomically. Until that sync
+succeeds, affected hosts' personal or collective availability fails with
+`calendar_sync_unavailable`; round-robin pools omit affected hosts and can offer fresh
+slots from other hosts.
 Other providers, bookings and calendar settings are preserved. Stop every old web/all
 and worker process before applying the migration, then restart all roles with the new
-code: old binaries cannot read date-based busy rows safely.
+code. Sync snapshot version 2 makes old web processes reject new snapshots and new code
+reject and rebuild version 1 snapshots from old workers, so mixed versions fail closed
+for affected hosts.
 
 PostgreSQL is the system of record. The schema is defined by the SQL files in
 `packages/db/migrations` (applied in order, never edited once applied); TypeScript table
@@ -283,6 +287,12 @@ sequence and required operator steps. Historical `Column-drop upgrade:` notes re
 accepted. The migration policy test is a static lint that ignores comments and quoted
 strings. Dynamic SQL, `DO` blocks and function bodies are out of scope and need manual
 review. It flags missing notes; never edit published SQL to add one.
+
+Also review `DROP NOT NULL` for compatibility with old readers: a table that gains nullable
+rows can break an old binary's assumptions even though no column is removed. The static
+lint does not identify which tables old code reads, so this requires manual review and
+an explicit upgrade note when old readers are incompatible. Migration 0039 is such a case:
+old availability queries skip the new date rows because `calendar_busy.period` is NULL.
 
 ## Sign-in email outbox
 

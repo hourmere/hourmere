@@ -60,7 +60,7 @@ describe.skipIf(!serverUrl)('all-day busy dates in schedule zones (real Postgres
         check_conflicts: true,
         last_synced_at: new Date(NOW.epochMilliseconds),
         sync_state: {
-          version: 1,
+          version: 2,
           timeZone,
           start: '2025-01-01T00:00:00Z',
           end: '2028-01-01T00:00:00Z',
@@ -91,6 +91,52 @@ describe.skipIf(!serverUrl)('all-day busy dates in schedule zones (real Postgres
     }
     return result.id
   }
+
+  it('rejects fresh v1 snapshots and accepts v2 snapshots for the same all-day query', async () => {
+    const host = await f.host()
+    await f.schedule(host.userId, { timeZone: 'America/Los_Angeles' })
+    const eventTypeId = await f.eventType(host.organizationId, host.userId)
+    const calendarId = await calendar(host.userId, 'Asia/Shanghai', [['2026-11-10', '2026-11-11']])
+    const query = {
+      eventTypeId,
+      hostUserId: host.userId,
+      rangeStart: instant('2026-11-09T08:00:00Z'),
+      rangeEnd: instant('2026-11-12T08:00:00Z'),
+      now: NOW,
+    }
+    const syncState = {
+      version: 1,
+      timeZone: 'Asia/Shanghai',
+      token: 'synthetic-legacy-worker-cursor',
+      start: '2025-01-01T00:00:00Z',
+      end: '2028-01-01T00:00:00Z',
+    }
+    await db
+      .updateTable('calendars')
+      .set({ sync_state: syncState })
+      .where('id', '=', calendarId)
+      .execute()
+    await expect(findSlots(db, query)).rejects.toMatchObject({
+      kind: 'conflict',
+      code: 'calendar_sync_unavailable',
+    })
+
+    await db
+      .updateTable('calendars')
+      .set({ sync_state: { ...syncState, version: 2 } })
+      .where('id', '=', calendarId)
+      .execute()
+    expect(busyTimes(await buildAvailabilityInput(db, query))).toEqual([
+      ['2026-11-10T08:00:00Z', '2026-11-11T08:00:00Z'],
+    ])
+    const localDates = (await findSlots(db, query)).map((slot) =>
+      slot.start.toZonedDateTimeISO('America/Los_Angeles').toPlainDate().toString(),
+    )
+    expect(localDates).toEqual([
+      ...Array<string>(16).fill('2026-11-09'),
+      ...Array<string>(16).fill('2026-11-11'),
+    ])
+  })
 
   it.each(['Asia/Shanghai', 'America/New_York'])(
     'blocks November 10 in the LA schedule with a %s calendar',

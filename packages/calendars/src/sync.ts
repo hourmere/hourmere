@@ -9,8 +9,9 @@ import { type GoogleEvent, GoogleSyncReset } from './google-events.ts'
 import { type CalendarDeps, lockUser, readTokens, tokenAad } from './index.ts'
 
 export const SYNC_MAX_AGE_MS = 10 * 60_000
+// v2 retains all-day dates. Never extend a v1 snapshot of calendar-zone instant ranges.
 const cursor = z.object({
-  version: z.literal(1),
+  version: z.literal(2),
   start: z.string(),
   end: z.string(),
   token: z.string().min(1).max(4096),
@@ -302,7 +303,7 @@ export async function syncGoogleCalendar(
         await trx
           .updateTable('calendars')
           .set({
-            sync_state: JSON.stringify({ version: 1, start, end, token: page.token, timeZone }),
+            sync_state: JSON.stringify({ version: 2, start, end, token: page.token, timeZone }),
             time_zone: timeZone,
             last_synced_at: new Date(now.epochMilliseconds),
             sync_error: null,

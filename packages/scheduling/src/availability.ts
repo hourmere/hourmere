@@ -673,7 +673,7 @@ export async function buildAvailabilityInput(
       !state ||
       typeof state !== 'object' ||
       Array.isArray(state) ||
-      state.version !== 1 ||
+      state.version !== 2 ||
       state.timeZone !== calendar.time_zone ||
       typeof state.start !== 'string' ||
       typeof state.end !== 'string'
