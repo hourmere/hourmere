@@ -146,6 +146,7 @@ describe.skipIf(!bootstrap)('round-robin winner-only durable integrations', () =
     const mail = {
       db,
       now,
+      secret: 'synthetic-notification-secret',
       publicUrl: 'http://localhost:5173',
       mailer: {
         send: async (m: MailMessage) => {

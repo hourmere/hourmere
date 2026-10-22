@@ -28,8 +28,14 @@ must approve publication through the [release workflow](https://github.com/hourm
   Invitees manage bookings without an account through private links; host moves preserve
   their existing links. Transactional conflict checks prevent double-booking, and booking
   creation supports idempotent retries.
+- Individual booking pages show the host's time zone, and public booking pages remember
+  the visitor's chosen zone. Each private manage link starts in the booking's saved invitee
+  zone. Booking emails include readable zone names and date-specific GMT offsets; host
+  emails also show the invitee's local time when their zones differ.
 - Passwordless email-link sign-in, optional Google and Microsoft sign-in, verified-email
   accounts, controlled registration, organization-bound API keys and account settings.
+- A branded sign-in confirmation page with Hourmere's mark and wordmark, light and dark
+  themes, and English and Simplified Chinese language controls.
 - A versioned REST API with OpenAPI types, remote MCP tools and an API-key command-line
   client for discovering configuration, finding slots and managing bookings. Optional MCP
   OAuth adds explicit organization consent and revocable connected apps.
@@ -37,6 +43,7 @@ must approve publication through the [release workflow](https://github.com/hourm
   owned-calendar booking writeback. Microsoft Calendar connections support account and
   calendar-list management; Microsoft busy-time synchronization and event writes are not
   implemented.
+- Calendar listings in the REST API include an additive, nullable `timeZone` field.
 - The user's own API keys can change their non-credential calendar settings and select
   their own authorized Zoom connection on event types they actually host, subject to the
   same organization permissions as browser sessions. Provider authorization and
@@ -49,9 +56,16 @@ must approve publication through the [release workflow](https://github.com/hourm
   invitations; queued sign-in emails; optional signed organization booking webhooks with
   bounded retries; first-party daily booking activity reports without visitor tracking.
 - Inline and popup booking widgets with an explicit parent-origin allowlist, plus English
-  and Simplified Chinese web interfaces.
+  and Simplified Chinese web interfaces. `data-hourmere-height` and the JavaScript `height`
+  option reserve an initial iframe height from 240 to 2000 px. Popups dim the backdrop,
+  lock background scrolling and close on outside clicks while keeping clicks in the dialog's
+  padding open; only one popup can be open at a time.
 - Docker Compose self-hosting with PostgreSQL-backed jobs, optional separate web/worker
   processes, health checks, security headers, request limits and graceful shutdown.
+- Support for installing a published GHCR release image with `docker-compose.image.yml`
+  and `setup.sh --image`, selecting an exact version through `--version` or
+  `HOURMERE_VERSION`. Setup reports the selected version and refuses a mismatch with the
+  checked-out release tag; source builds remain available with `setup.sh --source`.
 
 ### Deprecated
 
@@ -108,6 +122,13 @@ must approve publication through the [release workflow](https://github.com/hourm
 
 ### Security
 
+- Public booking and sign-in email abuse is bounded by a chain-wide invitee reschedule cap
+  (default 5), separate rolling recipient limits for booking and sign-in mail (each 5/hour
+  and 20/day), and one instance-wide mail cap (100/hour with a 20% reserve shared by host
+  and sign-in mail). Sign-in requests retain the same HTTP response when mail is suppressed.
+  Suppressed mail is never retried; recipient counters use domain-separated HMAC-SHA-256
+  hashes derived from `BETTER_AUTH_SECRET`, and ledger rows expire after two days. Hosts
+  can still reschedule and invitees can still cancel at the reschedule cap.
 - Calendar, conference, sign-in and webhook credentials use separate protection domains;
   tokens and private booking management links are excluded from public catalogs and
   webhook snapshots. Optional provider integrations retain explicit ownership checks.
@@ -122,6 +143,9 @@ must approve publication through the [release workflow](https://github.com/hourm
 
 ### Known limitations
 
+- Public booking and sign-in pages have no CAPTCHA; invitee/guest email addresses remain
+  unverified. Email abuse budgets apply per instance/database; separate instances do not
+  share limits. Per-IP request limits remain in process memory.
 - [Microsoft Calendar](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/microsoft-calendar.md)
   lists calendars only, without busy-time synchronization or event writes. Microsoft sign-in
   and calendar connections have not had real-account acceptance.
@@ -155,6 +179,21 @@ schema downgrade is not automatic. Direct source deployments require Node.js 26.
 Hourmere requires PostgreSQL 18+ because migrations use `uuidv7()`; the provided Compose
 stack includes PostgreSQL 18.
 
+- **Coordinate the mail-budget upgrade (migration 0040).** Build the new application,
+  stop every old `web`, `all` and `worker` process, including any on other hosts, then
+  start all roles with the upgraded code: build → stop app (and any separate worker) → up.
+  With Compose, run `docker compose build`, `docker compose stop app`,
+  `docker compose stop worker` if configured, then `docker compose up -d --wait`.
+  Migration `0040_notification_mail_limits.sql` is schema-compatible with mixed old/new
+  processes during the switch: old inserts default to `outcome = 'sent'` and NULL
+  `suppression_reason`, and old reads filter `outcome = 'sent'`. Old workers nevertheless
+  send without being counted or enforcing the budgets, so do not leave them running.
+  Keep PostgreSQL running; with `AUTO_MIGRATE=true`, the first new process applies the
+  migration on startup. Its unchanged backfill uses legacy unkeyed hashes: those rows count
+  toward the instance cap, but not the new HMAC recipient windows. Any gap lasts at most
+  24 hours, and old ledger rows are purged after two days; deleted identities cannot be
+  recovered. Rotating `BETTER_AUTH_SECRET` also resets recipient counters while preserving
+  the instance count. See [email abuse controls](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/notifications.md#email-abuse-controls).
 - **Rebuild Google busy snapshots for all-day dates.** Stop all old web/all/worker
   processes, including workers on other hosts, before applying
   `0039_calendar_busy_all_day_dates.sql`, then restart every role with the upgraded code.

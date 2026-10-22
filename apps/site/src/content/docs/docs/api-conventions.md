@@ -322,6 +322,13 @@ everywhere a token is taken, REST and MCP:
   follows the meeting: after a reschedule it opens the booking that replaced it (the latest
   of the chain), and cancels or reschedules that one.
 
+Invitee rescheduling is limited to five moves across the entire booking chain by default.
+`BOOKING_MAX_INVITEE_RESCHEDULES` accepts an integer at least zero; zero disables invitee
+rescheduling. Reaching the limit returns `409 booking_reschedule_limit`, with guidance to
+contact the host. New response tokens and older email links share the same budget.
+Authenticated host moves do not consume this budget and remain available after it is
+spent; cancellation remains available too.
+
 After a cancellation, any token still shows the booking (status `cancelled`); cancelling
 again or rescheduling gets 409 `booking_cancelled`. A token stops working only when its
 booking is deleted. Responses never contain an email's token. With an email's token, a

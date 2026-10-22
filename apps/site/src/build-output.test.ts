@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { globSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { JSDOM } from 'jsdom'
@@ -7,9 +7,10 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { attr, checkBuiltLinks, elements } from '../scripts/check-links.ts'
 import { site } from './site.ts'
 
-const siteRoot = fileURLToPath(new URL('../', import.meta.url))
+const sourceRoot = fileURLToPath(new URL('../', import.meta.url))
+const siteRoot = process.env.HOURMERE_SITE_TEST_ROOT ?? sourceRoot
 // Astro moves prerendered assets with rename(), so output must stay on the source filesystem.
-const scratch = mkdtempSync(join(siteRoot, 'node_modules/.hourmere-site-build-'))
+const scratch = mkdtempSync(join(sourceRoot, 'node_modules/.hourmere-site-build-'))
 const output = join(scratch, 'dist')
 const trademarkNotice =
   'Calendly and Cal.com are trademarks of their respective owners; Hourmere is not affiliated with or endorsed by them.'
@@ -35,6 +36,110 @@ beforeAll(() => {
 }, 120_000)
 
 describe('built website', () => {
+  it('publishes the unlisted device test page with its widget markup and loader', () => {
+    const dom = new JSDOM(readFileSync(join(output, 'embed-test/index.html'), 'utf8'))
+    try {
+      const document = dom.window.document
+      expect(document.querySelector('meta[name="robots"]')?.getAttribute('content')).toBe(
+        'noindex,nofollow',
+      )
+      expect(document.querySelector('h1')?.textContent?.trim()).toBe(
+        'Booking widget test page (unlisted)',
+      )
+      expect(
+        document.querySelector('[data-hourmere-inline]')?.getAttribute('data-hourmere-url'),
+      ).toBe('https://app.hourmere.com/adrian-lee/30-minute-call')
+      expect(
+        document.querySelector('[data-hourmere-inline]')?.getAttribute('data-hourmere-height'),
+      ).toBe('720')
+      const scripts = [...document.querySelectorAll('script')]
+      const widgetScripts = scripts.filter(
+        (script) => !script.getAttribute('src')?.startsWith('/_astro/'),
+      )
+      expect(widgetScripts.map((script) => script.getAttribute('src'))).toEqual([
+        'https://app.hourmere.com/hourmere-embed.js',
+        '/embed-test/popup.js',
+      ])
+      for (const script of scripts) {
+        expect(script.hasAttribute('src')).toBe(true)
+        expect(script.textContent?.trim()).toBe('')
+      }
+      for (const script of widgetScripts) {
+        expect(script.hasAttribute('defer')).toBe(true)
+        expect(script.hasAttribute('async')).toBe(false)
+        expect(script.hasAttribute('id')).toBe(false)
+      }
+      // This standalone page must not add another importer to shared CSS/font chunks.
+      expect(document.querySelectorAll('link[rel="stylesheet"]')).toHaveLength(0)
+      expect(readFileSync(join(output, 'embed-test/popup.js'), 'utf8')).toBe(
+        readFileSync(join(siteRoot, 'public/embed-test/popup.js'), 'utf8'),
+      )
+      expect(document.querySelector('button#open-booking-popup')).not.toBeNull()
+      expect(document.querySelector('[data-pagefind-body]')).toBeNull()
+      expect(document.documentElement.getAttribute('data-pagefind-ignore')).toBe('all')
+      expect(readFileSync(join(output, '_headers'), 'utf8')).toBe(
+        readFileSync(join(siteRoot, 'public/_headers'), 'utf8'),
+      )
+    } finally {
+      dom.window.close()
+    }
+  })
+
+  it('keeps shared layout CSS external on every existing marketing page', () => {
+    const stylesheets = ['index.html', 'privacy.html', 'terms.html', '404.html'].map((file) => {
+      const nodes = elements(readFileSync(join(output, file), 'utf8'))
+      const shared = nodes
+        .filter((node) => node.tagName === 'link' && attr(node, 'rel') === 'stylesheet')
+        .map((node) => attr(node, 'href'))
+        .filter((href) => href?.startsWith('/_astro/Base.'))
+      expect(shared, file).toHaveLength(1)
+      return shared[0]
+    })
+    expect(new Set(stylesheets).size).toBe(1)
+  })
+
+  it('keeps the test page out of all sitemap files while retaining public pages', () => {
+    const sitemaps = globSync('**/sitemap*.xml', { cwd: output })
+    expect(sitemaps.length).toBeGreaterThan(0)
+    const urls = sitemaps.flatMap((file) => {
+      const dom = new JSDOM(readFileSync(join(output, file), 'utf8'), { contentType: 'text/xml' })
+      try {
+        return [...dom.window.document.querySelectorAll('loc')].map(
+          (node) => node.textContent ?? '',
+        )
+      } finally {
+        dom.window.close()
+      }
+    })
+    const paths = urls.map((url) => new URL(url).pathname)
+    expect(paths).toContain('/')
+    expect(paths).toContain('/docs/embedding')
+    expect(paths.filter((path) => /^\/embed-test(?:\/|\.html$|$)/.test(path))).toEqual([])
+  })
+
+  it('has no inbound links to the unlisted test page from other rendered pages', () => {
+    const files = globSync('**/*.html', { cwd: output }).filter(
+      (file) => file !== 'embed-test/index.html',
+    )
+    expect(files.length).toBeGreaterThan(15)
+    const inbound: string[] = []
+    for (const file of files) {
+      const route = file.replace(/index\.html$/, '').replace(/\.html$/, '')
+      const nodes = elements(readFileSync(join(output, file), 'utf8'))
+      for (const node of nodes) {
+        const href = attr(node, 'href')
+        if (href === undefined) continue
+        const url = new URL(href, `https://hourmere.com/${route}`)
+        if (
+          ['hourmere.com', 'www.hourmere.com'].includes(url.hostname) &&
+          /^\/embed-test(?:\/|\.html$|$)/.test(decodeURI(url.pathname))
+        )
+          inbound.push(`${file}: ${href}`)
+      }
+    }
+    expect(inbound).toEqual([])
+  })
+
   it.each(['index.html', 'privacy.html', 'terms.html', '404.html'])(
     'publishes the trademark notice as footer paragraph text in %s',
     (file) => {

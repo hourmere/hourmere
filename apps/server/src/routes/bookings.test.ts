@@ -94,6 +94,47 @@ describe.skipIf(!serverUrl)('host booking routes', () => {
       body: body === undefined ? undefined : JSON.stringify(body),
     })
 
+  it('returns the stable 409 for the configured invitee cap and still allows cancellation', async () => {
+    const { createPublicBooking } = await import('@hourmere/scheduling')
+    const f = createFixtures(db)
+    const host = await f.host()
+    await f.schedule(host.userId)
+    await f.eventType(host.organizationId, host.userId, { slug: 'intro' })
+    const booked = await createPublicBooking(
+      { db, now: () => NOW },
+      {
+        handle: host.handle,
+        slug: 'intro',
+        start: Temporal.Instant.from('2026-11-02T09:00Z'),
+        invitee: { name: 'Invitee', email: 'invitee@example.com', timeZone: 'UTC' },
+      },
+    )
+    const limited = createApp({
+      publicUrl: 'http://localhost:3000',
+      checkDb: async () => {},
+      authHandler: async () => new Response(null, { status: 404 }),
+      resolveCaller: async () => ({ ok: false, error: 'unauthorized', setCookie: [] }),
+      routes: [bookingRoutes({ db, now: () => NOW, bookingMaxInviteeReschedules: 0 })],
+    })
+    const request = (action: string, body: unknown) =>
+      limited.request(`/api/v1/bookings/manage/${action}`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-manage-token': booked.manageToken as string,
+        },
+        body: JSON.stringify(body),
+      })
+    const refused = await request('reschedule', { start: '2026-11-02T10:00:00Z' })
+    expect(refused.status).toBe(409)
+    expect(await refused.json()).toEqual({
+      error: 'booking_reschedule_limit',
+      message:
+        'This booking has been rescheduled the maximum number of times. Contact the host to change it again.',
+    })
+    expect((await request('cancel', {})).status).toBe(200)
+  })
+
   it('requires a caller', async () => {
     for (const res of [
       await get('/api/v1/bookings'),

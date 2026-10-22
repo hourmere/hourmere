@@ -57,6 +57,7 @@ describe.skipIf(!serverUrl)('multi-host Meet identity and pinned mirrors (real P
     calls: { method: string; calendar: string; value: Record<string, unknown> }[]
   const mail = () => ({
     db,
+    secret: 'synthetic-notification-secret',
     publicUrl: 'https://hourmere.example',
     now: () => NOW,
     mailer: {
@@ -73,6 +74,7 @@ describe.skipIf(!serverUrl)('multi-host Meet identity and pinned mirrors (real P
     await owned?.drop()
   })
   beforeEach(async () => {
+    await db.deleteFrom('notification_email_sends').execute()
     users = await Promise.all(['Host A', 'Host B', 'Host C'].map((n) => createTestUser(db, n)))
     team = await createTestTeam(
       db,

@@ -275,6 +275,10 @@ Optional [automatic Google Meet](https://hourmere.com/docs/automatic-google-meet
 See the [consolidated limitations](https://hourmere.com/docs#known-limitations)
 and linked operating guides before deploying:
 
+- Public booking and sign-in pages have no CAPTCHA; invitee/guest addresses remain unverified.
+  [Email abuse limits](https://hourmere.com/docs/notifications#email-abuse-controls) apply per
+  instance/database; separate instances do not share budgets. Per-IP request limits remain
+  in process memory.
 - Microsoft Calendar lists calendars only; no busy-time sync or event writes. Microsoft sign-in and
   calendar connections have not had real-account acceptance.
 - Automatic Zoom supports personal event types and individual team event types with one

@@ -6,6 +6,7 @@ import { createJobs, type EnqueueOptions } from '@hourmere/jobs'
 import type { MailMessage } from '@hourmere/mail'
 import type pg from 'pg'
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { signInRecipientHash } from './mail-limits.ts'
 import {
   deliverSignInEmail,
   queuedSignInEmail,
@@ -59,6 +60,7 @@ describe.skipIf(!serverUrl)('queued sign-in email', () => {
   })
   beforeEach(async () => {
     await db.deleteFrom('sign_in_emails').execute()
+    await db.deleteFrom('notification_email_sends').execute()
     await db.deleteFrom('auth.verification').execute()
     await db.deleteFrom('auth.organization').execute()
     await db.deleteFrom('auth.user').execute()
@@ -348,6 +350,33 @@ describe.skipIf(!serverUrl)('queued sign-in email', () => {
     expect(await rows()).toEqual([])
     await deliverSignInEmail(deps(), row.id)
     expect(sent).toHaveLength(1)
+  })
+
+  it('returns identical HTTP responses before and after worker suppression', async () => {
+    await existing()
+    const auth = authWith()
+    const first = await request(auth)
+    const normal = { status: first.status, body: await first.json() }
+    const firstRow = (await rows())[0]
+    await deliverSignInEmail(deps({ signInMailMaxPerHour: 1 }), firstRow?.id as string)
+    const second = await request(auth)
+    expect({ status: second.status, body: await second.json() }).toEqual(normal)
+    expect(normal).toEqual({ status: 200, body: { status: true } })
+    const suppressed = (await rows())[0]
+    const log = vi.fn()
+    await deliverSignInEmail(deps({ signInMailMaxPerHour: 1, log }), suppressed?.id as string)
+    expect(sent).toHaveLength(1)
+    expect(await rows()).toEqual([])
+    expect(log.mock.calls.map(([line]) => JSON.parse(line as string))).toEqual([
+      {
+        level: 'warn',
+        event: 'sign_in_email_suppressed',
+        reason: 'recipient_hourly_limit',
+        recipientHash: signInRecipientHash('existing@example.com', secret).toString('hex'),
+      },
+    ])
+    const third = await request(auth)
+    expect({ status: third.status, body: await third.json() }).toEqual(normal)
   })
 
   it.each(['foreign-origin', 'query-token'])(

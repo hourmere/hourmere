@@ -47,7 +47,11 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
   let agent: { userId: string; key: string; keyId: string }
   let adaKey: { key: string; keyId: string }
 
-  function appWith(rateLimits: BookingToolsDeps['rateLimits'] = {}, automaticMeet = false) {
+  function appWith(
+    rateLimits: BookingToolsDeps['rateLimits'] = {},
+    automaticMeet = false,
+    bookingMaxInviteeReschedules?: number,
+  ) {
     const limits = { page: plenty, slots: plenty, book: plenty, manage: plenty, ...rateLimits }
     return createApp({
       checkDb: async () => {},
@@ -56,12 +60,24 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
       publicUrl: PUBLIC_URL,
       routes: [
         publicRoutes({ db, now: () => NOW, rateLimits: limits, automaticMeet }),
-        bookingRoutes({ db, now: () => NOW, rateLimits: limits, automaticMeet }),
+        bookingRoutes({
+          db,
+          now: () => NOW,
+          rateLimits: limits,
+          automaticMeet,
+          bookingMaxInviteeReschedules,
+        }),
       ],
       mcp: mcpEndpoint({
         tools: [
           whoamiTool,
-          ...bookingTools({ db, now: () => NOW, rateLimits: limits, automaticMeet }),
+          ...bookingTools({
+            db,
+            now: () => NOW,
+            rateLimits: limits,
+            automaticMeet,
+            bookingMaxInviteeReschedules,
+          }),
         ],
       }),
     })
@@ -430,6 +446,36 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
   }
 
   describe('rescheduling as the host', () => {
+    it('applies the configured invitee cap without limiting host moves or cancellation', async () => {
+      const { key, booked } = await hostedBooking()
+      const disabled = appWith({}, false, 0)
+      expect(
+        errorOf(
+          await call(
+            'reschedule_booking',
+            { manageToken: booked.manageToken, start: '2026-11-02T10:00:00Z' },
+            agent.key,
+            disabled,
+          ),
+        ),
+      ).toMatchObject({
+        error: 'booking_reschedule_limit',
+        message:
+          'This booking has been rescheduled the maximum number of times. Contact the host to change it again.',
+      })
+      const moved = ok<Booked>(
+        await call(
+          'reschedule_booking',
+          { bookingId: booked.booking.id, start: '2026-11-02T10:00:00Z' },
+          key.key,
+          disabled,
+        ),
+      )
+      expect(
+        ok(await call('cancel_booking', { manageToken: booked.manageToken }, agent.key, disabled)),
+      ).toMatchObject({ id: moved.booking.id, status: 'cancelled' })
+    })
+
     it('moves by bookingId and attributes the withdrawal/new booking to the host key', async () => {
       const { host, key, booked } = await hostedBooking()
       const moved = ok<Booked>(

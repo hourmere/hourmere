@@ -14,7 +14,7 @@ import {
 } from '@hourmere/scheduling'
 import { createFixtures, type Fixtures } from '@hourmere/scheduling/testing'
 import ICAL from 'ical.js'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import {
   BOOKING_NOTIFICATION_JOB,
   bookingNotificationJob,
@@ -110,6 +110,9 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
   afterAll(async () => {
     await testDb?.drop()
   })
+  beforeEach(async () => {
+    await db.deleteFrom('notification_email_sends').execute()
+  })
 
   /** A Berlin-scheduled host in New York with one event type, booked by Ada from Tokyo. */
   async function booked(options: { guests?: boolean } = {}) {
@@ -153,6 +156,7 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
     db,
     mailer,
     publicUrl: PUBLIC_URL,
+    secret: 'synthetic-notification-secret',
     now: () => now,
     log: () => {},
   })

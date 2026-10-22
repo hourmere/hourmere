@@ -359,6 +359,7 @@ export interface BookingNotifications {
   manage_token_hash: Buffer | null;
   outcome: Generated<string>;
   recipient: string;
+  suppression_reason: string | null;
 }
 
 export interface Bookings {
@@ -541,6 +542,11 @@ export interface McpOauthIntents {
   user_id: string;
 }
 
+export interface NotificationEmailSends {
+  recipient_hash: Buffer | null;
+  sent_at: Timestamp;
+}
+
 export interface PersonalOrganizations {
   organization_id: string;
   user_id: string;
@@ -652,6 +658,7 @@ export interface DB {
   mcp_oauth_client_activity: McpOauthClientActivity;
   mcp_oauth_grants: McpOauthGrants;
   mcp_oauth_intents: McpOauthIntents;
+  notification_email_sends: NotificationEmailSends;
   personal_organizations: PersonalOrganizations;
   profiles: Profiles;
   round_robin_state: RoundRobinState;
