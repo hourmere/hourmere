@@ -105,8 +105,10 @@ the development entry remains local-only. Do not create another database or use
    npm run deploy --workspace @hourmere/site
    ```
 
-   The script runs `npm run build && npx --yes wrangler@4.151.0 deploy --env=""`
-   from `apps/site`. The construction task runs no remote Wrangler commands.
+   The script first runs the site deploy guard, then
+   `npm run build && npx --yes wrangler@4.151.0 deploy --env=""` from `apps/site`.
+   Follow [Website publication](releasing.md#website-publication) for the required
+   fetch and deploy commands. The construction task runs no remote Wrangler commands.
 
 See Cloudflare's [D1 command reference](https://developers.cloudflare.com/d1/wrangler-commands/)
 for account-side operations. Keep remote operations separate from local checks.

@@ -259,7 +259,7 @@ describe('waitlist page integration', () => {
   it('deploys the pinned Wrangler version to the top-level environment explicitly', () => {
     const config = JSON.parse(read('../package.json'))
     expect(config.scripts.deploy).toBe(
-      'npm run build && npx --yes wrangler@4.151.0 deploy --env=""',
+      'node ../../scripts/site-deploy-guard.ts && npm run build && npx --yes wrangler@4.151.0 deploy --env=""',
     )
   })
 

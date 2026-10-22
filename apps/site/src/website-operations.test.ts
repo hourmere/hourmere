@@ -63,7 +63,7 @@ describe('Cloud waitlist operations contract', () => {
       readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
     )
     expect(sitePackage.scripts.deploy).toBe(
-      'npm run build && npx --yes wrangler@4.151.0 deploy --env=""',
+      'node ../../scripts/site-deploy-guard.ts && npm run build && npx --yes wrangler@4.151.0 deploy --env=""',
     )
     expect(prose).toContain('The construction task runs no remote Wrangler commands.')
   })
