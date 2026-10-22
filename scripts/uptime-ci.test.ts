@@ -20,7 +20,7 @@ const workflow = parse(source) as {
   jobs: Record<string, Job>
   [key: string]: unknown
 }
-const job = workflow.jobs.check
+const job = workflow.jobs.uptime
 const step = job?.steps.find((item) => item.name === 'Check public endpoints')
 const endpoints = [
   ['App health', 'https://app.hourmere.com/api/health'],
@@ -99,10 +99,16 @@ describe('scheduled uptime workflow', () => {
     expect(Object.keys(workflow.on).sort()).toEqual(['schedule', 'workflow_dispatch'])
     expect(workflow.on.schedule).toEqual([{ cron: '*/15 * * * *' }])
     expect(workflow.on.workflow_dispatch).toBeNull()
-    const comment = source.match(/^(?:#.*\n)+/)?.[0] ?? ''
+    const comment = (source.match(/^(?:#.*\n)+/)?.[0] ?? '')
+      .replace(/^#\s*/gm, '')
+      .replace(/\s+/g, ' ')
     expect(comment).toContain('Monitors app.hourmere.com health, hourmere.com')
     expect(comment).toContain('security.txt')
-    expect(comment).toMatch(/GitHub emails the workflow's last committer[\s\S]*on failure/)
+    expect(comment).toContain('When Actions failure emails are enabled')
+    expect(comment).toContain("GitHub initially notifies the workflow's creator")
+    expect(comment).toContain(
+      'then the user who last modified the cron line or re-enabled the workflow',
+    )
     expect(comment).toMatch(/GitHub disables schedules[\s\S]*60 days without repository activity/)
   })
 
@@ -121,9 +127,17 @@ describe('scheduled uptime workflow', () => {
     }
   })
 
+  it('keeps job ids and check names distinct from required status checks', () => {
+    const requiredChecks = ['check', 'e2e', 'docker', 'sign-off']
+    for (const [id, item] of Object.entries(workflow.jobs)) {
+      expect(requiredChecks).not.toContain(id)
+      expect(requiredChecks).not.toContain(item.name ?? id)
+    }
+  })
+
   it('bounds one non-overlapping job without canceling an active check', () => {
     expect(workflow.concurrency).toEqual({ group: 'uptime', 'cancel-in-progress': false })
-    expect(Object.keys(workflow.jobs)).toEqual(['check'])
+    expect(Object.keys(workflow.jobs)).toEqual(['uptime'])
     expect(job?.['runs-on']).toBe('ubuntu-latest')
     expect(job?.['timeout-minutes']).toBe(5)
     expect(job?.['continue-on-error']).toBeUndefined()
@@ -148,6 +162,8 @@ describe('scheduled uptime workflow', () => {
         '2',
         '--retry-delay',
         '10',
+        '--retry-max-time',
+        '60',
         '--output',
         join(result.directory, 'uptime-body'),
         '--write-out',

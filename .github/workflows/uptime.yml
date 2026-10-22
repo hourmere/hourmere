@@ -1,7 +1,7 @@
 # Monitors app.hourmere.com health, hourmere.com, and its security.txt policy.
-# GitHub emails the workflow's last committer (last cron editor) on failure when
-# Actions email notifications are enabled. GitHub disables schedules in public
-# repositories after 60 days without repository activity.
+# When Actions failure emails are enabled, GitHub initially notifies the workflow's
+# creator, then the user who last modified the cron line or re-enabled the workflow.
+# GitHub disables schedules in public repositories after 60 days without repository activity.
 name: Uptime
 
 on:
@@ -16,7 +16,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  check:
+  uptime:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -26,7 +26,7 @@ jobs:
           check_url() {
             local name=$1 url=$2 kind=$3
             local metrics status content_type
-            if ! metrics=$(curl --fail --silent --show-error --max-time 20 --retry 2 --retry-delay 10 \
+            if ! metrics=$(curl --fail --silent --show-error --max-time 20 --retry 2 --retry-delay 10 --retry-max-time 60 \
               --output "$RUNNER_TEMP/uptime-body" --write-out '%{http_code} %{content_type}' "$url"); then
               status=${metrics%% *}
               printf '%s failed (HTTP %s): curl request failed\n' "$name" "${status:-000}" >&2
