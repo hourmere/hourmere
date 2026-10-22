@@ -14,6 +14,8 @@ export default defineConfig({
   outputDir: '../../temp/product-screenshot-results',
   use: {
     ...functional.use,
+    // GPU rounded-border antialiasing can exceed the PNG tolerance; pin CPU rasterization.
+    launchOptions: { args: ['--disable-gpu-rasterization'] },
     locale: 'en-US',
     timezoneId: 'UTC',
     deviceScaleFactor: 2,

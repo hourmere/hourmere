@@ -3,6 +3,7 @@ import { stripTypeScriptTypes } from 'node:module'
 import { describe, expect, it } from 'vitest'
 import { AUDIT_NOW } from '../tools/e2e/audit-data.ts'
 import { prepareAuditLocale, settleAuditLayout, verifyAuditPath } from '../tools/e2e/audit-pages.ts'
+import { SCREENSHOT_BOOKING_DAY, SCREENSHOT_INVITEE } from '../tools/e2e/screenshot-data.ts'
 import { openScreenshotPage, productScreenshotOptions } from '../tools/e2e/screenshot-pages.ts'
 import { screenshotCases } from '../tools/e2e/screenshot-plan.ts'
 
@@ -17,8 +18,17 @@ function sourceCopy(before: string, after: string) {
     'prepareAuditLocale',
     'settleAuditLayout',
     'verifyAuditPath',
+    'SCREENSHOT_BOOKING_DAY',
+    'SCREENSHOT_INVITEE',
     `${copy}; return {openScreenshotPage,productScreenshotOptions}`,
-  )(AUDIT_NOW, prepareAuditLocale, settleAuditLayout, verifyAuditPath) as {
+  )(
+    AUDIT_NOW,
+    prepareAuditLocale,
+    settleAuditLayout,
+    verifyAuditPath,
+    SCREENSHOT_BOOKING_DAY,
+    SCREENSHOT_INVITEE,
+  ) as {
     openScreenshotPage: typeof openScreenshotPage
     productScreenshotOptions: typeof productScreenshotOptions
   }
@@ -27,6 +37,7 @@ function sourceCopy(before: string, after: string) {
 async function verifyPreparation(open = openScreenshotPage) {
   for (const id of [...new Set(screenshotCases.map((shot) => shot.page))]) {
     const calls: unknown[][] = []
+    const manageLink = { value: 'http://127.0.0.1:43123/booking#token=synthetic-private-marker' }
     let actualPath = ''
     const locator = (selector: string) => ({
       waitFor: async () => calls.push(['wait', selector]),
@@ -34,6 +45,10 @@ async function verifyPreparation(open = openScreenshotPage) {
       nth: (index: number) => locator(`${selector}[${index}]`),
       click: async () => calls.push(['click', selector]),
       fill: async (value: string) => calls.push(['fill', selector, value]),
+      evaluate: async (fn: (input: typeof manageLink) => void) => {
+        fn(manageLink)
+        calls.push(['sanitize', selector])
+      },
     })
     const page = {
       clock: { setFixedTime: async (date: Date) => calls.push(['clock', date.toISOString()]) },
@@ -80,16 +95,20 @@ async function verifyPreparation(open = openScreenshotPage) {
     if (publicPage) {
       expect(calls, 'fixed selected day').toContainEqual([
         'click',
-        'button.day-available[data-day="2030-01-08"]',
+        `button.day-available[data-day="${SCREENSHOT_BOOKING_DAY}"]`,
       ])
       expect(calls, 'visible time slots').toContainEqual(['wait', '.slots button'])
       if (id !== 'booking') {
         expect(calls, 'form step selected time').toContainEqual(['click', '.slots button'])
-        expect(calls, 'synthetic form name').toContainEqual(['fill', 'Your name', 'Taylor Kim'])
+        expect(calls, 'synthetic form name').toContainEqual([
+          'fill',
+          'Your name',
+          SCREENSHOT_INVITEE.name,
+        ])
         expect(calls, 'synthetic form email').toContainEqual([
           'fill',
           'Email',
-          'taylor@hourmere.invalid',
+          SCREENSHOT_INVITEE.email,
         ])
       }
       if (id === 'confirmation') {
@@ -98,6 +117,21 @@ async function verifyPreparation(open = openScreenshotPage) {
           'wait',
           '.confirmation .manage-link input[readonly]',
         ])
+        const linkWait = calls.findIndex(
+          ([call, selector]) =>
+            call === 'wait' && selector === '.confirmation .manage-link input[readonly]',
+        )
+        const linkSanitization = calls.findIndex(([call]) => call === 'sanitize')
+        expect(
+          linkSanitization,
+          'sanitize only after the confirmation field is ready',
+        ).toBeGreaterThan(linkWait)
+        expect(manageLink.value, 'documentation hostname before capture').toMatch(
+          /^https:\/\/hourmere\.example\.com\//,
+        )
+        expect(manageLink.value, 'stable fake manage link').toBe(
+          'https://hourmere.example.com/booking#token=example-manage-link',
+        )
       }
     } else if (id === 'availability') {
       expect(calls, 'availability details readiness').toContainEqual(['wait', 'Weekly hours'])
@@ -117,34 +151,28 @@ async function verifyPreparation(open = openScreenshotPage) {
 }
 
 function verifyCapture(options = productScreenshotOptions) {
-  const selectors: string[] = []
-  const result = options({
-    locator: (selector: string) => {
-      selectors.push(selector)
-      return selector
-    },
-  } as unknown as Parameters<typeof options>[0])
+  const result = options()
   expect(result.animations, 'disabled animations').toBe('disabled')
   expect(result.caret, 'hidden caret').toBe('hide')
   expect(result.fullPage, 'whole page capture').toBe(true)
   expect(result.scale, 'retina capture').toBe('device')
-  expect(selectors, 'capability and random port masked').toEqual(['.manage-link input[readonly]'])
-  expect(result.mask, 'capability mask applied').toHaveLength(1)
 }
 
 describe('product screenshot preparation', () => {
   it('opens real fixture routes with fixed clock, English data and ready content', () =>
     verifyPreparation())
-  it('masks the one-time capability and freezes capture effects at 2x', () => verifyCapture())
+  it('freezes capture effects at 2x', () => verifyCapture())
 
   for (const [before, after] of [
     ['await page.clock.setFixedTime(new Date(AUDIT_NOW))', ''],
     ["await app.auditSignIn(!publicPage, 'en-US')", "await app.auditSignIn(false, 'en-US')"],
     ["await page.addInitScript(prepareAuditLocale, 'en-US' as const)", ''],
-    ['2030-01-08', '2030-01-09'],
+    ['button.day-available[data-day=', 'button.day-available[data-date='],
     ["await page.locator('.slots button').first().click()", ''],
-    ["await page.getByLabel('Email', { exact: true }).fill('taylor@hourmere.invalid')", ''],
+    ["await page.getByLabel('Email', { exact: true }).fill(SCREENSHOT_INVITEE.email)", ''],
     ["await page.getByRole('button', { name: 'Confirm booking', exact: true }).click()", ''],
+    ['await manageLink.waitFor()', ''],
+    ["input.value = 'https://hourmere.example.com/booking#token=example-manage-link'", ''],
     ["await page.locator('.table-bookings tbody tr').nth(2).waitFor()", ''],
     ['await page.evaluate(settleAuditLayout)', ''],
   ])
@@ -159,7 +187,6 @@ describe('product screenshot preparation', () => {
     ["caret: 'hide'", "caret: 'initial'"],
     ["scale: 'device'", "scale: 'css'"],
     ['fullPage: true', 'fullPage: false'],
-    ["mask: [page.locator('.manage-link input[readonly]')]", 'mask: []'],
   ])
     it(`detects broken capture protection: ${before}`, () => {
       expect(() =>

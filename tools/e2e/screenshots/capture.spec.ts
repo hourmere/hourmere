@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import { expect, test } from '../fixtures.ts'
+import { SCREENSHOT_BOOKING_DAY } from '../screenshot-data.ts'
 import { openScreenshotPage, productScreenshotOptions } from '../screenshot-pages.ts'
 import { screenshotCases } from '../screenshot-plan.ts'
 
@@ -18,11 +19,17 @@ for (const shot of screenshotCases)
       await openScreenshotPage(page, app, shot.page)
       await expect(page.locator('html')).toHaveAttribute('lang', 'en')
       if (shot.page === 'booking') {
-        await expect(page.locator('button[data-day="2030-01-08"]')).toHaveClass(/day-selected/)
+        await expect(page.locator(`button[data-day="${SCREENSHOT_BOOKING_DAY}"]`)).toHaveClass(
+          /day-selected/,
+        )
         await expect(page.locator('.slots button').first()).toBeVisible()
       }
+      if (shot.page === 'confirmation')
+        await expect(page.locator('.confirmation .manage-link input[readonly]')).toHaveValue(
+          /^https:\/\/hourmere\.example\.com\//,
+        )
       await page.screenshot({
-        ...productScreenshotOptions(page),
+        ...productScreenshotOptions(),
         path: join(directory, shot.name),
       })
     })

@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { stripTypeScriptTypes } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
@@ -23,6 +24,34 @@ const expectedNames = [
   'booking-mobile-light.png',
 ]
 
+const configSource = readFileSync('tools/e2e/playwright.screenshots.config.ts', 'utf8')
+function verifyRasterConfig(copy = configSource) {
+  const functional = { use: { channel: 'chrome' } }
+  const body = stripTypeScriptTypes(copy)
+    .replace(/^import .*\n/gm, '')
+    .replace('export default', 'return')
+  const config = new Function('defineConfig', 'functional', body)(
+    (value: unknown) => value,
+    functional,
+  ) as { use: { channel: string; launchOptions?: { args?: string[] } } }
+  expect(config.use.channel, 'keep the installed Chrome channel').toBe('chrome')
+  expect(config.use.launchOptions?.args, 'pin CPU rasterization for product captures').toContain(
+    '--disable-gpu-rasterization',
+  )
+  expect(functional.use, 'leave the functional browser configuration unchanged').toEqual({
+    channel: 'chrome',
+  })
+}
+
+it('pins CPU rasterization only in the product capture configuration', () => verifyRasterConfig())
+it('detects removal of CPU rasterization pinning from a source copy', () => {
+  const mutant = configSource.replace("args: ['--disable-gpu-rasterization']", 'args: []')
+  expect(mutant).not.toBe(configSource)
+  expect(() => verifyRasterConfig(mutant)).toThrow(
+    expect.objectContaining({ name: 'AssertionError' }),
+  )
+})
+
 it('plans six desktop pages in both themes and a light 390px booking page', () => {
   expect(screenshotCases.map((screenshot) => screenshot.name)).toEqual(expectedNames)
   for (const screenshot of screenshotCases) {
@@ -33,7 +62,7 @@ it('plans six desktop pages in both themes and a light 390px booking page', () =
       viewport:
         screenshot.name === 'booking-mobile-light.png'
           ? { width: 390, height: 844 }
-          : { width: 1280, height: 900 },
+          : { width: 1280, height: 720 },
       isMobile: screenshot.name === 'booking-mobile-light.png',
     })
     expect(screenshot.name).toBe(
@@ -60,8 +89,8 @@ it('requires 2x image pixels while allowing a taller full-page capture', () => {
     expect(() => validateScreenshotImage(screenshot.name, width, height * 2)).toThrow('2x')
     expect(() => validateScreenshotImage(screenshot.name, width * 2, height)).toThrow('2x')
   }
-  expect(() => validateScreenshotImage('stale.png', 2560, 1800)).toThrow('Unknown')
-  for (const height of [Number.NaN, Number.POSITIVE_INFINITY, 1800.5])
+  expect(() => validateScreenshotImage('stale.png', 2560, 1440)).toThrow('Unknown')
+  for (const height of [Number.NaN, Number.POSITIVE_INFINITY, 1440.5])
     expect(() => validateScreenshotImage('booking-light.png', 2560, height)).toThrow('2x')
 })
 
@@ -84,7 +113,7 @@ const names=[...pages.flatMap(page=>[page+'-light.png',page+'-dark.png']),'booki
 assert.deepEqual(screenshotCases.map(screenshot=>screenshot.name),names,'All requested screenshot states must be planned')
 for(const screenshot of screenshotCases) {
   const mobile=screenshot.name==='booking-mobile-light.png'
-  assert.deepEqual(screenshot.viewport,mobile?{width:390,height:844}:{width:1280,height:900},'Capture viewport must stay fixed')
+  assert.deepEqual(screenshot.viewport,mobile?{width:390,height:844}:{width:1280,height:720},'Capture viewport must stay fixed')
   assert.equal(screenshot.isMobile,mobile,'Mobile state must use mobile layout')
   assert.equal(screenshot.name,screenshot.page+(mobile?'-mobile':'')+'-'+screenshot.theme+'.png','File name must match requested page and theme')
 }
@@ -92,11 +121,11 @@ assert.doesNotThrow(()=>validateScreenshotSet(names),'Complete set must pass')
 assert.throws(()=>validateScreenshotSet(names.slice(1)),/Missing/,'Missing screenshots must fail')
 assert.throws(()=>validateScreenshotSet([...names,names[0]]),/Duplicate/,'Duplicate screenshots must fail')
 assert.throws(()=>validateScreenshotSet([...names,'stale.png']),/Unexpected/,'Unexpected screenshots must fail')
-assert.doesNotThrow(()=>validateScreenshotImage('booking-light.png',2560,1800),'2x image must pass')
-assert.doesNotThrow(()=>validateScreenshotImage('booking-light.png',2560,2700),'Full-page image must pass')
-assert.throws(()=>validateScreenshotImage('stale.png',2560,1800),/Unknown/,'Unknown images must fail')
-assert.throws(()=>validateScreenshotImage('booking-light.png',1280,1800),/2x/,'1x width must fail')
-assert.throws(()=>validateScreenshotImage('booking-light.png',2560,900),/2x/,'1x height must fail')
+assert.doesNotThrow(()=>validateScreenshotImage('booking-light.png',2560,1440),'2x image must pass')
+assert.doesNotThrow(()=>validateScreenshotImage('booking-light.png',2560,2160),'Full-page image must pass')
+assert.throws(()=>validateScreenshotImage('stale.png',2560,1440),/Unknown/,'Unknown images must fail')
+assert.throws(()=>validateScreenshotImage('booking-light.png',1280,1440),/2x/,'1x width must fail')
+assert.throws(()=>validateScreenshotImage('booking-light.png',2560,720),/2x/,'1x height must fail')
 assert.throws(()=>validateScreenshotImage('booking-light.png',2560,Infinity),/2x/,'Non-pixel heights must fail')
 assert.doesNotThrow(()=>validateScreenshotBytes(1),'Nonempty set must pass')
 assert.doesNotThrow(()=>validateScreenshotBytes(2_999_999),'Set below size budget must pass')
@@ -123,7 +152,7 @@ describe('source-copy screenshot protection mutations', () => {
 
   for (const [from, to, assertion] of [
     ["  'confirmation',\n", '', 'All requested screenshot states must be planned'],
-    ['width: 1280, height: 900', 'width: 1280, height: 800', 'Capture viewport must stay fixed'],
+    ['width: 1280, height: 720', 'width: 1280, height: 800', 'Capture viewport must stay fixed'],
     ['isMobile: true', 'isMobile: false', 'Mobile state must use mobile layout'],
     [
       "page: 'booking',\n    theme",

@@ -2,9 +2,8 @@ import type { Page } from '@playwright/test'
 import { AUDIT_NOW } from './audit-data.ts'
 import { prepareAuditLocale, settleAuditLayout, verifyAuditPath } from './audit-pages.ts'
 import type { FixtureApp } from './fixtures.ts'
-import type { screenshotCases } from './screenshot-plan.ts'
-
-type ScreenshotPage = (typeof screenshotCases)[number]['page']
+import { SCREENSHOT_BOOKING_DAY, SCREENSHOT_INVITEE } from './screenshot-data.ts'
+import type { ScreenshotPage } from './screenshot-plan.ts'
 
 /** Only helper-owned data reaches these real pages; never navigate a manage capability. */
 export async function openScreenshotPage(page: Page, app: FixtureApp, id: ScreenshotPage) {
@@ -24,15 +23,20 @@ export async function openScreenshotPage(page: Page, app: FixtureApp, id: Screen
     verifyAuditPath(page.url(), path)
     if (publicPage) {
       await page.locator('.calendar-grid[aria-busy="true"]').waitFor({ state: 'detached' })
-      await page.locator('button.day-available[data-day="2030-01-08"]').click()
+      await page.locator(`button.day-available[data-day="${SCREENSHOT_BOOKING_DAY}"]`).click()
       await page.locator('.slots button').first().waitFor()
       if (id !== 'booking') {
         await page.locator('.slots button').first().click()
-        await page.getByLabel('Your name', { exact: true }).fill('Taylor Kim')
-        await page.getByLabel('Email', { exact: true }).fill('taylor@hourmere.invalid')
+        await page.getByLabel('Your name', { exact: true }).fill(SCREENSHOT_INVITEE.name)
+        await page.getByLabel('Email', { exact: true }).fill(SCREENSHOT_INVITEE.email)
         if (id === 'confirmation') {
           await page.getByRole('button', { name: 'Confirm booking', exact: true }).click()
-          await page.locator('.confirmation .manage-link input[readonly]').waitFor()
+          const manageLink = page.locator('.confirmation .manage-link input[readonly]')
+          await manageLink.waitFor()
+          // Publish a stable documentation example instead of this booking's capability.
+          await manageLink.evaluate((input: HTMLInputElement) => {
+            input.value = 'https://hourmere.example.com/booking#token=example-manage-link'
+          })
         }
       }
     } else if (id === 'event-types') {
@@ -64,14 +68,11 @@ export async function openScreenshotPage(page: Page, app: FixtureApp, id: Screen
   }
 }
 
-export function productScreenshotOptions(page: Page) {
+export function productScreenshotOptions() {
   return {
     animations: 'disabled' as const,
     caret: 'hide' as const,
     fullPage: true,
     scale: 'device' as const,
-    // Keep the actual confirmation UI, but never publish its random capability or port.
-    mask: [page.locator('.manage-link input[readonly]')],
-    maskColor: '#808080',
   }
 }

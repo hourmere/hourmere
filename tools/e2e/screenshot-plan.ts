@@ -29,7 +29,7 @@ export const screenshotCases: readonly ScreenshotCase[] = [
       name: `${page}-${theme}.png`,
       page,
       theme,
-      viewport: { width: 1280, height: 900 },
+      viewport: { width: 1280, height: 720 },
       isMobile: false,
     })),
   ),
