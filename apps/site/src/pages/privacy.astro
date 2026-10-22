@@ -186,6 +186,11 @@ const publicationDate = resolveLegalPublicationDate()
       reports.
     </li>
     <li>
+      <strong>Email sending records:</strong> to limit abuse of booking and sign-in emails,
+      Hourmere Cloud records a keyed hash of each recipient's email address, which cannot be
+      reversed without our server secret, together with the time each email was sent.
+    </li>
+    <li>
       <strong>Website and Cloud waitlist:</strong> if you join the Hourmere Cloud waitlist,
       {company.shortName} stores your trimmed, lowercased email address, the time you joined,
       which form you used, the language (locale), and the consent text version. See <a href="#this-website">section 14</a>.
@@ -530,8 +535,8 @@ const publicationDate = resolveLegalPublicationDate()
       Inc.), which provides the virtual server in Los Angeles, United States, where we operate
       Hourmere Cloud and store its backups, Zoho, which delivers sign-in emails, booking
       confirmations and reminders from its United States data center, and Cloudflare, which hosts
-      the hourmere.com website and stores the Hourmere Cloud waitlist (it does not host Hourmere Cloud
-      or process Google user data). We use them only to host
+      the hourmere.com website, provides its cookieless web analytics and stores the Hourmere Cloud
+      waitlist (it does not host Hourmere Cloud or process Google user data). We use them only to host
       the Service and deliver its email.
     </li>
     <li>
@@ -688,6 +693,10 @@ const publicationDate = resolveLegalPublicationDate()
       section 5 (Microsoft).
     </li>
     <li>
+      <strong>Email sending records</strong> (keyed recipient hashes and send times used to
+      enforce sending limits) are deleted automatically after 2 days.
+    </li>
+    <li>
       <strong>Cloud waitlist entries and requests for launch updates</strong> are kept until you
       ask us to stop or we have sent the launch notification.
       Cloudflare D1 keeps a restorable history of the database for up to 30 days, so deleted
@@ -695,7 +704,8 @@ const publicationDate = resolveLegalPublicationDate()
     </li>
   </ul>
   <p>
-    Beyond the cleanup described in sections 2, 4 and 7 and the backup rotation below, Hourmere does not currently run other
+    Beyond the cleanup described in sections 2, 4 and 7, the email sending records above and the
+    backup rotation below, Hourmere does not currently run other
     automatic deletion schedules for account data, conference identity and meeting records,
     remaining OAuth and notification metadata, server and API logs or support correspondence.
     You can ask about or request deletion of the data {company.shortName} holds
@@ -738,6 +748,8 @@ const publicationDate = resolveLegalPublicationDate()
     The hourmere.com website serves static pages
     and its waitlist form on Cloudflare Workers; the request data its hosting processes is described in
     <a href="#this-website">section 14</a>.
+    Website analytics are processed by Cloudflare as described in
+    <a href="#this-website">section 14</a>.
   </p>
 
   <p class="back-to-contents"><a href="#contents">{siteCopy.en.backToContents}</a></p>
@@ -762,11 +774,17 @@ const publicationDate = resolveLegalPublicationDate()
   <h2 id="this-website">14. This website, cookies and local storage</h2>
   <p>
     hourmere.com serves static pages and a Cloud waitlist form. It does not set cookies itself;
-    our hosting provider may set strictly necessary security cookies. The website does not use analytics or third-party trackers,
-    and its fonts are served from hourmere.com. Our website hosting provider processes standard
-    request data, such as IP address, browser type and the page requested, to deliver the site and
-    protect it from abuse. The documentation pages save small preferences, such as your light or
-    dark theme choice, in your browser's local storage; this stays on your device.
+    our hosting provider may set strictly necessary security cookies. We use Cloudflare Web Analytics
+    to see aggregate page views, the pages visited, referring websites and visitor countries, so we
+    can understand which pages and channels bring people to Hourmere. It runs a small script on our
+    pages, does not use cookies, local storage or other client-side state, and does not record query
+    strings. Cloudflare states that it does not fingerprint visitors, and we see only aggregated
+    statistics, not individual visitors. We do not use advertising or other third-party trackers,
+    and the website's fonts are served from hourmere.com. Our website hosting provider also
+    processes standard request data, such as IP address, browser type and the page requested, to
+    deliver the site, measure it and protect it from abuse. The documentation pages save small
+    preferences, such as your light or dark theme choice, in your browser's local storage; this
+    stays on your device.
   </p>
   <h3>Hourmere Cloud waitlist</h3>
   <p>
@@ -799,6 +817,9 @@ const publicationDate = resolveLegalPublicationDate()
     Hourmere Cloud, including the preview, uses only cookies that are strictly necessary for it to
     work, such as keeping you signed in. If you choose a display language, it also remembers that
     choice in a cookie and in your browser's local storage. We do not use advertising cookies.
+    Public booking pages remember a time zone you explicitly choose in your browser's local storage,
+    so later booking pages can show times in that zone; it stays on your device until you book,
+    when the booking records the time zone you booked in.
   </p>
   <p>
     Booking widgets display an Hourmere booking page in an isolated frame on a website allowed by
