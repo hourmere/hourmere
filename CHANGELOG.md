@@ -108,6 +108,11 @@ must approve publication through the [release workflow](https://github.com/hourm
 
 ### Security
 
+- Public booking email abuse is bounded by a chain-wide invitee reschedule cap (default
+  5), rolling invitee/guest recipient limits (5/hour and 20/day), and an instance-wide
+  notification cap (100/hour with a 20% host reserve). Operators can tune all four limits.
+  Suppressed emails are recorded and never retried; hashed send counters expire after two
+  days. Hosts can still reschedule and invitees can still cancel at the reschedule cap.
 - Calendar, conference, sign-in and webhook credentials use separate protection domains;
   tokens and private booking management links are excluded from public catalogs and
   webhook snapshots. Optional provider integrations retain explicit ownership checks.
@@ -122,6 +127,8 @@ must approve publication through the [release workflow](https://github.com/hourm
 
 ### Known limitations
 
+- Public booking pages have no CAPTCHA and invitee/guest email addresses remain unverified.
+  Email abuse budgets apply per instance/database; separate instances do not share limits.
 - [Microsoft Calendar](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/microsoft-calendar.md)
   lists calendars only, without busy-time synchronization or event writes. Microsoft sign-in
   and calendar connections have not had real-account acceptance.

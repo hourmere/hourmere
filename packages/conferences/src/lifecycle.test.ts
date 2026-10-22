@@ -89,6 +89,7 @@ describe.skipIf(!serverUrl)('automatic Zoom durable booking lifecycle (real Post
     await owned?.drop()
   })
   beforeEach(async () => {
+    await db.deleteFrom('notification_email_sends').execute()
     await db.deleteFrom('bookings').execute()
     await db.deleteFrom('event_types').execute()
     await db.deleteFrom('profiles').execute()

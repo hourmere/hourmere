@@ -24,6 +24,15 @@ import {
 import { conferenceOrganizerAvailable } from '@hourmere/scheduling/conferences'
 import { sql } from 'kysely'
 import { z } from 'zod'
+import {
+  lockNotificationEmailBudget,
+  type NotificationMailLimits,
+  notificationEmailBudget,
+  notificationRecipientHash,
+  type SuppressionReason,
+} from './mail-limits.ts'
+
+export { notificationEmailCleanupJob } from './mail-limits.ts'
 
 export const NOTIFICATION_KINDS = [
   'confirmed',
@@ -57,13 +66,13 @@ export const BookingNotificationPayload = z.strictObject({
   kind: z.enum(NOTIFICATION_KINDS),
 })
 
-export interface NotificationDeps {
+export interface NotificationDeps extends NotificationMailLimits {
   db: Db
   mailer: Mailer
   /** PUBLIC_URL: the origin used for invitee manage links and host booking links. */
   publicUrl: string
   now?: (() => Temporal.Instant) | undefined
-  /** Receives a line for each email the mail server refused for good. Default: console.warn. */
+  /** Permanent refusals and structured suppression warnings. Default: console.warn. */
   log?: ((line: string) => void) | undefined
 }
 
@@ -485,6 +494,7 @@ async function sendOnce(
     bookingId: string
     kind: NotificationKind
     recipient: string
+    email: string
     verifiedHost?: { id: string; email: string } | undefined
     conferenceRevision: number | undefined
   },
@@ -493,9 +503,10 @@ async function sendOnce(
   clock: () => Temporal.Instant,
   signal: AbortSignal | undefined,
   conferenceClaim: ConferenceNotificationClaim | undefined,
-): Promise<'sent' | 'sent before' | 'overtaken' | 'recipient unavailable'> {
+): Promise<'sent' | 'sent before' | 'overtaken' | 'recipient unavailable' | 'suppressed'> {
+  let suppression: { reason: SuppressionReason; recipientHash: string } | undefined
   try {
-    return await deps.db.transaction().execute(async (trx) => {
+    const outcome = await deps.db.transaction().execute(async (trx) => {
       if (key.verifiedHost) {
         // Parent protection before the notification's booking FK, matching user-deletion
         // order. Hold verification/address stable until this bounded SMTP attempt ends.
@@ -535,6 +546,7 @@ async function sendOnce(
       // Identity/member locks can wait behind an account edit after the host send. Read
       // the lifecycle only after those waits, without holding a booking lock over SMTP.
       await requireConferenceInvitationIdentity(trx, key.bookingId, key.kind, true)
+      await lockNotificationEmailBudget(trx)
       // Read the booking and the clock again: it may have been cancelled, or have started,
       // while an earlier recipient's email went out. Without a lock, which would hold up
       // that cancel.
@@ -572,10 +584,49 @@ async function sendOnce(
           .executeTakeFirst())
       )
         throw new Overtaken()
+      const recipientHash = notificationRecipientHash(key.email)
+      const inviteeFacing = key.verifiedHost === undefined
+      const reason = await notificationEmailBudget(
+        trx,
+        deps,
+        recipientHash,
+        inviteeFacing,
+        new Date(clock().epochMilliseconds),
+      )
+      if (reason) {
+        await trx
+          .updateTable('booking_notifications')
+          .set({ outcome: 'suppressed', suppression_reason: reason, manage_token_hash: null })
+          .where('booking_id', '=', key.bookingId)
+          .where('kind', '=', key.kind)
+          .where('recipient', '=', key.recipient)
+          .execute()
+        suppression = { reason, recipientHash: recipientHash.toString('hex') }
+        return 'suppressed' as const
+      }
       // An abort (worker shutdown) rejects here and rolls the row back for another worker.
       await deps.mailer.send(message(token), { signal })
-      return 'sent'
+      await trx
+        .insertInto('notification_email_sends')
+        .values({
+          recipient_hash: inviteeFacing ? recipientHash : null,
+          sent_at: new Date(clock().epochMilliseconds),
+        })
+        .execute()
+      return 'sent' as const
     })
+    // A rolled-back attempt is never reported as durable suppression.
+    if (suppression)
+      (deps.log ?? console.warn)(
+        JSON.stringify({
+          level: 'warn',
+          event: 'notification_email_suppressed',
+          bookingId: key.bookingId,
+          kind: key.kind,
+          ...suppression,
+        }),
+      )
+    return outcome
   } catch (err) {
     if (err instanceof Overtaken) return 'overtaken'
     if (err instanceof RecipientUnavailable) return 'recipient unavailable'
@@ -783,6 +834,7 @@ async function deliverBookingNotification(
         })
   const toAttendee = (attendee: (typeof attendees)[number]) => ({
     key: `attendee:${attendee.id}`,
+    email: attendee.email,
     verifiedHost: undefined,
     withLinks: attendee === invitee && kind !== 'cancelled',
     message: (token: string | undefined) =>
@@ -812,6 +864,7 @@ async function deliverBookingNotification(
   const recipients = [
     ...hosts.map((host) => ({
       key: `host:${host.id}`,
+      email: host.email,
       verifiedHost: { id: host.id, email: host.email },
       withLinks: false,
       message: () =>
@@ -862,6 +915,7 @@ async function deliverBookingNotification(
           bookingId,
           kind,
           recipient: r.key,
+          email: r.email,
           verifiedHost: r.verifiedHost,
           conferenceRevision: data.conferenceRevision,
         },

@@ -13,6 +13,24 @@ import { DEFAULT_HSTS_MAX_AGE } from './security-headers.ts'
 const optional = <T extends z.ZodType>(schema: T) =>
   z.preprocess((v) => (v === '' ? undefined : v), schema.optional())
 
+const emailLimit = (name: string, fallback: number, minimum: number) => {
+  const error = `${name} must be a whole number from ${minimum} to 2147483647`
+  return z.preprocess(
+    (value) =>
+      value === ''
+        ? undefined
+        : typeof value === 'string' && value.trim() === ''
+          ? Number.NaN
+          : value,
+    z.coerce
+      .number({ error })
+      .int({ error })
+      .min(minimum, { error })
+      .max(2147483647, { error })
+      .default(fallback),
+  )
+}
+
 // A whole number of seconds from 1 to an hour; the cap catches milliseconds given by mistake.
 const timeoutSeconds = (name: string, defaultMs: number) => {
   const error = `${name} must be a whole number of seconds from 1 to 3600`
@@ -145,6 +163,10 @@ const schema = z
       ),
     ),
     MAIL_FROM: optional(z.string()),
+    BOOKING_MAX_INVITEE_RESCHEDULES: emailLimit('BOOKING_MAX_INVITEE_RESCHEDULES', 5, 0),
+    MAIL_RECIPIENT_MAX_PER_HOUR: emailLimit('MAIL_RECIPIENT_MAX_PER_HOUR', 5, 1),
+    MAIL_RECIPIENT_MAX_PER_DAY: emailLimit('MAIL_RECIPIENT_MAX_PER_DAY', 20, 1),
+    MAIL_MAX_PER_HOUR: emailLimit('MAIL_MAX_PER_HOUR', 100, 0),
     GOOGLE_CLIENT_ID: optional(z.string()),
     GOOGLE_CLIENT_SECRET: optional(z.string()),
     GOOGLE_CALENDAR_CLIENT_ID: optional(z.string().trim().min(1)),

@@ -73,6 +73,7 @@ describe.skipIf(!serverUrl)('multi-host Meet identity and pinned mirrors (real P
     await owned?.drop()
   })
   beforeEach(async () => {
+    await db.deleteFrom('notification_email_sends').execute()
     users = await Promise.all(['Host A', 'Host B', 'Host C'].map((n) => createTestUser(db, n)))
     team = await createTestTeam(
       db,

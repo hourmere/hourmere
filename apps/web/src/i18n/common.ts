@@ -1,5 +1,7 @@
 // Public/shared UI messages. Admin messages live in a lazy catalog.
 export const common = {
+  'This booking has been rescheduled the maximum number of times. Contact the host to change it again.':
+    '此预约已达到改期次数上限。如需再次改期，请联系主持人。',
   'Skip to content': '跳至内容',
   '{0}: {1}': '{0}：{1}',
   '{0} {1}': '{0} {1}',

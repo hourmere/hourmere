@@ -2,7 +2,12 @@
 // Invitee reads go through getManagedBooking, while host slots use getHostBooking so the
 // same availability rules retain each caller's authorization boundary.
 import { checkSlotRange, hasBookablePart, intersectSlots, type SlotView } from './availability.ts'
-import { type Booking, getHostBooking, getManagedBooking } from './bookings.ts'
+import {
+  assertInviteeRescheduleAllowed,
+  type Booking,
+  getHostBooking,
+  getManagedBooking,
+} from './bookings.ts'
 import type { PublicContext, ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { bookingHostIds } from './hosts.ts'
@@ -53,7 +58,8 @@ export async function getManagedBookingDetails(
  * every host offers for its event type with this booking itself ignored, which is what
  * rescheduleManagedBooking accepts (so the new time may overlap the old one). The same range
  * rules as public slots (`invalid_range`, `range_too_long`); `booking_cancelled`,
- * `booking_in_past`, `event_type_unavailable` and `booking_has_no_host` as for rescheduling.
+ * `booking_in_past`, `booking_reschedule_limit`, `event_type_unavailable` and
+ * `booking_has_no_host` as for rescheduling.
  */
 export async function listManagedSlots(
   ctx: PublicContext,
@@ -62,7 +68,7 @@ export async function listManagedSlots(
 ): Promise<SlotView[]> {
   checkSlotRange(start, end)
   const booking = await getManagedBooking(ctx, token)
-  return listBookingSlots(ctx, booking, { start, end })
+  return listBookingSlots(ctx, booking, { start, end }, true)
 }
 
 /** The same reschedule slots, scoped to a booking the caller hosts in their organization. */
@@ -80,6 +86,7 @@ async function listBookingSlots(
   ctx: PublicContext,
   booking: Booking,
   { start, end }: { start: Temporal.Instant; end: Temporal.Instant },
+  asInvitee = false,
 ): Promise<SlotView[]> {
   const now = ctx.now()
   if (booking.status === 'cancelled') {
@@ -88,6 +95,7 @@ async function listBookingSlots(
   if (Temporal.Instant.compare(Temporal.Instant.from(booking.start), now) <= 0) {
     throw new DomainError('conflict', 'booking_in_past', 'This booking has already started')
   }
+  if (asInvitee) await assertInviteeRescheduleAllowed(ctx, booking.id)
   const eventType =
     booking.eventTypeId === null
       ? undefined

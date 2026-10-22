@@ -123,7 +123,8 @@ calendar-list access.
 | `booking_hosts` | organization | Hosts of a booking; carries the anti-double-booking constraint |
 | `booking_attendees` | organization | The invitee who booked plus guests |
 | `booking_calendar_events` | organization | The event each booking wrote to a host calendar, for idempotent updates and cancellation |
-| `booking_notifications` | organization | Each email sent about a booking (kind, recipient), or refused for good by the mail server, so a retried job never sends it twice; the SHA-256 of the manage-link secret an invitee email carried |
+| `booking_notifications` | organization | Each email sent about a booking (kind, recipient), refused for good, or suppressed by abuse controls, so a retried job never sends it twice; the SHA-256 of the manage-link secret a sent invitee email carried |
+| `notification_email_sends` | instance | Minimal two-day rolling mail accounting: invitee/guest recipient SHA-256 (NULL for hosts) and send timestamp, independent of booking deletion |
 
 ## Guarantees and why
 
@@ -364,6 +365,28 @@ unique constraint remains in place. Existing bookings and email-token hashes are
 by the migration. Host moves lock the personal owner (where applicable), organization and
 booking before host locks, matching deletion order; cancellation or invitee rescheduling
 that waited for a host transfer resolves the moved hash again under the booking lock.
+
+Invitee reschedule limits count predecessor rows with a retained response-token hash across
+the existing `rescheduled_from_id` chain. Host moves transfer and clear that hash; they
+neither consume nor reset the invitee count. The current booking's lock serializes moves
+and their limit checks. No separate counter or reschedule-schema migration is needed.
+
+## Notification email abuse accounting
+
+Migration 0040 adds terminal `suppressed` notification receipts with a bounded
+`suppression_reason` and no manage-token hash. `notification_email_sends` holds only a
+normalized invitee/guest recipient digest (or NULL for hosts) and timestamp. It has no
+booking foreign key, so cancellation, rebooking and deletion cannot reset the mail budget.
+An hourly cleanup job removes accounting rows older than two days. Existing retained sent
+receipts seed that ledger on upgrade; deleted recipient identities cannot be reconstructed.
+Stop old web/all/worker processes before migrating and restart every role with the new
+code, since old senders do not enforce or record these budgets.
+
+The send transaction serializes all notification mail through one database-local advisory
+lock, checks rolling counts, and commits a send plus accounting or a terminal suppression.
+Failed sends roll back. Existing receipt deduplication and the SMTP acceptance/failed-commit
+duplicate window remain. See [email abuse controls](https://hourmere.com/docs/notifications#email-abuse-controls)
+for defaults, host reserve and diagnostics.
 
 ## Booking webhooks
 

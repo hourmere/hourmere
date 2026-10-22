@@ -8,6 +8,39 @@ const base = {
 }
 
 describe('loadConfig', () => {
+  describe.each([
+    ['BOOKING_MAX_INVITEE_RESCHEDULES', 5, 0],
+    ['MAIL_RECIPIENT_MAX_PER_HOUR', 5, 1],
+    ['MAIL_RECIPIENT_MAX_PER_DAY', 20, 1],
+    ['MAIL_MAX_PER_HOUR', 100, 0],
+  ] as const)('%s', (name, fallback, minimum) => {
+    it('enables the default even when Compose passes an empty variable', () => {
+      expect(loadConfig(base)[name]).toBe(fallback)
+      expect(loadConfig({ ...base, [name]: '' })[name]).toBe(fallback)
+    })
+
+    it('accepts bounded whole numbers, with zero only for rescheduling or the global cap', () => {
+      for (const value of [minimum, 7, 2147483647])
+        expect(loadConfig({ ...base, [name]: String(value) })[name]).toBe(value)
+    })
+
+    it('rejects negative, fractional, nonnumeric and unbounded values before startup in every role', () => {
+      for (const HOURMERE_ROLE of ['all', 'web', 'worker'])
+        for (const value of [
+          String(minimum - 1),
+          '0.5',
+          'NaN',
+          'Infinity',
+          'off',
+          ' ',
+          '2147483648',
+        ])
+          expect(() => loadConfig({ ...base, HOURMERE_ROLE, [name]: value })).toThrow(
+            new RegExp(`${name} must be a whole number`),
+          )
+    })
+  })
+
   describe.each(['PRIVACY_POLICY_URL', 'TERMS_URL'] as const)('%s', (name) => {
     it('has no default for any instance and treats an empty value as unset', () => {
       for (const PUBLIC_URL of ['https://self.example', 'https://app.hourmere.com']) {

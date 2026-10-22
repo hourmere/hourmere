@@ -112,8 +112,8 @@ booking's `booking_hosts` whose address is verified: accounts start verified, an
 is not (it should not exist; see [data model](https://github.com/hourmere/hourmere/blob/main/docs/data-model.md)) is neither emailed nor named in the
 invitation, so a booking without a verified host sends nothing (the job logs one WARN line
 naming the booking and the kind, since the invitee hears nothing either). Guests are
-addresses an anonymous booker typed (up to 10 per booking); limiting abuse of that is a
-product follow-up. Times are shown in the recipient's zone with its IANA display name
+addresses an anonymous booker typed (up to 10 per booking); invitee/guest emails share
+per-recipient and instance-wide [abuse limits](#email-abuse-controls). Times are shown in the recipient's zone with its IANA display name
 (spaces instead of underscores) and the GMT offset for the meeting date: the attendee's
 zone from `booking_attendees`, a host's from their profile, else their default schedule,
 else UTC. Host emails also show the invitee's local time when the saved invitee zone
@@ -169,8 +169,9 @@ transaction and would miss any path that changes a booking without knowing about
 `booking_notifications` has one row per email: primary key (booking, kind, recipient), the
 recipient being `host:<user id>` or `attendee:<attendee id>` (so someone who books their own
 event type gets both emails). For each recipient the job, in one transaction, inserts the
-row (`ON CONFLICT DO NOTHING`); if it already exists the email was sent and is skipped;
-otherwise it sends the email and commits.
+row (`ON CONFLICT DO NOTHING`); if it already exists the email has a terminal sent,
+rejected or suppressed outcome and is skipped; otherwise it checks the abuse limits,
+sends the email if permitted, and commits.
 
 - A failed send rolls the row back, and the retry sends to the recipients still missing.
 - Two attempts at the same time (a job that ran past its expiry and was retried while still
@@ -500,11 +501,55 @@ off, including for event types created before migration 0015. REST and MCP expos
 a disabled event type return `400 guests_not_allowed` before any booking, attendee or
 notification is stored. Enabled types retain the ten-guest cap and existing rate limits.
 
-Turning the setting off affects new bookings. Existing guests still receive reminders and
-calendar updates/cancellations so their invitations do not become stale; retries of a
-successfully committed booking preserve the original result. This opt-in limits anonymous
-guest email amplification; it does not verify the main invitee's email address or eliminate
-all email abuse.
+Turning the setting off affects new bookings. Existing guests remain eligible for reminders
+and calendar updates/cancellations, subject to the email limits below; retries of a
+successfully committed booking preserve the original result.
+
+## Email abuse controls
+
+Invitees may reschedule a booking at most `BOOKING_MAX_INVITEE_RESCHEDULES` times (default
+5) across its entire reschedule chain. New response tokens and older email links use the
+same count; host/admin moves neither consume nor reset it. `0` disables invitee
+rescheduling. At the cap, invitee slot lookup and rescheduling return HTTP 409
+`booking_reschedule_limit`, with an English/Chinese manage-page message asking them to
+contact the host. Cancelling remains possible, and authenticated hosts may still move it.
+Existing chains count their earlier invitee moves too.
+
+Before every booking notification send (confirmed, rescheduled, cancelled, reminder and
+conference-failure notices), the worker enforces two rolling windows for invitees and
+guests: `MAIL_RECIPIENT_MAX_PER_HOUR` (default 5) and `MAIL_RECIPIENT_MAX_PER_DAY` (default
+20, over 24 hours). Addresses are trimmed and lowercased before hashing, shared across
+bookings and organizations. Host mail does not consume the recipient budget. Changing IPs,
+cancelling and rebooking, or deleting a booking does not reset the mail counters.
+
+`MAIL_MAX_PER_HOUR` (default 100, `0` means unlimited) counts **all booking notification
+emails**, including hosts, across every worker sharing this instance's database. Invitee
+and guest messages are suppressed once that many were sent in the preceding hour. Hosts
+are sent first and may continue until 120% of that cap (rounded down), then are suppressed
+too. Set it below your SMTP provider's hourly limit, allowing for this reserve and any
+sign-in or other mail using the same provider. Sign-in/authentication mail is outside these
+notification budgets. For a cap below 5, rounding may leave no extra host allowance.
+
+Cap checks and SMTP delivery use the existing per-recipient receipt transaction, serialized
+across workers with a database advisory lock. Successful sends add only a recipient hash
+for invitee-facing mail (NULL for host mail) and a timestamp to `notification_email_sends`;
+no plain address is stored in this ledger. Failed sends roll back their count and remain
+retryable under the existing policy. The SMTP acceptance/failed-commit duplicate window
+described above still applies.
+
+A limited message commits `booking_notifications.outcome = 'suppressed'`, a stable
+`suppression_reason`, and no manage-token hash. It does not fail the booking or the job,
+and retries never send it later, even when the rolling window clears or an operator raises
+the cap. A structured WARN log includes booking/kind, reason and recipient hash, never the
+plain email address. Operators can count outcomes and reasons in `booking_notifications`;
+these receipts remain subject to existing booking deletion. The hourly
+`notification-email-cleanup` job purges ledger rows older than two days, independently of
+booking deletion. On upgrade, existing sent receipts seed the ledger for the last two days
+where recipient identity is still available; see migration 0040's notes for compatibility.
+
+These controls have no CAPTCHA, do not verify invitee/guest addresses, and apply per
+instance/database. Separate instances do not share a budget. They reduce volume and may
+suppress legitimate updates; invitees who reach a limit should contact the host.
 
 ## Outbound booking webhooks
 

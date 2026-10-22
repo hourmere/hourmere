@@ -74,6 +74,7 @@ describe.skipIf(!serverUrl)('automatic Meet durable flow (real PostgreSQL)', () 
     await owned?.drop()
   })
   beforeEach(async () => {
+    await db.deleteFrom('notification_email_sends').execute()
     await db
       .updateTable('auth.user')
       .set({ emailVerified: true })

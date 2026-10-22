@@ -32,6 +32,7 @@ import {
   bookingNotificationJob,
   bookingNotifier,
   conferenceNotificationDispatchJob,
+  notificationEmailCleanupJob,
   queuedSignInEmail,
   signInEmailJobs,
 } from '@hourmere/notifications'
@@ -85,6 +86,7 @@ export function productRoutes({
   webhooks = { enabled: false },
   automaticMeet = false,
   automaticZoom = false,
+  bookingMaxInviteeReschedules,
   hostedSignupUrl,
   privacyPolicyUrl,
   termsUrl,
@@ -92,6 +94,7 @@ export function productRoutes({
   db: Db
   automaticMeet?: boolean
   automaticZoom?: boolean
+  bookingMaxInviteeReschedules?: number | undefined
   hostedSignupUrl?: string
   privacyPolicyUrl?: string
   termsUrl?: string
@@ -137,7 +140,7 @@ export function productRoutes({
     webhookRoutes({ db, ...webhooks }),
     eventTypeRoutes({ db, automaticMeet, automaticZoom }),
     publicRoutes({ db, notify, automaticMeet, automaticZoom }),
-    bookingRoutes({ db, notify, automaticMeet, automaticZoom }),
+    bookingRoutes({ db, notify, automaticMeet, automaticZoom, bookingMaxInviteeReschedules }),
     analyticsRoutes({ db }),
   ]
 }
@@ -148,6 +151,7 @@ export function productTools({
   notify,
   automaticMeet,
   automaticZoom,
+  bookingMaxInviteeReschedules,
   googleCalendar,
   zoomConference,
 }: {
@@ -155,12 +159,13 @@ export function productTools({
   notify?: BookingNotifier | undefined
   automaticMeet?: boolean | undefined
   automaticZoom?: boolean | undefined
+  bookingMaxInviteeReschedules?: number | undefined
   googleCalendar?: CalendarDeps['google']
   zoomConference?: ConferenceDeps['zoom']
 }): Tool[] {
   return [
     whoamiTool,
-    ...bookingTools({ db, notify, automaticMeet, automaticZoom }),
+    ...bookingTools({ db, notify, automaticMeet, automaticZoom, bookingMaxInviteeReschedules }),
     ...catalogTools({ db }),
     ...integrationTools({
       calendar: { db, google: googleCalendar },
@@ -312,6 +317,14 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
   let enqueueWritebackRecovery: (connectionId: string, after?: string) => Promise<unknown> =
     async () => {}
   // Background jobs: every role queues them, `all` and `worker` run them.
+  const notificationDeps = {
+    db,
+    mailer,
+    publicUrl: config.PUBLIC_URL,
+    mailRecipientMaxPerHour: config.MAIL_RECIPIENT_MAX_PER_HOUR,
+    mailRecipientMaxPerDay: config.MAIL_RECIPIENT_MAX_PER_DAY,
+    mailMaxPerHour: config.MAIL_MAX_PER_HOUR,
+  }
   const jobs = createJobs({
     connectionString: config.DATABASE_URL,
     definitions: [
@@ -323,8 +336,9 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
         secret: config.BETTER_AUTH_SECRET,
         signup: config.signup,
       }),
-      bookingNotificationJob({ db, mailer, publicUrl: config.PUBLIC_URL }),
-      conferenceNotificationDispatchJob({ db, mailer, publicUrl: config.PUBLIC_URL }),
+      bookingNotificationJob(notificationDeps),
+      conferenceNotificationDispatchJob(notificationDeps),
+      notificationEmailCleanupJob(notificationDeps),
       bookingConferenceJob(calendarDeps),
       conferenceDispatchJob(calendarDeps, (id) => enqueueConference(id)),
       conferenceMirrorDispatchJob(calendarDeps, (id) => enqueueBookingCalendar(id)),
@@ -418,6 +432,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
         socialProviders: config.socialProviders,
         automaticMeet: config.GOOGLE_MEET_ENABLED,
         automaticZoom: config.ZOOM_MEETINGS_ENABLED,
+        bookingMaxInviteeReschedules: config.BOOKING_MAX_INVITEE_RESCHEDULES,
         hostedSignupUrl: config.HOSTED_SIGNUP_URL,
         privacyPolicyUrl: config.PRIVACY_POLICY_URL,
         termsUrl: config.TERMS_URL,
@@ -451,6 +466,7 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
           notify,
           automaticMeet: config.GOOGLE_MEET_ENABLED,
           automaticZoom: config.ZOOM_MEETINGS_ENABLED,
+          bookingMaxInviteeReschedules: config.BOOKING_MAX_INVITEE_RESCHEDULES,
           googleCalendar,
           zoomConference,
         }),

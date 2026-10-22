@@ -24,6 +24,9 @@ The website at hourmere.com is separate from your Hourmere instance.
 
 ## Known limitations
 
+- Public booking pages have no CAPTCHA and invitee/guest email addresses remain unverified.
+  [Email abuse limits](/docs/notifications#email-abuse-controls) apply per instance/database;
+  separate instances do not share budgets.
 - [Microsoft Calendar](/docs/microsoft-calendar) lists calendars only, without busy-time
   synchronization or event writes. [Microsoft sign-in](/docs/configuration#sign-in-with-microsoft)
   and calendar connections have not had real-account acceptance.

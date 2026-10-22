@@ -63,6 +63,7 @@ describe.skipIf(!serverUrl)('iMIP interoperability', () => {
   })
   afterEach(async () => {
     if (users.length) await db.deleteFrom('auth.user').where('id', 'in', users.splice(0)).execute()
+    await db.deleteFrom('notification_email_sends').execute()
   })
   afterAll(async () => {
     await owned?.drop()

@@ -43,6 +43,7 @@ describe.skipIf(!serverUrl)('bounded conference notification outbox (real Postgr
   })
   beforeEach(async () => {
     await db.deleteFrom('bookings').execute()
+    await db.deleteFrom('notification_email_sends').execute()
     now = NOW
     logs = []
   })

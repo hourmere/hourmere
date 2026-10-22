@@ -29,12 +29,20 @@ describe.skipIf(!serverUrl)('booking notification mailer in the real composition
         // Web mode queues jobs without sending, so no SMTP connection is opened.
         SMTP_URL: 'smtp://127.0.0.1:1',
         MAIL_FROM: 'Hourmere bookings <bookings@example.com>',
+        MAIL_RECIPIENT_MAX_PER_HOUR: '3',
+        MAIL_RECIPIENT_MAX_PER_DAY: '12',
+        MAIL_MAX_PER_HOUR: '40',
       })
       expect(bookingNotificationJob).toHaveBeenCalledOnce()
       const mailer = vi.mocked(bookingNotificationJob).mock.calls[0]?.[0].mailer
       // A send-only wrapper loses this property and silently restores the legacy
       // host organizer, even though the underlying SMTP sender is still configured.
       expect(mailer?.senderEmail).toBe('bookings@example.com')
+      expect(vi.mocked(bookingNotificationJob).mock.calls[0]?.[0]).toMatchObject({
+        mailRecipientMaxPerHour: 3,
+        mailRecipientMaxPerDay: 12,
+        mailMaxPerHour: 40,
+      })
     } finally {
       await running?.close()
       await owned.drop()

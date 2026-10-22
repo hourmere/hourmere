@@ -117,8 +117,21 @@ for configuration and delivery behavior.
 |---|---|---|
 | `SMTP_URL` | Unset | `smtps://user:password@host:465` or `smtp://…:587`; special credential characters must be percent-encoded. Remote SMTP requires TLS/STARTTLS. Without SMTP, emails go to logs. |
 | `MAIL_FROM` | Unset | Required with SMTP, for example `Hourmere <bookings@example.com>`. Use a sender your SMTP provider accepts that can also receive calendar replies; see the requirements below. |
+| `BOOKING_MAX_INVITEE_RESCHEDULES` | `5` | Maximum invitee-initiated reschedules across one booking chain, including through old email links. `0` disables invitee rescheduling. Hosts may still reschedule; cancellation remains available. |
+| `MAIL_RECIPIENT_MAX_PER_HOUR` | `5` | Maximum invitee/guest notification emails sent to the same trimmed, lowercased address in a rolling hour. Positive integer. Host emails are exempt. |
+| `MAIL_RECIPIENT_MAX_PER_DAY` | `20` | Same per-recipient limit over a rolling 24 hours. Positive integer. |
+| `MAIL_MAX_PER_HOUR` | `100` | Instance-wide notification email limit in a rolling hour. `0` is unlimited. Invitee/guest mail stops at this cap; hosts may use up to 120% (rounded down), including mail already sent to invitees/guests. |
 | `SIGNUP` | `first-user` | `first-user`, `closed` or `open`; existing users can always sign in. |
 | `SIGNUP_ALLOWED_DOMAINS` | Unset | Comma-separated exact email domains, without `@` or wildcards. These domains may register even with `closed`. List subdomains separately. Invalid with `open`. |
+
+These limits default on, including when Compose passes empty variables. They accept whole
+numbers up to 2147483647; negative or fractional values fail startup. Set them identically
+on web and worker processes and recreate both after changing them. Set `MAIL_MAX_PER_HOUR`
+below your SMTP provider's hourly allowance, leaving room for the 20% host reserve,
+sign-in mail and other uses of the same SMTP account. Sign-in/authentication mail is outside
+these notification limits. Suppressed notifications are terminal and are never sent later,
+even after a limit resets. See [email abuse controls](/docs/notifications#email-abuse-controls)
+for retention and diagnostics.
 
 `MAIL_FROM` is the organizer for new calendar invitations. Avoid a Gmail or Google Workspace
 address, or any other address registered as a Google account: Gmail may treat it as a Google
