@@ -1,0 +1,164 @@
+---
+import { waitlistMessages } from '../waitlist-client'
+
+interface Props {
+  source: 'cloud' | 'pricing' | 'faq'
+}
+
+const { source } = Astro.props
+const id = `${source}-waitlist`
+const statusId = source === 'cloud' ? 'cloud-waitlist-success' : `${id}-status`
+---
+
+<div class="waitlist" id={id}>
+  <form action="/api/waitlist" method="post" data-waitlist-form>
+    <label for={`${id}-email`}>Email address</label>
+    <div class="waitlist-fields">
+      <input
+        id={`${id}-email`}
+        name="email"
+        type="email"
+        autocomplete="email"
+        maxlength="254"
+        required
+        aria-describedby={`${id}-consent`}
+      />
+      <button class="btn btn-primary" type="submit">Join the Cloud waitlist</button>
+    </div>
+    <div class="waitlist-trap" aria-hidden="true">
+      <label for={`${id}-hm-extra`}>Leave this field empty</label>
+      <input id={`${id}-hm-extra`} name="hm_extra" type="text" tabindex="-1" autocomplete="off" />
+    </div>
+    <input name="source" type="hidden" value={source} />
+    <input name="locale" type="hidden" value="en" />
+    <p class="waitlist-consent" id={`${id}-consent`}>
+      We'll email you when Hourmere Cloud launches. See our <a href="/privacy">privacy policy</a>.
+    </p>
+    <div class="waitlist-feedback">
+      <div class="waitlist-feedback-space" aria-hidden="true">
+        {Object.values(waitlistMessages).map((message) => <span>{message}</span>)}
+      </div>
+      <p
+        class="waitlist-status"
+        id={statusId}
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        tabindex="-1"
+        data-waitlist-status
+      >{source === 'cloud' ? waitlistMessages.success : ''}</p>
+    </div>
+  </form>
+</div>
+
+<script>
+  import { setupWaitlistForms } from '../waitlist-client'
+
+  setupWaitlistForms(document)
+</script>
+
+<style>
+  .waitlist {
+    margin-top: 24px;
+    scroll-margin-top: 24px;
+  }
+
+  label {
+    display: block;
+    margin-bottom: 6px;
+    font-weight: 700;
+  }
+
+  .waitlist-fields {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: start;
+    gap: 10px;
+  }
+
+  input[type="email"] {
+    flex: 1 1 220px;
+    width: 100%;
+    min-width: 0;
+    min-height: 46px;
+    padding: 10px 12px;
+    border: 2px solid var(--muted);
+    border-radius: 10px;
+    background: var(--bg);
+    color: var(--text);
+    font: inherit;
+    font-size: 16px;
+  }
+
+  input[aria-invalid="true"] {
+    border-color: var(--text);
+  }
+
+  button {
+    cursor: pointer;
+    font-family: inherit;
+  }
+
+  button:disabled {
+    opacity: 0.7;
+    cursor: wait;
+  }
+
+  .waitlist-trap {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .waitlist .waitlist-consent {
+    margin: 12px 0 0;
+    color: var(--muted);
+    font-size: 14px;
+  }
+
+  @media (pointer: coarse) {
+    .waitlist-consent a {
+      display: inline-flex;
+      align-items: center;
+      min-height: 44px;
+    }
+  }
+
+  /* Reserve the tallest possible message at every width, including before JavaScript runs. */
+  .waitlist-feedback,
+  .waitlist-feedback-space {
+    display: grid;
+  }
+
+  .waitlist-feedback {
+    margin-top: 12px;
+    color: var(--text);
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1.6;
+  }
+
+  .waitlist-feedback-space,
+  .waitlist .waitlist-status {
+    visibility: hidden;
+  }
+
+  .waitlist-feedback-space,
+  .waitlist-feedback-space span,
+  .waitlist .waitlist-status {
+    grid-area: 1 / 1;
+  }
+
+  .waitlist .waitlist-status {
+    margin: 0;
+    scroll-margin-top: 24px;
+  }
+
+  .waitlist-status:target,
+  .waitlist-status[data-state] {
+    visibility: visible;
+  }
+</style>

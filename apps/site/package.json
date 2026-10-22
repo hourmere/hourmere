@@ -7,7 +7,8 @@
     "build": "astro build",
     "preview": "astro preview",
     "typecheck": "node scripts/check.ts",
-    "deploy": "npm run build && npx --yes wrangler@4.151.0 deploy"
+    "test:smoke": "node scripts/waitlist-smoke.ts",
+    "deploy": "npm run build && npx --yes wrangler@4.151.0 deploy --env=\"\""
   },
   "devDependencies": {
     "@astrojs/check": "0.9.10",

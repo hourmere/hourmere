@@ -34,8 +34,6 @@ export const contact = {
   privacy: 'privacy@cobaltmere.com',
 } as const
 
-export const launchUpdatesHref = `mailto:${contact.hello}?subject=${encodeURIComponent('Hourmere launch updates')}`
-
 export const googlePolicies = {
   userData: 'https://developers.google.com/terms/api-services-user-data-policy',
   workspace: 'https://developers.google.com/workspace/workspace-api-user-data-developer-policy',
