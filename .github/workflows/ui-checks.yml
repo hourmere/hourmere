@@ -61,7 +61,7 @@ jobs:
       - name: Upload sanitized measurements
         if: always()
         continue-on-error: true
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ui-layout-${{ matrix.shard }}
           path: temp/ui-audit-reports/
@@ -106,7 +106,7 @@ jobs:
       - name: Upload sanitized measurements
         if: always()
         continue-on-error: true
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ui-a11y
           path: temp/ui-audit-reports/
@@ -163,7 +163,7 @@ jobs:
       - name: Upload sanitized measurements
         if: always()
         continue-on-error: true
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ui-cross-engine
           path: temp/ui-audit-reports/
@@ -226,7 +226,7 @@ jobs:
         run: node tools/e2e/reports-summary.ts
       - name: Upload sanitized measurements
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ui-visual
           path: temp/ui-audit-reports/
@@ -273,7 +273,7 @@ jobs:
         run: node tools/e2e/reports-summary.ts
       - name: Upload only masked baselines for review
         if: success()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: visual-baselines-linux
           path: tools/e2e/snapshots/**/*.png
