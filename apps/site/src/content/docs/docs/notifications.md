@@ -568,9 +568,10 @@ its outbox row rather than creating a booking receipt.
 
 The hourly `notification-email-cleanup` job purges ledger rows older than two days,
 independently of booking deletion. Migration 0040's unchanged backfill seeds the ledger
-from retained sent receipts for the last two days where recipient identity is still
-available. Its legacy unkeyed SHA-256 hashes (and any rows from earlier code) count toward
-the instance cap but do not match new HMAC recipient windows. The recipient-count gap
+from all retained sent receipts for the last two days. Rows without recipient identity get
+a NULL hash and still count toward the instance cap. Its legacy unkeyed SHA-256 hashes (and
+any rows from earlier code) count toward the instance cap but do not match new HMAC
+recipient windows. The recipient-count gap
 lasts at most 24 hours, and those old hashes are purged after two days. Deleted identities
 cannot be recovered. Mixed old/new processes are schema-compatible, but old workers send
 without being counted or enforcing these budgets: build first, stop all old web/all/worker
@@ -583,9 +584,12 @@ not share a mail budget. The controls reduce volume and may suppress legitimate 
 invitees who reach a limit should contact the host.
 
 An attacker who can trigger mail to eligible addresses can exhaust the instance hourly cap,
-including its host/sign-in reserve, and delay all hosts' sign-in and notification mail for
-up to an hour. Existing sessions are unaffected. Operators can raise `MAIL_MAX_PER_HOUR`
-while keeping the cap, reserve and other mail within their provider's limit.
+including its host/sign-in reserve. Until the rolling hour clears (up to an hour after the
+last counted send, longer if triggering continues), every host's sign-in email is dropped,
+so hosts must request a new link later, and all booking notification mail is suppressed and
+never sent later. Existing sessions are unaffected. Operators can raise `MAIL_MAX_PER_HOUR`
+while keeping the cap, reserve and other mail within their provider's limit; raising it does
+not resend messages that were already suppressed.
 
 ## Outbound booking webhooks
 
