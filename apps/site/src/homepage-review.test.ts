@@ -34,12 +34,12 @@ describe('reviewed homepage and comparison disclosures', () => {
     expect(home).toContain(disclosure)
   })
 
-  it('states the invitation-only comparison preview and planned self-hosting release', () => {
+  it('states the invitation-only comparison preview and released self-hosted version', () => {
     expect(intro).toContain(
-      'Hourmere Cloud is in an [invitation-only preview](/#faq) with sign-ups closed, and the open-source release for self-hosting is planned for November 30, 2026.',
+      'Hourmere Cloud is in an [invitation-only preview](/#faq) with sign-ups closed, and Hourmere 1.0.0 was released for self-hosting on November 30, 2026.',
     )
     expect(intro).not.toMatch(
-      /in development and not yet ready to use|Hourmere Cloud has not launched/,
+      /in development and not yet ready to use|Hourmere Cloud has not launched|planned for November 30, 2026/,
     )
   })
 

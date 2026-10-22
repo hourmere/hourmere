@@ -75,7 +75,9 @@ describe('comparison review information', () => {
       const source = read(`./content/docs/docs/${page}`)
       const intro = source.split(/^## /m)[0] ?? ''
       expect(intro).toMatch(/\[invitation-only preview\]\(\/#faq\) with sign-ups closed/)
-      expect(intro).toContain('planned for November 30, 2026')
+      expect(plainText(intro)).toContain(
+        'Hourmere 1.0.0 was released for self-hosting on November 30, 2026.',
+      )
       expect(intro).not.toMatch(/README/)
       expect(intro.replace(/\s+/g, ' ')).toContain(
         '[self-hosting guide](/docs/self-hosting) installs the published image pinned to an exact release version',
@@ -83,7 +85,9 @@ describe('comparison review information', () => {
       expect(intro).toContain('building from source remains an alternative')
       expect(intro).not.toMatch(/no prebuilt public image is published/i)
       expect(intro).toContain('](/docs/self-hosting)')
-      expect(intro).not.toMatch(/not yet ready to use|Cloud has not launched/)
+      expect(intro).not.toMatch(
+        /not yet ready to use|Cloud has not launched|planned for November 30, 2026/,
+      )
     })
   }
 
@@ -95,14 +99,16 @@ describe('comparison review information', () => {
       /Can I use Hourmere today\? Hourmere Cloud is in an invitation-only preview/,
     )
     expect(text).toContain('Sign-ups are currently closed.')
-    expect(text).toContain(
-      'The open-source release for self-hosting is planned for November 30, 2026.',
-    )
+    expect(
+      text.match(/Hourmere 1\.0\.0 was released for self-hosting on November 30, 2026\./g),
+    ).toHaveLength(2)
     expect(home).toContain('href="https://app.hourmere.com"')
     expect(home).toContain('operated by {company.shortName}')
     expect(home).toContain('href="/privacy"')
     expect(home).toContain('href="/terms"')
-    expect(text).not.toMatch(/Not yet\.|not available yet|no sign-up today|[Ii]n development/)
+    expect(text).not.toMatch(
+      /Not yet\.|not available yet|no sign-up today|[Ii]n development|planned for November 30, 2026/,
+    )
     expect(read('./site.ts')).not.toContain('adrian@cobaltmere.com')
   })
 

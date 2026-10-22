@@ -524,6 +524,39 @@ describe('release publication checklist', () => {
     )
   })
 
+  it.each([
+    'README.md:4',
+    'SECURITY.md:8',
+    'apps/site/src/content/docs/docs/index.md:6–8',
+    'apps/site/src/content/docs/docs/comparison.md:7–9',
+    'apps/site/src/pages/index.astro:90',
+    'Separate repository `hourmere/.github`, `profile/README.md`',
+  ])('includes the release-day wording action for %s', (location) => {
+    const table = docs().split('| File / preparation lines | Release-day change |')[1] ?? ''
+    expect(table).toContain(location)
+  })
+
+  it('keeps privacy and terms out of the release-timing copy changes', () => {
+    const copyChanges = docs()
+      .split('- Replace the no-stable-release/public-image')[1]
+      ?.split('- Retain')[0]
+    expect(copyChanges).toBeDefined()
+    expect(copyChanges).not.toContain('legal pages')
+  })
+
+  it.each([
+    'The `hourmere` npm organization exists.',
+    '**Hourmere 1.0.0 does not publish the CLI to npm**',
+    'The CLI stays source-run with `npm run --silent cli -- --help`',
+    'npm publication is deferred to a later, separately approved release.',
+    'Keep this job disabled for 1.0.0.',
+    'The bootstrap-credential and trusted-publisher guidance below is preparation for a later release',
+    'Remove bootstrap credentials after OIDC works.',
+  ])('preserves the card 150 CLI publication boundary: %s', (guidance) => {
+    const cli = docs().split('## CLI package identity')[1] ?? ''
+    expect(cli).toContain(guidance)
+  })
+
   it('checks automatic GHCR repository admin access after the first token push', () => {
     const [before, publication = ''] = docs().split('## Verify publication and handle failures')
     expect(before).not.toContain('Manage Actions access')

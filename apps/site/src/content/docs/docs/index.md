@@ -3,9 +3,9 @@ title: Documentation
 description: Run Hourmere yourself and connect booking clients through REST or MCP.
 ---
 
-Hourmere is in early development. These guides describe the current source tree; there is
-no stable release yet; the open-source release is planned for **2026-11-30**. Hourmere Cloud
-is an [invitation-only preview](/#faq) with sign-ups closed.
+Hourmere 1.0.0 was released on **2026-11-30**. These guides cover the released software;
+install the published image with the [self-hosting guide](/docs/self-hosting).
+Hourmere Cloud is an [invitation-only preview](/#faq) with sign-ups closed.
 The website at hourmere.com is separate from your Hourmere instance.
 
 - [Self-host with Docker Compose](/docs/self-hosting): install, configure email and a proxy,

@@ -5,8 +5,8 @@ security reports seriously. Thank you for helping keep its users safe.
 
 ## Supported versions
 
-Hourmere has not reached 1.0. Only the latest release and the `main` branch receive security
-fixes; older releases do not. Self-hosters should update to the latest release to get a fix.
+The `1.0.x` series and the `main` branch receive security fixes; older releases do not.
+Self-hosters should update to the latest `1.0.x` patch release to get a fix.
 
 ## Reporting a vulnerability
 

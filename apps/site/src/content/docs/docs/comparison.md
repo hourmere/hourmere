@@ -4,8 +4,8 @@ description: Compare Hourmere, Calendly, Cal.com and Cal.diy by deployment, agen
 lastVerified: '2026-10-20'
 ---
 
-Hourmere Cloud is in an [invitation-only preview](/#faq) with sign-ups closed, and the
-open-source release for self-hosting is planned for November 30, 2026. Its
+Hourmere Cloud is in an [invitation-only preview](/#faq) with sign-ups closed, and Hourmere 1.0.0
+was released for self-hosting on November 30, 2026. Its
 [self-hosting guide](/docs/self-hosting) installs the published image pinned to an exact release version;
 building from source remains an alternative.
 This page describes the documented implementation and its current limitations.
