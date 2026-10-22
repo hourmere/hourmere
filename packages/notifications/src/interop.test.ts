@@ -63,6 +63,7 @@ describe.skipIf(!serverUrl)('iMIP interoperability', () => {
   })
   afterEach(async () => {
     if (users.length) await db.deleteFrom('auth.user').where('id', 'in', users.splice(0)).execute()
+    await db.deleteFrom('notification_email_sends').execute()
   })
   afterAll(async () => {
     await owned?.drop()
@@ -114,7 +115,13 @@ describe.skipIf(!serverUrl)('iMIP interoperability', () => {
       sent,
       send: (bookingId: string, kind: 'confirmed' | 'rescheduled' | 'cancelled') =>
         sendBookingNotification(
-          { db, mailer, publicUrl: 'https://scheduler.example.org', now: () => now },
+          {
+            db,
+            mailer,
+            secret: 'synthetic-notification-secret',
+            publicUrl: 'https://scheduler.example.org',
+            now: () => now,
+          },
           bookingId,
           kind,
         ),
@@ -216,6 +223,7 @@ describe.skipIf(!serverUrl)('iMIP interoperability', () => {
       await sendBookingNotification(
         {
           db,
+          secret: 'synthetic-notification-secret',
           publicUrl: 'https://scheduler.example.org',
           now: () => now,
           mailer: {
@@ -701,6 +709,7 @@ describe.skipIf(!serverUrl)('iMIP interoperability', () => {
       sendBookingNotification(
         {
           db: db.withPlugin(barrier(second)),
+          secret: 'synthetic-notification-secret',
           publicUrl: 'https://scheduler.example.org',
           now: () => now,
           mailer: {

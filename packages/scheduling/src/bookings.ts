@@ -270,6 +270,42 @@ async function latestInChain(db: Db, id: string): Promise<string> {
   return rows[0]?.id ?? id
 }
 
+/**
+ * The predecessors retain exactly the authority needed for this count: an invitee move
+ * leaves its response-token hash behind; a host move clears it when transferring that
+ * hash to the successor. Count those edges, rather than all moves, without storing a
+ * second counter that could disagree with the chain. Writes hold the current row lock;
+ * predecessor links and hashes cannot change after they have a successor.
+ */
+async function inviteeRescheduleCount(db: Db, id: string): Promise<number> {
+  const { rows } = await sql<{ count: number }>`
+    WITH RECURSIVE chain (id, rescheduled_from_id, manage_token_hash, organization_id) AS (
+      SELECT id, rescheduled_from_id, manage_token_hash, organization_id
+        FROM bookings WHERE id = ${id}
+      UNION ALL
+      SELECT b.id, b.rescheduled_from_id, b.manage_token_hash, b.organization_id
+        FROM bookings b JOIN chain c ON b.id = c.rescheduled_from_id
+       WHERE b.organization_id = c.organization_id
+    ) CYCLE id SET is_cycle USING path
+    SELECT count(*)::int AS count FROM chain
+     WHERE id <> ${id} AND manage_token_hash IS NOT NULL AND NOT is_cycle`.execute(db)
+  return rows[0]?.count ?? 0
+}
+
+/** Shared by invitee reschedule slots and the final locked write. */
+export async function assertInviteeRescheduleAllowed(
+  ctx: PublicContext,
+  id: string,
+): Promise<void> {
+  if ((await inviteeRescheduleCount(ctx.db, id)) >= (ctx.bookingMaxInviteeReschedules ?? 5)) {
+    throw new DomainError(
+      'conflict',
+      'booking_reschedule_limit',
+      'This booking has been rescheduled the maximum number of times. Contact the host to change it again.',
+    )
+  }
+}
+
 /** How often lockManagedBooking follows a meeting that keeps moving before giving up. */
 const MAX_FOLLOW_ROUNDS = 10
 
@@ -1013,6 +1049,7 @@ async function rescheduleLocked(
 ): Promise<BookingWithToken> {
   // The status cannot change while the row is locked; the time check waits for the locks.
   if (old.status === 'cancelled') throw bookingCancelled()
+  if (!carryManageToken) await assertInviteeRescheduleAllowed({ ...ctx, db: trx }, old.id)
 
   const [hosts, attendees] = await Promise.all([
     trx.selectFrom('booking_hosts').select('user_id').where('booking_id', '=', old.id).execute(),

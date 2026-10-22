@@ -122,6 +122,13 @@ must approve publication through the [release workflow](https://github.com/hourm
 
 ### Security
 
+- Public booking and sign-in email abuse is bounded by a chain-wide invitee reschedule cap
+  (default 5), separate rolling recipient limits for booking and sign-in mail (each 5/hour
+  and 20/day), and one instance-wide mail cap (100/hour with a 20% reserve shared by host
+  and sign-in mail). Sign-in requests retain the same HTTP response when mail is suppressed.
+  Suppressed mail is never retried; recipient counters use domain-separated HMAC-SHA-256
+  hashes derived from `BETTER_AUTH_SECRET`, and ledger rows expire after two days. Hosts
+  can still reschedule and invitees can still cancel at the reschedule cap.
 - Calendar, conference, sign-in and webhook credentials use separate protection domains;
   tokens and private booking management links are excluded from public catalogs and
   webhook snapshots. Optional provider integrations retain explicit ownership checks.
@@ -136,6 +143,9 @@ must approve publication through the [release workflow](https://github.com/hourm
 
 ### Known limitations
 
+- Public booking and sign-in pages have no CAPTCHA; invitee/guest email addresses remain
+  unverified. Email abuse budgets apply per instance/database; separate instances do not
+  share limits. Per-IP request limits remain in process memory.
 - [Microsoft Calendar](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/microsoft-calendar.md)
   lists calendars only, without busy-time synchronization or event writes. Microsoft sign-in
   and calendar connections have not had real-account acceptance.
@@ -169,6 +179,21 @@ schema downgrade is not automatic. Direct source deployments require Node.js 26.
 Hourmere requires PostgreSQL 18+ because migrations use `uuidv7()`; the provided Compose
 stack includes PostgreSQL 18.
 
+- **Coordinate the mail-budget upgrade (migration 0040).** Build the new application,
+  stop every old `web`, `all` and `worker` process, including any on other hosts, then
+  start all roles with the upgraded code: build → stop app (and any separate worker) → up.
+  With Compose, run `docker compose build`, `docker compose stop app`,
+  `docker compose stop worker` if configured, then `docker compose up -d --wait`.
+  Migration `0040_notification_mail_limits.sql` is schema-compatible with mixed old/new
+  processes during the switch: old inserts default to `outcome = 'sent'` and NULL
+  `suppression_reason`, and old reads filter `outcome = 'sent'`. Old workers nevertheless
+  send without being counted or enforcing the budgets, so do not leave them running.
+  Keep PostgreSQL running; with `AUTO_MIGRATE=true`, the first new process applies the
+  migration on startup. Its unchanged backfill uses legacy unkeyed hashes: those rows count
+  toward the instance cap, but not the new HMAC recipient windows. Any gap lasts at most
+  24 hours, and old ledger rows are purged after two days; deleted identities cannot be
+  recovered. Rotating `BETTER_AUTH_SECRET` also resets recipient counters while preserving
+  the instance count. See [email abuse controls](https://github.com/hourmere/hourmere/blob/main/apps/site/src/content/docs/docs/notifications.md#email-abuse-controls).
 - **Rebuild Google busy snapshots for all-day dates.** Stop all old web/all/worker
   processes, including workers on other hosts, before applying
   `0039_calendar_busy_all_day_dates.sql`, then restart every role with the upgraded code.

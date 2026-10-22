@@ -177,6 +177,7 @@ const ListBookingsInput = z.strictObject(ListBookingsQuery.shape)
 
 export interface BookingToolsDeps {
   db: Db
+  bookingMaxInviteeReschedules?: number | undefined
   now?: () => Temporal.Instant
   /** Queues the booking emails in the transaction of each change, as for REST. */
   notify?: BookingNotifier | undefined
@@ -198,13 +199,21 @@ export interface BookingToolsDeps {
  */
 export function bookingTools({
   db,
+  bookingMaxInviteeReschedules,
   now = () => Temporal.Now.instant(),
   notify,
   automaticMeet,
   automaticZoom,
   rateLimits = {},
 }: BookingToolsDeps): Tool[] {
-  const pub: PublicContext = { db, now, notify, automaticMeet, automaticZoom }
+  const pub: PublicContext = {
+    db,
+    now,
+    notify,
+    automaticMeet,
+    automaticZoom,
+    bookingMaxInviteeReschedules,
+  }
   const context = (caller: McpCaller): ServiceContext => ({
     db,
     principal: caller,
@@ -323,7 +332,7 @@ export function bookingTools({
     name: 'reschedule_booking',
     title: 'Reschedule a booking',
     description:
-      "Moves a booking you host by bookingId, or one you made as the invitee by manageToken (give exactly one). Cancels the old booking and creates its successor at start with the same invitee, guests and answers; the new time may overlap the old one. Host moves return manageToken:null and preserve the invitee's existing token on the successor. Invitee moves return a new manageToken; the previous response token stays on the cancelled booking. Email tokens always follow the meeting. Not idempotent: retrying the old bookingId or the response token used for an invitee move fails with booking_cancelled; an email token would move the meeting again. Never retry automatically. Fails with booking_in_past once the meeting has started, and booking_changed if the token's meeting keeps moving while the call waits.",
+      "Moves a booking you host by bookingId, or one you made as the invitee by manageToken (give exactly one). Cancels the old booking and creates its successor at start with the same invitee, guests and answers; the new time may overlap the old one. Host moves return manageToken:null and preserve the invitee's existing token on the successor. Invitee moves return a new manageToken; the previous response token stays on the cancelled booking. Email tokens always follow the meeting. Invitee moves have an instance-configured limit across the entire chain (default five); booking_reschedule_limit means contact the host, and cancellation remains available. Host moves are unlimited and do not consume this limit. Not idempotent: retrying the old bookingId or the response token used for an invitee move fails with booking_cancelled; an email token would move the meeting again. Never retry automatically. Fails with booking_in_past once the meeting has started, and booking_changed if the token's meeting keeps moving while the call waits.",
     input: RescheduleInput,
     output: BookingWithToken,
     annotations: {

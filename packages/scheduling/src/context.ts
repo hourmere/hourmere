@@ -40,6 +40,8 @@ export interface ServiceContext {
 /** For unauthenticated flows such as public booking pages and invitee links. */
 export interface PublicContext {
   db: Db
+  /** Maximum invitee moves across one booking chain; defaults to 5, and 0 disables them. */
+  bookingMaxInviteeReschedules?: number | undefined
   /** Explicit instance capability; defaults off. */
   automaticMeet?: boolean | undefined
   automaticZoom?: boolean | undefined

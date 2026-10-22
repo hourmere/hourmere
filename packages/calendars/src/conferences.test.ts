@@ -57,6 +57,7 @@ describe.skipIf(!serverUrl)('automatic Meet durable flow (real PostgreSQL)', () 
   let sent: MailMessage[]
   const mail = () => ({
     db,
+    secret: 'synthetic-notification-secret',
     publicUrl: 'https://hourmere.example',
     now: () => NOW,
     mailer: {
@@ -74,6 +75,7 @@ describe.skipIf(!serverUrl)('automatic Meet durable flow (real PostgreSQL)', () 
     await owned?.drop()
   })
   beforeEach(async () => {
+    await db.deleteFrom('notification_email_sends').execute()
     await db
       .updateTable('auth.user')
       .set({ emailVerified: true })

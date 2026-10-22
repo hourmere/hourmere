@@ -222,6 +222,7 @@ const invalidCancel = error(
 
 export interface BookingRoutesDeps {
   db: Db
+  bookingMaxInviteeReschedules?: number | undefined
   automaticMeet?: boolean | undefined
   automaticZoom?: boolean | undefined
   now?: () => Temporal.Instant
@@ -240,6 +241,7 @@ export interface BookingRoutesDeps {
  */
 export function bookingRoutes({
   db,
+  bookingMaxInviteeReschedules,
   now = () => Temporal.Now.instant(),
   notify,
   automaticMeet,
@@ -247,7 +249,14 @@ export function bookingRoutes({
   rateLimits = {},
   hostRateLimits = {},
 }: BookingRoutesDeps): RouteModule {
-  const publicContext: PublicContext = { db, now, notify, automaticMeet, automaticZoom }
+  const publicContext: PublicContext = {
+    db,
+    now,
+    notify,
+    automaticMeet,
+    automaticZoom,
+    bookingMaxInviteeReschedules,
+  }
   const manageLimit = rateLimit(createRateLimiter(rateLimits.manage ?? PUBLIC_RATE_LIMITS.manage))
   // Picking a new time pages through months of slots, so it counts like public slots.
   const manageSlotsLimit = rateLimit(
@@ -396,7 +405,7 @@ export function bookingRoutes({
           ),
           404: manageNotFound,
           409: error(
-            'Already cancelled (`booking_cancelled`), already started (`booking_in_past`), the event type no longer takes bookings (`event_type_unavailable`) or the booking has no host (`booking_has_no_host`)',
+            'Already cancelled (`booking_cancelled`), the invitee reschedule limit is reached (`booking_reschedule_limit`), already started (`booking_in_past`), the event type no longer takes bookings (`event_type_unavailable`) or the booking has no host (`booking_has_no_host`)',
           ),
           429: rateLimited,
         },
@@ -452,7 +461,7 @@ export function bookingRoutes({
         path: '/api/v1/bookings/manage/reschedule',
         summary: 'Reschedule with the manage token',
         description:
-          'Cancels the booking and books the new time in one step. The new time may overlap the old one. Returns the new booking and its manage token. The token returned for the old booking then shows the cancelled booking, so a retry after a lost response gets 409 `booking_cancelled`; tokens from booking emails open the new booking (and would move it again).',
+          'Cancels the booking and books the new time in one step. The new time may overlap the old one. Returns the new booking and its manage token. Invitee moves are limited across the entire chain (default five); reaching the instance limit returns 409 `booking_reschedule_limit`, while cancellation stays available. Host moves do not consume that limit. The token returned for the old booking then shows the cancelled booking, so a retry after a lost response gets 409 `booking_cancelled`; tokens from booking emails open the new booking (and would move it again).',
         middleware: manageLimit,
         request: {
           headers: ManageToken,
@@ -466,7 +475,7 @@ export function bookingRoutes({
           400: error('Invalid request'),
           404: manageNotFound,
           409: error(
-            "Already cancelled (`booking_cancelled`), already started (`booking_in_past`), without a host (`booking_has_no_host`), the event type no longer takes bookings (`event_type_unavailable`), the time is not offered (`slot_unavailable`, `slot_taken`), or, with an email's token, the meeting kept being rescheduled while the request waited (`booking_changed`; try again)",
+            "Already cancelled (`booking_cancelled`), the invitee reschedule limit is reached (`booking_reschedule_limit`), already started (`booking_in_past`), without a host (`booking_has_no_host`), the event type no longer takes bookings (`event_type_unavailable`), the time is not offered (`slot_unavailable`, `slot_taken`), or, with an email's token, the meeting kept being rescheduled while the request waited (`booking_changed`; try again)",
           ),
           429: rateLimited,
         },
