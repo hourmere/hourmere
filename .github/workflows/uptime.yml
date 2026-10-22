@@ -1,0 +1,62 @@
+# Monitors app.hourmere.com health, hourmere.com, and its security.txt policy.
+# GitHub emails the workflow's last committer (last cron editor) on failure when
+# Actions email notifications are enabled. GitHub disables schedules in public
+# repositories after 60 days without repository activity.
+name: Uptime
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: uptime
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check public endpoints
+        shell: bash
+        run: |
+          check_url() {
+            local name=$1 url=$2 kind=$3
+            local metrics status content_type
+            if ! metrics=$(curl --fail --silent --show-error --max-time 20 --retry 2 --retry-delay 10 \
+              --output "$RUNNER_TEMP/uptime-body" --write-out '%{http_code} %{content_type}' "$url"); then
+              status=${metrics%% *}
+              printf '%s failed (HTTP %s): curl request failed\n' "$name" "${status:-000}" >&2
+              return 1
+            fi
+            status=${metrics%% *}
+            if [[ "$status" != 200 ]]; then
+              printf '%s failed (HTTP %s): expected 200\n' "$name" "$status" >&2
+              return 1
+            fi
+            if [[ "$kind" == health ]] && ! jq --exit-status --slurp \
+              'length == 1 and .[0].status == "ok" and .[0].database == "ok"' \
+              "$RUNNER_TEMP/uptime-body" > /dev/null 2>&1; then
+              printf '%s failed (HTTP %s): expected healthy status and database JSON fields\n' "$name" "$status" >&2
+              return 1
+            fi
+            if [[ "$kind" == text ]]; then
+              content_type=${metrics#* }
+              content_type=${content_type%%;*}
+              content_type=$(printf '%s' "$content_type" | tr '[:upper:]' '[:lower:]')
+              if [[ "$content_type" != text/plain ]]; then
+                printf '%s failed (HTTP %s): expected text/plain\n' "$name" "$status" >&2
+                return 1
+              fi
+            fi
+            printf '%s passed (HTTP %s)\n' "$name" "$status"
+          }
+
+          failed=0
+          check_url 'App health' 'https://app.hourmere.com/api/health' health || failed=1
+          check_url 'Website' 'https://hourmere.com/' site || failed=1
+          check_url 'Security policy' 'https://hourmere.com/.well-known/security.txt' text || failed=1
+          exit "$failed"
