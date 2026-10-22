@@ -8,6 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import {
   type Booking,
   type BookingOrigin,
+  type BookingWithToken,
   type CreateBookingInput,
   cancelHostBooking,
   cancelManagedBooking,
@@ -20,6 +21,7 @@ import {
   rescheduleManagedBooking,
 } from './bookings.ts'
 import type { BookingNotifier, PublicContext, ServiceContext } from './context.ts'
+import { listHostBookingSlots, listManagedSlots } from './manage.ts'
 import { createFixtures, type Fixtures } from './testing.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -1479,6 +1481,140 @@ describe.skipIf(!serverUrl)('bookings', () => {
       db,
       now: () => NOW,
       principal: principal(user, organizationId),
+    })
+
+    it('limits invitee moves to five across new response tokens and preserves cancellation', async () => {
+      const h = await setup()
+      let current: BookingWithToken = await h.book('2026-11-02T09:00Z')
+      const originalId = current.booking.id
+      let notifications = 0
+      const limited: PublicContext = {
+        ...ctx,
+        notify: async () => {
+          notifications++
+        },
+      }
+      for (const hour of [10, 11, 12, 13, 14]) {
+        current = await rescheduleManagedBooking(limited, current.manageToken as string, {
+          start: instant(`2026-11-02T${hour}:00Z`),
+        })
+      }
+      await expect(
+        rescheduleManagedBooking(limited, current.manageToken as string, {
+          start: instant('2026-11-02T15:00Z'),
+        }),
+      ).rejects.toMatchObject({
+        kind: 'conflict',
+        code: 'booking_reschedule_limit',
+        message:
+          'This booking has been rescheduled the maximum number of times. Contact the host to change it again.',
+      })
+      expect(notifications).toBe(5)
+      expect(
+        await count('SELECT count(*)::int AS n FROM bookings WHERE organization_id = $1', [
+          h.organizationId,
+        ]),
+      ).toBe(6)
+      expect(current.booking.id).not.toBe(originalId)
+      expect(await getManagedBooking(ctx, current.manageToken as string)).toMatchObject({
+        id: current.booking.id,
+        status: 'confirmed',
+      })
+      const hostMove = rescheduleHostBooking(as(h, h.organizationId), current.booking.id, {
+        start: instant('2026-11-02T15:00Z'),
+      })
+      await expect(hostMove).resolves.toMatchObject({ booking: { status: 'confirmed' } })
+      const hostMoved = await hostMove
+      const range = {
+        start: instant('2026-11-02T08:00Z'),
+        end: instant('2026-11-02T16:00Z'),
+      }
+      await expect(
+        listManagedSlots(limited, current.manageToken as string, range),
+      ).rejects.toMatchObject({ code: 'booking_reschedule_limit' })
+      expect(
+        await listHostBookingSlots(as(h, h.organizationId), hostMoved.booking.id, range),
+      ).not.toHaveLength(0)
+      expect(await cancelManagedBooking(limited, current.manageToken as string)).toMatchObject({
+        id: hostMoved.booking.id,
+        status: 'cancelled',
+      })
+      expect(notifications).toBe(6)
+    })
+
+    it('counts only invitee moves through mixed host moves and old email tokens', async () => {
+      const h = await setup()
+      const host = as(h, h.organizationId)
+      const limited: PublicContext = { ...ctx, bookingMaxInviteeReschedules: 2 }
+      const initial = await h.book('2026-11-02T09:00Z')
+      const fromEmail = await emailToken(initial.booking.id)
+      const hostFirst = await rescheduleHostBooking(host, initial.booking.id, {
+        start: instant('2026-11-02T10:00Z'),
+      })
+      const inviteeFirst = await rescheduleManagedBooking(limited, initial.manageToken as string, {
+        start: instant('2026-11-02T11:00Z'),
+      })
+      expect(inviteeFirst.booking.rescheduledFromId).toBe(hostFirst.booking.id)
+      const hostSecond = await rescheduleHostBooking(host, inviteeFirst.booking.id, {
+        start: instant('2026-11-02T12:00Z'),
+      })
+      const secondMove = rescheduleManagedBooking(limited, fromEmail, {
+        start: instant('2026-11-02T13:00Z'),
+      })
+      await expect(secondMove).resolves.toMatchObject({
+        booking: { rescheduledFromId: hostSecond.booking.id },
+      })
+      const inviteeSecond = await secondMove
+      const hostThird = await rescheduleHostBooking(host, inviteeSecond.booking.id, {
+        start: instant('2026-11-02T14:00Z'),
+      })
+      for (const token of [fromEmail, inviteeSecond.manageToken as string]) {
+        await expect(
+          rescheduleManagedBooking(limited, token, { start: instant('2026-11-02T15:00Z') }),
+        ).rejects.toMatchObject({ code: 'booking_reschedule_limit' })
+      }
+      // Host authority remains available after the invitee has spent its whole budget.
+      const hostFourth = await rescheduleHostBooking(host, hostThird.booking.id, {
+        start: instant('2026-11-02T15:00Z'),
+      })
+      expect(await getManagedBooking(ctx, fromEmail)).toMatchObject({ id: hostFourth.booking.id })
+      expect(await cancelManagedBooking(limited, fromEmail)).toMatchObject({
+        id: hostFourth.booking.id,
+        status: 'cancelled',
+      })
+    })
+
+    it('disables invitee rescheduling at zero while hosts and cancellation remain available', async () => {
+      const h = await setup()
+      const initial = await h.book('2026-11-02T09:00Z')
+      const disabled: PublicContext = { ...ctx, bookingMaxInviteeReschedules: 0 }
+      await expect(
+        rescheduleManagedBooking(disabled, initial.manageToken as string, {
+          start: instant('2026-11-02T10:00Z'),
+        }),
+      ).rejects.toMatchObject({ code: 'booking_reschedule_limit' })
+      const moved = await rescheduleHostBooking(as(h, h.organizationId), initial.booking.id, {
+        start: instant('2026-11-02T10:00Z'),
+      })
+      expect(await cancelManagedBooking(disabled, initial.manageToken as string)).toMatchObject({
+        id: moved.booking.id,
+        status: 'cancelled',
+      })
+    })
+
+    it('serializes competing email-token reschedules at the chain limit', async () => {
+      const h = await setup()
+      const initial = await h.book('2026-11-02T09:00Z')
+      const fromEmail = await emailToken(initial.booking.id)
+      const limited: PublicContext = { ...ctx, bookingMaxInviteeReschedules: 1 }
+      const results = await Promise.allSettled([
+        rescheduleManagedBooking(limited, fromEmail, { start: instant('2026-11-02T10:00Z') }),
+        rescheduleManagedBooking(limited, fromEmail, { start: instant('2026-11-02T11:00Z') }),
+      ])
+      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1)
+      expect(results.find((r) => r.status === 'rejected')).toMatchObject({
+        reason: { code: 'booking_reschedule_limit' },
+      })
     })
 
     it('returns current event title metadata only to hosts without rewriting historical titles', async () => {

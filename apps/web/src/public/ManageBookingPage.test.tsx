@@ -108,6 +108,80 @@ function manageServer(
 }
 
 describe('the invitee’s manage page', () => {
+  it.each(['en', 'zh-CN'] as const)(
+    'shows a capped slot lookup in %s and permits returning to cancellation',
+    async (language) => {
+      const user = userEvent.setup()
+      localStorage.setItem('hourmere-language', language)
+      const api = manageServer(managed(), {
+        more: {
+          'GET /api/v1/bookings/manage/slots': () =>
+            json(409, { error: 'booking_reschedule_limit', message: 'Server fallback' }),
+        },
+      })
+      renderApp(`/booking#token=${TOKEN}&action=reschedule`)
+      expect(
+        await screen.findByText(
+          language === 'en'
+            ? 'This booking has been rescheduled the maximum number of times. Contact the host to change it again.'
+            : '此预约已达到改期次数上限。如需再次改期，请联系主持人。',
+        ),
+      ).toBeDefined()
+      expect(api.to('POST /api/v1/bookings/manage/reschedule')).toHaveLength(0)
+      await user.click(
+        screen.getByRole('button', {
+          name: language === 'en' ? 'Keep the current time' : '保留当前时间',
+        }),
+      )
+      expect(
+        screen.getByRole('button', { name: language === 'en' ? 'Cancel booking' : '取消预约' }),
+      ).toBeDefined()
+    },
+  )
+
+  it.each(['en', 'zh-CN'] as const)(
+    'shows the reschedule cap in %s and still permits cancellation without retrying',
+    async (language) => {
+      const user = userEvent.setup()
+      const api = manageServer(managed(), {
+        more: {
+          'POST /api/v1/bookings/manage/reschedule': () =>
+            json(409, { error: 'booking_reschedule_limit', message: 'Server fallback' }),
+        },
+      })
+      renderApp(`/booking#token=${TOKEN}&action=reschedule`)
+      await user.click(await screen.findByRole('button', { name: /November 3, available/ }))
+      await user.click(screen.getByRole('button', { name: '10:00 AM' }))
+      await user.selectOptions(screen.getByLabelText('Interface language'), language)
+      await user.click(
+        screen.getByRole('button', {
+          name: language === 'en' ? 'Confirm new time' : '确认新时间',
+        }),
+      )
+      expect(
+        await screen.findByText(
+          language === 'en'
+            ? 'This booking has been rescheduled the maximum number of times. Contact the host to change it again.'
+            : '此预约已达到改期次数上限。如需再次改期，请联系主持人。',
+        ),
+      ).toBeDefined()
+      expect(api.to('POST /api/v1/bookings/manage/reschedule')).toHaveLength(1)
+      expect(screen.queryByText('Server fallback')).toBeNull()
+      expect(
+        screen.queryByRole('button', {
+          name: language === 'en' ? 'Confirm new time' : '确认新时间',
+        }),
+      ).toBeNull()
+      await user.click(
+        screen.getByRole('button', { name: language === 'en' ? 'Cancel booking' : '取消预约' }),
+      )
+      await user.click(
+        screen.getByRole('button', { name: language === 'en' ? 'Cancel booking' : '取消预约' }),
+      )
+      expect(api.to('POST /api/v1/bookings/manage/cancel')).toHaveLength(1)
+    },
+  )
+
   it('keeps rescheduling at the view width with a current-booking card and no cancellation action', async () => {
     const user = userEvent.setup()
     const api = manageServer()

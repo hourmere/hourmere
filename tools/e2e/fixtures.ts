@@ -745,6 +745,7 @@ export const test = base.extend<{
           const mail = {
             db,
             publicUrl: url,
+            secret: authSecret,
             mailer: {
               send: async (message: MailMessage) => {
                 sent.push(message)

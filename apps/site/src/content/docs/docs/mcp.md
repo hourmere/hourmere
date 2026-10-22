@@ -422,6 +422,10 @@ fields are those of the REST API (`/api/v1/openapi.json`). Results come as
   inspect `list_bookings`, `rescheduledToId` and `rescheduledFromId` before deciding what to do next.
   People and REST clients use the same service through `POST /api/v1/bookings/{id}/reschedule`
   (`{ start }`); the admin booking detail page offers the same action and authorized slots.
+- **Invitee move limit:** manage-token reschedules share one budget across the whole
+  booking chain (default five, configured by `BOOKING_MAX_INVITEE_RESCHEDULES`; zero
+  disables them). `booking_reschedule_limit` means contact the host to change it again.
+  Cancellation remains available. Host moves are unlimited and do not consume the budget.
 - **Emails:** bookings made, moved or cancelled through MCP send the same emails as the
   booking page (hosts, invitee, guests; [Notifications and background jobs](/docs/notifications)).
 - **Retries:** give `create_booking` an `idempotencyKey` (a new random value per booking,
@@ -443,7 +447,7 @@ themselves) whose text is the REST API's error body:
 
 - `error` is the same stable code the REST API uses for the same failure (`slot_unavailable`,
   `slot_taken`, `invalid_time_zone`, `invalid_responses`, `booking_not_found`,
-  `booking_cancelled`, `idempotency_key_reused`, …); `message` is safe to show and may change.
+  `booking_cancelled`, `booking_reschedule_limit`, `idempotency_key_reused`, …); `message` is safe to show and may change.
 - Arguments that do not fit the schema get `invalid_request`, with `message` naming the
   fields (`invitee.email: Invalid email address`; long names and messages are shortened).
   Unknown arguments are refused, not ignored. Text with NUL characters or malformed Unicode is

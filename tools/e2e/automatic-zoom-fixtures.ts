@@ -277,6 +277,7 @@ export const test = base.extend<{
       const mail = {
         db,
         publicUrl: url,
+        secret,
         now: () => Temporal.Now.instant(),
         mailer: {
           send: async (message: MailMessage) => {
