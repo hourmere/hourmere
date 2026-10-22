@@ -22,7 +22,7 @@ const steps = [
 const features = [
   {
     title: 'Booking links',
-    text: 'Create event types and share a booking link. The Free plan includes unlimited event types and bookings.',
+    text: 'Create event types and share a booking link. Self-hosted Hourmere is free and open source under AGPL-3.0, with all features included.',
   },
   {
     title: 'Calendar sync',
@@ -56,9 +56,14 @@ const agentActions = [
 
 const plans = [
   { name: 'Self-hosted', price: '$0', unit: '', note: 'Free under AGPL-3.0, on your own server.' },
-  { name: 'Free', price: '$0', unit: '', note: 'Unlimited event types and bookings.' },
-  { name: 'Pro', price: '$8', unit: 'per seat / month', note: 'Plan details at launch.' },
-  { name: 'Team', price: '$14', unit: 'per seat / month', note: 'Plan details at launch.' },
+  { name: 'Free (planned)', price: '$0', unit: '', note: 'Unlimited event types and bookings.' },
+  { name: 'Pro (planned)', price: '$8', unit: 'per seat / month', note: 'Plan details at launch.' },
+  {
+    name: 'Team (planned)',
+    price: '$14',
+    unit: 'per seat / month',
+    note: 'Plan details at launch.',
+  },
 ]
 ---
 
@@ -243,7 +248,7 @@ const plans = [
   <section class="section" id="pricing" aria-labelledby="pricing-title">
     <div class="container">
       <p class="eyebrow">Pricing</p>
-      <h2 id="pricing-title">Free to self-host. Simple cloud plans.</h2>
+      <h2 id="pricing-title">Free to self-host. Planned Hourmere Cloud pricing.</h2>
       <p class="section-intro">
         These are the planned prices for Hourmere Cloud. Final plan details will be published at
         launch. Joining the waitlist does not create an account or start a paid plan.

@@ -34,6 +34,29 @@ describe('reviewed homepage and comparison disclosures', () => {
     expect(home).toContain(disclosure)
   })
 
+  it('describes free, fully featured self-hosting without implying a live Cloud Free plan', () => {
+    expect(home).toContain(
+      'Create event types and share a booking link. Self-hosted Hourmere is free and open source under AGPL-3.0, with all features included.',
+    )
+    expect(home).not.toContain('The Free plan includes unlimited event types and bookings.')
+  })
+
+  it.each([
+    ['Free', '$0'],
+    ['Pro', '$8'],
+    ['Team', '$14'],
+  ])('labels the %s Cloud plan as planned and preserves its price', (name, price) => {
+    expect(home).toContain(`name: '${name} (planned)', price: '${price}'`)
+  })
+
+  it('keeps Cloud pricing provisional and retains the launch and waitlist disclosures', () => {
+    expect(home).toContain('Free to self-host. Planned Hourmere Cloud pricing.')
+    expect(home).toContain(
+      'These are the planned prices for Hourmere Cloud. Final plan details will be published at launch. Joining the waitlist does not create an account or start a paid plan.',
+    )
+    expect(home.match(/Plan details at launch\./g)).toHaveLength(2)
+  })
+
   it('states the invitation-only comparison preview and planned self-hosting release', () => {
     expect(intro).toContain(
       'Hourmere Cloud is in an [invitation-only preview](/#faq) with sign-ups closed, and the open-source release for self-hosting is planned for November 30, 2026.',
