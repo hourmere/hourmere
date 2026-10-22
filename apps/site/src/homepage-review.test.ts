@@ -34,11 +34,12 @@ describe('reviewed homepage and comparison disclosures', () => {
     expect(home).toContain(disclosure)
   })
 
-  it('describes free, fully featured self-hosting without implying a live Cloud Free plan', () => {
+  it('describes free self-hosting without implying a live Cloud Free plan', () => {
     expect(home).toContain(
-      'Create event types and share a booking link. Self-hosted Hourmere is free and open source under AGPL-3.0, with all features included.',
+      'Create event types and share a booking link. Self-hosted Hourmere is free and open source under AGPL-3.0, with unlimited event types and bookings.',
     )
     expect(home).not.toContain('The Free plan includes unlimited event types and bookings.')
+    expect(home).not.toContain('with all features included')
   })
 
   it.each([
