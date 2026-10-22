@@ -551,6 +551,34 @@ describe.skipIf(!serverUrl)('queued sign-in email', () => {
     },
   )
 
+  it('logs unavailable ciphertext only after the outbox deletion commits', async () => {
+    const row = await enqueueExisting()
+    const log = vi.fn()
+    const runtime = deps({ log, secret: randomBytes(32).toString('base64') })
+    try {
+      await owned.pool.query(
+        `CREATE FUNCTION test_fail_sign_in_discard_commit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'forced discard commit failure'; END $$`,
+      )
+      await owned.pool.query(
+        'CREATE CONSTRAINT TRIGGER test_fail_sign_in_discard AFTER DELETE ON sign_in_emails DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION test_fail_sign_in_discard_commit()',
+      )
+      await expect(deliverSignInEmail(runtime, row.id)).rejects.toThrow(
+        'forced discard commit failure',
+      )
+      expect(sent).toEqual([])
+      expect(await rows()).toEqual([row])
+      expect(log).not.toHaveBeenCalled()
+    } finally {
+      await owned.pool.query('DROP TRIGGER IF EXISTS test_fail_sign_in_discard ON sign_in_emails')
+      await owned.pool.query('DROP FUNCTION IF EXISTS test_fail_sign_in_discard_commit()')
+    }
+    await deliverSignInEmail(runtime, row.id)
+    await deliverSignInEmail(runtime, row.id)
+    expect(sent).toEqual([])
+    expect(await rows()).toEqual([])
+    expect(log.mock.calls).toEqual([['[auth] discarded an unavailable queued sign-in email']])
+  })
+
   it('serializes duplicate delivery through the outbox lock', async () => {
     const row = await enqueueExisting()
     let release = () => {}
