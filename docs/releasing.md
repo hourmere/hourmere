@@ -41,6 +41,79 @@ heading such as `## [1.0.1] - 2026-12-07`, with `### Added`, `### Changed`, `###
 matching section and refuses missing or ambiguous notes. Keep upgrade instructions with
 their release, including migrations, changed defaults and secrets that must stay stable.
 
+## Website publication
+
+The homepage, legal pages and `/docs` are published by hand with
+`npm run deploy --workspace @hourmere/site`. Until the 1.0.0 release, publish from `main`
+as today. On release day (card 217), the owner cuts `site-live` from `v1.0.0` and pushes
+it; from then on, publish the website only from `site-live`. This keeps documentation
+for unreleased features on `main` until their release.
+
+The deploy command checks Git state before building. It requires a clean worktree,
+including staged, unstaged and untracked files that would ship, and HEAD equal to the
+branch's upstream: nothing unpushed or unpulled. Ignored untracked files under the site's
+`src` and `public` directories also block deployment; ignored build output in `dist` does
+not. Before `origin/site-live` exists, the
+branch must be `main` and HEAD must equal `origin/main`. Once `origin/site-live` exists,
+the branch must be `site-live`, HEAD must equal `origin/site-live`, and HEAD must contain
+the highest stable `vX.Y.Z` tag by version. A stable tag must be available locally;
+prerelease tags such as `v1.1.0-rc.1` do not affect that check.
+Deploying from a separate Git worktree is supported: the guard checks the branch and
+state of the worktree running the command, so a clean, synchronized `main` worktree
+passes before the cut.
+
+The guard reads local remote-tracking refs and tags; it does not fetch. Before every
+deployment, the operator must refresh both and stop if either fetch fails. From the
+chosen deployment worktree at the repository root, run (the explicit refspec also
+refreshes every origin branch in a single-branch clone):
+
+```sh
+git fetch --prune origin '+refs/heads/*:refs/remotes/origin/*' &&
+git fetch --tags origin &&
+npm run deploy --workspace @hourmere/site
+```
+
+Resolve any refusal before running the command again: commit reviewed changes, remove
+untracked files that would ship, pull remote changes or push reviewed local commits as
+appropriate. There is no emergency override: bypassing the source checks could publish
+unreleased documentation. Emergency corrections use the same reviewed commit, push and
+deployment procedure.
+
+On the authorized 1.0.0 release day, after verifying the stable release, run the following
+in a clean checkout where the new branch will live. These are release-day actions, not
+release preparation:
+
+```sh
+git fetch --prune origin '+refs/heads/*:refs/remotes/origin/*' &&
+git fetch --tags origin &&
+git switch --create site-live v1.0.0 &&
+git push --set-upstream origin site-live
+```
+
+Homepage/legal edits and corrections to documentation for released features first merge
+to `main`. Cherry-pick the reviewed commits to `site-live`, push that branch, then deploy.
+Keep new-feature documentation on `main` until that feature's release tag is merged into
+`site-live`; do not merge unreleased `main` wholesale into the publication branch.
+Release-day documentation changes merged after `v1.0.0` follow the same cherry-pick rule
+before the first website deployment. Once they are pushed to `site-live`, deploy with
+the fetch-and-deploy command above.
+
+For every subsequent stable release, merge its new `vX.Y.Z` tag into `site-live` before
+deploying. For example, from the clean `site-live` deployment worktree after the approved
+`v1.0.1` release:
+
+```sh
+git fetch --prune origin '+refs/heads/*:refs/remotes/origin/*' &&
+git fetch --tags origin &&
+git pull --ff-only origin site-live &&
+git merge --no-edit v1.0.1 &&
+git push origin site-live &&
+npm run deploy --workspace @hourmere/site
+```
+
+Resolve and review any merge or cherry-pick conflicts before pushing and deploying. The
+guard reports the missing stable tag if the publication branch has not incorporated it.
+
 ## Renew the hosted security policy
 
 The website publishes `apps/site/public/.well-known/security.txt` on hourmere.com and
@@ -293,6 +366,7 @@ Make the documentation changes in a separate follow-up after verifying public ac
 
   | File / preparation lines | Release-day change |
   |---|---|
+  | Website publication branch | Cut `site-live` from `v1.0.0`, push it with its upstream, then cherry-pick the reviewed release-day website edits from `main` and deploy only from `site-live`; see [Website publication](#website-publication). |
   | `README.md:2`, `:75–134` (Self-hosting) | Describe the published image; clone `--branch v1.0.0`, select image setup, pull, then `up -d --wait` without `--build`; retain explicit `--source` alternative. |
   | `README.md:135–169` (upgrade/recovery) | Record the old exact version; change `HOURMERE_VERSION`, pull and start; revert it before startup, use backup/restore after any migration/startup. |
   | `apps/site/src/content/docs/docs/self-hosting.md:8–79` (Prepare / First start) | Remove the unpublished-image claim, require an exact release tag/version, describe the image overlay and same-version worker. |
@@ -308,6 +382,9 @@ Make the documentation changes in a separate follow-up after verifying public ac
   `no prebuilt public image is published`) together with the corresponding docs sentences.
   The draft PR above is the prepared revision of the source-build install instructions;
   keep the source-build alternative and exact-version/rollback guidance when merging it.
+- Complete the [website publication branch cut](#website-publication) from `v1.0.0`,
+  push `site-live`, cherry-pick the reviewed release-day website edits from `main`, and
+  publish from the clean, synchronized `site-live` worktree.
 - Retain Cloud nonavailability and its separate legal timing until Cloud launch is
   approved. Releasing the self-hosted software does not establish that Hourmere Cloud has
   launched or that real provider integrations have passed live acceptance.

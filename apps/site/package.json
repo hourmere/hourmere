@@ -7,7 +7,7 @@
     "build": "astro build",
     "preview": "astro preview",
     "typecheck": "node scripts/check.ts",
-    "deploy": "npm run build && npx --yes wrangler@4.151.0 deploy"
+    "deploy": "node ../../scripts/site-deploy-guard.ts && npm run build && npx --yes wrangler@4.151.0 deploy"
   },
   "devDependencies": {
     "@astrojs/check": "0.9.10",
