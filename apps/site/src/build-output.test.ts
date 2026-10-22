@@ -67,7 +67,10 @@ describe('built website', () => {
       for (const script of widgetScripts) {
         expect(script.hasAttribute('defer')).toBe(true)
         expect(script.hasAttribute('async')).toBe(false)
+        expect(script.hasAttribute('id')).toBe(false)
       }
+      // This standalone page must not add another importer to shared CSS/font chunks.
+      expect(document.querySelectorAll('link[rel="stylesheet"]')).toHaveLength(0)
       expect(readFileSync(join(output, 'embed-test/popup.js'), 'utf8')).toBe(
         readFileSync(join(siteRoot, 'public/embed-test/popup.js'), 'utf8'),
       )
@@ -80,6 +83,19 @@ describe('built website', () => {
     } finally {
       dom.window.close()
     }
+  })
+
+  it('keeps shared layout CSS external on every existing marketing page', () => {
+    const stylesheets = ['index.html', 'privacy.html', 'terms.html', '404.html'].map((file) => {
+      const nodes = elements(readFileSync(join(output, file), 'utf8'))
+      const shared = nodes
+        .filter((node) => node.tagName === 'link' && attr(node, 'rel') === 'stylesheet')
+        .map((node) => attr(node, 'href'))
+        .filter((href) => href?.startsWith('/_astro/Base.'))
+      expect(shared, file).toHaveLength(1)
+      return shared[0]
+    })
+    expect(new Set(stylesheets).size).toBe(1)
   })
 
   it('keeps the test page out of all sitemap files while retaining public pages', () => {

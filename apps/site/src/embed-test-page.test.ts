@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { runInNewContext } from 'node:vm'
@@ -165,5 +165,13 @@ describe('unlisted booking widget test page', () => {
     const robots = join(root, 'public/robots.txt')
     if (existsSync(robots))
       expect(readFileSync(robots, 'utf8')).toMatch(/^Disallow:\s*\/embed-test\/?\s*$/im)
+    const generatedRobots = readdirSync(join(root, 'src/pages'), {
+      recursive: true,
+      encoding: 'utf8',
+    }).filter((file) => /(?:^|[/\\])robots\.txt(?:[/\\]index)?\.[^./\\]+$/.test(file))
+    expect(
+      generatedRobots,
+      'A generated robots.txt route needs response coverage for Disallow: /embed-test.',
+    ).toEqual([])
   })
 })
