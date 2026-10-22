@@ -582,6 +582,11 @@ instance/database. Per-IP request limits remain in process memory; separate inst
 not share a mail budget. The controls reduce volume and may suppress legitimate updates;
 invitees who reach a limit should contact the host.
 
+An attacker who can trigger mail to eligible addresses can exhaust the instance hourly cap,
+including its host/sign-in reserve, and delay all hosts' sign-in and notification mail for
+up to an hour. Existing sessions are unaffected. Operators can raise `MAIL_MAX_PER_HOUR`
+while keeping the cap, reserve and other mail within their provider's limit.
+
 ## Outbound booking webhooks
 
 The composition root also invokes the optional webhook notifier in the same booking

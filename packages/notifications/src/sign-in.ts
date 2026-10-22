@@ -200,7 +200,7 @@ export async function deliverSignInEmail(
   signal?: AbortSignal,
 ): Promise<void> {
   const clock = deps.now ?? (() => new Date())
-  await deps.db.transaction().execute(async (trx) => {
+  const suppression = await deps.db.transaction().execute(async (trx) => {
     const row = await trx
       .selectFrom('sign_in_emails')
       .selectAll()
@@ -243,15 +243,7 @@ export async function deliverSignInEmail(
     const reason = await signInEmailBudget(trx, deps, recipientHash, now)
     if (reason) {
       await remove()
-      ;(deps.log ?? console.warn)(
-        JSON.stringify({
-          level: 'warn',
-          event: 'sign_in_email_suppressed',
-          reason,
-          recipientHash: recipientHash.toString('hex'),
-        }),
-      )
-      return
+      return { reason, recipientHash: recipientHash.toString('hex') }
     }
     const minutes = Math.max(1, Math.ceil((current.expiresAt.getTime() - now.getTime()) / 60_000))
     try {
@@ -273,6 +265,15 @@ export async function deliverSignInEmail(
       .execute()
     await remove()
   })
+  // A rolled-back attempt is never reported as durable suppression.
+  if (suppression)
+    (deps.log ?? console.warn)(
+      JSON.stringify({
+        level: 'warn',
+        event: 'sign_in_email_suppressed',
+        ...suppression,
+      }),
+    )
 }
 
 export function signInEmailJobs(deps: SignInEmailDeps) {
