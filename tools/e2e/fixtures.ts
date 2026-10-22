@@ -25,19 +25,24 @@ import {
   AUDIT_BOOKING_START,
   AUDIT_DESCRIPTION,
   AUDIT_EMAIL,
+  AUDIT_HOST_TIME_ZONE,
   AUDIT_NOW,
+  AUDIT_OVERNIGHT_BOOKING_END,
+  AUDIT_OVERNIGHT_BOOKING_START,
   AUDIT_TITLE,
   type AuditFixtureState,
 } from './audit-data.ts'
 import { startFixtureServer } from './fixture-server.ts'
 import { listenOwned, type OwnedListener } from './listeners.ts'
+import { type ScreenshotFixtureState, seedScreenshotData } from './screenshot-data.ts'
 
 export interface FixtureApp {
   url: string
   parentUrl: string
   personalPath: string
   auditState: () => Promise<AuditFixtureState>
-  auditSignIn: (signedIn: boolean) => Promise<void>
+  screenshotState: () => Promise<ScreenshotFixtureState>
+  auditSignIn: (signedIn: boolean, locale?: string) => Promise<void>
   auditOAuthQuery: () => Promise<string>
   teamPath: string
   collectivePath: string
@@ -444,12 +449,21 @@ export const test = base.extend<{
       })
       const firstFingerprints = new Map<string, Buffer>()
       let auditState: AuditFixtureState | undefined
+      let screenshotState: ScreenshotFixtureState | undefined
       let auditCookie: string | undefined
       let auditOAuthQuery: string | undefined
       await use({
         url,
         parentUrl,
         personalPath: '/fixture-host/call',
+        screenshotState: async () => {
+          if (auditState || automaticMeet)
+            throw new Error(
+              'Product screenshots require a fresh fixture without audit or Meet data',
+            )
+          screenshotState ??= await seedScreenshotData(db, f, host)
+          return screenshotState
+        },
         auditState: async () => {
           if (auditState) return auditState
           const eventTypeId = await f.eventType(host.organizationId, host.userId, {
@@ -486,6 +500,42 @@ export const test = base.extend<{
             .set({ name: 'Synthetic organization' })
             .where('id', '=', host.organizationId)
             .execute()
+          await db
+            .updateTable('profiles')
+            .set({ time_zone: AUDIT_HOST_TIME_ZONE })
+            .where('user_id', '=', host.userId)
+            .execute()
+          // Exercise the selected destination's zone notice with a long display name.
+          // Conflict sync stays off; the web-only fixture never runs provider workers.
+          const auditConnection = await db
+            .insertInto('calendar_connections')
+            .values({
+              user_id: host.userId,
+              provider: 'google',
+              external_account_id: 'synthetic-audit-calendar-account',
+              account_email: 'synthetic-calendar@hourmere.invalid',
+              credentials: Buffer.from('synthetic-unused-calendar-credential'),
+              scopes: [...GOOGLE_CALENDAR_SYNC_SCOPES],
+            })
+            .returning('id')
+            .executeTakeFirstOrThrow()
+          const auditCalendar = await db
+            .insertInto('calendars')
+            .values({
+              connection_id: auditConnection.id,
+              external_id: 'synthetic-audit-calendar',
+              name: 'Synthetic cross-zone calendar',
+              access_role: 'owner',
+              time_zone: 'America/Argentina/Buenos_Aires',
+              check_conflicts: false,
+            })
+            .returning('id')
+            .executeTakeFirstOrThrow()
+          await db
+            .updateTable('profiles')
+            .set({ destination_calendar_id: auditCalendar.id })
+            .where('user_id', '=', host.userId)
+            .execute()
           const bookingId = await f.booking(
             host.organizationId,
             [host.userId],
@@ -506,6 +556,24 @@ export const test = base.extend<{
             })
             .where('id', '=', bookingId)
             .execute()
+          const overnightBookingId = await f.booking(
+            host.organizationId,
+            [host.userId],
+            AUDIT_OVERNIGHT_BOOKING_START,
+            AUDIT_OVERNIGHT_BOOKING_END,
+            {
+              eventTypeId,
+              attendee: {
+                name: 'Synthetic overnight invitee',
+                email: 'synthetic.overnight@hourmere.invalid',
+              },
+            },
+          )
+          await db
+            .updateTable('bookings')
+            .set({ title: AUDIT_TITLE, created_at: AUDIT_NOW })
+            .where('id', '=', overnightBookingId)
+            .execute()
           auditState = {
             organizationId: host.organizationId,
             eventTypeId,
@@ -517,7 +585,7 @@ export const test = base.extend<{
           }
           return auditState
         },
-        auditSignIn: async (signedIn) => {
+        auditSignIn: async (signedIn, locale = 'en') => {
           // Audit pages exercise the same browser-session endpoints as people do.
           // No API-key header remains when switching back to a public/sign-in state.
           authorization = undefined
@@ -525,6 +593,12 @@ export const test = base.extend<{
             await context.clearCookies({ name: 'better-auth.session_token' })
             return
           }
+          // Signed-in routes prefer the account language over the browser language.
+          await db
+            .updateTable('profiles')
+            .set({ locale: locale === 'zh-CN' ? 'zh-CN' : 'en' })
+            .where('user_id', '=', host.userId)
+            .execute()
           if (!auditCookie) {
             const token = randomBytes(24).toString('base64url')
             await db
@@ -535,7 +609,8 @@ export const test = base.extend<{
                 token,
                 updatedAt: new Date(),
                 expiresAt: new Date(
-                  Math.max(Date.now(), uiAudit ? Date.parse(AUDIT_NOW) : 0) + 86_400_000,
+                  Math.max(Date.now(), uiAudit || screenshotState ? Date.parse(AUDIT_NOW) : 0) +
+                    86_400_000,
                 ),
               })
               .execute()
@@ -670,6 +745,7 @@ export const test = base.extend<{
           const mail = {
             db,
             publicUrl: url,
+            secret: authSecret,
             mailer: {
               send: async (message: MailMessage) => {
                 sent.push(message)

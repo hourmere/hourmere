@@ -9,7 +9,7 @@ exports[`booking email language goldens > en cancelled guest 1`] = `
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light">
 <meta name="supported-color-schemes" content="light">
-<title>Cancelled: Intro call with Grace Hopper on Tue, Oct 20, 10:00 AM (Europe/Berlin)</title>
+<title>Cancelled: Intro call with Grace Hopper on Tue, Oct 20, 10:00 AM (Europe/Berlin, GMT+02:00)</title>
 <style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
 </head>
 <body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
@@ -20,7 +20,7 @@ exports[`booking email language goldens > en cancelled guest 1`] = `
 <p style="margin: 0 0 16px; overflow-wrap: anywhere; word-break: break-word;">Your meeting with Grace Hopper has been cancelled.</p>
 <table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">What</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Intro call</td></tr>
-<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">When</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin)</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">When</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin, GMT+02:00)</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Where</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Google Meet</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Host</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Grace Hopper</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Reason</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">A scheduling conflict.<br>Please book another time.</td></tr>
@@ -32,13 +32,13 @@ exports[`booking email language goldens > en cancelled guest 1`] = `
 </body>
 </html>
 ",
-  "subject": "Cancelled: Intro call with Grace Hopper on Tue, Oct 20, 10:00 AM (Europe/Berlin)",
+  "subject": "Cancelled: Intro call with Grace Hopper on Tue, Oct 20, 10:00 AM (Europe/Berlin, GMT+02:00)",
   "text": "Hourmere
 
 Your meeting with Grace Hopper has been cancelled.
 
 What: Intro call
-When: Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin)
+When: Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin, GMT+02:00)
 Where: Google Meet
 Host: Grace Hopper
 Reason: A scheduling conflict.
@@ -58,7 +58,7 @@ exports[`booking email language goldens > en cancelled host 1`] = `
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light">
 <meta name="supported-color-schemes" content="light">
-<title>Cancelled: Intro call with Ada Lovelace on Tue, Oct 20, 4:00 AM (America/New_York)</title>
+<title>Cancelled: Intro call with Ada Lovelace on Tue, Oct 20, 4:00 AM (America/New York, GMT-04:00)</title>
 <style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
 </head>
 <body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
@@ -69,7 +69,8 @@ exports[`booking email language goldens > en cancelled host 1`] = `
 <p style="margin: 0 0 16px; overflow-wrap: anywhere; word-break: break-word;">Your meeting with Ada Lovelace has been cancelled.</p>
 <table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">What</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Intro call</td></tr>
-<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">When</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Tuesday, October 20, 2026, 4:00 AM – 4:30 AM (America/New_York)</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">When</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Tuesday, October 20, 2026, 4:00 AM – 4:30 AM (America/New York, GMT-04:00)</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Invitee&#39;s time</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Tue, Oct 20, 10:00 AM (Europe/Berlin, GMT+02:00)</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Where</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Google Meet</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Invitee</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Ada Lovelace &lt;ada@example.com&gt;</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Guests</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Charles Babbage &lt;charles@example.com&gt;</td></tr>
@@ -85,13 +86,14 @@ exports[`booking email language goldens > en cancelled host 1`] = `
 </body>
 </html>
 ",
-  "subject": "Cancelled: Intro call with Ada Lovelace on Tue, Oct 20, 4:00 AM (America/New_York)",
+  "subject": "Cancelled: Intro call with Ada Lovelace on Tue, Oct 20, 4:00 AM (America/New York, GMT-04:00)",
   "text": "Hourmere
 
 Your meeting with Ada Lovelace has been cancelled.
 
 What: Intro call
-When: Tuesday, October 20, 2026, 4:00 AM – 4:30 AM (America/New_York)
+When: Tuesday, October 20, 2026, 4:00 AM – 4:30 AM (America/New York, GMT-04:00)
+Invitee's time: Tue, Oct 20, 10:00 AM (Europe/Berlin, GMT+02:00)
 Where: Google Meet
 Invitee: Ada Lovelace <ada@example.com>
 Guests: Charles Babbage <charles@example.com>
@@ -119,7 +121,7 @@ exports[`booking email language goldens > en cancelled invitee 1`] = `
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light">
 <meta name="supported-color-schemes" content="light">
-<title>Cancelled: Intro call with Grace Hopper on Tue, Oct 20, 10:00 AM (Europe/Berlin)</title>
+<title>Cancelled: Intro call with Grace Hopper on Tue, Oct 20, 10:00 AM (Europe/Berlin, GMT+02:00)</title>
 <style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
 </head>
 <body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
@@ -130,7 +132,7 @@ exports[`booking email language goldens > en cancelled invitee 1`] = `
 <p style="margin: 0 0 16px; overflow-wrap: anywhere; word-break: break-word;">Your meeting with Grace Hopper has been cancelled.</p>
 <table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">What</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Intro call</td></tr>
-<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">When</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin)</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">When</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin, GMT+02:00)</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Where</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Google Meet</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Host</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Grace Hopper</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Reason</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">A scheduling conflict.<br>Please book another time.</td></tr>
@@ -142,13 +144,13 @@ exports[`booking email language goldens > en cancelled invitee 1`] = `
 </body>
 </html>
 ",
-  "subject": "Cancelled: Intro call with Grace Hopper on Tue, Oct 20, 10:00 AM (Europe/Berlin)",
+  "subject": "Cancelled: Intro call with Grace Hopper on Tue, Oct 20, 10:00 AM (Europe/Berlin, GMT+02:00)",
   "text": "Hourmere
 
 Your meeting with Grace Hopper has been cancelled.
 
 What: Intro call
-When: Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin)
+When: Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin, GMT+02:00)
 Where: Google Meet
 Host: Grace Hopper
 Reason: A scheduling conflict.
@@ -168,7 +170,7 @@ exports[`booking email language goldens > en confirmed guest 1`] = `
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light">
 <meta name="supported-color-schemes" content="light">
-<title>Confirmed: Intro call with Grace Hopper on Tue, Oct 20, 10:00 AM (Europe/Berlin)</title>
+<title>Confirmed: Intro call with Grace Hopper on Tue, Oct 20, 10:00 AM (Europe/Berlin, GMT+02:00)</title>
 <style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
 </head>
 <body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
@@ -179,7 +181,7 @@ exports[`booking email language goldens > en confirmed guest 1`] = `
 <p style="margin: 0 0 16px; overflow-wrap: anywhere; word-break: break-word;">Your meeting with Grace Hopper is booked.</p>
 <table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">What</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Intro call</td></tr>
-<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">When</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin)</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">When</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin, GMT+02:00)</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Where</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Google Meet</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Host</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Grace Hopper</td></tr>
 </table>
@@ -195,13 +197,13 @@ exports[`booking email language goldens > en confirmed guest 1`] = `
 </body>
 </html>
 ",
-  "subject": "Confirmed: Intro call with Grace Hopper on Tue, Oct 20, 10:00 AM (Europe/Berlin)",
+  "subject": "Confirmed: Intro call with Grace Hopper on Tue, Oct 20, 10:00 AM (Europe/Berlin, GMT+02:00)",
   "text": "Hourmere
 
 Your meeting with Grace Hopper is booked.
 
 What: Intro call
-When: Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin)
+When: Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin, GMT+02:00)
 Where: Google Meet
 Host: Grace Hopper
 
@@ -224,7 +226,7 @@ exports[`booking email language goldens > en confirmed host 1`] = `
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light">
 <meta name="supported-color-schemes" content="light">
-<title>New booking: Intro call with Ada Lovelace on Tue, Oct 20, 4:00 AM (America/New_York)</title>
+<title>New booking: Intro call with Ada Lovelace on Tue, Oct 20, 4:00 AM (America/New York, GMT-04:00)</title>
 <style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
 </head>
 <body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
@@ -235,7 +237,8 @@ exports[`booking email language goldens > en confirmed host 1`] = `
 <p style="margin: 0 0 16px; overflow-wrap: anywhere; word-break: break-word;">Ada Lovelace booked a meeting with you.</p>
 <table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">What</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Intro call</td></tr>
-<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">When</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Tuesday, October 20, 2026, 4:00 AM – 4:30 AM (America/New_York)</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">When</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Tuesday, October 20, 2026, 4:00 AM – 4:30 AM (America/New York, GMT-04:00)</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Invitee&#39;s time</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Tue, Oct 20, 10:00 AM (Europe/Berlin, GMT+02:00)</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Where</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Google Meet</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Invitee</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Ada Lovelace &lt;ada@example.com&gt;</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Guests</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Charles Babbage &lt;charles@example.com&gt;</td></tr>
@@ -255,13 +258,14 @@ exports[`booking email language goldens > en confirmed host 1`] = `
 </body>
 </html>
 ",
-  "subject": "New booking: Intro call with Ada Lovelace on Tue, Oct 20, 4:00 AM (America/New_York)",
+  "subject": "New booking: Intro call with Ada Lovelace on Tue, Oct 20, 4:00 AM (America/New York, GMT-04:00)",
   "text": "Hourmere
 
 Ada Lovelace booked a meeting with you.
 
 What: Intro call
-When: Tuesday, October 20, 2026, 4:00 AM – 4:30 AM (America/New_York)
+When: Tuesday, October 20, 2026, 4:00 AM – 4:30 AM (America/New York, GMT-04:00)
+Invitee's time: Tue, Oct 20, 10:00 AM (Europe/Berlin, GMT+02:00)
 Where: Google Meet
 Invitee: Ada Lovelace <ada@example.com>
 Guests: Charles Babbage <charles@example.com>
@@ -292,7 +296,7 @@ exports[`booking email language goldens > en confirmed invitee 1`] = `
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light">
 <meta name="supported-color-schemes" content="light">
-<title>Confirmed: Intro call with Grace Hopper on Tue, Oct 20, 10:00 AM (Europe/Berlin)</title>
+<title>Confirmed: Intro call with Grace Hopper on Tue, Oct 20, 10:00 AM (Europe/Berlin, GMT+02:00)</title>
 <style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
 </head>
 <body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
@@ -303,7 +307,7 @@ exports[`booking email language goldens > en confirmed invitee 1`] = `
 <p style="margin: 0 0 16px; overflow-wrap: anywhere; word-break: break-word;">Your meeting with Grace Hopper is booked.</p>
 <table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">What</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Intro call</td></tr>
-<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">When</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin)</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">When</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin, GMT+02:00)</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Where</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Google Meet</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Host</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Grace Hopper</td></tr>
 </table>
@@ -323,13 +327,13 @@ exports[`booking email language goldens > en confirmed invitee 1`] = `
 </body>
 </html>
 ",
-  "subject": "Confirmed: Intro call with Grace Hopper on Tue, Oct 20, 10:00 AM (Europe/Berlin)",
+  "subject": "Confirmed: Intro call with Grace Hopper on Tue, Oct 20, 10:00 AM (Europe/Berlin, GMT+02:00)",
   "text": "Hourmere
 
 Your meeting with Grace Hopper is booked.
 
 What: Intro call
-When: Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin)
+When: Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin, GMT+02:00)
 Where: Google Meet
 Host: Grace Hopper
 
@@ -356,7 +360,7 @@ exports[`booking email language goldens > en rescheduled guest 1`] = `
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light">
 <meta name="supported-color-schemes" content="light">
-<title>Rescheduled: Intro call with Grace Hopper, now Tue, Oct 20, 10:00 AM (Europe/Berlin)</title>
+<title>Rescheduled: Intro call with Grace Hopper, now Tue, Oct 20, 10:00 AM (Europe/Berlin, GMT+02:00)</title>
 <style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
 </head>
 <body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
@@ -367,8 +371,8 @@ exports[`booking email language goldens > en rescheduled guest 1`] = `
 <p style="margin: 0 0 16px; overflow-wrap: anywhere; word-break: break-word;">Your meeting with Grace Hopper has moved to a new time.</p>
 <table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">What</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Intro call</td></tr>
-<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">When</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin)</td></tr>
-<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Was</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word; color: #777; text-decoration: line-through;">Monday, October 19, 2026, 10:00 AM – 10:30 AM (Europe/Berlin)</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">When</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin, GMT+02:00)</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Was</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word; color: #777; text-decoration: line-through;">Monday, October 19, 2026, 10:00 AM – 10:30 AM (Europe/Berlin, GMT+02:00)</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Where</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Google Meet</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Host</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Grace Hopper</td></tr>
 </table>
@@ -384,14 +388,14 @@ exports[`booking email language goldens > en rescheduled guest 1`] = `
 </body>
 </html>
 ",
-  "subject": "Rescheduled: Intro call with Grace Hopper, now Tue, Oct 20, 10:00 AM (Europe/Berlin)",
+  "subject": "Rescheduled: Intro call with Grace Hopper, now Tue, Oct 20, 10:00 AM (Europe/Berlin, GMT+02:00)",
   "text": "Hourmere
 
 Your meeting with Grace Hopper has moved to a new time.
 
 What: Intro call
-When: Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin)
-Was: Monday, October 19, 2026, 10:00 AM – 10:30 AM (Europe/Berlin)
+When: Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin, GMT+02:00)
+Was: Monday, October 19, 2026, 10:00 AM – 10:30 AM (Europe/Berlin, GMT+02:00)
 Where: Google Meet
 Host: Grace Hopper
 
@@ -414,7 +418,7 @@ exports[`booking email language goldens > en rescheduled host 1`] = `
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light">
 <meta name="supported-color-schemes" content="light">
-<title>Rescheduled: Intro call with Ada Lovelace, now Tue, Oct 20, 4:00 AM (America/New_York)</title>
+<title>Rescheduled: Intro call with Ada Lovelace, now Tue, Oct 20, 4:00 AM (America/New York, GMT-04:00)</title>
 <style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
 </head>
 <body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
@@ -425,8 +429,9 @@ exports[`booking email language goldens > en rescheduled host 1`] = `
 <p style="margin: 0 0 16px; overflow-wrap: anywhere; word-break: break-word;">Your meeting with Ada Lovelace has moved to a new time.</p>
 <table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">What</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Intro call</td></tr>
-<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">When</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Tuesday, October 20, 2026, 4:00 AM – 4:30 AM (America/New_York)</td></tr>
-<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Was</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word; color: #777; text-decoration: line-through;">Monday, October 19, 2026, 4:00 AM – 4:30 AM (America/New_York)</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">When</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Tuesday, October 20, 2026, 4:00 AM – 4:30 AM (America/New York, GMT-04:00)</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Invitee&#39;s time</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Tue, Oct 20, 10:00 AM (Europe/Berlin, GMT+02:00)</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Was</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word; color: #777; text-decoration: line-through;">Monday, October 19, 2026, 4:00 AM – 4:30 AM (America/New York, GMT-04:00)</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Where</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Google Meet</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Invitee</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Ada Lovelace &lt;ada@example.com&gt;</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Guests</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Charles Babbage &lt;charles@example.com&gt;</td></tr>
@@ -446,14 +451,15 @@ exports[`booking email language goldens > en rescheduled host 1`] = `
 </body>
 </html>
 ",
-  "subject": "Rescheduled: Intro call with Ada Lovelace, now Tue, Oct 20, 4:00 AM (America/New_York)",
+  "subject": "Rescheduled: Intro call with Ada Lovelace, now Tue, Oct 20, 4:00 AM (America/New York, GMT-04:00)",
   "text": "Hourmere
 
 Your meeting with Ada Lovelace has moved to a new time.
 
 What: Intro call
-When: Tuesday, October 20, 2026, 4:00 AM – 4:30 AM (America/New_York)
-Was: Monday, October 19, 2026, 4:00 AM – 4:30 AM (America/New_York)
+When: Tuesday, October 20, 2026, 4:00 AM – 4:30 AM (America/New York, GMT-04:00)
+Invitee's time: Tue, Oct 20, 10:00 AM (Europe/Berlin, GMT+02:00)
+Was: Monday, October 19, 2026, 4:00 AM – 4:30 AM (America/New York, GMT-04:00)
 Where: Google Meet
 Invitee: Ada Lovelace <ada@example.com>
 Guests: Charles Babbage <charles@example.com>
@@ -484,7 +490,7 @@ exports[`booking email language goldens > en rescheduled invitee 1`] = `
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light">
 <meta name="supported-color-schemes" content="light">
-<title>Rescheduled: Intro call with Grace Hopper, now Tue, Oct 20, 10:00 AM (Europe/Berlin)</title>
+<title>Rescheduled: Intro call with Grace Hopper, now Tue, Oct 20, 10:00 AM (Europe/Berlin, GMT+02:00)</title>
 <style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
 </head>
 <body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
@@ -495,8 +501,8 @@ exports[`booking email language goldens > en rescheduled invitee 1`] = `
 <p style="margin: 0 0 16px; overflow-wrap: anywhere; word-break: break-word;">Your meeting with Grace Hopper has moved to a new time.</p>
 <table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">What</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Intro call</td></tr>
-<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">When</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin)</td></tr>
-<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Was</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word; color: #777; text-decoration: line-through;">Monday, October 19, 2026, 10:00 AM – 10:30 AM (Europe/Berlin)</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">When</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin, GMT+02:00)</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Was</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word; color: #777; text-decoration: line-through;">Monday, October 19, 2026, 10:00 AM – 10:30 AM (Europe/Berlin, GMT+02:00)</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Where</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Google Meet</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Host</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Grace Hopper</td></tr>
 </table>
@@ -516,14 +522,14 @@ exports[`booking email language goldens > en rescheduled invitee 1`] = `
 </body>
 </html>
 ",
-  "subject": "Rescheduled: Intro call with Grace Hopper, now Tue, Oct 20, 10:00 AM (Europe/Berlin)",
+  "subject": "Rescheduled: Intro call with Grace Hopper, now Tue, Oct 20, 10:00 AM (Europe/Berlin, GMT+02:00)",
   "text": "Hourmere
 
 Your meeting with Grace Hopper has moved to a new time.
 
 What: Intro call
-When: Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin)
-Was: Monday, October 19, 2026, 10:00 AM – 10:30 AM (Europe/Berlin)
+When: Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin, GMT+02:00)
+Was: Monday, October 19, 2026, 10:00 AM – 10:30 AM (Europe/Berlin, GMT+02:00)
 Where: Google Meet
 Host: Grace Hopper
 
@@ -550,7 +556,7 @@ exports[`booking email language goldens > zh-CN cancelled guest 1`] = `
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light">
 <meta name="supported-color-schemes" content="light">
-<title>已取消：与 Grace Hopper 的 Intro call，10月20日周二，10:00（Europe/Berlin）</title>
+<title>已取消：与 Grace Hopper 的 Intro call，10月20日周二，10:00（Europe/Berlin，GMT+02:00）</title>
 <style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
 </head>
 <body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
@@ -561,7 +567,7 @@ exports[`booking email language goldens > zh-CN cancelled guest 1`] = `
 <p style="margin: 0 0 16px; overflow-wrap: anywhere; word-break: break-word;">你与 Grace Hopper 的会议已取消。</p>
 <table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">活动</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Intro call</td></tr>
-<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">时间</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">2026年10月20日星期二，10:00 至 10:30（Europe/Berlin）</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">时间</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">2026年10月20日星期二，10:00 至 10:30（Europe/Berlin，GMT+02:00）</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">地点</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Google Meet</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">主持人</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Grace Hopper</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">原因</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">A scheduling conflict.<br>Please book another time.</td></tr>
@@ -573,13 +579,13 @@ exports[`booking email language goldens > zh-CN cancelled guest 1`] = `
 </body>
 </html>
 ",
-  "subject": "已取消：与 Grace Hopper 的 Intro call，10月20日周二，10:00（Europe/Berlin）",
+  "subject": "已取消：与 Grace Hopper 的 Intro call，10月20日周二，10:00（Europe/Berlin，GMT+02:00）",
   "text": "Hourmere
 
 你与 Grace Hopper 的会议已取消。
 
 活动：Intro call
-时间：2026年10月20日星期二，10:00 至 10:30（Europe/Berlin）
+时间：2026年10月20日星期二，10:00 至 10:30（Europe/Berlin，GMT+02:00）
 地点：Google Meet
 主持人：Grace Hopper
 原因：A scheduling conflict.
@@ -599,7 +605,7 @@ exports[`booking email language goldens > zh-CN cancelled host 1`] = `
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light">
 <meta name="supported-color-schemes" content="light">
-<title>已取消：与 Ada Lovelace 的 Intro call，10月20日周二，04:00（America/New_York）</title>
+<title>已取消：与 Ada Lovelace 的 Intro call，10月20日周二，04:00（America/New York，GMT-04:00）</title>
 <style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
 </head>
 <body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
@@ -610,7 +616,8 @@ exports[`booking email language goldens > zh-CN cancelled host 1`] = `
 <p style="margin: 0 0 16px; overflow-wrap: anywhere; word-break: break-word;">你与 Ada Lovelace 的会议已取消。</p>
 <table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">活动</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Intro call</td></tr>
-<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">时间</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">2026年10月20日星期二，04:00 至 04:30（America/New_York）</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">时间</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">2026年10月20日星期二，04:00 至 04:30（America/New York，GMT-04:00）</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">预约人当地时间</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">10月20日周二，10:00（Europe/Berlin，GMT+02:00）</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">地点</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Google Meet</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">预约人</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Ada Lovelace &lt;ada@example.com&gt;</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">来宾</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Charles Babbage &lt;charles@example.com&gt;</td></tr>
@@ -626,13 +633,14 @@ exports[`booking email language goldens > zh-CN cancelled host 1`] = `
 </body>
 </html>
 ",
-  "subject": "已取消：与 Ada Lovelace 的 Intro call，10月20日周二，04:00（America/New_York）",
+  "subject": "已取消：与 Ada Lovelace 的 Intro call，10月20日周二，04:00（America/New York，GMT-04:00）",
   "text": "Hourmere
 
 你与 Ada Lovelace 的会议已取消。
 
 活动：Intro call
-时间：2026年10月20日星期二，04:00 至 04:30（America/New_York）
+时间：2026年10月20日星期二，04:00 至 04:30（America/New York，GMT-04:00）
+预约人当地时间：10月20日周二，10:00（Europe/Berlin，GMT+02:00）
 地点：Google Meet
 预约人：Ada Lovelace <ada@example.com>
 来宾：Charles Babbage <charles@example.com>
@@ -660,7 +668,7 @@ exports[`booking email language goldens > zh-CN cancelled invitee 1`] = `
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light">
 <meta name="supported-color-schemes" content="light">
-<title>已取消：与 Grace Hopper 的 Intro call，10月20日周二，10:00（Europe/Berlin）</title>
+<title>已取消：与 Grace Hopper 的 Intro call，10月20日周二，10:00（Europe/Berlin，GMT+02:00）</title>
 <style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
 </head>
 <body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
@@ -671,7 +679,7 @@ exports[`booking email language goldens > zh-CN cancelled invitee 1`] = `
 <p style="margin: 0 0 16px; overflow-wrap: anywhere; word-break: break-word;">你与 Grace Hopper 的会议已取消。</p>
 <table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">活动</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Intro call</td></tr>
-<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">时间</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">2026年10月20日星期二，10:00 至 10:30（Europe/Berlin）</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">时间</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">2026年10月20日星期二，10:00 至 10:30（Europe/Berlin，GMT+02:00）</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">地点</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Google Meet</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">主持人</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Grace Hopper</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">原因</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">A scheduling conflict.<br>Please book another time.</td></tr>
@@ -683,13 +691,13 @@ exports[`booking email language goldens > zh-CN cancelled invitee 1`] = `
 </body>
 </html>
 ",
-  "subject": "已取消：与 Grace Hopper 的 Intro call，10月20日周二，10:00（Europe/Berlin）",
+  "subject": "已取消：与 Grace Hopper 的 Intro call，10月20日周二，10:00（Europe/Berlin，GMT+02:00）",
   "text": "Hourmere
 
 你与 Grace Hopper 的会议已取消。
 
 活动：Intro call
-时间：2026年10月20日星期二，10:00 至 10:30（Europe/Berlin）
+时间：2026年10月20日星期二，10:00 至 10:30（Europe/Berlin，GMT+02:00）
 地点：Google Meet
 主持人：Grace Hopper
 原因：A scheduling conflict.
@@ -709,7 +717,7 @@ exports[`booking email language goldens > zh-CN confirmed guest 1`] = `
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light">
 <meta name="supported-color-schemes" content="light">
-<title>已确认：与 Grace Hopper 的 Intro call，10月20日周二，10:00（Europe/Berlin）</title>
+<title>已确认：与 Grace Hopper 的 Intro call，10月20日周二，10:00（Europe/Berlin，GMT+02:00）</title>
 <style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
 </head>
 <body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
@@ -720,7 +728,7 @@ exports[`booking email language goldens > zh-CN confirmed guest 1`] = `
 <p style="margin: 0 0 16px; overflow-wrap: anywhere; word-break: break-word;">你与 Grace Hopper 的会议已预约。</p>
 <table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">活动</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Intro call</td></tr>
-<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">时间</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">2026年10月20日星期二，10:00 至 10:30（Europe/Berlin）</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">时间</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">2026年10月20日星期二，10:00 至 10:30（Europe/Berlin，GMT+02:00）</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">地点</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Google Meet</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">主持人</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Grace Hopper</td></tr>
 </table>
@@ -736,13 +744,13 @@ exports[`booking email language goldens > zh-CN confirmed guest 1`] = `
 </body>
 </html>
 ",
-  "subject": "已确认：与 Grace Hopper 的 Intro call，10月20日周二，10:00（Europe/Berlin）",
+  "subject": "已确认：与 Grace Hopper 的 Intro call，10月20日周二，10:00（Europe/Berlin，GMT+02:00）",
   "text": "Hourmere
 
 你与 Grace Hopper 的会议已预约。
 
 活动：Intro call
-时间：2026年10月20日星期二，10:00 至 10:30（Europe/Berlin）
+时间：2026年10月20日星期二，10:00 至 10:30（Europe/Berlin，GMT+02:00）
 地点：Google Meet
 主持人：Grace Hopper
 
@@ -765,7 +773,7 @@ exports[`booking email language goldens > zh-CN confirmed host 1`] = `
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light">
 <meta name="supported-color-schemes" content="light">
-<title>新预约：与 Ada Lovelace 的 Intro call，10月20日周二，04:00（America/New_York）</title>
+<title>新预约：与 Ada Lovelace 的 Intro call，10月20日周二，04:00（America/New York，GMT-04:00）</title>
 <style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
 </head>
 <body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
@@ -776,7 +784,8 @@ exports[`booking email language goldens > zh-CN confirmed host 1`] = `
 <p style="margin: 0 0 16px; overflow-wrap: anywhere; word-break: break-word;">Ada Lovelace 预约了与你的会议。</p>
 <table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">活动</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Intro call</td></tr>
-<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">时间</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">2026年10月20日星期二，04:00 至 04:30（America/New_York）</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">时间</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">2026年10月20日星期二，04:00 至 04:30（America/New York，GMT-04:00）</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">预约人当地时间</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">10月20日周二，10:00（Europe/Berlin，GMT+02:00）</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">地点</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Google Meet</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">预约人</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Ada Lovelace &lt;ada@example.com&gt;</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">来宾</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Charles Babbage &lt;charles@example.com&gt;</td></tr>
@@ -796,13 +805,14 @@ exports[`booking email language goldens > zh-CN confirmed host 1`] = `
 </body>
 </html>
 ",
-  "subject": "新预约：与 Ada Lovelace 的 Intro call，10月20日周二，04:00（America/New_York）",
+  "subject": "新预约：与 Ada Lovelace 的 Intro call，10月20日周二，04:00（America/New York，GMT-04:00）",
   "text": "Hourmere
 
 Ada Lovelace 预约了与你的会议。
 
 活动：Intro call
-时间：2026年10月20日星期二，04:00 至 04:30（America/New_York）
+时间：2026年10月20日星期二，04:00 至 04:30（America/New York，GMT-04:00）
+预约人当地时间：10月20日周二，10:00（Europe/Berlin，GMT+02:00）
 地点：Google Meet
 预约人：Ada Lovelace <ada@example.com>
 来宾：Charles Babbage <charles@example.com>
@@ -833,7 +843,7 @@ exports[`booking email language goldens > zh-CN confirmed invitee 1`] = `
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light">
 <meta name="supported-color-schemes" content="light">
-<title>已确认：与 Grace Hopper 的 Intro call，10月20日周二，10:00（Europe/Berlin）</title>
+<title>已确认：与 Grace Hopper 的 Intro call，10月20日周二，10:00（Europe/Berlin，GMT+02:00）</title>
 <style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
 </head>
 <body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
@@ -844,7 +854,7 @@ exports[`booking email language goldens > zh-CN confirmed invitee 1`] = `
 <p style="margin: 0 0 16px; overflow-wrap: anywhere; word-break: break-word;">你与 Grace Hopper 的会议已预约。</p>
 <table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">活动</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Intro call</td></tr>
-<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">时间</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">2026年10月20日星期二，10:00 至 10:30（Europe/Berlin）</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">时间</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">2026年10月20日星期二，10:00 至 10:30（Europe/Berlin，GMT+02:00）</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">地点</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Google Meet</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">主持人</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Grace Hopper</td></tr>
 </table>
@@ -864,13 +874,13 @@ exports[`booking email language goldens > zh-CN confirmed invitee 1`] = `
 </body>
 </html>
 ",
-  "subject": "已确认：与 Grace Hopper 的 Intro call，10月20日周二，10:00（Europe/Berlin）",
+  "subject": "已确认：与 Grace Hopper 的 Intro call，10月20日周二，10:00（Europe/Berlin，GMT+02:00）",
   "text": "Hourmere
 
 你与 Grace Hopper 的会议已预约。
 
 活动：Intro call
-时间：2026年10月20日星期二，10:00 至 10:30（Europe/Berlin）
+时间：2026年10月20日星期二，10:00 至 10:30（Europe/Berlin，GMT+02:00）
 地点：Google Meet
 主持人：Grace Hopper
 
@@ -897,7 +907,7 @@ exports[`booking email language goldens > zh-CN rescheduled guest 1`] = `
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light">
 <meta name="supported-color-schemes" content="light">
-<title>已改期：与 Grace Hopper 的 Intro call，现为 10月20日周二，10:00（Europe/Berlin）</title>
+<title>已改期：与 Grace Hopper 的 Intro call，现为 10月20日周二，10:00（Europe/Berlin，GMT+02:00）</title>
 <style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
 </head>
 <body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
@@ -908,8 +918,8 @@ exports[`booking email language goldens > zh-CN rescheduled guest 1`] = `
 <p style="margin: 0 0 16px; overflow-wrap: anywhere; word-break: break-word;">你与 Grace Hopper 的会议已改期。</p>
 <table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">活动</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Intro call</td></tr>
-<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">时间</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">2026年10月20日星期二，10:00 至 10:30（Europe/Berlin）</td></tr>
-<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">原时间</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word; color: #777; text-decoration: line-through;">2026年10月19日星期一，10:00 至 10:30（Europe/Berlin）</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">时间</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">2026年10月20日星期二，10:00 至 10:30（Europe/Berlin，GMT+02:00）</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">原时间</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word; color: #777; text-decoration: line-through;">2026年10月19日星期一，10:00 至 10:30（Europe/Berlin，GMT+02:00）</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">地点</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Google Meet</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">主持人</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Grace Hopper</td></tr>
 </table>
@@ -925,14 +935,14 @@ exports[`booking email language goldens > zh-CN rescheduled guest 1`] = `
 </body>
 </html>
 ",
-  "subject": "已改期：与 Grace Hopper 的 Intro call，现为 10月20日周二，10:00（Europe/Berlin）",
+  "subject": "已改期：与 Grace Hopper 的 Intro call，现为 10月20日周二，10:00（Europe/Berlin，GMT+02:00）",
   "text": "Hourmere
 
 你与 Grace Hopper 的会议已改期。
 
 活动：Intro call
-时间：2026年10月20日星期二，10:00 至 10:30（Europe/Berlin）
-原时间：2026年10月19日星期一，10:00 至 10:30（Europe/Berlin）
+时间：2026年10月20日星期二，10:00 至 10:30（Europe/Berlin，GMT+02:00）
+原时间：2026年10月19日星期一，10:00 至 10:30（Europe/Berlin，GMT+02:00）
 地点：Google Meet
 主持人：Grace Hopper
 
@@ -955,7 +965,7 @@ exports[`booking email language goldens > zh-CN rescheduled host 1`] = `
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light">
 <meta name="supported-color-schemes" content="light">
-<title>已改期：与 Ada Lovelace 的 Intro call，现为 10月20日周二，04:00（America/New_York）</title>
+<title>已改期：与 Ada Lovelace 的 Intro call，现为 10月20日周二，04:00（America/New York，GMT-04:00）</title>
 <style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
 </head>
 <body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
@@ -966,8 +976,9 @@ exports[`booking email language goldens > zh-CN rescheduled host 1`] = `
 <p style="margin: 0 0 16px; overflow-wrap: anywhere; word-break: break-word;">你与 Ada Lovelace 的会议已改期。</p>
 <table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">活动</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Intro call</td></tr>
-<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">时间</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">2026年10月20日星期二，04:00 至 04:30（America/New_York）</td></tr>
-<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">原时间</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word; color: #777; text-decoration: line-through;">2026年10月19日星期一，04:00 至 04:30（America/New_York）</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">时间</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">2026年10月20日星期二，04:00 至 04:30（America/New York，GMT-04:00）</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">预约人当地时间</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">10月20日周二，10:00（Europe/Berlin，GMT+02:00）</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">原时间</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word; color: #777; text-decoration: line-through;">2026年10月19日星期一，04:00 至 04:30（America/New York，GMT-04:00）</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">地点</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Google Meet</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">预约人</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Ada Lovelace &lt;ada@example.com&gt;</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">来宾</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Charles Babbage &lt;charles@example.com&gt;</td></tr>
@@ -987,14 +998,15 @@ exports[`booking email language goldens > zh-CN rescheduled host 1`] = `
 </body>
 </html>
 ",
-  "subject": "已改期：与 Ada Lovelace 的 Intro call，现为 10月20日周二，04:00（America/New_York）",
+  "subject": "已改期：与 Ada Lovelace 的 Intro call，现为 10月20日周二，04:00（America/New York，GMT-04:00）",
   "text": "Hourmere
 
 你与 Ada Lovelace 的会议已改期。
 
 活动：Intro call
-时间：2026年10月20日星期二，04:00 至 04:30（America/New_York）
-原时间：2026年10月19日星期一，04:00 至 04:30（America/New_York）
+时间：2026年10月20日星期二，04:00 至 04:30（America/New York，GMT-04:00）
+预约人当地时间：10月20日周二，10:00（Europe/Berlin，GMT+02:00）
+原时间：2026年10月19日星期一，04:00 至 04:30（America/New York，GMT-04:00）
 地点：Google Meet
 预约人：Ada Lovelace <ada@example.com>
 来宾：Charles Babbage <charles@example.com>
@@ -1025,7 +1037,7 @@ exports[`booking email language goldens > zh-CN rescheduled invitee 1`] = `
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light">
 <meta name="supported-color-schemes" content="light">
-<title>已改期：与 Grace Hopper 的 Intro call，现为 10月20日周二，10:00（Europe/Berlin）</title>
+<title>已改期：与 Grace Hopper 的 Intro call，现为 10月20日周二，10:00（Europe/Berlin，GMT+02:00）</title>
 <style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
 </head>
 <body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
@@ -1036,8 +1048,8 @@ exports[`booking email language goldens > zh-CN rescheduled invitee 1`] = `
 <p style="margin: 0 0 16px; overflow-wrap: anywhere; word-break: break-word;">你与 Grace Hopper 的会议已改期。</p>
 <table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">活动</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Intro call</td></tr>
-<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">时间</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">2026年10月20日星期二，10:00 至 10:30（Europe/Berlin）</td></tr>
-<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">原时间</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word; color: #777; text-decoration: line-through;">2026年10月19日星期一，10:00 至 10:30（Europe/Berlin）</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">时间</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">2026年10月20日星期二，10:00 至 10:30（Europe/Berlin，GMT+02:00）</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">原时间</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word; color: #777; text-decoration: line-through;">2026年10月19日星期一，10:00 至 10:30（Europe/Berlin，GMT+02:00）</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">地点</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Google Meet</td></tr>
 <tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">主持人</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Grace Hopper</td></tr>
 </table>
@@ -1057,14 +1069,14 @@ exports[`booking email language goldens > zh-CN rescheduled invitee 1`] = `
 </body>
 </html>
 ",
-  "subject": "已改期：与 Grace Hopper 的 Intro call，现为 10月20日周二，10:00（Europe/Berlin）",
+  "subject": "已改期：与 Grace Hopper 的 Intro call，现为 10月20日周二，10:00（Europe/Berlin，GMT+02:00）",
   "text": "Hourmere
 
 你与 Grace Hopper 的会议已改期。
 
 活动：Intro call
-时间：2026年10月20日星期二，10:00 至 10:30（Europe/Berlin）
-原时间：2026年10月19日星期一，10:00 至 10:30（Europe/Berlin）
+时间：2026年10月20日星期二，10:00 至 10:30（Europe/Berlin，GMT+02:00）
+原时间：2026年10月19日星期一，10:00 至 10:30（Europe/Berlin，GMT+02:00）
 地点：Google Meet
 主持人：Grace Hopper
 
@@ -1078,6 +1090,134 @@ https://meet.example.com/abc
 取消：https://cal.example.com/booking#token=fixture&action=cancel
 
 你收到此邮件，是因为你通过 Hourmere 预约了与 Grace Hopper 的会议。
+",
+}
+`;
+
+exports[`cross-zone booking email clarity > en confirmed shows the invitee's local date and time to the host 1`] = `
+{
+  "html": "<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>New booking: Intro call with Ada Lovelace on Tue, Nov 10, 4:00 PM (America/Los Angeles, GMT-08:00)</title>
+<style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
+</head>
+<body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
+<!--[if mso]><table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" style="width: 600px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><![endif]-->
+<table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="width: 100%; max-width: 600px; margin: 0 auto; background-color: #ffffff; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;">
+<tr><td style="padding: 24px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; overflow-wrap: anywhere; word-break: break-word;">
+<p style="margin: 0 0 24px; color: #1f4fd8; font-size: 20px; font-weight: 700;">Hourmere</p>
+<p style="margin: 0 0 16px; overflow-wrap: anywhere; word-break: break-word;">Ada Lovelace booked a meeting with you.</p>
+<table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">What</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Intro call</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">When</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Tuesday, November 10, 2026, 4:00 PM – 4:30 PM (America/Los Angeles, GMT-08:00)</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Invitee&#39;s time</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Wed, Nov 11, 8:00 AM (Asia/Shanghai, GMT+08:00)</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Where</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Google Meet</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Invitee</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Ada Lovelace &lt;ada@example.com&gt;</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">Guests</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Charles Babbage &lt;charles@example.com&gt;</td></tr>
+</table>
+<p style="margin: 24px 0 4px; font-weight: 600;">Answers</p>
+<p style="margin: 0 0 12px; overflow-wrap: anywhere; word-break: break-word;"><span style="color: #555;">What should we discuss?</span><br>Analytical engines.<br>A short demo.</p>
+<div style="margin: 24px 0 0;">
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="padding: 16px 0; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td bgcolor="#1f4fd8" style="padding: 0; mso-padding-alt: 12px 18px; background-color: #1f4fd8; border: 1px solid #1f4fd8; border-radius: 6px; text-align: center; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><a href="https://meet.example.com/abc" style="display: block; padding: 12px 18px; line-height: 20px; min-height: 20px; color: #ffffff; text-decoration: none; overflow-wrap: anywhere; word-break: break-word;">Join Google Meet meeting</a></td></tr></table></td></tr></table>
+<p style="margin: 4px 0 0; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;"><a href="https://meet.example.com/abc" style="color: #1f4fd8; overflow-wrap: anywhere; word-break: break-word;">https://meet.example.com/abc</a></p>
+</div>
+<p style="margin: 24px 0 0; color: #555; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;">You received this email because Ada Lovelace booked a meeting with you via Hourmere.</p>
+</td></tr>
+</table>
+<!--[if mso]></td></tr></table><![endif]-->
+</body>
+</html>
+",
+  "subject": "New booking: Intro call with Ada Lovelace on Tue, Nov 10, 4:00 PM (America/Los Angeles, GMT-08:00)",
+  "text": "Hourmere
+
+Ada Lovelace booked a meeting with you.
+
+What: Intro call
+When: Tuesday, November 10, 2026, 4:00 PM – 4:30 PM (America/Los Angeles, GMT-08:00)
+Invitee's time: Wed, Nov 11, 8:00 AM (Asia/Shanghai, GMT+08:00)
+Where: Google Meet
+Invitee: Ada Lovelace <ada@example.com>
+Guests: Charles Babbage <charles@example.com>
+
+Answers
+What should we discuss?
+  Analytical engines.
+  A short demo.
+
+Join Google Meet meeting
+https://meet.example.com/abc
+
+You received this email because Ada Lovelace booked a meeting with you via Hourmere.
+",
+}
+`;
+
+exports[`cross-zone booking email clarity > zh-CN confirmed shows the invitee's local date and time to the host 1`] = `
+{
+  "html": "<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>新预约：与 Ada Lovelace 的 Intro call，11月10日周二，16:00（America/Los Angeles，GMT-08:00）</title>
+<style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
+</head>
+<body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
+<!--[if mso]><table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" style="width: 600px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><![endif]-->
+<table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="width: 100%; max-width: 600px; margin: 0 auto; background-color: #ffffff; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;">
+<tr><td style="padding: 24px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; overflow-wrap: anywhere; word-break: break-word;">
+<p style="margin: 0 0 24px; color: #1f4fd8; font-size: 20px; font-weight: 700;">Hourmere</p>
+<p style="margin: 0 0 16px; overflow-wrap: anywhere; word-break: break-word;">Ada Lovelace 预约了与你的会议。</p>
+<table role="presentation" width="100%" style="width: 100%; border-collapse: collapse;">
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">活动</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Intro call</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">时间</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">2026年11月10日星期二，16:00 至 16:30（America/Los Angeles，GMT-08:00）</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">预约人当地时间</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">11月11日周三，08:00（Asia/Shanghai，GMT+08:00）</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">地点</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Google Meet</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">预约人</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Ada Lovelace &lt;ada@example.com&gt;</td></tr>
+<tr><td style="padding: 2px 16px 2px 0; vertical-align: top; color: #555; white-space: nowrap; width: 1%;">来宾</td><td style="padding: 2px 16px 2px 0; vertical-align: top; overflow-wrap: anywhere; word-break: break-word;">Charles Babbage &lt;charles@example.com&gt;</td></tr>
+</table>
+<p style="margin: 24px 0 4px; font-weight: 600;">回答</p>
+<p style="margin: 0 0 12px; overflow-wrap: anywhere; word-break: break-word;"><span style="color: #555;">What should we discuss?</span><br>Analytical engines.<br>A short demo.</p>
+<div style="margin: 24px 0 0;">
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="padding: 16px 0; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td bgcolor="#1f4fd8" style="padding: 0; mso-padding-alt: 12px 18px; background-color: #1f4fd8; border: 1px solid #1f4fd8; border-radius: 6px; text-align: center; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><a href="https://meet.example.com/abc" style="display: block; padding: 12px 18px; line-height: 20px; min-height: 20px; color: #ffffff; text-decoration: none; overflow-wrap: anywhere; word-break: break-word;">加入 Google Meet 会议</a></td></tr></table></td></tr></table>
+<p style="margin: 4px 0 0; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;"><a href="https://meet.example.com/abc" style="color: #1f4fd8; overflow-wrap: anywhere; word-break: break-word;">https://meet.example.com/abc</a></p>
+</div>
+<p style="margin: 24px 0 0; color: #555; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;">你收到此邮件，是因为 Ada Lovelace 通过 Hourmere 预约了与你的会议。</p>
+</td></tr>
+</table>
+<!--[if mso]></td></tr></table><![endif]-->
+</body>
+</html>
+",
+  "subject": "新预约：与 Ada Lovelace 的 Intro call，11月10日周二，16:00（America/Los Angeles，GMT-08:00）",
+  "text": "Hourmere
+
+Ada Lovelace 预约了与你的会议。
+
+活动：Intro call
+时间：2026年11月10日星期二，16:00 至 16:30（America/Los Angeles，GMT-08:00）
+预约人当地时间：11月11日周三，08:00（Asia/Shanghai，GMT+08:00）
+地点：Google Meet
+预约人：Ada Lovelace <ada@example.com>
+来宾：Charles Babbage <charles@example.com>
+
+回答
+What should we discuss?
+  Analytical engines.
+  A short demo.
+
+加入 Google Meet 会议
+https://meet.example.com/abc
+
+你收到此邮件，是因为 Ada Lovelace 通过 Hourmere 预约了与你的会议。
 ",
 }
 `;

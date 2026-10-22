@@ -1,5 +1,7 @@
 // Public/shared UI messages. Admin messages live in a lazy catalog.
 export const common = {
+  'This booking has been rescheduled the maximum number of times. Contact the host to change it again.':
+    '此预约已达到改期次数上限。如需再次改期，请联系主持人。',
   'Skip to content': '跳至内容',
   '{0}: {1}': '{0}：{1}',
   '{0} {1}': '{0} {1}',
@@ -321,6 +323,8 @@ export const common = {
   '{event} with {host}': '与{host}的{event}',
   'Required hosts:': '必选主持人：',
   'Required hosts: {hosts}': '必选主持人：{hosts}',
+  "Host's time zone: {zone}": '主持人的时区：{zone}',
+  "That's {time} for the host": '主持人当地时间为{time}',
   'Zoom meeting update': 'Zoom 会议更新',
   'Your booking is cancelled. The Zoom meeting update is pending.':
     '预约已取消，Zoom 会议仍在更新。',

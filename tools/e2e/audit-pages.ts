@@ -2,6 +2,7 @@ import type { Page } from '@playwright/test'
 import {
   AUDIT_CONFIRMATION_EMAIL,
   AUDIT_EMAIL,
+  AUDIT_NOW,
   AUDIT_TITLE,
   visualMaskSelector,
   visualMaskText,
@@ -128,7 +129,11 @@ async function verifyAuditContent(page: Page, id: AuditPageId) {
       await page.locator('#activity-summary').waitFor()
       break
     case 'calendars':
-      await page.getByText(/^(No calendar accounts connected yet\.|尚未连接日历账号。)$/).waitFor()
+      await page.getByText('Synthetic cross-zone calendar', { exact: true }).waitFor()
+      await page
+        .locator('.calendar-list .alert-info')
+        .filter({ hasText: 'America/Argentina/Buenos Aires' })
+        .waitFor()
       break
     case 'conferences':
       await page.getByText(/^(No Zoom accounts connected\.|尚未连接 Zoom 账号。)$/).waitFor()
@@ -164,8 +169,11 @@ export async function openAuditPage(
   { locale = 'en-US' }: { locale?: AuditLocale } = {},
 ): Promise<void> {
   try {
+    // Earlier audit states create real bookings; pin the calendar and list filters
+    // before navigation so later pages never inherit wall-clock-dependent rows.
+    await page.clock.setFixedTime(new Date(AUDIT_NOW))
     const fixture = await app.auditState()
-    await app.auditSignIn(!publicPages.has(id))
+    await app.auditSignIn(!publicPages.has(id), locale)
     await page.addInitScript(prepareAuditLocale, locale)
     const paths: Record<AuditPageId, string> = {
       host: '/fixture-host',
@@ -264,12 +272,80 @@ export async function openAuditPage(
     )
     verifyAuditPath(page.url(), paths[id])
     await verifyAuditContent(page, id)
+    if (
+      ['booking', 'booking-form', 'booking-time-zone', 'embedded-booking', 'team-booking'].includes(
+        id,
+      )
+    )
+      await page.locator('.event-facts li').filter({ hasText: 'America/New York' }).waitFor()
+    if (id === 'booking-form') await page.locator('.host-local-time').waitFor()
     await page.evaluate(() => window.scrollTo(0, 0))
+    await page.evaluate(settleAuditLayout)
   } catch {
     // Browser errors can quote current URLs, DOM text, headers, or a manage capability.
     // This intentionally drops their message/cause while retaining a useful state id.
     throw new Error(`Could not prepare synthetic audit state: ${id}`)
   }
+}
+
+/** Runs entirely in the browser; geometry and DOM contents never leave the page. */
+export async function settleAuditLayout(): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    let frame = 0,
+      revision = 0,
+      previous = '',
+      stableSince = performance.now(),
+      finished = false
+    const observer = new MutationObserver(() => revision++)
+    const finish = (error?: Error) => {
+      if (finished) return
+      finished = true
+      cancelAnimationFrame(frame)
+      clearTimeout(timeout)
+      observer.disconnect()
+      if (error) reject(error)
+      else resolve()
+    }
+    const timeout = setTimeout(() => finish(new Error('Audit layout did not settle')), 5000)
+    observer.observe(document.documentElement, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      characterData: true,
+    })
+    const sample = () => {
+      const geometry = [...document.querySelectorAll('*')].map((element) => {
+        const rect = element.getBoundingClientRect()
+        return [
+          rect.x,
+          rect.y,
+          rect.width,
+          rect.height,
+          element.clientWidth,
+          element.clientHeight,
+          element.scrollWidth,
+          element.scrollHeight,
+        ]
+      })
+      const current = JSON.stringify([revision, geometry])
+      if (current !== previous || document.fonts.status !== 'loaded') {
+        previous = current
+        stableSince = performance.now()
+      } else if (performance.now() - stableSince >= 100) {
+        finish()
+        return
+      }
+      frame = requestAnimationFrame(sample)
+    }
+    // Content readiness can precede font loading and React's final layout. Require
+    // both loaded fonts and a quiet interval across paints before any audit scan.
+    void document.fonts.ready.then(
+      () => {
+        if (!finished) frame = requestAnimationFrame(sample)
+      },
+      () => finish(new Error('Audit fonts did not load')),
+    )
+  })
 }
 
 export function visualScreenshotOptions(page: Page) {

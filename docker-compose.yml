@@ -1,5 +1,6 @@
-# Self-hosting: ./scripts/setup.sh creates a private .env, then
-#   docker compose up -d --build --wait
+# Self-hosting: ./scripts/setup.sh creates a private .env and prints the next commands.
+# --image selects docker-compose.image.yml and an exact HOURMERE_VERSION; start without --build.
+# --source builds this checkout with docker compose up -d --build --wait.
 # The optional docker-compose.proxy.yml adds Caddy HTTPS (selected by setup.sh).
 # The app listens on 127.0.0.1:3000; put a reverse proxy with TLS in front of it. Until SMTP
 # is configured, sign-in links are printed by `docker compose logs app`. With the default
@@ -31,6 +32,12 @@ services:
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set BETTER_AUTH_SECRET in .env (openssl rand -base64 32)}
       SMTP_URL: ${SMTP_URL:-}
       MAIL_FROM: ${MAIL_FROM:-}
+      BOOKING_MAX_INVITEE_RESCHEDULES: ${BOOKING_MAX_INVITEE_RESCHEDULES:-}
+      MAIL_RECIPIENT_MAX_PER_HOUR: ${MAIL_RECIPIENT_MAX_PER_HOUR:-}
+      MAIL_RECIPIENT_MAX_PER_DAY: ${MAIL_RECIPIENT_MAX_PER_DAY:-}
+      SIGN_IN_MAIL_MAX_PER_HOUR: ${SIGN_IN_MAIL_MAX_PER_HOUR:-}
+      SIGN_IN_MAIL_MAX_PER_DAY: ${SIGN_IN_MAIL_MAX_PER_DAY:-}
+      MAIL_MAX_PER_HOUR: ${MAIL_MAX_PER_HOUR:-}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       GOOGLE_MEET_ENABLED: ${GOOGLE_MEET_ENABLED:-false}

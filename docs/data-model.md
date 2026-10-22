@@ -7,6 +7,26 @@ deletion. `booking_calendar_events` maps each written booking version to the sam
 event. See [Google Calendar synchronization](https://hourmere.com/docs/google-calendar) for the cursor, freshness
 and writeback rules.
 
+`calendar_busy` stores each event ID with exactly one representation: a nonempty
+`period` (`tstzrange`) for a timed event, or `all_day_start` and `all_day_end` (`date`)
+with an exclusive end for an all-day event. The dates are finite, within years 0001–9999,
+and strictly increasing. Availability expands all-day dates in each evaluated host's
+schedule zone, including collective and round-robin hosts; it does not use the source
+calendar's zone. Timed events retain their absolute instants.
+
+Migration `0039_calendar_busy_all_day_dates.sql` invalidates `sync_state` and
+`last_synced_at` for every Google calendar, including unselected calendars. Original
+all-day dates cannot be reconstructed unambiguously from old instant ranges. Existing
+busy rows remain until the next complete sync replaces them atomically. Until that sync
+succeeds, affected hosts' personal or collective availability fails with
+`calendar_sync_unavailable`; round-robin pools omit affected hosts and can offer fresh
+slots from other hosts.
+Other providers, bookings and calendar settings are preserved. Stop every old web/all
+and worker process before applying the migration, then restart all roles with the new
+code. Sync snapshot version 2 makes old web processes reject new snapshots and new code
+reject and rebuild version 1 snapshots from old workers, so mixed versions fail closed
+for affected hosts.
+
 PostgreSQL is the system of record. The schema is defined by the SQL files in
 `packages/db/migrations` (applied in order, never edited once applied); TypeScript table
 types in `packages/db/src/tables.ts` are generated from the migrated database.
@@ -30,9 +50,10 @@ types in `packages/db/src/tables.ts` are generated from the migrated database.
 - **Public namespaces.** Organization creation and explicit slug updates reject the same
   case-insensitive reserved names as profile handles. Existing rows are not rewritten;
   metadata-only updates remain available for legacy slugs.
-- **Time** is always `timestamptz` (an instant). Wall-clock rules (working hours) are
-  stored with their IANA time zone and expanded by the availability engine
-  (`@hourmere/core`), which handles DST.
+- **Instants** use `timestamptz`. All-day calendar events retain a start date and
+  exclusive end date; availability expands them at local midnights in the evaluated
+  host's schedule zone. Wall-clock rules (working hours) retain their IANA time zone.
+  Temporal handles DST when these dates and rules become instants.
 
 ## Tables
 
@@ -95,14 +116,15 @@ calendar-list access.
 | `calendar_connections` | user | A connected Google / Microsoft / CalDAV account; credentials encrypted (AES-256-GCM) |
 | `calendar_oauth_states` | user + session | Short-lived, single-use calendar connection attempts: state digest, encrypted PKCE verifier and expiry; separate from sign-in |
 | `calendars` | user | Calendars inside a connection: conflict checking on/off, sync cursor and push channel |
-| `calendar_busy` | user | Busy intervals mirrored by incremental sync (recurring events expanded) |
+| `calendar_busy` | user | Timed busy intervals or all-day date ranges mirrored by incremental sync (recurring events expanded) |
 | `event_types` | organization | What can be booked: duration, step, buffers, notice, window, daily limit, location, questions; soft-deleted |
 | `event_type_hosts` | organization | Who hosts an event type, with optional per-host schedule, destination calendar and round-robin weight |
 | `bookings` | organization | A booked meeting: instant range, status, resolved location, answers, source (`web`/`embed`/`api`/`mcp`), idempotency key |
 | `booking_hosts` | organization | Hosts of a booking; carries the anti-double-booking constraint |
 | `booking_attendees` | organization | The invitee who booked plus guests |
 | `booking_calendar_events` | organization | The event each booking wrote to a host calendar, for idempotent updates and cancellation |
-| `booking_notifications` | organization | Each email sent about a booking (kind, recipient), or refused for good by the mail server, so a retried job never sends it twice; the SHA-256 of the manage-link secret an invitee email carried |
+| `booking_notifications` | organization | Each email sent about a booking (kind, recipient), refused for good, or suppressed by abuse controls, so a retried job never sends it twice; the SHA-256 of the manage-link secret a sent invitee email carried |
+| `notification_email_sends` | instance | Minimal two-day rolling mail accounting: domain-separated invitee/guest or sign-in recipient HMAC-SHA-256 (NULL for hosts) and send timestamp, independent of booking deletion |
 
 ## Guarantees and why
 
@@ -267,6 +289,12 @@ accepted. The migration policy test is a static lint that ignores comments and q
 strings. Dynamic SQL, `DO` blocks and function bodies are out of scope and need manual
 review. It flags missing notes; never edit published SQL to add one.
 
+Also review `DROP NOT NULL` for compatibility with old readers: a table that gains nullable
+rows can break an old binary's assumptions even though no column is removed. The static
+lint does not identify which tables old code reads, so this requires manual review and
+an explicit upgrade note when old readers are incompatible. Migration 0039 is such a case:
+old availability queries skip the new date rows because `calendar_busy.period` is NULL.
+
 ## Sign-in email outbox
 
 `sign_in_emails` is instance-wide authentication delivery state. Every link request writes
@@ -337,6 +365,43 @@ unique constraint remains in place. Existing bookings and email-token hashes are
 by the migration. Host moves lock the personal owner (where applicable), organization and
 booking before host locks, matching deletion order; cancellation or invitee rescheduling
 that waited for a host transfer resolves the moved hash again under the booking lock.
+
+Invitee reschedule limits count predecessor rows with a retained response-token hash across
+the existing `rescheduled_from_id` chain. Host moves transfer and clear that hash; they
+neither consume nor reset the invitee count. The current booking's lock serializes moves
+and their limit checks. No separate counter or reschedule-schema migration is needed.
+
+## Notification email abuse accounting
+
+Migration 0040 adds terminal `suppressed` notification receipts with a bounded
+`suppression_reason` and no manage-token hash. `notification_email_sends` holds only a
+normalized invitee/guest or sign-in recipient digest (or NULL for hosts) and timestamp.
+Runtime hashes use HMAC-SHA-256 with a key derived from `BETTER_AUTH_SECRET` under a fixed
+mail-accounting label, with separate booking and sign-in domains; normalization is trim
+and lowercase only. The ledger has no booking foreign key, so cancellation, rebooking and
+deletion cannot reset the mail budget. Sign-in suppression deletes the outbox row without
+sending; successfully committed sends add a ledger row and delete their outbox row, so a
+retried job cannot resend them. An hourly cleanup job removes accounting rows older than
+two days.
+
+Existing retained sent receipts seed that ledger on upgrade; deleted recipient identities
+cannot be reconstructed. Migration 0040 remains unchanged and backfills legacy unkeyed
+SHA-256 hashes. Those rows (and rows from earlier code) count toward the instance cap but
+not HMAC recipient windows; the recipient-count gap lasts at most 24 hours and old hashes
+are purged after two days. Rotating `BETTER_AUTH_SECRET` likewise resets recipient counters
+while preserving instance counts. Mixed old/new processes are schema-compatible: old
+inserts default to `outcome = 'sent'` and NULL `suppression_reason`, and old reads filter
+`outcome = 'sent'`. Nevertheless, build first, stop every old web/all/worker process, then
+start all roles with the new code, since old senders do not enforce or record these budgets.
+
+The send transaction serializes all notification and sign-in mail through one
+database-local advisory lock, checks rolling counts, and commits a send plus accounting or
+a terminal suppression. Slow SMTP therefore holds up other sends in this instance. All
+sends count toward the instance cap; host and sign-in mail share its 20% reserve, and
+sign-in and booking recipient windows remain separate. Failed sends roll back. Existing
+receipt deduplication and the SMTP acceptance/failed-commit duplicate window remain. See
+[email abuse controls](https://hourmere.com/docs/notifications#email-abuse-controls)
+for defaults, reserve and diagnostics.
 
 ## Booking webhooks
 

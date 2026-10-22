@@ -42,6 +42,28 @@ for (const viewport of [
           if (!(id in selectors)) continue
           const selector = selectors[id as keyof typeof selectors]
           await expect(page.locator(selector)).toBeVisible()
+          if (id === 'booking-form') {
+            const zone = page.locator('.host-time-zone')
+            await expect(zone.locator('wbr')).toHaveCount(1)
+            // Chinese permits breaks inside Latin names unless each slash segment stays together.
+            expect(
+              await zone.locator('.time-zone-segment').evaluateAll((segments) => {
+                // Also measure the longer name from the reported 1280px Chinese regression.
+                const city = segments.at(-1)
+                const original = city?.textContent ?? ''
+                if (city) city.textContent = 'Los Angeles'
+                try {
+                  return segments.every((segment) => {
+                    const range = document.createRange()
+                    range.selectNodeContents(segment)
+                    return range.getClientRects().length === 1
+                  })
+                } finally {
+                  if (city) city.textContent = original
+                }
+              }),
+            ).toBe(true)
+          }
           if (id === 'team-booking') await expect(page.locator(selector)).toHaveText('FixtureTeam')
           if (id === 'oauth-consent')
             await expect(page.locator(selector)).toHaveText(/^(Allow access|允许访问)$/)

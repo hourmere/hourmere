@@ -43,6 +43,7 @@ describe.skipIf(!serverUrl)('bounded conference notification outbox (real Postgr
   })
   beforeEach(async () => {
     await db.deleteFrom('bookings').execute()
+    await db.deleteFrom('notification_email_sends').execute()
     now = NOW
     logs = []
   })
@@ -50,6 +51,7 @@ describe.skipIf(!serverUrl)('bounded conference notification outbox (real Postgr
     db,
     mailer,
     now: () => now,
+    secret: 'synthetic-notification-secret',
     publicUrl: 'https://hourmere.example',
     log: (line: string) => logs.push(line),
   })

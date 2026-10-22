@@ -867,6 +867,32 @@ Apply the same checkout-only limit above; otherwise use backup/restore. If rollb
 this `main`-tracking checkout detached, run `git switch main` before the next upgrade so
 `git pull --ff-only` works.
 
+**Migration 0040 requires stopping all old senders to enforce the mail budgets.** Build
+first, stop every old `web`, `all` and `worker` process (including any on other hosts), then
+start all roles with the upgraded code: build → stop app (and any separate worker) → up.
+With Compose, run `docker compose build`, `docker compose stop app`,
+`docker compose stop worker` if configured, then `docker compose up -d --wait`.
+Leave PostgreSQL running. With `AUTO_MIGRATE=true`, the first new process applies
+`0040_notification_mail_limits.sql` on startup. Mixed old/new processes are
+schema-compatible during the switch: old inserts default to `outcome = 'sent'` and NULL
+`suppression_reason`, and old reads filter `outcome = 'sent'`. Old workers would still send
+without being counted or enforcing the new limits, so all old senders must stop before
+new processes start. The unchanged backfill counts legacy sends toward the instance cap,
+but their old hashes do not match the new keyed recipient counters; that recipient-window
+gap lasts at most 24 hours, and ledger rows are purged after two days. See
+[email abuse controls](/docs/notifications#email-abuse-controls).
+
+**Migration 0039 requires stopping all old processes; do not use a rolling deployment.**
+Before any new process applies `0039_calendar_busy_all_day_dates.sql`, stop every old `web`,
+`all` and `worker` process, including any on other hosts. With Compose, run
+`docker compose stop app` and, if the separate worker is configured, `docker compose stop worker`.
+Leave PostgreSQL running, then start every role with the upgraded code and let Google
+calendar re-sync complete before relying on affected hosts' availability. With
+`AUTO_MIGRATE=true`, the first new process applies the migration on startup. Snapshot
+version 2 makes mixed versions fail closed for affected hosts; round-robin pools can still
+offer fresh slots from other hosts. See the
+[Google busy-time upgrade notes](/docs/google-calendar#busy-time-and-recurring-event-synchronization).
+
 **Migration 0038 requires stopping all old processes; do not use a rolling deployment.**
 Before any new process applies `0038_booking_ical_identity.sql`, stop every old `web`, `all`
 and `worker` process, including any on other hosts. With Compose, run

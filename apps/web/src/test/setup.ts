@@ -7,6 +7,7 @@ afterEach(() => {
   cleanup()
   try {
     localStorage.removeItem('hourmere-language')
+    localStorage.removeItem('hourmere-visitor-time-zone')
     // biome-ignore lint/suspicious/noDocumentCookie: clear only the language preference created by this test
     document.cookie = 'hourmere-language=; Path=/; Max-Age=0'
   } catch {

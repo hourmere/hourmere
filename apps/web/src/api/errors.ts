@@ -150,6 +150,8 @@ export function errorMessage(err: unknown): UiText {
     oauth_organization_forbidden: 'You no longer have access to the selected organization.',
     booking_cancelled: 'This booking was already cancelled.',
     booking_in_past: 'This meeting has already started, so it can’t be changed.',
+    booking_reschedule_limit:
+      'This booking has been rescheduled the maximum number of times. Contact the host to change it again.',
     slot_taken: 'Someone else just booked that time. Please pick another one.',
     slot_unavailable: 'That time is no longer available. Please pick another one.',
     EMAIL_NOT_VERIFIED:

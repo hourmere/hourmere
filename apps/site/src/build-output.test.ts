@@ -1,15 +1,20 @@
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { globSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { JSDOM } from 'jsdom'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { attr, checkBuiltLinks, elements } from '../scripts/check-links.ts'
 import { site } from './site.ts'
 
-const siteRoot = fileURLToPath(new URL('../', import.meta.url))
+const sourceRoot = fileURLToPath(new URL('../', import.meta.url))
+const siteRoot = process.env.HOURMERE_SITE_TEST_ROOT ?? sourceRoot
 // Astro moves prerendered assets with rename(), so output must stay on the source filesystem.
-const scratch = mkdtempSync(join(siteRoot, 'node_modules/.hourmere-site-build-'))
+const scratch = mkdtempSync(join(sourceRoot, 'node_modules/.hourmere-site-build-'))
 const output = join(scratch, 'dist')
+const trademarkNotice =
+  'Calendly and Cal.com are trademarks of their respective owners; Hourmere is not affiliated with or endorsed by them.'
+const text = (node: Element) => node.textContent?.replace(/\s+/g, ' ').trim()
 afterAll(() => rmSync(scratch, { recursive: true, force: true }))
 
 beforeAll(() => {
@@ -31,6 +36,152 @@ beforeAll(() => {
 }, 120_000)
 
 describe('built website', () => {
+  it('publishes the unlisted device test page with its widget markup and loader', () => {
+    const dom = new JSDOM(readFileSync(join(output, 'embed-test/index.html'), 'utf8'))
+    try {
+      const document = dom.window.document
+      expect(document.querySelector('meta[name="robots"]')?.getAttribute('content')).toBe(
+        'noindex,nofollow',
+      )
+      expect(document.querySelector('h1')?.textContent?.trim()).toBe(
+        'Booking widget test page (unlisted)',
+      )
+      expect(
+        document.querySelector('[data-hourmere-inline]')?.getAttribute('data-hourmere-url'),
+      ).toBe('https://app.hourmere.com/adrian-lee/30-minute-call')
+      expect(
+        document.querySelector('[data-hourmere-inline]')?.getAttribute('data-hourmere-height'),
+      ).toBe('720')
+      const scripts = [...document.querySelectorAll('script')]
+      const widgetScripts = scripts.filter(
+        (script) => !script.getAttribute('src')?.startsWith('/_astro/'),
+      )
+      expect(widgetScripts.map((script) => script.getAttribute('src'))).toEqual([
+        'https://app.hourmere.com/hourmere-embed.js',
+        '/embed-test/popup.js',
+      ])
+      for (const script of scripts) {
+        expect(script.hasAttribute('src')).toBe(true)
+        expect(script.textContent?.trim()).toBe('')
+      }
+      for (const script of widgetScripts) {
+        expect(script.hasAttribute('defer')).toBe(true)
+        expect(script.hasAttribute('async')).toBe(false)
+        expect(script.hasAttribute('id')).toBe(false)
+      }
+      // This standalone page must not add another importer to shared CSS/font chunks.
+      expect(document.querySelectorAll('link[rel="stylesheet"]')).toHaveLength(0)
+      expect(readFileSync(join(output, 'embed-test/popup.js'), 'utf8')).toBe(
+        readFileSync(join(siteRoot, 'public/embed-test/popup.js'), 'utf8'),
+      )
+      expect(document.querySelector('button#open-booking-popup')).not.toBeNull()
+      expect(document.querySelector('[data-pagefind-body]')).toBeNull()
+      expect(document.documentElement.getAttribute('data-pagefind-ignore')).toBe('all')
+      expect(readFileSync(join(output, '_headers'), 'utf8')).toBe(
+        readFileSync(join(siteRoot, 'public/_headers'), 'utf8'),
+      )
+    } finally {
+      dom.window.close()
+    }
+  })
+
+  it('keeps shared layout CSS external on every existing marketing page', () => {
+    const stylesheets = ['index.html', 'privacy.html', 'terms.html', '404.html'].map((file) => {
+      const nodes = elements(readFileSync(join(output, file), 'utf8'))
+      const shared = nodes
+        .filter((node) => node.tagName === 'link' && attr(node, 'rel') === 'stylesheet')
+        .map((node) => attr(node, 'href'))
+        .filter((href) => href?.startsWith('/_astro/Base.'))
+      expect(shared, file).toHaveLength(1)
+      return shared[0]
+    })
+    expect(new Set(stylesheets).size).toBe(1)
+  })
+
+  it('keeps the test page out of all sitemap files while retaining public pages', () => {
+    const sitemaps = globSync('**/sitemap*.xml', { cwd: output })
+    expect(sitemaps.length).toBeGreaterThan(0)
+    const urls = sitemaps.flatMap((file) => {
+      const dom = new JSDOM(readFileSync(join(output, file), 'utf8'), { contentType: 'text/xml' })
+      try {
+        return [...dom.window.document.querySelectorAll('loc')].map(
+          (node) => node.textContent ?? '',
+        )
+      } finally {
+        dom.window.close()
+      }
+    })
+    const paths = urls.map((url) => new URL(url).pathname)
+    expect(paths).toContain('/')
+    expect(paths).toContain('/docs/embedding')
+    expect(paths.filter((path) => /^\/embed-test(?:\/|\.html$|$)/.test(path))).toEqual([])
+  })
+
+  it('has no inbound links to the unlisted test page from other rendered pages', () => {
+    const files = globSync('**/*.html', { cwd: output }).filter(
+      (file) => file !== 'embed-test/index.html',
+    )
+    expect(files.length).toBeGreaterThan(15)
+    const inbound: string[] = []
+    for (const file of files) {
+      const route = file.replace(/index\.html$/, '').replace(/\.html$/, '')
+      const nodes = elements(readFileSync(join(output, file), 'utf8'))
+      for (const node of nodes) {
+        const href = attr(node, 'href')
+        if (href === undefined) continue
+        const url = new URL(href, `https://hourmere.com/${route}`)
+        if (
+          ['hourmere.com', 'www.hourmere.com'].includes(url.hostname) &&
+          /^\/embed-test(?:\/|\.html$|$)/.test(decodeURI(url.pathname))
+        )
+          inbound.push(`${file}: ${href}`)
+      }
+    }
+    expect(inbound).toEqual([])
+  })
+
+  it.each(['index.html', 'privacy.html', 'terms.html', '404.html'])(
+    'publishes the trademark notice as footer paragraph text in %s',
+    (file) => {
+      const document = new JSDOM(readFileSync(join(output, file), 'utf8')).window.document
+      const notices = [...document.querySelectorAll('.site-footer p')].filter(
+        (paragraph) => text(paragraph) === trademarkNotice,
+      )
+      expect(notices).toHaveLength(1)
+      expect(notices[0]?.closest('[hidden], [aria-hidden="true"]')).toBeNull()
+    },
+  )
+
+  it('publishes the comparison trademark notice in Product names and independence', () => {
+    const document = new JSDOM(readFileSync(join(output, 'docs/comparison.html'), 'utf8')).window
+      .document
+    const nodes = [...document.querySelectorAll('.sl-markdown-content h2, .sl-markdown-content p')]
+    const notices = nodes.filter((node) => node.tagName === 'P' && text(node) === trademarkNotice)
+    expect(notices).toHaveLength(1)
+    const notice = notices[0]
+    if (!notice) throw new Error('Comparison trademark notice paragraph is missing')
+    expect(notice.closest('[hidden], [aria-hidden="true"]')).toBeNull()
+    const heading = nodes.slice(0, nodes.indexOf(notice)).findLast((node) => node.tagName === 'H2')
+    expect(heading?.id).toBe('product-names-and-independence')
+  })
+
+  it('preserves the comparison independence statement for Cal.diy', () => {
+    const document = new JSDOM(readFileSync(join(output, 'docs/comparison.html'), 'utf8')).window
+      .document
+    const statements = [...document.querySelectorAll('.sl-markdown-content p')].filter(
+      (paragraph) =>
+        text(paragraph) ===
+        'Hourmere is not affiliated with or endorsed by Calendly, Cal.com or the Cal.diy project.',
+    )
+    expect(statements).toHaveLength(1)
+    expect(statements[0]?.closest('[hidden], [aria-hidden="true"]')).toBeNull()
+  })
+
+  it('keeps the trademark notice out of ordinary documentation', () => {
+    const document = new JSDOM(readFileSync(join(output, 'docs/rest.html'), 'utf8')).window.document
+    expect(text(document.body)).not.toContain(trademarkNotice)
+  })
+
   it('copies security.txt unchanged into the configured Workers assets build', () => {
     // Share one real site build with link checks rather than racing Astro's prerender directory.
     const config = JSON.parse(

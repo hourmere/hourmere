@@ -109,7 +109,7 @@ describe.skipIf(!databaseUrl)('separate Google calendar connections (real Postgr
     expect(list.data).toHaveLength(1)
     expect(list.data[0]).toMatchObject({
       accountEmail: 'calendar@example.com',
-      calendars: [{ name: 'My calendar', isPrimary: true }],
+      calendars: [{ name: 'My calendar', isPrimary: true, timeZone: 'America/Los_Angeles' }],
     })
     expect(JSON.stringify(list)).not.toMatch(
       /fake-refresh-token|fake-access-token|credentials|external_account_id/,
@@ -117,6 +117,12 @@ describe.skipIf(!databaseUrl)('separate Google calendar connections (real Postgr
     expect((await listCalendarConnections(deps, other)).data).toEqual([])
     expect(await db.selectFrom('auth.account').selectAll().execute()).toEqual([])
     expect(await db.selectFrom('calendar_oauth_states').selectAll().execute()).toEqual([])
+  })
+
+  it('returns a calendar without a known time zone as null', async () => {
+    await connect()
+    await db.updateTable('calendars').set({ time_zone: null }).execute()
+    expect((await listCalendarConnections(deps, owner)).data[0]?.calendars[0]?.timeZone).toBeNull()
   })
 
   it('does not consume a state used by another user or another session of its owner', async () => {

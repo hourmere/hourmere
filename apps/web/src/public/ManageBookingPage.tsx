@@ -26,6 +26,7 @@ import { useRequest } from './paths.ts'
 import { SlotPicker } from './SlotPicker.tsx'
 import { formatDate, formatTimeRange, offsetLabel, zoneName } from './time.ts'
 import { LIMITS, reasonError } from './validation.ts'
+import { rememberVisitorTimeZone } from './visitor-time-zone.ts'
 
 type Action = 'cancel' | 'reschedule'
 
@@ -281,6 +282,14 @@ function ManageView({
 
   async function failed(err: unknown, during: Action) {
     const code = codeOf(err)
+    if (code === 'booking_reschedule_limit') {
+      setMode({
+        kind: 'view',
+        message:
+          'This booking has been rescheduled the maximum number of times. Contact the host to change it again.',
+      })
+      return true
+    }
     if (code === 'booking_changed') {
       // An email's link follows the meeting, which kept being moved while this waited. Show
       // it as it is now and let people decide; never send the change again by itself.
@@ -370,7 +379,10 @@ function ManageView({
               load={loadSlots}
               durationMinutes={durationMinutes}
               timeZone={timeZone}
-              onTimeZoneChange={setTimeZone}
+              onTimeZoneChange={(zone) => {
+                rememberVisitorTimeZone(zone)
+                setTimeZone(zone)
+              }}
               locale={locale}
               now={now}
               selected={null}

@@ -5,6 +5,7 @@ import type { Schemas } from '../api/client.ts'
 import { goTo } from '../browser.ts'
 import styles from '../styles.css?raw'
 import { fakeApi, json, later, PROFILE, profile, renderApp, signedIn } from '../test/fake-api.tsx'
+import { schedule } from '../test/fixtures.ts'
 
 vi.mock('../browser.ts', () => ({ goTo: vi.fn() }))
 const connection: Schemas['CalendarConnection'] = {
@@ -19,6 +20,7 @@ const connection: Schemas['CalendarConnection'] = {
     {
       id: 'c0000000-0000-7000-8000-000000000001',
       name: 'Work calendar',
+      timeZone: null,
       isPrimary: true,
       checkConflicts: false,
       accessRole: 'owner',
@@ -27,13 +29,150 @@ const connection: Schemas['CalendarConnection'] = {
     },
   ],
 }
-const list = (data = [connection], googleEnabled = true, microsoftEnabled = false) => ({
+const list = (
+  data = [connection],
+  googleEnabled = true,
+  microsoftEnabled = false,
+  destinationCalendarId: string | null = null,
+) => ({
   'GET /api/v1/calendar-connections': () =>
-    json(200, { data, googleEnabled, microsoftEnabled, destinationCalendarId: null }),
+    json(200, { data, googleEnabled, microsoftEnabled, destinationCalendarId }),
 })
 const authorizationUrl = 'https://accounts.google.com/o/oauth2/v2/auth?state=fake-state'
 
 describe('the calendars page', () => {
+  it.each(['en', 'zh-CN'] as const)(
+    'explains a Google calendar zone mismatch using the default schedule rather than the profile in %s',
+    async (locale) => {
+      const user = userEvent.setup()
+      const calendar = connection.calendars[0] as NonNullable<(typeof connection.calendars)[0]>
+      fakeApi({
+        ...signedIn,
+        ...profile({ ...PROFILE, timeZone: 'Asia/Shanghai' }),
+        ...list(
+          [{ ...connection, calendars: [{ ...calendar, timeZone: 'America/New_York' }] }],
+          true,
+          false,
+          calendar.id,
+        ),
+        'GET /api/v1/schedules': () =>
+          json(200, {
+            data: [
+              schedule({ timeZone: 'America/New_York', isDefault: false }),
+              schedule({ timeZone: 'America/Los_Angeles' }),
+            ],
+          }),
+      })
+      renderApp('/app/calendars')
+      await screen.findByRole('heading', { name: 'calendar@example.com' })
+      if (locale === 'zh-CN')
+        await user.selectOptions(screen.getByLabelText('Interface language'), locale)
+      const notice = document.querySelector('.calendar-list .alert-info')
+      expect(notice?.textContent).toMatchSnapshot()
+      expect(notice?.textContent).not.toContain('_')
+      expect(notice?.textContent).not.toContain('Asia/Shanghai')
+      expect(screen.queryByRole('alert')).toBeNull()
+    },
+  )
+
+  it.each([
+    ['reader calendar in another zone', 'reader', 'this', false],
+    ['owned non-destination calendar in another zone', 'owner', 'other', false],
+    ['owned destination calendar in another zone', 'owner', 'this', true],
+    ['no selected destination', 'owner', null, false],
+  ] as const)(
+    'limits the zone notice to an owned booking destination: %s',
+    async (_name, accessRole, selected, expected) => {
+      const calendar = connection.calendars[0] as NonNullable<(typeof connection.calendars)[0]>
+      const otherId = 'c0000000-0000-7000-8000-000000000002'
+      fakeApi({
+        ...signedIn,
+        ...profile(),
+        ...list(
+          [
+            {
+              ...connection,
+              syncAuthorized: true,
+              calendars: [
+                { ...calendar, accessRole, timeZone: 'America/New_York' },
+                {
+                  ...calendar,
+                  id: otherId,
+                  name: 'Other calendar',
+                  isPrimary: false,
+                  timeZone: 'America/Los_Angeles',
+                },
+              ],
+            },
+          ],
+          true,
+          false,
+          selected === 'this' ? calendar.id : selected === 'other' ? otherId : null,
+        ),
+        'GET /api/v1/schedules': () =>
+          json(200, { data: [schedule({ timeZone: 'America/Los_Angeles' })] }),
+      })
+      renderApp('/app/calendars')
+      await screen.findByRole('heading', { name: 'calendar@example.com' })
+      const notices = document.querySelectorAll('.calendar-list .alert-info')
+      expect(notices).toHaveLength(expected ? 1 : 0)
+      if (expected) expect(notices[0]?.closest('li')?.textContent).toContain('Work calendar')
+    },
+  )
+
+  it.each([
+    ['matching zones', 'google', 'America/New_York', 'America/New_York', false],
+    ['renamed matching zones', 'google', 'Asia/Calcutta', 'Asia/Kolkata', false],
+    ['unknown calendar zone', 'google', null, 'America/Los_Angeles', false],
+    ['Microsoft calendar', 'microsoft', 'America/New_York', 'America/Los_Angeles', false],
+    ['no default schedule', 'google', 'America/New_York', null, false],
+    ['unavailable schedules', 'google', 'America/New_York', 'America/Los_Angeles', true],
+  ] as const)(
+    'omits the zone notice for %s and keeps calendar controls available',
+    async (_name, provider, timeZone, scheduleZone, unavailable) => {
+      const calendar = connection.calendars[0] as NonNullable<(typeof connection.calendars)[0]>
+      fakeApi({
+        ...signedIn,
+        ...profile(),
+        ...list(
+          [
+            {
+              ...connection,
+              provider,
+              syncAuthorized: true,
+              calendars: [{ ...calendar, timeZone }],
+            },
+            ...(!timeZone || provider === 'microsoft'
+              ? [
+                  {
+                    ...connection,
+                    id: 'a0000000-0000-7000-8000-000000000002',
+                    accountEmail: 'other@example.com',
+                    calendars: [{ ...calendar, timeZone: scheduleZone }],
+                  },
+                ]
+              : []),
+          ],
+          true,
+          false,
+          calendar.id,
+        ),
+        'GET /api/v1/schedules': () =>
+          unavailable
+            ? json(503, { error: 'internal_error' })
+            : json(200, { data: scheduleZone ? [schedule({ timeZone: scheduleZone })] : [] }),
+      })
+      renderApp('/app/calendars')
+      await screen.findByRole('heading', { name: 'calendar@example.com' })
+      expect(document.querySelector('.calendar-list .alert-info')).toBeNull()
+      expect(
+        screen
+          .getAllByRole('checkbox', { name: 'Check this calendar for conflicts' })[0]
+          ?.matches(':disabled'),
+      ).toBe(false)
+    },
+  )
+
   it('uses a shared introduction and an empty state leading to available connection options', async () => {
     fakeApi({ ...signedIn, ...profile(), ...list([]) })
     renderApp('/app/calendars')
@@ -361,11 +500,13 @@ describe('the calendars page', () => {
   )
 
   it.each([
-    ['en', 'Check this calendar for conflicts', 'Write new bookings here'],
-    ['zh-CN', '检查此日历的冲突', '将新预约写入此日历'],
+    ['en', 'Check this calendar for conflicts', 'Write new bookings here', false],
+    ['en', 'Check this calendar for conflicts', 'Stop writing bookings here', true],
+    ['zh-CN', '检查此日历的冲突', '将新预约写入此日历', false],
+    ['zh-CN', '检查此日历的冲突', '停止向此日历写入预约', true],
   ] as const)(
-    'keeps calendar names literal and controls in separate wrapping rows in %s',
-    async (language, conflictLabel, writeLabel) => {
+    'keeps calendar names literal and %s controls in separate wrapping rows: %s, %s',
+    async (language, conflictLabel, writeLabel, destination) => {
       const user = userEvent.setup()
       const name = `Settings-${'long-calendar-name'.repeat(8)}`
       const calendar = {
@@ -375,7 +516,12 @@ describe('the calendars page', () => {
       fakeApi({
         ...signedIn,
         ...profile(),
-        ...list([{ ...connection, syncAuthorized: true, calendars: [calendar] }]),
+        ...list(
+          [{ ...connection, syncAuthorized: true, calendars: [calendar] }],
+          true,
+          false,
+          destination ? calendar.id : null,
+        ),
       })
       const sheet = document.createElement('style')
       sheet.textContent = styles
@@ -401,6 +547,7 @@ describe('the calendars page', () => {
         expect(getComputedStyle(group).display).toBe('grid')
         expect(getComputedStyle(group).gridTemplateColumns).toBe('minmax(0, 1fr)')
         expect(getComputedStyle(write).maxWidth).toBe('100%')
+        expect(getComputedStyle(write).whiteSpace).toBe('normal')
         expect(getComputedStyle(write).overflowWrap).toBe('anywhere')
       } finally {
         sheet.remove()

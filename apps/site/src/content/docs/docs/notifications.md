@@ -112,10 +112,13 @@ booking's `booking_hosts` whose address is verified: accounts start verified, an
 is not (it should not exist; see [data model](https://github.com/hourmere/hourmere/blob/main/docs/data-model.md)) is neither emailed nor named in the
 invitation, so a booking without a verified host sends nothing (the job logs one WARN line
 naming the booking and the kind, since the invitee hears nothing either). Guests are
-addresses an anonymous booker typed (up to 10 per booking); limiting abuse of that is a
-product follow-up. Times are shown in the recipient's zone with its IANA name: the attendee's zone from `booking_attendees`, a
-host's from their profile, else their default schedule, else UTC. Host emails add the
-invitee's contact details, guests and answers; only the invitee's email has manage links.
+addresses an anonymous booker typed (up to 10 per booking); invitee/guest emails share
+per-recipient and instance-wide [abuse limits](#email-abuse-controls). Times are shown in the recipient's zone with its IANA display name
+(spaces instead of underscores) and the GMT offset for the meeting date: the attendee's
+zone from `booking_attendees`, a host's from their profile, else their default schedule,
+else UTC. Host emails also show the invitee's local time when the saved invitee zone
+differs from the host email's zone. Host emails add the invitee's contact details, guests
+and answers; only the invitee's email has manage links.
 Invitee/guest confirmations and reschedules carry an invitation (`METHOD:REQUEST`),
 cancellations a cancellation (`METHOD:CANCEL`); reminders carry none. New host notifications
 carry the same calendar item only when there is no pinned provider calendar copy (details
@@ -166,8 +169,9 @@ transaction and would miss any path that changes a booking without knowing about
 `booking_notifications` has one row per email: primary key (booking, kind, recipient), the
 recipient being `host:<user id>` or `attendee:<attendee id>` (so someone who books their own
 event type gets both emails). For each recipient the job, in one transaction, inserts the
-row (`ON CONFLICT DO NOTHING`); if it already exists the email was sent and is skipped;
-otherwise it sends the email and commits.
+row (`ON CONFLICT DO NOTHING`); if it already exists the email has a terminal sent,
+rejected or suppressed outcome and is skipped; otherwise it checks the abuse limits,
+sends the email if permitted, and commits.
 
 - A failed send rolls the row back, and the retry sends to the recipients still missing.
 - Two attempts at the same time (a job that ran past its expiry and was retried while still
@@ -235,8 +239,9 @@ transaction (so a failed send leaves no token behind). Email delivery never rota
 booking's own hash. Host moves transfer that hash to the successor without revealing a
 token. Every token, the API's and each email's, opens the booking for as long as it
 exists. No raw secret is stored anywhere, encrypted or not, and the queue holds only
-`{ bookingId, kind }`; nothing depends on `BETTER_AUTH_SECRET`; retries are harmless (at
-worst an unused hash); reminders carry working links. The cost is a second place to look
+`{ bookingId, kind }`; management-token validity does not depend on `BETTER_AUTH_SECRET`
+(the separate abuse counters do); retries are harmless (at worst an unused hash);
+reminders carry working links. The cost is a second place to look
 up a token (below), and several valid secrets per booking, each 256 random bits.
 
 ### Which booking a token opens
@@ -497,11 +502,85 @@ off, including for event types created before migration 0015. REST and MCP expos
 a disabled event type return `400 guests_not_allowed` before any booking, attendee or
 notification is stored. Enabled types retain the ten-guest cap and existing rate limits.
 
-Turning the setting off affects new bookings. Existing guests still receive reminders and
-calendar updates/cancellations so their invitations do not become stale; retries of a
-successfully committed booking preserve the original result. This opt-in limits anonymous
-guest email amplification; it does not verify the main invitee's email address or eliminate
-all email abuse.
+Turning the setting off affects new bookings. Existing guests remain eligible for reminders
+and calendar updates/cancellations, subject to the email limits below; retries of a
+successfully committed booking preserve the original result.
+
+## Email abuse controls
+
+Invitees may reschedule a booking at most `BOOKING_MAX_INVITEE_RESCHEDULES` times (default
+5) across its entire reschedule chain. New response tokens and older email links use the
+same count; host/admin moves neither consume nor reset it. `0` disables invitee
+rescheduling. At the cap, invitee slot lookup and rescheduling return HTTP 409
+`booking_reschedule_limit`, with an English/Chinese manage-page message asking them to
+contact the host. Cancelling remains possible, and authenticated hosts may still move it.
+Existing chains count their earlier invitee moves too.
+
+Before every booking notification send (confirmed, rescheduled, cancelled, reminder and
+conference-failure notices), the worker enforces two rolling windows for invitees and
+guests: `MAIL_RECIPIENT_MAX_PER_HOUR` (default 5) and `MAIL_RECIPIENT_MAX_PER_DAY` (default
+20, over 24 hours). These counters are shared across bookings and organizations. Host mail
+does not consume the booking recipient budget. Changing IPs, cancelling and rebooking, or
+deleting a booking does not reset the mail counters.
+
+After checking account/registration policy, the sign-in worker applies
+`SIGN_IN_MAIL_MAX_PER_HOUR` (default 5) and `SIGN_IN_MAIL_MAX_PER_DAY` (default 20, over
+24 hours). Sign-in recipient hashes use a separate domain from booking hashes, so sign-in
+and booking recipient counts do not mix, even for the same mailbox. If limited, the worker
+deletes the outbox row, emits a WARN with the recipient hash and reason only, and sends
+nothing. Retrying that job never resends it. Every sign-in request retains the same HTTP
+response whether an address is ineligible, under a mail limit or allowed to receive mail;
+the HTTP request does not check these budgets or wait for SMTP.
+
+Recipient normalization is trim + lowercase only. Plus-addressing, Gmail dots and IDN
+variants are not merged; the instance cap is the backstop for those variants. Ledger and
+suppression-log recipient hashes use HMAC-SHA-256 with a key derived from
+`BETTER_AUTH_SECRET` under a fixed mail-accounting label, and separate booking/sign-in
+domains. Without the secret, hashes cannot be matched against a dictionary of addresses.
+Use the same secret on every web and worker process. Rotating it resets the recipient
+counters because earlier hashes no longer match, while instance counts remain intact.
+
+`MAIL_MAX_PER_HOUR` (default 100, `0` means unlimited) counts **all booking notification
+and sign-in emails**, including hosts, across every worker sharing this instance's
+database. Invitee and guest messages are suppressed once that many were sent in the
+preceding hour. Hosts are sent first within each booking job. Host and sign-in mail may
+continue until 120% of that cap (rounded down), then are suppressed too; both share that
+reserve, and sign-in recipient limits still apply. For example, with the default cap,
+invitee/guest mail stops at 100 sends and host/sign-in mail stops at 120. Set the cap below
+your SMTP provider's hourly allowance, accounting for this reserve and any other mail
+using the same provider. For a cap below 5, rounding may leave no extra allowance.
+
+Cap checks and SMTP delivery use the existing send transactions, serialized across workers
+with one database advisory lock. Notification and sign-in sends are serialized per instance,
+so slow SMTP holds up other notification and sign-in sends until it finishes or fails.
+Successful sends add only a recipient hash for invitee/guest and sign-in mail (NULL for
+host mail) and a timestamp to `notification_email_sends`; no plain address is stored in
+this ledger. Failed sends roll back their count and remain retryable under the existing
+policy. The SMTP acceptance/failed-commit duplicate window described above still applies.
+
+A limited booking message commits `booking_notifications.outcome = 'suppressed'`, a stable
+`suppression_reason`, and no manage-token hash. It does not fail the booking or the job,
+and retries never send it later, even when the rolling window clears or an operator raises
+the cap. A structured WARN log includes booking/kind, reason and recipient hash, never the
+plain email address. Operators can count outcomes and reasons in `booking_notifications`;
+these receipts remain subject to existing booking deletion. Sign-in suppression deletes
+its outbox row rather than creating a booking receipt.
+
+The hourly `notification-email-cleanup` job purges ledger rows older than two days,
+independently of booking deletion. Migration 0040's unchanged backfill seeds the ledger
+from retained sent receipts for the last two days where recipient identity is still
+available. Its legacy unkeyed SHA-256 hashes (and any rows from earlier code) count toward
+the instance cap but do not match new HMAC recipient windows. The recipient-count gap
+lasts at most 24 hours, and those old hashes are purged after two days. Deleted identities
+cannot be recovered. Mixed old/new processes are schema-compatible, but old workers send
+without being counted or enforcing these budgets: build first, stop all old web/all/worker
+processes, then start the new code. See the
+[0040 upgrade notes](/docs/self-hosting#upgrading-from-a-pre-10-checkout).
+
+These controls have no CAPTCHA, do not verify invitee/guest addresses, and apply per
+instance/database. Per-IP request limits remain in process memory; separate instances do
+not share a mail budget. The controls reduce volume and may suppress legitimate updates;
+invitees who reach a limit should contact the host.
 
 ## Outbound booking webhooks
 

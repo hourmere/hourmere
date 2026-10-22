@@ -61,10 +61,10 @@ The web app only uses the public API (`/api/v1/*` and Better Auth's `/api/auth/*
 
 Other commands: `npm run lint`, `npm run typecheck`, `npm test`, `npm run build`, `npm run db:migrate`, `npm run db:down`, `npm run api:types`.
 
-The website runs on its own: `npm run dev --workspace @hourmere/site` (http://localhost:4321). `npm run build` writes it to `apps/site/dist`. `npm run deploy --workspace @hourmere/site` builds it and publishes it as Cloudflare Workers static assets on hourmere.com and www.hourmere.com (config in `apps/site/wrangler.jsonc`); it needs `wrangler login` to the Cobaltmere Cloudflare account.
+The website runs on its own: `npm run dev --workspace @hourmere/site` (http://localhost:4321). `npm run build` writes it to `apps/site/dist`. A small Cloudflare Worker handles the Hourmere Cloud waitlist and serves the static assets on hourmere.com and www.hourmere.com (config in `apps/site/wrangler.jsonc`). The D1 database already exists. See [website operations](docs/website.md) for local D1/form testing and the migration the lead must apply before running `npm run deploy --workspace @hourmere/site` in the Cobaltmere Cloudflare account.
 
 The privacy policy's effective and last-updated dates and the terms' effective date share
-`LEGAL_PUBLICATION_DATE` in `apps/site/src/data/legal.ts`, currently `2026-10-20`.
+`LEGAL_PUBLICATION_DATE` in `apps/site/src/data/legal.ts`, currently `2026-10-22`.
 Keep that date on later deployments, including documentation and homepage changes; change it
 only when publishing revised legal text. A placeholder or invalid date stops the site build.
 Environment variables cannot override the source date. CI retains a fixture-date substitution
@@ -312,6 +312,10 @@ Optional [automatic Google Meet](https://hourmere.com/docs/automatic-google-meet
 See the [consolidated limitations](https://hourmere.com/docs#known-limitations)
 and linked operating guides before deploying:
 
+- Public booking and sign-in pages have no CAPTCHA; invitee/guest addresses remain unverified.
+  [Email abuse limits](https://hourmere.com/docs/notifications#email-abuse-controls) apply per
+  instance/database; separate instances do not share budgets. Per-IP request limits remain
+  in process memory.
 - Microsoft Calendar lists calendars only; no busy-time sync or event writes. Microsoft sign-in and
   calendar connections have not had real-account acceptance.
 - Automatic Zoom supports personal event types and individual team event types with one

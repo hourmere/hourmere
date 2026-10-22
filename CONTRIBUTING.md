@@ -193,6 +193,10 @@ serious/critical violations.
 A CI-only canary with known violations verifies the in-browser scan pipeline. Cross-engine
 smoke covers booking, sign-in and the embed popup in desktop WebKit, iPhone WebKit and
 Firefox. These measurements use synthetic data and the disposable-database fixture.
+Every audit page pins the browser clock to the fixture's `AUDIT_NOW` before navigation,
+including form submissions that create rows read by later pages. After content readiness,
+audits await `document.fonts.ready` and 100 ms of stable DOM and geometry across paints;
+failure to settle within five seconds is a scan error.
 Browser downloads are cached by the pinned Playwright version. The system dependency check
 runs even on cache hits because a browser cache does not preserve runner apt packages;
 Playwright installs system packages only when its dry-run check finds packages missing.

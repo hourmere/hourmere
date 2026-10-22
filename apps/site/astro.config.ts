@@ -1,4 +1,5 @@
 import { satteri } from '@astrojs/markdown-satteri'
+import sitemap from '@astrojs/sitemap'
 import starlight from '@astrojs/starlight'
 import { defineConfig } from 'astro/config'
 import docsTablesPlugin from './src/docs-tables.ts'
@@ -22,6 +23,8 @@ export default defineConfig({
   // identifiers whole, wrap long code at separators and stack rows on narrow screens.
   markdown: { processor: satteri({ hastPlugins: [docsTablesPlugin()] }) },
   integrations: [
+    // Replace Starlight's default sitemap so the manual device-test page stays unlisted.
+    sitemap({ filter: (page) => !/^\/embed-test(?:\/|$)/.test(new URL(page).pathname) }),
     {
       name: 'legal-publication-date',
       hooks: {

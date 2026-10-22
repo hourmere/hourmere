@@ -560,9 +560,11 @@ export async function writeBookingConference(
               period: sql<string>`tstzrange(${c.booking.start_at}::timestamptz,${c.booking.end_at}::timestamptz,'[)')`,
             })
             .onConflict((oc) =>
-              oc
-                .columns(['calendar_id', 'external_event_id'])
-                .doUpdateSet((eb) => ({ period: eb.ref('excluded.period') })),
+              oc.columns(['calendar_id', 'external_event_id']).doUpdateSet((eb) => ({
+                period: eb.ref('excluded.period'),
+                all_day_start: null,
+                all_day_end: null,
+              })),
             )
             .execute()
         else

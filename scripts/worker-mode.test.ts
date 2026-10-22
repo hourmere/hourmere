@@ -371,7 +371,7 @@ describe('private worker overlay configuration', () => {
     const setup = fixture(`COMPOSE_FILE='${base}'\n`)
     const enabled = setup.run()
     expect(enabled.status).toBe(0)
-    expect(enabled.stdout).toContain('unset COMPOSE_FILE')
+    expect(enabled.stdout).toContain('unset COMPOSE_FILE HOURMERE_VERSION')
     expect(enabled.stdout).toContain(
       '# Bundled HTTPS only; omit this check in plain mode.\n  docker compose config --services | grep -qx proxy &&\n  docker compose config --services | grep -qx worker',
     )
@@ -384,10 +384,40 @@ describe('private worker overlay configuration', () => {
     expect(disabled.stdout).toContain('docker compose up -d --build --wait --remove-orphans')
   })
 
-  it.each([false, true])(
-    'starts only after printed worker and proxy checks succeed (proxy present: %s)',
-    (hasProxy) => {
-      const setup = fixture(`COMPOSE_FILE='${base}:${proxy}'\n`)
+  it.each([image, `./${image}`])(
+    'omits source builds when enabling and disabling an image selection (%s)',
+    (imageFile) => {
+      const setup = fixture(
+        `COMPOSE_FILE='${base}:${imageFile}:${proxy}'\nHOURMERE_VERSION='1.0.0'\n`,
+      )
+      const enabled = setup.run()
+      expect(enabled.status).toBe(0)
+      expect(enabled.stdout).toContain('docker compose up -d --wait')
+      expect(enabled.stdout).not.toContain('--build')
+      const disabled = setup.run('off')
+      expect(disabled.status).toBe(0)
+      expect(disabled.stdout).toContain('docker compose up -d --wait --remove-orphans')
+      expect(disabled.stdout).not.toContain('--build')
+    },
+  )
+
+  it('decides the startup hint from the selection rather than unrelated multiline values', () => {
+    const setup = fixture(
+      `OTHER='first\nCOMPOSE_FILE=${base}:${image}\nlast'\nCOMPOSE_FILE='${base}:${proxy}'\n`,
+    )
+    const enabled = setup.run()
+    expect(enabled.status).toBe(0)
+    expect(enabled.stdout).toContain('docker compose up -d --build --wait')
+  })
+
+  it.each(
+    [false, true].flatMap((published) =>
+      [false, true].map((hasProxy) => ({ published, hasProxy })),
+    ),
+  )(
+    'runs the matching start command only after worker and proxy checks (image: $published, proxy present: $hasProxy)',
+    ({ published, hasProxy }) => {
+      const setup = fixture(`COMPOSE_FILE='${base}${published ? `:${image}` : ''}:${proxy}'\n`)
       const enabled = setup.run()
       expect(enabled.status).toBe(0)
       const commands = enabled.stdout.split('Run from this checkout:\n')[1]
@@ -397,7 +427,14 @@ describe('private worker overlay configuration', () => {
       mkdirSync(bin)
       writeFileSync(
         join(bin, 'docker'),
-        '#!/bin/sh\ncase "$*" in\n  "compose config --services") printf "%s\\n" app db worker; [ "$HAS_PROXY" != true ] || printf "%s\\n" proxy ;;\n  "compose up -d --build --wait") : > "$STARTED_FILE" ;;\n  *) exit 99 ;;\nesac\n',
+        `#!/bin/sh
+[ -z "\${COMPOSE_FILE+x}\${HOURMERE_VERSION+x}" ] || exit 98
+case "$*" in
+  "compose config --services") printf "%s\\n" app db worker; [ "$HAS_PROXY" != true ] || printf "%s\\n" proxy ;;
+  "$EXPECTED_START") : > "$STARTED_FILE" ;;
+  *) exit 99 ;;
+esac
+`,
         { mode: 0o755 },
       )
       const run = spawnSync('/bin/sh', ['-c', commands ?? 'exit 99'], {
@@ -406,6 +443,9 @@ describe('private worker overlay configuration', () => {
           PATH: `${bin}:${process.env.PATH}`,
           HAS_PROXY: String(hasProxy),
           STARTED_FILE: started,
+          EXPECTED_START: `compose up -d${published ? '' : ' --build'} --wait`,
+          COMPOSE_FILE: 'unrelated-shell-selection.yml',
+          HOURMERE_VERSION: '9.9.9',
         },
       })
       expect(run.status).toBe(hasProxy ? 0 : 1)
