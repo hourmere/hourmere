@@ -75,7 +75,9 @@ describe('comparison review information', () => {
       const source = read(`./content/docs/docs/${page}`)
       const intro = source.split(/^## /m)[0] ?? ''
       expect(intro).toMatch(/\[invitation-only preview\]\(\/#faq\) with sign-ups closed/)
-      expect(intro).toContain('planned for November 30, 2026')
+      expect(plainText(intro)).toContain(
+        'Hourmere 1.0.0 was released for self-hosting on November 30, 2026.',
+      )
       expect(intro).not.toMatch(/README/)
       expect(intro.replace(/\s+/g, ' ')).toContain(
         '[self-hosting guide](/docs/self-hosting) installs the published image pinned to an exact release version',
@@ -83,7 +85,9 @@ describe('comparison review information', () => {
       expect(intro).toContain('building from source remains an alternative')
       expect(intro).not.toMatch(/no prebuilt public image is published/i)
       expect(intro).toContain('](/docs/self-hosting)')
-      expect(intro).not.toMatch(/not yet ready to use|Cloud has not launched/)
+      expect(intro).not.toMatch(
+        /not yet ready to use|Cloud has not launched|planned for November 30, 2026/,
+      )
     })
   }
 
@@ -95,14 +99,16 @@ describe('comparison review information', () => {
       /Can I use Hourmere today\? Hourmere Cloud is in an invitation-only preview/,
     )
     expect(text).toContain('Sign-ups are currently closed.')
-    expect(text).toContain(
-      'The open-source release for self-hosting is planned for November 30, 2026.',
-    )
+    expect(
+      text.match(/Hourmere 1\.0\.0 was released for self-hosting on November 30, 2026\./g),
+    ).toHaveLength(2)
     expect(home).toContain('href="https://app.hourmere.com"')
     expect(home).toContain('operated by {company.shortName}')
     expect(home).toContain('href="/privacy"')
     expect(home).toContain('href="/terms"')
-    expect(text).not.toMatch(/Not yet\.|not available yet|no sign-up today|[Ii]n development/)
+    expect(text).not.toMatch(
+      /Not yet\.|not available yet|no sign-up today|[Ii]n development|planned for November 30, 2026/,
+    )
     expect(read('./site.ts')).not.toContain('adrian@cobaltmere.com')
   })
 
@@ -228,7 +234,9 @@ describe('privacy data-flow disclosures', () => {
 
   it('separates transient IP abuse checks from persisted waitlist records and hosting requests', () => {
     const website = section('this-website')
-    expect(website).toMatch(/hosting provider processes standard request data, such as IP address/)
+    expect(website).toMatch(
+      /hosting provider also processes standard request data, such as IP address/,
+    )
     expect(website).toMatch(
       /uses your IP address to derive a SHA-256 key for Cloudflare's transient rate limiter/,
     )
@@ -239,6 +247,42 @@ describe('privacy data-flow disclosures', () => {
     )
     expect(website).toMatch(
       /Cloudflare also processes standard website request data.*its own handling of that data is separate from the waitlist records/,
+    )
+  })
+
+  it('names Cloudflare Web Analytics and limits the website reports to aggregate statistics', () => {
+    const website = block('p', 'hourmere.com serves static pages')
+    expect(website).toContain(
+      'We use Cloudflare Web Analytics to see aggregate page views, the pages visited, referring websites and visitor countries, so we can understand which pages and channels bring people to Hourmere.',
+    )
+    expect(website).toContain(
+      'It runs a small script on our pages, does not use cookies, local storage or other client-side state, and does not record query strings.',
+    )
+    expect(website).toContain(
+      'Cloudflare states that it does not fingerprint visitors, and we see only aggregated statistics, not individual visitors.',
+    )
+    expect(website).toContain(
+      "We do not use advertising or other third-party trackers, and the website's fonts are served from hourmere.com.",
+    )
+    expect(website).not.toMatch(/does not use analytics/)
+  })
+
+  it('discloses the keyed recipient hashes and send times immediately after usage information', () => {
+    const emailRecords = block('li', 'Email sending records:')
+    expect(emailRecords).toContain(
+      "Email sending records: to limit abuse of booking and sign-in emails, Hourmere Cloud records a keyed hash of each recipient's email address, which cannot be reversed without our server secret, together with the time each email was sent.",
+    )
+    const items = blocks('li')
+    const usageIndex = items.findIndex((item) =>
+      item.startsWith('Usage and diagnostic information:'),
+    )
+    expect(usageIndex).toBeGreaterThan(-1)
+    expect(items[usageIndex + 1]).toBe(emailRecords)
+  })
+
+  it('discloses automatic two-day deletion of the email sending records', () => {
+    expect(section('retention')).toContain(
+      'Email sending records (keyed recipient hashes and send times used to enforce sending limits) are deleted automatically after 2 days.',
     )
   })
 
@@ -603,7 +647,7 @@ describe('privacy data-flow disclosures', () => {
       /Zoho, which delivers sign-in emails, booking confirmations and reminders from its United States data center/,
     )
     expect(providers).toContain(
-      'Cloudflare, which hosts the hourmere.com website and stores the Hourmere Cloud waitlist (it does not host Hourmere Cloud or process Google user data)',
+      'Cloudflare, which hosts the hourmere.com website, provides its cookieless web analytics and stores the Hourmere Cloud waitlist (it does not host Hourmere Cloud or process Google user data)',
     )
     expect(providers).toContain('We use them only to host the Service and deliver its email.')
     expect(providers).not.toMatch(/GitHub/)
@@ -629,6 +673,9 @@ describe('privacy data-flow disclosures', () => {
     expect(transfers).toMatch(
       /Authorized personnel, who may be outside the United States, can access or export the waitlist to send the Cloud opening notification\./,
     )
+    expect(transfers).toContain(
+      'Website analytics are processed by Cloudflare as described in section 14 .',
+    )
     expect(transfers).not.toMatch(/We are based|China|Chinese|Sent folder|sent-copy retention/i)
   })
 
@@ -637,6 +684,12 @@ describe('privacy data-flow disclosures', () => {
       /If you choose a display language, it also remembers that choice in a cookie and in your browser's local storage/,
     )
     expect(section('this-website')).toContain('We do not use advertising cookies.')
+  })
+
+  it('discloses browser-local visitor time zone preferences and their storage with a booking', () => {
+    expect(block('p', 'Hourmere Cloud, including the preview, uses only cookies')).toContain(
+      "Public booking pages remember a time zone you explicitly choose in your browser's local storage, so later booking pages can show times in that zone; it stays on your device until you book, when the booking records the time zone you booked in.",
+    )
   })
 
   it('describes Stripe and Link payment processing conditionally in privacy and terms', () => {
@@ -672,6 +725,9 @@ describe('privacy data-flow disclosures', () => {
 
   it('describes current cleanup and one-month deletion responses without other retention promises', () => {
     const retention = section('retention')
+    expect(retention).toContain(
+      'Beyond the cleanup described in sections 2, 4 and 7, the email sending records above and the backup rotation below, Hourmere does not currently run other automatic deletion schedules',
+    )
     expect(retention).toMatch(/does not currently run other automatic deletion schedules/)
     expect(retention).toMatch(
       /ask about or request deletion of the data \{company\.shortName\} holds about you by emailing .*we respond within one month/,

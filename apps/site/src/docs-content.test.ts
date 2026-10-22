@@ -24,6 +24,7 @@ const repositoryDocs = globSync('**/*.md', { cwd: join(root, 'docs') }).map(
 // Keep exceptions scoped to their file and purpose, so a new self-hosting example still fails.
 const ownSiteReferences: Record<string, readonly string[]> = {
   'README.md': [
+    'Open-source scheduling for people and AI agents. Self-host from the published container image; Hourmere Cloud is in an invitation-only preview with sign-ups closed. [Join the Cloud waitlist](https://hourmere.com/#cloud-waitlist).',
     '| `apps/site` | Website for hourmere.com (Astro + Starlight): homepage, legal pages, docs. Static; not part of the Docker image. |',
     'The website runs on its own: `npm run dev --workspace @hourmere/site` (http://localhost:4321). `npm run build` writes it to `apps/site/dist`. A small Cloudflare Worker handles the Hourmere Cloud waitlist and serves the static assets on hourmere.com and www.hourmere.com (config in `apps/site/wrangler.jsonc`). The D1 database already exists. See [website operations](docs/website.md) for local D1/form testing and the migration the lead must apply before running `npm run deploy --workspace @hourmere/site` in the Cobaltmere Cloudflare account.',
     'hosted service. `HOSTED_SIGNUP_URL` sets their destination (default `https://hourmere.com`);',
@@ -142,13 +143,23 @@ describe('self-hosting documentation links', () => {
 })
 
 describe('launch documentation disclosures', () => {
-  it('keeps the docs overview consistent with the planned release and Cloud preview', () => {
+  it('keeps website operations consistent with the release and closed Cloud preview', () => {
+    const intro = prose(read('docs/website.md').split(/^## /m)[0] ?? '')
+    expect(intro).toContain('Hourmere 1.0.0 was released for self-hosting on November 30, 2026.')
+    expect(intro).toContain('invitation-only preview with sign-ups closed.')
+    expect(intro).not.toContain('is planned for November 30, 2026')
+  })
+
+  it('keeps the docs overview consistent with the released version and Cloud preview', () => {
     const intro = prose(read(`${siteDocs}/index.md`).split(/^## /m)[0] ?? '')
-    expect(intro).toMatch(/no stable release yet/i)
-    expect(intro).toContain('2026-11-30')
-    expect(intro).toMatch(/release.*planned|planned.*release/i)
+    expect(intro).toContain('Hourmere 1.0.0 was released on 2026-11-30.')
+    expect(intro).toContain('install the published image with the self-hosting guide')
+    expect(read(`${siteDocs}/index.md`)).toContain('[self-hosting guide](/docs/self-hosting)')
     expect(intro).toMatch(/Hourmere Cloud is (?:in )?an invitation-only preview/)
-    expect(intro).not.toMatch(/no.*hosted booking service|stable release is available/i)
+    expect(intro).toContain('with sign-ups closed')
+    expect(intro).not.toMatch(
+      /no.*hosted booking service|no stable release yet|release.*planned|planned.*release|early development/i,
+    )
   })
 
   it('records the comparison claims re-verification date', () => {

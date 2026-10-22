@@ -2,8 +2,8 @@
 
 Hourmere releases are published from `main` in the public
 [`hourmere/hourmere`](https://github.com/hourmere/hourmere) repository under AGPL-3.0-only.
-The first stable release is planned for **2026-11-30**. Preparing or merging release files
-does not publish an image, tag, package or GitHub Release.
+The first stable release, **1.0.0**, was released on **November 30, 2026**. Preparing or
+merging release files does not publish an image, tag, package or GitHub Release.
 
 ## Versioning and release notes
 
@@ -196,11 +196,11 @@ Use these values for publication verification and reproducible deployments.
 ## RC image installation rehearsal
 
 The owner chose the published GHCR image as the primary self-hosting path on 2026-10-20
-(card 197, option A). The installer and `docker-compose.image.yml` are prepared now;
-the live README and website must continue to select `setup.sh --source` until publication.
-No public image is available yet. Rehearse the image path during the approved November
-11–13 RC window, after an RC has actually been published and made public through the
-release process above. A successful dry-run build alone does not make an image pullable.
+(card 197, option A). Hourmere 1.0.0 is available as a public image; the README and website
+select `setup.sh --image`, retaining `setup.sh --source` as an alternative. For future
+release candidates, rehearse the image path in the approved RC window, only after the RC
+has actually been published and made public through the release process above. A successful
+dry-run build alone does not make an image pullable.
 
 For the approved RC, replace `1.0.0-rc.1` below with its **exact** version. On both an
 amd64 host and an arm64 host, pull anonymously with an empty Docker credential directory;
@@ -294,7 +294,15 @@ Make the documentation changes in a separate follow-up after verifying public ac
   | File / preparation lines | Release-day change |
   |---|---|
   | `README.md:2`, `:75–134` (Self-hosting) | Describe the published image; clone `--branch v1.0.0`, select image setup, pull, then `up -d --wait` without `--build`; retain explicit `--source` alternative. |
+  | `README.md:2` (Cloud status), `README.md:4` (release banner) | Keep Cloud in invitation-only preview with sign-ups closed and a waitlist; replace the early-development warning with the 1.0.0 release date, November 30, 2026. Do not promise Cloud availability or pricing. |
   | `README.md:135–169` (upgrade/recovery) | Record the old exact version; change `HOURMERE_VERSION`, pull and start; revert it before startup, use backup/restore after any migration/startup. |
+  | `SECURITY.md:8` (Supported versions) | Support the `1.0.x` series and direct self-hosters to the latest `1.0.x` patch release. |
+  | `apps/site/src/content/docs/docs/index.md:6–8`, `apps/site/src/content/docs/docs/comparison.md:7–9` (introductions) | State that 1.0.0 was released on November 30, 2026; retain Cloud's invitation-only preview and closed sign-ups. |
+  | `apps/site/src/pages/index.astro` (hero status) | Set the label above the main heading to `Hourmere 1.0.0 released`; keep Cloud's separate invitation-only preview status. |
+  | `apps/site/src/pages/index.astro:90`, `:277` (release copy) | Replace the planned self-hosted release with the released 1.0.0 and its date; preserve the Cloud waitlist markup and preview limits. Update homepage, legal-content, docs-content and waitlist-client wording guards together. |
+  | `apps/site/src/pages/index.astro` (pricing disclosure and Pro/Team notes) | Say that final plan details will be published when Hourmere Cloud launches; keep the planned Cloud prices distinct from the self-hosted 1.0.0 release. |
+  | `docs/releasing.md` (introduction and RC image installation rehearsal), `docs/website.md` (introduction) | State the November 30, 2026 release and public image availability; retain source builds as an alternative and the publication prerequisites for future RCs. |
+  | Separate repository `hourmere/.github`, `profile/README.md` ("planned for November 30, 2026" sentence) | Replace the planned-release sentence with the 1.0.0 release and date in a separate release-day PR in that repository; this repository's docs PR only lists the action. |
   | `apps/site/src/content/docs/docs/self-hosting.md:8–79` (Prepare / First start) | Remove the unpublished-image claim, require an exact release tag/version, describe the image overlay and same-version worker. |
   | Same guide `:174–220` (Caddy migration) | Preserve `docker-compose.image.yml` when switching proxy modes; pull the pinned image before recreating app/worker without `--build`, keeping Caddy state and the guarded migration sequence. |
   | Same guide `:122–173`, `:221–397` (plain / worker / webhook) | Preserve the image overlay in every file list and remove image-path builds. |
@@ -305,8 +313,9 @@ Make the documentation changes in a separate follow-up after verifying public ac
   | `scripts/deploy-docs.test.ts` and `scripts/restore-env.test.ts` | Update executable paste/restore expectations with the docs, preserving failure guards and private `.env` handling. |
 
 - Replace the no-stable-release/public-image sentences in `README.md`, `SECURITY.md`,
-  the site's self-hosting, configuration, comparison and index guides, homepage, site description and
-  legal pages. Update `apps/site/src/legal-content.test.ts` (currently line 80, asserting
+  the site's self-hosting, configuration, comparison and index guides, and homepage.
+  Privacy and terms contain no release-timing sentences and need no release-day text change.
+  Update `apps/site/src/legal-content.test.ts` (currently line 80, asserting
   `no prebuilt public image is published`) together with the corresponding docs sentences.
   The draft PR above is the prepared revision of the source-build install instructions;
   keep the source-build alternative and exact-version/rollback guidance when merging it.
@@ -321,21 +330,36 @@ and request owner approval again for a retry. Never move a published tag or forc
 fix product content in a new patch release. A package-publicity failure is not fixed by
 claiming that an image is public in documentation.
 
+### Merge procedure
+
+Merge [PR #77](https://github.com/hourmere/hourmere/pull/77) with a merge commit, not a squash.
+Then retarget [PR #98](https://github.com/hourmere/hourmere/pull/98) to `main` with
+`gh pr edit 98 --base main` before merging it. Publish the website changes to `site-live`
+through [Website publication](#website-publication), including `-m 1` when cherry-picking
+merge commits.
+
+### Website publication
+
+Website changes reach the public site through `site-live`. Cherry-pick the reviewed website
+changes from `main` onto `site-live`; for a merge commit, use
+`git cherry-pick -m 1 <merge-commit>` so the change is taken relative to its first parent.
+Follow the build, deployment and verification steps in
+[website operations](website.md#lead-commands-after-acceptance).
+
 ## CLI package identity
 
 Directory preparation is in [mcp-directories.md](mcp-directories.md).
 
 Use **`@hourmere/cli`**, exposing the **`hourmere`** command. It matches the existing
 workspace name, groups future packages under the Hourmere scope, and avoids consuming the
-bare product name. On 2026-10-19, read-only `npm view hourmere` and
-`npm view @hourmere/cli` both returned E404 from the public npm registry. This means no
-package metadata was found; it neither reserves the name nor proves scope ownership or
-publication permission. The owner must confirm control of the `hourmere` npm organization,
-check the name again, and authorize the first public release.
+bare product name. The `hourmere` npm organization exists. The owner decided in card 150
+that **Hourmere 1.0.0 does not publish the CLI to npm**. The CLI stays source-run with
+`npm run --silent cli -- --help`; see the [CLI guide](https://hourmere.com/docs/cli).
+Organization ownership and prepared package metadata do not authorize publication.
 
-The first intended public version is **`1.0.0`**, already recorded in the product and CLI
-manifests. Stamping this version does not publish the package. For later releases, update
-all metadata together using the versioning procedure above, then review the tarball:
+The product and CLI manifests record **`1.0.0`**. Stamping this version does not publish
+the package. npm publication is deferred to a later, separately approved release. For that
+release, update all metadata together using the versioning procedure above, then review the tarball:
 
 ```sh
 npm run cli:pack-smoke
@@ -388,7 +412,9 @@ is `${{ false }}`, and it depends on both `prepare` and the reusable `ci` job th
 and `id-token: write` permissions. No tag or pull request can publish through this job
 while it is disabled.
 
-Before enabling npm publication, the owner must:
+Keep this job disabled for 1.0.0. The bootstrap-credential and trusted-publisher guidance
+below is preparation for a later release, not part of the 1.0.0 publication checklist.
+Before enabling npm publication for that later release, the owner must:
 
 1. Confirm control of the `hourmere` npm organization, package availability, publisher
    access and the approved package/lockfile version diff. The source repository is already

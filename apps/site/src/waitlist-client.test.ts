@@ -302,9 +302,7 @@ describe('waitlist layout protections', () => {
     expect(home).toMatch(/href=\{`mailto:\$\{contact\.hello\}`\}/)
     expect(home).not.toContain('Cloud has not launched')
     expect(home.match(/Sign-ups are currently closed\./g)).toHaveLength(3)
-    expect(home).toContain(
-      'The open-source release for self-hosting is planned for November 30, 2026.',
-    )
+    expect(home).toContain('Hourmere 1.0.0 was released for self-hosting on November 30, 2026.')
   })
 
   it('reserves every possible status at its actual wrapped height before any request starts', () => {

@@ -22,7 +22,7 @@ const steps = [
 const features = [
   {
     title: 'Booking links',
-    text: 'Create event types and share a booking link. The Free plan includes unlimited event types and bookings.',
+    text: 'Create event types and share a booking link. Self-hosted Hourmere is free and open source under AGPL-3.0, with unlimited event types and bookings.',
   },
   {
     title: 'Calendar sync',
@@ -56,9 +56,19 @@ const agentActions = [
 
 const plans = [
   { name: 'Self-hosted', price: '$0', unit: '', note: 'Free under AGPL-3.0, on your own server.' },
-  { name: 'Free', price: '$0', unit: '', note: 'Unlimited event types and bookings.' },
-  { name: 'Pro', price: '$8', unit: 'per seat / month', note: 'Plan details at launch.' },
-  { name: 'Team', price: '$14', unit: 'per seat / month', note: 'Plan details at launch.' },
+  { name: 'Free (planned)', price: '$0', unit: '', note: 'Unlimited event types and bookings.' },
+  {
+    name: 'Pro (planned)',
+    price: '$8',
+    unit: 'per seat / month',
+    note: 'Plan details when Hourmere Cloud launches.',
+  },
+  {
+    name: 'Team (planned)',
+    price: '$14',
+    unit: 'per seat / month',
+    note: 'Plan details when Hourmere Cloud launches.',
+  },
 ]
 ---
 
@@ -70,7 +80,7 @@ const plans = [
   <section class="hero">
     <div class="container hero-grid">
       <div>
-        <p class="status"><span class="status-dot" aria-hidden="true"></span>Invitation-only preview</p>
+        <p class="status"><span class="status-dot" aria-hidden="true"></span>Hourmere 1.0.0 released</p>
         <h1>Open-source scheduling for people and AI agents.</h1>
         <p class="lead">
           Hourmere is an open-source alternative to Calendly. Share a
@@ -88,7 +98,7 @@ const plans = [
         <p class="note">
           Hourmere Cloud, operated by {company.shortName}, is in an invitation-only preview at
           <a href="https://app.hourmere.com">app.hourmere.com</a>. Sign-ups are currently closed.
-          The open-source release for self-hosting is planned for November 30, 2026.
+          Hourmere 1.0.0 was released for self-hosting on November 30, 2026.
           <a href="#cloud-waitlist" data-waitlist-link>Join the waitlist</a> to hear when Hourmere Cloud opens to everyone.
           Read the <a href="/privacy">Privacy Policy</a> and <a href="/terms">Terms of Service</a>.
         </p>
@@ -243,10 +253,10 @@ const plans = [
   <section class="section" id="pricing" aria-labelledby="pricing-title">
     <div class="container">
       <p class="eyebrow">Pricing</p>
-      <h2 id="pricing-title">Free to self-host. Simple cloud plans.</h2>
+      <h2 id="pricing-title">Free to self-host. Planned Hourmere Cloud pricing.</h2>
       <p class="section-intro">
-        These are the planned prices for Hourmere Cloud. Final plan details will be published at
-        launch. Joining the waitlist does not create an account or start a paid plan.
+        These are the planned prices for Hourmere Cloud. Final plan details will be published when
+        Hourmere Cloud launches. Joining the waitlist does not create an account or start a paid plan.
       </p>
       <div class="grid plans">
         {
@@ -276,8 +286,8 @@ const plans = [
           <p>
             Hourmere Cloud is in an invitation-only preview at
             <a href="https://app.hourmere.com">app.hourmere.com</a>, operated by {company.shortName}.
-            Sign-ups are currently closed. The open-source release for self-hosting is planned
-            for November 30, 2026. You can <a href={site.github}>follow development on GitHub</a>,
+            Sign-ups are currently closed. Hourmere 1.0.0 was released for self-hosting on
+            November 30, 2026. You can <a href={site.github}>follow development on GitHub</a>,
             and <a href="#cloud-waitlist" data-waitlist-link>join the waitlist</a> to hear when
             Hourmere Cloud opens to everyone.
           </p>

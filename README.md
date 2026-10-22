@@ -1,7 +1,7 @@
 # Hourmere
-Open-source scheduling for people and AI agents. Self-host from the published container image; Hourmere Cloud is coming.
+Open-source scheduling for people and AI agents. Self-host from the published container image; Hourmere Cloud is in an invitation-only preview with sign-ups closed. [Join the Cloud waitlist](https://hourmere.com/#cloud-waitlist).
 
-> Early development. Nothing here is ready to use yet.
+> Hourmere 1.0.0 was released on November 30, 2026.
 
 ## Features
 
