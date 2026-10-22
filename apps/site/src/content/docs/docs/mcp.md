@@ -14,7 +14,7 @@ header on every request:
   "mcpServers": {
     "hourmere": {
       "type": "http",
-      "url": "https://meet.example.com/mcp",
+      "url": "https://hourmere.example.com/mcp",
       "headers": { "Authorization": "Bearer <your API key>" }
     }
   }
