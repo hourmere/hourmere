@@ -125,6 +125,7 @@ describe.skipIf(!serverUrl)('conference lifecycle after real identity lock waits
           const deps = {
             db,
             now: () => now,
+            secret: 'synthetic-notification-secret',
             publicUrl: 'https://hourmere.example',
             log: () => {},
             mailer: {

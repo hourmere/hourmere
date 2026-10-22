@@ -28,7 +28,7 @@ includes PostgreSQL 18.
 | `HOSTED_SIGNUP_URL` | `https://hourmere.com` | Hosted service destination for public attribution and confirmation links. Set the hosted sign-up page URL when available; HTTP(S), no credentials, query or fragment. Independent of this instance’s `PUBLIC_URL`; attribution cannot be disabled. |
 | `PRIVACY_POLICY_URL` | Unset | This instance operator's privacy policy. Absolute HTTP(S) URL, at most 2048 characters, without credentials, whitespace or control characters. Empty hides the privacy link. |
 | `TERMS_URL` | Unset | This instance operator's terms. Same URL rules as `PRIVACY_POLICY_URL`. Empty hides the terms link. |
-| `BETTER_AUTH_SECRET` | Required | At least 32 non-whitespace random characters. Signs sessions and protects sign-in tokens. Changing it signs people out. |
+| `BETTER_AUTH_SECRET` | Required | At least 32 non-whitespace random characters. Signs sessions, protects sign-in tokens and derives the recipient mail-accounting HMAC key. Changing it signs people out and resets recipient mail counters; instance counts remain. |
 | `AUTO_MIGRATE` | `true` | Apply SQL/job migrations on startup. `false` requires manual migrations first; startup still needs database access. Forwarded by the default Compose file with a default of `true`. |
 | `WEB_DIST` | Unset | Built SPA directory. Not forwarded by the default Compose file: Docker sets `/app/apps/web/dist`; development uses Vite instead. |
 | `EMBED_ALLOWED_ORIGINS` | Unset | Up to 32 comma-separated exact HTTPS website origins permitted to embed public booking pages. Empty disables embedding; no wildcards or paths. Loopback HTTP is accepted for local development. |
@@ -120,17 +120,21 @@ for configuration and delivery behavior.
 | `BOOKING_MAX_INVITEE_RESCHEDULES` | `5` | Maximum invitee-initiated reschedules across one booking chain, including through old email links. `0` disables invitee rescheduling. Hosts may still reschedule; cancellation remains available. |
 | `MAIL_RECIPIENT_MAX_PER_HOUR` | `5` | Maximum invitee/guest notification emails sent to the same trimmed, lowercased address in a rolling hour. Positive integer. Host emails are exempt. |
 | `MAIL_RECIPIENT_MAX_PER_DAY` | `20` | Same per-recipient limit over a rolling 24 hours. Positive integer. |
-| `MAIL_MAX_PER_HOUR` | `100` | Instance-wide notification email limit in a rolling hour. `0` is unlimited. Invitee/guest mail stops at this cap; hosts may use up to 120% (rounded down), including mail already sent to invitees/guests. |
+| `SIGN_IN_MAIL_MAX_PER_HOUR` | `5` | Maximum sign-in emails sent to the same trimmed, lowercased address in a rolling hour, separate from booking recipient limits. Positive integer. |
+| `SIGN_IN_MAIL_MAX_PER_DAY` | `20` | Same sign-in recipient limit over a rolling 24 hours. Positive integer. |
+| `MAIL_MAX_PER_HOUR` | `100` | Instance-wide booking notification and sign-in email limit in a rolling hour. `0` is unlimited. Invitee/guest mail stops at this cap; host and sign-in mail may use up to 120% (rounded down), counting all these sends. |
 | `SIGNUP` | `first-user` | `first-user`, `closed` or `open`; existing users can always sign in. |
 | `SIGNUP_ALLOWED_DOMAINS` | Unset | Comma-separated exact email domains, without `@` or wildcards. These domains may register even with `closed`. List subdomains separately. Invalid with `open`. |
 
 These limits default on, including when Compose passes empty variables. They accept whole
 numbers up to 2147483647; negative or fractional values fail startup. Set them identically
 on web and worker processes and recreate both after changing them. Set `MAIL_MAX_PER_HOUR`
-below your SMTP provider's hourly allowance, leaving room for the 20% host reserve,
-sign-in mail and other uses of the same SMTP account. Sign-in/authentication mail is outside
-these notification limits. Suppressed notifications are terminal and are never sent later,
-even after a limit resets. See [email abuse controls](/docs/notifications#email-abuse-controls)
+below your SMTP provider's hourly allowance, allowing for the shared 20% host/sign-in
+reserve and any other uses of the same SMTP account. Sign-in mail counts toward this cap
+but can use the reserve so users can still sign in during a booking flood; its separate
+recipient limits still apply. Suppressed notifications are terminal and are never sent
+later, even after a limit resets. Suppressed sign-in jobs delete their outbox row without
+sending, and every sign-in request retains the same HTTP response. See [email abuse controls](/docs/notifications#email-abuse-controls)
 for retention and diagnostics.
 
 `MAIL_FROM` is the organizer for new calendar invitations. Avoid a Gmail or Google Workspace

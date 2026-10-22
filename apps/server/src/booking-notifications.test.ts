@@ -114,6 +114,7 @@ describe.skipIf(!serverUrl)('booking notifications over REST and MCP', () => {
     bookingNotificationJob({
       db,
       mailer,
+      secret: 'synthetic-notification-secret',
       publicUrl: PUBLIC_URL,
       now: () => NOW,
       log: (line) => logs.push(line),

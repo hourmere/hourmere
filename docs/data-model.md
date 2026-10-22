@@ -124,7 +124,7 @@ calendar-list access.
 | `booking_attendees` | organization | The invitee who booked plus guests |
 | `booking_calendar_events` | organization | The event each booking wrote to a host calendar, for idempotent updates and cancellation |
 | `booking_notifications` | organization | Each email sent about a booking (kind, recipient), refused for good, or suppressed by abuse controls, so a retried job never sends it twice; the SHA-256 of the manage-link secret a sent invitee email carried |
-| `notification_email_sends` | instance | Minimal two-day rolling mail accounting: invitee/guest recipient SHA-256 (NULL for hosts) and send timestamp, independent of booking deletion |
+| `notification_email_sends` | instance | Minimal two-day rolling mail accounting: domain-separated invitee/guest or sign-in recipient HMAC-SHA-256 (NULL for hosts) and send timestamp, independent of booking deletion |
 
 ## Guarantees and why
 
@@ -375,18 +375,33 @@ and their limit checks. No separate counter or reschedule-schema migration is ne
 
 Migration 0040 adds terminal `suppressed` notification receipts with a bounded
 `suppression_reason` and no manage-token hash. `notification_email_sends` holds only a
-normalized invitee/guest recipient digest (or NULL for hosts) and timestamp. It has no
-booking foreign key, so cancellation, rebooking and deletion cannot reset the mail budget.
-An hourly cleanup job removes accounting rows older than two days. Existing retained sent
-receipts seed that ledger on upgrade; deleted recipient identities cannot be reconstructed.
-Stop old web/all/worker processes before migrating and restart every role with the new
-code, since old senders do not enforce or record these budgets.
+normalized invitee/guest or sign-in recipient digest (or NULL for hosts) and timestamp.
+Runtime hashes use HMAC-SHA-256 with a key derived from `BETTER_AUTH_SECRET` under a fixed
+mail-accounting label, with separate booking and sign-in domains; normalization is trim
+and lowercase only. The ledger has no booking foreign key, so cancellation, rebooking and
+deletion cannot reset the mail budget. Sign-in suppression deletes the outbox row without
+sending; successfully committed sends add a ledger row and delete their outbox row, so a
+retried job cannot resend them. An hourly cleanup job removes accounting rows older than
+two days.
 
-The send transaction serializes all notification mail through one database-local advisory
-lock, checks rolling counts, and commits a send plus accounting or a terminal suppression.
-Failed sends roll back. Existing receipt deduplication and the SMTP acceptance/failed-commit
-duplicate window remain. See [email abuse controls](https://hourmere.com/docs/notifications#email-abuse-controls)
-for defaults, host reserve and diagnostics.
+Existing retained sent receipts seed that ledger on upgrade; deleted recipient identities
+cannot be reconstructed. Migration 0040 remains unchanged and backfills legacy unkeyed
+SHA-256 hashes. Those rows (and rows from earlier code) count toward the instance cap but
+not HMAC recipient windows; the recipient-count gap lasts at most 24 hours and old hashes
+are purged after two days. Rotating `BETTER_AUTH_SECRET` likewise resets recipient counters
+while preserving instance counts. Mixed old/new processes are schema-compatible: old
+inserts default to `outcome = 'sent'` and NULL `suppression_reason`, and old reads filter
+`outcome = 'sent'`. Nevertheless, build first, stop every old web/all/worker process, then
+start all roles with the new code, since old senders do not enforce or record these budgets.
+
+The send transaction serializes all notification and sign-in mail through one
+database-local advisory lock, checks rolling counts, and commits a send plus accounting or
+a terminal suppression. Slow SMTP therefore holds up other sends in this instance. All
+sends count toward the instance cap; host and sign-in mail share its 20% reserve, and
+sign-in and booking recipient windows remain separate. Failed sends roll back. Existing
+receipt deduplication and the SMTP acceptance/failed-commit duplicate window remain. See
+[email abuse controls](https://hourmere.com/docs/notifications#email-abuse-controls)
+for defaults, reserve and diagnostics.
 
 ## Booking webhooks
 

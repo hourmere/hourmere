@@ -184,6 +184,7 @@ describe.skipIf(!serverUrl)('automatic Zoom durable booking lifecycle (real Post
   }
   const mail = () => ({
     db,
+    secret: 'synthetic-notification-secret',
     publicUrl: 'https://hourmere.invalid',
     now: () => NOW,
     mailer: {

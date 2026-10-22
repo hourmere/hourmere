@@ -156,6 +156,7 @@ describe.skipIf(!serverUrl)('booking notifications', () => {
     db,
     mailer,
     publicUrl: PUBLIC_URL,
+    secret: 'synthetic-notification-secret',
     now: () => now,
     log: () => {},
   })

@@ -69,6 +69,8 @@ export const BookingNotificationPayload = z.strictObject({
 export interface NotificationDeps extends NotificationMailLimits {
   db: Db
   mailer: Mailer
+  /** BETTER_AUTH_SECRET: purpose-derived key for private recipient accounting. */
+  secret: string
   /** PUBLIC_URL: the origin used for invitee manage links and host booking links. */
   publicUrl: string
   now?: (() => Temporal.Instant) | undefined
@@ -584,7 +586,7 @@ async function sendOnce(
           .executeTakeFirst())
       )
         throw new Overtaken()
-      const recipientHash = notificationRecipientHash(key.email)
+      const recipientHash = notificationRecipientHash(key.email, deps.secret)
       const inviteeFacing = key.verifiedHost === undefined
       const reason = await notificationEmailBudget(
         trx,

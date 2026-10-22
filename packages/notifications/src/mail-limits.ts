@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHmac } from 'node:crypto'
 import type { Db } from '@hourmere/db'
 import { defineJob } from '@hourmere/jobs'
 import { sql } from 'kysely'
@@ -8,7 +8,15 @@ export interface NotificationMailLimits {
   /** Invitee/guest mail only. Positive integers; hosts do not consume this budget. */
   mailRecipientMaxPerHour?: number | undefined
   mailRecipientMaxPerDay?: number | undefined
-  /** All booking notification mail. Zero disables the instance limit. */
+  /** All booking notification and sign-in mail. Zero disables the instance limit. */
+  mailMaxPerHour?: number | undefined
+}
+
+export interface SignInMailLimits {
+  /** Sign-in mail only; separate from booking recipient budgets. */
+  signInMailMaxPerHour?: number | undefined
+  signInMailMaxPerDay?: number | undefined
+  /** Sign-in mail shares the host reserve above the instance cap. */
   mailMaxPerHour?: number | undefined
 }
 
@@ -17,8 +25,24 @@ export type SuppressionReason =
   | 'recipient_daily_limit'
   | 'instance_hourly_limit'
 
-export function notificationRecipientHash(email: string): Buffer {
-  return createHash('sha256').update(email.trim().toLowerCase(), 'utf8').digest()
+function recipientHash(email: string, secret: string, purpose: 'booking' | 'sign-in'): Buffer {
+  // Derive an independent key: ledger/log digests cannot be matched from an address
+  // dictionary without BETTER_AUTH_SECRET, or reused in another server-secret protocol.
+  const key = createHmac('sha256', secret)
+    .update('hourmere/notification-recipient-hash/v1', 'utf8')
+    .digest()
+  return createHmac('sha256', key)
+    .update(`${purpose}\0`, 'utf8')
+    .update(email.trim().toLowerCase(), 'utf8')
+    .digest()
+}
+
+export function notificationRecipientHash(email: string, secret: string): Buffer {
+  return recipientHash(email, secret, 'booking')
+}
+
+export function signInRecipientHash(email: string, secret: string): Buffer {
+  return recipientHash(email, secret, 'sign-in')
 }
 
 /** Whole emails only: a cap of one has no fractional host allowance. */
@@ -79,6 +103,22 @@ export async function notificationEmailBudget(
     limits,
     { instanceHour: Number(global.count), recipientHour, recipientDay },
     inviteeFacing,
+  )
+}
+
+/** Same lock/ledger as booking mail, with a separate recipient budget and host reserve. */
+export async function signInEmailBudget(db: Db, limits: SignInMailLimits, hash: Buffer, now: Date) {
+  const cap = limits.mailMaxPerHour ?? 100
+  return notificationEmailBudget(
+    db,
+    {
+      mailMaxPerHour: cap === 0 ? 0 : Math.floor(cap * 1.2),
+      mailRecipientMaxPerHour: limits.signInMailMaxPerHour ?? 5,
+      mailRecipientMaxPerDay: limits.signInMailMaxPerDay ?? 20,
+    },
+    hash,
+    true,
+    now,
   )
 }
 

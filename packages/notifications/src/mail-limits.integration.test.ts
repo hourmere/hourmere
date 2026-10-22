@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import type { Mailer, MailMessage } from '@hourmere/mail'
@@ -23,6 +24,7 @@ import {
 const serverUrl = process.env.DATABASE_URL
 const NOW = Temporal.Instant.from('2026-11-01T12:00Z')
 const EMAIL = 'ada@example.test'
+const SECRET = 'synthetic-notification-secret'
 
 describe.skipIf(!serverUrl)('durable notification mail limits (real PostgreSQL)', () => {
   let owned: TestDatabase
@@ -49,6 +51,7 @@ describe.skipIf(!serverUrl)('durable notification mail limits (real PostgreSQL)'
   })
   const deps = (overrides: Partial<NotificationDeps> = {}): NotificationDeps => ({
     db,
+    secret: SECRET,
     publicUrl: 'https://hourmere.example',
     now: () => now,
     log: (line) => logs.push(line),
@@ -78,7 +81,7 @@ describe.skipIf(!serverUrl)('durable notification mail limits (real PostgreSQL)'
       .insertInto('notification_email_sends')
       .values(
         Array.from({ length: count }, () => ({
-          recipient_hash: email === null ? null : notificationRecipientHash(email),
+          recipient_hash: email === null ? null : notificationRecipientHash(email, SECRET),
           sent_at: new Date(at.epochMilliseconds),
         })),
       )
@@ -115,7 +118,7 @@ describe.skipIf(!serverUrl)('durable notification mail limits (real PostgreSQL)'
         bookingId: second.id,
         kind: 'confirmed',
         reason: 'recipient_hourly_limit',
-        recipientHash: notificationRecipientHash(EMAIL).toString('hex'),
+        recipientHash: notificationRecipientHash(EMAIL, SECRET).toString('hex'),
       },
     ])
     expect(logs.join('\n')).not.toMatch(/ada@|example\.test/i)
@@ -163,6 +166,33 @@ describe.skipIf(!serverUrl)('durable notification mail limits (real PostgreSQL)'
     await sendBookingNotification(deps(), id, 'confirmed')
     expect(sent).toHaveLength(2)
     expect(logs).toEqual([])
+  })
+
+  it('counts migration-era unkeyed hashes only toward the instance budget', async () => {
+    const legacyHash = createHash('sha256').update(EMAIL).digest()
+    await db
+      .insertInto('notification_email_sends')
+      .values(
+        Array.from({ length: 5 }, () => ({
+          recipient_hash: legacyHash,
+          sent_at: new Date(now.epochMilliseconds),
+        })),
+      )
+      .execute()
+    const first = await booked()
+    await sendBookingNotification(deps(), first.id, 'confirmed')
+    expect(sent).toHaveLength(2)
+    expect(
+      (await ledger()).filter((row) =>
+        row.recipient_hash?.equals(notificationRecipientHash(EMAIL, SECRET)),
+      ),
+    ).toHaveLength(1)
+    const second = await booked(false, 'another@example.test')
+    await sendBookingNotification(deps({ mailMaxPerHour: 7 }), second.id, 'confirmed')
+    expect(sent).toHaveLength(3)
+    expect((await receipts(second.id)).find((row) => row.outcome === 'suppressed')).toMatchObject({
+      suppression_reason: 'instance_hourly_limit',
+    })
   })
 
   it('suppresses invitees at the instance cap and reserves the last twenty percent for hosts', async () => {

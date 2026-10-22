@@ -57,6 +57,7 @@ describe.skipIf(!serverUrl)('multi-host Meet identity and pinned mirrors (real P
     calls: { method: string; calendar: string; value: Record<string, unknown> }[]
   const mail = () => ({
     db,
+    secret: 'synthetic-notification-secret',
     publicUrl: 'https://hourmere.example',
     now: () => NOW,
     mailer: {

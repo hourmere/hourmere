@@ -57,6 +57,7 @@ describe.skipIf(!serverUrl)('automatic Meet durable flow (real PostgreSQL)', () 
   let sent: MailMessage[]
   const mail = () => ({
     db,
+    secret: 'synthetic-notification-secret',
     publicUrl: 'https://hourmere.example',
     now: () => NOW,
     mailer: {
