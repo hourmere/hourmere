@@ -18,7 +18,16 @@ import type { BookingNotifier } from '@hourmere/scheduling'
 import { createFixtures } from '@hourmere/scheduling/testing'
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import type pg from 'pg'
-import { afterAll, beforeAll, describe, expect, it, type MockInstance, vi } from 'vitest'
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  type MockInstance,
+  vi,
+} from 'vitest'
 import { createApp } from './app.ts'
 import { bookingTools } from './mcp/bookings.ts'
 import { mcpEndpoint } from './mcp/endpoint.ts'
@@ -105,10 +114,16 @@ describe.skipIf(!serverUrl)('booking notifications over REST and MCP', () => {
     bookingNotificationJob({
       db,
       mailer,
+      secret: 'synthetic-notification-secret',
       publicUrl: PUBLIC_URL,
       now: () => NOW,
       log: (line) => logs.push(line),
     })
+
+  beforeEach(async () => {
+    // The abuse ledger deliberately survives booking deletion; each scenario owns its budget.
+    await db.deleteFrom('notification_email_sends').execute()
+  })
 
   function appWith(notifier: BookingNotifier) {
     return createApp({

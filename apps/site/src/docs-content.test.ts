@@ -25,10 +25,17 @@ const repositoryDocs = globSync('**/*.md', { cwd: join(root, 'docs') }).map(
 const ownSiteReferences: Record<string, readonly string[]> = {
   'README.md': [
     '| `apps/site` | Website for hourmere.com (Astro + Starlight): homepage, legal pages, docs. Static; not part of the Docker image. |',
-    'The website runs on its own: `npm run dev --workspace @hourmere/site` (http://localhost:4321). `npm run build` writes it to `apps/site/dist`. `npm run deploy --workspace @hourmere/site` builds it and publishes it as Cloudflare Workers static assets on hourmere.com and www.hourmere.com (config in `apps/site/wrangler.jsonc`); it needs `wrangler login` to the Cobaltmere Cloudflare account.',
+    'The website runs on its own: `npm run dev --workspace @hourmere/site` (http://localhost:4321). `npm run build` writes it to `apps/site/dist`. A small Cloudflare Worker handles the Hourmere Cloud waitlist and serves the static assets on hourmere.com and www.hourmere.com (config in `apps/site/wrangler.jsonc`). The D1 database already exists. See [website operations](docs/website.md) for local D1/form testing and the migration the lead must apply before running `npm run deploy --workspace @hourmere/site` in the Cobaltmere Cloudflare account.',
     'hosted service. `HOSTED_SIGNUP_URL` sets their destination (default `https://hourmere.com`);',
     'instance must explicitly set `https://hourmere.com/privacy` and `https://hourmere.com/terms`.',
     '[security@hourmere.com](mailto:security@hourmere.com), not in a public issue. See [SECURITY.md](SECURITY.md).',
+  ],
+  'docs/website.md': [
+    '`Origin` is mandatory: only `https://hourmere.com` and',
+    '`https://www.hourmere.com` are accepted in production. Loopback development is',
+    '3. Confirm the existing custom-domain routes **`hourmere.com`** and',
+    '**`www.hourmere.com`**, and the **`ASSETS`** binding with API worker-first',
+    'For an individual deletion/withdrawal request sent to `hello@hourmere.com`,',
   ],
   '.env.example': [
     'HOSTED_SIGNUP_URL=https://hourmere.com',
@@ -80,6 +87,15 @@ describe('self-hosting documentation links', () => {
       /(?:(?<![\w.-])hourmere\.com|[(\s"'`])\/docs(?:\/[\w-]+)*\/(?=[?#\s"'`)<>{}]|$)/i,
     )
   })
+
+  it.each(['google-calendar', 'mcp', 'embedding'])(
+    'uses the canonical instance hostname in the %s guide',
+    (guide) => {
+      const source = read(`${siteDocs}/${guide}.md`)
+      expect(source).toContain('https://hourmere.example.com')
+      expect(source).not.toMatch(/\b(?:meet|calendar)\.example\.com\b/)
+    },
+  )
 
   it('uses the canonical MCP documentation URL in registry metadata', () => {
     expect(JSON.parse(read('server.json')).websiteUrl).toBe('https://hourmere.com/docs/mcp')
@@ -487,8 +503,8 @@ describe('complete public documentation', () => {
     const readme = normalize(read('README.md'))
     const legal = read('apps/site/src/data/legal.ts')
     const date = legal.match(/LEGAL_PUBLICATION_DATE[^=]*=\s*'([^']+)'/)?.[1]
-    expect(date).toBe('2026-10-20')
-    expect(readme).toContain('2026-10-20')
+    expect(date).toBe('2026-10-22')
+    expect(readme).toContain('2026-10-22')
     expect(readme).toContain('change it only when publishing revised legal text')
     expect(readme).toContain('CI retains a fixture-date substitution')
     expect(readme).toContain('with the current committed date, that substitution makes no change')
@@ -560,7 +576,7 @@ describe('consolidated guide facts', () => {
     '`frame-src`',
     '`CSSStyleSheet`',
     '`adoptedStyleSheets`',
-    'https://calendar.example.com/team/Alpha/intro',
+    'https://hourmere.example.com/team/Alpha/intro',
     'Repeated loading failures',
     'No booking ID',
     'The browser checks every ancestor',

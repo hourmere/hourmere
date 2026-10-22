@@ -25,6 +25,7 @@ const sections = [
 ]
 
 const privacyMail = `mailto:${contact.privacy}`
+const waitlistMail = `mailto:${contact.hello}`
 const publicationDate = resolveLegalPublicationDate()
 ---
 
@@ -185,6 +186,11 @@ const publicationDate = resolveLegalPublicationDate()
       reports.
     </li>
     <li>
+      <strong>Website and Cloud waitlist:</strong> if you join the Hourmere Cloud waitlist,
+      {company.shortName} stores your trimmed, lowercased email address, the time you joined,
+      which form you used, the language (locale), and the consent text version. See <a href="#this-website">section 14</a>.
+    </li>
+    <li>
       <strong>Communications:</strong> messages you send to us, for example to our support address
       or to ask for launch updates.
     </li>
@@ -225,8 +231,9 @@ const publicationDate = resolveLegalPublicationDate()
     including billing for paid plans;
     our legitimate interests in operating a secure and reliable service, which cover security,
     fraud and abuse prevention, and service improvement; compliance with legal obligations, which
-    covers tax and accounting records; and your consent, which covers marketing emails and any
-    other processing for which we ask your permission. You can withdraw consent at any time; see
+    covers tax and accounting records; and your consent, which covers marketing emails, the
+    Hourmere Cloud waitlist and any other processing for which we ask your permission. You can
+    withdraw consent at any time; see
     <a href="#your-rights">section 13</a>.
   </p>
 
@@ -353,7 +360,7 @@ const publicationDate = resolveLegalPublicationDate()
       address and calendar names (see <a href="#ai-assistants">section 6</a>);
     </li>
     <li>
-      with the service providers that host the Service and deliver its email (see
+      with the service providers that host Hourmere Cloud and deliver its email (see
       <a href="#sharing">section 7</a>), only to provide the Service. For example, your name and
       email address from Google sign-in, and Google Meet links, appear in booking emails that
       our email provider delivers;
@@ -521,8 +528,10 @@ const publicationDate = resolveLegalPublicationDate()
     <li>
       <strong>Service providers</strong> that we use to run the Service: BandwagonHost (IT7 Networks
       Inc.), which provides the virtual server in Los Angeles, United States, where we operate
-      Hourmere Cloud and store its backups, and Zoho, which delivers sign-in emails, booking
-      confirmations and reminders from its United States data center. We use them only to host
+      Hourmere Cloud and store its backups, Zoho, which delivers sign-in emails, booking
+      confirmations and reminders from its United States data center, and Cloudflare, which hosts
+      the hourmere.com website and stores the Hourmere Cloud waitlist (it does not host Hourmere Cloud
+      or process Google user data). We use them only to host
       the Service and deliver its email.
     </li>
     <li>
@@ -679,8 +688,10 @@ const publicationDate = resolveLegalPublicationDate()
       section 5 (Microsoft).
     </li>
     <li>
-      <strong>Requests for launch updates</strong> are kept until you ask us to stop or we have sent
-      the launch announcement.
+      <strong>Cloud waitlist entries and requests for launch updates</strong> are kept until you
+      ask us to stop or we have sent the launch notification.
+      Cloudflare D1 keeps a restorable history of the database for up to 30 days, so deleted
+      waitlist entries can remain recoverable for up to 30 days.
     </li>
   </ul>
   <p>
@@ -721,8 +732,11 @@ const publicationDate = resolveLegalPublicationDate()
     secure and support the Service. Hourmere Cloud, including the invitation-only preview at
     app.hourmere.com, is operated by Cobaltmere on a virtual private server that we rent from
     BandwagonHost (IT7 Networks Inc.) in Los Angeles, United States.
-    Hourmere Cloud data and its on-host backups are stored there. The hourmere.com website is published as static
-    files on Cloudflare Workers; the request data its hosting processes is described in
+    Hourmere Cloud data and its on-host backups are stored there. The Hourmere Cloud waitlist is
+    stored in Cloudflare D1 in the United States. Authorized personnel, who may be outside the
+    United States, can access or export the waitlist to send the Cloud opening notification.
+    The hourmere.com website serves static pages
+    and its waitlist form on Cloudflare Workers; the request data its hosting processes is described in
     <a href="#this-website">section 14</a>.
   </p>
 
@@ -747,13 +761,40 @@ const publicationDate = resolveLegalPublicationDate()
 
   <h2 id="this-website">14. This website, cookies and local storage</h2>
   <p>
-    hourmere.com is a static website. It does not set cookies itself; our hosting provider may set
-    strictly necessary security cookies. The website does not use analytics or third-party trackers,
+    hourmere.com serves static pages and a Cloud waitlist form. It does not set cookies itself;
+    our hosting provider may set strictly necessary security cookies. The website does not use analytics or third-party trackers,
     and its fonts are served from hourmere.com. Our website hosting provider processes standard
     request data, such as IP address, browser type and the page requested, to deliver the site and
     protect it from abuse. The documentation pages save small preferences, such as your light or
     dark theme choice, in your browser's local storage; this stays on your device.
   </p>
+  <h3>Hourmere Cloud waitlist</h3>
+  <p>
+    If you join the Hourmere Cloud waitlist, Cobaltmere stores your trimmed, lowercased email
+    address, the time you joined, which form you used, the language (locale), and the consent text
+    version. We use the list only to tell you when Hourmere Cloud opens. The list is stored in
+    Cloudflare D1 in the United States. We do not sell the list. We share it only with Cloudflare,
+    which hosts the website and stores the list, and with the email service we use to send the
+    opening notification. Authorized personnel, who may be outside the United States, can access
+    or export the list to send that notification.
+  </p>
+  <p>
+    To prevent abuse, the waitlist uses your IP address to derive a SHA-256 key for Cloudflare's
+    transient rate limiter, which uses a 60-second counter period. The raw IP address is not sent
+    to that limiter. The waitlist application does not write your IP address, the limiter key,
+    other request data or the honeypot field to D1 or application logs. Cloudflare also processes
+    standard website request data as described above; its own handling of that data is separate
+    from the waitlist records.
+  </p>
+  <p>
+    The legal basis for the waitlist is your consent, which you can withdraw at any time. We keep
+    waitlist entries until you ask us to stop or we have sent the Cloud opening notification.
+    Cloudflare D1 keeps a restorable history of the database for up to 30 days, so deleted waitlist
+    entries can remain recoverable for up to 30 days.
+    To unsubscribe, withdraw consent or ask for deletion, email
+    <a href={waitlistMail}>{contact.hello}</a>. The form does not send a confirmation email.
+  </p>
+  <h3>Hourmere Cloud and booking widgets</h3>
   <p>
     Hourmere Cloud, including the preview, uses only cookies that are strictly necessary for it to
     work, such as keeping you signed in. If you choose a display language, it also remembers that

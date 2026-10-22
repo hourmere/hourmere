@@ -13,6 +13,12 @@ import type { Db } from '@hourmere/db'
 import { defineJob, type EnqueueOptions } from '@hourmere/jobs'
 import { type Mailer, magicLinkEmail } from '@hourmere/mail'
 import { z } from 'zod'
+import {
+  lockNotificationEmailBudget,
+  type SignInMailLimits,
+  signInEmailBudget,
+  signInRecipientHash,
+} from './mail-limits.ts'
 
 export const SIGN_IN_EMAIL_JOB = 'sign-in-email'
 const CLEANUP_JOB = 'sign-in-email-cleanup'
@@ -31,7 +37,7 @@ const StoredRequest = z.object({
 })
 export const SignInEmailPayload = z.strictObject({ emailId: z.uuid() })
 
-export interface SignInEmailDeps {
+export interface SignInEmailDeps extends SignInMailLimits {
   db: Db
   mailer: Mailer
   publicUrl: string
@@ -223,17 +229,31 @@ export async function deliverSignInEmail(
       await remove()
       return
     }
-    // Check token expiry once, after policy queries that may have waited while the
-    // one-time link was used or expired. Outbox retention is checked independently above.
+    // Serialize every notification send, then recheck credentials after any lock wait:
+    // the one-time link may have been used or expired while another SMTP send ran.
+    await lockNotificationEmailBudget(trx)
+    signal?.throwIfAborted()
     const current = await verification(trx, deps, request)
-    if (!current || current.expiresAt <= clock()) {
+    const now = clock()
+    if (!current || current.expiresAt <= now || row.expires_at <= now) {
       await remove()
       return
     }
-    const minutes = Math.max(
-      1,
-      Math.ceil((current.expiresAt.getTime() - clock().getTime()) / 60_000),
-    )
+    const recipientHash = signInRecipientHash(request.email, deps.secret)
+    const reason = await signInEmailBudget(trx, deps, recipientHash, now)
+    if (reason) {
+      await remove()
+      ;(deps.log ?? console.warn)(
+        JSON.stringify({
+          level: 'warn',
+          event: 'sign_in_email_suppressed',
+          reason,
+          recipientHash: recipientHash.toString('hex'),
+        }),
+      )
+      return
+    }
+    const minutes = Math.max(1, Math.ceil((current.expiresAt.getTime() - now.getTime()) / 60_000))
     try {
       await deps.mailer.send(
         magicLinkEmail({
@@ -247,6 +267,10 @@ export async function deliverSignInEmail(
     } catch (error) {
       throw deliveryError(error)
     }
+    await trx
+      .insertInto('notification_email_sends')
+      .values({ recipient_hash: recipientHash, sent_at: clock() })
+      .execute()
     await remove()
   })
 }

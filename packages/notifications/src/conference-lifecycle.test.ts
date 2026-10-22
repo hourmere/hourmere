@@ -43,6 +43,7 @@ describe.skipIf(!serverUrl)('conference lifecycle after real identity lock waits
   })
   beforeEach(async () => {
     await db.deleteFrom('bookings').execute()
+    await db.deleteFrom('notification_email_sends').execute()
   })
   async function blockedBy(pid: number, ownsLock: boolean) {
     const deadline = Date.now() + 3000
@@ -124,6 +125,7 @@ describe.skipIf(!serverUrl)('conference lifecycle after real identity lock waits
           const deps = {
             db,
             now: () => now,
+            secret: 'synthetic-notification-secret',
             publicUrl: 'https://hourmere.example',
             log: () => {},
             mailer: {

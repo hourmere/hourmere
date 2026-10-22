@@ -68,6 +68,14 @@ describe('release preparation', () => {
     expect(notes).not.toMatch(/(?<![\w/])#\d+\b/)
     expect(notes).toContain('https://github.com/hourmere/hourmere/blob/v1.0.0/')
     expect(notes).not.toContain('https://github.com/hourmere/hourmere/blob/main/')
+    expect(notes).toMatch(/`data-hourmere-height`[\s\S]*?`height`[\s\S]*?240 to 2000 px/)
+    expect(notes).toMatch(/lock background scrolling[\s\S]*?only one popup/)
+    expect(notes).toMatch(/host's time zone[\s\S]*?GMT offsets[\s\S]*?invitee's local time/)
+    expect(notes).toContain('additive, nullable `timeZone` field')
+    expect(notes).toContain('branded sign-in confirmation page')
+    expect(notes).toMatch(
+      /published GHCR release image[\s\S]*?`docker-compose.image.yml`[\s\S]*?`setup.sh --image`[\s\S]*?`--version`[\s\S]*?`HOURMERE_VERSION`[\s\S]*?refuses a mismatch/,
+    )
   })
 
   it('pins relocated and existing site guides in the real changelog to the released version', () => {

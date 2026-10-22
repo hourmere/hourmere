@@ -34,12 +34,14 @@ import {
 } from './audit-data.ts'
 import { startFixtureServer } from './fixture-server.ts'
 import { listenOwned, type OwnedListener } from './listeners.ts'
+import { type ScreenshotFixtureState, seedScreenshotData } from './screenshot-data.ts'
 
 export interface FixtureApp {
   url: string
   parentUrl: string
   personalPath: string
   auditState: () => Promise<AuditFixtureState>
+  screenshotState: () => Promise<ScreenshotFixtureState>
   auditSignIn: (signedIn: boolean, locale?: string) => Promise<void>
   auditOAuthQuery: () => Promise<string>
   teamPath: string
@@ -447,12 +449,21 @@ export const test = base.extend<{
       })
       const firstFingerprints = new Map<string, Buffer>()
       let auditState: AuditFixtureState | undefined
+      let screenshotState: ScreenshotFixtureState | undefined
       let auditCookie: string | undefined
       let auditOAuthQuery: string | undefined
       await use({
         url,
         parentUrl,
         personalPath: '/fixture-host/call',
+        screenshotState: async () => {
+          if (auditState || automaticMeet)
+            throw new Error(
+              'Product screenshots require a fresh fixture without audit or Meet data',
+            )
+          screenshotState ??= await seedScreenshotData(db, f, host)
+          return screenshotState
+        },
         auditState: async () => {
           if (auditState) return auditState
           const eventTypeId = await f.eventType(host.organizationId, host.userId, {
@@ -598,7 +609,8 @@ export const test = base.extend<{
                 token,
                 updatedAt: new Date(),
                 expiresAt: new Date(
-                  Math.max(Date.now(), uiAudit ? Date.parse(AUDIT_NOW) : 0) + 86_400_000,
+                  Math.max(Date.now(), uiAudit || screenshotState ? Date.parse(AUDIT_NOW) : 0) +
+                    86_400_000,
                 ),
               })
               .execute()
@@ -733,6 +745,7 @@ export const test = base.extend<{
           const mail = {
             db,
             publicUrl: url,
+            secret: authSecret,
             mailer: {
               send: async (message: MailMessage) => {
                 sent.push(message)

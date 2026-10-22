@@ -19,7 +19,7 @@ empty, which disables embedding.
 For example:
 
 ```dotenv
-PUBLIC_URL=https://calendar.example.com
+PUBLIC_URL=https://hourmere.example.com
 EMBED_ALLOWED_ORIGINS=https://www.example.com,https://blog.example.com
 ```
 
@@ -43,13 +43,13 @@ the parent uses a strict policy.
 
 ```html
 <div data-hourmere-inline
-     data-hourmere-url="https://calendar.example.com/ada/intro"
+     data-hourmere-url="https://hourmere.example.com/ada/intro"
      data-hourmere-height="720"></div>
-<script src="https://calendar.example.com/hourmere-embed.js" defer></script>
+<script src="https://hourmere.example.com/hourmere-embed.js" defer></script>
 ```
 
 Use your full public booking URL; a team URL works in the same place.
-For a team, use `https://calendar.example.com/team/Alpha/intro`. Do not pass an app, sign-in,
+For a team, use `https://hourmere.example.com/team/Alpha/intro`. Do not pass an app, sign-in,
 API or manage URL, or a booking URL containing a query or fragment. The widget constructs
 the separate `/embed/…` route with its parent origin and a random correlation identifier.
 Those values contain no visitor or booking data. A manual iframe must follow the same
@@ -66,8 +66,8 @@ allow a container at least 320px wide.
 
 ```html
 <button type="button" data-hourmere-popup
-        data-hourmere-url="https://calendar.example.com/ada/intro">Book a meeting</button>
-<script src="https://calendar.example.com/hourmere-embed.js" defer></script>
+        data-hourmere-url="https://hourmere.example.com/ada/intro">Book a meeting</button>
+<script src="https://hourmere.example.com/hourmere-embed.js" defer></script>
 ```
 
 The popup uses the browser's modal dialog with a visible dimmed backdrop: the rest of the
@@ -120,13 +120,13 @@ After the script loads, `window.Hourmere` provides:
 ```js
 const handle = window.Hourmere.initInline({
   element: document.querySelector('#booking'),
-  url: 'https://calendar.example.com/ada/intro',
+  url: 'https://hourmere.example.com/ada/intro',
   height: 720, // optional integer, 240–2000
 });
 // Dispose when your page/component unmounts.
 handle.destroy();
 
-window.Hourmere.openPopup({ url: 'https://calendar.example.com/ada/intro' });
+window.Hourmere.openPopup({ url: 'https://hourmere.example.com/ada/intro' });
 window.Hourmere.closePopup();
 // Initialize newly added declarative elements after a client-side navigation.
 window.Hourmere.init();

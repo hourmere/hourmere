@@ -21,28 +21,99 @@ afterEach(() => {
 
 const head = 'a'.repeat(40)
 const other = 'b'.repeat(40)
-const state = (overrides: Partial<SiteDeployState> = {}): SiteDeployState => ({
-  branch: 'main',
-  head,
-  upstreamSha: head,
-  originMainSha: head,
-  originSiteLiveSha: null,
-  tags: [],
-  dirty: false,
-  ...overrides,
-})
+const fetchCommand = "git fetch origin --tags --prune '+refs/heads/*:refs/remotes/origin/*'"
+const state = (overrides: Partial<SiteDeployState> = {}): SiteDeployState => {
+  const local = {
+    branch: 'main',
+    head,
+    upstreamSha: head,
+    originMainSha: head,
+    originSiteLiveSha: null,
+    tags: [],
+    dirty: false,
+    ...overrides,
+  }
+  return {
+    ...local,
+    remoteRefs: {
+      mainSha: local.originMainSha,
+      siteLiveSha: local.originSiteLiveSha,
+      tags: local.tags,
+    },
+    ...overrides,
+  }
+}
 const live = (overrides: Partial<SiteDeployState> = {}) =>
   state({
     branch: 'site-live',
     originSiteLiveSha: head,
-    tags: [{ name: 'v1.0.0', reachable: true }],
+    tags: [{ name: 'v1.0.0', sha: head, reachable: true }],
     ...overrides,
   })
 
 describe('website deploy decisions', () => {
   it('allows clean, synchronized main before site-live exists, even with release tags', () => {
     expect(siteDeployRefusal(state())).toBeNull()
-    expect(siteDeployRefusal(state({ tags: [{ name: 'v1.0.0', reachable: false }] }))).toBeNull()
+    expect(
+      siteDeployRefusal(state({ tags: [{ name: 'v1.0.0', sha: head, reachable: false }] })),
+    ).toBeNull()
+  })
+
+  it('fails closed when origin cannot be inspected', () => {
+    expect(siteDeployRefusal(state({ remoteRefs: null }))).toBe(
+      `Cannot inspect origin; run ${fetchCommand} successfully and retry.`,
+    )
+  })
+
+  it.each([
+    ['main advanced or changed', { mainSha: other, siteLiveSha: null, tags: [] }],
+    ['main was deleted', { mainSha: null, siteLiveSha: null, tags: [] }],
+    ['site-live is unknown locally', { mainSha: head, siteLiveSha: other, tags: [] }],
+  ])('refuses stale fetched refs when %s', (_reason, remoteRefs) => {
+    expect(siteDeployRefusal(state({ remoteRefs }))).toBe(
+      `Local origin branches or stable tags differ from origin; run ${fetchCommand} and retry.`,
+    )
+  })
+
+  it.each([other, null])('refuses changed or deleted remote site-live (%s)', (siteLiveSha) => {
+    expect(
+      siteDeployRefusal(live({ remoteRefs: { mainSha: head, siteLiveSha, tags: [] } })),
+    ).toContain(fetchCommand)
+  })
+
+  it.each([{ tags: [] }, { tags: [{ name: 'v1.0.0', sha: other, reachable: true }] }])(
+    'refuses stable tags missing or different locally (%j)',
+    ({ tags }) => {
+      expect(
+        siteDeployRefusal(
+          state({
+            tags,
+            remoteRefs: {
+              mainSha: head,
+              siteLiveSha: null,
+              tags: [{ name: 'v1.0.0', sha: head }],
+            },
+          }),
+        ),
+      ).toContain(fetchCommand)
+    },
+  )
+
+  it('ignores remote prereleases and nonstable tag names', () => {
+    expect(
+      siteDeployRefusal(
+        state({
+          remoteRefs: {
+            mainSha: head,
+            siteLiveSha: null,
+            tags: ['v2.0.0-rc.1', 'v2.0.0+build', 'v02.0.0', 'v2.0'].map((name) => ({
+              name,
+              sha: other,
+            })),
+          },
+        }),
+      ),
+    ).toBeNull()
   })
 
   it('allows synchronized site-live containing the latest stable release and later corrections', () => {
@@ -51,9 +122,9 @@ describe('website deploy decisions', () => {
       siteDeployRefusal(
         live({
           tags: [
-            { name: 'v1.0.0', reachable: true },
-            { name: 'v1.1.0', reachable: true },
-            { name: 'v2.0.0-rc.1', reachable: false },
+            { name: 'v1.0.0', sha: head, reachable: true },
+            { name: 'v1.1.0', sha: head, reachable: true },
+            { name: 'v2.0.0-rc.1', sha: head, reachable: false },
           ],
         }),
       ),
@@ -112,8 +183,8 @@ describe('website deploy decisions', () => {
     ['v2.0.9', 'v2.0.10'],
   ])('requires the numeric highest stable tag (%s < %s), naming it', (older, latest) => {
     const tags = [
-      { name: older, reachable: true },
-      { name: latest, reachable: false },
+      { name: older, sha: head, reachable: true },
+      { name: latest, sha: other, reachable: false },
     ]
     for (const list of [tags, [...tags].reverse()]) {
       expect(siteDeployRefusal(live({ tags: list }))).toBe(
@@ -131,9 +202,9 @@ describe('website deploy decisions', () => {
       '9.0.0',
       'v9.0',
       'other',
-    ].map((name) => ({ name, reachable: false }))
+    ].map((name) => ({ name, sha: other, reachable: false }))
     expect(
-      siteDeployRefusal(live({ tags: [...tags, { name: 'v1.0.0', reachable: true }] })),
+      siteDeployRefusal(live({ tags: [...tags, { name: 'v1.0.0', sha: head, reachable: true }] })),
     ).toBeNull()
     expect(siteDeployRefusal(live({ tags }))).toContain('No stable release tag')
   })
@@ -172,9 +243,11 @@ function fixture() {
   git('add', '.')
   git('commit', '--quiet', '--message=Start')
   const first = git('rev-parse', 'HEAD')
-  // Local remote refs keep tests entirely offline; no remote is contacted.
-  git('remote', 'add', 'origin', join(dir, 'unused-origin'))
-  git('update-ref', 'refs/remotes/origin/main', first)
+  // A private local bare remote exercises ls-remote without network access.
+  const origin = join(directory(), 'origin.git')
+  git('init', '--quiet', '--bare', '--initial-branch=main', origin)
+  git('remote', 'add', 'origin', origin)
+  git('push', '--quiet', 'origin', 'main')
   git('branch', '--set-upstream-to=origin/main', 'main')
   const run = (cwd = join(dir, 'apps/site')) =>
     spawnSync(process.execPath, [script], { cwd, env, encoding: 'utf8' })
@@ -183,7 +256,7 @@ function fixture() {
     return git('rev-parse', 'HEAD')
   }
   const synchronize = (branch: string) => {
-    git('update-ref', `refs/remotes/origin/${branch}`, git('rev-parse', 'HEAD'))
+    git('push', '--quiet', 'origin', `HEAD:refs/heads/${branch}`, '--tags')
     git('branch', `--set-upstream-to=origin/${branch}`, branch)
   }
   const cut = () => {
@@ -191,7 +264,7 @@ function fixture() {
     git('switch', '--quiet', '--create', 'site-live')
     synchronize('site-live')
   }
-  return { dir, git, first, run, commit, synchronize, cut }
+  return { dir, git, origin, first, run, commit, synchronize, cut }
 }
 
 describe('website deploy Git wrapper', () => {
@@ -230,7 +303,7 @@ describe('website deploy Git wrapper', () => {
     expect(repo.run().status).toBe(0)
   })
 
-  it.each(['public/debug.log', 'src/pages/unreleased.astro'])(
+  it.each(['public/debug.log', 'src/pages/unreleased.astro', 'worker/unreleased.ts'])(
     'refuses ignored build inputs that could ship (%s)',
     (path) => {
       const repo = fixture()
@@ -254,7 +327,89 @@ describe('website deploy Git wrapper', () => {
     expect(repo.run().stderr).toContain('Set the branch upstream')
     repo.synchronize('main')
     repo.git('update-ref', '-d', 'refs/remotes/origin/main')
-    expect(repo.run().stderr).toContain('Set the branch upstream')
+    expect(repo.run().stderr).toContain(fetchCommand)
+  })
+
+  it.each(['main', 'site-live'])(
+    'refuses remote %s changes that have not been fetched',
+    (branch) => {
+      const repo = fixture()
+      if (branch === 'site-live') repo.cut()
+      const before = repo.git('rev-parse', 'HEAD')
+      const next = repo.commit()
+      repo.git('push', '--quiet', 'origin', 'HEAD:refs/heads/remote-update')
+      repo.git('reset', '--quiet', '--hard', before)
+      repo.git('--git-dir', repo.origin, 'update-ref', `refs/heads/${branch}`, next)
+      const result = repo.run()
+      expect(result.status).toBe(1)
+      expect(result.stderr.trim()).toBe(
+        `site-deploy-guard: Local origin branches or stable tags differ from origin; run ${fetchCommand} and retry.`,
+      )
+      expect(repo.git('rev-parse', `refs/remotes/origin/${branch}`)).toBe(before)
+    },
+  )
+
+  it('refuses main when site-live exists remotely but is unknown locally', () => {
+    const repo = fixture()
+    repo.git('--git-dir', repo.origin, 'update-ref', 'refs/heads/site-live', repo.first)
+    const inspected = readSiteDeployState(repo.dir)
+    expect(inspected.originSiteLiveSha).toBeNull()
+    expect(inspected.remoteRefs?.siteLiveSha).toBe(repo.first)
+    const result = repo.run()
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain(fetchCommand)
+  })
+
+  it.each(['annotated', 'lightweight'])(
+    'refuses a stable %s tag missing locally, then permits after the documented fetch',
+    (kind) => {
+      const repo = fixture()
+      if (kind === 'annotated') {
+        repo.git('tag', '--annotate', 'v1.0.0', '--message=Release 1.0.0')
+      } else {
+        repo.git('tag', 'v1.0.0')
+      }
+      repo.git('push', '--quiet', 'origin', '--tags')
+      repo.git('tag', '--delete', 'v1.0.0')
+      const inspected = readSiteDeployState(repo.dir)
+      expect(inspected.remoteRefs?.tags).toEqual([{ name: 'v1.0.0', sha: repo.first }])
+      expect(repo.run().status).toBe(1)
+      expect(repo.run().stderr).toContain(fetchCommand)
+      repo.git('fetch', 'origin', '--tags', '--prune', '+refs/heads/*:refs/remotes/origin/*')
+      const result = repo.run()
+      expect(result.status, result.stderr).toBe(0)
+    },
+  )
+
+  it('refuses a local stable tag pointing to a different commit than origin', () => {
+    const repo = fixture()
+    repo.git('tag', 'v1.0.0')
+    repo.git('push', '--quiet', 'origin', '--tags')
+    repo.commit()
+    repo.git('tag', '--force', 'v1.0.0')
+    repo.git('reset', '--quiet', '--hard', repo.first)
+    expect(repo.run().status).toBe(1)
+    expect(repo.run().stderr).toContain(fetchCommand)
+  })
+
+  it('allows a remote prerelease tag that has not been fetched', () => {
+    const repo = fixture()
+    repo.git('tag', 'v2.0.0-rc.1')
+    repo.git('push', '--quiet', 'origin', '--tags')
+    repo.git('tag', '--delete', 'v2.0.0-rc.1')
+    expect(repo.run().status).toBe(0)
+  })
+
+  it('fails closed on ls-remote errors with one actionable line', () => {
+    const repo = fixture()
+    repo.git('remote', 'set-url', 'origin', join(repo.dir, 'unavailable-origin'))
+    expect(readSiteDeployState(repo.dir).remoteRefs).toBeNull()
+    const result = repo.run()
+    expect(result.status).toBe(1)
+    expect(result.stderr.trim().split('\n')).toHaveLength(1)
+    expect(result.stderr.trim()).toBe(
+      `site-deploy-guard: Cannot inspect origin; run ${fetchCommand} successfully and retry.`,
+    )
   })
 
   it.each(['ahead', 'behind', 'diverged'])(
@@ -306,7 +461,11 @@ describe('website deploy Git wrapper', () => {
     repo.git('merge', '--quiet', '--no-edit', 'v1.10.0')
     repo.synchronize('site-live')
     expect(repo.run().status).toBe(0)
-    expect(readSiteDeployState(repo.dir).tags).toContainEqual({ name: 'v1.10.0', reachable: true })
+    expect(readSiteDeployState(repo.dir).tags).toContainEqual({
+      name: 'v1.10.0',
+      sha: repo.git('rev-parse', 'v1.10.0'),
+      reachable: true,
+    })
   })
 
   it('fails closed on Git errors and emits a single actionable line', () => {
@@ -323,7 +482,7 @@ describe('site deploy command', () => {
     const { scripts } = JSON.parse(readFileSync(manifest, 'utf8'))
     expect(scripts.build).toBe('astro build')
     expect(scripts.deploy).toBe(
-      'node ../../scripts/site-deploy-guard.ts && npm run build && npx --yes wrangler@4.151.0 deploy',
+      'node ../../scripts/site-deploy-guard.ts && npm run build && npx --yes wrangler@4.151.0 deploy --env=""',
     )
     const dir = directory()
     const bin = join(dir, 'bin')

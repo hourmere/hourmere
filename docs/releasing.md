@@ -52,24 +52,25 @@ for unreleased features on `main` until their release.
 The deploy command checks Git state before building. It requires a clean worktree,
 including staged, unstaged and untracked files that would ship, and HEAD equal to the
 branch's upstream: nothing unpushed or unpulled. Ignored untracked files under the site's
-`src` and `public` directories also block deployment; ignored build output in `dist` does
-not. Before `origin/site-live` exists, the
-branch must be `main` and HEAD must equal `origin/main`. Once `origin/site-live` exists,
+`src`, `public` and `worker` directories also block deployment; ignored build output in
+`dist` does not. Before `origin/site-live` exists, the branch must be `main` and HEAD
+must equal `origin/main`. Once `origin/site-live` exists,
 the branch must be `site-live`, HEAD must equal `origin/site-live`, and HEAD must contain
 the highest stable `vX.Y.Z` tag by version. A stable tag must be available locally;
 prerelease tags such as `v1.1.0-rc.1` do not affect that check.
-Deploying from a separate Git worktree is supported: the guard checks the branch and
-state of the worktree running the command, so a clean, synchronized `main` worktree
-passes before the cut.
+Deploy from a full clone or worktree whose checked-out branch is `main` before 1.0 or
+`site-live` after 1.0, such as a dedicated deploy clone, because a branch can be checked
+out in only one worktree.
 
-The guard reads local remote-tracking refs and tags; it does not fetch. Before every
-deployment, the operator must refresh both and stop if either fetch fails. From the
-chosen deployment worktree at the repository root, run (the explicit refspec also
+The guard compares local remote-tracking refs and stable tags with
+`git ls-remote origin refs/heads/main refs/heads/site-live 'refs/tags/v*'` and refuses
+deployment if they are stale or the remote cannot be read; it does not fetch.
+Before every deployment, the operator must refresh both and stop if the fetch fails.
+From the chosen deployment worktree at the repository root, run (the explicit refspec also
 refreshes every origin branch in a single-branch clone):
 
 ```sh
-git fetch --prune origin '+refs/heads/*:refs/remotes/origin/*' &&
-git fetch --tags origin &&
+git fetch origin --tags --prune '+refs/heads/*:refs/remotes/origin/*' &&
 npm run deploy --workspace @hourmere/site
 ```
 
@@ -84,8 +85,7 @@ in a clean checkout where the new branch will live. These are release-day action
 release preparation:
 
 ```sh
-git fetch --prune origin '+refs/heads/*:refs/remotes/origin/*' &&
-git fetch --tags origin &&
+git fetch origin --tags --prune '+refs/heads/*:refs/remotes/origin/*' &&
 git switch --create site-live v1.0.0 &&
 git push --set-upstream origin site-live
 ```
@@ -103,8 +103,7 @@ deploying. For example, from the clean `site-live` deployment worktree after the
 `v1.0.1` release:
 
 ```sh
-git fetch --prune origin '+refs/heads/*:refs/remotes/origin/*' &&
-git fetch --tags origin &&
+git fetch origin --tags --prune '+refs/heads/*:refs/remotes/origin/*' &&
 git pull --ff-only origin site-live &&
 git merge --no-edit v1.0.1 &&
 git push origin site-live &&

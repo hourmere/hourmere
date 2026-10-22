@@ -7,7 +7,13 @@ export interface SiteDeployState {
   originMainSha: string | null
   // A null SHA means the fetched origin/site-live ref does not exist yet.
   originSiteLiveSha: string | null
-  tags: readonly { name: string; reachable: boolean }[]
+  tags: readonly { name: string; sha: string; reachable: boolean }[]
+  // Null means origin could not be inspected, so publication must fail closed.
+  remoteRefs: {
+    mainSha: string | null
+    siteLiveSha: string | null
+    tags: readonly { name: string; sha: string }[]
+  } | null
   dirty: boolean
 }
 
@@ -17,9 +23,26 @@ function stableVersion(name: string): bigint[] | undefined {
   return match?.slice(1).map((part) => BigInt(part))
 }
 
+const fetchCommand = "git fetch origin --tags --prune '+refs/heads/*:refs/remotes/origin/*'"
+
 /** A refusal with the next operator action, or null when publication is allowed. */
 export function siteDeployRefusal(state: SiteDeployState): string | null {
   if (state.dirty) return 'Worktree is dirty; commit or remove local changes before deploying.'
+
+  if (state.remoteRefs === null) {
+    return `Cannot inspect origin; run ${fetchCommand} successfully and retry.`
+  }
+  if (
+    state.originMainSha !== state.remoteRefs.mainSha ||
+    state.originSiteLiveSha !== state.remoteRefs.siteLiveSha ||
+    state.remoteRefs.tags.some(
+      (remote) =>
+        stableVersion(remote.name) &&
+        !state.tags.some((local) => local.name === remote.name && local.sha === remote.sha),
+    )
+  ) {
+    return `Local origin branches or stable tags differ from origin; run ${fetchCommand} and retry.`
+  }
 
   const branch = state.originSiteLiveSha === null ? 'main' : 'site-live'
   if (state.branch !== branch) return `Switch to the ${branch} branch before deploying.`
@@ -57,7 +80,7 @@ export function siteDeployRefusal(state: SiteDeployState): string | null {
   return null
 }
 
-/** Read only local Git state; the operator must successfully fetch branches and tags first. */
+/** Inspect local state and origin without changing refs; fetching remains an operator action. */
 export function readSiteDeployState(cwd = process.cwd()): SiteDeployState {
   const git = (...args: string[]) =>
     execFileSync('git', args, {
@@ -90,20 +113,54 @@ export function readSiteDeployState(cwd = process.cwd()): SiteDeployState {
   )
   const upstream = branch === null ? undefined : refs.get(`refs/heads/${branch}`)?.upstream
   const reachable = new Set(git('tag', '--merged', 'HEAD').split('\n'))
+  const remote = spawnSync(
+    'git',
+    ['ls-remote', 'origin', 'refs/heads/main', 'refs/heads/site-live', 'refs/tags/v*'],
+    { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
+  )
+  const remoteRefs = new Map(
+    remote.stdout
+      ?.trim()
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => {
+        const [sha = '', name = ''] = line.split('\t')
+        return [name, sha] as const
+      }),
+  )
   return {
     branch,
     head: git('rev-parse', '--verify', 'HEAD'),
     upstreamSha: upstream ? (refs.get(upstream)?.sha ?? null) : null,
     originMainSha: refs.get('refs/remotes/origin/main')?.sha ?? null,
     originSiteLiveSha: refs.get('refs/remotes/origin/site-live')?.sha ?? null,
-    tags: git('tag', '--list')
+    tags: git(
+      'for-each-ref',
+      '--format=%(refname:strip=2)%00%(objectname)%00%(*objectname)',
+      'refs/tags/',
+    )
       .split('\n')
       .filter(Boolean)
-      .map((name) => ({ name, reachable: reachable.has(name) })),
+      .map((line) => {
+        const [name = '', object = '', peeled = ''] = line.split('\0')
+        return { name, sha: peeled || object, reachable: reachable.has(name) }
+      }),
+    remoteRefs:
+      remote.error || remote.status !== 0
+        ? null
+        : {
+            mainSha: remoteRefs.get('refs/heads/main') ?? null,
+            siteLiveSha: remoteRefs.get('refs/heads/site-live') ?? null,
+            tags: [...remoteRefs].flatMap(([ref, sha]) => {
+              const name = ref.slice('refs/tags/'.length)
+              if (!ref.startsWith('refs/tags/') || !stableVersion(name)) return []
+              return [{ name, sha: remoteRefs.get(`${ref}^{}`) ?? sha }]
+            }),
+          },
     // Check the entire repository, including from apps/site or a linked worktree.
     dirty:
       git('status', '--porcelain=v1', '--untracked-files=all', '--ignore-submodules=none') !== '' ||
-      // Ignore rules such as *.log must not hide files Astro could publish or import.
+      // Ignore rules must not hide Astro inputs or Worker source Wrangler publishes.
       git(
         'ls-files',
         '--others',
@@ -112,6 +169,7 @@ export function readSiteDeployState(cwd = process.cwd()): SiteDeployState {
         '--',
         ':(top)apps/site/src',
         ':(top)apps/site/public',
+        ':(top)apps/site/worker',
       ) !== '',
   }
 }

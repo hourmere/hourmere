@@ -180,6 +180,7 @@ describe.skipIf(!serverUrl)(
       const mailDeps = {
         db,
         now,
+        secret: 'synthetic-notification-secret',
         publicUrl: 'http://localhost:5111',
         mailer: {
           send: async (message: MailMessage) => {

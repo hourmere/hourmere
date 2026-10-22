@@ -2,13 +2,57 @@
 // Deploy with `npm run deploy --workspace @hourmere/site` after `wrangler login`.
 {
   "name": "hourmere-site",
+  "main": "./worker/index.ts",
   "compatibility_date": "2026-10-01",
+  "observability": { "enabled": false },
   "assets": {
     // Astro copies public/.well-known/security.txt here; serve it as an exact asset.
     "directory": "./dist",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/waitlist"],
     // /privacy serves privacy.html (the build writes flat .html files).
     "html_handling": "auto-trailing-slash",
     "not_found_handling": "404-page"
+  },
+  "d1_databases": [
+    {
+      "binding": "WAITLIST_DB",
+      "database_name": "hourmere-cloud-waitlist",
+      "database_id": "1af0d108-0f24-4166-8f33-d20583d15798",
+      "migrations_dir": "./migrations",
+      "remote": false
+    }
+  ],
+  "ratelimits": [
+    {
+      "name": "WAITLIST_RATE_LIMITER",
+      // This namespace must stay account-unique.
+      "namespace_id": "1001",
+      "simple": { "limit": 5, "period": 60 }
+    }
+  ],
+  // Use only with `wrangler dev --local --env development`; never deploy this environment.
+  "env": {
+    "development": {
+      "vars": { "WAITLIST_DEVELOPMENT": "true" },
+      "routes": [],
+      "d1_databases": [
+        {
+          "binding": "WAITLIST_DB",
+          "database_name": "hourmere-cloud-waitlist-local",
+          "database_id": "LOCAL_ONLY_WAITLIST_D1_DATABASE",
+          "migrations_dir": "./migrations",
+          "remote": false
+        }
+      ],
+      "ratelimits": [
+        {
+          "name": "WAITLIST_RATE_LIMITER",
+          "namespace_id": "1002",
+          "simple": { "limit": 5, "period": 60 }
+        }
+      ]
+    }
   },
   // Custom domains: Cloudflare creates the DNS records and certificates.
   "routes": [

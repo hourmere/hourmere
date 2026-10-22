@@ -7,11 +7,13 @@
     "build": "astro build",
     "preview": "astro preview",
     "typecheck": "node scripts/check.ts",
-    "deploy": "node ../../scripts/site-deploy-guard.ts && npm run build && npx --yes wrangler@4.151.0 deploy"
+    "test:smoke": "node scripts/waitlist-smoke.ts",
+    "deploy": "node ../../scripts/site-deploy-guard.ts && npm run build && npx --yes wrangler@4.151.0 deploy --env=\"\""
   },
   "devDependencies": {
     "@astrojs/check": "0.9.10",
     "@astrojs/markdown-satteri": "0.4.4",
+    "@astrojs/sitemap": "3.7.4",
     "@astrojs/starlight": "0.42.6",
     "@fontsource-variable/manrope": "5.3.0",
     "@types/jsdom": "30.0.0",
