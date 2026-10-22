@@ -392,6 +392,7 @@ describe('published image installation selection', () => {
     expect(result.stdout).toContain('docker compose pull')
     expect(result.stdout).toContain('docker compose up -d --wait')
     expect(result.stdout).not.toContain('--build')
+    expect(result.stdout).toContain('Using image version 1.2.3 from the prompted version.')
   })
 
   it('accepts the source alternative at the installation prompt', () => {
@@ -432,6 +433,7 @@ describe('published image installation selection', () => {
       expect(result.status).toBe(0)
       expect(setup.text().includes(`HOURMERE_VERSION='${version}'\n`)).toBe(true)
       expect(setup.text().match(/^HOURMERE_VERSION=/gm)).toHaveLength(1)
+      expect(result.stdout).toContain(`Using image version ${version} from --version.`)
     },
   )
 
@@ -501,6 +503,7 @@ describe('published image installation selection', () => {
     const result = setup.run(plainInput, { HOURMERE_VERSION: '1.0.0-rc.1' }, false, ['--image'])
     expect(result.status).toBe(0)
     expect(setup.text().includes("HOURMERE_VERSION='1.0.0-rc.1'\n")).toBe(true)
+    expect(result.stdout).toContain('Using image version 1.0.0-rc.1 from HOURMERE_VERSION.')
   })
 
   it('rejects an invalid environment version', () => {
@@ -546,8 +549,12 @@ describe('published image installation selection', () => {
   ])('derives the exact version from checked-out tag $tag', ({ tag, annotated }) => {
     const setup = fixture()
     taggedCheckout(setup, tag, annotated)
-    expect(setup.run(plainInput, {}, false, ['--image']).status).toBe(0)
+    const result = setup.run(plainInput, {}, false, ['--image'])
+    expect(result.status).toBe(0)
     expect(setup.text().includes(`HOURMERE_VERSION='${tag.slice(1)}'\n`)).toBe(true)
+    expect(result.stdout).toContain(
+      `Using image version ${tag.slice(1)} from the checked-out tag ${tag}.`,
+    )
   })
 
   it('requires a prompt beyond the tagged commit instead of choosing an ancestor release', () => {
@@ -558,10 +565,47 @@ describe('published image installation selection', () => {
     expect(existsSync(setup.envFile)).toBe(false)
   })
 
-  it('lets an explicit version override the checked-out release tag', () => {
-    const setup = fixture()
-    taggedCheckout(setup, 'v1.0.0')
-    expect(setup.run(plainInput, {}, false, ['--image', '--version', '1.0.1']).status).toBe(0)
-    expect(setup.text().includes("HOURMERE_VERSION='1.0.1'\n")).toBe(true)
-  })
+  it.each(['--version', 'HOURMERE_VERSION'])(
+    'accepts %s when it matches the checked-out release tag',
+    (selection) => {
+      const setup = fixture()
+      taggedCheckout(setup, 'v1.0.0')
+      const result = setup.run(
+        plainInput,
+        selection === 'HOURMERE_VERSION' ? { HOURMERE_VERSION: '1.0.0' } : {},
+        false,
+        selection === '--version' ? ['--image', '--version', '1.0.0'] : ['--image'],
+      )
+      expect(result.status).toBe(0)
+      expect(setup.text().includes("HOURMERE_VERSION='1.0.0'\n")).toBe(true)
+      expect(result.stdout).toContain(`Using image version 1.0.0 from ${selection}.`)
+    },
+  )
+
+  it.each([
+    { selection: '--version', tag: 'v1.0.0', annotated: false },
+    { selection: 'HOURMERE_VERSION', tag: 'v1.0.0', annotated: false },
+    { selection: '--version', tag: 'v1.0.0-rc.1', annotated: true },
+    { selection: 'HOURMERE_VERSION', tag: 'v1.0.0-rc.1', annotated: true },
+  ])(
+    'rejects $selection differing from checked-out $tag before setup writes',
+    ({ selection, tag, annotated }) => {
+      const setup = fixture()
+      taggedCheckout(setup, tag, annotated)
+      const result = setup.run(
+        plainInput,
+        selection === 'HOURMERE_VERSION' ? { HOURMERE_VERSION: '1.0.1' } : {},
+        false,
+        selection === '--version' ? ['--image', '--version', '1.0.1'] : ['--image'],
+      )
+      expect(result.status).toBe(1)
+      expect(result.stderr).toContain(
+        `Selected image version 1.0.1 from ${selection} differs from checked-out tag ${tag}.`,
+      )
+      expect(result.stderr).toContain('Check out the matching release tag before running setup.')
+      expect(result.stderr).not.toContain('Deployment mode')
+      expect(existsSync(setup.envFile)).toBe(false)
+      expect(setup.noStaging()).toBe(true)
+    },
+  )
 })

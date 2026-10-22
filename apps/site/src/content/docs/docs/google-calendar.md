@@ -109,6 +109,12 @@ immediate read; workers poll selected active calendars every minute. A web-only 
 without a worker does not perform scheduled synchronization. **Refresh calendar list**
 updates metadata.
 
+Calendar listings include each calendar's saved `timeZone` (null when the provider has
+not supplied one). When your selected owned Google booking destination uses a different
+zone from your default availability schedule, **Calendars** explains both zones. A booking
+still lands at the same instant; Google Calendar usually shows it in that calendar's time
+zone, depending on the viewer's Google Calendar time-zone setting.
+
 The user's own API keys can list calendar connections/status, refresh the calendar list,
 choose conflict calendars and the writeback destination, and sync now through the public
 REST API with the same ownership checks. Read-only MCP `list_calendar_connections` accepts
@@ -116,12 +122,15 @@ API keys and enabled MCP OAuth grants. OAuth authorization, code exchange and di
 require a live browser session. Cookie-authenticated writes require the app's own origin.
 
 External event titles/descriptions are not fetched or stored; synchronization retains IDs
-and busy intervals. Cancelled, transparent and self-declined events do not block time.
-Google expands recurring instances and exceptions; all-day events use exclusive local
-midnights with daylight-saving rules. A timezone change rebuilds the busy snapshot.
+and busy intervals or all-day dates. Cancelled, transparent and self-declined events do not
+block time. Google expands recurring instances and exceptions; all-day dates expand from
+local midnight to exclusive end midnight in each host's schedule zone, with daylight-saving
+rules. A calendar timezone change rebuilds the busy snapshot.
 
-Missing, failed, stale (over ten minutes) or uncovered snapshots return
-`calendar_sync_unavailable`, rather than making unknown time bookable. The window extends
+Missing, failed, stale (over ten minutes), incompatible-version or uncovered snapshots
+make the affected host unavailable. Personal and collective availability returns
+`calendar_sync_unavailable`; round-robin pools omit affected hosts and can offer fresh
+slots from other hosts. The window extends
 from three days before the current UTC day through 403 days after it, renewed daily.
 Incremental tokens and 410 resets refresh that bounded snapshot. Network/polling delay can
 still race a newly created Google event; there is no shared atomic Google/Hourmere transaction.
@@ -247,14 +256,34 @@ bounded (100 pages / 20,000 events); an incomplete or malformed result never rep
 live data. Cursor and busy intervals commit atomically. Retries preserve rotated credentials.
 
 Google expands recurring events and their exceptions (`singleEvents=true`). Cancelled,
-transparent and self-declined events remove their busy intervals. All-day ends are exclusive
-local midnights in the calendar's time zone, including DST changes. Sub-millisecond intervals
-are widened before database storage. Only event IDs and busy intervals are mirrored.
+transparent and self-declined events remove their busy entries. All-day events retain their
+start date and exclusive end date. They block those whole local days in the time zone of
+the host's availability schedule, including DST changes; the Google calendar's time zone
+does not shift the blocked dates. Collective and round-robin meetings apply each host's
+own schedule zone. Timed events retain their absolute instants, and sub-millisecond
+intervals are widened before database storage. Only event IDs and busy intervals or dates
+are mirrored.
+
+When upgrading an existing installation, migration `0039_calendar_busy_all_day_dates.sql`
+clears every Google calendar's sync cursor and last successful sync time, including
+calendars not currently selected for conflict checks. Original all-day dates cannot be
+recovered unambiguously from the old instant ranges. The next sync fetches a complete
+snapshot and atomically replaces those rows; existing busy data remains until it succeeds.
+Until a selected calendar's new snapshot is ready, its host's personal or collective
+availability returns `calendar_sync_unavailable`. Round-robin pools omit affected hosts
+and continue if another host offers a fresh slot; if no slots remain and any host has
+unavailable sync state, they return the same error. Run workers and let synchronization
+complete, or use **Sync now** for a selected calendar. Stop all old web/all/worker processes
+before migration and restart every role with the upgraded code. Snapshot version 2 makes
+old web processes reject new snapshots and makes new code reject and rebuild version 1
+snapshots from old workers, so mixed versions fail closed for affected hosts.
 
 Availability over REST, public pages and MCP refuses selected Google calendars when their
-snapshot is missing, failed, older than ten minutes, revoked, or does not cover the requested
-range including scheduling buffers. The error is 409 `calendar_sync_unavailable`: unknown
-calendar state never silently becomes free time. Far-future requests beyond the synchronized
+snapshot is missing, failed, older than ten minutes, revoked, has an incompatible version,
+or does not cover the requested range including scheduling buffers. Personal and collective
+requests fail with 409 `calendar_sync_unavailable`. Round-robin pools omit affected hosts;
+if no slots remain and any host has unavailable sync state, they return the same error.
+Unknown calendar state never silently becomes free time. Far-future requests beyond the synchronized
 window are unavailable. Disable a conflict calendar deliberately to stop using its busy time.
 Network/polling latency still permits an external event created after the last successful poll
 to race a booking; Google does not offer a transaction shared with our booking database.

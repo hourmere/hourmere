@@ -26,6 +26,7 @@ import { useRequest } from './paths.ts'
 import { SlotPicker } from './SlotPicker.tsx'
 import { formatDate, formatTimeRange, offsetLabel, zoneName } from './time.ts'
 import { LIMITS, reasonError } from './validation.ts'
+import { rememberVisitorTimeZone } from './visitor-time-zone.ts'
 
 type Action = 'cancel' | 'reschedule'
 
@@ -370,7 +371,10 @@ function ManageView({
               load={loadSlots}
               durationMinutes={durationMinutes}
               timeZone={timeZone}
-              onTimeZoneChange={setTimeZone}
+              onTimeZoneChange={(zone) => {
+                rememberVisitorTimeZone(zone)
+                setTimeZone(zone)
+              }}
               locale={locale}
               now={now}
               selected={null}

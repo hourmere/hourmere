@@ -45,6 +45,7 @@ export const CalendarConnection = z
       z.object({
         id: z.uuid(),
         name: z.string(),
+        timeZone: z.string().nullable(),
         isPrimary: z.boolean(),
         checkConflicts: z.boolean(),
         accessRole: z.string(),

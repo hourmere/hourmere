@@ -2,8 +2,19 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { loadConfig } from '../apps/server/src/config.ts'
 
-const compose = readFileSync(new URL('../docker-compose.yml', import.meta.url), 'utf8')
-const example = readFileSync(new URL('../.env.example', import.meta.url), 'utf8')
+const compose = readFileSync(
+  process.env.HOURMERE_BASE_COMPOSE_FILE ?? new URL('../docker-compose.yml', import.meta.url),
+  'utf8',
+)
+const worker = readFileSync(
+  process.env.HOURMERE_WORKER_COMPOSE_FILE ??
+    new URL('../docker-compose.worker.yml', import.meta.url),
+  'utf8',
+)
+const example = readFileSync(
+  process.env.HOURMERE_EXAMPLE_ENV_FILE ?? new URL('../.env.example', import.meta.url),
+  'utf8',
+)
 const reference = readFileSync(
   new URL('../apps/site/src/content/docs/docs/configuration.md', import.meta.url),
   'utf8',
@@ -34,6 +45,45 @@ function composeAppEnvironment(compose: string): Map<string, string> {
 }
 
 describe('documented Compose configuration', () => {
+  it('describes image and source selections in the environment template', () => {
+    expect(example).toContain('setup.sh --source selects a local build')
+    expect(example).toContain(
+      'setup.sh --image adds docker-compose.image.yml and writes an exact HOURMERE_VERSION',
+    )
+    expect(example).toContain('image installs omit --build; source installs include --build')
+    expect(example).toContain(
+      'Keep the existing files in the list, including docker-compose.image.yml for an image install',
+    )
+    expect(example).toContain(
+      'Optional source-build image tag; ignored by docker-compose.image.yml',
+    )
+    expect(example).toContain('exact release version here (without v); it must match')
+    expect(example).toContain('the exact checkout tag when present')
+    expect(example).toContain('Keep unset for setup.sh --source; never select a moving tag')
+    expect(example).toMatch(/^# HOURMERE_VERSION=1\.0\.0$/m)
+    expect(example).not.toMatch(/^HOURMERE_VERSION=/m)
+  })
+
+  it('describes setup commands for both paths in the base Compose header', () => {
+    const header = compose.split('name: hourmere')[0]
+    expect(header).toContain(
+      '--image selects docker-compose.image.yml and an exact HOURMERE_VERSION; start without --build',
+    )
+    expect(header).toContain(
+      '--source builds this checkout with docker compose up -d --build --wait',
+    )
+    expect(header).toContain('prints the next commands')
+  })
+
+  it('preserves image selection and follows the matching worker startup hint', () => {
+    const header = worker.split('services:')[0]
+    expect(header).toContain('./scripts/enable-worker.sh after setup.sh')
+    expect(header).toContain('image installs omit --build; source installs include --build')
+    expect(header).toContain(
+      'Preserve docker-compose.image.yml in the file list for an image install',
+    )
+  })
+
   it('forwards every loadConfig environment input, apart from explicit container settings', () => {
     // Zod reads every declared input, including absent optionals. Discover those reads
     // from the real loader so adding a setting automatically extends this contract.

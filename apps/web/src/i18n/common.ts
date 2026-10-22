@@ -321,6 +321,8 @@ export const common = {
   '{event} with {host}': '与{host}的{event}',
   'Required hosts:': '必选主持人：',
   'Required hosts: {hosts}': '必选主持人：{hosts}',
+  "Host's time zone: {zone}": '主持人的时区：{zone}',
+  "That's {time} for the host": '主持人当地时间为{time}',
   'Zoom meeting update': 'Zoom 会议更新',
   'Your booking is cancelled. The Zoom meeting update is pending.':
     '预约已取消，Zoom 会议仍在更新。',

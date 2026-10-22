@@ -602,22 +602,6 @@ docker compose up -d --wait`)
     },
   )
 
-  it.each([
-    [
-      'environment example',
-      process.env.HOURMERE_DEPLOY_ENV_EXAMPLE ?? new URL('../.env.example', import.meta.url),
-    ],
-    [
-      'worker overlay',
-      process.env.HOURMERE_DEPLOY_WORKER_COMPOSE ??
-        new URL('../docker-compose.worker.yml', import.meta.url),
-    ],
-  ])('chains the worker verification comment in the %s', (_name, path) => {
-    expect(readFileSync(path, 'utf8')).toContain(
-      '# docker compose config --services | grep -qx worker && docker compose up -d --build --wait',
-    )
-  })
-
   it('uses release tags for 1.0 upgrades and isolates pre-1.0 main-tracking notes', () => {
     const upgrade = guide.split('## Upgrade and roll back\n')[1]?.split('\n## ')[0]
     if (!upgrade) throw new Error('Upgrade instructions must exist')

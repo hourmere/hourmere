@@ -666,6 +666,7 @@ async function deliverBookingNotification(
     hostName: organizer?.name ?? (bookingLanguage === 'zh-CN' ? '主持人' : 'Host'),
     inviteeName: invitee.name,
     inviteeEmail: invitee.email,
+    inviteeTimeZone: invitee.timeZone,
     guests: guests.map(({ name, email }) => ({ name, email })),
     start: booking.start,
     end: booking.end,

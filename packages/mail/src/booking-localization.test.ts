@@ -23,6 +23,7 @@ const meeting: BookingEmailMeeting = {
   hostName: 'Grace Hopper',
   inviteeName: 'Ada Lovelace',
   inviteeEmail: 'ada@example.com',
+  inviteeTimeZone: 'Europe/Berlin',
   guests: [{ name: 'Charles Babbage', email: 'charles@example.com' }],
   start: at('2026-10-20T08:00:00Z'),
   end: at('2026-10-20T08:30:00Z'),
@@ -104,6 +105,146 @@ describe('booking email language goldens', () => {
         })
       }
     }
+  }
+})
+
+describe('cross-zone booking email clarity', () => {
+  const crossZoneMeeting = {
+    ...meeting,
+    inviteeTimeZone: 'Asia/Shanghai',
+    start: at('2026-11-11T00:00:00Z'),
+    end: at('2026-11-11T00:30:00Z'),
+  }
+  const crossZoneHost = { ...recipients.host, timeZone: 'America/Los_Angeles' }
+
+  for (const locale of languages) {
+    it(`${locale} suppresses duplicate invitee times for aliases across all host email kinds`, () => {
+      const label = locale === 'en' ? "Invitee's time" : '预约人当地时间'
+      for (const [inviteeZone, hostZone] of [
+        ['US/Pacific', 'America/Los_Angeles'],
+        ['America/Los_Angeles', 'US/Pacific'],
+        ['Asia/Calcutta', 'Asia/Kolkata'],
+        ['Europe/Kyiv', 'Europe/Kiev'],
+      ] as const) {
+        for (const kind of [...kinds, 'reminder', 'conference_failed'] as const) {
+          const message = bookingEmail(
+            kind,
+            { ...crossZoneMeeting, inviteeTimeZone: inviteeZone },
+            { ...crossZoneHost, timeZone: hostZone, locale },
+          )
+          expect(message.text).not.toContain(label)
+          expect(message.html).not.toContain(label.replaceAll("'", '&#39;'))
+        }
+      }
+    })
+
+    for (const kind of [...kinds, 'reminder', 'conference_failed'] as const) {
+      it(`${locale} ${kind} shows the invitee's local date and time to the host`, () => {
+        const message = bookingEmail(kind, crossZoneMeeting, { ...crossZoneHost, locale })
+        const label = locale === 'en' ? "Invitee's time" : '预约人当地时间'
+        const local =
+          locale === 'en'
+            ? 'Wed, Nov 11, 8:00 AM (Asia/Shanghai, GMT+08:00)'
+            : '11月11日周三，08:00（Asia/Shanghai，GMT+08:00）'
+        expect(message.text).toContain(`${label}${locale === 'en' ? ': ' : '：'}${local}`)
+        expect(message.html).toContain(local)
+        expect(message.html).toContain(label.replaceAll("'", '&#39;'))
+        expect(message.subject).toContain(
+          locale === 'en'
+            ? 'Tue, Nov 10, 4:00 PM (America/Los Angeles, GMT-08:00)'
+            : '11月10日周二，16:00（America/Los Angeles，GMT-08:00）',
+        )
+        expect(message.text).toContain(
+          locale === 'en'
+            ? 'When: Tuesday, November 10, 2026, 4:00 PM – 4:30 PM (America/Los Angeles, GMT-08:00)'
+            : '时间：2026年11月10日星期二，16:00 至 16:30（America/Los Angeles，GMT-08:00）',
+        )
+        if (kind === 'confirmed') {
+          expect({
+            subject: message.subject,
+            text: message.text,
+            html: message.html,
+          }).toMatchSnapshot()
+        }
+      })
+    }
+
+    it(`${locale} limits the invitee-time field to hosts whose email uses another zone`, () => {
+      const label = locale === 'en' ? "Invitee's time" : '预约人当地时间'
+      for (const recipient of [
+        { ...crossZoneHost, timeZone: 'Asia/Shanghai' },
+        recipients.invitee,
+        recipients.guest,
+      ]) {
+        const message = bookingEmail('confirmed', crossZoneMeeting, { ...recipient, locale })
+        expect(message.text).not.toContain(label)
+        expect(message.html).not.toContain(label.replaceAll("'", '&#39;'))
+      }
+      // Equal offsets do not make two named zones the same zone.
+      const message = bookingEmail('confirmed', crossZoneMeeting, {
+        ...crossZoneHost,
+        timeZone: 'Asia/Singapore',
+        locale,
+      })
+      expect(message.text).toContain(label)
+    })
+
+    it(`${locale} uses each meeting's offset in subjects and When lines through DST`, () => {
+      for (const [start, offset] of [
+        ['2026-11-01T05:30:00Z', 'GMT-04:00'],
+        ['2026-11-01T06:30:00Z', 'GMT-05:00'],
+      ] as const) {
+        const meeting = {
+          ...crossZoneMeeting,
+          start: at(start),
+          end: at(start).add({ minutes: 15 }),
+        }
+        for (const kind of [...kinds, 'reminder', 'conference_failed'] as const) {
+          for (const recipient of [recipients.host, recipients.invitee, recipients.guest]) {
+            const message = bookingEmail(kind, meeting, {
+              ...recipient,
+              timeZone: 'America/New_York',
+              locale,
+            })
+            const zone =
+              locale === 'en' ? ` (America/New York, ${offset})` : `（America/New York，${offset}）`
+            expect(message.subject).toContain(zone)
+            expect(
+              message.text
+                .split('\n')
+                .find((line) => line.startsWith(locale === 'en' ? 'When: ' : '时间：')),
+            ).toContain(zone)
+            expect(message.html).toContain(zone)
+          }
+        }
+      }
+    })
+
+    it(`${locale} preserves fractional offsets and UTC invitation instants`, () => {
+      const attachment = invitation('REQUEST')
+      for (const [timeZone, offset] of [
+        ['Asia/Kolkata', 'GMT+05:30'],
+        ['Asia/Kathmandu', 'GMT+05:45'],
+        ['UTC', 'GMT+00:00'],
+      ] as const) {
+        const message = bookingEmail(
+          'confirmed',
+          meeting,
+          {
+            ...recipients.invitee,
+            timeZone,
+            locale,
+          },
+          { attachment },
+        )
+        expect(message.subject).toContain(offset)
+        expect(message.text).toContain(offset)
+        expect(message.html).toContain(offset)
+        expect(message.attachments).toEqual([attachment])
+        expect(message.attachments?.[0]?.content).toContain('DTSTART:20261020T080000Z')
+        expect(message.attachments?.[0]?.content).not.toContain('TZID')
+      }
+    })
   }
 })
 
@@ -522,29 +663,43 @@ describe('localized dates and generated copy', () => {
       start: at('2026-10-27T00:30:00Z'),
       end: at('2026-10-27T01:00:00Z'),
     }
-    for (const [timeZone, short, long] of [
-      ['Europe/Berlin', '10月27日周二，01:30', '2026年10月27日星期二，01:30 至 02:00'],
-      ['America/New_York', '10月26日周一，20:30', '2026年10月26日星期一，20:30 至 21:00'],
-      ['invalid/zone', '10月27日周二，00:30', '2026年10月27日星期二，00:30 至 01:00'],
+    for (const [timeZone, short, long, label] of [
+      [
+        'Europe/Berlin',
+        '10月27日周二，01:30',
+        '2026年10月27日星期二，01:30 至 02:00',
+        'Europe/Berlin，GMT+01:00',
+      ],
+      [
+        'America/New_York',
+        '10月26日周一，20:30',
+        '2026年10月26日星期一，20:30 至 21:00',
+        'America/New York，GMT-04:00',
+      ],
+      [
+        'invalid/zone',
+        '10月27日周二，00:30',
+        '2026年10月27日星期二，00:30 至 01:00',
+        'UTC，GMT+00:00',
+      ],
     ] as const) {
-      const zone = timeZone === 'invalid/zone' ? 'UTC' : timeZone
       const message = bookingEmail('confirmed', overnight, {
         ...recipients.invitee,
         locale: 'zh-CN',
         timeZone,
       })
-      expect(message.subject).toBe(`已确认：与 Grace Hopper 的 Intro call，${short}（${zone}）`)
-      expect(message.text).toContain(`时间：${long}（${zone}）`)
-      expect(message.html).toContain(`${long}（${zone}）`)
+      expect(message.subject).toBe(`已确认：与 Grace Hopper 的 Intro call，${short}（${label}）`)
+      expect(message.text).toContain(`时间：${long}（${label}）`)
+      expect(message.html).toContain(`${long}（${label}）`)
     }
   })
 
   it('uses Chinese dates and 24-hour time in the recipient zone, including overnight and DST', () => {
     expect(formatMeetingTime(meeting.start, meeting.end, 'Europe/Berlin', 'zh-CN')).toBe(
-      '2026年10月20日星期二，10:00 至 10:30（Europe/Berlin）',
+      '2026年10月20日星期二，10:00 至 10:30（Europe/Berlin，GMT+02:00）',
     )
     expect(formatMeetingTime(meeting.start, meeting.end, 'America/New_York', 'zh-CN')).toBe(
-      '2026年10月20日星期二，04:00 至 04:30（America/New_York）',
+      '2026年10月20日星期二，04:00 至 04:30（America/New York，GMT-04:00）',
     )
     expect(
       formatMeetingTime(
@@ -553,7 +708,7 @@ describe('localized dates and generated copy', () => {
         'Europe/Berlin',
         'zh-CN',
       ),
-    ).toBe('2026年10月20日星期二，23:30 至 2026年10月21日星期三，00:30（Europe/Berlin）')
+    ).toBe('2026年10月20日星期二，23:30 至 2026年10月21日星期三，00:30（Europe/Berlin，GMT+02:00）')
     expect(
       formatMeetingTime(
         at('2026-10-26T08:00:00Z'),
@@ -561,9 +716,9 @@ describe('localized dates and generated copy', () => {
         'Europe/Berlin',
         'zh-CN',
       ),
-    ).toBe('2026年10月26日星期一，09:00 至 09:30（Europe/Berlin）')
+    ).toBe('2026年10月26日星期一，09:00 至 09:30（Europe/Berlin，GMT+01:00）')
     expect(formatMeetingTime(meeting.start, meeting.end, 'invalid/zone', 'zh-CN')).toBe(
-      '2026年10月20日星期二，08:00 至 08:30（UTC）',
+      '2026年10月20日星期二，08:00 至 08:30（UTC，GMT+00:00）',
     )
   })
 

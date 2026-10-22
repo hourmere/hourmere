@@ -701,6 +701,17 @@ Apply the same checkout-only limit above; otherwise use backup/restore. If rollb
 this `main`-tracking checkout detached, run `git switch main` before the next upgrade so
 `git pull --ff-only` works.
 
+**Migration 0039 requires stopping all old processes; do not use a rolling deployment.**
+Before any new process applies `0039_calendar_busy_all_day_dates.sql`, stop every old `web`,
+`all` and `worker` process, including any on other hosts. With Compose, run
+`docker compose stop app` and, if the separate worker is configured, `docker compose stop worker`.
+Leave PostgreSQL running, then start every role with the upgraded code and let Google
+calendar re-sync complete before relying on affected hosts' availability. With
+`AUTO_MIGRATE=true`, the first new process applies the migration on startup. Snapshot
+version 2 makes mixed versions fail closed for affected hosts; round-robin pools can still
+offer fresh slots from other hosts. See the
+[Google busy-time upgrade notes](/docs/google-calendar#busy-time-and-recurring-event-synchronization).
+
 **Migration 0038 requires stopping all old processes; do not use a rolling deployment.**
 Before any new process applies `0038_booking_ical_identity.sql`, stop every old `web`, `all`
 and `worker` process, including any on other hosts. With Compose, run

@@ -354,13 +354,16 @@ for(const [id,state] of Object.entries(expected)) {
     selectOption:async(value)=>calls.push(['select',selector,value]),
   })
   const page={
+    clock:{setFixedTime:async(date)=>calls.push(['clock',date.toISOString()])},
     addInitScript:async()=>{},goto:async(url)=>{path=new URL(url).pathname;query=new URL(url).search;calls.push(['goto',path])},
     locator,getByRole:(role,options)=>locator(role+':'+(options?.name ?? '')),
     getByLabel:(label)=>locator('label:'+label),getByText:(text)=>locator(text),
-    waitForFunction:async()=>{},evaluate:async()=>{},url:()=> 'http://127.0.0.1:42421'+path,
+    waitForFunction:async()=>{},evaluate:async(callback)=>calls.push(['evaluate',callback.name]),url:()=> 'http://127.0.0.1:42421'+path,
   }
   const app={url:'http://127.0.0.1:42421',parentUrl:'http://127.0.0.1:42422',auditState:async()=>({organizationId:'synthetic-org',bookingPath:'/fixture-host/layout-audit',teamBookingPath:'/team/FixtureTeam/layout-audit'}),auditSignIn:async(value)=>{signedIn=value},auditOAuthQuery:async()=>'?signed=fixture'}
   await assert.doesNotReject(()=>openAuditPage(page,app,id),'Could not prepare coverage state: '+id)
+  assert.deepEqual(calls[0],['clock',data.AUDIT_NOW],'Audit browser clock must be fixed before navigation: '+id)
+  assert.deepEqual(calls.at(-1),['evaluate','settleAuditLayout'],'Audit layout must settle after content verification: '+id)
   assert.equal(path,state.path,'Wrong coverage route: '+id)
   if(id==='manage-reschedule')assert.ok(calls.some(call=>call[0]==='wait'&&call[1]==='.reschedule-summary'),'Missing current booking summary readiness')
   assert.equal(signedIn,!state.public,'Wrong authentication state: '+id)
@@ -414,6 +417,16 @@ describe('source-copy coverage mutations', () => {
     })
 
   for (const [from, to, assertion] of [
+    [
+      'await page.clock.setFixedTime(new Date(AUDIT_NOW))',
+      '',
+      'Audit browser clock must be fixed before navigation',
+    ],
+    [
+      'await page.evaluate(settleAuditLayout)',
+      '',
+      'Audit layout must settle after content verification',
+    ],
     [
       '.reschedule-summary .event-title',
       '.reschedule-header p',
