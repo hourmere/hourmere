@@ -33,7 +33,8 @@
     "api:types": "npm run --silent --workspace @hourmere/api-types generate",
     "db:types": "kysely-codegen --dialect postgres --date-parser string --default-schema public --exclude-pattern \"{public.schema_migrations,pgboss.*}\" --out-file packages/db/src/tables.ts",
     "test:e2e": "npm run test --workspace @hourmere/e2e",
-    "test:e2e:privacy": "npm run test:privacy --workspace @hourmere/e2e"
+    "test:e2e:privacy": "npm run test:privacy --workspace @hourmere/e2e",
+    "screenshots": "node scripts/screenshots.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",
