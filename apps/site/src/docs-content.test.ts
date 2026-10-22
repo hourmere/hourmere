@@ -143,6 +143,13 @@ describe('self-hosting documentation links', () => {
 })
 
 describe('launch documentation disclosures', () => {
+  it('keeps website operations consistent with the release and closed Cloud preview', () => {
+    const intro = prose(read('docs/website.md').split(/^## /m)[0] ?? '')
+    expect(intro).toContain('Hourmere 1.0.0 was released for self-hosting on November 30, 2026.')
+    expect(intro).toContain('invitation-only preview with sign-ups closed.')
+    expect(intro).not.toContain('is planned for November 30, 2026')
+  })
+
   it('keeps the docs overview consistent with the released version and Cloud preview', () => {
     const intro = prose(read(`${siteDocs}/index.md`).split(/^## /m)[0] ?? '')
     expect(intro).toContain('Hourmere 1.0.0 was released on 2026-11-30.')

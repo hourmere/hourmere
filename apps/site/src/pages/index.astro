@@ -57,12 +57,17 @@ const agentActions = [
 const plans = [
   { name: 'Self-hosted', price: '$0', unit: '', note: 'Free under AGPL-3.0, on your own server.' },
   { name: 'Free (planned)', price: '$0', unit: '', note: 'Unlimited event types and bookings.' },
-  { name: 'Pro (planned)', price: '$8', unit: 'per seat / month', note: 'Plan details at launch.' },
+  {
+    name: 'Pro (planned)',
+    price: '$8',
+    unit: 'per seat / month',
+    note: 'Plan details when Hourmere Cloud launches.',
+  },
   {
     name: 'Team (planned)',
     price: '$14',
     unit: 'per seat / month',
-    note: 'Plan details at launch.',
+    note: 'Plan details when Hourmere Cloud launches.',
   },
 ]
 ---
@@ -75,7 +80,7 @@ const plans = [
   <section class="hero">
     <div class="container hero-grid">
       <div>
-        <p class="status"><span class="status-dot" aria-hidden="true"></span>Invitation-only preview</p>
+        <p class="status"><span class="status-dot" aria-hidden="true"></span>Hourmere 1.0.0 released</p>
         <h1>Open-source scheduling for people and AI agents.</h1>
         <p class="lead">
           Hourmere is an open-source alternative to Calendly. Share a
@@ -250,8 +255,8 @@ const plans = [
       <p class="eyebrow">Pricing</p>
       <h2 id="pricing-title">Free to self-host. Planned Hourmere Cloud pricing.</h2>
       <p class="section-intro">
-        These are the planned prices for Hourmere Cloud. Final plan details will be published at
-        launch. Joining the waitlist does not create an account or start a paid plan.
+        These are the planned prices for Hourmere Cloud. Final plan details will be published when
+        Hourmere Cloud launches. Joining the waitlist does not create an account or start a paid plan.
       </p>
       <div class="grid plans">
         {

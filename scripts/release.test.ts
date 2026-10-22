@@ -452,7 +452,16 @@ describe('release publication checklist', () => {
   it('rehearses anonymous native-platform pulls and attestation before image installation', () => {
     const rehearsal =
       docs().split('## RC image installation rehearsal')[1]?.split('## Verify publication')[0] ?? ''
-    expect(rehearsal).toContain('No public image is available yet.')
+    expect(rehearsal).toContain('Hourmere 1.0.0 is available as a public image')
+    expect(rehearsal).toContain(
+      'select `setup.sh --image`, retaining `setup.sh --source` as an alternative.',
+    )
+    expect(rehearsal).toContain(
+      'For future release candidates, rehearse the image path in the approved RC window, only after the RC has actually been published and made public through the release process above.',
+    )
+    expect(rehearsal).not.toMatch(
+      /No public image is available yet|must continue to select `setup.sh --source` until publication/,
+    )
     for (const platform of ['amd64', 'arm64']) {
       expect(rehearsal).toContain(
         `DOCKER_CONFIG="$anonymous_config" docker pull --platform linux/${platform} ghcr.io/hourmere/hourmere:1.0.0-rc.1`,
@@ -542,6 +551,42 @@ describe('release publication checklist', () => {
       ?.split('- Retain')[0]
     expect(copyChanges).toBeDefined()
     expect(copyChanges).not.toContain('legal pages')
+    expect(copyChanges).not.toContain('site description')
+  })
+
+  it('records the stable release in the release guide introduction', () => {
+    const intro = docs().split('## Versioning and release notes')[0]
+    expect(intro).toContain(
+      'The first stable release, **1.0.0**, was released on **November 30, 2026**.',
+    )
+    expect(intro).not.toContain('is planned for')
+  })
+
+  it('maps release-day copy to the pages that contain it', () => {
+    const table = docs().split('| File / preparation lines | Release-day change |')[1] ?? ''
+    const introductions = table.split('(introductions) |')[1]?.split(' |')[0]
+    expect(introductions?.trim()).toBe(
+      "State that 1.0.0 was released on November 30, 2026; retain Cloud's invitation-only preview and closed sign-ups.",
+    )
+    for (const action of [
+      '(hero status) | Set the label above the main heading to `Hourmere 1.0.0 released`',
+      '(pricing disclosure and Pro/Team notes)',
+      'final plan details will be published when Hourmere Cloud launches',
+      '`docs/releasing.md` (introduction and RC image installation rehearsal)',
+      '`docs/website.md` (introduction)',
+    ]) {
+      expect(table).toContain(action)
+    }
+  })
+
+  it('orders the release-day merges and publishes merge commits through site-live', () => {
+    const procedure = docs().split('### Merge procedure')[1]?.split('## CLI package identity')[0]
+    expect(procedure).toMatch(
+      /Merge \[PR #77\]\([^)]+\) with a merge commit, not a squash\. Then retarget \[PR #98\]\([^)]+\) to `main` with `gh pr edit 98 --base main` before merging it\./,
+    )
+    expect(procedure).toContain('[Website publication](#website-publication)')
+    expect(procedure).toContain('Website changes reach the public site through `site-live`.')
+    expect(procedure).toContain('`git cherry-pick -m 1 <merge-commit>`')
   })
 
   it.each([

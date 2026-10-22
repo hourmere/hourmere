@@ -1,8 +1,8 @@
 # Website and Hourmere Cloud waitlist
 
 `apps/site` is the English-only Astro website. Hourmere Cloud is in an
-invitation-only preview with sign-ups closed. The open-source self-hosted release
-is planned for November 30, 2026. The Cloud waitlist collects requests to hear
+invitation-only preview with sign-ups closed. Hourmere 1.0.0 was released for
+self-hosting on November 30, 2026. The Cloud waitlist collects requests to hear
 when Cloud opens to everyone; it does not create a hosted account or paid plan.
 The waitlist sends no email yet. Any later launch
 email must include a way to opt out and use the list only for its stated purpose.

@@ -9,7 +9,8 @@ const plainText = (source: string) =>
     .trim()
 
 describe('reviewed homepage and comparison disclosures', () => {
-  const home = plainText(read('./pages/index.astro'))
+  const homeSource = read('./pages/index.astro')
+  const home = plainText(homeSource)
   const intro = plainText(read('./content/docs/docs/comparison.md').split(/^## /m)[0] ?? '')
 
   it.each([
@@ -53,9 +54,18 @@ describe('reviewed homepage and comparison disclosures', () => {
   it('keeps Cloud pricing provisional and retains the launch and waitlist disclosures', () => {
     expect(home).toContain('Free to self-host. Planned Hourmere Cloud pricing.')
     expect(home).toContain(
-      'These are the planned prices for Hourmere Cloud. Final plan details will be published at launch. Joining the waitlist does not create an account or start a paid plan.',
+      'These are the planned prices for Hourmere Cloud. Final plan details will be published when Hourmere Cloud launches. Joining the waitlist does not create an account or start a paid plan.',
     )
-    expect(home.match(/Plan details at launch\./g)).toHaveLength(2)
+    expect(home.match(/Plan details when Hourmere Cloud launches\./g)).toHaveLength(2)
+    expect(home).not.toContain('Final plan details will be published at launch.')
+    expect(home).not.toContain('Plan details at launch.')
+  })
+
+  it('labels the hero with the released version while Cloud remains in preview', () => {
+    expect(homeSource).toContain('</span>Hourmere 1.0.0 released</p>')
+    expect(homeSource).not.toContain('</span>Invitation-only preview</p>')
+    expect(home).toContain('Sign-ups are currently closed.')
+    expect(home).toContain('Hourmere Cloud is in an invitation-only preview.')
   })
 
   it('states the invitation-only comparison preview and released self-hosted version', () => {
