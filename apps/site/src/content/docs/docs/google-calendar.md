@@ -26,7 +26,7 @@ put the sign-in OAuth client in a separate Google Cloud project.
 
 Create a Web application OAuth client for calendar connections. Register exactly
 `{PUBLIC_URL}/api/calendar/google/callback`, for example
-`https://meet.example.com/api/calendar/google/callback`. Local `npm run dev` uses
+`https://hourmere.example.com/api/calendar/google/callback`. Local `npm run dev` uses
 `http://localhost:5173/api/calendar/google/callback`; Vite proxies `/api` to the server.
 JavaScript origins are unnecessary for this server-side authorization-code flow. Use HTTPS
 except on loopback development hosts.
