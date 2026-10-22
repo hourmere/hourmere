@@ -1,0 +1,65 @@
+---
+import '@fontsource-variable/manrope'
+import '../../styles/global.css'
+---
+
+<!doctype html>
+<html lang="en" data-pagefind-ignore="all">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex,nofollow" />
+    <title>Booking widget test page (unlisted) | Hourmere</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>Booking widget test page (unlisted)</h1>
+      <p>This unlisted page is used for manual device testing of the Hourmere booking widget.</p>
+
+      <section aria-labelledby="inline-heading">
+        <h2 id="inline-heading">Inline widget</h2>
+        <div
+          data-hourmere-inline
+          data-hourmere-url="https://app.hourmere.com/adrian-lee/30-minute-call"
+          data-hourmere-height="720"
+        ></div>
+      </section>
+
+      <section aria-labelledby="popup-heading">
+        <h2 id="popup-heading">Popup widget</h2>
+        <button id="open-booking-popup" class="btn btn-primary" type="button" disabled>
+          Open booking popup
+        </button>
+        <p id="widget-status" role="status">Loading booking widget…</p>
+      </section>
+      <noscript>Enable JavaScript to test the booking widgets.</noscript>
+    </main>
+    <script
+      id="hourmere-embed"
+      is:inline
+      src="https://app.hourmere.com/hourmere-embed.js"
+      defer></script>
+    <!-- Keep this external: Astro may inline a processed script, which this page's CSP forbids. -->
+    <script is:inline src="/embed-test/popup.js" defer></script>
+  </body>
+</html>
+
+<style>
+  main {
+    max-width: 960px;
+    padding-block: 32px 64px;
+  }
+
+  h1 {
+    font-size: clamp(28px, 5vw, 40px);
+  }
+
+  section {
+    margin-block: 32px;
+  }
+
+  [data-hourmere-inline] {
+    min-height: 720px;
+  }
+</style>
