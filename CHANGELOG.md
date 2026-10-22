@@ -28,8 +28,14 @@ must approve publication through the [release workflow](https://github.com/hourm
   Invitees manage bookings without an account through private links; host moves preserve
   their existing links. Transactional conflict checks prevent double-booking, and booking
   creation supports idempotent retries.
+- Individual booking pages show the host's time zone, and public booking pages remember
+  the visitor's chosen zone. Each private manage link starts in the booking's saved invitee
+  zone. Booking emails include readable zone names and date-specific GMT offsets; host
+  emails also show the invitee's local time when their zones differ.
 - Passwordless email-link sign-in, optional Google and Microsoft sign-in, verified-email
   accounts, controlled registration, organization-bound API keys and account settings.
+- A branded sign-in confirmation page with Hourmere's mark and wordmark, light and dark
+  themes, and English and Simplified Chinese language controls.
 - A versioned REST API with OpenAPI types, remote MCP tools and an API-key command-line
   client for discovering configuration, finding slots and managing bookings. Optional MCP
   OAuth adds explicit organization consent and revocable connected apps.
@@ -37,6 +43,7 @@ must approve publication through the [release workflow](https://github.com/hourm
   owned-calendar booking writeback. Microsoft Calendar connections support account and
   calendar-list management; Microsoft busy-time synchronization and event writes are not
   implemented.
+- Calendar listings in the REST API include an additive, nullable `timeZone` field.
 - The user's own API keys can change their non-credential calendar settings and select
   their own authorized Zoom connection on event types they actually host, subject to the
   same organization permissions as browser sessions. Provider authorization and
@@ -49,9 +56,16 @@ must approve publication through the [release workflow](https://github.com/hourm
   invitations; queued sign-in emails; optional signed organization booking webhooks with
   bounded retries; first-party daily booking activity reports without visitor tracking.
 - Inline and popup booking widgets with an explicit parent-origin allowlist, plus English
-  and Simplified Chinese web interfaces.
+  and Simplified Chinese web interfaces. `data-hourmere-height` and the JavaScript `height`
+  option reserve an initial iframe height from 240 to 2000 px. Popups dim the backdrop,
+  lock background scrolling and close on outside clicks while keeping clicks in the dialog's
+  padding open; only one popup can be open at a time.
 - Docker Compose self-hosting with PostgreSQL-backed jobs, optional separate web/worker
   processes, health checks, security headers, request limits and graceful shutdown.
+- Support for installing a published GHCR release image with `docker-compose.image.yml`
+  and `setup.sh --image`, selecting an exact version through `--version` or
+  `HOURMERE_VERSION`. Setup reports the selected version and refuses a mismatch with the
+  checked-out release tag; source builds remain available with `setup.sh --source`.
 
 ### Deprecated
 
