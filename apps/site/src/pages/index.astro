@@ -1,7 +1,8 @@
 ---
 import BookingPreview from '../components/BookingPreview.astro'
+import WaitlistForm from '../components/WaitlistForm.astro'
 import Base from '../layouts/Base.astro'
-import { company, contact, launchUpdatesHref, site } from '../site'
+import { company, contact, site } from '../site'
 
 const steps = [
   {
@@ -81,14 +82,14 @@ const plans = [
           service.
         </p>
         <div class="cta-row">
-          <a class="btn btn-primary" href={launchUpdatesHref}>Get launch updates</a>
+          <a class="btn btn-primary" href="#cloud-waitlist" data-waitlist-link>Join the Cloud waitlist</a>
           <a class="btn" href={site.github}>Follow on GitHub</a>
         </div>
         <p class="note">
           Hourmere Cloud, operated by {company.shortName}, is in an invitation-only preview at
           <a href="https://app.hourmere.com">app.hourmere.com</a>. Sign-ups are currently closed.
           The open-source release for self-hosting is planned for November 30, 2026.
-          <a href={launchUpdatesHref}>Email us</a> to hear when Hourmere Cloud opens to everyone.
+          <a href="#cloud-waitlist" data-waitlist-link>Join the waitlist</a> to hear when Hourmere Cloud opens to everyone.
           Read the <a href="/privacy">Privacy Policy</a> and <a href="/terms">Terms of Service</a>.
         </p>
       </div>
@@ -233,6 +234,7 @@ const plans = [
           <p class="small">
             Operated by <a href={company.url}>{company.name}</a>.
           </p>
+          <WaitlistForm source="cloud" />
         </div>
       </div>
     </div>
@@ -244,7 +246,7 @@ const plans = [
       <h2 id="pricing-title">Free to self-host. Simple cloud plans.</h2>
       <p class="section-intro">
         These are the planned prices for Hourmere Cloud. Final plan details will be published at
-        launch.
+        launch. Joining the waitlist does not create an account or start a paid plan.
       </p>
       <div class="grid plans">
         {
@@ -260,6 +262,7 @@ const plans = [
           ))
         }
       </div>
+      <WaitlistForm source="pricing" />
     </div>
   </section>
 
@@ -275,9 +278,18 @@ const plans = [
             <a href="https://app.hourmere.com">app.hourmere.com</a>, operated by {company.shortName}.
             Sign-ups are currently closed. The open-source release for self-hosting is planned
             for November 30, 2026. You can <a href={site.github}>follow development on GitHub</a>,
-            and email <a href={launchUpdatesHref}>{contact.hello}</a> to hear when Hourmere Cloud
-            opens to everyone.
+            and <a href="#cloud-waitlist" data-waitlist-link>join the waitlist</a> to hear when
+            Hourmere Cloud opens to everyone.
           </p>
+        </details>
+        <details>
+          <summary>When will Hourmere Cloud be available?</summary>
+          <p>
+            Hourmere Cloud is in an invitation-only preview, with sign-ups closed. Join the waitlist
+            and we will email you when it opens to everyone. The source code is on
+            <a href={site.github}>GitHub</a>.
+          </p>
+          <WaitlistForm source="faq" />
         </details>
         <details>
           <summary>Is Hourmere really open source?</summary>
@@ -314,7 +326,7 @@ const plans = [
     <div class="container closing-inner">
       <h2 id="closing-title">Hourmere Cloud is in an invitation-only preview.</h2>
       <div class="cta-row">
-        <a class="btn btn-light" href={launchUpdatesHref}>Get launch updates</a>
+        <a class="btn btn-light" href="#cloud-waitlist" data-waitlist-link>Join the Cloud waitlist</a>
         <a class="btn btn-outline-light" href={site.github}>Follow on GitHub</a>
       </div>
     </div>
@@ -379,6 +391,14 @@ const plans = [
     flex-wrap: wrap;
     gap: 12px;
     margin-top: 28px;
+  }
+
+  @media (pointer: coarse) {
+    a[data-waitlist-link] {
+      display: inline-flex;
+      align-items: center;
+      min-height: 44px;
+    }
   }
 
   .note {
