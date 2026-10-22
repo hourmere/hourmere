@@ -79,4 +79,30 @@ describe('mail-budget upgrade documentation', () => {
     expect(notifications).toContain('Retrying that job never resends it')
     expect(notifications).toContain('recipient hash and reason only')
   })
+
+  it('explains lasting mail loss and rolling-hour exhaustion', () => {
+    const notifications = read(`${siteDocs}/notifications.md`)
+    expect(notifications).toContain(
+      [
+        'An attacker who can trigger mail to eligible addresses can exhaust the instance hourly cap,',
+        'including its host/sign-in reserve. Until the rolling hour clears (up to an hour after the',
+        "last counted send, longer if triggering continues), every host's sign-in email is dropped,",
+        'so hosts must request a new link later, and all booking notification mail is suppressed and',
+        'never sent later. Existing sessions are unaffected. Operators can raise `MAIL_MAX_PER_HOUR`',
+        "while keeping the cap, reserve and other mail within their provider's limit; raising it does",
+        'not resend messages that were already suppressed.',
+      ].join(' '),
+    )
+  })
+
+  it('includes retained receipts without recipient identity in the ledger backfill', () => {
+    const notifications = read(`${siteDocs}/notifications.md`)
+    expect(notifications).toContain(
+      "Migration 0040's unchanged backfill seeds the ledger from all retained sent receipts for the last two days.",
+    )
+    expect(notifications).toContain(
+      'Rows without recipient identity get a NULL hash and still count toward the instance cap.',
+    )
+    expect(notifications).not.toContain('where recipient identity is still available')
+  })
 })

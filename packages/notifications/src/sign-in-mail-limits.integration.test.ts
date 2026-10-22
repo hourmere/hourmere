@@ -148,6 +148,42 @@ describe.skipIf(!serverUrl)('durable sign-in mail limits (real PostgreSQL)', () 
     expect(await rows()).toEqual([])
   })
 
+  it('logs suppression only after the outbox deletion commits', async () => {
+    await history(5, signInRecipientHash(EMAIL, secret))
+    const row = await queued()
+    try {
+      await owned.pool.query(
+        `CREATE FUNCTION test_fail_sign_in_suppression_commit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'forced suppression commit failure'; END $$`,
+      )
+      await owned.pool.query(
+        'CREATE CONSTRAINT TRIGGER test_fail_sign_in_suppression AFTER DELETE ON sign_in_emails DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION test_fail_sign_in_suppression_commit()',
+      )
+      await expect(deliverSignInEmail(deps(), row.id)).rejects.toThrow(
+        'forced suppression commit failure',
+      )
+      expect(sent).toEqual([])
+      expect(await ledger()).toHaveLength(5)
+      expect((await rows()).map((value) => value.id)).toEqual([row.id])
+      expect(logs).toEqual([])
+    } finally {
+      await owned.pool.query(
+        'DROP TRIGGER IF EXISTS test_fail_sign_in_suppression ON sign_in_emails',
+      )
+      await owned.pool.query('DROP FUNCTION IF EXISTS test_fail_sign_in_suppression_commit()')
+    }
+    await deliverSignInEmail(deps(), row.id)
+    expect(sent).toEqual([])
+    expect(await rows()).toEqual([])
+    expect(logs.map((line) => JSON.parse(line))).toEqual([
+      {
+        level: 'warn',
+        event: 'sign_in_email_suppressed',
+        reason: 'recipient_hourly_limit',
+        recipientHash: signInRecipientHash(EMAIL, secret).toString('hex'),
+      },
+    ])
+  })
+
   it('excludes sends exactly one hour old from the hourly window', async () => {
     await history(5, signInRecipientHash(EMAIL, secret), new Date(now.getTime() - 3_600_000))
     await deliverSignInEmail(deps(), (await queued()).id)
