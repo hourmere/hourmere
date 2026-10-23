@@ -6,7 +6,8 @@ lastVerified: '2026-10-20'
 
 Hourmere Cloud is in an [invitation-only preview](/#faq) with sign-ups closed, and the
 open-source release for self-hosting is planned for November 30, 2026. Its
-[self-hosting guide](/docs/self-hosting) requires a source build; no prebuilt public image is published.
+[self-hosting guide](/docs/self-hosting) installs the published image pinned to an exact release version;
+building from source remains an alternative.
 This page describes the documented implementation and its current limitations.
 
 The verification date above applies to the linked sources on this page. Follow them for
@@ -16,7 +17,7 @@ current availability, terms and plan requirements before choosing a service.
 
 | Option | Deployment | Source and operating responsibility |
 | --- | --- | --- |
-| Hourmere | Build from source with Docker Compose: application and PostgreSQL; workers can run separately. See [self-hosting](/docs/self-hosting). | You operate the instance, backups, email delivery and calendar credentials; see the [configuration reference](/docs/configuration) and [backup guide](/docs/self-hosting#back-up-and-restore). |
+| Hourmere | Use a published image with Docker Compose: application and PostgreSQL; workers can run separately. See [self-hosting](/docs/self-hosting). | You operate the instance, backups, email delivery and calendar credentials; see the [configuration reference](/docs/configuration) and [backup guide](/docs/self-hosting#back-up-and-restore). |
 | Calendly | Vendor-hosted scheduling and MCP service. See its [service terms](https://calendly.com/legal/customer-terms-conditions) and [MCP documentation](https://developer.calendly.com/docs/mcp/calendly-mcp-server). | Its [MCP documentation](https://developer.calendly.com/docs/mcp/calendly-mcp-server) explicitly excludes self-hosting or local deployment of that server. |
 | Cal.com | Managed service or commercial enterprise self-hosting, as described in its [self-hosting guide](https://cal.com/blog/self-hosted-scheduling-platforms-benefits-and-challenges). | Cal.com's [transition announcement](https://cal.com/blog/cal-diy-open-source-to-closed-source) describes a private production codebase. Its [self-hosting guide](https://cal.com/blog/self-hosted-scheduling-platforms-benefits-and-challenges) directs enterprise deployments through its team. |
 | Cal.diy | Community edition installed on your infrastructure; see its [README](https://github.com/calcom/cal.diy/blob/main/README.md). | [MIT-licensed](https://github.com/calcom/cal.diy/blob/main/LICENSE). Its [self-hosting documentation](https://www.cal.diy/) recommends personal, non-production use and describes the operator's responsibilities. |

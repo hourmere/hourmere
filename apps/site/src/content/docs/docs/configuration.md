@@ -10,8 +10,8 @@ Empty optional values usually mean unset; `AUTO_MIGRATE` must be omitted or expl
 their environment; Compose interpolates `.env` into the variables explicitly listed in
 [`docker-compose.yml`](https://github.com/hourmere/hourmere/blob/main/docker-compose.yml). Adding an arbitrary entry to `.env` does not pass it to a container.
 Restart/recreate affected processes after changing configuration. The interactive
-[`scripts/setup.sh`](https://github.com/hourmere/hourmere/blob/main/scripts/setup.sh) creates a private `.env` from [`.env.example`](https://github.com/hourmere/hourmere/blob/main/.env.example) and selects either the
-plain Compose file or the optional automatic HTTPS override; see
+[`scripts/setup.sh`](https://github.com/hourmere/hourmere/blob/main/scripts/setup.sh) creates a private `.env` from [`.env.example`](https://github.com/hourmere/hourmere/blob/main/.env.example), selects the
+published-image overlay by default, and optionally adds the automatic HTTPS override; see
 [self-hosting](/docs/self-hosting) for the complete command sequence.
 
 ## Server and database
@@ -272,16 +272,18 @@ for recovery and exceptions.
 ## Compose-only settings and overrides
 
 These settings control Docker Compose rather than the server configuration loader. Compose
-2.24.4 or newer is required for the HTTPS and worker overlays' `!reset` tags. Setup defaults to the
-HTTPS path and writes the combined `COMPOSE_FILE`; copying [`.env.example`](https://github.com/hourmere/hourmere/blob/main/.env.example) without setup
-keeps the plain path.
+2.24.4 or newer is required for the image, HTTPS and worker overlays' `!reset` tags. Setup defaults
+to the image installation with HTTPS and writes
+`COMPOSE_FILE='docker-compose.yml:docker-compose.image.yml:docker-compose.proxy.yml'`; copying [`.env.example`](https://github.com/hourmere/hourmere/blob/main/.env.example) without setup
+keeps the plain source-build path.
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `POSTGRES_PASSWORD` | Required | Initializes the PostgreSQL role and becomes the app's `PGPASSWORD`. Changing `.env` does not change an already initialized database role's password. |
-| `COMPOSE_FILE` | [`docker-compose.yml`](https://github.com/hourmere/hourmere/blob/main/docker-compose.yml) | Not forwarded by the default Compose file: consumed by the Compose CLI. Setup writes `docker-compose.yml:docker-compose.proxy.yml` for bundled HTTPS, or [`docker-compose.yml`](https://github.com/hourmere/hourmere/blob/main/docker-compose.yml) for plain mode. After setup, run [`./scripts/enable-worker.sh`](https://github.com/hourmere/hourmere/blob/main/scripts/enable-worker.sh) to select the separate-worker overlay safely; it preserves the proxy selection and automatically switches the app to `web`. The saved `.env` preserves this choice for backups and upgrades without editing tracked Compose files. |
+| `COMPOSE_FILE` | [`docker-compose.yml`](https://github.com/hourmere/hourmere/blob/main/docker-compose.yml) | Not forwarded by the default Compose file: consumed by the Compose CLI. Image setup writes `docker-compose.yml:docker-compose.image.yml:docker-compose.proxy.yml` for bundled HTTPS, or `docker-compose.yml:docker-compose.image.yml` for plain mode. Source setup omits `docker-compose.image.yml`. After setup, run [`./scripts/enable-worker.sh`](https://github.com/hourmere/hourmere/blob/main/scripts/enable-worker.sh) to select the separate-worker overlay safely; it preserves image and proxy selections and automatically switches the app to `web`. The saved `.env` preserves this choice for backups and upgrades without editing tracked Compose files. |
 | `COMPOSE_PROJECT_NAME` | `hourmere` | Not forwarded by the default Compose file: consumed by the Compose CLI to select containers, networks and volumes. Setup persists this name; set it in setup's environment to choose an independent deployment. Keep the original name when migrating an existing installation; persist the new name when restoring to a separate project. |
-| `APP_IMAGE` | `hourmere:local` | Local image tag built from this checkout; `pull_policy: never` remains in force. Use a distinct tag for independent deployments on one Docker host. No prebuilt public image is published yet. |
+| `APP_IMAGE` | `hourmere:local` | Source builds only: local image tag built from this checkout with `pull_policy: never`. Use a distinct tag for independent source deployments on one Docker host. The image overlay ignores this setting and selects the published `ghcr.io/hourmere/hourmere:<HOURMERE_VERSION>` image for the app and any separate worker. |
+| `HOURMERE_VERSION` | Required for image installs | Not forwarded by the default Compose file: consumed by the Compose CLI for image selection. Exact published release version, for example `1.0.0` or `1.0.1-rc.1`, without a leading `v`; never `latest` or a floating minor tag. The image overlay requires it and pins the same image for app and worker. Keep it aligned with the checked-out release tag. Omit it for source builds. |
 | `PROXY_SUBNET` | `172.30.62.0/28` | Not forwarded by the default Compose file: the HTTPS override uses this dedicated IPv4 ingress subnet. Change it together with `PROXY_IP` and `PROXY_DYNAMIC_RANGE` before starting if it overlaps another network or another deployment. |
 | `PROXY_IP` | `172.30.62.2` | Not forwarded by the default Compose file: the HTTPS override assigns Caddy this address and forwards it as the app's `TRUSTED_PROXIES`. Must be a free usable address in `PROXY_SUBNET`, outside `PROXY_DYNAMIC_RANGE`. |
 | `PROXY_DYNAMIC_RANGE` | `172.30.62.8/29` | Not forwarded by the default Compose file: the HTTPS override allocates app and one-off app container addresses from this range inside `PROXY_SUBNET`, keeping Caddy's `PROXY_IP` outside it. Workers use only the default network. Change all three network settings together for another subnet/deployment. |
@@ -292,14 +294,14 @@ before recreating the stack. For plain mode, remove both lines of the proxy veri
 
 ```sh
 (
-  unset COMPOSE_FILE &&
+  unset COMPOSE_FILE HOURMERE_VERSION &&
   ./scripts/enable-worker.sh &&
   compose_services=$(docker compose config --services) &&
   { printf '%s\n' "$compose_services" | grep -qx worker ||
     { echo "Worker service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
   { printf '%s\n' "$compose_services" | grep -qx proxy ||
     { echo "Proxy service is missing; check COMPOSE_FILE before continuing."; exit 1; }; } &&
-  docker compose up -d --build --wait
+  docker compose up -d --wait
 )
 ```
 
@@ -310,8 +312,17 @@ worker container as described in [self-hosting](/docs/self-hosting#switch-back-t
 If editing manually, replace the whole quoted line, for example:
 
 ```dotenv
-COMPOSE_FILE='docker-compose.yml:docker-compose.proxy.yml:docker-compose.worker.yml'
+COMPOSE_FILE='docker-compose.yml:docker-compose.image.yml:docker-compose.proxy.yml:docker-compose.worker.yml'
 ```
+
+For a plain image installation, omit only the proxy overlay:
+
+```dotenv
+COMPOSE_FILE='docker-compose.yml:docker-compose.image.yml:docker-compose.worker.yml'
+```
+
+Source installations omit `docker-compose.image.yml` from either example and use
+`docker compose up -d --build --wait` when rebuilding the source checkout.
 
 Keep custom overlays inside the quotes. A shell-exported `COMPOSE_FILE` overrides `.env`;
 the block unsets it only inside its subshell. Unset it separately before standalone
