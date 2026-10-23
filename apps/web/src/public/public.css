@@ -442,6 +442,26 @@
   box-shadow: none;
 }
 
+/* Keep the event and calendar action ahead of the supporting management details. */
+.public .confirmation-secondary {
+  margin-top: var(--space-5);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border);
+}
+
+.public .confirmation-secondary > .booking-details,
+.public .confirmation-secondary .manage-link h2 {
+  margin-top: 0;
+}
+
+.public .confirmation-secondary > .booking-details {
+  margin-bottom: 0;
+}
+
+.public .confirmation-secondary > .muted {
+  margin: 0;
+}
+
 .public .confirmation-indicator {
   display: inline-grid;
   place-items: center;

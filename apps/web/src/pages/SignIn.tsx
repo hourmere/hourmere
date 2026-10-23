@@ -184,8 +184,10 @@ function SignInForm({ next, expired }: { next: string; expired: boolean }) {
             {t('Check your email')}
           </h1>
           <p>
-            {t('We sent a sign-in link to')} <strong>{phase.email}</strong>
-            {t('. Open it to sign in; it works once and expires in a few minutes.')}
+            {t('We received your sign-in link request for')} <strong>{phase.email}</strong>
+            {t(
+              '. If this address can sign in, check your inbox for a link. It works once and expires in a few minutes.',
+            )}
           </p>
           <EmailDeliveryHint />
           <button
@@ -268,7 +270,7 @@ function SignInForm({ next, expired }: { next: string; expired: boolean }) {
           </>
         )}
         <p className="fine-print">
-          {t('No password needed. New here? Signing in creates your account.')}
+          {t('No password needed. New account registration depends on this instance’s settings.')}
         </p>
         <LegalLinks {...(instance.status === 'ready' ? instance.data : {})} />
       </div>

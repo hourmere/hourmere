@@ -165,6 +165,75 @@ describe('the booking page', () => {
     },
   )
 
+  it.each([
+    ['en', 'You’re booked', 'When', 'Where', 'Host', 'Add to your calendar', 'Outlook'],
+    ['zh-CN', '预约成功', '时间', '地点', '主持人', '添加到日历', 'Outlook'],
+  ])(
+    'puts event facts and calendar actions before supporting details in %s',
+    async (language, result, when, where, host, calendar, outlook) => {
+      const user = userEvent.setup()
+      const data = booking()
+      fakeApi({
+        ...eventRoutes(EVENT, DST_SLOTS),
+        'POST /api/v1/public/ada/intro/bookings': () =>
+          json(201, {
+            booking: {
+              ...data,
+              attendees: [
+                ...data.attendees,
+                {
+                  name: 'A guest with a long display name / 名字较长的来宾',
+                  email: 'guest@example.invalid',
+                  timeZone: 'Asia/Shanghai',
+                  locale: 'zh-CN',
+                  isBooker: false,
+                },
+              ],
+            },
+            manageToken: TOKEN,
+          }),
+      })
+      renderApp('/ada/intro')
+      await chooseSlot(user, /November 2, available/, '9:00 AM')
+      await user.type(screen.getByLabelText('Your name'), 'Grace Hopper')
+      await user.type(screen.getByLabelText('Email'), 'grace@example.com')
+      await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+      await screen.findByRole('heading', { name: 'You’re booked' })
+      await user.selectOptions(screen.getByLabelText('Interface language'), language)
+
+      const ordered = [
+        screen.getByRole('heading', { name: result }),
+        screen.getByText(when, { selector: 'dt' }),
+        screen.getByText(where, { selector: 'dt' }),
+        screen.getByRole('heading', { name: calendar }),
+        screen.getByText(host, { selector: 'dt' }),
+        screen.getByRole('heading', {
+          name:
+            language === 'en' ? 'Save your link to change or cancel' : '保存用于更改或取消的链接',
+        }),
+        screen.getByText(
+          language === 'en'
+            ? 'Didn’t get the email? Check spam or junk and add the sender to your contacts.'
+            : '没收到邮件？请检查垃圾邮件文件夹，并将发件人加入通讯录。',
+        ),
+      ]
+      for (const [index, element] of ordered.entries()) {
+        const next = ordered[index + 1]
+        if (next)
+          expect(
+            element.compareDocumentPosition(next) & Node.DOCUMENT_POSITION_FOLLOWING,
+          ).toBeTruthy()
+      }
+      // After the primary calendar actions, keyboard navigation reaches the private link.
+      screen.getByRole('link', { name: outlook }).focus()
+      await user.tab()
+      const link = screen.getByRole('textbox') as HTMLInputElement
+      expect(document.activeElement).toBe(link)
+      expect(link.value).toBe(`${window.location.origin}/booking#token=${TOKEN}`)
+      expect(screen.getByText('A guest with a long display name / 名字较长的来宾')).toBeDefined()
+    },
+  )
+
   it('explains calendar responses and opens cancellation with the existing private capability', async () => {
     const user = userEvent.setup()
     const api = fakeApi({
@@ -190,7 +259,7 @@ describe('the booking page', () => {
       name: 'Cancel booking',
     })
     const calendar = screen.getByRole('heading', { name: 'Add to your calendar' }).parentElement
-    expect(calendar?.nextElementSibling).toBe(note.parentElement)
+    expect(calendar?.nextElementSibling).toBe(note.parentElement?.parentElement)
     expectStackGap(note.parentElement?.parentElement as HTMLElement)
     expect(cancel.getAttribute('href')).toBe(`/booking#token=${TOKEN}&action=cancel`)
     expect(cancel.getAttribute('target')).toBeNull()
@@ -244,6 +313,9 @@ describe('the booking page', () => {
       expect(screen.queryByRole('link', { name: 'Cancel booking' })).toBeNull()
       expect(screen.getByText(/Use the link in your confirmation email instead/)).toBeDefined()
       expect(document.querySelectorAll('.confirmation .alert-info')).toHaveLength(1)
+      if (state === 'cancelled')
+        expect(screen.queryByRole('heading', { name: 'Add to your calendar' })).toBeNull()
+      else expect(screen.getByRole('heading', { name: 'Add to your calendar' })).toBeDefined()
     },
   )
 
@@ -282,6 +354,8 @@ describe('the booking page', () => {
         ),
       ).toBeDefined()
       expect(screen.queryByText(/^Booking confirmed\./)).toBeNull()
+      expect(screen.queryByRole('heading', { name: 'Add to your calendar' })).toBeNull()
+      expect(screen.getByLabelText('Your link to change or cancel this booking')).toBeDefined()
       await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
       expect(
         screen.getByText(

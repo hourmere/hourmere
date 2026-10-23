@@ -31,7 +31,7 @@ for (const viewport of [
       test(`prepare additional required page states ${locale}`, async ({ page, app }) => {
         const selectors = {
           'booking-form': '.details-step form input[type="email"]',
-          'booking-confirmation': '.confirmation .booking-details',
+          'booking-confirmation': '.confirmation > .booking-details',
           'booking-time-zone': '.tz-panel [role="listbox"]:visible',
           'embedded-booking': '.public-embedded .event-title',
           'team-booking': '.event-host',
@@ -42,6 +42,16 @@ for (const viewport of [
           if (!(id in selectors)) continue
           const selector = selectors[id as keyof typeof selectors]
           await expect(page.locator(selector)).toBeVisible()
+          if (id === 'booking-confirmation') {
+            const supportingDetails = page.locator('.confirmation-secondary > .booking-details')
+            await expect(supportingDetails).toBeVisible()
+            await expect(page.locator(selector).locator('dt')).toHaveText(
+              locale === 'zh-CN' ? ['事项', '时间', '地点'] : ['What', 'When', 'Where'],
+            )
+            await expect(
+              supportingDetails.locator('dt').filter({ hasText: /^(Host|主持人)$/ }),
+            ).toBeVisible()
+          }
           if (id === 'booking-form') {
             const zone = page.locator('.host-time-zone')
             await expect(zone.locator('wbr')).toHaveCount(1)

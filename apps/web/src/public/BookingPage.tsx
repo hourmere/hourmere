@@ -464,8 +464,6 @@ function Confirmation({
             },
           )}
         </p>
-        {booking.status === 'confirmed' &&
-          (!booking.conference || booking.conference.status === 'ready') && <EmailDeliveryHint />}
         <DetailList
           items={[
             ['What', event.title],
@@ -480,23 +478,6 @@ function Confirmation({
               />,
             ],
             ['Where', <LocationDetails key="where" location={booking.location} />],
-            ['Host', hostDetail],
-            ...(invitee
-              ? ([
-                  ['You', t('{name} ({detail})', { name: invitee.name, detail: invitee.email })],
-                ] as [string, string][])
-              : []),
-            ...(guests.length
-              ? ([
-                  [
-                    'Guests',
-                    formatList(
-                      guests.map((g) => g.name),
-                      language,
-                    ),
-                  ],
-                ] as [string, string][])
-              : []),
           ]}
         />
         <ConferenceNotice
@@ -505,20 +486,44 @@ function Confirmation({
           manageToken={manageToken}
           onChange={setBooking}
         />
-        <div className="stack">
-          {booking.status === 'confirmed' &&
-            (!booking.conference || booking.conference.status === 'ready') && (
-              <AddToCalendar
-                event={{
-                  id: booking.id,
-                  title,
-                  start: Date.parse(booking.start),
-                  end: Date.parse(booking.end),
-                  description: event.description ?? undefined,
-                  location: locationText(booking.location, ui, t(': ')),
-                }}
-              />
-            )}
+        {booking.status === 'confirmed' &&
+          (!booking.conference || booking.conference.status === 'ready') && (
+            <AddToCalendar
+              event={{
+                id: booking.id,
+                title,
+                start: Date.parse(booking.start),
+                end: Date.parse(booking.end),
+                description: event.description ?? undefined,
+                location: locationText(booking.location, ui, t(': ')),
+              }}
+            />
+          )}
+        <div className="confirmation-secondary stack">
+          <DetailList
+            items={[
+              ['Host', hostDetail],
+              ...(invitee
+                ? ([
+                    ['You', t('{name} ({detail})', { name: invitee.name, detail: invitee.email })],
+                  ] as [string, string][])
+                : []),
+              ...(guests.length
+                ? ([
+                    [
+                      'Guests',
+                      formatList(
+                        guests.map((g) => g.name),
+                        language,
+                      ),
+                    ],
+                  ] as [string, string][])
+                : []),
+            ]}
+          />
+          {manageToken && (
+            <ManageLink token={manageToken} intro={t('Use this link to reschedule or cancel.')} />
+          )}
           {(canCancel || (!manageToken && replayed)) && (
             <div className="alert alert-info">
               {!manageToken && replayed && (
@@ -551,10 +556,9 @@ function Confirmation({
               )}
             </div>
           )}
+          {booking.status === 'confirmed' &&
+            (!booking.conference || booking.conference.status === 'ready') && <EmailDeliveryHint />}
         </div>
-        {manageToken && (
-          <ManageLink token={manageToken} intro={t('Use this link to reschedule or cancel.')} />
-        )}
         <CreateBookingLink />
       </div>
     </PublicLayout>
