@@ -165,8 +165,8 @@ export const admin = {
   ', until': '，至',
   ', your personal organization': '（你的个人组织）',
   '. Lowercase letters, digits and hyphens, up to': '。使用小写字母、数字和连字符，最多',
-  '. Open it to sign in; it works once and expires in a few minutes.':
-    '。打开链接即可登录；链接仅可使用一次，几分钟后过期。',
+  '. If this address can sign in, check your inbox for a link. It works once and expires in a few minutes.':
+    '。若此邮箱可登录，请查收登录链接。链接仅可使用一次，几分钟后过期。',
   '. They are saved right away.': '。更改会立即保存。',
   '”? Anything using it stops working at once. This cannot be undone.':
     '”？使用此密钥的应用会立即失效，且无法撤销。',
@@ -490,8 +490,8 @@ export const admin = {
   'No extra questions.': '没有额外问题。',
   'No hours set': '尚未设置时间段',
   'No hours: unavailable.': '没有时间段：不可用。',
-  'No password needed. New here? Signing in creates your account.':
-    '无需密码。首次使用？登录后即可创建账号。',
+  'No password needed. New account registration depends on this instance’s settings.':
+    '无需密码。能否创建新账号取决于此实例的注册设置。',
   'No past bookings yet.': '尚无过去的预约。',
   'No public booking link': '没有公开预约链接',
   'No upcoming bookings.': '没有即将到来的预约。',
@@ -689,7 +689,7 @@ export const admin = {
   'Waiting for the first synchronization. Booking times stay unavailable until it completes.':
     '正在等待首次同步。完成前，相关时间将保持不可预约。',
   'wants to connect to Hourmere.': '希望连接至 Hourmere。',
-  'We sent a sign-in link to': '已发送登录链接至',
+  'We received your sign-in link request for': '已收到此邮箱的登录链接申请：',
   Wed: '周三',
   Wednesday: '星期三',
   'Weekly hours': '每周时间段',

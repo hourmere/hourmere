@@ -30,7 +30,7 @@ const describeSignInErrorText = (...args: Parameters<typeof describeSignInError>
   return result === null ? null : translateMessage('en', result)
 }
 describe('the sign-in page', () => {
-  it('emails a sign-in link and says where it went', async () => {
+  it('requests a sign-in link and keeps its address and return path', async () => {
     const api = fakeApi({
       ...signedOut,
       ...instance(),
