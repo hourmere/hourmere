@@ -114,7 +114,10 @@ jobs:
           if-no-files-found: warn
 
   e2e-cross-engine:
-    runs-on: ubuntu-latest
+    # The browser cache key does not include the OS release, and Playwright's WebKit build
+    # links against the release it was installed on (libicu74 on 24.04). Pin the image so
+    # ubuntu-latest moving to a new release cannot restore an incompatible cached browser.
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     services:
       postgres:
