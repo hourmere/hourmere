@@ -2,7 +2,7 @@ import { type FormEvent, useEffect, useRef, useState } from 'react'
 import { Navigate, useSearchParams } from 'react-router'
 import { type SocialProvider, sendSignInLink, startSocialSignIn } from '../api/auth.ts'
 import { api, unwrap } from '../api/client.ts'
-import { errorMessage } from '../api/errors.ts'
+import { errorMessage, RequestError } from '../api/errors.ts'
 import { goTo } from '../browser.ts'
 import { EmailDeliveryHint } from '../components/EmailDeliveryHint.tsx'
 import { LegalLinks } from '../components/LegalLinks.tsx'
@@ -89,6 +89,8 @@ type Phase =
   | { kind: 'sending' }
   | { kind: 'sent'; email: string }
 
+type ResendState = 'idle' | 'sending' | 'success' | 'limited' | 'error'
+
 export function SignInPage() {
   const { t } = useI18n()
 
@@ -116,8 +118,14 @@ function SignInForm({ next, expired }: { next: string; expired: boolean }) {
   }))
   const [email, setEmail] = useState('')
   const [redirecting, setRedirecting] = useState<SocialProvider | null>(null)
+  const [resend, setResend] = useState<ResendState>('idle')
+  const resendInFlight = useRef(false)
+  const resendButton = useRef<HTMLButtonElement>(null)
+  const restoreResendFocus = useRef(false)
   const [instance] = useLoad(loadInstance)
   const sentHeading = useRef<HTMLHeadingElement>(null)
+  const emailInput = useRef<HTMLInputElement>(null)
+  const focusEmail = useRef(false)
 
   // The error was read into state above; take it out of the address bar so a reload or a
   // bookmark does not show it again.
@@ -131,7 +139,19 @@ function SignInForm({ next, expired }: { next: string; expired: boolean }) {
 
   useEffect(() => {
     if (phase.kind === 'sent') sentHeading.current?.focus()
+    else if (phase.kind === 'form' && focusEmail.current) {
+      emailInput.current?.focus()
+      focusEmail.current = false
+    }
   }, [phase.kind])
+
+  useEffect(() => {
+    if (resend === 'sending' || !restoreResendFocus.current) return
+    // Chrome blurs a focused button when it becomes disabled. Restore that lost
+    // focus after rendering it enabled, unless the user has focused another control.
+    if (document.activeElement === document.body) resendButton.current?.focus()
+    restoreResendFocus.current = false
+  }, [resend])
 
   // Better Auth comes back here (keeping `next`) when the link or the provider fails.
   const redirects = { callbackURL: next, errorCallbackURL: signInPath(next) }
@@ -172,6 +192,30 @@ function SignInForm({ next, expired }: { next: string; expired: boolean }) {
     }
   }
 
+  async function resendLink() {
+    // Lock synchronously, before React renders the disabled button.
+    if (phase.kind !== 'sent' || resendInFlight.current) return
+    resendInFlight.current = true
+    restoreResendFocus.current = document.activeElement === resendButton.current
+    setResend('sending')
+    try {
+      await sendSignInLink(phase.email, redirects)
+      setResend('success')
+    } catch (err) {
+      setResend(err instanceof RequestError && err.status === 429 ? 'limited' : 'error')
+    } finally {
+      resendInFlight.current = false
+    }
+  }
+
+  function changeEmail() {
+    if (phase.kind !== 'sent' || resendInFlight.current) return
+    setEmail(phase.email)
+    setResend('idle')
+    focusEmail.current = true
+    setPhase({ kind: 'form', error: null })
+  }
+
   if (phase.kind === 'sent') {
     return (
       <main className="centered">
@@ -190,13 +234,42 @@ function SignInForm({ next, expired }: { next: string; expired: boolean }) {
             )}
           </p>
           <EmailDeliveryHint />
-          <button
-            type="button"
-            className="button button-block"
-            onClick={() => setPhase({ kind: 'form', error: null })}
-          >
-            {t('Use a different email or try again')}
-          </button>
+          <div role="status" aria-atomic="true">
+            {resend === 'sending' && <p>{t('Resending…')}</p>}
+            {resend === 'success' && (
+              <p>
+                {t(
+                  'We received your new sign-in link request. Check your inbox if this address can sign in.',
+                )}
+              </p>
+            )}
+          </div>
+          {(resend === 'limited' || resend === 'error') && (
+            <p className="alert alert-error" role="alert">
+              {resend === 'limited'
+                ? t('Too many requests. Please wait and try again later.')
+                : t('Could not resend the link. Please try again.')}
+            </p>
+          )}
+          <div className="stack">
+            <button
+              ref={resendButton}
+              type="button"
+              className="button button-primary button-block"
+              disabled={resend === 'sending'}
+              onClick={resendLink}
+            >
+              {t('Resend link')}
+            </button>
+            <button
+              type="button"
+              className="button button-block"
+              disabled={resend === 'sending'}
+              onClick={changeEmail}
+            >
+              {t('Change email')}
+            </button>
+          </div>
           <LegalLinks {...(instance.status === 'ready' ? instance.data : {})} />
         </div>
       </main>
@@ -226,6 +299,7 @@ function SignInForm({ next, expired }: { next: string; expired: boolean }) {
           <div className="field">
             <label htmlFor="email">{t('Email')}</label>
             <input
+              ref={emailInput}
               id="email"
               name="email"
               type="email"
