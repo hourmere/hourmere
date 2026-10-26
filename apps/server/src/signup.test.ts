@@ -117,20 +117,20 @@ describe.skipIf(!serverUrl)('sign-up control', () => {
 
   type App = ReturnType<typeof instance>
 
-  const askForLinkRequest = (app: App, email: string) =>
+  const askForLinkRequest = (app: App, email: string, callbackURL = '/') =>
     app.request('/api/auth/sign-in/magic-link', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ email, callbackURL: '/' }),
+      body: JSON.stringify({ email, callbackURL }),
     })
 
   /** Waits until a sign-in email has been sent: that happens after the answer. */
   const afterSend = () => new Promise<void>((resolve) => setImmediate(resolve))
 
   /** Asks for a sign-in link; returns the emailed link, or undefined if no email was sent. */
-  async function askForLink(app: App, email: string): Promise<URL | undefined> {
+  async function askForLink(app: App, email: string, callbackURL = '/'): Promise<URL | undefined> {
     const before = outbox.length
-    const res = await askForLinkRequest(app, email)
+    const res = await askForLinkRequest(app, email, callbackURL)
     // The same answer whether or not an email was sent.
     expect(res.status, email).toBe(200)
     expect(await res.json(), email).toEqual({ status: true })
@@ -433,6 +433,95 @@ describe.skipIf(!serverUrl)('sign-up control', () => {
         .returningAll()
         .executeTakeFirstOrThrow()
     }
+
+    it.each(restricted)(
+      'keeps invitation callbacks and repeated sign-in separate from acceptance in $mode',
+      async (policy) => {
+        const invitation = await invite()
+        const app = instance(policy)
+        const callbackURL = `/app/join?invitationId=${invitation.id}`
+        const link = await askForLink(app, invitation.email, callbackURL)
+        expect(link).toBeDefined()
+        const signedIn = await useLink(app, link)
+        expect(signedIn.status).toBe(302)
+        expect(signedIn.headers.get('location')).toBe(`${origin}${callbackURL}`)
+        expect(hasSession(signedIn)).toBe(true)
+        await signIn(app, invitation.email)
+
+        const user = await db
+          .selectFrom('auth.user')
+          .select(['id', 'emailVerified'])
+          .where('email', '=', invitation.email)
+          .executeTakeFirstOrThrow()
+        expect(user.emailVerified).toBe(true)
+        expect(
+          await db
+            .selectFrom('auth.invitation')
+            .select('status')
+            .where('id', '=', invitation.id)
+            .executeTakeFirstOrThrow(),
+        ).toEqual({ status: 'pending' })
+        expect(
+          await db
+            .selectFrom('auth.member')
+            .select('id')
+            .where('organizationId', '=', invitation.organizationId)
+            .where('userId', '=', user.id)
+            .execute(),
+        ).toEqual([])
+        const personal = await db
+          .selectFrom('personal_organizations')
+          .select('organization_id')
+          .where('user_id', '=', user.id)
+          .executeTakeFirstOrThrow()
+        const sessions = await db
+          .selectFrom('auth.session')
+          .select('activeOrganizationId')
+          .where('userId', '=', user.id)
+          .execute()
+        expect(sessions).toHaveLength(2)
+        expect(sessions).toEqual([
+          { activeOrganizationId: personal.organization_id },
+          { activeOrganizationId: personal.organization_id },
+        ])
+      },
+    )
+
+    it.each(restricted)(
+      'does not grant signup authority to an arbitrary invitation callback in $mode',
+      async (policy) => {
+        const open = instance(OPEN)
+        await signIn(open, 'first@outside.example')
+        const untrusted = await signIn(open, 'untrusted@outside.example')
+        const invitation = await inviteFromTeam(open, untrusted, 'next@outside.example')
+        const callbackURL = `/app/join?invitationId=${invitation.id}`
+        const app = instance(policy)
+        // Compare presence only so a failing upgrade never prints a usable sign-in link.
+        expect((await askForLink(app, 'next@outside.example', callbackURL)) === undefined).toBe(
+          true,
+        )
+        // Even a previously issued identity link cannot turn an untrusted team invitation
+        // into permission to create an account when the registration policy is restricted.
+        const earlier = await askForLink(open, 'next@outside.example', callbackURL)
+        expect(earlier).toBeDefined()
+        expectSignupDisabled(await useLink(app, earlier))
+        expect(await users()).toEqual(['first@outside.example', 'untrusted@outside.example'])
+        expect(
+          await db
+            .selectFrom('auth.invitation')
+            .select('status')
+            .where('id', '=', invitation.id)
+            .executeTakeFirstOrThrow(),
+        ).toEqual({ status: 'pending' })
+        expect(
+          await db
+            .selectFrom('auth.member')
+            .select('id')
+            .where('organizationId', '=', invitation.organizationId)
+            .execute(),
+        ).toHaveLength(1)
+      },
+    )
 
     it('uses createdAt then id to choose the one first-user inviter', async () => {
       const invitation = await invite()
