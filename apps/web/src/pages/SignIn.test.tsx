@@ -1,4 +1,4 @@
-import { act, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { goTo } from '../browser.ts'
@@ -8,6 +8,7 @@ import {
   fakeApi,
   instance,
   json,
+  later,
   organizations,
   renderApp,
   signedIn,
@@ -22,6 +23,7 @@ const PROTOTYPE_KEYS = ['__proto__', 'constructor', 'toString', 'hasOwnProperty'
 const location = () => screen.getByTestId('location').textContent
 const heading = () => screen.findByRole('heading', { name: 'Sign in to Hourmere' })
 const linkSent = () => json(200, { status: true })
+const resendStatus = () => within(screen.getByRole('main')).getByRole('status')
 /** Lets answered requests reach the page (for checking that something did not appear). */
 const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 20)))
 
@@ -63,7 +65,8 @@ describe('the sign-in page', () => {
     expect(
       screen.getByText('没收到邮件？请检查垃圾邮件文件夹，并将发件人加入通讯录。'),
     ).toBeDefined()
-    expect(screen.getByRole('button', { name: '使用其他邮箱或重试' })).toBeDefined()
+    expect(screen.getByRole('button', { name: '重新发送链接' })).toBeDefined()
+    expect(screen.getByRole('button', { name: '更换邮箱' })).toBeDefined()
     await userEvent.selectOptions(screen.getByLabelText('界面语言'), 'en')
     expect(api.to('POST /api/auth/sign-in/magic-link').map((c) => c.body)).toEqual([
       {
@@ -73,10 +76,316 @@ describe('the sign-in page', () => {
       },
     ])
 
-    await userEvent.click(
-      screen.getByRole('button', { name: 'Use a different email or try again' }),
-    )
+    await userEvent.click(screen.getByRole('button', { name: 'Change email' }))
     expect(await heading()).toBeDefined()
+    const email = screen.getByLabelText<HTMLInputElement>('Email')
+    expect(email.value).toBe('ada@example.com')
+    expect(document.activeElement).toBe(email)
+    expect(location()).toBe('/sign-in?next=%2Fapp%2Fapi-keys')
+    expect(api.to('POST /api/auth/sign-in/magic-link')).toHaveLength(1)
+    await userEvent.clear(email)
+    await userEvent.type(email, ' grace@example.com ')
+    await userEvent.click(screen.getByRole('button', { name: 'Email me a sign-in link' }))
+    await screen.findByRole('heading', { name: 'Check your email' })
+    expect(screen.getByText('grace@example.com')).toBeDefined()
+    expect(api.to('POST /api/auth/sign-in/magic-link')[1]?.body).toEqual({
+      email: 'grace@example.com',
+      callbackURL: '/app/api-keys',
+      errorCallbackURL: '/sign-in?next=%2Fapp%2Fapi-keys',
+    })
+  })
+
+  it('resends to the same email and return path without moving focus or returning to the form', async () => {
+    const api = fakeApi({
+      ...signedOut,
+      ...instance(),
+      'POST /api/auth/sign-in/magic-link': linkSent,
+    })
+    renderApp('/sign-in?next=%2Fapp%2Fsettings%3Ftab%3Dprofile')
+    await userEvent.type(await screen.findByLabelText('Email'), ' ada@example.com ')
+    await userEvent.click(screen.getByRole('button', { name: 'Email me a sign-in link' }))
+    const sent = await screen.findByRole('heading', { name: 'Check your email' })
+    const resend = screen.getByRole('button', { name: 'Resend link' })
+
+    await userEvent.click(resend)
+    await waitFor(() =>
+      expect(resendStatus().textContent).toBe(
+        'We received your new sign-in link request. Check your inbox if this address can sign in.',
+      ),
+    )
+    expect(screen.getByRole('heading', { name: 'Check your email' })).toBe(sent)
+    expect(document.activeElement).toBe(resend)
+    expect(resend.hasAttribute('disabled')).toBe(false)
+    expect(screen.queryByLabelText('Email')).toBeNull()
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(location()).toBe('/sign-in?next=%2Fapp%2Fsettings%3Ftab%3Dprofile')
+    expect(api.to('POST /api/auth/sign-in/magic-link').map((call) => call.body)).toEqual([
+      {
+        email: 'ada@example.com',
+        callbackURL: '/app/settings?tab=profile',
+        errorCallbackURL: '/sign-in?next=%2Fapp%2Fsettings%3Ftab%3Dprofile',
+      },
+      {
+        email: 'ada@example.com',
+        callbackURL: '/app/settings?tab=profile',
+        errorCallbackURL: '/sign-in?next=%2Fapp%2Fsettings%3Ftab%3Dprofile',
+      },
+    ])
+  })
+
+  it.each(['body', 'language picker'])(
+    'restores only lost resend focus when focus is on the %s after native button disabling',
+    async (target) => {
+      const pending = later()
+      let requests = 0
+      fakeApi({
+        ...signedOut,
+        ...instance(),
+        'POST /api/auth/sign-in/magic-link': () =>
+          ++requests === 1 ? linkSent() : pending.response,
+      })
+      renderApp('/sign-in')
+      await userEvent.type(await screen.findByLabelText('Email'), 'ada@example.com')
+      await userEvent.click(screen.getByRole('button', { name: 'Email me a sign-in link' }))
+      const resend = await screen.findByRole('button', { name: 'Resend link' })
+      await userEvent.click(resend)
+      expect(resend.hasAttribute('disabled')).toBe(true)
+      const picker = screen.getByRole('combobox', { name: 'Interface language' })
+      if (target === 'body') {
+        // JSDOM keeps focus on disabled buttons; simulate Chrome moving it to the body.
+        document.body.tabIndex = -1
+        document.body.focus()
+        document.body.removeAttribute('tabindex')
+      } else {
+        picker.focus()
+      }
+      expect(document.activeElement).toBe(target === 'body' ? document.body : picker)
+
+      await pending.answer(linkSent())
+      expect(resend.hasAttribute('disabled')).toBe(false)
+      expect(resendStatus().textContent).toMatch(/new sign-in link request/)
+      expect(document.activeElement).toBe(target === 'body' ? resend : picker)
+    },
+  )
+
+  it('clears previous resend feedback when changing email and submitting a fresh request', async () => {
+    const api = fakeApi({
+      ...signedOut,
+      ...instance(),
+      'POST /api/auth/sign-in/magic-link': linkSent,
+    })
+    renderApp('/sign-in?next=%2Fapp%2Fsettings')
+    await userEvent.type(await screen.findByLabelText('Email'), 'ada@example.com')
+    await userEvent.click(screen.getByRole('button', { name: 'Email me a sign-in link' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Resend link' }))
+    await waitFor(() => expect(resendStatus().textContent).toMatch(/new sign-in link request/))
+
+    await userEvent.click(screen.getByRole('button', { name: 'Change email' }))
+    const email = await screen.findByLabelText<HTMLInputElement>('Email')
+    expect(email.value).toBe('ada@example.com')
+    await userEvent.clear(email)
+    await userEvent.type(email, 'grace@example.com')
+    await userEvent.click(screen.getByRole('button', { name: 'Email me a sign-in link' }))
+    await screen.findByRole('heading', { name: 'Check your email' })
+
+    expect(screen.getByText('grace@example.com')).toBeDefined()
+    expect(resendStatus().textContent).toBe('')
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(api.to('POST /api/auth/sign-in/magic-link')[2]?.body).toEqual({
+      email: 'grace@example.com',
+      callbackURL: '/app/settings',
+      errorCallbackURL: '/sign-in?next=%2Fapp%2Fsettings',
+    })
+  })
+
+  it('sends one resend request for a double click and disables both actions while it is pending', async () => {
+    const pending = later()
+    let requests = 0
+    const api = fakeApi({
+      ...signedOut,
+      ...instance(),
+      'POST /api/auth/sign-in/magic-link': () => (++requests === 1 ? linkSent() : pending.response),
+    })
+    renderApp('/sign-in')
+    await userEvent.type(await screen.findByLabelText('Email'), 'ada@example.com')
+    await userEvent.click(screen.getByRole('button', { name: 'Email me a sign-in link' }))
+    const sent = await screen.findByRole('heading', { name: 'Check your email' })
+    const resend = screen.getByRole('button', { name: 'Resend link' })
+    await userEvent.dblClick(resend)
+
+    expect(api.to('POST /api/auth/sign-in/magic-link')).toHaveLength(2)
+    expect(screen.getByRole('button', { name: 'Resend link' })).toBe(resend)
+    expect(resend.hasAttribute('disabled')).toBe(true)
+    expect(screen.getByRole('button', { name: 'Change email' }).hasAttribute('disabled')).toBe(true)
+    expect(resendStatus().textContent).toBe('Resending…')
+    expect(screen.getByRole('heading', { name: 'Check your email' })).toBe(sent)
+    await userEvent.click(screen.getByRole('button', { name: 'Change email' }))
+    expect(screen.queryByLabelText('Email')).toBeNull()
+
+    await pending.answer(linkSent())
+    expect(api.to('POST /api/auth/sign-in/magic-link')).toHaveLength(2)
+    expect(screen.getByRole('button', { name: 'Resend link' }).hasAttribute('disabled')).toBe(false)
+    expect(screen.getByRole('button', { name: 'Change email' }).hasAttribute('disabled')).toBe(
+      false,
+    )
+    expect(document.activeElement).toBe(resend)
+  })
+
+  it('also guards two resend clicks dispatched before the busy state renders', async () => {
+    const pending = later()
+    let requests = 0
+    const api = fakeApi({
+      ...signedOut,
+      ...instance(),
+      'POST /api/auth/sign-in/magic-link': () => (++requests === 1 ? linkSent() : pending.response),
+    })
+    renderApp('/sign-in')
+    await userEvent.type(await screen.findByLabelText('Email'), 'ada@example.com')
+    await userEvent.click(screen.getByRole('button', { name: 'Email me a sign-in link' }))
+    const resend = await screen.findByRole('button', { name: 'Resend link' })
+    act(() => {
+      fireEvent.click(resend)
+      fireEvent.click(resend)
+    })
+    await settle()
+    expect(api.to('POST /api/auth/sign-in/magic-link')).toHaveLength(2)
+    await pending.answer(linkSent())
+  })
+
+  it('keeps the sent screen when Change email is clicked before a pending resend renders', async () => {
+    const pending = later()
+    let requests = 0
+    const api = fakeApi({
+      ...signedOut,
+      ...instance(),
+      'POST /api/auth/sign-in/magic-link': () => (++requests === 1 ? linkSent() : pending.response),
+    })
+    renderApp('/sign-in?next=%2Fapp%2Fbookings')
+    await userEvent.type(await screen.findByLabelText('Email'), 'ada@example.com')
+    await userEvent.click(screen.getByRole('button', { name: 'Email me a sign-in link' }))
+    const sent = await screen.findByRole('heading', { name: 'Check your email' })
+    const resend = screen.getByRole('button', { name: 'Resend link' })
+    const change = screen.getByRole('button', { name: 'Change email' })
+    act(() => {
+      fireEvent.click(resend)
+      fireEvent.click(change)
+    })
+    await settle()
+
+    expect(api.to('POST /api/auth/sign-in/magic-link')).toHaveLength(2)
+    expect(screen.getByRole('heading', { name: 'Check your email' })).toBe(sent)
+    expect(screen.queryByLabelText('Email')).toBeNull()
+    expect(resendStatus().textContent).toBe('Resending…')
+    expect(change.hasAttribute('disabled')).toBe(true)
+    await pending.answer(linkSent())
+    expect(screen.getByRole('heading', { name: 'Check your email' })).toBe(sent)
+    expect(resendStatus().textContent).toMatch(/new sign-in link request/)
+    expect(location()).toBe('/sign-in?next=%2Fapp%2Fbookings')
+  })
+
+  it('explains a server resend rate limit without inventing a waiting time and allows retry', async () => {
+    let requests = 0
+    const api = fakeApi({
+      ...signedOut,
+      ...instance(),
+      'POST /api/auth/sign-in/magic-link': () => (++requests === 2 ? json(429, {}) : linkSent()),
+    })
+    renderApp('/sign-in?next=%2Fapp%2Fbookings')
+    await userEvent.type(await screen.findByLabelText('Email'), 'ada@example.com')
+    await userEvent.click(screen.getByRole('button', { name: 'Email me a sign-in link' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Resend link' }))
+
+    expect((await screen.findByRole('alert')).textContent).toBe(
+      'Too many requests. Please wait and try again later.',
+    )
+    expect(screen.getByRole('heading', { name: 'Check your email' })).toBeDefined()
+    expect(screen.getByText('ada@example.com')).toBeDefined()
+    expect(screen.getByRole('button', { name: 'Resend link' }).hasAttribute('disabled')).toBe(false)
+    expect(location()).toBe('/sign-in?next=%2Fapp%2Fbookings')
+    await userEvent.click(screen.getByRole('button', { name: 'Resend link' }))
+    await waitFor(() => expect(resendStatus().textContent).toMatch(/new sign-in link request/))
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(api.to('POST /api/auth/sign-in/magic-link')).toHaveLength(3)
+    expect(api.to('POST /api/auth/sign-in/magic-link')[2]?.body).toEqual({
+      email: 'ada@example.com',
+      callbackURL: '/app/bookings',
+      errorCallbackURL: '/sign-in?next=%2Fapp%2Fbookings',
+    })
+  })
+
+  it.each(['network', 'server'])(
+    'allows retry after a %s resend failure with the same email and return path',
+    async (failure) => {
+      let requests = 0
+      const api = fakeApi({
+        ...signedOut,
+        ...instance(),
+        'POST /api/auth/sign-in/magic-link': () => {
+          if (++requests !== 2) return linkSent()
+          if (failure === 'network') throw new TypeError('Failed to fetch')
+          return json(503, { message: 'Service unavailable' })
+        },
+      })
+      renderApp('/sign-in?next=%2Fapp%2Fapi-keys')
+      await userEvent.type(await screen.findByLabelText('Email'), ' ada@example.com ')
+      await userEvent.click(screen.getByRole('button', { name: 'Email me a sign-in link' }))
+      const sent = await screen.findByRole('heading', { name: 'Check your email' })
+      await userEvent.click(screen.getByRole('button', { name: 'Resend link' }))
+
+      expect((await screen.findByRole('alert')).textContent).toBe(
+        'Could not resend the link. Please try again.',
+      )
+      expect(screen.getByRole('heading', { name: 'Check your email' })).toBe(sent)
+      expect(screen.getByText('ada@example.com')).toBeDefined()
+      expect(screen.queryByLabelText('Email')).toBeNull()
+      expect(location()).toBe('/sign-in?next=%2Fapp%2Fapi-keys')
+      const resend = screen.getByRole('button', { name: 'Resend link' })
+      expect(resend.hasAttribute('disabled')).toBe(false)
+      await userEvent.click(resend)
+      await waitFor(() => expect(resendStatus().textContent).toMatch(/new sign-in link request/))
+      expect(screen.queryByRole('alert')).toBeNull()
+      expect(document.activeElement).toBe(resend)
+      expect(api.to('POST /api/auth/sign-in/magic-link').map((call) => call.body)).toEqual(
+        Array.from({ length: 3 }, () => ({
+          email: 'ada@example.com',
+          callbackURL: '/app/api-keys',
+          errorCallbackURL: '/sign-in?next=%2Fapp%2Fapi-keys',
+        })),
+      )
+    },
+  )
+
+  it('localizes resend progress, success, rate limits and retryable failures into Chinese', async () => {
+    const pending = later()
+    let requests = 0
+    fakeApi({
+      ...signedOut,
+      ...instance(),
+      'POST /api/auth/sign-in/magic-link': () => {
+        requests++
+        if (requests === 2) return pending.response
+        if (requests === 3) return json(429, {})
+        if (requests === 4) throw new TypeError('Failed to fetch')
+        return linkSent()
+      },
+    })
+    renderApp('/sign-in')
+    await userEvent.type(await screen.findByLabelText('Email'), 'ada@example.com')
+    await userEvent.click(screen.getByRole('button', { name: 'Email me a sign-in link' }))
+    await screen.findByRole('heading', { name: 'Check your email' })
+    await userEvent.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+    await userEvent.click(screen.getByRole('button', { name: '重新发送链接' }))
+    expect(screen.getByRole('button', { name: '重新发送链接' }).hasAttribute('disabled')).toBe(true)
+    expect(resendStatus().textContent).toBe('正在重新发送…')
+    await pending.answer(linkSent())
+    expect(resendStatus().textContent).toBe(
+      '我们已收到新的登录链接请求。如果此邮箱可以登录，请检查收件箱。',
+    )
+    await userEvent.click(screen.getByRole('button', { name: '重新发送链接' }))
+    expect((await screen.findByRole('alert')).textContent).toBe('请求过多，请稍后重试。')
+    await userEvent.click(screen.getByRole('button', { name: '重新发送链接' }))
+    expect((await screen.findByRole('alert')).textContent).toBe('无法重新发送链接，请重试。')
+    expect(screen.getByRole('button', { name: '更换邮箱' })).toBeDefined()
   })
 
   it('shows only email sign-in when no provider is enabled', async () => {
