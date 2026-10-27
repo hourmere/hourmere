@@ -368,6 +368,15 @@ adapter maintenance are excluded; this recorder does not add authorization or ch
 caller/session checks. New management services must record through their own authorized
 write transaction rather than a post-commit hook.
 
+Writers acquire the organization before the target row. Cancellation reuses the existing
+personal-owner/organization lock order before locking a booking. Membership writes reserve
+their organization foreign-key lock through the eventual operation INSERT before updating
+or removing the member, including perceived role no-ops. A failed conditional update or
+successful no-op discards that tentative row; only an actual change retains it, stamped
+after the successful write. Tentative rows remain invisible outside their transaction.
+This order prevents a cycle with team-management writes that lock organization then member
+or booking.
+
 Actor, target, API-key and OAuth identifiers deliberately have no foreign keys: deleting
 an account or credential must not erase who performed a retained team operation. They do
 not retain the deleted account's name or email, or restore access. Booking deletion

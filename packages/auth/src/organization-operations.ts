@@ -59,7 +59,7 @@ export function organizationOperationRecords(): BetterAuthPlugin {
         actorUserId: string,
         newRole?: string,
       ) => {
-        await adapter.create({
+        const inserted = await adapter.create<Record<string, unknown>, { id: string }>({
           model: 'organizationOperation',
           data: {
             organizationId: member.organizationId,
@@ -72,7 +72,24 @@ export function organizationOperationRecords(): BetterAuthPlugin {
             occurredAt: new Date(),
           },
         })
+        return inserted.id
       }
+
+      const discard = (adapter: DBTransactionAdapter, id: string) =>
+        adapter.delete({
+          model: 'organizationOperation',
+          where: [{ field: 'id', value: id }],
+        })
+
+      const stamp = (adapter: DBTransactionAdapter, id: string, previousRole?: string) =>
+        adapter.update({
+          model: 'organizationOperation',
+          where: [{ field: 'id', value: id }],
+          update: {
+            ...(previousRole === undefined ? {} : { previousRole }),
+            occurredAt: new Date(),
+          },
+        })
 
       const wrap = (adapter: DBTransactionAdapter, inTransaction: boolean) => {
         const update = adapter.update
@@ -97,16 +114,31 @@ export function organizationOperationRecords(): BetterAuthPlugin {
               where: request.where,
             })
             if (!member) return null
+            // The eventual record acquires its organization FK lock first, matching
+            // writers that lock the organization before its members. Both this record
+            // and the member write remain invisible until the transaction commits.
+            // A missed conditional UPDATE can retain a member lock, so no-ops also
+            // reserve the FK before their first attempt and discard their record below.
+            const operationId = !(await isPersonal(adapter, member.organizationId))
+              ? await record(adapter, member, actorUserId, request.update.role)
+              : undefined
             const updated = await update<T>({
               ...request,
-              where: [...request.where, { field: 'role', value: member.role }],
+              where: [
+                ...request.where,
+                { field: 'role', value: member.role },
+                { field: 'organizationId', value: member.organizationId },
+                { field: 'userId', value: member.userId },
+              ],
             })
-            if (!updated) continue
-            if (
-              member.role !== request.update.role &&
-              !(await isPersonal(adapter, member.organizationId))
-            )
-              await record(adapter, member, actorUserId, request.update.role)
+            if (!updated) {
+              if (operationId) await discard(adapter, operationId)
+              continue
+            }
+            if (operationId) {
+              if (member.role === request.update.role) await discard(adapter, operationId)
+              else await stamp(adapter, operationId)
+            }
             return updated
           }
           throw new Error('Member role changed concurrently; retry the operation')
@@ -120,11 +152,27 @@ export function organizationOperationRecords(): BetterAuthPlugin {
             return remove(request)
           if (!inTransaction) return ctx.adapter.transaction((trx) => trx.delete(request))
 
-          // DELETE RETURNING captures the row actually removed, rather than the request's
-          // target or a snapshot loaded before Better Auth's authorization checks.
-          const member = await adapter.consumeOne<Member>(request)
-          if (member && !(await isPersonal(adapter, member.organizationId)))
-            await record(adapter, member, actorUserId)
+          const snapshot = await adapter.findOne<Member>(request)
+          if (!snapshot) return
+          const operationId = !(await isPersonal(adapter, snapshot.organizationId))
+            ? await record(adapter, snapshot, actorUserId)
+            : undefined
+          // Acquire the organization FK before the delete locks its member. Constrain
+          // DELETE RETURNING to the recorded identity, then retain the role from the row
+          // actually removed, including a role change after the initial snapshot.
+          const member = await adapter.consumeOne<Member>({
+            ...request,
+            where: [
+              ...request.where,
+              { field: 'organizationId', value: snapshot.organizationId },
+              { field: 'userId', value: snapshot.userId },
+            ],
+          })
+          if (!member) {
+            if (operationId) await discard(adapter, operationId)
+            return
+          }
+          if (operationId) await stamp(adapter, operationId, member.role)
         }
         return adapter
       }

@@ -729,6 +729,18 @@ async function insertBooking(
 const bookingCancelled = () =>
   new DomainError('conflict', 'booking_cancelled', 'This booking is already cancelled')
 
+async function lockCancellationOrganization(trx: Db, organizationId: string): Promise<void> {
+  try {
+    // The operation record's parent FK takes an organization lock. Acquire the parent
+    // before the booking, matching team-management writes and organization deletion.
+    await lockOrganization(trx, organizationId)
+  } catch (error) {
+    if (error instanceof DomainError && error.code === 'event_type_not_found')
+      throw bookingNotFound()
+    throw error
+  }
+}
+
 function assertChangeable(row: { status: string; start_at: Date }, now: Temporal.Instant): void {
   if (row.status === 'cancelled') throw bookingCancelled()
   if (Temporal.Instant.compare(toInstant(row.start_at), now) <= 0) {
@@ -1015,6 +1027,16 @@ export async function cancelManagedBooking(
   if (!hash) throw bookingNotFound()
   const cancelReason = normalizeReason(reason)
   return ctx.db.transaction().execute(async (trx) => {
+    const target = await resolveManagedTarget(trx, hash)
+    const parent =
+      target &&
+      (await trx
+        .selectFrom('bookings')
+        .select('organization_id')
+        .where('id', '=', target.id)
+        .executeTakeFirst())
+    if (!parent) throw bookingNotFound()
+    await lockCancellationOrganization(trx, parent.organization_id)
     const row = await lockManagedBooking(trx, hash)
     if (!row) throw bookingNotFound()
     return cancelLocked(
@@ -1413,6 +1435,7 @@ export async function cancelHostBooking(
   if (!UUID.test(id)) throw bookingNotFound()
   const cancelReason = normalizeReason(reason)
   return ctx.db.transaction().execute(async (trx) => {
+    await lockCancellationOrganization(trx, ctx.principal.organization.id)
     const row = await trx
       .selectFrom('bookings as b')
       .innerJoin('booking_hosts as bh', 'bh.booking_id', 'b.id')

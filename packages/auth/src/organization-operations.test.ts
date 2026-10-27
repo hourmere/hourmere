@@ -1,4 +1,5 @@
 import { createHmac, randomBytes, randomUUID } from 'node:crypto'
+import { setTimeout } from 'node:timers/promises'
 import { type AuthEndpointContext, runWithEndpointContext } from '@better-auth/core/context'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
@@ -183,6 +184,25 @@ describe.skipIf(!serverUrl)('member operation attribution', () => {
     expect(session.activeOrganizationId).toBeNull()
   })
 
+  it('retains only allowlisted role-change attribution without session credentials', async () => {
+    const f = await fixture()
+    const response = await post('update-member-role', f.owner.cookie, {
+      organizationId: f.organizationId,
+      memberId: f.memberId,
+      role: 'admin',
+      actorUserId: f.target.id,
+      token: 'synthetic-private-value',
+      emailBody: 'synthetic-private-value',
+      responses: { answer: 'synthetic-private-value' },
+    })
+    expect(response.status).toBe(200)
+    const records = await operations(f.organizationId)
+    expect(JSON.stringify(records).includes('synthetic-private-value')).toBe(false)
+    expect(JSON.stringify(records).includes(f.owner.cookie)).toBe(false)
+    expect(JSON.stringify(records).includes(f.target.email)).toBe(false)
+    expect(records).toEqual([expected(f, f.owner.id, 'admin')])
+  })
+
   it('retains before/after roles and does not emit a second event for a no-op', async () => {
     const f = await fixture()
     for (const role of ['admin', 'admin']) {
@@ -324,6 +344,88 @@ describe.skipIf(!serverUrl)('member operation attribution', () => {
     ])
   })
 
+  it('records the role from the member actually removed and stamps it after deletion', async () => {
+    const f = await fixture()
+    const context = await auth.$context
+    const session = await auth.api.getSession({ headers: new Headers({ cookie: f.owner.cookie }) })
+    let deletedAt = 0
+    await runWithEndpointContext(
+      {
+        path: '/organization/remove-member',
+        context: { ...context, session } as unknown as AuthEndpointContext['context'],
+      },
+      () =>
+        context.adapter.transaction(async (trx) => {
+          const consumeOne = trx.consumeOne
+          trx.consumeOne = async <T>(
+            request: Parameters<DBTransactionAdapter['consumeOne']>[0],
+          ) => {
+            if (request.model === 'member')
+              await db
+                .updateTable('auth.member')
+                .set({ role: 'admin' })
+                .where('id', '=', f.memberId)
+                .execute()
+            const removed = await consumeOne<T>(request)
+            if (request.model === 'member') {
+              await setTimeout(15)
+              deletedAt = Date.now()
+            }
+            return removed
+          }
+          await trx.delete({ model: 'member', where: [{ field: 'id', value: f.memberId }] })
+        }),
+    )
+    expect(await membership(f.memberId)).toBeUndefined()
+    const records = await operations(f.organizationId)
+    expect(records).toEqual([{ ...expected(f, f.owner.id), previous_role: 'admin' }])
+    expect((records[0]?.occurred_at.getTime() ?? 0) >= deletedAt).toBe(true)
+  })
+
+  it.each(['organizationId', 'userId'] as const)(
+    'discards removal attribution if the stored %s changed before deletion',
+    async (changedField) => {
+      const f = await fixture()
+      const other = await fixture()
+      const context = await auth.$context
+      const session = await auth.api.getSession({
+        headers: new Headers({ cookie: f.owner.cookie }),
+      })
+      await runWithEndpointContext(
+        {
+          path: '/organization/remove-member',
+          context: { ...context, session } as unknown as AuthEndpointContext['context'],
+        },
+        () =>
+          context.adapter.transaction(async (trx) => {
+            const consumeOne = trx.consumeOne
+            trx.consumeOne = async <T>(
+              request: Parameters<DBTransactionAdapter['consumeOne']>[0],
+            ) => {
+              if (request.model === 'member')
+                await db
+                  .updateTable('auth.member')
+                  .set({
+                    [changedField]:
+                      changedField === 'organizationId' ? other.organizationId : other.owner.id,
+                  })
+                  .where('id', '=', f.memberId)
+                  .execute()
+              return consumeOne<T>(request)
+            }
+            await trx.delete({ model: 'member', where: [{ field: 'id', value: f.memberId }] })
+          }),
+      )
+      const remaining = await membership(f.memberId)
+      expect(remaining !== undefined).toBe(true)
+      expect(remaining?.[changedField]).toBe(
+        changedField === 'organizationId' ? other.organizationId : other.owner.id,
+      )
+      expect(await operations(f.organizationId)).toEqual([])
+      expect(await operations(other.organizationId)).toEqual([])
+    },
+  )
+
   it.each(['remove-member', 'leave', 'update-member-role'] as const)(
     'rolls back %s when its operation record cannot be written',
     async (path) => {
@@ -333,7 +435,7 @@ describe.skipIf(!serverUrl)('member operation attribution', () => {
         LANGUAGE plpgsql AS $$ BEGIN
           RAISE EXCEPTION 'Synthetic operation record failure';
         END $$;
-        CREATE TRIGGER reject_synthetic_member_operation BEFORE INSERT
+        CREATE TRIGGER reject_synthetic_member_operation BEFORE UPDATE
         ON public.organization_operations FOR EACH ROW
         EXECUTE FUNCTION public.reject_synthetic_member_operation();
       `)
@@ -344,9 +446,16 @@ describe.skipIf(!serverUrl)('member operation attribution', () => {
           memberId: f.memberId,
           role: 'admin',
         }
-        await expect(
-          post(path, path === 'leave' ? f.target.cookie : f.owner.cookie, body),
-        ).rejects.toThrow('Synthetic operation record failure')
+        const failed = await post(
+          path,
+          path === 'leave' ? f.target.cookie : f.owner.cookie,
+          body,
+        ).then(
+          () => false,
+          (error: unknown) =>
+            error instanceof Error && error.message.includes('Synthetic operation record failure'),
+        )
+        expect(failed).toBe(true)
         expect((await membership(f.memberId))?.role).toBe('member')
         expect(await operations(f.organizationId)).toEqual([])
       } finally {
@@ -385,4 +494,82 @@ describe.skipIf(!serverUrl)('member operation attribution', () => {
     expect(records[0]).toEqual(expected(f, records[0]?.actor_user_id as string, 'admin'))
     expect([f.owner.id, secondOwner.id]).toContain(records[0]?.actor_user_id)
   })
+
+  it.each([
+    ['remove-member', 'admin', 'admin'],
+    ['update-member-role', 'admin', 'owner'],
+    ['update-member-role', 'member', 'admin'],
+  ] as const)(
+    'locks the organization before its member for %s requesting %s',
+    async (path, requestedRole, changedRole) => {
+      const f = await fixture()
+      const parent = await owned.pool.connect()
+      let recorderWaiting = false
+      let memberLocked = false
+      let committed = false
+      let pending: Promise<{ response: Response } | { failed: true }> | undefined
+      try {
+        await parent.query('BEGIN')
+        await parent.query("SET LOCAL lock_timeout = '250ms'")
+        await parent.query('SELECT id FROM auth.organization WHERE id = $1 FOR UPDATE', [
+          f.organizationId,
+        ])
+        pending = post(path, f.owner.cookie, {
+          organizationId: f.organizationId,
+          memberIdOrEmail: f.memberId,
+          memberId: f.memberId,
+          role: requestedRole,
+        }).then(
+          (response) => ({ response }),
+          () => ({ failed: true as const }),
+        )
+        const deadline = Date.now() + 3_000
+        while (Date.now() < deadline) {
+          const blocked = await owned.pool.query<{ blocked: boolean }>(`
+            SELECT EXISTS (
+              SELECT 1 FROM pg_stat_activity
+              WHERE datname = current_database() AND wait_event_type = 'Lock'
+                AND query LIKE '%organization_operations%'
+            ) AS blocked
+          `)
+          if (blocked.rows[0]?.blocked) {
+            recorderWaiting = true
+            break
+          }
+          await setTimeout(10)
+        }
+        // A team-management writer already owns the parent lock and next locks the
+        // member. The recorder waiting for that parent must not hold the member yet.
+        memberLocked = await parent
+          .query('SELECT id FROM auth.member WHERE id = $1 FOR UPDATE', [f.memberId])
+          .then(
+            () => true,
+            () => false,
+          )
+        if (memberLocked) {
+          await parent.query('UPDATE auth.member SET role = $2 WHERE id = $1', [
+            f.memberId,
+            changedRole,
+          ])
+          await parent.query('COMMIT')
+          committed = true
+        }
+      } finally {
+        if (!committed) await parent.query('ROLLBACK')
+        parent.release()
+      }
+      const outcome = await pending
+      expect(recorderWaiting).toBe(true)
+      expect(memberLocked).toBe(true)
+      expect(
+        outcome !== undefined && 'response' in outcome && outcome.response.status === 200,
+      ).toBe(true)
+      expect(await operations(f.organizationId)).toEqual([
+        {
+          ...expected(f, f.owner.id, path === 'remove-member' ? undefined : requestedRole),
+          previous_role: changedRole,
+        },
+      ])
+    },
+  )
 })

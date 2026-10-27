@@ -418,4 +418,128 @@ describe.skipIf(!serverUrl)('booking operation attribution', () => {
     )
     await expect(verifyClockAfterLock(copy)).rejects.toMatchObject({ name: 'AssertionError' })
   })
+
+  async function verifyCancellationLockOrder(copy: BookingModule, path: 'host' | 'manage') {
+    const s = await fixture()
+    let release = () => {}
+    const hold = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let paused = false
+    const updates = new WeakSet<object>()
+    const observed = db.withPlugin({
+      transformQuery({ node, queryId }) {
+        if (
+          node.kind === 'UpdateQueryNode' &&
+          JSON.stringify(node).includes('"name":"bookings"') &&
+          JSON.stringify(node).includes('"value":"cancelled"')
+        )
+          updates.add(queryId)
+        return node
+      },
+      async transformResult({ result, queryId }) {
+        if (updates.has(queryId) && !paused) {
+          paused = true
+          // The UPDATE is complete, while its transaction still holds the booking.
+          // The next operation INSERT must acquire its organization foreign-key lock.
+          await hold
+        }
+        return result
+      },
+    })
+    const settle = <T>(operation: Promise<T>): Promise<PromiseSettledResult<T>> =>
+      operation.then(
+        (value) => ({ status: 'fulfilled', value }),
+        (reason: unknown) => ({ status: 'rejected', reason }),
+      )
+    const cancellation = settle(
+      path === 'host'
+        ? copy.cancelHostBooking(testContext(observed, s.team.as(s.host), now), s.booking.id)
+        : copy.cancelManagedBooking({ db: observed, now }, s.token),
+    )
+    let teamCancellation: Promise<PromiseSettledResult<void>> | undefined
+    try {
+      await expect.poll(() => paused, { timeout: 3000, interval: 10 }).toBe(true)
+      teamCancellation = settle(
+        s.access.write(s.principal, s.team.id, (trx, actor) =>
+          copy.cancelTeamBookingInTransaction(trx, actor, s.booking.id, now),
+        ),
+      )
+      let waiting: { query: string }[] = []
+      await expect
+        .poll(
+          async () => {
+            waiting = (
+              await owned.pool.query<{ query: string }>(`SELECT query FROM pg_stat_activity
+                WHERE datname=current_database() AND pid<>pg_backend_pid()
+                  AND wait_event_type='Lock' AND query LIKE '%for update%'`)
+            ).rows
+            return waiting.length
+          },
+          { timeout: 3000, interval: 10 },
+        )
+        .toBe(1)
+      // Both paths must already hold the parent before locking/updating the booking.
+      // Without that order, team management owns the parent and waits for the booking,
+      // forming a cycle when cancellation INSERTs its organization operation record.
+      expect(waiting[0]?.query).toContain('from "auth"."organization"')
+    } finally {
+      release()
+      await Promise.all([cancellation, teamCancellation])
+    }
+    const outcomes = await Promise.all([cancellation, teamCancellation])
+    expect(outcomes[0]).toMatchObject({ status: 'fulfilled', value: { status: 'cancelled' } })
+    expect(outcomes[1]).toMatchObject({ status: 'rejected', reason: { code: 'booking_cancelled' } })
+    for (const result of outcomes)
+      if (result?.status === 'rejected')
+        expect((result.reason as { code?: string }).code).not.toBe('40P01')
+    const rows = await operations(s.booking.id)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.actor_user_id).toBe(path === 'host' ? s.host.id : null)
+  }
+
+  it.each(['host', 'manage'] as const)(
+    'locks the organization before the booking for a %s cancellation racing team management',
+    async (path) => {
+      await verifyCancellationLockOrder(bookings, path)
+    },
+    10_000,
+  )
+
+  it.each(['host', 'manage'] as const)(
+    'detects a missing parent lock in a %s cancellation source copy',
+    async (path) => {
+      const copy = await sourceCopy(
+        path === 'host'
+          ? '    await lockCancellationOrganization(trx, ctx.principal.organization.id)\n'
+          : '    await lockCancellationOrganization(trx, parent.organization_id)\n',
+        '',
+      )
+      await expect(verifyCancellationLockOrder(copy, path)).rejects.toMatchObject({
+        name: 'AssertionError',
+      })
+    },
+    10_000,
+  )
+
+  async function verifyDeletedOrganization(copy: BookingModule) {
+    const s = await fixture()
+    const principal = s.team.as(s.host)
+    await db.deleteFrom('auth.organization').where('id', '=', s.team.id).execute()
+    await expect(
+      copy.cancelHostBooking(testContext(db, principal, now), s.booking.id),
+    ).rejects.toMatchObject({ code: 'booking_not_found' })
+  }
+
+  it('keeps the booking error when the organization disappears after authentication', async () => {
+    await verifyDeletedOrganization(bookings)
+  })
+
+  it('detects a missing cancellation error mapping in a source copy', async () => {
+    const copy = await sourceCopy(
+      "    if (error instanceof DomainError && error.code === 'event_type_not_found')\n      throw bookingNotFound()\n",
+      '',
+    )
+    await expect(verifyDeletedOrganization(copy)).rejects.toMatchObject({ name: 'AssertionError' })
+  })
 })
