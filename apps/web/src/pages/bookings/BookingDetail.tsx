@@ -126,7 +126,7 @@ function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loa
   }
   const [status, setStatus] = useState<UiText>(flash ?? '')
   const statusRef = useRef<HTMLParagraphElement>(null)
-  const format = zoned(timeZone, locale === 'zh-CN' ? locale : displayLocale)
+  const format = zoned(timeZone, displayLocale)
   const zoneName = format.timeZone.replaceAll('_', ' ')
   const browserZoneHint = t('Shown in this browser’s time zone. {0}.').split('{0}')
   const [invitee, ...guests] = [...booking.attendees].sort(
@@ -283,10 +283,10 @@ function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loa
                   {t('Time zone: {zone}', { zone: invitee.timeZone.replaceAll('_', ' ') })}
                   {invitee.timeZone !== format.timeZone &&
                     t(' ({time} there)', {
-                      time: zoned(
-                        invitee.timeZone,
-                        locale === 'zh-CN' ? locale : displayLocale,
-                      ).dateTimeRange(booking.start, booking.end),
+                      time: zoned(invitee.timeZone, displayLocale).dateTimeRange(
+                        booking.start,
+                        booking.end,
+                      ),
                     })}
                 </span>
               </>

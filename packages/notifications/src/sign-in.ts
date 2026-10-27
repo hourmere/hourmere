@@ -9,6 +9,7 @@ import {
   randomUUID,
 } from 'node:crypto'
 import { hasAccount, MAGIC_LINK_CONFIRM_PATH, maySignUp, type SignupPolicy } from '@hourmere/auth'
+import { localeCodes } from '@hourmere/core/language'
 import type { Db } from '@hourmere/db'
 import { defineJob, type EnqueueOptions } from '@hourmere/jobs'
 import { type Mailer, magicLinkEmail } from '@hourmere/mail'
@@ -27,7 +28,7 @@ const Request = z.strictObject({
   email: z.email(),
   url: z.string().max(524_288),
   // Old encrypted outbox rows have no language and keep the original English template.
-  language: z.enum(['en', 'zh-CN']).optional(),
+  language: z.enum(localeCodes).optional(),
 })
 // A newer web process may enqueue additive metadata or a language this worker does
 // not support. Ignore that metadata and use English while still validating credentials.

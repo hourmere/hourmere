@@ -1,5 +1,87 @@
 import { describe, expect, it } from 'vitest'
-import { acceptLanguage, cookieLanguage, explicitLanguage, interfaceLanguage } from './language.ts'
+import {
+  acceptLanguage,
+  cookieLanguage,
+  createLocaleResolver,
+  explicitLanguage,
+  formattingLocale,
+  interfaceLanguage,
+  localeCodes,
+  localeFallbacks,
+  localeRegistry,
+  registeredLocales,
+} from './language.ts'
+
+describe('shared locale registry', () => {
+  it('provides language metadata and explicit choices from the same entries', () => {
+    expect(localeCodes).toEqual(Object.keys(localeRegistry))
+    expect(registeredLocales).toEqual(Object.values(localeRegistry))
+    for (const locale of registeredLocales) {
+      expect(explicitLanguage(locale.code)).toBe(locale.code)
+      expect(locale.nativeName).not.toBe('')
+      expect(locale.direction).toBe('ltr')
+      expect(new Intl.Locale(locale.formatLocale).baseName).toBe(locale.formatLocale)
+    }
+    expect(localeFallbacks('en')).toEqual(['en'])
+    expect(localeFallbacks('zh-CN')).toEqual(['zh-CN', 'en'])
+  })
+
+  it('uses registry Intl locales without changing the existing English or Chinese formats', () => {
+    const instant = new Date('2026-10-27T15:30:00Z')
+    const options = {
+      timeZone: 'America/Los_Angeles',
+      dateStyle: 'long',
+      timeStyle: 'short',
+    } as const
+    expect(new Intl.DateTimeFormat(formattingLocale('en'), options).format(instant)).toBe(
+      'October 27, 2026 at 8:30 AM',
+    )
+    expect(new Intl.DateTimeFormat(formattingLocale('zh-CN'), options).format(instant)).toBe(
+      '2026年10月27日 08:30',
+    )
+  })
+
+  it('accepts another registered regional locale throughout preference resolution and formatting', () => {
+    const languages = createLocaleResolver({
+      ...localeRegistry,
+      'pt-BR': {
+        code: 'pt-BR',
+        nativeName: 'Português (Brasil)',
+        fallbacks: [],
+        formatLocale: 'pt-BR',
+        direction: 'ltr',
+      },
+      'pt-PT': {
+        code: 'pt-PT',
+        nativeName: 'Português (Portugal)',
+        fallbacks: ['pt-BR', 'pt-BR', 'en', 'en'],
+        formatLocale: 'pt-PT',
+        direction: 'ltr',
+      },
+    })
+    expect(languages.explicitLanguage('pt-BR')).toBe('pt-BR')
+    expect(languages.explicitLanguage('PT-br')).toBeUndefined()
+    expect(languages.interfaceLanguage('PT-br')).toBe('pt-BR')
+    expect(languages.interfaceLanguage('pt')).toBe('pt-BR')
+    expect(languages.interfaceLanguage('pt-AO')).toBe('pt-BR')
+    expect(languages.interfaceLanguage('pt-Cyrl')).toBeUndefined()
+    expect(languages.interfaceLanguage('pt-PT-u-ca-gregory')).toBe('pt-PT')
+    expect(languages.cookieLanguage('hourmere-language=pt-BR')).toBe('pt-BR')
+    expect(languages.acceptLanguage('pt-PT;q=0.5,pt-BR;q=0.9,en;q=0.8')).toBe('pt-BR')
+    expect(languages.localeFallbacks('pt-BR')).toEqual(['pt-BR', 'en'])
+    expect(languages.localeFallbacks('pt-PT')).toEqual(['pt-PT', 'pt-BR', 'en'])
+    expect(languages.registeredLocales.map((locale) => locale.code)).toEqual([
+      ...new Set([...Object.keys(localeRegistry), 'pt-BR', 'pt-PT']),
+    ])
+    expect(
+      new Intl.DateTimeFormat(languages.formattingLocale('pt-BR'), {
+        timeZone: 'America/Los_Angeles',
+        dateStyle: 'long',
+        timeStyle: 'short',
+      }).format(new Date('2026-10-27T15:30:00Z')),
+    ).toBe('27 de outubro de 2026 às 08:30')
+  })
+})
 
 describe('bounded interface language preferences', () => {
   it.each(['en', 'zh-CN'] as const)('accepts only the explicit value %s', (value) => {
@@ -23,6 +105,8 @@ describe('bounded interface language preferences', () => {
   it.each([
     ['en-US', 'en'],
     ['en-GB', 'en'],
+    ['en-Shaw', 'en'],
+    ['en-Cyrl', 'en'],
     ['zh', 'zh-CN'],
     ['zh-Hans', 'zh-CN'],
     ['zh-SG', 'zh-CN'],
@@ -39,7 +123,7 @@ describe('bounded interface language preferences', () => {
     'zh-TW',
     'zh-HK',
     'zh-MO',
-    'pt-BR',
+    'qab-BR',
     'fa-IR',
     'th-TH',
     'en_bad',
@@ -54,10 +138,10 @@ describe('bounded interface language preferences', () => {
     expect(cookieLanguage(`other=${'x'.repeat(16385)}; hourmere-language=en`)).toBeUndefined()
   })
   it('respects quality values, ordering, unsupported defaults and hard bounds', () => {
-    expect(acceptLanguage('fr,zh-CN;q=0.8,en;q=0.6')).toBe('zh-CN')
+    expect(acceptLanguage('qab,zh-CN;q=0.8,en;q=0.6')).toBe('zh-CN')
     expect(acceptLanguage('zh-CN;q=0,en-US;q=0.8')).toBe('en')
     expect(acceptLanguage('zh-CN;q=broken,en;q=0.5')).toBe('en')
-    expect(acceptLanguage('zh-Hant,zh-TW,pt-BR')).toBe('en')
+    expect(acceptLanguage('zh-Hant,zh-TW,qab-BR')).toBe('en')
     expect(acceptLanguage('zh-CN;q=0.9,en;q=0.9')).toBe('zh-CN')
     expect(acceptLanguage(`${'xx,'.repeat(32)}zh-CN`)).toBe('en')
     expect(acceptLanguage(`zh-CN${' '.repeat(4096)}`)).toBe('en')

@@ -1057,8 +1057,8 @@ describe('the booking page', () => {
   })
 
   it.each([
-    { languages: ['fr-FR', 'zh-Hans-CN'], language: 'zh-CN', locale: 'zh-CN' },
-    { languages: ['fr-FR', 'de-DE'], language: 'en', locale: 'en' },
+    { languages: ['qab', 'zh-Hans-CN'], language: 'zh-CN', locale: 'zh-CN' },
+    { languages: ['qab', 'qac'], language: 'en', locale: 'en' },
     { languages: ['zh-Hans-CN', 'en-US'], language: 'zh-CN', locale: 'zh-Hans-CN' },
   ])(
     'stores the visible interface language for browser preferences $languages',

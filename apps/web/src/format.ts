@@ -1,30 +1,6 @@
 // Formatting for people: durations, and instants shown in a named time zone.
 import { formatTimeRange } from './public/time.ts'
 
-/** "30 min", "1 h", "1 h 30 min", "2 days", "1 day 4 h". */
-export function formatMinutes(total: number, locale = 'en'): string {
-  if (locale.startsWith('zh')) {
-    if (total === 0) return '0 分钟'
-    const parts = []
-    const days = Math.floor(total / 1440),
-      hours = Math.floor((total % 1440) / 60),
-      minutes = total % 60
-    if (days) parts.push(`${days} 天`)
-    if (hours) parts.push(`${hours} 小时`)
-    if (minutes) parts.push(`${minutes} 分钟`)
-    return parts.join(' ')
-  }
-  if (total === 0) return '0 min'
-  const days = Math.floor(total / 1440)
-  const hours = Math.floor((total % 1440) / 60)
-  const minutes = total % 60
-  const parts: string[] = []
-  if (days) parts.push(`${days} ${days === 1 ? 'day' : 'days'}`)
-  if (hours) parts.push(`${hours} h`)
-  if (minutes) parts.push(`${minutes} min`)
-  return parts.join(' ')
-}
-
 /** The time zone the browser is set to, e.g. "Europe/Berlin". */
 export function browserTimeZone(): string {
   try {

@@ -133,18 +133,18 @@ function Authorization({ email }: { email: string }) {
             </p>
             <p className="muted">
               {t('Client:')}
-              {locale === 'en' ? ' ' : ''}
+              {locale === 'zh-CN' ? '' : ' '}
               <BreakableText>{info.data.clientId}</BreakableText>
             </p>
             <p className="muted">
               {t('Return address:')}
-              {locale === 'en' ? ' ' : ''}
+              {locale === 'zh-CN' ? '' : ' '}
               <BreakableText>{info.data.redirectUri}</BreakableText>
             </p>
             {consent ? (
               <p>
                 {t('Organization:')}
-                {locale === 'en' ? ' ' : ''}
+                {locale === 'zh-CN' ? '' : ' '}
                 <strong>{info.data.selectedOrganization?.name}</strong>
               </p>
             ) : (

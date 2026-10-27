@@ -47,7 +47,8 @@ The website at hourmere.com is separate from your Hourmere instance.
   uses in-process memory; multiple web replicas multiply the limits. Run a single web process;
   a [separate worker](/docs/self-hosting#run-workers-separately) is supported.
 - [Interface languages](/docs/interface-languages)
-  are English and Simplified Chinese only.
+  are English and Simplified Chinese only. Missing translations fall back to English;
+  dates use the active language with the existing time-zone rules.
 - [Schema downgrade is not automatic](/docs/self-hosting#upgrade-and-roll-back). Some
   migrations are not rolling-upgrade safe: stop all old app and worker processes as required
   by the [migration notes](https://github.com/hourmere/hourmere/blob/main/docs/data-model.md#changing-the-schema)

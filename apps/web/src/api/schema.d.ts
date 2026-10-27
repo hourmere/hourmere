@@ -4871,6 +4871,7 @@ export interface components {
             email: string;
             /** @description The invitee who made the booking; the others are guests they added */
             isBooker: boolean;
+            /** @description BCP 47 language tag. Registered interface and notification languages: en, zh-CN. Regional tags are matched to a registered language; unsupported languages and missing translations fall back to English. Locale does not change the meeting time zone. */
             locale: string | null;
             name: string;
             /** @description IANA time zone */
@@ -5050,6 +5051,7 @@ export interface components {
             invitee: {
                 /** Format: email */
                 email: string;
+                /** @description BCP 47 language tag. Registered interface and notification languages: en, zh-CN. Regional tags are matched to a registered language; unsupported languages and missing translations fall back to English. Locale does not change the meeting time zone. */
                 locale?: string;
                 name: string;
                 /** @description IANA time zone */
@@ -5448,7 +5450,10 @@ export interface components {
             createdAt: string;
             /** @example ada */
             handle: string;
-            /** @example en */
+            /**
+             * @description BCP 47 language tag. Registered interface and notification languages: en, zh-CN. Regional tags are matched to a registered language; unsupported languages and missing translations fall back to English. Locale does not change the meeting time zone.
+             * @example en
+             */
             locale: string;
             /** @example Europe/Berlin */
             timeZone: string;
@@ -5462,7 +5467,7 @@ export interface components {
              */
             handle: string;
             /**
-             * @description BCP 47 language tag
+             * @description BCP 47 language tag. Registered interface and notification languages: en, zh-CN. Regional tags are matched to a registered language; unsupported languages and missing translations fall back to English. Locale does not change the meeting time zone.
              * @example en
              */
             locale: string;

@@ -1,6 +1,7 @@
 import { useCallback } from 'react'
 import { Link, Navigate, useParams } from 'react-router'
 import { usePageTitle } from '../hooks.ts'
+import { formatDuration } from '../i18n/duration.ts'
 import { useI18n } from '../i18n/runtime.tsx'
 import { literal } from '../i18n/translate.ts'
 import { codeOf, failureMessage, getHost } from './api.ts'
@@ -8,7 +9,6 @@ import { locationLabel } from './BookingDetails.tsx'
 import { collapseBlankLines } from './description.ts'
 import { PublicLayout, PublicNotFound, PublicStatus } from './PublicLayout.tsx'
 import { normalizedHandle, useRequest } from './paths.ts'
-import { formatDuration } from './time.ts'
 
 /** /{handle}: the host and the event types people can book with them. */
 export function HostPage() {

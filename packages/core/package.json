@@ -7,6 +7,7 @@
     "./reserved": "./src/reserved.ts",
     "./embed": "./src/embed.ts",
     "./language": "./src/language.ts",
+    "./locales": "./src/locales.ts",
     "./conference-url": "./src/conference-url.ts"
   },
   "scripts": {

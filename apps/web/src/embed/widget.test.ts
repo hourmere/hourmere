@@ -703,7 +703,7 @@ describe('popup chrome protections', () => {
     first.handle.close()
     expect(document.body.style.overflow).toBe('hidden')
     expect(() => openPopup({ url: 'javascript:bad' })).toThrow()
-    expect(() => openPopup({ url, language: 'fr' as 'en' })).toThrow()
+    expect(() => openPopup({ url, language: 'qab' as 'en' })).toThrow()
     expect(popupDialog()).toBe(current)
     expect(document.documentElement.style.overflow).toBe('hidden')
     closePopup()
@@ -802,9 +802,9 @@ describe('host page language defaults', () => {
     const { iframe } = mount()
     expect(new URL(iframe.src).searchParams.get('language')).toBe(expected)
   })
-  it.each(['', 'fr', 'zh-TW', 'invalid tag'])('falls back from host %s to the browser', (page) => {
+  it.each(['', 'qab', 'zh-TW', 'invalid tag'])('falls back from host %s to the browser', (page) => {
     document.documentElement.lang = page
-    vi.spyOn(navigator, 'languages', 'get').mockReturnValue(['fr', 'zh-CN'])
+    vi.spyOn(navigator, 'languages', 'get').mockReturnValue(['qab', 'zh-CN'])
     const { iframe } = mount()
     expect(new URL(iframe.src).searchParams.get('language')).toBe('zh-CN')
   })

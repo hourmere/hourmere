@@ -313,7 +313,7 @@ describe('calendarResponseDescription', () => {
           calendarResponseDescription(role, 'zh-CN'),
         )
       }
-      for (const locale of [undefined, null, 'en-GB', 'zh-TW', 'fr', 'invalid_locale']) {
+      for (const locale of [undefined, null, 'en-GB', 'zh-TW', 'qaa', 'invalid_locale']) {
         expect(calendarResponseDescription(role, locale)).toBe(
           calendarResponseDescription(role, 'en'),
         )

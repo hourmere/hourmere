@@ -1,4 +1,4 @@
-import { interfaceLanguage } from '@hourmere/core/language'
+import { explicitLanguage, interfaceLanguage, registeredLocales } from '@hourmere/core/language'
 import { type FormEvent, useRef, useState } from 'react'
 import { api, unwrap } from '../api/client.ts'
 import { errorMessage, RequestError } from '../api/errors.ts'
@@ -188,7 +188,7 @@ function validateProfile(draft: ProfileDraft): FieldErrors {
   else if (!isKnownTimeZone(draft.timeZone.trim())) {
     errors.timeZone = 'Choose a time zone from the list, e.g. Europe/Berlin.'
   }
-  if (!['en', 'zh-CN'].includes(draft.locale)) {
+  if (!explicitLanguage(draft.locale)) {
     errors.locale = 'Choose a supported notification language.'
   }
   return errors
@@ -371,12 +371,11 @@ function ProfileForm({ profile, me }: { profile: Profile | null; me: Me }) {
         >
           {(props) => (
             <select {...props} value={draft.locale} onChange={(e) => set('locale', e.target.value)}>
-              <option value="en" lang="en">
-                English
-              </option>
-              <option value="zh-CN" lang="zh-CN">
-                简体中文
-              </option>
+              {registeredLocales.map(({ code, nativeName }) => (
+                <option key={code} value={code} lang={code}>
+                  {nativeName}
+                </option>
+              ))}
             </select>
           )}
         </Field>

@@ -1,6 +1,6 @@
 ---
 title: Interface languages
-description: Choose English or Simplified Chinese in the web interface and booking widgets.
+description: Choose a registered interface language, with English fallback and localized dates.
 ---
 
 The web interface is available in English and Simplified Chinese. The language control is
@@ -16,19 +16,20 @@ changing the interface never saves the profile. A supported profile default is l
 the authenticated account becomes available. Unsupported profile locale values remain
 valid profile settings.
 
-Without an explicit interface choice, date and time formatting retains the browser's
-full BCP 47 locale, including locales whose interface text falls back to English. Choosing
-English or Simplified Chinese explicitly also chooses that display format. Dates retain the
+An explicit interface choice uses its registered date and time format. A supported
+non-English profile or browser default uses that language's format too. Otherwise formatting retains
+the browser's full BCP 47 locale, including regional English formats and locales whose
+interface text falls back to English. Dates retain the
 Gregorian calendar and the selected IANA time zone. A booking flow freezes its request
 locale independently of display changes, so retrying after a lost response keeps the same
 body and idempotency key.
 
-The language preference stores only the tiny allowlisted value `en` or `zh-CN`, under
+The language preference stores only a registered language code (currently `en` or `zh-CN`), under
 `hourmere-language` in local storage and a same-name `SameSite=Lax`, path-wide cookie. The
 cookie has a one-year lifetime and is `Secure` on HTTPS. Refusing either storage mechanism
 does not prevent changing the current page. No account identifiers, answers or management
 capabilities enter preference storage. The standalone email sign-in confirmation page uses
-the same preference cookie, then `Accept-Language`, and provides its own language buttons.
+the same preference cookie, then quality-ranked `Accept-Language`, and provides the same registered language choices.
 Language changes never submit that form or change its fragment.
 
 Public booking and rescheduling pages also remember an explicitly selected IANA time
@@ -44,31 +45,65 @@ in that known zone, the meeting time for the host. Round-robin pages wait until 
 User-provided event titles, descriptions, names, answers, locations and question options
 are left as entered. Known error codes have fixed local messages. Unknown server prose is
 shown verbatim rather than interpreted as a translation key. API, MCP and CLI machine
-protocols, notification email templates, website and legal pages are outside this interface
-translation catalog.
+protocol fields stay stable across languages. [Notification emails](/docs/notifications#email-language)
+use the same locale registry with their own catalogues. Website and legal pages are outside
+the product's translation catalogues.
 
 ## Widgets
 
 The standalone helper accepts an optional, strictly validated `language` value in
-`initInline` and `openPopup`, or `data-hourmere-language` on declarative elements. Only `en`
-and `zh-CN` are accepted. Without an explicit value, the helper uses the host page's supported
+`initInline` and `openPopup`, or `data-hourmere-language` on declarative elements. Values
+must be exact registered codes (currently `en` and `zh-CN`). Without an explicit value, the helper uses the host page's supported
 `<html lang>`, then a supported browser language, then English. Embedded pages hide their
 page-level language picker; choose the page or widget language before initialization.
 The iframe receives only that non-sensitive allowlisted value in its
 `language` query parameter. Existing exact origin, source and instance checks still apply;
 completion messages contain no booking or attendee data.
 
+## English fallback
+
+Every message resolves independently through the selected locale's fallback chain and then
+English. A partially translated language can show its translated labels alongside complete
+English messages; missing keys never display internal identifiers. Literal user content stays
+unchanged. This applies to interface text, widget controls, email subjects and bodies, and
+generated calendar summary/description text. Dates continue to use the selected language's
+format even when an individual message falls back to English.
+
+REST `invitee.locale`, MCP `create_booking` and CLI `book` accept the same optional BCP 47
+locale. Host notifications use the host's profile; guests follow the booker's saved language.
+Unsupported tags use English notifications without rejecting an otherwise valid booking.
+Locale changes do not alter time zones, UTC API timestamps, idempotency or calendar identity.
+The OpenAPI locale descriptions list the registered languages; profile locale values remain
+general BCP 47 preferences rather than a closed enum.
+
+界面和邮件共用语言注册表，目前提供英文和简体中文。缺失词条逐条回退英文；日期按选定语言和
+原有时区显示。REST、MCP、CLI 使用相同的预约语言字段，重试、改期和取消保留已保存的语言。
+本卡只建立扩展基础，不新增语言或收费限制。
+
 ## Development
 
-[`apps/web/src/i18n/common.ts`](https://github.com/hourmere/hourmere/blob/main/apps/web/src/i18n/common.ts) contains public/shared message keys and Simplified Chinese
-text. The separate [`admin.ts`](https://github.com/hourmere/hourmere/blob/main/apps/web/src/i18n/admin.ts) catalog is registered only through the existing lazy session
-graph. English text is the typed semantic key. Use `t(key, values)` during render and
-`msg(key, values)` for a notice or validation message held in state. Nested messages, date
-arguments and lists are formatted when rendered, so an already visible message follows a
-language change. Plain interpolation arguments remain literal user content. Wrap arbitrary
-server prose or user-generated page titles in `literal(text)`.
+Add one entry to
+[`packages/core/src/locales.ts`](https://github.com/hourmere/hourmere/blob/main/packages/core/src/locales.ts):
+code, native name, ordered fallback codes, Intl formatting locale and `ltr` direction.
+Add the corresponding catalogue files; loaders and language selectors discover them automatically:
+
+- `apps/web/src/i18n/catalogues/{code}/common.ts`: public/shared messages (`common` export).
+- `apps/web/src/i18n/catalogues/{code}/admin.ts`: account messages (`admin` export), kept in the lazy session graph.
+- `apps/web/src/i18n/catalogues/{code}/widget.ts`: widget controls (`widget` export).
+- `packages/mail/src/catalogues/{code}.json`: booking/sign-in email and generated calendar copy.
+- `apps/server/src/i18n/catalogues/{code}.json`: the standalone sign-in confirmation page.
+
+Use the existing English files as the key and placeholder reference. Partial catalogues are
+allowed for future languages. Catalogue tests report each locale's coverage, warn about
+missing translations for new locales, and fail for malformed or mismatched placeholders.
+English and Simplified Chinese remain complete. This card adds no production language.
+
+Use `t(key, values)` during render and `msg(key, values)` for a notice or validation message
+held in state. Nested messages, date arguments and lists format when rendered, so visible
+messages follow language changes. Plain interpolation arguments remain literal user content;
+wrap arbitrary server prose or user-generated page titles in `literal(text)`.
 
 Do not translate protocol fields, create language-based React keys, replace arbitrary DOM
 text, add private session lookups to public routes, or include capabilities in language
-parameters or preferences. Test both languages and preserve the existing arbitrary-locale,
-Gregorian, daylight-saving and privacy regressions when adding pages.
+parameters or preferences. Preserve arbitrary-locale, Gregorian, daylight-saving and privacy
+regressions when adding pages. Language support is available in full on self-hosted instances.

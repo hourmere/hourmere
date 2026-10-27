@@ -40,7 +40,7 @@ export function FieldError({ id, children }: { id: string; children: UiText }) {
     <p id={id} className="field-error" tabIndex={-1}>
       <span className="visually-hidden">
         {t('Error:')}
-        {locale === 'en' ? ' ' : ''}
+        {locale === 'zh-CN' ? '' : ' '}
       </span>
       {uiText(children)}
     </p>
