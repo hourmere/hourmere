@@ -368,8 +368,8 @@ adapter maintenance are excluded; this recorder does not add authorization or ch
 caller/session checks. New management services must record through their own authorized
 write transaction rather than a post-commit hook.
 
-Writers acquire the organization before the target row. Cancellation reuses the existing
-personal-owner/organization lock order before locking a booking. Membership writes reserve
+Writers acquire the organization before the target row. Cancellation takes only the
+organization key-share lock before its booking, without locking host identity. Membership writes reserve
 their organization foreign-key lock through the eventual operation INSERT before updating
 or removing the member, including perceived role no-ops. A failed conditional update or
 successful no-op discards that tentative row; only an actual change retains it, stamped

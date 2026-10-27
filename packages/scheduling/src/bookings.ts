@@ -730,15 +730,15 @@ const bookingCancelled = () =>
   new DomainError('conflict', 'booking_cancelled', 'This booking is already cancelled')
 
 async function lockCancellationOrganization(trx: Db, organizationId: string): Promise<void> {
-  try {
-    // The operation record's parent FK takes an organization lock. Acquire the parent
-    // before the booking, matching team-management writes and organization deletion.
-    await lockOrganization(trx, organizationId)
-  } catch (error) {
-    if (error instanceof DomainError && error.code === 'event_type_not_found')
-      throw bookingNotFound()
-    throw error
-  }
+  // Cancellation adds no host/user FK. Lock only the operation's organization parent,
+  // before the booking, without depending on the host's current identity locks.
+  const row = await trx
+    .selectFrom('auth.organization')
+    .select('id')
+    .where('id', '=', organizationId)
+    .forKeyShare()
+    .executeTakeFirst()
+  if (!row) throw bookingNotFound()
 }
 
 function assertChangeable(row: { status: string; start_at: Date }, now: Temporal.Instant): void {

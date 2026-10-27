@@ -535,10 +535,10 @@ describe.skipIf(!serverUrl)('booking operation attribution', () => {
     await verifyDeletedOrganization(bookings)
   })
 
-  it('detects a missing cancellation error mapping in a source copy', async () => {
+  it('detects a changed missing-parent cancellation error in a source copy', async () => {
     const copy = await sourceCopy(
-      "    if (error instanceof DomainError && error.code === 'event_type_not_found')\n      throw bookingNotFound()\n",
-      '',
+      '    .forKeyShare()\n    .executeTakeFirst()\n  if (!row) throw bookingNotFound()',
+      "    .forKeyShare()\n    .executeTakeFirst()\n  if (!row) throw new DomainError('not_found', 'event_type_not_found')",
     )
     await expect(verifyDeletedOrganization(copy)).rejects.toMatchObject({ name: 'AssertionError' })
   })
