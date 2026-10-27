@@ -1,5 +1,39 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  'Review synchronization permissions': 'Review synchronization permissions',
+  'Unavailable for new bookings': 'Unavailable for new bookings',
+  'Selected for new bookings — unavailable': 'Selected for new bookings — unavailable',
+  'Calendar connection options': 'Calendar connection options',
+  'Reconnect required': 'Reconnect required',
+  'Busy-time sync': 'Busy-time sync',
+  'Conflict checks': 'Conflict checks',
+  'New bookings': 'New bookings',
+  'Not available': 'Not available',
+  '{0} selected': '{0} selected',
+  'Not available — calendar list only.': 'Not available — calendar list only.',
+  'Not enabled — calendar list only.': 'Not enabled — calendar list only.',
+  'Paused until you reconnect this account.': 'Paused until you reconnect this account.',
+  'Unavailable on this instance.': 'Unavailable on this instance.',
+  'Synchronization needs attention. Review the failed calendars below.':
+    'Synchronization needs attention. Review the failed calendars below.',
+  'Waiting for the first synchronization on selected calendars.':
+    'Waiting for the first synchronization on selected calendars.',
+  'No calendars selected for conflict checks.': 'No calendars selected for conflict checks.',
+  'Latest synchronization of selected conflict calendars succeeded.':
+    'Latest synchronization of selected conflict calendars succeeded.',
+  'Not written to this account': 'Not written to this account',
+  'Selected for conflict checks': 'Selected for conflict checks',
+  'Not used for conflict checks': 'Not used for conflict checks',
+  'Selected for new bookings': 'Selected for new bookings',
+  'Not a booking destination': 'Not a booking destination',
+  'The calendar provider could not be reached. Try refreshing the calendar list again.':
+    'The calendar provider could not be reached. Try refreshing the calendar list again.',
+  'Connecting a calendar is optional. Basic booking works without one. Set up an event type to start taking bookings.':
+    'Connecting a calendar is optional. Basic booking works without one. Set up an event type to start taking bookings.',
+  'Set up event types': 'Set up event types',
+  'Busy times synchronized for this calendar.': 'Busy times synchronized for this calendar.',
+  'Disconnect deletes stored credentials and local calendar data, but leaves existing event copies in Google Calendar and does not revoke your Google grant. You can revoke access in your Google Account:':
+    'Disconnect deletes stored credentials and local calendar data, but leaves existing event copies in Google Calendar and does not revoke your Google grant. You can revoke access in your Google Account:',
   'Team name': 'Team name',
   'Team public address': 'Team public address',
   'This address is kept for a safe retry. Check the existing team before starting another creation.':
@@ -271,7 +305,6 @@ export const admin = {
   'Bookings per day, {0}–{1}. Empty: no limit.': 'Bookings per day, {0}–{1}. Empty: no limit.',
   'Buffer after': 'Buffer after',
   'Buffer before': 'Buffer before',
-  'Busy times synchronized.': 'Busy times synchronized.',
   'Calendar list refreshed.': 'Calendar list refreshed.',
   'Cancel booking…': 'Cancel booking…',
   'Cancel this booking': 'Cancel this booking',
@@ -465,8 +498,6 @@ export const admin = {
     'Google Calendar is not configured on this Hourmere instance. Contact its administrator to enable it.',
   'Google will ask for your email, calendar list and event access: to check busy times on selected calendars, and to create one private copy of each new booking on the calendar you own and select. Changing this destination affects new bookings; existing booking copies continue to be updated or cancelled on their original calendar. Automatic Google Meet adds a link only when you enable it. Busy-time synchronization stores times and event IDs, not event titles or descriptions. Connecting is optional and separate from signing in.':
     'Google will ask for your email, calendar list and event access: to check busy times on selected calendars, and to create one private copy of each new booking on the calendar you own and select. Changing this destination affects new bookings; existing booking copies continue to be updated or cancelled on their original calendar. Automatic Google Meet adds a link only when you enable it. Busy-time synchronization stores times and event IDs, not event titles or descriptions. Connecting is optional and separate from signing in.',
-  'Disconnect below deletes stored credentials and local calendar data, but leaves existing event copies in Google Calendar and does not revoke your Google grant. You can revoke access in your Google Account:':
-    'Disconnect below deletes stored credentials and local calendar data, but leaves existing event copies in Google Calendar and does not revoke your Google grant. You can revoke access in your Google Account:',
   'Google Account connections': 'Google Account connections',
   'Could not load privacy information. Try again before connecting Google Calendar.':
     'Could not load privacy information. Try again before connecting Google Calendar.',
