@@ -255,7 +255,7 @@ export const admin = {
   'Bookings per day, {0}–{1}. Empty: no limit.': '每天的预约数量，{0}–{1}。留空表示不限。',
   'Buffer after': '会后缓冲',
   'Buffer before': '会前缓冲',
-  'Busy times synchronized.': '忙闲时间已同步。',
+  'Busy times synchronized for this calendar.': '此日历的忙碌时段已同步。',
   'Calendar list refreshed.': '日历列表已刷新。',
   'Cancel booking…': '取消预约…',
   'Cancel this booking': '取消此预约',

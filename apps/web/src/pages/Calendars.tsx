@@ -197,7 +197,7 @@ export function CalendarsPage() {
       if (!mounted.current) return
       setNotice(
         action === 'sync'
-          ? 'Busy times synchronized.'
+          ? 'Busy times synchronized for this calendar.'
           : action === 'toggle'
             ? 'Conflict calendar selection saved.'
             : 'Booking calendar saved. New bookings use this destination; existing meetings keep theirs.',

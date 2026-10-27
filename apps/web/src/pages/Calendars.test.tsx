@@ -245,6 +245,91 @@ describe('the calendars page', () => {
       ).toBeDefined()
   })
 
+  it.each(['en', 'zh-CN'] as const)(
+    'limits a successful sync notice to its calendar while another selected calendar remains failed in %s',
+    async (locale) => {
+      const user = userEvent.setup()
+      let synced = false
+      const calendar = connection.calendars[0] as NonNullable<(typeof connection.calendars)[0]>
+      const failedId = 'c0000000-0000-7000-8000-000000000002'
+      const requests = fakeApi({
+        ...signedIn,
+        ...profile({ ...PROFILE, locale }),
+        'GET /api/v1/calendar-connections': () =>
+          json(200, {
+            googleEnabled: true,
+            microsoftEnabled: false,
+            destinationCalendarId: null,
+            data: [
+              {
+                ...connection,
+                syncAuthorized: true,
+                calendars: [
+                  {
+                    ...calendar,
+                    checkConflicts: true,
+                    lastSyncedAt: synced ? '2026-10-16T12:00:00Z' : null,
+                  },
+                  {
+                    ...calendar,
+                    id: failedId,
+                    name: 'Failed calendar',
+                    isPrimary: false,
+                    checkConflicts: true,
+                    lastSyncedAt: '2026-10-16T10:00:00Z',
+                    syncError: 'provider_unavailable',
+                  },
+                ],
+              },
+            ],
+          }),
+        [`POST /api/v1/calendars/${calendar.id}/sync`]: () => {
+          synced = true
+          return new Response(null, { status: 204 })
+        },
+      })
+      renderApp('/app/calendars')
+      const initialArticle = (
+        await screen.findByRole('heading', { name: 'calendar@example.com' })
+      ).closest('article') as HTMLElement
+      const successfulCalendar = within(initialArticle).getAllByRole('listitem')[0] as HTMLElement
+      await user.click(
+        within(successfulCalendar).getByRole('button', {
+          name: locale === 'en' ? 'Sync now' : '立即同步',
+        }),
+      )
+      await screen.findByText(locale === 'en' ? /^Last synchronized:/ : /^上次同步：/)
+      expect(within(screen.getByRole('main')).getByRole('status').textContent).toBe(
+        locale === 'en' ? 'Busy times synchronized for this calendar.' : '此日历的忙碌时段已同步。',
+      )
+      expect(
+        screen.queryByText(locale === 'en' ? 'Busy times synchronized.' : '忙闲时间已同步。'),
+      ).toBeNull()
+      const article = screen
+        .getByRole('heading', { name: 'calendar@example.com' })
+        .closest('article') as HTMLElement
+      expect(
+        definition(article, locale === 'en' ? 'Busy-time sync' : '忙碌时段同步').textContent,
+      ).toBe(
+        locale === 'en'
+          ? 'Synchronization needs attention. Review the failed calendars below.'
+          : '同步需要处理，请查看下方同步失败的日历。',
+      )
+      const failedCalendar = within(article)
+        .getByRole('heading', { name: 'Failed calendar' })
+        .closest('li') as HTMLElement
+      expect(
+        within(failedCalendar).getByText(
+          locale === 'en'
+            ? 'Synchronization failed. Booking times stay unavailable until synchronization recovers.'
+            : '同步失败。在同步恢复之前，相关时间将保持不可预约。',
+        ),
+      ).toBeDefined()
+      expect(requests.to(`POST /api/v1/calendars/${calendar.id}/sync`)).toHaveLength(1)
+      expect(requests.to(`POST /api/v1/calendars/${failedId}/sync`)).toHaveLength(0)
+    },
+  )
+
   it('does not present historical synchronization as available when Google is disabled', async () => {
     const calendar = connection.calendars[0] as NonNullable<(typeof connection.calendars)[0]>
     fakeApi({
@@ -1457,6 +1542,9 @@ describe('the calendars page', () => {
     })
     await user.click(screen.getByRole('button', { name: 'Sync now' }))
     expect(await screen.findByText(/Last synchronized:/)).toBeDefined()
+    expect(within(screen.getByRole('main')).getByRole('status').textContent).toBe(
+      'Busy times synchronized for this calendar.',
+    )
     await user.click(screen.getByRole('button', { name: 'Write new bookings here' }))
     expect(await screen.findByRole('button', { name: 'Stop writing bookings here' })).toBeDefined()
     expect(requests.to('PUT /api/v1/calendar-destination')[0]?.body).toEqual({
