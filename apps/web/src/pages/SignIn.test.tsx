@@ -52,7 +52,12 @@ describe('the sign-in page', () => {
     await heading()
     expect(screen.queryByText(invitationGuidance)).not.toBeNull()
     expect(screen.getByLabelText<HTMLInputElement>('Email').value).toBe('')
-    expect(api.calls.map(({ path }) => path).sort()).toEqual(['/api/v1/instance', '/api/v1/me'])
+    // The instance request can start after the heading renders, so wait for it, then let
+    // any late request arrive before checking that nothing else was looked up.
+    const paths = () => api.calls.map(({ path }) => path).sort()
+    await waitFor(() => expect(paths()).toEqual(['/api/v1/instance', '/api/v1/me']))
+    await settle()
+    expect(paths()).toEqual(['/api/v1/instance', '/api/v1/me'])
     await userEvent.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
     expect(screen.getByText('请使用收到此邀请的邮箱登录。登录不会自动加入团队。')).toBeDefined()
   })
