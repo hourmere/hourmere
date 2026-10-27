@@ -1,7 +1,7 @@
-import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fakeApi, json, renderApp } from '../test/fake-api.tsx'
+import { fakeApi, json, later, renderApp } from '../test/fake-api.tsx'
 import { expectStackGap } from '../test/layout.ts'
 import {
   ALL_QUESTIONS,
@@ -59,13 +59,13 @@ async function chooseSlot(user: ReturnType<typeof userEvent.setup>, dayName: Reg
 
 describe('the booking page', () => {
   it.each(['Change time', 'conflict'])(
-    'restores the browsed month and day after returning through %s',
+    'restores the month, day, time zone and complete draft after returning through %s',
     async (back) => {
       const user = userEvent.setup()
       const starts = ['2026-11-03T15:00:00Z', '2026-12-08T15:00:00Z', '2026-12-08T16:00:00Z']
       let taken = false
-      fakeApi({
-        ...eventRoutes(EVENT, starts),
+      const api = fakeApi({
+        ...eventRoutes({ ...EVENT, questions: ALL_QUESTIONS }, starts),
         'GET /api/v1/public/ada/intro/slots': (call) =>
           slotsAnswer(taken ? starts.filter((start) => start !== starts[1]) : starts)(call),
         'POST /api/v1/public/ada/intro/bookings': () => {
@@ -76,9 +76,21 @@ describe('the booking page', () => {
       renderApp('/ada/intro')
       await day('Tuesday, November 3, available')
       await user.click(screen.getByRole('button', { name: 'Next month' }))
-      await chooseSlot(user, /December 8, available/, '10:00 AM')
+      await user.click(screen.getByRole('button', { name: /Time zone/ }))
+      await user.type(screen.getByRole('combobox', { name: 'Search time zones' }), 'utc')
+      await user.keyboard('{Enter}')
+      await chooseSlot(user, /December 8, available/, '3:00 PM')
       await user.type(screen.getByLabelText('Your name'), 'Synthetic Visitor')
       await user.type(screen.getByLabelText('Email'), 'synthetic@example.invalid')
+      await user.type(screen.getByLabelText('Topic'), 'Compilers')
+      await user.type(screen.getByLabelText(/Anything else\?/), 'Keep this draft\nfor later')
+      await user.type(screen.getByLabelText(/Phone/), '+1 202 555 0123')
+      await user.selectOptions(screen.getByLabelText('Team size'), '11+')
+      await user.click(screen.getByLabelText('MCP'))
+      await user.click(screen.getByLabelText('I agree to the terms'))
+      await user.click(screen.getByRole('button', { name: 'Add a guest' }))
+      await user.type(screen.getByLabelText('Guest 1 name'), 'Synthetic Guest')
+      await user.type(screen.getByLabelText('Guest 1 email'), 'guest@example.invalid')
       await user.click(
         screen.getByRole('button', { name: back === 'conflict' ? 'Confirm booking' : back }),
       )
@@ -89,14 +101,175 @@ describe('the booking page', () => {
       const restored = await day('Tuesday, December 8, available')
       expect(screen.getByRole('heading', { name: 'December 2026' })).toBeDefined()
       expect(restored.closest('td')?.getAttribute('aria-selected')).toBe('true')
-      expect(slotButtons()).toEqual(back === 'conflict' ? ['11:00 AM'] : ['10:00 AM', '11:00 AM'])
-      await user.click(screen.getByRole('button', { name: '11:00 AM' }))
+      expect(screen.getByRole('button', { name: /Time zone/ }).textContent).toContain('UTC')
+      expect(slotButtons()).toEqual(back === 'conflict' ? ['4:00 PM'] : ['3:00 PM', '4:00 PM'])
+      expect(screen.queryByRole('button', { name: 'Confirm booking' })).toBeNull()
+      expect(document.querySelector('.chosen-time')).toBeNull()
+      await waitFor(() => expect(api.to('GET /api/v1/public/ada/intro/slots')).toHaveLength(3))
+      const lastQuery = new URL(
+        api.to('GET /api/v1/public/ada/intro/slots')[2]?.path ?? '',
+        'http://x',
+      ).searchParams
+      expect(lastQuery.get('start')).toBe('2026-11-30T09:30:00.000Z')
+      expect(api.to('POST /api/v1/public/ada/intro/bookings')).toHaveLength(
+        back === 'conflict' ? 1 : 0,
+      )
+      if (back === 'conflict') {
+        expect(screen.getByRole('alert').textContent).toBe(
+          'Someone else just booked that time. Please pick another one.',
+        )
+      }
+      await user.click(screen.getByRole('button', { name: '4:00 PM' }))
       expect(screen.getByLabelText<HTMLInputElement>('Your name').value).toBe('Synthetic Visitor')
       expect(screen.getByLabelText<HTMLInputElement>('Email').value).toBe(
         'synthetic@example.invalid',
       )
+      expect(screen.getByLabelText<HTMLInputElement>('Topic').value).toBe('Compilers')
+      expect(screen.getByLabelText<HTMLTextAreaElement>(/Anything else\?/).value).toBe(
+        'Keep this draft\nfor later',
+      )
+      expect(screen.getByLabelText<HTMLInputElement>(/Phone/).value).toBe('+1 202 555 0123')
+      expect(screen.getByLabelText<HTMLSelectElement>('Team size').value).toBe('11+')
+      expect(screen.getByLabelText<HTMLInputElement>('MCP').checked).toBe(true)
+      expect(screen.getByLabelText<HTMLInputElement>('I agree to the terms').checked).toBe(true)
+      expect(screen.getByLabelText<HTMLInputElement>('Guest 1 name').value).toBe('Synthetic Guest')
+      expect(screen.getByLabelText<HTMLInputElement>('Guest 1 email').value).toBe(
+        'guest@example.invalid',
+      )
+      expect(document.querySelector('.chosen-time .muted')?.textContent).toContain('UTC')
+      expect(api.to('POST /api/v1/public/ada/intro/bookings')).toHaveLength(
+        back === 'conflict' ? 1 : 0,
+      )
     },
   )
+
+  it('keeps retry identity across language changes and resets it when another time is chosen', async () => {
+    const user = userEvent.setup()
+    let attempts = 0
+    const starts = ['2026-11-03T15:00:00Z', '2026-12-08T15:00:00Z', '2026-12-08T16:00:00Z']
+    const api = fakeApi({
+      ...eventRoutes(EVENT, starts),
+      'POST /api/v1/public/ada/intro/bookings': () => {
+        if (++attempts < 4) throw new TypeError('Failed to fetch')
+        return json(201, { booking: booking(), manageToken: TOKEN })
+      },
+    })
+    renderApp('/ada/intro')
+    await day('Tuesday, November 3, available')
+    await user.click(screen.getByRole('button', { name: 'Next month' }))
+    await chooseSlot(user, /December 8, available/, '10:00 AM')
+    await user.type(screen.getByLabelText('Your name'), 'Synthetic Visitor')
+    await user.type(screen.getByLabelText('Email'), 'synthetic@example.invalid')
+    await user.click(screen.getByRole('button', { name: 'Confirm booking' }))
+    await screen.findByText(/Your booking is not confirmed yet/)
+    await user.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+    expect(screen.getByLabelText<HTMLInputElement>('你的姓名').value).toBe('Synthetic Visitor')
+    await user.click(screen.getByRole('button', { name: '确认预约' }))
+    await screen.findByText(/你的预约尚未确认/)
+
+    // Browsing back to the same time still retries the unchanged request.
+    await user.click(screen.getByRole('button', { name: '更改时间' }))
+    const restored = await waitFor(() => {
+      const selected = document.querySelector('[data-day="2026-12-08"]')
+      expect(selected?.closest('td')?.getAttribute('aria-selected')).toBe('true')
+      expect(screen.getByRole('list', { name: /的时间$/ })).toBeDefined()
+      return selected
+    })
+    expect(restored).not.toBeNull()
+    expect(screen.getByRole('heading', { name: '2026年12月' })).toBeDefined()
+    const chooseTime = (index: number) =>
+      user.click(
+        within(screen.getByRole('list', { name: /的时间$/ })).getAllByRole('button')[
+          index
+        ] as HTMLElement,
+      )
+    await chooseTime(0)
+    await user.click(screen.getByRole('button', { name: '确认预约' }))
+    await screen.findByText(/你的预约尚未确认/)
+    const retries = api.to('POST /api/v1/public/ada/intro/bookings')
+    expect(retries).toHaveLength(3)
+    const key = retries[0]?.headers.get('idempotency-key')
+    expect(key).toBeTruthy()
+    for (const retry of retries.slice(1)) {
+      expect(retry.headers.get('idempotency-key')).toBe(key)
+      expect(retry.body).toEqual(retries[0]?.body)
+    }
+    expect(retries[0]?.body).toHaveProperty('invitee.locale', 'en-US')
+
+    // Choosing another time ends that attempt, even if the visitor then returns to it.
+    await user.click(screen.getByRole('button', { name: '更改时间' }))
+    await screen.findByRole('list', { name: /的时间$/ })
+    await chooseTime(1)
+    expect(screen.getByLabelText<HTMLInputElement>('邮箱').value).toBe('synthetic@example.invalid')
+    await user.click(screen.getByRole('button', { name: '更改时间' }))
+    await screen.findByRole('list', { name: /的时间$/ })
+    await chooseTime(0)
+    expect(api.to('POST /api/v1/public/ada/intro/bookings')).toHaveLength(3)
+    await user.click(screen.getByRole('button', { name: '确认预约' }))
+    await screen.findByRole('heading', { name: '预约成功' })
+    const posts = api.to('POST /api/v1/public/ada/intro/bookings')
+    expect(posts).toHaveLength(4)
+    expect(posts[3]?.headers.get('idempotency-key')).not.toBe(key)
+    expect(posts[3]?.body).toMatchObject({
+      start: '2026-12-08T15:00:00.000Z',
+      invitee: {
+        name: 'Synthetic Visitor',
+        email: 'synthetic@example.invalid',
+        locale: 'zh-CN',
+      },
+    })
+  })
+
+  it('keeps the selected time fixed and sends one request while submission is pending', async () => {
+    const user = userEvent.setup()
+    const pending = later()
+    const api = fakeApi({
+      ...eventRoutes(EVENT, DST_SLOTS),
+      'POST /api/v1/public/ada/intro/bookings': () => pending.response,
+    })
+    renderApp('/ada/intro')
+    await chooseSlot(user, /November 2, available/, '9:00 AM')
+    await user.type(screen.getByLabelText('Your name'), 'Synthetic Visitor')
+    await user.type(screen.getByLabelText('Email'), 'synthetic@example.invalid')
+    const form = screen.getByRole('button', { name: 'Confirm booking' }).closest('form')
+    const change = screen.getByRole<HTMLButtonElement>('button', { name: 'Change time' })
+    expect(form).not.toBeNull()
+    act(() => {
+      fireEvent.submit(form as HTMLFormElement)
+      fireEvent.submit(form as HTMLFormElement)
+      fireEvent.click(change)
+    })
+    await waitFor(() => expect(api.to('POST /api/v1/public/ada/intro/bookings')).toHaveLength(1))
+    expect(change.disabled).toBe(true)
+    await user.click(change)
+    expect(screen.getByRole('heading', { name: 'Your details' })).toBeDefined()
+    expect(screen.queryByRole('heading', { name: 'Pick a time' })).toBeNull()
+    await pending.answer(json(409, { error: 'slot_taken' }))
+    await screen.findByRole('heading', { name: 'Pick a time' })
+    expect(screen.queryByRole('button', { name: 'Confirm booking' })).toBeNull()
+    expect(api.to('POST /api/v1/public/ada/intro/bookings')).toHaveLength(1)
+  })
+
+  it('discards visitor details when the booking page is mounted again', async () => {
+    const user = userEvent.setup()
+    const api = fakeApi(eventRoutes({ ...EVENT, questions: ALL_QUESTIONS }, DST_SLOTS))
+    const page = renderApp('/ada/intro')
+    await chooseSlot(user, /November 2, available/, '9:00 AM')
+    await user.type(screen.getByLabelText('Your name'), 'Synthetic Visitor')
+    await user.type(screen.getByLabelText('Email'), 'synthetic@example.invalid')
+    await user.type(screen.getByLabelText('Topic'), 'Private draft')
+    await user.click(screen.getByRole('button', { name: 'Add a guest' }))
+    await user.type(screen.getByLabelText('Guest 1 email'), 'guest@example.invalid')
+    page.unmount()
+
+    renderApp('/ada/intro')
+    await chooseSlot(user, /November 2, available/, '9:00 AM')
+    expect(screen.getByLabelText<HTMLInputElement>('Your name').value).toBe('')
+    expect(screen.getByLabelText<HTMLInputElement>('Email').value).toBe('')
+    expect(screen.getByLabelText<HTMLInputElement>('Topic').value).toBe('')
+    expect(screen.queryByLabelText('Guest 1 email')).toBeNull()
+    expect(api.to('POST /api/v1/public/ada/intro/bookings')).toHaveLength(0)
+  })
 
   it.each(['Change time', 'conflict'])(
     'rechecks the current time when returning through %s',

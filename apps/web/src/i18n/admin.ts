@@ -30,6 +30,38 @@ export const admin = {
   'Connecting a calendar is optional. Basic booking works without one. Set up an event type to start taking bookings.':
     '日历连接是可选的。不连接日历也能使用基础预约。设置活动类型，即可开始接受预约。',
   'Set up event types': '设置活动类型',
+  'Team name': '团队名称',
+  'Team public address': '团队公开地址',
+  'This address is kept for a safe retry. Check the existing team before starting another creation.':
+    '为安全重试，已保留此地址。再次创建其他团队前，请先核对已有团队。',
+  'Enter a team name on one line, up to 200 characters.': '请输入单行团队名称，最多 200 个字符。',
+  'Choose a name and public address for your team.': '为团队选择名称和公开地址。',
+  'Use a name your teammates will recognize, up to 200 characters.':
+    '使用团队成员熟悉的名称，最多 200 个字符。',
+  'Team addresses preserve letter case and are separate from personal handles.':
+    '团队地址区分字母大小写，与个人用户名互相独立。',
+  'Team booking URL preview': '团队预约网址预览',
+  'Each team event gets its own address at the end of this URL. Creating a team does not publish a booking page.':
+    '每个团队活动都会在此网址末尾使用独立的活动地址。创建团队不会发布预约页面。',
+  'A team with this address is in your teams. Open it to continue.':
+    '你的团队列表中已有使用此地址的团队。打开该团队以继续。',
+  'No team was found at this address. You can try creating it again.':
+    '未找到使用此地址的团队。你可以再次尝试创建。',
+  'Creation could not be confirmed. Checking your teams before retrying…':
+    '无法确认创建结果。正在检查团队列表，以便安全重试…',
+  'Could not check your teams. Check team status before trying again.':
+    '无法检查团队列表。请先检查团队状态，再尝试创建。',
+  'Open team': '打开团队',
+  'Check team status': '检查团队状态',
+  'Creating team…': '正在创建团队…',
+  'Create team': '创建团队',
+  'Your role': '你的角色',
+  'Last confirmed role': '上次确认的角色',
+  Owner: '所有者',
+  Admin: '管理员',
+  Member: '成员',
+  'Loading your team role…': '正在加载你的团队角色…',
+  'Could not load your team role.': '无法加载你的团队角色。',
   'API key usage command': 'API 密钥使用命令',
   'New API key test command': '新 API 密钥测试命令',
   'No schedules yet.': '尚无日程。',
@@ -196,7 +228,7 @@ export const admin = {
   ', your personal organization': '（你的个人组织）',
   '. Lowercase letters, digits and hyphens, up to': '。使用小写字母、数字和连字符，最多',
   '. If this address can sign in, check your inbox for a link. It works once and expires in a few minutes.':
-    '。若此邮箱可登录，请查收登录链接。链接仅可使用一次，几分钟后过期。',
+    '。如果此邮箱可以登录，请检查收件箱中的登录链接。链接仅可使用一次，几分钟后过期。',
   '. They are saved right away.': '。更改会立即保存。',
   '”? Anything using it stops working at once. This cannot be undone.':
     '”？使用此密钥的应用会立即失效，且无法撤销。',
@@ -725,7 +757,7 @@ export const admin = {
   'Waiting for the first synchronization. Booking times stay unavailable until it completes.':
     '正在等待首次同步。完成前，相关时间将保持不可预约。',
   'wants to connect to Hourmere.': '希望连接至 Hourmere。',
-  'We received your sign-in link request for': '已收到此邮箱的登录链接申请：',
+  'We received your sign-in link request for': '我们已收到此邮箱的登录链接请求：',
   Wed: '周三',
   Wednesday: '星期三',
   'Weekly hours': '每周时间段',
