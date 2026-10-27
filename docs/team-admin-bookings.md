@@ -1,9 +1,15 @@
 # Team administrator booking fields
 
 This page fixes the data boundary for team administrators from the team access policy.
-There is no team-administrator booking endpoint yet. The scheduling service
-exports `TeamAdminBookingSchema`, `TeamAdminBookingPageSchema`, their inferred types and
-`toTeamAdminBooking` for the future endpoint.
+`GET /api/v1/team/bookings` lists bookings of the browser session's current team, including
+bookings hosted by other members. It requires the shared `teamManagementAccess` middleware:
+a current verified session and a current exact owner/admin role in a non-personal organization.
+Ordinary members, personal organizations and API-key callers receive the same
+`403 team_management_access_denied`; missing authentication returns `401 unauthorized`.
+The route preserves the shared caller middleware's Origin/Referer handling.
+
+The scheduling service exports `listTeamAdminBookings`, `TeamAdminBookingSchema`,
+`TeamAdminBookingPageSchema`, their inferred types and `toTeamAdminBooking`.
 
 List items and details use the same explicit whitelist:
 
@@ -18,9 +24,19 @@ List items and details use the same explicit whitelist:
 | `attendees` | `{ name, email, timeZone, isBooker }` for the invitee and guests: contact, scheduling and booker identification needed for coordination. |
 
 The list envelope contains only `data` and opaque `nextCursor` (null on the last page).
-Each object schema is strict, including the nested activity, hosts and attendees. The
-mapper constructs new objects and arrays from named fields; it does not filter, extend
-or spread the host booking DTO.
+It accepts the existing booking filters: start `from` inclusive and `to` exclusive,
+`endAfter` exclusive and `endTo` inclusive, and `status` (`confirmed` or `cancelled`).
+`order` is `asc` by default or `desc`; `limit` is 1–100, default 50. Follow `nextCursor` as
+`cursor`, keeping the same filters and order. Pages use stored start time with microsecond
+precision and ID as an exclusive keyset boundary. Inserts before that boundary do not shift
+later pages; new rows after it can appear. Collective bookings occupy one row regardless of
+their host count. Reschedule predecessors remain `cancelled`, with successors listed as
+their own bookings; reschedule-chain identifiers are excluded.
+
+The internal validation schemas are strict, including the nested activity, hosts and
+attendees. The published response schemas use the same fields and remain open for additive
+v1 changes. The mapper constructs new objects and arrays from named fields; it does not
+filter, extend or spread the host booking DTO.
 
 All custom answers are excluded: no question has been classified as essential for team
 administration. Management tokens and hashes, personal calendar copies, calendar names,
@@ -36,9 +52,9 @@ on asynchronous provider cleanup. Any future link field needs an explicit visibi
 contract and current booking/conference snapshot checks before expanding this whitelist.
 
 `TeamAdminBookingRecord` is an internal read model, not an authorization result. Before
-calling the mapper, the future endpoint must apply the shared team-management access check,
-scope every booking to the authorized team, read current booking state, and load only that
-booking's hosts and attendees. Event metadata must come from its associated event type
-in that team, with a null title after soft deletion. List paging and detail lookup belong
-to that authorized service. This change adds no endpoint and no session, role or caller
-logic; existing host, public, management-token and agent interfaces keep their contracts.
+calling the mapper, the route applies the shared team-management access check and the
+service rechecks current access, scopes every booking to the authorized team, reads current
+booking state, and loads only that booking's hosts and attendees. Event metadata comes from
+its associated event type in that team, with a null title after soft deletion. Existing host,
+public, management-token and agent interfaces keep their contracts. This endpoint grants
+read access only.
