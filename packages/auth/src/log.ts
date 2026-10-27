@@ -8,15 +8,27 @@ const CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u20
 const NAMED: Record<string, string> = { '\n': '\\n', '\r': '\\r', '\t': '\\t' }
 
 /**
- * Makes text safe to put on one log line: control characters become visible escapes, so a
- * value from a request (Better Auth logs rejected callback URLs verbatim) cannot start a
- * line of its own and imitate other log output, such as a sign-in link.
+ * Makes text safe to put on one log line: control characters become visible escapes, so
+ * request input in an error cannot start a line of its own and imitate other log output,
+ * such as a sign-in link.
  */
 export function escapeControlCharacters(text: string): string {
   return text.replace(
     CONTROL,
     (c) => NAMED[c] ?? `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`,
   )
+}
+
+// Include absolute URLs/URIs and local paths. Queries can contain quotes or backslashes;
+// only whitespace ends a URL token, so its entire query/fragment is removed.
+const URL_TEXT = /(?:\b[a-z][a-z\d+.-]*:|\/)\S*/gi
+const UUID = /\b[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}\b/gi
+
+/** Preserve diagnostic text while removing identifiers and URL query/fragment values. */
+export function redactLogDetails(text: string): string {
+  return text
+    .replace(URL_TEXT, (url) => url.split(/[?#]/, 1)[0] ?? url)
+    .replace(UUID, '[redacted UUID]')
 }
 
 const MAIL_FAILURE = '[auth] sign-in email not sent'
@@ -51,12 +63,14 @@ export function logMailFailure(err: unknown): void {
 }
 
 const format = (arg: unknown) =>
-  typeof arg === 'string' ? arg : inspect(arg, { breakLength: Number.POSITIVE_INFINITY })
+  typeof arg === 'string'
+    ? redactLogDetails(arg)
+    : inspect(arg, { breakLength: Number.POSITIVE_INFINITY })
 
 /**
- * Better Auth's log output, one line per entry with control characters escaped. A rejected
- * API key, which Better Auth logs as a multi-line error with a stack trace, becomes one info
- * line with the reason only (never the key): a wrong key is the caller's problem.
+ * Better Auth's diagnostic message and arguments, redacted before control escaping so
+ * each entry stays useful and occupies one line. Rejected API keys retain a bounded code,
+ * never the key: a wrong key is the caller's problem.
  */
 export function betterAuthLog(
   level: 'debug' | 'info' | 'warn' | 'error',
@@ -65,11 +79,12 @@ export function betterAuthLog(
 ): void {
   if (message.startsWith('Failed to validate API key')) {
     const code = (args[0] as { body?: { code?: unknown } } | undefined)?.body?.code
-    const reason = typeof code === 'string' ? code : 'INVALID_API_KEY'
-    console.info(`[auth] API key rejected: ${escapeControlCharacters(reason)}`)
+    const reason =
+      typeof code === 'string' && /^[A-Z_]{1,64}$/.test(code) ? code : 'INVALID_API_KEY'
+    console.info(`[auth] API key rejected: ${reason}`)
     return
   }
-  const text = escapeControlCharacters([message, ...args.map(format)].join(' '))
+  const text = escapeControlCharacters(redactLogDetails([message, ...args.map(format)].join(' ')))
   const line = `${new Date().toISOString()} ${level.toUpperCase()} [Better Auth]: ${text}`
   if (level === 'error') console.error(line)
   else if (level === 'warn') console.warn(line)

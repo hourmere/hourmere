@@ -362,7 +362,8 @@ describe('reconciling an uncertain creation result', () => {
     await waitFor(() => expect(slugInput().getAttribute('aria-invalid')).toBe('true'))
     await waitFor(() => expect(document.activeElement).toBe(slugInput()))
     expect(screen.getByTestId('location').textContent).toBe('/app/teams/new')
-    expect(screen.getByTestId('location-state').textContent).toBe('null')
+    // The restored form can receive focus before the router commits consuming its state.
+    await waitFor(() => expect(screen.getByTestId('location-state').textContent).toBe('null'))
     expect(nameInput().value).toBe(team.name)
     expect(slugInput().value).toBe(ME.organization.slug)
     expect(slugInput().matches(':disabled')).toBe(false)

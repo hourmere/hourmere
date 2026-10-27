@@ -1,5 +1,7 @@
 // Public/shared UI messages. Admin messages live in a lazy catalog.
 export const common = {
+  'Sign in with the email address that received this invitation. Signing in does not join the team.':
+    '请使用收到此邀请的邮箱登录。登录不会自动加入团队。',
   'This booking has been rescheduled the maximum number of times. Contact the host to change it again.':
     '此预约已达到改期次数上限。如需再次改期，请联系主持人。',
   'Skip to content': '跳至内容',
