@@ -270,6 +270,20 @@ pagination and add `nextCursor`: pass it as `cursor` (with the same filters) for
 it is null on the last page. Cursors are opaque; `limit` sets the page size (1–100, default
 50). Small lists return everything and have no `nextCursor`.
 
+`GET /api/v1/team/bookings` lists the browser session's current team's bookings for current
+verified team owners/admins, including meetings hosted by other members. It accepts the
+same time/status filters, `order`, `limit` and opaque `cursor` as the host booking list.
+Pagination uses start time and ID, retaining microsecond cursor precision; collective
+bookings appear once. Inserts before a cursor do not shift later pages; later inserts can
+appear after it. Personal organizations, ordinary members and API keys receive
+`403 team_management_access_denied`. The route uses the shared team-management access check
+and caller Origin/Referer handling. Responses contain only ID, status, start/end,
+`cancelledAt`, associated `eventType: {id,title}` (null title after deletion), saved
+`hosts: [{userId,name}]` and `attendees: [{name,email,timeZone,isBooker}]`, inside
+`{data,nextCursor}`. No answers, free-text titles/reasons, management capabilities, calendar
+copies, conference URLs or reschedule-chain IDs are included. Cancelled reschedule
+predecessors and their successors are separate rows.
+
 Booking lists accept `endAfter` (end strictly after this instant) and `endTo` (end at or
 before it), alongside the existing start-time `from`/`to` filters. The web app splits Upcoming
 and Past at the end time, so a meeting in progress stays Upcoming. Ordering and cursors

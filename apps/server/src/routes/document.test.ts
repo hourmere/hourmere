@@ -8,7 +8,7 @@ import {
 } from './test-app.ts'
 
 describe('the OpenAPI document', () => {
-  it('documents every /api/v1 JSON response as open and every JSON request body as strict', async () => {
+  it('documents extensible responses and strict requests, with an explicit team booking whitelist', async () => {
     const doc = await openApiDocument(productApp({} as Db))
     const paths = Object.keys(doc.paths).filter((path) => path.startsWith('/api/v1/'))
     // Catalog and booking routes alike.
@@ -19,12 +19,23 @@ describe('the OpenAPI document', () => {
         '/api/v1/event-types/{id}',
         '/api/v1/public/{handle}/{slug}',
         '/api/v1/bookings/{id}/cancel',
+        '/api/v1/team/bookings',
       ]),
     )
-    expect(responseAndRequestStrictness(doc, paths)).toEqual({
+    // Team administration deliberately fixes a strict privacy whitelist, independently of
+    // the extensible host/public booking contracts.
+    expect(
+      responseAndRequestStrictness(
+        doc,
+        paths.filter((path) => path !== '/api/v1/team/bookings'),
+      ),
+    ).toEqual({
       closedResponses: [],
       openRequests: [],
     })
+    expect(responseAndRequestStrictness(doc, ['/api/v1/team/bookings']).closedResponses).toEqual(
+      expect.arrayContaining(['get /api/v1/team/bookings 200 $']),
+    )
   })
 
   it('names each component once: route modules can register in any order', async () => {
