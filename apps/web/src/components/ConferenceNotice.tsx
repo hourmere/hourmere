@@ -1,9 +1,8 @@
 import { displayConferenceUrl } from '@hourmere/core/conference-url'
-import { useEffect, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { api, type Schemas, unwrap } from '../api/client.ts'
 import { isOrganizationContextChanged } from '../api/errors.ts'
 import { useI18n } from '../i18n/runtime.tsx'
-import { OrganizationContextConflict } from './OrganizationContextConflict.tsx'
 
 type Booking = Schemas['Booking']
 /** No session/profile requests on public pages; the capability stays in memory and a header. */
@@ -12,12 +11,14 @@ export function ConferenceNotice({
   manageToken,
   host = false,
   expectedOrganizationId,
+  renderConflict,
   onChange,
 }: {
   booking: Booking
   manageToken?: string | null
   host?: boolean
   expectedOrganizationId?: string
+  renderConflict?: (error: unknown) => ReactNode
   onChange?: (booking: Booking) => void
 }) {
   const { t } = useI18n()
@@ -236,7 +237,7 @@ export function ConferenceNotice({
           {t('Could not request a safe retry. Check the booking status before trying again.')}
         </p>
       )}
-      {conflict !== null && <OrganizationContextConflict error={conflict} />}
+      {conflict !== null && renderConflict?.(conflict)}
       {host &&
         current.conferenceCanRetry !== false &&
         status === 'failed' &&

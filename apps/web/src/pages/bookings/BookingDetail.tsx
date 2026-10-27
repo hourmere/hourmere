@@ -286,6 +286,7 @@ function BookingView({
         booking={booking}
         host
         expectedOrganizationId={expectedOrganizationId}
+        renderConflict={(error) => <OrganizationContextConflict error={error} />}
         onChange={updateBooking}
       />
       <CalendarCopyNotice
