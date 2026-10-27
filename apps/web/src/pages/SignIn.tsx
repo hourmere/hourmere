@@ -12,6 +12,7 @@ import { useLoad, usePageTitle } from '../hooks.ts'
 import { LanguageSwitcher, useI18n } from '../i18n/runtime.tsx'
 import { msg, type UiText } from '../i18n/translate.ts'
 import { safeNextPath, signInPath } from '../next-path.ts'
+import { PATHS } from '../paths.ts'
 import { emailError } from '../public/validation.ts'
 import { PageStatus, useSession } from '../session.tsx'
 
@@ -289,6 +290,7 @@ function SignInForm({ next, expired }: { next: string; expired: boolean }) {
   }
 
   const busy = phase.kind === 'sending' || redirecting !== null
+  const joiningTeam = new URL(next, 'https://app.invalid').pathname === PATHS.join
   return (
     <main className="centered">
       <div className="card">
@@ -297,6 +299,13 @@ function SignInForm({ next, expired }: { next: string; expired: boolean }) {
           <LanguageSwitcher />
         </header>
         <h1>{t('Sign in to Hourmere')}</h1>
+        {joiningTeam && (
+          <p>
+            {t(
+              'Sign in with the email address that received this invitation. Signing in does not join the team.',
+            )}
+          </p>
+        )}
         {expired && (
           <p className="alert alert-info" role="status">
             {t('Your session ended. Please sign in again.')}

@@ -305,9 +305,42 @@ describe('createLogMailer', () => {
     expect(record).toMatchObject({
       to: 'ada@example.com',
       subject: 'Sign in to Hourmere',
-      links: [url],
     })
+    expect(record.links.length === 1 && record.links[0] === url).toBe(true)
   })
+
+  it.each(['fragment', 'query'] as const)(
+    'preserves sign-in callback destinations in logged links and text (%s)',
+    async (location) => {
+      const invitationId = '00000000-0000-4000-8000-000000000071'
+      const next = `/app/join?invitationId=${invitationId}`
+      const callbacks = {
+        callbackURL: `https://cal.example.com${next}`,
+        newUserCallbackURL: `https://cal.example.com${next}`,
+        errorCallbackURL: `/sign-in?${new URLSearchParams({ next })}`,
+      }
+      const params = new URLSearchParams({ token: crypto.randomUUID(), ...callbacks })
+      const link = `https://cal.example.com/sign-in/confirm${location === 'fragment' ? '#' : '?'}${params}`
+      const message = magicLinkEmail({ to: 'ada@example.com', url: link, expiresInMinutes: 5 })
+      const original = structuredClone(message)
+      const lines: string[] = []
+      await createLogMailer((line) => lines.push(line)).send(message)
+      expect(lines.length === 1).toBe(true)
+      const record = JSON.parse((lines[0] as string).slice('[mail] '.length))
+      expect(Array.isArray(record.links) && record.links.length === 1).toBe(true)
+      const loggedUrl = new URL(record.links[0])
+      const loggedParams =
+        location === 'fragment'
+          ? new URLSearchParams(loggedUrl.hash.slice(1))
+          : loggedUrl.searchParams
+      for (const [name, destination] of Object.entries(callbacks)) {
+        expect(loggedParams.get(name) === destination, name).toBe(true)
+      }
+      expect(record.links[0] === link).toBe(true)
+      expect(record.text === message.text).toBe(true)
+      expect(JSON.stringify(message) === JSON.stringify(original)).toBe(true)
+    },
+  )
 
   it('names attachments and their sizes, not their contents', async () => {
     const lines: string[] = []

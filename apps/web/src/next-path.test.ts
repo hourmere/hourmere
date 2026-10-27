@@ -8,6 +8,10 @@ describe('safeNextPath', () => {
     ['/app/', '/app/'],
     ['/app/api-keys', '/app/api-keys'],
     ['/app/bookings?tab=past', '/app/bookings?tab=past'],
+    [
+      '/app/join?invitationId=00000000-0000-7000-8000-000000000001',
+      '/app/join?invitationId=00000000-0000-7000-8000-000000000001',
+    ],
     ['/app/settings#profile', '/app/settings#profile'],
     [
       '/app/event-types/00000000-0000-7000-8000-000000000001',
@@ -26,6 +30,7 @@ describe('safeNextPath', () => {
     ['app/api-keys'],
     ['https://evil.example/'],
     ['https://evil.example/app'],
+    ['https://evil.example/app/join?invitationId=00000000-0000-7000-8000-000000000001'],
     ['javascript:alert(1)'],
     ['//evil.example'],
     ['//evil.example/app'],
@@ -66,6 +71,8 @@ describe('safeNextPath', () => {
     ['/app/a%2fb'],
     ['/app/%5Cexample.com'],
     ['/app/a%5cb'],
+    ['/app%2fjoin?invitationId=00000000-0000-7000-8000-000000000001'],
+    ['/app/%5c%5cevil.example/join'],
     // The API, not pages.
     ['/api'],
     ['/api/v1/me'],
@@ -82,6 +89,12 @@ describe('safeNextPath', () => {
 describe('signInPath', () => {
   it('remembers the page to come back to', () => {
     expect(signInPath('/app/api-keys?x=1')).toBe('/sign-in?next=%2Fapp%2Fapi-keys%3Fx%3D1')
+  })
+
+  it('remembers the invitation identifier without moving it to a public page', () => {
+    expect(signInPath('/app/join?invitationId=00000000-0000-7000-8000-000000000001')).toBe(
+      '/sign-in?next=%2Fapp%2Fjoin%3FinvitationId%3D00000000-0000-7000-8000-000000000001',
+    )
   })
 
   it('leaves out the default page and anything outside the app', () => {
