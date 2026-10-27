@@ -62,6 +62,13 @@ credentials, calendars and outstanding connection attempts. It does not revoke t
 account-wide grant; remove that separately in the Microsoft account's application permissions
 if desired. Keep regular encrypted database backups and protect the encryption key separately.
 
+An expired or revoked account offers **Reconnect Microsoft Calendar**, leading to the
+Microsoft permission disclosure and authorization action. Choose the original Microsoft
+account yourself; connecting a different account does not restore the original connection.
+On return, check the account statuses shown by Hourmere. A temporary provider failure
+offers **Refresh calendar list** instead. Recovery does not enable busy-time synchronization
+or booking writes for Microsoft connections.
+
 See Microsoft's [calendar-list permissions](https://learn.microsoft.com/en-us/graph/api/user-list-calendars?view=graph-rest-1.0)
 and [authorization-code flow](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-auth-code-flow)
 for the provider's current behavior. Test organizational mailboxes separately from personal
