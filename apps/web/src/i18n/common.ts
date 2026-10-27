@@ -296,6 +296,12 @@ export const common = {
   'Your link to change or cancel this booking': '用于更改或取消此预约的链接',
   'Your name': '你的姓名',
   'Your session has ended. Sign in again.': '你的登录已过期。请重新登录。',
+  'This team address is already in use. Choose another one.':
+    '此团队地址已被使用。请选择其他地址。',
+  'This team address is reserved. Choose another one.': '此团队地址为保留地址。请选择其他地址。',
+  "You don't have permission to create a team.": '你没有创建团队的权限。',
+  'You no longer have access to this team. Choose another team.':
+    '你已无权访问此团队。请选择其他团队。',
   'Your time zone ({0}) was not accepted. Change the time, pick another time zone and try again.':
     '时区（{0}）未被接受。请更改时间、选择其他时区后重试。',
   '1 time zone': '1 个时区',
