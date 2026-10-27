@@ -9,6 +9,7 @@ vi.mock('./lazy-pages.tsx', () => {
     throw pending
   }
   const names = [
+    'AcceptInvitationPage',
     'AnalyticsPage',
     'ApiKeysPage',
     'AppShell',

@@ -277,7 +277,13 @@ export function createApp({
       `${new Date().toISOString()} ${level} ${escapeControlCharacters(`${c.req.method} ${c.req.path}: ${text}`)}`,
     )
   const logError = (c: Context, label: string, detail: unknown) =>
-    logLine(c, 'ERROR', `${label}${inspect(detail, { breakLength: Number.POSITIVE_INFINITY })}`)
+    logLine(
+      c,
+      'ERROR',
+      c.req.path.startsWith('/api/auth/')
+        ? 'authentication request failed (details omitted)'
+        : `${label}${inspect(detail, { breakLength: Number.POSITIVE_INFINITY })}`,
+    )
 
   // Unexpected errors (including Better Auth's, which it rethrows) are logged and answered
   // with an opaque 500; only failures the caller can act on get a specific code.

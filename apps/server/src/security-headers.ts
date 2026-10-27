@@ -52,11 +52,10 @@ export function strictTransportSecurity(publicUrl: string, maxAge: number): stri
 }
 
 /**
- * The invitee's manage page (/booking#token=…), like the sign-in confirm page, sends no
- * Referer at all. Its secret is in the fragment, which no Referer carries anyway; this keeps
- * that true if anything secret ever ends up in its path or query.
+ * Capability pages and sign-in callbacks send no Referer at all. Sign-in's next path can
+ * carry an invitation ID, including during a client-side navigation to the join page.
  */
-const NO_REFERRER_PAGES = /^\/booking(\/|$)/i
+const NO_REFERRER_PAGES = /^\/(?:booking|sign-in|app\/join)(\/|$)/i
 
 const HTML = /^text\/html/i
 
@@ -70,7 +69,7 @@ export interface SecurityHeadersOptions {
  * Adds the headers to every response, errors and 404s included, once it is made. Every
  * response gets nosniff and, when given, HSTS, whatever it says itself; it also gets
  * X-Frame-Options DENY and Referrer-Policy strict-origin-when-cross-origin (no-referrer on the
- * manage page) unless it has a value of its own, which the route set on purpose (the sign-in
+ * manage, join and sign-in pages) unless the route set a value of its own (the sign-in
  * confirm page's no-referrer, for instance). HTML pages also get APP_CSP and
  * Cross-Origin-Opener-Policy same-origin, likewise unless they have their own (the confirm
  * page's stricter CSP). An empty value counts as none.

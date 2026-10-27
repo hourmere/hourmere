@@ -33,6 +33,10 @@ export const SignInPage = page(
   () => import('./pages/SignIn.tsx'),
   (m) => m.SignInPage,
 )
+export const AcceptInvitationPage = page(
+  () => import('./pages/AcceptInvitation.tsx'),
+  (m) => m.AcceptInvitationPage,
+)
 export const ApiKeysPage = page(
   () => import('./pages/ApiKeys.tsx'),
   (m) => m.ApiKeysPage,

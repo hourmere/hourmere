@@ -6,6 +6,7 @@ import { embedQueryLanguage } from './embed/language.ts'
 import { useI18n } from './i18n/runtime.tsx'
 import { translate } from './i18n/translate.ts'
 import {
+  AcceptInvitationPage,
   AnalyticsPage,
   ApiKeysPage,
   AppShell,
@@ -87,6 +88,8 @@ export function App() {
             <Route path="/oauth/authorize" element={<McpAuthorizePage />} />
             <Route path="/oauth/consent" element={<McpAuthorizePage />} />
             <Route path="/sign-in" element={<SignInPage />} />
+            {/* Keep the protected invitation entry ahead of the app shell and public booking routes. */}
+            <Route path={PATHS.join} element={<AcceptInvitationPage />} />
             <Route path="/app" element={<RequireSession />}>
               <Route element={<AppShell />}>
                 <Route index element={<Navigate to={PATHS.eventTypes} replace />} />

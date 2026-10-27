@@ -1,6 +1,7 @@
 // The parts of Better Auth's own HTTP protocol (/api/auth/*) the web app uses: sign-in,
 // sign-out, organizations and API keys. It is not in our OpenAPI document (https://hourmere.com/docs/api-conventions), so
 // the shapes used here are written out by hand. Errors are `{ "message", "code" }`.
+import { safeNextPath, signInPath } from '../next-path.ts'
 import { api, notifyUnauthorized, type Schemas, unwrap } from './client.ts'
 import { errorFromResponse } from './errors.ts'
 
@@ -33,9 +34,21 @@ export interface SignInRedirects {
   errorCallbackURL: string
 }
 
+/** Keep both callbacks in the same safe return flow, even for a future adapter caller. */
+function checkedSignInRedirects(redirects: SignInRedirects): SignInRedirects {
+  if (
+    safeNextPath(redirects.callbackURL) !== redirects.callbackURL ||
+    redirects.errorCallbackURL !== signInPath(redirects.callbackURL)
+  )
+    throw new Error('Invalid sign-in callback path')
+  return redirects
+}
+
 /** Emails a sign-in link to `email`. */
-export function sendSignInLink(email: string, redirects: SignInRedirects): Promise<unknown> {
-  return authRequest('/sign-in/magic-link', { body: { email, ...redirects } })
+export async function sendSignInLink(email: string, redirects: SignInRedirects): Promise<unknown> {
+  return authRequest('/sign-in/magic-link', {
+    body: { email, ...checkedSignInRedirects(redirects) },
+  })
 }
 
 /** Starts sign-in with a provider; returns the provider's page to send the browser to. */
@@ -44,7 +57,7 @@ export async function startSocialSignIn(
   redirects: SignInRedirects,
 ): Promise<string> {
   const { url } = await authRequest<{ url?: string }>('/sign-in/social', {
-    body: { provider, ...redirects },
+    body: { provider, ...checkedSignInRedirects(redirects) },
   })
   if (!url) throw new Error('Better Auth returned no provider URL')
   return url
@@ -124,6 +137,49 @@ export interface OrganizationMember {
   userId: string
   role: string
   createdAt: string
+}
+
+/** Better Auth invitation dates are JSON strings; expiry is separate from stored status. */
+export interface Invitation {
+  id: string
+  email: string
+  role: string
+  organizationId: string
+  inviterId: string
+  status: 'pending' | 'accepted' | 'rejected' | 'canceled'
+  expiresAt: string
+  createdAt: string
+}
+
+/** Only the signed-in, verified recipient can read these invitation details. */
+export interface InvitationDetails extends Invitation {
+  organizationName: string
+  organizationSlug: string
+  inviterEmail: string
+}
+
+export interface AcceptedInvitation {
+  invitation: Invitation & { status: 'accepted' }
+  member: OrganizationMember
+}
+
+/** Lookup uses `id`, unlike the accept endpoint's `invitationId` body field. */
+export function getInvitation(id: string, signal?: AbortSignal): Promise<InvitationDetails> {
+  return authRequest(
+    `/organization/get-invitation?${new URLSearchParams({ id })}`,
+    signal ? { signal } : {},
+  )
+}
+
+/** Explicit acceptance only; signing in or looking up an invitation never calls this. */
+export function acceptInvitation(
+  invitationId: string,
+  signal?: AbortSignal,
+): Promise<AcceptedInvitation> {
+  return authRequest('/organization/accept-invitation', {
+    body: { invitationId },
+    ...(signal && { signal }),
+  })
 }
 
 /** Better Auth 1.7.10 returns the organization plus its creator's membership. */

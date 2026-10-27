@@ -1,5 +1,3 @@
-import { inspect } from 'node:util'
-
 // C0 and C1 control characters, the Unicode line and paragraph separators, and the bidi
 // embedding, override and isolate characters (which can make a log line read differently
 // from what it contains).
@@ -8,9 +6,9 @@ const CONTROL = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u20
 const NAMED: Record<string, string> = { '\n': '\\n', '\r': '\\r', '\t': '\\t' }
 
 /**
- * Makes text safe to put on one log line: control characters become visible escapes, so a
- * value from a request (Better Auth logs rejected callback URLs verbatim) cannot start a
- * line of its own and imitate other log output, such as a sign-in link.
+ * Makes text safe to put on one log line: control characters become visible escapes, so
+ * request input in an error cannot start a line of its own and imitate other log output,
+ * such as a sign-in link.
  */
 export function escapeControlCharacters(text: string): string {
   return text.replace(
@@ -50,13 +48,10 @@ export function logMailFailure(err: unknown): void {
   }
 }
 
-const format = (arg: unknown) =>
-  typeof arg === 'string' ? arg : inspect(arg, { breakLength: Number.POSITIVE_INFINITY })
-
 /**
- * Better Auth's log output, one line per entry with control characters escaped. A rejected
- * API key, which Better Auth logs as a multi-line error with a stack trace, becomes one info
- * line with the reason only (never the key): a wrong key is the caller's problem.
+ * Better Auth's diagnostics may quote callback URLs, invitation IDs or database input.
+ * Keep the level and a fixed label only. Rejected API keys retain a bounded code, never
+ * the key: a wrong key is the caller's problem.
  */
 export function betterAuthLog(
   level: 'debug' | 'info' | 'warn' | 'error',
@@ -65,12 +60,12 @@ export function betterAuthLog(
 ): void {
   if (message.startsWith('Failed to validate API key')) {
     const code = (args[0] as { body?: { code?: unknown } } | undefined)?.body?.code
-    const reason = typeof code === 'string' ? code : 'INVALID_API_KEY'
-    console.info(`[auth] API key rejected: ${escapeControlCharacters(reason)}`)
+    const reason =
+      typeof code === 'string' && /^[A-Z_]{1,64}$/.test(code) ? code : 'INVALID_API_KEY'
+    console.info(`[auth] API key rejected: ${reason}`)
     return
   }
-  const text = escapeControlCharacters([message, ...args.map(format)].join(' '))
-  const line = `${new Date().toISOString()} ${level.toUpperCase()} [Better Auth]: ${text}`
+  const line = `${new Date().toISOString()} ${level.toUpperCase()} [Better Auth]: diagnostic details omitted`
   if (level === 'error') console.error(line)
   else if (level === 'warn') console.warn(line)
   else console.log(line)

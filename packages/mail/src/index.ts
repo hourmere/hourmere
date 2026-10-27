@@ -286,10 +286,31 @@ export function createSmtpMailer({ url, from }: SmtpMailerOptions): Mailer {
 const LINE_BREAKING = /[\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/g
 const unicodeEscape = (c: string) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`
 
+/** Keep development sign-in links usable without logging private callback destinations. */
+function loggedMailText(text: string): string {
+  return text.replace(/https?:\/\/\S+/g, (link) => {
+    let url: URL
+    try {
+      url = new URL(link)
+    } catch {
+      return link
+    }
+    if (url.pathname !== '/sign-in/confirm') return link
+    const fragment = new URLSearchParams(url.hash.slice(1))
+    for (const name of ['callbackURL', 'newUserCallbackURL', 'errorCallbackURL']) {
+      url.searchParams.delete(name)
+      fragment.delete(name)
+    }
+    url.hash = fragment.toString()
+    return url.toString()
+  })
+}
+
 /**
  * Prints messages to the log instead of sending them, so a fresh self-hosted instance can
- * sign in before email is configured. Sign-in links appear in the log in full: only use it
- * where whoever can read the log may sign in as anyone.
+ * sign in before email is configured. Sign-in tokens appear in the log: only use it where
+ * whoever can read the log may sign in as anyone. Callback destinations are omitted; a
+ * logged link uses the default landing page. The email sent through SMTP is unchanged.
  *
  * Each message is one line, `[mail] {json}`. Other log output has its control characters
  * escaped, so nothing a request gets into the log can imitate such a line.
@@ -302,13 +323,14 @@ export function createLogMailer(print: (line: string) => void = console.log): Ma
         print(`[mail] ${JSON.stringify({ notSent: 'SMTP_URL is not set', sensitive: true })}`)
         return
       }
-      const links = text.match(/https?:\/\/\S+/g) ?? []
+      const loggedText = loggedMailText(text)
+      const links = loggedText.match(/https?:\/\/\S+/g) ?? []
       const record = JSON.stringify({
         notSent: 'SMTP_URL is not set',
         to,
         subject,
         links,
-        text,
+        text: loggedText,
         // Names and sizes only: an invitation's body adds nothing a reader of the log needs.
         ...(attachments?.length && {
           attachments: attachments.map(({ filename, contentType, content }) => ({

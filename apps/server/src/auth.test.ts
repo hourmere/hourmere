@@ -425,10 +425,9 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
         status = res.status
       })
       expect(status).toBe(403)
-      // Better Auth logs the rejected URL, but on one line with the breaks escaped.
-      expect(lines.some((l) => l.includes('Invalid callbackURL') && l.includes('\\n[mail]'))).toBe(
-        true,
-      )
+      // Rejected destinations may carry invitation IDs; their details stay out of logs.
+      expect(lines.some((l) => l.includes('[Better Auth]: diagnostic details omitted'))).toBe(true)
+      expect(lines.some((l) => l.includes('evil.example') || l.includes('forged'))).toBe(false)
       expect(lines.filter((l) => l.startsWith('[mail]'))).toEqual([])
     })
 
@@ -1664,7 +1663,7 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
   })
 
   describe('unexpected errors', () => {
-    it('are logged on one escaped line', async () => {
+    it('are logged without request-controlled auth error details', async () => {
       const app = createApp({
         checkDb: async () => {},
         authHandler: async () => {
@@ -1679,7 +1678,10 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
       })
       expect(res?.status).toBe(500)
       expect(await res?.json()).toEqual({ error: 'internal_error' })
-      expect(lines.filter((l) => l.includes('boom'))).toHaveLength(1)
+      expect(
+        lines.filter((l) => l.includes('authentication request failed (details omitted)')),
+      ).toHaveLength(1)
+      expect(lines.some((l) => l.includes('boom') || l.includes('forged'))).toBe(false)
       expect(lines.filter((l) => l.startsWith('[mail]') || l.startsWith('    at '))).toEqual([])
     })
 

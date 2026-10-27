@@ -1,5 +1,45 @@
 import { describe, expect, it, vi } from 'vitest'
-import { escapeControlCharacters, logMailFailure } from './log.ts'
+import { betterAuthLog, escapeControlCharacters, logMailFailure } from './log.ts'
+
+describe('Better Auth diagnostic privacy', () => {
+  it('omits callback destinations, nested next paths and raw invitation IDs at every level', () => {
+    const invitationId = '00000000-0000-4000-8000-000000000071'
+    const next = `/app/join?invitationId=${invitationId}`
+    const callback = `https://evil.example/sign-in?${new URLSearchParams({ next })}`
+    const calls: unknown[][] = []
+    const spies = ['log', 'warn', 'error'].map((method) =>
+      vi.spyOn(console, method as 'log' | 'warn' | 'error').mockImplementation((...args) => {
+        calls.push(args)
+      }),
+    )
+    try {
+      for (const level of ['debug', 'info', 'warn', 'error'] as const) {
+        betterAuthLog(level, `Invalid callbackURL: ${callback}`, {
+          invitationId,
+          error: new Error(invitationId),
+        })
+      }
+      expect(calls).toHaveLength(4)
+      expect(calls.every((args) => args.join(' ').endsWith('diagnostic details omitted'))).toBe(
+        true,
+      )
+      expect(JSON.stringify(calls).includes(invitationId)).toBe(false)
+      expect(JSON.stringify(calls).includes('evil.example')).toBe(false)
+    } finally {
+      for (const spy of spies) spy.mockRestore()
+    }
+  })
+
+  it('bounds the only retained dynamic API-key code', () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {})
+    try {
+      betterAuthLog('error', 'Failed to validate API key', { body: { code: '/app/join?private' } })
+      expect(info.mock.calls).toEqual([['[auth] API key rejected: INVALID_API_KEY']])
+    } finally {
+      info.mockRestore()
+    }
+  })
+})
 
 describe('escapeControlCharacters', () => {
   it('escapes line breaks, other control characters and bidi controls', () => {

@@ -204,6 +204,22 @@ describe('security headers', () => {
     }
   })
 
+  it('keeps invitation destinations out of Referer during join and sign-in navigation', async () => {
+    const invitationId = '00000000-0000-4000-8000-000000000071'
+    const next = `/app/join?invitationId=${invitationId}`
+    for (const path of [next, `/sign-in?${new URLSearchParams({ next })}`]) {
+      const response = await app.request(path)
+      expect(response.status).toBe(200)
+      expect(response.headers.get('referrer-policy')).toBe('no-referrer')
+      expect(response.headers.get('content-security-policy')).toBe(APP_CSP)
+    }
+    for (const path of ['/app/joined', '/sign-in-other']) {
+      expect((await app.request(path)).headers.get('referrer-policy')).toBe(
+        'strict-origin-when-cross-origin',
+      )
+    }
+  })
+
   it('leave hashed bundles and other files their own type and long-lived cache', async () => {
     const bundle = await app.request('/assets/app-abc123.js')
     expect(bundle.status).toBe(200)

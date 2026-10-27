@@ -54,6 +54,43 @@ describe('request log', () => {
       log.mockRestore()
     }
   })
+
+  it('does not log invitation query IDs, callbacks, bodies or auth error details', async () => {
+    const invitationId = '00000000-0000-4000-8000-000000000071'
+    const callbackURL = `/app/join?invitationId=${invitationId}`
+    const app = createApp({
+      ...noAuth,
+      checkDb: async () => {},
+      authHandler: async () => {
+        throw new Error(`database input: ${invitationId}; callbackURL=${callbackURL}`)
+      },
+    })
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      await app.request(`/api/auth/organization/get-invitation?id=${invitationId}`)
+      await app.request('/api/auth/organization/accept-invitation', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ invitationId }),
+      })
+      await app.request('/api/auth/sign-in/magic-link', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: 'invitee@example.com', callbackURL }),
+      })
+      const lines = [...log.mock.calls, ...error.mock.calls].map((args) => args.join(' '))
+      expect(error.mock.calls).toHaveLength(3)
+      expect(error.mock.calls.every((args) => args.join(' ').endsWith('(details omitted)'))).toBe(
+        true,
+      )
+      expect(lines.every((line) => !line.includes(invitationId))).toBe(true)
+      expect(lines.every((line) => !line.includes('invitee@example.com'))).toBe(true)
+    } finally {
+      log.mockRestore()
+      error.mockRestore()
+    }
+  })
 })
 
 describe('API surface', () => {
