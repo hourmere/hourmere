@@ -62,7 +62,7 @@ describe('host rescheduling in the booking detail', () => {
       const user = userEvent.setup()
       const starts = ['2026-11-03T15:00:00Z', '2026-12-08T15:00:00Z', '2026-12-08T16:00:00Z']
       let taken = false
-      hostApi({
+      const api = hostApi({
         [`GET ${slotsPath}`]: (call) =>
           slotsAnswer(taken ? starts.filter((start) => start !== starts[1]) : starts)(call),
         [`POST ${movePath}`]: () => {
@@ -74,10 +74,14 @@ describe('host rescheduling in the booking detail', () => {
       await user.click(await screen.findByRole('button', { name: 'Reschedule' }))
       await screen.findByRole('button', { name: 'Tuesday, November 3, available' })
       await user.click(screen.getByRole('button', { name: 'Next month' }))
+      await screen.findByRole('button', { name: 'Tuesday, December 8, available' })
+      await user.click(screen.getByRole('button', { name: /Time zone/ }))
+      await user.type(screen.getByRole('combobox', { name: 'Search time zones' }), 'UTC')
+      await user.click(screen.getByRole('option', { name: /^UTC/ }))
       await user.click(
         await screen.findByRole('button', { name: 'Tuesday, December 8, available' }),
       )
-      await user.click(screen.getByRole('button', { name: '4:00 PM' }))
+      await user.click(screen.getByRole('button', { name: '3:00 PM' }))
       await user.click(
         screen.getByRole('button', { name: back === 'conflict' ? 'Confirm new time' : back }),
       )
@@ -87,11 +91,19 @@ describe('host rescheduling in the booking detail', () => {
       const restored = await screen.findByRole('button', { name: 'Tuesday, December 8, available' })
       expect(screen.getByRole('heading', { name: 'December 2026' })).toBeDefined()
       expect(restored.closest('td')?.getAttribute('aria-selected')).toBe('true')
+      expect(screen.getByRole('button', { name: /Time zone/ }).textContent).toContain('UTC')
+      expect(screen.queryByRole('button', { name: 'Confirm new time' })).toBeNull()
+      expect(api.to(`GET ${slotsPath}`)).toHaveLength(3)
+      expect(api.to(`POST ${movePath}`)).toHaveLength(back === 'conflict' ? 1 : 0)
       expect(
         within(screen.getByRole('list', { name: /^Times on/ }))
           .getAllByRole('button')
           .map((button) => button.textContent),
-      ).toEqual(back === 'conflict' ? ['5:00 PM'] : ['4:00 PM', '5:00 PM'])
+      ).toEqual(back === 'conflict' ? ['4:00 PM'] : ['3:00 PM', '4:00 PM'])
+      await user.click(screen.getByRole('button', { name: '4:00 PM' }))
+      expect(screen.getByRole('button', { name: 'Confirm new time' })).toBeDefined()
+      expect(screen.getByText('UTC')).toBeDefined()
+      expect(api.to(`POST ${movePath}`)).toHaveLength(back === 'conflict' ? 1 : 0)
     },
   )
 
