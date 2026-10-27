@@ -1,5 +1,20 @@
 // English semantic keys keep local UI messages language-independent in state.
 export const admin = {
+  'Calendar permissions need review': '日历权限需要复核',
+  'Selected for new bookings — review permissions': '已选为新预约写入目标，请复核权限',
+  'Permissions required': '需要授权',
+  'Calendar permissions need attention. Busy-time synchronization is reported separately below.':
+    '日历权限需要处理。忙碌时段的同步结果会在下方单独显示。',
+  'Choose {0} on the {1} authorization page. Connecting a different account will not restore this one.':
+    '请在{1}授权页面选择{0}。连接其他账户不会恢复此账户。',
+  'Choose the original account on the {0} authorization page.': '请在{0}授权页面选择原账户。',
+  'Reconnect {0} Calendar': '重新连接{0}日历',
+  'Restore calendar permissions': '恢复日历权限',
+  'Retry synchronization': '重试同步',
+  'Choose another booking calendar': '选择其他预约写入日历',
+  'Review availability time zone': '查看可用时间的时区',
+  '{0} Calendar connected. Your calendar list is ready. Review the account status below to confirm which account connected.':
+    '{0}日历已连接。日历列表已就绪。请查看下方账户状态，确认实际连接的账户。',
   'Review synchronization permissions': '查看同步权限说明',
   'Unavailable for new bookings': '暂不能写入新预约',
   'Selected for new bookings — unavailable': '已选为新预约写入目标，暂不可用',
