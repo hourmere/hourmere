@@ -98,6 +98,11 @@ export function errorMessage(err: unknown): UiText {
     invalid_calendar_access: 'Choose calendar-list access or calendar synchronization.',
     profile_not_found: 'Create your profile in Settings first.',
     session_required: 'Your session has ended. Sign in again.',
+    ORGANIZATION_ALREADY_EXISTS: 'This team address is already in use. Choose another one.',
+    ORGANIZATION_SLUG_RESERVED: 'This team address is reserved. Choose another one.',
+    YOU_ARE_NOT_ALLOWED_TO_CREATE_A_NEW_ORGANIZATION: "You don't have permission to create a team.",
+    USER_IS_NOT_A_MEMBER_OF_THE_ORGANIZATION:
+      'You no longer have access to this team. Choose another team.',
     invalid_oauth_state: 'This connection attempt expired or was already used. Start again.',
     calendar_connection_not_found: 'This calendar connection no longer exists.',
     calendar_not_found: 'This calendar is no longer available. Refresh the calendar list.',
