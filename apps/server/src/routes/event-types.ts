@@ -1,4 +1,5 @@
 import { createRoute, z } from '@hono/zod-openapi'
+import type { Principal } from '@hourmere/auth'
 import { EVENT_TYPE_RULE_BOUNDS } from '@hourmere/core'
 import {
   activateRoundRobin,
@@ -28,6 +29,11 @@ import {
   type ServiceDeps,
   serviceContext,
 } from '../openapi.ts'
+import {
+  EXPECTED_ORGANIZATION_HEADER,
+  ORGANIZATION_CONTEXT_CHANGED,
+  organizationWriteAccess,
+} from '../team-management.ts'
 
 // Schemas check the JSON shape (400 invalid_request); the service checks values (the rule
 // bounds are the availability engine's) and answers with specific codes, the same for REST
@@ -254,6 +260,12 @@ const EventTypeUpdate = z
 const EventTypeList = z.object({ data: z.array(EventType) }).openapi('EventTypeList')
 
 const IdParams = z.object({ id: z.string().openapi({ format: 'uuid' }) })
+const ExpectedOrganizationHeaders = z.object({
+  'x-expected-organization-id': z.string().optional().openapi({
+    description:
+      'The organization bound to the web form when it opened. Required for team session writes; ignored for API keys. A stale or missing context is refused with organization_context_changed; reload before retrying.',
+  }),
+})
 
 const tags = ['Event types']
 
@@ -274,6 +286,10 @@ const forbidden = `insufficient_role: team event types need the owner or admin r
 const slugTaken = 'slug_taken: another event type on the same page has this slug'
 
 export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
+  const writeContext = (principal: Principal, expectedOrganizationId?: string) => ({
+    ...serviceContext(deps, principal),
+    authorizeOrganizationWrite: organizationWriteAccess(principal, expectedOrganizationId),
+  })
   return ({ app, caller }) => {
     const route = { security: authenticated, middleware: caller, tags }
 
@@ -335,15 +351,25 @@ export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
         summary: 'Create an event type',
         description:
           "Created in the organization the caller acts in and hosted by the caller: on the caller's personal page in a personal organization, on the team page in a team (owners and admins only).",
-        request: { body: { content: json(EventTypeInput), required: true } },
+        request: {
+          headers: ExpectedOrganizationHeaders,
+          body: { content: json(EventTypeInput), required: true },
+        },
         responses: {
           201: { description: 'The new event type', content: json(EventType) },
-          ...errorResponses({ 400: invalid, 403: forbidden, 409: slugTaken }),
+          ...errorResponses({
+            400: invalid,
+            403: forbidden,
+            409: `${slugTaken}; ${ORGANIZATION_CONTEXT_CHANGED}`,
+          }),
         },
       }),
       async (c) =>
         c.json(
-          await createEventType(serviceContext(deps, c.var.principal), c.req.valid('json')),
+          await createEventType(
+            writeContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
+            c.req.valid('json'),
+          ),
           201,
         ),
     )
@@ -374,16 +400,25 @@ export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
         method: 'patch',
         path: '/api/v1/event-types/{id}',
         summary: 'Change an event type',
-        request: { params: IdParams, body: { content: json(EventTypeUpdate), required: true } },
+        request: {
+          params: IdParams,
+          headers: ExpectedOrganizationHeaders,
+          body: { content: json(EventTypeUpdate), required: true },
+        },
         responses: {
           200: { description: 'The changed event type', content: json(EventType) },
-          ...errorResponses({ 400: invalid, 403: forbidden, 404: notFound, 409: slugTaken }),
+          ...errorResponses({
+            400: invalid,
+            403: forbidden,
+            404: notFound,
+            409: `${slugTaken}; ${ORGANIZATION_CONTEXT_CHANGED}`,
+          }),
         },
       }),
       async (c) =>
         c.json(
           await updateEventType(
-            serviceContext(deps, c.var.principal),
+            writeContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
             c.req.valid('param').id,
             c.req.valid('json'),
           ),
@@ -400,15 +435,27 @@ export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
         summary: 'Explicitly activate a team round-robin pool',
         description:
           'Validates the complete current verified host pool. Ordinary metadata saves and mode changes never activate it. Existing fairness sequence values are preserved.',
-        request: { params: IdParams, body: { content: json(z.strictObject({})), required: true } },
+        request: {
+          params: IdParams,
+          headers: ExpectedOrganizationHeaders,
+          body: { content: json(z.strictObject({})), required: true },
+        },
         responses: {
           200: { description: 'The activated configuration', content: json(EventType) },
-          ...errorResponses({ 400: invalid, 403: forbidden, 404: notFound }),
+          ...errorResponses({
+            400: invalid,
+            403: forbidden,
+            404: notFound,
+            409: ORGANIZATION_CONTEXT_CHANGED,
+          }),
         },
       }),
       async (c) =>
         c.json(
-          await activateRoundRobin(serviceContext(deps, c.var.principal), c.req.valid('param').id),
+          await activateRoundRobin(
+            writeContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
+            c.req.valid('param').id,
+          ),
           200,
         ),
     )
@@ -421,14 +468,17 @@ export function eventTypeRoutes(deps: ServiceDeps): RouteModule {
         summary: 'Delete an event type',
         description:
           'It disappears from the API and its slug becomes free; past bookings keep pointing at it.',
-        request: { params: IdParams },
+        request: { params: IdParams, headers: ExpectedOrganizationHeaders },
         responses: {
           204: { description: 'Deleted' },
-          ...errorResponses({ 403: forbidden, 404: notFound }),
+          ...errorResponses({ 403: forbidden, 404: notFound, 409: ORGANIZATION_CONTEXT_CHANGED }),
         },
       }),
       async (c) => {
-        await deleteEventType(serviceContext(deps, c.var.principal), c.req.valid('param').id)
+        await deleteEventType(
+          writeContext(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
+          c.req.valid('param').id,
+        )
         return c.body(null, 204)
       },
     )

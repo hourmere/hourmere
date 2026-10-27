@@ -15,6 +15,15 @@ interface TeamManager {
 const uuid = (id: string) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
 const denied = () => new DomainError('forbidden', 'team_management_access_denied')
+export const EXPECTED_ORGANIZATION_HEADER = 'X-Expected-Organization-Id'
+export const ORGANIZATION_CONTEXT_CHANGED =
+  'organization_context_changed: reload the page before trying this team write again'
+const contextChanged = () =>
+  new DomainError(
+    'conflict',
+    'organization_context_changed',
+    'Your team context changed. Reload the page before trying again.',
+  )
 
 /** Current database facts only: principal organization metadata and client roles are not authority. */
 async function check(
@@ -22,7 +31,14 @@ async function check(
   principal: Principal,
   teamId: string,
   lock = false,
+  context?: { expectedOrganizationId: string; allowPersonal: boolean },
 ): Promise<TeamManager> {
+  if (
+    context &&
+    (!uuid(context.expectedOrganizationId) ||
+      context.expectedOrganizationId.toLowerCase() !== teamId.toLowerCase())
+  )
+    throw contextChanged()
   if (
     principal.kind !== 'session' ||
     !uuid(principal.user.id) ||
@@ -51,7 +67,7 @@ async function check(
     .select('organization_id')
     .where('organization_id', '=', teamId)
     .executeTakeFirst()
-  if (personal) throw denied()
+  if (personal && !context?.allowPersonal) throw denied()
 
   // Re-read AFTER acquiring the parent locks: a revocation committed while waiting wins.
   let memberQuery = db
@@ -71,7 +87,7 @@ async function check(
   // evaluated before waiting for an unchanged locked row. Use wall time, not BEGIN time.
   let sessionQuery = db
     .selectFrom('auth.session')
-    .select('expiresAt')
+    .select(['expiresAt', 'activeOrganizationId'])
     .where('id', '=', principal.sessionId)
     .where('userId', '=', principal.user.id)
   if (lock) sessionQuery = sessionQuery.forShare()
@@ -82,7 +98,63 @@ async function check(
     .executeTakeFirstOrThrow()
   if (!validity.active) throw denied()
 
+  if (context && session.activeOrganizationId?.toLowerCase() !== organization.id.toLowerCase()) {
+    // The caller resolver falls back to the personal organization when the active team's
+    // membership has gone. Recompute that effective context from current database facts.
+    const activeMembership =
+      session.activeOrganizationId && uuid(session.activeOrganizationId)
+        ? await db
+            .selectFrom('auth.member')
+            .select('id')
+            .where('organizationId', '=', session.activeOrganizationId)
+            .where('userId', '=', principal.user.id)
+            .executeTakeFirst()
+        : undefined
+    if (activeMembership || !personal) throw contextChanged()
+  }
+
   return { userId: principal.user.id, organizationId: organization.id, role }
+}
+
+/**
+ * Bind existing event-type web writes to their draft's organization. Scheduling calls this
+ * inside its write transaction, before taking any locks. Reuse the shared management
+ * check and its user → organization → member → session locks; never trust the header as
+ * membership or role authority. API-key/OAuth bindings remain independent of web context.
+ */
+export function organizationWriteAccess(principal: Principal, expectedOrganizationId?: string) {
+  return async (db: Db, organizationId: string, targetId?: string): Promise<void> => {
+    if (principal.kind !== 'session') return
+    const personal = await db
+      .selectFrom('personal_organizations')
+      .select('organization_id')
+      .where('organization_id', '=', organizationId)
+      .executeTakeFirst()
+    // Existing personal clients need no new header. When the web supplies one, preserve
+    // its binding too, so a personal draft cannot silently become a team creation.
+    if (personal && expectedOrganizationId === undefined) return
+    if (expectedOrganizationId === undefined) throw contextChanged()
+    await check(db, principal, organizationId, true, {
+      expectedOrganizationId,
+      allowPersonal: true,
+    })
+    if (targetId !== undefined) {
+      // Do not distinguish another organization's object from a missing object. The same
+      // recoverable refusal also prevents an expected=current forgery targeting another team.
+      if (!uuid(targetId)) throw contextChanged()
+      const target = await db
+        .selectFrom('event_types')
+        .select('id')
+        .where('id', '=', targetId)
+        .where('organization_id', '=', organizationId)
+        .where('deleted_at', 'is', null)
+        .where((eb) =>
+          eb.or([eb('owner_user_id', 'is', null), eb('owner_user_id', '=', principal.user.id)]),
+        )
+        .executeTakeFirst()
+      if (!target) throw contextChanged()
+    }
+  }
 }
 
 /**

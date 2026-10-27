@@ -315,7 +315,7 @@ describe.skipIf(!serverUrl)('sign-up control', () => {
       const organization = (await created.json()) as { id: string }
       const invited = await app.request('/api/auth/organization/invite-member', {
         method: 'POST',
-        headers,
+        headers: { ...headers, 'x-expected-organization-id': organization.id },
         body: JSON.stringify({ email, role: 'member', organizationId: organization.id }),
       })
       expect(invited.status).toBe(200)

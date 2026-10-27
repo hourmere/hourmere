@@ -166,6 +166,54 @@ session or an API key. The MCP server at `/mcp` ([MCP quickstart](/docs/mcp)) ac
 when enabled, MCP OAuth grants. Session cookies never authenticate MCP. OAuth grants are
 limited to MCP tools and do not authenticate REST requests.
 
+### Browser organization context
+
+Organization-scoped browser drafts bind `X-Expected-Organization-Id` to the organization
+where the form or action started. Do not replace that value with the active organization
+at submission time. A header works with both the strict REST JSON bodies and Better Auth's
+separate protocol, without adding fields to either body.
+
+The existing covered endpoints are:
+
+| Write | Endpoint |
+|---|---|
+| Create a team event type | `POST /api/v1/event-types` |
+| Edit, enable or disable a team event type | `PATCH /api/v1/event-types/{id}` |
+| Delete a team event type | `DELETE /api/v1/event-types/{id}` |
+| Activate a round-robin team event type | `POST /api/v1/event-types/{id}/round-robin/activate` |
+| Invite or resend an invitation | `POST /api/auth/organization/invite-member` |
+| Revoke an invitation | `POST /api/auth/organization/cancel-invitation` |
+| Change a member's role | `POST /api/auth/organization/update-member-role` |
+| Remove a member | `POST /api/auth/organization/remove-member` |
+| Leave a team | `POST /api/auth/organization/leave` |
+| Change team settings, including name or slug | `POST /api/auth/organization/update` |
+
+For covered session writes, the expected organization must match both the operation's
+target organization and the current valid session organization. Missing or mismatched
+context returns HTTP 409: `organization_context_changed` under `/api/v1`, or
+`ORGANIZATION_CONTEXT_CHANGED` under `/api/auth`. The message asks the person to reload.
+Inaccessible and missing event-type targets receive the same context refusal on bound
+browser writes, so the error cannot reveal another team's objects. The expected ID grants
+no access: current membership, verification and role checks still apply. The event editor
+also binds personal forms so a switch into a team cannot retarget an unsaved personal draft.
+Organization writes and context transitions in the same browser session are ordered across
+server processes, so a switch cannot overtake an already checked organization write.
+
+On refusal, keep the draft, show reload guidance and ask before discarding unsaved changes.
+Never replay the write or switch organizations automatically. Focus/visibility refresh and
+organization remounting remain the browser's recovery path; the server check also protects
+requests that arrive before that refresh.
+
+Team creation, explicit switching and invitation acceptance bind their explicit targets
+under their existing rules rather than requiring the previous active organization. Personal
+profile, calendar and schedule writes, API-key management and OAuth connection management
+are excluded. API keys retain their issued organization, and OAuth grants retain their
+consented organization; neither depends on this browser header. Public booking and private
+manage-token operations retain their existing authority. Team deletion is unavailable
+through the browser organization endpoint. There is currently no team-administrator booking
+cancellation endpoint; the existing booking-ID routes still require the caller to be a host.
+Any future administrator cancellation route must use the same context protection.
+
 ### Integration settings
 
 The user's own API keys have the same non-credential settings access as browser sessions:

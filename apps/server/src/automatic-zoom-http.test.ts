@@ -185,6 +185,9 @@ describe.skipIf(!bootstrap)('automatic Zoom real TCP/session/API-key boundaries'
       headers: {
         ...(cookie ? { cookie } : {}),
         ...(method === 'GET' ? {} : { origin: url }),
+        ...(cookie && path.startsWith('/api/v1/event-types')
+          ? { 'X-Expected-Organization-Id': team }
+          : {}),
         ...(body === undefined ? {} : { 'content-type': 'application/json' }),
         ...extra,
       },

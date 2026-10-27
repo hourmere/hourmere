@@ -77,6 +77,8 @@ export interface FixtureApp {
   hostCounts: () => Promise<number[]>
   rows: () => Promise<{ source: string; status: string }[]>
   authorizeHost: (teamRole?: 'owner' | 'member') => Promise<void>
+  authorizeTeamSession: () => Promise<{ teamId: string; personalId: string }>
+  eventTypeTitles: () => Promise<string[]>
   bookingState: () => Promise<{
     total: number
     roots: number
@@ -902,6 +904,36 @@ export const test = base.extend<{
             ),
           )
         },
+        authorizeTeamSession: async () => {
+          authorization = undefined
+          const token = randomBytes(24).toString('base64url')
+          await db
+            .insertInto('auth.session')
+            .values({
+              userId: host.userId,
+              activeOrganizationId: team,
+              token,
+              updatedAt: new Date(),
+              expiresAt: new Date(Date.now() + 86_400_000),
+            })
+            .execute()
+          await context.addCookies([
+            {
+              name: 'better-auth.session_token',
+              value: encodeURIComponent(
+                `${token}.${createHmac('sha256', authSecret).update(token).digest('base64')}`,
+              ),
+              url,
+              httpOnly: true,
+              sameSite: 'Lax',
+            },
+          ])
+          return { teamId: team, personalId: host.organizationId }
+        },
+        eventTypeTitles: async () =>
+          (await db.selectFrom('event_types').select('title').orderBy('title').execute()).map(
+            (row) => row.title,
+          ),
         authorizeHost: async (teamRole) => {
           const signup = { mode: 'closed', allowedDomains: [] } as const
           authPool ??= createAuthPool(owned.url, signup)

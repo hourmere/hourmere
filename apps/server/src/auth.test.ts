@@ -163,7 +163,17 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
   const post = (path: string, cookie: string, body: unknown, app = main.app) =>
     app.request(path, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', cookie, origin },
+      headers: {
+        'content-type': 'application/json',
+        cookie,
+        origin,
+        ...(typeof body === 'object' &&
+        body !== null &&
+        'organizationId' in body &&
+        typeof body.organizationId === 'string'
+          ? { 'x-expected-organization-id': body.organizationId }
+          : {}),
+      },
       body: typeof body === 'string' ? body : JSON.stringify(body),
     })
 
@@ -812,7 +822,7 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
       expect(members.rows).toEqual([{ role: 'owner', slug: 'grace' }])
     })
 
-    it('cannot be deleted, while team organizations can', async () => {
+    it('refuses direct browser deletion of personal and team organizations', async () => {
       const cookie = await signIn('keeper@example.com')
       const personal = (await me({ cookie })).body.organization
       const remove = (organizationId: string) =>
@@ -824,7 +834,7 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
 
       const refused = await remove(personal.id)
       expect(refused.status).toBe(403)
-      expect(await refused.json()).toMatchObject({ code: 'PERSONAL_ORGANIZATION' })
+      expect(await refused.json()).toMatchObject({ code: 'TEAM_OPERATION_NOT_SUPPORTED' })
       expect((await me({ cookie })).body.organization).toEqual(personal)
 
       const team = await main.app.request('/api/auth/organization/create', {
@@ -832,7 +842,7 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
         headers: { 'content-type': 'application/json', cookie, origin },
         body: JSON.stringify({ name: 'Short-lived', slug: 'short-lived' }),
       })
-      expect((await remove(((await team.json()) as { id: string }).id)).status).toBe(200)
+      expect((await remove(((await team.json()) as { id: string }).id)).status).toBe(403)
     })
 
     describe("stays its owner's alone", () => {
@@ -899,6 +909,7 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
           `INSERT INTO auth.member ("organizationId", "userId", role, "createdAt") VALUES ($1, $2, 'owner', now())`,
           [personal.id, await userId('bob@example.com')],
         )
+        await post('/api/auth/organization/set-active', bob, { organizationId: personal.id })
         await refused(
           await post('/api/auth/organization/update-member-role', bob, {
             memberId: aliceMemberId,
@@ -984,6 +995,7 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
           [ownerId],
         )
       ).rows[0]?.organization_id
+      await post('/api/auth/organization/set-active', cookie, { organizationId: personal })
       const response = await post('/api/auth/organization/update', cookie, {
         organizationId: personal,
         data: { slug: 'CALENDARS' },
