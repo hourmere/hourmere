@@ -204,6 +204,8 @@ export const common = {
   'Page not found': '找不到页面',
   'Phone call': '电话会议',
   'Pick a day to see its times.': '请选择日期以查看可用时间。',
+  'The date you were viewing is no longer available. Please pick another day.':
+    '之前查看的日期已不可用，请选择其他日期。',
   'Pick a new time': '选择新时间',
   'Pick a time': '选择时间',
   'Pick an event to see available times.': '选择活动以查看可用时间。',

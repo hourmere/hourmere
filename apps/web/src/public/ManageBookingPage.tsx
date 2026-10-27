@@ -23,7 +23,7 @@ import { DetailList, LocationDetails, When } from './BookingDetails.tsx'
 import { now as currentTime, detectTimeZone, preferredLocale } from './env.ts'
 import { FocusHeading, PublicLayout, PublicStatus } from './PublicLayout.tsx'
 import { useRequest } from './paths.ts'
-import { SlotPicker } from './SlotPicker.tsx'
+import { SlotPicker, type SlotPickerPosition } from './SlotPicker.tsx'
 import { formatDate, formatTimeRange, offsetLabel, zoneName } from './time.ts'
 import { LIMITS, reasonError } from './validation.ts'
 import { rememberVisitorTimeZone } from './visitor-time-zone.ts'
@@ -241,6 +241,7 @@ function ManageView({
   })
   const [now, setNow] = useState(currentTime)
   const [version, setVersion] = useState(0)
+  const [pickerPosition, setPickerPosition] = useState<SlotPickerPosition | null>(null)
   const observedNow = currentTime()
   const started = Date.parse(booking.start) <= observedNow
   const ended = Date.parse(booking.end) <= observedNow
@@ -386,6 +387,8 @@ function ManageView({
               locale={locale}
               now={now}
               selected={null}
+              initialPosition={pickerPosition}
+              onPositionChange={setPickerPosition}
               excludeStart={booking.start}
               onSelect={(slot) => setMode({ kind: 'confirm-reschedule', slot })}
               version={version}
@@ -424,7 +427,10 @@ function ManageView({
                 <button
                   type="button"
                   className="button button-primary"
-                  onClick={() => setMode({ kind: 'reschedule' })}
+                  onClick={() => {
+                    setNow(currentTime())
+                    setMode({ kind: 'reschedule' })
+                  }}
                 >
                   {t('Reschedule')}
                 </button>
@@ -479,7 +485,10 @@ function ManageView({
               current={booking}
               timeZone={timeZone}
               locale={locale}
-              onBack={() => setMode({ kind: 'reschedule' })}
+              onBack={() => {
+                setNow(currentTime())
+                setMode({ kind: 'reschedule' })
+              }}
               onConfirm={async () => {
                 const { slot } = mode
                 try {

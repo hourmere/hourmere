@@ -43,7 +43,7 @@ import {
   PublicStatus,
 } from './PublicLayout.tsx'
 import { normalizedHandle, normalizedSlug, teamSlug, useRequest } from './paths.ts'
-import { SlotPicker } from './SlotPicker.tsx'
+import { SlotPicker, type SlotPickerPosition } from './SlotPicker.tsx'
 import { formatDate, formatTime, formatTimeRange, offsetAt, offsetLabel, zoneName } from './time.ts'
 import {
   bookingErrors,
@@ -150,6 +150,7 @@ function BookingFlow({
   const [timeZone, setTimeZone] = useState(() => visitorTimeZone(detectTimeZone()))
   const [now, setNow] = useState(currentTime)
   const [slot, setSlot] = useState<Slot | null>(null)
+  const [pickerPosition, setPickerPosition] = useState<SlotPickerPosition | null>(null)
   const [version, setVersion] = useState(0)
   const [notice, setNotice] = useState<UiText | null>(null)
   const [backToPicker, setBackToPicker] = useState(false)
@@ -177,6 +178,7 @@ function BookingFlow({
 
   function changeTime() {
     setSlot(null)
+    setNow(currentTime())
     setBackToPicker(true)
   }
 
@@ -372,6 +374,8 @@ function BookingFlow({
               locale={locale}
               now={now}
               selected={slot}
+              initialPosition={pickerPosition}
+              onPositionChange={setPickerPosition}
               onSelect={pick}
               version={version}
               focusTitle={backToPicker}

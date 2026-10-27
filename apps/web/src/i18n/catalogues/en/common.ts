@@ -205,6 +205,8 @@ export const common = {
   'Page not found': 'Page not found',
   'Phone call': 'Phone call',
   'Pick a day to see its times.': 'Pick a day to see its times.',
+  'The date you were viewing is no longer available. Please pick another day.':
+    'The date you were viewing is no longer available. Please pick another day.',
   'Pick a new time': 'Pick a new time',
   'Pick a time': 'Pick a time',
   'Pick an event to see available times.': 'Pick an event to see available times.',

@@ -10,7 +10,7 @@ import { msg, type UiText } from '../../i18n/translate.ts'
 import { RULES } from '../../limits.ts'
 import { bookingPath, PATHS } from '../../paths.ts'
 import type { Slot, SlotLoader } from '../../public/api.ts'
-import { SlotPicker } from '../../public/SlotPicker.tsx'
+import { SlotPicker, type SlotPickerPosition } from '../../public/SlotPicker.tsx'
 
 /** Hosts use their session, never the invitee's management capability. */
 export function RescheduleBooking({
@@ -25,8 +25,9 @@ export function RescheduleBooking({
   const mounted = useMounted()
   const [open, setOpen] = useState(false)
   const [timeZone, setTimeZone] = useState(initialTimeZone)
-  const [now] = useState(Date.now)
+  const [now, setNow] = useState(Date.now)
   const [slot, setSlot] = useState<Slot | null>(null)
+  const [pickerPosition, setPickerPosition] = useState<SlotPickerPosition | null>(null)
   const [error, setError] = useState<UiText | null>(null)
   const [blocked, setBlocked] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -70,6 +71,7 @@ export function RescheduleBooking({
         ['slot_taken', 'slot_unavailable'].includes(err.code ?? '')
       ) {
         setSlot(null)
+        setNow(Date.now())
         setError(errorMessage(err))
       } else if (!(err instanceof RequestError) || err.status >= 500) {
         // The server may have committed before its answer was lost. Never offer a replay.
@@ -107,7 +109,10 @@ export function RescheduleBooking({
             type="button"
             className="button"
             ref={openButton}
-            onClick={() => setOpen(true)}
+            onClick={() => {
+              setNow(Date.now())
+              setOpen(true)
+            }}
             aria-expanded={false}
           >
             {t('Reschedule')}
@@ -147,7 +152,10 @@ export function RescheduleBooking({
                   type="button"
                   className="button"
                   disabled={busy}
-                  onClick={() => setSlot(null)}
+                  onClick={() => {
+                    setNow(Date.now())
+                    setSlot(null)
+                  }}
                 >
                   {t('Pick another time')}
                 </button>
@@ -165,6 +173,8 @@ export function RescheduleBooking({
               now={now}
               excludeStart={booking.start}
               selected={null}
+              initialPosition={pickerPosition}
+              onPositionChange={setPickerPosition}
               onSelect={(value) => {
                 setError(null)
                 setSlot(value)

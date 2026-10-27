@@ -58,6 +58,80 @@ async function chooseSlot(user: ReturnType<typeof userEvent.setup>, dayName: Reg
 }
 
 describe('the booking page', () => {
+  it.each(['Change time', 'conflict'])(
+    'restores the browsed month and day after returning through %s',
+    async (back) => {
+      const user = userEvent.setup()
+      const starts = ['2026-11-03T15:00:00Z', '2026-12-08T15:00:00Z', '2026-12-08T16:00:00Z']
+      let taken = false
+      fakeApi({
+        ...eventRoutes(EVENT, starts),
+        'GET /api/v1/public/ada/intro/slots': (call) =>
+          slotsAnswer(taken ? starts.filter((start) => start !== starts[1]) : starts)(call),
+        'POST /api/v1/public/ada/intro/bookings': () => {
+          taken = true
+          return json(409, { error: 'slot_taken' })
+        },
+      })
+      renderApp('/ada/intro')
+      await day('Tuesday, November 3, available')
+      await user.click(screen.getByRole('button', { name: 'Next month' }))
+      await chooseSlot(user, /December 8, available/, '10:00 AM')
+      await user.type(screen.getByLabelText('Your name'), 'Synthetic Visitor')
+      await user.type(screen.getByLabelText('Email'), 'synthetic@example.invalid')
+      await user.click(
+        screen.getByRole('button', { name: back === 'conflict' ? 'Confirm booking' : back }),
+      )
+
+      await waitFor(() =>
+        expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Pick a time' })),
+      )
+      const restored = await day('Tuesday, December 8, available')
+      expect(screen.getByRole('heading', { name: 'December 2026' })).toBeDefined()
+      expect(restored.closest('td')?.getAttribute('aria-selected')).toBe('true')
+      expect(slotButtons()).toEqual(back === 'conflict' ? ['11:00 AM'] : ['10:00 AM', '11:00 AM'])
+      await user.click(screen.getByRole('button', { name: '11:00 AM' }))
+      expect(screen.getByLabelText<HTMLInputElement>('Your name').value).toBe('Synthetic Visitor')
+      expect(screen.getByLabelText<HTMLInputElement>('Email').value).toBe(
+        'synthetic@example.invalid',
+      )
+    },
+  )
+
+  it.each(['Change time', 'conflict'])(
+    'rechecks the current time when returning through %s',
+    async (back) => {
+      const user = userEvent.setup()
+      fakeApi({
+        ...eventRoutes(EVENT, [
+          '2026-11-03T15:00:00Z',
+          '2026-12-08T15:00:00Z',
+          '2026-12-09T15:00:00Z',
+        ]),
+        'POST /api/v1/public/ada/intro/bookings': () => json(409, { error: 'slot_taken' }),
+      })
+      renderApp('/ada/intro')
+      await day('Tuesday, November 3, available')
+      await user.click(screen.getByRole('button', { name: 'Next month' }))
+      await chooseSlot(user, /December 8, available/, '10:00 AM')
+      if (back === 'conflict') {
+        await user.type(screen.getByLabelText('Your name'), 'Synthetic Visitor')
+        await user.type(screen.getByLabelText('Email'), 'synthetic@example.invalid')
+      }
+      env.now = Date.parse('2026-12-08T15:05:00Z')
+      await user.click(
+        screen.getByRole('button', { name: back === 'conflict' ? 'Confirm booking' : back }),
+      )
+      const expired = await day('Tuesday, December 8, no times available')
+      expect(expired.getAttribute('aria-disabled')).toBe('true')
+      await waitFor(() => {
+        expect(expired.closest('td')?.getAttribute('aria-selected')).toBe('false')
+        expect(screen.queryByRole('list', { name: /^Times on/ })).toBeNull()
+      })
+      expect(await day('Wednesday, December 9, available')).toBeDefined()
+    },
+  )
+
   it.each([
     ['en', 'America/New York (GMT-05:00)', 'GMT-05:00)', ' ('],
     ['zh-CN', 'America/New York（GMT-05:00）', 'GMT-05:00）', '（'],
