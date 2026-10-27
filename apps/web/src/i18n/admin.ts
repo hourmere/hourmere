@@ -18,7 +18,8 @@ export const admin = {
     '同步需要处理，请查看下方同步失败的日历。',
   'Waiting for the first synchronization on selected calendars.': '已选日历正在等待首次同步。',
   'No calendars selected for conflict checks.': '尚未选择用于冲突检查的日历。',
-  'Selected conflict calendars synchronized.': '已选冲突检查日历已同步。',
+  'Latest synchronization of selected conflict calendars succeeded.':
+    '所选冲突检查日历的最近一次同步已成功。',
   'Not written to this account': '不写入此账号',
   'Selected for conflict checks': '已选为冲突检查日历',
   'Not used for conflict checks': '不用于冲突检查',

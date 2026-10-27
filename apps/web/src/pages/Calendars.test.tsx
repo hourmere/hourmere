@@ -58,9 +58,9 @@ describe('the calendars page', () => {
     }
   })
 
-  it.each(['needs_reauth', 'revoked', 'permissions_missing'] as const)(
-    'identifies the account that needs reconnection for %s even when its calendar last synchronized',
-    async (failure) => {
+  it.each(['needs_reauth', 'revoked'] as const)(
+    'pauses busy-time sync for a non-active %s account even when its calendar last synchronized',
+    async (status) => {
       const calendar = connection.calendars[0] as NonNullable<(typeof connection.calendars)[0]>
       fakeApi({
         ...signedIn,
@@ -77,8 +77,7 @@ describe('the calendars page', () => {
             ...connection,
             id: 'a0000000-0000-7000-8000-000000000002',
             accountEmail: 'reconnect@example.com',
-            status: failure === 'permissions_missing' ? 'active' : failure,
-            lastError: failure === 'permissions_missing' ? failure : null,
+            status,
             syncAuthorized: true,
             calendars: [
               {
@@ -100,7 +99,7 @@ describe('the calendars page', () => {
         .closest('article') as HTMLElement
       expect(within(healthy).getByText('Connected')).toBeDefined()
       expect(definition(healthy, 'Busy-time sync').textContent).toBe(
-        'Selected conflict calendars synchronized.',
+        'Latest synchronization of selected conflict calendars succeeded.',
       )
       expect(within(reconnect).getByText('Reconnect required')).toBeDefined()
       expect(definition(reconnect, 'Busy-time sync').textContent).toBe(
@@ -109,6 +108,79 @@ describe('the calendars page', () => {
       expect(within(reconnect).getByRole('alert').textContent).toContain(
         'account again to restore it.',
       )
+    },
+  )
+
+  it.each(
+    (['en', 'zh-CN'] as const).flatMap((locale) =>
+      (['synced', 'failed', 'waiting'] as const).map((state) => ({ locale, state })),
+    ),
+  )(
+    'uses the $state calendar sync result for an active account with writeback permissions missing in $locale',
+    async ({ locale, state }) => {
+      const calendar = connection.calendars[0] as NonNullable<(typeof connection.calendars)[0]>
+      fakeApi({
+        ...signedIn,
+        ...profile({ ...PROFILE, locale }),
+        ...list(
+          [
+            {
+              ...connection,
+              syncAuthorized: true,
+              lastError: 'permissions_missing',
+              calendars: [
+                {
+                  ...calendar,
+                  checkConflicts: true,
+                  lastSyncedAt: state === 'waiting' ? null : new Date().toISOString(),
+                  syncError: state === 'failed' ? 'provider_unavailable' : null,
+                },
+              ],
+            },
+          ],
+          true,
+          false,
+          calendar.id,
+        ),
+      })
+      renderApp('/app/calendars')
+      const article = (
+        await screen.findByRole('heading', { name: 'calendar@example.com' })
+      ).closest('article') as HTMLElement
+      const expected = {
+        synced:
+          locale === 'en'
+            ? 'Latest synchronization of selected conflict calendars succeeded.'
+            : '所选冲突检查日历的最近一次同步已成功。',
+        failed:
+          locale === 'en'
+            ? 'Synchronization needs attention. Review the failed calendars below.'
+            : '同步需要处理，请查看下方同步失败的日历。',
+        waiting:
+          locale === 'en'
+            ? 'Waiting for the first synchronization on selected calendars.'
+            : '已选日历正在等待首次同步。',
+      }
+      expect(
+        definition(article, locale === 'en' ? 'Busy-time sync' : '忙碌时段同步').textContent,
+      ).toBe(expected[state])
+      expect(
+        within(article).getByText(locale === 'en' ? 'Reconnect required' : '需要重新连接'),
+      ).toBeDefined()
+      expect(within(article).getByRole('alert').textContent).toContain(
+        locale === 'en' ? 'Access has expired or been removed.' : '访问权限已过期或被移除。',
+      )
+      const summary = article.querySelector('.calendar-account-summary') as HTMLElement
+      expect(
+        definition(summary, locale === 'en' ? 'New bookings' : '新预约').textContent,
+      ).toContain(locale === 'en' ? 'Unavailable for new bookings' : '暂不能写入新预约')
+      expect(
+        within(article).getByText(
+          locale === 'en'
+            ? 'Selected for new bookings — unavailable'
+            : '已选为新预约写入目标，暂不可用',
+        ),
+      ).toBeDefined()
     },
   )
 
@@ -177,7 +249,7 @@ describe('the calendars page', () => {
       failed: false,
       waiting: false,
       selected: true,
-      expected: 'Selected conflict calendars synchronized.',
+      expected: 'Latest synchronization of selected conflict calendars succeeded.',
     },
     {
       name: 'no selected conflict calendars',
@@ -227,7 +299,7 @@ describe('the calendars page', () => {
     expect(definition(article, 'Busy-time sync').textContent).toBe(state.expected)
     if (state.failed || state.waiting)
       expect(definition(article, 'Busy-time sync').textContent).not.toBe(
-        'Selected conflict calendars synchronized.',
+        'Latest synchronization of selected conflict calendars succeeded.',
       )
     expect(within(article).queryAllByText(/^Last synchronized:/)).toHaveLength(
       Number(state.selected),

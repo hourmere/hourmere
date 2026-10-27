@@ -60,7 +60,7 @@ const needsReconnect = (connection: Connection) =>
 const syncSummary = (connection: Connection, googleEnabled: boolean): UiText => {
   if (connection.provider === 'microsoft') return 'Not available — calendar list only.'
   if (!connection.syncAuthorized) return 'Not enabled — calendar list only.'
-  if (needsReconnect(connection)) return 'Paused until you reconnect this account.'
+  if (connection.status !== 'active') return 'Paused until you reconnect this account.'
   if (!googleEnabled) return 'Unavailable on this instance.'
   const selected = connection.calendars.filter((calendar) => calendar.checkConflicts)
   if (selected.some((calendar) => calendar.syncError))
@@ -68,7 +68,7 @@ const syncSummary = (connection: Connection, googleEnabled: boolean): UiText => 
   if (selected.some((calendar) => !calendar.lastSyncedAt))
     return 'Waiting for the first synchronization on selected calendars.'
   if (!selected.length) return 'No calendars selected for conflict checks.'
-  return 'Selected conflict calendars synchronized.'
+  return 'Latest synchronization of selected conflict calendars succeeded.'
 }
 const noticeFor = (search: URLSearchParams): UiText | null => {
   const code = search.get('connection')
