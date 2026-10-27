@@ -95,6 +95,10 @@ describe('calendar recovery actions', () => {
       renderApp('/app/calendars')
       const card = await account()
       expect(within(card).getByText(`${name} Calendar`)).toBeDefined()
+      if (provider === 'google')
+        expect(within(card).getByRole('button', { name: 'Sync now' }).matches(':disabled')).toBe(
+          true,
+        )
       expect(card.textContent).toContain(
         `Choose original@example.test on the ${name} authorization page. Connecting a different account will not restore this one.`,
       )
@@ -182,31 +186,127 @@ describe('calendar recovery actions', () => {
   })
 
   it.each([
-    ['permissions_missing', 'Enable calendar synchronization'],
-    ['needs_reauth', 'Reconnect Google Calendar'],
+    {
+      status: 'active',
+      lastError: 'permissions_missing',
+      syncAuthorized: true,
+      syncError: 'permissions_missing',
+      label: 'Enable calendar synchronization',
+    },
+    {
+      status: 'needs_reauth',
+      lastError: null,
+      syncAuthorized: true,
+      syncError: 'needs_reauth',
+      label: 'Reconnect Google Calendar',
+    },
+    {
+      status: 'active',
+      lastError: 'needs_reauth',
+      syncAuthorized: true,
+      syncError: 'needs_reauth',
+      label: 'Reconnect Google Calendar',
+    },
+    {
+      status: 'active',
+      lastError: null,
+      syncAuthorized: false,
+      syncError: 'permissions_missing',
+      label: 'Enable calendar synchronization',
+    },
   ] as const)(
-    'routes a selected calendar with %s to authorization rather than an enabled sync retry',
-    async (syncError, label) => {
+    'requires authorization for status $status, lastError $lastError and syncAuthorized $syncAuthorized',
+    async ({ status, lastError, syncAuthorized, syncError, label }) => {
       const user = userEvent.setup()
       const requests = fakeApi({
         ...signedIn,
         ...profile(),
-        ...list([{ ...connection, calendars: [{ ...calendar, syncError }] }]),
+        ...list([
+          {
+            ...connection,
+            status,
+            lastError,
+            syncAuthorized,
+            calendars: [{ ...calendar, syncError }],
+          },
+        ]),
         'POST /api/v1/calendar-connections/google/authorize': () =>
           json(200, { authorizationUrl: authorization.google }),
       })
       renderApp('/app/calendars')
       const card = await account()
-      for (const button of within(card).queryAllByRole('button', {
-        name: /^(Retry synchronization|Sync now)$/,
-      }))
-        expect(button.matches(':disabled')).toBe(true)
+      expect(
+        within(card).getByRole('button', { name: 'Retry synchronization' }).matches(':disabled'),
+      ).toBe(true)
       await user.click(await reviewRecovery(user, card, label, 'google', requests))
       await vi.waitFor(() => expect(goTo).toHaveBeenCalledWith(authorization.google))
       expect(requests.to('POST /api/v1/calendar-connections/google/authorize')[0]?.body).toEqual({
         access: 'sync',
       })
       expect(requests.to(`POST /api/v1/calendars/${calendar.id}/sync`)).toHaveLength(0)
+    },
+  )
+
+  it.each(
+    [
+      {
+        locale: 'en',
+        connected: 'Connected',
+        retry: 'Retry synchronization',
+        success: 'Latest synchronization of selected conflict calendars succeeded.',
+      },
+      {
+        locale: 'zh-CN',
+        connected: '已连接',
+        retry: '重试同步',
+        success: '所选冲突检查日历的最近一次同步已成功。',
+      },
+    ].flatMap((messages) =>
+      (['needs_reauth', 'permissions_missing'] as const).map((syncError) => ({
+        ...messages,
+        syncError,
+      })),
+    ),
+  )(
+    'keeps a reconnected account with stale $syncError retryable in $locale',
+    async ({ locale, connected, retry, success, syncError }) => {
+      const user = userEvent.setup()
+      let failed = true
+      const requests = fakeApi({
+        ...signedIn,
+        ...profile({ ...PROFILE, locale }),
+        'GET /api/v1/calendar-connections': () =>
+          json(200, {
+            googleEnabled: true,
+            microsoftEnabled: true,
+            destinationCalendarId: null,
+            data: [
+              {
+                ...connection,
+                status: 'active',
+                lastError: null,
+                syncAuthorized: true,
+                calendars: [{ ...calendar, syncError: failed ? syncError : null }],
+              },
+            ],
+          }),
+        [`POST /api/v1/calendars/${calendar.id}/sync`]: () => {
+          failed = false
+          return new Response(null, { status: 204 })
+        },
+      })
+      renderApp('/app/calendars')
+      const card = await account()
+      expect(within(card).getByText(connected)).toBeDefined()
+      const retryButton = within(card).getByRole('button', { name: retry })
+      expect(retryButton.matches(':disabled')).toBe(false)
+      expect(within(card).queryByRole('link')).toBeNull()
+      await user.click(retryButton)
+      await screen.findByText(success)
+      expect(requests.to(`POST /api/v1/calendars/${calendar.id}/sync`)).toHaveLength(1)
+      expect(requests.to('GET /api/v1/calendar-connections').length).toBeGreaterThan(1)
+      expect(requests.to('POST /api/v1/calendar-connections/google/authorize')).toHaveLength(0)
+      expect(goTo).not.toHaveBeenCalled()
     },
   )
 
@@ -425,7 +525,7 @@ describe('calendar recovery actions', () => {
     {
       provider: 'google',
       status: 'active',
-      lastError: null,
+      lastError: 'permissions_missing',
       syncError: 'permissions_missing',
       label: '启用日历同步',
       summary: '同步需要处理，请查看下方同步失败的日历。',

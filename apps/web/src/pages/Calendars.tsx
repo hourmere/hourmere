@@ -59,17 +59,14 @@ const providerName = (connection: Connection) =>
 const needsReconnect = (connection: Connection) =>
   connection.status !== 'active' ||
   connection.lastError === 'needs_reauth' ||
-  (connection.provider === 'microsoft' && connection.lastError === 'permissions_missing') ||
-  (connection.provider === 'google' &&
-    connection.calendars.some(
-      (calendar) => calendar.checkConflicts && calendar.syncError === 'needs_reauth',
-    ))
+  (connection.provider === 'microsoft' && connection.lastError === 'permissions_missing')
 const needsSyncPermission = (connection: Connection) =>
   connection.provider === 'google' &&
   (!connection.syncAuthorized ||
-    connection.calendars.some(
-      (calendar) => calendar.checkConflicts && calendar.syncError === 'permissions_missing',
-    ))
+    (connection.lastError === 'permissions_missing' &&
+      connection.calendars.some(
+        (calendar) => calendar.checkConflicts && calendar.syncError === 'permissions_missing',
+      )))
 const needsPermissionReview = (connection: Connection) =>
   connection.provider === 'google' && connection.lastError === 'permissions_missing'
 const recoveryLabel = (connection: Connection): UiText =>
@@ -624,7 +621,8 @@ export function CalendarsPage() {
                                       !state.data.googleEnabled ||
                                       !connection.syncAuthorized ||
                                       reconnect ||
-                                      calendar.syncError === 'permissions_missing'
+                                      (connection.lastError === 'permissions_missing' &&
+                                        calendar.syncError === 'permissions_missing')
                                     }
                                     onClick={() => calendarAction(calendar.id, 'sync')}
                                   >
