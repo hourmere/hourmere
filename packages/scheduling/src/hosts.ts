@@ -4,6 +4,44 @@ import { DomainError } from './errors.ts'
 const invalidHosts = () =>
   new DomainError('invalid', 'invalid_hosts', 'Hosts must be current verified organization members')
 
+export interface HostUserFact {
+  id: string
+  emailVerified: boolean
+}
+
+export interface HostMembershipFact {
+  userId: string
+  organizationId: string
+}
+
+/** The same host cardinality applies to cached configuration reads and public resolution. */
+export function hasValidHostShape(mode: string, hostIds: readonly string[]): boolean {
+  if (mode !== 'individual' && mode !== 'collective' && mode !== 'round_robin') return false
+  return (
+    new Set(hostIds).size === hostIds.length &&
+    hostIds.length >= (mode === 'collective' ? 2 : 1) &&
+    hostIds.length <= (mode === 'individual' ? 1 : 8)
+  )
+}
+
+/** Evaluate complete, already loaded facts without making one query per event or member. */
+export function eligibleHostIds(
+  organizationId: string,
+  configured: readonly string[],
+  users: readonly HostUserFact[],
+  members: readonly HostMembershipFact[],
+): string[] {
+  const ids = [...new Set(configured)].sort()
+  if (!ids.length || ids.length > 8) return []
+  const verified = new Set(users.filter((user) => user.emailVerified).map((user) => user.id))
+  const membership = new Set(
+    members
+      .filter((member) => member.organizationId === organizationId)
+      .map((member) => member.userId),
+  )
+  return ids.filter((id) => verified.has(id) && membership.has(id))
+}
+
 /** Hold current membership and verification until a host assignment or booking commits. */
 export async function assertHosts(
   db: Db,
@@ -22,17 +60,13 @@ export async function assertHosts(
   const verified = await users.execute()
   let members = db
     .selectFrom('auth.member')
-    .select('userId')
+    .select(['userId', 'organizationId'])
     .where('organizationId', '=', organizationId)
     .where('userId', 'in', ids)
     .orderBy('userId')
   if (lock) members = members.forShare()
   const current = await members.execute()
-  if (
-    verified.length !== ids.length ||
-    verified.some((u) => !u.emailVerified) ||
-    current.length !== ids.length
-  )
+  if (eligibleHostIds(organizationId, ids, verified, current).length !== ids.length)
     throw invalidHosts()
 }
 

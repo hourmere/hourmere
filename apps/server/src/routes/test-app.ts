@@ -12,6 +12,7 @@ import { conferenceRoutes } from './conferences.ts'
 import { eventTypeRoutes } from './event-types.ts'
 import { profileRoutes } from './profile.ts'
 import { publicRoutes } from './public.ts'
+import { readinessRoutes } from './readiness.ts'
 import { scheduleRoutes } from './schedules.ts'
 import { webhookRoutes } from './webhooks.ts'
 
@@ -61,6 +62,7 @@ export const productRoutes = (db: Db) => [
   publicRoutes({ db }),
   bookingRoutes({ db }),
   analyticsRoutes({ db }),
+  readinessRoutes({ db }),
 ]
 
 /**

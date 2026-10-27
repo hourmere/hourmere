@@ -59,6 +59,7 @@ import { eventTypeRoutes } from './routes/event-types.ts'
 import { instanceRoutes } from './routes/instance.ts'
 import { profileRoutes } from './routes/profile.ts'
 import { publicRoutes } from './routes/public.ts'
+import { readinessRoutes } from './routes/readiness.ts'
 import { scheduleRoutes } from './routes/schedules.ts'
 import { webhookRoutes } from './routes/webhooks.ts'
 import { zoomEventRoutes } from './routes/zoom-events.ts'
@@ -142,6 +143,7 @@ export function productRoutes({
     publicRoutes({ db, notify, automaticMeet, automaticZoom }),
     bookingRoutes({ db, notify, automaticMeet, automaticZoom, bookingMaxInviteeReschedules }),
     analyticsRoutes({ db }),
+    readinessRoutes({ db, automaticMeet, automaticZoom }),
   ]
 }
 

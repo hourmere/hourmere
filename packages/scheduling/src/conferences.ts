@@ -39,6 +39,50 @@ export interface ConferenceResult {
   error?: string
   knownNoCreate?: boolean
 }
+
+export interface ZoomConnectionFacts {
+  id: string
+  user_id: string | null
+  provider: string
+  external_user_id: string | null
+  mode: string
+  scopes: string[]
+  status: string
+}
+
+export type ZoomConnectionEligibility =
+  | { eligible: true; zoom_connection_id: string; zoom_user_id: string }
+  | { eligible: false }
+
+/** Pinned account eligibility from complete cached facts, including its actual owner. */
+export function evaluateZoomConnection(
+  userId: string,
+  id: string | null | undefined,
+  row: ZoomConnectionFacts | undefined,
+  allowRefreshing = false,
+): ZoomConnectionEligibility {
+  const scopes = [
+    'user:read:user',
+    'meeting:write:meeting',
+    'meeting:read:meeting',
+    'meeting:update:meeting',
+    'meeting:delete:meeting',
+  ]
+  if (
+    !id ||
+    row?.id !== id ||
+    row.user_id !== userId ||
+    row.provider !== 'zoom' ||
+    (row.status !== 'active' && !(allowRefreshing && row.status === 'refreshing')) ||
+    row.mode !== 'meetings' ||
+    !row.external_user_id ||
+    row.scopes.length !== scopes.length ||
+    scopes.some((s, i) => row.scopes[i] !== s)
+  )
+    return { eligible: false }
+  return { eligible: true, zoom_connection_id: row.id, zoom_user_id: row.external_user_id }
+}
+
 /** Cache-only check, never a provider lock/network under booking or host locks. */
 export async function requireZoomConnection(
   db: Db,
@@ -56,32 +100,20 @@ export async function requireZoomConnection(
   const row = id
     ? await db
         .selectFrom('conference_connections')
-        .select(['id', 'external_user_id', 'mode', 'scopes', 'status'])
+        .select(['id', 'user_id', 'provider', 'external_user_id', 'mode', 'scopes', 'status'])
         .where('id', '=', id)
         .where('user_id', '=', user)
         .where('provider', '=', 'zoom')
         .executeTakeFirst()
     : undefined
-  const scopes = [
-    'user:read:user',
-    'meeting:write:meeting',
-    'meeting:read:meeting',
-    'meeting:update:meeting',
-    'meeting:delete:meeting',
-  ]
-  if (
-    (row?.status !== 'active' && !(allowRefreshing && row?.status === 'refreshing')) ||
-    row.mode !== 'meetings' ||
-    !row.external_user_id ||
-    row.scopes.length !== scopes.length ||
-    scopes.some((s, i) => row.scopes[i] !== s)
-  )
+  const value = evaluateZoomConnection(user, id, row, allowRefreshing)
+  if (!value.eligible)
     throw new DomainError(
       'conflict',
       'automatic_zoom_unavailable',
       'Choose your own connected Zoom account with meeting permissions.',
     )
-  return { zoom_connection_id: row.id, zoom_user_id: row.external_user_id }
+  return { zoom_connection_id: value.zoom_connection_id, zoom_user_id: value.zoom_user_id }
 }
 export interface ConferenceStatus {
   provider: 'google_meet' | 'zoom'
@@ -112,29 +144,22 @@ export type WriteDestination =
         | 'meet_unsupported'
     }
 
-/** Tagged cache-only eligibility; unknown SQL/parse failures are deliberately not caught. */
-export async function googleWriteDestination(
-  db: Db,
-  userId: string,
-  eventTypeId?: string,
+export interface GoogleWriteDestinationFacts {
+  destination: string | null
+  calendar_id: string | null
+  connection_id: string | null
+  provider: string | null
+  status: string | null
+  access_role: string | null
+  supports_google_meet: boolean | null
+  scopes: string[] | null
+}
+
+/** Evaluate the same destination facts whether loaded for one booking or a batch read. */
+export function evaluateGoogleWriteDestination(
+  r: GoogleWriteDestinationFacts | undefined,
   meet = false,
-): Promise<WriteDestination> {
-  const result = await sql<{
-    destination: string | null
-    calendar_id: string | null
-    connection_id: string | null
-    provider: string | null
-    status: string | null
-    access_role: string | null
-    supports_google_meet: boolean | null
-    scopes: string[] | null
-  }>`SELECT coalesce(h.destination_calendar_id,p.destination_calendar_id) AS destination,
-      c.id AS calendar_id,cc.id AS connection_id,cc.provider,cc.status,c.access_role,c.supports_google_meet,cc.scopes
-    FROM profiles p LEFT JOIN event_type_hosts h ON h.user_id=p.user_id AND h.event_type_id=${eventTypeId ?? null}::uuid
-    LEFT JOIN calendars c ON c.id=coalesce(h.destination_calendar_id,p.destination_calendar_id)
-    LEFT JOIN calendar_connections cc ON cc.id=c.connection_id AND cc.user_id=p.user_id
-    WHERE p.user_id=${userId}::uuid`.execute(db)
-  const r = result.rows[0]
+): WriteDestination {
   if (!r?.destination) return { eligible: false, reason: 'not_configured' }
   if (!r.calendar_id || !r.connection_id) return { eligible: false, reason: 'calendar_unavailable' }
   if (r.provider !== 'google') return { eligible: false, reason: 'unsupported_provider' }
@@ -150,6 +175,23 @@ export async function googleWriteDestination(
     return { eligible: false, reason: 'permissions_missing' }
   if (meet && !r.supports_google_meet) return { eligible: false, reason: 'meet_unsupported' }
   return { eligible: true, calendar_id: r.calendar_id, connection_id: r.connection_id }
+}
+
+/** Tagged cache-only eligibility; unknown SQL/parse failures are deliberately not caught. */
+export async function googleWriteDestination(
+  db: Db,
+  userId: string,
+  eventTypeId?: string,
+  meet = false,
+): Promise<WriteDestination> {
+  const result =
+    await sql<GoogleWriteDestinationFacts>`SELECT coalesce(h.destination_calendar_id,p.destination_calendar_id) AS destination,
+      c.id AS calendar_id,cc.id AS connection_id,cc.provider,cc.status,c.access_role,c.supports_google_meet,cc.scopes
+    FROM profiles p LEFT JOIN event_type_hosts h ON h.user_id=p.user_id AND h.event_type_id=${eventTypeId ?? null}::uuid
+    LEFT JOIN calendars c ON c.id=coalesce(h.destination_calendar_id,p.destination_calendar_id)
+    LEFT JOIN calendar_connections cc ON cc.id=c.connection_id AND cc.user_id=p.user_id
+    WHERE p.user_id=${userId}::uuid`.execute(db)
+  return evaluateGoogleWriteDestination(result.rows[0], meet)
 }
 export async function requireMeetDestination(
   db: Db,
