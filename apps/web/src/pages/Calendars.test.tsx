@@ -39,8 +39,439 @@ const list = (
     json(200, { data, googleEnabled, microsoftEnabled, destinationCalendarId }),
 })
 const authorizationUrl = 'https://accounts.google.com/o/oauth2/v2/auth?state=fake-state'
+const definition = (container: HTMLElement, label: string) => {
+  const value = within(container).getByText(label, { selector: 'dt' }).nextElementSibling
+  expect(value?.tagName).toBe('DD')
+  return value as HTMLElement
+}
 
 describe('the calendars page', () => {
+  it('puts connected accounts before connection options and their permission disclosures', async () => {
+    fakeApi({ ...signedIn, ...profile(), ...list([connection], true, true) })
+    renderApp('/app/calendars')
+    const accounts = await screen.findByRole('region', { name: 'Connected accounts' })
+    for (const provider of ['Google', 'Microsoft']) {
+      const options = screen.getByRole('region', { name: `Connect ${provider} Calendar` })
+      expect(accounts.compareDocumentPosition(options) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+        Node.DOCUMENT_POSITION_FOLLOWING,
+      )
+    }
+  })
+
+  it.each(['needs_reauth', 'revoked', 'permissions_missing'] as const)(
+    'identifies the account that needs reconnection for %s even when its calendar last synchronized',
+    async (failure) => {
+      const calendar = connection.calendars[0] as NonNullable<(typeof connection.calendars)[0]>
+      fakeApi({
+        ...signedIn,
+        ...profile(),
+        ...list([
+          {
+            ...connection,
+            syncAuthorized: true,
+            calendars: [
+              { ...calendar, checkConflicts: true, lastSyncedAt: '2026-10-16T12:00:00Z' },
+            ],
+          },
+          {
+            ...connection,
+            id: 'a0000000-0000-7000-8000-000000000002',
+            accountEmail: 'reconnect@example.com',
+            status: failure === 'permissions_missing' ? 'active' : failure,
+            lastError: failure === 'permissions_missing' ? failure : null,
+            syncAuthorized: true,
+            calendars: [
+              {
+                ...calendar,
+                id: 'c0000000-0000-7000-8000-000000000002',
+                checkConflicts: true,
+                lastSyncedAt: '2026-10-16T12:00:00Z',
+              },
+            ],
+          },
+        ]),
+      })
+      renderApp('/app/calendars')
+      const healthy = (
+        await screen.findByRole('heading', { name: 'calendar@example.com' })
+      ).closest('article') as HTMLElement
+      const reconnect = screen
+        .getByRole('heading', { name: 'reconnect@example.com' })
+        .closest('article') as HTMLElement
+      expect(within(healthy).getByText('Connected')).toBeDefined()
+      expect(definition(healthy, 'Busy-time sync').textContent).toBe(
+        'Selected conflict calendars synchronized.',
+      )
+      expect(within(reconnect).getByText('Reconnect required')).toBeDefined()
+      expect(definition(reconnect, 'Busy-time sync').textContent).toBe(
+        'Paused until you reconnect this account.',
+      )
+      expect(within(reconnect).getByRole('alert').textContent).toContain(
+        'account again to restore it.',
+      )
+    },
+  )
+
+  it.each(['google', 'microsoft'] as const)(
+    'links a retained %s account to its disabled-provider explanation when reconnection is unavailable',
+    async (provider) => {
+      fakeApi({
+        ...signedIn,
+        ...profile(),
+        ...list(
+          [
+            {
+              ...connection,
+              provider,
+              status: 'needs_reauth',
+              syncAuthorized: provider === 'google',
+            },
+          ],
+          false,
+          false,
+        ),
+      })
+      renderApp('/app/calendars')
+      const article = (
+        await screen.findByRole('heading', { name: 'calendar@example.com' })
+      ).closest('article') as HTMLElement
+      const link = within(article).getByRole('link', {
+        name: 'Review calendar connection options',
+      })
+      const targetId =
+        provider === 'google'
+          ? 'calendar-connection-options'
+          : 'microsoft-calendar-connection-options'
+      expect(link.getAttribute('href')).toBe(`#${targetId}`)
+      const target = document.getElementById(targetId)
+      expect(target?.getAttribute('tabindex')).toBe('-1')
+      expect(target?.textContent).toBe(
+        `${provider === 'google' ? 'Google' : 'Microsoft'} Calendar is not configured on this Hourmere instance. Contact its administrator to enable it.`,
+      )
+      for (const name of [
+        'Connect Google Calendar',
+        'Connect Microsoft Calendar',
+        'Enable calendar synchronization',
+      ])
+        expect(screen.queryByRole('button', { name })).toBeNull()
+    },
+  )
+
+  it.each([
+    {
+      name: 'a failed selection beside a successful and a waiting calendar',
+      failed: true,
+      waiting: true,
+      selected: true,
+      expected: 'Synchronization needs attention. Review the failed calendars below.',
+    },
+    {
+      name: 'a waiting selection beside a successful calendar',
+      failed: false,
+      waiting: true,
+      selected: true,
+      expected: 'Waiting for the first synchronization on selected calendars.',
+    },
+    {
+      name: 'successful selections beside an unused failed calendar',
+      failed: false,
+      waiting: false,
+      selected: true,
+      expected: 'Selected conflict calendars synchronized.',
+    },
+    {
+      name: 'no selected conflict calendars',
+      failed: false,
+      waiting: false,
+      selected: false,
+      expected: 'No calendars selected for conflict checks.',
+    },
+  ])('summarizes $name without masking incomplete synchronization', async (state) => {
+    const calendar = connection.calendars[0] as NonNullable<(typeof connection.calendars)[0]>
+    fakeApi({
+      ...signedIn,
+      ...profile(),
+      ...list([
+        {
+          ...connection,
+          syncAuthorized: true,
+          calendars: [
+            {
+              ...calendar,
+              checkConflicts: state.selected,
+              lastSyncedAt: '2026-10-16T12:00:00Z',
+            },
+            {
+              ...calendar,
+              id: 'c0000000-0000-7000-8000-000000000002',
+              name: 'Failed calendar',
+              checkConflicts: state.failed,
+              lastSyncedAt: '2026-10-16T12:00:00Z',
+              syncError: 'provider_unavailable',
+            },
+            {
+              ...calendar,
+              id: 'c0000000-0000-7000-8000-000000000003',
+              name: 'Waiting calendar',
+              checkConflicts: state.waiting,
+              lastSyncedAt: null,
+            },
+          ],
+        },
+      ]),
+    })
+    renderApp('/app/calendars')
+    const article = (await screen.findByRole('heading', { name: 'calendar@example.com' })).closest(
+      'article',
+    ) as HTMLElement
+    expect(definition(article, 'Busy-time sync').textContent).toBe(state.expected)
+    if (state.failed || state.waiting)
+      expect(definition(article, 'Busy-time sync').textContent).not.toBe(
+        'Selected conflict calendars synchronized.',
+      )
+    expect(within(article).queryAllByText(/^Last synchronized:/)).toHaveLength(
+      Number(state.selected),
+    )
+    const failure = within(article).queryByText(
+      'Synchronization failed. Booking times stay unavailable until synchronization recovers.',
+    )
+    if (state.failed) expect(failure).not.toBeNull()
+    else expect(failure).toBeNull()
+    if (state.waiting)
+      expect(
+        within(article).getByText(
+          'Waiting for the first synchronization. Booking times stay unavailable until it completes.',
+        ),
+      ).toBeDefined()
+  })
+
+  it('does not present historical synchronization as available when Google is disabled', async () => {
+    const calendar = connection.calendars[0] as NonNullable<(typeof connection.calendars)[0]>
+    fakeApi({
+      ...signedIn,
+      ...profile(),
+      ...list(
+        [
+          {
+            ...connection,
+            syncAuthorized: true,
+            calendars: [
+              { ...calendar, checkConflicts: true, lastSyncedAt: '2026-10-16T12:00:00Z' },
+            ],
+          },
+        ],
+        false,
+      ),
+    })
+    renderApp('/app/calendars')
+    const article = (await screen.findByRole('heading', { name: 'calendar@example.com' })).closest(
+      'article',
+    ) as HTMLElement
+    expect(definition(article, 'Busy-time sync').textContent).toBe('Unavailable on this instance.')
+    expect(within(article).getByRole('button', { name: 'Sync now' }).matches(':disabled')).toBe(
+      true,
+    )
+  })
+
+  it.each(['en', 'zh-CN'] as const)(
+    'keeps a calendar-list provider failure visible without calling for new authorization in %s',
+    async (locale) => {
+      fakeApi({
+        ...signedIn,
+        ...profile({ ...PROFILE, locale }),
+        ...list([{ ...connection, syncAuthorized: true, lastError: 'provider_unavailable' }]),
+      })
+      renderApp('/app/calendars')
+      const article = (
+        await screen.findByRole('heading', { name: 'calendar@example.com' })
+      ).closest('article') as HTMLElement
+      expect(within(article).getByRole('alert').textContent).toBe(
+        locale === 'en'
+          ? 'The calendar provider could not be reached. Try refreshing the calendar list again.'
+          : '无法连接日历服务，请重试刷新日历列表。',
+      )
+      expect(
+        within(article).queryByText(locale === 'en' ? 'Reconnect required' : '需要重新连接'),
+      ).toBeNull()
+      expect(
+        within(article)
+          .getByRole('button', {
+            name: locale === 'en' ? 'Refresh calendar list' : '刷新日历列表',
+          })
+          .matches(':disabled'),
+      ).toBe(false)
+    },
+  )
+
+  it.each([
+    ['google', false, 'Not enabled — calendar list only.'],
+    ['microsoft', false, 'Not available — calendar list only.'],
+    ['microsoft', true, 'Not available — calendar list only.'],
+  ] as const)(
+    'keeps %s list-only capability explicit when sync authorization is %s',
+    async (provider, syncAuthorized, expected) => {
+      const calendar = connection.calendars[0] as NonNullable<(typeof connection.calendars)[0]>
+      fakeApi({
+        ...signedIn,
+        ...profile(),
+        ...list(
+          [
+            {
+              ...connection,
+              provider,
+              syncAuthorized,
+              calendars: [{ ...calendar, lastSyncedAt: '2026-10-16T12:00:00Z' }],
+            },
+          ],
+          true,
+          true,
+        ),
+      })
+      renderApp('/app/calendars')
+      const article = (
+        await screen.findByRole('heading', { name: 'calendar@example.com' })
+      ).closest('article') as HTMLElement
+      expect(definition(article, 'Busy-time sync').textContent).toBe(expected)
+      expect(within(article).queryByRole('button', { name: 'Sync now' })).toBeNull()
+      expect(within(article).queryByRole('button', { name: 'Write new bookings here' })).toBeNull()
+      expect(within(article).queryByRole('checkbox')).toBeNull()
+      if (provider === 'microsoft') {
+        expect(within(article).getByText(/lists calendars only/)).toBeDefined()
+        expect(
+          within(article).queryByRole('button', { name: 'Enable calendar synchronization' }),
+        ).toBeNull()
+      } else expect(within(article).getByText(/calendar-list access only/)).toBeDefined()
+    },
+  )
+
+  it.each(['en', 'zh-CN'] as const)(
+    'shows each calendar conflict and booking purpose separately from its controls in %s',
+    async (locale) => {
+      const calendar = connection.calendars[0] as NonNullable<(typeof connection.calendars)[0]>
+      const calendars = [
+        { ...calendar, name: 'Busy calendar', checkConflicts: true, accessRole: 'reader' },
+        {
+          ...calendar,
+          id: 'c0000000-0000-7000-8000-000000000002',
+          name: 'Booking calendar',
+          isPrimary: false,
+        },
+        {
+          ...calendar,
+          id: 'c0000000-0000-7000-8000-000000000003',
+          name: 'Unused calendar',
+          isPrimary: false,
+        },
+      ]
+      fakeApi({
+        ...signedIn,
+        ...profile({ ...PROFILE, locale }),
+        ...list(
+          [{ ...connection, syncAuthorized: true, calendars }],
+          true,
+          false,
+          calendars[1]?.id,
+        ),
+      })
+      renderApp('/app/calendars')
+      const article = (
+        await screen.findByRole('heading', { name: 'calendar@example.com' })
+      ).closest('article') as HTMLElement
+      const summary = article.querySelector('.calendar-account-summary') as HTMLElement
+      const conflictLabel = locale === 'en' ? 'Conflict checks' : '冲突检查'
+      const bookingsLabel = locale === 'en' ? 'New bookings' : '新预约'
+      expect(definition(summary, conflictLabel).textContent).toBe(
+        locale === 'en' ? '1 selected' : '已选择 1 个日历',
+      )
+      expect(definition(summary, bookingsLabel).textContent).toBe('Booking calendar')
+      const items = within(article).getAllByRole('listitem')
+      expect(items).toHaveLength(3)
+      for (const [index, item] of items.entries()) {
+        const purpose = item.querySelector('.calendar-purpose') as HTMLElement
+        expect(purpose.closest('fieldset')).toBeNull()
+        expect(definition(purpose, conflictLabel).textContent).toBe(
+          locale === 'en'
+            ? index === 0
+              ? 'Selected for conflict checks'
+              : 'Not used for conflict checks'
+            : index === 0
+              ? '已选为冲突检查日历'
+              : '不用于冲突检查',
+        )
+        expect(definition(purpose, bookingsLabel).textContent).toBe(
+          locale === 'en'
+            ? index === 1
+              ? 'Selected for new bookings'
+              : 'Not a booking destination'
+            : index === 1
+              ? '已选为新预约写入目标'
+              : '不写入新预约',
+        )
+        const write = within(item).queryByRole('button', {
+          name: locale === 'en' ? 'Write new bookings here' : '将新预约写入此日历',
+        })
+        if (index === 0) expect(write).toBeNull()
+        if (index === 2) expect(write).not.toBeNull()
+      }
+      const bookingItem = items[1] as HTMLElement
+      expect(
+        within(bookingItem).getByRole('button', {
+          name: locale === 'en' ? 'Stop writing bookings here' : '停止向此日历写入预约',
+        }),
+      ).toBeDefined()
+    },
+  )
+
+  it.each([
+    ['calendar became read-only', 'reader', true, 'active', true, null],
+    ['synchronization access was removed', 'owner', false, 'active', true, null],
+    ['account requires reconnection', 'owner', true, 'needs_reauth', true, null],
+    ['provider is disabled', 'owner', true, 'active', false, null],
+    ['write permission was removed', 'owner', true, 'active', true, 'permissions_missing'],
+  ] as const)(
+    'marks a retained booking destination unavailable when %s and keeps local clearing available',
+    async (_reason, accessRole, syncAuthorized, status, googleEnabled, lastError) => {
+      const calendar = connection.calendars[0] as NonNullable<(typeof connection.calendars)[0]>
+      fakeApi({
+        ...signedIn,
+        ...profile(),
+        ...list(
+          [
+            {
+              ...connection,
+              syncAuthorized,
+              status,
+              lastError,
+              calendars: [{ ...calendar, accessRole }],
+            },
+          ],
+          googleEnabled,
+          false,
+          calendar.id,
+        ),
+      })
+      renderApp('/app/calendars')
+      const article = (
+        await screen.findByRole('heading', { name: 'calendar@example.com' })
+      ).closest('article') as HTMLElement
+      const summary = article.querySelector('.calendar-account-summary') as HTMLElement
+      expect(definition(summary, 'New bookings').textContent).toContain(calendar.name)
+      expect(
+        within(definition(summary, 'New bookings')).getByText('Unavailable for new bookings'),
+      ).toBeDefined()
+      const item = within(article).getByRole('listitem')
+      const purpose = item.querySelector('.calendar-purpose') as HTMLElement
+      expect(definition(purpose, 'New bookings').textContent).toBe(
+        'Selected for new bookings — unavailable',
+      )
+      expect(
+        within(item)
+          .getByRole('button', { name: 'Stop writing bookings here' })
+          .matches(':disabled'),
+      ).toBe(false)
+    },
+  )
+
   it.each(['en', 'zh-CN'] as const)(
     'explains a Google calendar zone mismatch using the default schedule rather than the profile in %s',
     async (locale) => {
@@ -148,6 +579,7 @@ describe('the calendars page', () => {
                     ...connection,
                     id: 'a0000000-0000-7000-8000-000000000002',
                     accountEmail: 'other@example.com',
+                    syncAuthorized: true,
                     calendars: [{ ...calendar, timeZone: scheduleZone }],
                   },
                 ]
@@ -173,7 +605,7 @@ describe('the calendars page', () => {
     },
   )
 
-  it('uses a shared introduction and an empty state leading to available connection options', async () => {
+  it('uses a shared introduction and an optional calendar empty state with booking and connection next steps', async () => {
     fakeApi({ ...signedIn, ...profile(), ...list([]) })
     renderApp('/app/calendars')
     await screen.findByText('No calendar accounts connected yet.')
@@ -186,6 +618,13 @@ describe('the calendars page', () => {
     const action = screen.getByRole('link', { name: 'Review calendar connection options' })
     expect(action.closest('.empty-actions')).not.toBeNull()
     expect(action.getAttribute('href')).toBe('#calendar-connection-options')
+    const empty = action.closest('.empty') as HTMLElement
+    expect(empty.textContent).toContain(
+      'Connecting a calendar is optional. Basic booking works without one. Set up an event type to start taking bookings.',
+    )
+    expect(
+      within(empty).getByRole('link', { name: 'Set up event types' }).getAttribute('href'),
+    ).toBe('/app/event-types')
     expect(
       document
         .querySelector('#calendar-connection-options')
@@ -194,7 +633,7 @@ describe('the calendars page', () => {
   })
 
   it.each(['en', 'zh-CN'] as const)(
-    'directs an empty calendar list to the administrator when no provider is configured in %s',
+    'keeps basic booking and its next step available when no calendar provider is configured in %s',
     async (locale) => {
       const user = userEvent.setup()
       fakeApi({ ...signedIn, ...profile(), ...list([], false, false) })
@@ -204,11 +643,19 @@ describe('the calendars page', () => {
         await user.selectOptions(screen.getByLabelText('Interface language'), locale)
       const empty = document.querySelector('.empty') as HTMLElement
       expect(empty.textContent).toContain(
-        locale === 'en'
-          ? 'Ask your administrator to enable calendar connections.'
-          : '请联系管理员启用日历连接。',
+        locale === 'en' ? 'Basic booking works without one.' : '不连接日历也能使用基础预约。',
       )
-      expect(within(empty).queryByRole('link')).toBeNull()
+      expect(within(empty).getAllByRole('link')).toHaveLength(1)
+      expect(
+        within(empty)
+          .getByRole('link', { name: locale === 'en' ? 'Set up event types' : '设置活动类型' })
+          .getAttribute('href'),
+      ).toBe('/app/event-types')
+      expect(
+        within(empty).queryByRole('link', {
+          name: locale === 'en' ? 'Review calendar connection options' : '查看日历连接选项',
+        }),
+      ).toBeNull()
       expect(empty.textContent).not.toContain(
         locale === 'en' ? 'Connect a calendar account to get started.' : '连接日历账号以开始使用。',
       )
@@ -225,7 +672,10 @@ describe('the calendars page', () => {
       renderApp('/app/calendars')
       await screen.findByText('No calendar accounts connected yet.')
       const empty = document.querySelector('.empty') as HTMLElement
-      expect(within(empty).getByText('Connect a calendar account to get started.')).toBeDefined()
+      expect(empty.textContent).toContain('Connecting a calendar is optional.')
+      expect(
+        within(empty).getByRole('link', { name: 'Set up event types' }).getAttribute('href'),
+      ).toBe('/app/event-types')
       expect(
         within(empty).getByRole('link', { name: 'Review calendar connection options' }),
       ).toBeDefined()
@@ -685,7 +1135,7 @@ describe('the calendars page', () => {
       )
       expect(disclosure.textContent).toContain('not event titles or descriptions')
       expect(disclosure.textContent).toContain('optional and separate from signing in')
-      expect(within(section).getByText(/Disconnect below/).textContent).toContain(
+      expect(within(section).getByText(/Disconnect deletes/).textContent).toContain(
         'deletes stored credentials and local calendar data',
       )
       const revoke = within(section).getByRole('link', { name: 'Google Account connections' })
@@ -724,7 +1174,7 @@ describe('the calendars page', () => {
     expect(disclosure.textContent).toContain('与登录相互独立')
     expect(
       within(section).getByText(
-        (_, node) => node?.tagName === 'P' && /使用下方的“断开连接”/.test(node.textContent ?? ''),
+        (_, node) => node?.tagName === 'P' && /“断开连接”可删除/.test(node.textContent ?? ''),
       ).textContent,
     ).toContain('删除已存储的凭证和本地日历数据')
     expect(
@@ -997,7 +1447,11 @@ describe('the calendars page', () => {
     await user.click(
       await screen.findByRole('checkbox', { name: 'Check this calendar for conflicts' }),
     )
-    expect(await screen.findByText(/Waiting for the first synchronization/)).toBeDefined()
+    expect(
+      await screen.findByText(
+        'Waiting for the first synchronization. Booking times stay unavailable until it completes.',
+      ),
+    ).toBeDefined()
     expect(requests.to(`PATCH /api/v1/calendars/${calendar.id}`)[0]?.body).toEqual({
       checkConflicts: true,
     })

@@ -55,6 +55,21 @@ const outcomes = {
 } as const
 const providerName = (connection: Connection) =>
   connection.provider === 'microsoft' ? 'Microsoft' : 'Google'
+const needsReconnect = (connection: Connection) =>
+  connection.status !== 'active' || connection.lastError === 'permissions_missing'
+const syncSummary = (connection: Connection, googleEnabled: boolean): UiText => {
+  if (connection.provider === 'microsoft') return 'Not available — calendar list only.'
+  if (!connection.syncAuthorized) return 'Not enabled — calendar list only.'
+  if (needsReconnect(connection)) return 'Paused until you reconnect this account.'
+  if (!googleEnabled) return 'Unavailable on this instance.'
+  const selected = connection.calendars.filter((calendar) => calendar.checkConflicts)
+  if (selected.some((calendar) => calendar.syncError))
+    return 'Synchronization needs attention. Review the failed calendars below.'
+  if (selected.some((calendar) => !calendar.lastSyncedAt))
+    return 'Waiting for the first synchronization on selected calendars.'
+  if (!selected.length) return 'No calendars selected for conflict checks.'
+  return 'Selected conflict calendars synchronized.'
+}
 const noticeFor = (search: URLSearchParams): UiText | null => {
   const code = search.get('connection')
   return code && Object.hasOwn(outcomes, code)
@@ -288,6 +303,324 @@ export function CalendarsPage() {
                 <Link to={`${PATHS.settings}#profile-heading`}>{t('Create profile')}</Link>
               </p>
             )}
+          <section className="stack" aria-label={t('Connected accounts')}>
+            <h2 ref={accountsHeading} tabIndex={-1}>
+              {t('Connected accounts')}
+            </h2>
+            {state.data.data.length === 0 && (
+              <EmptyState
+                title={t('No calendar accounts connected yet.')}
+                action={
+                  <>
+                    <Link className="button button-primary" to={PATHS.eventTypes}>
+                      {t('Set up event types')}
+                    </Link>
+                    {(state.data.googleEnabled || state.data.microsoftEnabled) && (
+                      <a className="button" href="#calendar-connection-options">
+                        {t('Review calendar connection options')}
+                      </a>
+                    )}
+                  </>
+                }
+              >
+                <p>
+                  {t(
+                    'Connecting a calendar is optional. Basic booking works without one. Set up an event type to start taking bookings.',
+                  )}
+                </p>
+              </EmptyState>
+            )}
+            {state.data.data.map((connection) => {
+              const reconnect = needsReconnect(connection)
+              const syncCapable = connection.provider === 'google' && connection.syncAuthorized
+              const conflictCount = connection.calendars.filter(
+                (calendar) => calendar.checkConflicts,
+              ).length
+              const destination = connection.calendars.find(
+                (calendar) => calendar.id === state.data.destinationCalendarId,
+              )
+              const destinationAvailable =
+                destination &&
+                syncCapable &&
+                !reconnect &&
+                state.data.googleEnabled &&
+                destination.accessRole === 'owner'
+              return (
+                <article className="panel stack calendar-account" key={connection.id}>
+                  <header className="calendar-account-heading">
+                    <div>
+                      <h3>
+                        {connection.accountEmail ? (
+                          <BreakableText>{connection.accountEmail}</BreakableText>
+                        ) : (
+                          t('{0} account', { '0': providerName(connection) })
+                        )}
+                      </h3>
+                      <p>
+                        {providerName(connection)} {t('Calendar')}
+                      </p>
+                    </div>
+                    <span className={`badge${reconnect ? ' badge-danger' : ''}`}>
+                      {reconnect ? t('Reconnect required') : t('Connected')}
+                    </span>
+                  </header>
+                  {reconnect && (
+                    <div className="alert alert-error">
+                      <p role="alert">
+                        {t('Access has expired or been removed. Connect this')}{' '}
+                        {providerName(connection)} {t('account again to restore it.')}
+                      </p>
+                      <a
+                        href={
+                          connection.provider === 'microsoft'
+                            ? '#microsoft-calendar-connection-options'
+                            : '#calendar-connection-options'
+                        }
+                      >
+                        {t('Review calendar connection options')}
+                      </a>
+                    </div>
+                  )}
+                  {connection.lastError === 'provider_unavailable' && (
+                    <p className="alert alert-error" role="alert">
+                      {t(
+                        'The calendar provider could not be reached. Try refreshing the calendar list again.',
+                      )}
+                    </p>
+                  )}
+                  <dl className="calendar-account-summary">
+                    <div>
+                      <dt>{t('Busy-time sync')}</dt>
+                      <dd>{ui(syncSummary(connection, state.data.googleEnabled))}</dd>
+                    </div>
+                    <div>
+                      <dt>{t('Conflict checks')}</dt>
+                      <dd>
+                        {syncCapable
+                          ? t('{0} selected', { '0': conflictCount })
+                          : t('Not available')}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>{t('New bookings')}</dt>
+                      <dd>
+                        {destination ? (
+                          <>
+                            {destination.name}
+                            {!destinationAvailable && (
+                              <span className="calendar-unavailable">
+                                {t('Unavailable for new bookings')}
+                              </span>
+                            )}
+                          </>
+                        ) : (
+                          t('Not written to this account')
+                        )}
+                      </dd>
+                    </div>
+                  </dl>
+                  {connection.provider === 'microsoft' && (
+                    <p>
+                      {t(
+                        'This connection lists calendars only. Busy-time synchronization and booking writes are not yet available.',
+                      )}
+                    </p>
+                  )}
+                  {connection.provider === 'google' && !connection.syncAuthorized && (
+                    <div className="stack">
+                      <p>
+                        {t(
+                          'This connection has calendar-list access only. Enable synchronization to use busy times and write booking events.',
+                        )}
+                      </p>
+                      <a href="#calendar-connection-options">
+                        {t('Review synchronization permissions')}
+                      </a>
+                    </div>
+                  )}
+                  <ul className="calendar-list">
+                    {connection.calendars.map((calendar) => (
+                      <li className="calendar-item" key={calendar.id}>
+                        <h4 id={`calendar-${calendar.id}`}>
+                          {calendar.name}
+                          {calendar.isPrimary ? t(' (primary)') : ''}
+                        </h4>
+                        <dl className="calendar-purpose">
+                          <div>
+                            <dt>{t('Conflict checks')}</dt>
+                            <dd>
+                              {calendar.checkConflicts
+                                ? t('Selected for conflict checks')
+                                : t('Not used for conflict checks')}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>{t('New bookings')}</dt>
+                            <dd>
+                              {state.data.destinationCalendarId === calendar.id
+                                ? destinationAvailable
+                                  ? t('Selected for new bookings')
+                                  : t('Selected for new bookings — unavailable')
+                                : t('Not a booking destination')}
+                            </dd>
+                          </div>
+                        </dl>
+                        {connection.provider === 'google' &&
+                          calendar.accessRole === 'owner' &&
+                          state.data.destinationCalendarId === calendar.id &&
+                          calendar.timeZone &&
+                          state.data.defaultScheduleZone &&
+                          zoneName(calendar.timeZone) !==
+                            zoneName(state.data.defaultScheduleZone) && (
+                            <p className="alert alert-info">
+                              {t(
+                                'This Google calendar uses {calendarZone}; your availability uses {scheduleZone}. Bookings land at the same moment; Google Calendar usually shows them in {calendarZone} time.',
+                                {
+                                  calendarZone: zoneName(calendar.timeZone),
+                                  scheduleZone: zoneName(state.data.defaultScheduleZone),
+                                },
+                              )}
+                            </p>
+                          )}
+                        {connection.provider === 'google' &&
+                          (connection.syncAuthorized ||
+                            calendar.checkConflicts ||
+                            state.data.destinationCalendarId === calendar.id) && (
+                            <fieldset
+                              className="form-fieldset calendar-controls"
+                              aria-labelledby={`calendar-${calendar.id}`}
+                              disabled={pending !== null}
+                            >
+                              <label className="checkbox">
+                                <input
+                                  type="checkbox"
+                                  checked={calendar.checkConflicts}
+                                  disabled={
+                                    pending !== null ||
+                                    (!calendar.checkConflicts &&
+                                      (calendar.accessRole === 'freeBusyReader' ||
+                                        connection.status !== 'active' ||
+                                        !state.data.googleEnabled ||
+                                        !connection.syncAuthorized))
+                                  }
+                                  onChange={(event) =>
+                                    calendarAction(calendar.id, 'toggle', event.target.checked)
+                                  }
+                                />
+                                {t('Check this calendar for conflicts')}
+                              </label>
+                              {calendar.checkConflicts && (
+                                <>
+                                  <p>
+                                    {calendar.syncError
+                                      ? t(
+                                          'Synchronization failed. Booking times stay unavailable until synchronization recovers.',
+                                        )
+                                      : calendar.lastSyncedAt
+                                        ? t('Last synchronized: {0}', {
+                                            '0': new Date(calendar.lastSyncedAt).toLocaleString(
+                                              displayLocale,
+                                              { calendar: 'gregory' },
+                                            ),
+                                          })
+                                        : t(
+                                            'Waiting for the first synchronization. Booking times stay unavailable until it completes.',
+                                          )}
+                                  </p>
+                                  <button
+                                    type="button"
+                                    className="button button-small"
+                                    disabled={
+                                      connection.status !== 'active' ||
+                                      !state.data.googleEnabled ||
+                                      !connection.syncAuthorized
+                                    }
+                                    onClick={() => calendarAction(calendar.id, 'sync')}
+                                  >
+                                    {t('Sync now')}
+                                  </button>
+                                </>
+                              )}
+                              {(calendar.accessRole === 'owner' ||
+                                state.data.destinationCalendarId === calendar.id) && (
+                                <button
+                                  type="button"
+                                  className="button button-small"
+                                  aria-describedby={
+                                    state.data.hasProfile ||
+                                    state.data.destinationCalendarId === calendar.id
+                                      ? undefined
+                                      : 'calendar-profile-hint'
+                                  }
+                                  disabled={
+                                    state.data.destinationCalendarId !== calendar.id &&
+                                    (!state.data.hasProfile ||
+                                      connection.status !== 'active' ||
+                                      !state.data.googleEnabled ||
+                                      !connection.syncAuthorized)
+                                  }
+                                  onClick={() =>
+                                    calendarAction(
+                                      calendar.id,
+                                      'destination',
+                                      state.data.destinationCalendarId === calendar.id,
+                                    )
+                                  }
+                                >
+                                  {state.data.destinationCalendarId === calendar.id
+                                    ? t('Stop writing bookings here')
+                                    : t('Write new bookings here')}
+                                </button>
+                              )}
+                            </fieldset>
+                          )}
+                      </li>
+                    ))}
+                  </ul>
+                  {!connection.calendars.length && (
+                    <p>{t('No calendars found in this account.')}</p>
+                  )}
+                  <fieldset className="form-fieldset" disabled={pending !== null}>
+                    <div className="form-actions">
+                      {(connection.provider === 'google'
+                        ? state.data.googleEnabled
+                        : state.data.microsoftEnabled) && (
+                        <button
+                          type="button"
+                          className="button"
+                          disabled={pending !== null || connection.status !== 'active'}
+                          onClick={() => update(connection, false)}
+                        >
+                          {t('Refresh calendar list')}
+                        </button>
+                      )}
+                      <ConfirmAction
+                        label={t('Disconnect')}
+                        accessibleLabel={t('Disconnect {0}', {
+                          '0': connection.accountEmail ?? `${providerName(connection)} account`,
+                        })}
+                        prompt={t(
+                          'Disconnect {0}? This deletes stored credentials and local calendar data. You can also remove Hourmere’s access in {1} account settings.',
+                          {
+                            '0':
+                              connection.accountEmail ?? `this ${providerName(connection)} account`,
+                            '1': providerName(connection),
+                          },
+                        )}
+                        confirmLabel={t('Disconnect account')}
+                        busyLabel={t('Disconnecting…')}
+                        failure={t('Could not disconnect {0} Calendar.', {
+                          '0': providerName(connection),
+                        })}
+                        onConfirm={() => update(connection, true)}
+                      />
+                    </div>
+                  </fieldset>
+                </article>
+              )
+            })}
+          </section>
+          <h2>{t('Calendar connection options')}</h2>
           {state.data.googleEnabled ? (
             <section
               id="calendar-connection-options"
@@ -303,7 +636,7 @@ export function CalendarsPage() {
                 </p>
                 <p>
                   {text(
-                    'Disconnect below deletes stored credentials and local calendar data, but leaves existing event copies in Google Calendar and does not revoke your Google grant. You can revoke access in your Google Account:',
+                    'Disconnect deletes stored credentials and local calendar data, but leaves existing event copies in Google Calendar and does not revoke your Google grant. You can revoke access in your Google Account:',
                   )}{' '}
                   <a
                     href="https://myaccount.google.com/connections"
@@ -338,7 +671,7 @@ export function CalendarsPage() {
                   </div>
                 )}
               </div>
-              <div>
+              <div className="form-actions">
                 <button
                   type="button"
                   className="button button-primary"
@@ -348,6 +681,23 @@ export function CalendarsPage() {
                 >
                   {pending === 'connect' ? t('Opening Google…') : t('Connect Google Calendar')}
                 </button>
+                {state.data.data.some(
+                  (connection) => connection.provider === 'google' && !connection.syncAuthorized,
+                ) && (
+                  <button
+                    type="button"
+                    className="button"
+                    aria-describedby={
+                      state.data.googleEnabled ? 'google-calendar-permissions' : undefined
+                    }
+                    disabled={
+                      pending !== null || !state.data.googleEnabled || instance.status !== 'ready'
+                    }
+                    onClick={() => connect('sync')}
+                  >
+                    {t('Enable calendar synchronization')}
+                  </button>
+                )}
               </div>
             </section>
           ) : (
@@ -358,7 +708,12 @@ export function CalendarsPage() {
             </p>
           )}
           {state.data.microsoftEnabled ? (
-            <section className="stack" aria-label={t('Connect Microsoft Calendar')}>
+            <section
+              id="microsoft-calendar-connection-options"
+              tabIndex={-1}
+              className="stack"
+              aria-label={t('Connect Microsoft Calendar')}
+            >
               <p>
                 {t(
                   'Microsoft will ask for your account identity, continuing access and permission to read basic calendar details. This connection lists your calendars; busy-time synchronization and booking event writes are not yet available. Connecting is separate from signing in.',
@@ -378,242 +733,16 @@ export function CalendarsPage() {
               </div>
             </section>
           ) : (
-            <p className="alert alert-info">
+            <p
+              id="microsoft-calendar-connection-options"
+              tabIndex={-1}
+              className="alert alert-info"
+            >
               {t(
                 'Microsoft Calendar is not configured on this Hourmere instance. Contact its administrator to enable it.',
               )}
             </p>
           )}
-          <section className="stack" aria-label={t('Connected accounts')}>
-            <h2 ref={accountsHeading} tabIndex={-1}>
-              {t('Connected accounts')}
-            </h2>
-            {state.data.data.length === 0 && (
-              <EmptyState
-                title={t('No calendar accounts connected yet.')}
-                action={
-                  (state.data.googleEnabled || state.data.microsoftEnabled) && (
-                    <a className="button" href="#calendar-connection-options">
-                      {t('Review calendar connection options')}
-                    </a>
-                  )
-                }
-              >
-                <p>
-                  {t(
-                    state.data.googleEnabled || state.data.microsoftEnabled
-                      ? 'Connect a calendar account to get started.'
-                      : 'Ask your administrator to enable calendar connections.',
-                  )}
-                </p>
-              </EmptyState>
-            )}
-            {state.data.data.map((connection) => (
-              <article className="panel stack" key={connection.id}>
-                <h3>
-                  {connection.accountEmail ? (
-                    <BreakableText>{connection.accountEmail}</BreakableText>
-                  ) : (
-                    t('{0} account', { '0': providerName(connection) })
-                  )}
-                </h3>
-                <p>
-                  {providerName(connection)} {t('Calendar')}
-                </p>
-                {(connection.status !== 'active' ||
-                  connection.lastError === 'permissions_missing') && (
-                  <p className="alert alert-error" role="alert">
-                    {t('Access has expired or been removed. Connect this')}{' '}
-                    {providerName(connection)} {t('account again to restore it.')}
-                  </p>
-                )}
-                {connection.provider === 'microsoft' && (
-                  <p>
-                    {t(
-                      'This connection lists calendars only. Busy-time synchronization and booking writes are not yet available.',
-                    )}
-                  </p>
-                )}
-                {connection.provider === 'google' && !connection.syncAuthorized && (
-                  <div className="stack">
-                    <p>
-                      {t(
-                        'This connection has calendar-list access only. Enable synchronization to use busy times and write booking events.',
-                      )}
-                    </p>
-                    <button
-                      type="button"
-                      className="button"
-                      aria-describedby={
-                        state.data.googleEnabled ? 'google-calendar-permissions' : undefined
-                      }
-                      disabled={
-                        pending !== null || !state.data.googleEnabled || instance.status !== 'ready'
-                      }
-                      onClick={() => connect('sync')}
-                    >
-                      {t('Enable calendar synchronization')}
-                    </button>
-                  </div>
-                )}
-                <ul className="calendar-list">
-                  {connection.calendars.map((calendar) => (
-                    <li className="calendar-item" key={calendar.id}>
-                      <div id={`calendar-${calendar.id}`}>
-                        {calendar.name}
-                        {calendar.isPrimary ? t(' (primary)') : ''}
-                      </div>
-                      {connection.provider === 'google' &&
-                        calendar.accessRole === 'owner' &&
-                        state.data.destinationCalendarId === calendar.id &&
-                        calendar.timeZone &&
-                        state.data.defaultScheduleZone &&
-                        zoneName(calendar.timeZone) !==
-                          zoneName(state.data.defaultScheduleZone) && (
-                          <p className="alert alert-info">
-                            {t(
-                              'This Google calendar uses {calendarZone}; your availability uses {scheduleZone}. Bookings land at the same moment; Google Calendar usually shows them in {calendarZone} time.',
-                              {
-                                calendarZone: zoneName(calendar.timeZone),
-                                scheduleZone: zoneName(state.data.defaultScheduleZone),
-                              },
-                            )}
-                          </p>
-                        )}
-                      {(connection.syncAuthorized ||
-                        calendar.checkConflicts ||
-                        state.data.destinationCalendarId === calendar.id) && (
-                        <fieldset
-                          className="form-fieldset calendar-controls"
-                          aria-labelledby={`calendar-${calendar.id}`}
-                          disabled={pending !== null}
-                        >
-                          <label className="checkbox">
-                            <input
-                              type="checkbox"
-                              checked={calendar.checkConflicts}
-                              disabled={
-                                pending !== null ||
-                                (!calendar.checkConflicts &&
-                                  (calendar.accessRole === 'freeBusyReader' ||
-                                    connection.status !== 'active' ||
-                                    !state.data.googleEnabled ||
-                                    !connection.syncAuthorized))
-                              }
-                              onChange={(event) =>
-                                calendarAction(calendar.id, 'toggle', event.target.checked)
-                              }
-                            />
-                            {t('Check this calendar for conflicts')}
-                          </label>
-                          {calendar.checkConflicts && (
-                            <>
-                              <p>
-                                {calendar.syncError
-                                  ? t(
-                                      'Synchronization failed. Booking times stay unavailable until synchronization recovers.',
-                                    )
-                                  : calendar.lastSyncedAt
-                                    ? t('Last synchronized: {0}', {
-                                        '0': new Date(calendar.lastSyncedAt).toLocaleString(
-                                          displayLocale,
-                                          { calendar: 'gregory' },
-                                        ),
-                                      })
-                                    : t(
-                                        'Waiting for the first synchronization. Booking times stay unavailable until it completes.',
-                                      )}
-                              </p>
-                              <button
-                                type="button"
-                                className="button button-small"
-                                disabled={
-                                  connection.status !== 'active' ||
-                                  !state.data.googleEnabled ||
-                                  !connection.syncAuthorized
-                                }
-                                onClick={() => calendarAction(calendar.id, 'sync')}
-                              >
-                                {t('Sync now')}
-                              </button>
-                            </>
-                          )}
-                          {(calendar.accessRole === 'owner' ||
-                            state.data.destinationCalendarId === calendar.id) && (
-                            <button
-                              type="button"
-                              className="button button-small"
-                              aria-describedby={
-                                state.data.hasProfile ||
-                                state.data.destinationCalendarId === calendar.id
-                                  ? undefined
-                                  : 'calendar-profile-hint'
-                              }
-                              disabled={
-                                state.data.destinationCalendarId !== calendar.id &&
-                                (!state.data.hasProfile ||
-                                  connection.status !== 'active' ||
-                                  !state.data.googleEnabled ||
-                                  !connection.syncAuthorized)
-                              }
-                              onClick={() =>
-                                calendarAction(
-                                  calendar.id,
-                                  'destination',
-                                  state.data.destinationCalendarId === calendar.id,
-                                )
-                              }
-                            >
-                              {state.data.destinationCalendarId === calendar.id
-                                ? t('Stop writing bookings here')
-                                : t('Write new bookings here')}
-                            </button>
-                          )}
-                        </fieldset>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-                {!connection.calendars.length && <p>{t('No calendars found in this account.')}</p>}
-                <fieldset className="form-fieldset" disabled={pending !== null}>
-                  <div className="form-actions">
-                    {(connection.provider === 'google'
-                      ? state.data.googleEnabled
-                      : state.data.microsoftEnabled) && (
-                      <button
-                        type="button"
-                        className="button"
-                        disabled={pending !== null || connection.status !== 'active'}
-                        onClick={() => update(connection, false)}
-                      >
-                        {t('Refresh calendar list')}
-                      </button>
-                    )}
-                    <ConfirmAction
-                      label={t('Disconnect')}
-                      accessibleLabel={t('Disconnect {0}', {
-                        '0': connection.accountEmail ?? `${providerName(connection)} account`,
-                      })}
-                      prompt={t(
-                        'Disconnect {0}? This deletes stored credentials and local calendar data. You can also remove Hourmere’s access in {1} account settings.',
-                        {
-                          '0':
-                            connection.accountEmail ?? `this ${providerName(connection)} account`,
-                          '1': providerName(connection),
-                        },
-                      )}
-                      confirmLabel={t('Disconnect account')}
-                      busyLabel={t('Disconnecting…')}
-                      failure={t('Could not disconnect {0} Calendar.', {
-                        '0': providerName(connection),
-                      })}
-                      onConfirm={() => update(connection, true)}
-                    />
-                  </div>
-                </fieldset>
-              </article>
-            ))}
-          </section>
         </>
       )}
     </div>
