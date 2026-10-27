@@ -547,6 +547,21 @@ export interface NotificationEmailSends {
   sent_at: Timestamp;
 }
 
+export interface OrganizationOperations {
+  actor_user_id: string | null;
+  api_key_id: string | null;
+  booking_id: string | null;
+  id: Generated<string>;
+  new_role: string | null;
+  oauth_consent_id: string | null;
+  occurred_at: Generated<Timestamp>;
+  operation: string;
+  organization_id: string;
+  previous_role: string | null;
+  source: string;
+  target_user_id: string | null;
+}
+
 export interface PersonalOrganizations {
   organization_id: string;
   user_id: string;
@@ -659,6 +674,7 @@ export interface DB {
   mcp_oauth_grants: McpOauthGrants;
   mcp_oauth_intents: McpOauthIntents;
   notification_email_sends: NotificationEmailSends;
+  organization_operations: OrganizationOperations;
   personal_organizations: PersonalOrganizations;
   profiles: Profiles;
   round_robin_state: RoundRobinState;

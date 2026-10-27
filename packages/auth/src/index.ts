@@ -17,6 +17,7 @@ import { beforeHook } from './hooks.ts'
 import { betterAuthLog, logMailFailure } from './log.ts'
 import { confirmLink, SIGN_IN_PATH } from './magic-link.ts'
 import { mcpOAuthPlugins } from './mcp-oauth.ts'
+import { organizationOperationRecords } from './organization-operations.ts'
 import { ensurePersonalOrganization, organizationGuards } from './organizations.ts'
 import { hasAccount, maySignUp, type SignupPolicy, signupConnectionOptions } from './signup.ts'
 
@@ -324,6 +325,7 @@ export function createAuth({
         },
       },
       ...(mcpOAuth ? mcpOAuthPlugins(db, baseURL, mcpMetadataFetcher) : []),
+      organizationOperationRecords(),
       organization({
         // An invitation is accepted only by someone who proved they own the invited address.
         requireEmailVerificationOnInvitation: true,
