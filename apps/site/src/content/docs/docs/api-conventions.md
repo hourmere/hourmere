@@ -177,9 +177,9 @@ The existing covered endpoints are:
 
 | Write | Endpoint |
 |---|---|
-| Create a team event type | `POST /api/v1/event-types` |
-| Edit, enable or disable a team event type | `PATCH /api/v1/event-types/{id}` |
-| Delete a team event type | `DELETE /api/v1/event-types/{id}` |
+| Create a personal or team event type | `POST /api/v1/event-types` |
+| Edit, enable or disable a personal or team event type | `PATCH /api/v1/event-types/{id}` |
+| Delete a personal or team event type | `DELETE /api/v1/event-types/{id}` |
 | Activate a round-robin team event type | `POST /api/v1/event-types/{id}/round-robin/activate` |
 | Invite or resend an invitation | `POST /api/auth/organization/invite-member` |
 | Revoke an invitation | `POST /api/auth/organization/cancel-invitation` |
@@ -194,8 +194,10 @@ context returns HTTP 409: `organization_context_changed` under `/api/v1`, or
 `ORGANIZATION_CONTEXT_CHANGED` under `/api/auth`. The message asks the person to reload.
 Inaccessible and missing event-type targets receive the same context refusal on bound
 browser writes, so the error cannot reveal another team's objects. The expected ID grants
-no access: current membership, verification and role checks still apply. The event editor
-also binds personal forms so a switch into a team cannot retarget an unsaved personal draft.
+no access: current membership, verification and role checks still apply. Every session
+event-type write requires the header, including personal forms. This prevents an old form
+without context from becoming a personal creation after switching or losing team membership,
+and prevents a switch into a team from retargeting an unsaved personal draft.
 Organization writes and context transitions in the same browser session are ordered across
 server processes, so a switch cannot overtake an already checked organization write.
 

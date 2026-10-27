@@ -2538,7 +2538,7 @@ export interface paths {
             parameters: {
                 query?: never;
                 header?: {
-                    /** @description The organization bound to the web form when it opened. Required for team session writes; ignored for API keys. A stale or missing context is refused with organization_context_changed; reload before retrying. */
+                    /** @description The organization bound to the web form when it opened. Required for session event-type writes, including personal forms; ignored for API keys. A stale or missing context is refused with organization_context_changed; reload before retrying. */
                     "x-expected-organization-id"?: string;
                 };
                 path?: never;
@@ -2679,7 +2679,7 @@ export interface paths {
             parameters: {
                 query?: never;
                 header?: {
-                    /** @description The organization bound to the web form when it opened. Required for team session writes; ignored for API keys. A stale or missing context is refused with organization_context_changed; reload before retrying. */
+                    /** @description The organization bound to the web form when it opened. Required for session event-type writes, including personal forms; ignored for API keys. A stale or missing context is refused with organization_context_changed; reload before retrying. */
                     "x-expected-organization-id"?: string;
                 };
                 path: {
@@ -2750,7 +2750,7 @@ export interface paths {
             parameters: {
                 query?: never;
                 header?: {
-                    /** @description The organization bound to the web form when it opened. Required for team session writes; ignored for API keys. A stale or missing context is refused with organization_context_changed; reload before retrying. */
+                    /** @description The organization bound to the web form when it opened. Required for session event-type writes, including personal forms; ignored for API keys. A stale or missing context is refused with organization_context_changed; reload before retrying. */
                     "x-expected-organization-id"?: string;
                 };
                 path: {
@@ -2848,7 +2848,7 @@ export interface paths {
             parameters: {
                 query?: never;
                 header?: {
-                    /** @description The organization bound to the web form when it opened. Required for team session writes; ignored for API keys. A stale or missing context is refused with organization_context_changed; reload before retrying. */
+                    /** @description The organization bound to the web form when it opened. Required for session event-type writes, including personal forms; ignored for API keys. A stale or missing context is refused with organization_context_changed; reload before retrying. */
                     "x-expected-organization-id"?: string;
                 };
                 path: {

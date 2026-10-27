@@ -263,7 +263,7 @@ const IdParams = z.object({ id: z.string().openapi({ format: 'uuid' }) })
 const ExpectedOrganizationHeaders = z.object({
   'x-expected-organization-id': z.string().optional().openapi({
     description:
-      'The organization bound to the web form when it opened. Required for team session writes; ignored for API keys. A stale or missing context is refused with organization_context_changed; reload before retrying.',
+      'The organization bound to the web form when it opened. Required for session event-type writes, including personal forms; ignored for API keys. A stale or missing context is refused with organization_context_changed; reload before retrying.',
   }),
 })
 

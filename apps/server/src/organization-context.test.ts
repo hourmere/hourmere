@@ -351,7 +351,7 @@ describe.skipIf(!bootstrap)('organization-bound event-type web writes', () => {
     }
   })
 
-  it('binds personal drafts and team drafts across switches without requiring a header for legacy personal writes', async () => {
+  it('requires context for personal drafts and preserves their binding across team switches', async () => {
     const f = await fixture()
     const personalId = f.user.principal.organization.id
     await switchTo(f, personalId)
@@ -360,8 +360,10 @@ describe.skipIf(!bootstrap)('organization-bound event-type web writes', () => {
       headers: { cookie: f.cookie, origin, 'content-type': 'application/json' },
       body: JSON.stringify(input()),
     })
-    expect(legacy.status).toBe(201)
-    expect(await legacy.json()).toMatchObject({
+    await expectRefused(legacy)
+    const personal = await write(f, 'create', personalId)
+    expect(personal.status).toBe(201)
+    expect(await personal.json()).toMatchObject({
       organizationId: personalId,
       ownerUserId: f.user.id,
     })
@@ -370,6 +372,35 @@ describe.skipIf(!bootstrap)('organization-bound event-type web writes', () => {
     await expectRefused(await write(f, 'create', personalId))
     await expectUnchanged(f)
   })
+
+  it.each(['switch', 'removal'] as const)(
+    'refuses an old team-create form without context after %s falls back to personal',
+    async (change) => {
+      const f = await fixture()
+      const personalId = f.user.principal.organization.id
+      if (change === 'switch') await switchTo(f, personalId)
+      else
+        await db
+          .deleteFrom('auth.member')
+          .where('organizationId', '=', f.first.id)
+          .where('userId', '=', f.user.id)
+          .execute()
+      const response = await app.request('/api/v1/event-types', {
+        method: 'POST',
+        headers: { cookie: f.cookie, origin, 'content-type': 'application/json' },
+        body: JSON.stringify(input()),
+      })
+      await expectRefused(response)
+      await expectUnchanged(f)
+      expect(
+        await db
+          .selectFrom('event_types')
+          .select('id')
+          .where('organization_id', '=', personalId)
+          .execute(),
+      ).toEqual([])
+    },
+  )
 
   it('keeps API keys pinned independently of web switches and ignores a forged web header', async () => {
     const f = await fixture()

@@ -125,14 +125,8 @@ async function check(
 export function organizationWriteAccess(principal: Principal, expectedOrganizationId?: string) {
   return async (db: Db, organizationId: string, targetId?: string): Promise<void> => {
     if (principal.kind !== 'session') return
-    const personal = await db
-      .selectFrom('personal_organizations')
-      .select('organization_id')
-      .where('organization_id', '=', organizationId)
-      .executeTakeFirst()
-    // Existing personal clients need no new header. When the web supplies one, preserve
-    // its binding too, so a personal draft cannot silently become a team creation.
-    if (personal && expectedOrganizationId === undefined) return
+    // A missing header cannot distinguish a personal form from an old team form whose
+    // session has since switched or fallen back to personal after membership removal.
     if (expectedOrganizationId === undefined) throw contextChanged()
     await check(db, principal, organizationId, true, {
       expectedOrganizationId,
