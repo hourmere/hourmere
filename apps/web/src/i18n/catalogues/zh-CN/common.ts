@@ -1,5 +1,7 @@
 // Public/shared UI messages. Admin messages live in a lazy catalog.
 export const common = {
+  'Your team context changed. Reload before making changes.':
+    '你的团队上下文已改变。请重新加载后再进行修改。',
   '{count} min': '{count}分钟',
   '{count} h': '{count}小时',
   '{count} day': '{count}天',

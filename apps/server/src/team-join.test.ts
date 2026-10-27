@@ -96,12 +96,30 @@ describe.skipIf(!serverUrl)('team invitation contract', () => {
   }
   type Instance = ReturnType<typeof instance>
 
-  const post = (app: Instance['app'], action: string, cookie: string, body: unknown) =>
-    app.request(`/api/auth/organization/${action}`, {
+  const post = async (app: Instance['app'], action: string, cookie: string, body: unknown) => {
+    const input = body as { organizationId?: string; invitationId?: string }
+    const expected =
+      input.organizationId ??
+      (action === 'cancel-invitation' && input.invitationId
+        ? (
+            await db
+              .selectFrom('auth.invitation')
+              .select('organizationId')
+              .where('id', '=', input.invitationId)
+              .executeTakeFirst()
+          )?.organizationId
+        : undefined)
+    return app.request(`/api/auth/organization/${action}`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', origin, cookie },
+      headers: {
+        'content-type': 'application/json',
+        origin,
+        cookie,
+        ...(expected ? { 'x-expected-organization-id': expected } : {}),
+      },
       body: JSON.stringify(body),
     })
+  }
   const get = (app: Instance['app'], id: string, cookie = '') =>
     app.request(`/api/auth/organization/get-invitation?id=${id}`, { headers: { cookie } })
 
@@ -288,11 +306,14 @@ describe.skipIf(!serverUrl)('team invitation contract', () => {
         `INSERT INTO auth.member ("organizationId", "userId", role, "createdAt") VALUES ($1, $2, $3, now())`,
         [org.id, user.id, role],
       )
+      expect(
+        (await post(i.app, 'set-active', user.cookie, { organizationId: org.id })).status,
+      ).toBe(200)
     }
     const invitation = await invite(i, owner.cookie, org.id, 'recipient@example.com')
     for (const [actor, status, code] of [
       [member, 403, 'YOU_ARE_NOT_ALLOWED_TO_INVITE_USERS_TO_THIS_ORGANIZATION'],
-      [outsider, 400, 'MEMBER_NOT_FOUND'],
+      [outsider, 409, 'ORGANIZATION_CONTEXT_CHANGED'],
     ] as const) {
       const response = await post(i.app, 'invite-member', actor.cookie, {
         email: 'other@example.com',
@@ -307,7 +328,9 @@ describe.skipIf(!serverUrl)('team invitation contract', () => {
       expect(canceled.status).toBe(status)
       expect(await canceled.json()).toMatchObject({
         code:
-          actor === member ? 'YOU_ARE_NOT_ALLOWED_TO_CANCEL_THIS_INVITATION' : 'MEMBER_NOT_FOUND',
+          actor === member
+            ? 'YOU_ARE_NOT_ALLOWED_TO_CANCEL_THIS_INVITATION'
+            : 'ORGANIZATION_CONTEXT_CHANGED',
       })
       expect(await state(org.id)).toEqual([{ status: 'pending', members: 3 }])
     }

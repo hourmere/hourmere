@@ -1,6 +1,8 @@
 import { registeredLocales } from '@hourmere/core/language'
 import { describe, expect, it } from 'vitest'
 import { type Catalog, catalogueCoverage } from './catalogues.ts'
+import { commonCatalogues } from './common.ts'
+import { translate, translateMessage } from './translate.ts'
 
 const teamMessages = {
   'Team name': '团队名称',
@@ -44,6 +46,16 @@ const groups = {
 }
 
 describe('catalogue coverage and interpolation', () => {
+  it('discovers the reviewed team-context guidance in both common catalogues', () => {
+    const key = 'Your team context changed. Reload before making changes.'
+    const chinese = '你的团队上下文已改变。请重新加载后再进行修改。'
+    expect(commonCatalogues['./catalogues/en/common.ts']?.[key]).toBe(key)
+    expect(commonCatalogues['./catalogues/zh-CN/common.ts']?.[key]).toBe(chinese)
+    expect(translate('en', key)).toBe(key)
+    expect(translate('zh-CN', key)).toBe(chinese)
+    expect(translateMessage('zh-CN', key)).toBe(chinese)
+  })
+
   it('preserves team creation and role copy in the English and Chinese catalogues', () => {
     const english = groups.admin['./catalogues/en/admin.ts']
     const chinese = groups.admin['./catalogues/zh-CN/admin.ts']

@@ -300,6 +300,7 @@ export async function createEventType(
   const fields = validFields({ ...DEFAULTS, ...defined(input) })
   return withWriteErrors(() =>
     ctx.db.transaction().execute(async (trx) => {
+      await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id)
       await lockOrganization(trx, ctx.principal.organization.id)
       const { personalOwnerId, canManageTeam } = await access(trx, ctx, true)
       if (personalOwnerId !== null ? personalOwnerId !== ctx.principal.user.id : !canManageTeam) {
@@ -365,6 +366,7 @@ export async function updateEventType(
   const changes = defined(input)
   return withWriteErrors(() =>
     ctx.db.transaction().execute(async (trx) => {
+      await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, id)
       await lockOrganization(trx, ctx.principal.organization.id)
       // Locked, so concurrent updates of different fields cannot undo each other.
       const row = await visibleRow(trx, ctx, id, { lock: true })
@@ -503,14 +505,18 @@ export async function updateEventType(
 
 /** Marks the event type deleted; its slug becomes free and its bookings keep it. */
 export async function deleteEventType(ctx: ServiceContext, id: string): Promise<void> {
-  const row = await visibleRow(ctx.db, ctx, id)
-  await assertCanWrite(ctx.db, ctx, row)
-  await ctx.db
-    .updateTable('event_types')
-    .set({ deleted_at: new Date(ctx.now().epochMilliseconds) })
-    .where('id', '=', row.id)
-    .where('deleted_at', 'is', null)
-    .execute()
+  await ctx.db.transaction().execute(async (trx) => {
+    await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, id)
+    await lockOrganization(trx, ctx.principal.organization.id)
+    const row = await visibleRow(trx, ctx, id, { lock: true })
+    await assertCanWrite(trx, ctx, row, true)
+    await trx
+      .updateTable('event_types')
+      .set({ deleted_at: new Date(ctx.now().epochMilliseconds) })
+      .where('id', '=', row.id)
+      .where('deleted_at', 'is', null)
+      .execute()
+  })
 }
 
 function selectEventTypes(db: Db) {
@@ -946,6 +952,7 @@ export async function listEventTypeHosts(
 /** Explicit activation; metadata saves and mode changes never invoke this operation. */
 export async function activateRoundRobin(ctx: ServiceContext, id: string): Promise<EventType> {
   return ctx.db.transaction().execute(async (trx) => {
+    await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, id)
     await lockOrganization(trx, ctx.principal.organization.id)
     const row = await visibleRow(trx, ctx, id, { lock: true })
     await assertCanWrite(trx, ctx, row, true)

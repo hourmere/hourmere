@@ -30,6 +30,15 @@ export class RequestError extends Error {
   }
 }
 
+/** A stale form must be reloaded; retrying cannot change its bound organization. */
+export function isOrganizationContextChanged(err: unknown): boolean {
+  return (
+    err instanceof RequestError &&
+    err.status === 409 &&
+    (err.code === 'organization_context_changed' || err.code === 'ORGANIZATION_CONTEXT_CHANGED')
+  )
+}
+
 export const UNREACHABLE = "Can't reach Hourmere. Check your connection and try again."
 
 function messageForStatus(status: number): MessageKey {
@@ -94,6 +103,8 @@ export function errorMessage(err: unknown): UiText {
   if (err.displayMessage) return err.displayMessage
   const known: Readonly<Record<string, MessageKey>> = {
     invalid_request: 'Check the form and try again.',
+    organization_context_changed: 'Your team context changed. Reload before making changes.',
+    ORGANIZATION_CONTEXT_CHANGED: 'Your team context changed. Reload before making changes.',
     invalid_calendar_settings: 'Check your calendar settings and try again.',
     invalid_calendar_access: 'Choose calendar-list access or calendar synchronization.',
     profile_not_found: 'Create your profile in Settings first.',

@@ -1,5 +1,7 @@
 // English source messages; other catalogues may translate any subset.
 export const common = {
+  'Your team context changed. Reload before making changes.':
+    'Your team context changed. Reload before making changes.',
   '{count} min': '{count} min',
   '{count} h': '{count} h',
   '{count} day': '{count} day',

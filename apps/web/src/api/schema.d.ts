@@ -2537,7 +2537,10 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /** @description The organization bound to the web form when it opened. Required for session event-type writes, including personal forms; ignored for API keys. A stale or missing context is refused with organization_context_changed; reload before retrying. */
+                    "x-expected-organization-id"?: string;
+                };
                 path?: never;
                 cookie?: never;
             };
@@ -2583,7 +2586,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description slug_taken: another event type on the same page has this slug */
+                /** @description slug_taken: another event type on the same page has this slug; organization_context_changed: reload the page before trying this team write again */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -2675,7 +2678,10 @@ export interface paths {
         delete: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /** @description The organization bound to the web form when it opened. Required for session event-type writes, including personal forms; ignored for API keys. A stale or missing context is refused with organization_context_changed; reload before retrying. */
+                    "x-expected-organization-id"?: string;
+                };
                 path: {
                     id: string;
                 };
@@ -2717,6 +2723,15 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
+                /** @description organization_context_changed: reload the page before trying this team write again */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
                 /** @description The API key's rate limit is used up */
                 429: {
                     headers: {
@@ -2734,7 +2749,10 @@ export interface paths {
         patch: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /** @description The organization bound to the web form when it opened. Required for session event-type writes, including personal forms; ignored for API keys. A stale or missing context is refused with organization_context_changed; reload before retrying. */
+                    "x-expected-organization-id"?: string;
+                };
                 path: {
                     id: string;
                 };
@@ -2791,7 +2809,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description slug_taken: another event type on the same page has this slug */
+                /** @description slug_taken: another event type on the same page has this slug; organization_context_changed: reload the page before trying this team write again */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -2829,7 +2847,10 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /** @description The organization bound to the web form when it opened. Required for session event-type writes, including personal forms; ignored for API keys. A stale or missing context is refused with organization_context_changed; reload before retrying. */
+                    "x-expected-organization-id"?: string;
+                };
                 path: {
                     id: string;
                 };
@@ -2879,6 +2900,15 @@ export interface paths {
                 };
                 /** @description event_type_not_found: no such event type in the organization, or one the caller cannot see */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description organization_context_changed: reload the page before trying this team write again */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -4790,6 +4820,96 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/team/bookings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Bookings of the session's current team
+         * @description Requires a current verified team owner/admin browser session. Includes bookings hosted by other team members, with only the team-administration field whitelist. Ordered by start time and id, ascending by default. Pass nextCursor as cursor with the same filters and order for the next page. Collective bookings appear once. Personal organizations are excluded.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    cursor?: string;
+                    /** @description Only bookings ending after (exclusive) */
+                    endAfter?: string;
+                    /** @description Only bookings ending at or before (inclusive) */
+                    endTo?: string;
+                    /** @description Only bookings starting at or after */
+                    from?: string;
+                    /** @description Page size, 1–100 (default 50) */
+                    limit?: number;
+                    /** @description Order by start time and id: asc (default) or desc. Keep unchanged between pages. */
+                    order?: "asc" | "desc";
+                    status?: "confirmed" | "cancelled";
+                    /** @description Only bookings starting before */
+                    to?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description A page of team bookings */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TeamAdminBookingPage"];
+                    };
+                };
+                /** @description Invalid parameters (invalid_request, invalid_range or invalid_cursor) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No valid session or API key */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description team_management_access_denied: requires a current team owner/admin session */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The API key's rate limit is used up */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/webhooks": {
         parameters: {
             query?: never;
@@ -5634,6 +5754,38 @@ export interface components {
              * @example 2026-11-02T09:00:00.000Z
              */
             start: string;
+        };
+        TeamAdminBooking: {
+            attendees: {
+                email: string;
+                isBooker: boolean;
+                name: string;
+                timeZone: string;
+            }[];
+            /** Format: date-time */
+            cancelledAt: string | null;
+            /** Format: date-time */
+            end: string;
+            eventType: {
+                /** Format: uuid */
+                id: string;
+                title: string | null;
+            } | null;
+            hosts: {
+                name: string;
+                /** Format: uuid */
+                userId: string;
+            }[];
+            /** Format: uuid */
+            id: string;
+            /** Format: date-time */
+            start: string;
+            /** @enum {string} */
+            status: "confirmed" | "cancelled";
+        };
+        TeamAdminBookingPage: {
+            data: components["schemas"]["TeamAdminBooking"][];
+            nextCursor: string | null;
         };
         /** @description Intervals of one day must not overlap; touching ones are joined */
         WallClockInterval: {
