@@ -27,6 +27,9 @@ interface Draft {
   name: string
   slug: string
 }
+interface PendingCreation extends Draft {
+  addressTaken: boolean
+}
 
 function addressConflictDraft(state: unknown, me: Me): Draft | null {
   if (!state || typeof state !== 'object' || !('teamAddressConflict' in state)) return null
@@ -74,7 +77,7 @@ export function CreateTeamPage() {
   const [busy, setBusy] = useState(false)
   const lock = useRef(false)
   // Keep the submitted address fixed until reads establish whether creation committed.
-  const [uncertain, setUncertain] = useState<Draft | null>(null)
+  const [uncertain, setUncertain] = useState<PendingCreation | null>(null)
   const [retrySlug, setRetrySlug] = useState<string | null>(null)
   const [created, setCreated] = useState<Organization | null>(null)
   const [createdMember, setCreatedMember] = useState<OrganizationMember | null>(null)
@@ -112,7 +115,7 @@ export function CreateTeamPage() {
     setAttempt((value) => value + 1)
   }
 
-  function personalAddressConflict() {
+  function addressConflict() {
     setCreated(null)
     setCreatedMember(null)
     setUncertain(null)
@@ -133,7 +136,7 @@ export function CreateTeamPage() {
     // The list endpoint has no personal marker. A recovered organization must be checked
     // through /me before treating it as a team or publishing a team membership.
     if (confirmed.organization.personal) {
-      personalAddressConflict()
+      addressConflict()
       if (confirmed.organization.id !== me.organization.id) {
         // Publishing the new context remounts this page; keep the draft and field error
         // in this history entry just long enough for that remount to consume them.
@@ -156,7 +159,7 @@ export function CreateTeamPage() {
     accept(confirmed)
   }
 
-  async function reconcile(submitted: Draft) {
+  async function reconcile(submitted: PendingCreation) {
     // Both reads must succeed before a new create attempt can be offered. This function
     // never repeats the creation POST, including when a confirmation response was lost.
     const [current, organizations] = await Promise.all([refresh(), listOrganizations()])
@@ -164,13 +167,18 @@ export function CreateTeamPage() {
     if (!current || current.user.id !== me.user.id) throw new Error('Session not confirmed')
     const found = organizations.find((organization) => organization.slug === submitted.slug)
     if (found?.id === current.organization.id && current.organization.personal) {
-      personalAddressConflict()
+      addressConflict()
       return
     }
     if (found) {
       setCreated(found)
       setUncertain(null)
       setMessage('A team with this address is in your teams. Open it to continue.')
+    } else if (submitted.addressTaken) {
+      // A collision proves the address exists. Only a successful membership check can
+      // release it; an empty list alone could still precede the original commit.
+      addressConflict()
+      return
     } else {
       setUncertain(null)
       setMessage('No team was found at this address. You can try creating it again.')
@@ -223,10 +231,14 @@ export function CreateTeamPage() {
         // Even a successful no-match read can precede a delayed original commit. Reusing
         // this exact address lets server uniqueness protect the explicit retry too.
         setRetrySlug(submitted.slug)
-        setUncertain(submitted)
+        const pending = {
+          ...submitted,
+          addressTaken: err instanceof RequestError && err.code === 'ORGANIZATION_ALREADY_EXISTS',
+        }
+        setUncertain(pending)
         setMessage('Creation could not be confirmed. Checking your teams before retrying…')
         try {
-          await reconcile(submitted)
+          await reconcile(pending)
         } catch {
           if (mounted.current) {
             setMessage('Could not check your teams. Check team status before trying again.')
@@ -351,7 +363,7 @@ export function CreateTeamPage() {
           <p className="hint">{t('Team booking URL preview')}</p>
           <p className="mono preview user-content">
             <BreakableText>
-              {publicTeamPageUrl(draft.slug.trim() || t('your-team'), t('event-address'))}
+              {publicTeamPageUrl(draft.slug.trim() || 'your-team', 'event-link')}
             </BreakableText>
           </p>
           <p className="hint">

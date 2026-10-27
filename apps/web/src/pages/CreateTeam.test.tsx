@@ -106,11 +106,16 @@ describe('creating a team', () => {
       chooseLanguage(locale)
       const { api } = server()
       renderApp('/app/teams/new')
+      const preview = await screen.findByText((content) =>
+        content.startsWith(`${window.location.origin}/team/`),
+      )
+      expect(preview.textContent).toBe(`${window.location.origin}/team/your-team/event-link`)
       const user = await fill(`  ${team.name}  `)
       expect(nameInput().labels?.[0]?.textContent).toBe(locale === 'en' ? 'Team name' : '团队名称')
       expect(slugInput().labels?.[0]?.textContent).toBe(
         locale === 'en' ? 'Team public address' : '团队公开地址',
       )
+      expect(preview.textContent).toBe(`${window.location.origin}/team/${team.slug}/event-link`)
       await user.keyboard('{Enter}')
       await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/app/settings'))
       expect(api.to('POST /api/auth/organization/create').map((call) => call.body)).toEqual([
@@ -243,6 +248,72 @@ describe('creating a team', () => {
 })
 
 describe('reconciling an uncertain creation result', () => {
+  it.each(['none', 'session', 'list'] as const)(
+    'releases a pinned address after a retry collision and a successful check with %s read failure',
+    async (failure) => {
+      let attempts = 0
+      let unavailable = failure !== 'none'
+      const { api, state } = server({
+        'POST /api/auth/organization/create': () => {
+          attempts++
+          if (attempts === 1) throw new TypeError('Synthetic lost response')
+          return attempts === 2
+            ? json(400, { code: 'ORGANIZATION_ALREADY_EXISTS' })
+            : json(200, team)
+        },
+        'GET /api/v1/me': () =>
+          attempts === 2 && unavailable && failure === 'session'
+            ? json(503, { error: 'internal_error' })
+            : json(200, state.me),
+        'GET /api/auth/organization/list': () =>
+          attempts === 2 && unavailable && failure === 'list'
+            ? json(503, { code: 'INTERNAL_SERVER_ERROR' })
+            : json(200, [ME.organization]),
+      })
+      renderApp('/app/teams/new')
+      const user = await fill(team.name, 'Taken-Team')
+      await user.click(submit())
+      await screen.findByText('No team was found at this address. You can try creating it again.')
+      expect(slugInput().matches(':disabled')).toBe(true)
+      expect(api.to('POST /api/auth/organization/create')).toHaveLength(1)
+      await user.click(submit())
+      if (failure !== 'none') {
+        await screen.findByText(
+          'Could not check your teams. Check team status before trying again.',
+        )
+        expect(slugInput().matches(':disabled')).toBe(true)
+        expect(createButton()).toBeNull()
+        fireEvent.submit(screen.getByRole('form', { name: 'Create team' }))
+        expect(api.to('POST /api/auth/organization/create')).toHaveLength(2)
+        unavailable = false
+        await user.click(checkStatus())
+      }
+      await waitFor(() => expect(slugInput().getAttribute('aria-invalid')).toBe('true'))
+      const alert = screen.getByRole('alert')
+      expect(within(alert).getByRole('link').getAttribute('href')).toBe('#teamSlug')
+      expect(alert.textContent).toContain(
+        'This team address is already in use. Choose another one.',
+      )
+      await waitFor(() => expect(document.activeElement).toBe(slugInput()))
+      expect(slugInput().matches(':disabled')).toBe(false)
+      expect(slugInput().value).toBe('Taken-Team')
+      expect(nameInput().value).toBe(team.name)
+      expect(leaving()).toBe(true)
+      expect(screen.queryByRole('button', { name: 'Open team' })).toBeNull()
+      expect(api.to('POST /api/auth/organization/set-active')).toHaveLength(0)
+      expect(api.to('POST /api/auth/organization/create')).toHaveLength(2)
+      await user.clear(slugInput())
+      await user.type(slugInput(), team.slug)
+      await user.click(submit())
+      await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/app/settings'))
+      expect(api.to('POST /api/auth/organization/create').map((call) => call.body)).toEqual([
+        { name: team.name, slug: 'Taken-Team', keepCurrentActiveOrganization: true },
+        { name: team.name, slug: 'Taken-Team', keepCurrentActiveOrganization: true },
+        { name: team.name, slug: team.slug, keepCurrentActiveOrganization: true },
+      ])
+    },
+  )
+
   it('treats the current personal organization as an address conflict and allows a corrected team address', async () => {
     let attempts = 0
     const { api } = server({

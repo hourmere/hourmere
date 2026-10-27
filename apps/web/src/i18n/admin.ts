@@ -11,11 +11,8 @@ export const admin = {
   'Team addresses preserve letter case and are separate from personal handles.':
     '团队地址区分字母大小写，与个人用户名互相独立。',
   'Team booking URL preview': '团队预约网址预览',
-  'your-team': '你的团队',
-  'event-address': '活动地址',
   'Each team event gets its own address at the end of this URL. Creating a team does not publish a booking page.':
     '每个团队活动都会在此网址末尾使用独立的活动地址。创建团队不会发布预约页面。',
-  'Team created.': '团队已创建。',
   'A team with this address is in your teams. Open it to continue.':
     '你的团队列表中已有使用此地址的团队。打开该团队以继续。',
   'No team was found at this address. You can try creating it again.':
