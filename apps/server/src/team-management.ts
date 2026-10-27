@@ -12,6 +12,12 @@ interface TeamManager {
   role: 'owner' | 'admin'
 }
 
+interface TeamReader {
+  userId: string
+  organizationId: string
+  role: 'owner' | 'admin' | 'member'
+}
+
 const uuid = (id: string) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
 const denied = () => new DomainError('forbidden', 'team_management_access_denied')
@@ -32,7 +38,8 @@ async function check(
   teamId: string,
   lock = false,
   context?: { expectedOrganizationId: string; allowPersonal: boolean },
-): Promise<TeamManager> {
+  allowMemberRead = false,
+): Promise<TeamReader> {
   if (
     context &&
     (!uuid(context.expectedOrganizationId) ||
@@ -79,7 +86,13 @@ async function check(
   const member = await memberQuery.executeTakeFirst()
   // Better Auth can store multiple roles. Only these exact known tokens grant management.
   const roles = member?.role.split(',').map((role) => role.trim()) ?? []
-  const role = roles.includes('owner') ? 'owner' : roles.includes('admin') ? 'admin' : undefined
+  const role = roles.includes('owner')
+    ? 'owner'
+    : roles.includes('admin')
+      ? 'admin'
+      : allowMemberRead && roles.includes('member')
+        ? 'member'
+        : undefined
   if (!role) throw denied()
 
   // Also refuse a session invalidated since requireCaller (including email-proof rotation).
@@ -177,8 +190,15 @@ export function teamManagementAccess(db: Db, caller: CallerMiddleware) {
     await check(db, c.var.principal, c.var.principal.organization.id)
     await next()
   })
+  // Entry to self-impact reads only. The service must still scope the target to the
+  // caller for ordinary members and recheck the current session organization.
+  const memberRead = createMiddleware<CallerEnv>(async (c, next) => {
+    await check(db, c.var.principal, c.var.principal.organization.id, false, undefined, true)
+    await next()
+  })
   return {
     middleware: [caller, sessionOnly] as [CallerMiddleware, typeof sessionOnly],
+    memberReadMiddleware: [caller, memberRead] as [CallerMiddleware, typeof memberRead],
     write<T>(
       principal: Principal,
       teamId: string,
@@ -187,7 +207,11 @@ export function teamManagementAccess(db: Db, caller: CallerMiddleware) {
       return db
         .transaction()
         .setIsolationLevel('read committed')
-        .execute(async (trx) => operation(trx, await check(trx, principal, teamId, true)))
+        .execute(async (trx) => {
+          const actor = await check(trx, principal, teamId, true)
+          if (actor.role === 'member') throw denied()
+          return operation(trx, { ...actor, role: actor.role })
+        })
     },
   }
 }
