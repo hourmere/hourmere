@@ -173,12 +173,23 @@ export function organizationWriteAccess(principal: Principal, expectedOrganizati
  * their own authorization and organization bindings.
  */
 export function teamManagementAccess(db: Db, caller: CallerMiddleware) {
+  const sessionCaller = createMiddleware<CallerEnv>(async (c, next) => {
+    // Authorization selects the agent credential boundary, even with a valid cookie.
+    // Never let a session resolver grant team-management privileges to that request.
+    if (c.req.raw.headers.has('authorization')) throw denied()
+    const response = await caller(c, next)
+    if (response instanceof Response && response.status === 401) {
+      c.header('WWW-Authenticate', undefined)
+      throw denied()
+    }
+    return response
+  })
   const sessionOnly = createMiddleware<CallerEnv>(async (c, next) => {
     await check(db, c.var.principal, c.var.principal.organization.id)
     await next()
   })
   return {
-    middleware: [caller, sessionOnly] as [CallerMiddleware, typeof sessionOnly],
+    middleware: [sessionCaller, sessionOnly] as [CallerMiddleware, typeof sessionOnly],
     write<T>(
       principal: Principal,
       teamId: string,

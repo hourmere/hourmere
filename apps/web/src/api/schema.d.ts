@@ -4829,7 +4829,7 @@ export interface paths {
         };
         /**
          * Bookings of the session's current team
-         * @description Requires a current verified team owner/admin browser session. Includes bookings hosted by other team members, with only the team-administration field whitelist. Ordered by start time and id, ascending by default. Pass nextCursor as cursor with the same filters and order for the next page. Collective bookings appear once. Personal organizations are excluded.
+         * @description Requires a current verified team owner/admin browser session. Any Authorization header selects API-key/OAuth authentication and is denied, even with a valid session cookie. Missing sessions and ineligible callers receive the same 403 team_management_access_denied without revealing team existence. Includes bookings hosted by other team members, with only the team-administration field whitelist. Ordered by start time and id, ascending by default. Pass nextCursor as cursor with the same filters and order for the next page. Collective bookings appear once. Personal organizations are excluded.
          */
         get: {
             parameters: {
@@ -4873,26 +4873,8 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description No valid session or API key */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description team_management_access_denied: requires a current team owner/admin session */
+                /** @description team_management_access_denied: requires a current team owner/admin session without Authorization */
                 403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description The API key's rate limit is used up */
-                429: {
                     headers: {
                         [name: string]: unknown;
                     };

@@ -168,6 +168,11 @@ limited to MCP tools and do not authenticate REST requests.
 
 ### Browser organization context
 
+Better Auth's `/api/auth/organization/*` endpoints require browser sessions. Any
+Authorization header, including an empty or invalid value, returns `403 SESSION_REQUIRED`
+even alongside a valid owner/admin cookie. API keys and MCP OAuth tokens cannot inherit
+the browser's organization-management privileges.
+
 Organization-scoped browser drafts bind `X-Expected-Organization-Id` to the organization
 where the form or action started. Do not replace that value with the active organization
 at submission time. A header works with both the strict REST JSON bodies and Better Auth's
@@ -325,8 +330,10 @@ verified team owners/admins, including meetings hosted by other members. It acce
 same time/status filters, `order`, `limit` and opaque `cursor` as the host booking list.
 Pagination uses start time and ID, retaining microsecond cursor precision; collective
 bookings appear once. Inserts before a cursor do not shift later pages; later inserts can
-appear after it. Personal organizations, ordinary members and API keys receive
-`403 team_management_access_denied`. The route uses the shared team-management access check
+appear after it. Missing or invalid sessions, personal organizations, ordinary or removed
+members and API-key/OAuth callers receive the same `403 team_management_access_denied`,
+without revealing team existence. Any Authorization header is denied even alongside a
+valid owner/admin session cookie. The route uses the shared team-management access check
 and caller Origin/Referer handling. Responses contain only ID, status, start/end,
 `cancelledAt`, associated `eventType: {id,title}` (null title after deletion), saved
 `hosts: [{userId,name}]` and `attendees: [{name,email,timeZone,isBooker}]`, inside
