@@ -1,6 +1,8 @@
-import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { MemoryRouter, useLocation } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
+import { App } from '../App.tsx'
 import type { CreatedOrganization } from '../api/auth.ts'
 import type { Schemas } from '../api/client.ts'
 import { chooseLanguage } from '../i18n/store.ts'
@@ -76,6 +78,25 @@ async function fill(name = team.name, slug = team.slug) {
   await user.type(nameInput(), name)
   await user.type(slugInput(), slug)
   return user
+}
+
+function RecoveryLocation() {
+  const location = useLocation()
+  return (
+    <>
+      <output data-testid="location">{location.pathname}</output>
+      <output data-testid="location-state">{JSON.stringify(location.state ?? null)}</output>
+    </>
+  )
+}
+
+function renderRecovery(state: unknown = null) {
+  render(
+    <MemoryRouter initialEntries={[{ pathname: '/app/teams/new', state }]}>
+      <App />
+      <RecoveryLocation />
+    </MemoryRouter>,
+  )
 }
 
 describe('creating a team', () => {
@@ -222,6 +243,147 @@ describe('creating a team', () => {
 })
 
 describe('reconciling an uncertain creation result', () => {
+  it('treats the current personal organization as an address conflict and allows a corrected team address', async () => {
+    let attempts = 0
+    const { api } = server({
+      'POST /api/auth/organization/create': () =>
+        ++attempts === 1 ? json(500, { code: 'INTERNAL_SERVER_ERROR' }) : json(200, team),
+    })
+    renderApp('/app/teams/new')
+    const user = await fill(team.name, ME.organization.slug)
+    await user.click(submit())
+    const alert = await screen.findByRole('alert')
+    await waitFor(() => expect(slugInput().getAttribute('aria-invalid')).toBe('true'))
+    expect(within(alert).getByRole('link').textContent).toContain(
+      'This team address is already in use. Choose another one.',
+    )
+    await waitFor(() => expect(document.activeElement).toBe(slugInput()))
+    expect(slugInput().matches(':disabled')).toBe(false)
+    expect(nameInput().value).toBe(team.name)
+    expect(screen.queryByRole('button', { name: 'Open team' })).toBeNull()
+    expect(api.to('POST /api/auth/organization/set-active')).toHaveLength(0)
+    expect(api.to('POST /api/auth/organization/create')).toHaveLength(1)
+    await user.clear(slugInput())
+    await user.type(slugInput(), team.slug)
+    await user.click(submit())
+    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/app/settings'))
+    expect(api.to('POST /api/auth/organization/create').map((call) => call.body)).toEqual([
+      { name: team.name, slug: ME.organization.slug, keepCurrentActiveOrganization: true },
+      { name: team.name, slug: team.slug, keepCurrentActiveOrganization: true },
+    ])
+    expect(await screen.findByText('Owner')).toBeDefined()
+  })
+
+  it('restores an editable address conflict when opening a recovered organization confirms it is personal', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const { api, state } = server({
+      'POST /api/auth/organization/create': () => json(500, { code: 'INTERNAL_SERVER_ERROR' }),
+      'POST /api/auth/organization/set-active': () => {
+        state.me = ME
+        return json(200, ME.organization)
+      },
+    })
+    state.me = teamMe
+    renderRecovery()
+    const user = await fill(team.name, ME.organization.slug)
+    await user.click(submit())
+    await user.click(await screen.findByRole('button', { name: 'Open team' }))
+    await waitFor(() => expect(slugInput().getAttribute('aria-invalid')).toBe('true'))
+    await waitFor(() => expect(document.activeElement).toBe(slugInput()))
+    expect(screen.getByTestId('location').textContent).toBe('/app/teams/new')
+    expect(screen.getByTestId('location-state').textContent).toBe('null')
+    expect(nameInput().value).toBe(team.name)
+    expect(slugInput().value).toBe(ME.organization.slug)
+    expect(slugInput().matches(':disabled')).toBe(false)
+    expect(nameInput().matches(':disabled')).toBe(false)
+    expect(screen.queryByRole('button', { name: 'Open team' })).toBeNull()
+    expect(screen.getByRole('alert').textContent).toContain(
+      'This team address is already in use. Choose another one.',
+    )
+    expect(api.to('POST /api/auth/organization/create')).toHaveLength(1)
+    expect(api.to('POST /api/auth/organization/set-active').map((call) => call.body)).toEqual([
+      { organizationId: ME.organization.id },
+    ])
+    await user.clear(slugInput())
+    await user.type(slugInput(), 'Corrected-Team')
+    expect(slugInput().value).toBe('Corrected-Team')
+    await user.click(screen.getByRole('link', { name: 'Settings' }))
+    const account = await screen.findByRole('region', { name: 'Account' })
+    expect(account.textContent).toContain(ME.organization.name)
+    expect(account.textContent).toContain('(personal)')
+    expect(account.textContent).not.toContain(team.name)
+    await user.click(screen.getByRole('link', { name: 'Create team' }))
+    await screen.findByRole('heading', { name: 'Create team', level: 1 })
+    expect(nameInput().value).toBe('')
+    expect(slugInput().value).toBe('')
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(api.to('POST /api/auth/organization/create')).toHaveLength(1)
+  })
+
+  it.each([
+    {},
+    { teamAddressConflict: null },
+    { teamAddressConflict: 'invalid' },
+    {
+      teamAddressConflict: {
+        name: 123,
+        slug: 'ada',
+        userId: ME.user.id,
+        organizationId: ME.organization.id,
+      },
+    },
+    {
+      teamAddressConflict: {
+        name: team.name,
+        slug: ['ada'],
+        userId: ME.user.id,
+        organizationId: ME.organization.id,
+      },
+    },
+    {
+      teamAddressConflict: {
+        name: team.name,
+        slug: 'ada',
+        userId: 'foreign-user',
+        organizationId: ME.organization.id,
+      },
+    },
+    {
+      teamAddressConflict: {
+        name: team.name,
+        slug: 'ada',
+        userId: ME.user.id,
+        organizationId: 'foreign-organization',
+      },
+    },
+  ])('ignores malformed address-conflict route state (%#)', async (state) => {
+    server()
+    renderRecovery(state)
+    await screen.findByRole('heading', { name: 'Create team', level: 1 })
+    expect(nameInput().value).toBe('')
+    expect(slugInput().value).toBe('')
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(slugInput().matches(':disabled')).toBe(false)
+  })
+
+  it('ignores a personal-address conflict marker in a confirmed team context', async () => {
+    const { state } = server()
+    state.me = teamMe
+    renderRecovery({
+      teamAddressConflict: {
+        name: team.name,
+        slug: team.slug,
+        userId: ME.user.id,
+        organizationId: team.id,
+      },
+    })
+    await screen.findByRole('heading', { name: 'Create team', level: 1 })
+    expect(nameInput().value).toBe('')
+    expect(slugInput().value).toBe('')
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(slugInput().matches(':disabled')).toBe(false)
+  })
+
   it('recovers an already committed team from a refreshed list without a second create', async () => {
     const { api } = server({
       'POST /api/auth/organization/create': () => {

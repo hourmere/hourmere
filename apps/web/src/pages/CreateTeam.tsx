@@ -1,6 +1,6 @@
 import { isPublicTeamSlug, isReservedName } from '@hourmere/core/reserved'
 import { type FormEvent, useEffect, useRef, useState } from 'react'
-import { Link, useNavigate } from 'react-router'
+import { Link, useLocation, useNavigate } from 'react-router'
 import {
   createOrganization,
   listOrganizations,
@@ -17,14 +17,33 @@ import { useMounted, usePageTitle } from '../hooks.ts'
 import { useI18n } from '../i18n/runtime.tsx'
 import type { UiText } from '../i18n/translate.ts'
 import { PATHS, publicTeamPageUrl, TEAM_LINK_SLUG_HINT } from '../paths.ts'
-import { useMe, useSession } from '../session.tsx'
+import { type Me, useMe, useSession } from '../session.tsx'
 import { useUnsavedChanges } from '../unsaved-changes.tsx'
 
 const NAME_ERROR = 'Enter a team name on one line, up to 200 characters.'
+const ADDRESS_TAKEN = 'This team address is already in use. Choose another one.'
 const LABELS = { teamName: 'Team name', teamSlug: 'Team public address' }
 interface Draft {
   name: string
   slug: string
+}
+
+function addressConflictDraft(state: unknown, me: Me): Draft | null {
+  if (!state || typeof state !== 'object' || !('teamAddressConflict' in state)) return null
+  const draft = state.teamAddressConflict
+  return draft &&
+    typeof draft === 'object' &&
+    'name' in draft &&
+    'slug' in draft &&
+    'userId' in draft &&
+    draft.userId === me.user.id &&
+    'organizationId' in draft &&
+    draft.organizationId === me.organization.id &&
+    me.organization.personal &&
+    typeof draft.name === 'string' &&
+    typeof draft.slug === 'string'
+    ? { name: draft.name, slug: draft.slug }
+    : null
 }
 
 function validate({ name, slug }: Draft): FieldErrors {
@@ -44,12 +63,14 @@ export function CreateTeamPage() {
   const me = useMe()
   const { refresh, accept } = useSession()
   const navigate = useNavigate()
+  const location = useLocation()
+  const [restored] = useState(() => addressConflictDraft(location.state, me))
   const mounted = useMounted()
-  const [draft, setDraft] = useState<Draft>({ name: '', slug: '' })
-  const [errors, setErrors] = useState<FieldErrors>({})
+  const [draft, setDraft] = useState<Draft>(restored ?? { name: '', slug: '' })
+  const [errors, setErrors] = useState<FieldErrors>(restored ? { teamSlug: ADDRESS_TAKEN } : {})
   const [message, setMessage] = useState<UiText | null>(null)
-  const [attempt, setAttempt] = useState(0)
-  const [focusSlug, setFocusSlug] = useState(false)
+  const [attempt, setAttempt] = useState(restored ? 1 : 0)
+  const [focusSlug, setFocusSlug] = useState(Boolean(restored))
   const [busy, setBusy] = useState(false)
   const lock = useRef(false)
   // Keep the submitted address fixed until reads establish whether creation committed.
@@ -62,6 +83,24 @@ export function CreateTeamPage() {
   useUnsavedChanges(!complete && Boolean(draft.name || draft.slug))
   const slugField = useRef<HTMLInputElement>(null)
 
+  useEffect(() => {
+    const recovered = addressConflictDraft(location.state, me)
+    if (recovered) {
+      // Router navigation can arrive after the session's keyed remount. Only the page
+      // for the confirmed caller/context may apply and consume this handoff.
+      setDraft(recovered)
+      setErrors({ teamSlug: ADDRESS_TAKEN })
+      setFocusSlug(true)
+      setAttempt((value) => value + 1)
+      const state = { ...location.state }
+      delete state.teamAddressConflict
+      navigate(
+        { pathname: location.pathname, search: location.search, hash: location.hash },
+        { replace: true, state: Object.keys(state).length ? state : null },
+      )
+    }
+  }, [location, navigate, me])
+
   // ErrorSummary focuses first; address failures then lead directly to the address control.
   // biome-ignore lint/correctness/useExhaustiveDependencies: each failed submit repeats focus
   useEffect(() => {
@@ -73,6 +112,17 @@ export function CreateTeamPage() {
     setAttempt((value) => value + 1)
   }
 
+  function personalAddressConflict() {
+    setCreated(null)
+    setCreatedMember(null)
+    setUncertain(null)
+    setRetrySlug(null)
+    setMessage(null)
+    setErrors({ teamSlug: ADDRESS_TAKEN })
+    setFocusSlug(true)
+    setAttempt((value) => value + 1)
+  }
+
   async function openTeam(organization: Organization, member = createdMember) {
     await setActiveOrganization({ organizationId: organization.id })
     if (!mounted.current) return
@@ -80,6 +130,27 @@ export function CreateTeamPage() {
     if (!mounted.current) return
     if (confirmed.user.id !== me.user.id || confirmed.organization.id !== organization.id)
       throw new Error('Organization context changed')
+    // The list endpoint has no personal marker. A recovered organization must be checked
+    // through /me before treating it as a team or publishing a team membership.
+    if (confirmed.organization.personal) {
+      personalAddressConflict()
+      if (confirmed.organization.id !== me.organization.id) {
+        // Publishing the new context remounts this page; keep the draft and field error
+        // in this history entry just long enough for that remount to consume them.
+        navigate(PATHS.newTeam, {
+          replace: true,
+          state: {
+            teamAddressConflict: {
+              ...draft,
+              userId: confirmed.user.id,
+              organizationId: confirmed.organization.id,
+            },
+          },
+        })
+        accept(confirmed)
+      }
+      return
+    }
     setComplete(true)
     navigate(PATHS.settings, { replace: true, state: { createdMember: member } })
     accept(confirmed)
@@ -92,6 +163,10 @@ export function CreateTeamPage() {
     if (!mounted.current) return
     if (!current || current.user.id !== me.user.id) throw new Error('Session not confirmed')
     const found = organizations.find((organization) => organization.slug === submitted.slug)
+    if (found?.id === current.organization.id && current.organization.personal) {
+      personalAddressConflict()
+      return
+    }
     if (found) {
       setCreated(found)
       setUncertain(null)

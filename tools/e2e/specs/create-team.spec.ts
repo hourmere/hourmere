@@ -137,4 +137,61 @@ for (const locale of ['en-US', 'zh-CN'] as const) {
       1,
     )
   })
+
+  test(`a lost duplicate response keeps a personal address editable without treating it as a team ${locale}`, async ({
+    page,
+    app,
+  }) => {
+    await app.auditSignIn(true, locale)
+    await page.addInitScript(prepareAuditLocale, locale)
+    await page.setViewportSize(viewport)
+    const originalResponse = await page.request.get(`${app.url}/api/v1/me`)
+    expect(originalResponse.status()).toBe(200)
+    const original = (await originalResponse.json()) as {
+      organization: { id: string; slug: string; personal: boolean }
+    }
+    expect(original.organization.personal).toBe(true)
+    let creations = 0
+    let switches = 0
+    page.on('request', (request) => {
+      if (new URL(request.url()).pathname === '/api/auth/organization/set-active') switches++
+    })
+    await page.route(`${app.url}/api/auth/organization/create`, async (route) => {
+      creations++
+      if (creations === 1) {
+        const response = await route.fetch()
+        expect(response.status()).toBe(400)
+        await route.abort('failed')
+      } else await route.continue()
+    })
+    await page.goto(`${app.url}/app/teams/new`)
+    const teamName = page.getByLabel(text.name, { exact: true })
+    const slug = page.getByLabel(text.slug, { exact: true })
+    await teamName.fill('Research corrected address')
+    await slug.fill(original.organization.slug)
+    await slug.press('Enter')
+    await expect(slug).toHaveAttribute('aria-invalid', 'true')
+    await expect(slug).toBeFocused()
+    await expect(slug).toBeEnabled()
+    await expect(teamName).toHaveValue('Research corrected address')
+    await expect(page.getByRole('button', { name: text.open, exact: true })).toHaveCount(0)
+    expect(creations).toBe(1)
+    expect(switches).toBe(0)
+    const currentResponse = await page.request.get(`${app.url}/api/v1/me`)
+    const current = (await currentResponse.json()) as {
+      organization: { id: string; personal: boolean }
+    }
+    expect(current.organization.id).toBe(original.organization.id)
+    expect(current.organization.personal).toBe(true)
+    await fits(page, 'Personal address conflict')
+    await slug.press('ControlOrMeta+A')
+    await page.keyboard.insertText('Public-Research')
+    await slug.press('Enter')
+    await expect.poll(() => new URL(page.url()).pathname).toBe('/app/settings')
+    const account = page.getByRole('region', { name: text.account, exact: true })
+    await expect(account).toContainText('Research corrected address')
+    await expect(account.getByText(text.owner, { exact: true })).toBeVisible()
+    expect(creations).toBe(2)
+    expect(switches).toBe(1)
+  })
 }
