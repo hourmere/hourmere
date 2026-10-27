@@ -42,7 +42,7 @@ import {
   PublicStatus,
 } from './PublicLayout.tsx'
 import { normalizedHandle, normalizedSlug, teamSlug, useRequest } from './paths.ts'
-import { SlotPicker } from './SlotPicker.tsx'
+import { SlotPicker, type SlotPickerPosition } from './SlotPicker.tsx'
 import {
   formatDate,
   formatDuration,
@@ -157,6 +157,7 @@ function BookingFlow({
   const [timeZone, setTimeZone] = useState(() => visitorTimeZone(detectTimeZone()))
   const [now, setNow] = useState(currentTime)
   const [slot, setSlot] = useState<Slot | null>(null)
+  const [pickerPosition, setPickerPosition] = useState<SlotPickerPosition | null>(null)
   const [version, setVersion] = useState(0)
   const [notice, setNotice] = useState<UiText | null>(null)
   const [backToPicker, setBackToPicker] = useState(false)
@@ -164,6 +165,7 @@ function BookingFlow({
   const [serverErrors, setServerErrors] = useState<FieldErrors>({})
   const [formError, setFormError] = useState<UiText | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const inFlight = useRef(false)
   const [confirmed, setConfirmed] = useState<Confirmed | null>(null)
   const [gone, setGone] = useState(false)
   // One Idempotency-Key per booking attempt: resending the same request (after a network
@@ -177,18 +179,22 @@ function BookingFlow({
   if (confirmed) return <Confirmation event={event} confirmed={confirmed} locale={locale} />
 
   function pick(chosen: Slot) {
+    // A different time starts a new intent, even if they later return to the old time.
+    if (attempt.current && attempt.current.body.start !== chosen.start) attempt.current = null
     setSlot(chosen)
     setNotice(null)
     setFormError(null)
   }
 
   function changeTime() {
+    if (inFlight.current) return
     setSlot(null)
+    setNow(currentTime())
     setBackToPicker(true)
   }
 
   async function submit() {
-    if (!slot) return
+    if (!slot || inFlight.current) return
     const guests = guestsFor(values.guests)
     const body: CreateBooking = {
       ...(embedded && { source: 'embed' as const }),
@@ -214,6 +220,7 @@ function BookingFlow({
       if (inviteeLocale) body.invitee.locale = inviteeLocale
       attempt.current = { key: randomKey(), details, body }
     }
+    inFlight.current = true
     setSubmitting(true)
     setFormError(null)
     setServerErrors({})
@@ -268,6 +275,7 @@ function BookingFlow({
         )
       }
     } finally {
+      inFlight.current = false
       setSubmitting(false)
     }
   }
@@ -341,7 +349,12 @@ function BookingFlow({
                     })}
                   </p>
                 )}
-              <button type="button" className="button button-small" onClick={changeTime}>
+              <button
+                type="button"
+                className="button button-small"
+                onClick={changeTime}
+                disabled={submitting}
+              >
                 {t('Change time')}
               </button>
             </div>
@@ -379,6 +392,8 @@ function BookingFlow({
               locale={locale}
               now={now}
               selected={slot}
+              initialPosition={pickerPosition}
+              onPositionChange={setPickerPosition}
               onSelect={pick}
               version={version}
               focusTitle={backToPicker}

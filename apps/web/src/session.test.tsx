@@ -200,6 +200,8 @@ describe('the session gate', () => {
     const api = fakeApi({
       ...profile(),
       'GET /api/v1/me': () => json(200, me),
+      'GET /api/auth/organization/get-active-member': () =>
+        json(200, { organizationId: TEAM_ID, userId: ME.user.id, role: 'owner' }),
       ...instance(),
       ...profile(),
     })

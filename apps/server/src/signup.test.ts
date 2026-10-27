@@ -989,6 +989,65 @@ describe.skipIf(!serverUrl)('sign-up control', () => {
   })
 
   describe('sign-in link email', () => {
+    it('returns identical rate limits for existing, unknown and disallowed addresses on one IP', async () => {
+      const existing = 'early@anywhere.example'
+      const unknown = 'nobody@team.example'
+      const disallowed = 'stranger@elsewhere.example'
+      await signIn(instance(OPEN), existing)
+      const app = instance(CLOSED)
+      // Better Auth disables its request limiter in NODE_ENV=test by default.
+      // Enable the real production rules without changing the per-IP/path storage or limit.
+      const context = await app.auth.$context
+      context.rateLimit.enabled = true
+      const socket = { incoming: { socket: { remoteAddress: '203.0.113.54' } } }
+      const request = (email: string, peer = socket) =>
+        app.request(
+          '/api/auth/sign-in/magic-link',
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ email, callbackURL: '/app' }),
+          },
+          peer,
+        )
+
+      // Freeze only Date.now so retry-delay headers cannot tick between comparisons.
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now())
+      try {
+        // Different addresses consume the same five-request IP/path budget.
+        for (const email of [existing, unknown, disallowed, existing, unknown]) {
+          expect((await request(email)).status).toBe(200)
+        }
+        const answers = []
+        for (const email of [existing, unknown, disallowed]) {
+          const res = await request(email)
+          expect(res.status, email).toBe(429)
+          expect(res.headers.get('x-retry-after'), email).toBe('60')
+          answers.push({
+            status: res.status,
+            headers: Object.fromEntries(res.headers),
+            body: await res.text(),
+          })
+        }
+        expect(answers[1]).toEqual(answers[0])
+        expect(answers[2]).toEqual(answers[0])
+        expect(JSON.parse(answers[0]?.body ?? '')).toEqual({
+          message: 'Too many requests. Please try again later.',
+        })
+        // The same address remains eligible from a different client's fresh bucket.
+        expect(
+          (
+            await request(existing, {
+              incoming: { socket: { remoteAddress: '203.0.113.55' } },
+            })
+          ).status,
+        ).toBe(200)
+      } finally {
+        clock.mockRestore()
+      }
+      await afterSend()
+    })
+
     it('is not sent to, nor printed for, an address that may not sign up', async () => {
       await signIn(instance(OPEN), 'early@anywhere.example')
       // Without SMTP, links are printed instead of sent.
