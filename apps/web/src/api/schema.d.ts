@@ -2537,7 +2537,10 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /** @description The organization bound to the web form when it opened. Required for session event-type writes, including personal forms; ignored for API keys. A stale or missing context is refused with organization_context_changed; reload before retrying. */
+                    "x-expected-organization-id"?: string;
+                };
                 path?: never;
                 cookie?: never;
             };
@@ -2583,7 +2586,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description slug_taken: another event type on the same page has this slug */
+                /** @description slug_taken: another event type on the same page has this slug; organization_context_changed: reload the page before trying this team write again */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -2675,7 +2678,10 @@ export interface paths {
         delete: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /** @description The organization bound to the web form when it opened. Required for session event-type writes, including personal forms; ignored for API keys. A stale or missing context is refused with organization_context_changed; reload before retrying. */
+                    "x-expected-organization-id"?: string;
+                };
                 path: {
                     id: string;
                 };
@@ -2717,6 +2723,15 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
+                /** @description organization_context_changed: reload the page before trying this team write again */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
                 /** @description The API key's rate limit is used up */
                 429: {
                     headers: {
@@ -2734,7 +2749,10 @@ export interface paths {
         patch: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /** @description The organization bound to the web form when it opened. Required for session event-type writes, including personal forms; ignored for API keys. A stale or missing context is refused with organization_context_changed; reload before retrying. */
+                    "x-expected-organization-id"?: string;
+                };
                 path: {
                     id: string;
                 };
@@ -2791,7 +2809,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description slug_taken: another event type on the same page has this slug */
+                /** @description slug_taken: another event type on the same page has this slug; organization_context_changed: reload the page before trying this team write again */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -2829,7 +2847,10 @@ export interface paths {
         post: {
             parameters: {
                 query?: never;
-                header?: never;
+                header?: {
+                    /** @description The organization bound to the web form when it opened. Required for session event-type writes, including personal forms; ignored for API keys. A stale or missing context is refused with organization_context_changed; reload before retrying. */
+                    "x-expected-organization-id"?: string;
+                };
                 path: {
                     id: string;
                 };
@@ -2879,6 +2900,15 @@ export interface paths {
                 };
                 /** @description event_type_not_found: no such event type in the organization, or one the caller cannot see */
                 404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description organization_context_changed: reload the page before trying this team write again */
+                409: {
                     headers: {
                         [name: string]: unknown;
                     };

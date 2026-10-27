@@ -10,6 +10,7 @@ import type pg from 'pg'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import { createApp } from './app.ts'
+import { EXPECTED_ORGANIZATION_HEADER } from './team-management.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const origin = 'http://localhost:3000'
@@ -149,7 +150,12 @@ describe.skipIf(!serverUrl)('invitation creation and delivery enqueue ordering',
   ) =>
     i.app.request('/api/auth/organization/invite-member', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', origin, cookie: actor.cookie },
+      headers: {
+        'content-type': 'application/json',
+        origin,
+        cookie: actor.cookie,
+        [EXPECTED_ORGANIZATION_HEADER]: actor.organizationId,
+      },
       body: JSON.stringify({
         email: 'recipient@example.com',
         role: 'member',

@@ -2,7 +2,7 @@ import { isPublicTeamSlug } from '@hourmere/core/reserved'
 import { type FormEvent, useCallback, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { api, unwrap } from '../../api/client.ts'
-import { errorMessage } from '../../api/errors.ts'
+import { errorMessage, isOrganizationContextChanged } from '../../api/errors.ts'
 import {
   type EventType,
   isNotFound,
@@ -31,8 +31,8 @@ import {
   TEAM_LINK_SLUG_HINT,
 } from '../../paths.ts'
 import { randomHex } from '../../random.ts'
-import { type Me, useMe } from '../../session.tsx'
-import { useUnsavedChanges } from '../../unsaved-changes.tsx'
+import { type Me, useMe, useSession } from '../../session.tsx'
+import { useConfirmLeave, useUnsavedChanges } from '../../unsaved-changes.tsx'
 import { MissingRecord } from '../NotFound.tsx'
 import {
   comparable,
@@ -139,6 +139,13 @@ function EventTypeForm({
   const scheduleHint = t('The weekly hours times are offered in. {0}').split('{0}')
 
   const me = useMe()
+  // A form keeps the organization it started in; submitting never adopts another tab's
+  // active organization. RequireSession remounts it after a confirmed context reload.
+  const [expectedOrganizationId] = useState(me.organization.id)
+  const headers = { 'X-Expected-Organization-Id': expectedOrganizationId }
+  const { reload: reloadSession } = useSession()
+  const confirmLeave = useConfirmLeave()
+  const [contextChanged, setContextChanged] = useState(false)
   const navigate = useNavigate()
   const [saved, setSaved] = useState<EventType | null>(eventType)
   const [baseline, setBaseline] = useState(() =>
@@ -199,7 +206,11 @@ function EventTypeForm({
     try {
       if (saved) {
         const updated = await unwrap(
-          api.PATCH('/api/v1/event-types/{id}', { params: { path: { id: saved.id } }, body }),
+          api.PATCH('/api/v1/event-types/{id}', {
+            params: { path: { id: saved.id } },
+            body,
+            headers,
+          }),
         )
         // Left meanwhile: the answer is for a page that is gone.
         if (!mounted.current) return
@@ -210,7 +221,7 @@ function EventTypeForm({
         setStatus('Saved.')
         statusRef.current?.focus()
       } else {
-        const created = await unwrap(api.POST('/api/v1/event-types', { body }))
+        const created = await unwrap(api.POST('/api/v1/event-types', { body, headers }))
         // Left meanwhile: don't pull the person away from the page they are on now.
         if (!mounted.current) return
         setBaseline(draft)
@@ -223,7 +234,9 @@ function EventTypeForm({
     } catch (err) {
       if (!mounted.current) return
       setStatus('')
-      const mapped = serverErrors(err, draft)
+      const changed = isOrganizationContextChanged(err)
+      if (changed) setContextChanged(true)
+      const mapped = changed ? { fields: {}, message: errorMessage(err) } : serverErrors(err, draft)
       setErrors(mapped.fields)
       setFormError(
         Object.keys(mapped.fields).length > 0
@@ -254,10 +267,12 @@ function EventTypeForm({
           ? api.POST('/api/v1/event-types/{id}/round-robin/activate', {
               params: { path: { id: saved.id } },
               body: {},
+              headers,
             })
           : api.PATCH('/api/v1/event-types/{id}', {
               params: { path: { id: saved.id } },
               body: { schedulingType: 'round_robin', hosts: saved.hosts, scheduleId: null },
+              headers,
             }),
       )
       if (!mounted.current) return
@@ -274,6 +289,7 @@ function EventTypeForm({
     } catch (error) {
       if (!mounted.current) return
       setStatus('')
+      if (isOrganizationContextChanged(error)) setContextChanged(true)
       setFormError(msg('Could not update round robin. {0}', { '0': errorMessage(error) }))
       setAttempt((n) => n + 1)
     }
@@ -282,7 +298,14 @@ function EventTypeForm({
 
   async function remove() {
     if (!saved) return
-    await unwrap(api.DELETE('/api/v1/event-types/{id}', { params: { path: { id: saved.id } } }))
+    try {
+      await unwrap(
+        api.DELETE('/api/v1/event-types/{id}', { params: { path: { id: saved.id } }, headers }),
+      )
+    } catch (error) {
+      if (mounted.current && isOrganizationContextChanged(error)) setContextChanged(true)
+      throw error
+    }
     if (!mounted.current) return
     setBaseline(draft)
     navigate(PATHS.eventTypes, { state: flash(msg('Deleted “{0}”.', { '0': saved.title })) })
@@ -320,6 +343,20 @@ function EventTypeForm({
           message={formError}
           attempt={attempt}
         />
+
+        {contextChanged && (
+          <p>
+            <button
+              type="button"
+              className="button button-small"
+              onClick={() => {
+                if (confirmLeave()) reloadSession()
+              }}
+            >
+              {t('Reload')}
+            </button>
+          </p>
+        )}
 
         <fieldset className="form-fieldset" disabled={saving} role="presentation">
           <section className="panel" aria-labelledby="basics-heading">

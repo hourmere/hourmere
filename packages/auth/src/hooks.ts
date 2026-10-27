@@ -4,6 +4,7 @@ import { type AuthMiddlewareContext, apiKeyRules } from './api-keys.ts'
 import { displayNameRules } from './display-name.ts'
 import { checkListQuery, emptyMemberList } from './lists.ts'
 import { defaultMagicLinkErrorRedirect } from './magic-link.ts'
+import { organizationContext } from './organization-context.ts'
 import { isUuid, personalOwner } from './organizations.ts'
 
 /** Request fields that Better Auth looks up in uuid columns. */
@@ -102,6 +103,7 @@ export function beforeHook(db: Db) {
     requireSocialAuthorizationRequest(ctx)
     requireUuidIds(ctx.query)
     requireUuidIds(ctx.body)
+    await organizationContext(ctx, db)
     const filter = checkListQuery(ctx.path, ctx.query)
     const empty = await emptyMemberList(ctx, db, filter)
     if (empty) return empty

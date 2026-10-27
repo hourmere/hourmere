@@ -178,7 +178,7 @@ for (const locale of ['en-US', 'zh-CN'] as const) {
     const response = await page.request.patch(
       `${app.url}/api/v1/event-types/${state.eventTypeId}`,
       {
-        headers: { origin: app.url },
+        headers: { origin: app.url, 'X-Expected-Organization-Id': state.organizationId },
         data: { slug },
       },
     )
