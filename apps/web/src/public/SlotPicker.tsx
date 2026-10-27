@@ -8,8 +8,10 @@ import {
   addMonths,
   compareMonths,
   type DateKey,
+  daysInMonth,
   firstDayOfWeek,
   monthOf,
+  parseDateKey,
   toDateKey,
   type YearMonth,
 } from './calendar.ts'
@@ -49,6 +51,12 @@ type Loaded =
   | { status: 'ready'; slots: Slot[] }
   | { status: 'error'; message: UiText }
 
+/** Calendar position owned by the booking flow, independent of its selected time. */
+export interface SlotPickerPosition {
+  month: YearMonth
+  day: DateKey | null
+}
+
 interface SlotPickerProps {
   load: SlotLoader
   /** The meeting's length, for splitting long requests without losing slots. */
@@ -63,6 +71,9 @@ interface SlotPickerProps {
   excludeStart?: string | undefined
   selected: Slot | null
   onSelect: (slot: Slot) => void
+  /** Restore when the picker remounts after another step in the same flow. */
+  initialPosition?: SlotPickerPosition | null
+  onPositionChange?: (position: SlotPickerPosition) => void
   /** Changing it reloads the slots, e.g. after the chosen one was taken. */
   version: number
   title?: string
@@ -75,6 +86,39 @@ interface SlotPickerProps {
 }
 
 const monthKey = ({ year, month }: YearMonth) => `${year}-${month}`
+
+function restorePosition(
+  position: SlotPickerPosition | null | undefined,
+  firstMonth: YearMonth,
+  lastMonth: YearMonth,
+  today: DateKey,
+) {
+  if (!position) return { month: firstMonth, day: null, unavailable: false }
+  const { month, day } = position
+  if (
+    !Number.isInteger(month.year) ||
+    !Number.isInteger(month.month) ||
+    month.month < 1 ||
+    month.month > 12 ||
+    compareMonths(month, firstMonth) < 0 ||
+    compareMonths(month, lastMonth) > 0
+  ) {
+    return { month: firstMonth, day: null, unavailable: true }
+  }
+  if (day !== null) {
+    const parsed = parseDateKey(day)
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(day) ||
+      parsed.day < 1 ||
+      parsed.day > daysInMonth(month) ||
+      compareMonths(monthOf(day), month) !== 0 ||
+      day < today
+    ) {
+      return { month, day: null, unavailable: true }
+    }
+  }
+  return { month, day, unavailable: false }
+}
 
 /**
  * Picks a slot: a month calendar of the days with times, the times of the chosen day in the
@@ -93,6 +137,8 @@ export function SlotPicker({
   selected,
   excludeStart,
   onSelect,
+  initialPosition,
+  onPositionChange,
   version,
   title = 'Pick a time',
   afterTitle,
@@ -110,9 +156,16 @@ export function SlotPicker({
   const today = dateKeyIn(now, timeZone)
   const firstMonth = useMemo(() => monthOf(today), [today])
   const lastMonth = useMemo(() => addMonths(firstMonth, MONTHS_AHEAD), [firstMonth])
-  const [month, setMonth] = useState<YearMonth>(firstMonth)
-  const [day, setDay] = useState<DateKey | null>(null)
-  const [focusDay, setFocusDay] = useState<DateKey>(today)
+  const [restored] = useState(() => restorePosition(initialPosition, firstMonth, lastMonth, today))
+  const [month, setMonth] = useState<YearMonth>(restored.month)
+  const [day, setDay] = useState<DateKey | null>(restored.day)
+  const [positionUnavailable, setPositionUnavailable] = useState(restored.unavailable)
+  const [focusDay, setFocusDay] = useState<DateKey>(
+    restored.day ??
+      (compareMonths(restored.month, firstMonth) === 0
+        ? today
+        : toDateKey({ ...restored.month, day: 1 })),
+  )
   const [focusRequested, setFocusRequested] = useState(false)
   const [retry, setRetry] = useState(0)
   const slotsHeading = useRef<HTMLHeadingElement>(null)
@@ -121,14 +174,28 @@ export function SlotPicker({
   const [moreSlots, setMoreSlots] = useState(false)
   // Loaded data remembers what it was loaded for, so a render between a change and the new
   // answer never takes the previous month's slots for this one's.
-  const request = `${monthKey(month)}|${version}|${retry}`
+  const request = `${monthKey(month)}|${version}|${retry}|${now}|${durationMinutes}`
   const [loaded, setLoaded] = useState<{ request: string } & Loaded>({
     request: '',
     status: 'loading',
   })
   const state: Loaded = loaded.request === request ? loaded : { status: 'loading' }
-  const autoAdvanced = useRef(0)
+  // Returning to a browsed month must not silently move it, even if it is now empty.
+  const autoAdvanced = useRef(initialPosition ? AUTO_ADVANCE : 0)
   const weekStart = useMemo(() => firstDayOfWeek(locale), [locale])
+
+  useEffect(() => {
+    onPositionChange?.({ month, day })
+  }, [month, day, onPositionChange])
+
+  // Time passing or changing zones can move the accessible month window.
+  useEffect(() => {
+    if (compareMonths(month, firstMonth) >= 0 && compareMonths(month, lastMonth) <= 0) return
+    autoAdvanced.current = AUTO_ADVANCE
+    setMonth(firstMonth)
+    setDay(null)
+    setPositionUnavailable(true)
+  }, [month, firstMonth, lastMonth])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -183,8 +250,11 @@ export function SlotPicker({
   // day's times to the day before or after); keyboard focus stays in the month shown.
   useEffect(() => {
     if (day === null) return
-    if (compareMonths(monthOf(day), month) !== 0 || (ready && !available.has(day))) setDay(null)
-  }, [day, month, available, ready])
+    if (day < today || compareMonths(monthOf(day), month) !== 0 || (ready && !available.has(day))) {
+      setDay(null)
+      setPositionUnavailable(true)
+    }
+  }, [day, month, available, ready, today])
   useEffect(() => {
     if (compareMonths(monthOf(focusDay), month) !== 0) {
       setFocusDay(toDateKey({ ...month, day: 1 }))
@@ -194,12 +264,16 @@ export function SlotPicker({
   const changeMonth = useCallback((next: YearMonth, focus?: DateKey) => {
     autoAdvanced.current = AUTO_ADVANCE // people paging themselves stop the automatic advance
     setMonth(next)
+    setDay(null)
+    setPositionUnavailable(false)
     if (focus) {
       setFocusDay(focus)
       setFocusRequested(true)
     }
   }, [])
   const moveFocus = useCallback((target: DateKey) => {
+    // Browsing days with the keyboard or pointer also takes precedence over auto-jump.
+    autoAdvanced.current = AUTO_ADVANCE
     setFocusDay(target)
     setFocusRequested(true)
   }, [])
@@ -269,6 +343,11 @@ export function SlotPicker({
           <p role="alert">{uiText(notice)}</p>
         </div>
       )}
+      {positionUnavailable && (
+        <p className="alert alert-info" role="status">
+          {t('The date you were viewing is no longer available. Please pick another day.')}
+        </p>
+      )}
       <div className="picker-body">
         <div className="picker-calendar">
           <MonthCalendar
@@ -281,6 +360,7 @@ export function SlotPicker({
             onSelect={(next) => {
               setDaySelection((attempt) => attempt + 1)
               setDay(next)
+              setPositionUnavailable(false)
             }}
             focusDay={focusDay}
             onFocusDay={moveFocus}
