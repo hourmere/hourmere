@@ -11,16 +11,16 @@
     "deploy": "node ../../scripts/site-deploy-guard.ts && npm run build && npx --yes wrangler@4.151.0 deploy --env=\"\""
   },
   "devDependencies": {
-    "@astrojs/check": "0.9.10",
+    "@astrojs/check": "0.9.11",
     "@astrojs/markdown-satteri": "0.4.4",
     "@astrojs/sitemap": "3.7.4",
     "@astrojs/starlight": "0.42.6",
     "@fontsource-variable/manrope": "5.3.0",
     "@types/jsdom": "30.0.0",
-    "astro": "7.3.8",
-    "jsdom": "30.1.2",
+    "astro": "7.4.1",
+    "jsdom": "30.1.3",
     "parse5": "8.0.1",
-    "postcss": "8.5.30",
+    "postcss": "8.5.31",
     "sharp": "0.35.5",
     "typescript": "6.0.3"
   }
