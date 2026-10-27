@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   acceptLanguage,
   cookieLanguage,
@@ -81,6 +81,21 @@ describe('shared locale registry', () => {
       }).format(new Date('2026-10-27T15:30:00Z')),
     ).toBe('27 de outubro de 2026 às 08:30')
   })
+
+  it('takes regional and script exclusions from the registered locale', () => {
+    const languages = createLocaleResolver({
+      ...localeRegistry,
+      'zh-CN': {
+        ...localeRegistry['zh-CN'],
+        excludedRegions: ['US'],
+        excludedScripts: ['Latn'],
+      },
+    })
+    expect(languages.interfaceLanguage('zh-US')).toBeUndefined()
+    expect(languages.interfaceLanguage('zh-Latn')).toBeUndefined()
+    expect(languages.interfaceLanguage('zh-TW')).toBe('zh-CN')
+    expect(languages.interfaceLanguage('zh-Hant')).toBe('zh-CN')
+  })
 })
 
 describe('bounded interface language preferences', () => {
@@ -109,11 +124,17 @@ describe('bounded interface language preferences', () => {
     ['en-Cyrl', 'en'],
     ['zh', 'zh-CN'],
     ['zh-Hans', 'zh-CN'],
+    ['zh-US', 'zh-CN'],
+    ['zh-AU', 'zh-CN'],
+    ['zh-GB', 'zh-CN'],
+    ['zh-ID', 'zh-CN'],
+    ['zh-TH', 'zh-CN'],
+    ['zh-PH', 'zh-CN'],
+    ['zh-VN', 'zh-CN'],
     ['zh-SG', 'zh-CN'],
+    ['zh-Latn', 'zh-CN'],
+    ['zh-Bopo', 'zh-CN'],
     ['zh-Hans-CN', 'zh-CN'],
-    ['zh-Hans-TW', 'zh-CN'],
-    ['zh-Hans-HK', 'zh-CN'],
-    ['zh-Hans-MO', 'zh-CN'],
   ])('recognizes a supported BCP47 default %s', (value, language) => {
     expect(interfaceLanguage(value)).toBe(language)
   })
@@ -123,6 +144,9 @@ describe('bounded interface language preferences', () => {
     'zh-TW',
     'zh-HK',
     'zh-MO',
+    'zh-Hans-TW',
+    'zh-Hans-HK',
+    'zh-Hans-MO',
     'qab-BR',
     'fa-IR',
     'th-TH',
@@ -131,6 +155,26 @@ describe('bounded interface language preferences', () => {
   ])('falls through for unsupported or malformed default %s', (value) => {
     expect(interfaceLanguage(value)).toBeUndefined()
   })
+  it.each(['Hans', 'Hant'])('ignores regional CLDR script defaults of %s', (script) => {
+    const maximize = Intl.Locale.prototype.maximize
+    const regionalDefaults = vi
+      .spyOn(Intl.Locale.prototype, 'maximize')
+      .mockImplementation(function (this: Intl.Locale) {
+        return this.language === 'zh' && this.region
+          ? new Intl.Locale(`zh-${script}-${this.region}`)
+          : maximize.call(this)
+      })
+    try {
+      for (const tag of ['zh', 'zh-US', 'zh-AU', 'zh-GB', 'zh-SG', 'zh-Latn', 'zh-Bopo'])
+        expect(interfaceLanguage(tag), tag).toBe('zh-CN')
+      for (const tag of ['zh-TW', 'zh-HK', 'zh-MO', 'zh-Hant', 'zh-Hant-CN', 'zh-Hans-TW'])
+        expect(interfaceLanguage(tag), tag).toBeUndefined()
+      expect(acceptLanguage('zh-AU,en;q=0.5')).toBe('zh-CN')
+      expect(acceptLanguage('fr,zh-US;q=0.5')).toBe('zh-CN')
+    } finally {
+      regionalDefaults.mockRestore()
+    }
+  })
   it('reads the complete cookie value without accepting suffixes or encoded lookalikes', () => {
     expect(cookieLanguage('session=irrelevant; hourmere-language=zh-CN; other=1')).toBe('zh-CN')
     for (const value of ['en=extra', 'en%00', '%65n', 'zh-CN/', ' en', 'zh_CN'])
@@ -138,6 +182,8 @@ describe('bounded interface language preferences', () => {
     expect(cookieLanguage(`other=${'x'.repeat(16385)}; hourmere-language=en`)).toBeUndefined()
   })
   it('respects quality values, ordering, unsupported defaults and hard bounds', () => {
+    expect(acceptLanguage('zh-AU,en;q=0.5')).toBe('zh-CN')
+    expect(acceptLanguage('fr,zh-US;q=0.5')).toBe('zh-CN')
     expect(acceptLanguage('qab,zh-CN;q=0.8,en;q=0.6')).toBe('zh-CN')
     expect(acceptLanguage('zh-CN;q=0,en-US;q=0.8')).toBe('en')
     expect(acceptLanguage('zh-CN;q=broken,en;q=0.5')).toBe('en')

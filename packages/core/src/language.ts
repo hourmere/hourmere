@@ -24,15 +24,19 @@ export function createLocaleResolver<
       const locale = new Intl.Locale(value)
       const exact = explicitLanguage(locale.baseName)
       if (exact) return exact
-      const script = locale.maximize().script
+      // Regional likely-subtag data must not change the language's default script.
+      const script = locale.script ?? new Intl.Locale(locale.language).maximize().script
       const matches = localeCodes.filter((code) => {
         const candidate = new Intl.Locale(code)
-        // Language-wide entries accept variants; regional entries keep their script
-        // so Traditional Chinese does not select the Simplified Chinese catalogue.
-        return (
-          candidate.language === locale.language &&
-          ((!candidate.script && !candidate.region) || candidate.maximize().script === script)
+        const definition: LocaleDefinition = registry[code]
+        if (
+          candidate.language !== locale.language ||
+          definition.excludedRegions?.includes(locale.region ?? '')
         )
+          return false
+        if (definition.excludedScripts) return !definition.excludedScripts.includes(script ?? '')
+        // Language-wide entries accept variants; other regional entries keep their script.
+        return (!candidate.script && !candidate.region) || candidate.maximize().script === script
       })
       return (
         matches.find((code) => new Intl.Locale(code).region === locale.region) ??

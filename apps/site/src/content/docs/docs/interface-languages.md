@@ -76,10 +76,6 @@ Locale changes do not alter time zones, UTC API timestamps, idempotency or calen
 The OpenAPI locale descriptions list the registered languages; profile locale values remain
 general BCP 47 preferences rather than a closed enum.
 
-界面和邮件共用语言注册表，目前提供英文和简体中文。缺失词条逐条回退英文；日期按选定语言和
-原有时区显示。REST、MCP、CLI 使用相同的预约语言字段，重试、改期和取消保留已保存的语言。
-本卡只建立扩展基础，不新增语言或收费限制。
-
 ## Development
 
 Add one entry to
@@ -96,7 +92,7 @@ Add the corresponding catalogue files; loaders and language selectors discover t
 Use the existing English files as the key and placeholder reference. Partial catalogues are
 allowed for future languages. Catalogue tests report each locale's coverage, warn about
 missing translations for new locales, and fail for malformed or mismatched placeholders.
-English and Simplified Chinese remain complete. This card adds no production language.
+English and Simplified Chinese remain complete.
 
 Use `t(key, values)` during render and `msg(key, values)` for a notice or validation message
 held in state. Nested messages, date arguments and lists format when rendered, so visible
@@ -106,4 +102,4 @@ wrap arbitrary server prose or user-generated page titles in `literal(text)`.
 Do not translate protocol fields, create language-based React keys, replace arbitrary DOM
 text, add private session lookups to public routes, or include capabilities in language
 parameters or preferences. Preserve arbitrary-locale, Gregorian, daylight-saving and privacy
-regressions when adding pages. Language support is available in full on self-hosted instances.
+regressions when adding pages.

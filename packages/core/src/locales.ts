@@ -4,6 +4,9 @@ export type LocaleDefinition = {
   readonly fallbacks: readonly string[]
   readonly formatLocale: string
   readonly direction: 'ltr'
+  readonly excludedRegions?: readonly string[]
+  /** When present, accept every script except those listed instead of matching the entry's script. */
+  readonly excludedScripts?: readonly string[]
 }
 
 /** Add a registry entry and its catalogues to make another interface language available. */
@@ -21,6 +24,8 @@ export const localeRegistry = {
     fallbacks: ['en'],
     formatLocale: 'zh-CN',
     direction: 'ltr',
+    excludedRegions: ['TW', 'HK', 'MO'],
+    excludedScripts: ['Hant'],
   },
 } as const satisfies Record<string, LocaleDefinition>
 
