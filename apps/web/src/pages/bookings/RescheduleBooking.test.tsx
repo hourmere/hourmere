@@ -56,6 +56,90 @@ beforeEach(() => {
 })
 
 describe('host rescheduling in the booking detail', () => {
+  it.each(['Pick another time', 'conflict'])(
+    'restores the browsed month and day after returning through %s',
+    async (back) => {
+      const user = userEvent.setup()
+      const starts = ['2026-11-03T15:00:00Z', '2026-12-08T15:00:00Z', '2026-12-08T16:00:00Z']
+      let taken = false
+      hostApi({
+        [`GET ${slotsPath}`]: (call) =>
+          slotsAnswer(taken ? starts.filter((start) => start !== starts[1]) : starts)(call),
+        [`POST ${movePath}`]: () => {
+          taken = true
+          return json(409, { error: 'slot_taken' })
+        },
+      })
+      renderApp(detail)
+      await user.click(await screen.findByRole('button', { name: 'Reschedule' }))
+      await screen.findByRole('button', { name: 'Tuesday, November 3, available' })
+      await user.click(screen.getByRole('button', { name: 'Next month' }))
+      await user.click(
+        await screen.findByRole('button', { name: 'Tuesday, December 8, available' }),
+      )
+      await user.click(screen.getByRole('button', { name: '4:00 PM' }))
+      await user.click(
+        screen.getByRole('button', { name: back === 'conflict' ? 'Confirm new time' : back }),
+      )
+
+      const heading = await screen.findByRole('heading', { name: 'Pick a new time' })
+      await waitFor(() => expect(document.activeElement).toBe(heading))
+      const restored = await screen.findByRole('button', { name: 'Tuesday, December 8, available' })
+      expect(screen.getByRole('heading', { name: 'December 2026' })).toBeDefined()
+      expect(restored.closest('td')?.getAttribute('aria-selected')).toBe('true')
+      expect(
+        within(screen.getByRole('list', { name: /^Times on/ }))
+          .getAllByRole('button')
+          .map((button) => button.textContent),
+      ).toEqual(back === 'conflict' ? ['5:00 PM'] : ['4:00 PM', '5:00 PM'])
+    },
+  )
+
+  it.each(['Pick another time', 'conflict', 'reopen'])(
+    'rechecks the current time when returning through %s',
+    async (back) => {
+      const user = userEvent.setup()
+      hostApi(
+        {
+          [`GET ${slotsPath}`]: slotsAnswer([
+            '2026-11-03T15:00:00Z',
+            '2026-12-08T15:00:00Z',
+            '2026-12-09T15:00:00Z',
+          ]),
+          [`POST ${movePath}`]: () => json(409, { error: 'slot_taken' }),
+        },
+        booking({ start: '2027-01-15T14:00:00Z', end: '2027-01-15T14:30:00Z' }),
+      )
+      renderApp(detail)
+      await user.click(await screen.findByRole('button', { name: 'Reschedule' }))
+      await screen.findByRole('button', { name: 'Tuesday, November 3, available' })
+      await user.click(screen.getByRole('button', { name: 'Next month' }))
+      await user.click(
+        await screen.findByRole('button', { name: 'Tuesday, December 8, available' }),
+      )
+      await user.click(
+        screen.getByRole('button', { name: back === 'reopen' ? 'Keep booking' : '4:00 PM' }),
+      )
+      vi.mocked(Date.now).mockReturnValue(Date.parse('2026-12-08T15:05:00Z'))
+      await user.click(
+        screen.getByRole('button', {
+          name: back === 'conflict' ? 'Confirm new time' : back === 'reopen' ? 'Reschedule' : back,
+        }),
+      )
+      const expired = await screen.findByRole('button', {
+        name: 'Tuesday, December 8, no times available',
+      })
+      expect(expired.getAttribute('aria-disabled')).toBe('true')
+      await waitFor(() => {
+        expect(expired.closest('td')?.getAttribute('aria-selected')).toBe('false')
+        expect(screen.queryByRole('list', { name: /^Times on/ })).toBeNull()
+      })
+      expect(
+        await screen.findByRole('button', { name: 'Wednesday, December 9, available' }),
+      ).toBeDefined()
+    },
+  )
+
   it('uses the account Chinese locale for both reschedule summary ranges', async () => {
     browserLocale('en-US')
     const user = userEvent.setup()
