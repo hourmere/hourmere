@@ -295,15 +295,81 @@ describe.skipIf(!bootstrap)('organization-bound host booking writes', () => {
     },
   )
 
-  it('refuses a target from another organization even when the header matches the current organization', async () => {
-    const f = await fixture()
-    expect((await switchTeam(f)).status).toBe(200)
-    const before = await snapshot(f)
-    const result = await request(f, 'cancel', f.second.id)
-    expect(result.status).toBe(409)
-    expect(await result.json()).toEqual(refused)
-    expect(await snapshot(f)).toEqual(before)
-  })
+  it.each(actions)(
+    'keeps unknown, inaccessible and other-organization %s targets indistinguishable',
+    async (action) => {
+      const f = await fixture()
+      const before = await snapshot(f)
+      const other = await createTestUser(db, 'Other member host')
+      await db
+        .insertInto('auth.member')
+        .values({
+          userId: other.id,
+          organizationId: f.first.id,
+          role: 'member',
+          createdAt: new Date(),
+        })
+        .execute()
+      const inaccessible = await createFixtures(db).booking(
+        f.first.id,
+        [other.id],
+        '2030-11-05T10:00Z',
+        '2030-11-05T10:30Z',
+      )
+      const otherOrganization = await createFixtures(db).booking(
+        f.second.id,
+        [f.host.id],
+        '2030-11-05T11:00Z',
+        '2030-11-05T11:30Z',
+      )
+      for (const [bookingId, organizationId, hostId] of [
+        [inaccessible, f.first.id, other.id],
+        [otherOrganization, f.second.id, f.host.id],
+      ] as const) {
+        await db
+          .insertInto('booking_conferences')
+          .values({
+            root_booking_id: bookingId,
+            booking_id: bookingId,
+            organization_id: organizationId,
+            organizer_user_id: hostId,
+            calendar_id: randomUUID(),
+            connection_id: randomUUID(),
+            state: 'failed',
+            error_code: 'provider_unavailable',
+          })
+          .execute()
+        await db
+          .insertInto('booking_conference_mirrors')
+          .values({
+            root_booking_id: bookingId,
+            user_id: hostId,
+            calendar_id: randomUUID(),
+            connection_id: randomUUID(),
+            state: 'failed',
+            error_code: 'provider_unavailable',
+          })
+          .execute()
+      }
+      const statuses: number[] = []
+      const bodies: { error: string }[] = []
+      for (const bookingId of [randomUUID(), inaccessible, otherOrganization]) {
+        const response = await request({ ...f, bookingId }, action)
+        statuses.push(response.status)
+        bodies.push((await response.json()) as { error: string })
+      }
+      expect(statuses).toEqual([404, 404, 404])
+      const code =
+        action === 'conference/retry'
+          ? 'conference_not_found'
+          : action === 'calendar-copy/retry'
+            ? 'calendar_copy_not_found'
+            : 'booking_not_found'
+      expect(bodies[0]?.error).toBe(code)
+      expect(bodies).toEqual([bodies[0], bodies[0], bodies[0]])
+      expect(await snapshot(f)).toEqual(before)
+    },
+  )
 
   it.each(['', 'not-an-organization', randomUUID()])(
     'refuses a mismatched or malformed expected organization without changing the current booking (%#)',

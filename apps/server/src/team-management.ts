@@ -158,7 +158,7 @@ export function organizationWriteAccess(principal: Principal, expectedOrganizati
  * live context and membership remain valid through commit, without granting management roles.
  */
 export function bookingWriteAccess(principal: Principal, expectedOrganizationId?: string) {
-  return async (db: Db, organizationId: string, targetId?: string): Promise<void> => {
+  return async (db: Db, organizationId: string): Promise<void> => {
     if (principal.kind !== 'session' || expectedOrganizationId === undefined) return
     if (
       !uuid(expectedOrganizationId) ||
@@ -232,15 +232,6 @@ export function bookingWriteAccess(principal: Principal, expectedOrganizationId?
       : personal?.organization_id
     if (effectiveOrganizationId?.toLowerCase() !== organizationId.toLowerCase())
       throw contextChanged()
-
-    if (!targetId || !uuid(targetId)) throw contextChanged()
-    const booking = await db
-      .selectFrom('bookings')
-      .select('id')
-      .where('id', '=', targetId)
-      .where('organization_id', '=', organizationId)
-      .executeTakeFirst()
-    if (!booking) throw contextChanged()
   }
 }
 
