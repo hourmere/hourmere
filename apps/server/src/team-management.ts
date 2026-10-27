@@ -157,7 +157,8 @@ export function organizationWriteAccess(principal: Principal, expectedOrganizati
  * In a RouteModule, create `const access = teamManagementAccess(db, caller)` and declare
  * `middleware: access.middleware`. This preserves requireCaller's Origin/Referer checks,
  * then applies the existing sessionOnly pattern with fresh verified team owner/admin facts.
- * Read and validate the request body before calling `access.write(principal, teamId, ...)`.
+ * Bind read targets with `access.read(principal, teamId, ...)`. Read and validate the
+ * request body before calling `access.write(principal, teamId, ...)`.
  * Pass `{ expectedOrganizationId }` as the fourth argument for organization-bound writes;
  * the shared check also verifies the session's current organization under its locks.
  *
@@ -181,6 +182,14 @@ export function teamManagementAccess(db: Db, caller: CallerMiddleware) {
   })
   return {
     middleware: [caller, sessionOnly] as [CallerMiddleware, typeof sessionOnly],
+    /** Recheck the bound team before loading any read data; no provider I/O. */
+    async read<T>(
+      principal: Principal,
+      teamId: string,
+      operation: (db: Db, actor: TeamManager) => Promise<T>,
+    ): Promise<T> {
+      return operation(db, await check(db, principal, teamId))
+    },
     write<T>(
       principal: Principal,
       teamId: string,
