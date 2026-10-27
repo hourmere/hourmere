@@ -108,11 +108,18 @@ describe.skipIf(!serverUrl)('member operation attribution', () => {
     return { owner, target, organizationId, memberId: member.id }
   }
 
-  function post(path: string, cookie: string, body: object) {
+  function post(path: string, cookie: string, body: object, expectedOrganizationId?: string) {
     return auth.handler(
       new Request(`${origin}/api/auth/organization/${path}`, {
         method: 'POST',
-        headers: { cookie, origin, 'content-type': 'application/json' },
+        headers: {
+          cookie,
+          origin,
+          'content-type': 'application/json',
+          ...(expectedOrganizationId === undefined
+            ? {}
+            : { 'X-Expected-Organization-Id': expectedOrganizationId }),
+        },
         body: JSON.stringify(body),
       }),
     )
@@ -150,17 +157,22 @@ describe.skipIf(!serverUrl)('member operation attribution', () => {
 
   it('records the actual session actor and stored target while retaining only allowlisted fields', async () => {
     const f = await fixture()
-    const response = await post('remove-member', f.owner.cookie, {
-      organizationId: f.organizationId,
-      memberIdOrEmail: f.target.email,
-      actorUserId: f.target.id,
-      targetUserId: f.owner.id,
-      source: 'api',
-      apiKeyId: randomUUID(),
-      token: 'synthetic-private-value',
-      emailBody: 'synthetic-private-value',
-      responses: { answer: 'synthetic-private-value' },
-    })
+    const response = await post(
+      'remove-member',
+      f.owner.cookie,
+      {
+        organizationId: f.organizationId,
+        memberIdOrEmail: f.target.email,
+        actorUserId: f.target.id,
+        targetUserId: f.owner.id,
+        source: 'api',
+        apiKeyId: randomUUID(),
+        token: 'synthetic-private-value',
+        emailBody: 'synthetic-private-value',
+        responses: { answer: 'synthetic-private-value' },
+      },
+      f.organizationId,
+    )
     expect(response.status).toBe(200)
     expect(await membership(f.memberId)).toBeUndefined()
     const records = await operations(f.organizationId)
@@ -172,7 +184,12 @@ describe.skipIf(!serverUrl)('member operation attribution', () => {
 
   it('attributes ordinary leave to the member and clears their active team', async () => {
     const f = await fixture()
-    const response = await post('leave', f.target.cookie, { organizationId: f.organizationId })
+    const response = await post(
+      'leave',
+      f.target.cookie,
+      { organizationId: f.organizationId },
+      f.organizationId,
+    )
     expect(response.status).toBe(200)
     expect(await membership(f.memberId)).toBeUndefined()
     expect(await operations(f.organizationId)).toEqual([expected(f, f.target.id)])
@@ -186,15 +203,20 @@ describe.skipIf(!serverUrl)('member operation attribution', () => {
 
   it('retains only allowlisted role-change attribution without session credentials', async () => {
     const f = await fixture()
-    const response = await post('update-member-role', f.owner.cookie, {
-      organizationId: f.organizationId,
-      memberId: f.memberId,
-      role: 'admin',
-      actorUserId: f.target.id,
-      token: 'synthetic-private-value',
-      emailBody: 'synthetic-private-value',
-      responses: { answer: 'synthetic-private-value' },
-    })
+    const response = await post(
+      'update-member-role',
+      f.owner.cookie,
+      {
+        organizationId: f.organizationId,
+        memberId: f.memberId,
+        role: 'admin',
+        actorUserId: f.target.id,
+        token: 'synthetic-private-value',
+        emailBody: 'synthetic-private-value',
+        responses: { answer: 'synthetic-private-value' },
+      },
+      f.organizationId,
+    )
     expect(response.status).toBe(200)
     const records = await operations(f.organizationId)
     expect(JSON.stringify(records).includes('synthetic-private-value')).toBe(false)
@@ -206,20 +228,30 @@ describe.skipIf(!serverUrl)('member operation attribution', () => {
   it('retains before/after roles and does not emit a second event for a no-op', async () => {
     const f = await fixture()
     for (const role of ['admin', 'admin']) {
-      const response = await post('update-member-role', f.owner.cookie, {
-        organizationId: f.organizationId,
-        memberId: f.memberId,
-        role,
-      })
+      const response = await post(
+        'update-member-role',
+        f.owner.cookie,
+        {
+          organizationId: f.organizationId,
+          memberId: f.memberId,
+          role,
+        },
+        f.organizationId,
+      )
       expect(response.status).toBe(200)
     }
     expect((await membership(f.memberId))?.role).toBe('admin')
     expect(await operations(f.organizationId)).toEqual([expected(f, f.owner.id, 'admin')])
-    const response = await post('update-member-role', f.owner.cookie, {
-      organizationId: f.organizationId,
-      memberId: f.memberId,
-      role: 'member',
-    })
+    const response = await post(
+      'update-member-role',
+      f.owner.cookie,
+      {
+        organizationId: f.organizationId,
+        memberId: f.memberId,
+        role: 'member',
+      },
+      f.organizationId,
+    )
     expect(response.status).toBe(200)
     expect(await operations(f.organizationId)).toEqual([
       expected(f, f.owner.id, 'admin'),
@@ -229,18 +261,32 @@ describe.skipIf(!serverUrl)('member operation attribution', () => {
 
   it('does not record rejected operations or direct adapter maintenance', async () => {
     const f = await fixture()
-    const denied = await post('remove-member', f.target.cookie, {
-      organizationId: f.organizationId,
-      memberIdOrEmail: f.owner.email,
+    const denied = await post(
+      'remove-member',
+      f.target.cookie,
+      {
+        organizationId: f.organizationId,
+        memberIdOrEmail: f.owner.email,
+      },
+      f.organizationId,
+    )
+    expect(denied.status).toBe(400)
+    expect(await denied.json()).toMatchObject({
+      code: 'YOU_CANNOT_LEAVE_THE_ORGANIZATION_AS_THE_ONLY_OWNER',
     })
-    expect(denied.status).toBeGreaterThanOrEqual(400)
     const other = await fixture()
-    const crossTeam = await post('update-member-role', f.owner.cookie, {
-      organizationId: f.organizationId,
-      memberId: other.memberId,
-      role: 'admin',
-    })
-    expect(crossTeam.status).toBeGreaterThanOrEqual(400)
+    const crossTeam = await post(
+      'update-member-role',
+      f.owner.cookie,
+      {
+        organizationId: f.organizationId,
+        memberId: other.memberId,
+        role: 'admin',
+      },
+      f.organizationId,
+    )
+    expect(crossTeam.status).toBe(409)
+    expect(await crossTeam.json()).toMatchObject({ code: 'ORGANIZATION_CONTEXT_CHANGED' })
     expect(await operations(f.organizationId)).toEqual([])
     expect(await operations(other.organizationId)).toEqual([])
     const adapter = (await auth.$context).adapter
@@ -256,9 +302,59 @@ describe.skipIf(!serverUrl)('member operation attribution', () => {
     expect(await operations(f.organizationId)).toEqual([])
   })
 
+  it.each(['remove-member', 'leave', 'update-member-role'] as const)(
+    'checks %s context before persistence and records an admitted request exactly once',
+    async (path) => {
+      const f = await fixture()
+      const caller = path === 'leave' ? f.target : f.owner
+      const body = {
+        organizationId: f.organizationId,
+        ...(path === 'remove-member' ? { memberIdOrEmail: f.memberId } : {}),
+        ...(path === 'update-member-role' ? { memberId: f.memberId, role: 'admin' } : {}),
+      }
+      const before = await membership(f.memberId)
+      async function refused(expectedOrganizationId?: string) {
+        const response = await post(path, caller.cookie, body, expectedOrganizationId)
+        expect(response.status).toBe(409)
+        expect(await response.json()).toMatchObject({ code: 'ORGANIZATION_CONTEXT_CHANGED' })
+        expect(await membership(f.memberId)).toEqual(before)
+        expect(await operations(f.organizationId)).toEqual([])
+      }
+
+      await refused()
+      await refused('not-a-uuid')
+      const personalId = await ensurePersonalOrganization(db, caller.id)
+      expect((await post('set-active', caller.cookie, { organizationId: personalId })).status).toBe(
+        200,
+      )
+      // Keep the draft's original context after a real session switch. Even a header
+      // replaced with the current context cannot authorize the old draft's target.
+      await refused(f.organizationId)
+      await refused(personalId)
+      expect(await operations(personalId)).toEqual([])
+
+      expect(
+        (await post('set-active', caller.cookie, { organizationId: f.organizationId })).status,
+      ).toBe(200)
+      const response = await post(path, caller.cookie, body, f.organizationId)
+      expect(response.status).toBe(200)
+      if (path === 'update-member-role') {
+        expect((await membership(f.memberId))?.role).toBe('admin')
+      } else {
+        expect(await membership(f.memberId)).toBeUndefined()
+      }
+      expect(await operations(f.organizationId)).toEqual([
+        expected(f, caller.id, path === 'update-member-role' ? 'admin' : undefined),
+      ])
+    },
+  )
+
   it('does not record legacy member maintenance in a personal organization', async () => {
     const f = await fixture()
     const personalId = await ensurePersonalOrganization(db, f.owner.id)
+    expect((await post('set-active', f.owner.cookie, { organizationId: personalId })).status).toBe(
+      200,
+    )
     const legacy = await db
       .insertInto('auth.member')
       .values({
@@ -269,16 +365,26 @@ describe.skipIf(!serverUrl)('member operation attribution', () => {
       })
       .returning('id')
       .executeTakeFirstOrThrow()
-    const updated = await post('update-member-role', f.owner.cookie, {
-      organizationId: personalId,
-      memberId: legacy.id,
-      role: 'admin',
-    })
+    const updated = await post(
+      'update-member-role',
+      f.owner.cookie,
+      {
+        organizationId: personalId,
+        memberId: legacy.id,
+        role: 'admin',
+      },
+      personalId,
+    )
     expect(updated.status).toBe(200)
-    const removed = await post('remove-member', f.owner.cookie, {
-      organizationId: personalId,
-      memberIdOrEmail: legacy.id,
-    })
+    const removed = await post(
+      'remove-member',
+      f.owner.cookie,
+      {
+        organizationId: personalId,
+        memberIdOrEmail: legacy.id,
+      },
+      personalId,
+    )
     expect(removed.status).toBe(200)
     expect(await membership(legacy.id)).toBeUndefined()
     expect(await operations(personalId)).toEqual([])
@@ -450,6 +556,7 @@ describe.skipIf(!serverUrl)('member operation attribution', () => {
           path,
           path === 'leave' ? f.target.cookie : f.owner.cookie,
           body,
+          f.organizationId,
         ).then(
           () => false,
           (error: unknown) =>
@@ -479,13 +586,21 @@ describe.skipIf(!serverUrl)('member operation attribution', () => {
         createdAt: new Date(),
       })
       .execute()
+    expect(
+      (await post('set-active', secondOwner.cookie, { organizationId: f.organizationId })).status,
+    ).toBe(200)
     const results = await Promise.all(
       [f.owner.cookie, secondOwner.cookie].map((cookie) =>
-        post('update-member-role', cookie, {
-          organizationId: f.organizationId,
-          memberId: f.memberId,
-          role: 'admin',
-        }),
+        post(
+          'update-member-role',
+          cookie,
+          {
+            organizationId: f.organizationId,
+            memberId: f.memberId,
+            role: 'admin',
+          },
+          f.organizationId,
+        ),
       ),
     )
     expect(results.map((response) => response.status)).toEqual([200, 200])
@@ -514,12 +629,17 @@ describe.skipIf(!serverUrl)('member operation attribution', () => {
         await parent.query('SELECT id FROM auth.organization WHERE id = $1 FOR UPDATE', [
           f.organizationId,
         ])
-        pending = post(path, f.owner.cookie, {
-          organizationId: f.organizationId,
-          memberIdOrEmail: f.memberId,
-          memberId: f.memberId,
-          role: requestedRole,
-        }).then(
+        pending = post(
+          path,
+          f.owner.cookie,
+          {
+            organizationId: f.organizationId,
+            memberIdOrEmail: f.memberId,
+            memberId: f.memberId,
+            role: requestedRole,
+          },
+          f.organizationId,
+        ).then(
           (response) => ({ response }),
           () => ({ failed: true as const }),
         )

@@ -101,6 +101,15 @@ to arbitrary hosts' private bookings. Results default to ascending start time an
 order unchanged for every page. Rate limits return `429` and `Retry-After`; slot races
 return `slot_taken` or `slot_unavailable`. Recheck availability before retrying with a new key.
 
+Team owners/admins can use `GET /api/v1/team/bookings` with a verified browser session in
+the current team. It includes bookings hosted by other members and returns only the team
+administration fields: ID, status, times, cancellation time, event ID/title, saved host
+IDs/names and attendee contact/time-zone/booker fields. API keys, personal organizations
+and ordinary members receive `403 team_management_access_denied`. The endpoint uses the
+same time/status filters and opaque cursor pagination as the host list; keep filters and
+order unchanged between pages. Collective bookings appear once. No answers, private
+management links, calendar copies or conference links are returned.
+
 To move a booking you host, read `GET /api/v1/bookings/{id}/slots?start=…&end=…`, then
 send `POST /api/v1/bookings/{id}/reschedule` with JSON `{ "start": "<chosen slot start>" }`.
 Both require a session or API key in the booking's organization. Slots ignore the current

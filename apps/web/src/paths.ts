@@ -17,6 +17,7 @@ export const PATHS = {
   connectedApps: `${APP_BASE}/connected-apps`,
   apiKeys: `${APP_BASE}/api-keys`,
   settings: `${APP_BASE}/settings`,
+  newTeam: `${APP_BASE}/teams/new`,
   signIn: '/sign-in',
 } as const
 

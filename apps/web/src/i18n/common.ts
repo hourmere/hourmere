@@ -18,6 +18,8 @@ export const common = {
   'This meeting has ended.': '此会议已结束。',
   'Something went wrong': '出错了',
   Reload: '重新加载',
+  'Your team context changed. Reload before making changes.':
+    '你的团队上下文已改变。请重新加载后再进行修改。',
   'Scheduling page powered by Hourmere — pick a time that works.':
     '由 Hourmere 提供支持的预约页面，选择适合你的时间。',
   'Didn’t get the email? Check spam or junk and add the sender to your contacts.':
@@ -199,6 +201,8 @@ export const common = {
   'Page not found': '找不到页面',
   'Phone call': '电话会议',
   'Pick a day to see its times.': '请选择日期以查看可用时间。',
+  'The date you were viewing is no longer available. Please pick another day.':
+    '之前查看的日期已不可用，请选择其他日期。',
   'Pick a new time': '选择新时间',
   'Pick a time': '选择时间',
   'Pick an event to see available times.': '选择活动以查看可用时间。',

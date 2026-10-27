@@ -1,8 +1,19 @@
 import { describe, expect, it } from 'vitest'
 import { translateMessage } from '../i18n/translate.ts'
-import { errorFromResponse, errorMessage, requestError } from './errors.ts'
+import {
+  errorFromResponse,
+  errorMessage,
+  isOrganizationContextChanged,
+  requestError,
+} from './errors.ts'
 
 const teamErrors = [
+  ...['organization_context_changed', 'ORGANIZATION_CONTEXT_CHANGED'].map((code) => ({
+    status: 409,
+    code,
+    english: 'Your team context changed. Reload before making changes.',
+    chinese: '你的团队上下文已改变。请重新加载后再进行修改。',
+  })),
   {
     status: 400,
     code: 'ORGANIZATION_ALREADY_EXISTS',
@@ -30,6 +41,15 @@ const teamErrors = [
 ] as const
 
 describe('team organization error messages', () => {
+  it('recognizes the context refusal only for the documented status and codes', () => {
+    for (const code of ['organization_context_changed', 'ORGANIZATION_CONTEXT_CHANGED']) {
+      expect(isOrganizationContextChanged(requestError(409, { error: code }))).toBe(true)
+      expect(isOrganizationContextChanged(requestError(403, { error: code }))).toBe(false)
+    }
+    expect(isOrganizationContextChanged(requestError(409, { error: 'slot_taken' }))).toBe(false)
+    expect(isOrganizationContextChanged(new Error('organization_context_changed'))).toBe(false)
+  })
+
   it.each(teamErrors)('localizes Better Auth $code from its code', async (testCase) => {
     // No admin catalog registration: errors also work before the lazy session graph loads.
     for (const message of ['Unrelated server detail.', 'Changed server detail.']) {
