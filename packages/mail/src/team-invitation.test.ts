@@ -88,7 +88,8 @@ describe('teamInvitationEmail', () => {
   it.each([
     { language: 'zh', defaultLanguage: 'en', expected: 'zh-CN' },
     { language: 'zh-SG', defaultLanguage: 'en', expected: 'zh-CN' },
-    { language: 'zh-Hans-TW', defaultLanguage: 'en', expected: 'zh-CN' },
+    // The registry excludes TW even when the tag explicitly requests Simplified Chinese.
+    { language: 'zh-Hans-TW', defaultLanguage: 'en', expected: 'en' },
     { language: 'en-GB', defaultLanguage: 'zh-CN', expected: 'en' },
     { language: 'EN-us', defaultLanguage: 'zh-CN', expected: 'en' },
     { language: 'fr', defaultLanguage: 'zh-CN', expected: 'zh-CN' },

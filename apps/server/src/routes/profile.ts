@@ -8,6 +8,7 @@ import {
   putProfile,
   updateDisplayName,
 } from '@hourmere/scheduling'
+import { localeDescription } from '../i18n/locale-description.ts'
 import {
   authenticated,
   CROSS_ORIGIN_WRITE,
@@ -27,7 +28,7 @@ export const Profile = z
   .object({
     handle: z.string().openapi({ example: 'ada' }),
     timeZone: z.string().openapi({ example: 'Europe/Berlin' }),
-    locale: z.string().openapi({ example: 'en' }),
+    locale: z.string().openapi({ description: localeDescription, example: 'en' }),
     createdAt: z.iso.datetime(),
     updatedAt: z.iso.datetime(),
   })
@@ -44,7 +45,7 @@ const ProfileInput = z
     }),
     timeZone: z.string().openapi({ description: 'IANA time zone name', example: 'Europe/Berlin' }),
     locale: z.string().openapi({
-      description: 'BCP 47 language tag',
+      description: localeDescription,
       maxLength: LOCALE_MAX_LENGTH,
       example: 'en',
     }),

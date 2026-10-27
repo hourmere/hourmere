@@ -1,9 +1,11 @@
-import type { InterfaceLanguage } from '@hourmere/core/language'
-import type { admin } from './admin.ts'
-import { common } from './common.ts'
+import { formattingLocale, type InterfaceLanguage, localeFallbacks } from '@hourmere/core/language'
+import type { admin } from './catalogues/en/admin.ts'
+import type { common } from './catalogues/en/common.ts'
+import { catalogTemplate, knownMessage, registerCatalogues } from './catalogues.ts'
+import { commonCatalogues } from './common.ts'
 import { spaceCjkBoundaries } from './formatting.ts'
 export type MessageKey = keyof typeof common | keyof typeof admin
-export type Catalog = Readonly<Record<string, string>>
+export { type Catalog, registerCatalog } from './catalogues.ts'
 export interface UiMessage {
   readonly key: MessageKey
   readonly values: Readonly<
@@ -36,10 +38,13 @@ export function literal(text: string): UiLiteral {
 export function msg(key: MessageKey, values: UiMessage['values'] = {}): UiMessage {
   return { key, values }
 }
-const catalogs: Catalog[] = [common]
-/** Registered by the lazy session graph; public routes never import the admin catalog. */
-export function registerCatalog(catalog: Catalog) {
-  if (!catalogs.includes(catalog)) catalogs.push(catalog)
+registerCatalogues(commonCatalogues)
+function templateFor(locale: InterfaceLanguage, key: string): string | undefined {
+  for (const fallback of localeFallbacks(locale)) {
+    const template = catalogTemplate(fallback, key)
+    if (template !== undefined) return template
+  }
+  return undefined
 }
 export interface TranslationFormat {
   /** Undefined deliberately retains the browser’s full default BCP 47 date format. */
@@ -51,13 +56,7 @@ export function translate(
   values: UiMessage['values'] = {},
   formatting?: TranslationFormat,
 ): string {
-  let template: string = key
-  if (locale === 'zh-CN')
-    for (const catalog of catalogs)
-      if (Object.hasOwn(catalog, key)) {
-        template = catalog[key] ?? key
-        break
-      }
+  const template = templateFor(locale, key) ?? key
   return template.replace(/\{(\w+)\}/g, (placeholder, name: string, offset: number) => {
     if (!Object.hasOwn(values, name)) return placeholder
     const value = values[name]
@@ -91,20 +90,20 @@ export function translateMessage(
         .map((item) => translateMessage(locale, item, formatting))
         .join(message.separator)
     if ('date' in message)
-      return new Intl.DateTimeFormat(formatting ? formatting.dateLocale : locale, {
-        calendar: 'gregory',
-        timeZone: 'UTC',
-        weekday: 'short',
-        day: 'numeric',
-        month: 'short',
-        year: 'numeric',
-      }).format(new Date(`${message.date}T00:00:00Z`))
+      return new Intl.DateTimeFormat(
+        formatting ? formatting.dateLocale : formattingLocale(locale),
+        {
+          calendar: 'gregory',
+          timeZone: 'UTC',
+          weekday: 'short',
+          day: 'numeric',
+          month: 'short',
+          year: 'numeric',
+        },
+      ).format(new Date(`${message.date}T00:00:00Z`))
     return translate(locale, message.key, message.values, formatting)
   }
-  if (locale === 'en') return message
-  for (const catalog of catalogs)
-    if (Object.hasOwn(catalog, message)) return catalog[message] ?? message
-  return message
+  return templateFor(locale, message) ?? message
 }
 
 /** History state is untrusted; only bounded records with known keys are accepted. */
@@ -138,7 +137,7 @@ export function isUiText(value: unknown, depth = 0): value is UiText {
   if (
     Object.keys(record).some((key) => key !== 'key' && key !== 'values') ||
     typeof record.key !== 'string' ||
-    !catalogs.some((catalog) => Object.hasOwn(catalog, record.key as string))
+    !knownMessage(record.key)
   )
     return false
   if (!record.values || typeof record.values !== 'object' || Array.isArray(record.values))

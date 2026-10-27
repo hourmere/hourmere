@@ -1,3 +1,4 @@
+import { registeredLocales } from '@hourmere/core/language'
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
@@ -55,7 +56,9 @@ describe('the profile settings', () => {
       name: 'Notification language',
     })
     expect(bookingLanguage.tagName).toBe('SELECT')
-    expect([...bookingLanguage.options].map((option) => option.value)).toEqual(['en', 'zh-CN'])
+    expect([...bookingLanguage.options].map((option) => option.value)).toEqual(
+      registeredLocales.map(({ code }) => code),
+    )
     const explanation = document.getElementById(
       bookingLanguage.getAttribute('aria-describedby') ?? '',
     )

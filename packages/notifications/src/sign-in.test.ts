@@ -242,7 +242,7 @@ describe.skipIf(!serverUrl)('queued sign-in email', () => {
     expect(log).not.toHaveBeenCalled()
   })
 
-  it.each(['fr-FR', null, { tag: 'zh-CN' }])(
+  it.each(['qaa-QM', null, { tag: 'zh-CN' }])(
     'falls back to English for an unrecognized optional stored language: %j',
     async (language) => {
       const row = await enqueueStoredPayload({ language })
@@ -266,7 +266,7 @@ describe.skipIf(!serverUrl)('queued sign-in email', () => {
     },
   )
 
-  it.each([{ futureMetadata: true }, { language: 'fr-FR' }])(
+  it.each([{ futureMetadata: true }, { language: 'qaa-QM' }])(
     'refuses noncanonical input in the current producer: %j',
     async (invalid) => {
       await existing()

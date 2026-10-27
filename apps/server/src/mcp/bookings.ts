@@ -226,6 +226,7 @@ export function bookingTools({
     source: 'mcp',
     apiKeyId: caller.kind === 'api_key' ? caller.apiKeyId : null,
     oauthConsentId: caller.kind === 'oauth' ? caller.oauthConsentId : null,
+    actorUserId: caller.user.id,
   })
   const limiter = (group: keyof typeof PUBLIC_RATE_LIMITS) =>
     createRateLimiter(rateLimits[group] ?? PUBLIC_RATE_LIMITS[group])

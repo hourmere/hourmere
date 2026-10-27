@@ -1,0 +1,8 @@
+{
+  "title": "Sign in to Hourmere",
+  "instruction": "Press the button to finish signing in.",
+  "note": "This extra step keeps email security scanners, which open links to check them, from using up your sign-in link.",
+  "incomplete": "This sign-in link is incomplete. Open the whole link from the email, or ask for a new one.",
+  "javascript": "Signing in needs JavaScript. Turn it on for this page, then open the link from the email again.",
+  "language": "Interface language"
+}

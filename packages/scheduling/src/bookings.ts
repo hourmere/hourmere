@@ -2,8 +2,8 @@
 // listed, rescheduled and cancelled by hosts. Availability is always recomputed inside the transaction
 // that writes, and the exclusion constraint on booking_hosts is the last word on overlaps.
 import { createHash, randomBytes } from 'node:crypto'
-import type { Db, Json } from '@hourmere/db'
-import { sql } from 'kysely'
+import type { Database, Db, Json } from '@hourmere/db'
+import { sql, type Transaction } from 'kysely'
 import {
   eventTypeNotFound,
   findPublicEventType,
@@ -730,6 +730,18 @@ async function insertBooking(
 const bookingCancelled = () =>
   new DomainError('conflict', 'booking_cancelled', 'This booking is already cancelled')
 
+async function lockCancellationOrganization(trx: Db, organizationId: string): Promise<void> {
+  // Cancellation adds no host/user FK. Lock only the operation's organization parent,
+  // before the booking, without depending on the host's current identity locks.
+  const row = await trx
+    .selectFrom('auth.organization')
+    .select('id')
+    .where('id', '=', organizationId)
+    .forKeyShare()
+    .executeTakeFirst()
+  if (!row) throw bookingNotFound()
+}
+
 function assertChangeable(row: { status: string; start_at: Date }, now: Temporal.Instant): void {
   if (row.status === 'cancelled') throw bookingCancelled()
   if (Temporal.Instant.compare(toInstant(row.start_at), now) <= 0) {
@@ -739,11 +751,12 @@ function assertChangeable(row: { status: string; start_at: Date }, now: Temporal
 
 async function cancelLocked(
   db: Db,
-  row: { id: string; status: string; start_at: Date },
+  row: { id: string; organization_id: string; status: string; start_at: Date },
   now: Temporal.Instant,
   reason: string | null,
   notify: BookingNotifier | undefined,
   origin: BookingOrigin,
+  actorUserId: string | null,
 ): Promise<Booking> {
   assertChangeable(row, now)
   await db
@@ -757,6 +770,19 @@ async function cancelLocked(
       cancelled_oauth_consent_id: origin.oauthConsentId ?? null,
     })
     .where('id', '=', row.id)
+    .execute()
+  await db
+    .insertInto('organization_operations')
+    .values({
+      organization_id: row.organization_id,
+      operation: 'booking_cancelled',
+      actor_user_id: actorUserId,
+      booking_id: row.id,
+      source: origin.source,
+      api_key_id: origin.apiKeyId,
+      oauth_consent_id: origin.oauthConsentId ?? null,
+      occurred_at: now.toString(),
+    })
     .execute()
   await cancelBookingConference(db, row.id, now)
   // In this transaction: the cancellation email exists exactly when the cancellation does.
@@ -791,6 +817,8 @@ export interface BookingOrigin {
   apiKeyId: string | null
   /** OAuth grants have their own retry and audit scope, separate from keys and anonymous callers. */
   oauthConsentId?: string | null | undefined
+  /** Authenticated transport identity, when known; never inferred from the invitee or host. */
+  actorUserId?: string | null | undefined
 }
 
 const BOOKING_PAGE: BookingOrigin = { source: 'web', apiKeyId: null }
@@ -1000,9 +1028,27 @@ export async function cancelManagedBooking(
   if (!hash) throw bookingNotFound()
   const cancelReason = normalizeReason(reason)
   return ctx.db.transaction().execute(async (trx) => {
+    const target = await resolveManagedTarget(trx, hash)
+    const parent =
+      target &&
+      (await trx
+        .selectFrom('bookings')
+        .select('organization_id')
+        .where('id', '=', target.id)
+        .executeTakeFirst())
+    if (!parent) throw bookingNotFound()
+    await lockCancellationOrganization(trx, parent.organization_id)
     const row = await lockManagedBooking(trx, hash)
     if (!row) throw bookingNotFound()
-    return cancelLocked(trx, row, ctx.now(), cancelReason, ctx.notify, origin)
+    return cancelLocked(
+      trx,
+      row,
+      ctx.now(),
+      cancelReason,
+      ctx.notify,
+      origin,
+      origin.actorUserId ?? null,
+    )
   })
 }
 
@@ -1262,10 +1308,11 @@ export async function cancelHostBooking(
   if (!UUID.test(id)) throw bookingNotFound()
   const cancelReason = normalizeReason(reason)
   return ctx.db.transaction().execute(async (trx) => {
+    await lockCancellationOrganization(trx, ctx.principal.organization.id)
     const row = await trx
       .selectFrom('bookings as b')
       .innerJoin('booking_hosts as bh', 'bh.booking_id', 'b.id')
-      .select(['b.id', 'b.status', 'b.start_at'])
+      .select(['b.id', 'b.organization_id', 'b.status', 'b.start_at'])
       .where('b.id', '=', id)
       .where('bh.user_id', '=', ctx.principal.user.id)
       .where('b.organization_id', '=', ctx.principal.organization.id)
@@ -1284,6 +1331,42 @@ export async function cancelHostBooking(
         apiKeyId: ctx.principal.kind === 'api_key' ? ctx.principal.apiKeyId : null,
         oauthConsentId: ctx.principal.kind === 'oauth' ? ctx.principal.oauthConsentId : null,
       },
+      ctx.principal.user.id,
     )
   })
+}
+
+/**
+ * Cancellation inside the shared team-management write transaction. The caller must use
+ * that check's returned actor and transaction; this helper supplies no authorization of
+ * its own. The caller can reload its normal minimal team projection after the write.
+ * Read the clock after the booking lock, so waiting cannot extend the cancellation window.
+ * Existing host and manage-token entry points keep their original access rules.
+ */
+export async function cancelTeamBookingInTransaction(
+  trx: Transaction<Database>,
+  actor: { userId: string; organizationId: string },
+  id: string,
+  now: () => Temporal.Instant,
+  options: { reason?: string | undefined; notify?: BookingNotifier | undefined } = {},
+): Promise<void> {
+  if (!trx.isTransaction) throw new Error('Team cancellation requires a transaction')
+  if (!UUID.test(id)) throw bookingNotFound()
+  const row = await trx
+    .selectFrom('bookings')
+    .select(['id', 'organization_id', 'status', 'start_at'])
+    .where('id', '=', id)
+    .where('organization_id', '=', actor.organizationId)
+    .forUpdate()
+    .executeTakeFirst()
+  if (!row) throw bookingNotFound()
+  await cancelLocked(
+    trx,
+    row,
+    now(),
+    normalizeReason(options.reason),
+    options.notify,
+    BOOKING_PAGE,
+    actor.userId,
+  )
 }

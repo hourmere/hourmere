@@ -470,7 +470,7 @@ describe.skipIf(!serverUrl)('iMIP interoperability', () => {
     },
   )
 
-  it.each([null, 'fr-FR', 'zh-Hant-TW', 'invalid_locale'])(
+  it.each([null, 'qaa-QM', 'zh-Hant-TW', 'invalid_locale'])(
     'falls back to English independently for unsupported or absent locales (%s)',
     async (locale) => {
       const info = await setup()
