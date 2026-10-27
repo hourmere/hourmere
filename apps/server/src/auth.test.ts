@@ -425,10 +425,42 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
         status = res.status
       })
       expect(status).toBe(403)
-      // Rejected destinations may carry invitation IDs; their details stay out of logs.
-      expect(lines.some((l) => l.includes('[Better Auth]: diagnostic details omitted'))).toBe(true)
-      expect(lines.some((l) => l.includes('evil.example') || l.includes('forged'))).toBe(false)
+      // Keep the rejection diagnostic on one escaped line, without URL query values.
+      expect(lines.some((l) => l.includes('Invalid callbackURL') && l.includes('\\n[mail]'))).toBe(
+        true,
+      )
+      expect(lines.some((l) => l.includes('https://evil.example/'))).toBe(true)
+      expect(lines.some((l) => l.includes('token=forged') || l.includes('callbackURL=%2F'))).toBe(
+        false,
+      )
       expect(lines.filter((l) => l.startsWith('[mail]'))).toEqual([])
+    })
+
+    it('redacts an invitation UUID in rejected callback URLs while retaining the diagnostic', async () => {
+      const invitationId = '019a06ab-0000-7000-8000-000000000071'
+      const callbackURL = `https://evil.example/invitations/${invitationId}?invitationId=${invitationId}&value=left'private-query#private`
+      const lines = await printedLines(async () => {
+        const res = await main.app.request('/api/auth/sign-in/magic-link', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ email: 'admin@example.com', callbackURL }),
+        })
+        expect(res.status).toBe(403)
+      })
+      expect(
+        lines.filter((l) =>
+          l.includes('Invalid callbackURL: https://evil.example/invitations/[redacted UUID]'),
+        ),
+      ).toHaveLength(1)
+      expect(
+        lines.some(
+          (l) =>
+            l.includes(invitationId) ||
+            l.includes('?invitationId=') ||
+            l.includes('private-query') ||
+            l.includes('#private'),
+        ),
+      ).toBe(false)
     })
 
     it('accept only known sort and filter fields, exact filters, and UUIDs for id filters', async () => {
@@ -1663,7 +1695,7 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
   })
 
   describe('unexpected errors', () => {
-    it('are logged without request-controlled auth error details', async () => {
+    it('are logged on one escaped line', async () => {
       const app = createApp({
         checkDb: async () => {},
         authHandler: async () => {
@@ -1678,11 +1710,35 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
       })
       expect(res?.status).toBe(500)
       expect(await res?.json()).toEqual({ error: 'internal_error' })
-      expect(
-        lines.filter((l) => l.includes('authentication request failed (details omitted)')),
-      ).toHaveLength(1)
-      expect(lines.some((l) => l.includes('boom') || l.includes('forged'))).toBe(false)
+      expect(lines.filter((l) => l.includes('boom\\n[mail]'))).toHaveLength(1)
       expect(lines.filter((l) => l.startsWith('[mail]') || l.startsWith('    at '))).toEqual([])
+    })
+
+    it('retains auth errors while redacting invitation UUIDs and URL query/fragment values', async () => {
+      const invitationId = '019a06ab-0000-7000-8000-000000000071'
+      const app = createApp({
+        checkDb: async () => {},
+        authHandler: async () => {
+          throw new Error(
+            `Invitation ${invitationId} failed: https://host.example/app/join?invitationId=${invitationId}#private`,
+          )
+        },
+        resolveCaller: createCallerResolver({ auth: main.auth, db }),
+        publicUrl: origin,
+      })
+      const lines = await printedLines(async () => {
+        expect((await app.request('/api/auth/whatever')).status).toBe(500)
+      })
+      expect(
+        lines.filter((l) =>
+          l.includes('Invitation [redacted UUID] failed: https://host.example/app/join'),
+        ),
+      ).toHaveLength(1)
+      expect(
+        lines.some(
+          (l) => l.includes(invitationId) || l.includes('?invitationId=') || l.includes('#private'),
+        ),
+      ).toBe(false)
     })
 
     it('from Better Auth reach that handler instead of being printed raw', async () => {
@@ -1721,6 +1777,7 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
       expect(res?.status).toBe(500)
       expect(await res?.json()).toEqual({ error: 'internal_error' })
       expect(lines.some((l) => l.includes('ERROR POST /api/auth/sign-in/magic-link'))).toBe(true)
+      expect(lines.filter((l) => l.includes('db down\\n[mail]'))).toHaveLength(1)
       expect(
         lines.filter(
           (l) => l.startsWith('    at ') || l.startsWith('[mail]') || l.includes('# SERVER_ERROR'),

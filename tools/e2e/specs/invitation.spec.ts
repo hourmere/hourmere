@@ -78,7 +78,7 @@ test('an emailed sign-in link returns to the invitation and joining requires the
   expect(await app.state()).toEqual({ status: 'pending', joined: false, activeTeam: false })
   expect(calls.accepts).toBe(0)
   await page.getByRole('button', { name: 'Accept invitation', exact: true }).click()
-  await expect(page.getByRole('status')).toHaveText('You joined Invitation team.')
+  await expect(page.getByText('You joined Invitation team.', { exact: true })).toBeVisible()
   await expect
     .poll(() => app.state())
     .toEqual({ status: 'accepted', joined: true, activeTeam: true })

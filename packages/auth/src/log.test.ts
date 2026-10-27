@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
-import { betterAuthLog, escapeControlCharacters, logMailFailure } from './log.ts'
+import { betterAuthLog, escapeControlCharacters, logMailFailure, redactLogDetails } from './log.ts'
 
 describe('Better Auth diagnostic privacy', () => {
-  it('omits callback destinations, nested next paths and raw invitation IDs at every level', () => {
+  it('retains diagnostics with URL queries and UUIDs redacted at every level', () => {
     const invitationId = '00000000-0000-4000-8000-000000000071'
     const next = `/app/join?invitationId=${invitationId}`
     const callback = `https://evil.example/sign-in?${new URLSearchParams({ next })}`
@@ -14,17 +14,28 @@ describe('Better Auth diagnostic privacy', () => {
     )
     try {
       for (const level of ['debug', 'info', 'warn', 'error'] as const) {
-        betterAuthLog(level, `Invalid callbackURL: ${callback}`, {
+        betterAuthLog(level, `Invalid callbackURL: ${callback}\nInvitation ${invitationId}`, {
           invitationId,
-          error: new Error(invitationId),
+          error: new Error(`Invitation lookup failed: ${invitationId}`),
+          callback: "https://evil.example/sign-in?value=left'private-query",
         })
       }
       expect(calls).toHaveLength(4)
-      expect(calls.every((args) => args.join(' ').endsWith('diagnostic details omitted'))).toBe(
+      expect(
+        calls.every((args) =>
+          args.join(' ').includes('Invalid callbackURL: https://evil.example/sign-in'),
+        ),
+      ).toBe(true)
+      expect(
+        calls.every((args) => args.join(' ').includes('Invitation lookup failed: [redacted UUID]')),
+      ).toBe(true)
+      expect(calls.every((args) => args.join(' ').includes('\\nInvitation [redacted UUID]'))).toBe(
         true,
       )
       expect(JSON.stringify(calls).includes(invitationId)).toBe(false)
-      expect(JSON.stringify(calls).includes('evil.example')).toBe(false)
+      expect(JSON.stringify(calls).includes('next=')).toBe(false)
+      expect(JSON.stringify(calls).includes('private-query')).toBe(false)
+      expect(calls.every((args) => !args.join(' ').includes('\n'))).toBe(true)
     } finally {
       for (const spy of spies) spy.mockRestore()
     }
@@ -38,6 +49,45 @@ describe('Better Auth diagnostic privacy', () => {
     } finally {
       info.mockRestore()
     }
+  })
+})
+
+describe('redactLogDetails', () => {
+  it('removes query and fragment tails containing quotes or backslashes', () => {
+    for (const delimiter of ["'", '"', '\\', '`', '<', '>']) {
+      for (const separator of ['?', '#']) {
+        expect(
+          redactLogDetails(
+            `Invalid callbackURL: https://evil.example/join${separator}left${delimiter}private-query then failed`,
+          ),
+        ).toBe('Invalid callbackURL: https://evil.example/join then failed')
+      }
+    }
+  })
+
+  it('strips query strings and fragments while keeping absolute and local URL paths', () => {
+    expect(
+      redactLogDetails(
+        'Rejected https://evil.example/path?secret=value#private then /app/join?invitationId=private',
+      ),
+    ).toBe('Rejected https://evil.example/path then /app/join')
+    expect(
+      redactLogDetails(
+        'Rejected https://evil.example/path#private then //evil.example/path?secret=value',
+      ),
+    ).toBe('Rejected https://evil.example/path then //evil.example/path')
+    expect(redactLogDetails('Rejected custom://callback/path?secret=value#private')).toBe(
+      'Rejected custom://callback/path',
+    )
+  })
+
+  it('redacts invitation UUIDs in URL paths and plain messages, including uppercase', () => {
+    const invitationId = '019A06AB-0000-7000-8000-000000000071'
+    expect(
+      redactLogDetails(
+        `Invitation ${invitationId} failed at https://host.example/invitations/${invitationId}#private`,
+      ),
+    ).toBe('Invitation [redacted UUID] failed at https://host.example/invitations/[redacted UUID]')
   })
 })
 

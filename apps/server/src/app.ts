@@ -8,6 +8,7 @@ import {
   InvalidApiKeyError,
   MCP_OAUTH_SCOPE,
   MCP_OAUTH_SCOPES,
+  redactLogDetails,
 } from '@hourmere/auth'
 import { embedParent } from '@hourmere/core/embed'
 import { DomainError, type DomainErrorKind } from '@hourmere/scheduling'
@@ -274,16 +275,10 @@ export function createApp({
   // c.req.path is percent-decoded, so it is escaped too.
   const logLine = (c: Context, level: 'ERROR' | 'WARN', text: string) =>
     (level === 'ERROR' ? console.error : console.warn)(
-      `${new Date().toISOString()} ${level} ${escapeControlCharacters(`${c.req.method} ${c.req.path}: ${text}`)}`,
+      `${new Date().toISOString()} ${level} ${escapeControlCharacters(redactLogDetails(`${c.req.method} ${c.req.path}: ${text}`))}`,
     )
   const logError = (c: Context, label: string, detail: unknown) =>
-    logLine(
-      c,
-      'ERROR',
-      c.req.path.startsWith('/api/auth/')
-        ? 'authentication request failed (details omitted)'
-        : `${label}${inspect(detail, { breakLength: Number.POSITIVE_INFINITY })}`,
-    )
+    logLine(c, 'ERROR', `${label}${inspect(detail, { breakLength: Number.POSITIVE_INFINITY })}`)
 
   // Unexpected errors (including Better Auth's, which it rethrows) are logged and answered
   // with an opaque 500; only failures the caller can act on get a specific code.

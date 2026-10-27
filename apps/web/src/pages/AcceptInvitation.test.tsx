@@ -239,6 +239,8 @@ describe('accept invitation entry', () => {
     await screen.findByRole('button', { name: 'Accept invitation' })
     await user.click(screen.getByRole('button', { name: 'Accept invitation' }))
     await screen.findByText('You joined Team Alpha.')
+    expect(screen.getByRole('main').querySelectorAll('[role="status"]')).toHaveLength(1)
+    expect(screen.getByText('Loading…').getAttribute('role')).toBeNull()
     expect(screen.queryByRole('link', { name: 'Go to Hourmere' })).toBeNull()
     await context.answer(json(500, { error: 'internal_error' }))
     await screen.findByRole('button', { name: 'Try again' })

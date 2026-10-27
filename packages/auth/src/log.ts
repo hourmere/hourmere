@@ -1,3 +1,5 @@
+import { inspect } from 'node:util'
+
 // C0 and C1 control characters, the Unicode line and paragraph separators, and the bidi
 // embedding, override and isolate characters (which can make a log line read differently
 // from what it contains).
@@ -15,6 +17,18 @@ export function escapeControlCharacters(text: string): string {
     CONTROL,
     (c) => NAMED[c] ?? `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`,
   )
+}
+
+// Include absolute URLs/URIs and local paths. Queries can contain quotes or backslashes;
+// only whitespace ends a URL token, so its entire query/fragment is removed.
+const URL_TEXT = /(?:\b[a-z][a-z\d+.-]*:|\/)\S*/gi
+const UUID = /\b[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}\b/gi
+
+/** Preserve diagnostic text while removing identifiers and URL query/fragment values. */
+export function redactLogDetails(text: string): string {
+  return text
+    .replace(URL_TEXT, (url) => url.split(/[?#]/, 1)[0] ?? url)
+    .replace(UUID, '[redacted UUID]')
 }
 
 const MAIL_FAILURE = '[auth] sign-in email not sent'
@@ -48,10 +62,15 @@ export function logMailFailure(err: unknown): void {
   }
 }
 
+const format = (arg: unknown) =>
+  typeof arg === 'string'
+    ? redactLogDetails(arg)
+    : inspect(arg, { breakLength: Number.POSITIVE_INFINITY })
+
 /**
- * Better Auth's diagnostics may quote callback URLs, invitation IDs or database input.
- * Keep the level and a fixed label only. Rejected API keys retain a bounded code, never
- * the key: a wrong key is the caller's problem.
+ * Better Auth's diagnostic message and arguments, redacted before control escaping so
+ * each entry stays useful and occupies one line. Rejected API keys retain a bounded code,
+ * never the key: a wrong key is the caller's problem.
  */
 export function betterAuthLog(
   level: 'debug' | 'info' | 'warn' | 'error',
@@ -65,7 +84,8 @@ export function betterAuthLog(
     console.info(`[auth] API key rejected: ${reason}`)
     return
   }
-  const line = `${new Date().toISOString()} ${level.toUpperCase()} [Better Auth]: diagnostic details omitted`
+  const text = escapeControlCharacters(redactLogDetails([message, ...args.map(format)].join(' ')))
+  const line = `${new Date().toISOString()} ${level.toUpperCase()} [Better Auth]: ${text}`
   if (level === 'error') console.error(line)
   else if (level === 'warn') console.warn(line)
   else console.log(line)

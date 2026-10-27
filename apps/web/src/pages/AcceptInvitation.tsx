@@ -207,7 +207,7 @@ function Invitation({ email, search }: { email: string; search: string }) {
                   {t('Go to Hourmere')}
                 </Link>
               ) : checkingContext ? (
-                <p role="status">{t('Loading…')}</p>
+                <p>{t('Loading…')}</p>
               ) : (
                 <>
                   <p role="alert">{t('Could not check your session. Please reload.')}</p>

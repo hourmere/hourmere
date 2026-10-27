@@ -305,43 +305,42 @@ describe('createLogMailer', () => {
     expect(record).toMatchObject({
       to: 'ada@example.com',
       subject: 'Sign in to Hourmere',
-      links: ['https://cal.example.com/sign-in/confirm#token=abc'],
     })
+    expect(record.links.length === 1 && record.links[0] === url).toBe(true)
   })
 
-  it('omits invitation callbacks from logged sign-in links while preserving the actual email', async () => {
-    const invitationId = '00000000-0000-4000-8000-000000000071'
-    const next = `/app/join?invitationId=${invitationId}`
-    const callbackURL = `https://cal.example.com${next}`
-    const errorCallbackURL = `/sign-in?${new URLSearchParams({ next })}`
-    for (const delimiter of ['#', '?']) {
-      const params = new URLSearchParams({
-        token: 'synthetic-token',
-        callbackURL,
-        newUserCallbackURL: callbackURL,
-        errorCallbackURL,
-      })
-      const message = magicLinkEmail({
-        to: 'ada@example.com',
-        url: `https://cal.example.com/sign-in/confirm${delimiter}${params}`,
-        expiresInMinutes: 5,
-      })
+  it.each(['fragment', 'query'] as const)(
+    'preserves sign-in callback destinations in logged links and text (%s)',
+    async (location) => {
+      const invitationId = '00000000-0000-4000-8000-000000000071'
+      const next = `/app/join?invitationId=${invitationId}`
+      const callbacks = {
+        callbackURL: `https://cal.example.com${next}`,
+        newUserCallbackURL: `https://cal.example.com${next}`,
+        errorCallbackURL: `/sign-in?${new URLSearchParams({ next })}`,
+      }
+      const params = new URLSearchParams({ token: crypto.randomUUID(), ...callbacks })
+      const link = `https://cal.example.com/sign-in/confirm${location === 'fragment' ? '#' : '?'}${params}`
+      const message = magicLinkEmail({ to: 'ada@example.com', url: link, expiresInMinutes: 5 })
       const original = structuredClone(message)
       const lines: string[] = []
       await createLogMailer((line) => lines.push(line)).send(message)
-      expect(lines).toHaveLength(1)
-      expect(lines.every((line) => !line.includes(invitationId))).toBe(true)
+      expect(lines.length === 1).toBe(true)
       const record = JSON.parse((lines[0] as string).slice('[mail] '.length))
+      expect(Array.isArray(record.links) && record.links.length === 1).toBe(true)
       const loggedUrl = new URL(record.links[0])
-      expect(loggedUrl.searchParams.has('callbackURL')).toBe(false)
-      const fragment = new URLSearchParams(loggedUrl.hash.slice(1))
-      expect([...loggedUrl.searchParams.keys(), ...fragment.keys()]).toEqual(['token'])
-      expect(loggedUrl.searchParams.get('token') ?? fragment.get('token')).toBe('synthetic-token')
-      expect(message).toEqual(original)
-      expect(message.text.includes(invitationId)).toBe(true)
-      expect(message.html?.includes(invitationId)).toBe(true)
-    }
-  })
+      const loggedParams =
+        location === 'fragment'
+          ? new URLSearchParams(loggedUrl.hash.slice(1))
+          : loggedUrl.searchParams
+      for (const [name, destination] of Object.entries(callbacks)) {
+        expect(loggedParams.get(name) === destination, name).toBe(true)
+      }
+      expect(record.links[0] === link).toBe(true)
+      expect(record.text === message.text).toBe(true)
+      expect(JSON.stringify(message) === JSON.stringify(original)).toBe(true)
+    },
+  )
 
   it('names attachments and their sizes, not their contents', async () => {
     const lines: string[] = []

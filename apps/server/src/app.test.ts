@@ -55,7 +55,7 @@ describe('request log', () => {
     }
   })
 
-  it('does not log invitation query IDs, callbacks, bodies or auth error details', async () => {
+  it('keeps auth diagnostics without invitation IDs, URL query values or request bodies', async () => {
     const invitationId = '00000000-0000-4000-8000-000000000071'
     const callbackURL = `/app/join?invitationId=${invitationId}`
     const app = createApp({
@@ -81,10 +81,13 @@ describe('request log', () => {
       })
       const lines = [...log.mock.calls, ...error.mock.calls].map((args) => args.join(' '))
       expect(error.mock.calls).toHaveLength(3)
-      expect(error.mock.calls.every((args) => args.join(' ').endsWith('(details omitted)'))).toBe(
-        true,
-      )
+      expect(
+        error.mock.calls.every((args) =>
+          args.join(' ').includes('database input: [redacted UUID]; callbackURL=/app/join'),
+        ),
+      ).toBe(true)
       expect(lines.every((line) => !line.includes(invitationId))).toBe(true)
+      expect(lines.every((line) => !line.includes('?invitationId='))).toBe(true)
       expect(lines.every((line) => !line.includes('invitee@example.com'))).toBe(true)
     } finally {
       log.mockRestore()

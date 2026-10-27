@@ -233,9 +233,6 @@ without the recipient or link.
 Team invitation links open `/app/join?invitationId=<uuid>`. Sign in with the exact email
 address that received the invitation; email-link and enabled social sign-in return to that
 page. Signing in does not join the team: review the invitation and choose **Accept invitation**.
-Development log mail omits callback destinations to keep invitation identifiers out of logs;
-those logged sign-in links use the default landing page. Email delivered through SMTP keeps
-the return destination.
 
 The database enforces the sign-up rules too, using settings the app passes in the `options`
 startup parameter when it connects (`search_path` and `hourmere.*`), and it needs read
