@@ -14,10 +14,22 @@ import {
 import { teamManagementAccess } from '../team-management.ts'
 import { ListBookingsQuery } from './bookings.ts'
 
-const TeamAdminBooking = TeamAdminBookingSchema.openapi('TeamAdminBooking')
-const TeamAdminBookingPage = TeamAdminBookingPageSchema.extend({
-  data: z.array(TeamAdminBooking),
-}).openapi('TeamAdminBookingPage')
+// Published responses remain extensible within v1; the mapper's shared schemas retain
+// their strict privacy whitelist, including nested objects.
+const TeamAdminBooking = z
+  .object({
+    ...TeamAdminBookingSchema.shape,
+    eventType: z.object(TeamAdminBookingSchema.shape.eventType.unwrap().shape).nullable(),
+    hosts: z.array(z.object(TeamAdminBookingSchema.shape.hosts.element.shape)),
+    attendees: z.array(z.object(TeamAdminBookingSchema.shape.attendees.element.shape)),
+  })
+  .openapi('TeamAdminBooking')
+const TeamAdminBookingPage = z
+  .object({
+    ...TeamAdminBookingPageSchema.shape,
+    data: z.array(TeamAdminBooking),
+  })
+  .openapi('TeamAdminBookingPage')
 
 /** Team administration uses browser sessions and the shared current-team access check. */
 export function teamBookingRoutes(deps: ServiceDeps): RouteModule {

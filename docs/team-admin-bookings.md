@@ -33,9 +33,10 @@ later pages; new rows after it can appear. Collective bookings occupy one row re
 their host count. Reschedule predecessors remain `cancelled`, with successors listed as
 their own bookings; reschedule-chain identifiers are excluded.
 
-Each object schema is strict, including the nested activity, hosts and attendees. The
-mapper constructs new objects and arrays from named fields; it does not filter, extend
-or spread the host booking DTO.
+The internal validation schemas are strict, including the nested activity, hosts and
+attendees. The published response schemas use the same fields and remain open for additive
+v1 changes. The mapper constructs new objects and arrays from named fields; it does not
+filter, extend or spread the host booking DTO.
 
 All custom answers are excluded: no question has been classified as essential for team
 administration. Management tokens and hashes, personal calendar copies, calendar names,
@@ -54,6 +55,6 @@ contract and current booking/conference snapshot checks before expanding this wh
 calling the mapper, the route applies the shared team-management access check and the
 service rechecks current access, scopes every booking to the authorized team, reads current
 booking state, and loads only that booking's hosts and attendees. Event metadata comes from
-its associated event type
-in that team, with a null title after soft deletion. Existing host, public, management-token
-and agent interfaces keep their contracts. This endpoint grants read access only.
+its associated event type in that team, with a null title after soft deletion. Existing host,
+public, management-token and agent interfaces keep their contracts. This endpoint grants
+read access only.

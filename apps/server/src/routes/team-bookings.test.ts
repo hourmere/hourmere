@@ -24,7 +24,7 @@ import { productRoutes } from '../server.ts'
 import { teamManagementAccess } from '../team-management.ts'
 import { ListBookingsQuery } from './bookings.ts'
 import { teamBookingRoutes } from './team-bookings.ts'
-import { openApiDocument, resolve } from './test-app.ts'
+import { openApiDocument, resolve, responseAndRequestStrictness } from './test-app.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const origin = 'http://localhost:4389'
@@ -442,7 +442,7 @@ describe.skipIf(!serverUrl)('team administrator booking routes', () => {
     expect(await response.json()).toMatchObject({ error })
   })
 
-  it('registers the production route as session-only with the strict whitelist in OpenAPI', async () => {
+  it('registers the production route as session-only with an extensible whitelist in OpenAPI', async () => {
     const production = application(productRoutes({ db, socialProviders: {} }))
     expect(
       (await page(await get(seeded.ownerSession.cookie, '', {}, production))).data.map(
@@ -455,11 +455,10 @@ describe.skipIf(!serverUrl)('team administrator booking routes', () => {
     const schema = operation?.responses['200']?.content?.['application/json']?.schema
     expect(schema).toBeDefined()
     const envelope = resolve(document, schema as Record<string, unknown>)
-    expect(envelope.additionalProperties).toBe(false)
+    expect(responseAndRequestStrictness(document, [path]).closedResponses).toEqual([])
     expect(Object.keys(envelope.properties as object).sort()).toEqual(['data', 'nextCursor'])
     const data = (envelope.properties as Record<string, { items: Record<string, unknown> }>).data
     const item = resolve(document, data?.items as Record<string, unknown>)
-    expect(item.additionalProperties).toBe(false)
     expect(Object.keys(item.properties as object).sort()).toEqual([
       'attendees',
       'cancelledAt',
@@ -472,8 +471,16 @@ describe.skipIf(!serverUrl)('team administrator booking routes', () => {
     ])
   })
 
-  function sourceCopy(removeAccess: boolean, accessObserved: () => void): typeof teamBookingRoutes {
+  function sourceCopy(
+    removeAccess: boolean,
+    accessObserved: () => void,
+    replacement?: [string, string],
+  ): typeof teamBookingRoutes {
     let source = readFileSync('apps/server/src/routes/team-bookings.ts', 'utf8')
+    if (replacement) {
+      expect(source.includes(replacement[0]), 'mutation must match source').toBe(true)
+      source = source.replace(...replacement)
+    }
     if (removeAccess) {
       const original = 'middleware: access.middleware,'
       expect(source.includes(original), 'mutation must match source').toBe(true)
@@ -516,6 +523,40 @@ describe.skipIf(!serverUrl)('team administrator booking routes', () => {
     // the shared access middleware, rather than merely declare session-only documentation.
     expect(observed()).toBe(1)
   }
+
+  async function verifyOpenResponses(factory: typeof teamBookingRoutes) {
+    const copy = application([factory({ db, now: () => NOW })])
+    const document = await openApiDocument(copy)
+    expect(responseAndRequestStrictness(document, [path]).closedResponses).toEqual([])
+  }
+
+  it('passes the extensible response assertion with an unmodified route source copy', async () => {
+    await verifyOpenResponses(sourceCopy(false, () => {}))
+  })
+
+  it.each<[string, [string, string]]>([
+    [
+      'strict shared page schema',
+      ['content: json(TeamAdminBookingPage)', 'content: json(TeamAdminBookingPageSchema)'],
+    ],
+    [
+      'closed page',
+      ['TeamAdminBookingPage = z\n  .object({', 'TeamAdminBookingPage = z\n  .strictObject({'],
+    ],
+    [
+      'closed booking',
+      ['TeamAdminBooking = z\n  .object({', 'TeamAdminBooking = z\n  .strictObject({'],
+    ],
+    ['closed event type', ['eventType: z.object(', 'eventType: z.strictObject(']],
+    ['closed host', ['hosts: z.array(z.object(', 'hosts: z.array(z.strictObject(']],
+    ['closed attendee', ['attendees: z.array(z.object(', 'attendees: z.array(z.strictObject(']],
+  ])('detects publication of %s with a real assertion failure', async (_, replacement) => {
+    // Compile before checking assertion errors so load errors cannot count as detection.
+    const copy = sourceCopy(false, () => {}, replacement)
+    await expect(verifyOpenResponses(copy)).rejects.toThrow(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
+  })
 
   it('passes the access assertion with an unmodified route source copy', async () => {
     let observed = 0
