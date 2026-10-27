@@ -4,6 +4,8 @@ on:
   pull_request:
     # Retargeting a PR changes the checked commit range without pushing a new head.
     types: [opened, synchronize, reopened, edited]
+  # The merge queue needs the required sign-off check on its temporary merge branch too.
+  merge_group:
 
 permissions:
   contents: read
@@ -31,12 +33,13 @@ jobs:
       - name: Check sign-offs
         # Commit text reaches the script only through git, never through ${{ }} in the shell.
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
           # Exemptions go by author email, which anyone can set, so they apply only to branches
           # pushed to this repository (that takes write access). In a pull request from a fork,
-          # every commit needs a sign-off.
-          FROM_FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
+          # every commit needs a sign-off. A merge group holds only pull requests that already
+          # passed this check (forks without exemptions) plus clean merge commits GitHub made.
+          FROM_FORK: ${{ github.event_name == 'merge_group' && 'false' || github.event.pull_request.head.repo.full_name != github.repository }}
         run: |
           # Fail closed: only the literal false enables same-repository exemptions.
           if [ "$FROM_FORK" = false ]; then

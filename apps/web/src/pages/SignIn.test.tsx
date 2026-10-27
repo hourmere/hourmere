@@ -24,6 +24,16 @@ const location = () => screen.getByTestId('location').textContent
 const heading = () => screen.findByRole('heading', { name: 'Sign in to Hourmere' })
 const linkSent = () => json(200, { status: true })
 const resendStatus = () => within(screen.getByRole('main')).getByRole('status')
+const signInFailures = [
+  ['429', () => json(429, {})],
+  ['503', () => json(503, {})],
+  [
+    'network',
+    () => {
+      throw new TypeError('Failed to fetch')
+    },
+  ],
+] as const
 /** Lets answered requests reach the page (for checking that something did not appear). */
 const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 20)))
 
@@ -167,6 +177,49 @@ describe('the sign-in page', () => {
       expect(document.activeElement).toBe(target === 'body' ? resend : picker)
     },
   )
+
+  describe.each(signInFailures)('first-send %s failures', (_failure, fail) => {
+    it.each([
+      ['submit', 'body'],
+      ['submit', 'language picker'],
+      ['email', 'body'],
+    ] as const)('restores only lost submit focus (%s → %s)', async (origin, target) => {
+      const pending = later()
+      fakeApi({
+        ...signedOut,
+        ...instance(),
+        'POST /api/auth/sign-in/magic-link': async () => {
+          await pending.response
+          return fail()
+        },
+      })
+      renderApp('/sign-in')
+      const email = await screen.findByLabelText('Email')
+      await userEvent.type(email, 'ada@example.com')
+      const submit = screen.getByRole('button', { name: 'Email me a sign-in link' })
+      if (origin === 'submit') submit.focus()
+      await userEvent.keyboard('{Enter}')
+      expect(submit.hasAttribute('disabled')).toBe(true)
+      const picker = screen.getByRole('combobox', { name: 'Interface language' })
+      if (target === 'body') {
+        // JSDOM retains disabled-button focus; reproduce Chrome's native blur.
+        document.body.tabIndex = -1
+        document.body.focus()
+        document.body.removeAttribute('tabindex')
+      } else {
+        picker.focus()
+      }
+      expect(document.activeElement).toBe(target === 'body' ? document.body : picker)
+
+      await pending.answer(linkSent())
+      expect(await screen.findByRole('alert')).toBeDefined()
+      expect(submit.hasAttribute('disabled')).toBe(false)
+      expect(document.activeElement).toBe(
+        target === 'language picker' ? picker : origin === 'submit' ? submit : document.body,
+      )
+      expect(screen.getByLabelText<HTMLInputElement>('Email').value).toBe('ada@example.com')
+    })
+  })
 
   it('clears previous resend feedback when changing email and submitting a fresh request', async () => {
     const api = fakeApi({
@@ -355,6 +408,51 @@ describe('the sign-in page', () => {
     },
   )
 
+  it.each(signInFailures)(
+    'keeps next through request, failed resend (%s), change email and resubmit',
+    async (_failure, fail) => {
+      let requests = 0
+      const api = fakeApi({
+        ...signedOut,
+        ...instance(),
+        'POST /api/auth/sign-in/magic-link': () => (++requests === 2 ? fail() : linkSent()),
+      })
+      const next = '/app/settings?tab=profile#calendar'
+      const signIn = `/sign-in?next=${encodeURIComponent(next)}`
+      renderApp(signIn)
+      await userEvent.type(await screen.findByLabelText('Email'), 'ada@example.com')
+      await userEvent.click(screen.getByRole('button', { name: 'Email me a sign-in link' }))
+      const resend = await screen.findByRole('button', { name: 'Resend link' })
+      resend.focus()
+      await userEvent.keyboard('{Enter}')
+      expect(await screen.findByRole('alert')).toBeDefined()
+      expect(screen.getAllByRole('alert')).toHaveLength(1)
+      expect(resendStatus().textContent).toBe('')
+      expect(document.activeElement).toBe(resend)
+
+      await userEvent.tab()
+      expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Change email' }))
+      await userEvent.keyboard('{Enter}')
+      const email = await screen.findByLabelText<HTMLInputElement>('Email')
+      expect(document.activeElement).toBe(email)
+      expect(email.value).toBe('ada@example.com')
+      expect(screen.queryByRole('alert')).toBeNull()
+      expect(location()).toBe(signIn)
+      await userEvent.clear(email)
+      await userEvent.type(email, 'grace@example.com')
+      await userEvent.keyboard('{Enter}')
+      await screen.findByRole('heading', { name: 'Check your email' })
+
+      expect(api.to('POST /api/auth/sign-in/magic-link').map((call) => call.body)).toEqual(
+        ['ada@example.com', 'ada@example.com', 'grace@example.com'].map((address) => ({
+          email: address,
+          callbackURL: next,
+          errorCallbackURL: signIn,
+        })),
+      )
+    },
+  )
+
   it('localizes resend progress, success, rate limits and retryable failures into Chinese', async () => {
     const pending = later()
     let requests = 0
@@ -374,6 +472,9 @@ describe('the sign-in page', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Email me a sign-in link' }))
     await screen.findByRole('heading', { name: 'Check your email' })
     await userEvent.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+    expect(screen.getByText('ada@example.com').closest('p')?.textContent).toBe(
+      '我们已收到此邮箱的登录链接请求： ada@example.com。如果此邮箱可以登录，请检查收件箱中的登录链接。链接仅可使用一次，几分钟后过期。',
+    )
     await userEvent.click(screen.getByRole('button', { name: '重新发送链接' }))
     expect(screen.getByRole('button', { name: '重新发送链接' }).hasAttribute('disabled')).toBe(true)
     expect(resendStatus().textContent).toBe('正在重新发送…')
@@ -511,20 +612,39 @@ describe('the sign-in page', () => {
     await vi.waitFor(() => expect(location()).toBe('/sign-in?next=%2Fapp%2Fsettings'))
   })
 
-  it('reports a rate limit when sending the link', async () => {
-    fakeApi({
-      ...signedOut,
-      ...instance(),
-      'POST /api/auth/sign-in/magic-link': () => json(429, {}),
-    })
-    renderApp('/sign-in')
-    await userEvent.type(await screen.findByLabelText('Email'), 'ada@example.com')
-    await userEvent.click(screen.getByRole('button', { name: 'Email me a sign-in link' }))
-    expect((await screen.findByRole('alert')).textContent).toBe(
-      'Could not send the link. Too many requests. Wait a minute and try again.',
-    )
-    expect(screen.getByLabelText<HTMLInputElement>('Email').value).toBe('ada@example.com')
-  })
+  it.each(['en', 'zh-CN'] as const)(
+    'uses the same generic first-send and resend rate-limit wording in %s',
+    async (language) => {
+      let requests = 0
+      fakeApi({
+        ...signedOut,
+        ...instance(),
+        'POST /api/auth/sign-in/magic-link': () => (++requests === 2 ? linkSent() : json(429, {})),
+      })
+      renderApp('/sign-in')
+      await screen.findByLabelText('Email')
+      await userEvent.selectOptions(screen.getByLabelText('Interface language'), language)
+      const chinese = language === 'zh-CN'
+      const email = screen.getByLabelText<HTMLInputElement>(chinese ? '邮箱' : 'Email')
+      const submitName = chinese ? '通过邮件发送登录链接' : 'Email me a sign-in link'
+      await userEvent.type(email, 'ada@example.com')
+      await userEvent.click(screen.getByRole('button', { name: submitName }))
+      const message = (await screen.findByRole('alert')).textContent
+      expect(message).toBe(
+        chinese ? '请求过多，请稍后重试。' : 'Too many requests. Please wait and try again later.',
+      )
+      expect(email.value).toBe('ada@example.com')
+      expect(screen.getByRole('button', { name: submitName }).hasAttribute('disabled')).toBe(false)
+
+      await userEvent.click(screen.getByRole('button', { name: submitName }))
+      const resend = await screen.findByRole('button', {
+        name: chinese ? '重新发送链接' : 'Resend link',
+      })
+      await userEvent.click(resend)
+      expect((await screen.findByRole('alert')).textContent).toBe(message)
+      expect(resend.hasAttribute('disabled')).toBe(false)
+    },
+  )
 
   it('sends people who are already signed in on to where they were going', async () => {
     fakeApi({
