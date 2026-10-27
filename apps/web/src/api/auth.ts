@@ -189,3 +189,12 @@ export function setActiveOrganization(
 export function listOrganizations(signal?: AbortSignal): Promise<Organization[]> {
   return authRequest('/organization/list', signal ? { signal } : {})
 }
+
+/**
+ * The caller's membership in the session's active organization. Better Auth ignores
+ * organization selectors here: check organizationId and userId before using the result
+ * with a previously loaded /me context, since another tab can switch organizations.
+ */
+export function getActiveOrganizationMember(signal?: AbortSignal): Promise<OrganizationMember> {
+  return authRequest('/organization/get-active-member', signal ? { signal } : {})
+}

@@ -425,6 +425,8 @@ describe('the API keys page', () => {
     let refuse: (res: Response) => void = () => {}
     fakeApi({
       'GET /api/v1/me': () => json(200, me),
+      'GET /api/auth/organization/get-active-member': () =>
+        json(200, { organizationId: TEAM.id, userId: ME.user.id, role: 'member' }),
       ...organizations([ME.organization]),
       ...profile(),
       'GET /api/auth/api-key/list': () => json(200, { apiKeys: [], total: 0 }),

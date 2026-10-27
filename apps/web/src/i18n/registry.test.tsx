@@ -1,9 +1,18 @@
 import { type InterfaceLanguage, registeredLocales } from '@hourmere/core/language'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { widgetMessages } from '../embed/language.ts'
-import { fakeApi, json, PROFILE, profile, renderApp, signedIn } from '../test/fake-api.tsx'
+import {
+  fakeApi,
+  json,
+  ME,
+  PROFILE,
+  profile,
+  renderApp,
+  signedIn,
+  signedInAs,
+} from '../test/fake-api.tsx'
 import { booking, EVENT, eventRoutes } from '../test/public-fixtures.ts'
 import { registerCatalogues } from './catalogues.ts'
 import { formatDuration, formatMinutes } from './duration.ts'
@@ -139,6 +148,38 @@ describe('a locale registered only by metadata and catalogue files', () => {
     await waitFor(() => expect(api.to('PUT /api/v1/profile')).toHaveLength(1))
     await screen.findByText('Saved.')
     expect(api.to('PUT /api/v1/profile')[0]?.body).toMatchObject({ locale: fixture })
+  })
+
+  it('keeps team creation and the current role alongside a registry-only notification language', async () => {
+    const user = userEvent.setup()
+    const team = { ...ME, organization: { ...ME.organization, personal: false } }
+    const api = fakeApi({
+      ...signedInAs(team),
+      ...profile(PROFILE),
+      'GET /api/auth/organization/get-active-member': () =>
+        json(200, {
+          id: 'fixture-member',
+          organizationId: team.organization.id,
+          userId: team.user.id,
+          role: 'admin',
+          createdAt: '2026-10-27T10:00:00.000Z',
+        }),
+      'PUT /api/v1/profile': ({ body }) => json(200, { ...PROFILE, ...(body as object) }),
+    })
+    renderApp('/app/settings')
+    const account = await screen.findByRole('region', { name: 'Account' })
+    await waitFor(() => expect(within(account).queryByText('Admin')).not.toBeNull())
+    await user.selectOptions(screen.getByLabelText('Interface language'), fixture)
+    expect(within(account).getByText('Your role')).toBeDefined()
+    expect(within(account).getByText('Admin')).toBeDefined()
+    expect(within(account).queryByRole('link', { name: 'Create team' })?.getAttribute('href')).toBe(
+      '/app/teams/new',
+    )
+    await user.selectOptions(screen.getByLabelText('Notification language'), fixture)
+    await user.click(screen.getByRole('button', { name: 'Save profile' }))
+    await screen.findByText('Saved.')
+    expect(api.to('PUT /api/v1/profile')[0]?.body).toMatchObject({ locale: fixture })
+    expect(within(account).getByText('Admin')).toBeDefined()
   })
 
   it('formats public booking dates in the registry locale and captures the chosen language in the request', async () => {

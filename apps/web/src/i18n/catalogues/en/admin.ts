@@ -1,5 +1,39 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  'Team name': 'Team name',
+  'Team public address': 'Team public address',
+  'This address is kept for a safe retry. Check the existing team before starting another creation.':
+    'This address is kept for a safe retry. Check the existing team before starting another creation.',
+  'Enter a team name on one line, up to 200 characters.':
+    'Enter a team name on one line, up to 200 characters.',
+  'Choose a name and public address for your team.':
+    'Choose a name and public address for your team.',
+  'Use a name your teammates will recognize, up to 200 characters.':
+    'Use a name your teammates will recognize, up to 200 characters.',
+  'Team addresses preserve letter case and are separate from personal handles.':
+    'Team addresses preserve letter case and are separate from personal handles.',
+  'Team booking URL preview': 'Team booking URL preview',
+  'Each team event gets its own address at the end of this URL. Creating a team does not publish a booking page.':
+    'Each team event gets its own address at the end of this URL. Creating a team does not publish a booking page.',
+  'A team with this address is in your teams. Open it to continue.':
+    'A team with this address is in your teams. Open it to continue.',
+  'No team was found at this address. You can try creating it again.':
+    'No team was found at this address. You can try creating it again.',
+  'Creation could not be confirmed. Checking your teams before retrying…':
+    'Creation could not be confirmed. Checking your teams before retrying…',
+  'Could not check your teams. Check team status before trying again.':
+    'Could not check your teams. Check team status before trying again.',
+  'Open team': 'Open team',
+  'Check team status': 'Check team status',
+  'Creating team…': 'Creating team…',
+  'Create team': 'Create team',
+  'Your role': 'Your role',
+  'Last confirmed role': 'Last confirmed role',
+  Owner: 'Owner',
+  Admin: 'Admin',
+  Member: 'Member',
+  'Loading your team role…': 'Loading your team role…',
+  'Could not load your team role.': 'Could not load your team role.',
   'API key usage command': 'API key usage command',
   'New API key test command': 'New API key test command',
   'No schedules yet.': 'No schedules yet.',

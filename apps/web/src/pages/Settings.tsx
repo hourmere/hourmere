@@ -1,5 +1,7 @@
 import { explicitLanguage, interfaceLanguage, registeredLocales } from '@hourmere/core/language'
-import { type FormEvent, useRef, useState } from 'react'
+import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react'
+import { Link, useLocation, useNavigate } from 'react-router'
+import { getActiveOrganizationMember, type OrganizationMember } from '../api/auth.ts'
 import { api, unwrap } from '../api/client.ts'
 import { errorMessage, RequestError } from '../api/errors.ts'
 import { loadProfile, type Profile, updateDisplayName } from '../api/resources.ts'
@@ -13,6 +15,7 @@ import { useLoad, useMounted, usePageTitle } from '../hooks.ts'
 import { useI18n } from '../i18n/runtime.tsx'
 import { msg, type UiText } from '../i18n/translate.ts'
 import { ACCOUNT, PROFILE } from '../limits.ts'
+import { PATHS } from '../paths.ts'
 import { type Me, useMe, useSession } from '../session.tsx'
 import { useUnsavedChanges } from '../unsaved-changes.tsx'
 
@@ -21,6 +24,34 @@ export function SettingsPage() {
 
   usePageTitle('Settings')
   const me = useMe()
+  const location = useLocation()
+  const navigate = useNavigate()
+  // Keep the creation response through a failed read in this view. Consume history state
+  // afterwards so reloading cannot replay an old membership as current confirmation.
+  const [createdMember] = useState(() => {
+    const member = (location.state as { createdMember?: OrganizationMember } | null)?.createdMember
+    return member &&
+      member.organizationId === me.organization.id &&
+      member.userId === me.user.id &&
+      typeof member.role === 'string' &&
+      member.role.trim()
+      ? member
+      : null
+  })
+  useEffect(() => {
+    if (
+      location.state &&
+      typeof location.state === 'object' &&
+      Object.hasOwn(location.state, 'createdMember')
+    ) {
+      const state = { ...location.state }
+      delete state.createdMember
+      navigate(
+        { pathname: location.pathname, search: location.search, hash: location.hash },
+        { replace: true, state: Object.keys(state).length ? state : null },
+      )
+    }
+  }, [location, navigate])
   const [profile, reload] = useLoad(loadProfile)
 
   return (
@@ -51,13 +82,73 @@ export function SettingsPage() {
             <BreakableText>{me.user.email}</BreakableText>
           </dd>
           <dt>{t('Organization')}</dt>
-          <dd>
-            {me.organization.name}
+          <dd className="user-content">
+            <BreakableText>{me.organization.name}</BreakableText>
             {me.organization.personal && <span className="muted">{t(' (personal)')}</span>}
           </dd>
+          {!me.organization.personal && <TeamRole me={me} createdMember={createdMember} />}
         </dl>
+        <p>
+          <Link className="button" to={PATHS.newTeam}>
+            {t('Create team')}
+          </Link>
+        </p>
         <p className="hint">{t('Your email comes from how you sign in.')}</p>
       </section>
+    </>
+  )
+}
+
+function TeamRole({ me, createdMember }: { me: Me; createdMember: OrganizationMember | null }) {
+  const { t } = useI18n()
+  const organizationId = me.organization.id
+  const userId = me.user.id
+  const load = useCallback(
+    async (signal: AbortSignal) => {
+      const member = await getActiveOrganizationMember(signal)
+      if (member.organizationId !== organizationId || member.userId !== userId || !member.role) {
+        throw new Error('Membership does not match the displayed account and organization')
+      }
+      return member.role
+    },
+    [organizationId, userId],
+  )
+  const [role, reload] = useLoad(load)
+  const displayedRole = role.status === 'ready' ? role.data : createdMember?.role
+  const labels: Record<string, string> = {
+    owner: t('Owner'),
+    admin: t('Admin'),
+    member: t('Member'),
+  }
+
+  return (
+    <>
+      <dt>{t('Your role')}</dt>
+      <dd className="user-content">
+        {displayedRole && (
+          <BreakableText>
+            {displayedRole
+              .split(',')
+              .map((value) => {
+                const name = value.trim()
+                return Object.hasOwn(labels, name) ? labels[name] : name
+              })
+              .join(', ')}
+          </BreakableText>
+        )}
+        {displayedRole && role.status !== 'ready' && (
+          <p className="hint">{t('Last confirmed role')}</p>
+        )}
+        {role.status === 'loading' && <span role="status">{t('Loading your team role…')}</span>}
+        {role.status === 'error' && (
+          <div>
+            <p role="alert">{t('Could not load your team role.')}</p>
+            <button type="button" className="button button-small" onClick={reload}>
+              {t('Try again')}
+            </button>
+          </div>
+        )}
+      </dd>
     </>
   )
 }

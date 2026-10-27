@@ -8,6 +8,7 @@ import { emailText, escapeHtml, singleLine } from './text.ts'
 
 export * from './booking.ts'
 export * from './ics.ts'
+export * from './team-invitation.ts'
 export { escapeHtml, formatChineseTemplate, multiLine, singleLine, subjectLine } from './text.ts'
 
 export interface MailAttachment {
@@ -19,7 +20,7 @@ export interface MailAttachment {
 }
 
 export interface MailMessage {
-  /** Meeting capabilities must never appear in the development log mailer. */
+  /** Private message content and capabilities must never appear in the development log mailer. */
   sensitive?: boolean | undefined
   /** One address. It is never parsed as a list, so a comma in it cannot add recipients. */
   to: string
