@@ -2,9 +2,9 @@ import { act, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { BookingDetailPage } from '../pages/bookings/BookingDetail.tsx'
-import { fakeApi, json, profile } from '../test/fake-api.tsx'
+import { RequireSession, SessionProvider } from '../session.tsx'
+import { fakeApi, json, profile, signedIn } from '../test/fake-api.tsx'
 import { managed, TOKEN } from '../test/public-fixtures.ts'
-import { UnsavedChangesProvider } from '../unsaved-changes.tsx'
 import { ManageBookingPage } from './ManageBookingPage.tsx'
 
 const providers = [
@@ -266,17 +266,20 @@ describe.each(providers)('%s booking snapshot adoption', (provider, join, joinLa
     const old = replaced(provider)
     const route = `GET /api/v1/bookings/${old.id}`
     const api = fakeApi({
+      ...signedIn,
       ...profile(),
       [route]: () => json(200, old),
     })
     await act(async () => {
       render(
         <MemoryRouter initialEntries={[`/app/bookings/${old.id}`]}>
-          <UnsavedChangesProvider>
+          <SessionProvider>
             <Routes>
-              <Route path="/app/bookings/:id" element={<BookingDetailPage />} />
+              <Route element={<RequireSession />}>
+                <Route path="/app/bookings/:id" element={<BookingDetailPage />} />
+              </Route>
             </Routes>
-          </UnsavedChangesProvider>
+          </SessionProvider>
         </MemoryRouter>,
       )
     })

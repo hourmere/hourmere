@@ -188,7 +188,7 @@ The existing covered endpoints are:
 | Leave a team | `POST /api/auth/organization/leave` |
 | Change team settings, including name or slug | `POST /api/auth/organization/update` |
 
-For covered session writes, the expected organization must match both the operation's
+For the session writes above, the expected organization must match both the operation's
 target organization and the current valid session organization. Missing or mismatched
 context returns HTTP 409: `organization_context_changed` under `/api/v1`, or
 `ORGANIZATION_CONTEXT_CHANGED` under `/api/auth`. The message asks the person to reload.
@@ -201,19 +201,34 @@ and prevents a switch into a team from retargeting an unsaved personal draft.
 Organization writes and context transitions in the same browser session are ordered across
 server processes, so a switch cannot overtake an already checked organization write.
 
+The web booking detail also binds cancellation, rescheduling, conference reconciliation
+and calendar-copy retries to its opening organization with this header. These four
+booking-ID endpoints validate a supplied expectation against the live session,
+membership and booking organization inside the write transaction, ordered with session
+organization transitions. They retain ordinary host/organizer permissions; the header
+grants no administrative access. For compatibility, callers that omit the header keep
+the existing booking-ID authorization. API keys and OAuth grants keep their issued context.
+
 On refusal, keep the draft, show reload guidance and ask before discarding unsaved changes.
-Never replay the write or switch organizations automatically. Focus/visibility refresh and
-organization remounting remain the browser's recovery path; the server check also protects
-requests that arrive before that refresh.
+Never replay the write or switch organizations automatically. Focus/visibility refresh
+uses the same unsaved-changes prompt before replacing an organization's drafts. Declining
+keeps the old context and draft; accepting remounts the page. Explicit conflict reload
+discards older background session answers before reloading. The server check also protects
+requests that arrive before a refresh.
 
 Team creation, explicit switching and invitation acceptance bind their explicit targets
-under their existing rules rather than requiring the previous active organization. Personal
+under their existing rules rather than requiring the previous active organization. Automatic
+activation after team creation additionally sends the opening organization as its expected
+**source** context. Better Auth checks that source under the existing session transition
+lock before activating the explicit target; a conflict keeps the created team and draft
+available for recovery. Deliberate switches without this optional header retain their
+existing target-bound behavior. Personal
 profile, calendar and schedule writes, API-key management and OAuth connection management
 are excluded. API keys retain their issued organization, and OAuth grants retain their
 consented organization; neither depends on this browser header. Public booking and private
 manage-token operations retain their existing authority. Team deletion is unavailable
 through the browser organization endpoint. There is currently no team-administrator booking
-cancellation endpoint; the existing booking-ID routes still require the caller to be a host.
+cancellation endpoint; booking-ID routes still require the caller to be a host.
 Any future administrator cancellation route must use the same context protection.
 
 ### Integration settings

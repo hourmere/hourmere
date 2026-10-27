@@ -9,9 +9,10 @@ import {
   setActiveOrganization,
 } from '../api/auth.ts'
 import { api, unwrap } from '../api/client.ts'
-import { errorMessage, RequestError } from '../api/errors.ts'
+import { errorMessage, isOrganizationContextChanged, RequestError } from '../api/errors.ts'
 import { BreakableText } from '../components/BreakableText.tsx'
 import { ErrorSummary, Field, type FieldErrors } from '../components/forms.tsx'
+import { OrganizationContextConflict } from '../components/OrganizationContextConflict.tsx'
 import { PageHeader } from '../components/PageHeader.tsx'
 import { useMounted, usePageTitle } from '../hooks.ts'
 import { useI18n } from '../i18n/runtime.tsx'
@@ -64,6 +65,7 @@ export function CreateTeamPage() {
   const { t, ui } = useI18n()
   usePageTitle('Create team')
   const me = useMe()
+  const [openedContext] = useState(me)
   const { refresh, accept } = useSession()
   const navigate = useNavigate()
   const location = useLocation()
@@ -72,6 +74,7 @@ export function CreateTeamPage() {
   const [draft, setDraft] = useState<Draft>(restored ?? { name: '', slug: '' })
   const [errors, setErrors] = useState<FieldErrors>(restored ? { teamSlug: ADDRESS_TAKEN } : {})
   const [message, setMessage] = useState<UiText | null>(null)
+  const [contextError, setContextError] = useState<unknown>(null)
   const [attempt, setAttempt] = useState(restored ? 1 : 0)
   const [focusSlug, setFocusSlug] = useState(Boolean(restored))
   const [busy, setBusy] = useState(false)
@@ -112,6 +115,7 @@ export function CreateTeamPage() {
 
   function report(err: unknown) {
     setMessage(errorMessage(err))
+    setContextError(err)
     setAttempt((value) => value + 1)
   }
 
@@ -121,18 +125,36 @@ export function CreateTeamPage() {
     setUncertain(null)
     setRetrySlug(null)
     setMessage(null)
+    setContextError(null)
     setErrors({ teamSlug: ADDRESS_TAKEN })
     setFocusSlug(true)
     setAttempt((value) => value + 1)
   }
 
-  async function openTeam(organization: Organization, member = createdMember) {
-    await setActiveOrganization({ organizationId: organization.id })
+  async function openTeam(organization: Organization, member = createdMember, current?: Me) {
+    const before = current ?? (await unwrap(api.GET('/api/v1/me')))
     if (!mounted.current) return
-    const confirmed = await unwrap(api.GET('/api/v1/me'))
-    if (!mounted.current) return
+    if (
+      before.user.id !== openedContext.user.id ||
+      (before.organization.id !== openedContext.organization.id &&
+        before.organization.id !== organization.id)
+    )
+      throw new RequestError(409, 'organization_context_changed', '')
+    // Activation may have committed even when its confirmation was lost. Confirm that
+    // target without switching again; a different live team must never be overwritten.
+    let confirmed = before
+    if (before.organization.id !== organization.id) {
+      await setActiveOrganization(
+        { organizationId: organization.id },
+        undefined,
+        openedContext.organization.id,
+      )
+      if (!mounted.current) return
+      confirmed = await unwrap(api.GET('/api/v1/me'))
+      if (!mounted.current) return
+    }
     if (confirmed.user.id !== me.user.id || confirmed.organization.id !== organization.id)
-      throw new Error('Organization context changed')
+      throw new RequestError(409, 'organization_context_changed', '')
     // The list endpoint has no personal marker. A recovered organization must be checked
     // through /me before treating it as a team or publishing a team membership.
     if (confirmed.organization.personal) {
@@ -194,6 +216,7 @@ export function CreateTeamPage() {
     setErrors(problems)
     setFocusSlug(Boolean(problems.teamSlug))
     setMessage(null)
+    setContextError(null)
     setAttempt((value) => value + 1)
     if (Object.keys(problems).length) return
     lock.current = true
@@ -213,7 +236,7 @@ export function CreateTeamPage() {
       setCreatedMember(membership ?? null)
       // Creation and activation are separate: a failed switch can only retry opening.
       try {
-        await openTeam(result.organization, membership ?? null)
+        await openTeam(result.organization, membership ?? null, result.me)
       } catch (err) {
         if (mounted.current) report(err)
       }
@@ -253,7 +276,7 @@ export function CreateTeamPage() {
   }
 
   async function recover() {
-    if (lock.current) return
+    if (lock.current || isOrganizationContextChanged(contextError)) return
     lock.current = true
     setBusy(true)
     setMessage(null)
@@ -281,6 +304,7 @@ export function CreateTeamPage() {
       />
       <form className="panel stack" aria-label={t('Create team')} onSubmit={submit} noValidate>
         <ErrorSummary errors={errors} labels={LABELS} message={message} attempt={attempt} />
+        <OrganizationContextConflict error={contextError} />
         {created && (
           <dl className="details">
             <dt>{t('Team name')}</dt>
@@ -377,7 +401,7 @@ export function CreateTeamPage() {
             <button
               type="button"
               className="button button-primary"
-              disabled={busy}
+              disabled={busy || isOrganizationContextChanged(contextError)}
               onClick={recover}
             >
               {busy ? t('Working…') : created ? t('Open team') : t('Check team status')}

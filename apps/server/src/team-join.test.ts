@@ -115,7 +115,7 @@ describe.skipIf(!serverUrl)('team invitation contract', () => {
         'content-type': 'application/json',
         origin,
         cookie,
-        ...(expected ? { 'x-expected-organization-id': expected } : {}),
+        ...(expected && action !== 'set-active' ? { 'x-expected-organization-id': expected } : {}),
       },
       body: JSON.stringify(body),
     })

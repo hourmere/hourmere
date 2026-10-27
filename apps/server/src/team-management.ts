@@ -152,6 +152,99 @@ export function organizationWriteAccess(principal: Principal, expectedOrganizati
 }
 
 /**
+ * Host booking actions keep their existing explicit-ID authority. Browser callers may
+ * additionally bind the action to its opening organization; older clients and credentials
+ * retain their existing contract. Run first inside the service's write transaction so the
+ * live context and membership remain valid through commit, without granting management roles.
+ */
+export function bookingWriteAccess(principal: Principal, expectedOrganizationId?: string) {
+  return async (db: Db, organizationId: string, targetId?: string): Promise<void> => {
+    if (principal.kind !== 'session' || expectedOrganizationId === undefined) return
+    if (
+      !uuid(expectedOrganizationId) ||
+      !uuid(principal.user.id) ||
+      !uuid(principal.sessionId) ||
+      expectedOrganizationId.toLowerCase() !== organizationId.toLowerCase() ||
+      organizationId.toLowerCase() !== principal.organization.id.toLowerCase()
+    )
+      throw contextChanged()
+
+    // A context transition uses its dedicated lock pool and then reads the app database.
+    // Refuse contention promptly so waiting booking transactions cannot fill that pool.
+    const lock = await sql<{
+      locked: boolean
+    }>`SELECT pg_try_advisory_xact_lock(hashtextextended(${`hourmere.organization-context:${principal.sessionId}`}, 0)) AS locked`.execute(
+      db,
+    )
+    if (!lock.rows[0]?.locked) throw contextChanged()
+    const user = await db
+      .selectFrom('auth.user')
+      .select('emailVerified')
+      .where('id', '=', principal.user.id)
+      .forShare()
+      .executeTakeFirst()
+    const organization = await db
+      .selectFrom('auth.organization')
+      .select('id')
+      .where('id', '=', organizationId)
+      .forShare()
+      .executeTakeFirst()
+    const member = await db
+      .selectFrom('auth.member')
+      .select('id')
+      .where('userId', '=', principal.user.id)
+      .where('organizationId', '=', organizationId)
+      .forShare()
+      .executeTakeFirst()
+    const session = await db
+      .selectFrom('auth.session')
+      .select(['expiresAt', 'activeOrganizationId'])
+      .where('id', '=', principal.sessionId)
+      .where('userId', '=', principal.user.id)
+      .forShare()
+      .executeTakeFirst()
+    if (!user?.emailVerified || !organization || !member || !session) throw contextChanged()
+    const validity = await db
+      .selectNoFrom(
+        sql<boolean>`${session.expiresAt}::timestamptz > clock_timestamp()`.as('active'),
+      )
+      .executeTakeFirstOrThrow()
+    if (!validity.active) throw contextChanged()
+
+    const activeMember =
+      session.activeOrganizationId && uuid(session.activeOrganizationId)
+        ? await db
+            .selectFrom('auth.member')
+            .select('id')
+            .where('userId', '=', principal.user.id)
+            .where('organizationId', '=', session.activeOrganizationId)
+            .executeTakeFirst()
+        : undefined
+    const personal = activeMember
+      ? undefined
+      : await db
+          .selectFrom('personal_organizations')
+          .select('organization_id')
+          .where('user_id', '=', principal.user.id)
+          .executeTakeFirst()
+    const effectiveOrganizationId = activeMember
+      ? session.activeOrganizationId
+      : personal?.organization_id
+    if (effectiveOrganizationId?.toLowerCase() !== organizationId.toLowerCase())
+      throw contextChanged()
+
+    if (!targetId || !uuid(targetId)) throw contextChanged()
+    const booking = await db
+      .selectFrom('bookings')
+      .select('id')
+      .where('id', '=', targetId)
+      .where('organization_id', '=', organizationId)
+      .executeTakeFirst()
+    if (!booking) throw contextChanged()
+  }
+}
+
+/**
  * Shared entry for new team-management web routes.
  *
  * In a RouteModule, create `const access = teamManagementAccess(db, caller)` and declare

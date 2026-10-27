@@ -1,20 +1,22 @@
 import { type FormEvent, useCallback, useId, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router'
 import { api, type Schemas, unwrap } from '../../api/client.ts'
-import { errorMessage, RequestError } from '../../api/errors.ts'
+import { errorMessage, isOrganizationContextChanged, RequestError } from '../../api/errors.ts'
 import { type Booking, isNotFound, loadProfile } from '../../api/resources.ts'
 import { BreakableText } from '../../components/BreakableText.tsx'
 import { ConferenceNotice } from '../../components/ConferenceNotice.tsx'
 import { Field } from '../../components/forms.tsx'
+import { OrganizationContextConflict } from '../../components/OrganizationContextConflict.tsx'
 import { PageHeader } from '../../components/PageHeader.tsx'
 import { PageSkeleton } from '../../components/PageSkeleton.tsx'
 import { useFlash } from '../../flash.ts'
 import { zoned } from '../../format.ts'
-import { useLoad, usePageTitle } from '../../hooks.ts'
+import { useLoad, useMounted, usePageTitle } from '../../hooks.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
 import { msg, type UiText } from '../../i18n/translate.ts'
 import { BOOKING } from '../../limits.ts'
 import { bookingPath, PATHS } from '../../paths.ts'
+import { useMe } from '../../session.tsx'
 import { isMultiLineText } from '../../text.ts'
 import { useUnsavedChanges } from '../../unsaved-changes.tsx'
 import { MissingRecord } from '../NotFound.tsx'
@@ -47,6 +49,8 @@ export function BookingDetailPage() {
 
 function BookingDetail({ id }: { id: string }) {
   const { t, ui } = useI18n()
+  const me = useMe()
+  const [expectedOrganizationId] = useState(me.organization.id)
 
   const load = useCallback(
     async (signal: AbortSignal): Promise<Loaded | 'missing'> => {
@@ -113,10 +117,16 @@ function BookingDetail({ id }: { id: string }) {
       />
     )
   }
-  return <BookingView {...state.data} />
+  return <BookingView {...state.data} expectedOrganizationId={expectedOrganizationId} />
 }
 
-function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loaded) {
+function BookingView({
+  booking: initial,
+  questions,
+  timeZone,
+  fromProfile,
+  expectedOrganizationId,
+}: Loaded & { expectedOrganizationId: string }) {
   const { t, ui, locale, formatLocale: displayLocale } = useI18n()
   const flash = useFlash()
 
@@ -247,11 +257,18 @@ function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loa
         </dl>
       </section>
 
-      {!cancelled && !started && <RescheduleBooking booking={booking} timeZone={timeZone} />}
+      {!cancelled && !started && (
+        <RescheduleBooking
+          booking={booking}
+          timeZone={timeZone}
+          expectedOrganizationId={expectedOrganizationId}
+        />
+      )}
 
       {!cancelled && !started && (
         <CancelBooking
           booking={booking}
+          expectedOrganizationId={expectedOrganizationId}
           onCancelled={(updated) => {
             updateBooking(updated)
             setStatus('The booking is cancelled.')
@@ -264,8 +281,19 @@ function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loa
         />
       )}
 
-      <ConferenceNotice key={booking.id} booking={booking} host onChange={updateBooking} />
-      <CalendarCopyNotice key={`copy:${booking.id}`} booking={booking} onChange={updateBooking} />
+      <ConferenceNotice
+        key={booking.id}
+        booking={booking}
+        host
+        expectedOrganizationId={expectedOrganizationId}
+        onChange={updateBooking}
+      />
+      <CalendarCopyNotice
+        key={`copy:${booking.id}`}
+        booking={booking}
+        expectedOrganizationId={expectedOrganizationId}
+        onChange={updateBooking}
+      />
       <section className="panel user-content" aria-labelledby="people-heading">
         <h2 id="people-heading">{t('People')}</h2>
         <dl className="details">
@@ -340,19 +368,23 @@ function BookingView({ booking: initial, questions, timeZone, fromProfile }: Loa
 /** The host cancels, with an optional reason the invitee is told. */
 function CancelBooking({
   booking,
+  expectedOrganizationId,
   onCancelled,
   onAlreadyCancelled,
 }: {
   booking: Booking
+  expectedOrganizationId: string
   onCancelled: (booking: Booking) => void
   onAlreadyCancelled: (message: string) => void
 }) {
   const { t, ui } = useI18n()
+  const mounted = useMounted()
 
   const [open, setOpen] = useState(false)
   const [reason, setReason] = useState('')
   const [reasonError, setReasonError] = useState<UiText | undefined>()
   const [error, setError] = useState<UiText | null>(null)
+  const [conflict, setConflict] = useState<unknown>(null)
   const [busy, setBusy] = useState(false)
   const openButton = useRef<HTMLButtonElement>(null)
   const formId = useId()
@@ -363,12 +395,14 @@ function CancelBooking({
     setReason('')
     setReasonError(undefined)
     setError(null)
+    setConflict(null)
     // Back to the button that opened the form.
     setTimeout(() => openButton.current?.focus())
   }
 
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
+    if (busy || conflict) return
     setError(null)
     const text = reason.trim()
     if (text.length > BOOKING.cancelReasonMaxLength) {
@@ -391,15 +425,20 @@ function CancelBooking({
     try {
       const updated = await unwrap(
         api.POST('/api/v1/bookings/{id}/cancel', {
+          headers: { 'X-Expected-Organization-Id': expectedOrganizationId },
           params: { path: { id: booking.id } },
           body: text ? { reason: text } : {},
         }),
       )
+      if (!mounted.current) return
       setReason('')
       onCancelled(updated)
       return
     } catch (err) {
-      if (err instanceof RequestError && err.code === 'invalid_reason') {
+      if (!mounted.current) return
+      if (isOrganizationContextChanged(err)) {
+        setConflict(err)
+      } else if (err instanceof RequestError && err.code === 'invalid_reason') {
         setReasonError(
           'Use at most 1000 characters, without control characters other than tabs and line breaks.',
         )
@@ -413,7 +452,7 @@ function CancelBooking({
         setError(msg('Could not cancel the booking. {0}', { '0': errorMessage(err) }))
       }
     }
-    setBusy(false)
+    if (mounted.current) setBusy(false)
   }
 
   return (
@@ -465,8 +504,9 @@ function CancelBooking({
               {ui(error)}
             </p>
           )}
+          {conflict !== null && <OrganizationContextConflict error={conflict} />}
           <div className="form-actions">
-            <button type="submit" className="button button-danger" disabled={busy}>
+            <button type="submit" className="button button-danger" disabled={busy || !!conflict}>
               {busy ? t('Cancelling…') : t('Cancel booking')}
             </button>
             <button type="button" className="button" onClick={close} disabled={busy}>

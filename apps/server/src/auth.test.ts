@@ -167,7 +167,8 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
         'content-type': 'application/json',
         cookie,
         origin,
-        ...(typeof body === 'object' &&
+        ...(path !== '/api/auth/organization/set-active' &&
+        typeof body === 'object' &&
         body !== null &&
         'organizationId' in body &&
         typeof body.organizationId === 'string'
