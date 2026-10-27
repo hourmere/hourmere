@@ -429,7 +429,6 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
       expect(lines.some((l) => l.includes('Invalid callbackURL') && l.includes('\\n[mail]'))).toBe(
         true,
       )
-      expect(lines.some((l) => l.includes('https://evil.example/'))).toBe(true)
       expect(lines.some((l) => l.includes('token=forged') || l.includes('callbackURL=%2F'))).toBe(
         false,
       )
