@@ -66,7 +66,7 @@ describe('application recovery and sharing metadata', () => {
     },
   )
 
-  it.each(['language=fr', 'language=zh-CN&language=en', 'language=zh-CN&language=zh-CN'])(
+  it.each(['language=qab', 'language=zh-CN&language=en', 'language=zh-CN&language=zh-CN'])(
     'ignores invalid or duplicate embed language queries: %s',
     async (query) => {
       vi.spyOn(navigator, 'languages', 'get').mockReturnValue(['en-US'])
@@ -84,7 +84,7 @@ describe('application recovery and sharing metadata', () => {
   it('falls back to the existing Chinese preference for an unsupported embed language', async () => {
     chooseLanguage('zh-CN')
     render(
-      <MemoryRouter initialEntries={['/embed/ada/meeting?language=fr']}>
+      <MemoryRouter initialEntries={['/embed/ada/meeting?language=qab']}>
         <App />
       </MemoryRouter>,
       { onCaughtError: vi.fn() },

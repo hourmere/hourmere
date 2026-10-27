@@ -1070,6 +1070,20 @@ describe.skipIf(!serverUrl)('MCP with real API keys and bookings', () => {
             })),
           ),
         )
+        expect(
+          await db
+            .selectFrom('organization_operations')
+            .select(['booking_id', 'actor_user_id', 'source', 'api_key_id'])
+            .where('booking_id', 'in', [booked.booking.id, moved.booking.id])
+            .execute(),
+        ).toEqual([
+          {
+            booking_id: moved.booking.id,
+            actor_user_id: agent.userId,
+            source: 'mcp',
+            api_key_id: agent.keyId,
+          },
+        ])
         const twice = await call('cancel_booking', { manageToken: moved.manageToken })
         expect(errorOf(twice).error).toBe('booking_cancelled')
         const unknown = await call('cancel_booking', { manageToken: 'x'.repeat(43) })

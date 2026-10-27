@@ -40,6 +40,7 @@ export {
   type CreateBookingResult,
   cancelHostBooking,
   cancelManagedBooking,
+  cancelTeamBookingInTransaction,
   createPublicBooking,
   createPublicTeamBooking,
   DEFAULT_PAGE_SIZE,

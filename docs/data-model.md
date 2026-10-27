@@ -120,6 +120,7 @@ calendar-list access.
 | `event_types` | organization | What can be booked: duration, step, buffers, notice, window, daily limit, location, questions; soft-deleted |
 | `event_type_hosts` | organization | Who hosts an event type, with optional per-host schedule, destination calendar and round-robin weight |
 | `bookings` | organization | A booked meeting: instant range, status, resolved location, answers, source (`web`/`embed`/`api`/`mcp`), idempotency key |
+| `organization_operations` | organization | Minimal actual-actor records for cancellation, member removal/leave and role changes; identifiers, origin, role transition and time only |
 | `booking_hosts` | organization | Hosts of a booking; carries the anti-double-booking constraint |
 | `booking_attendees` | organization | The invitee who booked plus guests |
 | `booking_calendar_events` | organization | The event each booking wrote to a host calendar, for idempotent updates and cancellation |
@@ -340,6 +341,50 @@ without cascading on credential deletion. OAuth origins require `source=mcp` and
 key ID. The idempotency index includes both nullable credential columns, preserving existing
 anonymous/API-key scopes while isolating each OAuth consent. Public booking representations
 expose neither credential identifier.
+
+## Organization operation attribution
+
+`organization_operations` supplements the existing booking source, API-key and OAuth
+attribution with the authenticated user who actually cancelled. A small shared table is
+needed because membership removal/leave and role changes have no booking row. It stores
+only the operation, organization, actor/target UUIDs, source/credential UUIDs, role
+transition and occurrence time. It contains no generic payload, names, email addresses,
+answers, cancellation reasons, session identifiers or tokens, and has no public read API
+or audit-management interface.
+
+Cancellation records use the same source/key/OAuth origin as `bookings.cancelled_*`, in
+the booking transaction. Host operations take the actor from the authenticated principal;
+the team-management transaction helper takes the actor returned by the shared access
+check, scoped to its organization. A private-link cancellation without an authenticated
+identity records a null actor; an authenticated MCP private-link caller records that
+caller's user, which can differ from the original host and invitee. Holding a link does
+not prove the attendee's identity. Reschedule withdrawals retain their existing booking
+attribution and do not create cancellation-operation records.
+
+Better Auth's remove-member, leave and update-member-role persistence paths record the
+actual changed membership in the same adapter transaction. A role no-op, rejected request
+or rolled-back operation creates no record. Personal-organization maintenance and direct
+adapter maintenance are excluded; this recorder does not add authorization or change
+caller/session checks. New management services must record through their own authorized
+write transaction rather than a post-commit hook.
+
+Writers acquire the organization before the target row. Cancellation takes only the
+organization key-share lock before its booking, without locking host identity. Membership writes reserve
+their organization foreign-key lock through the eventual operation INSERT before updating
+or removing the member, including perceived role no-ops. A failed conditional update or
+successful no-op discards that tentative row; only an actual change retains it, stamped
+after the successful write. Tentative rows remain invisible outside their transaction.
+This order prevents a cycle with team-management writes that lock organization then member
+or booking.
+
+Actor, target, API-key and OAuth identifiers deliberately have no foreign keys: deleting
+an account or credential must not erase who performed a retained team operation. They do
+not retain the deleted account's name or email, or restore access. Booking deletion
+cascades its cancellation record; organization deletion cascades every operation record.
+Member records remain with the organization. The additive migration creates an empty
+table without rewriting existing booking fields, timestamps or physical rows, and never
+guesses historical actors. Older binaries remain schema-compatible but do not create
+these records; upgrade every writer to obtain complete attribution from that point on.
 
 ## Required booking hosts
 

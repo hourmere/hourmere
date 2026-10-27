@@ -7,40 +7,19 @@ import {
   cookieLanguage,
   type InterfaceLanguage,
   LANGUAGE_COOKIE,
+  registeredLocales,
 } from '@hourmere/core/language'
 import type { Context } from 'hono'
+import { confirmationCatalogues } from './i18n/confirmation.ts'
+
+const escapeHtml = (value: string) =>
+  value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
 
 export { MAGIC_LINK_CONFIRM_PATH }
-
-interface ConfirmationWords {
-  title: string
-  instruction: string
-  note: string
-  incomplete: string
-  javascript: string
-  language: string
-}
-
-const WORDS = {
-  en: {
-    title: 'Sign in to Hourmere',
-    instruction: 'Press the button to finish signing in.',
-    note: 'This extra step keeps email security scanners, which open links to check them, from using up your sign-in link.',
-    incomplete:
-      'This sign-in link is incomplete. Open the whole link from the email, or ask for a new one.',
-    javascript:
-      'Signing in needs JavaScript. Turn it on for this page, then open the link from the email again.',
-    language: 'Interface language',
-  },
-  'zh-CN': {
-    title: '登录 Hourmere',
-    instruction: '点击按钮完成登录。',
-    note: '此步骤可防止邮件安全扫描程序在检查链接时提前用掉你的一次性登录链接。',
-    incomplete: '此登录链接不完整。请打开邮件中的完整链接，或重新申请登录链接。',
-    javascript: '登录需要 JavaScript。请为此页面启用 JavaScript，然后重新打开邮件中的链接。',
-    language: '界面语言',
-  },
-} satisfies Record<InterfaceLanguage, ConfirmationWords>
 
 // The fragment never reaches the server. Only the explicit sign-in GET form carries its
 // existing Better Auth parameters; the language select cannot submit or rewrite that form.
@@ -61,11 +40,12 @@ if (params.get('token')) {
 } else {
   document.getElementById('incomplete').hidden = false;
 }
-const languages = ${JSON.stringify(WORDS)};
+const languages = ${JSON.stringify(confirmationCatalogues).replaceAll('<', '\\u003c')};
 function setLanguage(language) {
-  if (language !== 'en' && language !== 'zh-CN') return;
+  if (!Object.hasOwn(languages, language)) return;
   const words = languages[language];
   document.documentElement.lang = language;
+  document.documentElement.dir = 'ltr';
   document.title = words.title;
   document.getElementById('page-title').textContent = words.title;
   document.getElementById('confirm-instruction').textContent = words.instruction;
@@ -184,14 +164,14 @@ const CSP = [
 ].join('; ')
 
 function page(language: InterfaceLanguage) {
-  const words = WORDS[language]
+  const words = confirmationCatalogues[language]
   return `<!doctype html>
 <html lang="${language}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
-<title>${words.title}</title>
+<title>${escapeHtml(words.title)}</title>
 <style>${STYLE}</style>
 </head>
 <body>
@@ -209,21 +189,20 @@ function page(language: InterfaceLanguage) {
 <span class="logo-word">Hourmere</span>
 </span>
 <label class="language-picker">
-<span id="language-label">${words.language}</span>
-<select id="language-select" aria-label="${words.language}">
-<option value="en" lang="en"${language === 'en' ? ' selected' : ''}>English</option>
-<option value="zh-CN" lang="zh-CN"${language === 'zh-CN' ? ' selected' : ''}>简体中文</option>
+<span id="language-label">${escapeHtml(words.language)}</span>
+<select id="language-select" aria-label="${escapeHtml(words.language)}">
+${registeredLocales.map(({ code, nativeName }) => `<option value="${code}" lang="${code}"${language === code ? ' selected' : ''}>${escapeHtml(nativeName)}</option>`).join('\n')}
 </select>
 </label>
 </header>
-<h1 id="page-title">${words.title}</h1>
+<h1 id="page-title">${escapeHtml(words.title)}</h1>
 <form id="confirm" method="get" action="/api/auth/magic-link/verify" hidden>
-<p id="confirm-instruction">${words.instruction}</p>
-<p><button type="submit">${words.title}</button></p>
-<p id="scanner-note" class="note">${words.note}</p>
+<p id="confirm-instruction">${escapeHtml(words.instruction)}</p>
+<p><button type="submit">${escapeHtml(words.title)}</button></p>
+<p id="scanner-note" class="note">${escapeHtml(words.note)}</p>
 </form>
-<p id="incomplete" hidden>${words.incomplete}</p>
-<noscript><p id="javascript-note">${words.javascript}</p></noscript>
+<p id="incomplete" hidden>${escapeHtml(words.incomplete)}</p>
+<noscript><p id="javascript-note">${escapeHtml(words.javascript)}</p></noscript>
 </div>
 </main>
 <script>${SCRIPT}</script>

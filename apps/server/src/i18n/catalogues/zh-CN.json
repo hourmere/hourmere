@@ -1,0 +1,8 @@
+{
+  "title": "登录 Hourmere",
+  "instruction": "点击按钮完成登录。",
+  "note": "此步骤可防止邮件安全扫描程序在检查链接时提前用掉你的一次性登录链接。",
+  "incomplete": "此登录链接不完整。请打开邮件中的完整链接，或重新申请登录链接。",
+  "javascript": "登录需要 JavaScript。请为此页面启用 JavaScript，然后重新打开邮件中的链接。",
+  "language": "界面语言"
+}

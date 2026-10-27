@@ -14,6 +14,7 @@ import {
   type PublicContext,
 } from '@hourmere/scheduling'
 import { routeBodyLimit } from '../body-limit.ts'
+import { localeDescription } from '../i18n/locale-description.ts'
 import { ErrorBody, json, Question, type RouteModule } from '../openapi.ts'
 import { createRateLimiter, PUBLIC_RATE_LIMITS, type RateLimit, rateLimit } from '../rate-limit.ts'
 import { BookingWithToken, Instant, LocationKind, Responses, Slot } from './bookings.ts'
@@ -86,7 +87,7 @@ export const CreateBooking = z
       name,
       email,
       timeZone: z.string().min(1).max(64).openapi({ description: 'IANA time zone' }),
-      locale: z.string().max(35).optional(),
+      locale: z.string().max(35).optional().openapi({ description: localeDescription }),
     }),
     guests: z.array(z.strictObject({ name, email })).max(MAX_GUESTS).optional().openapi({
       description:

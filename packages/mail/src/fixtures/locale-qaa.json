@@ -1,0 +1,9 @@
+{
+  "What": "Fixture activité",
+  "Host": "Fixture hôte",
+  "calendar.summary": "Fixture {event} avec {other}",
+  "calendar.booked": "Fixture réservé avec {name}.",
+  "calendar.response.invitee": "Fixture utiliser le courriel pour annuler.",
+  "signIn.subject": "Fixture connexion",
+  "answer.yes": "Fixture oui"
+}

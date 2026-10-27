@@ -102,13 +102,28 @@ describe('typed interface messages and language state', () => {
     expect(screen.getByRole('heading').textContent).toBe('Your details')
   })
   it('uses browser language when no supported account default exists', () => {
-    vi.spyOn(navigator, 'languages', 'get').mockReturnValue(['fr-FR', 'zh-CN'])
+    vi.spyOn(navigator, 'languages', 'get').mockReturnValue(['qab', 'zh-CN'])
     render(
-      <AccountLanguage locale="pt-BR">
+      <AccountLanguage locale="qac">
         <Draft />
       </AccountLanguage>,
     )
     expect(screen.getByRole('heading').textContent).toBe('你的信息')
+  })
+  it('formats in Chinese when it follows an unsupported browser language', () => {
+    vi.spyOn(navigator, 'languages', 'get').mockReturnValue(['qab', 'zh-CN'])
+    function DateNotice() {
+      const { ui, formatLocale } = useI18n()
+      return (
+        <>
+          <output data-testid="format-locale">{formatLocale}</output>
+          <p>{ui(dateMessage('2026-11-02'))}</p>
+        </>
+      )
+    }
+    render(<DateNotice />)
+    expect(screen.getByTestId('format-locale').textContent).toBe('zh-CN')
+    expect(screen.getByText(/11月/)).toBeDefined()
   })
   it('keeps the current tab working when both preference stores reject access', async () => {
     vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
@@ -158,7 +173,7 @@ describe('typed interface messages and language state', () => {
     })
     expect(translateMessage('zh-CN', problem)).toBe('以下时间段重叠：09:00–12:00 与 11:00–14:00。')
   })
-  it('keeps default date formatting independent of the account interface until explicitly chosen', async () => {
+  it('formats dates in the active account locale before a switcher choice', async () => {
     const user = userEvent.setup()
     const date = dateMessage('2026-11-02')
     function DateNotice() {
@@ -176,16 +191,8 @@ describe('typed interface messages and language state', () => {
         <DateNotice />
       </AccountLanguage>,
     )
-    const expectedBrowserDate = new Intl.DateTimeFormat(undefined, {
-      calendar: 'gregory',
-      timeZone: 'UTC',
-      weekday: 'short',
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-    }).format(new Date('2026-11-02T00:00:00Z'))
-    expect(screen.getByTestId('date-format-locale').textContent).toBe('browser-default')
-    expect(screen.getByTestId('notice-date').textContent).toContain(expectedBrowserDate)
+    expect(screen.getByTestId('date-format-locale').textContent).toBe('zh-CN')
+    expect(screen.getByTestId('notice-date').textContent).toContain('11月')
     await user.selectOptions(screen.getByLabelText('界面语言'), 'zh-CN')
     expect(screen.getByTestId('date-format-locale').textContent).toBe('zh-CN')
     expect(screen.getByTestId('notice-date').textContent).toContain('11月')

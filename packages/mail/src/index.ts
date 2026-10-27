@@ -2,6 +2,7 @@ import { domainToASCII } from 'node:url'
 import type { InterfaceLanguage } from '@hourmere/core/language'
 import nodemailer from 'nodemailer'
 import addressparser from 'nodemailer/lib/addressparser'
+import { mailMessage } from './catalogue.ts'
 import { emailButton, emailLayout, emailLinkStyle, emailWrapStyle } from './layout.ts'
 import { emailText, escapeHtml, singleLine } from './text.ts'
 
@@ -335,29 +336,17 @@ export function magicLinkEmail({
   expiresInMinutes: number
   language?: InterfaceLanguage | undefined
 }): MailMessage {
+  const t = (key: Parameters<typeof mailMessage>[1]) =>
+    mailMessage(language, key, { minutes: String(expiresInMinutes) })
   const words = {
-    en: {
-      subject: 'Sign in to Hourmere',
-      instruction:
-        'To sign in to Hourmere, open this link, then press "Sign in to Hourmere" on the page it opens:',
-      htmlInstruction:
-        'To sign in to Hourmere, press the button below, then "Sign in to Hourmere" on the page it opens.',
-      button: 'Sign in',
-      expiry: `The link expires in ${expiresInMinutes} minutes and works once. If you did not ask to sign in, you can ignore this email.`,
-      fallback: 'If the button does not work, copy this link into your browser:',
-      footer:
-        'You received this email because a sign-in link was requested for your Hourmere account.',
-    },
-    'zh-CN': {
-      subject: '登录 Hourmere',
-      instruction: '如需登录 Hourmere，请打开此链接，然后在打开的页面上点击“登录 Hourmere”：',
-      htmlInstruction: '如需登录 Hourmere，请点击下方按钮，然后在打开的页面上点击“登录 Hourmere”。',
-      button: '登录',
-      expiry: `此链接将在 ${expiresInMinutes} 分钟后过期，且仅能使用一次。如果你没有申请登录，可以忽略此邮件。`,
-      fallback: '如果按钮无法使用，请将此链接复制到浏览器中：',
-      footer: '你收到此邮件是因为有人为你的 Hourmere 账号申请了登录链接。',
-    },
-  }[language]
+    subject: t('signIn.subject'),
+    instruction: t('signIn.instruction'),
+    htmlInstruction: t('signIn.htmlInstruction'),
+    button: t('signIn.button'),
+    expiry: t('signIn.expiry'),
+    fallback: t('signIn.fallback'),
+    footer: t('signIn.footer'),
+  }
   const link = escapeHtml(url)
   // The link opens a page whose button signs in (so that mail scanners opening the link do
   // not use it up).
