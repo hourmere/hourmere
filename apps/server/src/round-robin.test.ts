@@ -95,6 +95,7 @@ describe.skipIf(!bootstrap)('round robin through HTTP, real authentication, MCP 
     const session = {
       cookie: `better-auth.session_token=${encodeURIComponent(`${token}.${signature}`)}`,
       origin: BASE,
+      'X-Expected-Organization-Id': team.id,
     }
     const headers = { authorization: `Bearer ${key.key}` }
     const created = await api(
@@ -270,12 +271,19 @@ describe.skipIf(!bootstrap)('round robin through HTTP, real authentication, MCP 
   })
 
   for (const kind of ['key', 'session'] as const)
-    it(`rechecks ${kind} authority after real HTTP activation waits on event configuration`, async () => {
+    it(`rechecks ${kind} authority after real HTTP activation waits on its authorization parent`, async () => {
       const s = await setup()
       const actor = kind === 'key' ? s.owner : s.member
       const blocker = await owned.pool.connect()
       await blocker.query('BEGIN')
-      await blocker.query('SELECT id FROM event_types WHERE id=$1 FOR UPDATE', [s.event.id])
+      // Session writes now acquire the shared team-management locks before reading the
+      // event. Block their organization parent so the role change commits before that check.
+      await blocker.query(
+        kind === 'session'
+          ? 'SELECT id FROM auth.organization WHERE id=$1 FOR UPDATE'
+          : 'SELECT id FROM event_types WHERE id=$1 FOR UPDATE',
+        [kind === 'session' ? s.team.id : s.event.id],
+      )
       const pid = required(
         (await blocker.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0],
       ).pid
@@ -291,7 +299,9 @@ describe.skipIf(!bootstrap)('round robin through HTTP, real authentication, MCP 
         await blocker.query('COMMIT')
         const refused = await pending
         expect(refused.status).toBe(403)
-        expect(await refused.json()).toMatchObject({ error: 'insufficient_role' })
+        expect(await refused.json()).toMatchObject({
+          error: kind === 'session' ? 'team_management_access_denied' : 'insufficient_role',
+        })
         expect((await api('GET', s.path)).status).toBe(404)
         expect(
           await db

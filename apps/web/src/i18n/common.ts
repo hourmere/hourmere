@@ -18,6 +18,8 @@ export const common = {
   'This meeting has ended.': '此会议已结束。',
   'Something went wrong': '出错了',
   Reload: '重新加载',
+  'Your team context changed. Reload before making changes.':
+    '你的团队上下文已改变。请重新加载后再进行修改。',
   'Scheduling page powered by Hourmere — pick a time that works.':
     '由 Hourmere 提供支持的预约页面，选择适合你的时间。',
   'Didn’t get the email? Check spam or junk and add the sender to your contacts.':

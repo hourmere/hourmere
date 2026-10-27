@@ -196,6 +196,11 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
   it('pins consent and code/refresh tokens to a trusted organization choice across active-team switches', async () => {
     const s = await session(),
       team = await createTestTeam(db, [{ user: s.user, role: 'owner' }])
+    await db
+      .updateTable('auth.session')
+      .set({ activeOrganizationId: team.id })
+      .where('id', '=', s.sessionId)
+      .execute()
     const { query, verifier } = authorization()
     const answer = await request(`/api/auth/oauth2/authorize?${query}`, { headers: s.headers })
     expect(answer.status).toBe(302)
@@ -215,6 +220,8 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
     const headers = new Headers(s.headers)
     headers.set('content-type', 'application/json')
     headers.set('accept', 'application/json')
+    // Browser draft context must never replace the organization explicitly consented to.
+    headers.set('X-Expected-Organization-Id', s.user.principal.organization.id)
     const continuation = await withMcpOAuthIntent(intent, () =>
       request('/api/auth/oauth2/continue', {
         method: 'POST',
@@ -247,7 +254,10 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
     expect(typeof code === 'string').toBe(true)
     const token = await request('/api/auth/oauth2/token', {
       method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        'X-Expected-Organization-Id': s.user.principal.organization.id,
+      },
       body: new URLSearchParams({
         grant_type: 'authorization_code',
         client_id: CLIENT,
@@ -274,7 +284,10 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
     ).toEqual([{ referenceId: grant.id }])
     const refresh = await request('/api/auth/oauth2/token', {
       method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        'X-Expected-Organization-Id': s.user.principal.organization.id,
+      },
       body: new URLSearchParams({
         grant_type: 'refresh_token',
         client_id: CLIENT,
@@ -288,6 +301,19 @@ describe.skipIf(!serverUrl)('MCP OAuth provider foundation', () => {
       Buffer.from(next.access_token.split('.')[1] as string, 'base64url').toString(),
     )
     expect(nextClaims['https://hourmere.com/organization']).toBe(team.id)
+    const resolve = createMcpOAuthResolver({ auth, db, publicUrl: BASE })
+    const scoped = mcpRequest(next.access_token, {
+      'X-Expected-Organization-Id': s.user.principal.organization.id,
+    })
+    const caller = await resolve(scoped)
+    expect(caller.ok).toBe(true)
+    if (caller.ok) expect(caller.principal.organization.id).toBe(team.id)
+    await db
+      .deleteFrom('auth.member')
+      .where('organizationId', '=', team.id)
+      .where('userId', '=', s.user.id)
+      .execute()
+    expect((await resolve(scoped)).ok).toBe(false)
   })
   function app(trustedProxies: readonly string[] = []) {
     return createApp({

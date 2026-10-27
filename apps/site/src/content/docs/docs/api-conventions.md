@@ -166,6 +166,56 @@ session or an API key. The MCP server at `/mcp` ([MCP quickstart](/docs/mcp)) ac
 when enabled, MCP OAuth grants. Session cookies never authenticate MCP. OAuth grants are
 limited to MCP tools and do not authenticate REST requests.
 
+### Browser organization context
+
+Organization-scoped browser drafts bind `X-Expected-Organization-Id` to the organization
+where the form or action started. Do not replace that value with the active organization
+at submission time. A header works with both the strict REST JSON bodies and Better Auth's
+separate protocol, without adding fields to either body.
+
+The existing covered endpoints are:
+
+| Write | Endpoint |
+|---|---|
+| Create a personal or team event type | `POST /api/v1/event-types` |
+| Edit, enable or disable a personal or team event type | `PATCH /api/v1/event-types/{id}` |
+| Delete a personal or team event type | `DELETE /api/v1/event-types/{id}` |
+| Activate a round-robin team event type | `POST /api/v1/event-types/{id}/round-robin/activate` |
+| Invite or resend an invitation | `POST /api/auth/organization/invite-member` |
+| Revoke an invitation | `POST /api/auth/organization/cancel-invitation` |
+| Change a member's role | `POST /api/auth/organization/update-member-role` |
+| Remove a member | `POST /api/auth/organization/remove-member` |
+| Leave a team | `POST /api/auth/organization/leave` |
+| Change team settings, including name or slug | `POST /api/auth/organization/update` |
+
+For covered session writes, the expected organization must match both the operation's
+target organization and the current valid session organization. Missing or mismatched
+context returns HTTP 409: `organization_context_changed` under `/api/v1`, or
+`ORGANIZATION_CONTEXT_CHANGED` under `/api/auth`. The message asks the person to reload.
+Inaccessible and missing event-type targets receive the same context refusal on bound
+browser writes, so the error cannot reveal another team's objects. The expected ID grants
+no access: current membership, verification and role checks still apply. Every session
+event-type write requires the header, including personal forms. This prevents an old form
+without context from becoming a personal creation after switching or losing team membership,
+and prevents a switch into a team from retargeting an unsaved personal draft.
+Organization writes and context transitions in the same browser session are ordered across
+server processes, so a switch cannot overtake an already checked organization write.
+
+On refusal, keep the draft, show reload guidance and ask before discarding unsaved changes.
+Never replay the write or switch organizations automatically. Focus/visibility refresh and
+organization remounting remain the browser's recovery path; the server check also protects
+requests that arrive before that refresh.
+
+Team creation, explicit switching and invitation acceptance bind their explicit targets
+under their existing rules rather than requiring the previous active organization. Personal
+profile, calendar and schedule writes, API-key management and OAuth connection management
+are excluded. API keys retain their issued organization, and OAuth grants retain their
+consented organization; neither depends on this browser header. Public booking and private
+manage-token operations retain their existing authority. Team deletion is unavailable
+through the browser organization endpoint. There is currently no team-administrator booking
+cancellation endpoint; the existing booking-ID routes still require the caller to be a host.
+Any future administrator cancellation route must use the same context protection.
+
 ### Integration settings
 
 The user's own API keys have the same non-credential settings access as browser sessions:
@@ -269,6 +319,20 @@ A list response is `{ "data": [ … ] }`. Lists that can grow without bound use 
 pagination and add `nextCursor`: pass it as `cursor` (with the same filters) for the next page;
 it is null on the last page. Cursors are opaque; `limit` sets the page size (1–100, default
 50). Small lists return everything and have no `nextCursor`.
+
+`GET /api/v1/team/bookings` lists the browser session's current team's bookings for current
+verified team owners/admins, including meetings hosted by other members. It accepts the
+same time/status filters, `order`, `limit` and opaque `cursor` as the host booking list.
+Pagination uses start time and ID, retaining microsecond cursor precision; collective
+bookings appear once. Inserts before a cursor do not shift later pages; later inserts can
+appear after it. Personal organizations, ordinary members and API keys receive
+`403 team_management_access_denied`. The route uses the shared team-management access check
+and caller Origin/Referer handling. Responses contain only ID, status, start/end,
+`cancelledAt`, associated `eventType: {id,title}` (null title after deletion), saved
+`hosts: [{userId,name}]` and `attendees: [{name,email,timeZone,isBooker}]`, inside
+`{data,nextCursor}`. No answers, free-text titles/reasons, management capabilities, calendar
+copies, conference URLs or reschedule-chain IDs are included. Cancelled reschedule
+predecessors and their successors are separate rows.
 
 Booking lists accept `endAfter` (end strictly after this instant) and `endTo` (end at or
 before it), alongside the existing start-time `from`/`to` filters. The web app splits Upcoming

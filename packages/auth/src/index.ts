@@ -1,6 +1,6 @@
 import { apiKey } from '@better-auth/api-key'
 import { acceptLanguage, cookieLanguage, type InterfaceLanguage } from '@hourmere/core/language'
-import { type Db, guardPoolErrors } from '@hourmere/db'
+import { createDb, type Db, guardPoolErrors } from '@hourmere/db'
 import { type Mailer, magicLinkEmail } from '@hourmere/mail'
 import { betterAuth } from 'better-auth'
 import type { DBTransactionAdapter } from 'better-auth/adapters'
@@ -17,6 +17,7 @@ import { beforeHook } from './hooks.ts'
 import { betterAuthLog, logMailFailure } from './log.ts'
 import { confirmLink, SIGN_IN_PATH } from './magic-link.ts'
 import { mcpOAuthPlugins } from './mcp-oauth.ts'
+import { serializeOrganizationContext } from './organization-context.ts'
 import { ensurePersonalOrganization, organizationGuards } from './organizations.ts'
 import { hasAccount, maySignUp, type SignupPolicy, signupConnectionOptions } from './signup.ts'
 
@@ -54,6 +55,28 @@ export {
   type SignupPolicy,
 } from './signup.ts'
 
+/** Separate lock connections cannot starve the handler's auth/application query pools. */
+class AuthPool extends pg.Pool {
+  readonly organizationLocks: pg.Pool
+
+  constructor(config: pg.PoolConfig) {
+    super(config)
+    this.organizationLocks = new pg.Pool({ ...config, max: 2 })
+    guardPoolErrors(this.organizationLocks, ' (organization context)')
+  }
+
+  override end(): Promise<void>
+  override end(callback: () => void): void
+  override end(callback?: () => void): Promise<void> | void {
+    const closing = Promise.all([super.end(), this.organizationLocks.end()]).then(() => {})
+    if (callback) {
+      void closing.then(callback, callback)
+      return
+    }
+    return closing
+  }
+}
+
 /**
  * Better Auth owns the `auth` schema (its own table and column naming). Its pool only
  * sees that schema; application tables live in `public` and reference auth rows by id.
@@ -74,7 +97,7 @@ export function createAuthPool(databaseUrl: string, signup: SignupPolicy): pg.Po
   const options = ['-c search_path=auth', config.options, signupConnectionOptions(signup)]
     .filter(Boolean)
     .join(' ')
-  const pool = new pg.Pool({ ...(config as pg.PoolConfig), options })
+  const pool = new AuthPool({ ...(config as pg.PoolConfig), options })
   // Same reason as createPool in @hourmere/db: an unhandled client error would kill the
   // process.
   guardPoolErrors(pool, ' (auth)')
@@ -140,8 +163,10 @@ export function createAuth({
   mcpOAuth = false,
   mcpMetadataFetcher,
 }: AuthConfig) {
+  const lockPool = (pool as Partial<AuthPool>).organizationLocks
+  if (!lockPool) throw new Error('createAuth requires a pool created by createAuthPool')
   const { google, microsoft } = socialProviders
-  return betterAuth({
+  const auth = betterAuth({
     database: pool,
     disabledPaths: [
       // Hourmere uses social providers only for sign-in. Browser sessions must not read
@@ -371,6 +396,10 @@ export function createAuth({
       }),
     ],
   })
+  auth.handler = serializeOrganizationContext(createDb(lockPool), auth.handler, (headers) =>
+    auth.api.getSession({ headers }),
+  )
+  return auth
 }
 
 export type Auth = ReturnType<typeof createAuth>
