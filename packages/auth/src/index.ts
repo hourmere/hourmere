@@ -323,16 +323,6 @@ export function createAuth({
     hooks: { before: beforeHook(db, teamRolePolicy.before) },
     plugins: [
       {
-        id: 'team-role-policy',
-        init(ctx) {
-          const adapter = ctx.adapter
-          teamRolePolicy.adapter(adapter)
-          const transaction = adapter.transaction
-          adapter.transaction = (callback) =>
-            transaction((trx) => callback(teamRolePolicy.adapter(trx)))
-        },
-      },
-      {
         id: 'sign-in-token-updates',
         init(ctx) {
           // Better Auth 1.7.10 passes only the patch to update.before, without its id or
@@ -368,6 +358,20 @@ export function createAuth({
       },
       ...(mcpOAuth ? mcpOAuthPlugins(db, baseURL, mcpMetadataFetcher) : []),
       organizationOperationRecords(),
+      {
+        id: 'team-role-policy',
+        init(ctx) {
+          // Wrap the operation recorder last: HTTP role changes use the policy's locked
+          // application transaction for both the member update and its attribution.
+          // An outer native recorder would hold an organization FK lock on a separate
+          // connection while this policy waits for that organization's write lock.
+          const adapter = ctx.adapter
+          teamRolePolicy.adapter(adapter)
+          const transaction = adapter.transaction
+          adapter.transaction = (callback) =>
+            transaction((trx) => callback(teamRolePolicy.adapter(trx)))
+        },
+      },
       organization({
         // An invitation is accepted only by someone who proved they own the invited address.
         requireEmailVerificationOnInvitation: true,

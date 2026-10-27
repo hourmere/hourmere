@@ -5,6 +5,7 @@ import { APIError, getSessionFromCtx } from 'better-auth/api'
 import type { Transaction } from 'kysely'
 import type { AuthMiddlewareContext } from './api-keys.ts'
 import type { Principal } from './caller.ts'
+import { recordTeamRoleChange } from './organization-operations.ts'
 import { isUuid } from './organizations.ts'
 import {
   checkTeamManagementAccess,
@@ -290,13 +291,15 @@ export function createTeamRolePolicy(db: Db) {
             if (!selects(request.where, { id: target.id })) {
               throw teamRoleDenied()
             }
-            return trx
+            const updated = await trx
               .updateTable('auth.member')
               .set({ role })
               .where('id', '=', target.id)
               .where('organizationId', '=', facts.organizationId)
               .returningAll()
-              .executeTakeFirstOrThrow() as never
+              .executeTakeFirstOrThrow()
+            await recordTeamRoleChange(trx, target, facts.userId, role)
+            return updated as never
           })
         }
         if (ctx?.path === invite && request.model === 'invitation') {

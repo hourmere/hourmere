@@ -153,6 +153,33 @@ describe.skipIf(!serverUrl)('launch team role policy through HTTP', () => {
     expect(await response.json()).toEqual(denial)
   }
 
+  function operations(f: Fixture) {
+    return db
+      .selectFrom('organization_operations')
+      .selectAll()
+      .where('organization_id', '=', f.teamId)
+      .orderBy('occurred_at')
+      .orderBy('id')
+      .execute()
+  }
+
+  function roleOperation(f: Fixture, previousRole: string, newRole: string) {
+    return {
+      id: expect.any(String),
+      organization_id: f.teamId,
+      operation: 'member_role_changed',
+      actor_user_id: f.actor.id,
+      booking_id: null,
+      target_user_id: f.target.id,
+      previous_role: previousRole,
+      new_role: newRole,
+      source: 'web',
+      api_key_id: null,
+      oauth_consent_id: null,
+      occurred_at: expect.any(Date),
+    }
+  }
+
   function snapshot(f: Fixture) {
     return Promise.all([
       db
@@ -167,6 +194,7 @@ describe.skipIf(!serverUrl)('launch team role policy through HTTP', () => {
         .where('organizationId', '=', f.teamId)
         .orderBy('id')
         .execute(),
+      operations(f),
     ])
   }
 
@@ -238,6 +266,7 @@ describe.skipIf(!serverUrl)('launch team role policy through HTTP', () => {
             .where('email', '=', email)
             .executeTakeFirstOrThrow(),
         ).toEqual({ role: 'member' })
+        expect(await operations(f)).toEqual([])
       } else {
         await refused(response)
         expect(await snapshot(f)).toEqual(before)
@@ -282,7 +311,7 @@ describe.skipIf(!serverUrl)('launch team role policy through HTTP', () => {
         role: requestedRole,
       })
       if (allowed) {
-        const storedRole = Array.isArray(requestedRole) ? requestedRole[0] : requestedRole
+        const storedRole = Array.isArray(requestedRole) ? requestedRole.join(',') : requestedRole
         expect(response.status).toBe(200)
         expect(await response.json()).toMatchObject({
           id: f.targetMemberId,
@@ -297,12 +326,56 @@ describe.skipIf(!serverUrl)('launch team role policy through HTTP', () => {
             .where('id', '=', f.targetMemberId)
             .executeTakeFirstOrThrow(),
         ).toEqual({ role: storedRole })
+        expect(await operations(f)).toEqual(
+          targetRole === storedRole ? [] : [roleOperation(f, targetRole, storedRole)],
+        )
       } else {
         await refused(response)
         expect(await snapshot(f)).toEqual(before)
       }
     },
   )
+
+  it('rolls back the HTTP role change when its attribution record cannot be written', async () => {
+    const f = await fixture()
+    const before = await snapshot(f)
+    await owned.pool.query(`
+      CREATE FUNCTION public.reject_test_team_role_operation() RETURNS trigger
+      LANGUAGE plpgsql AS $$ BEGIN
+        RAISE EXCEPTION 'Synthetic role operation record failure';
+      END $$;
+      CREATE TRIGGER reject_test_team_role_operation BEFORE INSERT
+      ON public.organization_operations FOR EACH ROW
+      EXECUTE FUNCTION public.reject_test_team_role_operation();
+    `)
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const response = await post(f, 'update-member-role', {
+        organizationId: f.teamId,
+        memberId: f.targetMemberId,
+        role: 'admin',
+      })
+      expect(response.status).toBe(500)
+      expect(await snapshot(f)).toEqual(before)
+    } finally {
+      errors.mockRestore()
+      await owned.pool.query(`
+        DROP TRIGGER reject_test_team_role_operation ON public.organization_operations;
+        DROP FUNCTION public.reject_test_team_role_operation();
+      `)
+    }
+  })
+
+  it('retains a legacy target role verbatim in the actual role transition', async () => {
+    const f = await fixture('owner', 'member, admin')
+    const response = await post(f, 'update-member-role', {
+      organizationId: f.teamId,
+      memberId: f.targetMemberId,
+      role: 'member',
+    })
+    expect(response.status).toBe(200)
+    expect(await operations(f)).toEqual([roleOperation(f, 'member, admin', 'member')])
+  })
 
   it.each(['owner', 'admin', 'member'])(
     'refuses %s self-promotion and self-role changes without changing any membership',
@@ -678,6 +751,7 @@ describe.skipIf(!serverUrl)('launch team role policy through HTTP', () => {
             member.id === f.actorMemberId ? { ...member, role: 'member' } : member,
           ),
           before[1],
+          before[2],
         ])
       } finally {
         resume.resolve()
