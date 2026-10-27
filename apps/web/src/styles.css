@@ -1408,6 +1408,73 @@ input[type="radio"] {
   overflow-wrap: anywhere;
 }
 
+.calendar-account-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.calendar-account-heading > div {
+  min-width: 0;
+}
+
+.calendar-account-heading :is(h3, p),
+.calendar-item h4 {
+  margin: 0;
+}
+
+.calendar-account-heading .badge {
+  margin: 0;
+  max-width: 100%;
+  white-space: normal;
+}
+
+.calendar-account-summary,
+.calendar-purpose {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-3);
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.calendar-account-summary > div,
+.calendar-purpose > div {
+  min-width: 0;
+}
+
+.calendar-account-summary dt,
+.calendar-purpose dt {
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+.calendar-account-summary dd,
+.calendar-purpose dd {
+  margin: 0;
+}
+
+.calendar-purpose {
+  margin-top: var(--space-3);
+}
+
+.calendar-unavailable {
+  display: block;
+  color: var(--error-text);
+}
+
+@media (min-width: 640px) {
+  .calendar-account-summary {
+    grid-template-columns: minmax(0, 2fr) repeat(2, minmax(0, 1fr));
+  }
+
+  .calendar-purpose {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 .calendar-controls {
   display: grid;
   grid-template-columns: minmax(0, 1fr);

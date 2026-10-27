@@ -20,6 +20,36 @@ export const admin = {
   'Check invitation status': '检查邀请状态',
   'Could not confirm acceptance. Check the invitation status before trying again.':
     '无法确认是否已接受。请先检查邀请状态，再决定是否重试。',
+  'Review synchronization permissions': '查看同步权限说明',
+  'Unavailable for new bookings': '暂不能写入新预约',
+  'Selected for new bookings — unavailable': '已选为新预约写入目标，暂不可用',
+  'Calendar connection options': '日历连接选项',
+  'Reconnect required': '需要重新连接',
+  'Busy-time sync': '忙碌时段同步',
+  'Conflict checks': '冲突检查',
+  'New bookings': '新预约',
+  'Not available': '暂不可用',
+  '{0} selected': '已选择{0}个日历',
+  'Not available — calendar list only.': '暂不支持，仅可查看日历列表。',
+  'Not enabled — calendar list only.': '尚未启用，仅可查看日历列表。',
+  'Paused until you reconnect this account.': '已暂停，请重新连接此账号。',
+  'Unavailable on this instance.': '此实例暂不可用。',
+  'Synchronization needs attention. Review the failed calendars below.':
+    '同步需要处理，请查看下方同步失败的日历。',
+  'Waiting for the first synchronization on selected calendars.': '已选日历正在等待首次同步。',
+  'No calendars selected for conflict checks.': '尚未选择用于冲突检查的日历。',
+  'Latest synchronization of selected conflict calendars succeeded.':
+    '所选冲突检查日历的最近一次同步已成功。',
+  'Not written to this account': '不写入此账号',
+  'Selected for conflict checks': '已选为冲突检查日历',
+  'Not used for conflict checks': '不用于冲突检查',
+  'Selected for new bookings': '已选为新预约写入目标',
+  'Not a booking destination': '不写入新预约',
+  'The calendar provider could not be reached. Try refreshing the calendar list again.':
+    '无法连接日历服务，请重试刷新日历列表。',
+  'Connecting a calendar is optional. Basic booking works without one. Set up an event type to start taking bookings.':
+    '日历连接是可选的。不连接日历也能使用基础预约。设置活动类型，即可开始接受预约。',
+  'Set up event types': '设置活动类型',
   'Team name': '团队名称',
   'Team public address': '团队公开地址',
   'This address is kept for a safe retry. Check the existing team before starting another creation.':
@@ -278,7 +308,7 @@ export const admin = {
   'Bookings per day, {0}–{1}. Empty: no limit.': '每天的预约数量，{0}–{1}。留空表示不限。',
   'Buffer after': '会后缓冲',
   'Buffer before': '会前缓冲',
-  'Busy times synchronized.': '忙闲时间已同步。',
+  'Busy times synchronized for this calendar.': '此日历的忙碌时段已同步。',
   'Calendar list refreshed.': '日历列表已刷新。',
   'Cancel booking…': '取消预约…',
   'Cancel this booking': '取消此预约',
@@ -461,8 +491,8 @@ export const admin = {
     '此 Hourmere 实例尚未配置 Google 日历。请联系管理员启用。',
   'Google will ask for your email, calendar list and event access: to check busy times on selected calendars, and to create one private copy of each new booking on the calendar you own and select. Changing this destination affects new bookings; existing booking copies continue to be updated or cancelled on their original calendar. Automatic Google Meet adds a link only when you enable it. Busy-time synchronization stores times and event IDs, not event titles or descriptions. Connecting is optional and separate from signing in.':
     'Google 将请求你的邮箱、日历列表和事件访问权限：读取所选日历的忙闲时间来检查冲突，并在你拥有且选作写入目标的日历中，为每个新预约创建一份私有副本。更改写入目标只影响新预约；现有预约的副本仍会在原日历中更新或取消。只有启用自动 Google Meet 时才会添加会议链接。忙闲同步保存时间和事件 ID，不保存事件标题或描述。连接日历是可选的，与登录相互独立。',
-  'Disconnect below deletes stored credentials and local calendar data, but leaves existing event copies in Google Calendar and does not revoke your Google grant. You can revoke access in your Google Account:':
-    '使用下方的“断开连接”可删除已存储的凭证和本地日历数据，但会保留 Google 日历中的现有事件副本，也不会撤销 Google 授权。你可以在 Google 账号中撤销授权：',
+  'Disconnect deletes stored credentials and local calendar data, but leaves existing event copies in Google Calendar and does not revoke your Google grant. You can revoke access in your Google Account:':
+    '“断开连接”可删除已存储的凭证和本地日历数据，但会保留 Google 日历中的现有事件副本，也不会撤销 Google 授权。你可以在 Google 账号中撤销授权：',
   'Google Account connections': 'Google 账号连接',
   'Could not load privacy information. Try again before connecting Google Calendar.':
     '无法加载隐私信息。请重试后再连接 Google 日历。',
