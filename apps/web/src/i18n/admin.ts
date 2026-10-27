@@ -166,7 +166,7 @@ export const admin = {
   ', your personal organization': '（你的个人组织）',
   '. Lowercase letters, digits and hyphens, up to': '。使用小写字母、数字和连字符，最多',
   '. If this address can sign in, check your inbox for a link. It works once and expires in a few minutes.':
-    '。若此邮箱可登录，请查收登录链接。链接仅可使用一次，几分钟后过期。',
+    '。如果此邮箱可以登录，请检查收件箱中的登录链接。链接仅可使用一次，几分钟后过期。',
   '. They are saved right away.': '。更改会立即保存。',
   '”? Anything using it stops working at once. This cannot be undone.':
     '”？使用此密钥的应用会立即失效，且无法撤销。',
@@ -695,7 +695,7 @@ export const admin = {
   'Waiting for the first synchronization. Booking times stay unavailable until it completes.':
     '正在等待首次同步。完成前，相关时间将保持不可预约。',
   'wants to connect to Hourmere.': '希望连接至 Hourmere。',
-  'We received your sign-in link request for': '已收到此邮箱的登录链接申请：',
+  'We received your sign-in link request for': '我们已收到此邮箱的登录链接请求：',
   Wed: '周三',
   Wednesday: '星期三',
   'Weekly hours': '每周时间段',
