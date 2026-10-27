@@ -1,0 +1,485 @@
+import { fireEvent, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { describe, expect, it, vi } from 'vitest'
+import type { CreatedOrganization } from '../api/auth.ts'
+import type { Schemas } from '../api/client.ts'
+import { chooseLanguage } from '../i18n/store.ts'
+import {
+  fakeApi,
+  json,
+  later,
+  ME,
+  PROFILE,
+  profile,
+  type Routes,
+  renderApp,
+} from '../test/fake-api.tsx'
+import { LEAVE_WITH_UNSAVED_CHANGES } from '../unsaved-changes.tsx'
+
+const team: CreatedOrganization = {
+  id: '00000000-0000-7000-8000-000000000010',
+  name: 'Research team',
+  slug: 'Research-Team',
+  logo: null,
+  createdAt: '2026-10-01T09:00:00.000Z',
+  members: [
+    {
+      id: '00000000-0000-7000-8000-000000000011',
+      organizationId: '00000000-0000-7000-8000-000000000010',
+      userId: ME.user.id,
+      role: 'owner',
+      createdAt: '2026-10-01T09:00:00.000Z',
+    },
+  ],
+}
+const teamMe: Schemas['Me'] = {
+  ...ME,
+  organization: {
+    id: team.id,
+    name: team.name,
+    slug: team.slug,
+    personal: false,
+  },
+}
+const nameInput = () => document.getElementById('teamName') as HTMLInputElement
+const slugInput = () => document.getElementById('teamSlug') as HTMLInputElement
+const submit = () => screen.getByRole('button', { name: /^(Create team|创建团队)$/ })
+const createButton = () => screen.queryByRole('button', { name: /^(Create team|创建团队)$/ })
+const checkStatus = () => screen.getByRole('button', { name: /^(Check team status|检查团队状态)$/ })
+const leaving = () => {
+  const event = new Event('beforeunload', { cancelable: true })
+  window.dispatchEvent(event)
+  return event.defaultPrevented
+}
+
+function server(overrides: Routes = {}, role = 'owner') {
+  const state = { me: ME }
+  const api = fakeApi({
+    ...profile(PROFILE),
+    'GET /api/v1/me': () => json(200, state.me),
+    'GET /api/auth/organization/list': () => json(200, [ME.organization, team]),
+    'POST /api/auth/organization/create': () => json(200, team),
+    'POST /api/auth/organization/set-active': () => {
+      state.me = teamMe
+      return json(200, team)
+    },
+    'GET /api/auth/organization/get-active-member': () => json(200, { ...team.members[0], role }),
+    'GET /api/v1/bookings': () => json(200, { data: [], nextCursor: null }),
+    ...overrides,
+  })
+  return { api, state }
+}
+
+async function fill(name = team.name, slug = team.slug) {
+  const user = userEvent.setup()
+  await screen.findByRole('heading', { name: /^(Create team|创建团队)$/, level: 1 })
+  await user.type(nameInput(), name)
+  await user.type(slugInput(), slug)
+  return user
+}
+
+describe('creating a team', () => {
+  it.each(['en', 'zh-CN'] as const)(
+    'creates once by keyboard, activates by ID and displays the confirmed name and role in %s',
+    async (locale) => {
+      chooseLanguage(locale)
+      const { api } = server()
+      renderApp('/app/teams/new')
+      const user = await fill(`  ${team.name}  `)
+      expect(nameInput().labels?.[0]?.textContent).toBe(locale === 'en' ? 'Team name' : '团队名称')
+      expect(slugInput().labels?.[0]?.textContent).toBe(
+        locale === 'en' ? 'Team public address' : '团队公开地址',
+      )
+      await user.keyboard('{Enter}')
+      await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/app/settings'))
+      expect(api.to('POST /api/auth/organization/create').map((call) => call.body)).toEqual([
+        { name: team.name, slug: team.slug, keepCurrentActiveOrganization: true },
+      ])
+      expect(api.to('POST /api/auth/organization/set-active').map((call) => call.body)).toEqual([
+        { organizationId: team.id },
+      ])
+      const account = await screen.findByRole('region', {
+        name: locale === 'en' ? 'Account' : '账号',
+      })
+      expect(account.textContent).toContain(team.name)
+      expect(await screen.findByText(locale === 'en' ? 'Owner' : '所有者')).toBeDefined()
+      expect(leaving()).toBe(false)
+    },
+  )
+
+  it('previews the exact-case team namespace as text without making a personal booking link', async () => {
+    server()
+    renderApp('/app/teams/new')
+    await fill()
+    const preview = screen.getByText((content) =>
+      content.startsWith(`${window.location.origin}/team/${team.slug}/`),
+    )
+    expect(preview.closest('a')).toBeNull()
+    expect(document.querySelector(`a[href^="/${team.slug}/"]`)).toBeNull()
+    expect(preview.textContent).not.toContain('/ada/')
+  })
+
+  it('shows the confirmed current role rather than inferring ownership from creation', async () => {
+    server({}, 'member')
+    renderApp('/app/teams/new')
+    const user = await fill()
+    await user.click(submit())
+    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/app/settings'))
+    expect(await screen.findByText('Member')).toBeDefined()
+    expect(screen.queryByText('Owner')).toBeNull()
+  })
+
+  it.each(['', '-bad', 'bad-', 'two words', 'a/b', '你好', 'a'.repeat(65), 'Admin'])(
+    'rejects invalid or reserved address %j before posting and focuses it',
+    async (slug) => {
+      const { api } = server()
+      renderApp('/app/teams/new')
+      await fill(team.name, 'valid')
+      fireEvent.change(slugInput(), { target: { value: slug } })
+      fireEvent.submit(screen.getByRole('form', { name: 'Create team' }))
+      await screen.findByRole('alert')
+      await waitFor(() => expect(document.activeElement).toBe(slugInput()))
+      expect(slugInput().getAttribute('aria-invalid')).toBe('true')
+      expect(api.to('POST /api/auth/organization/create')).toHaveLength(0)
+    },
+  )
+
+  it.each(['', '   ', 'a'.repeat(201), 'first\u2028second', 'a\u0000b', 'a\ud800b'])(
+    'rejects invalid team name %j before posting',
+    async (name) => {
+      const { api } = server()
+      renderApp('/app/teams/new')
+      await fill('valid')
+      fireEvent.change(nameInput(), { target: { value: name } })
+      fireEvent.submit(screen.getByRole('form', { name: 'Create team' }))
+      await screen.findByRole('alert')
+      expect(nameInput().getAttribute('aria-invalid')).toBe('true')
+      expect(api.to('POST /api/auth/organization/create')).toHaveLength(0)
+    },
+  )
+
+  it.each(['ORGANIZATION_ALREADY_EXISTS', 'ORGANIZATION_SLUG_RESERVED'])(
+    'puts the server address error %s on the address field and focuses it',
+    async (code) => {
+      const { api } = server({
+        'POST /api/auth/organization/create': () => json(400, { code }),
+      })
+      renderApp('/app/teams/new')
+      const user = await fill()
+      await user.click(submit())
+      const alert = await screen.findByRole('alert')
+      expect(within(alert).getByRole('link').getAttribute('href')).toBe('#teamSlug')
+      await waitFor(() => expect(document.activeElement).toBe(slugInput()))
+      expect(slugInput().value).toBe(team.slug)
+      expect(api.to('POST /api/auth/organization/create')).toHaveLength(1)
+      expect(leaving()).toBe(true)
+    },
+  )
+
+  it('locks both drafts through create and confirmation and rejects a double submit', async () => {
+    const pending = later()
+    const { api } = server({ 'POST /api/auth/organization/create': () => pending.response })
+    renderApp('/app/teams/new')
+    const user = await fill()
+    await user.click(submit())
+    expect(nameInput().matches(':disabled')).toBe(true)
+    expect(slugInput().matches(':disabled')).toBe(true)
+    fireEvent.submit(screen.getByRole('form', { name: 'Create team' }))
+    expect(api.to('POST /api/auth/organization/create')).toHaveLength(1)
+    expect(leaving()).toBe(true)
+    await pending.answer(json(200, team))
+    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/app/settings'))
+    expect(api.to('POST /api/auth/organization/create')).toHaveLength(1)
+  })
+
+  it('protects unsaved drafts across app navigation and browser unload', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    server()
+    renderApp('/app/teams/new')
+    await screen.findByRole('heading', { name: 'Create team', level: 1 })
+    expect(leaving()).toBe(false)
+    const user = await fill()
+    expect(leaving()).toBe(true)
+    await user.click(screen.getByRole('link', { name: 'Bookings' }))
+    expect(confirm).toHaveBeenCalledWith(LEAVE_WITH_UNSAVED_CHANGES)
+    expect(screen.getByTestId('location').textContent).toBe('/app/teams/new')
+    expect(nameInput().value).toBe(team.name)
+  })
+
+  it('does not switch context or navigate when a create response arrives after leaving', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const pending = later()
+    const { api } = server({ 'POST /api/auth/organization/create': () => pending.response })
+    renderApp('/app/teams/new')
+    const user = await fill()
+    await user.click(submit())
+    await user.click(screen.getByRole('link', { name: 'Bookings' }))
+    await screen.findByText('No upcoming bookings.')
+    await pending.answer(json(200, team))
+    expect(screen.getByTestId('location').textContent).toBe('/app/bookings')
+    expect(api.to('POST /api/auth/organization/set-active')).toHaveLength(0)
+  })
+})
+
+describe('reconciling an uncertain creation result', () => {
+  it('recovers an already committed team from a refreshed list without a second create', async () => {
+    const { api } = server({
+      'POST /api/auth/organization/create': () => {
+        throw new TypeError('Synthetic lost response')
+      },
+    })
+    renderApp('/app/teams/new')
+    const user = await fill()
+    await user.click(submit())
+    await waitFor(() => expect(api.to('GET /api/auth/organization/list')).toHaveLength(1))
+    expect(screen.getByTestId('location').textContent).toBe('/app/teams/new')
+    expect(createButton()).toBeNull()
+    await user.click(await screen.findByRole('button', { name: 'Open team' }))
+    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/app/settings'))
+    expect(api.to('GET /api/v1/me').length).toBeGreaterThan(1)
+    expect(api.to('POST /api/auth/organization/create')).toHaveLength(1)
+    expect(await screen.findByText('Owner')).toBeDefined()
+  })
+
+  it('permits only an explicit retry after refreshed session and list prove no matching team', async () => {
+    let attempts = 0
+    const { api } = server({
+      'POST /api/auth/organization/create': () =>
+        ++attempts === 1 ? json(500, { code: 'INTERNAL_SERVER_ERROR' }) : json(200, team),
+      'GET /api/auth/organization/list': () => json(200, [ME.organization]),
+    })
+    renderApp('/app/teams/new')
+    const user = await fill()
+    await user.click(submit())
+    await waitFor(() => expect(api.to('GET /api/auth/organization/list')).toHaveLength(1))
+    await waitFor(() => expect(submit().matches(':disabled')).toBe(false))
+    expect(api.to('GET /api/v1/me').length).toBeGreaterThan(1)
+    expect(api.to('POST /api/auth/organization/create')).toHaveLength(1)
+    expect(nameInput().value).toBe(team.name)
+    expect(leaving()).toBe(true)
+    await user.click(submit())
+    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/app/settings'))
+    expect(api.to('POST /api/auth/organization/create')).toHaveLength(2)
+  })
+
+  it.each(['session', 'list'] as const)(
+    'blocks another POST while the %s reconciliation read is unavailable, then checks safely',
+    async (failure) => {
+      let reads = 0
+      let offline = true
+      const { api } = server({
+        'GET /api/v1/me': () =>
+          ++reads > 1 && failure === 'session' && offline
+            ? json(503, { error: 'internal_error' })
+            : json(200, ME),
+        'POST /api/auth/organization/create': () => json(500, { code: 'INTERNAL_SERVER_ERROR' }),
+        'GET /api/auth/organization/list': () =>
+          failure === 'list' && offline
+            ? json(503, { code: 'INTERNAL_SERVER_ERROR' })
+            : json(200, [ME.organization]),
+      })
+      renderApp('/app/teams/new')
+      const user = await fill()
+      await user.click(submit())
+      await screen.findByRole('button', { name: 'Check team status' })
+      expect(createButton()).toBeNull()
+      expect(nameInput().matches(':disabled')).toBe(true)
+      expect(slugInput().matches(':disabled')).toBe(true)
+      fireEvent.submit(screen.getByRole('form', { name: 'Create team' }))
+      expect(api.to('POST /api/auth/organization/create')).toHaveLength(1)
+      offline = false
+      await user.click(checkStatus())
+      await waitFor(() => expect(submit().matches(':disabled')).toBe(false))
+      expect(api.to('POST /api/auth/organization/create')).toHaveLength(1)
+    },
+  )
+
+  it('reconciles a failed post-create /me confirmation instead of posting again', async () => {
+    let reads = 0
+    const { api, state } = server({
+      'GET /api/v1/me': () =>
+        ++reads === 2 ? json(503, { error: 'internal_error' }) : json(200, state.me),
+    })
+    renderApp('/app/teams/new')
+    const user = await fill()
+    await user.click(submit())
+    await waitFor(() => expect(api.to('GET /api/auth/organization/list')).toHaveLength(1))
+    await user.click(await screen.findByRole('button', { name: 'Open team' }))
+    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/app/settings'))
+    expect(api.to('POST /api/auth/organization/create')).toHaveLength(1)
+  })
+
+  it('uses exact-case addresses when deciding whether a team already exists', async () => {
+    const { api } = server({
+      'POST /api/auth/organization/create': () => json(500, { code: 'INTERNAL_SERVER_ERROR' }),
+      'GET /api/auth/organization/list': () =>
+        json(200, [{ ...team, slug: team.slug.toLowerCase() }]),
+    })
+    renderApp('/app/teams/new')
+    const user = await fill()
+    await user.click(submit())
+    await screen.findByText('No team was found at this address. You can try creating it again.')
+    expect(submit().matches(':disabled')).toBe(false)
+    expect(screen.queryByRole('button', { name: 'Open team' })).toBeNull()
+    expect(api.to('POST /api/auth/organization/create')).toHaveLength(1)
+  })
+
+  it('pins the address across a stale empty list and collision instead of creating a different team', async () => {
+    let attempts = 0
+    let lists = 0
+    const { api } = server({
+      'POST /api/auth/organization/create': () =>
+        ++attempts === 1
+          ? json(500, { code: 'INTERNAL_SERVER_ERROR' })
+          : json(400, { code: 'ORGANIZATION_ALREADY_EXISTS' }),
+      'GET /api/auth/organization/list': () =>
+        json(200, ++lists === 1 ? [ME.organization] : [ME.organization, team]),
+    })
+    renderApp('/app/teams/new')
+    const user = await fill()
+    await user.click(submit())
+    await screen.findByText('No team was found at this address. You can try creating it again.')
+    expect(nameInput().matches(':disabled')).toBe(false)
+    expect(slugInput().matches(':disabled')).toBe(true)
+    await user.clear(nameInput())
+    await user.type(nameInput(), 'Revised name')
+    // A stale scripted change must not bypass the pinned identity used by the request.
+    fireEvent.change(slugInput(), { target: { value: 'Different-Team' } })
+    await user.click(submit())
+    const open = await screen.findByRole('button', { name: 'Open team' })
+    await waitFor(() => expect(open.matches(':disabled')).toBe(false))
+    expect(api.to('POST /api/auth/organization/create').map((call) => call.body)).toEqual([
+      { name: team.name, slug: team.slug, keepCurrentActiveOrganization: true },
+      { name: 'Revised name', slug: team.slug, keepCurrentActiveOrganization: true },
+    ])
+    expect(api.to('GET /api/auth/organization/list')).toHaveLength(2)
+    expect(createButton()).toBeNull()
+    expect(screen.getByText(team.name)).toBeDefined()
+    await user.click(open)
+    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/app/settings'))
+    expect(api.to('POST /api/auth/organization/create')).toHaveLength(2)
+  })
+
+  it.each(['activation', 'confirmation'] as const)(
+    'retries opening only after %s fails for a team already created',
+    async (failure) => {
+      let switches = 0
+      let reads = 0
+      const { api, state } = server({
+        'POST /api/auth/organization/set-active': () => {
+          switches++
+          if (failure === 'activation' && switches === 1)
+            return json(503, { code: 'INTERNAL_SERVER_ERROR' })
+          state.me = teamMe
+          return json(200, team)
+        },
+        'GET /api/v1/me': () =>
+          ++reads === 3 && failure === 'confirmation'
+            ? json(503, { error: 'internal_error' })
+            : json(200, state.me),
+      })
+      renderApp('/app/teams/new')
+      const user = await fill()
+      await user.click(submit())
+      const open = await screen.findByRole('button', { name: 'Open team' })
+      await waitFor(() => expect(open.matches(':disabled')).toBe(false))
+      expect(createButton()).toBeNull()
+      expect(nameInput().matches(':disabled')).toBe(true)
+      expect(screen.getByTestId('location').textContent).toBe('/app/teams/new')
+      expect(screen.getByText(team.name)).toBeDefined()
+      expect(screen.getByText('Owner')).toBeDefined()
+      await user.click(open)
+      await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/app/settings'))
+      expect(api.to('POST /api/auth/organization/create')).toHaveLength(1)
+      expect(api.to('POST /api/auth/organization/set-active')).toHaveLength(2)
+    },
+  )
+
+  it('does not leave the chosen page when a delayed activation completes', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const pending = later()
+    const { api } = server({
+      'POST /api/auth/organization/set-active': () => pending.response,
+    })
+    renderApp('/app/teams/new')
+    const user = await fill()
+    await user.click(submit())
+    await waitFor(() => expect(api.to('POST /api/auth/organization/set-active')).toHaveLength(1))
+    await user.click(screen.getByRole('link', { name: 'Bookings' }))
+    await screen.findByText('No upcoming bookings.')
+    await pending.answer(json(200, team))
+    expect(screen.getByTestId('location').textContent).toBe('/app/bookings')
+    expect(api.to('GET /api/v1/me')).toHaveLength(2)
+  })
+
+  it.each(['organization', 'user'] as const)(
+    'keeps creation blocked when the activation confirmation identifies another %s',
+    async (mismatch) => {
+      let reads = 0
+      const { api } = server({
+        'GET /api/v1/me': () => {
+          if (++reads < 3) return json(200, ME)
+          return json(
+            200,
+            mismatch === 'organization'
+              ? ME
+              : { ...teamMe, user: { ...ME.user, id: 'another-user' } },
+          )
+        },
+      })
+      renderApp('/app/teams/new')
+      const user = await fill()
+      await user.click(submit())
+      const open = await screen.findByRole('button', { name: 'Open team' })
+      await waitFor(() => expect(open.matches(':disabled')).toBe(false))
+      expect(createButton()).toBeNull()
+      expect(screen.getByTestId('location').textContent).toBe('/app/teams/new')
+      expect(api.to('POST /api/auth/organization/create')).toHaveLength(1)
+    },
+  )
+
+  it.each(['organizationId', 'userId'] as const)(
+    'does not show the role of a returned member with a foreign %s',
+    async (field) => {
+      server({
+        'POST /api/auth/organization/create': () =>
+          json(200, {
+            ...team,
+            members: [{ ...team.members[0], [field]: 'foreign-identity' }],
+          }),
+        'POST /api/auth/organization/set-active': () =>
+          json(503, { code: 'INTERNAL_SERVER_ERROR' }),
+      })
+      renderApp('/app/teams/new')
+      const user = await fill()
+      await user.click(submit())
+      const open = await screen.findByRole('button', { name: 'Open team' })
+      await waitFor(() => expect(open.matches(':disabled')).toBe(false))
+      expect(screen.getByText(team.name)).toBeDefined()
+      expect(screen.queryByText('Owner')).toBeNull()
+      expect(createButton()).toBeNull()
+    },
+  )
+
+  it('ignores a late activation confirmation after the person leaves', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const pending = later()
+    let reads = 0
+    const { api } = server({
+      'GET /api/v1/me': () => (++reads === 3 ? pending.response : json(200, ME)),
+    })
+    renderApp('/app/teams/new')
+    const user = await fill()
+    await user.click(submit())
+    await waitFor(() => expect(reads).toBe(3))
+    await user.click(screen.getByRole('link', { name: 'Bookings' }))
+    await screen.findByText('No upcoming bookings.')
+    await pending.answer(json(200, teamMe))
+    expect(screen.getByTestId('location').textContent).toBe('/app/bookings')
+    expect(api.to('POST /api/auth/organization/create')).toHaveLength(1)
+    await user.click(screen.getByRole('link', { name: 'Settings' }))
+    const account = await screen.findByRole('region', { name: 'Account' })
+    expect(account.textContent).toContain(ME.organization.name)
+    expect(account.textContent).not.toContain(team.name)
+  })
+})

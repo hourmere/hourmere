@@ -65,6 +65,10 @@ export const SettingsPage = page(
   () => import('./pages/Settings.tsx'),
   (m) => m.SettingsPage,
 )
+export const CreateTeamPage = page(
+  () => import('./pages/CreateTeam.tsx'),
+  (m) => m.CreateTeamPage,
+)
 export const ConferencesPage = page(
   () => import('./pages/Conferences.tsx'),
   (m) => m.ConferencesPage,
