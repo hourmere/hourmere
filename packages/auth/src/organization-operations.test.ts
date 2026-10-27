@@ -163,10 +163,10 @@ describe.skipIf(!serverUrl)('member operation attribution', () => {
     expect(response.status).toBe(200)
     expect(await membership(f.memberId)).toBeUndefined()
     const records = await operations(f.organizationId)
-    expect(records).toEqual([expected(f, f.owner.id)])
     expect(JSON.stringify(records).includes('synthetic-private-value')).toBe(false)
     expect(JSON.stringify(records).includes(f.owner.cookie)).toBe(false)
     expect(JSON.stringify(records).includes(f.target.email)).toBe(false)
+    expect(records).toEqual([expected(f, f.owner.id)])
   })
 
   it('attributes ordinary leave to the member and clears their active team', async () => {

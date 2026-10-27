@@ -1444,13 +1444,14 @@ export async function cancelHostBooking(
  * Cancellation inside the shared team-management write transaction. The caller must use
  * that check's returned actor and transaction; this helper supplies no authorization of
  * its own. The caller can reload its normal minimal team projection after the write.
+ * Read the clock after the booking lock, so waiting cannot extend the cancellation window.
  * Existing host and manage-token entry points keep their original access rules.
  */
 export async function cancelTeamBookingInTransaction(
   trx: Transaction<Database>,
   actor: { userId: string; organizationId: string },
   id: string,
-  now: Temporal.Instant,
+  now: () => Temporal.Instant,
   options: { reason?: string | undefined; notify?: BookingNotifier | undefined } = {},
 ): Promise<void> {
   if (!trx.isTransaction) throw new Error('Team cancellation requires a transaction')
@@ -1466,7 +1467,7 @@ export async function cancelTeamBookingInTransaction(
   await cancelLocked(
     trx,
     row,
-    now,
+    now(),
     normalizeReason(options.reason),
     options.notify,
     BOOKING_PAGE,

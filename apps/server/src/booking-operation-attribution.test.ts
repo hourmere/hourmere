@@ -94,7 +94,7 @@ describe.skipIf(!serverUrl)('booking operation attribution', () => {
   async function verifyTeam(copy: BookingModule) {
     const s = await fixture()
     await s.access.write(s.principal, s.team.id, (trx, actor) =>
-      copy.cancelTeamBookingInTransaction(trx, actor, s.booking.id, now(), {
+      copy.cancelTeamBookingInTransaction(trx, actor, s.booking.id, now, {
         reason: 'private-reason-marker',
       }),
     )
@@ -132,7 +132,7 @@ describe.skipIf(!serverUrl)('booking operation attribution', () => {
     expect(stored.cancelled_at).toEqual(new Date(now().toString()))
     await expect(
       s.access.write(s.principal, s.team.id, (trx, actor) =>
-        copy.cancelTeamBookingInTransaction(trx, actor, s.booking.id, now()),
+        copy.cancelTeamBookingInTransaction(trx, actor, s.booking.id, now),
       ),
     ).rejects.toMatchObject({ code: 'booking_cancelled' })
     expect(await operations(s.booking.id)).toHaveLength(1)
@@ -146,7 +146,7 @@ describe.skipIf(!serverUrl)('booking operation attribution', () => {
     const s = await fixture()
     const cancel = (id: string, instant = now(), notify?: bookings.BookingNotifier) =>
       s.access.write(s.principal, s.team.id, (trx, actor) =>
-        bookings.cancelTeamBookingInTransaction(trx, actor, id, instant, { notify }),
+        bookings.cancelTeamBookingInTransaction(trx, actor, id, () => instant, { notify }),
       )
     await expect(cancel(randomUUID())).rejects.toMatchObject({ code: 'booking_not_found' })
     const outside = await db
@@ -309,7 +309,7 @@ describe.skipIf(!serverUrl)('booking operation attribution', () => {
           db as Parameters<BookingModule['cancelTeamBookingInTransaction']>[0],
           { userId: s.manager.id, organizationId: s.team.id },
           s.booking.id,
-          now(),
+          now,
         ),
       ).rejects.toThrow('Team cancellation requires a transaction')
     }
@@ -338,10 +338,84 @@ describe.skipIf(!serverUrl)('booking operation attribution', () => {
     const assertion = async () => {
       await expect(
         s.access.write(s.principal, s.team.id, (trx, actor) =>
-          copy.cancelTeamBookingInTransaction(trx, actor, outside.id, now()),
+          copy.cancelTeamBookingInTransaction(trx, actor, outside.id, now),
         ),
       ).rejects.toMatchObject({ code: 'booking_not_found' })
     }
     await expect(assertion()).rejects.toMatchObject({ name: 'AssertionError' })
+  })
+
+  async function verifyClockAfterLock(copy: BookingModule) {
+    const s = await fixture()
+    let release = () => {}
+    let acquired = () => {}
+    const hold = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const locked = new Promise<void>((resolve) => {
+      acquired = resolve
+    })
+    const blocker = db.transaction().execute(async (trx) => {
+      await trx
+        .selectFrom('bookings')
+        .select('id')
+        .where('id', '=', s.booking.id)
+        .forUpdate()
+        .execute()
+      acquired()
+      await hold
+    })
+    await locked
+    let instant = now()
+    const outcome = s.access
+      .write(s.principal, s.team.id, (trx, actor) =>
+        copy.cancelTeamBookingInTransaction(trx, actor, s.booking.id, () => instant),
+      )
+      .then(
+        () => null,
+        (error: unknown) => error,
+      )
+    try {
+      await expect
+        .poll(
+          async () =>
+            (
+              await owned.pool.query<{ waiting: boolean }>(`
+        SELECT EXISTS (SELECT FROM pg_stat_activity
+          WHERE datname=current_database() AND pid<>pg_backend_pid()
+            AND wait_event_type='Lock' AND query LIKE '%bookings%') AS waiting
+      `)
+            ).rows[0]?.waiting,
+          { timeout: 3000, interval: 10 },
+        )
+        .toBe(true)
+      instant = Temporal.Instant.from('2026-11-02T09:00Z')
+    } finally {
+      release()
+      await blocker
+    }
+    await expect(outcome).resolves.toMatchObject({ code: 'booking_in_past' })
+    expect(await operations(s.booking.id)).toEqual([])
+    expect(
+      (
+        await db
+          .selectFrom('bookings')
+          .select('status')
+          .where('id', '=', s.booking.id)
+          .executeTakeFirstOrThrow()
+      ).status,
+    ).toBe('confirmed')
+  }
+
+  it('rechecks the cancellation window after waiting for the booking lock', async () => {
+    await verifyClockAfterLock(bookings)
+  })
+
+  it('detects a clock read moved before the booking lock in a source copy', async () => {
+    const copy = await sourceCopy(
+      "  if (!trx.isTransaction) throw new Error('Team cancellation requires a transaction')",
+      "  const checkedAt = now(); now = () => checkedAt;\n  if (!trx.isTransaction) throw new Error('Team cancellation requires a transaction')",
+    )
+    await expect(verifyClockAfterLock(copy)).rejects.toMatchObject({ name: 'AssertionError' })
   })
 })
