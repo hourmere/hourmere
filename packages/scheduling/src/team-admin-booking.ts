@@ -45,7 +45,7 @@ export type TeamAdminBookingPage = z.infer<typeof TeamAdminBookingPageSchema>
  * retains its ID with a null title; a missing event association is null.
  *
  * This is a projection boundary, not an access check. The future team endpoint must
- * first apply the shared team-admin access check and team scope (card 583), and load
+ * first apply the shared team-admin access check and team scope, and load
  * current booking state. No endpoint or session/role authorization is introduced here.
  */
 export interface TeamAdminBookingRecord {

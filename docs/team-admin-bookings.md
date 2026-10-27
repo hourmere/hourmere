@@ -1,7 +1,7 @@
 # Team administrator booking fields
 
-Card 581 / TS02 implements the data boundary from the approved team policy contract
-(card 580). There is no team-administrator booking endpoint yet. The scheduling service
+This page fixes the data boundary for team administrators from the team access policy.
+There is no team-administrator booking endpoint yet. The scheduling service
 exports `TeamAdminBookingSchema`, `TeamAdminBookingPageSchema`, their inferred types and
 `toTeamAdminBooking` for the future endpoint.
 
@@ -36,7 +36,7 @@ on asynchronous provider cleanup. Any future link field needs an explicit visibi
 contract and current booking/conference snapshot checks before expanding this whitelist.
 
 `TeamAdminBookingRecord` is an internal read model, not an authorization result. Before
-calling the mapper, the future endpoint must apply the shared access check from card 583,
+calling the mapper, the future endpoint must apply the shared team-management access check,
 scope every booking to the authorized team, read current booking state, and load only that
 booking's hosts and attendees. Event metadata must come from its associated event type
 in that team, with a null title after soft deletion. List paging and detail lookup belong
