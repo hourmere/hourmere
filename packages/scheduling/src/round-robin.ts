@@ -1,6 +1,7 @@
 import type { Db } from '@hourmere/db'
 import { sql } from 'kysely'
 import { DomainError } from './errors.ts'
+import { eligibleHostIds } from './hosts.ts'
 
 /** Eligibility is an explicit current-data filter, never a swallowed authorization error. */
 export async function eligibleRoundRobinHosts(
@@ -20,15 +21,12 @@ export async function eligibleRoundRobinHosts(
   const currentUsers = await users.execute()
   let members = db
     .selectFrom('auth.member')
-    .select('userId')
+    .select(['userId', 'organizationId'])
     .where('organizationId', '=', organizationId)
     .where('userId', 'in', ids)
     .orderBy('userId')
   if (lock) members = members.forShare()
-  const membership = new Set((await members.execute()).map((member) => member.userId))
-  return currentUsers
-    .filter((user) => user.emailVerified && membership.has(user.id))
-    .map((user) => user.id)
+  return eligibleHostIds(organizationId, ids, currentUsers, await members.execute())
 }
 
 /** Call after the event share lock and every configured host's ordered advisory lock. */

@@ -9,6 +9,8 @@ describe('openApiDocument', () => {
       expect.arrayContaining([
         '/api/health',
         '/api/v1/me',
+        '/api/v1/readiness/self',
+        '/api/v1/teams/{teamId}/readiness',
         '/api/v1/instance',
         '/api/v1/profile',
         '/api/v1/schedules',
