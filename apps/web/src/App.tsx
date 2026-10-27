@@ -1,9 +1,9 @@
 import { Suspense, useEffect } from 'react'
-import { Navigate, Route, Routes, useLocation } from 'react-router'
+import { matchRoutes, Navigate, Route, Routes, useLocation } from 'react-router'
 import { AdminLoading } from './components/AdminLoading.tsx'
 import { RouteErrorBoundary } from './components/RouteErrorBoundary.tsx'
 import { embedQueryLanguage } from './embed/language.ts'
-import { useI18n } from './i18n/runtime.tsx'
+import { InterfaceScope, useI18n } from './i18n/runtime.tsx'
 import { translate } from './i18n/translate.ts'
 import {
   AcceptInvitationPage,
@@ -56,6 +56,27 @@ function RouteLoadingStatus() {
  * kept: they are free for public pages.
  */
 export function App() {
+  const { pathname } = useLocation()
+  const admin = Boolean(
+    matchRoutes(
+      [
+        { path: '/' },
+        { path: '/app/*' },
+        { path: '/sign-in' },
+        { path: '/oauth/authorize' },
+        { path: '/oauth/consent' },
+      ],
+      pathname,
+    ),
+  )
+  return (
+    <InterfaceScope surface={admin ? 'admin' : 'public'}>
+      <AppRoutes />
+    </InterfaceScope>
+  )
+}
+
+function AppRoutes() {
   const { t } = useI18n()
   const { pathname } = useLocation()
   useEffect(() => {

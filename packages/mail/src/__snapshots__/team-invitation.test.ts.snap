@@ -1,0 +1,205 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`teamInvitationEmail > preserves the complete en message bytes 1`] = `
+{
+  "html": "<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>Invitation to join Orbital Design</title>
+<style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
+</head>
+<body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
+<!--[if mso]><table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" style="width: 600px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><![endif]-->
+<table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="width: 100%; max-width: 600px; margin: 0 auto; background-color: #ffffff; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;">
+<tr><td style="padding: 24px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; overflow-wrap: anywhere; word-break: break-word;">
+<p style="margin: 0 0 24px; color: #1f4fd8; font-size: 20px; font-weight: 700;">Hourmere</p>
+<p>Ada Lovelace invited you to join the team “Orbital Design” on Hourmere.</p>
+<p>Sign in with the invited email address invited+team@example.test and verify it, then accept the invitation on the page. Email aliases cannot replace this address.</p>
+<p>Signing in alone does not join the team; you must explicitly accept on the page.</p>
+<p>This invitation expires at 2026-10-29 17:30:00 UTC.</p>
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="padding: 16px 0; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td bgcolor="#1f4fd8" style="padding: 0; mso-padding-alt: 12px 18px; background-color: #1f4fd8; border: 1px solid #1f4fd8; border-radius: 6px; text-align: center; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><a href="https://calendar.example.test/app/join?invitationId=019a278e-3ff2-7a91-8fe0-1846a52d0b22" style="display: block; padding: 12px 18px; line-height: 20px; min-height: 20px; color: #ffffff; text-decoration: none; overflow-wrap: anywhere; word-break: break-word;">View and accept invitation</a></td></tr></table></td></tr></table>
+<p style="color: #555; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;">If the button does not work, copy this link into your browser:<br><a href="https://calendar.example.test/app/join?invitationId=019a278e-3ff2-7a91-8fe0-1846a52d0b22" style="color: #1f4fd8; overflow-wrap: anywhere; word-break: break-word;">https://calendar.example.test/app/join?invitationId=019a278e-3ff2-7a91-8fe0-1846a52d0b22</a></p>
+<p style="margin-top: 24px; border-top: 1px solid #ddd; padding-top: 16px; color: #555; font-size: 13px;">If you do not recognize this team or do not want to join, you can ignore this email.</p>
+</td></tr>
+</table>
+<!--[if mso]></td></tr></table><![endif]-->
+</body>
+</html>
+",
+  "sensitive": true,
+  "subject": "Invitation to join Orbital Design",
+  "text": "Hourmere
+
+Ada Lovelace invited you to join the team “Orbital Design” on Hourmere.
+
+Sign in with the invited email address invited+team@example.test and verify it, then accept the invitation on the page. Email aliases cannot replace this address.
+
+Signing in alone does not join the team; you must explicitly accept on the page.
+
+This invitation expires at 2026-10-29 17:30:00 UTC.
+
+View and accept invitation
+https://calendar.example.test/app/join?invitationId=019a278e-3ff2-7a91-8fe0-1846a52d0b22
+
+If you do not recognize this team or do not want to join, you can ignore this email.
+",
+  "to": "invited+team@example.test",
+}
+`;
+
+exports[`teamInvitationEmail > preserves the complete en message bytes 2`] = `
+{
+  "html": "<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>Invitation to join Your team</title>
+<style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
+</head>
+<body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
+<!--[if mso]><table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" style="width: 600px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><![endif]-->
+<table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="width: 100%; max-width: 600px; margin: 0 auto; background-color: #ffffff; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;">
+<tr><td style="padding: 24px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; overflow-wrap: anywhere; word-break: break-word;">
+<p style="margin: 0 0 24px; color: #1f4fd8; font-size: 20px; font-weight: 700;">Hourmere</p>
+<p>A team member invited you to join the team “Your team” on Hourmere.</p>
+<p>Sign in with the invited email address invited+team@example.test and verify it, then accept the invitation on the page. Email aliases cannot replace this address.</p>
+<p>Signing in alone does not join the team; you must explicitly accept on the page.</p>
+<p>This invitation expires at 2026-10-29 17:30:00 UTC.</p>
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="padding: 16px 0; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td bgcolor="#1f4fd8" style="padding: 0; mso-padding-alt: 12px 18px; background-color: #1f4fd8; border: 1px solid #1f4fd8; border-radius: 6px; text-align: center; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><a href="https://calendar.example.test/app/join?invitationId=019a278e-3ff2-7a91-8fe0-1846a52d0b22" style="display: block; padding: 12px 18px; line-height: 20px; min-height: 20px; color: #ffffff; text-decoration: none; overflow-wrap: anywhere; word-break: break-word;">View and accept invitation</a></td></tr></table></td></tr></table>
+<p style="color: #555; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;">If the button does not work, copy this link into your browser:<br><a href="https://calendar.example.test/app/join?invitationId=019a278e-3ff2-7a91-8fe0-1846a52d0b22" style="color: #1f4fd8; overflow-wrap: anywhere; word-break: break-word;">https://calendar.example.test/app/join?invitationId=019a278e-3ff2-7a91-8fe0-1846a52d0b22</a></p>
+<p style="margin-top: 24px; border-top: 1px solid #ddd; padding-top: 16px; color: #555; font-size: 13px;">If you do not recognize this team or do not want to join, you can ignore this email.</p>
+</td></tr>
+</table>
+<!--[if mso]></td></tr></table><![endif]-->
+</body>
+</html>
+",
+  "sensitive": true,
+  "subject": "Invitation to join Your team",
+  "text": "Hourmere
+
+A team member invited you to join the team “Your team” on Hourmere.
+
+Sign in with the invited email address invited+team@example.test and verify it, then accept the invitation on the page. Email aliases cannot replace this address.
+
+Signing in alone does not join the team; you must explicitly accept on the page.
+
+This invitation expires at 2026-10-29 17:30:00 UTC.
+
+View and accept invitation
+https://calendar.example.test/app/join?invitationId=019a278e-3ff2-7a91-8fe0-1846a52d0b22
+
+If you do not recognize this team or do not want to join, you can ignore this email.
+",
+  "to": "invited+team@example.test",
+}
+`;
+
+exports[`teamInvitationEmail > preserves the complete zh-CN message bytes 1`] = `
+{
+  "html": "<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>邀请你加入团队：Orbital Design</title>
+<style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
+</head>
+<body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
+<!--[if mso]><table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" style="width: 600px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><![endif]-->
+<table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="width: 100%; max-width: 600px; margin: 0 auto; background-color: #ffffff; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;">
+<tr><td style="padding: 24px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; overflow-wrap: anywhere; word-break: break-word;">
+<p style="margin: 0 0 24px; color: #1f4fd8; font-size: 20px; font-weight: 700;">Hourmere</p>
+<p>Ada Lovelace 邀请你加入 Hourmere 上的团队「Orbital Design」。</p>
+<p>请使用受邀邮箱 invited+team@example.test 登录并完成邮箱验证，然后在邀请页面接受邀请。邮箱别名不能代替此地址。</p>
+<p>仅登录不会加入团队；你需要在页面上明确接受邀请。</p>
+<p>邀请有效期至：2026-10-29 17:30:00 UTC。</p>
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="padding: 16px 0; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td bgcolor="#1f4fd8" style="padding: 0; mso-padding-alt: 12px 18px; background-color: #1f4fd8; border: 1px solid #1f4fd8; border-radius: 6px; text-align: center; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><a href="https://calendar.example.test/app/join?invitationId=019a278e-3ff2-7a91-8fe0-1846a52d0b22" style="display: block; padding: 12px 18px; line-height: 20px; min-height: 20px; color: #ffffff; text-decoration: none; overflow-wrap: anywhere; word-break: break-word;">查看并接受邀请</a></td></tr></table></td></tr></table>
+<p style="color: #555; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;">如果按钮无法使用，请将此链接复制到浏览器中：<br><a href="https://calendar.example.test/app/join?invitationId=019a278e-3ff2-7a91-8fe0-1846a52d0b22" style="color: #1f4fd8; overflow-wrap: anywhere; word-break: break-word;">https://calendar.example.test/app/join?invitationId=019a278e-3ff2-7a91-8fe0-1846a52d0b22</a></p>
+<p style="margin-top: 24px; border-top: 1px solid #ddd; padding-top: 16px; color: #555; font-size: 13px;">如果你不认识此团队或不想加入，可以忽略此邮件。</p>
+</td></tr>
+</table>
+<!--[if mso]></td></tr></table><![endif]-->
+</body>
+</html>
+",
+  "sensitive": true,
+  "subject": "邀请你加入团队：Orbital Design",
+  "text": "Hourmere
+
+Ada Lovelace 邀请你加入 Hourmere 上的团队「Orbital Design」。
+
+请使用受邀邮箱 invited+team@example.test 登录并完成邮箱验证，然后在邀请页面接受邀请。邮箱别名不能代替此地址。
+
+仅登录不会加入团队；你需要在页面上明确接受邀请。
+
+邀请有效期至：2026-10-29 17:30:00 UTC。
+
+查看并接受邀请
+https://calendar.example.test/app/join?invitationId=019a278e-3ff2-7a91-8fe0-1846a52d0b22
+
+如果你不认识此团队或不想加入，可以忽略此邮件。
+",
+  "to": "invited+team@example.test",
+}
+`;
+
+exports[`teamInvitationEmail > preserves the complete zh-CN message bytes 2`] = `
+{
+  "html": "<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>邀请你加入团队：你的团队</title>
+<style>body, table, td { font-family: -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,Helvetica,Arial,sans-serif; } :root { color-scheme: light; supported-color-schemes: light; }</style>
+</head>
+<body bgcolor="#ffffff" style="margin: 0; padding: 0; background-color: #ffffff; color: #111; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; font-size: 16px; line-height: 1.5;">
+<!--[if mso]><table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" style="width: 600px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><![endif]-->
+<table role="presentation" width="600" align="center" cellspacing="0" cellpadding="0" border="0" bgcolor="#ffffff" style="width: 100%; max-width: 600px; margin: 0 auto; background-color: #ffffff; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;">
+<tr><td style="padding: 24px; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif; overflow-wrap: anywhere; word-break: break-word;">
+<p style="margin: 0 0 24px; color: #1f4fd8; font-size: 20px; font-weight: 700;">Hourmere</p>
+<p>团队成员 邀请你加入 Hourmere 上的团队「你的团队」。</p>
+<p>请使用受邀邮箱 invited+team@example.test 登录并完成邮箱验证，然后在邀请页面接受邀请。邮箱别名不能代替此地址。</p>
+<p>仅登录不会加入团队；你需要在页面上明确接受邀请。</p>
+<p>邀请有效期至：2026-10-29 17:30:00 UTC。</p>
+<table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td style="padding: 16px 0; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><table role="presentation" cellspacing="0" cellpadding="0" border="0" style="max-width: 100%; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><tr><td bgcolor="#1f4fd8" style="padding: 0; mso-padding-alt: 12px 18px; background-color: #1f4fd8; border: 1px solid #1f4fd8; border-radius: 6px; text-align: center; font-family: -apple-system,&quot;Segoe UI&quot;,&quot;PingFang SC&quot;,&quot;Microsoft YaHei&quot;,Roboto,Helvetica,Arial,sans-serif;"><a href="https://calendar.example.test/app/join?invitationId=019a278e-3ff2-7a91-8fe0-1846a52d0b22" style="display: block; padding: 12px 18px; line-height: 20px; min-height: 20px; color: #ffffff; text-decoration: none; overflow-wrap: anywhere; word-break: break-word;">查看并接受邀请</a></td></tr></table></td></tr></table>
+<p style="color: #555; font-size: 13px; overflow-wrap: anywhere; word-break: break-word;">如果按钮无法使用，请将此链接复制到浏览器中：<br><a href="https://calendar.example.test/app/join?invitationId=019a278e-3ff2-7a91-8fe0-1846a52d0b22" style="color: #1f4fd8; overflow-wrap: anywhere; word-break: break-word;">https://calendar.example.test/app/join?invitationId=019a278e-3ff2-7a91-8fe0-1846a52d0b22</a></p>
+<p style="margin-top: 24px; border-top: 1px solid #ddd; padding-top: 16px; color: #555; font-size: 13px;">如果你不认识此团队或不想加入，可以忽略此邮件。</p>
+</td></tr>
+</table>
+<!--[if mso]></td></tr></table><![endif]-->
+</body>
+</html>
+",
+  "sensitive": true,
+  "subject": "邀请你加入团队：你的团队",
+  "text": "Hourmere
+
+团队成员 邀请你加入 Hourmere 上的团队「你的团队」。
+
+请使用受邀邮箱 invited+team@example.test 登录并完成邮箱验证，然后在邀请页面接受邀请。邮箱别名不能代替此地址。
+
+仅登录不会加入团队；你需要在页面上明确接受邀请。
+
+邀请有效期至：2026-10-29 17:30:00 UTC。
+
+查看并接受邀请
+https://calendar.example.test/app/join?invitationId=019a278e-3ff2-7a91-8fe0-1846a52d0b22
+
+如果你不认识此团队或不想加入，可以忽略此邮件。
+",
+  "to": "invited+team@example.test",
+}
+`;

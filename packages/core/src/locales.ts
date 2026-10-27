@@ -1,9 +1,13 @@
+export type InterfaceSurface = 'public' | 'admin'
+
 export type LocaleDefinition = {
   readonly code: string
   readonly nativeName: string
   readonly fallbacks: readonly string[]
   readonly formatLocale: string
   readonly direction: 'ltr'
+  /** Omit to offer the language on every interface; notification support is independent. */
+  readonly interfaces?: readonly InterfaceSurface[]
   readonly excludedRegions?: readonly string[]
   /** When present, accept every script except those listed instead of matching the entry's script. */
   readonly excludedScripts?: readonly string[]
@@ -26,6 +30,14 @@ export const localeRegistry = {
     direction: 'ltr',
     excludedRegions: ['TW', 'HK', 'MO'],
     excludedScripts: ['Hant'],
+  },
+  de: {
+    code: 'de',
+    nativeName: 'Deutsch',
+    fallbacks: ['en'],
+    formatLocale: 'de-DE',
+    direction: 'ltr',
+    interfaces: ['public'],
   },
 } as const satisfies Record<string, LocaleDefinition>
 

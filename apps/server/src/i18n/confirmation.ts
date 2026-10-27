@@ -1,11 +1,20 @@
 import { readFileSync } from 'node:fs'
-import { type InterfaceLanguage, localeFallbacks, registeredLocales } from '@hourmere/core/language'
+import {
+  type InterfaceLanguage,
+  interfaceLanguages,
+  localeFallbacks,
+  registeredLocales,
+} from '@hourmere/core/language'
 import english from './catalogues/en.json' with { type: 'json' }
 
 type ConfirmationWords = typeof english
 
+export const confirmationLocales = registeredLocales.filter(({ code }) =>
+  interfaceLanguages('admin').includes(code),
+)
+
 const catalogues: Record<string, Partial<ConfirmationWords>> = { en: english }
-for (const { code } of registeredLocales) {
+for (const { code } of confirmationLocales) {
   if (code === 'en') continue
   try {
     const catalogue: unknown = JSON.parse(
@@ -29,7 +38,7 @@ for (const { code } of registeredLocales) {
 
 /** Resolve each word independently; incomplete catalogues always retain English copy. */
 export const confirmationCatalogues = Object.fromEntries(
-  registeredLocales.map(({ code }) => [
+  confirmationLocales.map(({ code }) => [
     code,
     Object.fromEntries(
       Object.entries(english).map(([key, value]) => [

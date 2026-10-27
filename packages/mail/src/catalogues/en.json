@@ -58,5 +58,15 @@
   "signIn.button": "Sign in",
   "signIn.expiry": "The link expires in {minutes} minutes and works once. If you did not ask to sign in, you can ignore this email.",
   "signIn.fallback": "If the button does not work, copy this link into your browser:",
-  "signIn.footer": "You received this email because a sign-in link was requested for your Hourmere account."
+  "signIn.footer": "You received this email because a sign-in link was requested for your Hourmere account.",
+  "teamInvitation.defaultTeam": "Your team",
+  "teamInvitation.defaultInviter": "A team member",
+  "teamInvitation.subject": "Invitation to join {team}",
+  "teamInvitation.introduction": "{inviter} invited you to join the team “{team}” on Hourmere.",
+  "teamInvitation.identity": "Sign in with the invited email address {email} and verify it, then accept the invitation on the page. Email aliases cannot replace this address.",
+  "teamInvitation.acceptance": "Signing in alone does not join the team; you must explicitly accept on the page.",
+  "teamInvitation.expiry": "This invitation expires at {expiry}.",
+  "teamInvitation.button": "View and accept invitation",
+  "teamInvitation.fallback": "If the button does not work, copy this link into your browser:",
+  "teamInvitation.footer": "If you do not recognize this team or do not want to join, you can ignore this email."
 }

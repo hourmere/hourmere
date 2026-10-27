@@ -67,6 +67,7 @@ describe('cross-zone public booking details', () => {
       renderApp(`${path}?language=${language}`)
       const chinese = language === 'zh-CN'
       const zone = await hostZoneLabel()
+      expect(zone.firstElementChild?.textContent).toBe('America')
       expect(zone.querySelectorAll('wbr')).toHaveLength(1)
       expect(zone.querySelector('wbr')?.previousSibling?.textContent).toBe('/')
       expect(zone.lastElementChild?.textContent).toBe('Los Angeles')

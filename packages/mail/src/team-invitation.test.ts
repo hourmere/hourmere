@@ -40,6 +40,14 @@ function renderError(options: Parameters<typeof teamInvitationEmail>[0]): Error 
 }
 
 describe('teamInvitationEmail', () => {
+  // Captured before moving the original English/Chinese copy into locale tables.
+  it.each(['en', 'zh-CN'])('preserves the complete %s message bytes', (language) => {
+    expect(teamInvitationEmail({ ...invitation, language })).toMatchSnapshot()
+    expect(
+      teamInvitationEmail({ ...invitation, language, teamName: '', inviterName: '' }),
+    ).toMatchSnapshot()
+  })
+
   it.each([
     {
       language: 'en',
@@ -58,6 +66,16 @@ describe('teamInvitationEmail', () => {
       expiry: /邀请有效期至：2026-10-29 17:30:00 UTC/,
       aliases: /邮箱别名不能代替此地址/,
       action: '查看并接受邀请',
+    },
+    {
+      language: 'de',
+      subject: 'Einladung zum Team Orbital Design',
+      identity:
+        /Melden Sie sich mit der eingeladenen E-Mail-Adresse .* an und bestätigen Sie diese/,
+      acceptance: /Durch die Anmeldung allein treten Sie dem Team nicht bei/,
+      expiry: /Diese Einladung ist bis 2026-10-29 17:30:00 UTC gültig/,
+      aliases: /E-Mail-Aliasse können diese Adresse nicht ersetzen/,
+      action: 'Einladung ansehen und annehmen',
     },
   ])('renders the complete $language invitation in both alternatives', (copy) => {
     const message = teamInvitationEmail({ ...invitation, language: copy.language })
@@ -92,6 +110,9 @@ describe('teamInvitationEmail', () => {
     { language: 'zh-Hans-TW', defaultLanguage: 'en', expected: 'en' },
     { language: 'en-GB', defaultLanguage: 'zh-CN', expected: 'en' },
     { language: 'EN-us', defaultLanguage: 'zh-CN', expected: 'en' },
+    { language: 'de-AT', defaultLanguage: 'en', expected: 'de' },
+    { language: 'de-CH', defaultLanguage: 'zh-CN', expected: 'de' },
+    { language: 'not_a_locale', defaultLanguage: 'de-CH', expected: 'de' },
     { language: 'fr', defaultLanguage: 'zh-CN', expected: 'zh-CN' },
     { language: 'zh-TW', defaultLanguage: 'zh-Hans', expected: 'zh-CN' },
     { language: 'zh-Hant-CN', defaultLanguage: 'en', expected: 'en' },
@@ -311,6 +332,7 @@ describe('teamInvitationEmail', () => {
   it.each([
     { language: 'en', team: 'Your team', inviter: 'A team member' },
     { language: 'zh-CN', team: '你的团队', inviter: '团队成员' },
+    { language: 'de', team: 'Ihr Team', inviter: 'Ein Teammitglied' },
   ])('uses localized anonymous display labels in $language', ({ language, team, inviter }) => {
     const message = teamInvitationEmail({
       ...invitation,

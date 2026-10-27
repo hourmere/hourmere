@@ -1,9 +1,11 @@
 {
   "What": "Fixture activité",
   "Host": "Fixture hôte",
+  "Invitee's time": "Fixture unusually long attendee local time label",
   "calendar.summary": "Fixture {event} avec {other}",
   "calendar.booked": "Fixture réservé avec {name}.",
   "calendar.response.invitee": "Fixture utiliser le courriel pour annuler.",
   "signIn.subject": "Fixture connexion",
-  "answer.yes": "Fixture oui"
+  "answer.yes": "Fixture oui",
+  "teamInvitation.subject": "Fixture équipe {team}"
 }
