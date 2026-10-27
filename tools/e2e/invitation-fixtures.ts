@@ -12,7 +12,7 @@ import {
 } from '../../packages/auth/src/index.ts'
 import { createDb, createPool } from '../../packages/db/src/index.ts'
 import { createTestDatabase } from '../../packages/db/src/testing.ts'
-import type { MailMessage } from '../../packages/mail/src/index.ts'
+import { type MailMessage, teamInvitationEmail } from '../../packages/mail/src/index.ts'
 import { createFixtures } from '../../packages/scheduling/src/testing.ts'
 import { test as base, expect } from './fixtures.ts'
 import { listenOwned, type OwnedListener } from './listeners.ts'
@@ -57,7 +57,20 @@ export const test = base.extend<{ invitationApp: InvitationApp }>({
         })
         .returning('id')
         .executeTakeFirstOrThrow()
-      const path = `/app/join?${new URLSearchParams({ invitationId: invitation.id })}`
+      // Open the actual invitation email destination so renderer/router drift fails the flow.
+      const invitationEmail = teamInvitationEmail({
+        to: email,
+        publicUrl: url,
+        invitationId: invitation.id,
+        teamName: 'Invitation team',
+        inviterName: 'Inviting owner',
+        expiresAt: new Date(Date.now() + 86_400_000),
+      })
+      const invitationLink = invitationEmail.text.match(/https?:\/\/[^\s]+/)?.[0]
+      if (!invitationLink) throw new Error('The invitation email must contain its entry link')
+      const invitationUrl = new URL(invitationLink)
+      expect(invitationUrl.origin === url).toBe(true)
+      const path = invitationUrl.pathname + invitationUrl.search
       const secret = randomBytes(32).toString('base64')
       const signup = { mode: 'closed', allowedDomains: [] } as const
       const client = { clientId: 'synthetic-client', clientSecret: 'synthetic-secret' }

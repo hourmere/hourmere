@@ -17,6 +17,7 @@ import {
   CalendarsPage,
   ConferencesPage,
   ConnectedAppsPage,
+  CreateTeamPage,
   EmbeddedBookingPage,
   EmbeddedTeamBookingPage,
   EventTypeEditorPage,
@@ -107,6 +108,7 @@ export function App() {
                 <Route path="connected-apps" element={<ConnectedAppsPage />} />
                 <Route path="api-keys" element={<ApiKeysPage />} />
                 <Route path="settings" element={<SettingsPage />} />
+                <Route path="teams/new" element={<CreateTeamPage />} />
                 <Route path="*" element={<AppNotFoundPage />} />
               </Route>
             </Route>

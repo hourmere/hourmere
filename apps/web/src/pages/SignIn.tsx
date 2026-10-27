@@ -25,6 +25,7 @@ const USE_EMAIL_LINK = 'Sign in with an email link instead.'
 const COULD_NOT_CREATE_ACCOUNT = 'Your account could not be created. Please try again.'
 const COULD_NOT_SIGN_IN = 'You could not be signed in. Please try again.'
 const NO_NEW_ACCOUNT = 'This Hourmere instance does not accept new accounts for that email address.'
+const RATE_LIMITED = 'Too many requests. Please wait and try again later.'
 
 // Better Auth sends people back with ?error=CODE (and an error_description, which is never
 // shown: anyone can put text in a link to this page). Codes are matched case-insensitively,
@@ -126,6 +127,8 @@ function SignInForm({ next, expired }: { next: string; expired: boolean }) {
   const [instance] = useLoad(loadInstance)
   const sentHeading = useRef<HTMLHeadingElement>(null)
   const emailInput = useRef<HTMLInputElement>(null)
+  const submitButton = useRef<HTMLButtonElement>(null)
+  const restoreSubmitFocus = useRef(false)
   const focusEmail = useRef(false)
 
   // The error was read into state above; take it out of the address bar so a reload or a
@@ -143,6 +146,11 @@ function SignInForm({ next, expired }: { next: string; expired: boolean }) {
     else if (phase.kind === 'form' && focusEmail.current) {
       emailInput.current?.focus()
       focusEmail.current = false
+    }
+    if (phase.kind === 'form' && restoreSubmitFocus.current) {
+      // A disabled submit button loses focus in Chrome, just like the resend button.
+      if (document.activeElement === document.body) submitButton.current?.focus()
+      restoreSubmitFocus.current = false
     }
   }, [phase.kind])
 
@@ -167,6 +175,7 @@ function SignInForm({ next, expired }: { next: string; expired: boolean }) {
       setPhase({ kind: 'form', error: problem })
       return
     }
+    restoreSubmitFocus.current = document.activeElement === submitButton.current
     setPhase({ kind: 'sending' })
     try {
       await sendSignInLink(address, redirects)
@@ -174,7 +183,10 @@ function SignInForm({ next, expired }: { next: string; expired: boolean }) {
     } catch (err) {
       setPhase({
         kind: 'form',
-        error: msg('Could not send the link. {0}', { '0': errorMessage(err) }),
+        error:
+          err instanceof RequestError && err.status === 429
+            ? msg(RATE_LIMITED)
+            : msg('Could not send the link. {0}', { '0': errorMessage(err) }),
       })
     }
   }
@@ -248,7 +260,7 @@ function SignInForm({ next, expired }: { next: string; expired: boolean }) {
           {(resend === 'limited' || resend === 'error') && (
             <p className="alert alert-error" role="alert">
               {resend === 'limited'
-                ? t('Too many requests. Please wait and try again later.')
+                ? t(RATE_LIMITED)
                 : t('Could not resend the link. Please try again.')}
             </p>
           )}
@@ -318,7 +330,12 @@ function SignInForm({ next, expired }: { next: string; expired: boolean }) {
               onChange={(e) => setEmail(e.target.value)}
             />
           </div>
-          <button type="submit" className="button button-primary button-block" disabled={busy}>
+          <button
+            ref={submitButton}
+            type="submit"
+            className="button button-primary button-block"
+            disabled={busy}
+          >
             {phase.kind === 'sending' ? t('Sending…') : t('Email me a sign-in link')}
           </button>
         </form>

@@ -47,6 +47,8 @@ interface Session {
    * `fresh` cancels an older check and starts one after a context-changing write.
    */
   refresh: (options?: { fresh?: boolean }) => Promise<Me | null>
+  /** Applies a freshly confirmed /me response during a deliberate organization handoff. */
+  accept: (me: Me) => void
   /** Ends the session on the server; throws if that fails. */
   signOut: () => Promise<void>
   /**
@@ -216,9 +218,21 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setState({ status: 'signed-out', reason: 'signed-out' })
   }, [invalidate])
 
+  const accept = useCallback((me: Me) => {
+    // A refresh started before the deliberate switch must not restore the old context.
+    epoch.current += 1
+    refreshing.current?.controller.abort()
+    refreshing.current = null
+    setState((current) =>
+      current.status === 'signed-in' && current.me.user.id === me.user.id
+        ? { status: 'signed-in', me }
+        : current,
+    )
+  }, [])
+
   const session = useMemo(
-    () => ({ state, reload, refresh, signOut, notice, setNotice }),
-    [state, reload, refresh, signOut, notice],
+    () => ({ state, reload, refresh, accept, signOut, notice, setNotice }),
+    [state, reload, refresh, accept, signOut, notice],
   )
   return (
     <SessionContext value={session}>

@@ -281,6 +281,14 @@ describe('accept invitation entry', () => {
       ...signedIn,
       'GET /api/v1/me': () =>
         ++reads === 1 ? json(200, ME) : reads === 2 ? background.response : json(200, teamMe),
+      'GET /api/auth/organization/get-active-member': () =>
+        json(200, {
+          id: '00000000-0000-7000-8000-000000000013',
+          organizationId: invitation.organizationId,
+          userId: ME.user.id,
+          role: 'member',
+          createdAt: invitation.createdAt,
+        }),
       [lookupRoute]: () => json(200, invitation),
       [acceptRoute]: () => json(200, { invitation, member: {} }),
     })
@@ -300,6 +308,8 @@ describe('accept invitation entry', () => {
     await user.click(screen.getByRole('link', { name: 'Inspect organization' }))
     await screen.findByRole('heading', { name: 'Settings', level: 1 })
     expect(screen.getByText('Organization').nextElementSibling?.textContent).toBe('Team Alpha')
+    await screen.findByText('Member', { exact: true })
+    expect(api.to('GET /api/auth/organization/get-active-member')).toHaveLength(1)
     expect(api.to(acceptRoute)).toHaveLength(1)
   })
 })

@@ -20,6 +20,7 @@ vi.mock('./lazy-pages.tsx', () => {
     'CalendarsPage',
     'ConferencesPage',
     'ConnectedAppsPage',
+    'CreateTeamPage',
     'EmbeddedBookingPage',
     'EmbeddedTeamBookingPage',
     'EventTypeEditorPage',

@@ -1,12 +1,14 @@
-import { act, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { Schemas } from './api/client.ts'
+import { SessionProvider, useSession } from './session.tsx'
 import {
   emptyAccount,
   fakeApi,
   instance,
   json,
+  later,
   ME,
   organizations,
   profile,
@@ -200,6 +202,8 @@ describe('the session gate', () => {
     const api = fakeApi({
       ...profile(),
       'GET /api/v1/me': () => json(200, me),
+      'GET /api/auth/organization/get-active-member': () =>
+        json(200, { organizationId: TEAM_ID, userId: ME.user.id, role: 'owner' }),
       ...instance(),
       ...profile(),
     })
@@ -300,6 +304,88 @@ describe('the session gate', () => {
       window.dispatchEvent(new Event('focus'))
     })
     expect(await screen.findByRole('heading', { name: 'Event types', level: 1 })).toBeDefined()
+  })
+})
+
+describe('fresh session reads and confirmed organization handoffs', () => {
+  const TEAM_ME = {
+    ...ME,
+    organization: { ...ME.organization, id: TEAM_ID, name: 'Acme', personal: false },
+  }
+
+  function Consumer() {
+    const { state, refresh, accept } = useSession()
+    return (
+      <>
+        <output data-testid="session-context">
+          {state.status === 'signed-in' ? state.me.organization.id : state.status}
+        </output>
+        <button type="button" onClick={() => void refresh()}>
+          Refresh session
+        </button>
+        <button type="button" onClick={() => void refresh({ fresh: true })}>
+          Refresh fresh session
+        </button>
+        <button type="button" onClick={() => accept(TEAM_ME)}>
+          Accept confirmed team
+        </button>
+      </>
+    )
+  }
+
+  async function open() {
+    render(
+      <SessionProvider>
+        <Consumer />
+      </SessionProvider>,
+    )
+    await screen.findByText(ME.organization.id)
+  }
+
+  it('coalesces with the fresh read after a superseded background read finishes', async () => {
+    const background = later()
+    const fresh = later()
+    let reads = 0
+    fakeApi({
+      ...signedIn,
+      'GET /api/v1/me': () =>
+        ++reads === 1 ? json(200, ME) : reads === 2 ? background.response : fresh.response,
+    })
+    await open()
+    act(() => screen.getByRole('button', { name: 'Refresh session' }).click())
+    await waitFor(() => expect(reads).toBe(2))
+    act(() => screen.getByRole('button', { name: 'Refresh fresh session' }).click())
+    await waitFor(() => expect(reads).toBe(3))
+    await background.answer(json(200, TEAM_ME))
+    expect(screen.getByTestId('session-context').textContent).toBe(ME.organization.id)
+
+    // Settling the cancelled request must not remove the newer in-flight check.
+    await userEvent.click(screen.getByRole('button', { name: 'Refresh session' }))
+    expect(reads).toBe(3)
+    await fresh.answer(json(200, TEAM_ME))
+    expect(screen.getByTestId('session-context').textContent).toBe(TEAM_ID)
+  })
+
+  it('keeps a confirmed handoff when an earlier fresh read answers, then permits a new check', async () => {
+    const fresh = later()
+    let reads = 0
+    fakeApi({
+      ...signedIn,
+      'GET /api/v1/me': () => (++reads === 2 ? fresh.response : json(200, ME)),
+    })
+    await open()
+    act(() => screen.getByRole('button', { name: 'Refresh fresh session' }).click())
+    await waitFor(() => expect(reads).toBe(2))
+    act(() => screen.getByRole('button', { name: 'Accept confirmed team' }).click())
+    expect(screen.getByTestId('session-context').textContent).toBe(TEAM_ID)
+    await fresh.answer(json(200, ME))
+    expect(screen.getByTestId('session-context').textContent).toBe(TEAM_ID)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Refresh session' }))
+    await waitFor(() => expect(reads).toBe(3))
+    await waitFor(() =>
+      expect(screen.getByTestId('session-context').textContent).toBe(ME.organization.id),
+    )
   })
 })
 
