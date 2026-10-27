@@ -897,4 +897,24 @@ export const admin = {
   'Saved account — unavailable for a new selection': '已保存的账号，目前无法重新选择',
   'No active Zoom meetings account is available. Authorize meeting permissions in Conference accounts first.':
     '没有可用的已启用 Zoom 会议账号。请先在会议账号页面授予会议权限。',
+  'Accept invitation': '接受邀请',
+  'Checking invitation…': '正在检查邀请…',
+  'This invitation is unavailable. It may have expired, been canceled or already been accepted. Ask the team owner for a new invitation.':
+    '此邀请已不可用，可能已过期、被撤销或已被接受。请向团队所有者申请新邀请。',
+  'Use the exact email address that received this invitation. Change accounts if you signed in with another address.':
+    '请使用收到此邀请的完整邮箱地址。如果你使用了其他邮箱登录，请切换账号。',
+  'Confirm your email address by signing in with an email link, then return to this invitation.':
+    '请通过邮件链接登录以验证邮箱，然后返回此邀请页面。',
+  'This team cannot accept more members. Contact the team owner.':
+    '此团队无法再添加成员。请联系团队所有者。',
+  'Invitation to join {team}': '加入{team}的邀请',
+  'Accepting this invitation joins the team. Signing in alone does not join it.':
+    '接受此邀请后，你将加入团队。仅登录不会加入。',
+  'Accepting…': '正在接受…',
+  'You joined {team}.': '你已加入{team}。',
+  'Change account': '切换账号',
+  'Changing account…': '正在切换账号…',
+  'Check invitation status': '检查邀请状态',
+  'Could not confirm acceptance. Check the invitation status before trying again.':
+    '无法确认是否已接受。请先检查邀请状态，再决定是否重试。',
 } as const

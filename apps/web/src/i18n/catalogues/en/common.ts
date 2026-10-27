@@ -376,4 +376,6 @@ export const common = {
   "You don't have permission to create a team.": "You don't have permission to create a team.",
   'You no longer have access to this team. Choose another team.':
     'You no longer have access to this team. Choose another team.',
+  'Sign in with the email address that received this invitation. Signing in does not join the team.':
+    'Sign in with the email address that received this invitation. Signing in does not join the team.',
 } as const

@@ -946,4 +946,24 @@ export const admin = {
     'Saved account — unavailable for a new selection',
   'No active Zoom meetings account is available. Authorize meeting permissions in Conference accounts first.':
     'No active Zoom meetings account is available. Authorize meeting permissions in Conference accounts first.',
+  'Accept invitation': 'Accept invitation',
+  'Checking invitation…': 'Checking invitation…',
+  'This invitation is unavailable. It may have expired, been canceled or already been accepted. Ask the team owner for a new invitation.':
+    'This invitation is unavailable. It may have expired, been canceled or already been accepted. Ask the team owner for a new invitation.',
+  'Use the exact email address that received this invitation. Change accounts if you signed in with another address.':
+    'Use the exact email address that received this invitation. Change accounts if you signed in with another address.',
+  'Confirm your email address by signing in with an email link, then return to this invitation.':
+    'Confirm your email address by signing in with an email link, then return to this invitation.',
+  'This team cannot accept more members. Contact the team owner.':
+    'This team cannot accept more members. Contact the team owner.',
+  'Invitation to join {team}': 'Invitation to join {team}',
+  'Accepting this invitation joins the team. Signing in alone does not join it.':
+    'Accepting this invitation joins the team. Signing in alone does not join it.',
+  'Accepting…': 'Accepting…',
+  'You joined {team}.': 'You joined {team}.',
+  'Change account': 'Change account',
+  'Changing account…': 'Changing account…',
+  'Check invitation status': 'Check invitation status',
+  'Could not confirm acceptance. Check the invitation status before trying again.':
+    'Could not confirm acceptance. Check the invitation status before trying again.',
 } as const

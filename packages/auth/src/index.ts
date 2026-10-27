@@ -33,7 +33,7 @@ export {
   type Principal,
 } from './caller.ts'
 export { DISPLAY_NAME_MAX_LENGTH } from './display-name.ts'
-export { escapeControlCharacters } from './log.ts'
+export { escapeControlCharacters, redactLogDetails } from './log.ts'
 export { MAGIC_LINK_CONFIRM_PATH, MAGIC_LINK_VERIFY_PARAMS } from './magic-link.ts'
 export {
   type BoundMcpOAuthIntent,

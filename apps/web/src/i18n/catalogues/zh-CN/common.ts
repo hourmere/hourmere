@@ -363,4 +363,6 @@ export const common = {
   "You don't have permission to create a team.": '你没有创建团队的权限。',
   'You no longer have access to this team. Choose another team.':
     '你已无权访问此团队。请选择其他团队。',
+  'Sign in with the email address that received this invitation. Signing in does not join the team.':
+    '请使用收到此邀请的邮箱登录。登录不会自动加入团队。',
 } as const

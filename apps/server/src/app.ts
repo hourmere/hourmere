@@ -8,6 +8,7 @@ import {
   InvalidApiKeyError,
   MCP_OAUTH_SCOPE,
   MCP_OAUTH_SCOPES,
+  redactLogDetails,
 } from '@hourmere/auth'
 import { embedParent } from '@hourmere/core/embed'
 import { DomainError, type DomainErrorKind } from '@hourmere/scheduling'
@@ -274,7 +275,7 @@ export function createApp({
   // c.req.path is percent-decoded, so it is escaped too.
   const logLine = (c: Context, level: 'ERROR' | 'WARN', text: string) =>
     (level === 'ERROR' ? console.error : console.warn)(
-      `${new Date().toISOString()} ${level} ${escapeControlCharacters(`${c.req.method} ${c.req.path}: ${text}`)}`,
+      `${new Date().toISOString()} ${level} ${escapeControlCharacters(redactLogDetails(`${c.req.method} ${c.req.path}: ${text}`))}`,
     )
   const logError = (c: Context, label: string, detail: unknown) =>
     logLine(c, 'ERROR', `${label}${inspect(detail, { breakLength: Number.POSITIVE_INFINITY })}`)

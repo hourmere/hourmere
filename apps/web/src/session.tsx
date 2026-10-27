@@ -44,8 +44,9 @@ interface Session {
    * Asks again in the background, e.g. when the window regains focus: the organization may
    * have changed in another tab. Keeps the current state if the server cannot be reached.
    * Resolves to the caller, or null when nobody is signed in (or it is not known).
+   * `fresh` cancels an older check and starts one after a context-changing write.
    */
-  refresh: () => Promise<Me | null>
+  refresh: (options?: { fresh?: boolean }) => Promise<Me | null>
   /** Applies a freshly confirmed /me response during a deliberate organization handoff. */
   accept: (me: Me) => void
   /** Ends the session on the server; throws if that fails. */
@@ -165,15 +166,18 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     load(new AbortController().signal)
   }, [load])
 
-  const refresh = useCallback(() => {
-    if (refreshing.current) return refreshing.current.promise
+  const refresh = useCallback((options?: { fresh?: boolean }) => {
+    if (refreshing.current) {
+      if (!options?.fresh) return refreshing.current.promise
+      refreshing.current.controller.abort()
+    }
     const started = epoch.current
     const controller = new AbortController()
     const promise: Promise<Me | null> = fetchMe(controller.signal)
       .then(
         (result) => {
           // The session ended after this check started (see epoch).
-          if (epoch.current !== started) return null
+          if (controller.signal.aborted || epoch.current !== started) return null
           if (result.ok) {
             setState({ status: 'signed-in', me: result.me })
             return result.me

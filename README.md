@@ -230,6 +230,10 @@ if delivery fails. In web-only mode, a separate worker
 is required for sign-in emails as well as booking notifications. Failures appear in the log
 without the recipient or link.
 
+Team invitation links open `/app/join?invitationId=<uuid>`. Sign in with the exact email
+address that received the invitation; email-link and enabled social sign-in return to that
+page. Signing in does not join the team: review the invitation and choose **Accept invitation**.
+
 The database enforces the sign-up rules too, using settings the app passes in the `options`
 startup parameter when it connects (`search_path` and `hourmere.*`), and it needs read
 committed isolation (Postgres's default) or serializable. Connect the app to Postgres
