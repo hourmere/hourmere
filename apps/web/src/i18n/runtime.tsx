@@ -1,7 +1,10 @@
 import {
   explicitLanguage,
+  formattingLocale,
   type InterfaceLanguage,
   interfaceLanguage,
+  localeRegistry,
+  registeredLocales,
 } from '@hourmere/core/language'
 import {
   createContext,
@@ -62,6 +65,10 @@ export function useI18n() {
   const embedded = useContext(EmbeddedLanguage)
   const selected = embedded?.language ?? explicit
   const locale = selected ?? account ?? browserLanguage()
+  // Keep the browser's regional conventions for implicit English. Every other active
+  // language, including a browser preference, uses its registered formatting locale.
+  const formatLanguage = selected ?? (locale === 'en' ? undefined : locale)
+  const formatLocale = formatLanguage ? formattingLocale(formatLanguage) : undefined
   const scopedSetLanguage = embedded?.setLanguage
   const setLanguage = useCallback(
     (language: InterfaceLanguage) => {
@@ -74,13 +81,13 @@ export function useI18n() {
   )
   const t = useCallback(
     (key: MessageKey, values?: UiMessage['values']) =>
-      translate(locale, key, values, { dateLocale: selected }),
-    [locale, selected],
+      translate(locale, key, values, { dateLocale: formatLocale }),
+    [locale, formatLocale],
   )
   const ui = useCallback(
     (message: UiText | null | undefined) =>
-      translateMessage(locale, message, { dateLocale: selected }),
-    [locale, selected],
+      translateMessage(locale, message, { dateLocale: formatLocale }),
+    [locale, formatLocale],
   )
   const text = useCallback(
     (key: MessageKey, values?: UiMessage['values']) => renderUiText(locale, t(key, values)),
@@ -90,13 +97,14 @@ export function useI18n() {
     (message: UiText | null | undefined) => renderUiText(locale, ui(message)),
     [locale, ui],
   )
-  return { locale, explicit: selected, formatLocale: selected, setLanguage, t, ui, text, uiText }
+  return { locale, explicit: selected, formatLocale, setLanguage, t, ui, text, uiText }
 }
 /** Changing this control updates text in place; router keys and form state do not change. */
 export function LanguageSwitcher({ compact = false }: { compact?: boolean }) {
   const { locale, t, setLanguage } = useI18n()
   useEffect(() => {
     document.documentElement.lang = locale
+    document.documentElement.dir = localeRegistry[locale].direction
   }, [locale])
   return (
     <label className={`language-picker${compact ? ' language-picker-compact' : ''}`}>
@@ -105,16 +113,15 @@ export function LanguageSwitcher({ compact = false }: { compact?: boolean }) {
         aria-label={t('Interface language')}
         value={locale}
         onChange={(event) => {
-          const value = event.target.value
-          if (value === 'en' || value === 'zh-CN') setLanguage(value)
+          const value = explicitLanguage(event.target.value)
+          if (value) setLanguage(value)
         }}
       >
-        <option value="en" lang="en">
-          English
-        </option>
-        <option value="zh-CN" lang="zh-CN">
-          简体中文
-        </option>
+        {registeredLocales.map(({ code, nativeName }) => (
+          <option key={code} value={code} lang={code}>
+            {nativeName}
+          </option>
+        ))}
       </select>
     </label>
   )

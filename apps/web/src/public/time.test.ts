@@ -1,13 +1,13 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { zoned } from '../format.ts'
+import { formatDuration } from '../i18n/duration.ts'
 import { addMonths, firstDayOfWeek, monthGrid, sameDayIn } from './calendar.ts'
 import { monthRequestRange } from './SlotPicker.tsx'
 import {
   dateKeyIn,
   formatDate,
   formatDayNumber,
-  formatDuration,
   formatMonth,
   formatTime,
   formatTimeRange,

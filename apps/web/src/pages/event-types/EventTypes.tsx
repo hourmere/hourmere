@@ -12,8 +12,8 @@ import { EmptyState } from '../../components/EmptyState.tsx'
 import { PageHeader } from '../../components/PageHeader.tsx'
 import { PageSkeleton } from '../../components/PageSkeleton.tsx'
 import { useFlash } from '../../flash.ts'
-import { formatMinutes } from '../../format.ts'
 import { useLoad, usePageTitle } from '../../hooks.ts'
+import { formatMinutes } from '../../i18n/duration.ts'
 import { useI18n } from '../../i18n/runtime.tsx'
 import {
   eventTypePath,

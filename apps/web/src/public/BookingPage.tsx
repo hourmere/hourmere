@@ -6,6 +6,7 @@ import { EmailDeliveryHint } from '../components/EmailDeliveryHint.tsx'
 import { TimeZoneName } from '../components/TimeZonePicker.tsx'
 import { isKnownTimeZone } from '../format.ts'
 import { usePageTitle } from '../hooks.ts'
+import { formatDuration } from '../i18n/duration.ts'
 import { formatList } from '../i18n/formatting.ts'
 import { useI18n } from '../i18n/runtime.tsx'
 import { literal, msg, type UiText } from '../i18n/translate.ts'
@@ -43,15 +44,7 @@ import {
 } from './PublicLayout.tsx'
 import { normalizedHandle, normalizedSlug, teamSlug, useRequest } from './paths.ts'
 import { SlotPicker, type SlotPickerPosition } from './SlotPicker.tsx'
-import {
-  formatDate,
-  formatDuration,
-  formatTime,
-  formatTimeRange,
-  offsetAt,
-  offsetLabel,
-  zoneName,
-} from './time.ts'
+import { formatDate, formatTime, formatTimeRange, offsetAt, offsetLabel, zoneName } from './time.ts'
 import {
   bookingErrors,
   bookingLocale,
@@ -149,11 +142,11 @@ function BookingFlow({
   slug: string
   team: boolean
 }) {
-  const { t, ui, locale: displayLocale, explicit } = useI18n()
+  const { t, ui, locale: displayLocale, explicit, formatLocale } = useI18n()
 
   const embedded = useEmbedded()
   const browserFormatLocale = useMemo(preferredLocale, [])
-  const locale = explicit ?? browserFormatLocale
+  const locale = formatLocale ?? browserFormatLocale
   const [timeZone, setTimeZone] = useState(() => visitorTimeZone(detectTimeZone()))
   const [now, setNow] = useState(currentTime)
   const [slot, setSlot] = useState<Slot | null>(null)

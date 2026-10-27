@@ -111,6 +111,11 @@ Choose a slot's UTC `start` unchanged. A booking input could contain:
 }
 ```
 
+Optional `invitee.locale` is the same BCP 47 notification preference as REST and MCP.
+The [shared locale registry](/docs/interface-languages) matches supported languages;
+unsupported languages and missing messages fall back to English. Dates use the recipient
+language and time zone; retries, reschedules and cancellation retain the saved locale.
+
 Generate and retain a random idempotency key before each booking, along with that booking's
 input. The CLI requires it and never generates a disposable key that would be lost after a
 network failure. After checking the request and recipient, create the booking and retain

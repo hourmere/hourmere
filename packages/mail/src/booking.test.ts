@@ -210,7 +210,7 @@ describe('bookingEmail', () => {
     { locale: 'zh-Hans-SG', language: 'zh-CN' },
     { locale: 'zh', language: 'zh-CN' },
     { locale: 'zh-TW', language: 'en' },
-    { locale: 'fr-FR', language: 'en' },
+    { locale: 'qaa-QM', language: 'en' },
     { locale: 'not_a_locale', language: 'en' },
     { locale: undefined, language: 'en' },
     { locale: null, language: 'en' },

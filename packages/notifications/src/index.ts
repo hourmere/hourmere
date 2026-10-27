@@ -9,9 +9,12 @@ import { defineJob, type EnqueueOptions, type KyselyTransactionLike } from '@hou
 import {
   type BookingEmailKind,
   type BookingEmailMeeting,
+  bookingAnswerText,
   bookingEmail,
+  bookingHostName,
+  calendarBookingDescription,
   calendarResponseDescription,
-  formatChineseTemplate,
+  calendarSummary,
   type IcsPerson,
   icsAttachment,
   type Mailer,
@@ -216,16 +219,6 @@ function meetingLocation(value: Json | null): MeetingLocation | null {
   }
 }
 
-function formatAnswer(value: unknown, language: InterfaceLanguage): string | undefined {
-  if (typeof value === 'string') return value
-  if (typeof value === 'boolean')
-    return language === 'zh-CN' ? (value ? '是' : '否') : value ? 'Yes' : 'No'
-  if (typeof value === 'number') return String(value)
-  if (Array.isArray(value))
-    return value.filter((v) => typeof v === 'string').join(language === 'zh-CN' ? '、' : ', ')
-  return undefined
-}
-
 /** Answers in question order, labelled; answers to removed questions keep their id. */
 function answersOf(
   questions: Json | null,
@@ -238,11 +231,11 @@ function answersOf(
   for (const q of Array.isArray(questions) ? questions : []) {
     if (!isRecord(q) || typeof q.id !== 'string' || !Object.hasOwn(given, q.id)) continue
     seen.add(q.id)
-    const answer = formatAnswer(given[q.id], language)
+    const answer = bookingAnswerText(given[q.id], language)
     if (answer) answers.push({ question: typeof q.label === 'string' ? q.label : q.id, answer })
   }
   for (const [id, value] of Object.entries(given)) {
-    const answer = seen.has(id) ? undefined : formatAnswer(value, language)
+    const answer = seen.has(id) ? undefined : bookingAnswerText(value, language)
     if (answer) answers.push({ question: id, answer })
   }
   return answers
@@ -716,7 +709,7 @@ async function deliverBookingNotification(
     eventName: booking.eventName,
     // A logistical failure needs no calendar organizer and must still reach the original
     // invitee when the pinned host was deleted or is no longer verified.
-    hostName: organizer?.name ?? (bookingLanguage === 'zh-CN' ? '主持人' : 'Host'),
+    hostName: organizer?.name ?? bookingHostName(bookingLanguage),
     inviteeName: invitee.name,
     inviteeEmail: invitee.email,
     inviteeTimeZone: invitee.timeZone,
@@ -783,19 +776,10 @@ async function deliverBookingNotification(
           start: booking.start,
           end: booking.end,
           // Each recipient sees the other person, while UID/SEQUENCE retain event identity.
-          summary:
-            language === 'zh-CN'
-              ? formatChineseTemplate('{event}（与{other}）', { event: booking.eventName, other })
-              : `${booking.eventName} with ${other}`,
+          summary: calendarSummary(booking.eventName, other, language),
           description:
             [
-              modern
-                ? language === 'zh-CN'
-                  ? formatChineseTemplate('通过 Hourmere 与{name}预约。', {
-                      name: calendarOrganizer.name,
-                    })
-                  : `Booked with ${calendarOrganizer.name} using Hourmere.`
-                : undefined,
+              modern ? calendarBookingDescription(calendarOrganizer.name, language) : undefined,
               kind !== 'cancelled' ? calendarResponseDescription(role, language) : undefined,
             ]
               .filter(Boolean)

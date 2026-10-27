@@ -1,6 +1,7 @@
 // Calendar invitations (iCalendar, RFC 5545; methods from iTIP, RFC 5546) attached to booking
 // emails, so the meeting lands in the recipient's calendar and later updates replace it.
 import { interfaceLanguage } from '@hourmere/core/language'
+import { mailMessage } from './catalogue.ts'
 import type { MailAttachment } from './index.ts'
 
 /** Public guidance only: calendar entries may be shared, so they never get manage links. */
@@ -8,20 +9,17 @@ export function calendarResponseDescription(
   role: 'invitee' | 'host' | 'guest',
   locale?: string | null,
 ): string {
-  if (interfaceLanguage(locale) === 'zh-CN') {
-    const cancellation = {
-      invitee: '如需取消，请使用 Hourmere 确认邮件中的取消链接。',
-      host: '如需取消，请在 Hourmere 中打开此预约。',
-      guest: '如需取消，请联系预约人或主持人。',
-    }
-    return `在日历中接受或拒绝邀请不会取消预约。${cancellation[role]}`
-  }
-  const cancellation = {
-    invitee: 'To cancel, use the link in your Hourmere confirmation email.',
-    host: 'To cancel, open the booking in Hourmere.',
-    guest: 'To cancel, contact the person who booked or the host.',
-  }
-  return `Accepting or declining this calendar invitation does not cancel the booking. ${cancellation[role]}`
+  return mailMessage(interfaceLanguage(locale) ?? 'en', `calendar.response.${role}`)
+}
+
+/** The localized calendar title, with user-supplied names kept literal. */
+export function calendarSummary(event: string, other: string, locale?: string | null): string {
+  return mailMessage(interfaceLanguage(locale) ?? 'en', 'calendar.summary', { event, other })
+}
+
+/** Public context only; this description never contains a booking management link. */
+export function calendarBookingDescription(name: string, locale?: string | null): string {
+  return mailMessage(interfaceLanguage(locale) ?? 'en', 'calendar.booked', { name })
 }
 
 export interface IcsPerson {

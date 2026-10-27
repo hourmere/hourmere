@@ -1,18 +1,15 @@
 // Emails about a booking, to its attendees and its hosts: confirmed, rescheduled, cancelled
 // and reminder. Plain text plus simple HTML with inline styles: no images, no external
 // assets, no tracking. Everything from the booking is someone's input and is treated so.
-import { type InterfaceLanguage, interfaceLanguage } from '@hourmere/core/language'
+import {
+  formattingLocale,
+  type InterfaceLanguage,
+  interfaceLanguage,
+} from '@hourmere/core/language'
+import { type MailKey, mailMessage as message } from './catalogue.ts'
 import type { MailAttachment, MailMessage } from './index.ts'
 import { emailButton, emailLayout, emailLinkStyle, emailWrapStyle } from './layout.ts'
-import {
-  emailText,
-  escapeHtml,
-  formatChineseTemplate,
-  linkableUrl,
-  multiLine,
-  singleLine,
-  subjectLine,
-} from './text.ts'
+import { emailText, escapeHtml, linkableUrl, multiLine, singleLine, subjectLine } from './text.ts'
 
 export type BookingEmailKind =
   | 'confirmed'
@@ -75,6 +72,21 @@ export interface HostRecipient {
 
 export type BookingEmailRecipient = AttendeeRecipient | HostRecipient
 
+/** A generated name for a host who is no longer available to the notification worker. */
+export function bookingHostName(locale?: string | null): string {
+  return message(interfaceLanguage(locale) ?? 'en', 'Host')
+}
+
+/** Generated answer labels follow the host language; custom answers remain untouched. */
+export function bookingAnswerText(value: unknown, language: InterfaceLanguage): string | undefined {
+  if (typeof value === 'string') return value
+  if (typeof value === 'boolean') return message(language, value ? 'answer.yes' : 'answer.no')
+  if (typeof value === 'number') return String(value)
+  if (Array.isArray(value))
+    return value.filter((v) => typeof v === 'string').join(message(language, 'answer.separator'))
+  return undefined
+}
+
 // --- Times --------------------------------------------------------------------------------
 
 /** A valid IANA zone name, or UTC when it is not valid. Temporal preserves aliases. */
@@ -113,7 +125,7 @@ const format = (
   options: Intl.DateTimeFormatOptions,
   language: InterfaceLanguage,
 ) =>
-  new Intl.DateTimeFormat(language === 'en' ? 'en-US' : language, {
+  new Intl.DateTimeFormat(formattingLocale(language), {
     ...(language === 'zh-CN' && options === TIME ? CHINESE_TIME : options),
     timeZone: time.timeZoneId,
   })
@@ -124,7 +136,7 @@ const format = (
 function zoneLabel(time: Temporal.ZonedDateTime, language: InterfaceLanguage): string {
   const name = time.timeZoneId.replaceAll('_', ' ')
   const offset = `GMT${time.offset}`
-  return language === 'zh-CN' ? `（${name}，${offset}）` : ` (${name}, ${offset})`
+  return message(language, 'format.zone', { name, offset })
 }
 
 /** `Tuesday, October 20, 2026, 10:00 AM – 10:30 AM (Europe/Berlin, GMT+02:00)` */
@@ -140,12 +152,18 @@ export function formatMeetingTime(
   const e = end.toZonedDateTimeISO(zone)
   const until = s.toPlainDate().equals(e.toPlainDate())
     ? format(e, TIME, language)
-    : language === 'zh-CN'
-      ? `${format(e, LONG_DATE, language)}，${format(e, TIME, language)}`
-      : `${format(e, LONG_DATE, language)}, ${format(e, TIME, language)}`
-  return language === 'zh-CN'
-    ? `${format(s, LONG_DATE, language)}，${format(s, TIME, language)} 至 ${until}${zoneLabel(s, language)}`
-    : `${format(s, LONG_DATE, language)}, ${format(s, TIME, language)} – ${until}${zoneLabel(s, language)}`
+    : message(language, 'format.dateTime', {
+        date: format(e, LONG_DATE, language),
+        time: format(e, TIME, language),
+      })
+  return message(language, 'format.timeRange', {
+    start: message(language, 'format.dateTime', {
+      date: format(s, LONG_DATE, language),
+      time: format(s, TIME, language),
+    }),
+    end: until,
+    zone: zoneLabel(s, language),
+  })
 }
 
 /** `Tue, Oct 20, 10:00 AM (Europe/Berlin, GMT+02:00)`, for subjects and invitee time. */
@@ -156,9 +174,10 @@ function formatShortTime(
 ): string {
   const zone = displayZone(timeZone)
   const s = start.toZonedDateTimeISO(zone)
-  return language === 'zh-CN'
-    ? `${format(s, SHORT_DATE, language)}，${format(s, TIME, language)}${zoneLabel(s, language)}`
-    : `${format(s, SHORT_DATE, language)}, ${format(s, TIME, language)}${zoneLabel(s, language)}`
+  return `${message(language, 'format.dateTime', {
+    date: format(s, SHORT_DATE, language),
+    time: format(s, TIME, language),
+  })}${zoneLabel(s, language)}`
 }
 
 // --- Locations ----------------------------------------------------------------------------
@@ -212,7 +231,7 @@ const htmlLines = (text: string, language: InterfaceLanguage) =>
 
 /** `Label: value`, with further lines of the value indented. */
 const textField = (label: string, value: string, language: InterfaceLanguage) =>
-  `${label}${language === 'zh-CN' ? '：' : ': '}${value.replaceAll('\n', '\n  ')}`
+  message(language, 'format.field', { label, value: value.replaceAll('\n', '\n  ') })
 
 interface Content {
   language: InterfaceLanguage
@@ -230,7 +249,7 @@ interface Content {
 
 function render(to: string, c: Content, attachment?: MailAttachment): MailMessage {
   const subject = subjectLine(c.subject)
-  const t = (key: keyof typeof chinese) => message(c.language, key)
+  const t = (key: MailKey) => message(c.language, key)
   const htmlText = (text: string) => emailText(text, c.language)
   const actionText = c.manageLinks
     ? [
@@ -325,78 +344,7 @@ ${rows}
 
 // --- Emails -------------------------------------------------------------------------------
 
-// English keys are the original email copy, shared by both renderings.
-const chinese = {
-  What: '活动',
-  When: '时间',
-  Was: '原时间',
-  Where: '地点',
-  Invitee: '预约人',
-  "Invitee's time": '预约人当地时间',
-  Guests: '来宾',
-  Host: '主持人',
-  Reason: '原因',
-  Phone: '电话',
-  Answers: '回答',
-  'Need to make a change?': '需要更改预约吗？',
-  Reschedule: '改期',
-  Cancel: '取消',
-  'Online meeting': '线上会议',
-  'Join Zoom meeting': '加入 Zoom 会议',
-  'Join Google Meet meeting': '加入 Google Meet 会议',
-  'Join Teams meeting': '加入 Teams 会议',
-  'Join meeting': '加入会议',
-  'Open in Hourmere': '在 Hourmere 中打开',
-  'You received this email because you booked a meeting with {host} via Hourmere.':
-    '你收到此邮件，是因为你通过 Hourmere 预约了与{host}的会议。',
-  'You received this email because {invitee} booked a meeting with you via Hourmere.':
-    '你收到此邮件，是因为{invitee}通过 Hourmere 预约了与你的会议。',
-  'You received this email because {invitee} added you to a booking with {host} via Hourmere.':
-    '你收到此邮件，是因为{invitee}在通过 Hourmere 与{host}的预约中添加了你。',
-  'Use these links to change or cancel:': '请使用以下链接更改或取消预约：',
-  'If the buttons do not work, copy a link into your browser:':
-    '如果按钮无法使用，请将链接复制到浏览器中：',
-  'Meeting link needs attention: {event} on {when}': '会议链接需要处理：{event}，{when}',
-  'New booking: {event} with {invitee} on {when}': '新预约：与{invitee}的{event}，{when}',
-  'Confirmed: {event} with {host} on {when}': '已确认：与{host}的{event}，{when}',
-  'Rescheduled: {event} with {other}, now {when}': '已改期：与{other}的{event}，现为 {when}',
-  'Cancelled: {event} with {other} on {when}': '已取消：与{other}的{event}，{when}',
-  'Reminder: {event} with {other} on {when}': '提醒：与{other}的{event}，{when}',
-  'The time is reserved, but Google Meet could not be prepared. Open this booking in Hourmere to review the problem, retry safe reconciliation or cancel. No final calendar invitation has been sent.':
-    '时段已保留，但无法准备 Google Meet 链接。请在 Hourmere 中打开此预约，查看问题、重试同步或取消预约。最终日历邀请尚未发送。',
-  'Your time is reserved, but the host needs to fix the Google Meet link. No final calendar invitation has been sent. You can use the links below to manage or cancel the booking.':
-    '时段已为你保留，但主持人需要修复 Google Meet 链接。最终日历邀请尚未发送。你可以使用以下链接管理或取消预约。',
-  '{invitee} booked a meeting with you.': '{invitee}预约了与你的会议。',
-  'Your meeting with {host} is booked.': '你与{host}的会议已预约。',
-  'Your meeting with {other} has moved to a new time.': '你与{other}的会议已改期。',
-  'Your meeting with {other} has been cancelled.': '你与{other}的会议已取消。',
-  'Your meeting with {other} is coming up.': '你与{other}的会议即将开始。',
-} as const
-
-function message(
-  language: InterfaceLanguage,
-  key: keyof typeof chinese,
-  values: Record<string, string> = {},
-): string {
-  if (language === 'zh-CN') return formatChineseTemplate(chinese[key], values)
-  return key.replace(/\{(\w+)\}/g, (placeholder, name: string) => values[name] ?? placeholder)
-}
-
 const field = (label: string, text: string) => ({ label, text })
-const calendarDecline = {
-  en: {
-    invitee:
-      'Accepting or declining this calendar invitation does not cancel the booking. To cancel, use the “Cancel” link in this email.',
-    host: 'Declining in your calendar is not synced to Hourmere; to cancel the booking, use Hourmere.',
-    guest:
-      'Accepting or declining this calendar invitation does not cancel the booking. To cancel, contact the person who booked or the host.',
-  },
-  'zh-CN': {
-    invitee: '在日历中接受或拒绝邀请不会取消预约。如需取消，请使用此邮件中的“取消”链接。',
-    host: '在日历中拒绝邀请不会同步到 Hourmere；如需取消预约，请在 Hourmere 中操作。',
-    guest: '在日历中接受或拒绝邀请不会取消预约。如需取消，请联系预约人或主持人。',
-  },
-}
 
 /**
  * The email about a booking event for one recipient, with times in the recipient's zone.
@@ -415,8 +363,7 @@ export function bookingEmail(
   // Who the meeting is with, from the recipient's side.
   const other = isHost ? invitee : host
   const language = interfaceLanguage(recipient.locale) ?? 'en'
-  const t = (key: keyof typeof chinese, values?: Record<string, string>) =>
-    message(language, key, values)
+  const t = (key: MailKey, values?: Record<string, string>) => message(language, key, values)
   const when = formatShortTime(meeting.start, recipient.timeZone, language)
   const values = { event, host, invitee, other, when }
 
@@ -428,7 +375,7 @@ export function bookingEmail(
     rescheduled: 'Rescheduled: {event} with {other}, now {when}',
     cancelled: 'Cancelled: {event} with {other} on {when}',
     reminder: 'Reminder: {event} with {other} on {when}',
-  } satisfies Record<BookingEmailKind, keyof typeof chinese>
+  } satisfies Record<BookingEmailKind, MailKey>
   const subject = t(subjects[kind], values)
   const intros = {
     conference_failed: isHost
@@ -440,7 +387,7 @@ export function bookingEmail(
     rescheduled: 'Your meeting with {other} has moved to a new time.',
     cancelled: 'Your meeting with {other} has been cancelled.',
     reminder: 'Your meeting with {other} is coming up.',
-  } satisfies Record<BookingEmailKind, keyof typeof chinese>
+  } satisfies Record<BookingEmailKind, MailKey>
   const intro = t(intros[kind], values)
 
   const fields: Content['fields'] = [
@@ -506,7 +453,7 @@ export function bookingEmail(
     /^METHOD:REQUEST\r?$/m.test(options.attachment.content)
   const footer =
     kind !== 'cancelled' && kind !== 'conference_failed' && invitation
-      ? { language, text: calendarDecline[language][footerRole] }
+      ? { language, text: t(`calendar.email.${footerRole}`) }
       : undefined
   const joinUrl = meeting.location?.kind === 'link' ? linkableUrl(meeting.location.url) : null
   const join =

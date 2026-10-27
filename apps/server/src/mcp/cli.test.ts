@@ -11,6 +11,8 @@ import { createFixtures } from '@hourmere/scheduling/testing'
 import { describe, expect, it } from 'vitest'
 import { runCli } from '../../../../tools/cli/src/cli.ts'
 import { createApp } from '../app.ts'
+import { bookingRoutes } from '../routes/bookings.ts'
+import { profileRoutes } from '../routes/profile.ts'
 import { bookingTools } from './bookings.ts'
 import { catalogTools } from './catalog.ts'
 import { mcpEndpoint } from './endpoint.ts'
@@ -41,6 +43,11 @@ describe.skipIf(!bootstrap)('CLI through HTTP and PostgreSQL', () => {
       })
       const fixtures = createFixtures(db)
       const host = await fixtures.host({ name: 'CLI Test Host', handle: 'cli-host' })
+      await db
+        .updateTable('profiles')
+        .set({ locale: 'pt-BR' })
+        .where('user_id', '=', host.userId)
+        .execute()
       await fixtures.schedule(host.userId)
       const event = await fixtures.eventType(host.organizationId, host.userId, {
         slug: 'intro',
@@ -59,6 +66,7 @@ describe.skipIf(!bootstrap)('CLI through HTTP and PostgreSQL', () => {
         checkDb: async () => {},
         authHandler: auth.handler,
         resolveCaller: createCallerResolver({ auth, db }),
+        routes: [bookingRoutes({ db }), profileRoutes({ db })],
         mcp: mcpEndpoint({
           tools: [
             whoamiTool,
@@ -119,6 +127,12 @@ describe.skipIf(!bootstrap)('CLI through HTTP and PostgreSQL', () => {
       expect(identity.code).toBe(0)
       expect(identity.data.organization.id).toBe(host.organizationId)
       expect((await run('profile')).data.handle).toBe('cli-host')
+      expect((await run('profile')).data.locale).toBe('pt-BR')
+      const restProfile = await app.request('/api/v1/profile', {
+        headers: { Authorization: `Bearer ${key.key}` },
+      })
+      expect(restProfile.status).toBe(200)
+      expect(await restProfile.json()).toMatchObject({ locale: 'pt-BR' })
       const catalog = await run('catalog', { limit: 1 })
       expect(catalog.data.data[0].id).toBe(event)
       expect((await run('event', { id: event })).code).toBe(0)
@@ -154,6 +168,7 @@ describe.skipIf(!bootstrap)('CLI through HTTP and PostgreSQL', () => {
           name: 'CLI Test Invitee',
           email: 'cli-invitee@example.test',
           timeZone: 'Europe/Berlin',
+          locale: 'pt-BR',
         },
         idempotencyKey: randomUUID(),
       }
@@ -163,10 +178,21 @@ describe.skipIf(!bootstrap)('CLI through HTTP and PostgreSQL', () => {
       expect(typeof created.manageToken === 'string').toBe(true)
       secrets.push(created.manageToken)
       expect(created.booking.source).toBe('mcp')
+      expect(created.booking.attendees).toEqual(
+        expect.arrayContaining([expect.objectContaining({ locale: 'pt-BR' })]),
+      )
+      const restBooking = await app.request(`/api/v1/bookings/${created.booking.id}`, {
+        headers: { Authorization: `Bearer ${key.key}` },
+      })
+      expect(restBooking.status).toBe(200)
+      expect(await restBooking.json()).toMatchObject({
+        attendees: expect.arrayContaining([expect.objectContaining({ locale: 'pt-BR' })]),
+      })
       const replay = await run('book', request)
       expect(replay.code).toBe(0)
       expect(replay.data.booking.id).toBe(created.booking.id)
       expect(replay.data.replayed).toBe(true)
+      expect(replay.data.booking.attendees).toEqual(created.booking.attendees)
       expect(replay.data.manageToken).toBeNull()
       const wrongRetry = await run('book', { ...request, start: slots.data.slots[1].start })
       expect(wrongRetry.error.error).toBe('idempotency_key_reused')
@@ -190,6 +216,7 @@ describe.skipIf(!bootstrap)('CLI through HTTP and PostgreSQL', () => {
       expect(moved.manageToken === null).toBe(true)
       expect(moved.booking.rescheduledFromId).toBe(created.booking.id)
       expect(moved.booking.source).toBe('mcp')
+      expect(moved.booking.attendees).toEqual(created.booking.attendees)
       expect(
         (
           await run('reschedule', {

@@ -22,6 +22,7 @@ import {
 import type { MiddlewareHandler } from 'hono'
 import { createMiddleware } from 'hono/factory'
 import type { CallerEnv } from '../caller.ts'
+import { localeDescription } from '../i18n/locale-description.ts'
 import { authenticated, ErrorBody, json, type RouteModule } from '../openapi.ts'
 import { createRateLimiter, PUBLIC_RATE_LIMITS, type RateLimit, rateLimit } from '../rate-limit.ts'
 
@@ -61,7 +62,7 @@ const Attendee = z
     name: z.string(),
     email: z.string(),
     timeZone: z.string().openapi({ description: 'IANA time zone' }),
-    locale: z.string().nullable(),
+    locale: z.string().nullable().openapi({ description: localeDescription }),
     isBooker: z.boolean().openapi({
       description: 'The invitee who made the booking; the others are guests they added',
     }),

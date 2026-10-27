@@ -783,7 +783,7 @@ describe('localized dates and generated copy', () => {
 
   it('falls back to the complete English email for unsupported preferences', () => {
     const expected = bookingEmail('confirmed', meeting, { ...recipients.invitee, locale: 'en' })
-    for (const locale of [undefined, null, 'fr', 'zh-TW', 'not_a_locale']) {
+    for (const locale of [undefined, null, 'qaa', 'zh-TW', 'not_a_locale']) {
       expect(bookingEmail('confirmed', meeting, { ...recipients.invitee, locale })).toEqual(
         expected,
       )
@@ -820,10 +820,10 @@ describe('localized dates and generated copy', () => {
 
   it('uses Chinese punctuation in every Chinese copy string', () => {
     // Inspect literal copy, excluding URLs, addresses, markup and Intl numeric time separators.
-    const source = readFileSync(new URL('./booking.ts', import.meta.url), 'utf8')
-    const copy = [...source.matchAll(/(['"])((?:\\.|(?!\1)[^\r\n\\])*)\1/g)]
-      .map((match) => match[2] ?? '')
-      .filter((literal) => /\p{Script=Han}/u.test(literal))
+    const catalogue: Record<string, string> = JSON.parse(
+      readFileSync(new URL('./catalogues/zh-CN.json', import.meta.url), 'utf8'),
+    )
+    const copy = Object.values(catalogue).filter((literal) => /\p{Script=Han}/u.test(literal))
     expect(copy.length).toBeGreaterThan(25)
     for (const text of copy) expect(text).not.toMatch(/[.!?,:;()"']/)
   })

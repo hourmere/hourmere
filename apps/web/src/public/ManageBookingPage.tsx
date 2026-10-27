@@ -231,10 +231,10 @@ function ManageView({
   /** Loads the booking again; null when that fails too. */
   onStale: () => Promise<ManagedBooking | null>
 }) {
-  const { t, explicit, locale: language } = useI18n()
+  const { t, formatLocale, locale: language } = useI18n()
 
   const browserFormatLocale = useMemo(preferredLocale, [])
-  const locale = explicit ?? browserFormatLocale
+  const locale = formatLocale ?? browserFormatLocale
   const [timeZone, setTimeZone] = useState(() => {
     const stored = booking.attendees.find((attendee) => attendee.isBooker)?.timeZone
     return stored && isKnownTimeZone(stored) ? stored : detectTimeZone()

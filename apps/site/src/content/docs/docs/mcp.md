@@ -92,6 +92,11 @@ available slot, then pass its exact UTC `start` to `create_booking` with an invi
 email and IANA time zone. Booking actions send the normal notifications and project onto a
 configured calendar. Use a controlled test address when trying it out.
 
+Optional `invitee.locale` chooses notification language using the
+[shared locale registry](/docs/interface-languages), with per-message English fallback.
+The same BCP 47 field is accepted by REST and CLI and is retained through booking retries,
+reschedules and cancellation; it does not change `timeZone` or UTC result timestamps.
+
 Keep manage tokens privately to reschedule/cancel. A create retry with the same idempotency
 key and arguments returns the existing booking but no new manage token. A different booking
 needs a new key. Rescheduling is not idempotent. Invitee moves return a new manage token;

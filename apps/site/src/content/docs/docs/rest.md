@@ -62,6 +62,11 @@ curl --fail-with-body "$HOURMERE_URL/api/v1/public/ada/intro/bookings" \
   -d '{"start":"<chosen slot start>","invitee":{"name":"Test Invitee","email":"<your test address>","timeZone":"America/Los_Angeles"}}'
 ```
 
+Set optional `invitee.locale` to a BCP 47 tag such as `zh-CN` for notification language.
+Supported tags use the [shared locale registry](/docs/interface-languages); unsupported
+languages and missing translations fall back to English. MCP and CLI accept the same field.
+The saved language survives retries, reschedules and cancellation, independently of `timeZone`.
+
 Save the returned `manageToken` privately. Only its hash is stored; it is returned once. A
 same-key retry returns HTTP 200 (rather than 201) with the original booking and
 `manageToken: null`. Reusing the key with different arguments fails with `idempotency_key_reused`; use a new key for a genuinely new booking.

@@ -83,7 +83,7 @@ function BookingList({
   timeZone: string
   fromProfile: boolean
 }) {
-  const { t, ui, locale, formatLocale: displayLocale } = useI18n()
+  const { t, ui, formatLocale: displayLocale } = useI18n()
 
   // Every page of a list uses the same moment, as the API's cursors require the same filters.
   const [now] = useState(() => new Date().toISOString())
@@ -113,7 +113,7 @@ function BookingList({
   const [status, setStatus] = useState<UiText>('')
   const [focusId, setFocusId] = useState<string | null>(null)
   const list = useRef<HTMLTableSectionElement>(null)
-  const format = zoned(timeZone, locale === 'zh-CN' ? locale : displayLocale)
+  const format = zoned(timeZone, displayLocale)
 
   useEffect(() => {
     if (!focusId) return
