@@ -13,6 +13,7 @@ import { eventTypeRoutes } from './event-types.ts'
 import { memberDepartureImpactRoutes } from './member-departure-impact.ts'
 import { profileRoutes } from './profile.ts'
 import { publicRoutes } from './public.ts'
+import { readinessRoutes } from './readiness.ts'
 import { scheduleRoutes } from './schedules.ts'
 import { teamBookingRoutes } from './team-bookings.ts'
 import { webhookRoutes } from './webhooks.ts'
@@ -65,6 +66,7 @@ export const productRoutes = (db: Db) => [
   teamBookingRoutes({ db }),
   memberDepartureImpactRoutes({ db }),
   analyticsRoutes({ db }),
+  readinessRoutes({ db }),
 ]
 
 /**

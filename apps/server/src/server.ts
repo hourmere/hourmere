@@ -60,6 +60,7 @@ import { instanceRoutes } from './routes/instance.ts'
 import { memberDepartureImpactRoutes } from './routes/member-departure-impact.ts'
 import { profileRoutes } from './routes/profile.ts'
 import { publicRoutes } from './routes/public.ts'
+import { readinessRoutes } from './routes/readiness.ts'
 import { scheduleRoutes } from './routes/schedules.ts'
 import { teamBookingRoutes } from './routes/team-bookings.ts'
 import { webhookRoutes } from './routes/webhooks.ts'
@@ -146,6 +147,7 @@ export function productRoutes({
     teamBookingRoutes({ db }),
     memberDepartureImpactRoutes({ db }),
     analyticsRoutes({ db }),
+    readinessRoutes({ db, automaticMeet, automaticZoom }),
   ]
 }
 

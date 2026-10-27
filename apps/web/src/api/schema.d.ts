@@ -4246,6 +4246,84 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/readiness/self": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the session member's own booking readiness
+         * @description Checks the current verified session and membership. Returns only the caller's private member detail and, in their personal organization, their personal event types. Uses cached configuration and sync facts, without a live provider request or a slot availability promise. Pages default to 50 items, at most 100; pass eventTypes.nextCursor as eventTypeCursor.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    eventTypeCursor?: string;
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Own member detail and a page of personal event-type readiness */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SelfReadinessPage"];
+                    };
+                };
+                /** @description invalid_request, invalid_limit or invalid_cursor */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No valid session or API key */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description readiness_access_denied: requires a current verified web session and membership */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The API key's rate limit is used up */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/schedules": {
         parameters: {
             query?: never;
@@ -4966,6 +5044,87 @@ export interface paths {
                     };
                 };
                 /** @description team_management_access_denied: inaccessible team or member */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The API key's rate limit is used up */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/teams/{teamId}/readiness": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a minimal booking readiness summary for the acting team
+         * @description Requires a current verified owner/admin web session in this team. Returns coarse reason codes and repair kinds, with no private calendar, account or schedule details. Every access denial, including an ordinary member, a different team and a missing team, uses team_management_access_denied. Member and event-type pages default to 50 items each, at most 100; pass their nextCursor as memberCursor and eventTypeCursor respectively.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    eventTypeCursor?: string;
+                    limit?: number;
+                    memberCursor?: string;
+                };
+                header?: never;
+                path: {
+                    teamId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Minimal member and event-type summaries scoped to this team */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TeamReadinessPage"];
+                    };
+                };
+                /** @description invalid_request, invalid_limit or invalid_cursor */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No valid session or API key */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description team_management_access_denied: requires the current team owner/admin web session */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -5878,6 +6037,134 @@ export interface components {
             timeZone?: string;
             weeklyHours?: components["schemas"]["WeeklyHoursInput"];
         };
+        SelfReadinessPage: {
+            eventTypes: {
+                data: {
+                    /** @enum {string} */
+                    activation: "active" | "inactive" | "not_applicable" | "not_checked" | "check_failed";
+                    /** @enum {string} */
+                    audience: "self_detail";
+                    /** @enum {string} */
+                    availability: "not_checked";
+                    /** @enum {string} */
+                    completeness: "complete" | "partial";
+                    details: {
+                        calendars: {
+                            accountEmail: string | null;
+                            checkConflicts: boolean;
+                            /** Format: uuid */
+                            id: string;
+                            /** Format: date-time */
+                            lastSyncedAt: string | null;
+                            name: string;
+                            provider: string;
+                            status: string;
+                            /** @enum {string|null} */
+                            syncError: "provider_unavailable" | "needs_reauth" | "permissions_missing" | null;
+                        }[];
+                        schedules: {
+                            /** Format: uuid */
+                            id: string;
+                            isDefault: boolean;
+                            name: string;
+                            timeZone: string;
+                        }[];
+                    };
+                    /** @enum {string} */
+                    enablement: "enabled" | "disabled" | "not_applicable" | "not_checked" | "check_failed";
+                    /** Format: date-time */
+                    evaluatedAt: string;
+                    /** @enum {string} */
+                    scope: "configuration_and_cached_sync";
+                    signals: {
+                        /** Format: date-time */
+                        checkedAt: string | null;
+                        /** @enum {string|null} */
+                        fixKind: "event_editor" | "self_availability" | "self_schedule" | "self_calendars" | "self_identity" | "self_profile" | "self_conferences" | "ask_member" | "retry_summary" | null;
+                        /** @enum {string} */
+                        id: "event_enablement" | "default_schedule" | "effective_event_schedule" | "host_eligibility" | "round_robin_activation" | "conflict_calendar_selection" | "selected_calendar_sync" | "optional_conference_dependency" | "slot_observation";
+                        /** @enum {string} */
+                        ownerKind: "member_self" | "event_owner" | "team_admin" | "calendar_worker" | "shared_evaluator" | "operator";
+                        reasonCode: string | null;
+                        /** @enum {string} */
+                        state: "satisfied" | "not_applicable" | "configuration_blocker" | "dependency_unavailable" | "not_checked" | "check_failed";
+                    }[];
+                    subject: {
+                        /** Format: uuid */
+                        id: string;
+                        /** @enum {string} */
+                        kind: "member" | "event_type";
+                        /** Format: uuid */
+                        organizationId: string;
+                    };
+                    /** @enum {string} */
+                    summary: "disabled" | "needs_activation" | "configuration_blocked" | "dependency_unavailable" | "check_failed" | "not_checked" | "checks_passed" | "partial_pool";
+                }[];
+                /** Format: uuid */
+                nextCursor: string | null;
+            };
+            member: {
+                /** @enum {string} */
+                activation: "active" | "inactive" | "not_applicable" | "not_checked" | "check_failed";
+                /** @enum {string} */
+                audience: "self_detail";
+                /** @enum {string} */
+                availability: "not_checked";
+                /** @enum {string} */
+                completeness: "complete" | "partial";
+                details: {
+                    calendars: {
+                        accountEmail: string | null;
+                        checkConflicts: boolean;
+                        /** Format: uuid */
+                        id: string;
+                        /** Format: date-time */
+                        lastSyncedAt: string | null;
+                        name: string;
+                        provider: string;
+                        status: string;
+                        /** @enum {string|null} */
+                        syncError: "provider_unavailable" | "needs_reauth" | "permissions_missing" | null;
+                    }[];
+                    schedules: {
+                        /** Format: uuid */
+                        id: string;
+                        isDefault: boolean;
+                        name: string;
+                        timeZone: string;
+                    }[];
+                };
+                /** @enum {string} */
+                enablement: "enabled" | "disabled" | "not_applicable" | "not_checked" | "check_failed";
+                /** Format: date-time */
+                evaluatedAt: string;
+                /** @enum {string} */
+                scope: "configuration_and_cached_sync";
+                signals: {
+                    /** Format: date-time */
+                    checkedAt: string | null;
+                    /** @enum {string|null} */
+                    fixKind: "event_editor" | "self_availability" | "self_schedule" | "self_calendars" | "self_identity" | "self_profile" | "self_conferences" | "ask_member" | "retry_summary" | null;
+                    /** @enum {string} */
+                    id: "event_enablement" | "default_schedule" | "effective_event_schedule" | "host_eligibility" | "round_robin_activation" | "conflict_calendar_selection" | "selected_calendar_sync" | "optional_conference_dependency" | "slot_observation";
+                    /** @enum {string} */
+                    ownerKind: "member_self" | "event_owner" | "team_admin" | "calendar_worker" | "shared_evaluator" | "operator";
+                    reasonCode: string | null;
+                    /** @enum {string} */
+                    state: "satisfied" | "not_applicable" | "configuration_blocker" | "dependency_unavailable" | "not_checked" | "check_failed";
+                }[];
+                subject: {
+                    /** Format: uuid */
+                    id: string;
+                    /** @enum {string} */
+                    kind: "member" | "event_type";
+                    /** Format: uuid */
+                    organizationId: string;
+                };
+                /** @enum {string} */
+                summary: "disabled" | "needs_activation" | "configuration_blocked" | "dependency_unavailable" | "check_failed" | "not_checked" | "checks_passed" | "partial_pool";
+            };
+        };
         Slot: {
             /**
              * Format: date-time
@@ -5923,6 +6210,47 @@ export interface components {
         TeamAdminBookingPage: {
             data: components["schemas"]["TeamAdminBooking"][];
             nextCursor: string | null;
+        };
+        TeamReadinessPage: {
+            eventTypes: {
+                data: {
+                    /** @enum {string} */
+                    activation: "active" | "inactive" | "not_applicable" | "not_checked" | "check_failed";
+                    /** @enum {string} */
+                    completeness: "complete" | "partial";
+                    /** @enum {string} */
+                    enablement: "enabled" | "disabled" | "not_applicable" | "not_checked" | "check_failed";
+                    /** Format: date-time */
+                    evaluatedAt: string;
+                    /** Format: uuid */
+                    eventTypeId: string;
+                    fixKinds: ("edit_event" | "ask_member" | "retry_summary")[];
+                    reasonCodes: ("default_schedule_required" | "host_configuration_required" | "activation_required" | "calendar_attention_required" | "check_not_performed" | "check_failed" | "optional_feature_attention_required")[];
+                    /** @enum {string} */
+                    summary: "disabled" | "needs_activation" | "configuration_blocked" | "dependency_unavailable" | "check_failed" | "not_checked" | "checks_passed" | "partial_pool";
+                }[];
+                /** Format: uuid */
+                nextCursor: string | null;
+            };
+            members: {
+                data: {
+                    /** @enum {string} */
+                    completeness: "complete" | "partial";
+                    displayName: string;
+                    /** Format: date-time */
+                    evaluatedAt: string;
+                    fixKinds: ("edit_event" | "ask_member" | "retry_summary")[];
+                    /** Format: uuid */
+                    memberId: string;
+                    reasonCodes: ("default_schedule_required" | "host_configuration_required" | "activation_required" | "calendar_attention_required" | "check_not_performed" | "check_failed" | "optional_feature_attention_required")[];
+                    /** @enum {string} */
+                    summary: "disabled" | "needs_activation" | "configuration_blocked" | "dependency_unavailable" | "check_failed" | "not_checked" | "checks_passed" | "partial_pool";
+                }[];
+                /** Format: uuid */
+                nextCursor: string | null;
+            };
+            /** Format: uuid */
+            organizationId: string;
         };
         /** @description Intervals of one day must not overlap; touching ones are joined */
         WallClockInterval: {

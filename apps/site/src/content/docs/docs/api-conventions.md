@@ -373,6 +373,31 @@ localizes its generated composition only when it exactly equals `eventTypeTitle`
 and titles without current event metadata remain unchanged. Public/manage responses omit
 `eventTypeTitle`.
 
+## Booking readiness reads
+
+`GET /api/v1/readiness/self` returns the current member’s own readiness detail. In their
+personal organization it also returns their personal event-type readiness; in a team it
+returns only that member’s detail. It requires a current verified web session and current
+membership. API keys and OAuth callers cannot use readiness reads.
+
+`GET /api/v1/teams/{teamId}/readiness` returns minimal member and event-type summaries for
+the acting team, through the shared team-management access check. Only current verified
+team owners/admins can read it. Ordinary members, other teams and nonexistent teams receive
+the same `403 team_management_access_denied`. The summary includes coarse reasons such as
+`calendar_attention_required` and repair kinds; it excludes private calendar/account data,
+schedules, exact sync times, provider errors and busy-time details.
+
+Both reads use cached server-side configuration and sync facts, without live provider calls.
+Enablement, round-robin activation, configuration, sync and check results remain separate.
+No external calendar is required for basic checks. A successful summary describes its check
+time and does not promise available slots or reserve a booking; booking still rechecks its
+current prerequisites. Unknown or failed checks remain `not_checked` or `check_failed`.
+
+Pages default to 50 items and accept `limit=1..100`. Pass the member page’s `nextCursor` as
+`memberCursor` and the event-type page’s `nextCursor` as `eventTypeCursor`; cursors are UUIDs.
+The self read has only an event-type page. Each returned item has its own completeness and
+check result; a page is not evidence that unreturned members or events passed.
+
 ## Public endpoints
 
 Booking pages and invitee links work without credentials. The web app serves them at the
