@@ -545,7 +545,20 @@ describe('the DCO workflow fork boundary', () => {
 
   it('detects forks by comparing the head repository with the current repository', () => {
     const expression = /^\s+FROM_FORK: \$\{\{ (.+) \}\}$/m.exec(workflow())?.[1]
-    expect(expression).toBe('github.event.pull_request.head.repo.full_name != github.repository')
+    expect(expression).toBe(
+      "github.event_name == 'merge_group' && 'false' || github.event.pull_request.head.repo.full_name != github.repository",
+    )
+  })
+
+  it('checks merge queue groups over the group range with same-repository exemptions', () => {
+    const text = workflow()
+    expect(text).toMatch(/^ {2}merge_group:$/m)
+    expect(text).toMatch(
+      /BASE_SHA: \$\{\{ github\.event\.pull_request\.base\.sha \|\| github\.event\.merge_group\.base_sha \}\}/,
+    )
+    expect(text).toMatch(
+      /HEAD_SHA: \$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.event\.merge_group\.head_sha \}\}/,
+    )
   })
 
   it.each(['false', 'true', '', 'False', 'FALSE', ' false', 'false ', '0', 'unknown'])(
