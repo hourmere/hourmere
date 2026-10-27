@@ -194,12 +194,16 @@ export const test = base.extend<{
         kind: keyof typeof cookies = 'personal',
         body?: unknown,
         method = body === undefined ? 'GET' : 'POST',
+        expectedOrganizationId?: string,
       ) =>
         app.request(path, {
           method,
           headers: {
             cookie: `better-auth.session_token=${cookies[kind]}`,
             ...(body === undefined ? {} : { origin: url, 'content-type': 'application/json' }),
+            ...(expectedOrganizationId === undefined
+              ? {}
+              : { 'X-Expected-Organization-Id': expectedOrganizationId }),
           },
           ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         })
@@ -305,6 +309,7 @@ export const test = base.extend<{
             teamEvent ? 'team' : 'personal',
             { location: { kind: 'zoom', autoCreate: true }, zoomConnectionId: pin },
             'PATCH',
+            teamEvent ? team : host.organizationId,
           )
           expect(result.status).toBe(200)
         },
@@ -370,6 +375,7 @@ export const test = base.extend<{
             'foreign',
             { location: { kind: 'zoom', autoCreate: true }, zoomConnectionId: pin },
             'PATCH',
+            team,
           )
           const foreignKey = await auth.api.createApiKey({
             body: {

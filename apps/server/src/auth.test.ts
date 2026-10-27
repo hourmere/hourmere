@@ -163,7 +163,17 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
   const post = (path: string, cookie: string, body: unknown, app = main.app) =>
     app.request(path, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', cookie, origin },
+      headers: {
+        'content-type': 'application/json',
+        cookie,
+        origin,
+        ...(typeof body === 'object' &&
+        body !== null &&
+        'organizationId' in body &&
+        typeof body.organizationId === 'string'
+          ? { 'x-expected-organization-id': body.organizationId }
+          : {}),
+      },
       body: typeof body === 'string' ? body : JSON.stringify(body),
     })
 
@@ -425,11 +435,41 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
         status = res.status
       })
       expect(status).toBe(403)
-      // Better Auth logs the rejected URL, but on one line with the breaks escaped.
+      // Keep the rejection diagnostic on one escaped line, without URL query values.
       expect(lines.some((l) => l.includes('Invalid callbackURL') && l.includes('\\n[mail]'))).toBe(
         true,
       )
+      expect(lines.some((l) => l.includes('token=forged') || l.includes('callbackURL=%2F'))).toBe(
+        false,
+      )
       expect(lines.filter((l) => l.startsWith('[mail]'))).toEqual([])
+    })
+
+    it('redacts an invitation UUID in rejected callback URLs while retaining the diagnostic', async () => {
+      const invitationId = '019a06ab-0000-7000-8000-000000000071'
+      const callbackURL = `https://evil.example/invitations/${invitationId}?invitationId=${invitationId}&value=left'private-query#private`
+      const lines = await printedLines(async () => {
+        const res = await main.app.request('/api/auth/sign-in/magic-link', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ email: 'admin@example.com', callbackURL }),
+        })
+        expect(res.status).toBe(403)
+      })
+      expect(
+        lines.filter((l) =>
+          l.includes('Invalid callbackURL: https://evil.example/invitations/[redacted UUID]'),
+        ),
+      ).toHaveLength(1)
+      expect(
+        lines.some(
+          (l) =>
+            l.includes(invitationId) ||
+            l.includes('?invitationId=') ||
+            l.includes('private-query') ||
+            l.includes('#private'),
+        ),
+      ).toBe(false)
     })
 
     it('accept only known sort and filter fields, exact filters, and UUIDs for id filters', async () => {
@@ -812,7 +852,7 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
       expect(members.rows).toEqual([{ role: 'owner', slug: 'grace' }])
     })
 
-    it('cannot be deleted, while team organizations can', async () => {
+    it('refuses direct browser deletion of personal and team organizations', async () => {
       const cookie = await signIn('keeper@example.com')
       const personal = (await me({ cookie })).body.organization
       const remove = (organizationId: string) =>
@@ -824,7 +864,7 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
 
       const refused = await remove(personal.id)
       expect(refused.status).toBe(403)
-      expect(await refused.json()).toMatchObject({ code: 'PERSONAL_ORGANIZATION' })
+      expect(await refused.json()).toMatchObject({ code: 'TEAM_OPERATION_NOT_SUPPORTED' })
       expect((await me({ cookie })).body.organization).toEqual(personal)
 
       const team = await main.app.request('/api/auth/organization/create', {
@@ -832,7 +872,7 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
         headers: { 'content-type': 'application/json', cookie, origin },
         body: JSON.stringify({ name: 'Short-lived', slug: 'short-lived' }),
       })
-      expect((await remove(((await team.json()) as { id: string }).id)).status).toBe(200)
+      expect((await remove(((await team.json()) as { id: string }).id)).status).toBe(403)
     })
 
     describe("stays its owner's alone", () => {
@@ -899,6 +939,7 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
           `INSERT INTO auth.member ("organizationId", "userId", role, "createdAt") VALUES ($1, $2, 'owner', now())`,
           [personal.id, await userId('bob@example.com')],
         )
+        await post('/api/auth/organization/set-active', bob, { organizationId: personal.id })
         await refused(
           await post('/api/auth/organization/update-member-role', bob, {
             memberId: aliceMemberId,
@@ -984,6 +1025,7 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
           [ownerId],
         )
       ).rows[0]?.organization_id
+      await post('/api/auth/organization/set-active', cookie, { organizationId: personal })
       const response = await post('/api/auth/organization/update', cookie, {
         organizationId: personal,
         data: { slug: 'CALENDARS' },
@@ -1679,8 +1721,35 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
       })
       expect(res?.status).toBe(500)
       expect(await res?.json()).toEqual({ error: 'internal_error' })
-      expect(lines.filter((l) => l.includes('boom'))).toHaveLength(1)
+      expect(lines.filter((l) => l.includes('boom\\n[mail]'))).toHaveLength(1)
       expect(lines.filter((l) => l.startsWith('[mail]') || l.startsWith('    at '))).toEqual([])
+    })
+
+    it('retains auth errors while redacting invitation UUIDs and URL query/fragment values', async () => {
+      const invitationId = '019a06ab-0000-7000-8000-000000000071'
+      const app = createApp({
+        checkDb: async () => {},
+        authHandler: async () => {
+          throw new Error(
+            `Invitation ${invitationId} failed: https://host.example/app/join?invitationId=${invitationId}#private`,
+          )
+        },
+        resolveCaller: createCallerResolver({ auth: main.auth, db }),
+        publicUrl: origin,
+      })
+      const lines = await printedLines(async () => {
+        expect((await app.request('/api/auth/whatever')).status).toBe(500)
+      })
+      expect(
+        lines.filter((l) =>
+          l.includes('Invitation [redacted UUID] failed: https://host.example/app/join'),
+        ),
+      ).toHaveLength(1)
+      expect(
+        lines.some(
+          (l) => l.includes(invitationId) || l.includes('?invitationId=') || l.includes('#private'),
+        ),
+      ).toBe(false)
     })
 
     it('from Better Auth reach that handler instead of being printed raw', async () => {
@@ -1719,6 +1788,7 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
       expect(res?.status).toBe(500)
       expect(await res?.json()).toEqual({ error: 'internal_error' })
       expect(lines.some((l) => l.includes('ERROR POST /api/auth/sign-in/magic-link'))).toBe(true)
+      expect(lines.filter((l) => l.includes('db down\\n[mail]'))).toHaveLength(1)
       expect(
         lines.filter(
           (l) => l.startsWith('    at ') || l.startsWith('[mail]') || l.includes('# SERVER_ERROR'),

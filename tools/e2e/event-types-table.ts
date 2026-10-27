@@ -14,7 +14,7 @@ export async function setLongBookingSlug(page: Page, app: FixtureApp): Promise<v
   const state = await app.auditState()
   await app.auditSignIn(true)
   const response = await page.request.patch(`${app.url}/api/v1/event-types/${state.eventTypeId}`, {
-    headers: { origin: app.url },
+    headers: { origin: app.url, 'X-Expected-Organization-Id': state.organizationId },
     data: { slug: LONG_BOOKING_SLUG },
   })
   if (response.status() !== 200) throw new Error('Could not give the audit event type a long slug')

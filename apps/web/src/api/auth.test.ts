@@ -1,12 +1,19 @@
 import { describe, expect, it, vi } from 'vitest'
 import { translateMessage } from '../i18n/translate.ts'
 import {
+  type AcceptedInvitation,
+  acceptInvitation,
   type CreatedOrganization,
   type CreateOrganizationInput,
   createOrganization,
+  getInvitation,
+  type InvitationDetails,
   listOrganizations,
   type Organization,
+  type SignInRedirects,
+  sendSignInLink,
   setActiveOrganization,
+  startSocialSignIn,
 } from './auth.ts'
 import { onUnauthorized, type Schemas } from './client.ts'
 import { errorMessage, RequestError, UNREACHABLE } from './errors.ts'
@@ -315,5 +322,166 @@ describe('organization adapters', () => {
     controller.abort()
     await rejected
     expect(fetch).toHaveBeenCalledTimes(2)
+  })
+})
+
+const INVITATION: InvitationDetails = {
+  id: '00000000-0000-7000-8000-000000000005',
+  email: 'ada@example.com',
+  role: 'member',
+  organizationId: ORGANIZATION.id,
+  inviterId: '00000000-0000-7000-8000-000000000006',
+  status: 'pending',
+  expiresAt: '2026-10-29T09:00:00.000Z',
+  createdAt: ORGANIZATION.createdAt,
+  organizationName: ORGANIZATION.name,
+  organizationSlug: ORGANIZATION.slug,
+  inviterEmail: 'grace@example.com',
+}
+const ACCEPTED: AcceptedInvitation = {
+  invitation: { ...INVITATION, status: 'accepted' },
+  member: {
+    id: '00000000-0000-7000-8000-000000000007',
+    organizationId: ORGANIZATION.id,
+    userId: PERSONAL_ME.user.id,
+    role: 'member',
+    createdAt: ORGANIZATION.createdAt,
+  },
+}
+const invitationAdapters = [
+  {
+    name: 'lookup',
+    run: (signal?: AbortSignal) => getInvitation(INVITATION.id, signal),
+    response: INVITATION,
+  },
+  {
+    name: 'accept',
+    run: (signal?: AbortSignal) => acceptInvitation(INVITATION.id, signal),
+    response: ACCEPTED,
+  },
+]
+
+describe('invitation adapters', () => {
+  it('gets invitation details with query id and does not accept or switch organizations', async () => {
+    const fetch = scriptedFetch(json(200, INVITATION))
+    expect(await getInvitation(INVITATION.id)).toEqual(INVITATION)
+    expect(fetch).toHaveBeenCalledExactlyOnceWith(
+      `/api/auth/organization/get-invitation?id=${INVITATION.id}`,
+      { method: 'GET' },
+    )
+  })
+
+  it('encodes the lookup value as one query field', async () => {
+    const fetch = scriptedFetch(json(400, { code: 'INVALID_ID' }))
+    await expect(getInvitation('bad&id=another')).rejects.toMatchObject({ code: 'INVALID_ID' })
+    expect(fetch.mock.calls[0]?.[0]).toBe(
+      '/api/auth/organization/get-invitation?id=bad%26id%3Danother',
+    )
+  })
+
+  it('posts explicit acceptance with invitationId and preserves invitation plus membership', async () => {
+    const fetch = scriptedFetch(json(200, ACCEPTED))
+    expect(await acceptInvitation(INVITATION.id)).toEqual(ACCEPTED)
+    expect(fetch).toHaveBeenCalledExactlyOnceWith('/api/auth/organization/accept-invitation', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ invitationId: INVITATION.id }),
+    })
+  })
+
+  it.each(invitationAdapters)('reuses shared unauthorized handling for $name', async ({ run }) => {
+    const unauthorized = vi.fn()
+    const unregister = onUnauthorized(unauthorized)
+    const fetch = scriptedFetch(json(401, { code: 'UNAUTHORIZED' }))
+    try {
+      await expect(run()).rejects.toMatchObject({ status: 401, code: 'UNAUTHORIZED' })
+      expect(unauthorized).toHaveBeenCalledTimes(1)
+      expect(fetch).toHaveBeenCalledTimes(1)
+    } finally {
+      unregister()
+    }
+  })
+
+  it.each(invitationAdapters)(
+    'preserves structured recipient errors for $name',
+    async ({ run }) => {
+      const fetch = scriptedFetch(json(403, { code: 'EMAIL_IS_NOT_VERIFIED', message: 'Denied.' }))
+      await expect(run()).rejects.toMatchObject({ status: 403, code: 'EMAIL_IS_NOT_VERIFIED' })
+      expect(fetch).toHaveBeenCalledTimes(1)
+    },
+  )
+
+  it.each(invitationAdapters)('forwards cancellation to $name', async ({ run, response }) => {
+    const controller = new AbortController()
+    const fetch = scriptedFetch(json(200, response))
+    await run(controller.signal)
+    expect(fetch.mock.calls[0]?.[1]?.signal).toBe(controller.signal)
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
+})
+
+const INVITATION_NEXT = `/app/join?invitationId=${INVITATION.id}`
+const INVITATION_REDIRECTS: SignInRedirects = {
+  callbackURL: INVITATION_NEXT,
+  errorCallbackURL: `/sign-in?next=${encodeURIComponent(INVITATION_NEXT)}`,
+}
+const signInAdapters = [
+  {
+    name: 'magic link',
+    run: (redirects: SignInRedirects) => sendSignInLink('ada@example.com', redirects),
+    path: '/api/auth/sign-in/magic-link',
+    body: { email: 'ada@example.com' },
+  },
+  {
+    name: 'Google',
+    run: (redirects: SignInRedirects) => startSocialSignIn('google', redirects),
+    path: '/api/auth/sign-in/social',
+    body: { provider: 'google' },
+  },
+  {
+    name: 'Microsoft',
+    run: (redirects: SignInRedirects) => startSocialSignIn('microsoft', redirects),
+    path: '/api/auth/sign-in/social',
+    body: { provider: 'microsoft' },
+  },
+]
+
+describe.each(signInAdapters)('$name sign-in callbacks', ({ run, path, body }) => {
+  it('preserves the invitation in success and error callbacks', async () => {
+    const fetch = scriptedFetch(json(200, { url: 'https://identity.example/authorize' }))
+    await run(INVITATION_REDIRECTS)
+    expect(fetch).toHaveBeenCalledExactlyOnceWith(path, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...body, ...INVITATION_REDIRECTS }),
+    })
+  })
+
+  it.each([
+    'https://evil.example/app/join',
+    '//evil.example/app/join',
+    '/\\evil.example/app/join',
+    '/app/../api/auth/sign-out',
+    '/app/%2f%2fevil.example',
+  ])('rejects unsafe success callback %s before requesting sign-in', async (callbackURL) => {
+    const fetch = scriptedFetch()
+    await expect(run({ callbackURL, errorCallbackURL: '/sign-in' })).rejects.toThrow(
+      'Invalid sign-in callback path',
+    )
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    'https://evil.example/sign-in',
+    '//evil.example/sign-in',
+    '/\\evil.example/sign-in',
+    '/sign-in?next=https%3A%2F%2Fevil.example',
+    '/sign-in?next=%2F%2Fevil.example',
+  ])('rejects unsafe error callback %s before requesting sign-in', async (errorCallbackURL) => {
+    const fetch = scriptedFetch()
+    await expect(run({ ...INVITATION_REDIRECTS, errorCallbackURL })).rejects.toThrow(
+      'Invalid sign-in callback path',
+    )
+    expect(fetch).not.toHaveBeenCalled()
   })
 })

@@ -13,6 +13,7 @@ import { eventTypeRoutes } from './event-types.ts'
 import { profileRoutes } from './profile.ts'
 import { publicRoutes } from './public.ts'
 import { scheduleRoutes } from './schedules.ts'
+import { teamBookingRoutes } from './team-bookings.ts'
 import { webhookRoutes } from './webhooks.ts'
 
 export const PUBLIC_URL = 'http://localhost:3000'
@@ -60,6 +61,7 @@ export const productRoutes = (db: Db) => [
   eventTypeRoutes({ db }),
   publicRoutes({ db }),
   bookingRoutes({ db }),
+  teamBookingRoutes({ db }),
   analyticsRoutes({ db }),
 ]
 

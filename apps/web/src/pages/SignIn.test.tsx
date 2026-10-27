@@ -24,6 +24,10 @@ const location = () => screen.getByTestId('location').textContent
 const heading = () => screen.findByRole('heading', { name: 'Sign in to Hourmere' })
 const linkSent = () => json(200, { status: true })
 const resendStatus = () => within(screen.getByRole('main')).getByRole('status')
+const invitationPath = '/app/join?invitationId=00000000-0000-7000-8000-000000000005'
+const invitationSignIn = `/sign-in?next=${encodeURIComponent(invitationPath)}`
+const invitationGuidance =
+  'Sign in with the email address that received this invitation. Signing in does not join the team.'
 const signInFailures = [
   ['429', () => json(429, {})],
   ['503', () => json(503, {})],
@@ -42,6 +46,87 @@ const describeSignInErrorText = (...args: Parameters<typeof describeSignInError>
   return result === null ? null : translateMessage('en', result)
 }
 describe('the sign-in page', () => {
+  it('explains which address to use before sign-in without looking up the invitation or account', async () => {
+    const api = fakeApi({ ...signedOut, ...instance({ google: true, microsoft: true }) })
+    renderApp(invitationSignIn)
+    await heading()
+    expect(screen.queryByText(invitationGuidance)).not.toBeNull()
+    expect(screen.getByLabelText<HTMLInputElement>('Email').value).toBe('')
+    expect(api.calls.map(({ path }) => path).sort()).toEqual(['/api/v1/instance', '/api/v1/me'])
+    await userEvent.selectOptions(screen.getByLabelText('Interface language'), 'zh-CN')
+    expect(screen.getByText('请使用收到此邀请的邮箱登录。登录不会自动加入团队。')).toBeDefined()
+  })
+
+  it('preserves the invitation in magic-link success, error, resend and retry paths', async () => {
+    const api = fakeApi({
+      ...signedOut,
+      ...instance(),
+      'POST /api/auth/sign-in/magic-link': linkSent,
+    })
+    renderApp(`${invitationSignIn}&error=INVALID_TOKEN`)
+    expect((await screen.findByRole('alert')).textContent).toMatch(/link is invalid/)
+    expect(screen.getByText(invitationGuidance)).toBeDefined()
+    await waitFor(() => expect(location()).toBe(invitationSignIn))
+    await userEvent.type(screen.getByLabelText('Email'), 'ada@example.com')
+    await userEvent.click(screen.getByRole('button', { name: 'Email me a sign-in link' }))
+    await userEvent.click(await screen.findByRole('button', { name: 'Resend link' }))
+    await waitFor(() => expect(api.to('POST /api/auth/sign-in/magic-link')).toHaveLength(2))
+    expect(api.to('POST /api/auth/sign-in/magic-link').map(({ body }) => body)).toEqual(
+      Array.from({ length: 2 }, () => ({
+        email: 'ada@example.com',
+        callbackURL: invitationPath,
+        errorCallbackURL: invitationSignIn,
+      })),
+    )
+    expect(api.to('GET /api/auth/organization/get-invitation')).toHaveLength(0)
+    expect(api.to('POST /api/auth/organization/accept-invitation')).toHaveLength(0)
+    expect(location()).toBe(invitationSignIn)
+  })
+
+  it.each([
+    ['google', 'Continue with Google'],
+    ['microsoft', 'Sign in with Microsoft'],
+  ] as const)('preserves the invitation for enabled %s sign-in', async (provider, label) => {
+    const api = fakeApi({
+      ...signedOut,
+      ...instance({ google: true, microsoft: true }),
+      'POST /api/auth/sign-in/social': () =>
+        json(200, { url: 'https://identity.example/authorize', redirect: true }),
+    })
+    renderApp(invitationSignIn)
+    await userEvent.click(await screen.findByRole('button', { name: label }))
+    await waitFor(() => expect(goTo).toHaveBeenCalledWith('https://identity.example/authorize'))
+    expect(api.to('POST /api/auth/sign-in/social').map(({ body }) => body)).toEqual([
+      { provider, callbackURL: invitationPath, errorCallbackURL: invitationSignIn },
+    ])
+    expect(api.to('GET /api/auth/organization/get-invitation')).toHaveLength(0)
+    expect(api.to('POST /api/auth/organization/accept-invitation')).toHaveLength(0)
+  })
+
+  it.each([
+    'https://evil.example/app/join?invitationId=untrusted',
+    '//evil.example/app/join?invitationId=untrusted',
+    '/\\evil.example/app/join?invitationId=untrusted',
+    '/app/../sign-in?next=https://evil.example',
+    '/app/%2f%2fevil.example',
+  ])('discards malicious next %s from both social callbacks', async (next) => {
+    const api = fakeApi({
+      ...signedOut,
+      ...instance({ google: true }),
+      'POST /api/auth/sign-in/social': () =>
+        json(200, { url: 'https://identity.example/authorize', redirect: true }),
+    })
+    renderApp(`/sign-in?next=${encodeURIComponent(next)}`)
+    await userEvent.click(await screen.findByRole('button', { name: 'Continue with Google' }))
+    await waitFor(() => expect(api.to('POST /api/auth/sign-in/social')).toHaveLength(1))
+    expect(api.to('POST /api/auth/sign-in/social')[0]?.body).toEqual({
+      provider: 'google',
+      callbackURL: '/app',
+      errorCallbackURL: '/sign-in',
+    })
+    expect(screen.queryByText(invitationGuidance)).toBeNull()
+  })
+
   it('requests a sign-in link and keeps its address and return path', async () => {
     const api = fakeApi({
       ...signedOut,

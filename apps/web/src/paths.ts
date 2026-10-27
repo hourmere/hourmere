@@ -6,6 +6,7 @@ export const APP_BASE = '/app'
 export const PATHS = {
   /** The default signed-in page (/app redirects there). */
   home: APP_BASE,
+  join: `${APP_BASE}/join`,
   eventTypes: `${APP_BASE}/event-types`,
   newEventType: `${APP_BASE}/event-types/new`,
   availability: `${APP_BASE}/availability`,
