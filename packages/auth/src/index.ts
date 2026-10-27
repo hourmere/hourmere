@@ -20,6 +20,7 @@ import { mcpOAuthPlugins } from './mcp-oauth.ts'
 import { serializeOrganizationContext } from './organization-context.ts'
 import { ensurePersonalOrganization, organizationGuards } from './organizations.ts'
 import { hasAccount, maySignUp, type SignupPolicy, signupConnectionOptions } from './signup.ts'
+import { createTeamRolePolicy } from './team-role-policy.ts'
 
 export { InvalidApiKeyError, requireActiveApiKey } from './api-key-principal.ts'
 export { API_KEY_RATE_LIMIT } from './api-keys.ts'
@@ -54,6 +55,11 @@ export {
   type SignupMode,
   type SignupPolicy,
 } from './signup.ts'
+export {
+  checkTeamManagementAccess,
+  TeamManagementError,
+  type TeamManager,
+} from './team-management.ts'
 
 /** Separate lock connections cannot starve the handler's auth/application query pools. */
 class AuthPool extends pg.Pool {
@@ -166,6 +172,7 @@ export function createAuth({
   const lockPool = (pool as Partial<AuthPool>).organizationLocks
   if (!lockPool) throw new Error('createAuth requires a pool created by createAuthPool')
   const { google, microsoft } = socialProviders
+  const teamRolePolicy = createTeamRolePolicy(db)
   const auth = betterAuth({
     database: pool,
     disabledPaths: [
@@ -312,8 +319,18 @@ export function createAuth({
         },
       },
     },
-    hooks: { before: beforeHook(db) },
+    hooks: { before: beforeHook(db, teamRolePolicy.before) },
     plugins: [
+      {
+        id: 'team-role-policy',
+        init(ctx) {
+          const adapter = ctx.adapter
+          teamRolePolicy.adapter(adapter)
+          const transaction = adapter.transaction
+          adapter.transaction = (callback) =>
+            transaction((trx) => callback(teamRolePolicy.adapter(trx)))
+        },
+      },
       {
         id: 'sign-in-token-updates',
         init(ctx) {
@@ -396,8 +413,10 @@ export function createAuth({
       }),
     ],
   })
-  auth.handler = serializeOrganizationContext(createDb(lockPool), auth.handler, (headers) =>
-    auth.api.getSession({ headers }),
+  auth.handler = teamRolePolicy.handler(
+    serializeOrganizationContext(createDb(lockPool), auth.handler, (headers) =>
+      auth.api.getSession({ headers }),
+    ),
   )
   return auth
 }

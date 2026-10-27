@@ -216,6 +216,26 @@ through the browser organization endpoint. There is currently no team-administra
 cancellation endpoint; the existing booking-ID routes still require the caller to be a host.
 Any future administrator cancellation route must use the same context protection.
 
+### Team roles
+
+Team invitations default to `member`; owners and admins may invite only that role,
+including when resending. Historical invitations with an elevated or custom stored role
+cannot be resent or accepted. Revoke them and issue a new member invitation instead.
+Acceptance still requires the exact invited, verified email and does not depend on the
+session's active organization. Registration continues to follow the instance's signup policy.
+
+Only a current verified team owner may change a non-owner's role between `admin` and
+`member`. Admins cannot change roles, including their own. Assigning `owner`, changing an
+existing owner's role and custom role assignments are unavailable. Existing teams with
+multiple owners retain their memberships and management access. Stored comma-separated
+roles are checked as exact role tokens.
+
+These rules apply to direct Better Auth requests as well as the web app. Policy denials
+use HTTP 403 `TEAM_MANAGEMENT_ACCESS_DENIED` in Better Auth's error shape; missing and
+inaccessible role targets receive the same denial. Browser context mismatches retain the
+409 response above. The server-only Better Auth add-member operation is not an HTTP
+onboarding path; joining a team requires accepting a member invitation.
+
 ### Integration settings
 
 The user's own API keys have the same non-credential settings access as browser sessions:

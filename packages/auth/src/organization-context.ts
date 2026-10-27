@@ -128,14 +128,14 @@ export async function organizationContext(ctx: AuthMiddlewareContext, db: Db) {
       .executeTakeFirst()
     if (!invitation) throw changed()
   }
+  // Role changes use the shared management policy's uniform target denial. Keep context
+  // drift distinct from role authority without disclosing missing/other-team members.
   const memberId =
-    ctx.path === '/organization/update-member-role'
-      ? body.memberId
-      : ctx.path === '/organization/remove-member' &&
-          typeof body.memberIdOrEmail === 'string' &&
-          !body.memberIdOrEmail.includes('@')
-        ? body.memberIdOrEmail
-        : undefined
+    ctx.path === '/organization/remove-member' &&
+    typeof body.memberIdOrEmail === 'string' &&
+    !body.memberIdOrEmail.includes('@')
+      ? body.memberIdOrEmail
+      : undefined
   if (typeof memberId === 'string') {
     const member = await db
       .selectFrom('auth.member')

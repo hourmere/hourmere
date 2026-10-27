@@ -282,7 +282,7 @@ const notFound =
   'event_type_not_found: no such event type in the organization, or one the caller cannot see'
 const invalid =
   'invalid_request, invalid_slug, invalid_event_type, invalid_location, invalid_questions, invalid_hosts, or invalid_schedule_id (scheduleId is not one of the host’s schedules)'
-const forbidden = `insufficient_role: team event types need the owner or admin role; ${CROSS_ORIGIN_WRITE}`
+const forbidden = `insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; ${CROSS_ORIGIN_WRITE}`
 const slugTaken = 'slug_taken: another event type on the same page has this slug'
 
 export function eventTypeRoutes(deps: ServiceDeps): RouteModule {

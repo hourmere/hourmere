@@ -1,23 +1,21 @@
-import type { Principal } from '@hourmere/auth'
+import {
+  checkTeamManagementAccess,
+  type Principal,
+  TeamManagementError,
+  type TeamManager,
+} from '@hourmere/auth'
 import type { Database, Db } from '@hourmere/db'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { createMiddleware } from 'hono/factory'
-import { sql, type Transaction } from 'kysely'
+import type { Transaction } from 'kysely'
 import type { CallerEnv } from './caller.ts'
 import type { CallerMiddleware } from './openapi.ts'
 
-interface TeamManager {
-  userId: string
-  organizationId: string
-  role: 'owner' | 'admin'
-}
-
-const uuid = (id: string) =>
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
-const denied = () => new DomainError('forbidden', 'team_management_access_denied')
 export const EXPECTED_ORGANIZATION_HEADER = 'X-Expected-Organization-Id'
 export const ORGANIZATION_CONTEXT_CHANGED =
   'organization_context_changed: reload the page before trying this team write again'
+const uuid = (id: string) =>
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
 const contextChanged = () =>
   new DomainError(
     'conflict',
@@ -25,95 +23,14 @@ const contextChanged = () =>
     'Your team context changed. Reload the page before trying again.',
   )
 
-/** Current database facts only: principal organization metadata and client roles are not authority. */
-async function check(
-  db: Db,
-  principal: Principal,
-  teamId: string,
-  lock = false,
-  context?: { expectedOrganizationId: string; allowPersonal: boolean },
-): Promise<TeamManager> {
-  if (
-    context &&
-    (!uuid(context.expectedOrganizationId) ||
-      context.expectedOrganizationId.toLowerCase() !== teamId.toLowerCase())
-  )
-    throw contextChanged()
-  if (
-    principal.kind !== 'session' ||
-    !uuid(principal.user.id) ||
-    !uuid(principal.sessionId) ||
-    !uuid(teamId) ||
-    teamId.toLowerCase() !== principal.organization.id.toLowerCase()
-  )
-    throw denied()
-
-  let userQuery = db
-    .selectFrom('auth.user')
-    .select('emailVerified')
-    .where('id', '=', principal.user.id)
-  if (lock) userQuery = userQuery.forShare()
-  const user = await userQuery.executeTakeFirst()
-  if (!user?.emailVerified) throw denied()
-
-  let organizationQuery = db.selectFrom('auth.organization').select('id').where('id', '=', teamId)
-  // Serialize team-management writes, including organization edits and self role changes,
-  // without competing SHARE → UPDATE upgrades in their callbacks.
-  if (lock) organizationQuery = organizationQuery.forUpdate()
-  const organization = await organizationQuery.executeTakeFirst()
-  if (!organization) throw denied()
-  const personal = await db
-    .selectFrom('personal_organizations')
-    .select('organization_id')
-    .where('organization_id', '=', teamId)
-    .executeTakeFirst()
-  if (personal && !context?.allowPersonal) throw denied()
-
-  // Re-read AFTER acquiring the parent locks: a revocation committed while waiting wins.
-  let memberQuery = db
-    .selectFrom('auth.member')
-    .select('role')
-    .where('userId', '=', principal.user.id)
-    .where('organizationId', '=', teamId)
-  if (lock) memberQuery = memberQuery.forShare()
-  const member = await memberQuery.executeTakeFirst()
-  // Better Auth can store multiple roles. Only these exact known tokens grant management.
-  const roles = member?.role.split(',').map((role) => role.trim()) ?? []
-  const role = roles.includes('owner') ? 'owner' : roles.includes('admin') ? 'admin' : undefined
-  if (!role) throw denied()
-
-  // Also refuse a session invalidated since requireCaller (including email-proof rotation).
-  // Check expiry AFTER acquiring the session lock too: a WHERE predicate can have been
-  // evaluated before waiting for an unchanged locked row. Use wall time, not BEGIN time.
-  let sessionQuery = db
-    .selectFrom('auth.session')
-    .select(['expiresAt', 'activeOrganizationId'])
-    .where('id', '=', principal.sessionId)
-    .where('userId', '=', principal.user.id)
-  if (lock) sessionQuery = sessionQuery.forShare()
-  const session = await sessionQuery.executeTakeFirst()
-  if (!session) throw denied()
-  const validity = await db
-    .selectNoFrom(sql<boolean>`${session.expiresAt}::timestamptz > clock_timestamp()`.as('active'))
-    .executeTakeFirstOrThrow()
-  if (!validity.active) throw denied()
-
-  if (context && session.activeOrganizationId?.toLowerCase() !== organization.id.toLowerCase()) {
-    // The caller resolver falls back to the personal organization when the active team's
-    // membership has gone. Recompute that effective context from current database facts.
-    const activeMembership =
-      session.activeOrganizationId && uuid(session.activeOrganizationId)
-        ? await db
-            .selectFrom('auth.member')
-            .select('id')
-            .where('organizationId', '=', session.activeOrganizationId)
-            .where('userId', '=', principal.user.id)
-            .executeTakeFirst()
-        : undefined
-    if (activeMembership || !personal) throw contextChanged()
+async function check(...args: Parameters<typeof checkTeamManagementAccess>): Promise<TeamManager> {
+  try {
+    return await checkTeamManagementAccess(...args)
+  } catch (error) {
+    if (!(error instanceof TeamManagementError)) throw error
+    if (error.code === 'organization_context_changed') throw contextChanged()
+    throw new DomainError('forbidden', error.code)
   }
-
-  return { userId: principal.user.id, organizationId: organization.id, role }
 }
 
 /**
