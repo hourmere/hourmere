@@ -25,7 +25,7 @@ import {
 } from './conferences.ts'
 import type { PublicContext } from './context.ts'
 import { DomainError } from './errors.ts'
-import { assertHosts } from './hosts.ts'
+import { assertHosts, hasValidHostShape } from './hosts.ts'
 import { parseQuestions, type Question } from './questions.ts'
 import { eligibleRoundRobinHosts } from './round-robin.ts'
 
@@ -120,7 +120,7 @@ export interface PublicEventTypeRecord {
  * handle, or a reserved name. A stored handle that became reserved after it was chosen is not
  * served, so nobody keeps a page at a path the app or the product now uses (/support, …).
  */
-function servedHandle(handle: string): string | undefined {
+export function servedHandle(handle: string): string | undefined {
   const h = handle.toLowerCase()
   return HANDLE.test(h) && !isReservedName(h) ? h : undefined
 }
@@ -266,13 +266,8 @@ export async function findPublicTeamEventType(
     .orderBy('h.user_id')
     .limit(9)
     .execute()
-  if (
-    row.scheduling_type === 'individual'
-      ? hosts.length !== 1
-      : hosts.length < (row.scheduling_type === 'collective' ? 2 : 1) || hosts.length > 8
-  )
-    return undefined
   const hostUserIds = hosts.map((h) => h.user_id)
+  if (!hasValidHostShape(row.scheduling_type, hostUserIds)) return undefined
   let eligibleHostUserIds = hostUserIds
   if (row.scheduling_type === 'round_robin') {
     eligibleHostUserIds = await eligibleRoundRobinHosts(
@@ -588,6 +583,62 @@ export interface AvailabilityQuery {
   useDefaultSchedule?: boolean | undefined
 }
 
+export interface CachedCalendarSync {
+  status: string
+  last_synced_at: Date | null
+  sync_state: Json | null
+  sync_error: string | null
+  time_zone: string | null
+}
+
+/** Cache-only metadata guard; a supplied window also requires full snapshot coverage. */
+export function assertCachedCalendarSync(
+  calendars: readonly CachedCalendarSync[],
+  now: Temporal.Instant,
+  window?: { start: Temporal.Instant; end: Temporal.Instant },
+): void {
+  for (const calendar of calendars) {
+    const unavailable = () =>
+      new DomainError(
+        'conflict',
+        'calendar_sync_unavailable',
+        'The host calendar is temporarily unavailable. Try again shortly.',
+      )
+    if (
+      calendar.status !== 'active' ||
+      calendar.sync_error ||
+      !calendar.last_synced_at ||
+      calendar.last_synced_at.getTime() > now.epochMilliseconds + 60_000 ||
+      now.epochMilliseconds - calendar.last_synced_at.getTime() > 10 * 60_000
+    )
+      throw unavailable()
+    const state = calendar.sync_state
+    if (
+      !state ||
+      typeof state !== 'object' ||
+      Array.isArray(state) ||
+      state.version !== 2 ||
+      state.timeZone !== calendar.time_zone ||
+      typeof state.start !== 'string' ||
+      typeof state.end !== 'string'
+    )
+      throw unavailable()
+    try {
+      const start = Temporal.Instant.from(state.start)
+      const end = Temporal.Instant.from(state.end)
+      if (
+        Temporal.Instant.compare(start, end) >= 0 ||
+        (window &&
+          (Temporal.Instant.compare(start, window.start) > 0 ||
+            Temporal.Instant.compare(end, window.end) < 0))
+      )
+        throw unavailable()
+    } catch {
+      throw unavailable()
+    }
+  }
+}
+
 /**
  * Builds the availability engine's input for one host and event type from the database:
  *
@@ -653,42 +704,7 @@ export async function buildAvailabilityInput(
     .where('cc.provider', '=', 'google')
     .where('c.check_conflicts', '=', true)
     .execute()
-  for (const calendar of googleCalendars) {
-    const unavailable = () =>
-      new DomainError(
-        'conflict',
-        'calendar_sync_unavailable',
-        'The host calendar is temporarily unavailable. Try again shortly.',
-      )
-    if (
-      calendar.status !== 'active' ||
-      calendar.sync_error ||
-      !calendar.last_synced_at ||
-      calendar.last_synced_at.getTime() > now.epochMilliseconds + 60_000 ||
-      now.epochMilliseconds - calendar.last_synced_at.getTime() > 10 * 60_000
-    )
-      throw unavailable()
-    const state = calendar.sync_state
-    if (
-      !state ||
-      typeof state !== 'object' ||
-      Array.isArray(state) ||
-      state.version !== 2 ||
-      state.timeZone !== calendar.time_zone ||
-      typeof state.start !== 'string' ||
-      typeof state.end !== 'string'
-    )
-      throw unavailable()
-    try {
-      if (
-        Temporal.Instant.compare(Temporal.Instant.from(state.start), window.start) > 0 ||
-        Temporal.Instant.compare(Temporal.Instant.from(state.end), window.end) < 0
-      )
-        throw unavailable()
-    } catch {
-      throw unavailable()
-    }
-  }
+  assertCachedCalendarSync(googleCalendars, now, window)
   const windowRange = <DB, TB extends keyof DB>(eb: ExpressionBuilder<DB, TB>) =>
     eb.fn<string>('tstzrange', [eb.val(window.start.toString()), eb.val(window.end.toString())])
   const windowDates = {
