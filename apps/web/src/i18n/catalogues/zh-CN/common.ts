@@ -353,4 +353,10 @@ export const common = {
     '指定的主持人必须登录自己的账号配置 Zoom。',
   'Choose your own active Zoom account with meeting permissions. Reconnect it in Conference accounts if needed.':
     '请选择自己已启用且具有会议权限的 Zoom 账号。需要时请在会议账号页面重新连接。',
+  'This team address is already in use. Choose another one.':
+    '此团队地址已被使用。请选择其他地址。',
+  'This team address is reserved. Choose another one.': '此团队地址为保留地址。请选择其他地址。',
+  "You don't have permission to create a team.": '你没有创建团队的权限。',
+  'You no longer have access to this team. Choose another team.':
+    '你已无权访问此团队。请选择其他团队。',
 } as const

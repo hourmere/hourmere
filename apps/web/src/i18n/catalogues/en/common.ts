@@ -365,4 +365,11 @@ export const common = {
     'The assigned host must configure Zoom in their own signed-in session.',
   'Choose your own active Zoom account with meeting permissions. Reconnect it in Conference accounts if needed.':
     'Choose your own active Zoom account with meeting permissions. Reconnect it in Conference accounts if needed.',
+  'This team address is already in use. Choose another one.':
+    'This team address is already in use. Choose another one.',
+  'This team address is reserved. Choose another one.':
+    'This team address is reserved. Choose another one.',
+  "You don't have permission to create a team.": "You don't have permission to create a team.",
+  'You no longer have access to this team. Choose another team.':
+    'You no longer have access to this team. Choose another team.',
 } as const

@@ -1,7 +1,7 @@
 // The parts of Better Auth's own HTTP protocol (/api/auth/*) the web app uses: sign-in,
-// sign-out, profile updates and API keys. It is not in our OpenAPI document (https://hourmere.com/docs/api-conventions), so
+// sign-out, organizations and API keys. It is not in our OpenAPI document (https://hourmere.com/docs/api-conventions), so
 // the shapes used here are written out by hand. Errors are `{ "message", "code" }`.
-import { notifyUnauthorized } from './client.ts'
+import { api, notifyUnauthorized, type Schemas, unwrap } from './client.ts'
 import { errorFromResponse } from './errors.ts'
 
 async function authRequest<T>(
@@ -111,9 +111,81 @@ export function deleteApiKey(keyId: string): Promise<unknown> {
 export interface Organization {
   id: string
   name: string
+  slug: string
+  logo: string | null
+  createdAt: string
+  /** Better Auth may return stored JSON text on list/switch, parsed metadata on create. */
+  metadata?: Record<string, unknown> | string | null
 }
 
-/** The organizations the signed-in user belongs to. */
+export interface OrganizationMember {
+  id: string
+  organizationId: string
+  userId: string
+  role: string
+  createdAt: string
+}
+
+/** Better Auth 1.7.10 returns the organization plus its creator's membership. */
+export interface CreatedOrganization extends Organization {
+  metadata?: Record<string, unknown> | null
+  members: OrganizationMember[]
+}
+
+/** Browser creation always uses the signed-in user; no server-only userId override. */
+export interface CreateOrganizationInput {
+  name: string
+  slug: string
+  logo?: string | null
+  metadata?: Record<string, unknown>
+  keepCurrentActiveOrganization?: boolean
+}
+
+export interface CreateOrganizationResult {
+  organization: CreatedOrganization
+  /**
+   * The caller and active organization confirmed after creation. Use me.organization for
+   * active context: it may differ from the created organization when keeping the current
+   * one or when another tab switches. This does not update the SessionProvider by itself.
+   */
+  me: Schemas['Me']
+}
+
+/**
+ * Creates once, then confirms active context through /me instead of assuming activation.
+ * If confirmation fails or is cancelled, creation may already have committed: refresh
+ * the session/list before offering a retry; never automatically repeat the POST.
+ */
+export async function createOrganization(
+  input: CreateOrganizationInput,
+  signal?: AbortSignal,
+): Promise<CreateOrganizationResult> {
+  const organization = await authRequest<CreatedOrganization>('/organization/create', {
+    body: input,
+    ...(signal && { signal }),
+  })
+  const me = await unwrap(api.GET('/api/v1/me', { signal }))
+  return { organization, me }
+}
+
+export interface SetActiveOrganizationInput {
+  /** Takes precedence over the slug; null clears the session's active organization. */
+  organizationId?: string | null
+  organizationSlug?: string
+}
+
+/** Returns the organization or null, not a session or a success envelope. */
+export function setActiveOrganization(
+  input: SetActiveOrganizationInput,
+  signal?: AbortSignal,
+): Promise<Organization | null> {
+  return authRequest('/organization/set-active', {
+    body: input,
+    ...(signal && { signal }),
+  })
+}
+
+/** Memberships only; this response has no personal marker or caller role. */
 export function listOrganizations(signal?: AbortSignal): Promise<Organization[]> {
   return authRequest('/organization/list', signal ? { signal } : {})
 }
