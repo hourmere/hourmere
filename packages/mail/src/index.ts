@@ -288,8 +288,8 @@ const unicodeEscape = (c: string) => `\\u${c.charCodeAt(0).toString(16).padStart
 
 /**
  * Prints messages to the log instead of sending them, so a fresh self-hosted instance can
- * sign in before email is configured. Sign-in tokens appear in the log: only use it where
- * whoever can read the log may sign in as anyone.
+ * sign in before email is configured. Sign-in links appear in the log in full: only use it
+ * where whoever can read the log may sign in as anyone.
  *
  * Each message is one line, `[mail] {json}`. Other log output has its control characters
  * escaped, so nothing a request gets into the log can imitate such a line.
