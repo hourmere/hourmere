@@ -86,7 +86,7 @@ async function check(
 }
 
 /**
- * Shared entry for new team-management web routes (TS04).
+ * Shared entry for new team-management web routes.
  *
  * In a RouteModule, create `const access = teamManagementAccess(db, caller)` and declare
  * `middleware: access.middleware`. This preserves requireCaller's Origin/Referer checks,
@@ -102,7 +102,7 @@ async function check(
  * Every eligibility denial is the same 403 team_management_access_denied, including missing
  * teams: this check reveals no target existence. It grants management entry only; consumers
  * must enforce operation/target rules (e.g. owner-only role changes). Expected-organization
- * context drift checks belong to CTX-SERVER; teamId must come from the bound operation/target,
+ * context drift checks are a separate layer; teamId must come from the bound operation/target,
  * never be silently replaced by the active organization. Existing API-key/OAuth routes keep
  * their own authorization and organization bindings.
  */
