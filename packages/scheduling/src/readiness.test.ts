@@ -1,17 +1,33 @@
 import { randomUUID } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { stripTypeScriptTypes } from 'node:module'
 import type { Principal } from '@hourmere/auth'
+import { validateTimeZone, validateWeeklyHours } from '@hourmere/core'
 import { createDb, type Db, type Json } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
-import type { KyselyPlugin } from 'kysely'
+import { type KyselyPlugin, sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { z } from 'zod'
+import { assertCachedCalendarSync, servedHandle } from './availability.ts'
+import { checkedCatalogPage } from './catalog-page.ts'
+import {
+  automaticMeet,
+  automaticZoom,
+  evaluateGoogleWriteDestination,
+  evaluateZoomConnection,
+  meetOrganizer,
+} from './conferences.ts'
 import type { ServiceContext } from './context.ts'
+import { DomainError } from './errors.ts'
+import { eligibleHostIds, hasValidHostShape } from './hosts.ts'
+import { isUuid } from './internal.ts'
 import { getSelfReadiness, getTeamReadiness } from './readiness.ts'
 import { createFixtures, createTestTeam, createTestUser, type TestUser } from './testing.ts'
+import { cleanText } from './text.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const now = () => Temporal.Instant.from('2026-11-01T12:00:00Z')
 const signalIds = [
-  'event_enablement',
   'default_schedule',
   'effective_event_schedule',
   'host_eligibility',
@@ -38,6 +54,47 @@ function queryPlugin(onQuery: (node: unknown) => void): KyselyPlugin {
       return args.result
     },
   }
+}
+
+type ReadinessModule = {
+  getSelfReadiness: typeof getSelfReadiness
+  getTeamReadiness: typeof getTeamReadiness
+}
+type Mutation = readonly [string, string]
+
+/** Evaluate an in-memory source copy; a negative control never changes repository files. */
+function sourceCopy(mutation?: Mutation): ReadinessModule {
+  let source = readFileSync('packages/scheduling/src/readiness.ts', 'utf8')
+  if (mutation) {
+    expect(source.includes(mutation[0]), 'mutation must match source').toBe(true)
+    source = source.replace(...mutation)
+  }
+  const script = stripTypeScriptTypes(
+    source.replace(/^import[\s\S]*?from '[^']+'\n/gm, ''),
+  ).replace(/\bexport /g, '')
+  const bindings = {
+    validateTimeZone,
+    validateWeeklyHours,
+    sql,
+    z,
+    assertCachedCalendarSync,
+    servedHandle,
+    checkedCatalogPage,
+    automaticMeet,
+    automaticZoom,
+    evaluateGoogleWriteDestination,
+    evaluateZoomConnection,
+    meetOrganizer,
+    DomainError,
+    eligibleHostIds,
+    hasValidHostShape,
+    isUuid,
+    cleanText,
+  }
+  return new Function(
+    ...Object.keys(bindings),
+    `${script}; return { getSelfReadiness, getTeamReadiness }`,
+  )(...Object.values(bindings)) as ReadinessModule
 }
 
 describe.skipIf(!serverUrl)('booking readiness from current cached facts (real Postgres)', () => {
@@ -302,6 +359,149 @@ describe.skipIf(!serverUrl)('booking readiness from current cached facts (real P
       .execute()
     expect((await getSelfReadiness(s.ctx)).eventTypes.data).toEqual([])
   })
+
+  it('returns private self configuration once while retaining empty event detail fields', async () => {
+    const s = await personal()
+    const ownCalendar = await calendar(s.user.id)
+    await s.f.eventType(s.user.principal.organization.id, s.user.id)
+    const verify = async ({ getSelfReadiness: read }: ReadinessModule) => {
+      const result = await read(s.ctx)
+      expect(result.member.details.schedules.map((row) => row.id)).toEqual([s.scheduleId])
+      expect(result.member.details.calendars.map((row) => row.id)).toEqual([ownCalendar.id])
+      expect(result.eventTypes.data).toHaveLength(2)
+      for (const event of result.eventTypes.data)
+        expect(event.details).toEqual({ schedules: [], calendars: [] })
+    }
+    await verify({ getSelfReadiness, getTeamReadiness })
+    for (const field of ['schedules', 'calendars'] as const) {
+      const source = `subject.kind === 'member' && facts.${field}.ok`
+      await rejectsMutation([source, `facts.${field}.ok`], verify)
+    }
+  })
+
+  it('omits the redundant enablement signal and uses the actual event axis', async () => {
+    const s = await personal()
+    const verify = async ({ getSelfReadiness: read }: ReadinessModule) => {
+      for (const active of [true, false]) {
+        await db
+          .updateTable('event_types')
+          .set({ is_active: active, is_hidden: true })
+          .where('id', '=', s.eventTypeId)
+          .execute()
+        const event = required((await read(s.ctx)).eventTypes.data[0])
+        expect(event.enablement).toBe(active ? 'enabled' : 'disabled')
+        expect(event.signals.map((row) => row.id)).not.toContain('event_enablement')
+      }
+    }
+    await verify({ getSelfReadiness, getTeamReadiness })
+    await rejectsMutation([".filter((id) => id !== 'event_enablement')", ''], verify)
+  })
+
+  it.each([
+    ['missing successful time', { syncedAt: null }, 'sync_not_ready'],
+    ['missing snapshot', { syncState: null }, 'sync_not_ready'],
+    [
+      'explicit sync error and missing success',
+      { syncedAt: null, syncState: null, syncError: 'permissions_missing' },
+      'calendar_attention_required',
+    ],
+    [
+      'reauth and missing success',
+      { syncedAt: null, syncState: null, status: 'needs_reauth' },
+      'calendar_attention_required',
+    ],
+  ] as const)('returns one actionable sync reason for %s', async (_name, options, reason) => {
+    const s = await personal()
+    await calendar(s.user.id, options)
+    const verify = async ({ getSelfReadiness: read }: ReadinessModule) => {
+      const result = await read(s.ctx)
+      for (const item of [result.member, required(result.eventTypes.data[0])]) {
+        const issues = item.signals.filter((row) => row.id === 'selected_calendar_sync')
+        expect(issues).toHaveLength(1)
+        expect(issues[0]).toMatchObject({
+          state: 'dependency_unavailable',
+          reasonCode: reason,
+          fixKind: 'self_calendars',
+        })
+        expect(item.signals.filter((row) => row.reasonCode === reason)).toHaveLength(1)
+        expect(item.signals.map((row) => row.reasonCode)).not.toContain(
+          reason === 'sync_not_ready' ? 'calendar_attention_required' : 'sync_not_ready',
+        )
+      }
+    }
+    await verify({ getSelfReadiness, getTeamReadiness })
+    await rejectsMutation(
+      reason === 'sync_not_ready'
+        ? ["? 'sync_not_ready'", "? 'calendar_attention_required'"]
+        : [
+            "selected.some((c) => c.provider === 'google' && (c.status !== 'active' || c.sync_error))",
+            'false',
+          ],
+      verify,
+    )
+  })
+
+  it('keeps missing or explicitly failed sync behind one coarse team issue', async () => {
+    const s = await team('individual', 1)
+    const ownCalendar = await calendar(s.owner.id, { syncedAt: null, syncState: null })
+    for (const syncError of [null, 'permissions_missing']) {
+      await db
+        .updateTable('calendars')
+        .set({ sync_error: syncError })
+        .where('id', '=', ownCalendar.id)
+        .execute()
+      const result = await s.read()
+      for (const item of [...result.members.data, ...result.eventTypes.data]) {
+        expect(item.reasonCodes).toEqual(['calendar_attention_required'])
+        expect(item.fixKinds).toEqual(['ask_member'])
+      }
+      expect(JSON.stringify(result)).not.toContain('sync_not_ready')
+    }
+  })
+
+  it.each([
+    ['unverified', false, 'unverified-name-canary', 'Team member'],
+    ['empty', true, '   ', 'Team member'],
+    ['control', true, 'unsafe\nname-canary', 'Team member'],
+    ['too long', true, 'x'.repeat(201), 'Team member'],
+    ['safe', true, '  Verified member  ', 'Verified member'],
+  ] as const)(
+    'uses only a verified display-safe team member name (%s)',
+    async (kind, verified, name, expected) => {
+      const s = await team()
+      const target = required(s.users[1])
+      await db
+        .updateTable('auth.user')
+        .set({ name, emailVerified: verified })
+        .where('id', '=', target.id)
+        .execute()
+      const { id: memberId } = await db
+        .selectFrom('auth.member')
+        .select('id')
+        .where('organizationId', '=', s.organization.id)
+        .where('userId', '=', target.id)
+        .executeTakeFirstOrThrow()
+      const verify = async ({ getTeamReadiness: read }: ReadinessModule) => {
+        const result = await read({ db, now, organizationId: s.organization.id })
+        expect(
+          required(result.members.data.find((row) => row.memberId === memberId)).displayName,
+        ).toBe(expected)
+      }
+      await verify({ getSelfReadiness, getTeamReadiness })
+      if (kind === 'unverified') await rejectsMutation(['member.emailVerified && ', ''], verify)
+      else if (kind !== 'empty')
+        await rejectsMutation(['cleanText(member.name, { max: 200 })', 'member.name'], verify)
+    },
+  )
+
+  async function rejectsMutation(
+    mutation: Mutation,
+    verify: (module: ReadinessModule) => Promise<void>,
+  ) {
+    await verify(sourceCopy())
+    await expect(verify(sourceCopy(mutation))).rejects.toMatchObject({ name: 'AssertionError' })
+    await verify(sourceCopy())
+  }
 
   it('distinguishes member default schedule gaps from a valid individual custom schedule', async () => {
     const s = await personal(false)
@@ -686,7 +886,7 @@ describe.skipIf(!serverUrl)('booking readiness from current cached facts (real P
         }
       },
     })
-    const result = await selfEvent(s, unsafeFacts)
+    const result = (await getSelfReadiness({ ...s.ctx, db: unsafeFacts })).member
     expect(result.summary).toBe('dependency_unavailable')
     expect(result.details.calendars).toHaveLength(1)
     expect(required(result.details.calendars[0]).syncError).toBeNull()
@@ -1162,6 +1362,75 @@ describe.skipIf(!serverUrl)('booking readiness from current cached facts (real P
       .where('userId', '=', s.owner.id)
       .execute()
     await expect(getSelfReadiness(fresh)).rejects.toMatchObject({ kind: 'forbidden' })
+  })
+
+  it('reauthorizes a previously resolved self context after switching organization', async () => {
+    const s = await personal()
+    const organization = await createTestTeam(db, [{ user: s.user, role: 'member' }])
+    const principal = s.ctx.principal
+    if (principal.kind !== 'session') throw new Error('Expected fixture session')
+    const teamContext = {
+      ...s.ctx,
+      principal: { ...principal, organization: organization.as(s.user).organization },
+    }
+    const verify = async ({ getSelfReadiness: read }: ReadinessModule) => {
+      await db
+        .updateTable('auth.session')
+        .set({ activeOrganizationId: s.user.principal.organization.id })
+        .where('id', '=', principal.sessionId)
+        .execute()
+      expect((await read(s.ctx)).member.subject.organizationId).toBe(
+        s.user.principal.organization.id,
+      )
+      await db
+        .updateTable('auth.session')
+        .set({ activeOrganizationId: organization.id })
+        .where('id', '=', principal.sessionId)
+        .execute()
+      await expect(read(s.ctx)).rejects.toMatchObject({
+        kind: 'forbidden',
+        code: 'readiness_access_denied',
+      })
+      const switched = await read(teamContext)
+      expect(switched.member.subject.organizationId).toBe(organization.id)
+      expect(switched.eventTypes.data).toEqual([])
+    }
+    await verify({ getSelfReadiness, getTeamReadiness })
+    await rejectsMutation(
+      [
+        "eb.fn.coalesce('activeMember.organizationId', 'personal.organization_id')",
+        "'m.organizationId'",
+      ],
+      verify,
+    )
+  })
+
+  it('matches the session personal fallback after active team removal or no active organization', async () => {
+    const s = await personal()
+    const organization = await createTestTeam(db, [{ user: s.user, role: 'member' }])
+    const principal = s.ctx.principal
+    if (principal.kind !== 'session') throw new Error('Expected fixture session')
+    await db
+      .deleteFrom('auth.member')
+      .where('organizationId', '=', organization.id)
+      .where('userId', '=', s.user.id)
+      .execute()
+    for (const activeOrganizationId of [organization.id, null]) {
+      await db
+        .updateTable('auth.session')
+        .set({ activeOrganizationId })
+        .where('id', '=', principal.sessionId)
+        .execute()
+      const result = await getSelfReadiness(s.ctx)
+      expect(result.member.subject.organizationId).toBe(s.user.principal.organization.id)
+      expect(result.eventTypes.data.map((row) => row.subject.id)).toEqual([s.eventTypeId])
+      await expect(
+        getSelfReadiness({
+          ...s.ctx,
+          principal: { ...principal, organization: organization.as(s.user).organization },
+        }),
+      ).rejects.toMatchObject({ kind: 'forbidden', code: 'readiness_access_denied' })
+    }
   })
 
   it('uses the same member evaluation for self detail and team minimal summary', async () => {

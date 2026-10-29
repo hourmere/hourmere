@@ -285,8 +285,13 @@ describe.skipIf(!serverUrl)('member operation attribution', () => {
       },
       f.organizationId,
     )
-    expect(crossTeam.status).toBe(409)
-    expect(await crossTeam.json()).toMatchObject({ code: 'ORGANIZATION_CONTEXT_CHANGED' })
+    expect(crossTeam.status).toBe(403)
+    expect(await crossTeam.json()).toEqual({
+      code: 'TEAM_MANAGEMENT_ACCESS_DENIED',
+      message: 'team_management_access_denied',
+    })
+    expect((await membership(f.memberId))?.role).toBe('member')
+    expect((await membership(other.memberId))?.role).toBe('member')
     expect(await operations(f.organizationId)).toEqual([])
     expect(await operations(other.organizationId)).toEqual([])
     const adapter = (await auth.$context).adapter
@@ -349,7 +354,7 @@ describe.skipIf(!serverUrl)('member operation attribution', () => {
     },
   )
 
-  it('does not record legacy member maintenance in a personal organization', async () => {
+  it('denies personal role changes and does not record legacy member maintenance', async () => {
     const f = await fixture()
     const personalId = await ensurePersonalOrganization(db, f.owner.id)
     expect((await post('set-active', f.owner.cookie, { organizationId: personalId })).status).toBe(
@@ -375,7 +380,30 @@ describe.skipIf(!serverUrl)('member operation attribution', () => {
       },
       personalId,
     )
-    expect(updated.status).toBe(200)
+    expect(updated.status).toBe(403)
+    expect(await updated.json()).toEqual({
+      code: 'TEAM_MANAGEMENT_ACCESS_DENIED',
+      message: 'team_management_access_denied',
+    })
+    expect((await membership(legacy.id))?.role).toBe('member')
+    expect(await operations(personalId)).toEqual([])
+    const context = await auth.$context
+    const session = await auth.api.getSession({ headers: new Headers({ cookie: f.owner.cookie }) })
+    await runWithEndpointContext(
+      {
+        path: '/organization/update-member-role',
+        context: { ...context, session } as unknown as AuthEndpointContext['context'],
+      },
+      () =>
+        context.adapter.transaction((trx) =>
+          trx.update({
+            model: 'member',
+            where: [{ field: 'id', value: legacy.id }],
+            update: { role: 'admin' },
+          }),
+        ),
+    )
+    expect((await membership(legacy.id))?.role).toBe('admin')
     const removed = await post(
       'remove-member',
       f.owner.cookie,
@@ -541,7 +569,7 @@ describe.skipIf(!serverUrl)('member operation attribution', () => {
         LANGUAGE plpgsql AS $$ BEGIN
           RAISE EXCEPTION 'Synthetic operation record failure';
         END $$;
-        CREATE TRIGGER reject_synthetic_member_operation BEFORE UPDATE
+        CREATE TRIGGER reject_synthetic_member_operation BEFORE ${path === 'update-member-role' ? 'INSERT' : 'UPDATE'}
         ON public.organization_operations FOR EACH ROW
         EXECUTE FUNCTION public.reject_synthetic_member_operation();
       `)
@@ -612,14 +640,23 @@ describe.skipIf(!serverUrl)('member operation attribution', () => {
 
   it.each([
     ['remove-member', 'admin', 'admin'],
-    ['update-member-role', 'admin', 'owner'],
+    ['update-member-role', 'admin', 'member'],
     ['update-member-role', 'member', 'admin'],
   ] as const)(
     'locks the organization before its member for %s requesting %s',
     async (path, requestedRole, changedRole) => {
       const f = await fixture()
+      if (path === 'update-member-role') {
+        await db
+          .updateTable('auth.member')
+          .set({ role: requestedRole })
+          .where('id', '=', f.memberId)
+          .execute()
+      }
       const parent = await owned.pool.connect()
-      let recorderWaiting = false
+      const parentPid = (await parent.query<{ pid: number }>('SELECT pg_backend_pid() AS pid'))
+        .rows[0]?.pid
+      let writerWaiting = false
       let memberLocked = false
       let committed = false
       let pending: Promise<{ response: Response } | { failed: true }> | undefined
@@ -645,21 +682,24 @@ describe.skipIf(!serverUrl)('member operation attribution', () => {
         )
         const deadline = Date.now() + 3_000
         while (Date.now() < deadline) {
-          const blocked = await owned.pool.query<{ blocked: boolean }>(`
+          const blocked = await owned.pool.query<{ blocked: boolean }>(
+            `
             SELECT EXISTS (
               SELECT 1 FROM pg_stat_activity
               WHERE datname = current_database() AND wait_event_type = 'Lock'
-                AND query LIKE '%organization_operations%'
+                AND $1 = ANY(pg_blocking_pids(pid))
             ) AS blocked
-          `)
+          `,
+            [parentPid],
+          )
           if (blocked.rows[0]?.blocked) {
-            recorderWaiting = true
+            writerWaiting = true
             break
           }
           await setTimeout(10)
         }
         // A team-management writer already owns the parent lock and next locks the
-        // member. The recorder waiting for that parent must not hold the member yet.
+        // member. The operation waiting for that parent must not hold the member yet.
         memberLocked = await parent
           .query('SELECT id FROM auth.member WHERE id = $1 FOR UPDATE', [f.memberId])
           .then(
@@ -679,7 +719,7 @@ describe.skipIf(!serverUrl)('member operation attribution', () => {
         parent.release()
       }
       const outcome = await pending
-      expect(recorderWaiting).toBe(true)
+      expect(writerWaiting).toBe(true)
       expect(memberLocked).toBe(true)
       expect(
         outcome !== undefined && 'response' in outcome && outcome.response.status === 200,

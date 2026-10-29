@@ -1,7 +1,8 @@
-import type { Db } from '@hourmere/db'
-import { sql } from 'kysely'
+import type { Database, Db } from '@hourmere/db'
+import { sql, type Transaction } from 'kysely'
 import { bookingPageQuery, encodeBookingCursor, type ListBookingsInput } from './booking-page.ts'
-import type { ServiceContext } from './context.ts'
+import { cancelTeamBookingInTransaction } from './bookings.ts'
+import type { BookingNotifier, ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { isUuid } from './internal.ts'
 import {
@@ -11,6 +12,33 @@ import {
 } from './team-admin-booking.ts'
 
 const denied = () => new DomainError('forbidden', 'team_management_access_denied')
+
+/**
+ * Cancel inside teamManagementAccess.write, using its returned transaction and actor.
+ * The caller must bind that write to its expected organization; this service adds no
+ * authorization layer. Missing, out-of-team and unchangeable bookings share one refusal.
+ * The existing cancellation transaction owns attribution, notifications and cleanup.
+ */
+export async function cancelTeamAdminBooking(
+  trx: Transaction<Database>,
+  actor: { userId: string; organizationId: string },
+  id: string,
+  now: () => Temporal.Instant,
+  options: { reason?: string | undefined; notify?: BookingNotifier | undefined } = {},
+): Promise<void> {
+  try {
+    await cancelTeamBookingInTransaction(trx, actor, id, now, options)
+  } catch (error) {
+    if (
+      error instanceof DomainError &&
+      (error.code === 'booking_not_found' ||
+        error.code === 'booking_cancelled' ||
+        error.code === 'booking_in_past')
+    )
+      throw denied()
+    throw error
+  }
+}
 
 /** The web access middleware guards its boundary; direct service calls need current facts too. */
 async function teamManager(ctx: ServiceContext): Promise<string> {
@@ -99,6 +127,18 @@ export async function listTeamAdminBookings(
   input: ListBookingsInput = {},
 ): Promise<TeamAdminBookingPage> {
   const teamId = await teamManager(ctx)
+  const { data, nextCursor } = await readTeamBookingPage(ctx, teamId, input)
+  return { data, nextCursor }
+}
+
+/** Internal projection shared by authorized team reads; callers supply their checked team. */
+export async function readTeamBookingPage(
+  ctx: ServiceContext,
+  teamId: string,
+  input: ListBookingsInput,
+  hostUserId?: string,
+  teamEventTypesOnly = false,
+): Promise<TeamAdminBookingPage & { startInstants: Map<string, Temporal.Instant> }> {
   // Page booking rows before loading their hosts: collective meetings occupy one row.
   const { query, limit } = bookingPageQuery(ctx.db, input)
   const rows = await query
@@ -118,10 +158,22 @@ export async function listTeamAdminBookings(
       ),
     )
     .where('b.organization_id', '=', teamId)
+    .$if(teamEventTypesOnly, (q) => q.where('event.owner_user_id', 'is', null))
+    .$if(hostUserId !== undefined, (q) =>
+      q.where((eb) =>
+        eb.exists(
+          eb
+            .selectFrom('booking_hosts as assigned_host')
+            .select('assigned_host.booking_id')
+            .whereRef('assigned_host.booking_id', '=', 'b.id')
+            .where('assigned_host.user_id', '=', hostUserId as string),
+        ),
+      ),
+    )
     .execute()
 
   const page = rows.slice(0, limit)
-  if (!page.length) return { data: [], nextCursor: null }
+  if (!page.length) return { data: [], nextCursor: null, startInstants: new Map() }
   const last = page.at(-1)
   const { byHost, byAttendee } = await pageParticipants(
     ctx.db,
@@ -129,6 +181,7 @@ export async function listTeamAdminBookings(
     page.map((row) => row.id),
   )
   return {
+    startInstants: new Map(page.map((row) => [row.id, Temporal.Instant.from(row.cursor_start)])),
     data: page.map((row) =>
       toTeamAdminBooking({
         id: row.id,

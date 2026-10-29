@@ -55,6 +55,23 @@ describe('event type routes in the OpenAPI document', () => {
     )
   })
 
+  it('documents both role denials on every session event-type write', async () => {
+    const { paths } = await openApiDocument(productApp({} as Db))
+    for (const [path, method] of [
+      ['/api/v1/event-types', 'post'],
+      ['/api/v1/event-types/{id}', 'patch'],
+      ['/api/v1/event-types/{id}', 'delete'],
+      ['/api/v1/event-types/{id}/round-robin/activate', 'post'],
+    ] as const) {
+      const forbidden = paths[path]?.[method]?.responses['403']
+      expect(forbidden).toHaveProperty('description', expect.stringContaining('insufficient_role'))
+      expect(forbidden).toHaveProperty(
+        'description',
+        expect.stringContaining('team_management_access_denied'),
+      )
+    }
+  })
+
   it('refuses an unknown caller without reading its streamed body', async () => {
     const sent = chunkedBody(JSON.stringify({ slug: 'intro', description: 'x'.repeat(1_900_000) }))
     const res = await productApp({} as Db).request('/api/v1/event-types', {
