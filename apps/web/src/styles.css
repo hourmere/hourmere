@@ -970,11 +970,11 @@ input[readonly] {
 }
 
 .table-event-types thead th:nth-child(1) {
-  width: 26%;
+  width: 36%;
 }
 
 .table-event-types thead th:nth-child(3) {
-  width: 24%;
+  width: 28%;
 }
 
 .event-enablement {
@@ -985,8 +985,14 @@ input[readonly] {
 }
 
 @container data-table (min-width: 880px) {
+  .table-event-types :is(th, td) {
+    padding-inline: var(--space-2);
+  }
+
   .table-event-types .event-enablement {
-    min-width: 8rem;
+    display: grid;
+    justify-items: start;
+    min-width: max-content;
   }
 }
 
