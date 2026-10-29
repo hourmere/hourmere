@@ -15,8 +15,10 @@ const denied = () => new DomainError('forbidden', 'team_management_access_denied
 
 /**
  * Cancel inside teamManagementAccess.write, using its returned transaction and actor.
- * The caller must bind that write to its expected organization; this service adds no
- * authorization layer. Missing, out-of-team and unchangeable bookings share one refusal.
+ * The required expected organization also guards this service against an unbound call.
+ * This service adds no authorization layer: the shared write check must still validate
+ * the live session. Missing, out-of-team and started bookings share one refusal; a retry
+ * for an already-cancelled booking in this team returns booking_already_cancelled.
  * The existing cancellation transaction owns attribution, notifications and cleanup.
  */
 export async function cancelTeamAdminBooking(
@@ -24,16 +26,35 @@ export async function cancelTeamAdminBooking(
   actor: { userId: string; organizationId: string },
   id: string,
   now: () => Temporal.Instant,
-  options: { reason?: string | undefined; notify?: BookingNotifier | undefined } = {},
+  options: {
+    expectedOrganizationId: string
+    notify: BookingNotifier
+    reason?: string | undefined
+  },
 ): Promise<void> {
+  if (
+    !isUuid(options?.expectedOrganizationId) ||
+    options.expectedOrganizationId.toLowerCase() !== actor.organizationId.toLowerCase()
+  )
+    throw new DomainError(
+      'conflict',
+      'organization_context_changed',
+      'Your team context changed. Reload the page before trying again.',
+    )
+  if (typeof options.notify !== 'function')
+    throw new TypeError('Team cancellation requires a notification dependency')
   try {
     await cancelTeamBookingInTransaction(trx, actor, id, now, options)
   } catch (error) {
+    if (error instanceof DomainError && error.code === 'booking_cancelled')
+      throw new DomainError(
+        'conflict',
+        'booking_already_cancelled',
+        'This booking is already cancelled',
+      )
     if (
       error instanceof DomainError &&
-      (error.code === 'booking_not_found' ||
-        error.code === 'booking_cancelled' ||
-        error.code === 'booking_in_past')
+      (error.code === 'booking_not_found' || error.code === 'booking_in_past')
     )
       throw denied()
     throw error
