@@ -1,6 +1,7 @@
 import type { Db } from '@hourmere/db'
 import { APIError, type createAuthMiddleware, getSessionFromCtx } from 'better-auth/api'
 import { sql } from 'kysely'
+import { API_KEY_ORGANIZATION_MEMBERSHIP_MESSAGE } from './api-key-errors.ts'
 import { API_KEY_PREFIX } from './caller.ts'
 import { ensurePersonalOrganization, isMember, isUuid } from './organizations.ts'
 
@@ -111,7 +112,7 @@ export async function apiKeyRules(ctx: AuthMiddlewareContext, db: Db) {
   const organizationId = metadata.organizationId ?? (await ensurePersonalOrganization(db, userId))
   if (!(await isMember(db, userId, organizationId))) {
     throw new APIError('FORBIDDEN', {
-      message: 'metadata.organizationId must be an organization you are a member of',
+      message: API_KEY_ORGANIZATION_MEMBERSHIP_MESSAGE,
     })
   }
   return { context: { body: { ...body, metadata: { organizationId } } } }
