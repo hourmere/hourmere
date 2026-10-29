@@ -179,7 +179,8 @@ describe('UI measurement CI contract', () => {
     ['check', '7454d8fe440d98ff3ae3a93a0674f4201fed921f3193225883c340296f1bd78b'],
     ['cli-compatibility', 'e6baff5e1cbf2e5b3339c961747ed5be373cc5d0b7874200d54b903f13a3e194'],
     // PR #58 builds a disposable documentation-site fixture before the browser regressions.
-    ['e2e', 'd0836cdc67e3046164fa3bab90d93f240f1dc543773582734b8eb62d94aa1d09'],
+    // The owner approved a 20-minute job limit because the suite now runs close to 10 minutes.
+    ['e2e', 'dc8078e78f6723dd71fa1c0e3769aee6b6a32dc0d8cb40e9cd6a315592fee208'],
     ['docker', '2594f351267b97c37981b7889ae22495076c653543f5cd8ee11825ac4ed63d9a'],
   ])('preserves required job %s and its behavior', (id, digest) => {
     expect(requiredWorkflow.jobs[id ?? '']).toBeDefined()
