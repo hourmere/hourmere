@@ -7,7 +7,7 @@ import {
 import type { Database, Db } from '@hourmere/db'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { createMiddleware } from 'hono/factory'
-import type { Transaction } from 'kysely'
+import { sql, type Transaction } from 'kysely'
 import type { CallerEnv } from './caller.ts'
 import type { CallerMiddleware } from './openapi.ts'
 
