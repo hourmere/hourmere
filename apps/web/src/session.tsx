@@ -43,6 +43,8 @@ interface Session {
   state: SessionState
   /** Asks the server again who is signed in, showing the loading state meanwhile. */
   reload: () => void
+  /** Reloads a context conflict after asking before discarding the current draft. */
+  confirmReload: () => void
   /**
    * Asks again in the background, e.g. when the window regains focus: the organization may
    * have changed in another tab. Keeps the current state if the server cannot be reached.
@@ -142,6 +144,10 @@ function SessionController({
   const confirmLeave = useConfirmLeave()
   const currentState = useRef(state)
   currentState.current = state
+  // A dismissed confirm can itself return focus to the window. Remember the refused
+  // context so that event cannot ask again. A conflict's Reload may be declined before
+  // /me reveals the new organization; null binds that refusal to the next answer.
+  const declinedContext = useRef<{ userId: string; organizationId: string | null } | null>(null)
   // Counts the moments the session ended (sign-out, or a 401). An answer to a request that
   // started before the latest one is stale: applying it would sign a signed-out person back
   // in, e.g. a background check that the server answered just before the sign-out.
@@ -155,6 +161,7 @@ function SessionController({
     epoch.current += 1
     refreshing.current?.controller.abort()
     refreshing.current = null
+    declinedContext.current = null
     setNotice(null)
   }, [])
 
@@ -198,6 +205,15 @@ function SessionController({
     load(new AbortController().signal)
   }, [invalidate, load, setState])
 
+  const confirmReload = useCallback(() => {
+    if (confirmLeave()) reload()
+    else {
+      const current = currentState.current
+      if (current.status === 'signed-in')
+        declinedContext.current = { userId: current.me.user.id, organizationId: null }
+    }
+  }, [confirmLeave, reload])
+
   const refresh = useCallback(
     (options?: { fresh?: boolean }) => {
       if (refreshing.current) {
@@ -213,13 +229,29 @@ function SessionController({
             if (controller.signal.aborted || epoch.current !== started) return null
             if (result.ok) {
               const current = currentState.current
+              const context = {
+                userId: result.me.user.id,
+                organizationId: result.me.organization.id,
+              }
+              const declined = declinedContext.current
+              if (declined?.userId === context.userId && declined.organizationId === null)
+                declinedContext.current = context
+              else if (
+                declined?.userId !== context.userId ||
+                declined.organizationId !== context.organizationId
+              )
+                declinedContext.current = null
               if (
                 current.status === 'signed-in' &&
                 current.me.user.id === result.me.user.id &&
-                current.me.organization.id !== result.me.organization.id &&
-                !confirmLeave()
-              )
-                return null
+                current.me.organization.id !== result.me.organization.id
+              ) {
+                if (declinedContext.current) return null
+                if (!confirmLeave()) {
+                  declinedContext.current = context
+                  return null
+                }
+              }
               setState({ status: 'signed-in', me: result.me })
               return result.me
             }
@@ -267,6 +299,7 @@ function SessionController({
       epoch.current += 1
       refreshing.current?.controller.abort()
       refreshing.current = null
+      declinedContext.current = null
       setState((current) =>
         current.status === 'signed-in' && current.me.user.id === me.user.id
           ? { status: 'signed-in', me }
@@ -277,8 +310,8 @@ function SessionController({
   )
 
   const session = useMemo(
-    () => ({ state, reload, refresh, accept, signOut, notice, setNotice }),
-    [state, reload, refresh, accept, signOut, notice],
+    () => ({ state, reload, confirmReload, refresh, accept, signOut, notice, setNotice }),
+    [state, reload, confirmReload, refresh, accept, signOut, notice],
   )
   return <SessionContext value={session}>{children}</SessionContext>
 }

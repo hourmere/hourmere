@@ -114,7 +114,7 @@ export function CreateTeamPage() {
   }, [attempt, focusSlug])
 
   function report(err: unknown) {
-    setMessage(errorMessage(err))
+    setMessage(isOrganizationContextChanged(err) ? null : errorMessage(err))
     setContextError(err)
     setAttempt((value) => value + 1)
   }

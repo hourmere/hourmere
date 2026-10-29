@@ -83,13 +83,62 @@ describe('booking actions bound to their opening organization', () => {
       expect(
         screen.getByRole<HTMLTextAreaElement>('textbox', { name: new RegExp(reason) }).value,
       ).toBe('Original team reason')
+      // Dismissing Chromium's confirm returns focus to the window. That focus and later
+      // visibility checks must remember the Reload refusal, even before the first /me.
+      await act(async () => window.dispatchEvent(new Event('focus')))
+      await act(async () => document.dispatchEvent(new Event('visibilitychange')))
+      expect(confirm).toHaveBeenCalledTimes(1)
+      expect(api.to('GET /api/v1/me')).toHaveLength(3)
+      expect(
+        screen.getByRole<HTMLTextAreaElement>('textbox', { name: new RegExp(reason) }).value,
+      ).toBe('Original team reason')
       confirm.mockReturnValue(true)
       await user.click(reloadButton)
       await waitFor(() => expect(screen.queryByRole('textbox')).toBeNull())
-      expect(api.to('GET /api/v1/me')).toHaveLength(2)
+      expect(confirm).toHaveBeenCalledTimes(2)
+      expect(api.to('GET /api/v1/me')).toHaveLength(4)
       expect(api.to(`POST ${cancelPath}`)).toHaveLength(1)
     },
   )
+
+  it('remembers a declined background context until a different context appears', async () => {
+    const user = userEvent.setup()
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    let active = team
+    const api = server({ 'GET /api/v1/me': () => json(200, active) })
+    renderApp(detail)
+    await user.click(await screen.findByRole('button', { name: 'Cancel booking…' }))
+    await user.type(screen.getByLabelText(/Reason/), 'Keep my original team draft')
+    active = { ...ME }
+    await act(async () => window.dispatchEvent(new Event('focus')))
+    expect(confirm).toHaveBeenCalledTimes(1)
+    expect(confirm).toHaveBeenLastCalledWith(LEAVE_WITH_UNSAVED_CHANGES)
+    await act(async () => window.dispatchEvent(new Event('focus')))
+    await act(async () => document.dispatchEvent(new Event('visibilitychange')))
+    expect(api.to('GET /api/v1/me')).toHaveLength(4)
+    expect(confirm).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole<HTMLTextAreaElement>('textbox', { name: /Reason/ }).value).toBe(
+      'Keep my original team draft',
+    )
+
+    active = { ...ME, organization: { ...ME.organization, id: 'another-team' } }
+    await act(async () => window.dispatchEvent(new Event('focus')))
+    expect(confirm).toHaveBeenCalledTimes(2)
+    await act(async () => document.dispatchEvent(new Event('visibilitychange')))
+    expect(confirm).toHaveBeenCalledTimes(2)
+    expect(screen.getByRole<HTMLTextAreaElement>('textbox', { name: /Reason/ }).value).toBe(
+      'Keep my original team draft',
+    )
+
+    // Seeing the opening team again also clears the refusal: a later switch back to the
+    // previously refused target is a new change and asks again.
+    active = team
+    await act(async () => window.dispatchEvent(new Event('focus')))
+    active = { ...ME, organization: { ...ME.organization, id: 'another-team' } }
+    await act(async () => window.dispatchEvent(new Event('focus')))
+    expect(confirm).toHaveBeenCalledTimes(3)
+    expect(api.to(`POST ${cancelPath}`)).toHaveLength(0)
+  })
 
   it.each([
     ['conference/retry', 'Recheck existing meeting'],

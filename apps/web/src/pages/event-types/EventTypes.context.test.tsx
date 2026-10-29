@@ -241,7 +241,7 @@ describe('form-bound organization context', () => {
       // Repeated visibility refresh remains guarded; rejecting does not adopt personal.
       const prompts = confirm.mock.calls.length
       await act(async () => fireEvent(document, new Event('visibilitychange')))
-      await waitFor(() => expect(confirm.mock.calls.length).toBeGreaterThan(prompts))
+      expect(confirm.mock.calls.length).toBe(prompts)
       expect(field().value).toBe('Recoverable team draft')
       expect(calls.to('POST /api/v1/event-types')).toHaveLength(1)
 

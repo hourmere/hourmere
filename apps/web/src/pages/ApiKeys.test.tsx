@@ -353,6 +353,52 @@ describe('the API keys page', () => {
     expect(screen.queryByRole('region', { name: /Copy your new key/ })).toBeNull()
   })
 
+  it.each(['FORBIDDEN', 'INSTANCE_POLICY_DENIED', undefined])(
+    'uses the normal permission error for an unrelated 403 with code %s',
+    async (code) => {
+      const user = userEvent.setup()
+      fakeApi({
+        ...signedInAs(IN_TEAM),
+        ...organizations([ME.organization, TEAM]),
+        'GET /api/auth/api-key/list': () => json(200, { apiKeys: [], total: 0 }),
+        'POST /api/auth/api-key/create': () =>
+          json(403, { code, message: 'API key creation is disabled by instance policy.' }),
+      })
+      renderApp('/app/api-keys')
+      await screen.findByText('You have no API keys yet.')
+      await user.type(screen.getByLabelText('Name'), 'Policy-refused key')
+      await user.click(screen.getByRole('button', { name: 'Create key' }))
+      const alerts = await screen.findAllByRole('alert')
+      expect(alerts).toHaveLength(1)
+      expect(alerts[0]?.textContent).toBe(
+        "Could not create the key. You don't have permission to do that.",
+      )
+      expect(screen.queryByRole('button', { name: 'Reload' })).toBeNull()
+      expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Policy-refused key')
+    },
+  )
+
+  it.each([
+    { status: 409, code: 'organization_context_changed' },
+    { status: 409, code: 'ORGANIZATION_CONTEXT_CHANGED' },
+    { status: 403, code: 'USER_IS_NOT_A_MEMBER_OF_THE_ORGANIZATION' },
+  ])('offers context recovery for $status $code', async ({ status, code }) => {
+    const user = userEvent.setup()
+    fakeApi({
+      ...signedInAs(IN_TEAM),
+      ...organizations([ME.organization, TEAM]),
+      'GET /api/auth/api-key/list': () => json(200, { apiKeys: [], total: 0 }),
+      'POST /api/auth/api-key/create': () => json(status, { code, message: 'Context drift.' }),
+    })
+    renderApp('/app/api-keys')
+    await screen.findByText('You have no API keys yet.')
+    await user.type(screen.getByLabelText('Name'), 'Original team key')
+    await user.click(screen.getByRole('button', { name: 'Create key' }))
+    await screen.findByRole('button', { name: 'Reload' })
+    expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Original team key')
+    expect(screen.queryByRole('region', { name: /Copy your new key/ })).toBeNull()
+  })
+
   it('revokes a key after confirmation', async () => {
     const user = userEvent.setup()
     const api = keyServer()

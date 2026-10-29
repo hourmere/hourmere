@@ -401,6 +401,41 @@ describe.skipIf(!bootstrap)('organization-bound host booking writes', () => {
     expect(result.status).toBe(200)
   })
 
+  it('allows two overlapping booking writes in the same session', async () => {
+    const f = await fixture()
+    const otherBookingId = await createFixtures(db).booking(
+      f.first.id,
+      [f.host.id],
+      '2030-11-05T09:00Z',
+      '2030-11-05T09:30Z',
+    )
+    const entered = barrier()
+    const release = barrier()
+    onNotification = async () => {
+      entered.release()
+      await release.promise
+    }
+    const firstWrite = request(f, 'cancel')
+    await entered.promise
+    let secondWrite: ReturnType<typeof request> | undefined
+    try {
+      secondWrite = request({ ...f, bookingId: otherBookingId }, 'cancel')
+      // The first write still holds its transaction lock when the second commits.
+      expect((await secondWrite).status).toBe(200)
+      const otherBooking = await db
+        .selectFrom('bookings')
+        .select('status')
+        .where('id', '=', otherBookingId)
+        .executeTakeFirstOrThrow()
+      expect(otherBooking.status).toBe('cancelled')
+    } finally {
+      release.release()
+      await Promise.allSettled([firstWrite, secondWrite])
+    }
+    expect((await firstWrite).status).toBe(200)
+    expect((await snapshot(f)).booking.status).toBe('cancelled')
+  })
+
   it('keeps an already checked booking write ahead of an overlapping real organization switch', async () => {
     const f = await fixture()
     const entered = barrier()

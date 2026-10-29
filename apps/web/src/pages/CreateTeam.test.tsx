@@ -746,21 +746,36 @@ describe('reconciling an uncertain creation result', () => {
     expect(slugInput().value).toBe(team.slug)
   })
 
-  it('keeps the created team when activation refuses a switch conflict', async () => {
-    const { api } = server({
-      'POST /api/auth/organization/set-active': () =>
-        json(409, { code: 'ORGANIZATION_CONTEXT_CHANGED' }),
-    })
-    renderApp('/app/teams/new')
-    const user = await fill()
-    await user.click(submit())
-    await screen.findByRole('button', { name: 'Reload' })
-    expect(nameInput().value).toBe(team.name)
-    expect(slugInput().value).toBe(team.slug)
-    expect(screen.getByRole('button', { name: 'Open team' }).matches(':disabled')).toBe(true)
-    expect(api.to('POST /api/auth/organization/create')).toHaveLength(1)
-    expect(api.to('POST /api/auth/organization/set-active')).toHaveLength(1)
-  })
+  it.each(['en', 'zh-CN'] as const)(
+    'announces an activation conflict once and keeps the created team in %s',
+    async (locale) => {
+      chooseLanguage(locale)
+      const { api } = server({
+        'POST /api/auth/organization/set-active': () =>
+          json(409, { code: 'ORGANIZATION_CONTEXT_CHANGED' }),
+      })
+      renderApp('/app/teams/new')
+      const user = await fill()
+      await user.click(submit())
+      await screen.findByRole('button', { name: locale === 'en' ? 'Reload' : '重新加载' })
+      const alerts = screen.getAllByRole('alert')
+      expect(alerts).toHaveLength(1)
+      expect(alerts[0]?.querySelector('p')?.textContent).toBe(
+        locale === 'en'
+          ? 'Your team context changed. Reload before making changes.'
+          : '你的团队上下文已改变。请重新加载后再进行修改。',
+      )
+      expect(nameInput().value).toBe(team.name)
+      expect(slugInput().value).toBe(team.slug)
+      expect(
+        screen
+          .getByRole('button', { name: locale === 'en' ? 'Open team' : '打开团队' })
+          .matches(':disabled'),
+      ).toBe(true)
+      expect(api.to('POST /api/auth/organization/create')).toHaveLength(1)
+      expect(api.to('POST /api/auth/organization/set-active')).toHaveLength(1)
+    },
+  )
 
   it.each(['organization', 'user'] as const)(
     'keeps creation blocked when the activation confirmation identifies another %s',

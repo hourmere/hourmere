@@ -203,7 +203,14 @@ function CreateKeyForm({
       )
       onCreated(key)
     } catch (err) {
-      if (err instanceof RequestError && err.status === 403 && err.code !== 'EMAIL_NOT_VERIFIED') {
+      if (
+        err instanceof RequestError &&
+        err.status === 403 &&
+        (err.code === 'USER_IS_NOT_A_MEMBER_OF_THE_ORGANIZATION' ||
+          // The API-key membership guard predates machine-readable refusal codes.
+          (err.code === undefined &&
+            err.message === 'metadata.organizationId must be an organization you are a member of'))
+      ) {
         setError(
           msg("Could not create the key: you can't create keys in {0}.", {
             '0': organization.name,

@@ -170,10 +170,11 @@ export function bookingWriteAccess(principal: Principal, expectedOrganizationId?
       throw contextChanged()
 
     // A context transition uses its dedicated lock pool and then reads the app database.
-    // Refuse contention promptly so waiting booking transactions cannot fill that pool.
+    // Booking writes may overlap; only an exclusive context transition should conflict.
+    // Refuse that contention promptly so waiting transactions cannot fill the lock pool.
     const lock = await sql<{
       locked: boolean
-    }>`SELECT pg_try_advisory_xact_lock(hashtextextended(${`hourmere.organization-context:${principal.sessionId}`}, 0)) AS locked`.execute(
+    }>`SELECT pg_try_advisory_xact_lock_shared(hashtextextended(${`hourmere.organization-context:${principal.sessionId}`}, 0)) AS locked`.execute(
       db,
     )
     if (!lock.rows[0]?.locked) throw contextChanged()
