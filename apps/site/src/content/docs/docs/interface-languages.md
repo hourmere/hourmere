@@ -40,11 +40,16 @@ cookie has a one-year lifetime and is `Secure` on HTTPS. Refusing either storage
 does not prevent changing the current page. No account identifiers, answers or management
 capabilities enter preference storage. Sign-in emails and the standalone email sign-in
 confirmation page use the same admin-surface language rules: a valid preference cookie
-follows its registered fallbacks to a supported sign-in language; otherwise, quality-ranked
-`Accept-Language` chooses a supported sign-in language, then English. A German cookie
-therefore gives English, while `Accept-Language: de-CH,zh-CN;q=0.8` without that cookie gives
-Simplified Chinese. The confirmation page provides the supported sign-in language choices.
-Language changes never submit that form or change its fragment.
+is used only when its language is available on the admin surface. An unavailable cookie,
+such as German, is treated as absent without changing the saved preference. A supported
+account default follows where the account is already known, then quality-ranked
+`Accept-Language` chooses an admin-supported language, then English. No account or profile
+lookups are added to public sign-in requests just to choose a language; the confirmation
+page uses only the request headers. A German cookie with `Accept-Language: zh-CN` therefore
+gives Simplified Chinese, while the same cookie with `Accept-Language: de-CH` gives English.
+A Simplified Chinese cookie takes precedence over `Accept-Language`. The confirmation page
+provides the supported sign-in language choices. Language changes never submit that form
+or change its fragment.
 
 Public booking and rescheduling pages also remember an explicitly selected IANA time
 zone in local storage. A valid saved choice becomes the default on later booking-page visits;

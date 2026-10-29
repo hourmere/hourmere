@@ -112,6 +112,26 @@ export function createLocaleResolver<
     return candidates[0]?.language ?? 'en'
   }
 
+  /** Server sign-in paths use only account defaults their caller already knows. */
+  function resolveAdminLanguage({
+    cookie,
+    accountLocale,
+    acceptLanguage: header,
+  }: {
+    cookie?: string | undefined
+    accountLocale?: string | undefined
+    acceptLanguage?: string | undefined
+  } = {}): Language {
+    const available = interfaceLanguages('admin')
+    const supported = (language: Language | undefined) =>
+      language && available.includes(language) ? language : undefined
+    return (
+      supported(cookieLanguage(cookie)) ??
+      supported(interfaceLanguage(accountLocale)) ??
+      acceptLanguage(header, 'admin')
+    )
+  }
+
   return {
     registeredLocales,
     interfaceLanguages,
@@ -122,6 +142,7 @@ export function createLocaleResolver<
     formattingLocale,
     cookieLanguage,
     acceptLanguage,
+    resolveAdminLanguage,
   }
 }
 
@@ -135,6 +156,7 @@ export const {
   formattingLocale,
   cookieLanguage,
   acceptLanguage,
+  resolveAdminLanguage,
 } = createLocaleResolver(localeRegistry)
 
 /**
