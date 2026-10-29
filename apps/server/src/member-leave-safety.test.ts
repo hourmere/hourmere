@@ -10,7 +10,9 @@ import {
   createCallerResolver,
   ensurePersonalOrganization,
   MemberDepartureBlockedError,
+  MemberDepartureOwnerRequiredError,
   TeamManagementError,
+  teamRoles,
 } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
@@ -34,7 +36,11 @@ import { DepartureImpact, memberDepartureImpactRoutes } from './routes/member-de
 import { memberLeaveRoutes } from './routes/member-leave.ts'
 import { openApiDocument, responseAndRequestStrictness } from './routes/test-app.ts'
 import { productRoutes } from './server.ts'
-import { EXPECTED_ORGANIZATION_HEADER, organizationContextWriteLock } from './team-management.ts'
+import {
+  EXPECTED_ORGANIZATION_HEADER,
+  organizationContextWriteLock,
+  teamManagementSessionCaller,
+} from './team-management.ts'
 
 const serverUrl = process.env.DATABASE_URL
 const origin = 'http://localhost:4391'
@@ -64,7 +70,9 @@ function serviceCopy(replacements: Replacement[] = []): Departure {
     checkTeamManagementAccess,
     ensurePersonalOrganization,
     MemberDepartureBlockedError,
+    MemberDepartureOwnerRequiredError,
     TeamManagementError,
+    teamRoles,
     DomainError,
     getTeamMemberDepartureImpact,
   }
@@ -87,6 +95,7 @@ function routeCopy(depart: Departure = leaveTeamMember, replacement?: Replacemen
     createRoute,
     z,
     MemberDepartureBlockedError,
+    MemberDepartureOwnerRequiredError,
     leaveTeamMember: depart,
     MemberDepartureImpactSchema,
     ErrorBody,
@@ -95,6 +104,7 @@ function routeCopy(depart: Departure = leaveTeamMember, replacement?: Replacemen
     serviceContext,
     EXPECTED_ORGANIZATION_HEADER,
     organizationContextWriteLock,
+    teamManagementSessionCaller,
     DepartureImpact,
   }
   return new Function(...Object.keys(bindings), `${source}; return memberLeaveRoutes`)(
@@ -478,7 +488,9 @@ describe.skipIf(!serverUrl)('safe team departure through HTTP', () => {
       headers: { origin, 'content-type': 'application/json' },
       body: '{}',
     })
-    expect(anonymous.status).toBe(401)
+    expect(anonymous.status).toBe(403)
+    expect(await anonymous.json()).toEqual({ error: 'team_management_access_denied' })
+    expect(anonymous.headers.has('www-authenticate')).toBe(false)
     const foreign = await app.request(`/api/v1/teams/${f.team.id}/leave`, {
       method: 'POST',
       headers: { ...headers(f), origin: 'https://foreign.example' },
@@ -590,6 +602,214 @@ describe.skipIf(!serverUrl)('safe team departure through HTTP', () => {
       { timeout: 3000, interval: 10 },
     )
   }
+
+  async function verifySoleOwner(depart: Departure = leaveTeamMember, otherRole = 'member') {
+    const f = await fixture('member, owner')
+    await db
+      .updateTable('auth.member')
+      .set({ role: otherRole })
+      .where('organizationId', '=', f.team.id)
+      .where('userId', '=', f.survivor.id)
+      .execute()
+    const response = await leave(f, application(auth, false, routeCopy(depart)))
+    expect(response.status, 'the final owner must retain membership').toBe(409)
+    expect(await response.json()).toEqual({
+      error: 'member_departure_owner_required',
+      message: 'Another owner is needed before you can leave.',
+      handling: { owner: 'another_owner_is_needed_before_you_can_leave' },
+    })
+    await unchanged(f)
+  }
+
+  it.each(['member', 'coowner', 'member,ownerish'])(
+    'refuses the sole REST owner when another member has role %s',
+    (role) => verifySoleOwner(leaveTeamMember, role),
+  )
+
+  it.each(['owner', 'member, owner'])(
+    'refuses the sole native owner with stored role %s',
+    async (role) => {
+      const f = await fixture(role)
+      await db
+        .updateTable('auth.member')
+        .set({ role: 'member' })
+        .where('organizationId', '=', f.team.id)
+        .where('userId', '=', f.survivor.id)
+        .execute()
+      const response = await native(f)
+      // Preserve Better Auth's early check; legacy whitespace roles also reach the
+      // shared locked check at the persistence boundary.
+      expect(response.status).toBe(role === 'owner' ? 400 : 409)
+      expect(await response.json()).toMatchObject({
+        code:
+          role === 'owner'
+            ? 'YOU_CANNOT_LEAVE_THE_ORGANIZATION_AS_THE_ONLY_OWNER'
+            : 'member_departure_owner_required',
+      })
+      await unchanged(f)
+    },
+  )
+
+  it.each(['REST', 'native'] as const)(
+    'allows an impact-free %s owner to leave while retaining another owner',
+    async (entry) => {
+      const f = await fixture('owner')
+      const response = await (entry === 'REST' ? leave(f) : native(f))
+      expect(response.status).toBe(200)
+      await departed(f)
+    },
+  )
+
+  it('recognizes a surviving owner among trimmed exact role tokens', async () => {
+    const f = await fixture('owner')
+    await db
+      .updateTable('auth.member')
+      .set({ role: 'member, owner ' })
+      .where('organizationId', '=', f.team.id)
+      .where('userId', '=', f.survivor.id)
+      .execute()
+    expect((await leave(f)).status).toBe(200)
+    await departed(f)
+  })
+
+  it.each(['REST', 'native'] as const)(
+    'still refuses a %s owner with another owner when departure impact remains',
+    async (entry) => {
+      const f = await fixture('owner')
+      await event(f)
+      await blocked(await (entry === 'REST' ? leave(f) : native(f)), f, entry === 'native')
+    },
+  )
+
+  async function verifyOwnerRace(
+    entries: readonly ['REST' | 'native', 'REST' | 'native'],
+    depart: Departure = leaveTeamMember,
+  ) {
+    const target = application(authentication(true, depart), false, routeCopy(depart))
+    const first = await fixture('owner')
+    const member = await db
+      .selectFrom('auth.member')
+      .select('id')
+      .where('organizationId', '=', first.team.id)
+      .where('userId', '=', first.survivor.id)
+      .executeTakeFirstOrThrow()
+    const second: Fixture = {
+      actor: first.survivor,
+      survivor: first.actor,
+      team: first.team,
+      memberId: member.id,
+      login: await session(first.survivor, first.team.id),
+    }
+    const holder = await owned.pool.connect()
+    const pending: Promise<Response>[] = []
+    try {
+      await holder.query('BEGIN')
+      await holder.query('SELECT id FROM auth.organization WHERE id=$1 FOR UPDATE', [first.team.id])
+      for (const [index, f] of [first, second].entries()) {
+        pending.push(
+          Promise.resolve(
+            entries[index] === 'REST' ? leave(f, target) : native(f, 'leave', f.memberId, target),
+          ),
+        )
+      }
+      const pid = (await holder.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0]
+        ?.pid
+      await vi.waitFor(
+        async () => {
+          const result = await owned.pool.query<{ waiting: number }>(
+            `WITH RECURSIVE blocked AS (
+               SELECT pid FROM pg_stat_activity
+               WHERE datname=current_database() AND $1=ANY(pg_blocking_pids(pid))
+               UNION
+               SELECT activity.pid FROM pg_stat_activity activity
+               JOIN blocked ON blocked.pid=ANY(pg_blocking_pids(activity.pid))
+               WHERE activity.datname=current_database()
+             ) SELECT count(*)::integer AS waiting FROM blocked`,
+            [pid],
+          )
+          expect(
+            result.rows[0]?.waiting,
+            'both departures must wait for the organization lock',
+          ).toBe(2)
+        },
+        { timeout: 3000, interval: 10 },
+      )
+      await holder.query('COMMIT')
+      const responses = await Promise.all(pending)
+      expect(
+        responses.map((response) => response.status).sort(),
+        'exactly one owner may leave',
+      ).toEqual([200, 409])
+      const loserIndex = responses.findIndex((response) => response.status === 409)
+      const loser = [first, second][loserIndex] as Fixture
+      expect(await responses[loserIndex]?.json()).toMatchObject({
+        [entries[loserIndex] === 'REST' ? 'error' : 'code']: 'member_departure_owner_required',
+        message: 'Another owner is needed before you can leave.',
+        handling: { owner: 'another_owner_is_needed_before_you_can_leave' },
+      })
+      expect(
+        await db
+          .selectFrom('auth.member')
+          .select(['userId', 'role'])
+          .where('organizationId', '=', first.team.id)
+          .execute(),
+      ).toEqual([{ userId: loser.actor.id, role: 'owner' }])
+      expect(
+        await db
+          .selectFrom('auth.session')
+          .select('activeOrganizationId')
+          .where('id', '=', loser.login.id)
+          .executeTakeFirstOrThrow(),
+      ).toEqual({ activeOrganizationId: first.team.id })
+      await departed([first, second][1 - loserIndex] as Fixture)
+    } finally {
+      await holder.query('ROLLBACK')
+      holder.release()
+      await Promise.allSettled(pending)
+    }
+  }
+
+  it.each([
+    ['REST', 'REST'],
+    ['native', 'native'],
+    ['REST', 'native'],
+  ] as const)('serializes two owners leaving through %s and %s', (first, second) =>
+    verifyOwnerRace([first, second]),
+  )
+
+  it.each<Replacement>([
+    ["if (actor.role === 'owner')", 'if (false)'],
+    [".where('userId', '!=', actor.userId)", ''],
+    [".where('organizationId', '=', actor.organizationId)", ''],
+    ["teamRoles(member.role).includes('owner')", "member.role.includes('owner')"],
+  ])('detects a broken owner count (%s) with real HTTP assertions', async (from, to) => {
+    await expect(verifySoleOwner(serviceCopy([[from, to]]), 'coowner')).rejects.toThrow(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
+  })
+
+  it('passes sole-owner assertions with an unmodified service source copy', async () => {
+    await verifySoleOwner(serviceCopy())
+  })
+
+  it.each(['REST', 'native'] as const)(
+    'detects counting owners before the organization lock through %s',
+    async (entry) => {
+      const copy = serviceCopy([
+        [
+          'const actor = await checkTeamManagementAccess(',
+          "const ownerSnapshot = await trx.selectFrom('auth.member').select('role').where('organizationId', '=', input.teamId).where('userId', '!=', principal.user.id).execute()\n      const actor = await checkTeamManagementAccess(",
+        ],
+        [
+          "const otherMembers = await trx\n          .selectFrom('auth.member')\n          .select('role')\n          .where('organizationId', '=', actor.organizationId)\n          .where('userId', '!=', actor.userId)\n          .execute()",
+          'const otherMembers = ownerSnapshot',
+        ],
+      ])
+      await expect(verifyOwnerRace([entry, entry], copy)).rejects.toThrow(
+        'exactly one owner may leave',
+      )
+    },
+  )
 
   async function verifyBoundSwitchOrdering(factory = memberLeaveRoutes) {
     const f = await fixture()

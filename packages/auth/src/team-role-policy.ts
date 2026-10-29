@@ -6,7 +6,10 @@ import { APIError, getSessionFromCtx } from 'better-auth/api'
 import type { Transaction } from 'kysely'
 import type { AuthMiddlewareContext } from './api-keys.ts'
 import type { Principal } from './caller.ts'
-import { MemberDepartureBlockedError } from './member-departure.ts'
+import {
+  MemberDepartureBlockedError,
+  MemberDepartureOwnerRequiredError,
+} from './member-departure.ts'
 import { recordTeamRoleChange } from './organization-operations.ts'
 import { isUuid } from './organizations.ts'
 import {
@@ -293,6 +296,13 @@ export function createTeamRolePolicy(
               code: error.code,
               message: error.message,
               impact: error.impact,
+              handling: error.handling,
+            })
+          }
+          if (error instanceof MemberDepartureOwnerRequiredError) {
+            throw new APIError('CONFLICT', {
+              code: error.code,
+              message: error.message,
               handling: error.handling,
             })
           }

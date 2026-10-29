@@ -3,12 +3,15 @@
 `POST /api/v1/teams/{teamId}/leave` accepts an empty JSON object and requires a current,
 verified browser session. Bind the action to its original team with
 `X-Expected-Organization-Id`. Missing or changed context returns
-`409 organization_context_changed`; reload before retrying. API keys and OAuth grants
-cannot use this route.
+`409 organization_context_changed`; reload before retrying. Missing or invalid sessions
+and any present Authorization header receive `403 team_management_access_denied` without
+a `WWW-Authenticate` challenge. Authorization-bearing requests are rejected before
+credentials are resolved, including when accompanied by a valid session cookie.
 
 `leaveTeamMember` reuses `checkTeamManagementAccess`, allowing ordinary members to act on
 themselves. In a read-committed transaction it takes the existing user → organization →
-member → session locks, then calls `getTeamMemberDepartureImpact` on that same transaction.
+member → session locks, then checks owner continuity and calls
+`getTeamMemberDepartureImpact` on that same transaction.
 The organization write lock conflicts with the organization share locks used by event-type
 and booking writers. Dependencies committed while departure waits are therefore included
 in the recheck, and no new dependency can commit between that check and membership deletion.
@@ -18,6 +21,14 @@ row locks. A source-bound automatic switch waiting behind leave rechecks the per
 fallback and returns 409; a leave contending with a switch returns 409 promptly. Native
 HTTP departure retains its existing outer context lock without reacquiring it on another
 connection.
+
+An owner may leave only while another current member has an exact `owner` role token.
+This check runs after the organization write lock, serializing simultaneous owner leaves
+and role changes. The REST refusal is `409 member_departure_owner_required` with
+`message: "Another owner is needed before you can leave."` and
+`handling: { "owner": "another_owner_is_needed_before_you_can_leave" }`.
+Legacy comma-separated roles are trimmed and matched by exact tokens. Another owner
+does not bypass the event and booking impact rules.
 
 An affected event type (including a disabled one) or a confirmed booking whose end is still
 in the future blocks departure. HTTP 409 has `error: member_departure_blocked`, `message`,
@@ -48,6 +59,9 @@ without it fail closed with `503 TEAM_LEAVE_UNAVAILABLE`. The adapter refreshes 
 handler's session snapshot after success so its later cleanup retains the committed
 personal fallback. Administrative removal continues through its existing path.
 
-Personal-organization owner guards are unchanged. This change adds no owner-continuity
-policy; the native handler retains its existing owner checks, and concurrent last-owner
-protection remains separate work.
+The native adapter maps the shared locked owner refusal to the same 409 code and handling
+in Better Auth's `{code,message,handling}` shape. Better Auth retains its earlier
+`400 YOU_CANNOT_LEAVE_THE_ORGANIZATION_AS_THE_ONLY_OWNER` check when it recognizes a sole
+owner before persistence. Concurrent native leaves also reach the serialized check, so
+only one of two owners may leave. Personal-organization owner guards remain in place.
+Owner demotion, removal and ownership transfer are outside this leave-path change.

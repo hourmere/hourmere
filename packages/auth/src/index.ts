@@ -47,7 +47,10 @@ export {
   mcpOAuthUrls,
   withMcpOAuthIntent,
 } from './mcp-oauth.ts'
-export { MemberDepartureBlockedError } from './member-departure.ts'
+export {
+  MemberDepartureBlockedError,
+  MemberDepartureOwnerRequiredError,
+} from './member-departure.ts'
 export { ensurePersonalOrganization } from './organizations.ts'
 export {
   assertSignupEnforced,
@@ -62,6 +65,7 @@ export {
   checkTeamManagementAccess,
   TeamManagementError,
   type TeamManager,
+  teamRoles,
 } from './team-management.ts'
 
 /** Separate lock connections cannot starve the handler's auth/application query pools. */

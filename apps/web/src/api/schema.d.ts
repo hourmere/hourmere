@@ -5160,7 +5160,7 @@ export interface paths {
         put?: never;
         /**
          * Leave a team after resolving event types and unfinished bookings
-         * @description Requires a verified browser session and X-Expected-Organization-Id matching this team and the current session. Rechecks departure impact inside the locked membership transaction. A blocked departure returns the first impact pages, counts and handling steps; use the departure-impact read to page remaining items. With no impact, revokes membership and returns the personal organization.
+         * @description Requires a verified browser session and X-Expected-Organization-Id matching this team and the current session. Any Authorization header, including empty, malformed, API-key or MCP OAuth values, is denied before credentials are resolved, even with a valid session cookie. Missing or invalid sessions receive the same 403 team_management_access_denied without a WWW-Authenticate challenge. Rechecks owner continuity and departure impact inside the locked membership transaction. A sole owner must arrange another owner before leaving. A blocked departure returns the first impact pages, counts and handling steps; use the departure-impact read to page remaining items. With no impact, revokes membership and returns the personal organization.
          */
         post: {
             parameters: {
@@ -5200,16 +5200,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description No valid session or API key */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description team_management_access_denied */
+                /** @description team_management_access_denied: requires a current team session without Authorization */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -5218,7 +5209,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description member_departure_blocked with impact/handling, or organization_context_changed: reload before retrying */
+                /** @description member_departure_blocked with impact/handling, member_departure_owner_required with handling.owner (another owner is needed before you can leave), or organization_context_changed: reload before retrying */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -5227,23 +5218,16 @@ export interface paths {
                         "application/json": components["schemas"]["Error"] & {
                             handling?: {
                                 /** @enum {string} */
-                                eventTypes: "ask_admin_to_replace_or_remove_host";
+                                eventTypes?: "ask_admin_to_replace_or_remove_host";
                                 /** @enum {string} */
-                                futureBookings: "coordinate_cancellation";
+                                futureBookings?: "coordinate_cancellation";
                                 /** @enum {string} */
-                                inProgressBookings: "wait_until_end_or_coordinate_offline";
+                                inProgressBookings?: "wait_until_end_or_coordinate_offline";
+                                /** @enum {string} */
+                                owner?: "another_owner_is_needed_before_you_can_leave";
                             };
                             impact?: components["schemas"]["MemberDepartureImpact"];
                         };
-                    };
-                };
-                /** @description The API key's rate limit is used up */
-                429: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
                     };
                 };
             };

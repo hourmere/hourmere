@@ -2,7 +2,9 @@ import {
   checkTeamManagementAccess,
   ensurePersonalOrganization,
   MemberDepartureBlockedError,
+  MemberDepartureOwnerRequiredError,
   TeamManagementError,
+  teamRoles,
 } from '@hourmere/auth'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
@@ -38,6 +40,19 @@ export async function leaveTeamMember(
         { expectedOrganizationId: input.expectedOrganizationId, allowPersonal: false },
         true,
       )
+      if (actor.role === 'owner') {
+        // Every leave and role change holds this organization UPDATE lock. Count only
+        // other current members with an exact owner token, after waiting for that lock.
+        const otherMembers = await trx
+          .selectFrom('auth.member')
+          .select('role')
+          .where('organizationId', '=', actor.organizationId)
+          .where('userId', '!=', actor.userId)
+          .execute()
+        if (!otherMembers.some((member) => teamRoles(member.role).includes('owner'))) {
+          throw new MemberDepartureOwnerRequiredError()
+        }
+      }
       // The organization UPDATE lock excludes the SHARE locks used by event/booking
       // writers. Read after waiting for it, on this same connection, through deletion.
       const impact = await getTeamMemberDepartureImpact(

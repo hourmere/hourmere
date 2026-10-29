@@ -238,6 +238,31 @@ describe.skipIf(!serverUrl)('native safe departure source-copy protections', () 
     expect(await currentMembership(f)).toEqual({ id: f.memberId })
   }
 
+  async function assertOwnerRequired(factory: NativeCopy) {
+    const f = await fixture(false)
+    // Better Auth's early owner check does not trim this legacy actor role; the
+    // persistence interception must still apply the shared locked owner check.
+    await db
+      .updateTable('auth.member')
+      .set({ role: 'member, owner' })
+      .where('id', '=', f.memberId)
+      .execute()
+    await db
+      .updateTable('auth.member')
+      .set({ role: 'member' })
+      .where('organizationId', '=', f.teamId)
+      .where('userId', '=', f.owner.id)
+      .execute()
+    const response = await post(app(factory), f)
+    expect(response.status).toBe(409)
+    expect(await response.json()).toEqual({
+      code: 'member_departure_owner_required',
+      message: 'Another owner is needed before you can leave.',
+      handling: { owner: 'another_owner_is_needed_before_you_can_leave' },
+    })
+    expect(await currentMembership(f)).toEqual({ id: f.memberId })
+  }
+
   async function personalId(user: TestUser) {
     const personal = await db
       .selectFrom('personal_organizations')
@@ -272,6 +297,18 @@ describe.skipIf(!serverUrl)('native safe departure source-copy protections', () 
     const copy = await sourceCopy()
     await assertTrustedBlocked(copy)
     await assertTrustedBlocked(copy, 'remove-member')
+  })
+
+  it('passes native owner refusal assertions with an unchanged source copy', async () => {
+    await assertOwnerRequired(await sourceCopy())
+  })
+
+  it('detects an omitted native owner refusal mapping with a real assertion failure', async () => {
+    await expect(
+      assertOwnerRequired(
+        await sourceCopy(['error instanceof MemberDepartureOwnerRequiredError', 'false']),
+      ),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
   })
 
   it.each([
