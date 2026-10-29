@@ -212,7 +212,9 @@ the existing booking-ID authorization. API keys and OAuth grants keep their issu
 On refusal, keep the draft, show reload guidance and ask before discarding unsaved changes.
 Never replay the write or switch organizations automatically. Focus/visibility refresh
 uses the same unsaved-changes prompt before replacing an organization's drafts. Declining
-keeps the old context and draft; accepting remounts the page. Explicit conflict reload
+keeps the old context and draft without repeating the prompt while changes remain unsaved.
+After saving, discarding or leaving the draft, the next focus/visibility read follows the
+current organization silently. Accepting remounts the page. Explicit conflict reload
 discards older background session answers before reloading. The server check also protects
 requests that arrive before a refresh.
 

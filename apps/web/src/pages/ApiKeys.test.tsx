@@ -1,6 +1,7 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
+import { API_KEY_ORGANIZATION_MEMBERSHIP_MESSAGE } from '../../../../packages/auth/src/api-key-errors.ts'
 import type { ApiKey } from '../api/auth.ts'
 import { chooseLanguage } from '../i18n/store.ts'
 import type { Me } from '../session.tsx'
@@ -435,8 +436,9 @@ describe('the API keys page', () => {
     expect(api.to('POST /api/auth/api-key/delete')).toHaveLength(0)
   })
 
+  // Use the server's actual wording so changes must keep the browser's legacy match in sync.
   it.each(['en', 'zh-CN'] as const)(
-    'keeps a recoverable key draft after membership removal in %s',
+    'recognizes the server legacy membership refusal and keeps a recoverable key draft in %s',
     async (locale) => {
       chooseLanguage(locale)
       const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
@@ -449,7 +451,7 @@ describe('the API keys page', () => {
         'GET /api/auth/api-key/list': () => json(200, { apiKeys: [], total: 0 }),
         'POST /api/auth/api-key/create': () =>
           json(403, {
-            message: 'metadata.organizationId must be an organization you are a member of',
+            message: API_KEY_ORGANIZATION_MEMBERSHIP_MESSAGE,
           }),
       })
       renderApp('/app/api-keys')
@@ -566,7 +568,7 @@ describe('the API keys page', () => {
     await act(async () => {
       refuse(
         json(403, {
-          message: 'metadata.organizationId must be an organization you are a member of',
+          message: API_KEY_ORGANIZATION_MEMBERSHIP_MESSAGE,
         }),
       )
       await new Promise((resolve) => setTimeout(resolve, 20))
