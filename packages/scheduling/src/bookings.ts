@@ -1264,6 +1264,7 @@ export async function rescheduleHostBooking(
 ): Promise<BookingWithToken> {
   if (!UUID.test(id)) throw bookingNotFound()
   return ctx.db.transaction().execute(async (trx) => {
+    await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, id)
     await lockOrganization(trx, ctx.principal.organization.id)
     const old = await trx
       .selectFrom('bookings')
@@ -1308,6 +1309,7 @@ export async function cancelHostBooking(
   if (!UUID.test(id)) throw bookingNotFound()
   const cancelReason = normalizeReason(reason)
   return ctx.db.transaction().execute(async (trx) => {
+    await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, id)
     await lockCancellationOrganization(trx, ctx.principal.organization.id)
     const row = await trx
       .selectFrom('bookings as b')

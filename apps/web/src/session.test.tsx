@@ -16,6 +16,7 @@ import {
   signedIn,
   signedOut,
 } from './test/fake-api.tsx'
+import { useUnsavedChanges } from './unsaved-changes.tsx'
 
 const location = () => screen.getByTestId('location').textContent
 const EXPIRED = 'Your session ended. Please sign in again.'
@@ -313,8 +314,9 @@ describe('fresh session reads and confirmed organization handoffs', () => {
     organization: { ...ME.organization, id: TEAM_ID, name: 'Acme', personal: false },
   }
 
-  function Consumer() {
-    const { state, refresh, accept } = useSession()
+  function Consumer({ dirty = false }: { dirty?: boolean }) {
+    const { state, reload, confirmReload, refresh, accept, signOut } = useSession()
+    useUnsavedChanges(dirty)
     return (
       <>
         <output data-testid="session-context">
@@ -329,18 +331,121 @@ describe('fresh session reads and confirmed organization handoffs', () => {
         <button type="button" onClick={() => accept(TEAM_ME)}>
           Accept confirmed team
         </button>
+        <button type="button" onClick={() => accept(ME)}>
+          Accept original team
+        </button>
+        <button type="button" onClick={reload}>
+          Reload session
+        </button>
+        <button type="button" onClick={confirmReload}>
+          Confirm reload
+        </button>
+        <button type="button" onClick={() => void signOut().catch(() => {})}>
+          End session
+        </button>
       </>
     )
   }
 
-  async function open() {
-    render(
+  async function open(dirty = false) {
+    const view = render(
       <SessionProvider>
-        <Consumer />
+        <Consumer dirty={dirty} />
       </SessionProvider>,
     )
     await screen.findByText(ME.organization.id)
+    return view
   }
+
+  it.each(['focus', 'visibilitychange'] as const)(
+    'follows a declined team silently on %s once the draft is clean',
+    async (event) => {
+      const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+      let active = ME
+      const api = fakeApi({
+        ...signedIn,
+        'GET /api/v1/me': () => json(200, active),
+      })
+      const view = await open(true)
+      active = TEAM_ME
+      const read = () =>
+        act(async () => (event === 'focus' ? window : document).dispatchEvent(new Event(event)))
+      await read()
+      await read()
+      expect(api.to('GET /api/v1/me')).toHaveLength(3)
+      expect(confirm).toHaveBeenCalledTimes(1)
+      expect(screen.getByTestId('session-context').textContent).toBe(ME.organization.id)
+
+      view.rerender(
+        <SessionProvider>
+          <Consumer dirty={false} />
+        </SessionProvider>,
+      )
+      await read()
+      expect(api.to('GET /api/v1/me')).toHaveLength(4)
+      expect(screen.getByTestId('session-context').textContent).toBe(TEAM_ID)
+      expect(confirm).toHaveBeenCalledTimes(1)
+    },
+  )
+
+  it('forgets a declined Reload when a pending session read finds the draft clean', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const pending = later()
+    let reads = 0
+    fakeApi({
+      ...signedIn,
+      'GET /api/v1/me': () => (++reads === 1 ? json(200, ME) : pending.response),
+    })
+    const view = await open(true)
+    await userEvent.click(screen.getByRole('button', { name: 'Confirm reload' }))
+    expect(confirm).toHaveBeenCalledTimes(1)
+    act(() => window.dispatchEvent(new Event('focus')))
+    await waitFor(() => expect(reads).toBe(2))
+    view.rerender(
+      <SessionProvider>
+        <Consumer dirty={false} />
+      </SessionProvider>,
+    )
+    await pending.answer(json(200, TEAM_ME))
+    expect(screen.getByTestId('session-context').textContent).toBe(TEAM_ID)
+    expect(confirm).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['Reload session', 'Accept original team', 'End session'])(
+    'clears a declined context on %s',
+    async (action) => {
+      const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+      let active = ME
+      let unavailable = false
+      fakeApi({
+        ...signedIn,
+        'GET /api/v1/me': () =>
+          unavailable ? json(503, { error: 'unavailable' }) : json(200, active),
+        // Even a failed sign-out invalidates old session reads and refusals.
+        'POST /api/auth/sign-out': () => json(503, { code: 'UNAVAILABLE' }),
+      })
+      await open(true)
+      active = TEAM_ME
+      await act(async () => window.dispatchEvent(new Event('focus')))
+      expect(confirm).toHaveBeenCalledTimes(1)
+      expect(screen.getByTestId('session-context').textContent).toBe(ME.organization.id)
+      unavailable = action === 'Reload session'
+      await userEvent.click(screen.getByRole('button', { name: action }))
+      if (unavailable) await screen.findByText('error')
+      unavailable = false
+      // Return to the original context after a failed reload without hiding a stale
+      // refusal behind an intermediate /me result.
+      if (action === 'Reload session') {
+        active = ME
+        await userEvent.click(screen.getByRole('button', { name: 'Reload session' }))
+        await screen.findByText(ME.organization.id)
+        active = TEAM_ME
+      }
+      await act(async () => window.dispatchEvent(new Event('focus')))
+      expect(confirm).toHaveBeenCalledTimes(2)
+      expect(screen.getByTestId('session-context').textContent).toBe(ME.organization.id)
+    },
+  )
 
   it('coalesces with the fresh read after a superseded background read finishes', async () => {
     const background = later()

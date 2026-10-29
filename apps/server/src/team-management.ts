@@ -7,7 +7,7 @@ import {
 import type { Database, Db } from '@hourmere/db'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { createMiddleware } from 'hono/factory'
-import type { Transaction } from 'kysely'
+import { sql, type Transaction } from 'kysely'
 import type { CallerEnv } from './caller.ts'
 import type { CallerMiddleware } from './openapi.ts'
 
@@ -70,11 +70,97 @@ export function organizationWriteAccess(principal: Principal, expectedOrganizati
 }
 
 /**
+ * Host booking actions keep their existing explicit-ID authority. Browser callers may
+ * additionally bind the action to its opening organization; older clients and credentials
+ * retain their existing contract. Run first inside the service's write transaction so the
+ * live context and membership remain valid through commit, without granting management roles.
+ */
+export function bookingWriteAccess(principal: Principal, expectedOrganizationId?: string) {
+  return async (db: Db, organizationId: string): Promise<void> => {
+    if (principal.kind !== 'session' || expectedOrganizationId === undefined) return
+    if (
+      !uuid(expectedOrganizationId) ||
+      !uuid(principal.user.id) ||
+      !uuid(principal.sessionId) ||
+      expectedOrganizationId.toLowerCase() !== organizationId.toLowerCase() ||
+      organizationId.toLowerCase() !== principal.organization.id.toLowerCase()
+    )
+      throw contextChanged()
+
+    // A context transition uses its dedicated lock pool and then reads the app database.
+    // Booking writes may overlap; only an exclusive context transition should conflict.
+    // Refuse that contention promptly so waiting transactions cannot fill the lock pool.
+    const lock = await sql<{
+      locked: boolean
+    }>`SELECT pg_try_advisory_xact_lock_shared(hashtextextended(${`hourmere.organization-context:${principal.sessionId}`}, 0)) AS locked`.execute(
+      db,
+    )
+    if (!lock.rows[0]?.locked) throw contextChanged()
+    const user = await db
+      .selectFrom('auth.user')
+      .select('emailVerified')
+      .where('id', '=', principal.user.id)
+      .forShare()
+      .executeTakeFirst()
+    const organization = await db
+      .selectFrom('auth.organization')
+      .select('id')
+      .where('id', '=', organizationId)
+      .forShare()
+      .executeTakeFirst()
+    const member = await db
+      .selectFrom('auth.member')
+      .select('id')
+      .where('userId', '=', principal.user.id)
+      .where('organizationId', '=', organizationId)
+      .forShare()
+      .executeTakeFirst()
+    const session = await db
+      .selectFrom('auth.session')
+      .select(['expiresAt', 'activeOrganizationId'])
+      .where('id', '=', principal.sessionId)
+      .where('userId', '=', principal.user.id)
+      .forShare()
+      .executeTakeFirst()
+    if (!user?.emailVerified || !organization || !member || !session) throw contextChanged()
+    const validity = await db
+      .selectNoFrom(
+        sql<boolean>`${session.expiresAt}::timestamptz > clock_timestamp()`.as('active'),
+      )
+      .executeTakeFirstOrThrow()
+    if (!validity.active) throw contextChanged()
+
+    const activeMember =
+      session.activeOrganizationId && uuid(session.activeOrganizationId)
+        ? await db
+            .selectFrom('auth.member')
+            .select('id')
+            .where('userId', '=', principal.user.id)
+            .where('organizationId', '=', session.activeOrganizationId)
+            .executeTakeFirst()
+        : undefined
+    const personal = activeMember
+      ? undefined
+      : await db
+          .selectFrom('personal_organizations')
+          .select('organization_id')
+          .where('user_id', '=', principal.user.id)
+          .executeTakeFirst()
+    const effectiveOrganizationId = activeMember
+      ? session.activeOrganizationId
+      : personal?.organization_id
+    if (effectiveOrganizationId?.toLowerCase() !== organizationId.toLowerCase())
+      throw contextChanged()
+  }
+}
+
+/**
  * Shared entry for new team-management web routes.
  *
  * In a RouteModule, create `const access = teamManagementAccess(db, caller)` and declare
- * `middleware: access.middleware`. This preserves requireCaller's Origin/Referer checks,
- * then applies the existing sessionOnly pattern with fresh verified team owner/admin facts.
+ * `middleware: access.middleware`. Authorization-bearing requests are denied before session
+ * resolution. Cookie callers retain requireCaller's Origin/Referer checks, followed by fresh
+ * verified team owner/admin facts; missing or invalid sessions get the same access denial.
  * Bind read targets with `access.read(principal, teamId, ...)`. Read and validate the
  * request body before calling `access.write(principal, teamId, ...)`.
  * Pass `{ expectedOrganizationId }` as the fourth argument for organization-bound writes;
@@ -94,6 +180,17 @@ export function organizationWriteAccess(principal: Principal, expectedOrganizati
  * their own authorization and organization bindings.
  */
 export function teamManagementAccess(db: Db, caller: CallerMiddleware) {
+  const sessionCaller = createMiddleware<CallerEnv>(async (c, next) => {
+    // Authorization selects the agent credential boundary, even with a valid cookie.
+    // Never let a session resolver grant team-management privileges to that request.
+    if (c.req.raw.headers.has('authorization')) throw denied()
+    const response = await caller(c, next)
+    if (response instanceof Response && response.status === 401) {
+      c.header('WWW-Authenticate', undefined)
+      throw denied()
+    }
+    return response
+  })
   const sessionOnly = createMiddleware<CallerEnv>(async (c, next) => {
     await check(db, c.var.principal, c.var.principal.organization.id)
     await next()
@@ -105,8 +202,8 @@ export function teamManagementAccess(db: Db, caller: CallerMiddleware) {
     await next()
   })
   return {
-    middleware: [caller, sessionOnly] as [CallerMiddleware, typeof sessionOnly],
-    memberReadMiddleware: [caller, memberRead] as [CallerMiddleware, typeof memberRead],
+    middleware: [sessionCaller, sessionOnly] as [CallerMiddleware, typeof sessionOnly],
+    memberReadMiddleware: [sessionCaller, memberRead] as [CallerMiddleware, typeof memberRead],
     /** Recheck the bound team before loading any read data; no provider I/O. */
     async read<T>(
       principal: Principal,

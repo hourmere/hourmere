@@ -111,7 +111,9 @@ describe.skipIf(!bootstrap)('organization-bound event-type web writes', () => {
       headers: {
         cookie: f.cookie,
         origin,
-        ...(expected === undefined ? {} : { [EXPECTED_ORGANIZATION_HEADER]: expected }),
+        ...(expected === undefined || path === '/api/auth/organization/set-active'
+          ? {}
+          : { [EXPECTED_ORGANIZATION_HEADER]: expected }),
         ...(body === undefined ? {} : { 'content-type': 'application/json' }),
         ...extra,
       },

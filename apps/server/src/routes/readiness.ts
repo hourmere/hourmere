@@ -94,7 +94,7 @@ export function readinessRoutes(deps: ServiceDeps): RouteModule {
         path: '/api/v1/teams/{teamId}/readiness',
         summary: 'Read a minimal booking readiness summary for the acting team',
         description:
-          'Rechecks a current verified owner/admin web session whose active team matches teamId on every request, including after organization switches and role changes. Returns verified, display-safe member names or the neutral label Team member, coarse reason codes and repair kinds, with no private calendar, account or schedule details. Every access denial after authentication, including an ordinary member, a different team and a missing team, uses team_management_access_denied. Authorization takes precedence over cookies; API keys and MCP OAuth tokens are not session callers. Member and event-type pages default to 50 items each, at most 100; pass their nextCursor as memberCursor and eventTypeCursor respectively.',
+          'Rechecks a current verified owner/admin web session whose active team matches teamId on every request, including after organization switches and role changes. Returns verified, display-safe member names or the neutral label Team member, coarse reason codes and repair kinds, with no private calendar, account or schedule details. Any Authorization header is denied, even with a valid session cookie; API keys and MCP OAuth tokens are not session callers. Every access denial, including missing or invalid sessions, an ordinary member, a different team and a missing team, uses the same 403 team_management_access_denied without revealing team existence. Member and event-type pages default to 50 items each, at most 100; pass their nextCursor as memberCursor and eventTypeCursor respectively.',
         tags: ['Readiness'],
         security: sessionSecurity,
         middleware: [...access.middleware, currentTeamSession] as [
@@ -115,10 +115,15 @@ export function readinessRoutes(deps: ServiceDeps): RouteModule {
               }),
             ),
           },
-          ...errorResponses({
-            400: 'invalid_request, invalid_limit or invalid_cursor',
-            403: 'team_management_access_denied: requires the current team owner/admin web session',
-          }),
+          400: {
+            description: 'invalid_request, invalid_limit or invalid_cursor',
+            content: json(ErrorBody),
+          },
+          403: {
+            description:
+              'team_management_access_denied: requires the current team owner/admin web session without Authorization',
+            content: json(ErrorBody),
+          },
           500: internalError,
         },
       }),

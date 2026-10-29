@@ -6,6 +6,8 @@
 // - links inside the app's frame (navigation, back links, the logo): AppShell asks on click,
 //   before React Router navigates;
 // - signing out: AppShell asks before ending the session;
+// - organization changes found on focus/visibility refresh: SessionProvider asks before
+//   applying the context and remounting the page;
 // - reloading, closing the tab or typing another address: the browser's own prompt
 //   (beforeunload).
 //
@@ -28,6 +30,8 @@ export const LEAVE_WITH_UNSAVED_CHANGES =
 interface UnsavedChanges {
   /** Records whether the source `key` has unsaved changes (false forgets it). */
   set: (key: symbol, dirty: boolean) => void
+  /** Reads the current registrations without asking to discard them. */
+  hasUnsavedChanges: () => boolean
   /** True when nothing is unsaved, or the person agreed to discard it. */
   confirmLeave: () => boolean
 }
@@ -44,20 +48,25 @@ export function UnsavedChangesProvider({ children }: { children: ReactNode }) {
     else dirty.current.delete(key)
   }, [])
 
+  const hasUnsavedChanges = useCallback(() => dirty.current.size > 0, [])
+
   const confirmLeave = useCallback(() => {
-    if (dirty.current.size === 0) return true
+    if (!hasUnsavedChanges()) return true
     // Registrations stay until their page unmounts: leaving can still fail (a sign-out the
     // server refuses), and the page, still there, must keep asking.
     return window.confirm(t(LEAVE_WITH_UNSAVED_CHANGES))
-  }, [t])
+  }, [hasUnsavedChanges, t])
 
-  const value = useMemo(() => ({ set, confirmLeave }), [set, confirmLeave])
+  const value = useMemo(
+    () => ({ set, hasUnsavedChanges, confirmLeave }),
+    [set, hasUnsavedChanges, confirmLeave],
+  )
   return <UnsavedChangesContext value={value}>{children}</UnsavedChangesContext>
 }
 
 function useUnsavedChangesContext(): UnsavedChanges {
   const context = useContext(UnsavedChangesContext)
-  if (!context) throw new Error('needs an <UnsavedChangesProvider> (AppShell has one)')
+  if (!context) throw new Error('needs an <UnsavedChangesProvider> (SessionProvider has one)')
   return context
 }
 
@@ -89,6 +98,11 @@ export function useUnsavedChanges(dirty: boolean) {
 /** Asks before leaving when something is unsaved; true when it is fine to leave. */
 export function useConfirmLeave(): () => boolean {
   return useUnsavedChangesContext().confirmLeave
+}
+
+/** Reads whether any part of the current page still has unsaved changes. */
+export function useHasUnsavedChanges(): () => boolean {
+  return useUnsavedChangesContext().hasUnsavedChanges
 }
 
 /**

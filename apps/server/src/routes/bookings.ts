@@ -25,6 +25,7 @@ import type { CallerEnv } from '../caller.ts'
 import { localeDescription } from '../i18n/locale-description.ts'
 import { authenticated, ErrorBody, json, type RouteModule } from '../openapi.ts'
 import { createRateLimiter, PUBLIC_RATE_LIMITS, type RateLimit, rateLimit } from '../rate-limit.ts'
+import { bookingWriteAccess, EXPECTED_ORGANIZATION_HEADER } from '../team-management.ts'
 
 // Schemas shared with the public routes (public.ts).
 
@@ -51,6 +52,13 @@ export const LocationKind = z.enum(LOCATION_KINDS)
 
 /** A bookable time: public slots and the times a booking can move to. */
 export const Slot = z.object({ start: Instant, end: Instant }).openapi('Slot')
+
+const ExpectedOrganizationHeaders = z.object({
+  'x-expected-organization-id': z.string().optional().openapi({
+    description:
+      'Browser host actions bind this to the organization where the action opened. When supplied by a browser session, mismatched, removed or stale organization context returns 409 organization_context_changed. Optional for older clients and ignored for API keys.',
+  }),
+})
 
 export const BookingLocation = z.looseObject({ kind: LocationKind }).openapi('BookingLocation', {
   description:
@@ -283,13 +291,17 @@ export function bookingRoutes({
     // Tuples preserve caller's principal type through createRoute's middleware inference.
     const hostManage: [typeof caller, MiddlewareHandler<CallerEnv>] = [caller, hostManageLimit]
     const hostSlots: [typeof caller, MiddlewareHandler<CallerEnv>] = [caller, hostSlotsLimit]
-    const context = (principal: ServiceContext['principal']): ServiceContext => ({
+    const context = (
+      principal: ServiceContext['principal'],
+      expectedOrganizationId?: string,
+    ): ServiceContext => ({
       db,
       principal,
       now,
       notify,
       automaticMeet,
       automaticZoom,
+      authorizeOrganizationWrite: bookingWriteAccess(principal, expectedOrganizationId),
     })
 
     app.openapi(
@@ -304,6 +316,7 @@ export function bookingRoutes({
           'A Google Meet conference_pending_timeout retry rechecks the same event and conference request without creating a replacement. Only an explicit conference_failed result permits a new request on that event.',
         request: {
           params: z.object({ id: z.uuid() }),
+          headers: ExpectedOrganizationHeaders,
           body: { required: true, content: json(z.strictObject({})) },
         },
         responses: {
@@ -312,7 +325,10 @@ export function bookingRoutes({
           401: unauthorized,
           403: crossOrigin,
           404: { description: 'No such booking or conference', content: json(ErrorBody) },
-          409: { description: 'conference_not_retryable', content: json(ErrorBody) },
+          409: {
+            description: 'conference_not_retryable or organization_context_changed',
+            content: json(ErrorBody),
+          },
         },
       }),
       async (c) => {
@@ -323,7 +339,10 @@ export function bookingRoutes({
           'application/json'
         )
           return c.json({ error: 'invalid_request', message: 'Send an empty JSON object.' }, 400)
-        await retryBookingConference(context(c.var.principal), c.req.valid('param').id)
+        await retryBookingConference(
+          context(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
+          c.req.valid('param').id,
+        )
         return c.body(null, 204)
       },
     )
@@ -337,6 +356,7 @@ export function bookingRoutes({
         summary: 'Reconcile my pinned ordinary calendar copy',
         request: {
           params: z.object({ id: z.uuid() }),
+          headers: ExpectedOrganizationHeaders,
           body: { required: true, content: json(z.strictObject({})) },
         },
         responses: {
@@ -345,7 +365,7 @@ export function bookingRoutes({
           401: unauthorized,
           403: crossOrigin,
           404: hostNotFound,
-          409: error('calendar_copy_not_retryable'),
+          409: error('calendar_copy_not_retryable or organization_context_changed'),
         },
       }),
       async (c) => {
@@ -354,7 +374,10 @@ export function bookingRoutes({
           'application/json'
         )
           return c.json({ error: 'invalid_request', message: 'Send an empty JSON object.' }, 400)
-        await retryConferenceMirror(context(c.var.principal), c.req.valid('param').id)
+        await retryConferenceMirror(
+          context(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
+          c.req.valid('param').id,
+        )
         return c.body(null, 204)
       },
     )
@@ -542,6 +565,7 @@ export function bookingRoutes({
         middleware: hostManage,
         request: {
           params: z.object({ id: z.uuid() }),
+          headers: ExpectedOrganizationHeaders,
           body: { content: json(RescheduleBody), required: true },
         },
         responses: {
@@ -554,14 +578,14 @@ export function bookingRoutes({
           403: crossOrigin,
           404: hostNotFound,
           409: error(
-            'Already cancelled (`booking_cancelled`), already started (`booking_in_past`), the event type no longer takes bookings (`event_type_unavailable`), required hosts are unavailable (`booking_has_no_host`, `booking_hosts_unavailable`), or the time is not offered (`slot_unavailable`, `slot_taken`)',
+            'Already cancelled (`booking_cancelled`), already started (`booking_in_past`), the event type no longer takes bookings (`event_type_unavailable`), required hosts are unavailable (`booking_has_no_host`, `booking_hosts_unavailable`), the time is not offered (`slot_unavailable`, `slot_taken`), or the browser organization context changed (`organization_context_changed`)',
           ),
           429: hostRateLimited,
         },
       }),
       async (c) => {
         const result = await rescheduleHostBooking(
-          context(c.var.principal),
+          context(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
           c.req.valid('param').id,
           {
             start: Temporal.Instant.from(c.req.valid('json').start),
@@ -633,6 +657,7 @@ export function bookingRoutes({
         middleware: caller,
         request: {
           params: z.object({ id: z.uuid() }),
+          headers: ExpectedOrganizationHeaders,
           body: { content: json(CancelBody), required: false },
         },
         responses: {
@@ -642,16 +667,18 @@ export function bookingRoutes({
           403: crossOrigin,
           404: hostNotFound,
           409: error(
-            'Already cancelled (`booking_cancelled`) or already started (`booking_in_past`)',
+            'Already cancelled (`booking_cancelled`), already started (`booking_in_past`), or the browser organization context changed (`organization_context_changed`)',
           ),
           429: keyRateLimited,
         },
       }),
       async (c) => {
         const { reason } = (c.req.valid('json') as z.infer<typeof CancelBody> | undefined) ?? {}
-        const booking = await cancelHostBooking(context(c.var.principal), c.req.valid('param').id, {
-          reason,
-        })
+        const booking = await cancelHostBooking(
+          context(c.var.principal, c.req.header(EXPECTED_ORGANIZATION_HEADER)),
+          c.req.valid('param').id,
+          { reason },
+        )
         return c.json(booking, 200)
       },
     )

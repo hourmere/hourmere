@@ -1,7 +1,9 @@
 import {
   createContext,
+  type Dispatch,
   Fragment,
   type ReactNode,
+  type SetStateAction,
   useCallback,
   useContext,
   useEffect,
@@ -19,6 +21,11 @@ import { AccountLanguage, useI18n } from './i18n/runtime.tsx'
 import type { UiText } from './i18n/translate.ts'
 import { registerCatalog } from './i18n/translate.ts'
 import { signInPath } from './next-path.ts'
+import {
+  UnsavedChangesProvider,
+  useConfirmLeave,
+  useHasUnsavedChanges,
+} from './unsaved-changes.tsx'
 
 registerCatalog(admin)
 
@@ -40,6 +47,8 @@ interface Session {
   state: SessionState
   /** Asks the server again who is signed in, showing the loading state meanwhile. */
   reload: () => void
+  /** Reloads a context conflict after asking before discarding the current draft. */
+  confirmReload: () => void
   /**
    * Asks again in the background, e.g. when the window regains focus: the organization may
    * have changed in another tab. Keeps the current state if the server cannot be reached.
@@ -91,7 +100,6 @@ async function fetchMe(signal: AbortSignal): Promise<MeResult> {
 /** Who is signed in, from GET /api/v1/me; the rest of the app reads it with useSession. */
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<SessionState>({ status: 'loading' })
-  const [notice, setNotice] = useState<Notice | null>(null)
   const [accountLocale, setAccountLocale] = useState<{
     userId: string
     locale: string | undefined
@@ -114,6 +122,38 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     )
     return () => controller.abort()
   }, [signedInUserId])
+  return (
+    <AccountLanguage
+      locale={accountLocale?.userId === signedInUserId ? accountLocale?.locale : undefined}
+    >
+      <UnsavedChangesProvider>
+        <SessionController state={state} setState={setState}>
+          {children}
+        </SessionController>
+      </UnsavedChangesProvider>
+    </AccountLanguage>
+  )
+}
+
+function SessionController({
+  children,
+  state,
+  setState,
+}: {
+  children: ReactNode
+  state: SessionState
+  setState: Dispatch<SetStateAction<SessionState>>
+}) {
+  const [notice, setNotice] = useState<Notice | null>(null)
+  const confirmLeave = useConfirmLeave()
+  const hasUnsavedChanges = useHasUnsavedChanges()
+  const currentState = useRef(state)
+  currentState.current = state
+  // A dismissed confirm can itself return focus to the window. Remember the refused
+  // context while the page is dirty so that event cannot ask again. A conflict's Reload
+  // may be declined before /me reveals the new organization; null binds that refusal to
+  // the next answer.
+  const declinedContext = useRef<{ userId: string; organizationId: string | null } | null>(null)
   // Counts the moments the session ended (sign-out, or a 401). An answer to a request that
   // started before the latest one is stale: applying it would sign a signed-out person back
   // in, e.g. a background check that the server answered just before the sign-out.
@@ -127,23 +167,27 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     epoch.current += 1
     refreshing.current?.controller.abort()
     refreshing.current = null
+    declinedContext.current = null
     setNotice(null)
   }, [])
 
-  const load = useCallback((signal: AbortSignal) => {
-    const started = epoch.current
-    fetchMe(signal).then(
-      (result) => {
-        if (signal.aborted || epoch.current !== started) return
-        if (result.ok) setState({ status: 'signed-in', me: result.me })
-        else if (result.status === 401) setState(lapsed)
-        else setState({ status: 'error', message: result.message })
-      },
-      (err: unknown) => {
-        if (!signal.aborted) setState({ status: 'error', message: errorMessage(err) })
-      },
-    )
-  }, [])
+  const load = useCallback(
+    (signal: AbortSignal) => {
+      const started = epoch.current
+      fetchMe(signal).then(
+        (result) => {
+          if (signal.aborted || epoch.current !== started) return
+          if (result.ok) setState({ status: 'signed-in', me: result.me })
+          else if (result.status === 401) setState(lapsed)
+          else setState({ status: 'error', message: result.message })
+        },
+        (err: unknown) => {
+          if (!signal.aborted) setState({ status: 'error', message: errorMessage(err) })
+        },
+      )
+    },
+    [setState],
+  )
 
   useEffect(() => {
     const controller = new AbortController()
@@ -158,42 +202,80 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         invalidate()
         setState(lapsed)
       }),
-    [invalidate],
+    [invalidate, setState],
   )
 
   const reload = useCallback(() => {
+    invalidate()
     setState({ status: 'loading' })
     load(new AbortController().signal)
-  }, [load])
+  }, [invalidate, load, setState])
 
-  const refresh = useCallback((options?: { fresh?: boolean }) => {
-    if (refreshing.current) {
-      if (!options?.fresh) return refreshing.current.promise
-      refreshing.current.controller.abort()
+  const confirmReload = useCallback(() => {
+    if (confirmLeave()) reload()
+    else {
+      const current = currentState.current
+      if (current.status === 'signed-in')
+        declinedContext.current = { userId: current.me.user.id, organizationId: null }
     }
-    const started = epoch.current
-    const controller = new AbortController()
-    const promise: Promise<Me | null> = fetchMe(controller.signal)
-      .then(
-        (result) => {
-          // The session ended after this check started (see epoch).
-          if (controller.signal.aborted || epoch.current !== started) return null
-          if (result.ok) {
-            setState({ status: 'signed-in', me: result.me })
-            return result.me
-          }
-          if (result.status === 401) setState(lapsed)
-          return null
-        },
-        // Offline for a moment, or cancelled: what is on screen stays.
-        () => null,
-      )
-      .finally(() => {
-        if (refreshing.current?.promise === promise) refreshing.current = null
-      })
-    refreshing.current = { promise, controller }
-    return promise
-  }, [])
+  }, [confirmLeave, reload])
+
+  const refresh = useCallback(
+    (options?: { fresh?: boolean }) => {
+      if (refreshing.current) {
+        if (!options?.fresh) return refreshing.current.promise
+        refreshing.current.controller.abort()
+      }
+      const started = epoch.current
+      const controller = new AbortController()
+      const promise: Promise<Me | null> = fetchMe(controller.signal)
+        .then(
+          (result) => {
+            // The session ended after this check started (see epoch).
+            if (controller.signal.aborted || epoch.current !== started) return null
+            if (result.ok) {
+              const current = currentState.current
+              const context = {
+                userId: result.me.user.id,
+                organizationId: result.me.organization.id,
+              }
+              const declined = declinedContext.current
+              if (!hasUnsavedChanges()) declinedContext.current = null
+              else if (declined?.userId === context.userId && declined.organizationId === null)
+                declinedContext.current = context
+              else if (
+                declined?.userId !== context.userId ||
+                declined.organizationId !== context.organizationId
+              )
+                declinedContext.current = null
+              if (
+                current.status === 'signed-in' &&
+                current.me.user.id === result.me.user.id &&
+                current.me.organization.id !== result.me.organization.id
+              ) {
+                if (declinedContext.current) return null
+                if (!confirmLeave()) {
+                  declinedContext.current = context
+                  return null
+                }
+              }
+              setState({ status: 'signed-in', me: result.me })
+              return result.me
+            }
+            if (result.status === 401) setState(lapsed)
+            return null
+          },
+          // Offline for a moment, or cancelled: what is on screen stays.
+          () => null,
+        )
+        .finally(() => {
+          if (refreshing.current?.promise === promise) refreshing.current = null
+        })
+      refreshing.current = { promise, controller }
+      return promise
+    },
+    [confirmLeave, hasUnsavedChanges, setState],
+  )
 
   // Coming back to the app (another tab, another window): check who is signed in and in
   // which organization, so the app does not act on what it saw when it started.
@@ -216,33 +298,29 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     await endSession()
     invalidate()
     setState({ status: 'signed-out', reason: 'signed-out' })
-  }, [invalidate])
+  }, [invalidate, setState])
 
-  const accept = useCallback((me: Me) => {
-    // A refresh started before the deliberate switch must not restore the old context.
-    epoch.current += 1
-    refreshing.current?.controller.abort()
-    refreshing.current = null
-    setState((current) =>
-      current.status === 'signed-in' && current.me.user.id === me.user.id
-        ? { status: 'signed-in', me }
-        : current,
-    )
-  }, [])
+  const accept = useCallback(
+    (me: Me) => {
+      // A refresh started before the deliberate switch must not restore the old context.
+      epoch.current += 1
+      refreshing.current?.controller.abort()
+      refreshing.current = null
+      declinedContext.current = null
+      setState((current) =>
+        current.status === 'signed-in' && current.me.user.id === me.user.id
+          ? { status: 'signed-in', me }
+          : current,
+      )
+    },
+    [setState],
+  )
 
   const session = useMemo(
-    () => ({ state, reload, refresh, accept, signOut, notice, setNotice }),
-    [state, reload, refresh, accept, signOut, notice],
+    () => ({ state, reload, confirmReload, refresh, accept, signOut, notice, setNotice }),
+    [state, reload, confirmReload, refresh, accept, signOut, notice],
   )
-  return (
-    <SessionContext value={session}>
-      <AccountLanguage
-        locale={accountLocale?.userId === signedInUserId ? accountLocale?.locale : undefined}
-      >
-        {children}
-      </AccountLanguage>
-    </SessionContext>
-  )
+  return <SessionContext value={session}>{children}</SessionContext>
 }
 
 export function useSession(): Session {

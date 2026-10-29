@@ -32,7 +32,7 @@ import {
 } from '../../paths.ts'
 import { randomHex } from '../../random.ts'
 import { type Me, useMe, useSession } from '../../session.tsx'
-import { useConfirmLeave, useUnsavedChanges } from '../../unsaved-changes.tsx'
+import { useUnsavedChanges } from '../../unsaved-changes.tsx'
 import { MissingRecord } from '../NotFound.tsx'
 import {
   comparable,
@@ -143,8 +143,7 @@ function EventTypeForm({
   // active organization. RequireSession remounts it after a confirmed context reload.
   const [expectedOrganizationId] = useState(me.organization.id)
   const headers = { 'X-Expected-Organization-Id': expectedOrganizationId }
-  const { reload: reloadSession } = useSession()
-  const confirmLeave = useConfirmLeave()
+  const { confirmReload } = useSession()
   const [contextChanged, setContextChanged] = useState(false)
   const navigate = useNavigate()
   const [saved, setSaved] = useState<EventType | null>(eventType)
@@ -346,13 +345,7 @@ function EventTypeForm({
 
         {contextChanged && (
           <p>
-            <button
-              type="button"
-              className="button button-small"
-              onClick={() => {
-                if (confirmLeave()) reloadSession()
-              }}
-            >
+            <button type="button" className="button button-small" onClick={confirmReload}>
               {t('Reload')}
             </button>
           </p>
