@@ -97,6 +97,14 @@ export {
   type ManagedBooking,
 } from './manage.ts'
 export {
+  getTeamMemberDepartureImpact,
+  MemberDepartureBookingSchema,
+  MemberDepartureEventTypeSchema,
+  type MemberDepartureImpact,
+  type MemberDepartureImpactInput,
+  MemberDepartureImpactSchema,
+} from './member-departure-impact.ts'
+export {
   getProfile,
   HANDLE_MAX_LENGTH,
   HANDLE_PATTERN,
