@@ -217,6 +217,27 @@ through the browser organization endpoint. Team-administrator booking cancellati
 the same context protection; the existing host booking-ID routes still require the caller
 to be a host.
 
+### Member departure preview
+
+`GET /api/v1/team/members/{memberUserId}/departure-impact?teamId={teamId}` lists the
+team event types and confirmed, not-yet-ended bookings affected by a member leaving.
+It requires a current verified browser session in that team. Members can inspect themselves;
+owners and admins can inspect current members of their team. Inaccessible and missing targets
+receive the same `403 team_management_access_denied`. Personal data and other teams are excluded.
+
+The response contains `evaluatedAt`, `eventTypes` and `bookings`; each collection has `data`,
+`nextCursor` and `totalCount`. Independent `eventTypesLimit` and `bookingsLimit` accept 1–100
+(default 50); follow the corresponding cursor as `eventTypesCursor` or `bookingsCursor`.
+Counts cover all matches, independently of pagination. Results are recalculated on every
+request. Event types give a host-dependency reason; booking fields use the team administrator
+whitelist plus `inProgress` and `handling`.
+
+Bookings with `start <= evaluatedAt < end` remain in the list and require waiting until
+they end or coordinating offline (`wait_until_end_or_coordinate_offline`). Future bookings
+use `coordinate_cancellation`, subject to separate authorization and existing cancellation
+time rules. This read neither cancels bookings nor authorizes leaving or removing a member.
+See the [full response and pagination contract](https://github.com/hourmere/hourmere/blob/main/docs/member-departure-impact.md).
+
 ### Integration settings
 
 The user's own API keys have the same non-credential settings access as browser sessions:

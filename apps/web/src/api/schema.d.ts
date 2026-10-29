@@ -5090,6 +5090,89 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/team/members/{memberUserId}/departure-impact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Event types and unfinished bookings affected by a member's departure
+         * @description Requires a current verified browser session in the requested team. Members can inspect themselves; owners and admins can inspect current members of their team. Each collection has an independent cursor and totalCount, with a default limit of 50 and maximum 100. Event types are ordered by id; bookings by precise stored start time and id. Confirmed bookings ending after evaluatedAt include those in progress. In-progress bookings require waiting until they end or coordinating offline; this read does not relax cancellation rules or authorize a departure. Results and counts are recalculated on every request; keep team, member and limits unchanged while following cursors.
+         */
+        get: {
+            parameters: {
+                query: {
+                    bookingsCursor?: string;
+                    bookingsLimit?: number;
+                    eventTypesCursor?: string;
+                    eventTypesLimit?: number;
+                    teamId: string;
+                };
+                header?: never;
+                path: {
+                    memberUserId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Current departure impact */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MemberDepartureImpact"];
+                    };
+                };
+                /** @description Invalid parameters (invalid_request, invalid_cursor or invalid_limit) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description No valid session or API key */
+                401: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description team_management_access_denied: inaccessible team or member */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+                /** @description The API key's rate limit is used up */
+                429: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Error"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/teams/{teamId}/readiness": {
         parameters: {
             query?: never;
@@ -5833,6 +5916,60 @@ export interface components {
                 /** Format: uuid */
                 id: string;
                 name: string;
+            };
+        };
+        MemberDepartureImpact: {
+            bookings: {
+                data: {
+                    attendees: {
+                        email: string;
+                        isBooker: boolean;
+                        name: string;
+                        timeZone: string;
+                    }[];
+                    /** Format: date-time */
+                    cancelledAt: string | null;
+                    /** Format: date-time */
+                    end: string;
+                    eventType: {
+                        /** Format: uuid */
+                        id: string;
+                        title: string | null;
+                    } | null;
+                    /** @enum {string} */
+                    handling: "coordinate_cancellation" | "wait_until_end_or_coordinate_offline";
+                    hosts: {
+                        name: string;
+                        /** Format: uuid */
+                        userId: string;
+                    }[];
+                    /** Format: uuid */
+                    id: string;
+                    inProgress: boolean;
+                    /** Format: date-time */
+                    start: string;
+                    /** @enum {string} */
+                    status: "confirmed" | "cancelled";
+                }[];
+                nextCursor: string | null;
+                totalCount: number;
+            };
+            /** Format: date-time */
+            evaluatedAt: string;
+            eventTypes: {
+                data: {
+                    /** Format: uuid */
+                    id: string;
+                    isActive: boolean;
+                    /** @enum {string} */
+                    reason: "sole_host" | "round_robin_pool_member" | "collective_required_host";
+                    /** @enum {string} */
+                    schedulingType: "individual" | "round_robin" | "collective";
+                    slug: string;
+                    title: string;
+                }[];
+                nextCursor: string | null;
+                totalCount: number;
             };
         };
         Profile: {

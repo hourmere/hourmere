@@ -148,6 +148,18 @@ export async function listTeamAdminBookings(
   input: ListBookingsInput = {},
 ): Promise<TeamAdminBookingPage> {
   const teamId = await teamManager(ctx)
+  const { data, nextCursor } = await readTeamBookingPage(ctx, teamId, input)
+  return { data, nextCursor }
+}
+
+/** Internal projection shared by authorized team reads; callers supply their checked team. */
+export async function readTeamBookingPage(
+  ctx: ServiceContext,
+  teamId: string,
+  input: ListBookingsInput,
+  hostUserId?: string,
+  teamEventTypesOnly = false,
+): Promise<TeamAdminBookingPage & { startInstants: Map<string, Temporal.Instant> }> {
   // Page booking rows before loading their hosts: collective meetings occupy one row.
   const { query, limit } = bookingPageQuery(ctx.db, input)
   const rows = await query
@@ -167,10 +179,22 @@ export async function listTeamAdminBookings(
       ),
     )
     .where('b.organization_id', '=', teamId)
+    .$if(teamEventTypesOnly, (q) => q.where('event.owner_user_id', 'is', null))
+    .$if(hostUserId !== undefined, (q) =>
+      q.where((eb) =>
+        eb.exists(
+          eb
+            .selectFrom('booking_hosts as assigned_host')
+            .select('assigned_host.booking_id')
+            .whereRef('assigned_host.booking_id', '=', 'b.id')
+            .where('assigned_host.user_id', '=', hostUserId as string),
+        ),
+      ),
+    )
     .execute()
 
   const page = rows.slice(0, limit)
-  if (!page.length) return { data: [], nextCursor: null }
+  if (!page.length) return { data: [], nextCursor: null, startInstants: new Map() }
   const last = page.at(-1)
   const { byHost, byAttendee } = await pageParticipants(
     ctx.db,
@@ -178,6 +202,7 @@ export async function listTeamAdminBookings(
     page.map((row) => row.id),
   )
   return {
+    startInstants: new Map(page.map((row) => [row.id, Temporal.Instant.from(row.cursor_start)])),
     data: page.map((row) =>
       toTeamAdminBooking({
         id: row.id,

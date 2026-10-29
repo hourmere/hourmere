@@ -551,7 +551,7 @@ describe.skipIf(!serverUrl)('team administrator cancellation service', () => {
   it('detects missing expected-organization forwarding in the shared writer source copy', async () => {
     const copy = await sourceCopy<{ teamManagementAccess: Access }>(
       './team-management.ts',
-      'options && {\n                expectedOrganizationId: options.expectedOrganizationId,\n                allowPersonal: false,\n              }',
+      'options && {\n              expectedOrganizationId: options.expectedOrganizationId,\n              allowPersonal: false,\n            }',
       'undefined',
     )
     await expect(verifyContext(copy.teamManagementAccess)).rejects.toMatchObject({
