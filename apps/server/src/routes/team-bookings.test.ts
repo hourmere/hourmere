@@ -4,10 +4,12 @@ import { createRequire, stripTypeScriptTypes } from 'node:module'
 import { createRoute, z } from '@hono/zod-openapi'
 import {
   type Auth,
+  checkTeamManagementAccess,
   createAuth,
   createAuthPool,
   createCallerResolver,
   createMcpOAuthResolver,
+  TeamManagementError,
 } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
@@ -631,9 +633,17 @@ describe.skipIf(!serverUrl)('team administrator booking routes', () => {
     return new Function(
       'DomainError',
       'createMiddleware',
+      'checkTeamManagementAccess',
+      'TeamManagementError',
       'sql',
       `${source}; return teamManagementAccess`,
-    )(DomainError, createMiddleware, sql) as typeof teamManagementAccess
+    )(
+      DomainError,
+      createMiddleware,
+      checkTeamManagementAccess,
+      TeamManagementError,
+      sql,
+    ) as typeof teamManagementAccess
   }
 
   async function verifySessionBoundary(managementFactory: typeof teamManagementAccess) {
