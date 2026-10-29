@@ -318,8 +318,8 @@ describe.skipIf(!serverUrl)('team invitation contract', () => {
     }
     const invitation = await invite(i, owner.cookie, org.id, 'recipient@example.com')
     for (const [actor, status, code] of [
-      [member, 403, 'TEAM_INVITATION_ACCESS_DENIED'],
-      [outsider, 403, 'TEAM_INVITATION_ACCESS_DENIED'],
+      [member, 403, 'TEAM_MANAGEMENT_ACCESS_DENIED'],
+      [outsider, 403, 'TEAM_MANAGEMENT_ACCESS_DENIED'],
     ] as const) {
       const response = await post(i.app, 'invite-member', actor.cookie, {
         email: 'other@example.com',
@@ -401,7 +401,6 @@ describe.skipIf(!serverUrl)('team invitation contract', () => {
     )
     const resent = await post(i.app, 'invite-member', owner.cookie, {
       ...body,
-      role: 'admin',
       resend: true,
     })
     expect(resent.status).toBe(200)

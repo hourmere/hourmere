@@ -239,14 +239,14 @@ describe.skipIf(!serverUrl)('organization web write context', () => {
       await refused(await post('cancel-invitation', f.cookie, { invitationId }, f.first.id))
     }
     for (const memberId of [f.second.memberId, randomUUID()]) {
-      await refused(
-        await post(
-          'update-member-role',
-          f.cookie,
-          { organizationId: f.first.id, memberId, role: 'admin' },
-          f.first.id,
-        ),
+      const denied = await post(
+        'update-member-role',
+        f.cookie,
+        { organizationId: f.first.id, memberId, role: 'admin' },
+        f.first.id,
       )
+      expect(denied.status).toBe(403)
+      expect(await denied.json()).toMatchObject({ code: 'TEAM_MANAGEMENT_ACCESS_DENIED' })
       await refused(
         await post(
           'remove-member',
@@ -296,7 +296,7 @@ describe.skipIf(!serverUrl)('organization web write context', () => {
     )
     expect(denied.status).toBe(403)
     expect(await denied.json()).toMatchObject({
-      code: 'TEAM_INVITATION_ACCESS_DENIED',
+      code: 'TEAM_MANAGEMENT_ACCESS_DENIED',
     })
     await db
       .deleteFrom('auth.member')

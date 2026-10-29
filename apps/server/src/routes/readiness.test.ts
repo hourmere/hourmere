@@ -4,12 +4,14 @@ import { stripTypeScriptTypes } from 'node:module'
 import { createRoute, z } from '@hono/zod-openapi'
 import {
   type Auth,
+  type checkTeamManagementAccess,
   createAuth,
   createAuthPool,
   createCallerResolver,
   createMcpOAuthResolver,
   ensurePersonalOrganization,
   type Principal,
+  type TeamManagementError,
 } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
@@ -66,11 +68,19 @@ function sourceCopy<T>(
 }
 
 function readRouteCopy(mutation?: [string, string], routeMutation?: [string, string]) {
+  const sharedAccess = sourceCopy<{
+    checkTeamManagementAccess: typeof checkTeamManagementAccess
+    TeamManagementError: typeof TeamManagementError
+  }>(
+    'packages/auth/src/team-management.ts',
+    { sql },
+    '({ checkTeamManagementAccess, TeamManagementError })',
+    mutation,
+  )
   const access = sourceCopy<typeof teamManagementAccess>(
     'apps/server/src/team-management.ts',
-    { DomainError, createMiddleware, sql },
+    { DomainError, createMiddleware, ...sharedAccess },
     'teamManagementAccess',
-    mutation,
   )
   return sourceCopy<typeof readinessRoutes>(
     'apps/server/src/routes/readiness.ts',
@@ -503,7 +513,11 @@ describe.skipIf(!process.env.DATABASE_URL)('booking readiness REST', () => {
       '    !uuid(teamId) ||\n    teamId.toLowerCase() !== principal.organization.id.toLowerCase()',
       '    !uuid(teamId)',
     ])
-    await expect(verify(mutated)).rejects.toMatchObject({ name: 'AssertionError' })
+    await expect(verify(mutated)).rejects.toMatchObject({
+      name: 'AssertionError',
+      actual: 200,
+      expected: 403,
+    })
     // The repository source was only read; rerun the original to prove it remains intact.
     await verify(readRouteCopy())
   })

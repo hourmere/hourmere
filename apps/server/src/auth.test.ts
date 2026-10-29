@@ -893,19 +893,20 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
         ).rows[0]?.id as string
       })
 
-      const refused = async (res: Response) => {
+      const refused = async (res: Response, code = 'PERSONAL_ORGANIZATION') => {
         expect(res.status).toBe(403)
-        expect(await res.json()).toMatchObject({ code: 'PERSONAL_ORGANIZATION' })
+        expect(await res.json()).toMatchObject({ code })
       }
 
       it('refuses invitations', async () => {
-        const response = await post('/api/auth/organization/invite-member', alice, {
-          email: 'bob@example.com',
-          role: 'owner',
-          organizationId: personal.id,
-        })
-        expect(response.status).toBe(403)
-        expect(await response.json()).toMatchObject({ code: 'TEAM_INVITATION_ACCESS_DENIED' })
+        await refused(
+          await post('/api/auth/organization/invite-member', alice, {
+            email: 'bob@example.com',
+            role: 'owner',
+            organizationId: personal.id,
+          }),
+          'TEAM_MANAGEMENT_ACCESS_DENIED',
+        )
       })
 
       it('refuses accepting an invitation that exists anyway', async () => {
@@ -918,6 +919,7 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
           await post('/api/auth/organization/accept-invitation', bob, {
             invitationId: invitation.rows[0]?.id,
           }),
+          'TEAM_MANAGEMENT_ACCESS_DENIED',
         )
       })
 
@@ -930,7 +932,7 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
               role: 'owner',
             },
           }),
-        ).rejects.toMatchObject({ body: { code: 'PERSONAL_ORGANIZATION' } })
+        ).rejects.toMatchObject({ body: { code: 'TEAM_MANAGEMENT_ACCESS_DENIED' } })
       })
 
       it('keeps its owner even if a second owner exists', async () => {
@@ -946,6 +948,7 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
             role: 'member',
             organizationId: personal.id,
           }),
+          'TEAM_MANAGEMENT_ACCESS_DENIED',
         )
         await refused(
           await post('/api/auth/organization/remove-member', bob, {
