@@ -89,6 +89,15 @@ describe.skipIf(!serverUrl)('shared team-management access', () => {
         )
         return c.json(actor)
       })
+      // Entry-only probes: no service recheck behind them, so they pin each middleware's own role gate.
+      app.get('/api/v1/team-management-test/:teamId/entry', ...access.middleware, (c) =>
+        c.json({ entered: true }),
+      )
+      app.get(
+        '/api/v1/team-management-test/:teamId/member-entry',
+        ...access.memberReadMiddleware,
+        (c) => c.json({ entered: true }),
+      )
     }
     const app = createApp({
       authHandler: auth.handler,
@@ -161,6 +170,26 @@ describe.skipIf(!serverUrl)('shared team-management access', () => {
       expect(await countWrites(f)).toBe(0)
     },
   )
+
+  it.each([
+    ['owner', 200, 200],
+    ['admin', 200, 200],
+    ['member', 403, 200],
+    ['superadmin', 403, 403],
+    ['', 403, 403],
+  ])('gates the %j role at each middleware entry', async (role, management, memberRead) => {
+    const f = await fixture(role)
+    const entry = (path: string) =>
+      f.app.request(`/api/v1/team-management-test/${f.team.id}/${path}`, {
+        headers: { origin, cookie: f.cookie },
+      })
+    const managementEntry = await entry('entry')
+    expect(managementEntry.status).toBe(management)
+    if (management === 403) await expectDenied(managementEntry)
+    const memberEntry = await entry('member-entry')
+    expect(memberEntry.status).toBe(memberRead)
+    if (memberRead === 403) await expectDenied(memberEntry)
+  })
 
   it('does not retain an admin role from an earlier request in the same session', async () => {
     const f = await fixture()
@@ -306,6 +335,27 @@ describe.skipIf(!serverUrl)('shared team-management access', () => {
     const missingTeam = await expectDenied(await post(f, { teamId: randomUUID() }))
     expect(wrongTeam).toEqual(missingTeam)
     expect(await countWrites(f)).toBe(0)
+  })
+
+  it('binds read callbacks to fresh access facts before loading any team data', async () => {
+    const f = await fixture()
+    const read = () => f.access.read(f.principal, f.team.id, async (_db, actor) => actor)
+    expect(await read()).toEqual({
+      userId: f.user.id,
+      organizationId: f.team.id,
+      role: 'admin',
+    })
+    const other = await createTestTeam(db, [{ user: f.user, role: 'owner' }])
+    let called = false
+    await expect(
+      f.access.read(f.principal, other.id, async () => {
+        called = true
+        return 'unexpected'
+      }),
+    ).rejects.toMatchObject({ code: denied.error })
+    expect(called).toBe(false)
+    await change(f, 'demotion')
+    await expect(read()).rejects.toMatchObject({ code: denied.error })
   })
 
   it('normalizes UUID case without changing the authorized organization', async () => {

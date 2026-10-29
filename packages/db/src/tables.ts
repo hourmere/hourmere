@@ -516,6 +516,22 @@ export interface EventTypes {
   zoom_connection_id: string | null;
 }
 
+export interface InvitationDeliveries {
+  attempts: Generated<number>;
+  created_at: Generated<Timestamp>;
+  due_at: Generated<Timestamp>;
+  generation: Generated<number>;
+  invitation_id: string;
+  last_error_code: string | null;
+  last_job_id: string | null;
+  lease_id: string | null;
+  lease_until: Timestamp | null;
+  resend_request_id: string | null;
+  smtp_accepted_at: Timestamp | null;
+  state: string;
+  updated_at: Generated<Timestamp>;
+}
+
 export interface McpOauthClientActivity {
   client_id: string;
   consented_at: Timestamp;
@@ -670,6 +686,7 @@ export interface DB {
   conference_token_operations: ConferenceTokenOperations;
   event_type_hosts: EventTypeHosts;
   event_types: EventTypes;
+  invitation_deliveries: InvitationDeliveries;
   mcp_oauth_client_activity: McpOauthClientActivity;
   mcp_oauth_grants: McpOauthGrants;
   mcp_oauth_intents: McpOauthIntents;

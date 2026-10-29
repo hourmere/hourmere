@@ -126,6 +126,7 @@ calendar-list access.
 | `booking_calendar_events` | organization | The event each booking wrote to a host calendar, for idempotent updates and cancellation |
 | `booking_notifications` | organization | Each email sent about a booking (kind, recipient), refused for good, or suppressed by abuse controls, so a retried job never sends it twice; the SHA-256 of the manage-link secret a sent invitee email carried |
 | `notification_email_sends` | instance | Minimal two-day rolling mail accounting: domain-separated invitee/guest or sign-in recipient HMAC-SHA-256 (NULL for hosts) and send timestamp, independent of booking deletion |
+| `invitation_deliveries` | invitation | Current delivery generation, bounded attempts, claim lease and safe outcome; deleted with its Better Auth invitation |
 
 ## Guarantees and why
 
@@ -306,6 +307,38 @@ eligibility, serializes delivery through the outbox row, and deletes it on succe
 it cannot be used. A periodic job removes expired rows even if their delivery job was lost.
 The encryption key is derived from the auth secret, separately from calendar encryption;
 row ID and public origin are authenticated associated data.
+
+## Invitation delivery storage
+
+`invitation_deliveries` retains one current generation per `auth.invitation` UUID,
+with `ON DELETE CASCADE`. Its five states are `queued`, `sending`, `smtp_accepted`,
+`failed` and `skipped`; these never change Better Auth's invitation lifecycle.
+Generation is bounded to 1–32 and attempts to 0–4. Only `sending` has a lease ID
+and deadline and requires a consumed attempt; only `smtp_accepted` has an SMTP
+acceptance timestamp. Failed and skipped outcomes require an allowlisted error code.
+The row holds no recipient, link, credential, message or provider response.
+A partial `(due_at, invitation_id)` index covers queued and sending records.
+
+The notification package's storage query lists pending, unexpired invitations in one
+organization with their delivery summaries. A missing delivery row reads as `unknown`,
+which provides no evidence of sending. Callers must authorize access to the organization
+before using this internal query; no HTTP endpoint is installed by the storage layer.
+
+Every delivery row remains while its invitation is pending and unexpired, including
+terminal delivery outcomes. Cleanup takes bounded batches, locks invitations before
+delivery records, and skips locked rows. It deletes only accepted, canceled, rejected or
+expired pending invitations' delivery records once both `expiresAt` and delivery
+`updated_at` are at least seven days old and no live lease remains. Unknown invitation
+statuses are retained. Invitation rows themselves are preserved.
+
+Before applying the invitation-delivery migration, stop all old web/all/worker processes.
+Existing pending, unexpired invitations are backfilled as
+`failed/legacy_delivery_unknown`, with generation 1 and zero attempts; other invitations
+and the sign-in mail tables are preserved. This prevents later repair from silently
+resending historic invitations with unknown mail outcomes. Restart every role with the
+new version. This migration installs storage and queries only; sender, queue registration,
+reconciliation and management integration are separate work. Explicit resend will extend
+expiry under the approved protocol; it is not implemented by these queries.
 
 ## Guest recipients
 
