@@ -168,6 +168,11 @@ limited to MCP tools and do not authenticate REST requests.
 
 ### Browser organization context
 
+Better Auth's `/api/auth/organization/*` endpoints require browser sessions. Any
+Authorization header, including an empty or invalid value, returns `403 SESSION_REQUIRED`
+even alongside a valid owner/admin cookie. API keys and MCP OAuth tokens cannot inherit
+the browser's organization-management privileges.
+
 Organization-scoped browser drafts bind `X-Expected-Organization-Id` to the organization
 where the form or action started. Do not replace that value with the active organization
 at submission time. A header works with both the strict REST JSON bodies and Better Auth's
@@ -181,6 +186,7 @@ The existing covered endpoints are:
 | Edit, enable or disable a personal or team event type | `PATCH /api/v1/event-types/{id}` |
 | Delete a personal or team event type | `DELETE /api/v1/event-types/{id}` |
 | Activate a round-robin team event type | `POST /api/v1/event-types/{id}/round-robin/activate` |
+| Cancel a current-team booking as an administrator | `POST /api/v1/team/bookings/{id}/cancel` |
 | Invite or resend an invitation | `POST /api/auth/organization/invite-member` |
 | Revoke an invitation | `POST /api/auth/organization/cancel-invitation` |
 | Change a member's role | `POST /api/auth/organization/update-member-role` |
@@ -227,9 +233,9 @@ profile, calendar and schedule writes, API-key management and OAuth connection m
 are excluded. API keys retain their issued organization, and OAuth grants retain their
 consented organization; neither depends on this browser header. Public booking and private
 manage-token operations retain their existing authority. Team deletion is unavailable
-through the browser organization endpoint. There is currently no team-administrator booking
-cancellation endpoint; booking-ID routes still require the caller to be a host.
-Any future administrator cancellation route must use the same context protection.
+through the browser organization endpoint. Team-administrator booking cancellation uses
+the same context protection; the existing host booking-ID routes still require the caller
+to be a host.
 
 ### Team roles
 
@@ -257,7 +263,9 @@ onboarding path; joining a team requires accepting a member invitation.
 team event types and confirmed, not-yet-ended bookings affected by a member leaving.
 It requires a current verified browser session in that team. Members can inspect themselves;
 owners and admins can inspect current members of their team. Inaccessible and missing targets
-receive the same `403 team_management_access_denied`. Personal data and other teams are excluded.
+receive the same `403 team_management_access_denied`. Missing or invalid sessions and any
+Authorization header, even alongside a valid cookie, receive that same denial without a
+`WWW-Authenticate` challenge. Personal data and other teams are excluded.
 
 The response contains `evaluatedAt`, `eventTypes` and `bookings`; each collection has `data`,
 `nextCursor` and `totalCount`. Independent `eventTypesLimit` and `bookingsLimit` accept 1–100
@@ -381,14 +389,39 @@ verified team owners/admins, including meetings hosted by other members. It acce
 same time/status filters, `order`, `limit` and opaque `cursor` as the host booking list.
 Pagination uses start time and ID, retaining microsecond cursor precision; collective
 bookings appear once. Inserts before a cursor do not shift later pages; later inserts can
-appear after it. Personal organizations, ordinary members and API keys receive
-`403 team_management_access_denied`. The route uses the shared team-management access check
+appear after it. Missing or invalid sessions, personal organizations, ordinary or removed
+members and API-key/OAuth callers receive the same `403 team_management_access_denied`,
+without revealing team existence. Any Authorization header is denied even alongside a
+valid owner/admin session cookie. The route uses the shared team-management access check
 and caller Origin/Referer handling. Responses contain only ID, status, start/end,
 `cancelledAt`, associated `eventType: {id,title}` (null title after deletion), saved
 `hosts: [{userId,name}]` and `attendees: [{name,email,timeZone,isBooker}]`, inside
 `{data,nextCursor}`. No answers, free-text titles/reasons, management capabilities, calendar
 copies, conference URLs or reschedule-chain IDs are included. Cancelled reschedule
 predecessors and their successors are separate rows.
+
+`POST /api/v1/team/bookings/{id}/cancel` lets the same current verified owner/admin browser
+session cancel a booking of its current team before the booking starts. Send
+`X-Expected-Organization-Id` from the team where the action started and an optional strict
+`{ "reason": "…" }` body (at most 1000 characters). A same-origin `Origin`, or a same-origin
+`Referer` when Origin is absent, is required; missing sources, `Origin: null` and other
+origins receive 403 `forbidden`. Missing or stale expected organization receives 409
+`organization_context_changed`; reload before deciding whether to submit again.
+
+Success returns 200 `{ "cancelled": true }`. A cancellation already committed in this team
+returns 409 `booking_already_cancelled`, including a retry after a lost response. Reload the
+team list to see the saved state; that response queues no additional notifications. Concurrent
+cancellations commit one cancellation and one notification set. Missing, other-team,
+personal and already-started bookings receive the same 403 `team_management_access_denied`.
+Current membership and role are rechecked under the write locks. API keys, including a key
+alongside a session cookie, receive the same denial for every target; MCP OAuth tokens do
+not authenticate REST and receive 401. An Authorization header never falls back to cookies.
+
+Cancellation retains the saved hosts and conference organizer, attributes the operation to
+the acting administrator, and queues the normal host/attendee cancellation notifications
+and conference cleanup in the same transaction. Team administration grants no host
+reschedule or organizer-only conference retry authority. Existing host, private-link, REST
+API-key and MCP cancellation permissions and retry responses remain unchanged.
 
 Booking lists accept `endAfter` (end strictly after this instant) and `endTo` (end at or
 before it), alongside the existing start-time `from`/`to` filters. The web app splits Upcoming
@@ -414,15 +447,16 @@ and titles without current event metadata remain unchanged. Public/manage respon
 personal organization it also returns their personal event-type readiness; in a team it
 returns only that member’s detail. It requires a current verified web session and current
 membership. API keys and OAuth callers cannot use readiness reads.
-An `Authorization` header takes precedence over the session cookie: a valid API key plus
+On the self read, an `Authorization` header takes precedence over the session cookie: a valid API key plus
 a cookie receives `403 readiness_access_denied`; an invalid bearer or MCP OAuth access
 token receives `401 unauthorized`, even alongside a valid cookie. There is no `userId`,
 organization or audience override; unknown query fields receive `400 invalid_request`.
 
 `GET /api/v1/teams/{teamId}/readiness` returns minimal member and event-type summaries for
 the acting team, through the shared team-management access check. Only current verified
-team owners/admins can read it. Ordinary members, other teams and nonexistent teams receive
-the same `403 team_management_access_denied`. The summary includes coarse reasons such as
+team owners/admins can read it. Missing sessions, ordinary members, other teams and
+nonexistent teams receive the same `403 team_management_access_denied`. Any Authorization
+header is denied even with a valid owner/admin cookie. The summary includes coarse reasons such as
 `calendar_attention_required` and repair kinds; it excludes private calendar/account data,
 schedules, exact sync times, provider errors and busy-time details.
 Names are returned only for verified members with a nonempty, valid display name;
@@ -477,11 +511,13 @@ Team summaries collapse these into the single coarse `calendar_attention_require
 Neither a missing timestamp nor a reset snapshot proves that synchronization was never tried.
 
 Both routes use the common open `Error` schema: `400 invalid_request` for malformed/unknown
-query fields (`invalid_limit` or `invalid_cursor` for service-level pagination validation),
-`401 unauthorized` for missing or invalid credentials, `403 readiness_access_denied` (self)
-or `team_management_access_denied` (team) for an authenticated caller without access,
-`429 rate_limited` for credential throttling, and `500 internal_error` for unexpected
-failures that prevent a safe response. Dependency evaluation failures that can be safely
+query fields (`invalid_limit` or `invalid_cursor` for service-level pagination validation)
+and `500 internal_error` for unexpected failures that prevent a safe response. The self read
+uses `401 unauthorized` for missing or invalid credentials, `403 readiness_access_denied`
+for an authenticated caller without access, and `429 rate_limited` for credential throttling.
+The team read refuses any Authorization header before credential resolution and uses only
+`403 team_management_access_denied` for every access denial, including missing or invalid
+sessions, without a `WWW-Authenticate` challenge. Dependency evaluation failures that can be safely
 represented inside an authorized item use `check_failed` in a successful response instead.
 
 Pages default to 50 items and accept `limit=1..100`. Pass the member page’s `nextCursor` as
