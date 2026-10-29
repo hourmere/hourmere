@@ -618,6 +618,7 @@ export async function writeBookingConference(
 
 export async function retryBookingConference(ctx: ServiceContext, bookingId: string) {
   await ctx.db.transaction().execute(async (trx) => {
+    await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, bookingId)
     // Match the service's parent protection before booking -> intent, and retain current
     // membership through the retry commit. These share locks are compatible with a
     // provider's owner KEY SHARE and never cover network work.

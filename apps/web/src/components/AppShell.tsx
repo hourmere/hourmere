@@ -5,7 +5,7 @@ import { LanguageSwitcher, useI18n } from '../i18n/runtime.tsx'
 import { msg, type UiText } from '../i18n/translate.ts'
 import { PATHS } from '../paths.ts'
 import { useMe, useSession } from '../session.tsx'
-import { leavesPage, UnsavedChangesProvider, useConfirmLeave } from '../unsaved-changes.tsx'
+import { leavesPage, useConfirmLeave } from '../unsaved-changes.tsx'
 import { InstanceLegalLinks } from './LegalLinks.tsx'
 import { Logo } from './Logo.tsx'
 import { PageSkeleton } from './PageSkeleton.tsx'
@@ -40,14 +40,6 @@ function keepActiveVisible(list: HTMLUListElement) {
 
 /** The frame around signed-in pages: header, navigation and the page itself. */
 export function AppShell() {
-  return (
-    <UnsavedChangesProvider>
-      <Shell />
-    </UnsavedChangesProvider>
-  )
-}
-
-function Shell() {
   const { locale, t, ui } = useI18n()
 
   const me = useMe()

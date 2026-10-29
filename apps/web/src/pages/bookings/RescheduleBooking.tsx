@@ -1,7 +1,8 @@
 import { useCallback, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { api, type Schemas, unwrap } from '../../api/client.ts'
-import { errorMessage, RequestError } from '../../api/errors.ts'
+import { errorMessage, isOrganizationContextChanged, RequestError } from '../../api/errors.ts'
+import { OrganizationContextConflict } from '../../components/OrganizationContextConflict.tsx'
 import { flash } from '../../flash.ts'
 import { zoned } from '../../format.ts'
 import { useMounted } from '../../hooks.ts'
@@ -11,14 +12,17 @@ import { RULES } from '../../limits.ts'
 import { bookingPath, PATHS } from '../../paths.ts'
 import type { Slot, SlotLoader } from '../../public/api.ts'
 import { SlotPicker, type SlotPickerPosition } from '../../public/SlotPicker.tsx'
+import { useUnsavedChanges } from '../../unsaved-changes.tsx'
 
 /** Hosts use their session, never the invitee's management capability. */
 export function RescheduleBooking({
   booking,
   timeZone: initialTimeZone,
+  expectedOrganizationId,
 }: {
   booking: Schemas['Booking']
   timeZone: string
+  expectedOrganizationId: string
 }) {
   const { t, ui, locale, formatLocale } = useI18n()
   const navigate = useNavigate()
@@ -29,11 +33,13 @@ export function RescheduleBooking({
   const [slot, setSlot] = useState<Slot | null>(null)
   const [pickerPosition, setPickerPosition] = useState<SlotPickerPosition | null>(null)
   const [error, setError] = useState<UiText | null>(null)
+  const [conflict, setConflict] = useState<unknown>(null)
   const [blocked, setBlocked] = useState(false)
   const [busy, setBusy] = useState(false)
   const inFlight = useRef(false)
   const openButton = useRef<HTMLButtonElement>(null)
   const format = zoned(timeZone, formatLocale)
+  useUnsavedChanges(open && slot !== null && !blocked)
   const loadSlots: SlotLoader = useCallback(
     async (start, end, signal) => {
       const result = await unwrap(
@@ -49,13 +55,14 @@ export function RescheduleBooking({
 
   async function move() {
     // Rescheduling is not idempotent. Only a deliberate confirmation may send one request.
-    if (!slot || inFlight.current || blocked) return
+    if (!slot || inFlight.current || blocked || conflict) return
     inFlight.current = true
     setBusy(true)
     setError(null)
     try {
       const result = await unwrap(
         api.POST('/api/v1/bookings/{id}/reschedule', {
+          headers: { 'X-Expected-Organization-Id': expectedOrganizationId },
           params: { path: { id: booking.id } },
           body: { start: slot.start },
         }),
@@ -66,7 +73,9 @@ export function RescheduleBooking({
       })
     } catch (err) {
       if (!mounted.current) return
-      if (
+      if (isOrganizationContextChanged(err)) {
+        setConflict(err)
+      } else if (
         err instanceof RequestError &&
         ['slot_taken', 'slot_unavailable'].includes(err.code ?? '')
       ) {
@@ -125,6 +134,7 @@ export function RescheduleBooking({
               {ui(error)}
             </p>
           )}
+          {conflict !== null && <OrganizationContextConflict error={conflict} />}
           {blocked ? (
             <p>
               <Link to={PATHS.bookings}>{t('Back to bookings')}</Link>
@@ -143,7 +153,7 @@ export function RescheduleBooking({
                 <button
                   type="button"
                   className="button button-primary"
-                  disabled={busy}
+                  disabled={busy || !!conflict}
                   onClick={move}
                 >
                   {busy ? t('Moving…') : t('Confirm new time')}
