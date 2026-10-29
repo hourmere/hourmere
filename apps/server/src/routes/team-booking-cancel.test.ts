@@ -513,8 +513,11 @@ describe.skipIf(!serverUrl)('team booking cancellation HTTP boundary', () => {
     for (const authorization of ['', 'Basic invalid', 'Bearer invalid', 'Bearer hm_invalid'])
       for (const id of [f.booking, randomUUID()]) {
         const response = await cancel(f, { id, headers: { authorization } })
-        expect(await answer(response)).toEqual({ status: 401, body: { error: 'unauthorized' } })
-        expect(response.headers.get('www-authenticate')).toBe('Bearer')
+        expect(await answer(response)).toEqual({
+          status: 403,
+          body: { error: 'team_management_access_denied' },
+        })
+        expect(response.headers.has('www-authenticate')).toBe(false)
       }
     await expectUnchanged(f.booking, before)
   })
@@ -525,8 +528,8 @@ describe.skipIf(!serverUrl)('team booking cancellation HTTP boundary', () => {
     for (const cookie of [null, 'better-auth.session_token=invalid'])
       for (const id of [f.booking, randomUUID()])
         expect(await answer(await cancel(f, { cookie, id }))).toEqual({
-          status: 401,
-          body: { error: 'unauthorized' },
+          status: 403,
+          body: { error: 'team_management_access_denied' },
         })
     await expectUnchanged(f.booking, before)
   })
@@ -607,7 +610,7 @@ describe.skipIf(!serverUrl)('team booking cancellation HTTP boundary', () => {
               headers: { authorization: `Bearer ${token}` },
             }),
           ),
-        ).toEqual({ status: 401, body: { error: 'unauthorized' } })
+        ).toEqual({ status: 403, body: { error: 'team_management_access_denied' } })
     await expectUnchanged(f.booking, before)
   })
 
