@@ -104,6 +104,7 @@ export {
   type MemberDepartureImpactInput,
   MemberDepartureImpactSchema,
 } from './member-departure-impact.ts'
+export { leaveTeamMember } from './member-leave.ts'
 export {
   getProfile,
   HANDLE_MAX_LENGTH,

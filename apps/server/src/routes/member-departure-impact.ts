@@ -24,7 +24,7 @@ const DepartureBooking = z.object({
   hosts: z.array(z.object(TeamAdminBookingSchema.shape.hosts.element.shape)),
   attendees: z.array(z.object(TeamAdminBookingSchema.shape.attendees.element.shape)),
 })
-const DepartureImpact = z
+export const DepartureImpact = z
   .object({
     ...MemberDepartureImpactSchema.shape,
     eventTypes: z.object({
