@@ -205,7 +205,7 @@ const publishedTablePages = [
   ['webhooks', 4],
   ['cli', 1],
   ['notifications', 4],
-  ['api-conventions', 4],
+  ['api-conventions', 5],
   ['google-calendar', 1],
   ['mcp', 3],
   ['zoom-connections', 2],

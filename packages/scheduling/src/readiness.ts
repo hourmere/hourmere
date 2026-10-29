@@ -15,6 +15,7 @@ import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { eligibleHostIds, hasValidHostShape } from './hosts.ts'
 import { isUuid } from './internal.ts'
+import { cleanText } from './text.ts'
 
 export const ReadinessStateSchema = z.enum([
   'satisfied',
@@ -48,17 +49,21 @@ const Reason = z.enum([
   'optional_feature_attention_required',
 ])
 const AdminFix = z.enum(['edit_event', 'ask_member', 'retry_summary'])
-const SignalId = z.enum([
-  'event_enablement',
-  'default_schedule',
-  'effective_event_schedule',
-  'host_eligibility',
-  'round_robin_activation',
-  'conflict_calendar_selection',
-  'selected_calendar_sync',
-  'optional_conference_dependency',
-  'slot_observation',
-])
+const SignalId = z
+  .enum([
+    'event_enablement',
+    'default_schedule',
+    'effective_event_schedule',
+    'host_eligibility',
+    'round_robin_activation',
+    'conflict_calendar_selection',
+    'selected_calendar_sync',
+    'optional_conference_dependency',
+    'slot_observation',
+  ])
+  .describe(
+    'event_enablement is a legacy signal ID and is no longer emitted; use the independent enablement field. Hidden visibility does not disable an event.',
+  )
 const Signal = z.object({
   id: SignalId,
   state: ReadinessStateSchema,
@@ -102,23 +107,27 @@ const SelfReadinessSchema = z.object({
   summary: Summary,
   availability: z.literal('not_checked'),
   completeness: Completeness,
-  details: z.object({
-    schedules: z.array(
-      z.object({ id: z.uuid(), name: z.string(), timeZone: z.string(), isDefault: z.boolean() }),
+  details: z
+    .object({
+      schedules: z.array(
+        z.object({ id: z.uuid(), name: z.string(), timeZone: z.string(), isDefault: z.boolean() }),
+      ),
+      calendars: z.array(
+        z.object({
+          id: z.uuid(),
+          name: z.string(),
+          accountEmail: z.string().nullable(),
+          provider: z.string(),
+          checkConflicts: z.boolean(),
+          lastSyncedAt: z.iso.datetime().nullable(),
+          syncError: SafeSyncError.nullable(),
+          status: z.string(),
+        }),
+      ),
+    })
+    .describe(
+      'Private details occur only in member.details. Event-type details are a deprecated compatibility field with empty schedules and calendars; reuse member.details.',
     ),
-    calendars: z.array(
-      z.object({
-        id: z.uuid(),
-        name: z.string(),
-        accountEmail: z.string().nullable(),
-        provider: z.string(),
-        checkConflicts: z.boolean(),
-        lastSyncedAt: z.iso.datetime().nullable(),
-        syncError: SafeSyncError.nullable(),
-        status: z.string(),
-      }),
-    ),
-  }),
 })
 const teamFields = {
   summary: Summary,
@@ -127,7 +136,13 @@ const teamFields = {
   reasonCodes: z.array(Reason),
   fixKinds: z.array(AdminFix),
 }
-const TeamMember = z.object({ memberId: z.uuid(), displayName: z.string(), ...teamFields })
+const TeamMember = z.object({
+  memberId: z.uuid(),
+  displayName: z
+    .string()
+    .describe('Verified, display-safe member name, otherwise the neutral label Team member.'),
+  ...teamFields,
+})
 const TeamEvent = z.object({
   eventTypeId: z.uuid(),
   enablement: Enablement,
@@ -255,6 +270,16 @@ export async function getSelfReadiness(
     .selectFrom('auth.member as m')
     .innerJoin('auth.user as u', 'u.id', 'm.userId')
     .innerJoin('auth.session as s', 's.userId', 'u.id')
+    .leftJoin('auth.member as activeMember', (join) =>
+      join
+        .onRef('activeMember.userId', '=', 's.userId')
+        .on(
+          sql<string>`${sql.ref('activeMember.organizationId')}::text`,
+          '=',
+          sql.ref('s.activeOrganizationId'),
+        ),
+    )
+    .leftJoin('personal_organizations as personal', 'personal.user_id', 's.userId')
     .leftJoin('personal_organizations as p', 'p.organization_id', 'm.organizationId')
     .select(['m.id', 'm.userId', 'u.name', 'u.emailVerified', 'p.user_id as personalOwner'])
     .where('m.organizationId', '=', principal.organization.id)
@@ -262,6 +287,13 @@ export async function getSelfReadiness(
     .where('u.emailVerified', '=', true)
     .where('s.id', '=', principal.sessionId)
     .where('s.expiresAt', '>', sql<Date>`clock_timestamp()`)
+    .where((eb) =>
+      eb(
+        eb.fn.coalesce('activeMember.organizationId', 'personal.organization_id'),
+        '=',
+        principal.organization.id,
+      ),
+    )
     .executeTakeFirst()
   if (!member) throw denied()
   const options = checkedPage(input)
@@ -329,7 +361,7 @@ export async function getTeamReadiness(
     members: {
       data: members.data.map((member) => ({
         memberId: member.id,
-        displayName: member.name,
+        displayName: memberDisplayName(member),
         ...adminView(evaluateMember(member, facts, now)),
       })),
       nextCursor: members.nextCursor,
@@ -347,6 +379,10 @@ export async function getTeamReadiness(
       nextCursor: events.nextCursor,
     },
   }
+}
+
+function memberDisplayName(member: Member): string {
+  return (member.emailVerified && cleanText(member.name, { max: 200 })) || 'Team member'
 }
 
 async function loadFacts(db: Db, organizationId: string, events: Event[], members: Member[]) {
@@ -550,7 +586,14 @@ function calendarChecks(facts: Facts, userId: string, now: Temporal.Instant): Ch
             'selected_calendar_sync',
             'dependency_unavailable',
             now,
-            'calendar_attention_required',
+            // An explicit failure takes precedence over absent success metadata.
+            selected.some((c) => c.provider === 'google' && (c.status !== 'active' || c.sync_error))
+              ? 'calendar_attention_required'
+              : selected.some(
+                    (c) => c.provider === 'google' && (!c.last_synced_at || c.sync_state === null),
+                  )
+                ? 'sync_not_ready'
+                : 'calendar_attention_required',
             'self_calendars',
             'calendar_worker',
           )
@@ -573,11 +616,13 @@ function calendarChecks(facts: Facts, userId: string, now: Temporal.Instant): Ch
 }
 
 function baseSignals(now: Temporal.Instant) {
-  return SignalId.options.map((id) =>
-    id === 'slot_observation'
-      ? check(id, 'not_checked', now, 'check_not_performed', 'retry_summary')
-      : na(id, now),
-  )
+  return SignalId.options
+    .filter((id) => id !== 'event_enablement')
+    .map((id) =>
+      id === 'slot_observation'
+        ? check(id, 'not_checked', now, 'check_not_performed', 'retry_summary')
+        : na(id, now),
+    )
 }
 function put(signals: Check[], ...checks: Check[]) {
   for (const value of checks) {
@@ -741,7 +786,6 @@ function evaluateEvent(
   const personal = event.owner_user_id !== null
   const mode = personal ? 'individual' : event.scheduling_type
   const enablement = event.is_active ? 'enabled' : 'disabled'
-  put(signals, check('event_enablement', 'satisfied', now))
   let activation: View['activation'] = 'not_applicable'
   if (mode === 'round_robin') {
     activation = facts.activation.ok
@@ -892,30 +936,32 @@ function selfView(
     summary: view.summary,
     completeness: view.completeness,
     details: {
-      schedules: facts.schedules.ok
-        ? facts.schedules.value
-            .filter((s) => s.user_id === userId)
-            .map((s) => ({
-              id: s.id,
-              name: s.name,
-              timeZone: s.time_zone,
-              isDefault: s.is_default,
-            }))
-        : [],
-      calendars: facts.calendars.ok
-        ? facts.calendars.value
-            .filter((c) => c.user_id === userId)
-            .map((c) => ({
-              id: c.id,
-              name: c.name,
-              accountEmail: c.account_email,
-              provider: c.provider,
-              checkConflicts: c.check_conflicts,
-              lastSyncedAt: c.last_synced_at?.toISOString() ?? null,
-              syncError: SafeSyncError.nullable().catch(null).parse(c.sync_error),
-              status: c.status,
-            }))
-        : [],
+      schedules:
+        subject.kind === 'member' && facts.schedules.ok
+          ? facts.schedules.value
+              .filter((s) => s.user_id === userId)
+              .map((s) => ({
+                id: s.id,
+                name: s.name,
+                timeZone: s.time_zone,
+                isDefault: s.is_default,
+              }))
+          : [],
+      calendars:
+        subject.kind === 'member' && facts.calendars.ok
+          ? facts.calendars.value
+              .filter((c) => c.user_id === userId)
+              .map((c) => ({
+                id: c.id,
+                name: c.name,
+                accountEmail: c.account_email,
+                provider: c.provider,
+                checkConflicts: c.check_conflicts,
+                lastSyncedAt: c.last_synced_at?.toISOString() ?? null,
+                syncError: SafeSyncError.nullable().catch(null).parse(c.sync_error),
+                status: c.status,
+              }))
+          : [],
     },
   }
 }

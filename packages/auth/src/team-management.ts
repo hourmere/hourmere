@@ -8,6 +8,10 @@ export interface TeamManager {
   role: 'owner' | 'admin'
 }
 
+interface TeamReader extends Omit<TeamManager, 'role'> {
+  role: 'owner' | 'admin' | 'member'
+}
+
 const uuid = (id: string) =>
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
 export class TeamManagementError extends Error {
@@ -65,7 +69,8 @@ export async function checkTeamManagementAccess(
   teamId: string,
   lock = false,
   context?: { expectedOrganizationId: string; allowPersonal: boolean },
-): Promise<TeamManager> {
+  allowMemberRead = false,
+): Promise<TeamReader> {
   if (
     context &&
     (!uuid(context.expectedOrganizationId) ||
@@ -106,7 +111,13 @@ export async function checkTeamManagementAccess(
   const member = await memberQuery.executeTakeFirst()
   // Better Auth can store multiple roles. Only these exact known tokens grant management.
   const roles = teamRoles(member?.role)
-  const role = roles.includes('owner') ? 'owner' : roles.includes('admin') ? 'admin' : undefined
+  const role = roles.includes('owner')
+    ? 'owner'
+    : roles.includes('admin')
+      ? 'admin'
+      : allowMemberRead && roles.includes('member')
+        ? 'member'
+        : undefined
   if (!role) throw denied()
 
   // Refuse a session invalidated since caller resolution, including email-proof rotation.

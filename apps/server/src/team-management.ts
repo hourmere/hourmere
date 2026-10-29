@@ -11,6 +11,7 @@ import type { Transaction } from 'kysely'
 import type { CallerEnv } from './caller.ts'
 import type { CallerMiddleware } from './openapi.ts'
 
+const denied = () => new DomainError('forbidden', 'team_management_access_denied')
 export const EXPECTED_ORGANIZATION_HEADER = 'X-Expected-Organization-Id'
 export const ORGANIZATION_CONTEXT_CHANGED =
   'organization_context_changed: reload the page before trying this team write again'
@@ -23,7 +24,7 @@ const contextChanged = () =>
     'Your team context changed. Reload the page before trying again.',
   )
 
-async function check(...args: Parameters<typeof checkTeamManagementAccess>): Promise<TeamManager> {
+async function check(...args: Parameters<typeof checkTeamManagementAccess>) {
   try {
     return await checkTeamManagementAccess(...args)
   } catch (error) {
@@ -76,6 +77,8 @@ export function organizationWriteAccess(principal: Principal, expectedOrganizati
  * then applies the existing sessionOnly pattern with fresh verified team owner/admin facts.
  * Bind read targets with `access.read(principal, teamId, ...)`. Read and validate the
  * request body before calling `access.write(principal, teamId, ...)`.
+ * Pass `{ expectedOrganizationId }` as the fourth argument for organization-bound writes;
+ * the shared check also verifies the session's current organization under its locks.
  *
  * `write` owns a READ COMMITTED transaction. All database writes must use its `trx` and
  * returned actor, with target objects scoped to actor.organizationId. It rechecks eligibility
@@ -95,25 +98,48 @@ export function teamManagementAccess(db: Db, caller: CallerMiddleware) {
     await check(db, c.var.principal, c.var.principal.organization.id)
     await next()
   })
+  // Entry to self-impact reads only. The service must still scope the target to the
+  // caller for ordinary members and recheck the current session organization.
+  const memberRead = createMiddleware<CallerEnv>(async (c, next) => {
+    await check(db, c.var.principal, c.var.principal.organization.id, false, undefined, true)
+    await next()
+  })
   return {
     middleware: [caller, sessionOnly] as [CallerMiddleware, typeof sessionOnly],
+    memberReadMiddleware: [caller, memberRead] as [CallerMiddleware, typeof memberRead],
     /** Recheck the bound team before loading any read data; no provider I/O. */
     async read<T>(
       principal: Principal,
       teamId: string,
       operation: (db: Db, actor: TeamManager) => Promise<T>,
     ): Promise<T> {
-      return operation(db, await check(db, principal, teamId))
+      const actor = await check(db, principal, teamId)
+      if (actor.role === 'member') throw denied()
+      return operation(db, { ...actor, role: actor.role })
     },
     write<T>(
       principal: Principal,
       teamId: string,
       operation: (trx: Transaction<Database>, actor: TeamManager) => Promise<T>,
+      options?: { expectedOrganizationId: string },
     ): Promise<T> {
       return db
         .transaction()
         .setIsolationLevel('read committed')
-        .execute(async (trx) => operation(trx, await check(trx, principal, teamId, true)))
+        .execute(async (trx) => {
+          const actor = await check(
+            trx,
+            principal,
+            teamId,
+            true,
+            options && {
+              expectedOrganizationId: options.expectedOrganizationId,
+              allowPersonal: false,
+            },
+          )
+          if (actor.role === 'member') throw denied()
+          return operation(trx, { ...actor, role: actor.role })
+        })
     },
   }
 }
