@@ -413,10 +413,12 @@ Each self signal is `{id,state,reasonCode,checkedAt,ownerKind,fixKind}`. Its sta
 
 Unknown and failed required checks set `completeness:"partial"`; they never imply passed
 checks or no slots. `slot_observation` always remains `not_checked` and is excluded from
-configuration completeness. For selected Google calendars, explicit sync errors or inactive
-connections take precedence as `calendar_attention_required`; otherwise a missing successful
-timestamp or snapshot uses `sync_not_ready`. Other unsafe cached-sync facts use
-`calendar_attention_required`. One selected-sync signal reports one cause and repair.
+configuration completeness. Each selected Google calendar is judged separately: explicit
+sync errors or inactive connections take precedence as `calendar_attention_required`;
+otherwise a missing successful timestamp or snapshot uses `sync_not_ready`. Other unsafe
+cached-sync facts use `calendar_attention_required`. Across selected calendars, unexpected
+evaluation failures remain `check_failed`; otherwise `calendar_attention_required` takes
+precedence over `sync_not_ready`. One selected-sync signal reports one cause and repair.
 Team summaries collapse these into the single coarse `calendar_attention_required` reason.
 Neither a missing timestamp nor a reset snapshot proves that synchronization was never tried.
 

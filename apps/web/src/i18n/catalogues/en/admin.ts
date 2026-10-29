@@ -1,5 +1,34 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  'Selected calendars cannot provide conflict checks.':
+    'Selected calendars cannot provide conflict checks.',
+  'Configuration checks': 'Configuration checks',
+  'Configuration checks passed': 'Configuration checks passed',
+  'Configuration needs attention': 'Configuration needs attention',
+  'Calendar sync needs attention': 'Calendar sync needs attention',
+  'Some hosts need attention': 'Some hosts need attention',
+  'Configuration not checked': 'Configuration not checked',
+  'Configuration check failed': 'Configuration check failed',
+  'Checking configuration…': 'Checking configuration…',
+  'Retry checks': 'Retry checks',
+  'RR activated': 'RR activated',
+  'Configuration checks do not guarantee available times. Check the booking page for current availability.':
+    'Configuration checks do not guarantee available times. Check the booking page for current availability.',
+  'Working hours are missing.': 'Working hours are missing.',
+  'Host settings need attention.': 'Host settings need attention.',
+  'Selected calendars are waiting for a successful sync.':
+    'Selected calendars are waiting for a successful sync.',
+  'Automatic meeting settings need attention.': 'Automatic meeting settings need attention.',
+  'Ask the hosts to review their personal working hours and calendars.':
+    'Ask the hosts to review their personal working hours and calendars.',
+  'Review hosts': 'Review hosts',
+  'Review event settings': 'Review event settings',
+  'Set working hours': 'Set working hours',
+  'Review schedule': 'Review schedule',
+  'Review calendar sync': 'Review calendar sync',
+  'Sign in to verify your identity': 'Sign in to verify your identity',
+  'Review profile': 'Review profile',
+  'Review conference accounts': 'Review conference accounts',
   'Calendar permissions need review': 'Calendar permissions need review',
   'Selected for new bookings — review permissions':
     'Selected for new bookings — review permissions',

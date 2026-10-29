@@ -52,8 +52,8 @@ describe('responsive table CSS contract', () => {
     for (const [selector, width] of [
       ['.table-bookings thead th:nth-child(2)', '45%'],
       ['.table-bookings thead th:nth-child(3)', '26%'],
-      ['.table-event-types thead th:nth-child(1)', '44%'],
-      ['.table-event-types thead th:nth-child(3)', '28%'],
+      ['.table-event-types thead th:nth-child(1)', '26%'],
+      ['.table-event-types thead th:nth-child(3)', '24%'],
       ['.table-api-keys thead th:nth-child(1)', '24%'],
       ['.table-api-keys thead th:nth-child(3)', '16%'],
     ]) {

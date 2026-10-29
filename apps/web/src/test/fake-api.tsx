@@ -88,6 +88,18 @@ export const signedInAs = (me: Schemas['Me']): Routes => ({
       signIn: { email: true, google: false, microsoft: false },
     }),
   'GET /api/v1/me': () => json(200, me),
+  // Existing page tests make no readiness claim unless they supply explicit event summaries.
+  'GET /api/v1/readiness/self': () =>
+    json(200, {
+      member: { subject: { kind: 'member', organizationId: me.organization.id } },
+      eventTypes: { data: [], nextCursor: null },
+    }),
+  [`GET /api/v1/teams/${me.organization.id}/readiness`]: () =>
+    json(200, {
+      organizationId: me.organization.id,
+      members: { data: [], nextCursor: null },
+      eventTypes: { data: [], nextCursor: null },
+    }),
   'GET /api/v1/profile': () => json(404, { error: 'profile_not_found' }),
 })
 export const signedIn = signedInAs(ME)

@@ -97,9 +97,9 @@ export function readinessRoutes(deps: ServiceDeps): RouteModule {
           'Rechecks a current verified owner/admin web session whose active team matches teamId on every request, including after organization switches and role changes. Returns verified, display-safe member names or the neutral label Team member, coarse reason codes and repair kinds, with no private calendar, account or schedule details. Every access denial after authentication, including an ordinary member, a different team and a missing team, uses team_management_access_denied. Authorization takes precedence over cookies; API keys and MCP OAuth tokens are not session callers. Member and event-type pages default to 50 items each, at most 100; pass their nextCursor as memberCursor and eventTypeCursor respectively.',
         tags: ['Readiness'],
         security: sessionSecurity,
-        middleware: [access.middleware[0], access.middleware[1], currentTeamSession] as [
+        middleware: [...access.middleware, currentTeamSession] as [
           typeof caller,
-          typeof currentTeamSession,
+          (typeof access.middleware)[1],
           typeof currentTeamSession,
         ],
         request: {
