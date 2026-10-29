@@ -165,20 +165,20 @@ describe('the calendars page', () => {
         definition(article, locale === 'en' ? 'Busy-time sync' : '忙碌时段同步').textContent,
       ).toBe(expected[state])
       expect(
-        within(article).getByText(locale === 'en' ? 'Reconnect required' : '需要重新连接'),
+        within(article).getByText(locale === 'en' ? 'Permissions required' : '需要授权'),
       ).toBeDefined()
       expect(within(article).getByRole('alert').textContent).toContain(
-        locale === 'en' ? 'Access has expired or been removed.' : '访问权限已过期或被移除。',
+        locale === 'en' ? 'Calendar permissions need attention.' : '日历权限需要处理。',
       )
       const summary = article.querySelector('.calendar-account-summary') as HTMLElement
       expect(
         definition(summary, locale === 'en' ? 'New bookings' : '新预约').textContent,
-      ).toContain(locale === 'en' ? 'Unavailable for new bookings' : '暂不能写入新预约')
+      ).toContain(locale === 'en' ? 'Calendar permissions need review' : '日历权限需要复核')
       expect(
         within(article).getByText(
           locale === 'en'
-            ? 'Selected for new bookings — unavailable'
-            : '已选为新预约写入目标，暂不可用',
+            ? 'Selected for new bookings — review permissions'
+            : '已选为新预约写入目标，请复核权限',
         ),
       ).toBeDefined()
     },
@@ -584,7 +584,6 @@ describe('the calendars page', () => {
     ['synchronization access was removed', 'owner', false, 'active', true, null],
     ['account requires reconnection', 'owner', true, 'needs_reauth', true, null],
     ['provider is disabled', 'owner', true, 'active', false, null],
-    ['write permission was removed', 'owner', true, 'active', true, 'permissions_missing'],
   ] as const)(
     'marks a retained booking destination unavailable when %s and keeps local clearing available',
     async (_reason, accessRole, syncAuthorized, status, googleEnabled, lastError) => {
@@ -1175,7 +1174,7 @@ describe('the calendars page', () => {
     await screen.findByRole('heading', { name: 'calendar@example.com' })
     await user.selectOptions(screen.getByRole('combobox', { name: 'Interface language' }), 'zh-CN')
     expect(within(screen.getByRole('main')).getByRole('status').textContent).toBe(
-      'Microsoft 日历已连接。日历列表已就绪。',
+      'Microsoft 日历已连接。日历列表已就绪。请查看下方账户状态，确认实际连接的账户。',
     )
     await user.click(screen.getByRole('button', { name: '断开连接：calendar@example.com' }))
     const group = screen.getByRole('group', { name: /断开 calendar@example.com？/ })
@@ -1187,7 +1186,7 @@ describe('the calendars page', () => {
     )
   })
 
-  it('prompts the host to reconnect an active account with a writeback permissions failure', async () => {
+  it('prompts the host to restore calendar permissions on an active account', async () => {
     fakeApi({
       ...signedIn,
       ...list([{ ...connection, syncAuthorized: true, lastError: 'permissions_missing' }]),
@@ -1197,8 +1196,11 @@ describe('the calendars page', () => {
       'article',
     ) as HTMLElement
     expect(within(article).queryByRole('alert')?.textContent).toContain(
-      'account again to restore it.',
+      'Calendar permissions need attention.',
     )
+    expect(
+      within(article).getByRole('link', { name: 'Restore calendar permissions' }),
+    ).toBeDefined()
     expect(screen.getByRole('button', { name: 'Connect Google Calendar' })).toBeDefined()
   })
 
@@ -1260,7 +1262,9 @@ describe('the calendars page', () => {
     fakeApi({ ...signedIn, ...list([]) })
     renderApp('/app/calendars?connection=connected&provider=microsoft')
     expect(
-      await screen.findByText('Microsoft Calendar connected. Your calendar list is ready.'),
+      await screen.findByText(
+        'Microsoft Calendar connected. Your calendar list is ready. Review the account status below to confirm which account connected.',
+      ),
     ).toBeDefined()
     await vi.waitFor(() =>
       expect(screen.getByTestId('location').textContent).toBe('/app/calendars'),
