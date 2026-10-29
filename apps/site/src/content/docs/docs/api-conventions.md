@@ -186,6 +186,7 @@ The existing covered endpoints are:
 | Edit, enable or disable a personal or team event type | `PATCH /api/v1/event-types/{id}` |
 | Delete a personal or team event type | `DELETE /api/v1/event-types/{id}` |
 | Activate a round-robin team event type | `POST /api/v1/event-types/{id}/round-robin/activate` |
+| Cancel a current-team booking as an administrator | `POST /api/v1/team/bookings/{id}/cancel` |
 | Invite or resend an invitation | `POST /api/auth/organization/invite-member` |
 | Revoke an invitation | `POST /api/auth/organization/cancel-invitation` |
 | Change a member's role | `POST /api/auth/organization/update-member-role` |
@@ -232,9 +233,9 @@ profile, calendar and schedule writes, API-key management and OAuth connection m
 are excluded. API keys retain their issued organization, and OAuth grants retain their
 consented organization; neither depends on this browser header. Public booking and private
 manage-token operations retain their existing authority. Team deletion is unavailable
-through the browser organization endpoint. There is currently no team-administrator booking
-cancellation endpoint; booking-ID routes still require the caller to be a host.
-Any future administrator cancellation route must use the same context protection.
+through the browser organization endpoint. Team-administrator booking cancellation uses
+the same context protection; the existing host booking-ID routes still require the caller
+to be a host.
 
 ### Team roles
 
@@ -398,6 +399,29 @@ and caller Origin/Referer handling. Responses contain only ID, status, start/end
 `{data,nextCursor}`. No answers, free-text titles/reasons, management capabilities, calendar
 copies, conference URLs or reschedule-chain IDs are included. Cancelled reschedule
 predecessors and their successors are separate rows.
+
+`POST /api/v1/team/bookings/{id}/cancel` lets the same current verified owner/admin browser
+session cancel a booking of its current team before the booking starts. Send
+`X-Expected-Organization-Id` from the team where the action started and an optional strict
+`{ "reason": "…" }` body (at most 1000 characters). A same-origin `Origin`, or a same-origin
+`Referer` when Origin is absent, is required; missing sources, `Origin: null` and other
+origins receive 403 `forbidden`. Missing or stale expected organization receives 409
+`organization_context_changed`; reload before deciding whether to submit again.
+
+Success returns 200 `{ "cancelled": true }`. A cancellation already committed in this team
+returns 409 `booking_already_cancelled`, including a retry after a lost response. Reload the
+team list to see the saved state; that response queues no additional notifications. Concurrent
+cancellations commit one cancellation and one notification set. Missing, other-team,
+personal and already-started bookings receive the same 403 `team_management_access_denied`.
+Current membership and role are rechecked under the write locks. API keys, including a key
+alongside a session cookie, receive the same denial for every target; MCP OAuth tokens do
+not authenticate REST and receive 401. An Authorization header never falls back to cookies.
+
+Cancellation retains the saved hosts and conference organizer, attributes the operation to
+the acting administrator, and queues the normal host/attendee cancellation notifications
+and conference cleanup in the same transaction. Team administration grants no host
+reschedule or organizer-only conference retry authority. Existing host, private-link, REST
+API-key and MCP cancellation permissions and retry responses remain unchanged.
 
 Booking lists accept `endAfter` (end strictly after this instant) and `endTo` (end at or
 before it), alongside the existing start-time `from`/`to` filters. The web app splits Upcoming

@@ -14,6 +14,7 @@ import {
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import {
+  cancelTeamAdminBooking,
   listTeamAdminBookings,
   type TeamAdminBookingPage,
   TeamAdminBookingPageSchema,
@@ -30,10 +31,14 @@ import { createMiddleware } from 'hono/factory'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createApp } from '../app.ts'
-import { ErrorBody, json, type RouteModule, serviceContext } from '../openapi.ts'
+import { ErrorBody, errorResponses, json, type RouteModule, serviceContext } from '../openapi.ts'
 import { productRoutes } from '../server.ts'
-import { teamManagementAccess } from '../team-management.ts'
-import { ListBookingsQuery } from './bookings.ts'
+import {
+  EXPECTED_ORGANIZATION_HEADER,
+  ORGANIZATION_CONTEXT_CHANGED,
+  teamManagementAccess,
+} from '../team-management.ts'
+import { CancelBody, ListBookingsQuery } from './bookings.ts'
 import { teamBookingRoutes } from './team-bookings.ts'
 import { openApiDocument, resolve, responseAndRequestStrictness } from './test-app.ts'
 
@@ -583,13 +588,18 @@ describe.skipIf(!serverUrl)('team administrator booking routes', () => {
     const bindings = {
       createRoute,
       z,
+      cancelTeamAdminBooking,
       listTeamAdminBookings,
       TeamAdminBookingPageSchema,
       TeamAdminBookingSchema,
       ErrorBody,
+      errorResponses,
       json,
       serviceContext,
+      CancelBody,
       ListBookingsQuery,
+      EXPECTED_ORGANIZATION_HEADER,
+      ORGANIZATION_CONTEXT_CHANGED,
       teamManagementAccess: (...args: Parameters<typeof teamManagementAccess>) => {
         const access = managementFactory(...args)
         const check = access.middleware[1]

@@ -144,7 +144,7 @@ export function productRoutes({
     eventTypeRoutes({ db, automaticMeet, automaticZoom }),
     publicRoutes({ db, notify, automaticMeet, automaticZoom }),
     bookingRoutes({ db, notify, automaticMeet, automaticZoom, bookingMaxInviteeReschedules }),
-    teamBookingRoutes({ db }),
+    teamBookingRoutes({ db, notify }),
     memberDepartureImpactRoutes({ db }),
     analyticsRoutes({ db }),
     readinessRoutes({ db, automaticMeet, automaticZoom }),
