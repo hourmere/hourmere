@@ -171,7 +171,12 @@ export interface OpenApiDoc {
     string,
     Record<
       string,
-      { security?: unknown; requestBody?: Content; responses: Record<string, Content> }
+      {
+        security?: unknown
+        parameters?: unknown[]
+        requestBody?: Content
+        responses: Record<string, Content>
+      }
     >
   >
   components: { schemas: Record<string, Schema> }
