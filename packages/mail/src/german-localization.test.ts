@@ -58,9 +58,9 @@ describe('German mail catalogue', () => {
         const prefix = {
           confirmed: isHost ? 'Neue Buchung:' : 'Bestätigt:',
           rescheduled: 'Verschoben:',
-          cancelled: 'Abgesagt:',
+          cancelled: 'Storniert:',
           reminder: 'Erinnerung:',
-          conference_failed: 'Besprechungslink prüfen:',
+          conference_failed: 'Meetinglink prüfen:',
         }[kind]
         expect(message.subject.startsWith(prefix)).toBe(true)
         expect(message.html).toContain('<html lang="de">')

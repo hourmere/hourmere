@@ -42,7 +42,7 @@ export const common = {
   'The original organizer’s verified invitation identity is unavailable. This booking will not switch organizers. Contact the host or cancel the booking.':
     'Die verifizierte Einladungsidentität der ursprünglich organisierenden Person ist nicht verfügbar. Diese Buchung wechselt nicht zu einer anderen organisierenden Person. Wenden Sie sich an die gastgebende Person oder stornieren Sie die Buchung.',
   'Automatic meeting links are unavailable. Contact the host or choose another meeting type.':
-    'Automatische Meetinglinks sind nicht verfügbar. Wenden Sie sich an die gastgebende Person oder wählen Sie einen anderen Meetingtyp.',
+    'Automatische Meetinglinks sind nicht verfügbar. Wenden Sie sich an die gastgebende Person oder wählen Sie einen anderen Termintyp.',
   'Meeting link': 'Meetinglink',
   'Google calendar update': 'Google-Kalenderaktualisierung',
   'Your booking is cancelled. The Google calendar update is pending.':
@@ -174,7 +174,7 @@ export const common = {
   'Guest {0} email': 'E-Mail-Adresse von Gast {0}',
   'Guest {0} name': 'Name von Gast {0}',
   Guests: 'Gäste',
-  'guests.': 'Gäste.',
+  'guests.': 'Gäste hinzufügen.',
   'has no events you can book right now.': 'bietet derzeit keine buchbaren Termine an.',
   Host: 'Gastgebende Person',
   Hourmere: 'Hourmere',
@@ -272,7 +272,7 @@ export const common = {
   'Time zones': 'Zeitzonen',
   'time zones.': 'Zeitzonen.',
   'Times on {0}': 'Zeiten am {0}',
-  To: 'Bis',
+  To: 'Auf',
   'To be confirmed': 'Noch zu bestätigen',
   'To be confirmed by the host': 'Von der gastgebenden Person zu bestätigen',
   'To see, reschedule or cancel a booking, open the link from your confirmation email or the one you saved when you booked. For your security it is removed from the address bar once opened, so reloading this page needs the link again.':
@@ -369,7 +369,7 @@ export const common = {
   'Automatic Zoom meetings are disabled on this instance.':
     'Automatische Zoom-Meetings sind auf dieser Instanz deaktiviert.',
   'Automatic Zoom meetings are unavailable. Contact the host or choose another meeting type.':
-    'Automatische Zoom-Meetings sind nicht verfügbar. Wenden Sie sich an die gastgebende Person oder wählen Sie einen anderen Meetingtyp.',
+    'Automatische Zoom-Meetings sind nicht verfügbar. Wenden Sie sich an die gastgebende Person oder wählen Sie einen anderen Termintyp.',
   'Automatic Zoom supports individual meetings with exactly one host.':
     'Automatisches Zoom unterstützt Einzelmeetings mit genau einer gastgebenden Person.',
   'The assigned host must configure Zoom in their own signed-in session.':

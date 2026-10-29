@@ -209,7 +209,7 @@ describe.skipIf(!serverUrl)('German booking notification language', () => {
           })
         }
         if (stage === 3) {
-          expect(message.subject).toMatch(/^Abgesagt: /)
+          expect(message.subject).toMatch(/^Storniert: /)
           expect(message.text).toContain('Planänderung')
           expect(message.text.includes('#token=')).toBe(false)
         }
