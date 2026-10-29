@@ -3,6 +3,7 @@ import { lazy, Suspense } from 'react'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
 import { chooseLanguage } from '../i18n/store.ts'
+import { UnsavedChangesProvider } from '../unsaved-changes.tsx'
 import { AppShell } from './AppShell.tsx'
 
 vi.mock('../session.tsx', () => ({
@@ -19,6 +20,7 @@ function shell(path = '/app/event-types') {
         </Route>
       </Routes>
     </MemoryRouter>,
+    { wrapper: UnsavedChangesProvider },
   )
 }
 
@@ -35,6 +37,7 @@ describe('admin shell layout', () => {
           </Routes>
         </Suspense>
       </MemoryRouter>,
+      { wrapper: UnsavedChangesProvider },
     )
     expect(screen.queryByRole('banner')).not.toBeNull()
     expect(screen.queryByRole('navigation', { name: 'Main' })).not.toBeNull()

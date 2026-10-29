@@ -1,4 +1,4 @@
-import { act, screen, within } from '@testing-library/react'
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { ApiKey } from '../api/auth.ts'
@@ -8,12 +8,14 @@ import { browserLocale } from '../test/browser-locale.ts'
 import {
   fakeApi,
   json,
+  later,
   ME,
   organizations,
   profile,
   renderApp,
   signedInAs,
 } from '../test/fake-api.tsx'
+import { LEAVE_WITH_UNSAVED_CHANGES } from '../unsaved-changes.tsx'
 
 const SECRET = 'hm_NewSecretValueThatIsOnlyShownOnce0123456789abcdefghijklmnopqrstuv'
 
@@ -351,6 +353,52 @@ describe('the API keys page', () => {
     expect(screen.queryByRole('region', { name: /Copy your new key/ })).toBeNull()
   })
 
+  it.each(['FORBIDDEN', 'INSTANCE_POLICY_DENIED', undefined])(
+    'uses the normal permission error for an unrelated 403 with code %s',
+    async (code) => {
+      const user = userEvent.setup()
+      fakeApi({
+        ...signedInAs(IN_TEAM),
+        ...organizations([ME.organization, TEAM]),
+        'GET /api/auth/api-key/list': () => json(200, { apiKeys: [], total: 0 }),
+        'POST /api/auth/api-key/create': () =>
+          json(403, { code, message: 'API key creation is disabled by instance policy.' }),
+      })
+      renderApp('/app/api-keys')
+      await screen.findByText('You have no API keys yet.')
+      await user.type(screen.getByLabelText('Name'), 'Policy-refused key')
+      await user.click(screen.getByRole('button', { name: 'Create key' }))
+      const alerts = await screen.findAllByRole('alert')
+      expect(alerts).toHaveLength(1)
+      expect(alerts[0]?.textContent).toBe(
+        "Could not create the key. You don't have permission to do that.",
+      )
+      expect(screen.queryByRole('button', { name: 'Reload' })).toBeNull()
+      expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Policy-refused key')
+    },
+  )
+
+  it.each([
+    { status: 409, code: 'organization_context_changed' },
+    { status: 409, code: 'ORGANIZATION_CONTEXT_CHANGED' },
+    { status: 403, code: 'USER_IS_NOT_A_MEMBER_OF_THE_ORGANIZATION' },
+  ])('offers context recovery for $status $code', async ({ status, code }) => {
+    const user = userEvent.setup()
+    fakeApi({
+      ...signedInAs(IN_TEAM),
+      ...organizations([ME.organization, TEAM]),
+      'GET /api/auth/api-key/list': () => json(200, { apiKeys: [], total: 0 }),
+      'POST /api/auth/api-key/create': () => json(status, { code, message: 'Context drift.' }),
+    })
+    renderApp('/app/api-keys')
+    await screen.findByText('You have no API keys yet.')
+    await user.type(screen.getByLabelText('Name'), 'Original team key')
+    await user.click(screen.getByRole('button', { name: 'Create key' }))
+    await screen.findByRole('button', { name: 'Reload' })
+    expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Original team key')
+    expect(screen.queryByRole('region', { name: /Copy your new key/ })).toBeNull()
+  })
+
   it('revokes a key after confirmation', async () => {
     const user = userEvent.setup()
     const api = keyServer()
@@ -387,39 +435,97 @@ describe('the API keys page', () => {
     expect(api.to('POST /api/auth/api-key/delete')).toHaveLength(0)
   })
 
-  it('explains, in plain words, a key refused because the organization changed', async () => {
+  it.each(['en', 'zh-CN'] as const)(
+    'keeps a recoverable key draft after membership removal in %s',
+    async (locale) => {
+      chooseLanguage(locale)
+      const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+      const user = userEvent.setup()
+      let me: Me = IN_TEAM
+      const api = fakeApi({
+        'GET /api/v1/profile': () => json(404, { error: 'profile_not_found' }),
+        'GET /api/v1/me': () => json(200, me),
+        ...organizations([ME.organization]),
+        'GET /api/auth/api-key/list': () => json(200, { apiKeys: [], total: 0 }),
+        'POST /api/auth/api-key/create': () =>
+          json(403, {
+            message: 'metadata.organizationId must be an organization you are a member of',
+          }),
+      })
+      renderApp('/app/api-keys')
+      await screen.findByRole('heading', {
+        name: locale === 'en' ? 'API keys' : 'API 密钥',
+        level: 1,
+      })
+      // Removed from the team meanwhile; the session now acts in the personal organization.
+      me = ME
+      const name = locale === 'en' ? 'Name' : '名称'
+      const expires = locale === 'en' ? 'Expires' : '到期时间'
+      await user.type(screen.getByLabelText(name), 'Team agent')
+      await user.selectOptions(screen.getByLabelText(expires), String(90 * 24 * 60 * 60))
+      await user.click(
+        screen.getByRole('button', { name: locale === 'en' ? 'Create key' : '创建密钥' }),
+      )
+      await screen.findByText(
+        locale === 'en'
+          ? "Could not create the key: you can't create keys in Acme."
+          : '无法创建密钥：你不能在 Acme 中创建密钥。',
+      )
+      expect(screen.queryByText(/metadata\.organizationId/)).toBeNull()
+      expect((screen.getByLabelText(name) as HTMLInputElement).value).toBe('Team agent')
+      expect((screen.getByLabelText(expires) as HTMLSelectElement).value).toBe(
+        String(90 * 24 * 60 * 60),
+      )
+      expect(api.to('POST /api/auth/api-key/create')[0]?.body).toMatchObject({
+        metadata: { organizationId: TEAM.id },
+      })
+      expect(api.to('GET /api/v1/me')).toHaveLength(1)
+      expect(
+        screen.queryByRole('button', { name: locale === 'en' ? 'Reload' : '重新加载' }),
+      ).not.toBeNull()
+      await user.click(
+        screen.getByRole('button', { name: locale === 'en' ? 'Reload' : '重新加载' }),
+      )
+      expect(confirm).toHaveBeenCalled()
+      expect((screen.getByLabelText(name) as HTMLInputElement).value).toBe('Team agent')
+      confirm.mockReturnValue(true)
+      await user.click(
+        screen.getByRole('button', { name: locale === 'en' ? 'Reload' : '重新加载' }),
+      )
+      await waitFor(() => expect((screen.getByLabelText(name) as HTMLInputElement).value).toBe(''))
+      expect(api.to('POST /api/auth/api-key/create')).toHaveLength(1)
+    },
+  )
+
+  it('keeps the original key target after a declined multi-tab switch', async () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
     const user = userEvent.setup()
     let me: Me = IN_TEAM
     const api = fakeApi({
-      'GET /api/v1/profile': () => json(404, { error: 'profile_not_found' }),
+      ...signedInAs(IN_TEAM),
+      ...organizations([ME.organization, TEAM]),
       'GET /api/v1/me': () => json(200, me),
-      ...organizations([ME.organization]),
       'GET /api/auth/api-key/list': () => json(200, { apiKeys: [], total: 0 }),
-      'POST /api/auth/api-key/create': () =>
-        json(403, {
-          message: 'metadata.organizationId must be an organization you are a member of',
-        }),
+      'POST /api/auth/api-key/create': ({ body }) =>
+        json(200, { ...existing, ...(body as object), key: SECRET }),
     })
     renderApp('/app/api-keys')
     await screen.findByText('You have no API keys yet.')
-    // Removed from the team meanwhile; the session now acts in the personal organization.
+    await user.type(screen.getByLabelText('Name'), 'Original team agent')
     me = ME
-    await user.type(screen.getByLabelText('Name'), 'Team agent')
+    await act(async () => window.dispatchEvent(new Event('focus')))
+    await waitFor(() => expect(confirm).toHaveBeenCalledWith(LEAVE_WITH_UNSAVED_CHANGES))
+    expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Original team agent')
     await user.click(screen.getByRole('button', { name: 'Create key' }))
-    expect((await screen.findByRole('alert')).textContent).toBe(
-      "You're no longer a member of Acme, so no key was created. Keys you create now act in Ada.",
-    )
-    expect(screen.queryByText(/metadata\.organizationId/)).toBeNull()
-    expect(screen.getByRole('region', { name: 'Create a key' }).textContent).toContain(
-      'The key will act in Ada, your personal organization.',
-    )
-    expect(api.to('GET /api/v1/me').length).toBeGreaterThanOrEqual(2)
-
-    await user.click(screen.getByRole('button', { name: 'Dismiss' }))
-    expect(screen.queryByRole('alert')).toBeNull()
+    await screen.findByRole('region', { name: /Copy your new key/ })
+    expect(api.to('POST /api/auth/api-key/create')[0]?.body).toEqual({
+      name: 'Original team agent',
+      metadata: { organizationId: TEAM.id },
+    })
   })
 
   it('does not show that explanation on a page the person went to meanwhile', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
     const user = userEvent.setup()
     let me: Me = IN_TEAM
     let refuse: (res: Response) => void = () => {}
@@ -465,11 +571,9 @@ describe('the API keys page', () => {
       )
       await new Promise((resolve) => setTimeout(resolve, 20))
     })
-    // The session moved to the personal organization; Settings shows it, with no warning.
+    // A late refusal cannot replace the current session or publish a warning.
     await vi.waitFor(() =>
-      expect(screen.getByText('Organization').nextElementSibling?.textContent).toBe(
-        'Ada (personal)',
-      ),
+      expect(screen.getByText('Organization').nextElementSibling?.textContent).toBe(TEAM.name),
     )
     watch.disconnect()
     expect(alerts).toEqual([])
@@ -479,6 +583,31 @@ describe('the API keys page', () => {
     await user.click(screen.getByRole('link', { name: 'API keys' }))
     await screen.findByText('You have no API keys yet.')
     expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('discards a late key secret after an accepted multi-tab switch', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const user = userEvent.setup()
+    const pending = later()
+    let me: Me = IN_TEAM
+    const api = fakeApi({
+      ...signedInAs(IN_TEAM),
+      ...organizations([ME.organization, TEAM]),
+      'GET /api/v1/me': () => json(200, me),
+      'GET /api/auth/api-key/list': () => json(200, { apiKeys: [], total: 0 }),
+      'POST /api/auth/api-key/create': () => pending.response,
+    })
+    renderApp('/app/api-keys')
+    await screen.findByText('You have no API keys yet.')
+    await user.type(screen.getByLabelText('Name'), 'Late team key')
+    await user.click(screen.getByRole('button', { name: 'Create key' }))
+    me = ME
+    fireEvent(window, new Event('focus'))
+    await waitFor(() => expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe(''))
+    await pending.answer(json(200, { ...existing, name: 'Late team key', key: SECRET }))
+    expect(screen.queryByRole('region', { name: /Copy your new key/ })).toBeNull()
+    expect(document.body.innerHTML).not.toContain(SECRET)
+    expect(api.to('POST /api/auth/api-key/create')).toHaveLength(1)
   })
 
   it('keeps the key when revoking is cancelled', async () => {

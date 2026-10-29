@@ -1,6 +1,7 @@
 import { displayConferenceUrl } from '@hourmere/core/conference-url'
-import { useEffect, useRef, useState } from 'react'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { api, type Schemas, unwrap } from '../api/client.ts'
+import { isOrganizationContextChanged } from '../api/errors.ts'
 import { useI18n } from '../i18n/runtime.tsx'
 
 type Booking = Schemas['Booking']
@@ -9,11 +10,15 @@ export function ConferenceNotice({
   booking,
   manageToken,
   host = false,
+  expectedOrganizationId,
+  renderConflict,
   onChange,
 }: {
   booking: Booking
   manageToken?: string | null
   host?: boolean
+  expectedOrganizationId?: string
+  renderConflict?: (error: unknown) => ReactNode
   onChange?: (booking: Booking) => void
 }) {
   const { t } = useI18n()
@@ -22,6 +27,7 @@ export function ConferenceNotice({
   const [paused, setPaused] = useState(false)
   const [retrying, setRetrying] = useState(false)
   const [retryError, setRetryError] = useState(false)
+  const [conflict, setConflict] = useState<unknown>(null)
   const [refresh, setRefresh] = useState(0)
   const consumedRefresh = useRef(0)
   // A cancellation can retain the booking id and remain conference-pending. A response
@@ -90,7 +96,7 @@ export function ConferenceNotice({
   }, [canRead, current.id, manageToken, status, refresh, lifecycle])
 
   async function retry() {
-    if (retrying) return
+    if (retrying || conflict) return
     retryRequest.current?.abort()
     const request = new AbortController()
     const requestLifecycle = lifecycle
@@ -100,6 +106,9 @@ export function ConferenceNotice({
     try {
       await unwrap(
         api.POST('/api/v1/bookings/{id}/conference/retry', {
+          headers: expectedOrganizationId
+            ? { 'X-Expected-Organization-Id': expectedOrganizationId }
+            : undefined,
           params: { path: { id: current.id } },
           body: {},
           signal: request.signal,
@@ -111,9 +120,11 @@ export function ConferenceNotice({
         conference: value.conference && { ...value.conference, status: 'pending', errorCode: null },
       }))
       setRefresh((n) => n + 1)
-    } catch {
-      if (!request.signal.aborted && currentLifecycle.current === requestLifecycle)
-        setRetryError(true)
+    } catch (err) {
+      if (!request.signal.aborted && currentLifecycle.current === requestLifecycle) {
+        if (isOrganizationContextChanged(err)) setConflict(err)
+        else setRetryError(true)
+      }
     } finally {
       if (!request.signal.aborted && currentLifecycle.current === requestLifecycle)
         setRetrying(false)
@@ -226,12 +237,18 @@ export function ConferenceNotice({
           {t('Could not request a safe retry. Check the booking status before trying again.')}
         </p>
       )}
+      {conflict !== null && renderConflict?.(conflict)}
       {host &&
         current.conferenceCanRetry !== false &&
         status === 'failed' &&
         !(zoom && ambiguous) &&
         (cancelled || Date.parse(current.start) > Date.now()) && (
-          <button type="button" className="button button-small" onClick={retry} disabled={retrying}>
+          <button
+            type="button"
+            className="button button-small"
+            onClick={retry}
+            disabled={retrying || !!conflict}
+          >
             {t(
               retrying
                 ? 'Requesting…'
