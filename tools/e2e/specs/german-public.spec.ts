@@ -95,7 +95,7 @@ test('German public booking, rescheduling, cancellation and embeds fit at narrow
   await page.getByRole('button', { name: 'Book a meeting', exact: true }).click()
   await expect(page.getByRole('dialog', { name: 'Termin buchen' })).toBeVisible()
   await fits(page, 'popup widget')
-  await page.getByRole('button', { name: 'Buchung schließen' }).click()
+  await page.getByRole('button', { name: 'Buchungsfenster schließen' }).click()
 })
 
 test('German booking and team invitation email labels, buttons and headers fit at 320px and desktop', async ({

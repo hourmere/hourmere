@@ -1,5 +1,12 @@
 import { Suspense, useEffect } from 'react'
-import { matchRoutes, Navigate, Route, Routes, useLocation } from 'react-router'
+import {
+  createRoutesFromElements,
+  matchRoutes,
+  Navigate,
+  Route,
+  useLocation,
+  useRoutes,
+} from 'react-router'
 import { AdminLoading } from './components/AdminLoading.tsx'
 import { RouteErrorBoundary } from './components/RouteErrorBoundary.tsx'
 import { embedQueryLanguage } from './embed/language.ts'
@@ -35,6 +42,57 @@ import {
 import { AppNotFoundPage, NotFoundPage } from './pages/NotFound.tsx'
 import { PATHS } from './paths.ts'
 
+export const appRoutes = createRoutesFromElements(
+  <>
+    <Route
+      path="/"
+      handle={{ surface: 'admin' }}
+      element={
+        <>
+          <Navigate to={PATHS.home} replace />
+          <AdminLoading />
+        </>
+      }
+    />
+    <Route element={<SessionLayout />} handle={{ surface: 'admin' }}>
+      <Route path="/oauth/authorize" element={<McpAuthorizePage />} />
+      <Route path="/oauth/consent" element={<McpAuthorizePage />} />
+      <Route path="/sign-in" element={<SignInPage />} />
+      {/* Keep the protected invitation entry ahead of the app shell and public booking routes. */}
+      <Route path={PATHS.join} element={<AcceptInvitationPage />} />
+      <Route path="/app" element={<RequireSession />}>
+        <Route element={<AppShell />}>
+          <Route index element={<Navigate to={PATHS.eventTypes} replace />} />
+          <Route path="event-types" element={<EventTypesPage />} />
+          <Route path="event-types/new" element={<EventTypeEditorPage />} />
+          <Route path="event-types/:id" element={<EventTypeEditorPage />} />
+          <Route path="availability" element={<AvailabilityPage />} />
+          <Route path="availability/new" element={<ScheduleEditorPage />} />
+          <Route path="availability/:id" element={<ScheduleEditorPage />} />
+          <Route path="bookings" element={<BookingsPage />} />
+          <Route path="analytics" element={<AnalyticsPage />} />
+          <Route path="bookings/:id" element={<BookingDetailPage />} />
+          <Route path="conferences" element={<ConferencesPage />} />
+          <Route path="calendars" element={<CalendarsPage />} />
+          <Route path="connected-apps" element={<ConnectedAppsPage />} />
+          <Route path="api-keys" element={<ApiKeysPage />} />
+          <Route path="settings" element={<SettingsPage />} />
+          <Route path="teams/new" element={<CreateTeamPage />} />
+          <Route path="*" element={<AppNotFoundPage />} />
+        </Route>
+      </Route>
+    </Route>
+    {/* Public pages, outside the session: they never ask who is signed in. */}
+    <Route path="/embed/team/:teamSlug/:slug" element={<EmbeddedTeamBookingPage />} />
+    <Route path="/embed/:handle/:slug" element={<EmbeddedBookingPage />} />
+    <Route path="/booking" element={<ManageBookingPage />} />
+    <Route path="/team/:teamSlug/:slug" element={<TeamBookingPage />} />
+    <Route path="/:handle" element={<HostPage />} />
+    <Route path="/:handle/:slug" element={<BookingPage />} />
+    <Route path="*" element={<NotFoundPage />} />
+  </>,
+)
+
 function RouteLoadingStatus() {
   const { t } = useI18n()
   const { pathname, search } = useLocation()
@@ -57,17 +115,8 @@ function RouteLoadingStatus() {
  */
 export function App() {
   const { pathname } = useLocation()
-  const admin = Boolean(
-    matchRoutes(
-      [
-        { path: '/' },
-        { path: '/app/*' },
-        { path: '/sign-in' },
-        { path: '/oauth/authorize' },
-        { path: '/oauth/consent' },
-      ],
-      pathname,
-    ),
+  const admin = matchRoutes(appRoutes, pathname)?.some(
+    ({ route }) => route.handle?.surface === 'admin',
   )
   return (
     <InterfaceScope surface={admin ? 'admin' : 'public'}>
@@ -77,6 +126,7 @@ export function App() {
 }
 
 function AppRoutes() {
+  const routes = useRoutes(appRoutes)
   const { t } = useI18n()
   const { pathname } = useLocation()
   useEffect(() => {
@@ -96,53 +146,7 @@ function AppRoutes() {
           )
         }
       >
-        <Routes>
-          <Route
-            path="/"
-            element={
-              <>
-                <Navigate to={PATHS.home} replace />
-                <AdminLoading />
-              </>
-            }
-          />
-          <Route element={<SessionLayout />}>
-            <Route path="/oauth/authorize" element={<McpAuthorizePage />} />
-            <Route path="/oauth/consent" element={<McpAuthorizePage />} />
-            <Route path="/sign-in" element={<SignInPage />} />
-            {/* Keep the protected invitation entry ahead of the app shell and public booking routes. */}
-            <Route path={PATHS.join} element={<AcceptInvitationPage />} />
-            <Route path="/app" element={<RequireSession />}>
-              <Route element={<AppShell />}>
-                <Route index element={<Navigate to={PATHS.eventTypes} replace />} />
-                <Route path="event-types" element={<EventTypesPage />} />
-                <Route path="event-types/new" element={<EventTypeEditorPage />} />
-                <Route path="event-types/:id" element={<EventTypeEditorPage />} />
-                <Route path="availability" element={<AvailabilityPage />} />
-                <Route path="availability/new" element={<ScheduleEditorPage />} />
-                <Route path="availability/:id" element={<ScheduleEditorPage />} />
-                <Route path="bookings" element={<BookingsPage />} />
-                <Route path="analytics" element={<AnalyticsPage />} />
-                <Route path="bookings/:id" element={<BookingDetailPage />} />
-                <Route path="conferences" element={<ConferencesPage />} />
-                <Route path="calendars" element={<CalendarsPage />} />
-                <Route path="connected-apps" element={<ConnectedAppsPage />} />
-                <Route path="api-keys" element={<ApiKeysPage />} />
-                <Route path="settings" element={<SettingsPage />} />
-                <Route path="teams/new" element={<CreateTeamPage />} />
-                <Route path="*" element={<AppNotFoundPage />} />
-              </Route>
-            </Route>
-          </Route>
-          {/* Public pages, outside the session: they never ask who is signed in. */}
-          <Route path="/embed/team/:teamSlug/:slug" element={<EmbeddedTeamBookingPage />} />
-          <Route path="/embed/:handle/:slug" element={<EmbeddedBookingPage />} />
-          <Route path="/booking" element={<ManageBookingPage />} />
-          <Route path="/team/:teamSlug/:slug" element={<TeamBookingPage />} />
-          <Route path="/:handle" element={<HostPage />} />
-          <Route path="/:handle/:slug" element={<BookingPage />} />
-          <Route path="*" element={<NotFoundPage />} />
-        </Routes>
+        {routes}
       </Suspense>
     </RouteErrorBoundary>
   )

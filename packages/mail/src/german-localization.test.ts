@@ -60,9 +60,10 @@ describe('German mail catalogue', () => {
           rescheduled: 'Verschoben:',
           cancelled: 'Storniert:',
           reminder: 'Erinnerung:',
-          conference_failed: 'Meetinglink prüfen:',
+          conference_failed: 'Problem mit dem Meetinglink:',
         }[kind]
         expect(message.subject.startsWith(prefix)).toBe(true)
+        if (kind === 'rescheduled') expect(message.subject).toContain(', neu am Di., 20. Okt.')
         expect(message.html).toContain('<html lang="de">')
         expect(message.text).toContain('Termin: Intro {other}')
         expect(message.html).toContain('>Termin</td>')
@@ -74,6 +75,9 @@ describe('German mail catalogue', () => {
           expect(content).not.toMatch(/Your meeting|What:|When:|You received this email/)
           if (kind === 'conference_failed') {
             expect(content).toContain('keine endgültige Kalendereinladung versendet')
+            if (!isHost) expect(content).toContain('Google-Meet-Link')
+          } else if (kind !== 'cancelled') {
+            expect(content).toContain('Mit Google Meet teilnehmen')
           }
         }
         expect(message.text.includes('token=fixture')).toBe(

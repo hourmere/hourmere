@@ -193,7 +193,7 @@ describe.skipIf(!serverUrl)('German booking notification language', () => {
         expect(message.html).toContain('<html lang="de">')
         expect(message.text).toContain('Dienstag, 3. November 2026')
         if (stage === 1) {
-          expect(message.subject).toMatch(/^Verschoben: /)
+          expect(message.subject).toMatch(/^Verschoben: .+, neu am Di., 3. Nov., /)
           expect(message.text).toContain('10:00')
           expect(message.text).toContain('11:00')
         }

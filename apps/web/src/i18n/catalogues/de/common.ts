@@ -48,10 +48,10 @@ export const common = {
   'Your booking is cancelled. The Google calendar update is pending.':
     'Ihre Buchung ist storniert. Die Google-Kalenderaktualisierung steht noch aus.',
   'Your time is reserved. The Google Meet link and final calendar invitation are being prepared.':
-    'Ihr Termin ist reserviert. Der Google Meet-Link und die endgültige Kalendereinladung werden vorbereitet.',
+    'Ihr Termin ist reserviert. Der Google-Meet-Link und die endgültige Kalendereinladung werden vorbereitet.',
   'The Google calendar copy is cancelled. Cancelling does not revoke access to an existing Meet link.':
     'Die Kopie im Google-Kalender ist storniert. Die Stornierung entzieht nicht den Zugriff auf einen bestehenden Meet-Link.',
-  'Join Google Meet': 'An Google Meet teilnehmen',
+  'Join Google Meet': 'Mit Google Meet teilnehmen',
   'The meeting link could not be displayed. Check its status or contact the host.':
     'Der Meetinglink konnte nicht angezeigt werden. Prüfen Sie seinen Status oder wenden Sie sich an die gastgebende Person.',
   'Your booking is cancelled, but Google calendar cleanup needs the host’s attention.':
@@ -65,7 +65,7 @@ export const common = {
   'The original Google calendar is unavailable. This booking will not switch to a different account or calendar.':
     'Der ursprüngliche Google-Kalender ist nicht verfügbar. Diese Buchung wechselt nicht zu einem anderen Konto oder Kalender.',
   'The host needs to reconnect the original Google Calendar account before retrying.':
-    'Die gastgebende Person muss das ursprüngliche Google Calendar-Konto vor einem erneuten Versuch wieder verbinden.',
+    'Die gastgebende Person muss das ursprüngliche Google-Calendar-Konto vor einem erneuten Versuch wieder verbinden.',
   'Could not check the meeting link. Your booking has not been changed.':
     'Der Meetinglink konnte nicht geprüft werden. Ihre Buchung wurde nicht geändert.',
   'Could not request a safe retry. Check the booking status before trying again.':
@@ -82,7 +82,7 @@ export const common = {
     'Termin reserviert; Meetinglink erfordert Aufmerksamkeit',
   'Automatic Google Meet': 'Automatisches Google Meet',
   'Create a unique Google Meet link for each booking':
-    'Für jede Buchung einen eigenen Google Meet-Link erstellen',
+    'Für jede Buchung einen eigenen Google-Meet-Link erstellen',
   'Automatic creation is unavailable on this instance or meeting mode. You can keep the provider label or use your own meeting link.':
     'Die automatische Erstellung ist auf dieser Instanz oder in diesem Meetingmodus nicht verfügbar. Sie können die Anbieterbezeichnung beibehalten oder einen eigenen Meetinglink verwenden.',
   'Google Meet (provider label only)': 'Google Meet (nur Anbieterbezeichnung)',
@@ -170,6 +170,8 @@ export const common = {
   'Enter your name, at most 200 characters.':
     'Geben Sie Ihren Namen mit höchstens 200 Zeichen ein.',
   From: 'Von',
+  'reschedule.previousTime': 'Bisher',
+  'reschedule.newTime': 'Neu',
   'Google Calendar': 'Google Calendar',
   'Guest {0} email': 'E-Mail-Adresse von Gast {0}',
   'Guest {0} name': 'Name von Gast {0}',
@@ -225,7 +227,7 @@ export const common = {
   Reschedule: 'Verschieben',
   '{title}, {date}, {time}': '{title}, {date}, {time}',
   'Save your link to change or cancel': 'Link zum Ändern oder Stornieren speichern',
-  'Search by city or offset': 'Nach Stadt oder Zeitverschiebung suchen',
+  'Search by city or offset': 'Nach Stadt oder UTC-Abweichung suchen',
   'Search time zones': 'Zeitzonen suchen',
   'Show next month': 'Nächsten Monat anzeigen',
   'Someone else just booked that time. Please pick another one.':

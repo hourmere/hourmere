@@ -48,6 +48,7 @@ export function TimeZoneName({
 }) {
   // Only IANA name segments stay together; translated surrounding prose can wrap normally.
   const at = label?.indexOf(name) ?? -1
+  if (label !== undefined && at < 0) return <span className={className}>{label}</span>
   return (
     <span className={className}>
       {at >= 0 && label?.slice(0, at)}

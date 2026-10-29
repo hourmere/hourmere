@@ -15,10 +15,13 @@ Changing it updates the existing page without restarting a form, discarding a ch
 reissuing a booking or replacing its private management link.
 
 An explicit interface choice takes precedence over a supported signed-in profile default,
-then the browser's supported language, then English. A language unavailable for the
-current interface follows its English fallback without replacing the saved preference. Signed-in routes read the existing
-profile after authentication; public routes never request a session or profile to choose a
-language. The interface choice is separate from the profile's **Language** BCP 47 field:
+then the browser's supported language, then English. A choice unavailable for the current
+interface is skipped: the profile default and browser language are checked before the
+registry's English fallback, without replacing the saved preference. For example, a saved
+German choice on an account page still allows a Chinese profile or browser default.
+Signed-in routes read the existing profile after authentication; public routes never request
+a session or profile to choose a language. The interface choice is separate from the
+profile's **Language** BCP 47 field:
 changing the interface never saves the profile. A supported profile default is loaded when
 the authenticated account becomes available. Unsupported profile locale values remain
 valid profile settings.
@@ -35,8 +38,12 @@ The language preference stores only a registered language code (currently `en`, 
 `hourmere-language` in local storage and a same-name `SameSite=Lax`, path-wide cookie. The
 cookie has a one-year lifetime and is `Secure` on HTTPS. Refusing either storage mechanism
 does not prevent changing the current page. No account identifiers, answers or management
-capabilities enter preference storage. The standalone email sign-in confirmation page uses
-the same preference cookie, then quality-ranked `Accept-Language`, and provides the supported sign-in language choices.
+capabilities enter preference storage. Sign-in emails and the standalone email sign-in
+confirmation page use the same admin-surface language rules: a valid preference cookie
+follows its registered fallbacks to a supported sign-in language; otherwise, quality-ranked
+`Accept-Language` chooses a supported sign-in language, then English. A German cookie
+therefore gives English, while `Accept-Language: de-CH,zh-CN;q=0.8` without that cookie gives
+Simplified Chinese. The confirmation page provides the supported sign-in language choices.
 Language changes never submit that form or change its fragment.
 
 Public booking and rescheduling pages also remember an explicitly selected IANA time

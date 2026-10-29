@@ -5,7 +5,6 @@ import {
   type InterfaceSurface,
   interfaceLanguage,
   interfaceLanguages,
-  localeFallbacks,
   localeRegistry,
   registeredLocales,
 } from '@hourmere/core/language'
@@ -79,11 +78,11 @@ export function useI18n() {
   const embedded = useContext(EmbeddedLanguage)
   const surface = useContext(Surface)
   const available = interfaceLanguages(surface)
-  const supported = (language: InterfaceLanguage) =>
-    localeFallbacks(language).find((code) => available.includes(code)) ?? 'en'
+  const supported = (language: InterfaceLanguage | undefined) =>
+    language && available.includes(language) ? language : undefined
   const preference = embedded?.language ?? explicit
-  const selected = preference ? supported(preference) : undefined
-  const locale = selected ?? supported(account ?? browserLanguage(surface))
+  const selected = supported(preference)
+  const locale = selected ?? supported(account) ?? browserLanguage(surface)
   // Keep the browser's regional conventions for implicit English. Every other active
   // language, including a browser preference, uses its registered formatting locale.
   const formatLanguage = selected ?? (locale === 'en' ? undefined : locale)
