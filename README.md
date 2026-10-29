@@ -294,8 +294,9 @@ and linked operating guides before deploying:
   and an IPv4-only ingress network.
 - Rate limiting uses in-process memory; multiple web replicas multiply the limits. Run a
   single web process; a separate worker is supported.
-- [Interface languages](https://hourmere.com/docs/interface-languages) are English
-  and Simplified Chinese only. Missing translations fall back to English; dates follow the active locale.
+- [Public booking pages and emails](https://hourmere.com/docs/interface-languages) support English,
+  Simplified Chinese, German and French. Account and sign-in interfaces support English and
+  Simplified Chinese. Missing translations fall back to English; dates follow the active locale.
 - No automatic schema downgrade; some migrations require stopping all old app and worker
   processes. Review the [migration notes](docs/data-model.md#changing-the-schema).
 

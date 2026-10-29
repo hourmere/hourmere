@@ -39,6 +39,14 @@ export const localeRegistry = {
     direction: 'ltr',
     interfaces: ['public'],
   },
+  fr: {
+    code: 'fr',
+    nativeName: 'Français',
+    fallbacks: ['en'],
+    formatLocale: 'fr-FR',
+    direction: 'ltr',
+    interfaces: ['public'],
+  },
 } as const satisfies Record<string, LocaleDefinition>
 
 /** Account locale remains an independent BCP 47 setting. */

@@ -199,7 +199,10 @@ describe('launch documentation disclosures', () => {
     },
     {
       topic: 'interface languages',
-      claims: [/Interface languages are English and Simplified Chinese only/],
+      claims: [
+        /Public booking pages and emails support English, Simplified Chinese, German and French/,
+        /Account and sign-in interfaces support English and Simplified Chinese/,
+      ],
     },
     {
       topic: 'downgrade and migration compatibility',
