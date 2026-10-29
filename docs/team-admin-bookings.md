@@ -4,8 +4,10 @@ This page fixes the data boundary for team administrators from the team access p
 `GET /api/v1/team/bookings` lists bookings of the browser session's current team, including
 bookings hosted by other members. It requires the shared `teamManagementAccess` middleware:
 a current verified session and a current exact owner/admin role in a non-personal organization.
-Ordinary members, personal organizations and API-key callers receive the same
-`403 team_management_access_denied`; missing authentication returns `401 unauthorized`.
+Missing or invalid sessions, ordinary or removed members, personal organizations and
+API-key/OAuth callers receive the same `403 team_management_access_denied`.
+Any Authorization header selects the agent credential boundary and is denied, even with
+a valid owner/admin session cookie. The response does not reveal team existence or key validity.
 The route preserves the shared caller middleware's Origin/Referer handling.
 
 The scheduling service exports `listTeamAdminBookings`, `TeamAdminBookingSchema`,

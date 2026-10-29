@@ -1,8 +1,16 @@
-import { createHmac, randomBytes } from 'node:crypto'
+import { createHmac, randomBytes, randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
-import { stripTypeScriptTypes } from 'node:module'
+import { createRequire, stripTypeScriptTypes } from 'node:module'
 import { createRoute, z } from '@hono/zod-openapi'
-import { type Auth, createAuth, createAuthPool, createCallerResolver } from '@hourmere/auth'
+import {
+  type Auth,
+  checkTeamManagementAccess,
+  createAuth,
+  createAuthPool,
+  createCallerResolver,
+  createMcpOAuthResolver,
+  TeamManagementError,
+} from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import {
@@ -11,15 +19,18 @@ import {
   TeamAdminBookingPageSchema,
   TeamAdminBookingSchema,
 } from '@hourmere/scheduling'
+import { DomainError } from '@hourmere/scheduling/errors'
 import {
   createFixtures,
   createTestTeam,
   createTestUser,
   type TestUser,
 } from '@hourmere/scheduling/testing'
+import { createMiddleware } from 'hono/factory'
+import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createApp } from '../app.ts'
-import { errorResponses, json, type RouteModule, serviceContext } from '../openapi.ts'
+import { ErrorBody, json, type RouteModule, serviceContext } from '../openapi.ts'
 import { productRoutes } from '../server.ts'
 import { teamManagementAccess } from '../team-management.ts'
 import { ListBookingsQuery } from './bookings.ts'
@@ -32,6 +43,8 @@ const secret = 'synthetic-team-booking-session-secret-000000000000'
 const path = '/api/v1/team/bookings'
 const NOW = Temporal.Instant.from('2026-11-01T12:00:00Z')
 const denied = { error: 'team_management_access_denied' }
+// Resolve the signer from the auth workspace, which owns the MCP token dependency.
+const { signJWT } = createRequire(import.meta.resolve('@hourmere/auth'))('better-auth/plugins/jwt')
 
 describe.skipIf(!serverUrl)('team administrator booking routes', () => {
   let owned: TestDatabase
@@ -55,6 +68,7 @@ describe.skipIf(!serverUrl)('team administrator booking routes', () => {
       secret,
       signup,
       mailer: { send: async () => {} },
+      mcpOAuth: true,
     })
     resolveCaller = createCallerResolver({ auth, db })
     app = application()
@@ -233,15 +247,14 @@ describe.skipIf(!serverUrl)('team administrator booking routes', () => {
     expect(await response.json()).toEqual(denied)
   }
 
-  it('requires a real session and refuses invalid bearer credentials despite a valid cookie', async () => {
+  it('uniformly denies missing sessions and invalid bearer credentials despite a valid cookie', async () => {
     for (const response of [
       await get(),
       await get('better-auth.session_token=invalid'),
       await get(seeded.ownerSession.cookie, '', { authorization: 'Bearer invalid' }),
     ]) {
-      expect(response.status).toBe(401)
-      expect(await response.json()).toEqual({ error: 'unauthorized' })
-      expect(response.headers.get('www-authenticate')).toBe('Bearer')
+      await expectDenied(response)
+      expect(response.headers.has('www-authenticate')).toBe(false)
     }
   })
 
@@ -305,6 +318,78 @@ describe.skipIf(!serverUrl)('team administrator booking routes', () => {
     })
     for (const cookie of [undefined, seeded.ownerSession.cookie]) {
       await expectDenied(await get(cookie, '', { authorization: `Bearer ${key.key}` }))
+    }
+  })
+
+  it.each(['', 'Basic invalid', 'Bearer', 'Bearer invalid', 'Bearer hm_invalid'])(
+    'does not grant session privileges when Authorization is %j',
+    async (authorization) => {
+      await expectDenied(await get(seeded.ownerSession.cookie, '', { authorization }))
+    },
+  )
+
+  it('denies a real MCP OAuth token with and without an owner cookie', async () => {
+    const clientId = 'https://team-boundary.example/client.json'
+    await db
+      .insertInto('auth.oauthClient')
+      .values({
+        clientId,
+        redirectUris: JSON.stringify(['https://team-boundary.example/callback']),
+      })
+      .execute()
+    const grant = await db
+      .insertInto('mcp_oauth_grants')
+      .values({ user_id: seeded.owner.id, organization_id: seeded.team.id, client_id: clientId })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    await db
+      .insertInto('auth.oauthConsent')
+      .values({
+        clientId,
+        userId: seeded.owner.id,
+        referenceId: grant.id,
+        scopes: JSON.stringify(['mcp:tools']),
+        resources: JSON.stringify([`${origin}/mcp`]),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .execute()
+    const value = await signJWT(
+      { context: await auth.$context },
+      {
+        header: { typ: 'at+jwt' },
+        payload: {
+          sub: seeded.owner.id,
+          client_id: clientId,
+          scope: 'mcp:tools',
+          iat: Math.floor(Date.now() / 1000),
+          exp: Math.floor(Date.now() / 1000) + 300,
+          iss: `${origin}/api/auth`,
+          aud: `${origin}/mcp`,
+          'https://hourmere.com/organization': seeded.team.id,
+          'https://hourmere.com/grant': grant.id,
+        },
+      },
+    )
+    const headers = { authorization: `Bearer ${value}` }
+    // Prove this is a usable grant, rather than testing another invalid bearer string.
+    const resolved = await createMcpOAuthResolver({ auth, db, publicUrl: origin })(
+      new Request(`${origin}/mcp`, { headers }),
+    )
+    expect(resolved.ok).toBe(true)
+    for (const cookie of [undefined, seeded.ownerSession.cookie]) {
+      await expectDenied(await get(cookie, '', headers))
+    }
+  })
+
+  it('does not distinguish another organization from a nonexistent active team', async () => {
+    const outsider = await createTestUser(db, 'Other organization member')
+    await createTestTeam(db, [{ user: outsider, role: 'owner' }])
+    for (const teamId of [seeded.team.id, randomUUID()]) {
+      const outsiderSession = await session(outsider, teamId)
+      for (const query of ['', '?limit=0']) {
+        await expectDenied(await get(outsiderSession.cookie, query))
+      }
     }
   })
 
@@ -452,6 +537,10 @@ describe.skipIf(!serverUrl)('team administrator booking routes', () => {
     const document = await openApiDocument(production)
     const operation = document.paths[path]?.get
     expect(operation?.security).toEqual([{ session: [] }])
+    const description = (operation as { description?: string } | undefined)?.description
+    expect(description).toContain('Any Authorization header')
+    expect(description).toContain('even with a valid session cookie')
+    expect(operation?.responses['401']).toBeUndefined()
     const schema = operation?.responses['200']?.content?.['application/json']?.schema
     expect(schema).toBeDefined()
     const envelope = resolve(document, schema as Record<string, unknown>)
@@ -475,6 +564,7 @@ describe.skipIf(!serverUrl)('team administrator booking routes', () => {
     removeAccess: boolean,
     accessObserved: () => void,
     replacement?: [string, string],
+    managementFactory = teamManagementAccess,
   ): typeof teamBookingRoutes {
     let source = readFileSync('apps/server/src/routes/team-bookings.ts', 'utf8')
     if (replacement) {
@@ -496,12 +586,12 @@ describe.skipIf(!serverUrl)('team administrator booking routes', () => {
       listTeamAdminBookings,
       TeamAdminBookingPageSchema,
       TeamAdminBookingSchema,
-      errorResponses,
+      ErrorBody,
       json,
       serviceContext,
       ListBookingsQuery,
       teamManagementAccess: (...args: Parameters<typeof teamManagementAccess>) => {
-        const access = teamManagementAccess(...args)
+        const access = managementFactory(...args)
         const check = access.middleware[1]
         access.middleware[1] = async (c, next) => {
           accessObserved()
@@ -529,6 +619,72 @@ describe.skipIf(!serverUrl)('team administrator booking routes', () => {
     const document = await openApiDocument(copy)
     expect(responseAndRequestStrictness(document, [path]).closedResponses).toEqual([])
   }
+
+  function managementSourceCopy(replacement?: [string, string]): typeof teamManagementAccess {
+    let source = readFileSync('apps/server/src/team-management.ts', 'utf8')
+    if (replacement) {
+      expect(source.includes(replacement[0]), 'mutation must match source').toBe(true)
+      source = source.replace(...replacement)
+    }
+    source = stripTypeScriptTypes(source.replace(/^import[\s\S]*?from '[^']+'\n/gm, '')).replace(
+      /\bexport /g,
+      '',
+    )
+    return new Function(
+      'DomainError',
+      'createMiddleware',
+      'checkTeamManagementAccess',
+      'TeamManagementError',
+      'sql',
+      `${source}; return teamManagementAccess`,
+    )(
+      DomainError,
+      createMiddleware,
+      checkTeamManagementAccess,
+      TeamManagementError,
+      sql,
+    ) as typeof teamManagementAccess
+  }
+
+  async function verifySessionBoundary(managementFactory: typeof teamManagementAccess) {
+    const factory = sourceCopy(false, () => {}, undefined, managementFactory)
+    const copy = application([factory({ db, now: () => NOW })])
+    expect((await get(seeded.ownerSession.cookie, '', {}, copy)).status).toBe(200)
+    // A spent key must get the same denial as every other agent credential, without
+    // exposing its validity or rate-limit state and without borrowing the owner cookie.
+    const key = await auth.api.createApiKey({
+      body: { userId: seeded.owner.id, metadata: { organizationId: seeded.team.id } },
+    })
+    await db
+      .updateTable('auth.apikey')
+      .set({ rateLimitEnabled: true, rateLimitMax: 1, requestCount: 1, lastRequest: new Date() })
+      .where('id', '=', key.id)
+      .execute()
+    const headers = { authorization: `Bearer ${key.key}` }
+    const resolved = await resolveCaller(new Headers(headers))
+    expect(!resolved.ok && resolved.error === 'rate_limited').toBe(true)
+    await expectDenied(await get(seeded.ownerSession.cookie, '', headers, copy))
+    await expectDenied(await get(undefined, '', {}, copy))
+  }
+
+  it('passes session-boundary assertions for the unmodified shared access source copy', () =>
+    verifySessionBoundary(managementSourceCopy()))
+
+  it.each<[string, [string, string]]>([
+    [
+      'Authorization precedence',
+      ["if (c.req.raw.headers.has('authorization')) throw denied()", ''],
+    ],
+    [
+      'uniform unauthenticated denial',
+      ['response instanceof Response && response.status === 401', 'false'],
+    ],
+  ])('detects removal of %s with a real HTTP assertion failure', async (_, replacement) => {
+    const copy = managementSourceCopy(replacement)
+    await expect(verifySessionBoundary(copy)).rejects.toThrow(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
+  })
 
   it('passes the extensible response assertion with an unmodified route source copy', async () => {
     await verifyOpenResponses(sourceCopy(false, () => {}))

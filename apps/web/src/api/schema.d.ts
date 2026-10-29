@@ -4928,7 +4928,7 @@ export interface paths {
         };
         /**
          * Bookings of the session's current team
-         * @description Requires a current verified team owner/admin browser session. Includes bookings hosted by other team members, with only the team-administration field whitelist. Ordered by start time and id, ascending by default. Pass nextCursor as cursor with the same filters and order for the next page. Collective bookings appear once. Personal organizations are excluded.
+         * @description Requires a current verified team owner/admin browser session. Any Authorization header selects API-key/OAuth authentication and is denied, even with a valid session cookie. Missing sessions and ineligible callers receive the same 403 team_management_access_denied without revealing team existence. Includes bookings hosted by other team members, with only the team-administration field whitelist. Ordered by start time and id, ascending by default. Pass nextCursor as cursor with the same filters and order for the next page. Collective bookings appear once. Personal organizations are excluded.
          */
         get: {
             parameters: {
@@ -4972,26 +4972,8 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description No valid session or API key */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description team_management_access_denied: requires a current team owner/admin session */
+                /** @description team_management_access_denied: requires a current team owner/admin session without Authorization */
                 403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description The API key's rate limit is used up */
-                429: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -5018,7 +5000,7 @@ export interface paths {
         };
         /**
          * Event types and unfinished bookings affected by a member's departure
-         * @description Requires a current verified browser session in the requested team. Members can inspect themselves; owners and admins can inspect current members of their team. Each collection has an independent cursor and totalCount, with a default limit of 50 and maximum 100. Event types are ordered by id; bookings by precise stored start time and id. Confirmed bookings ending after evaluatedAt include those in progress. In-progress bookings require waiting until they end or coordinating offline; this read does not relax cancellation rules or authorize a departure. Results and counts are recalculated on every request; keep team, member and limits unchanged while following cursors.
+         * @description Requires a current verified browser session in the requested team. Members can inspect themselves; owners and admins can inspect current members of their team. Any Authorization header, including empty, malformed, API-key or MCP OAuth values, is denied even with a valid session cookie. Missing or invalid sessions and inaccessible teams or members receive the same 403 team_management_access_denied without revealing their existence. Each collection has an independent cursor and totalCount, with a default limit of 50 and maximum 100. Event types are ordered by id; bookings by precise stored start time and id. Confirmed bookings ending after evaluatedAt include those in progress. In-progress bookings require waiting until they end or coordinating offline; this read does not relax cancellation rules or authorize a departure. Results and counts are recalculated on every request; keep team, member and limits unchanged while following cursors.
          */
         get: {
             parameters: {
@@ -5055,26 +5037,8 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description No valid session or API key */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description team_management_access_denied: inaccessible team or member */
+                /** @description team_management_access_denied: requires a current team session without Authorization and an accessible member */
                 403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description The API key's rate limit is used up */
-                429: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -5101,7 +5065,7 @@ export interface paths {
         };
         /**
          * Read a minimal booking readiness summary for the acting team
-         * @description Rechecks a current verified owner/admin web session whose active team matches teamId on every request, including after organization switches and role changes. Returns verified, display-safe member names or the neutral label Team member, coarse reason codes and repair kinds, with no private calendar, account or schedule details. Every access denial after authentication, including an ordinary member, a different team and a missing team, uses team_management_access_denied. Authorization takes precedence over cookies; API keys and MCP OAuth tokens are not session callers. Member and event-type pages default to 50 items each, at most 100; pass their nextCursor as memberCursor and eventTypeCursor respectively.
+         * @description Rechecks a current verified owner/admin web session whose active team matches teamId on every request, including after organization switches and role changes. Returns verified, display-safe member names or the neutral label Team member, coarse reason codes and repair kinds, with no private calendar, account or schedule details. Any Authorization header is denied, even with a valid session cookie; API keys and MCP OAuth tokens are not session callers. Every access denial, including missing or invalid sessions, an ordinary member, a different team and a missing team, uses the same 403 team_management_access_denied without revealing team existence. Member and event-type pages default to 50 items each, at most 100; pass their nextCursor as memberCursor and eventTypeCursor respectively.
          */
         get: {
             parameters: {
@@ -5136,26 +5100,8 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description No valid session or API key */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description team_management_access_denied: requires the current team owner/admin web session */
+                /** @description team_management_access_denied: requires the current team owner/admin web session without Authorization */
                 403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Error"];
-                    };
-                };
-                /** @description The API key's rate limit is used up */
-                429: {
                     headers: {
                         [name: string]: unknown;
                     };

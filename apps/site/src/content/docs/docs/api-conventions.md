@@ -168,6 +168,11 @@ limited to MCP tools and do not authenticate REST requests.
 
 ### Browser organization context
 
+Better Auth's `/api/auth/organization/*` endpoints require browser sessions. Any
+Authorization header, including an empty or invalid value, returns `403 SESSION_REQUIRED`
+even alongside a valid owner/admin cookie. API keys and MCP OAuth tokens cannot inherit
+the browser's organization-management privileges.
+
 Organization-scoped browser drafts bind `X-Expected-Organization-Id` to the organization
 where the form or action started. Do not replace that value with the active organization
 at submission time. A header works with both the strict REST JSON bodies and Better Auth's
@@ -257,7 +262,9 @@ onboarding path; joining a team requires accepting a member invitation.
 team event types and confirmed, not-yet-ended bookings affected by a member leaving.
 It requires a current verified browser session in that team. Members can inspect themselves;
 owners and admins can inspect current members of their team. Inaccessible and missing targets
-receive the same `403 team_management_access_denied`. Personal data and other teams are excluded.
+receive the same `403 team_management_access_denied`. Missing or invalid sessions and any
+Authorization header, even alongside a valid cookie, receive that same denial without a
+`WWW-Authenticate` challenge. Personal data and other teams are excluded.
 
 The response contains `evaluatedAt`, `eventTypes` and `bookings`; each collection has `data`,
 `nextCursor` and `totalCount`. Independent `eventTypesLimit` and `bookingsLimit` accept 1–100
@@ -381,8 +388,10 @@ verified team owners/admins, including meetings hosted by other members. It acce
 same time/status filters, `order`, `limit` and opaque `cursor` as the host booking list.
 Pagination uses start time and ID, retaining microsecond cursor precision; collective
 bookings appear once. Inserts before a cursor do not shift later pages; later inserts can
-appear after it. Personal organizations, ordinary members and API keys receive
-`403 team_management_access_denied`. The route uses the shared team-management access check
+appear after it. Missing or invalid sessions, personal organizations, ordinary or removed
+members and API-key/OAuth callers receive the same `403 team_management_access_denied`,
+without revealing team existence. Any Authorization header is denied even alongside a
+valid owner/admin session cookie. The route uses the shared team-management access check
 and caller Origin/Referer handling. Responses contain only ID, status, start/end,
 `cancelledAt`, associated `eventType: {id,title}` (null title after deletion), saved
 `hosts: [{userId,name}]` and `attendees: [{name,email,timeZone,isBooker}]`, inside
@@ -414,15 +423,16 @@ and titles without current event metadata remain unchanged. Public/manage respon
 personal organization it also returns their personal event-type readiness; in a team it
 returns only that member’s detail. It requires a current verified web session and current
 membership. API keys and OAuth callers cannot use readiness reads.
-An `Authorization` header takes precedence over the session cookie: a valid API key plus
+On the self read, an `Authorization` header takes precedence over the session cookie: a valid API key plus
 a cookie receives `403 readiness_access_denied`; an invalid bearer or MCP OAuth access
 token receives `401 unauthorized`, even alongside a valid cookie. There is no `userId`,
 organization or audience override; unknown query fields receive `400 invalid_request`.
 
 `GET /api/v1/teams/{teamId}/readiness` returns minimal member and event-type summaries for
 the acting team, through the shared team-management access check. Only current verified
-team owners/admins can read it. Ordinary members, other teams and nonexistent teams receive
-the same `403 team_management_access_denied`. The summary includes coarse reasons such as
+team owners/admins can read it. Missing sessions, ordinary members, other teams and
+nonexistent teams receive the same `403 team_management_access_denied`. Any Authorization
+header is denied even with a valid owner/admin cookie. The summary includes coarse reasons such as
 `calendar_attention_required` and repair kinds; it excludes private calendar/account data,
 schedules, exact sync times, provider errors and busy-time details.
 Names are returned only for verified members with a nonempty, valid display name;
@@ -477,11 +487,13 @@ Team summaries collapse these into the single coarse `calendar_attention_require
 Neither a missing timestamp nor a reset snapshot proves that synchronization was never tried.
 
 Both routes use the common open `Error` schema: `400 invalid_request` for malformed/unknown
-query fields (`invalid_limit` or `invalid_cursor` for service-level pagination validation),
-`401 unauthorized` for missing or invalid credentials, `403 readiness_access_denied` (self)
-or `team_management_access_denied` (team) for an authenticated caller without access,
-`429 rate_limited` for credential throttling, and `500 internal_error` for unexpected
-failures that prevent a safe response. Dependency evaluation failures that can be safely
+query fields (`invalid_limit` or `invalid_cursor` for service-level pagination validation)
+and `500 internal_error` for unexpected failures that prevent a safe response. The self read
+uses `401 unauthorized` for missing or invalid credentials, `403 readiness_access_denied`
+for an authenticated caller without access, and `429 rate_limited` for credential throttling.
+The team read refuses any Authorization header before credential resolution and uses only
+`403 team_management_access_denied` for every access denial, including missing or invalid
+sessions, without a `WWW-Authenticate` challenge. Dependency evaluation failures that can be safely
 represented inside an authorized item use `check_failed` in a successful response instead.
 
 Pages default to 50 items and accept `limit=1..100`. Pass the member page’s `nextCursor` as

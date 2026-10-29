@@ -158,8 +158,9 @@ export function bookingWriteAccess(principal: Principal, expectedOrganizationId?
  * Shared entry for new team-management web routes.
  *
  * In a RouteModule, create `const access = teamManagementAccess(db, caller)` and declare
- * `middleware: access.middleware`. This preserves requireCaller's Origin/Referer checks,
- * then applies the existing sessionOnly pattern with fresh verified team owner/admin facts.
+ * `middleware: access.middleware`. Authorization-bearing requests are denied before session
+ * resolution. Cookie callers retain requireCaller's Origin/Referer checks, followed by fresh
+ * verified team owner/admin facts; missing or invalid sessions get the same access denial.
  * Bind read targets with `access.read(principal, teamId, ...)`. Read and validate the
  * request body before calling `access.write(principal, teamId, ...)`.
  * Pass `{ expectedOrganizationId }` as the fourth argument for organization-bound writes;
@@ -179,6 +180,17 @@ export function bookingWriteAccess(principal: Principal, expectedOrganizationId?
  * their own authorization and organization bindings.
  */
 export function teamManagementAccess(db: Db, caller: CallerMiddleware) {
+  const sessionCaller = createMiddleware<CallerEnv>(async (c, next) => {
+    // Authorization selects the agent credential boundary, even with a valid cookie.
+    // Never let a session resolver grant team-management privileges to that request.
+    if (c.req.raw.headers.has('authorization')) throw denied()
+    const response = await caller(c, next)
+    if (response instanceof Response && response.status === 401) {
+      c.header('WWW-Authenticate', undefined)
+      throw denied()
+    }
+    return response
+  })
   const sessionOnly = createMiddleware<CallerEnv>(async (c, next) => {
     await check(db, c.var.principal, c.var.principal.organization.id)
     await next()
@@ -190,8 +202,8 @@ export function teamManagementAccess(db: Db, caller: CallerMiddleware) {
     await next()
   })
   return {
-    middleware: [caller, sessionOnly] as [CallerMiddleware, typeof sessionOnly],
-    memberReadMiddleware: [caller, memberRead] as [CallerMiddleware, typeof memberRead],
+    middleware: [sessionCaller, sessionOnly] as [CallerMiddleware, typeof sessionOnly],
+    memberReadMiddleware: [sessionCaller, memberRead] as [CallerMiddleware, typeof memberRead],
     /** Recheck the bound team before loading any read data; no provider I/O. */
     async read<T>(
       principal: Principal,

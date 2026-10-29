@@ -22,6 +22,7 @@ import {
   productApp,
   resolve,
   responseAndRequestStrictness,
+  syntheticSessionCookie,
   type TestApp,
 } from './test-app.ts'
 
@@ -185,18 +186,19 @@ describe('readiness published contract', () => {
     for (const path of [selfPath, teamTemplate]) {
       const operation = doc.paths[path]?.get
       expect(operation?.security).toEqual([{ session: [] }])
-      expect(Object.keys(operation?.responses ?? {}).sort()).toEqual([
-        '200',
-        '400',
-        '401',
-        '403',
-        '429',
-        '500',
-      ])
-      for (const status of ['400', '401', '403', '429', '500']) {
+      const errorStatuses =
+        path === selfPath ? ['400', '401', '403', '429', '500'] : ['400', '403', '500']
+      expect(Object.keys(operation?.responses ?? {}).sort()).toEqual(['200', ...errorStatuses])
+      for (const status of errorStatuses) {
         const schema = operation?.responses[status]?.content?.['application/json']?.schema
         expect(schema && resolve(doc, schema)).toEqual(doc.components.schemas.Error)
       }
+      if (path === teamTemplate)
+        expect(operation?.responses['403']).toMatchObject({
+          description: expect.stringContaining(
+            'team_management_access_denied: requires the current team owner/admin web session without Authorization',
+          ),
+        })
       const schema = operation?.responses['200']?.content?.['application/json']?.schema
       const published = schema && resolve(doc, schema)
       expect(published?.description).toContain('not_checked')
@@ -318,7 +320,7 @@ describe.skipIf(!process.env.DATABASE_URL)('readiness strict wire projection', (
           : t.db
       const app = productApp(db, new Map([['hm_unknown_contract', f.own]]))
       const response = await app.request(selfPath, {
-        headers: { authorization: 'Bearer hm_unknown_contract' },
+        headers: { cookie: syntheticSessionCookie('hm_unknown_contract') },
       })
       expect(response.status).toBe(200)
       const body = selfContract.parse(await response.json())
@@ -361,7 +363,7 @@ describe.skipIf(!process.env.DATABASE_URL)('readiness strict wire projection', (
           routes({ db: t.db }),
         ])
         const response = await app.request(path, {
-          headers: { authorization: 'Bearer hm_contract_copy' },
+          headers: { cookie: syntheticSessionCookie('hm_contract_copy') },
         })
         expect(response.status).toBe(200)
         expect(contract.safeParse(await response.json()).success).toBe(true)

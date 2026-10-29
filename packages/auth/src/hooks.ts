@@ -98,9 +98,23 @@ async function personalOwnerStays(ctx: AuthMiddlewareContext, db: Db) {
   }
 }
 
+/** Agent credentials never inherit browser organization privileges from a cookie. */
+function requireOrganizationSession(ctx: AuthMiddlewareContext) {
+  if (
+    ctx.request?.headers.has('authorization') &&
+    (ctx.path === '/organization' || ctx.path.startsWith('/organization/'))
+  ) {
+    throw new APIError('FORBIDDEN', {
+      code: 'SESSION_REQUIRED',
+      message: 'Organization management requires a browser session without Authorization',
+    })
+  }
+}
+
 /** Better Auth's `hooks.before`: checks that apply across its endpoints. */
 export function beforeHook(db: Db, teamRolePolicy: (ctx: AuthMiddlewareContext) => Promise<void>) {
   return createAuthMiddleware(async (ctx) => {
+    requireOrganizationSession(ctx)
     requireSocialAuthorizationRequest(ctx)
     requireUuidIds(ctx.query)
     if (ctx.path === '/organization/update-member-role' && isRecord(ctx.body)) {

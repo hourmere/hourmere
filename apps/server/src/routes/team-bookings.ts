@@ -4,13 +4,7 @@ import {
   TeamAdminBookingPageSchema,
   TeamAdminBookingSchema,
 } from '@hourmere/scheduling'
-import {
-  errorResponses,
-  json,
-  type RouteModule,
-  type ServiceDeps,
-  serviceContext,
-} from '../openapi.ts'
+import { ErrorBody, json, type RouteModule, type ServiceDeps, serviceContext } from '../openapi.ts'
 import { teamManagementAccess } from '../team-management.ts'
 import { ListBookingsQuery } from './bookings.ts'
 
@@ -41,17 +35,22 @@ export function teamBookingRoutes(deps: ServiceDeps): RouteModule {
         path: '/api/v1/team/bookings',
         summary: "Bookings of the session's current team",
         description:
-          'Requires a current verified team owner/admin browser session. Includes bookings hosted by other team members, with only the team-administration field whitelist. Ordered by start time and id, ascending by default. Pass nextCursor as cursor with the same filters and order for the next page. Collective bookings appear once. Personal organizations are excluded.',
+          'Requires a current verified team owner/admin browser session. Any Authorization header selects API-key/OAuth authentication and is denied, even with a valid session cookie. Missing sessions and ineligible callers receive the same 403 team_management_access_denied without revealing team existence. Includes bookings hosted by other team members, with only the team-administration field whitelist. Ordered by start time and id, ascending by default. Pass nextCursor as cursor with the same filters and order for the next page. Collective bookings appear once. Personal organizations are excluded.',
         tags: ['Team bookings'],
         security: [{ session: [] }],
         middleware: access.middleware,
         request: { query: ListBookingsQuery },
         responses: {
           200: { description: 'A page of team bookings', content: json(TeamAdminBookingPage) },
-          ...errorResponses({
-            400: 'Invalid parameters (invalid_request, invalid_range or invalid_cursor)',
-            403: 'team_management_access_denied: requires a current team owner/admin session',
-          }),
+          400: {
+            description: 'Invalid parameters (invalid_request, invalid_range or invalid_cursor)',
+            content: json(ErrorBody),
+          },
+          403: {
+            description:
+              'team_management_access_denied: requires a current team owner/admin session without Authorization',
+            content: json(ErrorBody),
+          },
         },
       }),
       async (c) => {
