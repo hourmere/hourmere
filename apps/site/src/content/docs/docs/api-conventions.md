@@ -15,6 +15,26 @@ additive within a version. The OpenAPI document is served at `/api/v1/openapi.js
 - `/api/auth/*` is [Better Auth](https://www.better-auth.com)'s own protocol (sign-in,
   sessions, organizations, API keys). It follows Better Auth's conventions, including its
   error shape (`{ "message", "code" }`), not the ones below.
+
+  Team invitation writes at `POST /api/auth/organization/invite-member` require a current
+  verified owner/admin, a same-origin session and `X-Expected-Organization-Id`. Only
+  `role: "member"` is accepted. Ordinary retries find the unambiguous pending invitation
+  by normalized email within the authorized team and preserve its generation/outcome.
+  Explicit resend additionally requires `resend: true`, `invitationId`,
+  `expectedGeneration` (1–32) and a fresh UUID `requestId`. An identical request replays
+  its current result; stale generations or ambiguous matches return 409
+  `INVITATION_CONFLICT`. Resending retains the invitation's ID, email, role and inviter,
+  and extends expiry from now by its original validity length. Expired, accepted,
+  canceled or rejected invitations cannot be resent.
+
+  Resends wait 60 seconds between generations (`429 INVITATION_RESEND_COOLDOWN`,
+  `retryAfterSeconds: 60`, `Retry-After: 60`); live sending leases return 409
+  `INVITATION_DELIVERY_BUSY`, and generation 32 returns 409 `INVITATION_GENERATION_LIMIT`.
+  Request budgets return fixed `429 INVITATION_RATE_LIMITED`; unauthorized management
+  returns uniform `403 TEAM_INVITATION_ACCESS_DENIED`. None of these responses depends
+  on whether the recipient has an account. The additive `delivery` summary contains
+  `generation`, `state` and `attempts`; `queued` records intent, not successful delivery.
+  Invitation sending and reconciliation are not yet installed.
 - `/api/calendar/google/callback` is the separate calendar OAuth protocol callback. The
   owner-side connection API is versioned under `/api/v1/calendar-connections`; see
   [Google Calendar connections](/docs/google-calendar).

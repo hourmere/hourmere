@@ -899,13 +899,13 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
       }
 
       it('refuses invitations', async () => {
-        await refused(
-          await post('/api/auth/organization/invite-member', alice, {
-            email: 'bob@example.com',
-            role: 'owner',
-            organizationId: personal.id,
-          }),
-        )
+        const response = await post('/api/auth/organization/invite-member', alice, {
+          email: 'bob@example.com',
+          role: 'owner',
+          organizationId: personal.id,
+        })
+        expect(response.status).toBe(403)
+        expect(await response.json()).toMatchObject({ code: 'TEAM_INVITATION_ACCESS_DENIED' })
       })
 
       it('refuses accepting an invitation that exists anyway', async () => {

@@ -34,6 +34,7 @@ import {
   conferenceNotificationDispatchJob,
   notificationEmailCleanupJob,
   queuedSignInEmail,
+  reserveInvitationEmailBudget,
   signInEmailJobs,
 } from '@hourmere/notifications'
 import type { BookingNotifier } from '@hourmere/scheduling'
@@ -414,6 +415,8 @@ async function start(env: NodeJS.ProcessEnv, restoreConsole: () => void): Promis
       baseURL: config.PUBLIC_URL,
       secret: config.BETTER_AUTH_SECRET,
       mailer: countingMailer,
+      reserveInvitationEmail: (trx, input) =>
+        reserveInvitationEmailBudget(trx, input, notificationDeps),
       queueSignInEmail: queuedSignInEmail(jobs, {
         db,
         secret: config.BETTER_AUTH_SECRET,

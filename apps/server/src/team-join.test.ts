@@ -12,6 +12,7 @@ import {
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import type { MailMessage } from '@hourmere/mail'
+import { betterAuth } from 'better-auth'
 import type pg from 'pg'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.ts'
@@ -71,9 +72,9 @@ describe.skipIf(!serverUrl)('team invitation contract', () => {
   })
   afterEach(() => vi.restoreAllMocks())
 
-  function instance(instrument?: (options: OrganizationOptions) => void) {
+  function instance(instrument?: (options: OrganizationOptions) => void, nativeProbe = false) {
     const secret = randomBytes(32).toString('base64')
-    const auth = createAuth({
+    const configured = createAuth({
       pool,
       db,
       baseURL: origin,
@@ -81,6 +82,8 @@ describe.skipIf(!serverUrl)('team invitation contract', () => {
       signup: OPEN,
       mailer: { send: async (message) => void outbox.push(message) },
     })
+    // Native dependency probes explicitly omit the product admission hook.
+    const auth = nativeProbe ? betterAuth({ ...configured.options, hooks: undefined }) : configured
     // organization() closes over this same options object; this changes only the isolated
     // fixture. Production currently has neither sendInvitationEmail nor after-create hooks.
     const plugin = auth.options.plugins.find((candidate) => candidate.id === 'organization')
@@ -88,7 +91,7 @@ describe.skipIf(!serverUrl)('team invitation contract', () => {
     instrument?.(options)
     const app = createApp({
       authHandler: auth.handler,
-      resolveCaller: createCallerResolver({ auth, db }),
+      resolveCaller: createCallerResolver({ auth: configured, db }),
       checkDb: async () => {},
       publicUrl: origin,
     })
@@ -161,7 +164,10 @@ describe.skipIf(!serverUrl)('team invitation contract', () => {
       organizationId,
     })
     expect(response.status).toBe(200)
-    return (await response.json()) as Invitation
+    const { delivery: _delivery, ...invitation } = (await response.json()) as Invitation & {
+      delivery: unknown
+    }
+    return invitation
   }
   async function state(organizationId: string) {
     // This independent connection can see only committed rows, including inside callbacks.
@@ -312,8 +318,8 @@ describe.skipIf(!serverUrl)('team invitation contract', () => {
     }
     const invitation = await invite(i, owner.cookie, org.id, 'recipient@example.com')
     for (const [actor, status, code] of [
-      [member, 403, 'YOU_ARE_NOT_ALLOWED_TO_INVITE_USERS_TO_THIS_ORGANIZATION'],
-      [outsider, 409, 'ORGANIZATION_CONTEXT_CHANGED'],
+      [member, 403, 'TEAM_INVITATION_ACCESS_DENIED'],
+      [outsider, 403, 'TEAM_INVITATION_ACCESS_DENIED'],
     ] as const) {
       const response = await post(i.app, 'invite-member', actor.cookie, {
         email: 'other@example.com',
@@ -325,7 +331,7 @@ describe.skipIf(!serverUrl)('team invitation contract', () => {
       const canceled = await post(i.app, 'cancel-invitation', actor.cookie, {
         invitationId: invitation.id,
       })
-      expect(canceled.status).toBe(status)
+      expect(canceled.status).toBe(actor === member ? 403 : 409)
       expect(await canceled.json()).toMatchObject({
         code:
           actor === member
@@ -371,12 +377,12 @@ describe.skipIf(!serverUrl)('team invitation contract', () => {
     expect(body.session.activeOrganizationId).not.toBe(org.id)
   })
 
-  it('rejects an identical retry without a second row; explicit resend preserves id/role and only refreshes expiry', async () => {
+  it('pins native retry/resend behavior independently of the product admission protocol', async () => {
     const calls: string[] = []
     const i = instance((options) => {
       options.organizationHooks.afterCreateInvitation = async () => void calls.push('created')
       options.sendInvitationEmail = async () => void calls.push('mail')
-    })
+    }, true)
     const owner = await account(i, 'owner@example.com')
     const org = await team(i, owner.cookie)
     const invitation = await invite(i, owner.cookie, org.id, 'recipient@example.com')
@@ -408,7 +414,7 @@ describe.skipIf(!serverUrl)('team invitation contract', () => {
   })
 
   it.each(['beforeCreateInvitation', 'sendInvitationEmail', 'afterCreateInvitation'] as const)(
-    'keeps the real commit boundary when %s throws during invitation creation',
+    'pins the native commit boundary when %s throws independently of product admission',
     async (throwAt) => {
       const calls: { hook: string; rows: Awaited<ReturnType<typeof state>> }[] = []
       const i = instance((options) => {
@@ -426,7 +432,7 @@ describe.skipIf(!serverUrl)('team invitation contract', () => {
           if (hook === 'sendInvitationEmail') options.sendInvitationEmail = observe
           else options.organizationHooks[hook] = observe
         }
-      })
+      }, true)
       const owner = await account(i, 'owner@example.com')
       const org = await team(i, owner.cookie)
       const errors = vi.spyOn(console, 'error').mockImplementation(() => {})

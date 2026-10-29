@@ -14,6 +14,7 @@ import { API_KEY_RATE_LIMIT } from './api-keys.ts'
 import { API_KEY_PREFIX } from './caller.ts'
 import { sanitizeInitialDisplayName } from './display-name.ts'
 import { beforeHook } from './hooks.ts'
+import type { ReserveInvitationEmail } from './invitations.ts'
 import { betterAuthLog, logMailFailure } from './log.ts'
 import { confirmLink, SIGN_IN_PATH } from './magic-link.ts'
 import { mcpOAuthPlugins } from './mcp-oauth.ts'
@@ -128,6 +129,8 @@ export interface AuthConfig {
   queueSignInEmail?:
     | ((request: { email: string; url: string; language?: InterfaceLanguage }) => Promise<void>)
     | undefined
+  /** Invitation admission uses its own recipient domain and the shared non-reserved budget. */
+  reserveInvitationEmail?: ReserveInvitationEmail | undefined
   /** Who may create an account (SIGNUP); the same policy the pool was created with. */
   signup: SignupPolicy
   /** Each provider is enabled only when configured. */
@@ -158,6 +161,7 @@ export function createAuth({
   secret,
   mailer,
   queueSignInEmail,
+  reserveInvitationEmail,
   signup,
   socialProviders = {},
   socialProviderOptions = {},
@@ -313,7 +317,7 @@ export function createAuth({
         },
       },
     },
-    hooks: { before: beforeHook(db) },
+    hooks: { before: beforeHook(db, reserveInvitationEmail) },
     plugins: [
       {
         id: 'sign-in-token-updates',

@@ -2,6 +2,7 @@ import type { Db } from '@hourmere/db'
 import { APIError, createAuthMiddleware, getSessionFromCtx } from 'better-auth/api'
 import { type AuthMiddlewareContext, apiKeyRules } from './api-keys.ts'
 import { displayNameRules } from './display-name.ts'
+import { invitationRules, type ReserveInvitationEmail } from './invitations.ts'
 import { checkListQuery, emptyMemberList } from './lists.ts'
 import { defaultMagicLinkErrorRedirect } from './magic-link.ts'
 import { organizationContext } from './organization-context.ts'
@@ -98,11 +99,13 @@ async function personalOwnerStays(ctx: AuthMiddlewareContext, db: Db) {
 }
 
 /** Better Auth's `hooks.before`: checks that apply across its endpoints. */
-export function beforeHook(db: Db) {
+export function beforeHook(db: Db, reserveInvitationEmail?: ReserveInvitationEmail) {
   return createAuthMiddleware(async (ctx) => {
     requireSocialAuthorizationRequest(ctx)
     requireUuidIds(ctx.query)
     requireUuidIds(ctx.body)
+    const invitation = await invitationRules(ctx, db, reserveInvitationEmail)
+    if (invitation) return invitation
     await organizationContext(ctx, db)
     const filter = checkListQuery(ctx.path, ctx.query)
     const empty = await emptyMemberList(ctx, db, filter)

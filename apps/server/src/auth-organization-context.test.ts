@@ -127,6 +127,7 @@ describe.skipIf(!serverUrl)('organization web write context', () => {
           email: `${randomUUID()}@example.com`,
           role: 'member',
           status: 'pending',
+          createdAt: new Date(Date.now() - 3_600_000),
           expiresAt: new Date(Date.now() + 86_400_000),
         })
         .returning(['id', 'email'])
@@ -265,6 +266,9 @@ describe.skipIf(!serverUrl)('organization web write context', () => {
       email: f.first.invitation.email,
       role: 'member',
       resend: true,
+      invitationId: f.first.invitation.id,
+      expectedGeneration: 1,
+      requestId: randomUUID(),
     }
     const before = await snapshot(f)
     expect((await post('set-active', f.cookie, { organizationId: f.second.id })).status).toBe(200)
@@ -292,7 +296,7 @@ describe.skipIf(!serverUrl)('organization web write context', () => {
     )
     expect(denied.status).toBe(403)
     expect(await denied.json()).toMatchObject({
-      code: 'YOU_ARE_NOT_ALLOWED_TO_INVITE_USERS_TO_THIS_ORGANIZATION',
+      code: 'TEAM_INVITATION_ACCESS_DENIED',
     })
     await db
       .deleteFrom('auth.member')

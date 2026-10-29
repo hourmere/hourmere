@@ -510,6 +510,29 @@ successfully committed booking preserve the original result.
 
 ## Email abuse controls
 
+Team invitation creation and explicit resends are limited at admission: 20 requests per
+inviter per rolling hour and 100 per day, shared across teams; 50 per team per hour and
+200 per day, shared across inviters. Invitations use `MAIL_RECIPIENT_MAX_PER_HOUR` and
+`MAIL_RECIPIENT_MAX_PER_DAY` with an independent invitation HMAC domain. They share the
+global mail-budget lock and reserve only non-reserved capacity under `MAIL_MAX_PER_HOUR`,
+leaving the existing host/sign-in reserve available. Ordinary request retries and exact
+resend replays do not spend another slot; explicit resends never reset rolling counts.
+Deleting invitations or teams cannot reset those counts. Reservations expire from the
+two-day accounting ledger and do not indicate SMTP delivery.
+
+Explicit resends require the invitation ID, expected generation and UUID request ID;
+they wait 60 seconds, stop at 32 generations and extend expiry by the original validity
+length. Each delivery generation retains its existing maximum of four SMTP attempts.
+Expired or business-terminal invitations need a new invitation. Invitation admission
+never invokes the sign-in worker's account/sign-up eligibility decision and does not
+grant an inviter any new registration authority. Errors use fixed codes and diagnostics
+omit recipients and underlying database/provider text.
+
+This release records queued invitation intent atomically with admission. The invitation
+sender, pg-boss dispatch and reconciler are not installed yet, so no invitation mail is
+sent by these requests. A future sender must integrate the reservation accounting with
+its attempt budget and recheck lifecycle, authorization and mail capacity before SMTP.
+
 Invitees may reschedule a booking at most `BOOKING_MAX_INVITEE_RESCHEDULES` times (default
 5) across its entire reschedule chain. New response tokens and older email links use the
 same count; host/admin moves neither consume nor reset it. `0` disables invitee

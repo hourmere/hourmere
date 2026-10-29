@@ -1,10 +1,12 @@
-// These probes use a test-only delivery ledger, real pg-boss inserts and native Better Auth
-// requests. They establish transaction boundaries, not a shipped invitation delivery service.
+// These dependency probes deliberately bypass Hourmere's invitation admission hook to
+// retain evidence of Better Auth's native transaction gaps. Product behavior is covered
+// separately by invitation-limits.test.ts; production always installs the admission hook.
 import { createHmac, randomBytes, randomUUID } from 'node:crypto'
 import { createAuth, createAuthPool, createCallerResolver, type SignupPolicy } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createJobs, defineJob } from '@hourmere/jobs'
+import { betterAuth } from 'better-auth'
 import { sql } from 'kysely'
 import type pg from 'pg'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -92,7 +94,7 @@ describe.skipIf(!serverUrl)('invitation creation and delivery enqueue ordering',
 
   function instance(instrument: (options: OrganizationOptions) => void = () => {}) {
     const secret = randomBytes(32).toString('base64')
-    const auth = createAuth({
+    const configured = createAuth({
       pool: authPool,
       db,
       baseURL: origin,
@@ -100,13 +102,14 @@ describe.skipIf(!serverUrl)('invitation creation and delivery enqueue ordering',
       signup: OPEN,
       mailer: { send: async () => {} },
     })
+    const auth = betterAuth({ ...configured.options, hooks: undefined })
     const plugin = auth.options.plugins.find((candidate) => candidate.id === 'organization')
     const options = (plugin as unknown as { options: OrganizationOptions }).options
     instrument(options)
     return {
       app: createApp({
         authHandler: auth.handler,
-        resolveCaller: createCallerResolver({ auth, db }),
+        resolveCaller: createCallerResolver({ auth: configured, db }),
         checkDb: async () => {},
         publicUrl: origin,
       }),

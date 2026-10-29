@@ -338,7 +338,21 @@ and the sign-in mail tables are preserved. This prevents later repair from silen
 resending historic invitations with unknown mail outcomes. Restart every role with the
 new version. This migration installs storage and queries only; sender, queue registration,
 reconciliation and management integration are separate work. Explicit resend will extend
-expiry under the approved protocol; it is not implemented by these queries.
+expiry under the approved protocol; it is not implemented by these storage queries.
+
+Invitation admission now writes the invitation and its queued delivery intent in one
+transaction. `generation_started_at` tracks the explicit resend cooldown independently
+of worker updates; `expiry_duration_ms` retains the original validity length across
+successive renewals. The migration derives both from existing invitation/delivery rows
+without changing invitation status, expiry, attempts or delivery outcomes.
+
+`invitation_email_requests` retains only actor/team UUIDs and request time for rolling
+inviter/team limits. It has no foreign keys, so deleting an invitation, account or team
+cannot reset the budget. Admission reserves a separate invitation-domain recipient HMAC
+in `notification_email_sends` while holding the existing global mail-budget lock.
+Reservations are conservative accounting, not SMTP receipts. Both ledgers retain two days.
+The invitation sender, job queue and reconciler remain separate work; queued intent alone
+does not send mail or claim SMTP acceptance.
 
 ## Guest recipients
 

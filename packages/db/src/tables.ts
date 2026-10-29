@@ -520,7 +520,9 @@ export interface InvitationDeliveries {
   attempts: Generated<number>;
   created_at: Generated<Timestamp>;
   due_at: Generated<Timestamp>;
+  expiry_duration_ms: Generated<Int8>;
   generation: Generated<number>;
+  generation_started_at: Generated<Timestamp>;
   invitation_id: string;
   last_error_code: string | null;
   last_job_id: string | null;
@@ -530,6 +532,12 @@ export interface InvitationDeliveries {
   smtp_accepted_at: Timestamp | null;
   state: string;
   updated_at: Generated<Timestamp>;
+}
+
+export interface InvitationEmailRequests {
+  organization_id: string;
+  requested_at: Timestamp;
+  user_id: string;
 }
 
 export interface McpOauthClientActivity {
@@ -687,6 +695,7 @@ export interface DB {
   event_type_hosts: EventTypeHosts;
   event_types: EventTypes;
   invitation_deliveries: InvitationDeliveries;
+  invitation_email_requests: InvitationEmailRequests;
   mcp_oauth_client_activity: McpOauthClientActivity;
   mcp_oauth_grants: McpOauthGrants;
   mcp_oauth_intents: McpOauthIntents;
