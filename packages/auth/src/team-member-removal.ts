@@ -53,7 +53,7 @@ export async function teamMemberRemovalTarget(
  * organization write lock orders removal with host assignments and public bookings.
  * Existing bookings and both configured and saved host relations remain unchanged.
  */
-export async function removeTeamMemberInTransaction(
+async function removeTeamMemberInTransaction(
   trx: Transaction<Database>,
   actor: TeamManager,
   input: { memberUserId: string },
@@ -121,21 +121,21 @@ export async function removeTeamMemberInTransaction(
   return { operationId: operation.id, memberUserId: member.userId, deactivatedEventTypeIds }
 }
 
-/** Shared entry for native removal and callers that do not already own a team write. */
+/** Recheck current session authority in the same transaction as every removal write. */
 export function removeTeamMember(
   db: Db,
   principal: Principal,
   input: TeamMemberRemovalInput,
 ): Promise<TeamMemberRemoval> {
-  return db
-    .transaction()
-    .setIsolationLevel('read committed')
-    .execute(async (trx) => {
-      const actor = await checkTeamManagementAccess(trx, principal, input.teamId, true, {
-        expectedOrganizationId: input.expectedOrganizationId,
-        allowPersonal: false,
-      })
-      if (actor.role === 'member') throw teamManagementDenied()
-      return removeTeamMemberInTransaction(trx, { ...actor, role: actor.role }, input)
+  const write = async (trx: Transaction<Database>) => {
+    const actor = await checkTeamManagementAccess(trx, principal, input.teamId, true, {
+      expectedOrganizationId: input.expectedOrganizationId,
+      allowPersonal: false,
     })
+    if (actor.role === 'member') throw teamManagementDenied()
+    return removeTeamMemberInTransaction(trx, { ...actor, role: actor.role }, input)
+  }
+  return db.isTransaction
+    ? write(db as Transaction<Database>)
+    : db.transaction().setIsolationLevel('read committed').execute(write)
 }

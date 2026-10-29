@@ -7,7 +7,7 @@ import {
   createAuth,
   createAuthPool,
   createCallerResolver,
-  removeTeamMemberInTransaction,
+  removeTeamMember,
   TeamManagementError,
 } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
@@ -30,7 +30,11 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from '../app.ts'
 import { errorResponses, json, type RouteModule, serviceContext } from '../openapi.ts'
 import { productRoutes } from '../server.ts'
-import { EXPECTED_ORGANIZATION_HEADER, teamManagementAccess } from '../team-management.ts'
+import {
+  EXPECTED_ORGANIZATION_HEADER,
+  ORGANIZATION_CONTEXT_CHANGED,
+  teamManagementAccess,
+} from '../team-management.ts'
 import { eventTypeRoutes } from './event-types.ts'
 import { memberRemovalRoutes } from './member-removal.ts'
 import { publicRoutes } from './public.ts'
@@ -78,12 +82,18 @@ describe.skipIf(!serverUrl)('member removal through HTTP', () => {
     await owned?.drop()
   })
 
-  function application(routes: RouteModule[] = [memberRemovalRoutes({ db, now })]) {
+  function application(
+    routes: RouteModule[] = [memberRemovalRoutes({ db, now })],
+    observeResolution = () => {},
+  ) {
     return createApp({
       publicUrl: origin,
       checkDb: async () => {},
       authHandler: auth.handler,
-      resolveCaller,
+      resolveCaller: (headers) => {
+        observeResolution()
+        return resolveCaller(headers)
+      },
       routes,
     })
   }
@@ -647,6 +657,7 @@ describe.skipIf(!serverUrl)('member removal through HTTP', () => {
       body: { userId: f.actor.id, metadata: { organizationId: f.team.id } },
     })
     const deniedHeaders: Record<string, string>[] = [
+      {},
       { cookie: ordinaryLogin.cookie },
       { cookie: f.targetLogin.cookie },
       { authorization: `Bearer ${key.key}`, cookie: f.login.cookie },
@@ -655,8 +666,8 @@ describe.skipIf(!serverUrl)('member removal through HTTP', () => {
       const response = await handling(f, operationId, { headers })
       expect(response.status).toBe(403)
       expect(await response.json()).toEqual(denied)
+      expect(response.headers.has('www-authenticate')).toBe(false)
     }
-    expect((await handling(f, operationId, { headers: {} })).status).toBe(401)
     for (const id of [randomUUID(), operationId]) {
       const other = await createTestTeam(db, [{ user: f.actor, role: 'owner' }])
       const otherLogin = await session(f.actor, other.id)
@@ -700,6 +711,104 @@ describe.skipIf(!serverUrl)('member removal through HTTP', () => {
     expect((await remove(f, { origin: 'https://other.example' })).status).toBe(403)
     expect(await snapshot(f)).toEqual(before)
   })
+
+  async function verifySessionBoundary(factory: typeof memberRemovalRoutes) {
+    const f = await fixture()
+    const before = await snapshot(f)
+    const key = await auth.api.createApiKey({
+      body: { userId: f.actor.id, metadata: { organizationId: f.team.id } },
+    })
+    for (const cookie of [undefined, f.login.cookie]) {
+      for (const authorization of ['', 'Basic malformed', 'Bearer junk', `Bearer ${key.key}`]) {
+        const resolved = vi.fn()
+        const app = application([factory({ db, now })], resolved)
+        const response = await app.request(`/api/v1/team/members/${f.target.id}/removal`, {
+          method: 'POST',
+          headers: {
+            authorization,
+            ...(cookie ? { cookie } : {}),
+            origin,
+            'content-type': 'application/json',
+            [EXPECTED_ORGANIZATION_HEADER]: f.team.id,
+          },
+          body: JSON.stringify({ teamId: f.team.id }),
+        })
+        expect(response.status).toBe(403)
+        expect(await response.json()).toEqual(denied)
+        expect(response.headers.has('www-authenticate')).toBe(false)
+        expect(resolved).not.toHaveBeenCalled()
+      }
+    }
+    for (const cookie of [undefined, 'better-auth.session_token=invalid']) {
+      const response = await application([factory({ db, now })]).request(
+        `/api/v1/team/members/${f.target.id}/removal`,
+        {
+          method: 'POST',
+          headers: {
+            ...(cookie ? { cookie } : {}),
+            origin,
+            'content-type': 'application/json',
+            [EXPECTED_ORGANIZATION_HEADER]: f.team.id,
+          },
+          body: JSON.stringify({ teamId: f.team.id }),
+        },
+      )
+      expect(response.status).toBe(403)
+      expect(await response.json()).toEqual(denied)
+      expect(response.headers.has('www-authenticate')).toBe(false)
+    }
+    expect(await snapshot(f)).toEqual(before)
+  }
+
+  it('uniformly refuses missing sessions and Authorization before credential resolution', () =>
+    verifySessionBoundary(memberRemovalRoutes))
+
+  async function verifySwitchedContext(factory: typeof memberRemovalRoutes) {
+    const f = await fixture()
+    const other = await createTestTeam(db, [
+      { user: f.actor, role: 'owner' },
+      { user: f.target, role: 'member' },
+    ])
+    const app = application([factory({ db, now })])
+    const switched = await app.request('/api/auth/organization/set-active', {
+      method: 'POST',
+      headers: { cookie: f.login.cookie, origin, 'content-type': 'application/json' },
+      body: JSON.stringify({ organizationId: other.id }),
+    })
+    expect(switched.status).toBe(200)
+    const before = await snapshot(f)
+    // Both a stale body/header pair and a forged current header on an old body must reload.
+    for (const expected of [f.team.id, other.id]) {
+      const stale = await remove(f, { app, expected })
+      expect(stale.status).toBe(409)
+      expect(await stale.json()).toMatchObject({ error: 'organization_context_changed' })
+    }
+    // The native endpoint retains the same recoverable refusal for the stale tab.
+    const native = await nativeRemove(f)
+    expect(native.status).toBe(409)
+    expect(await native.json()).toMatchObject({ code: 'ORGANIZATION_CONTEXT_CHANGED' })
+    for (const expected of [null, f.team.id]) {
+      const wrongHeader = await remove(f, { app, teamId: other.id, expected })
+      expect(wrongHeader.status).toBe(409)
+      expect(await wrongHeader.json()).toMatchObject({ error: 'organization_context_changed' })
+    }
+    expect(await snapshot(f)).toEqual(before)
+    const membershipInCurrentTeam = () =>
+      db
+        .selectFrom('auth.member')
+        .select('id')
+        .where('organizationId', '=', other.id)
+        .where('userId', '=', f.target.id)
+        .executeTakeFirst()
+    expect(await membershipInCurrentTeam()).toBeDefined()
+    const fresh = await remove(f, { app, teamId: other.id, expected: other.id })
+    expect(fresh.status).toBe(200)
+    expect(await membershipInCurrentTeam()).toBeUndefined()
+    expect(await snapshot(f)).toEqual(before)
+  }
+
+  it('returns reload conflicts after a real session team switch and accepts fresh context', () =>
+    verifySwitchedContext(memberRemovalRoutes))
 
   it('revokes the removed member old team context immediately and refuses their next write with 409', async () => {
     const f = await fixture('owner', 'admin')
@@ -792,6 +901,7 @@ describe.skipIf(!serverUrl)('member removal through HTTP', () => {
       body: { userId: f.actor.id, metadata: { organizationId: f.team.id } },
     })
     const deniedHeaders: Record<string, string>[] = [
+      {},
       { cookie: ordinaryLogin.cookie },
       { cookie: f.targetLogin.cookie },
       { authorization: `Bearer ${key.key}`, cookie: f.login.cookie },
@@ -800,8 +910,8 @@ describe.skipIf(!serverUrl)('member removal through HTTP', () => {
       const response = await latestHandling(f, { headers })
       expect(response.status).toBe(403)
       expect(await response.json()).toEqual(denied)
+      expect(response.headers.has('www-authenticate')).toBe(false)
     }
-    expect((await latestHandling(f, { headers: {} })).status).toBe(401)
     const other = await createTestTeam(db, [{ user: f.actor, role: 'owner' }])
     const otherLogin = await session(f.actor, other.id)
     const inaccessible = await latestHandling(f, {
@@ -1073,7 +1183,7 @@ describe.skipIf(!serverUrl)('member removal through HTTP', () => {
     const bindings = {
       createRoute,
       z,
-      removeTeamMemberInTransaction,
+      removeTeamMember,
       TeamManagementError,
       getLatestTeamMemberRemovalHandling,
       getTeamMemberRemovalHandling,
@@ -1085,6 +1195,7 @@ describe.skipIf(!serverUrl)('member removal through HTTP', () => {
       json,
       serviceContext,
       EXPECTED_ORGANIZATION_HEADER,
+      ORGANIZATION_CONTEXT_CHANGED,
       teamManagementAccess: (...args: Parameters<typeof teamManagementAccess>) => {
         const access = teamManagementAccess(...args)
         const write = access.write.bind(access)
@@ -1112,6 +1223,29 @@ describe.skipIf(!serverUrl)('member removal through HTTP', () => {
 
   it('passes the publication assertion with an unmodified route source copy', () =>
     verifyOpen(sourceCopy()))
+
+  it('keeps the session-only boundary in an unmodified source copy', () =>
+    verifySessionBoundary(sourceCopy()))
+
+  it('detects reverting the session-only middleware with a real assertion', async () => {
+    await expect(
+      verifySessionBoundary(sourceCopy(['middleware: access.middleware,', 'middleware: caller,'])),
+    ).rejects.toThrow(expect.objectContaining({ name: 'AssertionError' }))
+  })
+
+  it('keeps switched team context bound in an unmodified source copy', () =>
+    verifySwitchedContext(sourceCopy()))
+
+  it('detects dropping the stale body context check with a real assertion', async () => {
+    await expect(
+      verifySwitchedContext(
+        sourceCopy([
+          'if (teamId.toLowerCase() !== c.var.principal.organization.id.toLowerCase())\n          throw contextChanged()',
+          '',
+        ]),
+      ),
+    ).rejects.toThrow(expect.objectContaining({ name: 'AssertionError' }))
+  })
 
   it.each<[string, Replacement]>([
     ['removal envelope', ['Removal = z\n  .object({', 'Removal = z\n  .strictObject({']],
@@ -1174,8 +1308,8 @@ describe.skipIf(!serverUrl)('member removal through HTTP', () => {
     await expect(
       verifyContext(
         sourceCopy([
-          "expectedOrganizationId: c.req.header(EXPECTED_ORGANIZATION_HEADER) ?? ''",
-          'expectedOrganizationId: teamId',
+          "const expectedOrganizationId = c.req.header(EXPECTED_ORGANIZATION_HEADER) ?? ''",
+          'const expectedOrganizationId = teamId',
         ]),
       ),
     ).rejects.toThrow(expect.objectContaining({ name: 'AssertionError' }))
@@ -1187,6 +1321,17 @@ describe.skipIf(!serverUrl)('member removal through HTTP', () => {
     expect(document.paths[removalPath]?.post?.security).toEqual([{ session: [] }])
     expect(document.paths[handlingPath]?.get?.security).toEqual([{ session: [] }])
     expect(document.paths[latestHandlingPath]?.get?.security).toEqual([{ session: [] }])
+    const removal = document.paths[removalPath]?.post
+    expect(Object.keys(removal?.responses ?? {})).toEqual(['200', '400', '403', '409', '429'])
+    expect(document.paths[handlingPath]?.get?.responses).not.toHaveProperty('401')
+    expect(document.paths[latestHandlingPath]?.get?.responses).not.toHaveProperty('401')
+    expect(removal?.parameters).toContainEqual(
+      expect.objectContaining({
+        in: 'header',
+        name: 'x-expected-organization-id',
+        required: true,
+      }),
+    )
     expect(
       responseAndRequestStrictness(document, [removalPath, handlingPath, latestHandlingPath]),
     ).toEqual({

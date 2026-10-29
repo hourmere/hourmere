@@ -63,7 +63,6 @@ export {
 } from './team-management.ts'
 export {
   removeTeamMember,
-  removeTeamMemberInTransaction,
   type TeamMemberRemoval,
   type TeamMemberRemovalInput,
 } from './team-member-removal.ts'

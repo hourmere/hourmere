@@ -1,5 +1,5 @@
 import { createRoute, z } from '@hono/zod-openapi'
-import { removeTeamMemberInTransaction, TeamManagementError } from '@hourmere/auth'
+import { removeTeamMember, TeamManagementError } from '@hourmere/auth'
 import {
   getLatestTeamMemberRemovalHandling,
   getTeamMemberRemovalHandling,
@@ -15,7 +15,11 @@ import {
   type ServiceDeps,
   serviceContext,
 } from '../openapi.ts'
-import { EXPECTED_ORGANIZATION_HEADER, teamManagementAccess } from '../team-management.ts'
+import {
+  EXPECTED_ORGANIZATION_HEADER,
+  ORGANIZATION_CONTEXT_CHANGED,
+  teamManagementAccess,
+} from '../team-management.ts'
 
 const Removal = z
   .object({
@@ -45,6 +49,20 @@ const HandlingQuery = z.strictObject({
   cursor: z.string().max(1024).optional(),
 })
 
+// These session-only routes convert authentication failures to the uniform 403.
+function sessionErrorResponses(...args: Parameters<typeof errorResponses>) {
+  const responses = errorResponses(...args)
+  delete responses[401]
+  return responses
+}
+
+const contextChanged = () =>
+  new DomainError(
+    'conflict',
+    'organization_context_changed',
+    'Your team context changed. Reload the page before trying again.',
+  )
+
 export function memberRemovalRoutes(deps: ServiceDeps): RouteModule {
   return ({ app, caller }) => {
     const access = teamManagementAccess(deps.db, caller)
@@ -54,37 +72,54 @@ export function memberRemovalRoutes(deps: ServiceDeps): RouteModule {
         path: '/api/v1/team/members/{memberUserId}/removal',
         summary: 'Revoke a team membership immediately',
         description:
-          'Requires a current verified owner/admin browser session and X-Expected-Organization-Id matching the requested team and current session. Owners may remove admins and members; admins may remove members. Owner targets are refused. In one transaction, revokes membership and deactivates team event types that lose their sole host, last current round-robin host or a required collective host. Existing bookings and saved hosts are preserved. Follow operationId through the handling-list route; affected event types require explicit repair and reactivation.',
+          'Requires a current verified owner/admin browser session and a same-origin Origin or Referer. Any Authorization header is denied before credential resolution, even with a valid session cookie. Missing or invalid sessions receive the same 403 team_management_access_denied without a WWW-Authenticate challenge. X-Expected-Organization-Id and body teamId must match the team where the action started and the current session team; missing or stale context returns 409 organization_context_changed. Owners may remove admins and members; admins may remove members. Owner targets are refused. In one transaction, revokes membership and deactivates team event types that lose their sole host, last current round-robin host or a required collective host. Existing bookings and saved hosts are preserved. Follow operationId through the handling-list route; affected event types require explicit repair and reactivation.',
         tags: ['Team members'],
         security: [{ session: [] }],
-        middleware: caller,
+        middleware: access.middleware,
         request: {
           params: z.strictObject({ memberUserId: z.uuid() }),
-          headers: z.object({ 'x-expected-organization-id': z.string().optional() }),
+          headers: z.object({
+            'x-expected-organization-id': z
+              .string()
+              .optional()
+              .openapi({
+                description: 'Required: the organization where this removal action started',
+                param: { required: true },
+              }),
+          }),
           body: { required: true, content: json(z.strictObject({ teamId: z.uuid() })) },
         },
         responses: {
           200: { description: 'Membership revoked and removal recorded', content: json(Removal) },
-          ...errorResponses({
+          ...sessionErrorResponses({
             400: 'Invalid parameters (invalid_request)',
-            403: 'team_management_access_denied: inaccessible team or disallowed member target',
-            409: 'organization_context_changed: reload the page before trying again',
+            403: 'team_management_access_denied: requires a current team owner/admin session without Authorization and an accessible allowed member target; forbidden: cookie writes require same-origin Origin or Referer',
+            409: ORGANIZATION_CONTEXT_CHANGED,
           }),
         },
       }),
       async (c) => {
         const { teamId } = c.req.valid('json')
         const { memberUserId } = c.req.valid('param')
+        const expectedOrganizationId = c.req.header(EXPECTED_ORGANIZATION_HEADER) ?? ''
+        if (teamId.toLowerCase() !== c.var.principal.organization.id.toLowerCase())
+          throw contextChanged()
         try {
           const result = await access.write(
             c.var.principal,
             teamId,
-            (trx, actor) => removeTeamMemberInTransaction(trx, actor, { memberUserId }),
-            { expectedOrganizationId: c.req.header(EXPECTED_ORGANIZATION_HEADER) ?? '' },
+            (trx, actor) =>
+              removeTeamMember(trx, c.var.principal, {
+                teamId: actor.organizationId,
+                memberUserId,
+                expectedOrganizationId,
+              }),
+            { expectedOrganizationId },
           )
           return c.json(result, 200)
         } catch (error) {
           if (!(error instanceof TeamManagementError)) throw error
+          if (error.code === 'organization_context_changed') throw contextChanged()
           throw new DomainError('forbidden', 'team_management_access_denied')
         }
       },
@@ -105,7 +140,7 @@ export function memberRemovalRoutes(deps: ServiceDeps): RouteModule {
         },
         responses: {
           200: { description: 'Current removal handling list', content: json(RemovalHandling) },
-          ...errorResponses({
+          ...sessionErrorResponses({
             400: 'Invalid parameters (invalid_request, invalid_cursor or invalid_limit)',
             403: 'team_management_access_denied: inaccessible team or removal record',
           }),
@@ -135,7 +170,7 @@ export function memberRemovalRoutes(deps: ServiceDeps): RouteModule {
         },
         responses: {
           200: { description: 'Latest removal handling list', content: json(RemovalHandling) },
-          ...errorResponses({
+          ...sessionErrorResponses({
             400: 'Invalid parameters (invalid_request, invalid_cursor or invalid_limit)',
             403: 'team_management_access_denied: inaccessible team or removal record',
           }),

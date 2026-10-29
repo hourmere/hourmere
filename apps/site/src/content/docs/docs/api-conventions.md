@@ -287,6 +287,12 @@ See the [full response and pagination contract](https://github.com/hourmere/hour
 and requires `X-Expected-Organization-Id`. A current verified owner can remove an admin
 or member; an admin can remove a member. Owner targets are refused. Missing and
 inaccessible members receive the same `403 team_management_access_denied`.
+Missing or invalid sessions and any Authorization header, even with a valid session
+cookie, receive that same denial without a `WWW-Authenticate` challenge. Authorization
+headers are refused before credentials are resolved. Cookie writes require a same-origin
+Origin or Referer. The header and body `teamId` must match the current session team;
+missing or stale context returns `409 organization_context_changed` without writing.
+Reload the page before submitting again.
 
 The membership revocation, affected event-type deactivation and removal operation record
 commit together. Individual and collective team types using the member are deactivated;

@@ -15,7 +15,7 @@ import {
   teamSession,
   teamSessionUser,
 } from './team-management.ts'
-import { removeTeamMemberInTransaction, teamMemberRemovalTarget } from './team-member-removal.ts'
+import { removeTeamMember, teamMemberRemovalTarget } from './team-member-removal.ts'
 
 const invite = '/organization/invite-member'
 const changeRole = '/organization/update-member-role'
@@ -142,7 +142,7 @@ export function createTeamRolePolicy(db: Db) {
     if (!target) throw teamRoleDenied()
     const manager = { ...facts, role: facts.role }
     const member = await teamMemberRemovalTarget(targetDb, manager, target.userId, lock)
-    return { actor: manager, member }
+    return { actor: manager, member, principal: actor, expectedOrganizationId }
   }
 
   async function manager(ctx: AuthMiddlewareContext, targetDb: Db, lock: boolean) {
@@ -310,11 +310,15 @@ export function createTeamRolePolicy(db: Db) {
         const ctx = removalContext()
         if (ctx?.path !== remove || request.model !== 'member') return deleteOne(request)
         return write(async (trx) => {
-          const { actor, member } = await removal(ctx, trx, true)
+          const { actor, member, principal, expectedOrganizationId } = await removal(ctx, trx, true)
           if (!selects(request.where, { id: member.id })) throw teamRoleDenied()
           // Bypass the native recorder here: this helper owns the member deletion,
           // dependent deactivation and one operation record on the same connection.
-          await removeTeamMemberInTransaction(trx, actor, { memberUserId: member.userId })
+          await removeTeamMember(trx, principal, {
+            teamId: actor.organizationId,
+            memberUserId: member.userId,
+            expectedOrganizationId,
+          })
         })
       }
       adapter.create = async (request) => {

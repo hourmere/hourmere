@@ -7,6 +7,7 @@ import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { z } from 'zod'
+import { bookingPageQuery, encodeBookingCursor } from './booking-page.ts'
 import type { ServiceContext } from './context.ts'
 import { DomainError } from './errors.ts'
 import { isUuid } from './internal.ts'
@@ -16,7 +17,8 @@ import {
   getTeamMemberRemovalHandling,
   MemberRemovalHandlingSchema,
 } from './member-removal.ts'
-import { readTeamBookingPage } from './team-bookings.ts'
+import { toTeamAdminBooking } from './team-admin-booking.ts'
+import { countTeamBookings, readTeamBookingPage } from './team-bookings.ts'
 import { createFixtures, createTestTeam, createTestUser } from './testing.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -24,17 +26,36 @@ const now = () => Temporal.Instant.from('2026-11-01T12:00:00Z')
 type Read = typeof getTeamMemberRemovalHandling
 type LatestRead = typeof getLatestTeamMemberRemovalHandling
 type Change = readonly [string, string]
+type Source = 'handling' | 'team' | 'page'
 
-function copies(change?: Change): { read: Read; latest: LatestRead } {
-  let source = readFileSync('packages/scheduling/src/member-removal.ts', 'utf8')
-  if (change) {
-    expect(source.includes(change[0]), 'mutation must match source').toBe(true)
-    source = source.replace(...change)
+function copies(change?: Change, target: Source = 'handling'): { read: Read; latest: LatestRead } {
+  function compile(path: string, sourceTarget: Source) {
+    let source = readFileSync(path, 'utf8')
+    if (change && sourceTarget === target) {
+      expect(source.includes(change[0]), 'mutation must match source').toBe(true)
+      source = source.replace(...change)
+    }
+    return stripTypeScriptTypes(source.replace(/^import[\s\S]*?from '[^']+'\n/gm, '')).replace(
+      /\bexport /g,
+      '',
+    )
   }
-  source = stripTypeScriptTypes(source.replace(/^import[\s\S]*?from '[^']+'\n/gm, '')).replace(
-    /\bexport /g,
-    '',
-  )
+  let page = { bookingPageQuery, encodeBookingCursor }
+  let team = { countTeamBookings, readTeamBookingPage }
+  if (target === 'page') {
+    page = new Function(
+      'DomainError',
+      'isUuid',
+      `${compile('packages/scheduling/src/booking-page.ts', 'page')}; return { bookingPageQuery, encodeBookingCursor }`,
+    )(DomainError, isUuid) as typeof page
+  }
+  if (target !== 'handling') {
+    const bindings = { sql, ...page, DomainError, isUuid, toTeamAdminBooking }
+    team = new Function(
+      ...Object.keys(bindings),
+      `${compile('packages/scheduling/src/team-bookings.ts', 'team')}; return { countTeamBookings, readTeamBookingPage }`,
+    )(...Object.values(bindings)) as typeof team
+  }
   const bindings = {
     checkTeamManagementAccess,
     TeamManagementError,
@@ -43,14 +64,14 @@ function copies(change?: Change): { read: Read; latest: LatestRead } {
     DomainError,
     isUuid,
     MemberDepartureBookingSchema,
-    readTeamBookingPage,
+    ...team,
   }
   return new Function(
     ...Object.keys(bindings),
-    `${source}; return { read: getTeamMemberRemovalHandling, latest: getLatestTeamMemberRemovalHandling }`,
+    `${compile('packages/scheduling/src/member-removal.ts', 'handling')}; return { read: getTeamMemberRemovalHandling, latest: getLatestTeamMemberRemovalHandling }`,
   )(...Object.values(bindings)) as { read: Read; latest: LatestRead }
 }
-const sourceCopy = (change?: Change) => copies(change).read
+const sourceCopy = (change?: Change, target?: Source) => copies(change, target).read
 
 describe.skipIf(!serverUrl)('member removal handling service', () => {
   let owned: TestDatabase
@@ -185,21 +206,70 @@ describe.skipIf(!serverUrl)('member removal handling service', () => {
     await verify(getTeamMemberRemovalHandling)
     await verify(sourceCopy())
   })
-  it.each<Change>([
-    [".where('booking.organization_id', '=', input.teamId)", ''],
-    [".where('event.owner_user_id', 'is', null)", ''],
-    [".where('host.user_id', '=', removal.target_user_id)", ''],
-    [".where('booking.status', '=', 'confirmed')", ''],
-    // biome-ignore lint/suspicious/noTemplateCurlyInString: exact source-copy mutation
-    [".where('booking.end_at', '>', sql<Date>`${now.toString()}::timestamptz`)", ''],
-    ['Temporal.Instant.compare(start, now) <= 0', 'Temporal.Instant.compare(start, now) < -1'],
+  it.each<[Source, Change]>([
+    ['team', [".where('b.organization_id', '=', teamId)", '']],
+    ['team', [".where('event.owner_user_id', 'is', null)", '']],
+    ['team', [".where('assigned_host.user_id', '=', hostUserId as string)", '']],
+    ['page', [".$if(status !== undefined, (q) => q.where('b.status', '=', status as string))", '']],
     [
-      "inProgress ? 'wait_until_end_or_coordinate_offline'",
-      "false ? 'wait_until_end_or_coordinate_offline'",
+      'page',
+      [
+        ".$if(endAfter !== undefined, (q) =>\n      q.where((eb) => eb('b.end_at', '>', timestamptz(eb, endAfter as Temporal.Instant))),\n    )",
+        '',
+      ],
     ],
-    ['totalCount: Number(count.count)', 'totalCount: data.length'],
-  ])('detects handling projection mutation %s', async (before, after) => {
-    await expect(verify(sourceCopy([before, after]))).rejects.toThrow(
+    [
+      'handling',
+      ['Temporal.Instant.compare(start, now) <= 0', 'Temporal.Instant.compare(start, now) < -1'],
+    ],
+    [
+      'handling',
+      [
+        "inProgress ? 'wait_until_end_or_coordinate_offline'",
+        "false ? 'wait_until_end_or_coordinate_offline'",
+      ],
+    ],
+    ['handling', ['      totalCount,', '      totalCount: data.length,']],
+  ])('detects handling projection mutation in %s: %s', async (target, change) => {
+    await expect(verify(sourceCopy(change, target))).rejects.toThrow(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
+  })
+
+  async function verifyMatchingCount(read: Read) {
+    const f = await fixture()
+    const first = await booking(f, '2026-11-02T09:00:00Z')
+    const personal = await createFixtures(db).eventType(f.team.id, f.removed.id, {})
+    const filtered = await booking(f, '2026-11-03T09:00:00Z', { eventId: personal })
+    const last = await booking(f, '2026-11-04T09:00:00Z')
+    const ids: string[] = []
+    let cursor: string | undefined
+    for (let page = 0; page < 3; page++) {
+      const result = await read(f.ctx, { ...f.input, limit: 1, cursor })
+      expect(result.bookings.totalCount).toBe(2)
+      ids.push(...result.bookings.data.map((item) => item.id))
+      cursor = result.bookings.nextCursor ?? undefined
+      if (cursor === undefined) break
+    }
+    expect(cursor).toBeUndefined()
+    expect(ids).toEqual([first, last])
+    expect(ids).not.toContain(filtered)
+    expect(ids).toHaveLength(2)
+  }
+
+  it('counts the same filtered booking set across every handling page', async () => {
+    await verifyMatchingCount(getTeamMemberRemovalHandling)
+    await verifyMatchingCount(sourceCopy())
+  })
+  it('detects a handling count that omits the shared event filter', async () => {
+    const read = sourceCopy(
+      [
+        'const { query } = teamBookingQuery(ctx, teamId, input, hostUserId, teamEventTypesOnly)',
+        'const { query } = teamBookingQuery(ctx, teamId, input, hostUserId)',
+      ],
+      'team',
+    )
+    await expect(verifyMatchingCount(read)).rejects.toThrow(
       expect.objectContaining({ name: 'AssertionError' }),
     )
   })

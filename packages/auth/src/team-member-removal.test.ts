@@ -13,6 +13,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { createApp } from '../../../apps/server/src/app.ts'
 import { createCallerResolver } from './caller.ts'
 import { beforeHook } from './hooks.ts'
+import * as authExports from './index.ts'
 import { type Auth, createAuth, createAuthPool } from './index.ts'
 import { organizationOperationRecords, recordTeamRoleChange } from './organization-operations.ts'
 import { isUuid, organizationGuards } from './organizations.ts'
@@ -24,11 +25,8 @@ import {
   teamSession,
   teamSessionUser,
 } from './team-management.ts'
-import {
-  removeTeamMember,
-  removeTeamMemberInTransaction,
-  teamMemberRemovalTarget,
-} from './team-member-removal.ts'
+import * as removalExports from './team-member-removal.ts'
+import { removeTeamMember, teamMemberRemovalTarget } from './team-member-removal.ts'
 import type { createTeamRolePolicy } from './team-role-policy.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -54,7 +52,10 @@ function sourceCopy(replacement?: Replacement): Remove {
   ) as Remove
 }
 
-function policySourceCopy(replacement?: Replacement): typeof createTeamRolePolicy {
+function policySourceCopy(
+  replacement?: Replacement,
+  remove: Remove = removeTeamMember,
+): typeof createTeamRolePolicy {
   let source = readFileSync('packages/auth/src/team-role-policy.ts', 'utf8')
   if (replacement) {
     expect(source.includes(replacement[0]), 'mutation must match source').toBe(true)
@@ -76,13 +77,45 @@ function policySourceCopy(replacement?: Replacement): typeof createTeamRolePolic
     teamRoles,
     teamSession,
     teamSessionUser,
-    removeTeamMemberInTransaction,
+    removeTeamMember: remove,
     teamMemberRemovalTarget,
   }
   return new Function(...Object.keys(bindings), `${source}; return createTeamRolePolicy`)(
     ...Object.values(bindings),
   ) as typeof createTeamRolePolicy
 }
+
+async function sourceExportCopy(reexportTransactionHelper = false) {
+  const location = new URL('./team-member-removal.ts', import.meta.url)
+  let source = readFileSync(location, 'utf8')
+  if (reexportTransactionHelper) source += '\nexport { removeTeamMemberInTransaction }\n'
+  source = stripTypeScriptTypes(source).replace(
+    /from '([^']+)'/g,
+    (_, specifier: string) =>
+      `from '${specifier.startsWith('.') ? new URL(specifier, location).href : import.meta.resolve(specifier)}'`,
+  )
+  return import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`)
+}
+
+function verifyExportBoundary(module: Record<string, unknown>) {
+  expect(module).not.toHaveProperty('removeTeamMemberInTransaction')
+  expect(module).toHaveProperty('removeTeamMember', expect.any(Function))
+}
+
+describe('member removal exports', () => {
+  it('exposes only the checked removal entry at the package and module boundaries', async () => {
+    verifyExportBoundary(authExports)
+    verifyExportBoundary(removalExports)
+    verifyExportBoundary(await sourceExportCopy())
+  })
+
+  it('detects a transaction helper export from a source copy with a real assertion', async () => {
+    const copy = await sourceExportCopy(true)
+    expect(() => verifyExportBoundary(copy)).toThrow(
+      expect.objectContaining({ name: 'AssertionError' }),
+    )
+  })
+})
 
 describe.skipIf(!serverUrl)('atomic member removal protections through HTTP', () => {
   let owned: TestDatabase
@@ -128,7 +161,7 @@ describe.skipIf(!serverUrl)('atomic member removal protections through HTTP', ()
       .where('userId', '=', target.id)
       .executeTakeFirstOrThrow()
     const token = randomBytes(24).toString('base64url')
-    await db
+    const login = await db
       .insertInto('auth.session')
       .values({
         userId: actor.id,
@@ -137,13 +170,23 @@ describe.skipIf(!serverUrl)('atomic member removal protections through HTTP', ()
         expiresAt: new Date(Date.now() + 3_600_000),
         updatedAt: new Date(),
       })
-      .execute()
+      .returning('id')
+      .executeTakeFirstOrThrow()
     const signature = createHmac('sha256', secret).update(token).digest('base64')
     const cookie = `better-auth.session_token=${encodeURIComponent(`${token}.${signature}`)}`
     const eventId = await createFixtures(db).eventType(team.id, null, {
       hosts: [{ userId: target.id }],
     })
-    return { actor, target, survivor, team, memberId: member.id, eventId, cookie }
+    return {
+      actor,
+      target,
+      survivor,
+      team,
+      memberId: member.id,
+      eventId,
+      cookie,
+      sessionId: login.id,
+    }
   }
   type Fixture = Awaited<ReturnType<typeof fixture>>
 
@@ -205,8 +248,8 @@ describe.skipIf(!serverUrl)('atomic member removal protections through HTTP', ()
     )
   }
 
-  function copiedNativePolicy(replacement?: Replacement) {
-    const policy = policySourceCopy(replacement)(db)
+  function copiedNativePolicy(replacement?: Replacement, remove: Remove = removeTeamMember) {
+    const policy = policySourceCopy(replacement, remove)(db)
     // Use the real pinned native endpoint, auth adapter transaction and recorder. Only
     // the policy is a source copy; the removed protection must fail a behavior assertion.
     const copiedAuth = betterAuth({
@@ -247,6 +290,52 @@ describe.skipIf(!serverUrl)('atomic member removal protections through HTTP', ()
         .executeTakeFirstOrThrow()
     ).is_active
   }
+
+  async function verifyCallerTransaction(remove: Remove = removeTeamMember) {
+    const f = await fixture()
+    const principal = {
+      kind: 'session' as const,
+      user: f.actor.principal.user,
+      organization: f.team.as(f.actor).organization,
+      sessionId: f.sessionId,
+    }
+    await expect(
+      db.transaction().execute(async (trx) => {
+        const result = await remove(trx, principal, {
+          teamId: f.team.id,
+          memberUserId: f.target.id,
+          expectedOrganizationId: f.team.id,
+        })
+        expect(result.deactivatedEventTypeIds).toEqual([f.eventId])
+        expect(
+          await trx
+            .selectFrom('auth.member')
+            .select('id')
+            .where('id', '=', f.memberId)
+            .executeTakeFirst(),
+        ).toBeUndefined()
+        throw new Error('Synthetic caller rollback')
+      }),
+    ).rejects.toThrow('Synthetic caller rollback')
+    expect(await member(f)).toBeDefined()
+    expect(await active(f.eventId)).toBe(true)
+    expect(
+      await db
+        .selectFrom('organization_operations')
+        .select('id')
+        .where('organization_id', '=', f.team.id)
+        .execute(),
+    ).toEqual([])
+  }
+
+  it('reuses a caller transaction so its rollback preserves membership and event activation', () =>
+    verifyCallerTransaction())
+
+  it('detects a nested removal transaction in a source copy with a real assertion', async () => {
+    await expect(
+      verifyCallerTransaction(sourceCopy(['return db.isTransaction', 'return false'])),
+    ).rejects.toMatchObject({ name: 'AssertionError' })
+  })
 
   it.each(['owner', 'member, admin'])(
     'protects the trusted Better Auth removeMember API for %s with atomic removal',
@@ -401,15 +490,21 @@ describe.skipIf(!serverUrl)('atomic member removal protections through HTTP', ()
   )
 
   it.each(['role', 'context'] as const)(
-    'detects a missing locked native %s recheck with a real assertion',
+    'detects missing locked native %s rechecks with a real assertion',
     async (change) => {
       await expect(
         verifyNativeRecheck(
           change,
-          copiedNativePolicy([
-            'const { actor, member } = await removal(ctx, trx, true)',
-            'const { actor, member } = await removal(ctx, trx, false)',
-          ]),
+          copiedNativePolicy(
+            [
+              'const { actor, member, principal, expectedOrganizationId } = await removal(ctx, trx, true)',
+              'const { actor, member, principal, expectedOrganizationId } = await removal(ctx, trx, false)',
+            ],
+            sourceCopy([
+              'checkTeamManagementAccess(trx, principal, input.teamId, true, {',
+              'checkTeamManagementAccess(trx, principal, input.teamId, false, {',
+            ]),
+          ),
         ),
       ).rejects.toMatchObject({ name: 'AssertionError' })
     },
@@ -676,8 +771,8 @@ describe.skipIf(!serverUrl)('atomic member removal protections through HTTP', ()
     {
       name: 'atomic removal transaction',
       replacement: [
-        '.execute(async (trx) => {',
-        '.execute(async (_transaction) => { const trx = db;',
+        'const write = async (trx: Transaction<Database>) => {',
+        'const write = async (_transaction: Transaction<Database>) => { const trx = db;',
       ],
       verify: verifyAtomicity,
     },
