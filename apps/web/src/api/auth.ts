@@ -7,14 +7,18 @@ import { errorFromResponse } from './errors.ts'
 
 async function authRequest<T>(
   path: string,
-  { body, signal }: { body?: object; signal?: AbortSignal } = {},
+  {
+    body,
+    signal,
+    headers,
+  }: { body?: object; signal?: AbortSignal; headers?: Record<string, string> } = {},
 ): Promise<T> {
   const response = await fetch(`/api/auth${path}`, {
     ...(body === undefined
       ? { method: 'GET' }
       : {
           method: 'POST',
-          headers: { 'content-type': 'application/json' },
+          headers: { 'content-type': 'application/json', ...headers },
           body: JSON.stringify(body),
         }),
     ...(signal && { signal }),
@@ -230,13 +234,17 @@ export interface SetActiveOrganizationInput {
   organizationSlug?: string
 }
 
-/** Returns the organization or null, not a session or a success envelope. */
+/** Optional source context protects automatic follow-ups; the body still selects the target. */
 export function setActiveOrganization(
   input: SetActiveOrganizationInput,
   signal?: AbortSignal,
+  expectedOrganizationId?: string,
 ): Promise<Organization | null> {
   return authRequest('/organization/set-active', {
     body: input,
+    ...(expectedOrganizationId && {
+      headers: { 'X-Expected-Organization-Id': expectedOrganizationId },
+    }),
     ...(signal && { signal }),
   })
 }

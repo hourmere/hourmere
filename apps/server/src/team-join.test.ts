@@ -115,7 +115,7 @@ describe.skipIf(!serverUrl)('team invitation contract', () => {
         'content-type': 'application/json',
         origin,
         cookie,
-        ...(expected ? { 'x-expected-organization-id': expected } : {}),
+        ...(expected && action !== 'set-active' ? { 'x-expected-organization-id': expected } : {}),
       },
       body: JSON.stringify(body),
     })
@@ -312,7 +312,7 @@ describe.skipIf(!serverUrl)('team invitation contract', () => {
     }
     const invitation = await invite(i, owner.cookie, org.id, 'recipient@example.com')
     for (const [actor, status, code] of [
-      [member, 403, 'YOU_ARE_NOT_ALLOWED_TO_INVITE_USERS_TO_THIS_ORGANIZATION'],
+      [member, 403, 'TEAM_MANAGEMENT_ACCESS_DENIED'],
       [outsider, 409, 'ORGANIZATION_CONTEXT_CHANGED'],
     ] as const) {
       const response = await post(i.app, 'invite-member', actor.cookie, {
@@ -395,7 +395,6 @@ describe.skipIf(!serverUrl)('team invitation contract', () => {
     )
     const resent = await post(i.app, 'invite-member', owner.cookie, {
       ...body,
-      role: 'admin',
       resend: true,
     })
     expect(resent.status).toBe(200)

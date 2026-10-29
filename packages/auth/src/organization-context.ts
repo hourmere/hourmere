@@ -74,11 +74,14 @@ export async function organizationContext(ctx: AuthMiddlewareContext, db: Db) {
       message: 'Deleting a team is not supported.',
     })
   }
-  if (!covered.has(ctx.path)) return
+  const expected = ctx.request.headers.get('x-expected-organization-id')
+  // Automatic follow-ups bind the source context; deliberate switching without an
+  // expectation keeps its existing explicit-target contract.
+  const boundSwitch = ctx.path === '/organization/set-active' && expected !== null
+  if (!covered.has(ctx.path) && !boundSwitch) return
   const session = await getSessionFromCtx(ctx)
   // Leave unauthenticated requests to the endpoint's existing authentication response.
   if (!session) return
-  const expected = ctx.request.headers.get('x-expected-organization-id')
   if (!expected || !isUuid(expected)) throw changed()
   const expectedId = expected.toLowerCase()
   // Read the live session, rather than trusting the organization cached while resolving
@@ -96,6 +99,7 @@ export async function organizationContext(ctx: AuthMiddlewareContext, db: Db) {
       ? live.activeOrganizationId
       : await ensurePersonalOrganization(db, session.user.id)
   if (expectedId !== active.toLowerCase()) throw changed()
+  if (boundSwitch) return
 
   const body = ctx.body as Record<string, unknown> | undefined
   if (!body || typeof body !== 'object' || Array.isArray(body)) return
@@ -128,14 +132,14 @@ export async function organizationContext(ctx: AuthMiddlewareContext, db: Db) {
       .executeTakeFirst()
     if (!invitation) throw changed()
   }
+  // Role changes use the shared management policy's uniform target denial. Keep context
+  // drift distinct from role authority without disclosing missing/other-team members.
   const memberId =
-    ctx.path === '/organization/update-member-role'
-      ? body.memberId
-      : ctx.path === '/organization/remove-member' &&
-          typeof body.memberIdOrEmail === 'string' &&
-          !body.memberIdOrEmail.includes('@')
-        ? body.memberIdOrEmail
-        : undefined
+    ctx.path === '/organization/remove-member' &&
+    typeof body.memberIdOrEmail === 'string' &&
+    !body.memberIdOrEmail.includes('@')
+      ? body.memberIdOrEmail
+      : undefined
   if (typeof memberId === 'string') {
     const member = await db
       .selectFrom('auth.member')

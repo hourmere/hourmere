@@ -1,4 +1,9 @@
-import type { Principal } from '@hourmere/auth'
+import {
+  checkTeamManagementAccess,
+  type Principal,
+  TeamManagementError,
+  type TeamManager,
+} from '@hourmere/auth'
 import type { Database, Db } from '@hourmere/db'
 import { DomainError } from '@hourmere/scheduling/errors'
 import { createMiddleware } from 'hono/factory'
@@ -6,24 +11,12 @@ import { sql, type Transaction } from 'kysely'
 import type { CallerEnv } from './caller.ts'
 import type { CallerMiddleware } from './openapi.ts'
 
-interface TeamManager {
-  userId: string
-  organizationId: string
-  role: 'owner' | 'admin'
-}
-
-interface TeamReader {
-  userId: string
-  organizationId: string
-  role: 'owner' | 'admin' | 'member'
-}
-
-const uuid = (id: string) =>
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
 const denied = () => new DomainError('forbidden', 'team_management_access_denied')
 export const EXPECTED_ORGANIZATION_HEADER = 'X-Expected-Organization-Id'
 export const ORGANIZATION_CONTEXT_CHANGED =
   'organization_context_changed: reload the page before trying this team write again'
+const uuid = (id: string) =>
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
 const contextChanged = () =>
   new DomainError(
     'conflict',
@@ -31,102 +24,14 @@ const contextChanged = () =>
     'Your team context changed. Reload the page before trying again.',
   )
 
-/** Current database facts only: principal organization metadata and client roles are not authority. */
-async function check(
-  db: Db,
-  principal: Principal,
-  teamId: string,
-  lock = false,
-  context?: { expectedOrganizationId: string; allowPersonal: boolean },
-  allowMemberRead = false,
-): Promise<TeamReader> {
-  if (
-    context &&
-    (!uuid(context.expectedOrganizationId) ||
-      context.expectedOrganizationId.toLowerCase() !== teamId.toLowerCase())
-  )
-    throw contextChanged()
-  if (
-    principal.kind !== 'session' ||
-    !uuid(principal.user.id) ||
-    !uuid(principal.sessionId) ||
-    !uuid(teamId) ||
-    teamId.toLowerCase() !== principal.organization.id.toLowerCase()
-  )
-    throw denied()
-
-  let userQuery = db
-    .selectFrom('auth.user')
-    .select('emailVerified')
-    .where('id', '=', principal.user.id)
-  if (lock) userQuery = userQuery.forShare()
-  const user = await userQuery.executeTakeFirst()
-  if (!user?.emailVerified) throw denied()
-
-  let organizationQuery = db.selectFrom('auth.organization').select('id').where('id', '=', teamId)
-  // Serialize team-management writes, including organization edits and self role changes,
-  // without competing SHARE → UPDATE upgrades in their callbacks.
-  if (lock) organizationQuery = organizationQuery.forUpdate()
-  const organization = await organizationQuery.executeTakeFirst()
-  if (!organization) throw denied()
-  const personal = await db
-    .selectFrom('personal_organizations')
-    .select('organization_id')
-    .where('organization_id', '=', teamId)
-    .executeTakeFirst()
-  if (personal && !context?.allowPersonal) throw denied()
-
-  // Re-read AFTER acquiring the parent locks: a revocation committed while waiting wins.
-  let memberQuery = db
-    .selectFrom('auth.member')
-    .select('role')
-    .where('userId', '=', principal.user.id)
-    .where('organizationId', '=', teamId)
-  if (lock) memberQuery = memberQuery.forShare()
-  const member = await memberQuery.executeTakeFirst()
-  // Better Auth can store multiple roles. Only these exact known tokens grant management.
-  const roles = member?.role.split(',').map((role) => role.trim()) ?? []
-  const role = roles.includes('owner')
-    ? 'owner'
-    : roles.includes('admin')
-      ? 'admin'
-      : allowMemberRead && roles.includes('member')
-        ? 'member'
-        : undefined
-  if (!role) throw denied()
-
-  // Also refuse a session invalidated since requireCaller (including email-proof rotation).
-  // Check expiry AFTER acquiring the session lock too: a WHERE predicate can have been
-  // evaluated before waiting for an unchanged locked row. Use wall time, not BEGIN time.
-  let sessionQuery = db
-    .selectFrom('auth.session')
-    .select(['expiresAt', 'activeOrganizationId'])
-    .where('id', '=', principal.sessionId)
-    .where('userId', '=', principal.user.id)
-  if (lock) sessionQuery = sessionQuery.forShare()
-  const session = await sessionQuery.executeTakeFirst()
-  if (!session) throw denied()
-  const validity = await db
-    .selectNoFrom(sql<boolean>`${session.expiresAt}::timestamptz > clock_timestamp()`.as('active'))
-    .executeTakeFirstOrThrow()
-  if (!validity.active) throw denied()
-
-  if (context && session.activeOrganizationId?.toLowerCase() !== organization.id.toLowerCase()) {
-    // The caller resolver falls back to the personal organization when the active team's
-    // membership has gone. Recompute that effective context from current database facts.
-    const activeMembership =
-      session.activeOrganizationId && uuid(session.activeOrganizationId)
-        ? await db
-            .selectFrom('auth.member')
-            .select('id')
-            .where('organizationId', '=', session.activeOrganizationId)
-            .where('userId', '=', principal.user.id)
-            .executeTakeFirst()
-        : undefined
-    if (activeMembership || !personal) throw contextChanged()
+async function check(...args: Parameters<typeof checkTeamManagementAccess>) {
+  try {
+    return await checkTeamManagementAccess(...args)
+  } catch (error) {
+    if (!(error instanceof TeamManagementError)) throw error
+    if (error.code === 'organization_context_changed') throw contextChanged()
+    throw new DomainError('forbidden', error.code)
   }
-
-  return { userId: principal.user.id, organizationId: organization.id, role }
 }
 
 /**
@@ -165,11 +70,97 @@ export function organizationWriteAccess(principal: Principal, expectedOrganizati
 }
 
 /**
+ * Host booking actions keep their existing explicit-ID authority. Browser callers may
+ * additionally bind the action to its opening organization; older clients and credentials
+ * retain their existing contract. Run first inside the service's write transaction so the
+ * live context and membership remain valid through commit, without granting management roles.
+ */
+export function bookingWriteAccess(principal: Principal, expectedOrganizationId?: string) {
+  return async (db: Db, organizationId: string): Promise<void> => {
+    if (principal.kind !== 'session' || expectedOrganizationId === undefined) return
+    if (
+      !uuid(expectedOrganizationId) ||
+      !uuid(principal.user.id) ||
+      !uuid(principal.sessionId) ||
+      expectedOrganizationId.toLowerCase() !== organizationId.toLowerCase() ||
+      organizationId.toLowerCase() !== principal.organization.id.toLowerCase()
+    )
+      throw contextChanged()
+
+    // A context transition uses its dedicated lock pool and then reads the app database.
+    // Booking writes may overlap; only an exclusive context transition should conflict.
+    // Refuse that contention promptly so waiting transactions cannot fill the lock pool.
+    const lock = await sql<{
+      locked: boolean
+    }>`SELECT pg_try_advisory_xact_lock_shared(hashtextextended(${`hourmere.organization-context:${principal.sessionId}`}, 0)) AS locked`.execute(
+      db,
+    )
+    if (!lock.rows[0]?.locked) throw contextChanged()
+    const user = await db
+      .selectFrom('auth.user')
+      .select('emailVerified')
+      .where('id', '=', principal.user.id)
+      .forShare()
+      .executeTakeFirst()
+    const organization = await db
+      .selectFrom('auth.organization')
+      .select('id')
+      .where('id', '=', organizationId)
+      .forShare()
+      .executeTakeFirst()
+    const member = await db
+      .selectFrom('auth.member')
+      .select('id')
+      .where('userId', '=', principal.user.id)
+      .where('organizationId', '=', organizationId)
+      .forShare()
+      .executeTakeFirst()
+    const session = await db
+      .selectFrom('auth.session')
+      .select(['expiresAt', 'activeOrganizationId'])
+      .where('id', '=', principal.sessionId)
+      .where('userId', '=', principal.user.id)
+      .forShare()
+      .executeTakeFirst()
+    if (!user?.emailVerified || !organization || !member || !session) throw contextChanged()
+    const validity = await db
+      .selectNoFrom(
+        sql<boolean>`${session.expiresAt}::timestamptz > clock_timestamp()`.as('active'),
+      )
+      .executeTakeFirstOrThrow()
+    if (!validity.active) throw contextChanged()
+
+    const activeMember =
+      session.activeOrganizationId && uuid(session.activeOrganizationId)
+        ? await db
+            .selectFrom('auth.member')
+            .select('id')
+            .where('userId', '=', principal.user.id)
+            .where('organizationId', '=', session.activeOrganizationId)
+            .executeTakeFirst()
+        : undefined
+    const personal = activeMember
+      ? undefined
+      : await db
+          .selectFrom('personal_organizations')
+          .select('organization_id')
+          .where('user_id', '=', principal.user.id)
+          .executeTakeFirst()
+    const effectiveOrganizationId = activeMember
+      ? session.activeOrganizationId
+      : personal?.organization_id
+    if (effectiveOrganizationId?.toLowerCase() !== organizationId.toLowerCase())
+      throw contextChanged()
+  }
+}
+
+/**
  * Shared entry for new team-management web routes.
  *
  * In a RouteModule, create `const access = teamManagementAccess(db, caller)` and declare
- * `middleware: access.middleware`. This preserves requireCaller's Origin/Referer checks,
- * then applies the existing sessionOnly pattern with fresh verified team owner/admin facts.
+ * `middleware: access.middleware`. Authorization-bearing requests are denied before session
+ * resolution. Cookie callers retain requireCaller's Origin/Referer checks, followed by fresh
+ * verified team owner/admin facts; missing or invalid sessions get the same access denial.
  * Bind read targets with `access.read(principal, teamId, ...)`. Read and validate the
  * request body before calling `access.write(principal, teamId, ...)`.
  * Pass `{ expectedOrganizationId }` as the fourth argument for organization-bound writes;
@@ -189,6 +180,17 @@ export function organizationWriteAccess(principal: Principal, expectedOrganizati
  * their own authorization and organization bindings.
  */
 export function teamManagementAccess(db: Db, caller: CallerMiddleware) {
+  const sessionCaller = createMiddleware<CallerEnv>(async (c, next) => {
+    // Authorization selects the agent credential boundary, even with a valid cookie.
+    // Never let a session resolver grant team-management privileges to that request.
+    if (c.req.raw.headers.has('authorization')) throw denied()
+    const response = await caller(c, next)
+    if (response instanceof Response && response.status === 401) {
+      c.header('WWW-Authenticate', undefined)
+      throw denied()
+    }
+    return response
+  })
   const sessionOnly = createMiddleware<CallerEnv>(async (c, next) => {
     await check(db, c.var.principal, c.var.principal.organization.id)
     await next()
@@ -200,8 +202,8 @@ export function teamManagementAccess(db: Db, caller: CallerMiddleware) {
     await next()
   })
   return {
-    middleware: [caller, sessionOnly] as [CallerMiddleware, typeof sessionOnly],
-    memberReadMiddleware: [caller, memberRead] as [CallerMiddleware, typeof memberRead],
+    middleware: [sessionCaller, sessionOnly] as [CallerMiddleware, typeof sessionOnly],
+    memberReadMiddleware: [sessionCaller, memberRead] as [CallerMiddleware, typeof memberRead],
     /** Recheck the bound team before loading any read data; no provider I/O. */
     async read<T>(
       principal: Principal,

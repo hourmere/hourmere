@@ -144,6 +144,72 @@ describe.skipIf(!serverUrl)('organization web write context', () => {
   }
   type Fixture = Awaited<ReturnType<typeof fixture>>
 
+  it('binds automatic activation to its source context while explicit switches stay target-bound', async () => {
+    const f = await fixture()
+    expect(
+      (await post('set-active', f.cookie, { organizationId: f.second.id }, f.first.id)).status,
+    ).toBe(200)
+    for (const expected of [f.first.id, '', 'invalid']) {
+      await refused(await post('set-active', f.cookie, { organizationId: f.first.id }, expected))
+      const session = await auth.api.getSession({ headers: new Headers({ cookie: f.cookie }) })
+      expect(session?.session).toMatchObject({ activeOrganizationId: f.second.id })
+    }
+    expect((await post('set-active', f.cookie, { organizationId: f.first.id })).status).toBe(200)
+  })
+
+  it('refuses a bound follow-up after source membership removal without activating another team', async () => {
+    const f = await fixture()
+    await db
+      .deleteFrom('auth.member')
+      .where('organizationId', '=', f.first.id)
+      .where('userId', '=', f.actor.id)
+      .execute()
+    await refused(await post('set-active', f.cookie, { organizationId: f.second.id }, f.first.id))
+    const session = await auth.api.getSession({ headers: new Headers({ cookie: f.cookie }) })
+    expect(session?.session).not.toMatchObject({ activeOrganizationId: f.second.id })
+  })
+
+  it('checks a bound follow-up after an overlapping switch commits', async () => {
+    const f = await fixture()
+    const adapter = (await auth.$context).adapter
+    const original = adapter.update.bind(adapter)
+    const entered = Promise.withResolvers<void>()
+    const resume = Promise.withResolvers<void>()
+    const spy = vi.spyOn(adapter, 'update')
+    spy.mockImplementation((async (request: Parameters<typeof original>[0]) => {
+      if (request.model === 'session' && request.update.activeOrganizationId === f.second.id) {
+        entered.resolve()
+        await resume.promise
+      }
+      return original(request)
+    }) as typeof original)
+    let switchRequest: Promise<Response> | undefined
+    let followup: Promise<Response> | undefined
+    try {
+      switchRequest = Promise.resolve(post('set-active', f.cookie, { organizationId: f.second.id }))
+      await entered.promise
+      followup = Promise.resolve(
+        post('set-active', f.cookie, { organizationId: f.first.id }, f.first.id),
+      )
+      await vi.waitFor(async () => {
+        const result = await testDb.pool.query<{ blocked: boolean }>(`SELECT EXISTS (
+          SELECT 1 FROM pg_stat_activity WHERE datname=current_database()
+          AND wait_event_type='Lock' AND query LIKE '%pg_advisory_xact_lock%'
+        ) AS blocked`)
+        expect(result.rows[0]?.blocked).toBe(true)
+      })
+      resume.resolve()
+      expect((await switchRequest).status).toBe(200)
+      await refused(await followup)
+      const session = await auth.api.getSession({ headers: new Headers({ cookie: f.cookie }) })
+      expect(session?.session).toMatchObject({ activeOrganizationId: f.second.id })
+    } finally {
+      resume.resolve()
+      await Promise.allSettled([switchRequest, followup].filter(Boolean))
+      spy.mockRestore()
+    }
+  })
+
   const operations = [
     [
       'invite-member',
@@ -238,14 +304,14 @@ describe.skipIf(!serverUrl)('organization web write context', () => {
       await refused(await post('cancel-invitation', f.cookie, { invitationId }, f.first.id))
     }
     for (const memberId of [f.second.memberId, randomUUID()]) {
-      await refused(
-        await post(
-          'update-member-role',
-          f.cookie,
-          { organizationId: f.first.id, memberId, role: 'admin' },
-          f.first.id,
-        ),
+      const denied = await post(
+        'update-member-role',
+        f.cookie,
+        { organizationId: f.first.id, memberId, role: 'admin' },
+        f.first.id,
       )
+      expect(denied.status).toBe(403)
+      expect(await denied.json()).toMatchObject({ code: 'TEAM_MANAGEMENT_ACCESS_DENIED' })
       await refused(
         await post(
           'remove-member',
@@ -292,7 +358,7 @@ describe.skipIf(!serverUrl)('organization web write context', () => {
     )
     expect(denied.status).toBe(403)
     expect(await denied.json()).toMatchObject({
-      code: 'YOU_ARE_NOT_ALLOWED_TO_INVITE_USERS_TO_THIS_ORGANIZATION',
+      code: 'TEAM_MANAGEMENT_ACCESS_DENIED',
     })
     await db
       .deleteFrom('auth.member')

@@ -20,6 +20,9 @@ import { webhookRoutes } from './webhooks.ts'
 
 export const PUBLIC_URL = 'http://localhost:3000'
 
+/** Synthetic transport for principals whose real session row is inserted by the test. */
+export const syntheticSessionCookie = (token: string) => `hourmere_test_session=${token}`
+
 export interface Answer {
   status: number
   /** The parsed JSON body; null when there is none (204). */
@@ -82,9 +85,16 @@ export function productApp(
     checkDb: async () => {},
     authHandler: async () => new Response(null, { status: 404 }),
     resolveCaller: async (headers) => {
-      const token = /^Bearer (\S+)$/.exec(headers.get('authorization') ?? '')?.[1]
+      const authorization = headers.get('authorization')
+      const token =
+        authorization === null
+          ? /(?:^|;\s*)hourmere_test_session=([^;]+)/.exec(headers.get('cookie') ?? '')?.[1]
+          : /^Bearer (\S+)$/.exec(authorization)?.[1]
       const principal = token === undefined ? undefined : principals.get(token)
-      return principal
+      const matchingCredential =
+        principal &&
+        (authorization === null ? principal.kind === 'session' : principal.kind !== 'session')
+      return matchingCredential
         ? { ok: true, principal, setCookie: [] }
         : { ok: false, error: 'unauthorized', setCookie: [] }
     },
@@ -109,10 +119,9 @@ export async function createTestApp(serverUrl: string): Promise<TestApp> {
   const principals = new Map<string, Principal>()
   const app = productApp(db, principals)
 
-  const client = (authorization: string | undefined, extra: Record<string, string> = {}) => {
+  const client = (credentials: Record<string, string> = {}, extra: Record<string, string> = {}) => {
     const sendText = async (method: string, path: string, json?: string): Promise<Answer> => {
-      const headers: Record<string, string> = { ...extra }
-      if (authorization) headers.authorization = authorization
+      const headers: Record<string, string> = { ...credentials, ...extra }
       if (json !== undefined) headers['content-type'] = 'application/json'
       const res = await app.request(path, {
         method,
@@ -140,9 +149,14 @@ export async function createTestApp(serverUrl: string): Promise<TestApp> {
     as: (principal, headers) => {
       const token = `hm_${randomUUID()}`
       principals.set(token, principal)
-      return client(`Bearer ${token}`, headers)
+      return client(
+        principal.kind === 'session'
+          ? { cookie: syntheticSessionCookie(token) }
+          : { authorization: `Bearer ${token}` },
+        headers,
+      )
     },
-    anonymous: client(undefined),
+    anonymous: client(),
     drop: () => testDb.drop(),
   }
 }

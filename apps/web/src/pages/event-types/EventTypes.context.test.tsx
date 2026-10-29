@@ -2,6 +2,7 @@ import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { EventType } from '../../api/resources.ts'
+import { chooseLanguage } from '../../i18n/store.ts'
 import {
   fakeApi,
   json,
@@ -153,6 +154,7 @@ describe('form-bound organization context', () => {
 
   it('discards a late refusal after focus refresh remounts the organization', async () => {
     const user = userEvent.setup()
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
     const pending = later()
     let active = team
     server({
@@ -170,4 +172,83 @@ describe('form-bound organization context', () => {
     expect(screen.queryByRole('alert')).toBeNull()
     expect(title().value).toBe('Intro call')
   })
+
+  it('does not let an older background check undo conflict recovery', async () => {
+    const user = userEvent.setup()
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const pending = later()
+    let reads = 0
+    const calls = server({
+      'GET /api/v1/me': () => {
+        reads++
+        return reads === 1 ? json(200, team) : reads === 2 ? pending.response : json(200, ME)
+      },
+    })
+    renderApp('/app/event-types/new')
+    await screen.findByRole('heading', { name: 'New event type', level: 1 })
+    await user.type(title(), 'Original draft')
+    await user.click(screen.getByRole('button', { name: 'Create event type' }))
+    await screen.findByRole('button', { name: 'Reload' })
+    await act(async () => fireEvent.focus(window))
+    await waitFor(() => expect(reads).toBe(2))
+    await user.click(screen.getByRole('button', { name: 'Reload' }))
+    await waitFor(() => expect(title().value).toBe(''))
+    await pending.answer(json(200, team))
+    await user.type(title(), 'Recovered personal draft')
+    await user.click(screen.getByRole('button', { name: 'Create event type' }))
+    await screen.findByRole('alert')
+    expect(calls.to('POST /api/v1/event-types')).toHaveLength(2)
+    expect(calls.to('POST /api/v1/event-types')[1]?.headers.get('X-Expected-Organization-Id')).toBe(
+      ME.organization.id,
+    )
+  })
+
+  it.each([
+    ['en', 'Create event type', 'Reload', guidance, LEAVE_WITH_UNSAVED_CHANGES],
+    [
+      'zh-CN',
+      '创建活动类型',
+      '重新加载',
+      '你的团队上下文已改变。请重新加载后再进行修改。',
+      '你有未保存的更改。离开此页面并放弃更改？',
+    ],
+  ] as const)(
+    'keeps the original draft across multi-tab refresh and membership removal in %s',
+    async (locale, createLabel, reloadLabel, message, prompt) => {
+      chooseLanguage(locale)
+      const user = userEvent.setup()
+      const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+      let active = team
+      const calls = server({ 'GET /api/v1/me': () => json(200, active) })
+      renderApp('/app/event-types/new')
+      // The actual input has the same ID in either locale.
+      await waitFor(() => expect(document.getElementById('title')).not.toBeNull())
+      const field = () => document.getElementById('title') as HTMLInputElement
+      await user.type(field(), 'Recoverable team draft')
+
+      // Another tab switched, or membership removal made the session fall back to personal.
+      active = { ...ME }
+      await act(async () => fireEvent.focus(window))
+      await waitFor(() => expect(confirm).toHaveBeenCalledWith(prompt))
+      expect(field().value).toBe('Recoverable team draft')
+      await user.click(screen.getByRole('button', { name: createLabel }))
+      expect((await screen.findByRole('alert')).textContent).toContain(message)
+      expect(
+        calls.to('POST /api/v1/event-types')[0]?.headers.get('X-Expected-Organization-Id'),
+      ).toBe(team.organization.id)
+      expect(field().value).toBe('Recoverable team draft')
+
+      // Repeated visibility refresh remains guarded; rejecting does not adopt personal.
+      const prompts = confirm.mock.calls.length
+      await act(async () => fireEvent(document, new Event('visibilitychange')))
+      expect(confirm.mock.calls.length).toBe(prompts)
+      expect(field().value).toBe('Recoverable team draft')
+      expect(calls.to('POST /api/v1/event-types')).toHaveLength(1)
+
+      confirm.mockReturnValue(true)
+      await user.click(screen.getByRole('button', { name: reloadLabel }))
+      await waitFor(() => expect(field().value).toBe(''))
+      expect(calls.to('POST /api/v1/event-types')).toHaveLength(1)
+    },
+  )
 })

@@ -7,6 +7,7 @@ import {
   fakeApi,
   json,
   later,
+  ME,
   PROFILE,
   profile,
   type Routes,
@@ -14,6 +15,7 @@ import {
   signedIn,
 } from '../../test/fake-api.tsx'
 import { booking, slotsAnswer } from '../../test/public-fixtures.ts'
+import { LEAVE_WITH_UNSAVED_CHANGES } from '../../unsaved-changes.tsx'
 
 const original = booking()
 const successor = booking({
@@ -355,6 +357,7 @@ describe('host rescheduling in the booking detail', () => {
 
   it('ignores a late move answer after the host leaves the detail page', async () => {
     const user = userEvent.setup()
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
     const delayed = later()
     hostApi({ [`POST ${movePath}`]: () => delayed.response })
     renderApp(detail)
@@ -365,5 +368,78 @@ describe('host rescheduling in the booking detail', () => {
     await delayed.answer(json(200, { booking: successor, manageToken: null }))
     expect(screen.getByTestId('location').textContent).toBe('/app/bookings')
     expect(screen.queryByText('The booking is moved to the new time.')).toBeNull()
+  })
+
+  it('keeps the selected time, opening organization and unsaved guard when another tab switches teams', async () => {
+    const user = userEvent.setup()
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    let active = ME
+    const api = hostApi({
+      'GET /api/v1/me': () => json(200, active),
+      [`POST ${movePath}`]: () => json(409, { error: 'organization_context_changed' }),
+    })
+    renderApp(detail)
+    await chooseNewTime(user)
+    active = {
+      ...ME,
+      organization: {
+        ...ME.organization,
+        id: '00000000-0000-7000-8000-000000000003',
+        personal: false,
+      },
+    }
+    await act(async () => fireEvent.focus(window))
+    await waitFor(() => expect(confirm).toHaveBeenCalledWith(LEAVE_WITH_UNSAVED_CHANGES))
+    expect(screen.getByRole('button', { name: 'Confirm new time' })).toBeDefined()
+    await user.click(screen.getByRole('button', { name: 'Confirm new time' }))
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Reload' })).not.toBeNull())
+    expect(screen.getByRole('alert').textContent).toContain(
+      'Your team context changed. Reload before making changes.',
+    )
+    expect(api.to(`POST ${movePath}`)[0]?.headers.get('X-Expected-Organization-Id')).toBe(
+      ME.organization.id,
+    )
+    expect(api.to(`POST ${movePath}`)[0]?.body).toEqual({ start: '2026-11-03T16:00:00.000Z' })
+    expect(screen.queryByRole('button', { name: 'Confirm new time' })).not.toBeNull()
+    expect(
+      screen.getByRole<HTMLButtonElement>('button', { name: 'Confirm new time' }).disabled,
+    ).toBe(true)
+    expect(screen.getByText('To').nextElementSibling?.textContent).toContain('5:00 PM')
+    await user.click(screen.getByRole('button', { name: 'Reload' }))
+    expect(confirm).toHaveBeenCalledTimes(2)
+    expect(api.to('GET /api/v1/me')).toHaveLength(2)
+    expect(screen.getByText('To').nextElementSibling?.textContent).toContain('5:00 PM')
+    confirm.mockReturnValue(true)
+    await user.click(screen.getByRole('button', { name: 'Reload' }))
+    await screen.findByRole('button', { name: 'Reschedule' })
+    expect(api.to(`POST ${movePath}`)).toHaveLength(1)
+  })
+
+  it('discards a late move response after focus refresh remounts the changed team', async () => {
+    const user = userEvent.setup()
+    const delayed = later()
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    let active = ME
+    const api = hostApi({
+      'GET /api/v1/me': () => json(200, active),
+      [`POST ${movePath}`]: () => delayed.response,
+    })
+    renderApp(detail)
+    await chooseNewTime(user)
+    await user.click(screen.getByRole('button', { name: 'Confirm new time' }))
+    active = {
+      ...ME,
+      organization: {
+        ...ME.organization,
+        id: '00000000-0000-7000-8000-000000000003',
+        personal: false,
+      },
+    }
+    await act(async () => fireEvent.focus(window))
+    await screen.findByRole('button', { name: 'Reschedule' })
+    await delayed.answer(json(200, { booking: successor, manageToken: null }))
+    expect(screen.getByTestId('location').textContent).toBe(detail)
+    expect(screen.queryByText('The booking is moved to the new time.')).toBeNull()
+    expect(api.to(`GET /api/v1/bookings/${successor.id}`)).toHaveLength(0)
   })
 })

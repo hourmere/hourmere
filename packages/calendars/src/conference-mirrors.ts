@@ -400,6 +400,7 @@ export async function writeConferenceMirrors(
 }
 export async function retryConferenceMirror(ctx: ServiceContext, bookingId: string) {
   await ctx.db.transaction().execute(async (trx) => {
+    await ctx.authorizeOrganizationWrite?.(trx, ctx.principal.organization.id, bookingId)
     const user = await trx
       .selectFrom('auth.user')
       .select('id')

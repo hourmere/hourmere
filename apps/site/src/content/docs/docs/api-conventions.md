@@ -168,6 +168,11 @@ limited to MCP tools and do not authenticate REST requests.
 
 ### Browser organization context
 
+Better Auth's `/api/auth/organization/*` endpoints require browser sessions. Any
+Authorization header, including an empty or invalid value, returns `403 SESSION_REQUIRED`
+even alongside a valid owner/admin cookie. API keys and MCP OAuth tokens cannot inherit
+the browser's organization-management privileges.
+
 Organization-scoped browser drafts bind `X-Expected-Organization-Id` to the organization
 where the form or action started. Do not replace that value with the active organization
 at submission time. A header works with both the strict REST JSON bodies and Better Auth's
@@ -189,7 +194,7 @@ The existing covered endpoints are:
 | Leave a team | `POST /api/auth/organization/leave` |
 | Change team settings, including name or slug | `POST /api/auth/organization/update` |
 
-For covered session writes, the expected organization must match both the operation's
+For the session writes above, the expected organization must match both the operation's
 target organization and the current valid session organization. Missing or mismatched
 context returns HTTP 409: `organization_context_changed` under `/api/v1`, or
 `ORGANIZATION_CONTEXT_CHANGED` under `/api/auth`. The message asks the person to reload.
@@ -202,13 +207,28 @@ and prevents a switch into a team from retargeting an unsaved personal draft.
 Organization writes and context transitions in the same browser session are ordered across
 server processes, so a switch cannot overtake an already checked organization write.
 
+The web booking detail also binds cancellation, rescheduling, conference reconciliation
+and calendar-copy retries to its opening organization with this header. These four
+booking-ID endpoints validate a supplied expectation against the live session,
+membership and booking organization inside the write transaction, ordered with session
+organization transitions. They retain ordinary host/organizer permissions; the header
+grants no administrative access. For compatibility, callers that omit the header keep
+the existing booking-ID authorization. API keys and OAuth grants keep their issued context.
+
 On refusal, keep the draft, show reload guidance and ask before discarding unsaved changes.
-Never replay the write or switch organizations automatically. Focus/visibility refresh and
-organization remounting remain the browser's recovery path; the server check also protects
-requests that arrive before that refresh.
+Never replay the write or switch organizations automatically. Focus/visibility refresh
+uses the same unsaved-changes prompt before replacing an organization's drafts. Declining
+keeps the old context and draft; accepting remounts the page. Explicit conflict reload
+discards older background session answers before reloading. The server check also protects
+requests that arrive before a refresh.
 
 Team creation, explicit switching and invitation acceptance bind their explicit targets
-under their existing rules rather than requiring the previous active organization. Personal
+under their existing rules rather than requiring the previous active organization. Automatic
+activation after team creation additionally sends the opening organization as its expected
+**source** context. Better Auth checks that source under the existing session transition
+lock before activating the explicit target; a conflict keeps the created team and draft
+available for recovery. Deliberate switches without this optional header retain their
+existing target-bound behavior. Personal
 profile, calendar and schedule writes, API-key management and OAuth connection management
 are excluded. API keys retain their issued organization, and OAuth grants retain their
 consented organization; neither depends on this browser header. Public booking and private
@@ -217,13 +237,35 @@ through the browser organization endpoint. Team-administrator booking cancellati
 the same context protection; the existing host booking-ID routes still require the caller
 to be a host.
 
+### Team roles
+
+Team invitations default to `member`; owners and admins may invite only that role,
+including when resending. Historical invitations with an elevated or custom stored role
+cannot be resent or accepted. Revoke them and issue a new member invitation instead.
+Acceptance still requires the exact invited, verified email and does not depend on the
+session's active organization. Registration continues to follow the instance's signup policy.
+
+Only a current verified team owner may change a non-owner's role between `admin` and
+`member`. Admins cannot change roles, including their own. Assigning `owner`, changing an
+existing owner's role and custom role assignments are unavailable. Existing teams with
+multiple owners retain their memberships and management access. Stored comma-separated
+roles are checked as exact role tokens.
+
+These rules apply to direct Better Auth requests as well as the web app. Policy denials
+use HTTP 403 `TEAM_MANAGEMENT_ACCESS_DENIED` in Better Auth's error shape; missing and
+inaccessible role targets receive the same denial. Browser context mismatches retain the
+409 response above. The server-only Better Auth add-member operation is not an HTTP
+onboarding path; joining a team requires accepting a member invitation.
+
 ### Member departure preview
 
 `GET /api/v1/team/members/{memberUserId}/departure-impact?teamId={teamId}` lists the
 team event types and confirmed, not-yet-ended bookings affected by a member leaving.
 It requires a current verified browser session in that team. Members can inspect themselves;
 owners and admins can inspect current members of their team. Inaccessible and missing targets
-receive the same `403 team_management_access_denied`. Personal data and other teams are excluded.
+receive the same `403 team_management_access_denied`. Missing or invalid sessions and any
+Authorization header, even alongside a valid cookie, receive that same denial without a
+`WWW-Authenticate` challenge. Personal data and other teams are excluded.
 
 The response contains `evaluatedAt`, `eventTypes` and `bookings`; each collection has `data`,
 `nextCursor` and `totalCount`. Independent `eventTypesLimit` and `bookingsLimit` accept 1–100
@@ -347,8 +389,10 @@ verified team owners/admins, including meetings hosted by other members. It acce
 same time/status filters, `order`, `limit` and opaque `cursor` as the host booking list.
 Pagination uses start time and ID, retaining microsecond cursor precision; collective
 bookings appear once. Inserts before a cursor do not shift later pages; later inserts can
-appear after it. Personal organizations, ordinary members and API keys receive
-`403 team_management_access_denied`. The route uses the shared team-management access check
+appear after it. Missing or invalid sessions, personal organizations, ordinary or removed
+members and API-key/OAuth callers receive the same `403 team_management_access_denied`,
+without revealing team existence. Any Authorization header is denied even alongside a
+valid owner/admin session cookie. The route uses the shared team-management access check
 and caller Origin/Referer handling. Responses contain only ID, status, start/end,
 `cancelledAt`, associated `eventType: {id,title}` (null title after deletion), saved
 `hosts: [{userId,name}]` and `attendees: [{name,email,timeZone,isBooker}]`, inside
@@ -403,15 +447,16 @@ and titles without current event metadata remain unchanged. Public/manage respon
 personal organization it also returns their personal event-type readiness; in a team it
 returns only that member’s detail. It requires a current verified web session and current
 membership. API keys and OAuth callers cannot use readiness reads.
-An `Authorization` header takes precedence over the session cookie: a valid API key plus
+On the self read, an `Authorization` header takes precedence over the session cookie: a valid API key plus
 a cookie receives `403 readiness_access_denied`; an invalid bearer or MCP OAuth access
 token receives `401 unauthorized`, even alongside a valid cookie. There is no `userId`,
 organization or audience override; unknown query fields receive `400 invalid_request`.
 
 `GET /api/v1/teams/{teamId}/readiness` returns minimal member and event-type summaries for
 the acting team, through the shared team-management access check. Only current verified
-team owners/admins can read it. Ordinary members, other teams and nonexistent teams receive
-the same `403 team_management_access_denied`. The summary includes coarse reasons such as
+team owners/admins can read it. Missing sessions, ordinary members, other teams and
+nonexistent teams receive the same `403 team_management_access_denied`. Any Authorization
+header is denied even with a valid owner/admin cookie. The summary includes coarse reasons such as
 `calendar_attention_required` and repair kinds; it excludes private calendar/account data,
 schedules, exact sync times, provider errors and busy-time details.
 Names are returned only for verified members with a nonempty, valid display name;
@@ -466,11 +511,13 @@ Team summaries collapse these into the single coarse `calendar_attention_require
 Neither a missing timestamp nor a reset snapshot proves that synchronization was never tried.
 
 Both routes use the common open `Error` schema: `400 invalid_request` for malformed/unknown
-query fields (`invalid_limit` or `invalid_cursor` for service-level pagination validation),
-`401 unauthorized` for missing or invalid credentials, `403 readiness_access_denied` (self)
-or `team_management_access_denied` (team) for an authenticated caller without access,
-`429 rate_limited` for credential throttling, and `500 internal_error` for unexpected
-failures that prevent a safe response. Dependency evaluation failures that can be safely
+query fields (`invalid_limit` or `invalid_cursor` for service-level pagination validation)
+and `500 internal_error` for unexpected failures that prevent a safe response. The self read
+uses `401 unauthorized` for missing or invalid credentials, `403 readiness_access_denied`
+for an authenticated caller without access, and `429 rate_limited` for credential throttling.
+The team read refuses any Authorization header before credential resolution and uses only
+`403 team_management_access_denied` for every access denial, including missing or invalid
+sessions, without a `WWW-Authenticate` challenge. Dependency evaluation failures that can be safely
 represented inside an authorized item use `check_failed` in a successful response instead.
 
 Pages default to 50 items and accept `limit=1..100`. Pass the member page’s `nextCursor` as

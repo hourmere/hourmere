@@ -167,7 +167,8 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
         'content-type': 'application/json',
         cookie,
         origin,
-        ...(typeof body === 'object' &&
+        ...(path !== '/api/auth/organization/set-active' &&
+        typeof body === 'object' &&
         body !== null &&
         'organizationId' in body &&
         typeof body.organizationId === 'string'
@@ -893,9 +894,9 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
         ).rows[0]?.id as string
       })
 
-      const refused = async (res: Response) => {
+      const refused = async (res: Response, code = 'PERSONAL_ORGANIZATION') => {
         expect(res.status).toBe(403)
-        expect(await res.json()).toMatchObject({ code: 'PERSONAL_ORGANIZATION' })
+        expect(await res.json()).toMatchObject({ code })
       }
 
       it('refuses invitations', async () => {
@@ -905,6 +906,7 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
             role: 'owner',
             organizationId: personal.id,
           }),
+          'TEAM_MANAGEMENT_ACCESS_DENIED',
         )
       })
 
@@ -918,6 +920,7 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
           await post('/api/auth/organization/accept-invitation', bob, {
             invitationId: invitation.rows[0]?.id,
           }),
+          'TEAM_MANAGEMENT_ACCESS_DENIED',
         )
       })
 
@@ -930,7 +933,7 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
               role: 'owner',
             },
           }),
-        ).rejects.toMatchObject({ body: { code: 'PERSONAL_ORGANIZATION' } })
+        ).rejects.toMatchObject({ body: { code: 'TEAM_MANAGEMENT_ACCESS_DENIED' } })
       })
 
       it('keeps its owner even if a second owner exists', async () => {
@@ -946,6 +949,7 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
             role: 'member',
             organizationId: personal.id,
           }),
+          'TEAM_MANAGEMENT_ACCESS_DENIED',
         )
         await refused(
           await post('/api/auth/organization/remove-member', bob, {
@@ -1307,8 +1311,20 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
     })
 
     it('are judged alone: a bad key does not fall back to the session cookie', async () => {
-      const { res } = await me({ cookie, authorization: `Bearer hm_${'x'.repeat(64)}` })
-      expect(res.status).toBe(401)
+      for (const authorization of [`Bearer hm_${'x'.repeat(64)}`, 'Bearer', '']) {
+        const { res } = await me({ cookie, authorization })
+        expect(res.status, JSON.stringify(authorization)).toBe(401)
+      }
+    })
+
+    it('are judged alone: a valid key wins over a valid session cookie', async () => {
+      const { key } = (await (await createKey(cookie)).json()) as { key: string }
+      // Creating a team makes it the session's active organization; the key stays personal.
+      const teamId = await createTeam(cookie, 'key-over-cookie')
+      expect((await me({ cookie })).body.organization?.id).toBe(teamId)
+      const both = await me({ cookie, authorization: `Bearer ${key}` })
+      expect(both.res.status).toBe(200)
+      expect(both.body.organization?.personal).toBe(true)
     })
 
     it('can act in a team organization only while the owner is a member', async () => {
