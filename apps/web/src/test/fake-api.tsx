@@ -88,6 +88,14 @@ export const signedInAs = (me: Schemas['Me']): Routes => ({
       signIn: { email: true, google: false, microsoft: false },
     }),
   'GET /api/v1/me': () => json(200, me),
+  'GET /api/auth/organization/get-active-member': () =>
+    json(200, {
+      id: 'membership-1',
+      organizationId: me.organization.id,
+      userId: me.user.id,
+      role: 'owner',
+      createdAt: '2026-10-01T09:00:00.000Z',
+    }),
   // Existing page tests make no readiness claim unless they supply explicit event summaries.
   'GET /api/v1/readiness/self': () =>
     json(200, {

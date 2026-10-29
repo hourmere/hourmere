@@ -11,7 +11,7 @@ export const admin = {
   'Configuration check failed': 'Configuration check failed',
   'Checking configuration…': 'Checking configuration…',
   'Retry checks': 'Retry checks',
-  'RR activated': 'RR activated',
+  'Round robin activated': 'Round robin activated',
   'Configuration checks do not guarantee available times. Check the booking page for current availability.':
     'Configuration checks do not guarantee available times. Check the booking page for current availability.',
   'Working hours are missing.': 'Working hours are missing.',

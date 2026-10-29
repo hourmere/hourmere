@@ -112,9 +112,24 @@ export function ConfigurationChecks({
     )
   const result = configuration(item)
   const teamFixes = item && 'fixKinds' in item ? item.fixKinds : []
+  const activationOnlyEdit =
+    item &&
+    'reasonCodes' in item &&
+    item.activation === 'inactive' &&
+    item.reasonCodes.every((reason) =>
+      [
+        'activation_required',
+        'default_schedule_required',
+        'calendar_attention_required',
+        'check_not_performed',
+        'check_failed',
+      ].includes(reason),
+    )
   const fixes = new Set<Fix>([
     ...result.fixes,
-    ...teamFixes.filter((fix) => fix !== 'retry_summary'),
+    ...teamFixes.filter(
+      (fix) => fix !== 'retry_summary' && !(fix === 'edit_event' && activationOnlyEdit),
+    ),
   ])
   const entries: Record<
     Exclude<Fix, 'retry_summary' | 'ask_member'>,
@@ -150,6 +165,7 @@ export function ConfigurationChecks({
       )}
       {[...fixes].map((fix) => {
         if (fix === 'retry_summary' || fix === 'ask_member') return null
+        if (!Object.hasOwn(entries, fix)) return null
         const entry = entries[fix]
         return (
           <Link key={fix} to={entry.path}>

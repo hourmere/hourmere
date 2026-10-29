@@ -10,7 +10,7 @@ export const admin = {
   'Configuration check failed': '配置检查失败',
   'Checking configuration…': '正在检查配置…',
   'Retry checks': '重试检查',
-  'RR activated': '轮询已激活',
+  'Round robin activated': '轮询已激活',
   'Configuration checks do not guarantee available times. Check the booking page for current availability.':
     '配置检查不保证有可约时段。当前可约时间以预约页为准。',
   'Working hours are missing.': '缺少工作时间设置。',

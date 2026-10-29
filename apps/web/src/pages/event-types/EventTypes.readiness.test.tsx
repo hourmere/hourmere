@@ -497,6 +497,53 @@ describe('event type configuration checks', () => {
     expect(link.getAttribute('href')).toBe(`/app/availability/${SCHEDULE_ID}`)
   })
 
+  it.each(['en', 'zh-CN'] as const)(
+    'ignores unknown repair kinds while retaining known fixes and the event list in %s',
+    async (language) => {
+      chooseLanguage(language)
+      server([eventType()], {
+        'GET /api/v1/readiness/self': () =>
+          json(
+            200,
+            selfPage([
+              selfCheck({
+                summary: 'configuration_blocked',
+                signals: [
+                  ...['future_fix', 'constructor', 'toString'].map((fixKind) =>
+                    signal({
+                      state: 'configuration_blocker',
+                      reasonCode: 'future_configuration_required',
+                      fixKind: fixKind as Signal['fixKind'],
+                    }),
+                  ),
+                  signal({
+                    state: 'configuration_blocker',
+                    reasonCode: 'default_schedule_required',
+                    fixKind: 'self_availability',
+                  }),
+                ],
+              }),
+            ]),
+          ),
+      })
+      await open()
+      const checks = within(configuration('Intro call', language))
+      const link = await checks.findByRole('link', {
+        name: language === 'en' ? 'Set working hours' : '设置工作时间',
+      })
+      expect(link.getAttribute('href')).toBe('/app/availability')
+      expect(checks.getAllByRole('link')).toHaveLength(1)
+      expect(
+        checks.getByText(language === 'en' ? 'Configuration needs attention' : '配置需要处理', {
+          selector: '.badge',
+        }),
+      ).toBeDefined()
+      expect(
+        checks.queryByText(language === 'en' ? 'Configuration checks passed' : '配置检查通过'),
+      ).toBeNull()
+    },
+  )
+
   it('rejects personal readiness from a different organization', async () => {
     const body = selfPage()
     body.member.subject.organizationId = TEAM.organization.id
@@ -626,6 +673,7 @@ describe('team event type configuration checks', () => {
       await within(configuration('Intro call', language)).findByText(
         language === 'en' ? 'Configuration checks passed' : '配置检查通过',
       )
+      expect(within(configuration('Intro call', language)).queryByRole('link')).toBeNull()
       expect(within(row()).getByText(language === 'en' ? 'Active' : '启用')).toBeDefined()
       expect(
         within(row()).getByText(language === 'en' ? 'Needs activation' : '待激活'),
@@ -633,9 +681,49 @@ describe('team event type configuration checks', () => {
       expect(within(row()).getByText(language === 'en' ? 'Unlisted' : '仅限链接')).toBeDefined()
       const active = within(row('Active pool'))
       expect(active.getByText(language === 'en' ? 'Inactive' : '未启用')).toBeDefined()
-      expect(active.getByText(language === 'en' ? 'RR activated' : '轮询已激活')).toBeDefined()
+      expect(
+        active.getByText(language === 'en' ? 'Round robin activated' : '轮询已激活'),
+      ).toBeDefined()
       expect(api.to(teamRoute)).toHaveLength(1)
       expect(api.to('GET /api/v1/readiness/self')).toHaveLength(0)
+    },
+  )
+
+  it.each([
+    ['default_schedule_required', false],
+    ['calendar_attention_required', false],
+    ['host_configuration_required', true],
+    ['optional_feature_attention_required', true],
+  ] as const)(
+    'keeps event-setting repairs only when the inactive pool also has %s',
+    async (reasonCode, needsEventSettings) => {
+      server(
+        [eventType({ ownerUserId: null, schedulingType: 'round_robin' })],
+        {
+          [teamRoute]: () =>
+            json(
+              200,
+              teamPage([
+                teamCheck({
+                  summary: 'needs_activation',
+                  activation: 'inactive',
+                  reasonCodes: ['activation_required', reasonCode],
+                  fixKinds: ['edit_event', 'ask_member'],
+                }),
+              ]),
+            ),
+        },
+        TEAM,
+      )
+      await open()
+      const checks = within(configuration())
+      await checks.findByRole('link', { name: 'Review hosts' })
+      expect(checks.queryByRole('link', { name: 'Review event settings' }) !== null).toBe(
+        needsEventSettings,
+      )
+      expect(checks.queryByText('Configuration checks passed')).toBeNull()
+      expect(checks.queryByText('Needs activation')).toBeNull()
+      expect(within(row()).getByRole('link', { name: 'Needs activation' })).toBeDefined()
     },
   )
 
@@ -780,6 +868,12 @@ describe('team event type configuration checks', () => {
     let active = ME
     server([eventType()], {
       'GET /api/v1/me': () => json(200, active),
+      'GET /api/auth/organization/get-active-member': () =>
+        json(200, {
+          organizationId: active.organization.id,
+          userId: active.user.id,
+          role: 'owner',
+        }),
       'GET /api/v1/event-types': () =>
         json(200, {
           data: [eventType({ ownerUserId: active.organization.personal ? ME.user.id : null })],

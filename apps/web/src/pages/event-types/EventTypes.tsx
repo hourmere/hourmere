@@ -107,8 +107,7 @@ function SetupHints({
 
   const handleHint = t('{0} to get booking links.').split('{0}')
   const scheduleHint = t('{0}, so there are times to book.').split('{0}')
-  if (!me.organization.personal) return null
-  const needsHandle = !profile
+  const needsHandle = me.organization.personal && !profile
   if (!needsHandle && hasSchedule) return null
   return (
     <div className="alert alert-info">
@@ -147,11 +146,13 @@ function EventTypeTable({
   return (
     <div className="table-container">
       <table className="table table-event-types">
-        <caption>
-          {t(
-            'Configuration checks do not guarantee available times. Check the booking page for current availability.',
-          )}
-        </caption>
+        {readiness.status !== 'unavailable' && (
+          <caption>
+            {t(
+              'Configuration checks do not guarantee available times. Check the booking page for current availability.',
+            )}
+          </caption>
+        )}
         <thead>
           <tr>
             <th scope="col">{t('Title')}</th>
@@ -162,7 +163,7 @@ function EventTypeTable({
             <th scope="col" className="fit nowrap">
               {t('Status')}
             </th>
-            <th scope="col">{t('Configuration checks')}</th>
+            {readiness.status !== 'unavailable' && <th scope="col">{t('Configuration checks')}</th>}
             <th scope="col" className="fit">
               <span className="visually-hidden">{t('Actions')}</span>
             </th>
@@ -240,7 +241,7 @@ function EventTypeTable({
                     )}
                     {e.schedulingType === 'round_robin' &&
                       (e.roundRobinActive ? (
-                        <span className="badge">{t('RR activated')}</span>
+                        <span className="badge">{t('Round robin activated')}</span>
                       ) : (
                         <Link to={eventTypePath(e.id)} className="badge">
                           {t('Needs activation')}
@@ -248,14 +249,16 @@ function EventTypeTable({
                       ))}
                   </div>
                 </td>
-                <td data-label={t('Configuration checks')}>
-                  <ConfigurationChecks
-                    event={e}
-                    item={readiness.status === 'ready' ? readiness.data.get(e.id) : undefined}
-                    status={readiness.status}
-                    retry={retryChecks}
-                  />
-                </td>
+                {readiness.status !== 'unavailable' && (
+                  <td data-label={t('Configuration checks')}>
+                    <ConfigurationChecks
+                      event={e}
+                      item={readiness.status === 'ready' ? readiness.data.get(e.id) : undefined}
+                      status={readiness.status}
+                      retry={retryChecks}
+                    />
+                  </td>
+                )}
                 <td className="actions">
                   <Link
                     to={eventTypePath(e.id)}
