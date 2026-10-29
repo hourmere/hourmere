@@ -343,8 +343,10 @@ expiry under the approved protocol; it is not implemented by these storage queri
 Invitation admission now writes the invitation and its queued delivery intent in one
 transaction. `generation_started_at` tracks the explicit resend cooldown independently
 of worker updates; `expiry_duration_ms` retains the original validity length across
-successive renewals. The migration derives both from existing invitation/delivery rows
-without changing invitation status, expiry, attempts or delivery outcomes.
+successive renewals. The migration retains delivery creation time as the cooldown anchor
+and seeds the known legacy 48-hour validity policy. Historic native resends changed expiry
+without changing invitation creation time, so their difference cannot recover original
+validity. Invitation status, expiry, attempts and delivery outcomes remain unchanged.
 
 `invitation_email_requests` retains only actor/team UUIDs and request time for rolling
 inviter/team limits. It has no foreign keys, so deleting an invitation, account or team

@@ -42,7 +42,7 @@ async function records(pool: pg.Pool, inventory: Table[]) {
 }
 
 describe.skipIf(!serverUrl)('invitation mail limits migration', () => {
-  it('upgrades populated predecessor data with exact validity backfills, matches fresh install and reruns without writes', async () => {
+  it('preserves populated predecessor data and prior native resend expiry while pinning 48-hour validity, matching fresh install and rerunning without writes', async () => {
     const predecessor = await mkdtemp(join(tmpdir(), 'hourmere-invite-budget-predecessor-'))
     let upgraded: TestDatabase | undefined
     let fresh: TestDatabase | undefined
@@ -69,7 +69,8 @@ describe.skipIf(!serverUrl)('invitation mail limits migration', () => {
         FROM auth.invitation CROSS JOIN (VALUES
           ('queued','pending','2026-01-05T04:05:06.123457Z'::timestamptz),
           ('accepted','accepted','2026-01-04T03:04:05.123456Z'::timestamptz),
-          ('expired','pending','2026-01-02T02:04:05.123456Z'::timestamptz)
+          ('expired','pending','2026-01-02T02:04:05.123456Z'::timestamptz),
+          ('prior-resend','pending','2027-01-04T03:04:05.123456Z'::timestamptz)
         ) AS fixture(name,status,expires);
         INSERT INTO invitation_deliveries
           (invitation_id,generation,state,attempts,created_at,updated_at,resend_request_id,last_error_code)
@@ -81,9 +82,17 @@ describe.skipIf(!serverUrl)('invitation mail limits migration', () => {
             '2026-02-03T04:05:06.654321Z');`)
       const inventory = await tables(pool)
       const before = await records(pool, inventory)
-      expect(before['public.invitation_deliveries']).toHaveLength(4)
+      expect(before['public.invitation_deliveries']).toHaveLength(5)
       expect(before['public.bookings']).toHaveLength(8)
       expect(before['public.sign_in_emails']).toHaveLength(2)
+      // A native resend retained creation time while replacing expiry. The migration
+      // must preserve these timestamps without interpreting the widened gap as TTL.
+      expect(
+        (
+          await pool.query(`SELECT "expiresAt"-"createdAt">interval '48 hours' AS renewed
+            FROM auth.invitation WHERE email='limit-prior-resend@example.test'`)
+        ).rows,
+      ).toEqual([{ renewed: true }])
       await copyFile(join(migrationsDir, migration), join(predecessor, migration))
       expect(await runMigrations(pool, predecessor)).toEqual([migration])
       expect(await records(pool, inventory)).toEqual(before)
@@ -104,16 +113,28 @@ describe.skipIf(!serverUrl)('invitation mail limits migration', () => {
         {
           email: 'limit-expired@example.test',
           generation_started_at: '2026-01-03 04:05:06.654321+00',
-          expiry_duration_ms: '1',
+          expiry_duration_ms: '172800000',
+          original_generation_start: true,
+        },
+        {
+          email: 'limit-prior-resend@example.test',
+          generation_started_at: '2026-01-03 04:05:06.654321+00',
+          expiry_duration_ms: '172800000',
           original_generation_start: true,
         },
         {
           email: 'limit-queued@example.test',
           generation_started_at: '2026-01-03 04:05:06.654321+00',
-          expiry_duration_ms: '262861001',
+          expiry_duration_ms: '172800000',
           original_generation_start: true,
         },
       ])
+      expect(
+        (
+          await pool.query(`SELECT bool_and(expiry_duration_ms=172800000) AS known_validity
+          FROM invitation_deliveries`)
+        ).rows,
+      ).toEqual([{ known_validity: true }])
       expect((await pool.query('SELECT * FROM invitation_email_requests')).rows).toEqual([])
       const schema = await snapshotSchema(pool)
       fresh = await createTestDatabase(serverUrl as string, predecessor, {

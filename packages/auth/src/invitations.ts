@@ -247,10 +247,9 @@ export async function manageInvitation(
           .returningAll()
           .executeTakeFirstOrThrow()
       }
-      const duration = Number(
-        delivery?.expiry_duration_ms ??
-          Math.max(1, invitation.expiresAt.getTime() - invitation.createdAt.getTime()),
-      )
+      // Legacy native resends changed expiresAt without changing createdAt. Missing
+      // metadata uses the known 48-hour creator policy, never their inflated difference.
+      const duration = Number(delivery?.expiry_duration_ms ?? lifetime)
       if (resend) {
         invitation = await trx
           .updateTable('auth.invitation')

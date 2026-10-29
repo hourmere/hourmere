@@ -623,6 +623,90 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
     expect(await snapshot()).toEqual(advanced)
   }
 
+  async function verifyLegacyDuration(factory = createAuth, storedDelivery = false) {
+    const i = instance(factory)
+    const a = await actor()
+    const row = await db
+      .insertInto('auth.invitation')
+      .values({
+        organizationId: a.organizationId,
+        inviterId: a.userId,
+        email: `${randomUUID()}@outside.example`,
+        role: 'member',
+        status: 'pending',
+        // Native historical resends changed expiresAt while retaining the original createdAt.
+        createdAt: new Date(Date.now() - 10 * 86_400_000),
+        expiresAt: new Date(Date.now() + 3_600_000),
+      })
+      .returningAll()
+      .executeTakeFirstOrThrow()
+    if (storedDelivery) {
+      await db
+        .insertInto('invitation_deliveries')
+        .values({
+          invitation_id: row.id,
+          state: 'failed',
+          last_error_code: 'legacy_delivery_unknown',
+          generation_started_at: new Date(Date.now() - 3_600_000),
+          expiry_duration_ms: lifetime,
+        })
+        .execute()
+    }
+    const invitation: Invitation = {
+      id: row.id,
+      email: row.email,
+      role: 'member',
+      expiresAt: row.expiresAt.toISOString(),
+      delivery: { generation: 1, state: storedDelivery ? 'failed' : 'unknown', attempts: 0 },
+    }
+    const response = await resend(i, a, invitation)
+    expect(response.status).toBe(200)
+    const renewed = (await response.json()) as Invitation
+    const duration = Date.parse(renewed.expiresAt) - Date.now()
+    expect(duration).toBeGreaterThan(lifetime - 10_000)
+    expect(duration).toBeLessThanOrEqual(lifetime + 1_000)
+    expect(renewed).toMatchObject({
+      id: row.id,
+      delivery: { generation: 2, attempts: 0, state: 'queued' },
+    })
+    const stored = await db
+      .selectFrom('invitation_deliveries')
+      .select('expiry_duration_ms')
+      .where('invitation_id', '=', row.id)
+      .executeTakeFirstOrThrow()
+    expect(Number(stored.expiry_duration_ms)).toBe(lifetime)
+  }
+
+  it.each([false, true])(
+    'uses the known 48-hour lifetime for previously resent legacy invitations (delivery record %s)',
+    async (storedDelivery) => {
+      await verifyLegacyDuration(createAuth, storedDelivery)
+    },
+  )
+
+  async function verifyPinnedDuration(factory = createAuth) {
+    const i = instance(factory)
+    const a = await actor()
+    const invitation = await created(i, a)
+    const pinnedDuration = 3 * 3_600_000
+    await db
+      .updateTable('invitation_deliveries')
+      .set({ expiry_duration_ms: pinnedDuration })
+      .where('invitation_id', '=', invitation.id)
+      .execute()
+    await ageGeneration(invitation)
+    const response = await resend(i, a, invitation)
+    expect(response.status).toBe(200)
+    const renewed = (await response.json()) as Invitation
+    const duration = Date.parse(renewed.expiresAt) - Date.now()
+    expect(duration).toBeGreaterThan(pinnedDuration - 10_000)
+    expect(duration).toBeLessThanOrEqual(pinnedDuration + 1_000)
+  }
+
+  it('preserves an explicitly persisted validity duration when resending', async () => {
+    await verifyPinnedDuration()
+  })
+
   it('extends the original expiry duration on every new generation and replays one request unchanged', async () => {
     await verifyResendProtocol()
   })
@@ -925,6 +1009,8 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
     await verifyVerified(copy)
     await verifyCooldown(copy)
     await verifyResendProtocol(copy)
+    await verifyLegacyDuration(copy)
+    await verifyPinnedDuration(copy)
     await verifyGenerationCap(copy)
     await verifyIneligible(copy)
     await verifyBusy(copy)
@@ -973,7 +1059,13 @@ describe.skipIf(!serverUrl)('team invitation request limits over real HTTP and P
       'persisted original validity duration',
       'delivery?.expiry_duration_ms ??',
       'undefined ??',
-      verifyResendProtocol,
+      verifyPinnedDuration,
+    ],
+    [
+      'known legacy validity interval',
+      'delivery?.expiry_duration_ms ?? lifetime',
+      'delivery?.expiry_duration_ms ?? Math.max(1, invitation.expiresAt.getTime() - invitation.createdAt.getTime())',
+      verifyLegacyDuration,
     ],
     [
       'business lifecycle guard',
