@@ -395,14 +395,19 @@ not prove the attendee's identity. Reschedule withdrawals retain their existing 
 attribution and do not create cancellation-operation records.
 
 Better Auth's remove-member, leave and update-member-role persistence paths record the
-actual changed membership in the same adapter transaction. A role no-op, rejected request
+actual changed membership in the same write transaction. HTTP role changes use the launch
+role policy's locked application transaction for both the update and its attribution;
+other native member operations use the adapter transaction. The policy wraps the native
+recorder so neither a second connection nor a second record is needed. A role no-op, rejected request
 or rolled-back operation creates no record. Personal-organization maintenance and direct
 adapter maintenance are excluded; this recorder does not add authorization or change
 caller/session checks. New management services must record through their own authorized
 write transaction rather than a post-commit hook.
 
 Writers acquire the organization before the target row. Cancellation takes only the
-organization key-share lock before its booking, without locking host identity. Membership writes reserve
+organization key-share lock before its booking, without locking host identity. HTTP role
+changes hold the organization's write lock before updating the target and inserting the
+record. Native membership writes reserve
 their organization foreign-key lock through the eventual operation INSERT before updating
 or removing the member, including perceived role no-ops. A failed conditional update or
 successful no-op discards that tentative row; only an actual change retains it, stamped

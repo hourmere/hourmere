@@ -27,6 +27,7 @@ import { serializeOrganizationContext } from './organization-context.ts'
 import { organizationOperationRecords } from './organization-operations.ts'
 import { ensurePersonalOrganization, organizationGuards } from './organizations.ts'
 import { hasAccount, maySignUp, type SignupPolicy, signupConnectionOptions } from './signup.ts'
+import { createTeamRolePolicy } from './team-role-policy.ts'
 
 export { InvalidApiKeyError, requireActiveApiKey } from './api-key-principal.ts'
 export { API_KEY_RATE_LIMIT } from './api-keys.ts'
@@ -61,6 +62,11 @@ export {
   type SignupMode,
   type SignupPolicy,
 } from './signup.ts'
+export {
+  checkTeamManagementAccess,
+  TeamManagementError,
+  type TeamManager,
+} from './team-management.ts'
 
 /** Separate lock connections cannot starve the handler's auth/application query pools. */
 class AuthPool extends pg.Pool {
@@ -173,6 +179,7 @@ export function createAuth({
   const lockPool = (pool as Partial<AuthPool>).organizationLocks
   if (!lockPool) throw new Error('createAuth requires a pool created by createAuthPool')
   const { google, microsoft } = socialProviders
+  const teamRolePolicy = createTeamRolePolicy(db)
   const auth = betterAuth({
     database: pool,
     disabledPaths: [
@@ -319,7 +326,7 @@ export function createAuth({
         },
       },
     },
-    hooks: { before: beforeHook(db) },
+    hooks: { before: beforeHook(db, teamRolePolicy.before) },
     plugins: [
       {
         id: 'sign-in-token-updates',
@@ -357,6 +364,20 @@ export function createAuth({
       },
       ...(mcpOAuth ? mcpOAuthPlugins(db, baseURL, mcpMetadataFetcher) : []),
       organizationOperationRecords(),
+      {
+        id: 'team-role-policy',
+        init(ctx) {
+          // Wrap the operation recorder last: HTTP role changes use the policy's locked
+          // application transaction for both the member update and its attribution.
+          // An outer native recorder would hold an organization FK lock on a separate
+          // connection while this policy waits for that organization's write lock.
+          const adapter = ctx.adapter
+          teamRolePolicy.adapter(adapter)
+          const transaction = adapter.transaction
+          adapter.transaction = (callback) =>
+            transaction((trx) => callback(teamRolePolicy.adapter(trx)))
+        },
+      },
       organization({
         // An invitation is accepted only by someone who proved they own the invited address.
         requireEmailVerificationOnInvitation: true,
@@ -408,8 +429,10 @@ export function createAuth({
       }),
     ],
   })
-  auth.handler = serializeOrganizationContext(createDb(lockPool), auth.handler, (headers) =>
-    auth.api.getSession({ headers }),
+  auth.handler = teamRolePolicy.handler(
+    serializeOrganizationContext(createDb(lockPool), auth.handler, (headers) =>
+      auth.api.getSession({ headers }),
+    ),
   )
   return auth
 }
