@@ -12,6 +12,8 @@ import { teamManagementAccess } from './team-management.ts'
 const serverUrl = process.env.DATABASE_URL
 const now = () => Temporal.Instant.from('2027-01-01T00:00Z')
 const denied = { kind: 'forbidden', code: 'team_management_access_denied' }
+const alreadyCancelled = { kind: 'conflict', code: 'booking_already_cancelled' }
+const contextChanged = { kind: 'conflict', code: 'organization_context_changed' }
 type Cancel = typeof cancelTeamAdminBooking
 type Access = typeof teamManagementAccess
 
@@ -133,7 +135,11 @@ describe.skipIf(!serverUrl)('team administrator cancellation service', () => {
           actor,
           options.id ?? f.booking.id,
           options.clock ?? now,
-          { reason: 'Schedule conflict', notify: options.notify },
+          {
+            expectedOrganizationId: options.expectedOrganizationId ?? f.team.id,
+            reason: 'Schedule conflict',
+            notify: options.notify ?? (async () => {}),
+          },
         ),
       { expectedOrganizationId: options.expectedOrganizationId ?? f.team.id },
     )
@@ -231,17 +237,75 @@ describe.skipIf(!serverUrl)('team administrator cancellation service', () => {
     }
     expect((await stored(personal.id)).status).toBe('confirmed')
     expect((await stored(outside.id)).status).toBe('confirmed')
+    await db
+      .updateTable('bookings')
+      .set({ status: 'cancelled', cancelled_at: new Date(now().toString()) })
+      .where('id', 'in', [personal.id, outside.id])
+      .execute()
+    for (const id of [personal.id, outside.id])
+      await expect(cancel(f, { id, service })).rejects.toMatchObject(denied)
     await expect(
       cancel(f, { service, clock: () => Temporal.Instant.from('2027-01-02T09:00Z') }),
     ).rejects.toMatchObject(denied)
     await expectUnchanged(f)
     await cancel(f, { service })
-    await expect(cancel(f, { service })).rejects.toMatchObject(denied)
+    await expect(cancel(f, { service })).rejects.toMatchObject(alreadyCancelled)
     expect(await records(f.booking.id)).toHaveLength(1)
   }
 
-  it('uses one denial for personal, other-team, missing, started and cancelled bookings', async () => {
+  it('uses one denial for inaccessible targets and distinguishes an already-cancelled team booking', async () => {
     await verifyTargetDenial(cancelTeamAdminBooking)
+  })
+
+  async function verifyServiceContext(service: Cancel) {
+    const f = await fixture()
+    let notifications = 0
+    const notify: BookingNotifier = async () => {
+      notifications++
+    }
+    const access = teamManagementAccess(db, async (_c, next) => next())
+    for (const options of [
+      undefined,
+      { notify },
+      { notify, expectedOrganizationId: '' },
+      { notify, expectedOrganizationId: 'invalid' },
+      { notify, expectedOrganizationId: f.other.id },
+    ]) {
+      // Deliberately bypass the TypeScript contract and omit the shared write's binding:
+      // the service must still reject future JavaScript callers before any effects.
+      await expect(
+        access.write(f.principal, f.team.id, (trx, actor) =>
+          Reflect.apply(service, undefined, [trx, actor, f.booking.id, now, options]),
+        ),
+      ).rejects.toMatchObject(contextChanged)
+      expect(notifications).toBe(0)
+      await expectUnchanged(f)
+    }
+  }
+
+  it('requires a valid matching expected organization at the service boundary', async () => {
+    await verifyServiceContext(cancelTeamAdminBooking)
+  })
+
+  async function verifyRequiredNotifier(service: Cancel) {
+    const f = await fixture()
+    const access = teamManagementAccess(db, async (_c, next) => next())
+    await expect(
+      access.write(f.principal, f.team.id, (trx, actor) =>
+        Reflect.apply(service, undefined, [
+          trx,
+          actor,
+          f.booking.id,
+          now,
+          { expectedOrganizationId: f.team.id },
+        ]),
+      ),
+    ).rejects.toThrow('Team cancellation requires a notification dependency')
+    await expectUnchanged(f)
+  }
+
+  it('requires the notification dependency before changing a booking', async () => {
+    await verifyRequiredNotifier(cancelTeamAdminBooking)
   })
 
   async function verifyContext(access: Access) {
@@ -344,8 +408,8 @@ describe.skipIf(!serverUrl)('team administrator cancellation service', () => {
       release()
     }
     expect(await first).toMatchObject({ status: 'fulfilled' })
-    expect(await second).toMatchObject({ status: 'rejected', reason: denied })
-    await expect(cancel(f, { notify })).rejects.toMatchObject(denied)
+    expect(await second).toMatchObject({ status: 'rejected', reason: alreadyCancelled })
+    await expect(cancel(f, { notify })).rejects.toMatchObject(alreadyCancelled)
     expect(notifications).toBe(1)
     expect(await records(f.booking.id)).toHaveLength(1)
   })
@@ -418,7 +482,11 @@ describe.skipIf(!serverUrl)('team administrator cancellation service', () => {
         f.principal,
         f.team.id,
         (trx, actor) =>
-          cancelTeamAdminBooking(trx, actor, f.booking.id, now, { reason: 'x'.repeat(1001) }),
+          cancelTeamAdminBooking(trx, actor, f.booking.id, now, {
+            expectedOrganizationId: f.team.id,
+            notify: async () => {},
+            reason: 'x'.repeat(1001),
+          }),
         { expectedOrganizationId: f.team.id },
       ),
     ).rejects.toMatchObject({ kind: 'invalid', code: 'invalid_reason' })
@@ -452,9 +520,11 @@ describe.skipIf(!serverUrl)('team administrator cancellation service', () => {
       "error.code === 'booking_not_found'",
     )
     await verifyTargetDenial(service.cancelTeamAdminBooking)
+    await verifyServiceContext(service.cancelTeamAdminBooking)
+    await verifyRequiredNotifier(service.cancelTeamAdminBooking)
   })
 
-  it.each(['booking_not_found', 'booking_cancelled', 'booking_in_past'])(
+  it.each(['booking_not_found', 'booking_in_past'])(
     'detects disclosure of %s in a service source copy',
     async (code) => {
       const copy = await sourceCopy<{ cancelTeamAdminBooking: Cancel }>(
@@ -467,6 +537,45 @@ describe.skipIf(!serverUrl)('team administrator cancellation service', () => {
       })
     },
   )
+
+  it('detects loss of the distinguishable already-cancelled result in a service source copy', async () => {
+    const copy = await sourceCopy<{ cancelTeamAdminBooking: Cancel }>(
+      '../../../packages/scheduling/src/team-bookings.ts',
+      "'booking_already_cancelled'",
+      "'booking_cancelled'",
+    )
+    await expect(verifyTargetDenial(copy.cancelTeamAdminBooking)).rejects.toMatchObject({
+      name: 'AssertionError',
+    })
+  })
+
+  it.each([
+    ['expected-organization validation', '!isUuid(options?.expectedOrganizationId)'],
+    [
+      'expected-organization comparison',
+      'options.expectedOrganizationId.toLowerCase() !== actor.organizationId.toLowerCase()',
+    ],
+  ])('detects missing service %s in a source copy', async (_label, source) => {
+    const copy = await sourceCopy<{ cancelTeamAdminBooking: Cancel }>(
+      '../../../packages/scheduling/src/team-bookings.ts',
+      source,
+      'false',
+    )
+    await expect(verifyServiceContext(copy.cancelTeamAdminBooking)).rejects.toMatchObject({
+      name: 'AssertionError',
+    })
+  })
+
+  it('detects missing required notification dependency check in a service source copy', async () => {
+    const copy = await sourceCopy<{ cancelTeamAdminBooking: Cancel }>(
+      '../../../packages/scheduling/src/team-bookings.ts',
+      "if (typeof options.notify !== 'function')",
+      'if (false)',
+    )
+    await expect(verifyRequiredNotifier(copy.cancelTeamAdminBooking)).rejects.toMatchObject({
+      name: 'AssertionError',
+    })
+  })
 
   it('detects missing expected-organization forwarding in the shared writer source copy', async () => {
     const copy = await sourceCopy<{ teamManagementAccess: Access }>(

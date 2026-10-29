@@ -4,7 +4,7 @@ import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import { createTestTeam, createTestUser } from '@hourmere/scheduling/testing'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { productApp } from './test-app.ts'
+import { productApp, syntheticSessionCookie } from './test-app.ts'
 import { webhookRoutes } from './webhooks.ts'
 
 const serverUrl = process.env.DATABASE_URL
@@ -35,7 +35,9 @@ describe.skipIf(!serverUrl)('webhook REST API', () => {
       app.request(`/api/v1${path}`, {
         method,
         headers: {
-          authorization: 'Bearer hm_webhook_fixture',
+          ...(session
+            ? { cookie: syntheticSessionCookie('hm_webhook_fixture') }
+            : { authorization: 'Bearer hm_webhook_fixture' }),
           ...(body === undefined ? {} : { 'content-type': 'application/json' }),
           ...headers,
         },

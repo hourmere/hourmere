@@ -96,7 +96,7 @@ All notifications go through one job, `booking-notification`, with payload
 |---|---|
 | Booking created (`createPublicBooking`, not on an idempotent replay) | `confirmed` now; `reminder` 24 hours before the start, unless that is less than an hour away |
 | Booking rescheduled (`rescheduleManagedBooking`, `rescheduleHostBooking`) | for the **new** booking: `rescheduled` now; `reminder` as above. Nothing for the old one (see below) |
-| Booking cancelled (`cancelManagedBooking`, `cancelHostBooking`) | `cancelled` now |
+| Booking cancelled (`cancelManagedBooking`, `cancelHostBooking`, `cancelTeamAdminBooking`) | `cancelled` now |
 
 The same services serve the booking page, the REST API and the MCP tools, so a booking an
 agent makes, moves or cancels sends exactly the emails a person's would.
@@ -452,6 +452,8 @@ So the services pass only ids:
   transaction that makes the change and the instant the service used for its checks (read
   after it waited for its locks), which also decides whether a reminder is queued.
   Scheduling stays free of pg-boss and mail; tests pass a fake.
+  The session-only `cancelTeamAdminBooking` service requires this dependency explicitly;
+  it refuses a missing notifier before changing the booking.
 - `createPublicBooking` calls it after `insertBooking`, inside the transaction, so never on
   the replay paths (a replay found before or after the host lock returns before it, and
   a concurrent duplicate's unique violation rolls back its jobs with it):
@@ -464,7 +466,7 @@ So the services pass only ids:
   update: `{ type: 'cancelled', bookingId }`.
 - [`server.ts`](https://github.com/hourmere/hourmere/blob/main/apps/server/src/server.ts) builds `notify = bookingNotifier(jobs)` (`@hourmere/notifications`, which
   calls `enqueueBookingNotifications`) for the `all` and `web` roles and passes it to
-  `publicRoutes`, `bookingRoutes` and the MCP `bookingTools`, which put it in the contexts
+  `publicRoutes`, `bookingRoutes`, `teamBookingRoutes` and the MCP `bookingTools`, which put it in the contexts
   they build. A worker serves no bookings and needs none.
 
 If `notify` throws (the queue insert fails), the booking change fails with it: a booking
