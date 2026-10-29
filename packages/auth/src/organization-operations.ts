@@ -1,6 +1,8 @@
 import { tryGetCurrentAuthEndpointContext } from '@better-auth/core/context'
+import type { Database } from '@hourmere/db'
 import type { BetterAuthPlugin } from 'better-auth'
 import type { DBTransactionAdapter } from 'better-auth/adapters'
+import type { Transaction } from 'kysely'
 
 interface Member {
   id: string
@@ -10,6 +12,29 @@ interface Member {
 }
 
 const removalPaths = new Set(['/organization/remove-member', '/organization/leave'])
+
+/** The launch policy already holds the team and target locks in this transaction. */
+export async function recordTeamRoleChange(
+  trx: Transaction<Database>,
+  member: Member,
+  actorUserId: string,
+  newRole: string,
+) {
+  if (member.role === newRole) return
+  await trx
+    .insertInto('organization_operations')
+    .values({
+      organization_id: member.organizationId,
+      operation: 'member_role_changed',
+      actor_user_id: actorUserId,
+      target_user_id: member.userId,
+      previous_role: member.role,
+      new_role: newRole,
+      source: 'web',
+      occurred_at: new Date(),
+    })
+    .execute()
+}
 
 /**
  * Records only successful member operations at Better Auth's persistence boundary. The
