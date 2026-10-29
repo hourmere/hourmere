@@ -257,7 +257,12 @@ describe.skipIf(!serverUrl)('team administrator cancellation notification transa
     teamManagementAccess(database, async (_c, next) => next()).write(
       principal,
       team.id,
-      (trx, actor) => service(trx, actor, id, () => NOW, { reason: REASON, notify: notifier }),
+      (trx, actor) =>
+        service(trx, actor, id, () => NOW, {
+          expectedOrganizationId: team.id,
+          reason: REASON,
+          notify: notifier,
+        }),
       { expectedOrganizationId: team.id },
     )
 
@@ -294,8 +299,8 @@ describe.skipIf(!serverUrl)('team administrator cancellation notification transa
     const f = await fixture()
     await cancel(f.booking.id, service)
     await expect(cancel(f.booking.id, service)).rejects.toMatchObject({
-      kind: 'forbidden',
-      code: 'team_management_access_denied',
+      kind: 'conflict',
+      code: 'booking_already_cancelled',
     })
     const jobs = await queued(f.booking.id)
     expect(jobs).toHaveLength(1)
@@ -416,7 +421,7 @@ describe.skipIf(!serverUrl)('team administrator cancellation notification transa
     expect(await first).toEqual({ ok: true })
     expect(await second).toMatchObject({
       ok: false,
-      error: { kind: 'forbidden', code: 'team_management_access_denied' },
+      error: { kind: 'conflict', code: 'booking_already_cancelled' },
     })
     expect(await queued(f.booking.id)).toHaveLength(1)
     expect(await operationRows(f.booking.id)).toHaveLength(1)

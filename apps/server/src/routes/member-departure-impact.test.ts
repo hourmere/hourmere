@@ -2,7 +2,15 @@ import { createHmac, randomBytes, randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import { createRoute, z } from '@hono/zod-openapi'
-import { type Auth, createAuth, createAuthPool, createCallerResolver } from '@hourmere/auth'
+import {
+  type Auth,
+  checkTeamManagementAccess,
+  createAuth,
+  createAuthPool,
+  createCallerResolver,
+  createMcpOAuthResolver,
+  TeamManagementError,
+} from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import {
@@ -12,15 +20,19 @@ import {
   MemberDepartureImpactSchema,
   TeamAdminBookingSchema,
 } from '@hourmere/scheduling'
+import { DomainError } from '@hourmere/scheduling/errors'
 import {
   createFixtures,
   createTestTeam,
   createTestUser,
   type TestUser,
 } from '@hourmere/scheduling/testing'
+import { createMiddleware } from 'hono/factory'
+import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { signTestMcpAccessToken } from '../../../../packages/auth/src/testing.ts'
 import { createApp } from '../app.ts'
-import { errorResponses, json, type RouteModule, serviceContext } from '../openapi.ts'
+import { ErrorBody, json, type RouteModule, serviceContext } from '../openapi.ts'
 import { productRoutes } from '../server.ts'
 import { teamManagementAccess } from '../team-management.ts'
 import { memberDepartureImpactRoutes } from './member-departure-impact.ts'
@@ -51,6 +63,7 @@ describe.skipIf(!serverUrl)('member departure impact route', () => {
       baseURL: origin,
       secret,
       signup,
+      mcpOAuth: true,
       mailer: { send: async () => {} },
     })
     resolveCaller = createCallerResolver({ auth, db })
@@ -114,6 +127,54 @@ describe.skipIf(!serverUrl)('member departure impact route', () => {
   }
   type Fixture = Awaited<ReturnType<typeof fixture>>
 
+  async function credentials(f: Fixture) {
+    const key = await auth.api.createApiKey({
+      body: { userId: f.actor.id, metadata: { organizationId: f.team.id } },
+    })
+    const apiKey = `Bearer ${key.key}`
+    const resolvedKey = await resolveCaller(new Headers({ authorization: apiKey }))
+    expect(resolvedKey.ok && resolvedKey.principal.kind === 'api_key').toBe(true)
+    const clientId = `https://departure.example/${randomUUID()}.json`
+    const grant = await db
+      .insertInto('mcp_oauth_grants')
+      .values({ user_id: f.actor.id, organization_id: f.team.id, client_id: clientId })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    await db
+      .insertInto('auth.oauthClient')
+      .values({ clientId, redirectUris: JSON.stringify(['https://departure.example/callback']) })
+      .execute()
+    await db
+      .insertInto('auth.oauthConsent')
+      .values({
+        clientId,
+        userId: f.actor.id,
+        referenceId: grant.id,
+        scopes: JSON.stringify(['mcp:tools', 'offline_access']),
+        resources: JSON.stringify([`${origin}/mcp`]),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .execute()
+    const token = await signTestMcpAccessToken(auth, {
+      sub: f.actor.id,
+      client_id: clientId,
+      scope: 'mcp:tools',
+      iat: Math.floor(Date.now() / 1000),
+      exp: Math.floor(Date.now() / 1000) + 300,
+      iss: `${origin}/api/auth`,
+      aud: `${origin}/mcp`,
+      'https://hourmere.com/organization': f.team.id,
+      'https://hourmere.com/grant': grant.id,
+    })
+    const oauth = `Bearer ${token}`
+    const resolvedOAuth = await createMcpOAuthResolver({ auth, db, publicUrl: origin })(
+      new Request(`${origin}/mcp`, { headers: { authorization: oauth } }),
+    )
+    expect(resolvedOAuth.ok && resolvedOAuth.principal.kind === 'oauth').toBe(true)
+    return [apiKey, oauth]
+  }
+
   function get(
     f: Fixture,
     targetId = f.target.id,
@@ -125,6 +186,12 @@ describe.skipIf(!serverUrl)('member departure impact route', () => {
       `/api/v1/team/members/${targetId}/departure-impact?${new URLSearchParams({ teamId: f.team.id, ...query })}`,
       { headers },
     )
+  }
+
+  async function expectDenied(response: Response) {
+    expect(response.status).toBe(403)
+    expect(await response.json()).toEqual(denied)
+    expect(response.headers.has('www-authenticate')).toBe(false)
   }
 
   it.each(['owner', 'admin', 'member, admin', 'member,owner'])(
@@ -201,7 +268,10 @@ describe.skipIf(!serverUrl)('member departure impact route', () => {
 
   it('requires authentication and refuses personal-space sessions', async () => {
     const f = await fixture('owner')
-    expect((await get(f, f.target.id, {}, application(), {})).status).toBe(401)
+    const anonymous = await get(f, f.target.id, {}, application(), {})
+    expect(anonymous.status).toBe(403)
+    expect(await anonymous.json()).toEqual(denied)
+    expect(anonymous.headers.has('www-authenticate')).toBe(false)
     const personal = await session(f.actor, f.actor.principal.organization.id)
     const response = await get(
       f,
@@ -227,6 +297,39 @@ describe.skipIf(!serverUrl)('member departure impact route', () => {
       expect(await response.json()).toEqual(denied)
     }
   })
+
+  it.each(['owner', 'admin', 'member'])(
+    'keeps the %s own-impact read session-only with uniform team denials',
+    async (role) => {
+      const f = await fixture(role)
+      const app = application()
+      const self = await get(f, f.actor.id, {}, app)
+      expect(self.status).toBe(200)
+      expect(MemberDepartureImpactSchema.parse(await self.json()).eventTypes.totalCount).toBe(0)
+      const authorizations = [
+        ...(await credentials(f)),
+        '',
+        'Bearer invalid',
+        'Bearer',
+        'Basic synthetic',
+        'DPoP synthetic',
+      ]
+      for (const teamId of [f.team.id, randomUUID()]) {
+        for (const cookie of [undefined, 'better-auth.session_token=invalid'])
+          await expectDenied(
+            await get(f, f.actor.id, { teamId }, app, cookie === undefined ? {} : { cookie }),
+          )
+        for (const authorization of authorizations)
+          for (const cookie of [undefined, f.login.cookie])
+            await expectDenied(
+              await get(f, f.actor.id, { teamId }, app, {
+                authorization,
+                ...(cookie === undefined ? {} : { cookie }),
+              }),
+            )
+      }
+    },
+  )
 
   it.each(['role', 'membership', 'switch', 'verification', 'session'])(
     'rechecks current %s after caller resolution',
@@ -289,6 +392,7 @@ describe.skipIf(!serverUrl)('member departure impact route', () => {
     expect(response.status).toBe(200)
     const document = await openApiDocument(app)
     expect(document.paths[path]?.get?.security).toEqual([{ session: [] }])
+    expect(Object.keys(document.paths[path]?.get?.responses ?? {})).toEqual(['200', '400', '403'])
     expect(responseAndRequestStrictness(document, [path]).closedResponses).toEqual([])
     expect(document.components?.schemas?.MemberDepartureImpact).toMatchObject({
       properties: {
@@ -306,7 +410,11 @@ describe.skipIf(!serverUrl)('member departure impact route', () => {
     })
   })
 
-  function sourceCopy(replacement?: [string, string], observe = () => {}) {
+  function sourceCopy(
+    replacement?: [string, string],
+    observe = () => {},
+    managementFactory = teamManagementAccess,
+  ) {
     let source = readFileSync('apps/server/src/routes/member-departure-impact.ts', 'utf8')
     if (replacement) {
       expect(source.includes(replacement[0]), 'mutation must match source').toBe(true)
@@ -324,11 +432,11 @@ describe.skipIf(!serverUrl)('member departure impact route', () => {
       MemberDepartureEventTypeSchema,
       MemberDepartureImpactSchema,
       TeamAdminBookingSchema,
-      errorResponses,
+      ErrorBody,
       json,
       serviceContext,
       teamManagementAccess: (...args: Parameters<typeof teamManagementAccess>) => {
-        const access = teamManagementAccess(...args)
+        const access = managementFactory(...args)
         const check = access.memberReadMiddleware[1]
         access.memberReadMiddleware[1] = async (c, next) => {
           observe()
@@ -418,4 +526,59 @@ describe.skipIf(!serverUrl)('member departure impact route', () => {
       verifyAccess(['middleware: access.memberReadMiddleware,', 'middleware: caller,']),
     ).rejects.toThrow(expect.objectContaining({ name: 'AssertionError' }))
   })
+
+  function managementSourceCopy(replacement?: [string, string]): typeof teamManagementAccess {
+    let source = readFileSync('apps/server/src/team-management.ts', 'utf8')
+    if (replacement) {
+      expect(source.includes(replacement[0]), 'mutation must match source').toBe(true)
+      source = source.replace(...replacement)
+    }
+    source = stripTypeScriptTypes(source.replace(/^import[\s\S]*?from '[^']+'\n/gm, '')).replace(
+      /\bexport /g,
+      '',
+    )
+    return new Function(
+      'DomainError',
+      'createMiddleware',
+      'checkTeamManagementAccess',
+      'TeamManagementError',
+      'sql',
+      `${source}; return teamManagementAccess`,
+    )(
+      DomainError,
+      createMiddleware,
+      checkTeamManagementAccess,
+      TeamManagementError,
+      sql,
+    ) as typeof teamManagementAccess
+  }
+
+  it.each(['missing session', 'invalid Authorization'])(
+    'detects removal of the member-read session boundary for %s with a real HTTP assertion',
+    async (credential) => {
+      const f = await fixture('member')
+      const baseline = managementSourceCopy()
+      const mutated = managementSourceCopy([
+        'memberReadMiddleware: [sessionCaller, memberRead]',
+        'memberReadMiddleware: [caller, memberRead]',
+      ])
+      const verify = async (managementFactory: typeof teamManagementAccess) => {
+        const factory = sourceCopy(undefined, () => {}, managementFactory)
+        const app = application([factory({ db, now })])
+        expect((await get(f, f.actor.id, {}, app)).status).toBe(200)
+        const headers: Record<string, string> =
+          credential === 'missing session'
+            ? {}
+            : { cookie: f.login.cookie, authorization: 'Bearer invalid' }
+        await expectDenied(await get(f, f.actor.id, {}, app, headers))
+      }
+      await verify(baseline)
+      await expect(verify(mutated)).rejects.toMatchObject({
+        name: 'AssertionError',
+        actual: 401,
+        expected: 403,
+      })
+      await verify(baseline)
+    },
+  )
 })

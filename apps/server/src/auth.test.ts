@@ -167,7 +167,8 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
         'content-type': 'application/json',
         cookie,
         origin,
-        ...(typeof body === 'object' &&
+        ...(path !== '/api/auth/organization/set-active' &&
+        typeof body === 'object' &&
         body !== null &&
         'organizationId' in body &&
         typeof body.organizationId === 'string'
@@ -1311,8 +1312,20 @@ describe.skipIf(!serverUrl)('sign-in and callers', () => {
     })
 
     it('are judged alone: a bad key does not fall back to the session cookie', async () => {
-      const { res } = await me({ cookie, authorization: `Bearer hm_${'x'.repeat(64)}` })
-      expect(res.status).toBe(401)
+      for (const authorization of [`Bearer hm_${'x'.repeat(64)}`, 'Bearer', '']) {
+        const { res } = await me({ cookie, authorization })
+        expect(res.status, JSON.stringify(authorization)).toBe(401)
+      }
+    })
+
+    it('are judged alone: a valid key wins over a valid session cookie', async () => {
+      const { key } = (await (await createKey(cookie)).json()) as { key: string }
+      // Creating a team makes it the session's active organization; the key stays personal.
+      const teamId = await createTeam(cookie, 'key-over-cookie')
+      expect((await me({ cookie })).body.organization?.id).toBe(teamId)
+      const both = await me({ cookie, authorization: `Bearer ${key}` })
+      expect(both.res.status).toBe(200)
+      expect(both.body.organization?.personal).toBe(true)
     })
 
     it('can act in a team organization only while the owner is a member', async () => {

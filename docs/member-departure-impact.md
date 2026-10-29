@@ -5,8 +5,10 @@ preview for a later leave or removal flow. It requires a current verified browse
 acting in that non-personal team. An ordinary member can inspect only themselves; a current
 owner or admin can inspect any current member of that team. Roles are parsed as exact
 comma-separated tokens from the database. Missing, removed and inaccessible targets all
-receive `403 team_management_access_denied`. Missing authentication receives `401 unauthorized`.
-API keys and MCP grants do not acquire this capability.
+receive `403 team_management_access_denied`. Missing or invalid sessions receive the same
+403 without a `WWW-Authenticate` challenge. Any Authorization header is denied before
+credential resolution, even alongside a valid cookie; API keys and MCP grants cannot
+acquire this capability.
 
 The route uses `teamManagementAccess.memberReadMiddleware`; the scheduling service
 `getTeamMemberDepartureImpact` independently checks the current session, expiry, active

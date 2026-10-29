@@ -6,6 +6,8 @@
 // - links inside the app's frame (navigation, back links, the logo): AppShell asks on click,
 //   before React Router navigates;
 // - signing out: AppShell asks before ending the session;
+// - organization changes found on focus/visibility refresh: SessionProvider asks before
+//   applying the context and remounting the page;
 // - reloading, closing the tab or typing another address: the browser's own prompt
 //   (beforeunload).
 //
@@ -57,7 +59,7 @@ export function UnsavedChangesProvider({ children }: { children: ReactNode }) {
 
 function useUnsavedChangesContext(): UnsavedChanges {
   const context = useContext(UnsavedChangesContext)
-  if (!context) throw new Error('needs an <UnsavedChangesProvider> (AppShell has one)')
+  if (!context) throw new Error('needs an <UnsavedChangesProvider> (SessionProvider has one)')
   return context
 }
 

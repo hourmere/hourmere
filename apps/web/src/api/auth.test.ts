@@ -209,6 +209,23 @@ describe('organization adapters', () => {
     expect(fetch).toHaveBeenCalledTimes(1)
   })
 
+  it('sends the opening organization separately from the explicit activation target', async () => {
+    const fetch = scriptedFetch(json(200, ORGANIZATION))
+    await setActiveOrganization(
+      { organizationId: ORGANIZATION.id },
+      undefined,
+      PERSONAL_ME.organization.id,
+    )
+    expect(fetch).toHaveBeenCalledExactlyOnceWith('/api/auth/organization/set-active', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'X-Expected-Organization-Id': PERSONAL_ME.organization.id,
+      },
+      body: JSON.stringify({ organizationId: ORGANIZATION.id }),
+    })
+  })
+
   it.each(adapters)('reuses shared 401 handling for $name', async ({ run, path }) => {
     const unauthorized = vi.fn()
     const unregister = onUnauthorized(unauthorized)

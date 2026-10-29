@@ -1,20 +1,25 @@
 import { useEffect, useRef, useState } from 'react'
 import { api, type Schemas, unwrap } from '../../api/client.ts'
+import { isOrganizationContextChanged } from '../../api/errors.ts'
+import { OrganizationContextConflict } from '../../components/OrganizationContextConflict.tsx'
 import { useI18n } from '../../i18n/runtime.tsx'
 
 type Booking = Schemas['Booking']
 /** Private caller-only copy status. Never loaded or rendered by the public booking page. */
 export function CalendarCopyNotice({
   booking,
+  expectedOrganizationId,
   onChange,
 }: {
   booking: Booking
+  expectedOrganizationId: string
   onChange: (b: Booking) => void
 }) {
   const { t } = useI18n(),
     [busy, setBusy] = useState(false),
     [failed, setFailed] = useState(false),
     [refresh, setRefresh] = useState(0)
+  const [conflict, setConflict] = useState<unknown>(null)
   const callback = useRef(onChange)
   callback.current = onChange
   const request = useRef<AbortController | null>(null)
@@ -60,7 +65,7 @@ export function CalendarCopyNotice({
   }, [booking.id, copyStatus, refresh, lifecycle])
   if (!state) return null
   async function retry() {
-    if (busy) return
+    if (busy || conflict) return
     request.current?.abort()
     const controller = new AbortController()
     request.current = controller
@@ -69,6 +74,7 @@ export function CalendarCopyNotice({
     try {
       await unwrap(
         api.POST('/api/v1/bookings/{id}/calendar-copy/retry', {
+          headers: { 'X-Expected-Organization-Id': expectedOrganizationId },
           params: { path: { id: booking.id } },
           body: {},
           signal: controller.signal,
@@ -81,8 +87,11 @@ export function CalendarCopyNotice({
         })
         setRefresh((n) => n + 1)
       }
-    } catch {
-      if (!controller.signal.aborted && currentLifecycle.current === lifecycle) setFailed(true)
+    } catch (err) {
+      if (!controller.signal.aborted && currentLifecycle.current === lifecycle) {
+        if (isOrganizationContextChanged(err)) setConflict(err)
+        else setFailed(true)
+      }
     } finally {
       if (!controller.signal.aborted && currentLifecycle.current === lifecycle) setBusy(false)
     }
@@ -113,8 +122,14 @@ export function CalendarCopyNotice({
           {t('Could not check or retry your calendar copy. Your booking has not been changed.')}
         </p>
       )}
+      {conflict !== null && <OrganizationContextConflict error={conflict} />}
       {state.canRetry && (
-        <button type="button" className="button button-small" disabled={busy} onClick={retry}>
+        <button
+          type="button"
+          className="button button-small"
+          disabled={busy || !!conflict}
+          onClick={retry}
+        >
           {t(busy ? 'Requesting…' : 'Recheck my calendar copy')}
         </button>
       )}
