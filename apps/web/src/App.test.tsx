@@ -20,7 +20,7 @@ function routePaths(routes: RouteObject[], parent = ''): string[] {
     const path = (
       route.path?.startsWith('/') ? route.path : `${parent}/${route.path ?? ''}`
     ).replace(/\/+/g, '/')
-    const example = path.replace(/:\w+/g, 'sample').replace('*', 'unknown').replace(/\/+$/g, '')
+    const example = path.replace(/:\w+/g, 'sample').replaceAll('*', 'unknown').replace(/\/+$/g, '')
     return [example || '/', ...routePaths(route.children ?? [], path)]
   })
 }
