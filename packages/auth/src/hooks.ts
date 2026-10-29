@@ -6,6 +6,7 @@ import { checkListQuery, emptyMemberList } from './lists.ts'
 import { defaultMagicLinkErrorRedirect } from './magic-link.ts'
 import { organizationContext } from './organization-context.ts'
 import { isUuid, personalOwner } from './organizations.ts'
+import { fixedTeamRole, teamRoleDenied } from './team-role-policy.ts'
 
 /** Request fields that Better Auth looks up in uuid columns. */
 const ID_FIELDS = ['id', 'userId', 'organizationId', 'memberId', 'invitationId', 'keyId']
@@ -111,13 +112,28 @@ function requireOrganizationSession(ctx: AuthMiddlewareContext) {
 }
 
 /** Better Auth's `hooks.before`: checks that apply across its endpoints. */
-export function beforeHook(db: Db) {
+export function beforeHook(db: Db, teamRolePolicy: (ctx: AuthMiddlewareContext) => Promise<void>) {
   return createAuthMiddleware(async (ctx) => {
     requireOrganizationSession(ctx)
     requireSocialAuthorizationRequest(ctx)
     requireUuidIds(ctx.query)
-    requireUuidIds(ctx.body)
+    if (ctx.path === '/organization/update-member-role' && isRecord(ctx.body)) {
+      // Role targets share one denial for malformed, missing and other-team identifiers.
+      const { memberId: _target, ...otherIds } = ctx.body
+      requireUuidIds(otherIds)
+    } else {
+      requireUuidIds(ctx.body)
+    }
+    // Better Auth intentionally exposes addMember only as a trusted server API. Its
+    // pathless operation still must not create elevated memberships in existing teams.
+    if (
+      (ctx as { operationId?: string }).operationId === 'addOrganizationMember' &&
+      fixedTeamRole(isRecord(ctx.body) ? ctx.body.role : undefined) !== 'member'
+    ) {
+      throw teamRoleDenied()
+    }
     await organizationContext(ctx, db)
+    await teamRolePolicy(ctx)
     const filter = checkListQuery(ctx.path, ctx.query)
     const empty = await emptyMemberList(ctx, db, filter)
     if (empty) return empty

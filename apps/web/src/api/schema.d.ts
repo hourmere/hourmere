@@ -2452,7 +2452,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description insufficient_role: team event types need the owner or admin role; forbidden: a cookie-authenticated write from another origin */
+                /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -2577,7 +2577,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description insufficient_role: team event types need the owner or admin role; forbidden: a cookie-authenticated write from another origin */
+                /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -2705,7 +2705,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description insufficient_role: team event types need the owner or admin role; forbidden: a cookie-authenticated write from another origin */
+                /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -2791,7 +2791,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description insufficient_role: team event types need the owner or admin role; forbidden: a cookie-authenticated write from another origin */
+                /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -2889,7 +2889,7 @@ export interface paths {
                         "application/json": components["schemas"]["Error"];
                     };
                 };
-                /** @description insufficient_role: team event types need the owner or admin role; forbidden: a cookie-authenticated write from another origin */
+                /** @description insufficient_role: team event types need the owner or admin role; team_management_access_denied: session writes require current verified owner or admin access; forbidden: a cookie-authenticated write from another origin */
                 403: {
                     headers: {
                         [name: string]: unknown;

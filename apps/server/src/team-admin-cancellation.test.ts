@@ -16,16 +16,40 @@ type Cancel = typeof cancelTeamAdminBooking
 type Access = typeof teamManagementAccess
 
 // Import changed copies without modifying source used by other workers.
-async function sourceCopy<T>(path: string, before: string, after: string): Promise<T> {
+function sourceCopyUrl(
+  path: string,
+  before: string,
+  after: string,
+  imports: Record<string, string> = {},
+): string {
   const location = new URL(path, import.meta.url)
   const source = readFileSync(location, 'utf8')
   expect(source.includes(before), 'mutation matches real source').toBe(true)
   const javascript = stripTypeScriptTypes(source.replace(before, after)).replace(
     /from '([^']+)'/g,
     (_, specifier: string) =>
-      `from '${specifier.startsWith('.') ? new URL(specifier, location).href : import.meta.resolve(specifier)}'`,
+      `from '${imports[specifier] ?? (specifier.startsWith('.') ? new URL(specifier, location).href : import.meta.resolve(specifier))}'`,
   )
-  return import(`data:text/javascript;base64,${Buffer.from(javascript).toString('base64')}`)
+  return `data:text/javascript;base64,${Buffer.from(javascript).toString('base64')}`
+}
+
+async function sourceCopy<T>(
+  path: string,
+  before: string,
+  after: string,
+  imports: Record<string, string> = {},
+): Promise<T> {
+  return import(sourceCopyUrl(path, before, after, imports))
+}
+
+function sharedCheckCopy(before: string, after: string) {
+  const shared = sourceCopyUrl('../../../packages/auth/src/team-management.ts', before, after)
+  return sourceCopy<{ teamManagementAccess: Access }>(
+    './team-management.ts',
+    'allowPersonal: false',
+    'allowPersonal: false',
+    { '@hourmere/auth': shared },
+  )
 }
 
 describe.skipIf(!serverUrl)('team administrator cancellation service', () => {
@@ -417,6 +441,11 @@ describe.skipIf(!serverUrl)('team administrator cancellation service', () => {
     )
     await verifyContext(copy.teamManagementAccess)
     await verifyPersonalContext(copy.teamManagementAccess)
+    const shared = await sharedCheckCopy(
+      'if (context && session.activeOrganizationId?.toLowerCase() !== organization.id.toLowerCase())',
+      'if (context && session.activeOrganizationId?.toLowerCase() !== organization.id.toLowerCase())',
+    )
+    await verifyContext(shared.teamManagementAccess)
     const service = await sourceCopy<{ cancelTeamAdminBooking: Cancel }>(
       '../../../packages/scheduling/src/team-bookings.ts',
       "error.code === 'booking_not_found'",
@@ -451,8 +480,7 @@ describe.skipIf(!serverUrl)('team administrator cancellation service', () => {
   })
 
   it('detects missing live-session context comparison in the shared check source copy', async () => {
-    const copy = await sourceCopy<{ teamManagementAccess: Access }>(
-      './team-management.ts',
+    const copy = await sharedCheckCopy(
       'if (context && session.activeOrganizationId?.toLowerCase() !== organization.id.toLowerCase())',
       'if (false)',
     )

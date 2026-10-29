@@ -1,6 +1,9 @@
 import { createHmac, randomBytes, randomUUID } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { stripTypeScriptTypes } from 'node:module'
 import {
   type Auth,
+  checkTeamManagementAccess,
   createAuth,
   createAuthPool,
   createCallerResolver,
@@ -8,7 +11,9 @@ import {
 } from '@hourmere/auth'
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
+import { DomainError } from '@hourmere/scheduling/errors'
 import { createTestTeam, createTestUser } from '@hourmere/scheduling/testing'
+import { createMiddleware } from 'hono/factory'
 import { sql } from 'kysely'
 import type { PoolClient } from 'pg'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -21,6 +26,41 @@ const serverUrl = process.env.DATABASE_URL
 const origin = 'http://localhost:4388'
 const secret = 'synthetic-team-management-session-secret-0000000000'
 const denied = { error: 'team_management_access_denied' }
+type Access = typeof teamManagementAccess
+
+// Evaluate isolated source copies so mutations cannot affect parallel test workers.
+function accessCopy(sharedMutation?: [string, string], serverMutation?: [string, string]): Access {
+  function copy(
+    path: string,
+    bindings: Record<string, unknown>,
+    name: string,
+    mutation?: [string, string],
+  ) {
+    let source = readFileSync(path, 'utf8')
+    if (mutation) {
+      expect(source.includes(mutation[0]), 'mutation matches real access source').toBe(true)
+      source = source.replace(...mutation)
+    }
+    const script = stripTypeScriptTypes(
+      source.replace(/^import\b[\s\S]*?from\s+['"][^'"]+['"]\n/gm, ''),
+    ).replace(/\bexport /g, '')
+    return new Function(...Object.keys(bindings), `${script}; return ${name}`)(
+      ...Object.values(bindings),
+    )
+  }
+  const shared = copy(
+    'packages/auth/src/team-management.ts',
+    { sql },
+    '({ checkTeamManagementAccess, TeamManagementError })',
+    sharedMutation,
+  )
+  return copy(
+    'apps/server/src/team-management.ts',
+    { DomainError, createMiddleware, ...shared },
+    'teamManagementAccess',
+    serverMutation,
+  ) as Access
+}
 
 describe.skipIf(!serverUrl)('shared team-management access', () => {
   let owned: TestDatabase
@@ -51,7 +91,11 @@ describe.skipIf(!serverUrl)('shared team-management access', () => {
     await owned?.drop()
   })
 
-  async function fixture(role = 'admin', personal = false) {
+  async function fixture(
+    role = 'admin',
+    personal = false,
+    accessFactory: Access = teamManagementAccess,
+  ) {
     const user = await createTestUser(db, 'Team manager')
     const team = personal
       ? { id: user.principal.organization.id }
@@ -75,7 +119,7 @@ describe.skipIf(!serverUrl)('shared team-management access', () => {
     if (!resolved.ok) throw new Error('Synthetic session did not resolve')
     let beforeWrite: (() => Promise<void>) | undefined
     const routes: RouteModule = ({ app, caller }) => {
-      const access = teamManagementAccess(db, caller)
+      const access = accessFactory(db, caller)
       app.post('/api/v1/team-management-test/:teamId', ...access.middleware, async (c) => {
         await beforeWrite?.()
         const actor = await access.write(
@@ -113,7 +157,7 @@ describe.skipIf(!serverUrl)('shared team-management access', () => {
       sessionId: session.id,
       principal: resolved.principal,
       app,
-      access: teamManagementAccess(db, requireCaller(resolve, { allowedOrigin: origin })),
+      access: accessFactory(db, requireCaller(resolve, { allowedOrigin: origin })),
       beforeWrite: (hook: () => Promise<void>) => {
         beforeWrite = hook
       },
@@ -175,6 +219,10 @@ describe.skipIf(!serverUrl)('shared team-management access', () => {
     ['owner', 200, 200],
     ['admin', 200, 200],
     ['member', 403, 200],
+    ['member, admin', 200, 200],
+    ['member, owner', 200, 200],
+    ['team-member', 403, 403],
+    ['MEMBER', 403, 403],
     ['superadmin', 403, 403],
     ['', 403, 403],
   ])('gates the %j role at each middleware entry', async (role, management, memberRead) => {
@@ -189,6 +237,76 @@ describe.skipIf(!serverUrl)('shared team-management access', () => {
     const memberEntry = await entry('member-entry')
     expect(memberEntry.status).toBe(memberRead)
     if (memberRead === 403) await expectDenied(memberEntry)
+  })
+
+  it('refuses members at the shared check and direct management read and write callbacks', async () => {
+    const f = await fixture('member')
+    await expect(checkTeamManagementAccess(db, f.principal, f.team.id)).rejects.toMatchObject({
+      code: denied.error,
+    })
+    expect(
+      await checkTeamManagementAccess(db, f.principal, f.team.id, false, undefined, true),
+    ).toEqual({
+      userId: f.user.id,
+      organizationId: f.team.id,
+      role: 'member',
+    })
+    const operation = vi.fn(async () => 'unexpected')
+    await expect(f.access.read(f.principal, f.team.id, operation)).rejects.toMatchObject({
+      code: denied.error,
+    })
+    await expect(f.access.write(f.principal, f.team.id, operation)).rejects.toMatchObject({
+      code: denied.error,
+    })
+    expect(operation).not.toHaveBeenCalled()
+  })
+
+  async function verifyMemberEntries(accessFactory: Access, role = 'member') {
+    const f = await fixture(role, false, accessFactory)
+    const entry = (path: string) =>
+      f.app.request(`/api/v1/team-management-test/${f.team.id}/${path}`, {
+        headers: { origin, cookie: f.cookie },
+      })
+    expect((await entry('entry')).status).toBe(403)
+    expect((await entry('member-entry')).status).toBe(role === 'member' ? 200 : 403)
+  }
+
+  it('runs unchanged shared and server access source copies against entry assertions', async () => {
+    await verifyMemberEntries(accessCopy())
+  })
+
+  it.each([
+    ['default member admission', 'allowMemberRead = false', 'allowMemberRead = true', 'member'],
+    ['lost member admission', "allowMemberRead && roles.includes('member')", 'false', 'member'],
+    [
+      'member role substring matching',
+      "allowMemberRead && roles.includes('member')",
+      "allowMemberRead && roles.some((role) => role.includes('member'))",
+      'team-member',
+    ],
+  ])('detects %s in a shared guard source copy', async (_name, before, after, role) => {
+    await expect(verifyMemberEntries(accessCopy([before, after]), role)).rejects.toMatchObject({
+      name: 'AssertionError',
+    })
+  })
+
+  it.each([
+    [
+      'management member admission',
+      'await check(db, c.var.principal, c.var.principal.organization.id)',
+      'await check(db, c.var.principal, c.var.principal.organization.id, false, undefined, true)',
+    ],
+    [
+      'lost member-read opt-in',
+      'await check(db, c.var.principal, c.var.principal.organization.id, false, undefined, true)',
+      'await check(db, c.var.principal, c.var.principal.organization.id)',
+    ],
+  ])('detects %s in a middleware source copy', async (_name, before, after) => {
+    await expect(verifyMemberEntries(accessCopy(undefined, [before, after]))).rejects.toMatchObject(
+      {
+        name: 'AssertionError',
+      },
+    )
   })
 
   it('does not retain an admin role from an earlier request in the same session', async () => {
