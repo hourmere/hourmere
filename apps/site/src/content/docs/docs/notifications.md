@@ -524,14 +524,13 @@ resend replays do not spend another slot; explicit resends never reset rolling c
 Deleting invitations or teams cannot reset those counts. Request counts expire from the
 two-day accounting ledger and do not indicate SMTP delivery. Admission stores only a
 purpose-separated recipient HMAC, the inviter/team identifiers and the request time.
-On upgrades from the earlier admission ledger, existing inviter/team counts are retained;
-recipient counts start with the new code and fill their rolling window within 24 hours,
-because the old request ledger has no recipient identity to backfill.
 
 Explicit resends require the invitation ID, expected generation and UUID request ID;
 they wait 60 seconds from the later of the generation start and latest delivery update,
 including worker attempts, stop at 32 generations and extend expiry by the original validity
-length. Each delivery generation retains its existing maximum of four SMTP attempts.
+length. The future invitation sender must update `updated_at` on every delivery attempt
+for this post-delivery cooldown to hold. Each delivery generation retains its existing
+maximum of four SMTP attempts.
 Expired or business-terminal invitations need a new invitation. Invitation admission
 never invokes the sign-in worker's account/sign-up eligibility decision and does not
 grant an inviter any new registration authority. Errors use fixed codes and diagnostics

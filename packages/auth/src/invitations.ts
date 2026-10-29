@@ -197,6 +197,8 @@ export async function manageInvitation(
             code: 'INVITATION_DELIVERY_BUSY',
             message: 'Invitation delivery is in progress. Try again shortly.',
           })
+        // The future sender must update updated_at on every delivery attempt so
+        // the post-delivery cooldown starts again even within the same generation.
         const started = new Date(
           Math.max(
             (delivery?.generation_started_at ?? invitation.createdAt).getTime(),

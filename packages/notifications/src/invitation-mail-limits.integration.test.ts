@@ -57,6 +57,7 @@ describe.skipIf(!serverUrl)('invitation admission budgets (real PostgreSQL)', ()
         Array.from({ length: count }, () => ({
           user_id: identity.userId,
           organization_id: identity.organizationId,
+          recipient_hash: invitationRecipientHash(`history-${randomUUID()}@example.test`, SECRET),
           requested_at: at,
         })),
       )

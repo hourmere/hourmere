@@ -16,6 +16,7 @@ import {
   createCallerResolver,
   createMcpOAuthResolver,
 } from './index.ts'
+import { invitationRules } from './invitations.ts'
 import { checkListQuery, emptyMemberList } from './lists.ts'
 import { defaultMagicLinkErrorRedirect } from './magic-link.ts'
 import { organizationContext } from './organization-context.ts'
@@ -384,6 +385,7 @@ describe.skipIf(!serverUrl)('browser-only organization management', () => {
       getSessionFromCtx,
       apiKeyRules,
       displayNameRules,
+      invitationRules,
       checkListQuery,
       emptyMemberList,
       defaultMagicLinkErrorRedirect,
@@ -409,7 +411,7 @@ describe.skipIf(!serverUrl)('browser-only organization management', () => {
   }
 
   it('passes the real HTTP boundary assertions with an unmodified auth hook source copy', async () => {
-    await verifyBoundary(sourceCopy(false))
+    await expect(verifyBoundary(sourceCopy(false))).resolves.toBeUndefined()
   })
 
   it('detects removal of Authorization precedence with a real HTTP assertion failure', async () => {

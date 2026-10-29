@@ -1,14 +1,17 @@
 -- Admission accounting survives deleting an invitation, team or inviter. No address
--- is stored here; recipient admission hashes are added by the next migration.
+-- is stored here; recipient limits use a purpose-separated HMAC.
 CREATE TABLE public.invitation_email_requests (
   user_id uuid NOT NULL,
   organization_id uuid NOT NULL,
+  recipient_hash bytea NOT NULL,
   requested_at timestamptz NOT NULL
 );
 CREATE INDEX invitation_email_requests_user_time
   ON public.invitation_email_requests (user_id, requested_at);
 CREATE INDEX invitation_email_requests_organization_time
   ON public.invitation_email_requests (organization_id, requested_at);
+CREATE INDEX invitation_email_requests_recipient_time
+  ON public.invitation_email_requests (recipient_hash, requested_at);
 CREATE INDEX invitation_email_requests_time
   ON public.invitation_email_requests (requested_at);
 

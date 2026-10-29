@@ -29,15 +29,18 @@ async function tables(pool: pg.Pool): Promise<Table[]> {
       GROUP BY table_schema,table_name ORDER BY table_schema,table_name`)
   ).rows
 }
-async function records(pool: pg.Pool, inventory: Table[]) {
+async function records(pool: pg.Pool, inventory: Table[], trackWrites = false) {
   const result: Record<string, string[]> = {}
-  for (const table of inventory)
+  for (const table of inventory) {
+    const columns = table.columns.map(quote)
+    if (trackWrites) columns.push('xmin::text AS _xmin', 'ctid::text AS _ctid')
     result[`${table.schema}.${table.name}`] = (
       await pool.query<{ row: string }>(`SELECT to_jsonb(r)::text AS row FROM
-        (SELECT ${table.columns.map(quote).join(',')}
+        (SELECT ${columns.join(',')}
           FROM ${quote(table.schema)}.${quote(table.name)}) r
         ORDER BY to_jsonb(r)::text COLLATE "C"`)
     ).rows.map((row) => row.row)
+  }
   return result
 }
 
@@ -85,6 +88,9 @@ describe.skipIf(!serverUrl)('invitation mail limits migration', () => {
       expect(before['public.invitation_deliveries']).toHaveLength(5)
       expect(before['public.bookings']).toHaveLength(8)
       expect(before['public.sign_in_emails']).toHaveLength(2)
+      expect(
+        (await pool.query('SELECT name FROM schema_migrations ORDER BY name')).rows.at(-1),
+      ).toEqual({ name: '0042_invitation_deliveries.sql' })
       // A native resend retained creation time while replacing expiry. The migration
       // must preserve these timestamps without interpreting the widened gap as TTL.
       expect(
@@ -136,6 +142,33 @@ describe.skipIf(!serverUrl)('invitation mail limits migration', () => {
         ).rows,
       ).toEqual([{ known_validity: true }])
       expect((await pool.query('SELECT * FROM invitation_email_requests')).rows).toEqual([])
+      expect(
+        (
+          await pool.query(`SELECT column_name,data_type,is_nullable,column_default
+            FROM information_schema.columns WHERE table_schema='public'
+            AND table_name='invitation_email_requests' ORDER BY ordinal_position`)
+        ).rows,
+      ).toEqual([
+        { column_name: 'user_id', data_type: 'uuid', is_nullable: 'NO', column_default: null },
+        {
+          column_name: 'organization_id',
+          data_type: 'uuid',
+          is_nullable: 'NO',
+          column_default: null,
+        },
+        {
+          column_name: 'recipient_hash',
+          data_type: 'bytea',
+          is_nullable: 'NO',
+          column_default: null,
+        },
+        {
+          column_name: 'requested_at',
+          data_type: 'timestamp with time zone',
+          is_nullable: 'NO',
+          column_default: null,
+        },
+      ])
       const schema = await snapshotSchema(pool)
       fresh = await createTestDatabase(serverUrl as string, predecessor, {
         tag: 'invite_new',
@@ -145,12 +178,21 @@ describe.skipIf(!serverUrl)('invitation mail limits migration', () => {
         'SELECT name,checksum,applied_at::text,xmin::text,ctid::text FROM schema_migrations ORDER BY name'
       const recorded = (await pool.query(ledger)).rows
       const latest = await tables(pool)
-      const acknowledged = await records(pool, latest)
+      await pool.query(`INSERT INTO invitation_email_requests
+        (user_id,organization_id,recipient_hash,requested_at)
+        SELECT "inviterId","organizationId",sha256(convert_to('synthetic-recipient','UTF8')),
+          '2026-11-01T12:00:00.123456Z' FROM auth.invitation LIMIT 1`)
+      const acknowledged = await records(pool, latest, true)
+      const freshRecorded = (await fresh.pool.query(ledger)).rows
+      const freshAcknowledged = await records(fresh.pool, await tables(fresh.pool), true)
       expect(await runMigrations(pool, predecessor)).toEqual([])
-      expect(await records(pool, latest)).toEqual(acknowledged)
+      expect(await records(pool, latest, true)).toEqual(acknowledged)
       expect((await pool.query(ledger)).rows).toEqual(recorded)
       expect(await snapshotSchema(pool)).toEqual(schema)
       expect(await runMigrations(fresh.pool, predecessor)).toEqual([])
+      expect(await records(fresh.pool, await tables(fresh.pool), true)).toEqual(freshAcknowledged)
+      expect((await fresh.pool.query(ledger)).rows).toEqual(freshRecorded)
+      expect(await snapshotSchema(fresh.pool)).toEqual(schema)
       expect(
         (await fresh.pool.query('SELECT name,checksum FROM schema_migrations ORDER BY name')).rows,
       ).toEqual(recorded.map(({ name, checksum }) => ({ name, checksum })))
@@ -165,7 +207,7 @@ describe.skipIf(!serverUrl)('invitation mail limits migration', () => {
     }
   }, 60_000)
 
-  it('retains admission counters after account/team deletion and enforces positive original validity', async () => {
+  it('requires recipient hashes, retains counters after account/team deletion and enforces positive original validity', async () => {
     const owned = await createTestDatabase(serverUrl as string, undefined, {
       tag: 'invite_checks',
     })
@@ -215,6 +257,17 @@ describe.skipIf(!serverUrl)('invitation mail limits migration', () => {
           '2026-11-01T12:00:00.123456Z')`,
         [userId, organizationId],
       )
+      for (const columns of [
+        'user_id,organization_id,requested_at',
+        'user_id,organization_id,requested_at,recipient_hash',
+      ])
+        await expect(
+          owned.pool.query(
+            `INSERT INTO invitation_email_requests(${columns})
+              VALUES($1,$2,now()${columns.endsWith('recipient_hash') ? ',NULL' : ''})`,
+            [userId, organizationId],
+          ),
+        ).rejects.toMatchObject({ code: '23502', column: 'recipient_hash' })
       const retained = (
         await owned.pool.query('SELECT to_jsonb(r)::text AS row FROM invitation_email_requests r')
       ).rows
@@ -241,6 +294,56 @@ describe.skipIf(!serverUrl)('invitation mail limits migration', () => {
       expect(owned.pool.totalCount).toBeLessThanOrEqual(1)
     } finally {
       await owned.drop()
+    }
+  }, 60_000)
+
+  it('rolls the ledger, indexes and delivery changes back if migration acknowledgement fails', async () => {
+    const predecessor = await mkdtemp(join(tmpdir(), 'hourmere-invite-budget-rollback-'))
+    let owned: TestDatabase | undefined
+    try {
+      const files = (await readdir(migrationsDir)).filter((file) => file.endsWith('.sql')).sort()
+      const migration = files.find((file) => file.endsWith('_invitation_mail_limits.sql'))
+      if (!migration) throw new Error('Invitation limits migration is missing')
+      const initial = files.filter((file) => file < migration)
+      const early = initial.filter((file) => file.slice(0, 4) <= '0012')
+      for (const file of early) await copyFile(join(migrationsDir, file), join(predecessor, file))
+      owned = await createTestDatabase(serverUrl as string, predecessor, {
+        tag: 'invite_bad',
+      })
+      const pool = owned.pool
+      await seedEarly(pool)
+      for (const file of initial.filter((file) => !early.includes(file)))
+        await copyFile(join(migrationsDir, file), join(predecessor, file))
+      await runMigrations(pool, predecessor)
+      await seedLater(pool)
+      await pool.query(`CREATE FUNCTION public.reject_invitation_limits_migration() RETURNS trigger
+          LANGUAGE plpgsql AS $$ BEGIN
+            IF NEW.name LIKE '%_invitation_mail_limits.sql' THEN
+              RAISE EXCEPTION 'synthetic acknowledgement failure' USING ERRCODE='P0001';
+            END IF;
+            RETURN NEW;
+          END $$;
+        CREATE TRIGGER reject_invitation_limits_migration BEFORE INSERT ON schema_migrations
+          FOR EACH ROW EXECUTE FUNCTION public.reject_invitation_limits_migration();`)
+      const beforeSchema = await snapshotSchema(pool)
+      const inventory = await tables(pool)
+      const beforeRows = await records(pool, inventory)
+      const ledger = 'SELECT name,checksum,applied_at::text FROM schema_migrations ORDER BY name'
+      const beforeLedger = (await pool.query(ledger)).rows
+      await copyFile(join(migrationsDir, migration), join(predecessor, migration))
+      await expect(runMigrations(pool, predecessor)).rejects.toMatchObject({
+        cause: { code: 'P0001' },
+      })
+      expect(await snapshotSchema(pool)).toEqual(beforeSchema)
+      expect(await records(pool, inventory)).toEqual(beforeRows)
+      expect((await pool.query(ledger)).rows).toEqual(beforeLedger)
+      expect(pool.totalCount).toBeLessThanOrEqual(1)
+    } finally {
+      try {
+        await owned?.drop()
+      } finally {
+        await rm(predecessor, { recursive: true, force: true })
+      }
     }
   }, 60_000)
 })

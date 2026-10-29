@@ -12,7 +12,6 @@ import {
 import { createDb, type Db } from '@hourmere/db'
 import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import type { MailMessage } from '@hourmere/mail'
-import { betterAuth } from 'better-auth'
 import type pg from 'pg'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from './app.ts'
@@ -74,7 +73,7 @@ describe.skipIf(!serverUrl)('team invitation contract', () => {
 
   function instance(instrument?: (options: OrganizationOptions) => void, nativeProbe = false) {
     const secret = randomBytes(32).toString('base64')
-    const configured = createAuth({
+    const auth = createAuth({
       pool,
       db,
       baseURL: origin,
@@ -83,7 +82,10 @@ describe.skipIf(!serverUrl)('team invitation contract', () => {
       mailer: { send: async (message) => void outbox.push(message) },
     })
     // Native dependency probes explicitly omit the product admission hook.
-    const auth = nativeProbe ? betterAuth({ ...configured.options, hooks: undefined }) : configured
+    if (nativeProbe) {
+      const hookOptions: { hooks?: typeof auth.options.hooks } = auth.options
+      hookOptions.hooks = undefined
+    }
     // organization() closes over this same options object; this changes only the isolated
     // fixture. Production currently has neither sendInvitationEmail nor after-create hooks.
     const plugin = auth.options.plugins.find((candidate) => candidate.id === 'organization')
@@ -91,7 +93,7 @@ describe.skipIf(!serverUrl)('team invitation contract', () => {
     instrument?.(options)
     const app = createApp({
       authHandler: auth.handler,
-      resolveCaller: createCallerResolver({ auth: configured, db }),
+      resolveCaller: createCallerResolver({ auth, db }),
       checkDb: async () => {},
       publicUrl: origin,
     })
