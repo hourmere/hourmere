@@ -21,7 +21,11 @@ import { AccountLanguage, useI18n } from './i18n/runtime.tsx'
 import type { UiText } from './i18n/translate.ts'
 import { registerCatalog } from './i18n/translate.ts'
 import { signInPath } from './next-path.ts'
-import { UnsavedChangesProvider, useConfirmLeave } from './unsaved-changes.tsx'
+import {
+  UnsavedChangesProvider,
+  useConfirmLeave,
+  useHasUnsavedChanges,
+} from './unsaved-changes.tsx'
 
 registerCatalog(admin)
 
@@ -142,11 +146,13 @@ function SessionController({
 }) {
   const [notice, setNotice] = useState<Notice | null>(null)
   const confirmLeave = useConfirmLeave()
+  const hasUnsavedChanges = useHasUnsavedChanges()
   const currentState = useRef(state)
   currentState.current = state
   // A dismissed confirm can itself return focus to the window. Remember the refused
-  // context so that event cannot ask again. A conflict's Reload may be declined before
-  // /me reveals the new organization; null binds that refusal to the next answer.
+  // context while the page is dirty so that event cannot ask again. A conflict's Reload
+  // may be declined before /me reveals the new organization; null binds that refusal to
+  // the next answer.
   const declinedContext = useRef<{ userId: string; organizationId: string | null } | null>(null)
   // Counts the moments the session ended (sign-out, or a 401). An answer to a request that
   // started before the latest one is stale: applying it would sign a signed-out person back
@@ -234,7 +240,8 @@ function SessionController({
                 organizationId: result.me.organization.id,
               }
               const declined = declinedContext.current
-              if (declined?.userId === context.userId && declined.organizationId === null)
+              if (!hasUnsavedChanges()) declinedContext.current = null
+              else if (declined?.userId === context.userId && declined.organizationId === null)
                 declinedContext.current = context
               else if (
                 declined?.userId !== context.userId ||
@@ -267,7 +274,7 @@ function SessionController({
       refreshing.current = { promise, controller }
       return promise
     },
-    [confirmLeave, setState],
+    [confirmLeave, hasUnsavedChanges, setState],
   )
 
   // Coming back to the app (another tab, another window): check who is signed in and in
