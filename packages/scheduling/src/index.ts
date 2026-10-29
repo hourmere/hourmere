@@ -171,7 +171,7 @@ export {
   TeamAdminBookingSchema,
   toTeamAdminBooking,
 } from './team-admin-booking.ts'
-export { listTeamAdminBookings } from './team-bookings.ts'
+export { cancelTeamAdminBooking, listTeamAdminBookings } from './team-bookings.ts'
 export {
   cleanText,
   isMultiLineText,

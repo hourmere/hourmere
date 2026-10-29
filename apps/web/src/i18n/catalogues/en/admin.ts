@@ -1,5 +1,22 @@
 // English source messages; other catalogues may translate any subset.
 export const admin = {
+  'Calendar permissions need review': 'Calendar permissions need review',
+  'Selected for new bookings — review permissions':
+    'Selected for new bookings — review permissions',
+  'Permissions required': 'Permissions required',
+  'Calendar permissions need attention. Busy-time synchronization is reported separately below.':
+    'Calendar permissions need attention. Busy-time synchronization is reported separately below.',
+  'Choose {0} on the {1} authorization page. Connecting a different account will not restore this one.':
+    'Choose {0} on the {1} authorization page. Connecting a different account will not restore this one.',
+  'Choose the original account on the {0} authorization page.':
+    'Choose the original account on the {0} authorization page.',
+  'Reconnect {0} Calendar': 'Reconnect {0} Calendar',
+  'Restore calendar permissions': 'Restore calendar permissions',
+  'Retry synchronization': 'Retry synchronization',
+  'Choose another booking calendar': 'Choose another booking calendar',
+  'Review availability time zone': 'Review availability time zone',
+  '{0} Calendar connected. Your calendar list is ready. Review the account status below to confirm which account connected.':
+    '{0} Calendar connected. Your calendar list is ready. Review the account status below to confirm which account connected.',
   'Review synchronization permissions': 'Review synchronization permissions',
   'Unavailable for new bookings': 'Unavailable for new bookings',
   'Selected for new bookings — unavailable': 'Selected for new bookings — unavailable',

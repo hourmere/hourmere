@@ -109,11 +109,24 @@ immediate read; workers poll selected active calendars every minute. A web-only 
 without a worker does not perform scheduled synchronization. **Refresh calendar list**
 updates metadata.
 
+On an account needing attention, follow its recovery link to the Google permission
+disclosure, then authorize with **Reconnect Google Calendar**, **Enable calendar
+synchronization** or **Restore calendar permissions**, as shown. A calendar synchronization
+failure offers **Retry synchronization**; a provider connection failure offers
+**Refresh calendar list**. A calendar permission warning does not by itself mean busy-time
+synchronization or booking writes failed; their permissions need review. If the booking destination is unavailable, choose another owned
+calendar or stop writing new bookings there; existing meetings keep their destination.
+Choose the original account on Google's authorization page. Hourmere cannot select it for
+you, and connecting a different account does not restore the original connection. After
+returning, check the actual account statuses on **Calendars**.
+
 Calendar listings include each calendar's saved `timeZone` (null when the provider has
 not supplied one). When your selected owned Google booking destination uses a different
 zone from your default availability schedule, **Calendars** explains both zones. A booking
 still lands at the same instant; Google Calendar usually shows it in that calendar's time
 zone, depending on the viewer's Google Calendar time-zone setting.
+**Review availability time zone** opens your availability settings if you want to change
+the schedule zone; the difference alone does not indicate a synchronization failure.
 
 The user's own API keys can list calendar connections/status, refresh the calendar list,
 choose conflict calendars and the writeback destination, and sync now through the public

@@ -379,6 +379,10 @@ and titles without current event metadata remain unchanged. Public/manage respon
 personal organization it also returns their personal event-type readiness; in a team it
 returns only that member’s detail. It requires a current verified web session and current
 membership. API keys and OAuth callers cannot use readiness reads.
+An `Authorization` header takes precedence over the session cookie: a valid API key plus
+a cookie receives `403 readiness_access_denied`; an invalid bearer or MCP OAuth access
+token receives `401 unauthorized`, even alongside a valid cookie. There is no `userId`,
+organization or audience override; unknown query fields receive `400 invalid_request`.
 
 `GET /api/v1/teams/{teamId}/readiness` returns minimal member and event-type summaries for
 the acting team, through the shared team-management access check. Only current verified
@@ -386,12 +390,64 @@ team owners/admins can read it. Ordinary members, other teams and nonexistent te
 the same `403 team_management_access_denied`. The summary includes coarse reasons such as
 `calendar_attention_required` and repair kinds; it excludes private calendar/account data,
 schedules, exact sync times, provider errors and busy-time details.
+Names are returned only for verified members with a nonempty, valid display name;
+otherwise `displayName` is the neutral label `Team member`. It never falls back to email.
+The path's `teamId` must match the session's current active team, even if the caller
+manages another team. Each request rechecks organization context and current roles, so
+switching organizations, demotion or removal cannot reuse an earlier authorized summary.
+After membership removal the ordinary caller resolver may fall back to the person's
+personal organization; the self response then describes that current context only.
 
 Both reads use cached server-side configuration and sync facts, without live provider calls.
 Enablement, round-robin activation, configuration, sync and check results remain separate.
 No external calendar is required for basic checks. A successful summary describes its check
 time and does not promise available slots or reserve a booking; booking still rechecks its
 current prerequisites. Unknown or failed checks remain `not_checked` or `check_failed`.
+
+The self response is `{member,eventTypes:{data,nextCursor}}`. Each item contains
+`subject:{kind,id,organizationId}`, `audience:"self_detail"`, `enablement`, `activation`,
+`evaluatedAt`, `scope:"configuration_and_cached_sync"`, `signals`, `summary`,
+`availability:"not_checked"`, `completeness` and `details`. Private schedule and calendar
+metadata appears once in `member.details`; event-type `details` retains the required
+`{schedules:[],calendars:[]}` container for compatibility. Use the member's detail for repairs.
+The redundant `event_enablement` signal is no longer emitted; its published enum value
+remains compatible with older responses. Read the independent `enablement` axis instead:
+inactive events are `disabled`, while active hidden events remain `enabled` because their
+direct booking link still works. Disabled is independent of configuration blockers.
+
+The team response is `{organizationId,members:{data,nextCursor},eventTypes:{data,nextCursor}}`.
+Member items contain `memberId`, `displayName`, `summary`, `completeness`, `evaluatedAt`,
+`reasonCodes` and `fixKinds`. Event items replace member identity/name with `eventTypeId`,
+`enablement` and `activation`. Repair kinds are `edit_event`, `ask_member` and `retry_summary`;
+member-owned calendar and schedule repairs require the member to act.
+
+Each self signal is `{id,state,reasonCode,checkedAt,ownerKind,fixKind}`. Its state is:
+
+| State | Meaning |
+|---|---|
+| `satisfied` | The condition passed at `checkedAt`; available slots are not promised. |
+| `not_applicable` | Successfully confirmed that this check does not apply. |
+| `configuration_blocker` | A known configuration gap needs repair. |
+| `dependency_unavailable` | Selected conflict-calendar data is unsafe or unavailable. |
+| `not_checked` | The check is unknown or unsupported; `checkedAt` is null. |
+| `check_failed` | A read or evaluation was attempted but failed; `checkedAt` is the attempt time. |
+
+Unknown and failed required checks set `completeness:"partial"`; they never imply passed
+checks or no slots. `slot_observation` always remains `not_checked` and is excluded from
+configuration completeness. For selected Google calendars, explicit sync errors or inactive
+connections take precedence as `calendar_attention_required`; otherwise a missing successful
+timestamp or snapshot uses `sync_not_ready`. Other unsafe cached-sync facts use
+`calendar_attention_required`. One selected-sync signal reports one cause and repair.
+Team summaries collapse these into the single coarse `calendar_attention_required` reason.
+Neither a missing timestamp nor a reset snapshot proves that synchronization was never tried.
+
+Both routes use the common open `Error` schema: `400 invalid_request` for malformed/unknown
+query fields (`invalid_limit` or `invalid_cursor` for service-level pagination validation),
+`401 unauthorized` for missing or invalid credentials, `403 readiness_access_denied` (self)
+or `team_management_access_denied` (team) for an authenticated caller without access,
+`429 rate_limited` for credential throttling, and `500 internal_error` for unexpected
+failures that prevent a safe response. Dependency evaluation failures that can be safely
+represented inside an authorized item use `check_failed` in a successful response instead.
 
 Pages default to 50 items and accept `limit=1..100`. Pass the member page’s `nextCursor` as
 `memberCursor` and the event-type page’s `nextCursor` as `eventTypeCursor`; cursors are UUIDs.

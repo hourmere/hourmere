@@ -1,9 +1,18 @@
-import { randomUUID } from 'node:crypto'
+import { createHmac, randomBytes, randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { stripTypeScriptTypes } from 'node:module'
 import { createRoute, z } from '@hono/zod-openapi'
-import type { Principal } from '@hourmere/auth'
-import type { Db } from '@hourmere/db'
+import {
+  type Auth,
+  createAuth,
+  createAuthPool,
+  createCallerResolver,
+  createMcpOAuthResolver,
+  ensurePersonalOrganization,
+  type Principal,
+} from '@hourmere/auth'
+import { createDb, type Db } from '@hourmere/db'
+import { createTestDatabase, type TestDatabase } from '@hourmere/db/testing'
 import {
   getSelfReadiness,
   getTeamReadiness,
@@ -20,9 +29,11 @@ import {
 import { createMiddleware } from 'hono/factory'
 import { sql } from 'kysely'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { errorResponses, json, serviceContext } from '../openapi.ts'
+import { signTestMcpAccessToken } from '../../../../packages/auth/src/testing.ts'
+import { createApp } from '../app.ts'
+import { ErrorBody, errorResponses, json, serviceContext } from '../openapi.ts'
 import type { teamManagementAccess } from '../team-management.ts'
-import type { readinessRoutes } from './readiness.ts'
+import { readinessRoutes } from './readiness.ts'
 import { createTestApp, openApiDocument, productApp, type TestApp } from './test-app.ts'
 
 const selfPath = '/api/v1/readiness/self'
@@ -54,7 +65,7 @@ function sourceCopy<T>(
   ) as T
 }
 
-function readRouteCopy(mutation?: [string, string]) {
+function readRouteCopy(mutation?: [string, string], routeMutation?: [string, string]) {
   const access = sourceCopy<typeof teamManagementAccess>(
     'apps/server/src/team-management.ts',
     { DomainError, createMiddleware, sql },
@@ -72,12 +83,14 @@ function readRouteCopy(mutation?: [string, string]) {
       TeamReadinessPageSchema,
       DomainError,
       createMiddleware,
+      ErrorBody,
       errorResponses,
       json,
       serviceContext,
       teamManagementAccess: access,
     },
     'readinessRoutes',
+    routeMutation,
   )
 }
 
@@ -86,6 +99,316 @@ describe('booking readiness OpenAPI', () => {
     const { paths } = await openApiDocument(productApp({} as Db))
     for (const path of [selfPath, '/api/v1/teams/{teamId}/readiness'])
       expect(paths[path]?.get?.security).toEqual([{ session: [] }])
+  })
+})
+
+describe.skipIf(!process.env.DATABASE_URL)('booking readiness real authentication', () => {
+  const origin = 'http://localhost:4392'
+  const secret = 'synthetic-readiness-session-secret-0000000000000000'
+  let owned: TestDatabase
+  let db: Db
+  let authPool: ReturnType<typeof createAuthPool>
+  let auth: Auth
+  let app: ReturnType<typeof createApp>
+
+  beforeAll(async () => {
+    owned = await createTestDatabase(process.env.DATABASE_URL as string)
+    db = createDb(owned.pool)
+    const signup = { mode: 'open', allowedDomains: [] } as const
+    // Reuse one auth pool for this file, including OAuth signing and organization changes.
+    authPool = createAuthPool(owned.url, signup)
+    auth = createAuth({
+      pool: authPool,
+      db,
+      baseURL: origin,
+      secret,
+      signup,
+      mcpOAuth: true,
+      mailer: { send: async () => {} },
+    })
+    app = application()
+  })
+
+  afterAll(async () => {
+    await authPool?.end()
+    await owned?.drop()
+  })
+
+  function application(resolveCaller = createCallerResolver({ auth, db })) {
+    return createApp({
+      publicUrl: origin,
+      checkDb: async () => {},
+      authHandler: auth.handler,
+      resolveCaller,
+      routes: [readinessRoutes({ db })],
+    })
+  }
+
+  async function session(user: TestUser, organizationId = user.principal.organization.id) {
+    const token = randomBytes(24).toString('base64url')
+    const row = await db
+      .insertInto('auth.session')
+      .values({
+        userId: user.id,
+        token,
+        activeOrganizationId: organizationId,
+        expiresAt: new Date(Date.now() + 3_600_000),
+        updatedAt: new Date(),
+      })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    const signature = createHmac('sha256', secret).update(token).digest('base64')
+    return {
+      id: row.id,
+      cookie: `better-auth.session_token=${encodeURIComponent(`${token}.${signature}`)}`,
+    }
+  }
+
+  function get(path: string, cookie?: string, extra: Record<string, string> = {}, target = app) {
+    return target.request(path, { headers: { ...(cookie && { cookie }), ...extra } })
+  }
+
+  async function answer(response: Response) {
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    return { status: response.status, body: await response.json() }
+  }
+
+  async function switchTo(cookie: string, organizationId: string) {
+    const response = await app.request('/api/auth/organization/set-active', {
+      method: 'POST',
+      headers: { cookie, origin, 'content-type': 'application/json' },
+      body: JSON.stringify({ organizationId }),
+    })
+    expect(response.status).toBe(200)
+  }
+
+  it('requires a real session on both routes and never falls back from invalid Authorization', async () => {
+    const user = await createTestUser(db)
+    const team = await createTestTeam(db, [{ user, role: 'owner' }])
+    const owner = await session(user, team.id)
+    for (const path of [selfPath, teamPath(team.id)]) {
+      for (const response of [
+        await get(path),
+        await get(path, 'better-auth.session_token=invalid'),
+        await get(path, owner.cookie, { authorization: 'Bearer invalid' }),
+      ]) {
+        expect(await answer(response)).toEqual({ status: 401, body: { error: 'unauthorized' } })
+        expect(response.headers.get('www-authenticate')).toBe('Bearer')
+      }
+    }
+  })
+
+  it('lets an ordinary member read only their own detail and uniformly refuses other teams', async () => {
+    const user = await createTestUser(db)
+    const other = await createTestUser(db)
+    const team = await createTestTeam(db, [
+      { user, role: 'member' },
+      { user: other, role: 'owner' },
+    ])
+    const outsiderUser = await createTestUser(db)
+    const unrelated = await createTestTeam(db, [{ user: outsiderUser, role: 'member' }])
+    const member = await session(user, team.id)
+    const self = await answer(await get(selfPath, member.cookie))
+    expect(self.status).toBe(200)
+    expect(self.body).toMatchObject({
+      member: { subject: { kind: 'member', organizationId: team.id } },
+      eventTypes: { data: [], nextCursor: null },
+    })
+    expect(JSON.stringify(self.body).includes(other.id)).toBe(false)
+    for (const path of [teamPath(team.id), teamPath(unrelated.id), teamPath(randomUUID())])
+      expect(await answer(await get(path, member.cookie))).toEqual({ status: 403, body: denial })
+    const outsider = await session(outsiderUser, unrelated.id)
+    expect(await answer(await get(teamPath(team.id), outsider.cookie))).toEqual({
+      status: 403,
+      body: denial,
+    })
+    expect((await get(`${selfPath}?userId=${other.id}`, member.cookie)).status).toBe(400)
+    const owner = await session(other, team.id)
+    expect((await get(`${teamPath(team.id)}?userId=${user.id}`, owner.cookie)).status).toBe(400)
+  })
+
+  it.each(['owner', 'admin'])('accepts a real current-team %s cookie', async (role) => {
+    const user = await createTestUser(db)
+    const team = await createTestTeam(db, [{ user, role }])
+    const current = await session(user, team.id)
+    for (const path of [selfPath, teamPath(team.id)])
+      expect((await get(path, current.cookie)).status).toBe(200)
+  })
+
+  it('refuses a real API key on both routes even with a valid owner cookie', async () => {
+    const user = await createTestUser(db)
+    const team = await createTestTeam(db, [{ user, role: 'owner' }])
+    const owner = await session(user, team.id)
+    const key = await auth.api.createApiKey({
+      body: { userId: user.id, metadata: { organizationId: team.id } },
+    })
+    for (const path of [selfPath, teamPath(team.id)])
+      for (const cookie of [undefined, owner.cookie])
+        expect(
+          await answer(await get(path, cookie, { authorization: `Bearer ${key.key}` })),
+        ).toEqual({
+          status: 403,
+          body: { error: path === selfPath ? 'readiness_access_denied' : denial.error },
+        })
+  })
+
+  it('detects cookie fallback from Authorization in a source-copy resolver', async () => {
+    const user = await createTestUser(db)
+    const team = await createTestTeam(db, [{ user, role: 'owner' }])
+    const owner = await session(user, team.id)
+    const key = await auth.api.createApiKey({
+      body: { userId: user.id, metadata: { organizationId: team.id } },
+    })
+    const resolver = (mutation?: [string, string]) =>
+      sourceCopy<typeof createCallerResolver>(
+        'packages/auth/src/caller.ts',
+        {
+          ensurePersonalOrganization,
+          isUuid: (id: string) => z.uuid().safeParse(id).success,
+          sql,
+        },
+        'createCallerResolver',
+        mutation,
+      )({ auth, db })
+    const verify = async (resolveCaller: ReturnType<typeof createCallerResolver>) => {
+      const target = application(resolveCaller)
+      for (const path of [selfPath, teamPath(team.id)])
+        expect(
+          (await get(path, owner.cookie, { authorization: `Bearer ${key.key}` }, target)).status,
+        ).toBe(403)
+    }
+    await verify(resolver())
+    await expect(
+      verify(
+        resolver([
+          'authorization === null ? fromSession(headers) : fromApiKey(authorization)',
+          "authorization === null || headers.has('cookie') ? fromSession(headers) : fromApiKey(authorization)",
+        ]),
+      ),
+    ).rejects.toMatchObject({ name: 'AssertionError', actual: 200, expected: 403 })
+    await verify(resolver())
+  })
+
+  it('refuses a valid MCP OAuth bearer as a REST session, including with an owner cookie', async () => {
+    const user = await createTestUser(db)
+    const team = await createTestTeam(db, [{ user, role: 'owner' }])
+    const owner = await session(user, team.id)
+    const clientId = `https://readiness.example/${randomUUID()}.json`
+    const grant = await db
+      .insertInto('mcp_oauth_grants')
+      .values({ user_id: user.id, organization_id: team.id, client_id: clientId })
+      .returning('id')
+      .executeTakeFirstOrThrow()
+    await db
+      .insertInto('auth.oauthClient')
+      .values({ clientId, redirectUris: JSON.stringify(['https://readiness.example/callback']) })
+      .execute()
+    await db
+      .insertInto('auth.oauthConsent')
+      .values({
+        clientId,
+        userId: user.id,
+        referenceId: grant.id,
+        scopes: JSON.stringify(['mcp:tools', 'offline_access']),
+        resources: JSON.stringify([`${origin}/mcp`]),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .execute()
+    const bearer = await signTestMcpAccessToken(auth, {
+      sub: user.id,
+      client_id: clientId,
+      scope: 'mcp:tools',
+      iat: Math.floor(Date.now() / 1000),
+      exp: Math.floor(Date.now() / 1000) + 300,
+      iss: `${origin}/api/auth`,
+      aud: `${origin}/mcp`,
+      'https://hourmere.com/organization': team.id,
+      'https://hourmere.com/grant': grant.id,
+    })
+    const headers = { authorization: `Bearer ${bearer}` }
+    const oauth = await createMcpOAuthResolver({ auth, db, publicUrl: origin })(
+      new Request(`${origin}/mcp`, { method: 'POST', headers }),
+    )
+    expect(oauth.ok).toBe(true)
+    if (oauth.ok) expect(oauth.principal.kind).toBe('oauth')
+    for (const path of [selfPath, teamPath(team.id)])
+      for (const cookie of [undefined, owner.cookie])
+        expect(await answer(await get(path, cookie, headers))).toEqual({
+          status: 401,
+          body: { error: 'unauthorized' },
+        })
+  })
+
+  it('reauthorizes both projections immediately after a real organization switch', async () => {
+    const user = await createTestUser(db)
+    const first = await createTestTeam(db, [{ user, role: 'owner' }])
+    const second = await createTestTeam(db, [{ user, role: 'owner' }])
+    const current = await session(user, first.id)
+    const fx = createFixtures(db)
+    const firstEvent = await fx.eventType(first.id, null, { hosts: [{ userId: user.id }] })
+    const secondEvent = await fx.eventType(second.id, null, { hosts: [{ userId: user.id }] })
+    const personalEvent = await fx.eventType(user.principal.organization.id, user.id)
+    expect((await get(teamPath(first.id), current.cookie)).status).toBe(200)
+    expect(await answer(await get(teamPath(second.id), current.cookie))).toEqual({
+      status: 403,
+      body: denial,
+    })
+    await switchTo(current.cookie, second.id)
+    const self = await answer(await get(selfPath, current.cookie))
+    expect(self.status).toBe(200)
+    expect(self.body).toMatchObject({ member: { subject: { organizationId: second.id } } })
+    expect(await answer(await get(teamPath(first.id), current.cookie))).toEqual({
+      status: 403,
+      body: denial,
+    })
+    const secondPage = await answer(await get(teamPath(second.id), current.cookie))
+    expect(secondPage.status).toBe(200)
+    expect(JSON.stringify(secondPage.body).includes(secondEvent)).toBe(true)
+    expect(JSON.stringify(secondPage.body).includes(firstEvent)).toBe(false)
+    await switchTo(current.cookie, user.principal.organization.id)
+    const personal = await answer(await get(selfPath, current.cookie))
+    expect(personal.status).toBe(200)
+    expect(JSON.stringify(personal.body).includes(personalEvent)).toBe(true)
+    expect(JSON.stringify(personal.body).includes(secondEvent)).toBe(false)
+    expect(await answer(await get(teamPath(second.id), current.cookie))).toEqual({
+      status: 403,
+      body: denial,
+    })
+  })
+
+  it('rechecks role revocation and removal on the next request using the same real cookie', async () => {
+    const user = await createTestUser(db)
+    const team = await createTestTeam(db, [{ user, role: 'admin' }])
+    const current = await session(user, team.id)
+    expect((await get(teamPath(team.id), current.cookie)).status).toBe(200)
+    await db
+      .updateTable('auth.member')
+      .set({ role: 'member' })
+      .where('organizationId', '=', team.id)
+      .where('userId', '=', user.id)
+      .execute()
+    expect(await answer(await get(teamPath(team.id), current.cookie))).toEqual({
+      status: 403,
+      body: denial,
+    })
+    expect((await get(selfPath, current.cookie)).status).toBe(200)
+    await db
+      .deleteFrom('auth.member')
+      .where('organizationId', '=', team.id)
+      .where('userId', '=', user.id)
+      .execute()
+    expect(await answer(await get(teamPath(team.id), current.cookie))).toEqual({
+      status: 403,
+      body: denial,
+    })
+    const personal = await answer(await get(selfPath, current.cookie))
+    expect(personal.status).toBe(200)
+    expect(personal.body).toMatchObject({
+      member: { subject: { organizationId: user.principal.organization.id } },
+    })
+    expect(JSON.stringify(personal.body).includes(team.id)).toBe(false)
+    expect(owned.pool.totalCount + authPool.totalCount).toBeLessThanOrEqual(20)
   })
 })
 
@@ -207,6 +530,58 @@ describe.skipIf(!process.env.DATABASE_URL)('booking readiness REST', () => {
       status: 403,
       body: { error: 'readiness_access_denied' },
     })
+  })
+
+  it('refuses a previously resolved team session after its active organization changes', async () => {
+    const user = await createTestUser(t.db)
+    const first = await createTestTeam(t.db, [{ user, role: 'owner' }])
+    const second = await createTestTeam(t.db, [{ user, role: 'owner' }])
+    const principal = await session(user, first.as(user))
+    const client = t.as(principal)
+    expect((await client.get(teamPath(first.id))).status).toBe(200)
+    await t.db
+      .updateTable('auth.session')
+      .set({ activeOrganizationId: second.id })
+      .where('id', '=', principal.sessionId)
+      .execute()
+    expect(await client.get(teamPath(first.id))).toEqual({ status: 403, body: denial })
+    expect(await client.get(teamPath(second.id))).toEqual({ status: 403, body: denial })
+    expect(await client.get(selfPath)).toEqual({
+      status: 403,
+      body: { error: 'readiness_access_denied' },
+    })
+  })
+
+  it('detects stale active-organization guard removal in a source-copy route', async () => {
+    const user = await createTestUser(t.db)
+    const first = await createTestTeam(t.db, [{ user, role: 'owner' }])
+    const second = await createTestTeam(t.db, [{ user, role: 'owner' }])
+    const principal = await session(user, first.as(user))
+    await t.db
+      .updateTable('auth.session')
+      .set({ activeOrganizationId: second.id })
+      .where('id', '=', principal.sessionId)
+      .execute()
+    const verify = async (routes: typeof readinessRoutes) => {
+      const app = productApp(t.db, new Map([['hm_source_copy_readiness', principal]]), [
+        routes({ db: t.db }),
+      ])
+      const response = await app.request(teamPath(first.id), {
+        headers: { authorization: 'Bearer hm_source_copy_readiness' },
+      })
+      expect(response.status).toBe(403)
+      expect(await response.json()).toEqual(denial)
+    }
+    await verify(readRouteCopy())
+    await expect(
+      verify(
+        readRouteCopy(undefined, [
+          "        .where('activeOrganizationId', '=', principal.organization.id)",
+          '',
+        ]),
+      ),
+    ).rejects.toMatchObject({ name: 'AssertionError', actual: 200, expected: 403 })
+    await verify(readRouteCopy())
   })
 
   it.each(['deleted', 'expired', 'unverified'] as const)(

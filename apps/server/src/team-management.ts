@@ -172,6 +172,8 @@ export function organizationWriteAccess(principal: Principal, expectedOrganizati
  * then applies the existing sessionOnly pattern with fresh verified team owner/admin facts.
  * Bind read targets with `access.read(principal, teamId, ...)`. Read and validate the
  * request body before calling `access.write(principal, teamId, ...)`.
+ * Pass `{ expectedOrganizationId }` as the fourth argument for organization-bound writes;
+ * the shared check also verifies the session's current organization under its locks.
  *
  * `write` owns a READ COMMITTED transaction. All database writes must use its `trx` and
  * returned actor, with target objects scoped to actor.organizationId. It rechecks eligibility
@@ -214,12 +216,22 @@ export function teamManagementAccess(db: Db, caller: CallerMiddleware) {
       principal: Principal,
       teamId: string,
       operation: (trx: Transaction<Database>, actor: TeamManager) => Promise<T>,
+      options?: { expectedOrganizationId: string },
     ): Promise<T> {
       return db
         .transaction()
         .setIsolationLevel('read committed')
         .execute(async (trx) => {
-          const actor = await check(trx, principal, teamId, true)
+          const actor = await check(
+            trx,
+            principal,
+            teamId,
+            true,
+            options && {
+              expectedOrganizationId: options.expectedOrganizationId,
+              allowPersonal: false,
+            },
+          )
           if (actor.role === 'member') throw denied()
           return operation(trx, { ...actor, role: actor.role })
         })

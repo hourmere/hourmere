@@ -44,7 +44,8 @@ const load = async (signal: AbortSignal) => {
 }
 const loadInstance = (signal: AbortSignal) => unwrap(api.GET('/api/v1/instance', { signal }))
 const outcomes = {
-  connected: '{0} Calendar connected. Your calendar list is ready.',
+  connected:
+    '{0} Calendar connected. Your calendar list is ready. Review the account status below to confirm which account connected.',
   denied: '{0} Calendar was not connected because you cancelled authorization.',
   invalid_state: 'This connection attempt expired or was already used. Start again.',
   permissions_missing:
@@ -56,7 +57,33 @@ const outcomes = {
 const providerName = (connection: Connection) =>
   connection.provider === 'microsoft' ? 'Microsoft' : 'Google'
 const needsReconnect = (connection: Connection) =>
-  connection.status !== 'active' || connection.lastError === 'permissions_missing'
+  connection.status !== 'active' ||
+  connection.lastError === 'needs_reauth' ||
+  (connection.provider === 'microsoft' && connection.lastError === 'permissions_missing')
+const needsSyncPermission = (connection: Connection) =>
+  connection.provider === 'google' &&
+  (!connection.syncAuthorized ||
+    (connection.lastError === 'permissions_missing' &&
+      connection.calendars.some(
+        (calendar) => calendar.checkConflicts && calendar.syncError === 'permissions_missing',
+      )))
+const needsPermissionReview = (connection: Connection) =>
+  connection.provider === 'google' && connection.lastError === 'permissions_missing'
+const recoveryLabel = (connection: Connection): UiText =>
+  needsReconnect(connection)
+    ? msg('Reconnect {0} Calendar', { '0': providerName(connection) })
+    : needsSyncPermission(connection)
+      ? 'Enable calendar synchronization'
+      : 'Restore calendar permissions'
+const accountHint = (connection: Connection): UiText =>
+  connection.accountEmail
+    ? msg(
+        'Choose {0} on the {1} authorization page. Connecting a different account will not restore this one.',
+        { '0': connection.accountEmail, '1': providerName(connection) },
+      )
+    : msg('Choose the original account on the {0} authorization page.', {
+        '0': providerName(connection),
+      })
 const syncSummary = (connection: Connection, googleEnabled: boolean): UiText => {
   if (connection.provider === 'microsoft') return 'Not available — calendar list only.'
   if (!connection.syncAuthorized) return 'Not enabled — calendar list only.'
@@ -89,6 +116,13 @@ export function CalendarsPage() {
   const [notice, setNotice] = useState(() => noticeFor(search))
   const [error, setError] = useState<UiText | null>(null)
   const [pending, setPending] = useState<string | null>(null)
+  const [recoveryAccountId, setRecoveryAccountId] = useState<string | null>(null)
+  const recoveryAccount =
+    state.status === 'ready'
+      ? state.data.data.find((connection) => connection.id === recoveryAccountId)
+      : undefined
+  const googleRecovery = recoveryAccount?.provider === 'google' ? recoveryAccount : undefined
+  const microsoftRecovery = recoveryAccount?.provider === 'microsoft' ? recoveryAccount : undefined
   const mounted = useMounted()
   const accountsHeading = useRef<HTMLHeadingElement>(null)
   const connectionRequest = useRef<AbortController | null>(null)
@@ -303,7 +337,12 @@ export function CalendarsPage() {
                 <Link to={`${PATHS.settings}#profile-heading`}>{t('Create profile')}</Link>
               </p>
             )}
-          <section className="stack" aria-label={t('Connected accounts')}>
+          <section
+            id="booking-calendar-options"
+            tabIndex={-1}
+            className="stack"
+            aria-label={t('Connected accounts')}
+          >
             <h2 ref={accountsHeading} tabIndex={-1}>
               {t('Connected accounts')}
             </h2>
@@ -332,6 +371,13 @@ export function CalendarsPage() {
             )}
             {state.data.data.map((connection) => {
               const reconnect = needsReconnect(connection)
+              const syncPermission = needsSyncPermission(connection)
+              const permissionReview = needsPermissionReview(connection)
+              const authorizationRequired = reconnect || syncPermission || permissionReview
+              const providerEnabled =
+                connection.provider === 'google'
+                  ? state.data.googleEnabled
+                  : state.data.microsoftEnabled
               const syncCapable = connection.provider === 'google' && connection.syncAuthorized
               const conflictCount = connection.calendars.filter(
                 (calendar) => calendar.checkConflicts,
@@ -360,8 +406,14 @@ export function CalendarsPage() {
                         {providerName(connection)} {t('Calendar')}
                       </p>
                     </div>
-                    <span className={`badge${reconnect ? ' badge-danger' : ''}`}>
-                      {reconnect ? t('Reconnect required') : t('Connected')}
+                    <span
+                      className={`badge${reconnect || permissionReview ? ' badge-danger' : ''}`}
+                    >
+                      {reconnect
+                        ? t('Reconnect required')
+                        : permissionReview
+                          ? t('Permissions required')
+                          : t('Connected')}
                     </span>
                   </header>
                   {reconnect && (
@@ -379,6 +431,30 @@ export function CalendarsPage() {
                       >
                         {t('Review calendar connection options')}
                       </a>
+                    </div>
+                  )}
+                  {!reconnect && permissionReview && (
+                    <p className="alert alert-error" role="alert">
+                      {t(
+                        'Calendar permissions need attention. Busy-time synchronization is reported separately below.',
+                      )}
+                    </p>
+                  )}
+                  {authorizationRequired && (
+                    <div className="stack">
+                      <p>{ui(accountHint(connection))}</p>
+                      {providerEnabled && (
+                        <a
+                          href={
+                            connection.provider === 'google'
+                              ? '#calendar-connection-options'
+                              : '#microsoft-calendar-connection-options'
+                          }
+                          onClick={() => setRecoveryAccountId(connection.id)}
+                        >
+                          {ui(recoveryLabel(connection))}
+                        </a>
+                      )}
                     </div>
                   )}
                   {connection.lastError === 'provider_unavailable' && (
@@ -407,9 +483,11 @@ export function CalendarsPage() {
                         {destination ? (
                           <>
                             {destination.name}
-                            {!destinationAvailable && (
+                            {(!destinationAvailable || permissionReview) && (
                               <span className="calendar-unavailable">
-                                {t('Unavailable for new bookings')}
+                                {!destinationAvailable
+                                  ? t('Unavailable for new bookings')
+                                  : t('Calendar permissions need review')}
                               </span>
                             )}
                           </>
@@ -419,6 +497,9 @@ export function CalendarsPage() {
                       </dd>
                     </div>
                   </dl>
+                  {destination && (!destinationAvailable || permissionReview) && (
+                    <a href="#booking-calendar-options">{t('Choose another booking calendar')}</a>
+                  )}
                   {connection.provider === 'microsoft' && (
                     <p>
                       {t(
@@ -459,7 +540,9 @@ export function CalendarsPage() {
                             <dd>
                               {state.data.destinationCalendarId === calendar.id
                                 ? destinationAvailable
-                                  ? t('Selected for new bookings')
+                                  ? permissionReview
+                                    ? t('Selected for new bookings — review permissions')
+                                    : t('Selected for new bookings')
                                   : t('Selected for new bookings — unavailable')
                                 : t('Not a booking destination')}
                             </dd>
@@ -479,7 +562,10 @@ export function CalendarsPage() {
                                   calendarZone: zoneName(calendar.timeZone),
                                   scheduleZone: zoneName(state.data.defaultScheduleZone),
                                 },
-                              )}
+                              )}{' '}
+                              <Link to={PATHS.availability}>
+                                {t('Review availability time zone')}
+                              </Link>
                             </p>
                           )}
                         {connection.provider === 'google' &&
@@ -533,11 +619,16 @@ export function CalendarsPage() {
                                     disabled={
                                       connection.status !== 'active' ||
                                       !state.data.googleEnabled ||
-                                      !connection.syncAuthorized
+                                      !connection.syncAuthorized ||
+                                      reconnect ||
+                                      (connection.lastError === 'permissions_missing' &&
+                                        calendar.syncError === 'permissions_missing')
                                     }
                                     onClick={() => calendarAction(calendar.id, 'sync')}
                                   >
-                                    {t('Sync now')}
+                                    {calendar.syncError
+                                      ? t('Retry synchronization')
+                                      : t('Sync now')}
                                   </button>
                                 </>
                               )}
@@ -672,6 +763,7 @@ export function CalendarsPage() {
                 )}
               </div>
               <div className="form-actions">
+                {googleRecovery && <p>{ui(accountHint(googleRecovery))}</p>}
                 <button
                   type="button"
                   className="button button-primary"
@@ -679,25 +771,26 @@ export function CalendarsPage() {
                   disabled={pending !== null || instance.status !== 'ready'}
                   onClick={() => connect()}
                 >
-                  {pending === 'connect' ? t('Opening Google…') : t('Connect Google Calendar')}
+                  {pending === 'connect'
+                    ? t('Opening Google…')
+                    : googleRecovery
+                      ? ui(recoveryLabel(googleRecovery))
+                      : t('Connect Google Calendar')}
                 </button>
-                {state.data.data.some(
-                  (connection) => connection.provider === 'google' && !connection.syncAuthorized,
-                ) && (
-                  <button
-                    type="button"
-                    className="button"
-                    aria-describedby={
-                      state.data.googleEnabled ? 'google-calendar-permissions' : undefined
-                    }
-                    disabled={
-                      pending !== null || !state.data.googleEnabled || instance.status !== 'ready'
-                    }
-                    onClick={() => connect('sync')}
-                  >
-                    {t('Enable calendar synchronization')}
-                  </button>
-                )}
+                {!googleRecovery &&
+                  state.data.data.some(
+                    (connection) => connection.provider === 'google' && !connection.syncAuthorized,
+                  ) && (
+                    <button
+                      type="button"
+                      className="button"
+                      aria-describedby="google-calendar-permissions"
+                      disabled={pending !== null || instance.status !== 'ready'}
+                      onClick={() => connect('sync')}
+                    >
+                      {t('Enable calendar synchronization')}
+                    </button>
+                  )}
               </div>
             </section>
           ) : (
@@ -714,21 +807,25 @@ export function CalendarsPage() {
               className="stack"
               aria-label={t('Connect Microsoft Calendar')}
             >
-              <p>
+              <p id="microsoft-calendar-permissions">
                 {t(
                   'Microsoft will ask for your account identity, continuing access and permission to read basic calendar details. This connection lists your calendars; busy-time synchronization and booking event writes are not yet available. Connecting is separate from signing in.',
                 )}
               </p>
+              {microsoftRecovery && <p>{ui(accountHint(microsoftRecovery))}</p>}
               <div>
                 <button
                   type="button"
                   className="button button-primary"
+                  aria-describedby="microsoft-calendar-permissions"
                   disabled={pending !== null}
                   onClick={() => connect('list', 'microsoft')}
                 >
                   {pending === 'connect-microsoft'
                     ? t('Opening Microsoft…')
-                    : t('Connect Microsoft Calendar')}
+                    : microsoftRecovery
+                      ? ui(recoveryLabel(microsoftRecovery))
+                      : t('Connect Microsoft Calendar')}
                 </button>
               </div>
             </section>
