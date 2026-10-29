@@ -8,7 +8,7 @@ import {
   calendarSummary,
   icsAttachment,
 } from './ics.ts'
-import { magicLinkEmail } from './index.ts'
+import { magicLinkEmail, teamInvitationEmail } from './index.ts'
 
 // A catalogue file plus one registry entry exercises the real loaders and renderers.
 // Neither this language nor its deliberately partial catalogue is shipped to customers.
@@ -155,5 +155,37 @@ describe('test-only locale mail registration', () => {
     expect(bookingAnswerText(true, language)).toBe('Fixture oui')
     expect(bookingAnswerText(false, language)).toBe('No')
     expect(bookingAnswerText(['literal', 'answer'], language)).toBe('literal, answer')
+  })
+
+  it('discovers team invitation messages and falls back for untranslated facts', () => {
+    const message = teamInvitationEmail({
+      to: recipient.email,
+      publicUrl: 'https://example.com',
+      invitationId: '019a278e-3ff2-7a91-8fe0-1846a52d0b22',
+      teamName: 'Orbital {inviter}',
+      inviterName: 'Ada',
+      expiresAt: '2026-10-29T17:30:00Z',
+      language: recipient.locale,
+    })
+    expect(message.subject).toBe('Fixture équipe Orbital {inviter}')
+    expect(message.html).toContain('<html lang="qaa">')
+    expect(message.text).toContain('Ada invited you to join the team “Orbital {inviter}”')
+    expect(message.text).toContain('This invitation expires at 2026-10-29 17:30:00 UTC.')
+  })
+
+  it('wraps long catalogue field labels independently of the language', () => {
+    const message = bookingEmail('confirmed', meeting, {
+      role: 'host',
+      email: 'grace@example.com',
+      timeZone: 'Europe/Berlin',
+      locale: recipient.locale,
+      answers: [],
+    })
+    const labelCell = message.html?.match(
+      /<td style="([^"]*)">Fixture unusually long attendee local time label<\/td>/,
+    )?.[1]
+    expect(labelCell).toContain('white-space: normal;')
+    expect(labelCell).toContain('overflow-wrap: anywhere;')
+    expect(labelCell).toContain('width: 35%;')
   })
 })

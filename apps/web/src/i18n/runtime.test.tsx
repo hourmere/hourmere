@@ -7,7 +7,7 @@ import { ErrorSummary, Field } from '../components/forms.tsx'
 import { browserLocale } from '../test/browser-locale.ts'
 import { admin } from './admin.ts'
 import { common } from './common.ts'
-import { AccountLanguage, LanguageSwitcher, useI18n } from './runtime.tsx'
+import { AccountLanguage, InterfaceScope, LanguageSwitcher, useI18n } from './runtime.tsx'
 import { chooseLanguage, resetLanguagePreference } from './store.ts'
 import {
   dateMessage,
@@ -109,6 +109,55 @@ describe('typed interface messages and language state', () => {
       </AccountLanguage>,
     )
     expect(screen.getByRole('heading').textContent).toBe('你的信息')
+  })
+  it.each([
+    { preference: 'de', account: 'zh-CN' },
+    { preference: 'de', account: undefined },
+    { preference: undefined, account: 'de' },
+    { preference: 'de', account: 'de' },
+  ] as const)(
+    'skips unavailable admin candidates before the account and browser language: %j',
+    ({ preference, account }) => {
+      if (preference) chooseLanguage(preference)
+      vi.spyOn(navigator, 'languages', 'get').mockReturnValue(['zh-CN'])
+      render(
+        <InterfaceScope surface="admin">
+          <AccountLanguage locale={account}>
+            <Draft />
+          </AccountLanguage>
+        </InterfaceScope>,
+      )
+      expect(screen.getByRole('heading').textContent).toBe('你的信息')
+      expect(screen.getByLabelText<HTMLSelectElement>('界面语言').value).toBe('zh-CN')
+      expect(localStorage.getItem('hourmere-language')).toBe(preference ?? null)
+    },
+  )
+  it('uses an available account language before the browser after skipping a public preference', () => {
+    chooseLanguage('de')
+    vi.spyOn(navigator, 'languages', 'get').mockReturnValue(['zh-CN'])
+    render(
+      <InterfaceScope surface="admin">
+        <AccountLanguage locale="en">
+          <Draft />
+        </AccountLanguage>
+      </InterfaceScope>,
+    )
+    expect(screen.getByRole('heading').textContent).toBe('Your details')
+  })
+  it('keeps an explicit German preference on the public surface before account and browser Chinese', () => {
+    chooseLanguage('de')
+    vi.spyOn(navigator, 'languages', 'get').mockReturnValue(['zh-CN'])
+    render(
+      <InterfaceScope surface="public">
+        <AccountLanguage locale="zh-CN">
+          <Draft />
+        </AccountLanguage>
+      </InterfaceScope>,
+    )
+    expect(screen.getByRole('heading').textContent).toBe('Ihre Angaben')
+    expect(screen.getByLabelText<HTMLSelectElement>('Sprache der Benutzeroberfläche').value).toBe(
+      'de',
+    )
   })
   it('formats in Chinese when it follows an unsupported browser language', () => {
     vi.spyOn(navigator, 'languages', 'get').mockReturnValue(['qab', 'zh-CN'])

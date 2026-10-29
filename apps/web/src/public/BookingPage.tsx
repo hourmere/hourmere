@@ -310,7 +310,8 @@ function BookingFlow({
               <li className="user-content">
                 <TimeZoneName
                   className="host-time-zone"
-                  name={t("Host's time zone: {zone}", { zone: zoneName(hostTimeZone) })}
+                  name={zoneName(hostTimeZone)}
+                  label={t("Host's time zone: {zone}", { zone: zoneName(hostTimeZone) })}
                 />
               </li>
             )}

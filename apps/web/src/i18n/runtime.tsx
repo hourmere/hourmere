@@ -2,7 +2,9 @@ import {
   explicitLanguage,
   formattingLocale,
   type InterfaceLanguage,
+  type InterfaceSurface,
   interfaceLanguage,
+  interfaceLanguages,
   localeRegistry,
   registeredLocales,
 } from '@hourmere/core/language'
@@ -25,6 +27,17 @@ import {
   type UiMessage,
   type UiText,
 } from './translate.ts'
+
+const Surface = createContext<InterfaceSurface>('public')
+export function InterfaceScope({
+  surface,
+  children,
+}: {
+  surface: InterfaceSurface
+  children: ReactNode
+}) {
+  return <Surface value={surface}>{children}</Surface>
+}
 
 const EmbeddedLanguage = createContext<{
   language: InterfaceLanguage | undefined
@@ -63,8 +76,13 @@ export function useI18n() {
   const explicit = useSyncExternalStore(subscribeLanguage, languageChoice, () => undefined)
   const account = useContext(AccountDefault)
   const embedded = useContext(EmbeddedLanguage)
-  const selected = embedded?.language ?? explicit
-  const locale = selected ?? account ?? browserLanguage()
+  const surface = useContext(Surface)
+  const available = interfaceLanguages(surface)
+  const supported = (language: InterfaceLanguage | undefined) =>
+    language && available.includes(language) ? language : undefined
+  const preference = embedded?.language ?? explicit
+  const selected = supported(preference)
+  const locale = selected ?? supported(account) ?? browserLanguage(surface)
   // Keep the browser's regional conventions for implicit English. Every other active
   // language, including a browser preference, uses its registered formatting locale.
   const formatLanguage = selected ?? (locale === 'en' ? undefined : locale)
@@ -73,11 +91,11 @@ export function useI18n() {
   const setLanguage = useCallback(
     (language: InterfaceLanguage) => {
       const valid = explicitLanguage(language)
-      if (!valid) return
+      if (!valid || !interfaceLanguages(surface).includes(valid)) return
       scopedSetLanguage?.(valid)
       chooseLanguage(valid)
     },
-    [scopedSetLanguage],
+    [scopedSetLanguage, surface],
   )
   const t = useCallback(
     (key: MessageKey, values?: UiMessage['values']) =>
@@ -97,11 +115,11 @@ export function useI18n() {
     (message: UiText | null | undefined) => renderUiText(locale, ui(message)),
     [locale, ui],
   )
-  return { locale, explicit: selected, formatLocale, setLanguage, t, ui, text, uiText }
+  return { locale, explicit: selected, formatLocale, available, setLanguage, t, ui, text, uiText }
 }
 /** Changing this control updates text in place; router keys and form state do not change. */
 export function LanguageSwitcher({ compact = false }: { compact?: boolean }) {
-  const { locale, t, setLanguage } = useI18n()
+  const { locale, t, available, setLanguage } = useI18n()
   useEffect(() => {
     document.documentElement.lang = locale
     document.documentElement.dir = localeRegistry[locale].direction
@@ -117,11 +135,13 @@ export function LanguageSwitcher({ compact = false }: { compact?: boolean }) {
           if (value) setLanguage(value)
         }}
       >
-        {registeredLocales.map(({ code, nativeName }) => (
-          <option key={code} value={code} lang={code}>
-            {nativeName}
-          </option>
-        ))}
+        {registeredLocales
+          .filter(({ code }) => available.includes(code))
+          .map(({ code, nativeName }) => (
+            <option key={code} value={code} lang={code}>
+              {nativeName}
+            </option>
+          ))}
       </select>
     </label>
   )
